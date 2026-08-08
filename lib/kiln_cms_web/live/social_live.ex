@@ -45,11 +45,11 @@ defmodule KilnCMSWeb.SocialLive do
   end
 
   @impl true
-  def handle_event("validate", %{"account" => params}, socket) do
+  def handle_event("validate", %{"account" => params}, socket) when is_map(params) do
     {:noreply, assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))}
   end
 
-  def handle_event("create", %{"account" => params}, socket) do
+  def handle_event("create", %{"account" => params}, socket) when is_map(params) do
     case AshPhoenix.Form.submit(socket.assigns.form, params: params) do
       {:ok, _account} ->
         {:noreply,
@@ -63,7 +63,7 @@ defmodule KilnCMSWeb.SocialLive do
     end
   end
 
-  def handle_event("edit", %{"id" => id}, socket) do
+  def handle_event("edit", %{"id" => id}, socket) when is_binary(id) do
     {:noreply,
      assign(socket, :edit, %{
        id: id,
@@ -73,7 +73,7 @@ defmodule KilnCMSWeb.SocialLive do
 
   def handle_event("cancel_edit", _params, socket), do: {:noreply, assign(socket, :edit, nil)}
 
-  def handle_event("validate_edit", %{"account" => params}, socket) do
+  def handle_event("validate_edit", %{"account" => params}, socket) when is_map(params) do
     edit = %{
       socket.assigns.edit
       | form: AshPhoenix.Form.validate(socket.assigns.edit.form, params)
@@ -82,7 +82,7 @@ defmodule KilnCMSWeb.SocialLive do
     {:noreply, assign(socket, :edit, edit)}
   end
 
-  def handle_event("save_edit", %{"account" => params}, socket) do
+  def handle_event("save_edit", %{"account" => params}, socket) when is_map(params) do
     case AshPhoenix.Form.submit(socket.assigns.edit.form, params: params) do
       {:ok, _account} ->
         {:noreply,
@@ -94,7 +94,7 @@ defmodule KilnCMSWeb.SocialLive do
   end
 
   # Ask the provider whether the stored credential still works, without posting.
-  def handle_event("verify", %{"id" => id}, socket) do
+  def handle_event("verify", %{"id" => id}, socket) when is_binary(id) do
     actor = socket.assigns.actor
     org = socket.assigns.current_org
 
@@ -115,7 +115,7 @@ defmodule KilnCMSWeb.SocialLive do
     {:noreply, socket}
   end
 
-  def handle_event("toggle_enabled", %{"id" => id}, socket) do
+  def handle_event("toggle_enabled", %{"id" => id}, socket) when is_binary(id) do
     actor = socket.assigns.actor
     org = socket.assigns.current_org
 
@@ -134,7 +134,7 @@ defmodule KilnCMSWeb.SocialLive do
     {:noreply, socket}
   end
 
-  def handle_event("delete", %{"id" => id}, socket) do
+  def handle_event("delete", %{"id" => id}, socket) when is_binary(id) do
     actor = socket.assigns.actor
     org = socket.assigns.current_org
 

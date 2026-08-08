@@ -86,7 +86,11 @@ defmodule KilnCMSWeb.MediaLive do
         do: socket,
         else: socket |> assign(:query, q) |> load_media()
 
-    {:noreply, assign_selected(socket, params["id"])}
+    # `?id[]=1` is the same bookmarkable shape, and `assign_selected/2`'s only
+    # other clause is `nil` — so the list reached `CMS.get_media_item/2` as a
+    # primary key. Absent reads as "nothing selected", which is what the
+    # omitted parameter does.
+    {:noreply, assign_selected(socket, Params.string(params, "id"))}
   end
 
   @impl true
@@ -111,7 +115,7 @@ defmodule KilnCMSWeb.MediaLive do
     end
   end
 
-  def handle_event("cancel", %{"ref" => ref}, socket) do
+  def handle_event("cancel", %{"ref" => ref}, socket) when is_binary(ref) do
     {:noreply, cancel_upload(socket, :media, ref)}
   end
 
@@ -135,7 +139,7 @@ defmodule KilnCMSWeb.MediaLive do
     {:noreply, socket}
   end
 
-  def handle_event("delete", %{"id" => id}, socket) do
+  def handle_event("delete", %{"id" => id}, socket) when is_binary(id) do
     actor = socket.assigns.actor
 
     socket =
@@ -237,7 +241,7 @@ defmodule KilnCMSWeb.MediaLive do
      |> start_async(:unsplash_search, fn -> {query, next, Unsplash.search(query, next)} end)}
   end
 
-  def handle_event("unsplash_import", %{"id" => id}, socket) do
+  def handle_event("unsplash_import", %{"id" => id}, socket) when is_binary(id) do
     photo = Enum.find(socket.assigns.unsplash_photos, &(&1.id == id))
 
     if is_nil(photo) or MapSet.member?(socket.assigns.unsplash_importing, id) do
@@ -253,7 +257,7 @@ defmodule KilnCMSWeb.MediaLive do
     end
   end
 
-  def handle_event("restore", %{"id" => id}, socket) do
+  def handle_event("restore", %{"id" => id}, socket) when is_binary(id) do
     actor = socket.assigns.actor
 
     socket =
@@ -277,7 +281,7 @@ defmodule KilnCMSWeb.MediaLive do
      |> reload_media()}
   end
 
-  def handle_event("purge", %{"id" => id}, socket) do
+  def handle_event("purge", %{"id" => id}, socket) when is_binary(id) do
     actor = socket.assigns.actor
 
     socket =
@@ -291,7 +295,7 @@ defmodule KilnCMSWeb.MediaLive do
 
   # Selection lives in the URL, so an open drawer survives refresh and can be
   # deep-linked (e.g. from the search palette).
-  def handle_event("select", %{"id" => id}, socket),
+  def handle_event("select", %{"id" => id}, socket) when is_binary(id),
     do: {:noreply, push_patch(socket, to: media_path(socket.assigns.query, id))}
 
   def handle_event("close", _params, socket),
@@ -329,7 +333,8 @@ defmodule KilnCMSWeb.MediaLive do
     end
   end
 
-  def handle_event("save_meta", %{"alt" => alt, "caption" => caption} = params, socket) do
+  def handle_event("save_meta", %{"alt" => alt, "caption" => caption} = params, socket)
+      when is_binary(alt) and is_binary(caption) do
     actor = socket.assigns.actor
     decorative = params["decorative"] in [true, "true"]
 

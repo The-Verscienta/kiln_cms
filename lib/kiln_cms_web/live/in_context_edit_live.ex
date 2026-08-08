@@ -119,7 +119,14 @@ defmodule KilnCMSWeb.InContextEditLive do
   # An inline region reports its edited text/HTML. Update just that block's field
   # in the working set (every other block and its stable id untouched) and persist
   # as a draft autosave, or mark it for an explicit Save on non-draft content.
-  def handle_event("update_block", %{"id" => id, "value" => value}, socket) do
+  #
+  # `value` is a binary for a plain-text region and a TipTap document (a map)
+  # for a rich one, so both shapes are the contract. A LIST is not, and is the
+  # shape worth excluding: `PortableText.from_tiptap/1` returns a list
+  # unchanged, so `"value" => [%{"_type" => "block", ...}]` would have written
+  # a client-authored body straight into the block without normalisation.
+  def handle_event("update_block", %{"id" => id, "value" => value}, socket)
+      when is_binary(id) and (is_binary(value) or is_map(value)) do
     case block_target(socket, id) do
       {index, field} ->
         inputs = InlineEditing.put_block_field(socket.assigns.block_inputs, index, field, value)
@@ -133,7 +140,7 @@ defmodule KilnCMSWeb.InContextEditLive do
   # Drag-and-drop reorder (the `Sortable` hook pushes the new order of block ids).
   # Reordering is a structural edit, but a single-block move is cheap and stays on
   # the inline surface; add/remove of blocks remains in the full editor (#335).
-  def handle_event("reorder", %{"order" => order}, socket) do
+  def handle_event("reorder", %{"order" => order}, socket) when is_list(order) do
     case reordered(socket, order) do
       {:ok, socket} -> {:noreply, mark_dirty(socket)}
       :noop -> {:noreply, socket}
@@ -142,7 +149,8 @@ defmodule KilnCMSWeb.InContextEditLive do
 
   # Keyboard-accessible reorder (the up/down buttons), so reordering isn't
   # drag-only (mirrors the block editor's #171 controls). Announces the move.
-  def handle_event("move_block", %{"id" => id, "dir" => dir}, socket) do
+  def handle_event("move_block", %{"id" => id, "dir" => dir}, socket)
+      when is_binary(id) and is_binary(dir) do
     ids = Enum.map(socket.assigns.blocks, &to_string(&1.id))
 
     with {order, pos} <- neighbor_swap(ids, id, dir),

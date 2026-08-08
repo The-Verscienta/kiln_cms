@@ -159,7 +159,7 @@ defmodule KilnCMSWeb.TokenPreviewLive do
 
   # The guest picked a display name — cap it, update presence (co-viewers see
   # the rename via the diff), and use it for future cursor broadcasts.
-  def handle_event("rename", %{"name" => name}, socket) do
+  def handle_event("rename", %{"name" => name}, socket) when is_binary(name) do
     name = name |> String.trim() |> String.slice(0, 40)
 
     if socket.assigns.viewer_key && name != "" do

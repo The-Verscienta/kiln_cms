@@ -168,7 +168,7 @@ defmodule KilnCMSWeb.PreviewLive do
   # Switch every co-viewer (self included) to a locale sibling — broadcast on
   # the preview topic, so the whole group stays on the same variant (#378).
   # Only ids from the resolved sibling list are accepted.
-  def handle_event("switch_variant", %{"id" => id}, socket) do
+  def handle_event("switch_variant", %{"id" => id}, socket) when is_binary(id) do
     if Enum.any?(socket.assigns.variants, &(&1.id == id)) and id != socket.assigns.record_id do
       Phoenix.PubSub.broadcast(
         KilnCMS.PubSub,

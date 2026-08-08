@@ -110,7 +110,8 @@ defmodule KilnCMSWeb.MailSettingsLive do
 
   # --- DNS records / verification ----------------------------------------------
 
-  def handle_event("save_server_ip", %{"settings" => %{"server_ip" => ip}}, socket) do
+  def handle_event("save_server_ip", %{"settings" => %{"server_ip" => ip}}, socket)
+      when is_binary(ip) do
     ip = if String.trim(ip) == "", do: nil, else: String.trim(ip)
 
     case Mail.set_mail_server_ip(socket.assigns.settings, %{server_ip: ip},
@@ -151,7 +152,7 @@ defmodule KilnCMSWeb.MailSettingsLive do
     end
   end
 
-  def handle_event("send_test", %{"test" => %{"to" => to}}, socket) do
+  def handle_event("send_test", %{"test" => %{"to" => to}}, socket) when is_binary(to) do
     recipient = String.trim(to)
 
     cond do
@@ -188,7 +189,7 @@ defmodule KilnCMSWeb.MailSettingsLive do
     {:noreply, put_flash(socket, :info, gettext("Copied to clipboard."))}
   end
 
-  def handle_event("unsuppress", %{"id" => id}, socket) do
+  def handle_event("unsuppress", %{"id" => id}, socket) when is_binary(id) do
     actor = socket.assigns.actor
 
     socket =

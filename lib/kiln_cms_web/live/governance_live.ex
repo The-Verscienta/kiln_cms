@@ -48,7 +48,7 @@ defmodule KilnCMSWeb.GovernanceLive do
 
   # Record a consent from the dashboard (#352 — consent management UI).
   @impl true
-  def handle_event("record_consent", %{"consent" => params}, socket) do
+  def handle_event("record_consent", %{"consent" => params}, socket) when is_map(params) do
     item = socket.assigns.trail.item
 
     attrs =

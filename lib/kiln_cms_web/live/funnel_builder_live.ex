@@ -56,7 +56,7 @@ defmodule KilnCMSWeb.FunnelBuilderLive do
   # --- settings ------------------------------------------------------------------
 
   @impl true
-  def handle_event("save_funnel", %{"funnel" => params}, socket) do
+  def handle_event("save_funnel", %{"funnel" => params}, socket) when is_map(params) do
     case Analytics.update_funnel(socket.assigns.funnel, params, actor_opts(socket)) do
       {:ok, funnel} ->
         {:noreply,
@@ -72,7 +72,7 @@ defmodule KilnCMSWeb.FunnelBuilderLive do
 
   # --- steps -----------------------------------------------------------------
 
-  def handle_event("pick_step_type", %{"type" => type}, socket) do
+  def handle_event("pick_step_type", %{"type" => type}, socket) when is_binary(type) do
     {:noreply,
      socket
      |> assign(:step_type, type)
@@ -113,7 +113,7 @@ defmodule KilnCMSWeb.FunnelBuilderLive do
     {:noreply, put_flash(socket, :error, gettext("Pick a content item first."))}
   end
 
-  def handle_event("remove_step", %{"id" => id}, socket) do
+  def handle_event("remove_step", %{"id" => id}, socket) when is_binary(id) do
     with %FunnelStep{} = step <- Enum.find(socket.assigns.steps, &(&1.id == id)) do
       Analytics.destroy_funnel_step(step, actor_opts(socket))
     end

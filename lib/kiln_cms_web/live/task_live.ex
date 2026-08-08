@@ -68,7 +68,7 @@ defmodule KilnCMSWeb.TaskLive do
   # FunctionClauseError that kills the view.
   def handle_event("set_auto_complete", _params, socket), do: {:noreply, socket}
 
-  def handle_event("complete", %{"id" => id}, socket) do
+  def handle_event("complete", %{"id" => id}, socket) when is_binary(id) do
     case Enum.find(all_tasks(socket), &(&1.id == id)) do
       nil ->
         {:noreply, socket}

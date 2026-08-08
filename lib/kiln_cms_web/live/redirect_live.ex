@@ -74,7 +74,7 @@ defmodule KilnCMSWeb.RedirectLive do
   # Prefill the form above with a 404'd path and send the admin to it. The
   # target still has to be chosen — Kiln redirects point at a *record*, so
   # there is nothing to guess.
-  def handle_event("redirect_missed", %{"id" => id}, socket) do
+  def handle_event("redirect_missed", %{"id" => id}, socket) when is_binary(id) do
     case Enum.find(socket.assigns.missed, &(&1.id == id)) do
       nil ->
         {:noreply, put_flash(socket, :error, gettext("That path is no longer listed."))}
@@ -89,11 +89,11 @@ defmodule KilnCMSWeb.RedirectLive do
     end
   end
 
-  def handle_event("dismiss_missed", %{"id" => id}, socket) do
+  def handle_event("dismiss_missed", %{"id" => id}, socket) when is_binary(id) do
     {:noreply, delete_missed(socket, id, gettext("Removed from the 404 list."))}
   end
 
-  def handle_event("create", %{"redirect" => params}, socket) do
+  def handle_event("create", %{"redirect" => params}, socket) when is_map(params) do
     case create_redirect(params, socket) do
       {:ok, path} ->
         {:noreply,
@@ -113,7 +113,7 @@ defmodule KilnCMSWeb.RedirectLive do
     end
   end
 
-  def handle_event("delete", %{"id" => id}, socket) do
+  def handle_event("delete", %{"id" => id}, socket) when is_binary(id) do
     actor = socket.assigns.actor
     org = socket.assigns.current_org
 

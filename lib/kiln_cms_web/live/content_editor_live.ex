@@ -1367,7 +1367,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     do: ContentTypes.transition(kind, verb, record, actor: actor, tenant: record.org_id)
 
   @impl true
-  def handle_event("validate", %{"form" => params} = event, socket) do
+  def handle_event("validate", %{"form" => params} = event, socket) when is_map(params) do
     # The columns children live in socket state (they aren't bound form inputs);
     # re-inject them so a keystroke's partial params can't wipe the nested tree.
     # GEO item rows (faq/how_to, #357) ARE bound inputs, but arrive as indexed
@@ -1390,7 +1390,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # knows (_touched), so a hook-injected input is silently dropped. Convert to
   # Portable Text here and re-validate with the body injected — the same
   # server-held-state pattern as columns children (apply_children/2).
-  def handle_event("rich_text_body", %{"doc" => doc} = event, socket) do
+  def handle_event("rich_text_body", %{"doc" => doc} = event, socket) when is_map(doc) do
     key =
       case event["id"] do
         id when is_binary(id) and id != "" -> id
@@ -1445,7 +1445,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Unknown/garbled tab value — ignore it rather than crash the editor.
   def handle_event("switch_inspector_tab", _params, socket), do: {:noreply, socket}
 
-  def handle_event("field_focus", %{"field" => field}, socket) do
+  def handle_event("field_focus", %{"field" => field}, socket) when is_binary(field) do
     broadcast_cursor(socket, field)
     {:noreply, assign(socket, :self_field, field)}
   end
@@ -1588,14 +1588,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def handle_event("copied", _params, socket),
     do: {:noreply, put_flash(socket, :info, gettext("Copied to clipboard."))}
 
-  def handle_event("seo_dismiss", %{"field" => field}, socket),
+  def handle_event("seo_dismiss", %{"field" => field}, socket) when is_binary(field),
     do:
       {:noreply, assign(socket, :seo_dismissed, MapSet.put(socket.assigns.seo_dismissed, field))}
 
   def handle_event("seo_dismiss_all", _params, socket),
     do: {:noreply, socket |> assign(:seo_drafts, nil) |> assign(:seo_dismissed, MapSet.new())}
 
-  def handle_event("seo_accept", %{"field" => field}, socket) do
+  def handle_event("seo_accept", %{"field" => field}, socket) when is_binary(field) do
     {socket, outcome} = apply_suggestion(socket, field)
     {:noreply, flash_outcomes(socket, [{field, outcome}])}
   end
@@ -1648,7 +1648,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   def handle_event("assist_close", _params, socket), do: {:noreply, close_assist(socket)}
 
-  def handle_event("assist_action", %{"action" => action}, socket) do
+  def handle_event("assist_action", %{"action" => action}, socket) when is_binary(action) do
     case KilnCMS.Assist.Action.fetch(action) do
       {:ok, %{id: id}} -> {:noreply, assign(socket, :assist_action, id)}
       # Never mints an atom from the pushed string; an unknown id is simply
@@ -1786,10 +1786,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   def handle_event("comment_add", _params, socket), do: {:noreply, socket}
 
-  def handle_event("comment_resolve", %{"id" => id}, socket),
+  def handle_event("comment_resolve", %{"id" => id}, socket) when is_binary(id),
     do: resolve_comment_thread(socket, id, :resolve_comment)
 
-  def handle_event("comment_unresolve", %{"id" => id}, socket),
+  def handle_event("comment_unresolve", %{"id" => id}, socket) when is_binary(id),
     do: resolve_comment_thread(socket, id, :unresolve_comment)
 
   # ── Editorial tasks (#501) ───────────────────────────────────────────────
@@ -1799,16 +1799,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def handle_event("task_assign_close", _params, socket),
     do: {:noreply, socket |> assign(:task_assign_open?, false) |> assign(:task_draft, %{})}
 
-  def handle_event("task_draft_change", %{"task_assignee_id" => v}, socket),
+  def handle_event("task_draft_change", %{"task_assignee_id" => v}, socket) when is_binary(v),
     do: {:noreply, put_task_draft(socket, "assignee_id", v)}
 
-  def handle_event("task_draft_change", %{"task_due_on" => v}, socket),
+  def handle_event("task_draft_change", %{"task_due_on" => v}, socket) when is_binary(v),
     do: {:noreply, put_task_draft(socket, "due_on", v)}
 
-  def handle_event("task_draft_change", %{"task_note" => v}, socket),
+  def handle_event("task_draft_change", %{"task_note" => v}, socket) when is_binary(v),
     do: {:noreply, put_task_draft(socket, "note", v)}
 
-  def handle_event("task_draft_change", %{"task_auto_complete" => v}, socket),
+  def handle_event("task_draft_change", %{"task_auto_complete" => v}, socket) when is_binary(v),
     do: {:noreply, put_task_draft(socket, "auto_complete", v)}
 
   def handle_event("task_draft_change", _params, socket), do: {:noreply, socket}
@@ -1843,10 +1843,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # No `<form>` for any of this — see `release_panel/1`. Each control carries its
   # own `phx-change` into `@release_draft`; the button is a plain `phx-click`.
-  def handle_event("release_draft_change", %{"release_target" => v}, socket),
+  def handle_event("release_draft_change", %{"release_target" => v}, socket) when is_binary(v),
     do: {:noreply, put_release_draft(socket, "release_id", v)}
 
-  def handle_event("release_draft_change", %{"release_action" => v}, socket),
+  def handle_event("release_draft_change", %{"release_action" => v}, socket) when is_binary(v),
     do: {:noreply, put_release_draft(socket, "action", v)}
 
   def handle_event("release_draft_change", _params, socket), do: {:noreply, socket}
@@ -1903,7 +1903,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
-  def handle_event("task_complete", %{"id" => id}, socket) do
+  def handle_event("task_complete", %{"id" => id}, socket) when is_binary(id) do
     case Enum.find(socket.assigns.tasks, &(&1.id == id)) do
       nil ->
         {:noreply, socket}
@@ -1931,7 +1931,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Selection is an ordered list, not a set: the order images are clicked is the
   # order they land in the gallery, which is the least surprising thing a
   # multi-select can do and saves a reorder afterwards.
-  def handle_event("toggle_pick", %{"id" => id, "url" => url}, socket) do
+  def handle_event("toggle_pick", %{"id" => id, "url" => url}, socket)
+      when is_binary(id) and is_binary(url) do
     picked = socket.assigns.picked
 
     picked =
@@ -1942,7 +1943,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, assign(socket, :picked, picked)}
   end
 
-  def handle_event("add_picked_images", %{"bid" => bid}, socket) do
+  def handle_event("add_picked_images", %{"bid" => bid}, socket) when is_binary(bid) do
     case socket.assigns.picked do
       [] ->
         {:noreply, reset_picker(socket)}
@@ -1964,7 +1965,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     do: {:noreply, reset_picker(socket)}
 
   # Live-filter the browser grid as the user types.
-  def handle_event("search_media", %{"q" => q}, socket) do
+  def handle_event("search_media", %{"q" => q}, socket) when is_binary(q) do
     results =
       if q == "",
         do: nil,
@@ -1974,11 +1975,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   # Set the social card image from the library (#476).
-  def handle_event("pick_image", %{"index" => "seo_image", "url" => url}, socket),
-    do: {:noreply, socket |> put_seo_image(url) |> reset_picker()}
+  def handle_event("pick_image", %{"index" => "seo_image", "url" => url}, socket)
+      when is_binary(url),
+      do: {:noreply, socket |> put_seo_image(url) |> reset_picker()}
 
   # Set the featured image from the library (#154).
-  def handle_event("pick_image", %{"index" => "featured", "id" => media_id}, socket) do
+  def handle_event("pick_image", %{"index" => "featured", "id" => media_id}, socket)
+      when is_binary(media_id) do
     params = AshPhoenix.Form.params(socket.assigns.form) |> Map.put("featured_image_id", media_id)
 
     {:noreply,
@@ -1991,7 +1994,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Insert a library image as a brand-new image block (browser opened from the
   # editor chrome): the URL becomes the block content and its id is stashed in
   # `data` so delivery can build srcset.
-  def handle_event("pick_image", %{"index" => "new", "id" => media_id, "url" => url}, socket) do
+  def handle_event("pick_image", %{"index" => "new", "id" => media_id, "url" => url}, socket)
+      when is_binary(media_id) and is_binary(url) do
     form =
       AshPhoenix.Form.add_form(socket.assigns.form, socket.assigns.form.name <> "[blocks]",
         params: %{
@@ -2010,7 +2014,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Fill the existing image block identified by `bid`. Its current position is
   # resolved from the live form now, not captured when the picker opened, so a
   # concurrent reorder/removal can't misdirect the image (audit T5.1).
-  def handle_event("pick_image", %{"index" => "block", "bid" => bid} = p, socket) do
+  def handle_event("pick_image", %{"index" => "block", "bid" => bid} = p, socket)
+      when is_binary(bid) do
     %{"id" => media_id, "url" => url} = p
 
     case block_index_by_id(socket.assigns.form, bid) do
@@ -2055,7 +2060,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def handle_event("close_file_picker", _params, socket), do: {:noreply, reset_picker(socket)}
 
   # Live-filter the file-picker grid as the user types.
-  def handle_event("search_file_media", %{"q" => q}, socket) do
+  def handle_event("search_file_media", %{"q" => q}, socket) when is_binary(q) do
     results =
       if q == "",
         do: nil,
@@ -2074,7 +2079,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # window lives ONLY in `@picker_files`, and an id present in neither list
   # (a stale click, or a co-editor's concurrent delete) must still resolve
   # correctly rather than silently no-op.
-  def handle_event("pick_file", %{"id" => media_id}, socket) do
+  def handle_event("pick_file", %{"id" => media_id}, socket) when is_binary(media_id) do
     bid = socket.assigns.file_picking
     actor = socket.assigns.actor
     org = socket.assigns.current_org
@@ -2123,7 +2128,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Live-filter the A/V picker grid as the user types, against whichever
   # library the open target wants.
-  def handle_event("search_av_media", %{"q" => q}, socket) do
+  def handle_event("search_av_media", %{"q" => q}, socket) when is_binary(q) do
     results =
       if q == "",
         do: nil,
@@ -2143,7 +2148,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # never trusted from the click payload — same reasoning as `pick_file`, and
   # the same direct `get_media_item` rather than a lookup in the mounted list
   # (a search result outside the mounted window lives only in `@picker_av`).
-  def handle_event("pick_av", %{"id" => media_id}, socket) do
+  def handle_event("pick_av", %{"id" => media_id}, socket) when is_binary(media_id) do
     with {bid, field} <- socket.assigns.av_picking,
          {:ok, item} <-
            CMS.get_media_item(media_id,
@@ -2189,7 +2194,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, socket |> refresh_preview() |> mark_dirty()}
   end
 
-  def handle_event("add_block", %{"type" => type} = p, socket) do
+  def handle_event("add_block", %{"type" => type} = p, socket) when is_binary(type) do
     # Every block carries a stable id from the moment it's added, so the picker,
     # delete, and keyboard-move can address it by identity rather than by a
     # position that a concurrent reorder can invalidate (audit T5.1/T5.2). The
@@ -2209,7 +2214,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Duplicate the block with stable id `bid`: copy its full field set, give the
   # copy (and, for a columns block, its nested children) fresh ids, and drop it in
   # right after the original.
-  def handle_event("duplicate_block", %{"bid" => bid}, socket) do
+  def handle_event("duplicate_block", %{"bid" => bid}, socket) when is_binary(bid) do
     case Enum.find(
            full_blocks_input(socket.assigns.form),
            &(to_string(&1["id"]) == to_string(bid))
@@ -2255,7 +2260,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # parallel socket state to keep in sync.
 
   def handle_event("item_row_add", %{"index" => index, "field" => field}, socket)
-      when field in @row_fields do
+      when field in @row_fields and is_binary(index) do
     update_item_rows(socket, index, field, &(&1 ++ [%{}]))
   end
 
@@ -2264,17 +2269,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
         %{"index" => index, "field" => field, "item" => item},
         socket
       )
-      when field in @row_fields do
+      when field in @row_fields and is_binary(index) and is_binary(item) do
     update_item_rows(socket, index, field, &List.delete_at(&1, to_int(item)))
   end
 
   # ── gallery image rows (#482) ───────────────────────────────────────────────
 
-  def handle_event("gallery_remove", %{"bid" => bid, "item" => item}, socket) do
+  def handle_event("gallery_remove", %{"bid" => bid, "item" => item}, socket)
+      when is_binary(bid) and is_binary(item) do
     update_gallery_images(socket, bid, &List.delete_at(&1, to_int(item)))
   end
 
-  def handle_event("gallery_move", %{"bid" => bid, "item" => item, "dir" => dir}, socket) do
+  def handle_event("gallery_move", %{"bid" => bid, "item" => item, "dir" => dir}, socket)
+      when is_binary(bid) and is_binary(item) and is_binary(dir) do
     from = to_int(item)
     to = if dir == "up", do: from - 1, else: from + 1
 
@@ -2298,7 +2305,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # and the server rebuilds from those — never from row content, which the
   # client could have edited between the drag and the event.
   def handle_event("gallery_reorder", %{"bid" => bid, "order" => order}, socket)
-      when is_list(order) do
+      when is_binary(bid) and is_list(order) do
     update_gallery_images(socket, bid, fn images ->
       # Deduped and rejected by INDEX, never by value. Two rows pointing at the
       # same media item are identical maps, so matching on the map itself
@@ -2323,7 +2330,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Remove the block with stable id `bid`. Resolving the id to a path now (rather
   # than trusting a path captured at render) means an in-flight reorder can't turn
   # a delete click into a delete of the wrong block (audit T5.2).
-  def handle_event("remove_block", %{"bid" => bid}, socket) do
+  def handle_event("remove_block", %{"bid" => bid}, socket) when is_binary(bid) do
     case block_index_by_id(socket.assigns.form, bid) do
       nil ->
         {:noreply, socket}
@@ -2341,7 +2348,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   def handle_event("remove_block", _params, socket), do: {:noreply, socket}
 
-  def handle_event("reorder", %{"order" => order}, socket) do
+  def handle_event("reorder", %{"order" => order}, socket) when is_list(order) do
     form = AshPhoenix.Form.sort_forms(socket.assigns.form, [:blocks], order)
     {:noreply, socket |> assign(:form, form) |> mark_dirty()}
   end
@@ -2350,7 +2357,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # block with its neighbour and announce the new position to screen readers.
   # The moved block is identified by its stable id and resolved to a live index
   # here, so the swap can't act on the wrong block after a reorder (T4.3/T5.2).
-  def handle_event("move_block", %{"bid" => bid, "dir" => dir}, socket) do
+  def handle_event("move_block", %{"bid" => bid, "dir" => dir}, socket)
+      when is_binary(bid) and is_binary(dir) do
     count = blocks_count(socket.assigns.form)
 
     # Bounds-check BOTH ends: an unknown id no-ops, and a source at either edge
@@ -2383,7 +2391,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # surviving a concurrent reorder.
 
   def handle_event("col_add_child", %{"id" => id, "col" => col, "type" => type}, socket)
-      when type in @nested_child_types do
+      when type in @nested_child_types and is_binary(id) and is_binary(col) do
     # Address the target column by a real index; a garbled `col` no-ops rather
     # than silently landing the child in column 0 (the old `to_int` fallback).
     case parse_index(col) do
@@ -2396,7 +2404,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
-  def handle_event("col_remove_child", %{"id" => id, "child" => child_id}, socket) do
+  def handle_event("col_remove_child", %{"id" => id, "child" => child_id}, socket)
+      when is_binary(id) and is_binary(child_id) do
     bc =
       update_columns(socket.assigns.block_children, id, fn blocks ->
         Enum.reject(blocks, &(&1["id"] == child_id))
@@ -2409,7 +2418,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
         "col_update_child",
         %{"id" => id, "child" => child_id, "field" => field} = p,
         socket
-      ) do
+      )
+      when is_binary(id) and is_binary(child_id) and is_binary(field) do
     value = Map.get(p, "value", "")
 
     bc =
@@ -2423,12 +2433,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Nested SortableJS drop: `cols` is the new child-id order of every column of
   # this block. Rebuild each column from the flat id→child map so a child can
   # move within or across the block's columns without losing its edits.
-  def handle_event("col_reorder", %{"id" => id, "cols" => cols}, socket) when is_list(cols) do
+  def handle_event("col_reorder", %{"id" => id, "cols" => cols}, socket)
+      when is_binary(id) and is_list(cols) do
     bc = Map.update(socket.assigns.block_children, id, [], &rebuild_columns(&1, cols))
     {:noreply, apply_children(socket, bc)}
   end
 
-  def handle_event("col_add_column", %{"id" => id}, socket) do
+  def handle_event("col_add_column", %{"id" => id}, socket) when is_binary(id) do
     bc =
       Map.update(socket.assigns.block_children, id, [%{"blocks" => []}], fn cols ->
         if length(cols) >= @max_columns, do: cols, else: cols ++ [%{"blocks" => []}]
@@ -2437,7 +2448,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, apply_children(socket, bc)}
   end
 
-  def handle_event("col_remove_column", %{"id" => id, "col" => col}, socket) do
+  def handle_event("col_remove_column", %{"id" => id, "col" => col}, socket)
+      when is_binary(id) and is_binary(col) do
     case parse_index(col) do
       {:ok, ci} ->
         bc = Map.update(socket.assigns.block_children, id, [], &drop_column(&1, ci))
@@ -2448,7 +2460,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
-  def handle_event("save", %{"form" => params}, socket) do
+  def handle_event("save", %{"form" => params}, socket) when is_map(params) do
     socket = cancel_autosave_timer(socket)
 
     params =
@@ -2509,13 +2521,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
      |> put_flash(:info, gettext("Reloaded the latest version."))}
   end
 
-  def handle_event("workflow", %{"action" => action}, socket) do
+  def handle_event("workflow", %{"action" => action}, socket) when is_binary(action) do
     {:noreply, run_workflow(socket, action)}
   end
 
   # One-click translation: duplicate this record's content into a new draft in
   # the target locale and jump to its editor.
-  def handle_event("create_translation", %{"locale" => locale}, socket) do
+  def handle_event("create_translation", %{"locale" => locale}, socket) when is_binary(locale) do
     %{kind: kind, record: record, actor: actor} = socket.assigns
 
     translation =
@@ -2569,7 +2581,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # ── Version compare (#467) ─────────────────────────────────────────────────
 
-  def handle_event("toggle_compare", %{"version_id" => version_id}, socket) do
+  def handle_event("toggle_compare", %{"version_id" => version_id}, socket)
+      when is_binary(version_id) do
     picks = socket.assigns.compare_pick
 
     picks =
@@ -2601,7 +2614,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, assign(socket, :compare, nil)}
   end
 
-  def handle_event("restore", %{"version_id" => version_id}, socket) do
+  def handle_event("restore", %{"version_id" => version_id}, socket) when is_binary(version_id) do
     result =
       restore_version(
         socket.assigns.kind,
@@ -3631,16 +3644,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Parse a non-negative integer index from a client value, or :error — so a
   # stale/garbled index no-ops instead of silently acting on position 0 (which
   # `to_int/1` would do).
-  defp parse_index(value) when is_integer(value) and value >= 0, do: {:ok, value}
-
+  #
+  # Binary-only: both callers (`col_add_child`, `col_remove_column`) now guard
+  # `is_binary(col)` on the head (#764), so the integer and catch-all clauses
+  # this used to carry were dead code. `:error` still covers the live case —
+  # an unparseable *string*, which a stale client can genuinely send.
   defp parse_index(value) when is_binary(value) do
     case Integer.parse(value) do
       {int, ""} when int >= 0 -> {:ok, int}
       _ -> :error
     end
   end
-
-  defp parse_index(_value), do: :error
 
   defp append_child(blocks, _type) when length(blocks) >= @max_children_per_column, do: blocks
   defp append_child(blocks, type), do: blocks ++ [new_child(type)]

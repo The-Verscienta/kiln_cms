@@ -87,7 +87,7 @@ defmodule KilnCMSWeb.SettingsLive do
      )}
   end
 
-  def handle_event("remove_passkey", %{"id" => id}, socket) do
+  def handle_event("remove_passkey", %{"id" => id}, socket) when is_binary(id) do
     user = socket.assigns.current_user
 
     socket =
@@ -130,7 +130,7 @@ defmodule KilnCMSWeb.SettingsLive do
   def handle_event("cancel_totp", _params, socket),
     do: {:noreply, assign(socket, :enrolling, nil)}
 
-  def handle_event("confirm_totp", %{"code" => code} = params, socket) do
+  def handle_event("confirm_totp", %{"code" => code} = params, socket) when is_binary(code) do
     user = socket.assigns.current_user
 
     args = %{
@@ -163,7 +163,7 @@ defmodule KilnCMSWeb.SettingsLive do
     end
   end
 
-  def handle_event("regenerate_recovery_codes", %{"code" => code}, socket) do
+  def handle_event("regenerate_recovery_codes", %{"code" => code}, socket) when is_binary(code) do
     user = socket.assigns.current_user
 
     case Accounts.regenerate_totp_recovery_codes(user, %{code: code}, actor: user) do
@@ -190,7 +190,7 @@ defmodule KilnCMSWeb.SettingsLive do
   def handle_event("dismiss_recovery_codes", _params, socket),
     do: {:noreply, assign(socket, :recovery_codes, nil)}
 
-  def handle_event("disable_totp", %{"code" => code}, socket) do
+  def handle_event("disable_totp", %{"code" => code}, socket) when is_binary(code) do
     user = socket.assigns.current_user
 
     case Accounts.disable_totp(user, %{code: code}, actor: user) do
@@ -213,11 +213,11 @@ defmodule KilnCMSWeb.SettingsLive do
   end
 
   @impl true
-  def handle_event("validate", %{"user" => params}, socket) do
+  def handle_event("validate", %{"user" => params}, socket) when is_map(params) do
     {:noreply, assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))}
   end
 
-  def handle_event("save", %{"user" => params}, socket) do
+  def handle_event("save", %{"user" => params}, socket) when is_map(params) do
     case AshPhoenix.Form.submit(socket.assigns.form, params: params) do
       {:ok, user} ->
         {:noreply,
@@ -234,12 +234,12 @@ defmodule KilnCMSWeb.SettingsLive do
     end
   end
 
-  def handle_event("validate_profile", %{"user" => params}, socket) do
+  def handle_event("validate_profile", %{"user" => params}, socket) when is_map(params) do
     {:noreply,
      assign(socket, :profile_form, AshPhoenix.Form.validate(socket.assigns.profile_form, params))}
   end
 
-  def handle_event("save_profile", %{"user" => params}, socket) do
+  def handle_event("save_profile", %{"user" => params}, socket) when is_map(params) do
     case AshPhoenix.Form.submit(socket.assigns.profile_form, params: params) do
       {:ok, user} ->
         {:noreply,
@@ -256,7 +256,7 @@ defmodule KilnCMSWeb.SettingsLive do
     end
   end
 
-  def handle_event("validate_password", %{"user" => params}, socket) do
+  def handle_event("validate_password", %{"user" => params}, socket) when is_map(params) do
     {:noreply,
      assign(
        socket,
@@ -265,7 +265,7 @@ defmodule KilnCMSWeb.SettingsLive do
      )}
   end
 
-  def handle_event("save_password", %{"user" => params}, socket) do
+  def handle_event("save_password", %{"user" => params}, socket) when is_map(params) do
     case AshPhoenix.Form.submit(socket.assigns.password_form, params: params) do
       {:ok, user} ->
         # Reset the form so the password fields clear after a successful change.

@@ -81,7 +81,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
   # --- tabs --------------------------------------------------------------------
 
   @impl true
-  def handle_event("set_tab", %{"tab" => tab}, socket) do
+  def handle_event("set_tab", %{"tab" => tab}, socket) when is_binary(tab) do
     tab = Map.get(@tabs, tab, :fields)
     socket = assign(socket, :tab, tab)
     socket = if tab == :entries, do: reload_submissions(socket), else: socket
@@ -90,7 +90,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
 
   # --- fields ------------------------------------------------------------------
 
-  def handle_event("add_field", %{"type" => type}, socket) do
+  def handle_event("add_field", %{"type" => type}, socket) when is_binary(type) do
     fields = socket.assigns.fields
     entry = Enum.find(palette(), &(Atom.to_string(&1.type) == type))
 
@@ -117,7 +117,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
     end
   end
 
-  def handle_event("select_field", %{"id" => id}, socket) do
+  def handle_event("select_field", %{"id" => id}, socket) when is_binary(id) do
     if Enum.any?(socket.assigns.fields, &(&1.id == id)) do
       {:noreply, assign(socket, :selected_id, id)}
     else
@@ -129,7 +129,8 @@ defmodule KilnCMSWeb.FormBuilderLive do
     {:noreply, assign(socket, :selected_id, nil)}
   end
 
-  def handle_event("update_field", %{"field" => %{"id" => id} = params}, socket) do
+  def handle_event("update_field", %{"field" => %{"id" => id} = params}, socket)
+      when is_binary(id) do
     field = Enum.find(socket.assigns.fields, &(&1.id == id))
 
     case field && CMS.update_form_field(field, field_params(params, field), actor_opts(socket)) do
@@ -139,7 +140,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
     end
   end
 
-  def handle_event("duplicate_field", %{"id" => id}, socket) do
+  def handle_event("duplicate_field", %{"id" => id}, socket) when is_binary(id) do
     fields = socket.assigns.fields
 
     case Enum.find(fields, &(&1.id == id)) do
@@ -148,7 +149,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
     end
   end
 
-  def handle_event("delete_field", %{"id" => id}, socket) do
+  def handle_event("delete_field", %{"id" => id}, socket) when is_binary(id) do
     with %FormField{} = field <- Enum.find(socket.assigns.fields, &(&1.id == id)) do
       CMS.destroy_form_field(field, actor_opts(socket))
     end
@@ -164,7 +165,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
 
   # --- form settings -----------------------------------------------------------
 
-  def handle_event("save_form", %{"form" => params}, socket) do
+  def handle_event("save_form", %{"form" => params}, socket) when is_map(params) do
     case CMS.update_form(socket.assigns.form, params, actor_opts(socket)) do
       {:ok, form} ->
         {:noreply,
@@ -180,7 +181,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
 
   # --- submissions (moderation, #477) ------------------------------------------
 
-  def handle_event("delete_submission", %{"id" => id}, socket) do
+  def handle_event("delete_submission", %{"id" => id}, socket) when is_binary(id) do
     opts = actor_opts(socket)
 
     with {:ok, submission} <- CMS.get_form_submission(id, opts) do
@@ -196,7 +197,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
     {:noreply, socket |> assign(:selected_submissions, selected) |> reload_submissions()}
   end
 
-  def handle_event("filter_status", %{"status" => status}, socket) do
+  def handle_event("filter_status", %{"status" => status}, socket) when is_binary(status) do
     {:noreply,
      socket
      |> assign(:status_filter, parse_status(status))
@@ -204,7 +205,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
      |> reload_submissions()}
   end
 
-  def handle_event("toggle_select", %{"id" => id}, socket) do
+  def handle_event("toggle_select", %{"id" => id}, socket) when is_binary(id) do
     selected = socket.assigns.selected_submissions
 
     updated =
@@ -223,10 +224,10 @@ defmodule KilnCMSWeb.FormBuilderLive do
   def handle_event("clear_selection", _params, socket),
     do: {:noreply, assign(socket, :selected_submissions, MapSet.new())}
 
-  def handle_event("mark_submission_spam", %{"id" => id}, socket),
+  def handle_event("mark_submission_spam", %{"id" => id}, socket) when is_binary(id),
     do: {:noreply, mark(socket, [id], :mark_form_submission_spam)}
 
-  def handle_event("mark_submission_reviewed", %{"id" => id}, socket),
+  def handle_event("mark_submission_reviewed", %{"id" => id}, socket) when is_binary(id),
     do: {:noreply, mark(socket, [id], :mark_form_submission_reviewed)}
 
   def handle_event("bulk_mark_spam", _params, socket),

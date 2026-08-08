@@ -31,11 +31,11 @@ defmodule KilnCMSWeb.BrandingLive do
   end
 
   @impl true
-  def handle_event("validate", %{"branding" => params}, socket) do
+  def handle_event("validate", %{"branding" => params}, socket) when is_map(params) do
     {:noreply, socket |> assign(:form, to_form(params, as: :branding)) |> assign_preview(params)}
   end
 
-  def handle_event("save", %{"branding" => params}, socket) do
+  def handle_event("save", %{"branding" => params}, socket) when is_map(params) do
     attrs = Map.new(@fields, fn field -> {field, blank_to_nil(params[field])} end)
 
     case CMS.save_site_branding(attrs,

@@ -118,7 +118,7 @@ defmodule KilnCMSWeb.PresentationLive do
 
   # A document scalar input (title/excerpt) changed.
   def handle_event("update_scalar", %{"field" => field, "value" => value}, socket)
-      when field in @scalar_fields do
+      when field in @scalar_fields and is_binary(value) do
     {:noreply,
      socket
      |> update(:scalar_changes, &Map.put(&1, field, value))
@@ -130,7 +130,11 @@ defmodule KilnCMSWeb.PresentationLive do
   end
 
   # A contenteditable region (InlineText/InlineRichText hook) pushed a new value.
-  def handle_event("update_block", %{"id" => id, "value" => value}, socket) do
+  # Binary for a plain region, a TipTap document (a map) for a rich one — both
+  # are the contract, a list is not. See `InContextEditLive.handle_event/3` for
+  # why that one shape matters.
+  def handle_event("update_block", %{"id" => id, "value" => value}, socket)
+      when is_binary(id) and (is_binary(value) or is_map(value)) do
     case block_index(socket, id) do
       {:ok, index, field} ->
         inputs = InlineEditing.put_block_field(socket.assigns.block_inputs, index, field, value)

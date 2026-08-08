@@ -29,7 +29,7 @@ defmodule KilnCMSWeb.FunnelLive do
   end
 
   @impl true
-  def handle_event("create_funnel", %{"funnel" => params}, socket) do
+  def handle_event("create_funnel", %{"funnel" => params}, socket) when is_map(params) do
     case Analytics.create_funnel(params, actor_opts(socket)) do
       {:ok, funnel} ->
         {:noreply,
@@ -42,7 +42,7 @@ defmodule KilnCMSWeb.FunnelLive do
     end
   end
 
-  def handle_event("delete_funnel", %{"id" => id}, socket) do
+  def handle_event("delete_funnel", %{"id" => id}, socket) when is_binary(id) do
     opts = actor_opts(socket)
 
     with {:ok, funnel} <- Analytics.get_funnel(id, opts),

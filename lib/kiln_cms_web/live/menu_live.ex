@@ -70,7 +70,7 @@ defmodule KilnCMSWeb.MenuLive do
   # --- menus -----------------------------------------------------------------
 
   @impl true
-  def handle_event("create_menu", %{"menu" => params}, socket) do
+  def handle_event("create_menu", %{"menu" => params}, socket) when is_map(params) do
     attrs = Map.take(params, ["key", "name", "locale", "description"])
 
     case CMS.create_menu(attrs, actor: socket.assigns.actor, tenant: socket.assigns.current_org) do
@@ -85,7 +85,7 @@ defmodule KilnCMSWeb.MenuLive do
     end
   end
 
-  def handle_event("delete_menu", %{"id" => id}, socket) do
+  def handle_event("delete_menu", %{"id" => id}, socket) when is_binary(id) do
     actor = socket.assigns.actor
     org = socket.assigns.current_org
 
@@ -102,7 +102,7 @@ defmodule KilnCMSWeb.MenuLive do
 
   # --- items -----------------------------------------------------------------
 
-  def handle_event("add_item", %{"item" => params}, socket) do
+  def handle_event("add_item", %{"item" => params}, socket) when is_map(params) do
     attrs =
       params
       |> item_attrs(socket)
@@ -125,7 +125,7 @@ defmodule KilnCMSWeb.MenuLive do
     end
   end
 
-  def handle_event("edit_item", %{"id" => id}, socket) do
+  def handle_event("edit_item", %{"id" => id}, socket) when is_binary(id) do
     case Enum.find(socket.assigns.items, &(&1.id == id)) do
       nil ->
         {:noreply, socket}
@@ -137,7 +137,8 @@ defmodule KilnCMSWeb.MenuLive do
 
   def handle_event("cancel_edit", _params, socket), do: {:noreply, assign(socket, :editing, nil)}
 
-  def handle_event("save_item", %{"item_id" => id, "item" => params}, socket) do
+  def handle_event("save_item", %{"item_id" => id, "item" => params}, socket)
+      when is_binary(id) and is_map(params) do
     actor = socket.assigns.actor
     org = socket.assigns.current_org
 
@@ -154,7 +155,7 @@ defmodule KilnCMSWeb.MenuLive do
     end
   end
 
-  def handle_event("delete_item", %{"id" => id}, socket) do
+  def handle_event("delete_item", %{"id" => id}, socket) when is_binary(id) do
     actor = socket.assigns.actor
     org = socket.assigns.current_org
 
@@ -173,7 +174,8 @@ defmodule KilnCMSWeb.MenuLive do
   # new child order, and every row in it is renumbered. Renumbering the whole
   # level (rather than the moved row alone) is what makes the result stable —
   # positions stay dense, so the next drop has no ties to break.
-  def handle_event("reorder_items", %{"parent_id" => parent_id, "order" => order}, socket) do
+  def handle_event("reorder_items", %{"parent_id" => parent_id, "order" => order}, socket)
+      when is_binary(parent_id) and is_list(order) do
     parent_id = if parent_id == "", do: nil, else: parent_id
     by_id = Map.new(socket.assigns.items, &{&1.id, &1})
 
@@ -205,7 +207,7 @@ defmodule KilnCMSWeb.MenuLive do
   # Indent: become the child of the sibling directly above. That is the only
   # placement a reader could predict from the visual order, and it is exactly
   # how Drupal and WordPress behave.
-  def handle_event("indent_item", %{"id" => id}, socket) do
+  def handle_event("indent_item", %{"id" => id}, socket) when is_binary(id) do
     with %{} = item <- Enum.find(socket.assigns.items, &(&1.id == id)),
          %{} = above <- sibling_above(socket, item) do
       case update_item(socket, item, %{
@@ -221,7 +223,7 @@ defmodule KilnCMSWeb.MenuLive do
   end
 
   # Outdent: become the next sibling of the current parent.
-  def handle_event("outdent_item", %{"id" => id}, socket) do
+  def handle_event("outdent_item", %{"id" => id}, socket) when is_binary(id) do
     with %{parent_id: parent_id} = item when not is_nil(parent_id) <-
            Enum.find(socket.assigns.items, &(&1.id == id)),
          %{} = parent <- Enum.find(socket.assigns.items, &(&1.id == parent_id)) do

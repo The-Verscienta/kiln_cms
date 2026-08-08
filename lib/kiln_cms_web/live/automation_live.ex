@@ -34,11 +34,11 @@ defmodule KilnCMSWeb.AutomationLive do
   end
 
   @impl true
-  def handle_event("validate", %{"rule" => params}, socket) do
+  def handle_event("validate", %{"rule" => params}, socket) when is_map(params) do
     {:noreply, assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))}
   end
 
-  def handle_event("create", %{"rule" => params}, socket) do
+  def handle_event("create", %{"rule" => params}, socket) when is_map(params) do
     case submit(socket.assigns.form, params) do
       {:ok, _rule} ->
         {:noreply,
@@ -58,7 +58,7 @@ defmodule KilnCMSWeb.AutomationLive do
     end
   end
 
-  def handle_event("edit", %{"id" => id}, socket) do
+  def handle_event("edit", %{"id" => id}, socket) when is_binary(id) do
     {:noreply,
      assign(socket, :edit, %{
        id: id,
@@ -68,7 +68,7 @@ defmodule KilnCMSWeb.AutomationLive do
 
   def handle_event("cancel_edit", _params, socket), do: {:noreply, assign(socket, :edit, nil)}
 
-  def handle_event("validate_edit", %{"rule" => params}, socket) do
+  def handle_event("validate_edit", %{"rule" => params}, socket) when is_map(params) do
     edit = %{
       socket.assigns.edit
       | form: AshPhoenix.Form.validate(socket.assigns.edit.form, params)
@@ -77,7 +77,7 @@ defmodule KilnCMSWeb.AutomationLive do
     {:noreply, assign(socket, :edit, edit)}
   end
 
-  def handle_event("save_edit", %{"rule" => params}, socket) do
+  def handle_event("save_edit", %{"rule" => params}, socket) when is_map(params) do
     case submit(socket.assigns.edit.form, params) do
       {:ok, _rule} ->
         {:noreply,
@@ -94,7 +94,7 @@ defmodule KilnCMSWeb.AutomationLive do
     end
   end
 
-  def handle_event("toggle_enabled", %{"id" => id}, socket) do
+  def handle_event("toggle_enabled", %{"id" => id}, socket) when is_binary(id) do
     actor = socket.assigns.actor
     org = socket.assigns.current_org
 
@@ -110,7 +110,7 @@ defmodule KilnCMSWeb.AutomationLive do
     {:noreply, socket}
   end
 
-  def handle_event("delete", %{"id" => id}, socket) do
+  def handle_event("delete", %{"id" => id}, socket) when is_binary(id) do
     actor = socket.assigns.actor
 
     org = socket.assigns.current_org
