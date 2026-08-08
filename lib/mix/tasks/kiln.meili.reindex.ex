@@ -9,6 +9,13 @@ defmodule Mix.Tasks.Kiln.Meili.Reindex do
 
       mix kiln.meili.reindex
 
+  Also the **removal** path, which is why it is worth running after an upgrade
+  that narrows what belongs in the index: the worker turns a document it will
+  not index into a `DELETE`, so a run enqueued over every published document
+  evicts the ones that should no longer be there. Audience-gated and
+  passphrase-locked documents indexed under an older rule are cleaned up this
+  way (#1006, #496).
+
   No-op (with a notice) when the Meilisearch backend is disabled.
   """
   use Mix.Task
@@ -35,6 +42,11 @@ defmodule Mix.Tasks.Kiln.Meili.Reindex do
         _ ->
           count = Enum.reduce(@sources, 0, &enqueue_source/2)
           Mix.shell().info("Configured index and enqueued #{count} published document(s).")
+
+          Mix.shell().info(
+            "Anything not public to an anonymous visitor — audience-gated or " <>
+              "passphrase-locked — is REMOVED from the index as those jobs run."
+          )
       end
     else
       Mix.shell().info(

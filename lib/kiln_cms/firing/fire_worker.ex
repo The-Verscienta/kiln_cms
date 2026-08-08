@@ -58,7 +58,7 @@ defmodule KilnCMS.Firing.FireWorker do
         # `org_id` explicitly so their reads/jobs stay scoped to this org.
         Engine.fire(document)
         References.invalidate(org_id, type, id, [References.key(type, id)])
-        enqueue_indexing(org_id, type, id)
+        enqueue_indexing(org_id, type, id, document)
         :ok
 
       :absent ->
@@ -103,7 +103,7 @@ defmodule KilnCMS.Firing.FireWorker do
     {:cancel, "no published #{type} #{inspect(id)}; purged its orphaned artifacts"}
   end
 
-  defp enqueue_indexing(org_id, type, id) do
+  defp enqueue_indexing(org_id, type, id, document) do
     # Re-index per-block embeddings for the fired content (decision D16).
     if KilnCMS.Search.semantic?() do
       %{"org_id" => org_id, "type" => to_string(type), "id" => id}
@@ -111,13 +111,34 @@ defmodule KilnCMS.Firing.FireWorker do
       |> Oban.insert()
     end
 
-    # Upsert into the optional Meilisearch index (Phase 6). No-op when disabled.
+    # Keep the optional Meilisearch index in step (Phase 6). No-op when disabled.
     if KilnCMS.Search.Meilisearch.enabled?() do
-      %{"org_id" => org_id, "op" => "upsert", "type" => to_string(type), "id" => id}
+      %{"org_id" => org_id, "op" => meili_op(document), "type" => to_string(type), "id" => id}
       |> KilnCMS.Search.MeilisearchWorker.new()
       |> Oban.insert()
     end
 
     :ok
+  end
+
+  # The op is chosen HERE, from the document that was just fired, rather than
+  # left for the worker to discover — and that is a correctness requirement, not
+  # an optimisation.
+  #
+  # `MeilisearchWorker` refuses to index anything not public to an anonymous
+  # visitor and turns it into a removal (#1006), so an upsert would reach the
+  # right answer on its own. But the worker's uniqueness key is
+  # `{org_id, op, type, id}`: an upsert enqueued because a document was just
+  # gated would be deduped against an upsert already **executing** for the same
+  # document — one that loaded the record while it was still public. That job
+  # writes the public body and finishes, and nothing re-enqueues, because only a
+  # fire does. The gated body would stay anonymously searchable until an
+  # unrelated edit or a manual `mix kiln.meili.reindex`.
+  #
+  # A removal is a different op, so it is never deduped against a running
+  # upsert. The worker's own check stays as the second line of defence, for a
+  # document gated between this enqueue and that job running.
+  defp meili_op(document) do
+    if KilnCMS.CMS.Audiences.public_to_anonymous?(document), do: "upsert", else: "delete"
   end
 end
