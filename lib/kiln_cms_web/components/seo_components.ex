@@ -122,6 +122,33 @@ defmodule KilnCMSWeb.SeoComponents do
   def finding_message(%{code: :keyphrase_not_in_first_paragraph}, _pinned?),
     do: gettext("The focus keyphrase doesn't appear in the opening paragraph.")
 
+  def finding_message(%{code: :keyphrase_not_in_headings}, _pinned?),
+    do: gettext("The focus keyphrase doesn't appear in any subheading.")
+
+  def finding_message(%{code: :seo_title_wide, args: a}, _pinned?),
+    do:
+      gettext(
+        "The title is about %{pixels}px wide — over the %{max}px Google shows, so it may be cut off.",
+        pixels: a.pixels,
+        max: a.max
+      )
+
+  def finding_message(%{code: :seo_description_wide, args: a}, _pinned?),
+    do:
+      gettext(
+        "The description is about %{pixels}px wide — over the %{max}px Google shows, so it may be cut off.",
+        pixels: a.pixels,
+        max: a.max
+      )
+
+  def finding_message(%{code: :passive_voice_high, args: a}, _pinned?),
+    do:
+      gettext(
+        "About %{percentage}% of sentences look passive (guideline: %{max}%). This is an estimate — passive voice is often the right choice.",
+        percentage: a.percentage,
+        max: a.max
+      )
+
   def finding_message(%{code: :keyphrase_density_low, args: a}, _pinned?),
     do:
       gettext("Focus keyphrase density is %{density}% — below the %{min}% guideline.",

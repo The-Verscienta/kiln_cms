@@ -255,12 +255,40 @@ anything is published.
 | `Checks.LinkText` | uninformative ("click here") / bare URL as label | warning |
 | `Checks.AllCaps` | a run of capitalised words | warning |
 | `Seo.Checks.Readability` | long sentences, long paragraphs, hard-to-read prose | warning / info |
+| `Seo.Checks.Keyphrase` | focus keyphrase missing from title / slug / description / opening / subheadings | warning |
+| `Seo.Checks.PixelWidth` | title or description likely truncated by rendered width | info |
+| `Seo.Checks.PassiveVoice` | high proportion of passive sentences | info |
 
 Only `link_text_empty` and `images_missing_alt` are errors. The rest are
 judgement calls with real exceptions — "read more" under a card heading that
 supplies the context is genuinely fine — and an advisory that cries wolf on a
 defensible choice is one authors learn to dismiss, at which point it isn't
 catching the real ones either.
+
+### The two estimates announce themselves as estimates (#551)
+
+`PixelWidth` and `PassiveVoice` are `:info` and English-gated, and both are
+deliberately weaker claims than they could be:
+
+* **`PixelWidth`** models a font Google can change without telling anyone.
+  `Seo.Checks.Meta` still reports the character count and still owns the
+  warning; this is the secondary signal, because a model should not outrank a
+  plain measurement in a list of things to fix. Per-character summing is
+  meaningless for CJK and wrong for scripts with shaping, so outside Latin it
+  answers `:n_a` rather than a confident number.
+
+* **`PassiveVoice`** has no part-of-speech tagger behind it, so "looks like a
+  past participle" is a list of irregulars plus `-ed` minus an adjective
+  stop-list. It reports a whole-document proportion over a generous floor
+  rather than flagging sentences, because a per-sentence flag puts a false
+  positive in front of an editor as a specific accusation. Its known misses
+  (`get`-passives) and known false hits (off-list predicate adjectives) are
+  asserted in `test/kiln_cms/seo/checks/parity_test.exs`, so they stay
+  documented rather than becoming surprises.
+
+Passive voice is also not categorically bad writing — "the vaccine was approved
+in March" has no useful active form — which is the other reason it never rises
+above `:info`.
 
 Two design notes worth knowing before changing them:
 

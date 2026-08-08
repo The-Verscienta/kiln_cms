@@ -246,4 +246,66 @@ defmodule KilnCMS.CMS.FieldGrantsTest do
       assert {:ok, _} = CMS.update_post(default_post, %{excerpt: "Free"}, actor: editor)
     end
   end
+
+  # Every admin-defined type shares one module (`KilnCMS.CMS.Entry`), so a grant
+  # key resolved from the module was `"entry"` for all of them. `field_grant/3`
+  # reads a miss as `nil` = NO restriction, so `{"recipe": ["title"]}` was the
+  # exact opposite of what the admin configured (#927).
+  describe "dynamic content types (#927)" do
+    setup do
+      admin = user(:admin)
+      name = "recipe#{System.unique_integer([:positive])}"
+
+      definition =
+        CMS.create_type_definition!(%{name: name, label: "Recipe"}, actor: admin)
+
+      %{admin: admin, name: name, definition: definition}
+    end
+
+    defp entry!(actor, definition, attrs \\ %{}) do
+      KilnCMS.CMS.ContentTypes.create!(
+        definition.name,
+        Map.merge(%{title: "A recipe", slug: slug(), blocks: []}, attrs),
+        actor: actor
+      )
+    end
+
+    test "a grant naming the dynamic type binds", %{admin: admin, name: name, definition: d} do
+      entry = entry!(admin, d)
+      editor = user(:editor, %{field_grants: %{name => ["title"]}})
+
+      assert {:ok, updated} =
+               KilnCMS.CMS.ContentTypes.update(name, entry, %{title: "Renamed"}, actor: editor)
+
+      assert updated.title == "Renamed"
+
+      assert {:error, %Ash.Error.Invalid{} = error} =
+               KilnCMS.CMS.ContentTypes.update(name, updated, %{excerpt: "Nope"}, actor: editor)
+
+      assert Exception.message(error) =~ "field grant"
+    end
+
+    # The bug in the other direction: a grant on one dynamic type must not bind
+    # a different one, which is what a shared `"entry"` key produced.
+    test "a grant on one dynamic type does not bind another", %{admin: admin, definition: d} do
+      other_name = "gadget#{System.unique_integer([:positive])}"
+      other = CMS.create_type_definition!(%{name: other_name, label: "Gadget"}, actor: admin)
+
+      entry = entry!(admin, other)
+      editor = user(:editor, %{field_grants: %{d.name => ["title"]}})
+
+      # The editor holds no grant for `other_name`, so nothing is restricted.
+      assert {:ok, _} =
+               KilnCMS.CMS.ContentTypes.update(other_name, entry, %{excerpt: "Fine"},
+                 actor: editor
+               )
+    end
+
+    test "the compiled-type key still resolves", %{admin: admin} do
+      post = post!(admin)
+      editor = user(:editor, %{field_grants: %{"post" => ["title"]}})
+
+      assert {:error, _} = CMS.update_post(post, %{excerpt: "Nope"}, actor: editor)
+    end
+  end
 end
