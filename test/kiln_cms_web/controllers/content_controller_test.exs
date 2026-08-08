@@ -168,6 +168,18 @@ defmodule KilnCMSWeb.ContentControllerTest do
               "width" => 800,
               "height" => 450,
               "content_type" => "image/webp"
+            },
+            # The full-size alternate. Every processed item has one since #473,
+            # and without it the whole `<source>` is suppressed (#919) — a
+            # matching `<source>` replaces the `<img>` srcset, so a webp ladder
+            # that stopped at 400w would cap this 1600px image at 400px for
+            # every webp-capable browser.
+            "full.webp" => %{
+              "key" => "fw",
+              "url" => "/uploads/p-full.webp",
+              "width" => 1600,
+              "height" => 1067,
+              "content_type" => "image/webp"
             }
           }
         })
@@ -185,6 +197,7 @@ defmodule KilnCMSWeb.ContentControllerTest do
       assert html =~ "<picture>"
       assert html =~ ~s(type="image/webp")
       assert html =~ "/uploads/p-thumb.webp 400w"
+      assert html =~ "/uploads/p-full.webp 1600w"
 
       # The `<img>` fallback carries the source format only — scoped to the
       # `<picture>`, since the console layout has an `<img>` of its own.
