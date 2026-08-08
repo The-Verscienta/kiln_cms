@@ -303,26 +303,25 @@ defmodule KilnCMS.Application do
     end
   end
 
-  # A multi-tenant deployment that leaves `TENANT_STRICT_HOST` off serves the
-  # DEFAULT org's content, branding and analytics to any request carrying an
-  # unrecognized Host (#563). That is the correct behaviour for the single-host
-  # install the fallback exists for, so it can't just be flipped — but on a
-  # deployment that has actually created a second org it is a live misconfig,
-  # and the operator should hear it from a log line rather than from an
-  # incident. Counted at boot, not per request: this runs once, and a
-  # single-org install stays silent.
+  # A deployment that leaves `TENANT_STRICT_HOST` off serves the DEFAULT org's
+  # content, branding and analytics to any request carrying an unrecognized Host
+  # (#563). That is the correct behaviour for the single-host install the
+  # fallback exists for, so it can't just be flipped — but on a deployment that
+  # has actually created a second org it is a live misconfig, and the operator
+  # should hear it from a log line rather than from an incident.
   #
   # Boot is the WEAKEST of the three places this is checked, and deliberately
   # not the only one: it already happened by the time someone creates the second
-  # org, and may not happen again for months (#660).
-  # `KilnCMSWeb.Tenant.strict_host_gap?/0` is the shared predicate; org creation
-  # and `/editor/system` ask it too.
+  # org, and may not happen again for months (#660). Org creation and
+  # `/editor/system` ask the same predicate — and it really is the same one,
+  # rather than a second copy that drifts.
   #
-  # Logger (not stderr like the config providers) so it reaches Sentry and
-  # whatever ships the container's logs — see #634.
+  # Logger, not the stderr the config providers use, so it reaches whatever
+  # ships the container's logs (#634). Note that is NOT Sentry: the
+  # `Sentry.LoggerHandler` this app attaches sets no `capture_log_messages`, so
+  # a plain `Logger.warning` never becomes an event.
   defp warn_if_multi_tenant_without_strict_host do
-    if Application.get_env(:kiln_cms, :multitenancy_enabled, false) and
-         not KilnCMSWeb.Tenant.strict_host?() and multiple_orgs?() do
+    if KilnCMSWeb.Tenant.strict_host_gap?() do
       require Logger
 
       Logger.warning(
@@ -333,17 +332,6 @@ defmodule KilnCMS.Application do
           "docs/environment-variables.md."
       )
     end
-  end
-
-  # Best-effort: a DB that isn't up yet at boot must not take the app with it,
-  # and a failed read is not evidence of a misconfiguration.
-  defp multiple_orgs? do
-    case Ash.count(KilnCMS.Accounts.Organization, authorize?: false) do
-      {:ok, n} when n > 1 -> true
-      _ -> false
-    end
-  rescue
-    _ -> false
   end
 
   # Enabling SEO drafting against a hosted provider means page content leaves

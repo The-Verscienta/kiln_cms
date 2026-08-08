@@ -44,39 +44,79 @@ defmodule KilnCMSWeb.StrictHostGapTest do
   defp restore(key, nil), do: Application.delete_env(:kiln_cms, key)
   defp restore(key, value), do: Application.put_env(:kiln_cms, key, value)
 
+  # The threshold, unit-tested. `Organization` has no destroy action, so a test
+  # cannot get the table below the seeded default org — which means a database
+  # -driven test can only ever assert the `> 1` side, and a threshold of `> 0`
+  # (or no threshold at all) sits here passing everything. Both mutations did.
+  describe "gap?/1" do
+    setup do
+      Application.put_env(:kiln_cms, :tenant_strict_host, false)
+      :ok
+    end
+
+    test "an empty or single-org install is not a gap" do
+      refute Tenant.gap?(0)
+      refute Tenant.gap?(1)
+    end
+
+    test "two or more is" do
+      assert Tenant.gap?(2)
+      assert Tenant.gap?(50)
+    end
+
+    test "a count that could not be read is not evidence of anything" do
+      refute Tenant.gap?(:unknown)
+    end
+
+    test "strict host on beats any count" do
+      Application.put_env(:kiln_cms, :tenant_strict_host, true)
+
+      refute Tenant.gap?(2)
+      refute Tenant.gap?(50)
+    end
+
+    # `TENANT_STRICT_HOST` reaches config through `KilnCMS.Config.Env`, which
+    # fails to the DEFAULT rather than to safe — so a garbage value leaves the
+    # flag off, and the gap is real.
+    test "a non-boolean flag counts as off, because that is what routing does" do
+      Application.put_env(:kiln_cms, :tenant_strict_host, :yes)
+
+      assert Tenant.gap?(2)
+    end
+  end
+
   describe "strict_host_gap?/0" do
     test "is false while strict host is on, however many orgs exist" do
-      Application.put_env(:kiln_cms, :multitenancy_enabled, true)
       Application.put_env(:kiln_cms, :tenant_strict_host, true)
       org("gap-strict")
 
       refute Tenant.strict_host_gap?()
     end
 
-    test "is false when the tenant axis is switched off entirely" do
+    # Deliberately NOT gated on `:multitenancy_enabled`. Nothing in the routing
+    # path reads that flag — it is a create kill switch — so an operator with
+    # several orgs who sets it to `false` to refuse another still has every
+    # unrecognized Host landing on the default org. Gating on it would silence
+    # all three warnings for exactly the deployment that needs them.
+    test "the create kill switch does not silence it" do
       Application.put_env(:kiln_cms, :multitenancy_enabled, false)
       Application.put_env(:kiln_cms, :tenant_strict_host, false)
-      org("gap-single-tenant")
+      org("gap-killswitch")
 
-      refute Tenant.strict_host_gap?()
+      assert Tenant.strict_host_gap?()
     end
 
-    # The condition is "more than one org", not "any org": the seeded default
-    # org is the whole install on a single-tenant deployment, and warning there
-    # would be noise every operator learns to ignore.
-    test "is true only once a second org exists" do
-      Application.put_env(:kiln_cms, :multitenancy_enabled, true)
+    test "reads the live count" do
       Application.put_env(:kiln_cms, :tenant_strict_host, false)
 
       # The test database always carries the seeded default org, so one more is
       # the crossing. Asserted as a delta rather than assuming a clean table.
-      {:ok, before} = Ash.count(Organization, authorize?: false)
-      assert before >= 1
+      before = Tenant.org_count()
+      assert is_integer(before) and before >= 1
 
       org("gap-second")
 
-      {:ok, after_count} = Ash.count(Organization, authorize?: false)
-      assert after_count == before + 1
+      assert Tenant.org_count() == before + 1
       assert Tenant.strict_host_gap?()
     end
   end
@@ -86,6 +126,10 @@ defmodule KilnCMSWeb.StrictHostGapTest do
       Application.put_env(:kiln_cms, :multitenancy_enabled, true)
       :ok
     end
+
+    # `Ash.Seed` bypasses the action, so these are the only creates that reach
+    # the change — which is also why the fixtures, the multi-tenancy suite and
+    # the restore/import paths are unaffected by it.
 
     defp create_org(slug) do
       Organization
@@ -98,11 +142,30 @@ defmodule KilnCMSWeb.StrictHostGapTest do
 
     test "warns, naming the flag and what an unmatched host gets" do
       Application.put_env(:kiln_cms, :tenant_strict_host, false)
+      assert Tenant.org_count() == 1, "another test leaked an org through the action"
 
       log = capture_log(fn -> assert {:ok, _org} = create_org("gap-create") end)
 
       assert log =~ "TENANT_STRICT_HOST"
       assert log =~ "DEFAULT org"
+    end
+
+    # The crossing only. Saying it again on every create would give a SaaS that
+    # has deliberately left the flag off a permanent warning per provisioning
+    # event — and the message would be false from the third on, since that create
+    # did not make anything multi-tenant. The standing state is what
+    # `/editor/system` is for.
+    test "says nothing on the third organization and after" do
+      Application.put_env(:kiln_cms, :tenant_strict_host, false)
+      assert {:ok, _second} = create_org("gap-crossing")
+
+      log =
+        capture_log(fn ->
+          assert {:ok, _third} = create_org("gap-third")
+          assert {:ok, _fourth} = create_org("gap-fourth")
+        end)
+
+      refute log =~ "TENANT_STRICT_HOST"
     end
 
     test "says nothing when strict host is already on" do
@@ -113,20 +176,29 @@ defmodule KilnCMSWeb.StrictHostGapTest do
       refute log =~ "TENANT_STRICT_HOST"
     end
 
-    # The advisory runs inside the create's transaction, so anything that raised
-    # there would roll the organization back — turning a log line into an outage,
-    # a worse failure than the one being warned about. The predicate is total (see
-    # `strict_host_gap?/0`) and the change rescues on top of it; this asserts the
-    # pair from the outside, with a config value no `and` will accept.
-    test "a config value that is not a boolean cannot take the create down" do
+    # The advisory reads the database, and it used to do so from an
+    # `after_action` — inside the create's own transaction. A read that fails
+    # there aborts the Postgres transaction, and no `rescue` can save it: the
+    # create comes back as an opaque `{:error, :rollback}` and the organization
+    # is gone. `after_transaction` moves it past the commit; this pins that the
+    # record survives independently of what the advisory does.
+    test "the organization is committed before the advisory runs" do
       Application.put_env(:kiln_cms, :tenant_strict_host, false)
-      Application.put_env(:kiln_cms, :multitenancy_enabled, :yes)
 
-      refute Tenant.strict_host_gap?()
+      parent = self()
 
-      log = capture_log(fn -> assert {:ok, _org} = create_org("gap-create-boom") end)
+      log =
+        capture_log(fn ->
+          assert {:ok, org} = create_org("gap-committed")
+          send(parent, {:created, org.id})
+        end)
 
-      refute log =~ "TENANT_STRICT_HOST"
+      assert log =~ "TENANT_STRICT_HOST"
+      assert_received {:created, id}
+
+      # Read back from the table: a rolled-back create still hands the caller a
+      # struct, so `{:ok, _}` alone proves nothing about what was committed.
+      assert {:ok, %Organization{}} = Ash.get(Organization, id, authorize?: false)
     end
   end
 
@@ -168,7 +240,6 @@ defmodule KilnCMSWeb.StrictHostGapTest do
     end
 
     test "shows the notice while the gap is open", %{conn: conn} do
-      Application.put_env(:kiln_cms, :multitenancy_enabled, true)
       Application.put_env(:kiln_cms, :tenant_strict_host, false)
 
       {:ok, _lv, html} = live(on_host(conn, org("gap-panel")), ~p"/editor/system")
@@ -178,7 +249,6 @@ defmodule KilnCMSWeb.StrictHostGapTest do
     end
 
     test "stays quiet once the flag is on", %{conn: conn} do
-      Application.put_env(:kiln_cms, :multitenancy_enabled, true)
       Application.put_env(:kiln_cms, :tenant_strict_host, true)
 
       {:ok, _lv, html} = live(on_host(conn, org("gap-panel-strict")), ~p"/editor/system")

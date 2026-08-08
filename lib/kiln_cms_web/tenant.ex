@@ -243,14 +243,14 @@ defmodule KilnCMSWeb.Tenant do
   def strict_host?, do: Application.get_env(:kiln_cms, :tenant_strict_host, false)
 
   @doc """
-  Whether this deployment is multi-tenant *and* still serving the default org to
-  unrecognized hosts (#660).
+  Whether this deployment is serving the default org to unrecognized hosts while
+  more than one organization exists (#660).
 
   `TENANT_STRICT_HOST` is off by default, and that is right for the single-host
   install the fallback exists for: with one org, "an unknown Host is served the
-  default org" describes the only org there is. The moment a second one is
-  created it becomes a live misconfiguration — an unrecognized Host, an IP, or
-  an attacker-supplied header is served *another tenant's* content, branding and
+  default org" describes the only org there is. The moment a second one exists it
+  becomes a live misconfiguration — an unrecognized Host, an IP, or an
+  attacker-supplied header is served *another tenant's* content, branding and
   analytics.
 
   Nothing about that moment is loud. `KilnCMS.Application` checks it at boot, but
@@ -259,26 +259,44 @@ defmodule KilnCMSWeb.Tenant do
   at the right time. So the same predicate also runs where the decision is made
   (creating the org) and where an operator goes to look (`/editor/system`).
 
-  Total by construction. One caller renders a page, one runs inside an
-  organization's create transaction, and one runs during boot; a predicate that
-  raised in any of them would turn an advisory into a worse failure than the one
-  it describes. So a database that is not up yet, or a config value that is not a
-  boolean, answers `false` — the same as "nothing to warn about". A failed read
-  is not evidence of a misconfiguration either way.
+  Deliberately **not** gated on `:multitenancy_enabled`. That flag is a create
+  kill switch and nothing in the routing path reads it — an operator with three
+  orgs who sets it to `false` to refuse a fourth still has every unrecognized
+  Host landing on the default org, and gating on it would silence all three
+  warnings for exactly the deployment that needs them.
   """
   @spec strict_host_gap?() :: boolean()
-  def strict_host_gap? do
-    Application.get_env(:kiln_cms, :multitenancy_enabled, false) == true and
-      strict_host?() != true and multiple_orgs?()
+  def strict_host_gap?, do: gap?(org_count())
+
+  @doc """
+  The pure half of `strict_host_gap?/0`: the verdict for an already-known count.
+
+  Split out to be testable. `Organization` has no destroy action, so a test
+  cannot get the table below the seeded default org and the `0`/`1` cases are
+  unreachable through the database — which is how a threshold of `> 0` would
+  otherwise sit here unnoticed, passing every test that exists.
+  """
+  @spec gap?(non_neg_integer() | :unknown) :: boolean()
+  def gap?(count) do
+    strict_host?() != true and is_integer(count) and count > 1
   end
 
-  defp multiple_orgs? do
+  @doc """
+  How many organizations exist, or `:unknown` if the question cannot be answered.
+
+  Total by construction. One caller renders a page, one runs after an
+  organization's create, and one runs during boot — a count that raised in any of
+  them would turn an advisory into a worse failure than the one it describes. A
+  database that is not up yet is not evidence of a misconfiguration.
+  """
+  @spec org_count() :: non_neg_integer() | :unknown
+  def org_count do
     case Ash.count(KilnCMS.Accounts.Organization, authorize?: false) do
-      {:ok, n} when n > 1 -> true
-      _ -> false
+      {:ok, n} -> n
+      _error -> :unknown
     end
   rescue
-    _ -> false
+    _error -> :unknown
   end
 
   @doc """

@@ -146,13 +146,13 @@ defmodule KilnCMSWeb.SystemLive do
             {gettext("Host matching is off, and this deployment has more than one organization")}
           </h2>
 
-          <p class="mt-2 text-sm text-warning-ink/90">
+          <p class="mt-2 text-sm text-warning-ink">
             {gettext(
               "A request whose Host header matches no organization is served the default organization's content, branding and analytics — including a bare hostname, an IP address, or a Host a caller made up. With one organization that is the same site either way. With more than one it is another tenant's."
             )}
           </p>
 
-          <p class="mt-2 text-sm text-warning-ink/90">
+          <p class="mt-2 text-sm text-warning-ink">
             {gettext(
               "Set TENANT_STRICT_HOST=true to reject unrecognized hosts instead, then restart. Leave it off only if an unmatched host reaching the default organization is what you want."
             )}
