@@ -340,9 +340,15 @@ defmodule KilnCMS.Cache do
   like every other aggregate key here.
 
   The calendar routes (#480) narrow `type` further — `"gigs/tag/jazz"` for a
-  tag-scoped calendar — which `bust_feeds/2` deliberately does not enumerate:
-  it drops the keys anyone is actually subscribed to and lets the TTL reclaim
-  the rest.
+  tag-scoped calendar — and the segment feeds (#720) do the same:
+  `"post/category/news"`, `"post/tag/jazz"`, `"locale/fr"`.
+
+  `bust_feeds/2` deliberately does not enumerate those. It is not an omission:
+  computing which segment keys a record belongs to needs that record's tags and
+  category, and the bust runs in an `after_action` — a relationship load there
+  is a database read inside the publish transaction, which can abort it and lose
+  the publish outright (#660). So it drops the keys anyone is actually
+  subscribed to, immediately, and lets the five-minute TTL reclaim the segments.
   """
   @spec feed_key(Ash.UUID.t(), String.t() | nil, :atom | :json | :ics) :: String.t()
   def feed_key(org_id, type, format), do: "feed:#{org_id}:#{type || "all"}:#{format}"

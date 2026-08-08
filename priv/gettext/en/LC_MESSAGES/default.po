@@ -1779,7 +1779,7 @@ msgstr ""
 msgid "Page %{page}"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/content_controller.ex:1236
+#: lib/kiln_cms_web/controllers/content_controller.ex:1243
 #: lib/kiln_cms_web/controllers/error_html/404.html.heex:7
 #, elixir-autogen, elixir-format
 msgid "Page not found"

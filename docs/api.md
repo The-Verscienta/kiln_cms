@@ -442,6 +442,10 @@ email-campaign tool is built on (#486):
 | `GET /feed.json` | JSON Feed 1.1 | Every syndicated content type |
 | `GET /blog/feed.xml` | Atom 1.0 | Posts only |
 | `GET /pages/feed.xml` | Atom 1.0 | Pages only |
+| `GET /blog/category/<slug>/feed.xml` | Atom 1.0 | Posts in one category |
+| `GET /blog/tags/<slug>/feed.json` | JSON Feed 1.1 | Posts carrying one tag |
+| `GET /fr/feed.xml` | Atom 1.0 | Everything, in French |
+| `GET /fr/blog/category/<slug>/feed.xml` | Atom 1.0 | All three at once |
 
 A type's own feed lives under its public path segment where it has one
 (`/blog/…` for posts) and under its plural otherwise (`/pages/…`) — a type served
@@ -451,7 +455,8 @@ at `/feed.xml`, which is already taken. Both spellings resolve, so
 segment automatically.
 
 Delivery pages advertise these in `<head>` via `<link rel="alternate">`, so a
-reader or a campaign tool finds them without being handed the URL.
+reader or a campaign tool finds them without being handed the URL — in the
+locale of the page being read, so a French article points at the French feed.
 
 **Feeds are published *and* public.** An audience-gated record is published and
 paywalled; it never appears in a feed, which anonymous readers and third-party
@@ -480,9 +485,36 @@ config :kiln_cms, :feeds,
 These two are deployment-wide, not per-organization — the wrong grain for a
 multi-tenant install, tracked separately.
 
-Feeds carry the **default locale only**: a record translated into three
-languages is three rows, and a feed carrying all three re-notifies every
-subscriber three times per publish.
+### Segments and locales (#720)
+
+Every entry carries its taxonomy — `<category term="slug" label="Name"/>` in
+Atom, a flat `tags` array of labels in JSON Feed — capped at 20 per entry so one
+heavily tagged record cannot bloat a document served to every subscriber.
+
+A category element is only useful if there is a feed narrow enough to act on, so
+a type's feed also comes scoped to **one category** or **one tag**. An unknown
+slug is a 404 rather than an empty document: a reader who subscribes to a typo
+would otherwise get something that never has anything in it, and no way to tell.
+
+An unscoped feed carries the **default locale only**. A record translated into
+three languages is three rows, and a feed carrying all three re-notifies every
+subscriber — and every "new post → campaign" automation — three times per
+publish. That left readers of other languages with no feed at all, so any
+locale prefix gives that language its own: `/fr/feed.xml`, `/fr/blog/feed.xml`,
+`/fr/blog/category/news/feed.xml`. Each language has exactly one feed, and
+nobody is notified twice.
+
+There is no `/<locale>/feed.xml` *route* — the locale prefix is stripped before
+the router for every URL on the delivery site, so feeds get this the same way
+pages do. `/en/feed.xml` therefore resolves, and advertises `/feed.xml` as its
+own id, so the two URLs are one thing to subscribe to rather than two.
+
+Segment feeds are cached like any other, but they are **not** dropped on
+publish: computing which segments a record belongs to needs its tags and
+category, and the cache bust runs inside the publish transaction, where a
+relationship load can abort it and lose the publish (#660). They are five
+minutes stale at worst; the site-wide and per-type feeds — the ones people
+actually subscribe to — still drop immediately.
 
 Feeds are cached for five minutes and dropped on any publish/unpublish, so a new
 post is in the feed on the next fetch rather than after the TTL.

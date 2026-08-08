@@ -7,6 +7,32 @@ defmodule KilnCMSWeb.FeedController do
   one type. Which types syndicate, and whether entries carry a summary or the
   rendered body, is `KilnCMS.Feeds`.
 
+  ## Scoped feeds (#720)
+
+  A campaign tool segments on `<category>`, and a category element is only
+  useful if there is a feed narrow enough to act on. So a type's feed also comes
+  scoped:
+
+    * `/<plural>/category/<slug>/feed.{xml,json}`
+    * `/<plural>/tags/<slug>/feed.{xml,json}`
+    * `/<locale>/feed.{xml,json}`
+
+  Entries carry their taxonomy either way — `<category term label>` in Atom,
+  `tags` in JSON Feed.
+
+  ## One locale, and why there is a locale feed at all
+
+  The unscoped feeds carry the **default locale only**. A record translated into
+  three languages is three rows, and a feed carrying all three re-notifies every
+  subscriber — and every "new post → campaign" automation — three times per
+  publish.
+
+  That left a reader of a non-default locale with no feed at all, which is a
+  worse answer than a noisy one. `/<locale>/feed.xml` drops the default-locale
+  filter in favour of that locale, so each language has exactly one feed and no
+  subscriber is notified twice. Only configured locales resolve; anything else
+  falls through to the type lookup and 404s as before.
+
   Shaped like `KilnCMSWeb.SitemapController`, deliberately: same per-org scoping,
   same "no actor + `authorize?: true` ⇒ published only" read, same aggregate
   cache key with a short TTL that the existing publish hooks already drop.
@@ -41,6 +67,12 @@ defmodule KilnCMSWeb.FeedController do
   # explicitly (`Cache.bust_feeds/1`).
   @cache_ttl :timer.minutes(5)
 
+  # A bound on the taxonomy a single entry can carry into the document. A
+  # hundred-tag record would otherwise put a hundred `<category>` elements in
+  # front of every subscriber, on a route that is fetched on a timer and cached
+  # for everyone.
+  @max_categories 20
+
   # Everything the serializer reads, and nothing else — see `select_fields/1`.
   @base_fields [
     :id,
@@ -58,20 +90,75 @@ defmodule KilnCMSWeb.FeedController do
   # serializations are two documents with two content types and two cache keys,
   # and a route that can be asked for either is a route whose cache key depends
   # on user input.
-  def index(conn, _params), do: render_feed(conn, nil, :atom)
-  def index_json(conn, _params), do: render_feed(conn, nil, :json)
+  def index(conn, _params), do: render_feed(conn, nil, scope(conn), :atom)
+  def index_json(conn, _params), do: render_feed(conn, nil, scope(conn), :json)
 
   def type(conn, %{"plural" => plural}), do: render_type(conn, plural, :atom)
   def type_json(conn, %{"plural" => plural}), do: render_type(conn, plural, :json)
+
+  def category(conn, %{"plural" => plural, "slug" => slug}),
+    do: render_scoped(conn, plural, {:category, slug}, :atom)
+
+  def category_json(conn, %{"plural" => plural, "slug" => slug}),
+    do: render_scoped(conn, plural, {:category, slug}, :json)
+
+  def tag(conn, %{"plural" => plural, "tag" => slug}),
+    do: render_scoped(conn, plural, {:tag, slug}, :atom)
+
+  def tag_json(conn, %{"plural" => plural, "tag" => slug}),
+    do: render_scoped(conn, plural, {:tag, slug}, :json)
 
   defp render_type(conn, plural, feed_format) do
     org = Tenant.current_org(conn)
 
     case find_type(org.id, plural) do
-      nil -> conn |> put_status(404) |> text("")
-      descriptor -> render_feed(conn, descriptor, feed_format)
+      nil -> not_found(conn)
+      descriptor -> render_feed(conn, descriptor, scope(conn), feed_format)
     end
   end
+
+  defp render_scoped(conn, plural, {kind, slug}, feed_format) do
+    org = Tenant.current_org(conn)
+
+    with descriptor when not is_nil(descriptor) <- find_type(org.id, plural),
+         term when not is_nil(term) <- taxonomy(org.id, kind, slug) do
+      render_feed(conn, descriptor, %{scope(conn) | taxonomy: {kind, term}}, feed_format)
+    else
+      # 404, never an empty feed: a reader who subscribes to a mistyped category
+      # gets a document that will never have anything in it and no way to tell.
+      _missing -> not_found(conn)
+    end
+  end
+
+  # A feed's scope is its locale and, optionally, one taxonomy term. Both at
+  # once, because they compose: `/fr/blog/category/news/feed.xml` is a real and
+  # useful URL, and a scope that could hold only one of them would silently drop
+  # the other from the filter *and* from the cache key — two feeds sharing a key.
+  #
+  # The locale is never routed for. `KilnCMSWeb.Plugs.SetLocale` strips a
+  # supported-locale prefix before the router runs, so `/fr/feed.xml` arrives
+  # here as `/feed.xml` with `path_locale = "fr"` — the same mechanism that
+  # serves every other page in every locale off one set of routes. Adding a
+  # `/:locale/feed.xml` route would have been a second, competing way to say it.
+  defp scope(conn) do
+    %{locale: conn.assigns[:path_locale] || KilnCMS.I18n.default_locale(), taxonomy: nil}
+  end
+
+  defp taxonomy(org_id, :category, slug) do
+    case KilnCMS.CMS.get_category_by_slug(slug, authorize?: false, tenant: org_id) do
+      {:ok, category} -> category
+      _other -> nil
+    end
+  end
+
+  defp taxonomy(org_id, :tag, slug) do
+    case KilnCMS.CMS.get_tag_by_slug(slug, authorize?: false, tenant: org_id) do
+      {:ok, tag} -> tag
+      _other -> nil
+    end
+  end
+
+  defp not_found(conn), do: conn |> put_status(404) |> text("")
 
   # `/blog/feed.xml` is a static route, so the plural never reaches `type/2` —
   # posts have their own path segment and their own descriptor.
@@ -91,36 +178,66 @@ defmodule KilnCMSWeb.FeedController do
   # every interpolated value and the JSON one goes through `Jason.encode!/1` —
   # and neither is HTML, so `send_resp/3` carries no XSS sink here.
   # sobelow_skip ["XSS.SendResp"]
-  defp render_feed(conn, descriptor, :atom) do
+  defp render_feed(conn, descriptor, scope, :atom) do
     conn
     |> put_resp_content_type("application/atom+xml")
-    |> send_resp(200, cached_body(conn, descriptor, :atom))
+    |> send_resp(200, cached_body(conn, descriptor, scope, :atom))
   end
 
   # sobelow_skip ["XSS.SendResp"]
-  defp render_feed(conn, descriptor, :json) do
+  defp render_feed(conn, descriptor, scope, :json) do
     conn
     |> put_resp_content_type("application/feed+json")
-    |> send_resp(200, cached_body(conn, descriptor, :json))
+    |> send_resp(200, cached_body(conn, descriptor, scope, :json))
   end
 
-  defp cached_body(conn, descriptor, feed_format) do
+  defp cached_body(conn, descriptor, scope, feed_format) do
     org = Tenant.current_org(conn)
-    key = Cache.feed_key(org.id, descriptor && to_string(descriptor.type), feed_format)
+    key = Cache.feed_key(org.id, cache_scope(descriptor, scope), feed_format)
 
     Cache.fetch(key, @cache_ttl, fn ->
-      org |> entries(descriptor) |> serialize(org, descriptor, feed_format)
+      org |> entries(descriptor, scope) |> serialize(org, descriptor, scope, feed_format)
     end)
   end
 
+  # Namespaced so a type's own feed and a scoped one cannot collide, and so
+  # `Cache.bust_feeds/2` — which drops `{org, type}` across every format — still
+  # reaches the unscoped key on publish. Mirrors `CalendarController`'s
+  # `cache_scope/2`, which solved the same problem for tag-scoped calendars.
+  #
+  # The scoped keys are NOT enumerated by `bust_feeds/2`, and that is a decision
+  # rather than an omission. Computing them needs the record's tags and category,
+  # and the bust runs in an `after_action` — a relationship load there is a
+  # database read inside the publish transaction, which can abort it and lose the
+  # publish (#660). Trading a five-minute TTL on a segment feed against losing a
+  # publish is not a close call, and it is the trade the tag-scoped calendar
+  # already makes.
+  defp cache_scope(descriptor, scope) do
+    [
+      descriptor && to_string(descriptor.type),
+      taxonomy_segment(scope.taxonomy),
+      # Only when it differs from the default, so the site-wide feed's key —
+      # the one `bust_feeds/2` drops on publish — stays exactly what it was.
+      scope.locale != KilnCMS.I18n.default_locale() && "locale/#{scope.locale}"
+    ]
+    |> Enum.filter(&is_binary/1)
+    |> case do
+      [] -> nil
+      segments -> Enum.join(segments, "/")
+    end
+  end
+
+  defp taxonomy_segment(nil), do: nil
+  defp taxonomy_segment({kind, term}), do: "#{kind}/#{term.slug}"
+
   # ── entries ───────────────────────────────────────────────────────────────
 
-  defp entries(org, descriptor) do
+  defp entries(org, descriptor, scope) do
     limit = Feeds.entry_limit()
     types = if descriptor, do: [descriptor], else: Feeds.syndicated_types(org.id)
 
     types
-    |> Enum.flat_map(&type_entries(&1, org, limit))
+    |> Enum.flat_map(&type_entries(&1, org, scope, limit))
     # Ordered and capped on the SAME key the per-type reads selected on. Sorting
     # the merged set by `updated_at` instead would let a bulk copy-edit of fifty
     # old records evict a post published five minutes ago — silently, and
@@ -130,31 +247,44 @@ defmodule KilnCMSWeb.FeedController do
     |> Enum.take(limit)
   end
 
-  defp type_entries(descriptor, org, limit) do
+  defp type_entries(descriptor, org, scope, limit) do
     descriptor
     |> ContentTypes.list!(
       authorize?: true,
       tenant: org.id,
       query: [
-        # Published *and* public — see the moduledoc. An `audience` other than
-        # `:public` is gated content that happens to be published.
-        #
-        # One locale, too: a record translated into three languages is three
-        # rows, and a feed carrying all three re-notifies every subscriber (and
-        # every "new post → campaign" automation) three times per publish. The
-        # sitemap wants every locale; a feed wants one.
-        filter: [audience: :public, locale: KilnCMS.I18n.default_locale()],
+        filter: filter(scope),
         sort: [published_at: :desc],
         limit: limit,
         # Only the fields the serializer reads. Without this every entry drags
         # its whole `blocks` union tree and its embedding vector into memory —
         # the spike `SitemapController` avoids the same way, and this route is
         # anonymous.
-        select: select_fields(descriptor)
+        select: select_fields(descriptor),
+        # Two batched queries for the whole page of entries, not two per entry:
+        # Ash resolves a `load` across the result set. Bounded on the way OUT
+        # (`@max_categories`) rather than here, because a `limit` inside a load
+        # is per-record and Postgres has no cheap way to express it.
+        load: [:category, :tags]
       ]
     )
     |> Enum.map(&entry(&1, descriptor, org))
   end
+
+  # Published *and* public — see the moduledoc. An `audience` other than
+  # `:public` is gated content that happens to be published, and this filter is
+  # explicit rather than inherited from the read policy: it is the difference
+  # between a feed and a leak.
+  #
+  # One locale, too, for the reason the moduledoc gives. A locale feed swaps
+  # which one rather than dropping the filter, so no record is ever in two feeds
+  # a person could subscribe to at once.
+  defp filter(scope),
+    do: [audience: :public, locale: scope.locale] ++ taxonomy_filter(scope.taxonomy)
+
+  defp taxonomy_filter({:category, category}), do: [category_id: category.id]
+  defp taxonomy_filter({:tag, tag}), do: [tags: [id: tag.id]]
+  defp taxonomy_filter(nil), do: []
 
   # `excerpt` only exists on types that declare it, and selecting an attribute a
   # resource doesn't have is an error rather than a nil.
@@ -172,9 +302,34 @@ defmodule KilnCMSWeb.FeedController do
       title: record.title,
       summary: summary(record),
       content: content(record, descriptor, org),
+      categories: categories(record),
       published_at: published_at,
       updated_at: record.updated_at
     }
+  end
+
+  # The record's taxonomy, as `{term, label}` — Atom's own two attributes, and
+  # the shape JSON Feed's flat `tags` array is derived from (#720).
+  #
+  # Category first: a record has at most one, and it is the coarse axis a
+  # campaign tool segments on. `%Ash.NotLoaded{}` and `nil` both fall through to
+  # an empty list rather than raising — a serializer is not the place to
+  # discover that a load was dropped, and a feed entry missing its categories is
+  # a smaller failure than a feed that 500s for every subscriber.
+  defp categories(record) do
+    category =
+      case Map.get(record, :category) do
+        %{slug: slug, name: name} -> [{slug, name}]
+        _absent -> []
+      end
+
+    tags =
+      case Map.get(record, :tags) do
+        list when is_list(list) -> for %{slug: slug, name: name} <- list, do: {slug, name}
+        _absent -> []
+      end
+
+    (category ++ tags) |> Enum.uniq_by(&elem(&1, 0)) |> Enum.take(@max_categories)
   end
 
   # A tag URI (RFC 4151), not the page URL: an entry id must survive the record
@@ -242,10 +397,10 @@ defmodule KilnCMSWeb.FeedController do
   # feed level covers them all, and the site is the honest answer. A per-entry
   # byline would mean loading the author relationship for every record, and
   # author identity is deliberately not treated as feed-facing data elsewhere.
-  defp serialize(entries, org, descriptor, :atom) do
+  defp serialize(entries, org, descriptor, scope, :atom) do
     base_url = Tenant.base_url(org)
-    self_url = base_url <> feed_path(descriptor, :atom)
-    title = feed_title(org, descriptor)
+    self_url = base_url <> scoped_path(descriptor, scope, :atom)
+    title = feed_title(org, descriptor, scope)
 
     """
     <?xml version="1.0" encoding="UTF-8"?>
@@ -255,20 +410,24 @@ defmodule KilnCMSWeb.FeedController do
       <link rel="self" href="#{escape(self_url)}" type="application/atom+xml"/>
       <link rel="alternate" href="#{escape(base_url)}" type="text/html"/>
       <updated>#{feed_updated(entries)}</updated>
-      <author><name>#{escape(feed_title(org, nil))}</name></author>
+      <author><name>#{escape(feed_title(org, nil, nil))}</name></author>
     #{Enum.map_join(entries, "\n", &atom_entry/1)}
     </feed>
     """
   end
 
-  defp serialize(entries, org, descriptor, :json) do
+  defp serialize(entries, org, descriptor, scope, :json) do
     base_url = Tenant.base_url(org)
 
     Jason.encode!(%{
       "version" => "https://jsonfeed.org/version/1.1",
-      "title" => feed_title(org, descriptor),
+      "title" => feed_title(org, descriptor, scope),
       "home_page_url" => base_url,
-      "feed_url" => base_url <> feed_path(descriptor, :json),
+      "feed_url" => base_url <> scoped_path(descriptor, scope, :json),
+      # A locale feed says which language it is in; JSON Feed 1.1 added the
+      # field for exactly this, and without it a reader aggregating several has
+      # nothing to tell them apart by.
+      "language" => scope.locale,
       "items" => Enum.map(entries, &json_item/1)
     })
   end
@@ -290,9 +449,22 @@ defmodule KilnCMSWeb.FeedController do
         <link rel="alternate" href="#{escape(entry.url)}" type="text/html"/>
         <published>#{DateTime.to_iso8601(entry.published_at)}</published>
         <updated>#{DateTime.to_iso8601(entry.updated_at)}</updated>
-    #{content}
+    #{atom_categories(entry)}#{content}
       </entry>\
     """
+  end
+
+  # `term` is the slug and `label` the display name — RFC 4287 §4.2.2 makes
+  # `term` the machine-readable one, and a campaign tool filtering on a
+  # human-facing name breaks the moment an editor renames a tag. No `scheme`:
+  # it is optional, and a URI that is not a real dereferenceable namespace is
+  # noise a reader has to ignore.
+  defp atom_categories(%{categories: []}), do: ""
+
+  defp atom_categories(entry) do
+    Enum.map_join(entry.categories, "", fn {term, label} ->
+      ~s(    <category term="#{escape(term)}" label="#{escape(label)}"/>\n)
+    end)
   end
 
   # JSON Feed 1.1 requires at least one of `content_html` / `content_text` on
@@ -310,6 +482,12 @@ defmodule KilnCMSWeb.FeedController do
       "date_modified" => DateTime.to_iso8601(entry.updated_at)
     }
 
+    # JSON Feed 1.1 `tags` is a flat array of strings, so the label is what goes
+    # in — the slug is Atom's `term`, and JSON Feed has no second field to put it
+    # in. Omitted entirely when empty: the spec says an item "may" have tags, and
+    # an empty array in every item is bytes on a route fetched on a timer.
+    base = if entry.categories == [], do: base, else: Map.put(base, "tags", labels(entry))
+
     if entry.content do
       Map.put(base, "content_html", entry.content)
     else
@@ -322,20 +500,57 @@ defmodule KilnCMSWeb.FeedController do
   defp feed_updated([]), do: DateTime.to_iso8601(DateTime.utc_now())
   defp feed_updated(entries), do: DateTime.to_iso8601(hd(entries).updated_at)
 
-  defp feed_title(org, nil), do: KilnCMS.Branding.for_org(org.id).site_name
+  defp labels(entry), do: Enum.map(entry.categories, &elem(&1, 1))
 
-  defp feed_title(org, descriptor),
-    do: "#{KilnCMS.Branding.for_org(org.id).site_name} — #{descriptor.label}"
+  defp feed_title(org, descriptor, scope) do
+    [
+      KilnCMS.Branding.for_org(org.id).site_name,
+      descriptor && descriptor.label,
+      scope_label(scope)
+    ]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join(" — ")
+  end
+
+  defp scope_label(%{taxonomy: {_kind, term}}), do: term.name
+  defp scope_label(_scope), do: nil
 
   @doc """
   The path a feed is served at — shared with the autodiscovery `<link>` tags so
   the advertised URL and the routed one cannot drift.
   """
   @spec feed_path(map() | nil, :atom | :json) :: String.t()
-  def feed_path(nil, :json), do: "/feed.json"
-  def feed_path(nil, :atom), do: "/feed.xml"
-  def feed_path(descriptor, :json), do: "#{feed_prefix(descriptor)}/feed.json"
-  def feed_path(descriptor, :atom), do: "#{feed_prefix(descriptor)}/feed.xml"
+  def feed_path(descriptor, format), do: scoped_path(descriptor, nil, format)
+
+  @doc """
+  The path a scoped feed is served at (#720) — a type's category, tag or locale.
+
+  Same contract as `feed_path/2`, and the same reason for existing: the
+  autodiscovery `<link>` and the route cannot drift if both come from here.
+  """
+  @spec scoped_path(map() | nil, scope() | nil, :atom | :json) :: String.t()
+  def scoped_path(descriptor, scope, format) do
+    scope_locale_prefix(scope) <>
+      type_prefix(descriptor) <> taxonomy_prefix(scope) <> "/feed." <> extension(format)
+  end
+
+  @typedoc "A feed's locale, and optionally the one taxonomy term it is narrowed to."
+  @type scope :: %{locale: String.t(), taxonomy: nil | {:category | :tag, map()}}
+
+  defp extension(:atom), do: "xml"
+  defp extension(:json), do: "json"
+
+  # The locale prefixes the whole path, exactly as it does for every other URL on
+  # the delivery site — `SetLocale` strips it back off on the way in.
+  defp scope_locale_prefix(%{locale: locale}), do: locale_prefix(locale)
+  defp scope_locale_prefix(_scope), do: ""
+
+  defp type_prefix(nil), do: ""
+  defp type_prefix(descriptor), do: feed_prefix(descriptor)
+
+  defp taxonomy_prefix(%{taxonomy: {:category, category}}), do: "/category/#{category.slug}"
+  defp taxonomy_prefix(%{taxonomy: {:tag, tag}}), do: "/tags/#{tag.slug}"
+  defp taxonomy_prefix(_scope), do: ""
 
   # The type's public prefix where it has one (`/blog/feed.xml` for posts), and
   # its plural otherwise (`/pages/feed.xml`). NOT `public_prefix/1` unguarded:
