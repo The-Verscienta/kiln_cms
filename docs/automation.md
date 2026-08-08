@@ -36,9 +36,22 @@ Manage rules at **`/editor/automation`** (admin-only). A rule is:
 | `suggest_tags` | Email semantic tag suggestions for the document (#377) | `to` |
 | `suggest_links` | Email internal-link suggestions for the document (#377) | `to` |
 | `suggest_metadata` | Email proposed `seo_title` / `seo_description` / `seo_keywords` (#377) | `to`, `allow_egress` |
+| `social_post` | Announce the publish on Bluesky / Mastodon (#497) — see [social-posting.md](social-posting.md) | `provider` (required), `template` |
 
 `send_email` subject/body and templates support `{{title}}`, `{{slug}}`,
 `{{id}}`, `{{type}}`, `{{event}}` (each HTML-escaped).
+
+### `social_post` is the one reaction that cannot be undone
+
+Every other reaction writes somewhere the operator controls — an inbox, a cache,
+an index. `social_post` writes to a public timeline in front of an audience, and
+a duplicate cannot be taken back.
+
+So it is the one reaction that is **at most once** rather than at least once: it
+claims a ledger row before it posts, never retries an ambiguous outcome, and
+runs with Oban retries off. The cost is that a genuinely lost announcement stays
+lost until someone looks at `/editor/social`. See
+[social-posting.md](social-posting.md).
 
 ### The intelligence reactions suggest, and never write
 

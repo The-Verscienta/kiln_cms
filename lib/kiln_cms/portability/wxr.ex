@@ -132,9 +132,36 @@ defmodule KilnCMS.Portability.WXR do
   # which are already trusted to name a file to read.
   # sobelow_skip ["Traversal.FileModule"]
   def parse_file(path) when is_binary(path) do
-    case File.read(path) do
-      {:ok, xml} -> parse(xml)
+    with :ok <- check_size(path),
+         {:ok, xml} <- File.read(path) do
+      parse(xml)
+    else
+      {:error, {:too_large, _, _} = reason} -> {:error, reason}
       {:error, reason} -> {:error, {:unreadable_file, reason}}
+    end
+  end
+
+  # `SweetXml.parse/2` runs `:erlang.binary_to_list/1` before `:xmerl_scan`, so
+  # the document becomes a charlist at ~16 bytes per source byte BEFORE the
+  # element tree is built on top of it. A 200 MB export is ~3 GB of charlist and
+  # several more of tree.
+  #
+  # Refusing up front, with the number and the remedy, beats the alternative:
+  # an OOM kill has no error, no partial progress, and nothing telling the
+  # operator that splitting the export is the answer.
+  @max_file_bytes 64 * 1024 * 1024
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp check_size(path) do
+    case File.stat(path) do
+      {:ok, %{size: size}} when size > @max_file_bytes ->
+        {:error, {:too_large, size, @max_file_bytes}}
+
+      {:ok, _stat} ->
+        :ok
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

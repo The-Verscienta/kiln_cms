@@ -26,6 +26,12 @@ defmodule Mix.Tasks.Kiln.Import.Wordpress do
       --skip-media       do not sideload images (blocks keep the source URLs)
       --no-redirects     do not create redirects from old permalinks
       --on-conflict      skip (default) | error
+      --author-map       login=kiln@email, repeatable — attribute imported
+                         content to the Kiln user who wrote it. Unmapped authors
+                         are matched on their own email, then fall back to
+                         --actor; every author is listed in the report.
+      --drain-media      run the queued image-variant jobs before exiting, for a
+                         one-off container where nothing else consumes the queue
 
   ## What is not imported
 
@@ -51,7 +57,8 @@ defmodule Mix.Tasks.Kiln.Import.Wordpress do
     limit: :integer,
     skip_media: :boolean,
     redirects: :boolean,
-    on_conflict: :string
+    on_conflict: :string,
+    author_map: :keep
   ]
 
   @impl Mix.Task
@@ -65,8 +72,22 @@ defmodule Mix.Tasks.Kiln.Import.Wordpress do
       end
 
     case WXR.parse_file(path) do
-      {:ok, parsed} -> import_parsed(parsed, opts)
-      {:error, reason} -> Mix.raise("Could not read #{path}: #{inspect(reason)}")
+      {:ok, parsed} ->
+        import_parsed(parsed, opts)
+
+      {:error, {:too_large, size, max}} ->
+        Mix.raise("""
+        #{path} is #{div(size, 1_048_576)} MB; the parser's ceiling is #{div(max, 1_048_576)} MB.
+
+        WXR is expanded to a charlist at roughly 16 bytes per source byte before
+        parsing, so a file this size would exhaust memory with no partial
+        progress. Use WordPress's own split export (Tools -> Export produces one
+        file per post type / date range) and run this task once per file —
+        re-running is safe, because what already landed is skipped.
+        """)
+
+      {:error, reason} ->
+        Mix.raise("Could not read #{path}: #{inspect(reason)}")
     end
   end
 
@@ -83,6 +104,7 @@ defmodule Mix.Tasks.Kiln.Import.Wordpress do
     # the run — one unimportable post must not abandon the other 3,999.
     {:ok, report} = Import.run(parsed, run_opts)
     KilnCMS.Portability.CLI.print_report(report)
+    KilnCMS.Portability.CLI.maybe_drain_media(opts[:drain_media])
   end
 
   defp site_line(%{title: title, url: url}) when is_binary(title),
@@ -96,7 +118,8 @@ defmodule Mix.Tasks.Kiln.Import.Wordpress do
       skip_media: Keyword.get(opts, :skip_media, false),
       redirects: Keyword.get(opts, :redirects, true),
       locale: Keyword.get(opts, :locale, "en"),
-      on_conflict: on_conflict(opts[:on_conflict])
+      on_conflict: on_conflict(opts[:on_conflict]),
+      author_map: opts |> Keyword.get_values(:author_map) |> KilnCMS.Portability.CLI.author_map!()
     ]
     |> maybe_put(:limit, opts[:limit])
   end

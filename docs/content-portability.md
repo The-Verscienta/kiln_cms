@@ -102,9 +102,31 @@ revisions. WXR carries some of them; none map onto anything here without an
 editorial decision a mix task should not be making silently. The imported
 record is the current version, and its history starts at the import.
 
-Authors are read from the file and reported, but content is created under the
-`--actor` you name. Mapping WordPress logins to Kiln users is a decision, not a
-default.
+### Authors
+
+Every author in the file is listed in the report — login, display name and
+email — with a marker showing whether it resolved to a Kiln user:
+
+```
+Authors (1 mapped, 1 unmapped):
+  -> jo "Jo Example" <jo@old.example.com>
+   ~ sam "Sam" <sam@old.example.com>
+```
+
+Resolution order:
+
+1. `--author-map login=kiln@email` (repeatable, and it also accepts the source
+   *email* on the left)
+2. otherwise the source author's own email, matched against a Kiln user — right
+   far more often than not when both systems served the same people
+
+An author that resolves to nobody is **not** an error: the record is attributed
+to `--actor`, exactly as before. It is reported so you can decide whether that
+matters before the content is live.
+
+The create always runs under `--actor`, so an import can never mint content a
+mapped author was not allowed to create; only the attribution moves afterwards,
+through a narrow action that fires no webhooks.
 
 ## The portable JSON envelope
 
@@ -153,15 +175,37 @@ import, or `--skip-media` will keep the blocks pointing at it.
 
 The WXR parser reads the whole file into memory and hands it to `xmerl`, which
 expands it to a charlist first — roughly **16 bytes per source byte** before the
-document tree is built on top. That puts the practical ceiling somewhere around
-50 MB of XML on a normal box; past that you will hit an OOM kill with no partial
-progress. WordPress's exporter can split a large site into several files, and
-that is the supported way to import one — the importer is safe to run once per
-file, because re-running skips what already landed.
+document tree is built on top. Files past **64 MB are refused up front**, with
+the size and the remedy, rather than OOM-killing the VM with no error and no
+partial progress:
 
-Media sideloading is serial and runs before any record is written, so a site
-with thousands of images spends a long time apparently doing nothing. `--limit`
-is the way to try a slice first.
+```
+export.xml is 210 MB; the parser's ceiling is 64 MB.
+Use WordPress's own split export ... and run this task once per file —
+re-running is safe, because what already landed is skipped.
+```
+
+Media sideloading runs concurrently, grouped so **no single host sees more than
+one in-flight request**. A WordPress export points overwhelmingly at one origin,
+so a flat concurrency pool would just be eight parallel requests at the site
+you are migrating away from.
+
+Both phases print progress every 25 items:
+
+```
+media: 150/512
+records: 400/4000
+```
+
+Without that, the entire multi-hour body of a run is silent and there is no way
+to tell "working" from "hung on a stalled fetch".
+
+`--drain-media` runs the queued variant jobs before the task exits. Use it when
+importing in a one-off container where nothing else consumes the `media`
+queue — otherwise the jobs sit `available` and imported images render full size
+until a node picks them up.
+
+`--limit` is still the way to try a slice first.
 
 ### Uses
 

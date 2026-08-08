@@ -93,6 +93,8 @@ defmodule KilnCMS.Portability.CLI do
     #{verb(report.dry_run, "would be created", "created")}\
     """)
 
+    print_authors(shell, Map.get(report, :authors))
+
     print_list(shell, "Failed", report.failed, &"  #{&1.kind} #{inspect(&1.title)}: #{&1.reason}")
 
     print_list(
@@ -108,6 +110,68 @@ defmodule KilnCMS.Portability.CLI do
 
     :ok
   end
+
+  # The source's authors, and which of them resolved to a Kiln user. Printed
+  # rather than counted: an operator who can only see "3 authors" cannot decide
+  # whether the unmapped ones matter, and the alternative is opening the XML.
+  defp print_authors(_shell, nil), do: :ok
+  defp print_authors(_shell, %{found: []}), do: :ok
+
+  defp print_authors(shell, %{found: found, mapped: mapped, unmapped: unmapped}) do
+    shell.info("\nAuthors (#{length(mapped)} mapped, #{length(unmapped)} unmapped):")
+
+    for author <- found do
+      mark = if author.login in mapped, do: "->", else: " ~"
+      shell.info("  #{mark} #{author.login} #{inspect(author.name)} <#{author.email}>")
+    end
+
+    if unmapped != [] do
+      shell.info(
+        "  Unmapped authors' content is attributed to the acting user. " <>
+          "Map them with --author-map login=kiln@email (repeatable)."
+      )
+    end
+  end
+
+  @doc """
+  Parse repeated `--author-map login=email` flags into the map
+  `KilnCMS.Portability.Import.resolve_authors/2` takes.
+
+  A value with no `=` is rejected loudly rather than ignored: a silently dropped
+  mapping looks identical to one that found no user, and the whole point of the
+  flag is to be sure about attribution.
+  """
+  @spec author_map!([String.t()]) :: %{String.t() => String.t()}
+  def author_map!(pairs) do
+    Map.new(pairs, fn pair ->
+      case String.split(pair, "=", parts: 2) do
+        [source, email] when source != "" and email != "" ->
+          {String.trim(source), String.trim(email)}
+
+        _ ->
+          Mix.raise("--author-map expects login=email, got: #{inspect(pair)}")
+      end
+    end)
+  end
+
+  @doc """
+  Run the image-variant jobs the import just queued, then return.
+
+  `Ingest` enqueues `VariantWorker`/`AVWorker` and does not wait — normally
+  right, because a running node picks them up. But a migration is often run in a
+  one-off container with nothing else consuming the `media` queue, and there the
+  jobs sit `available` forever and every imported image renders full size. This
+  is the opt-in for that case; `nil`/`false` keeps the asynchronous default.
+  """
+  @spec maybe_drain_media(boolean() | nil) :: :ok
+  def maybe_drain_media(true) do
+    Mix.shell().info("\nDraining the media queue …")
+    result = Oban.drain_queue(queue: :media, with_recursion: true)
+    Mix.shell().info("Media jobs: #{inspect(result)}")
+    :ok
+  end
+
+  def maybe_drain_media(_other), do: :ok
 
   # Truncated: a failing import can fail thousands of times, and a wall of
   # identical messages buries the one line that explains why. The count in the

@@ -73,6 +73,11 @@ config :kiln_cms, :unsplash, req_options: [plug: {Req.Test, KilnCMS.Unsplash}]
 # both be exercised by overriding this per-test.
 config :kiln_cms, Kiln.Updates, req_options: [plug: {Req.Test, Kiln.Updates}]
 
+# Route social-provider HTTP (#497) through a Req.Test stub, so no test ever
+# reaches bsky.social or somebody's Mastodon instance. Nothing posts without a
+# configured account, so this is a safety net rather than the gate.
+config :kiln_cms, KilnCMS.Social, req_options: [plug: {Req.Test, KilnCMS.Social}]
+
 # Route payment-provider HTTP through a Req.Test stub, so no test ever reaches
 # api.stripe.com. Billing still stays inert unless a test configures credentials
 # on the `KilnCMS.Billing.Settings` singleton — `configured?/0` gates every

@@ -382,4 +382,44 @@ defmodule KilnCMS.Search.BlockSearchTest do
       assert length(rows) == 1
     end
   end
+
+  describe "filtered recall (#998)" do
+    # What this pins is the SETTING, on every connection — which is exactly what
+    # this codebase contributes. Whether iterative scanning then recovers the
+    # filtered rows is pgvector's behaviour, not ours, and testing it here needs
+    # the planner to actually choose the HNSW index.
+    #
+    # It does not, at any fixture size worth putting in a suite. A first version
+    # of this test seeded 250 rows in a big org and 3 in a small one, forced
+    # `enable_seqscan = off`, and asserted the small org's rows came back — and
+    # it passed with `hnsw.iterative_scan = off` at every seed tried, because
+    # `EXPLAIN` shows a Bitmap Index Scan on the `org_id`-leading btree feeding a
+    # Sort. That plan is EXACT: filter-then-sort beats an ANN scan whenever the
+    # filtered set is small, which at test scale it always is. The assertion was
+    # about Postgres picking a different plan than it picks, so it proved
+    # nothing about the fix.
+    #
+    # So: assert the thing we control, and say plainly that the recall behaviour
+    # downstream of it is pgvector's contract, documented in
+    # `KilnCMS.Search.BlockSearch` and `docs/semantic-search-plan.md`.
+    test "every connection has iterative scanning on, so a filtered scan can resume" do
+      %{rows: [[mode]]} = KilnCMS.Repo.query!("SHOW hnsw.iterative_scan", [])
+
+      assert mode == "strict_order",
+             "filtered vector searches lose rows the tenant filter rejects without this"
+    end
+
+    test "the setting survives a checkout, not just the first connection" do
+      # `after_connect` runs per connection, and the pool has several. A setting
+      # applied to only the one the first query happened to get would look right
+      # in a single-query test and be wrong in production.
+      modes =
+        for _ <- 1..5 do
+          %{rows: [[mode]]} = KilnCMS.Repo.query!("SHOW hnsw.iterative_scan", [])
+          mode
+        end
+
+      assert Enum.uniq(modes) == ["strict_order"]
+    end
+  end
 end

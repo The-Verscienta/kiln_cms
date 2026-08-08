@@ -458,4 +458,160 @@ defmodule KilnCMS.Portability.ImportTest do
       assert length(second.skipped) == 1
     end
   end
+
+  describe "author mapping (#950)" do
+    # The fixture's `hello-world` carries `<dc:creator>jo</dc:creator>`, and its
+    # channel declares `jo <jo@old.example.com>`.
+    defp kiln_user(email) do
+      Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+        email: email,
+        hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+        confirmed_at: DateTime.utc_now(),
+        role: :editor
+      })
+    end
+
+    test "every source author is reported, mapped or not", %{parsed: parsed, scope: scope} do
+      report = import!(parsed, scope)
+
+      assert [%{login: "jo", name: "Jo Example", email: "jo@old.example.com"}] =
+               report.authors.found
+
+      assert report.authors.unmapped == ["jo"]
+      assert report.authors.mapped == []
+    end
+
+    test "an author whose email already exists in Kiln is matched automatically", %{
+      parsed: parsed,
+      scope: scope,
+      actor: actor
+    } do
+      jo = kiln_user("jo@old.example.com")
+
+      report = import!(parsed, scope)
+      assert report.authors.mapped == ["jo"]
+
+      post = posts(actor) |> find("hello-world")
+      assert post.author_id == jo.id
+      refute post.author_id == actor.id
+    end
+
+    test "--author-map attributes by login", %{parsed: parsed, scope: scope, actor: actor} do
+      new_home = kiln_user("newhome-#{System.unique_integer([:positive])}@example.com")
+
+      report = import!(parsed, scope, author_map: %{"jo" => new_home.email})
+
+      assert report.authors.mapped == ["jo"]
+      assert posts(actor) |> find("hello-world") |> Map.fetch!(:author_id) == new_home.id
+    end
+
+    test "an explicit map wins over the source email", %{
+      parsed: parsed,
+      scope: scope,
+      actor: actor
+    } do
+      _same_email = kiln_user("jo@old.example.com")
+      preferred = kiln_user("preferred-#{System.unique_integer([:positive])}@example.com")
+
+      import!(parsed, scope, author_map: %{"jo" => preferred.email})
+
+      assert posts(actor) |> find("hello-world") |> Map.fetch!(:author_id) == preferred.id
+    end
+
+    # The operator's actor is what is authorized; an unmapped author must not
+    # leave the record author-less or fail it.
+    test "an unmapped author falls back to the acting user", %{
+      parsed: parsed,
+      scope: scope,
+      actor: actor
+    } do
+      report = import!(parsed, scope, author_map: %{"nobody" => "nobody@example.com"})
+
+      assert report.failed == []
+      assert posts(actor) |> find("hello-world") |> Map.fetch!(:author_id) == actor.id
+    end
+
+    test "a mapping naming a user who does not exist is reported, not fatal", %{
+      parsed: parsed,
+      scope: scope,
+      actor: actor
+    } do
+      report = import!(parsed, scope, author_map: %{"jo" => "ghost@nowhere.example.com"})
+
+      assert report.failed == []
+      assert report.authors.unmapped == ["jo"]
+      assert posts(actor) |> find("hello-world") |> Map.fetch!(:author_id) == actor.id
+    end
+
+    test "attribution does not disturb the workflow state", %{
+      parsed: parsed,
+      scope: scope,
+      actor: actor
+    } do
+      kiln_user("jo@old.example.com")
+      import!(parsed, scope)
+
+      assert posts(actor) |> find("hello-world") |> Map.fetch!(:state) == :published
+    end
+  end
+
+  describe "CLI.author_map!/1" do
+    test "parses repeated login=email pairs" do
+      assert KilnCMS.Portability.CLI.author_map!(["jo=jo@x.com", "sam=sam@x.com"]) ==
+               %{"jo" => "jo@x.com", "sam" => "sam@x.com"}
+    end
+
+    test "refuses a pair with no = rather than dropping it silently" do
+      assert_raise Mix.Error, fn -> KilnCMS.Portability.CLI.author_map!(["jo"]) end
+      assert_raise Mix.Error, fn -> KilnCMS.Portability.CLI.author_map!(["=jo@x.com"]) end
+    end
+  end
+
+  describe "scale (#951)" do
+    test "progress is reported to the caller's sink", %{parsed: parsed, scope: scope} do
+      me = self()
+      import!(parsed, scope, progress: fn line -> send(me, {:progress, line}) end)
+
+      # 3 records, so the only tick is the final "records: 3/3".
+      assert_received {:progress, "records: 3/3"}
+    end
+
+    test "no sink means no output and no crash", %{parsed: parsed, scope: scope} do
+      report = import!(parsed, scope)
+      assert length(report.created) == 3
+    end
+
+    test "media failures survive the concurrent fetch", %{parsed: parsed, actor: actor} do
+      # The fixture's one image is unreachable, so this exercises the error path
+      # through Task.async_stream rather than the serial reduce it replaced.
+      report = import!(parsed, actor: actor)
+
+      assert length(report.created) == 3
+      assert [%{url: "https://old.example.com/wp-content/pic.jpg"}] = report.media.failed
+    end
+  end
+
+  describe "WXR size ceiling (#951)" do
+    test "a file past the parser's ceiling is refused with the size, not OOM-killed" do
+      path = Path.join(System.tmp_dir!(), "huge-#{System.unique_integer([:positive])}.xml")
+      # Sparse: allocates no real bytes but reports a large size to File.stat.
+      {:ok, file} = File.open(path, [:write, :binary])
+      :file.position(file, 100 * 1024 * 1024)
+      IO.binwrite(file, "x")
+      File.close(file)
+      on_exit(fn -> File.rm(path) end)
+
+      assert {:error, {:too_large, size, max}} = WXR.parse_file(path)
+      assert size > max
+    end
+
+    test "an ordinary file still parses" do
+      path = Path.join(System.tmp_dir!(), "ok-#{System.unique_integer([:positive])}.xml")
+      File.write!(path, WXRFixture.wxr())
+      on_exit(fn -> File.rm(path) end)
+
+      assert {:ok, parsed} = WXR.parse_file(path)
+      assert length(parsed.records) == 3
+    end
+  end
 end

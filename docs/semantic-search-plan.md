@@ -116,6 +116,63 @@ separate your corpus — reach for `rerank: true` instead.
 - Optional `Reranker` behaviour (cross-encoder via Bumblebee, hosted rerank, or
   LLM) over the top-k. Deferred until hybrid quality is proven insufficient.
 
+## Recall is approximate, and filters make it worse (#998)
+
+HNSW is an approximate index, and pgvector applies a query's `WHERE` clauses to
+rows the index has **already** chosen. Every semantic query here is filtered —
+by `org_id` always (the HNSW index is on `embedding` alone and `all_tenants?:
+true`, because HNSW cannot be multicolumn), and often by `block_type`, a
+published state, or an excluded document.
+
+With pgvector's default `hnsw.iterative_scan = off` the scan produces one batch
+of `ef_search` (40) candidates and stops. Anything the filter rejects is lost,
+and nothing distinguishes the short list from a genuinely empty one. Measured on
+20 000 rows in one org and 3 in another: a search issued by the small org
+returned **zero** rows.
+
+`KilnCMS.Repo` therefore sets `hnsw.iterative_scan = strict_order` on every
+connection (`init/2`), so a filtered scan resumes until it satisfies the `LIMIT`
+or reaches `hnsw.max_scan_tuples` (default 20 000, which is the bound on the
+extra work). `strict_order` rather than `relaxed_order` because callers treat the
+ordering as meaningful — relevance floors, near-duplicate thresholds — and
+approximate ordering would trade a silent recall bug for a silent ranking one.
+
+Two things follow:
+
+- **Recall is good, not guaranteed.** At the scan-tuple ceiling the answer is
+  still a short list. Nothing downstream may claim exhaustiveness — near-
+  duplicate detection reads as if it does, and it does not.
+- **If searches feel lossy on a large corpus**, raise `hnsw.ef_search` (per
+  connection or per transaction) before reaching for a bigger index; it widens
+  each batch. `hnsw.scan_mem_multiplier` is the other knob, and buys iterative
+  scans more working memory.
+
+### The cost, and the knob that caps it
+
+Iterative scanning is not free, and the cost falls **entirely on filtered scans
+that legitimately match nothing** — they walk to `hnsw.max_scan_tuples` before
+concluding it. Measured on 50 000 rows × 384-d with the index path forced,
+median of 10:
+
+| query | `iterative_scan = off` | `strict_order` |
+|---|---|---|
+| unfiltered, limit 10 | 1.00 ms | 1.00 ms |
+| dominant tenant (49 900 rows) | 1.09 ms | 1.09 ms |
+| small tenant (100 rows) | 1.53 ms | 26.9 ms |
+| **empty tenant** | 0.97 ms | **80.7 ms** |
+| **facet miss** (`block_type` with no rows) | 1.00 ms | **69.3 ms** |
+
+The fast paths are untouched; it is the empty result that got expensive. That
+matters because `/api/related` is public and anonymous and is correctly empty
+for most documents.
+
+`hnsw.max_scan_tuples` (default 20 000) is the cap. It is deliberately left at
+the default here: lowering it trades recall straight back, and choosing a number
+needs a **real** corpus to measure recall against — a synthetic one of random
+high-dimensional vectors has no meaningful "nearest" to lose, so it cannot
+answer the question. If `/api/related` latency becomes a problem on a large
+install, lower it there and measure recall on that install's own content.
+
 ## Cross-cutting
 - **Config flag:** `config :kiln_cms, KilnCMS.Search, semantic: false, embedder:
   KilnCMS.Search.Embedder.Bumblebee, model: "BAAI/bge-small-en-v1.5", dim: 384`.
