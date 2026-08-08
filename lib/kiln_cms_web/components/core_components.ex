@@ -342,10 +342,12 @@ defmodule KilnCMSWeb.CoreComponents do
   the one the person is actually in. Nesting is well-defined rather than
   accidental.
 
-  The cost of that scoping is that Escape needs focus to be *inside* the panel,
-  and `FocusTrap` currently only traps Tab — so focus can leave by other routes
-  (Safari does not focus a `<button>` on click) and Escape goes quiet until it
-  comes back. The scrim and the ✕ still close the dialog. Tracked as #1046.
+  Focus does leave the panel by routes nobody controls — Safari does not focus a
+  `<button>` on click, a patch can remove the focused node, browser chrome hands
+  focus back to `<body>` — and Escape used to go quiet until it came back. Since
+  #1046 the hook also listens on `document` and acts only when focus is inside
+  **no** panel, so scoping costs nothing: the dialog you are in still wins, and
+  a press from nowhere closes the innermost one.
 
   ## Variants
 

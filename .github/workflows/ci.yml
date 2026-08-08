@@ -405,11 +405,16 @@ jobs:
       - name: Install Elixir dependencies
         run: mix deps.get
 
-      - name: Install E2E dependencies + browser
+      - name: Install E2E dependencies + browsers
         working-directory: e2e
         run: |
           npm ci
-          npx playwright install --with-deps chromium
+          # WebKit as well as Chromium: `focus_trap.spec.js` runs on both,
+          # because Safari not focusing a `<button>` on click is the case that
+          # motivated #1046 and a Chromium-only run leaves it untested. Only
+          # that one spec uses it (see the `webkit-focus` project), so this buys
+          # a download rather than a doubled suite.
+          npx playwright install --with-deps chromium webkit
 
       # Compile the app in MIX_ENV=e2e up front, as a normal (uncapped) step, so
       # the potentially-cold dep build lands in the cached _build BEFORE
