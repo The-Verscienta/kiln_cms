@@ -461,56 +461,35 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
     |> Map.new(fn {key, values} -> {key, Enum.sort(values)} end)
   end
 
-  # Every nested typed child map inside a block, at any depth. A top-level block
-  # is a union member; only `columns` (and future nesting) carries raw child maps
-  # in its own field values.
+  # Every nested child map inside a block — **asked of the block**, not searched
+  # for (#956).
+  #
+  # This used to walk the whole term looking for maps that carried a `"blocks"`
+  # key. That is a guess about where children live, and a guess is defeatable:
+  # `field :columns, {:array, :map}` has no `fields` constraint, so an attacker
+  # could park a whole child list under any key of their choosing —
+  # `%{"blocks" => [real], "trash" => [%{"blocks" => [parked]}]}` — and the
+  # traversal counted the parked one while the renderer never showed it. That
+  # offsets the removal of a real admin-set value, so the two multisets compared
+  # equal and the removal went through. It did not even need a `columns` block:
+  # `gallery.images` is `{:array, :map}` too, and unknown keys survive
+  # sanitization there as well.
+  #
+  # The traversal has to mirror the renderer exactly — see the value only where
+  # a reader would — and the module that renders is the one that knows. So a
+  # block declares its children (`Columns.child_maps/1`) and everything else has
+  # none.
+  #
+  # A block type that nests children and does NOT declare them here is invisible
+  # to this check, which fails open. That is the cost of mirroring rather than
+  # guessing, and it is the safer trade: guessing failed open too — silently, and
+  # for content the renderer never shows.
   defp nested_maps(%Ash.Union{value: value}), do: nested_maps(value)
 
-  defp nested_maps(%module{} = block) do
-    module
-    |> Kiln.Block.Info.fields()
-    |> Enum.flat_map(&collect_maps(Map.get(block, &1.name)))
-  end
+  defp nested_maps(%KilnCMS.Blocks.Columns{} = block),
+    do: KilnCMS.Blocks.Columns.child_maps(block)
 
   defp nested_maps(_other), do: []
-
-  # A child is collected only from a position the RENDERER reads — a column's
-  # `"blocks"` list, mirroring `KilnCMS.Blocks.Columns`'s own `raw_blocks/1`.
-  #
-  # Collecting every map that merely carried a `_type` key, wherever it sat, was
-  # defeatable by the very omission this comparison exists to catch: a `_type`
-  # (plus the restricted field) added as a SIBLING key on the column wrapper is
-  # never rendered, but counted into the multiset — so it offset the removal of a
-  # real admin-set child value and the two sides compared equal. `field :columns,
-  # {:array, :map}` has no `fields` constraint, so such a key survives cast and
-  # the JSONB round-trip.
-  #
-  # A map is collected by its PARENT, never by itself, so each is counted once.
-  # Descent still walks every list value, so columns-nested-in-columns is reached
-  # at any depth — only *collection* is restricted to the rendered slot.
-  #
-  # If a future block nests children under a different key, this and
-  # `Columns.raw_blocks/1` have to change together; they are the same fact stated
-  # twice, deliberately, because reading the renderer is what makes this safe.
-  defp collect_maps(list) when is_list(list), do: Enum.flat_map(list, &collect_maps/1)
-  defp collect_maps(%Ash.Union{}), do: []
-
-  defp collect_maps(%{} = map) when not is_struct(map) do
-    rendered_children = map |> child_blocks() |> Enum.filter(&typed_map?/1)
-
-    rendered_children ++ Enum.flat_map(Map.values(map), &collect_maps/1)
-  end
-
-  defp collect_maps(_other), do: []
-
-  # Same accessor as `KilnCMS.Blocks.Columns.raw_blocks/1`, string or atom key.
-  defp child_blocks(map),
-    do: (Map.get(map, "blocks") || Map.get(map, :blocks) || []) |> List.wrap()
-
-  defp typed_map?(map) when is_map(map) and not is_struct(map),
-    do: Map.has_key?(map, "_type") or Map.has_key?(map, :_type)
-
-  defp typed_map?(_other), do: false
 
   defp collect_restricted(map, role, acc) do
     with {:ok, type} <- fetch_type(map),

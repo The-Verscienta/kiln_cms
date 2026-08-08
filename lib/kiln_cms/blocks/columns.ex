@@ -170,6 +170,45 @@ defmodule KilnCMS.Blocks.Columns do
     block |> columns() |> Enum.flat_map(&child_blocks/1)
   end
 
+  @doc """
+  The **raw child maps** of every column, flattened, including nested columns'
+  own children.
+
+  Same positions `child_blocks_flat/1` reads, before `TypedBlocks.to_typed/1`
+  fills in defaults — which is what `KilnCMS.CMS.Changes.EnforceBlockFieldPolicy`
+  needs, since a field the client omitted has to stay omitted for it to tell an
+  omission from a write of the default (#566).
+
+  Exported so that check can mirror the renderer exactly rather than guessing
+  where children live. Guessing was the bug: probing every map in the tree for a
+  `"blocks"` key let a restricted value be parked in a slot nothing renders and
+  still be counted, which offset the removal of a real one (#956).
+  """
+  @spec child_maps(struct()) :: [map()]
+  def child_maps(block) do
+    block |> columns() |> Enum.flat_map(&raw_child_maps/1)
+  end
+
+  defp raw_child_maps(col) do
+    col
+    |> raw_blocks()
+    |> Enum.filter(&is_map/1)
+    |> Enum.flat_map(&[&1 | nested_child_maps(&1)])
+  end
+
+  # A child that is itself a columns block carries its own columns, in the same
+  # raw shape — recursed here rather than by the caller so the "where do
+  # children live" answer stays in one module.
+  defp nested_child_maps(%{} = child) do
+    case Map.get(child, "columns") || Map.get(child, :columns) do
+      cols when is_list(cols) ->
+        cols |> Enum.filter(&is_map/1) |> Enum.flat_map(&raw_child_maps/1)
+
+      _none ->
+        []
+    end
+  end
+
   # Typed child blocks of a single column (tolerates string/atom keys from jsonb).
   defp child_blocks(col), do: col |> raw_blocks() |> TypedBlocks.to_typed()
 
