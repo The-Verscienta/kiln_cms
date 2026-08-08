@@ -307,15 +307,36 @@ defmodule KilnCMSWeb.ContentEditorLive do
            :categories,
            CMS.list_categories!(actor: actor, tenant: org, query: [sort: [name: :asc]])
          )
+         # Three columns, not every column (#528). This was the last mount load
+         # without a `select:`, and the picker reads exactly `id`, `name` and
+         # `tag_group_id` — the rest were `%Ash.NotLoaded{}` placeholders held
+         # for the socket's lifetime. Deliberately still UNPAGINATED: an
+         # unrendered checkbox is a detach (see `tag_picker/1`), so the list has
+         # to stay whole until the picker moves to the merge verbs (#638).
          |> assign(
            :tags,
-           CMS.list_tags!(actor: actor, tenant: org, query: [sort: [name: :asc]])
+           CMS.list_tags!(
+             actor: actor,
+             tenant: org,
+             query: [select: [:id, :name, :tag_group_id], sort: [name: :asc]]
+           )
          )
          # `TagGroup`'s primary read is already ordered by position then name.
+         #
+         # #528 also proposed skipping this read when no tag carries a group —
+         # the zero-group case, which is most installs. It is NOT safe, and the
+         # suite says so: with no groups loaded, `bucket_for/3` files a tag
+         # whose group does not resolve under "Ungrouped", so a tag a
+         # collaborator attaches after mount from an out-of-scope group lands
+         # there instead of in "Also attached". That section exists precisely to
+         # make such a tag visible and undoable before the next
+         # `append_and_remove` save silently detaches it (#522) — and it carries
+         # the note explaining where the tag came from, which "Ungrouped" does
+         # not. One small indexed read is the cheaper side of that trade.
          |> assign(:tag_groups, CMS.list_tag_groups!(actor: actor, tenant: org))
          # Which tag-picker sections render expanded, and which have rendered at
          # all (#523). Both start empty and are filled by `assign_record/2`
-         # below — see `refresh_tag_sections_open/1`.
+         # below — see `refresh_tag_index/1`.
          |> assign(:tag_sections_open, MapSet.new())
          |> assign(:tag_sections_seen, MapSet.new())
          |> assign(:audiences, audience_options())
@@ -545,7 +566,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:slug_customized?, slug_customized?(socket))
     |> assign(:may_write?, may_write?(record, socket.assigns.actor, socket.assigns.current_org))
     |> assign(:form, build_form(record, socket.assigns.actor))
-    |> refresh_tag_sections_open()
+    |> refresh_tag_index()
     |> seed_block_children(record)
     |> refresh_preview()
     |> load_versions()
@@ -4057,33 +4078,24 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # scannable. Groups may be scoped to certain content types; groups that don't
   # apply to `kind` are omitted.
   attr :form, :any, required: true
-  attr :tags, :list, required: true
-  attr :tag_groups, :list, required: true
-  attr :kind, :any, required: true
+  attr :tag_index, :any, required: true
   attr :record, :any, required: true
   attr :open_sections, :any, required: true
 
   defp tag_picker(assigns) do
-    # What's *persisted* on the record, as distinct from what's currently
-    # ticked. The rescue section below keys on this, so unchecking a tag can't
-    # delete its own checkbox.
-    attached = assigns.record.tags |> current_ids() |> Enum.map(&to_string/1)
-
-    # `@tags` is loaded once at mount and never refreshed, but `record.tags` is
-    # (every autosave's `fetch!`). So a tag created and attached after mount — a
-    # collaborator, another tab — is in `record.tags` but not `@tags`, renders
-    # no checkbox, and the next save submits `tag_ids` without it, which
-    # `append_and_remove` reads as "detach me" (#522). Render from the union of
-    # the two so every attached tag always has a control; the sections and the
-    # empty-state guard both key on it, not on the stale `@tags` alone.
-    pickable = all_pickable_tags(assigns.tags, assigns.record.tags)
-
+    # A **MapSet**, not a list (#528). Membership is tested three times per tag
+    # — the checkbox, the section count, and the filter — and this component
+    # re-renders on every `validate`, i.e. per keystroke anywhere in the form.
     selected =
       assigns.form
       |> selected_ids(:tag_ids, current_ids(assigns.record.tags))
-      |> Enum.map(&to_string/1)
+      |> MapSet.new(&to_string/1)
 
-    sections = tag_sections(pickable, assigns.tag_groups, assigns.kind, selected, attached)
+    # The skeleton — which tag sits in which section, and its downcased filter
+    # key — is computed once per RECORD change (`refresh_tag_index/1`), not per
+    # render. Only the per-section tick counts depend on `selected`, so only
+    # they are recomputed here.
+    sections = with_counts(assigns.tag_index.sections, selected)
 
     assigns =
       assigns
@@ -4099,7 +4111,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> assign(
         :empty_reason,
         cond do
-          pickable == [] -> :no_tags
+          assigns.tag_index.pickable? == false -> :no_tags
           sections == [] -> :none_apply
           true -> nil
         end
@@ -4155,7 +4167,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         </div>
 
         <%!-- `open` comes from a set judged once per section, never from the
-              live tick count — see `refresh_tag_sections_open/1`. A server value
+              live tick count — see `refresh_tag_index/1`. A server value
               that moves mid-session overrides the app-wide <details>
               preservation in `app.js`, and folded a section shut under the
               cursor (#523). Toggling one after that is the editor's business,
@@ -4186,14 +4198,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
           <div class="flex flex-wrap gap-2 p-2 pt-1">
             <label
               :for={tag <- section.tags}
-              data-tag-item={String.downcase(tag.name)}
+              data-tag-item={tag.filter}
               class="inline-flex cursor-pointer items-center gap-1.5 rounded border border-base-content/20 px-2 py-1 text-sm hover:bg-base-200"
             >
               <input
                 type="checkbox"
                 name={@name}
                 value={tag.id}
-                checked={to_string(tag.id) in @selected}
+                checked={MapSet.member?(@selected, tag.id)}
                 class="size-4 rounded border border-base-content/30 accent-primary"
               />
               {tag.name}
@@ -4231,7 +4243,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # checkbox that isn't rendered isn't submitted, and the link is *removed*.
   # Narrowing a group's content types after the fact would otherwise silently
   # strip tags off existing content the next time someone hit Save.
-  defp tag_sections(tags, groups, kind, selected, attached) do
+  defp tag_sections(tags, groups, kind, attached) do
     kind = to_string(kind)
     known_ids = MapSet.new(groups, & &1.id)
     applicable = Enum.filter(groups, &applies_to?(&1, kind))
@@ -4240,16 +4252,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
     grouped =
       Enum.map(applicable, fn group ->
-        section(
-          {:group, group.id},
-          group.name,
-          Map.get(by_bucket, {:group, group.id}, []),
-          selected
-        )
+        section({:group, group.id}, group.name, Map.get(by_bucket, {:group, group.id}, []))
       end)
 
-    ungrouped =
-      section(:ungrouped, gettext("Ungrouped"), Map.get(by_bucket, :ungrouped, []), selected)
+    ungrouped = section(:ungrouped, gettext("Ungrouped"), Map.get(by_bucket, :ungrouped, []))
 
     # Out-of-scope groups contribute only what the record ALREADY carries.
     # Keyed on `attached` (the persisted set) rather than `selected` (the live
@@ -4266,7 +4272,6 @@ defmodule KilnCMSWeb.ContentEditorLive do
         :out_of_scope,
         gettext("Also attached"),
         orphaned_tags,
-        selected,
         gettext("Already on this item, from a group scoped to other content types.")
       )
 
@@ -4298,10 +4303,30 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # `key` identifies the section across re-renders (the label is translated and
   # a group's name is editable, so neither is stable) — `@open_sections` is a
   # set of these, and `tag_section_id/1` turns one into the DOM id.
-  defp section(key, label, tags, selected, note \\ nil) do
-    count = Enum.count(tags, &(to_string(&1.id) in selected))
+  defp section(key, label, tags, note \\ nil) do
+    %{key: key, label: label, tags: Enum.map(tags, &tag_view/1), note: note}
+  end
 
-    %{key: key, label: label, tags: tags, selected_count: count, note: note}
+  # The projection the template renders. `id` is stringified and `filter` is
+  # downcased HERE rather than in the markup, because the section list is built
+  # once per record change while the markup is rebuilt on every keystroke —
+  # `String.downcase/1` per tag per render was the whole reason this exists.
+  defp tag_view(tag), do: %{id: to_string(tag.id), name: tag.name, filter: downcase(tag.name)}
+
+  defp downcase(name) when is_binary(name), do: String.downcase(name)
+  defp downcase(_name), do: ""
+
+  # Stamp each section with how many of its tags are currently ticked. The only
+  # part of the picker that depends on the live form, and therefore the only
+  # part recomputed per render.
+  defp with_counts(sections, selected) do
+    Enum.map(sections, fn section ->
+      Map.put(
+        section,
+        :selected_count,
+        Enum.count(section.tags, &MapSet.member?(selected, &1.id))
+      )
+    end)
   end
 
   # Which sections the picker renders expanded — a section carrying a tag the
@@ -4323,24 +4348,33 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # seen and undone before the next `append_and_remove` save, and which arriving
   # collapsed would undercut. After that first render the attribute is the
   # editor's (and the filter hook's), in both directions, for the session.
-  defp refresh_tag_sections_open(socket) do
+  defp refresh_tag_index(socket) do
     %{tags: tags, tag_groups: groups, kind: kind, record: record} = socket.assigns
-    attached = record.tags |> current_ids() |> Enum.map(&to_string/1)
+    attached = record.tags |> current_ids() |> MapSet.new(&to_string/1)
     seen = socket.assigns.tag_sections_seen
 
-    sections =
-      tags
-      |> all_pickable_tags(record.tags)
-      |> tag_sections(groups, kind, attached, attached)
+    # `@tags` is loaded once at mount and never refreshed, but `record.tags` is
+    # (every autosave's `fetch!`). So a tag created and attached after mount — a
+    # collaborator, another tab — is in `record.tags` but not `@tags`, renders
+    # no checkbox, and the next save submits `tag_ids` without it, which
+    # `append_and_remove` reads as "detach me" (#522). Build from the union of
+    # the two so every attached tag always has a control; the sections and the
+    # empty-state guard both key on it, not on the stale `@tags` alone.
+    pickable = all_pickable_tags(tags, record.tags)
+    sections = tag_sections(pickable, groups, kind, attached)
+
+    # Judged against what is PERSISTED, not what is ticked — see the template.
+    counted = with_counts(sections, attached)
 
     fresh =
-      for section <- sections,
+      for section <- counted,
           not MapSet.member?(seen, section.key),
           section.selected_count > 0,
           into: MapSet.new(),
           do: section.key
 
     socket
+    |> assign(:tag_index, %{sections: sections, pickable?: pickable != []})
     |> update(:tag_sections_open, &MapSet.union(&1, fresh))
     |> assign(:tag_sections_seen, MapSet.union(seen, MapSet.new(sections, & &1.key)))
   end
@@ -7608,9 +7642,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
                 <.tag_picker
                   form={@form}
-                  tags={@tags}
-                  tag_groups={@tag_groups}
-                  kind={@kind}
+                  tag_index={@tag_index}
                   record={@record}
                   open_sections={@tag_sections_open}
                 />
