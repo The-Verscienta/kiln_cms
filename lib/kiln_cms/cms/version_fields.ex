@@ -60,12 +60,30 @@ defmodule KilnCMS.CMS.VersionFields do
   # Editorially significant first; anything else the resource declares (a dynamic
   # type's own columns, a future attribute) is appended alphabetically rather
   # than dropped.
+  #
+  # `KilnCMSWeb.VersionDiffComponents` reads this through `field_order/0` and
+  # fails to compile if its labels do not cover it exactly (#712) — so adding a
+  # name here without a translated label, or removing one and leaving a dead
+  # label clause behind, is a build error rather than an English string in a
+  # Spanish UI.
   @field_order ~w(
     title slug path_alias excerpt state audience locale
     seo_title seo_description seo_keywords seo_image canonical_url
     published_at scheduled_at unpublish_at
     author_id category_id featured_image_id custom_fields
   )a
+
+  @doc """
+  The editorially significant attributes, in the order they should be displayed.
+
+  Exposed so `KilnCMSWeb.VersionDiffComponents` can order and check its labels
+  against it at compile time (#712) rather than restating the same nineteen names
+  in the same order. Anything a resource declares that is not on this list is
+  still diffed and restored — `content_fields/1` appends it alphabetically — it
+  simply has no opinion about where it belongs.
+  """
+  @spec field_order() :: [atom()]
+  def field_order, do: @field_order
 
   @doc """
   Every attribute of `resource` that PaperTrail records — bookkeeping included.

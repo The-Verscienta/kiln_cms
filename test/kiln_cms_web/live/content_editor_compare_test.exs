@@ -290,6 +290,20 @@ defmodule KilnCMSWeb.ContentEditorCompareTest do
     assert html =~ "Saved while comparing"
   end
 
+  # #712. The labels used to be a second copy of `field_order/0` — the same
+  # nineteen names in the same order, independently maintained. The gate below
+  # caught a *missing* label; nothing caught the ordering, so a name added to the
+  # labels but not to `field_order/0` sorted alphabetically into the "rest"
+  # bucket instead of where its author meant it.
+  #
+  # One list drives both now, and the drift is a compile error in both
+  # directions. This asserts the relationship the build enforces, so the reason
+  # for it survives in something readable.
+  test "the labels are the ordered fields, in that order" do
+    assert KilnCMSWeb.VersionDiffComponents.labelled_fields() ==
+             KilnCMS.CMS.VersionFields.field_order()
+  end
+
   test "every field the diff can report has a translated label" do
     # The fall-through humanizes the attribute name and ships it untranslated
     # with nothing going red, so this is the gate on that: a new content
