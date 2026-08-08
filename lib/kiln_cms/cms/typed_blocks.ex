@@ -41,6 +41,23 @@ defmodule KilnCMS.CMS.TypedBlocks do
   def to_typed(blocks), do: blocks |> List.wrap() |> Enum.map(&one_to_typed/1)
 
   defp one_to_typed(%Ash.Union{value: value}), do: one_to_typed(value)
+
+  # An `Ash.Union` that has been through JSON — `%{"type" => tag, "value" => …}`
+  # — which is how a union lands in a paper-trail version's freeform `changes`
+  # map. Without this clause it misses `typed_map?/1` (the `_type` tag is one
+  # level down), falls through to the legacy branch, and every block in a
+  # replayed document comes back as `Custom` (#917).
+  #
+  # That is why a point-in-time read rendered a bare `<!-- fragment block -->`:
+  # `Fragments.expand/3` never saw a `%Fragment{}` to expand. It was mis-typing
+  # every OTHER block the same way, silently, since replay existed.
+  #
+  # `map_size/1` pins the shape: the serialized union has exactly these two
+  # keys, while a legacy block carries its kind in `"type"` alongside its own
+  # attributes, so a bare size check is what keeps the two apart.
+  defp one_to_typed(%{"type" => _tag, "value" => %{} = value} = map) when map_size(map) == 2,
+    do: one_to_typed(value)
+
   defp one_to_typed(%mod{} = struct) when mod in @block_modules, do: struct
   defp one_to_typed(%{} = map), do: one_from_typed_or_legacy(map)
   defp one_to_typed(_other), do: %Custom{_type: "custom", data: %{}}

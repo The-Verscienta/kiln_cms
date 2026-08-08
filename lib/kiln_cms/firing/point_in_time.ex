@@ -217,7 +217,13 @@ defmodule KilnCMS.Firing.PointInTime do
           # today's formulas, and projecting onto today's field definitions
           # would add fields defined since and drop fields since deleted, making
           # the historical artifact assert values that were never live then.
-          |> Engine.fire(mode: :preview, custom_fields: :as_stored)
+          # `fragments: as_of` for the same reason (#917). `Fragments.expand/3`
+          # otherwise reads the target's *current* published blocks, so a
+          # historical read returned the fragment as edited today — or an empty
+          # `blocks` array where the content was, if the target has since been
+          # unpublished or gated. Both are silent wrong answers on the one
+          # endpoint whose entire promise is "what did this say on…".
+          |> Engine.fire(mode: :preview, custom_fields: :as_stored, fragments: as_of)
 
         {:ok, Map.fetch!(artifacts, surface), published_at}
 
@@ -251,6 +257,46 @@ defmodule KilnCMS.Firing.PointInTime do
       _none ->
         {:error, :not_published}
     end
+  end
+
+  @doc """
+  The attribute state `id` carried at `as_of`, if it was published then (#917).
+
+  The fragment-expansion counterpart of `read/5`: a point-in-time artifact has
+  to inline what the target said *then*, and this is the primitive
+  `KilnCMS.CMS.Fragments` calls to get it.
+
+  Returns the whole replayed state, string-keyed, **not just the blocks** — the
+  caller has to re-apply the visibility rules against the values that were live
+  at `as_of` (`"audience"`, and `"type_definition_id"` for a dynamic type), and
+  it can only do that if it can see them. Handing back blocks alone is what made
+  the first cut of this leak a gated fragment into a public artifact.
+
+  `:absent` covers every reason a target has no historical body — never
+  published, withdrawn before `as_of`, hard-purged since, or no version rows at
+  all — which expansion treats exactly as it treats an unpublished target
+  today: it expands to nothing.
+
+  Deliberately reuses `last_transition/4` and `still_exists?/3`, so "published
+  then" and "not erased" mean the same thing here, in `read/5` and in
+  `index/4`. A fragment visible in one and not the others would be the same
+  class of disagreement those two guard against.
+  """
+  @spec snapshot_state(Ash.UUID.t(), module(), Ash.UUID.t(), DateTime.t()) ::
+          {:ok, map()} | :absent
+  def snapshot_state(org_id, resource, id, %DateTime{} = as_of) do
+    version_module = Module.concat(resource, Version)
+
+    with true <- still_exists?(resource, id, org_id),
+         {:ok, published_at} <- last_transition(version_module, id, as_of, org_id) do
+      {:ok, replay(version_module, id, published_at, org_id)}
+    else
+      _absent -> :absent
+    end
+  rescue
+    # A target whose version table can't be read is a miss, not a 500 on a
+    # governance page — the same posture `read_target_live/4` takes.
+    _error -> :absent
   end
 
   # Reconstruct the full attribute state at `up_to` by merging every version's

@@ -65,6 +65,10 @@ defmodule KilnCMS.Firing.Engine do
     expanded =
       Fragments.expand(typed, org_id,
         audiences: host_audiences(document),
+        # `fragments: <DateTime>` makes expansion resolve each target as it was
+        # at that instant rather than as it is now (#917). Only point-in-time
+        # reads pass it; every other fire leaves it nil and reads live.
+        as_of: Keyword.get(opts, :fragments),
         # Seeded with the document itself, so a page embedding *itself* doesn't
         # inline its own body once before the cycle guard catches it a level
         # down.
