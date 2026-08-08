@@ -347,8 +347,9 @@ The headless surfaces are unchanged. The JSON and GraphQL APIs never serve a
 teaser, and the delivery `audiences` argument is **hidden from the GraphQL schema**
 — otherwise an anonymous client could request gated content directly. Gated
 content over headless still requires a bearer token or API key on an entitled
-account. Sitemaps, `llms.txt`, related content and SEO link suggestions all remain
-public-only.
+account. Sitemaps, `llms.txt`, feeds, related content, SEO link suggestions and
+the optional Meilisearch index (#1006) all remain public-only — gating a document
+removes it from the index, not merely from future updates.
 
 ## Member-only newsletters
 

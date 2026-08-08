@@ -138,6 +138,125 @@ defmodule KilnCMS.Search.MeilisearchTest do
       refute_received {:meili, :put, "/indexes/test_idx/documents" <> _, _}
     end
 
+    test "an audience-gated document is deleted, not indexed (#1006)" do
+      # The index has no audience facet and its queries are anonymous, so an
+      # indexed members-only body is anonymously searchable by anything holding
+      # a search-only key. Gating previously-indexed content therefore has to
+      # REMOVE it, not merely stop refreshing it.
+      actor = admin()
+
+      page =
+        CMS.create_page!(%{title: "Members only", slug: slug(), blocks: []}, actor: actor)
+        |> then(&CMS.publish_page!(&1, actor: actor))
+
+      drain()
+      assert_received {:meili, :put, "/indexes/test_idx/documents" <> _, [_doc]}
+
+      page
+      |> Ash.reload!(authorize?: false, tenant: page.org_id)
+      |> CMS.update_page!(%{audience: :member}, actor: actor)
+
+      drain()
+
+      assert_received {:meili, :delete, "/indexes/test_idx/documents/page_" <> id, _body}
+      assert id == page.id
+      refute_received {:meili, :put, "/indexes/test_idx/documents" <> _, _}
+    end
+
+    test "a document published straight into a gated audience is deleted, not indexed" do
+      # The other order: gated BEFORE the first publish, so there is nothing in
+      # the index to remove. It must still issue the DELETE rather than nothing
+      # at all — that degradation IS the eviction mechanism the upgrade story
+      # rests on, since `mix kiln.meili.reindex` enqueues an upsert for an
+      # already-gated document and relies on it becoming a removal. A bare
+      # `refute_received` on the PUT would stay green if it stopped.
+      actor = admin()
+
+      page =
+        CMS.create_page!(%{title: "Born gated", slug: slug(), audience: :member, blocks: []},
+          actor: actor
+        )
+        |> then(&CMS.publish_page!(&1, actor: actor))
+
+      drain()
+
+      refute_received {:meili, :put, "/indexes/test_idx/documents" <> _, _}
+      assert_received {:meili, :delete, "/indexes/test_idx/documents/page_" <> id, _body}
+      assert id == page.id
+    end
+
+    test "a gated POST is excluded too, not just a page" do
+      # Every other test in this file uses a Page, so dropping the `published/1`
+      # wrap from `load/3`'s "post" clause would survive all of them.
+      actor = admin()
+
+      post =
+        CMS.create_post!(%{title: "Members only post", slug: slug(), blocks: []}, actor: actor)
+        |> then(&CMS.publish_post!(&1, actor: actor))
+
+      drain()
+      assert_received {:meili, :put, "/indexes/test_idx/documents" <> _, [_doc]}
+
+      post
+      |> Ash.reload!(authorize?: false, tenant: post.org_id)
+      |> CMS.update_post!(%{audience: :member}, actor: actor)
+
+      drain()
+
+      assert_received {:meili, :delete, "/indexes/test_idx/documents/post_" <> id, _body}
+      assert id == post.id
+      refute_received {:meili, :put, "/indexes/test_idx/documents" <> _, _}
+    end
+
+    test "index_document/1 refuses a gated record even when called directly" do
+      # The worker is the only in-tree caller, but this is public API taking any
+      # struct and `to_document/1` puts the whole denormalized body in `body`. A
+      # console helper or a future bulk path must not be able to index a
+      # members-only page silently.
+      actor = admin()
+
+      page =
+        CMS.create_page!(%{title: "Direct", slug: slug(), audience: :member, blocks: []},
+          actor: actor
+        )
+        |> then(&CMS.publish_page!(&1, actor: actor))
+
+      drain()
+      # Clear the publish-path DELETE so the refute below is about this call.
+      assert_received {:meili, :delete, "/indexes/test_idx/documents/page_" <> _, _}
+
+      assert :not_public =
+               Meilisearch.index_document(
+                 Ash.reload!(page, authorize?: false, tenant: page.org_id)
+               )
+
+      refute_received {:meili, :put, "/indexes/test_idx/documents" <> _, _}
+    end
+
+    test "un-gating a document puts it back in the index" do
+      # The rule is a property of the document's current audience, not a
+      # one-way door: a page opened back up to everyone belongs in the index.
+      actor = admin()
+
+      page =
+        CMS.create_page!(%{title: "Reopened", slug: slug(), audience: :member, blocks: []},
+          actor: actor
+        )
+        |> then(&CMS.publish_page!(&1, actor: actor))
+
+      drain()
+      refute_received {:meili, :put, "/indexes/test_idx/documents" <> _, _}
+
+      page
+      |> Ash.reload!(authorize?: false, tenant: page.org_id)
+      |> CMS.update_page!(%{audience: :public}, actor: actor)
+
+      drain()
+
+      assert_received {:meili, :put, "/indexes/test_idx/documents" <> _, [doc]}
+      assert doc.title == "Reopened"
+    end
+
     test "unpublishing deletes the document from the index" do
       actor = admin()
 

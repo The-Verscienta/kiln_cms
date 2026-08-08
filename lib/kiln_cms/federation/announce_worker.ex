@@ -78,14 +78,16 @@ defmodule KilnCMS.Federation.AnnounceWorker do
   end
 
   defp federatable_document(descriptor, document_id, org_id, _verb) do
+    # Published, `:public`, and not passphrase-locked — the same three-part rule
+    # the Meilisearch index and related-content suggestions apply, and now the
+    # same expression of it (#1006). It used to be spelled here with
+    # `Map.get(record, :audience, :public)`, which defaults a MISSING audience to
+    # public: an Announce is a push to strangers' timelines with the title and a
+    # link, so the one direction that must never fail open is this one. A lock
+    # says the same thing more plainly, and federating past it is the loudest
+    # possible way to ignore it (#496).
     with {:ok, record} <- load(descriptor, document_id, org_id),
-         true <- record.state == :published,
-         true <- Map.get(record, :audience, :public) == :public,
-         # A passphrase-locked document (#496) is not announced. An Announce is a
-         # push to strangers' timelines with the title and a link; a lock says
-         # this document is for whoever holds the passphrase, and federating it
-         # is the loudest possible way to ignore that.
-         true <- is_nil(Map.get(record, :access_password_hash)),
+         true <- KilnCMS.CMS.Audiences.public_to_anonymous?(record),
          true <- record.locale == KilnCMS.I18n.default_locale() do
       {:ok, record}
     else

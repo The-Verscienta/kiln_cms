@@ -22,8 +22,13 @@ defmodule KilnCMS.Search.Meilisearch do
   `KilnCMS.CMS.Changes.FireArtifacts` / `DeleteArtifacts`. `mix kiln.meili.reindex`
   does a full (re)build.
 
-  Only published, non-archived documents live in the index — the public delivery
-  view — so the index never leaks drafts.
+  **Only content that is public to an anonymous visitor.** Published, `audience:
+  :public`, and not passphrase-locked — `KilnCMS.CMS.Audiences.public_to_anonymous?/1`
+  is the rule, and `index_document/1` enforces it rather than trusting callers.
+  The index has no audience, grant or password facet (see `to_document/1` and
+  `configure/0`) and its queries carry no actor, so anything in it is readable by
+  everyone who can reach it: the only correct entry for content that is not
+  public is none (#1006, #496). See `docs/meilisearch.md`.
 
   HTTP is delegated to a swappable `KilnCMS.Search.Meilisearch.Client` (default
   Req); tests inject a stub.
@@ -80,13 +85,21 @@ defmodule KilnCMS.Search.Meilisearch do
   Upsert a single content record (Page/Post) into the index. Documents are keyed
   by `"<type>_<id>"`, so re-publishing replaces the prior document. No-op when
   disabled.
+
+  **Refuses anything not public to an anonymous visitor** (`:not_public`) rather
+  than trusting the caller. `MeilisearchWorker` already decides this — it turns a
+  gated document into a DELETE, which is the stronger answer — but this is public
+  API taking any struct, and `to_document/1` puts the whole denormalized body in
+  `body`. A console helper or a future bulk path calling it on a members-only
+  page would otherwise index that page silently, with no error and nothing to
+  catch it (#1006).
   """
-  @spec index_document(struct()) :: {:ok, term()} | {:error, term()} | :disabled
+  @spec index_document(struct()) :: {:ok, term()} | {:error, term()} | :disabled | :not_public
   def index_document(record) do
-    if enabled?() do
-      upsert_documents([to_document(record)])
-    else
-      :disabled
+    cond do
+      not enabled?() -> :disabled
+      not KilnCMS.CMS.Audiences.public_to_anonymous?(record) -> :not_public
+      true -> upsert_documents([to_document(record)])
     end
   end
 

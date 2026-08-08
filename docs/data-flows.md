@@ -58,6 +58,12 @@ When configured, a `WebhookEndpoint` receives the **full `ContentSerializer`
 payload** (title, slug, blocks, SEO fields, state) on publish/update. Requests are
 HMAC-signed and SSRF-guarded (see `KilnCMS.SafeURL`).
 
+**Audience-gated content is included, and the payload does not say so** — there is
+no `audience` field on it, so a subscriber cannot filter gated documents out
+(#1014). A webhook endpoint is somewhere you deliberately send content, unlike the
+Meilisearch index, so this is not treated as a leak — but if your sink feeds a
+public surface, know that a members-only body reaches it.
+
 - **Disable:** delete the webhook endpoint(s) in `/editor/webhooks` (admin only).
   No endpoints configured ⇒ nothing is sent.
 
@@ -88,7 +94,7 @@ Configure the sender and adapter in `config/runtime.exs`
 
 | Subprocessor | Sends | Enabled by | Disable |
 |--------------|-------|-----------|---------|
-| **Meilisearch** | Published content (title, blocks, SEO) for the search index | `config :kiln_cms, KilnCMS.Search.Meilisearch, enabled: true` | `enabled: false` (default) — no content write talks to it. |
+| **Meilisearch** | **Public** published content only — title, slug, locale, excerpt and the denormalized body (`search_text`), plus `org_id`/`type`/`published_at` facets. No SEO fields and no actor data — never audience-gated or passphrase-locked documents, which are actively removed from the index rather than skipped (#1006, #496). The index has no audience facet and its queries are anonymous, so anything in it is readable by anyone who can reach it. | `config :kiln_cms, KilnCMS.Search.Meilisearch, enabled: true` | `enabled: false` (default) — no content write talks to it. |
 | **S3 / MinIO** | Uploaded media blobs | `config :kiln_cms, KilnCMS.Storage, adapter: KilnCMS.Storage.S3` | Default is `KilnCMS.Storage.Local` (no third party). |
 | **LLM provider** (SEO drafting) | On an editor's explicit request: the page title, excerpt, headings, existing SEO values and body text (truncated) | `config :kiln_cms, KilnCMS.Seo, generator: …, model: …` — or `SEO_MODEL` | `generator: nil` (default) — no module is called. Pointing `model:` at an on-prem endpoint (`ollama:`/`vllm:`) keeps content in the deployment; Kiln logs a warning at boot and shows an editor notice when the configured provider is third-party. See `docs/seo.md`. |
 | **Stripe** (paid memberships) | The member's email address at checkout, and the tier's price id. Card details never touch Kiln — the member is redirected to a provider-hosted page. Kiln stores only the returned customer/subscription ids. | An admin storing API credentials in `/editor/billing` | **Off by default** — with no credentials `KilnCMS.Billing.configured?/0` is false, no tier is offered, the checkout and webhook routes 404, and no request is made. "Disconnect" in the console clears the keys. See [Paid memberships](memberships.md). |
