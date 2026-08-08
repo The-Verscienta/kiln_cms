@@ -121,18 +121,25 @@ defmodule KilnCMSWeb.ErrorHTMLTest do
       end
     end
 
-    test "a request with no resolved tenant still renders, on the operator defaults" do
-      # Not every error page has a tenant behind it: an exception raised before
-      # `SetTenant` runs, a template rendered directly. This guards the shape
-      # the issue proposed — `current_org={@conn.assigns[:current_org]}` — which
-      # raises `KeyError` on `@conn` for a render with no conn at all, turning
-      # an error page into a second error.
-      assert render_to_string(KilnCMSWeb.ErrorHTML, "404", "html", []) =~ "Powered by KilnCMS."
+    # Not every error page has a tenant behind it: an exception raised before
+    # `SetTenant` runs, a template rendered directly. This guards the shape the
+    # issue proposed — `current_org={@conn.assigns[:current_org]}` — which raises
+    # `KeyError` on `@conn` for a render with no conn at all, turning an error
+    # page into a second error.
+    #
+    # Every templated status, not just 404: the 500 page is the one that has to
+    # tolerate a half-built conn, because that is precisely the request that
+    # raised. A 500 renderer that itself raises is the loop (#558).
+    for status <- ["403", "404", "500"] do
+      test "#{status} with no resolved tenant still renders, on the operator defaults" do
+        assert render_to_string(KilnCMSWeb.ErrorHTML, unquote(status), "html", []) =~
+                 "Powered by KilnCMS."
 
-      bare = %{Phoenix.ConnTest.build_conn() | assigns: %{}}
+        bare = %{Phoenix.ConnTest.build_conn() | assigns: %{}}
 
-      assert render_to_string(KilnCMSWeb.ErrorHTML, "404", "html", conn: bare) =~
-               "Powered by KilnCMS."
+        assert render_to_string(KilnCMSWeb.ErrorHTML, unquote(status), "html", conn: bare) =~
+                 "Powered by KilnCMS."
+      end
     end
   end
 end
