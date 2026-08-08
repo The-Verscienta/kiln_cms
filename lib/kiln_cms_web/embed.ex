@@ -153,9 +153,16 @@ defmodule KilnCMSWeb.Embed do
   an unrelated host — and a subdomain is the likeliest first thing an operator
   tries.
 
-  Once per node, via `:persistent_term`, so a busy embed route cannot flood the
-  log. Best-effort: a race that logs twice is harmless, and the alternative
-  costs a serialization point on a public route.
+  At most once an hour per node, via `:persistent_term`, so a busy embed route
+  cannot flood the log. Best-effort: a race that logs twice is harmless, and the
+  alternative costs a serialization point on a public route.
+
+  Once *ever* per node would be quieter, and was the first shape here — but
+  Fetch Metadata is only unspoofable inside a browser. `curl -H 'sec-fetch-dest:
+  iframe' -H 'sec-fetch-site: cross-site'` sets it freely, so a single scanner
+  hit would claim the one-shot and the operator's own broken embed would then
+  say nothing at all until the next deploy. An hour bounds what one probe can
+  suppress, and a genuinely broken embed page is being retried anyway.
 
   Deliberately not a boot check — a boot warning cannot know whether the
   deployment uses embeds at all, so it would fire on every default install and
@@ -171,50 +178,79 @@ defmodule KilnCMSWeb.Embed do
           "browser will discard this response and the form will not appear. Set " <>
           "EMBED_ORIGINS to the parent origins allowed to frame it, e.g. " <>
           "EMBED_ORIGINS=https://acme.com,https://blog.acme.com (or `*` for every " <>
-          "site). Logged once per node; see docs/forms.md."
+          "site). Logged at most hourly per node; see docs/forms.md."
       )
     end
 
     :ok
   end
 
-  # Only the browser can say it is framing us, and only Fetch Metadata says it
-  # without being spoofable by a plain `curl` (it is browser-set and forbidden
-  # to scripts). A request with no `Sec-Fetch-Dest` at all — an old browser, a
+  # Only the browser can say it is framing us, and Fetch Metadata is the header
+  # that says it: browser-set and forbidden to scripts, so no page can forge it.
+  # A plain `curl` still can — see `claim_warning?/0` for why that only costs an
+  # hour. A request with no `Sec-Fetch-Dest` at all — an old browser, a
   # server-side fetch — tells us nothing, so it does not warn.
+  #
+  # All four embedding destinations, not just `iframe`: `frame-ancestors`
+  # governs `<frameset>`, `<embed>` and `<object>` identically, and an operator
+  # who reached for one of those is exactly the one who needs telling.
+  @framed_dests [["iframe"], ["frame"], ["embed"], ["object"]]
+
   defp framed_by_another_site?(conn) do
     dest = Plug.Conn.get_req_header(conn, "sec-fetch-dest")
     site = Plug.Conn.get_req_header(conn, "sec-fetch-site")
 
-    dest == ["iframe"] and site not in [[], ["same-origin"], ["none"]]
+    dest in @framed_dests and site not in [[], ["same-origin"], ["none"]]
   end
 
   # The parent's origin, for the message. `Referer` is the only header that
   # carries it, and a strict referrer policy on the parent can strip it — hence
-  # the caller's fallback wording.
+  # the caller's fallback wording. Origin only: userinfo, path and query are
+  # dropped, so a credential or a query-string identifier in the parent's URL
+  # never reaches the log.
+  #
+  # `Referer` is attacker-controlled and this string goes into a log line, so it
+  # is checked before it is used, not merely parsed. `URI.parse/1` happily
+  # returns a host containing ESC — an operator reading `journalctl` would get
+  # terminal escapes executed at them. Bandit's HTTP/1 parser rejects CR/LF/NUL,
+  # but that is one transport's parser, not a property of the value.
+  @origin_charset ~r/\A[a-zA-Z0-9.\-:\[\]_%]+\z/
+  @max_host 100
+
   defp parent_origin(conn) do
     with [referer | _] <- Plug.Conn.get_req_header(conn, "referer"),
-         %URI{scheme: scheme, host: host} when is_binary(scheme) and is_binary(host) <-
-           URI.parse(referer) do
-      URI.to_string(%URI{scheme: scheme, host: host, port: URI.parse(referer).port})
+         %URI{scheme: scheme, host: host, port: port} <- URI.parse(referer),
+         true <- is_binary(scheme) and is_binary(host) and host != "",
+         true <- String.length(host) <= @max_host,
+         true <- Regex.match?(@origin_charset, scheme <> host) do
+      URI.to_string(%URI{scheme: scheme, host: host, port: port})
     else
       _no_usable_referer -> nil
     end
   end
 
-  @warning_key {__MODULE__, :framing_warned?}
+  @warning_key {__MODULE__, :framing_warned_at}
+  @rearm_after System.convert_time_unit(3600, :second, :native)
 
+  # Monotonic time, not wall clock: a node whose clock steps backwards would
+  # otherwise mute this for as long as the step.
   defp claim_warning? do
-    if :persistent_term.get(@warning_key, false) do
+    now = System.monotonic_time()
+    last = :persistent_term.get(@warning_key, nil)
+
+    if is_integer(last) and now - last < @rearm_after do
       false
     else
-      :persistent_term.put(@warning_key, true)
+      # Replacing a key schedules a global scan, so this must stay rare — which
+      # is exactly what the hour buys. The `get` above short-circuits every
+      # other request, spoofed or not.
+      :persistent_term.put(@warning_key, now)
       true
     end
   end
 
   @doc false
-  # The one-shot outlives a test, so the suite needs a way to arm it again.
+  # The claim outlives a test, so the suite needs a way to arm it again.
   def reset_framing_warning, do: :persistent_term.erase(@warning_key)
 
   @doc """

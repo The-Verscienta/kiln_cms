@@ -126,7 +126,7 @@ defmodule KilnCMSWeb.FormEmbedDefaultTest do
     defp framed(conn, site, opts \\ []) do
       conn
       |> unique_ip()
-      |> put_req_header("sec-fetch-dest", "iframe")
+      |> put_req_header("sec-fetch-dest", Keyword.get(opts, :dest, "iframe"))
       |> put_req_header("sec-fetch-site", site)
       |> then(fn c ->
         case Keyword.get(opts, :referer) do
@@ -152,7 +152,7 @@ defmodule KilnCMSWeb.FormEmbedDefaultTest do
       assert log =~ "https://acme.test"
       refute log =~ "/pricing"
 
-      # Once per node: a busy embed route must not flood the log.
+      # At most hourly per node: a busy embed route must not flood the log.
       second =
         ExUnit.CaptureLog.capture_log(fn ->
           build_conn()
@@ -162,6 +162,111 @@ defmodule KilnCMSWeb.FormEmbedDefaultTest do
         end)
 
       refute second =~ "EMBED_ORIGINS"
+    end
+
+    # A scanner can set Fetch Metadata by hand — the headers are unforgeable to a
+    # *page*, not to `curl`. A one-shot per node would let one probe claim the
+    # slot and leave the operator's own broken embed silent until the next
+    # deploy, which inverts what the warning is for.
+    test "a spoofed probe cannot mute the warning for good", %{conn: conn} do
+      form = form!()
+
+      probe =
+        ExUnit.CaptureLog.capture_log(fn ->
+          conn |> framed("cross-site") |> get(~p"/forms/#{form.slug}/embed") |> response(200)
+        end)
+
+      assert probe =~ "EMBED_ORIGINS"
+
+      # An hour later, by the clock the claim actually reads. Reaching into the
+      # persistent_term is the point: it asserts the re-arm is time-based rather
+      # than testing a helper that fakes the answer.
+      :persistent_term.put(
+        {KilnCMSWeb.Embed, :framing_warned_at},
+        System.monotonic_time() - System.convert_time_unit(3601, :second, :native)
+      )
+
+      operator =
+        ExUnit.CaptureLog.capture_log(fn ->
+          build_conn()
+          |> framed("cross-site", referer: "https://acme.test/")
+          |> get(~p"/forms/#{form.slug}/embed")
+          |> response(200)
+        end)
+
+      assert operator =~ "EMBED_ORIGINS"
+    end
+
+    # `frame-ancestors` governs all four embedding destinations identically, and
+    # an operator who reached for `<object>` rather than `<iframe>` is exactly
+    # the one who will not guess why the form is blank.
+    for dest <- ~w(frame embed object) do
+      test "a #{dest} destination warns like an iframe", %{conn: conn} do
+        form = form!()
+
+        log =
+          ExUnit.CaptureLog.capture_log(fn ->
+            conn
+            |> framed("cross-site", dest: unquote(dest))
+            |> get(~p"/forms/#{form.slug}/embed")
+            |> response(200)
+          end)
+
+        assert log =~ "EMBED_ORIGINS"
+      end
+    end
+
+    # `Referer` is attacker-controlled and this line goes into an operator's
+    # terminal. `URI.parse/1` will hand back a host containing ESC quite
+    # happily; Bandit's HTTP/1 parser rejects CR/LF/NUL, but that is one
+    # transport's parser rather than a property of the value.
+    test "a referer carrying terminal escapes is dropped, not logged", %{conn: conn} do
+      form = form!()
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          conn
+          |> framed("cross-site", referer: "https://acme.test\e[2J\e[31mINJECTED")
+          |> get(~p"/forms/#{form.slug}/embed")
+          |> response(200)
+        end)
+
+      # Still warns — the missing origin must not cost the operator the signal.
+      assert log =~ "EMBED_ORIGINS"
+      assert log =~ "framed by another site"
+      refute log =~ "INJECTED"
+    end
+
+    test "an absurdly long referer host is dropped", %{conn: conn} do
+      form = form!()
+      host = String.duplicate("a", 300)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          conn
+          |> framed("cross-site", referer: "https://#{host}.test/")
+          |> get(~p"/forms/#{form.slug}/embed")
+          |> response(200)
+        end)
+
+      assert log =~ "framed by another site"
+      refute log =~ host
+    end
+
+    # `https:///path` parses to a host of `""`, which is not a usable origin and
+    # reads worse in the message than saying nothing.
+    test "a hostless referer falls back to the generic wording", %{conn: conn} do
+      form = form!()
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          conn
+          |> framed("cross-site", referer: "https:///path")
+          |> get(~p"/forms/#{form.slug}/embed")
+          |> response(200)
+        end)
+
+      assert log =~ "framed by another site"
     end
 
     # `frame-ancestors 'self'` matches the ORIGIN, so a sibling subdomain is
