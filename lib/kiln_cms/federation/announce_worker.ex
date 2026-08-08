@@ -3,10 +3,11 @@ defmodule KilnCMS.Federation.AnnounceWorker do
   Builds one activity and fans it out to a site's followers (#491).
 
   Runs after the publish transaction has committed, so it reads the **live**
-  record rather than the event payload. That matters twice over: the payload is
-  a snapshot that may already be stale, and it does not carry `audience` at all
-  — the single most important field for deciding whether something may be
-  federated.
+  record rather than the event payload. The payload is a snapshot that may
+  already be stale, and an Announce is irrevocable — it lands in strangers'
+  timelines — so this decides from the row, not from a copy of it. (The payload
+  does now carry `audience`, since #1014; that closed a real gap for webhook
+  subscribers but does not make a stale snapshot safe to federate from.)
 
   ## Every gate is checked here, not at enqueue time
 

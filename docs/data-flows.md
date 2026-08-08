@@ -55,14 +55,18 @@ your deployment.
 ### Webhooks (opt-in, per endpoint)
 
 When configured, a `WebhookEndpoint` receives the **full `ContentSerializer`
-payload** (title, slug, blocks, SEO fields, state) on publish/update. Requests are
-HMAC-signed and SSRF-guarded (see `KilnCMS.SafeURL`).
+payload** (title, slug, blocks, SEO fields, state, audience, locked) on
+publish/update.
+Requests are HMAC-signed and SSRF-guarded (see `KilnCMS.SafeURL`).
 
-**Audience-gated content is included, and the payload does not say so** — there is
-no `audience` field on it, so a subscriber cannot filter gated documents out
-(#1014). A webhook endpoint is somewhere you deliberately send content, unlike the
-Meilisearch index, so this is not treated as a leak — but if your sink feeds a
-public surface, know that a members-only body reaches it.
+**Audience-gated and passphrase-locked content is included**, with the full block
+tree, and the payload marks both gates — `audience` and a derived `locked`
+boolean — so a subscriber can filter (#1014). A webhook endpoint is somewhere you
+deliberately send content — HMAC-signed, SSRF-guarded — unlike the
+anonymously-queryable Meilisearch index, so this is not treated as a leak. But if
+your sink feeds a public surface the filtering is yours to do, and it takes both
+fields: a document published openly and locked afterwards still reads
+`"audience": "public"`.
 
 - **Disable:** delete the webhook endpoint(s) in `/editor/webhooks` (admin only).
   No endpoints configured ⇒ nothing is sent.
