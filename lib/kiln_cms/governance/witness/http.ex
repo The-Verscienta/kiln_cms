@@ -190,15 +190,17 @@ defmodule KilnCMS.Governance.Witness.HTTP do
   defp to_binary(body) when is_binary(body), do: body
   defp to_binary(body), do: Jason.encode!(body)
 
-  defp header(%{headers: headers}, name) when is_map(headers) do
+  # `Req.Response`'s `headers` is always a `%{binary() => [binary()]}`, so there
+  # is no second clause to write — dialyzer rejects one as uncoverable. The
+  # single-binary branch stays because that is what a `Req.Test` plug's response
+  # can carry, and it costs nothing.
+  defp header(%Req.Response{headers: headers}, name) do
     case Map.get(headers, name) do
       [value | _rest] -> value
       value when is_binary(value) -> value
       _absent -> nil
     end
   end
-
-  defp header(_response, _name), do: nil
 
   defp headers(base) do
     case token() do
