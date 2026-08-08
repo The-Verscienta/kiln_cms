@@ -91,23 +91,35 @@ defmodule KilnCMS.Social.Announcer do
         {:ok, post}
 
       # The unique identity refused it: something already claimed this
-      # {rule, account, document, publish}. Not an error worth retrying —
-      # it is the guarantee working.
+      # {account, document, publish}. Not an error worth retrying — it is the
+      # guarantee working.
       {:error, %Ash.Error.Invalid{errors: errors}} = error ->
-        if Enum.any?(errors, &match?(%Ash.Error.Changes.InvalidAttribute{}, &1)) or
-             already_taken?(errors),
-           do: {:error, :already_announced},
-           else: error
+        if announce_conflict?(errors), do: {:error, :already_announced}, else: error
 
       other ->
         other
     end
   end
 
-  defp already_taken?(errors) do
+  # Matched on the CONSTRAINT NAME, not on the error struct and not on the
+  # message.
+  #
+  # Matching the struct alone (`%InvalidAttribute{}`) swallows every ordinary
+  # validation failure as "already announced" — a missing required field would
+  # read as a successful dedupe and the announcement would vanish with no error
+  # anywhere. Matching the message ("has already been taken") is a English
+  # string that a locale or an Ash release can change underneath this.
+  #
+  # The constraint name is the one part of the signal that is ours.
+  @announce_index "social_posts_announce_once_index"
+
+  defp announce_conflict?(errors) do
     Enum.any?(errors, fn
-      %{message: message} when is_binary(message) -> message =~ "already been taken"
-      _ -> false
+      %Ash.Error.Changes.InvalidAttribute{private_vars: vars} when is_list(vars) ->
+        vars[:constraint_type] == :unique and vars[:constraint] == @announce_index
+
+      _other ->
+        false
     end)
   end
 

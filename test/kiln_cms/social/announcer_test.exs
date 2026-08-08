@@ -136,6 +136,23 @@ defmodule KilnCMS.Social.AnnouncerTest do
 
       assert length(ledger(ctx)) == 1
     end
+
+    test "a real validation error is NOT reported as a duplicate", ctx do
+      account = account(ctx)
+      # A cast failure on `content_id` — an `InvalidAttribute`, exactly like a
+      # unique-constraint violation, but not this one.
+      record = %{published_post(ctx) | id: "not-a-uuid"}
+
+      result = Announcer.announce(record, account, automation_rule_id: nil)
+
+      # The regression this pins: conflict detection used to match any
+      # `InvalidAttribute`, so an ordinary validation failure came back as
+      # `:already_announced` — the announcement vanished and the ledger showed
+      # a successful dedupe that never happened.
+      refute result == {:error, :already_announced}
+      assert {:error, _} = result
+      assert ledger(ctx) == []
+    end
   end
 
   # ── What is never announced ─────────────────────────────────────────────────
