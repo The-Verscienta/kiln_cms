@@ -24,6 +24,14 @@ import Config
 # "explicitly false" for the flags that must only override config when the
 # operator actually set them. See the moduledoc for the per-flag caveats — this
 # fails to the *default*, which is only the safe side when the default is.
+#
+# ## Integer environment variables
+#
+# `Env.positive_integer/1`, on the same terms and for the same reason (#1009).
+# Four variables here had each hand-rolled the parse, the positivity check and
+# the warning, so "unparseable means the default, not a crash" was four
+# opportunities to disagree — and `IO.warn` alone never reached the Sentry
+# replay that #634 added, so a typo warned on container stdout and nowhere else.
 alias KilnCMS.Config.Env
 
 # ## Using releases
@@ -159,18 +167,8 @@ end
 # being interpreted — see KilnCMS.CMS.Calculations.ReadingTime. A release only
 # evaluates this file, so without this block the documented config key would be
 # unreachable on a Docker deployment.
-if wpm = System.get_env("KILN_READING_TIME_WPM") do
-  case Integer.parse(String.trim(wpm)) do
-    {parsed, ""} when parsed > 0 ->
-      config :kiln_cms, :reading_time_wpm, parsed
-
-    _ ->
-      IO.warn(
-        "KILN_READING_TIME_WPM must be a positive integer (got #{inspect(wpm)}); " <>
-          "keeping the default.",
-        []
-      )
-  end
+with {:ok, wpm} <- Env.positive_integer("KILN_READING_TIME_WPM") do
+  config :kiln_cms, :reading_time_wpm, wpm
 end
 
 # ## Visual-editing bridge (#355) — the annotated preview read + `/bridge.js`
@@ -406,18 +404,8 @@ if config_env() != :test do
 
   # Deep-merges with the two `config` calls above (`Config` merges successive
   # calls for the same key rather than overwriting them) — see #608.
-  if sticky_days = System.get_env("KILN_EXPERIMENTS_STICKY_DAYS") do
-    case Integer.parse(String.trim(sticky_days)) do
-      {parsed, ""} when parsed > 0 ->
-        config :kiln_cms, KilnCMS.Experiments, sticky_max_age_days: parsed
-
-      _other ->
-        IO.warn(
-          "KILN_EXPERIMENTS_STICKY_DAYS must be a positive integer " <>
-            "(got #{inspect(sticky_days)}); keeping the 30-day default.",
-          []
-        )
-    end
+  with {:ok, sticky_days} <- Env.positive_integer("KILN_EXPERIMENTS_STICKY_DAYS") do
+    config :kiln_cms, KilnCMS.Experiments, sticky_max_age_days: sticky_days
   end
 
   # Mount the signing key as a file instead of exporting it. The key is a
@@ -570,8 +558,7 @@ end
 # bucket can describe one visitor's arrival (design doc, "Where 'aggregate'
 # gets thin: low counts"). Runtime-readable for the same reason as the gate
 # above: an operator tightening or loosening this must not need a rebuild.
-# `KilnCMS.Config.Env` only parses booleans, so this is a plain integer parse
-# in the same shape as `KILN_READING_TIME_WPM` above — an unparseable or
+# `Env.positive_integer/1`, the shared reader (#1009) — an unparseable or
 # non-positive value keeps the default and warns rather than being
 # interpreted (e.g. silently disabling suppression at threshold 0).
 #
@@ -579,18 +566,8 @@ end
 # merges successive calls for the same key rather than overwriting), so both
 # land in the same `:analytics_referrers` keyword list — see #608 for why
 # that merge behavior matters here and can also bite.
-if threshold = System.get_env("KILN_ANALYTICS_LOW_COUNT_THRESHOLD") do
-  case Integer.parse(String.trim(threshold)) do
-    {parsed, ""} when parsed > 0 ->
-      config :kiln_cms, :analytics_referrers, low_count_threshold: parsed
-
-    _ ->
-      IO.warn(
-        "KILN_ANALYTICS_LOW_COUNT_THRESHOLD must be a positive integer " <>
-          "(got #{inspect(threshold)}); keeping the default.",
-        []
-      )
-  end
+with {:ok, threshold} <- Env.positive_integer("KILN_ANALYTICS_LOW_COUNT_THRESHOLD") do
+  config :kiln_cms, :analytics_referrers, low_count_threshold: threshold
 end
 
 if config_env() == :prod do
@@ -812,26 +789,16 @@ if config_env() == :prod do
     end
   end
 
-  # `Env.flag/2` handles the boolean (the one shared parser — see this file's
-  # header); the counts get a plain `Integer.parse` in the same shape as
-  # `KILN_ANALYTICS_LOW_COUNT_THRESHOLD` above, because `Env` parses only
-  # booleans. An unparseable or non-positive value keeps the default and warns
-  # rather than being interpreted — `BACKUP_KEEP_DAYS=0` read literally would
-  # delete every backup it had just taken.
+  # `Env.flag/2` for the boolean and `Env.positive_integer/1` for the counts —
+  # one shared parser each, see this file's header. The counts used to be a
+  # hand-rolled `Integer.parse` here and in three other places (#1009). An
+  # unparseable or non-positive value keeps the default and warns rather than
+  # being interpreted: `BACKUP_KEEP_DAYS=0` read literally would delete every
+  # backup it had just taken.
   backup_int = fn var, default ->
-    case backup_env.(var) do
-      nil ->
-        default
-
-      raw ->
-        case Integer.parse(String.trim(raw)) do
-          {parsed, ""} when parsed > 0 ->
-            parsed
-
-          _ ->
-            IO.warn("#{var} must be a positive integer — keeping the default of #{default}")
-            default
-        end
+    case Env.positive_integer(var) do
+      {:ok, parsed} -> parsed
+      _unset_or_unrecognized -> default
     end
   end
 

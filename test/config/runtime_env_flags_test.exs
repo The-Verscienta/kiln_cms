@@ -55,6 +55,8 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             MAIL_MODE SMTP_HOST SMTP_TLS SMTP_TLS_VERIFY S3_BUCKET
             KILN_PROVENANCE_ENABLED TENANT_STRICT_HOST API_DOCS_ENABLED
             BACKUP_ENABLED OEMBED_ENABLED
+            KILN_READING_TIME_WPM BACKUP_KEEP_DAYS BACKUP_STALE_AFTER_HOURS
+            KILN_EXPERIMENTS_STICKY_DAYS
           ) ++ Map.keys(@prod_env)
 
   setup do
@@ -321,8 +323,9 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
   end
 
   describe "KILN_ANALYTICS_LOW_COUNT_THRESHOLD (#620)" do
-    # Not a boolean, so this doesn't go through KilnCMS.Config.Env — same
-    # `Integer.parse` + positive-guard shape as KILN_READING_TIME_WPM.
+    # Not a boolean, but it does go through KilnCMS.Config.Env since #1009 —
+    # `Env.positive_integer/1`, the same shared reader as KILN_READING_TIME_WPM
+    # and the two `BACKUP_*` counts, which each used to hand-roll the parse.
     defp low_count_threshold(value) do
       {config, stderr} = eval_io(%{"KILN_ANALYTICS_LOW_COUNT_THRESHOLD" => value}, :prod)
       {get_in(config, [:kiln_cms, :analytics_referrers, :low_count_threshold]), stderr}
@@ -341,14 +344,28 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
     end
 
     test "zero, a negative number, or a non-integer value keeps the default and warns" do
-      for value <- ["0", "-1", "five", "3.5", ""] do
+      for value <- ["0", "-1", "five", "3.5", "7 days"] do
         {threshold, stderr} = low_count_threshold(value)
 
         assert threshold == nil,
                "KILN_ANALYTICS_LOW_COUNT_THRESHOLD=#{inspect(value)} must not be interpreted"
 
-        assert stderr =~ "KILN_ANALYTICS_LOW_COUNT_THRESHOLD must be a positive integer",
+        assert stderr =~ "KILN_ANALYTICS_LOW_COUNT_THRESHOLD is set to",
                "#{inspect(value)} should warn rather than be silently swallowed"
+
+        assert stderr =~ "not a positive integer"
+      end
+    end
+
+    test "blank reads as unset and warns about nothing (#1009)" do
+      # This changed with the shared reader: the hand-rolled parse here treated
+      # `VAR=` as a bad value and warned. `Env.fetch/1` has always read blank as
+      # unset, and `VAR=` in a compose file is how an operator writes "leave
+      # this alone" — warning about it is noise on every boot. Either way the
+      # default stands, so only the warning differs.
+      for value <- ["", " ", "\t"] do
+        assert {nil, stderr} = low_count_threshold(value)
+        refute stderr =~ "KILN_ANALYTICS_LOW_COUNT_THRESHOLD"
       end
     end
 
@@ -485,6 +502,74 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
   # else. These pin the handoff that lets `KilnCMS.Application` replay it through
   # `Logger` — the end-to-end half of `KilnCMS.Config.EnvTest`'s unit coverage,
   # through the real `Config.Reader` path a release actually takes.
+  # #1009: four variables had each hand-rolled `Integer.parse` + a positivity
+  # check + an `IO.warn`. Only one of the four had any test at all, which is how
+  # they were free to disagree — and none of the four registered with the
+  # collector, so a mistyped count warned on container stdout and reached
+  # neither Logger nor Sentry (#634). These pin all four through the real file.
+  describe "positive-integer variables (#1009)" do
+    @counts [
+      {"KILN_READING_TIME_WPM", [:kiln_cms, :reading_time_wpm]},
+      {"KILN_ANALYTICS_LOW_COUNT_THRESHOLD",
+       [:kiln_cms, :analytics_referrers, :low_count_threshold]},
+      {"BACKUP_KEEP_DAYS", [:kiln_cms, KilnCMS.Backups, :keep_days]},
+      {"BACKUP_STALE_AFTER_HOURS", [:kiln_cms, KilnCMS.Backups, :stale_after_hours]},
+      {"KILN_EXPERIMENTS_STICKY_DAYS", [:kiln_cms, KilnCMS.Experiments, :sticky_max_age_days]}
+    ]
+
+    test "each reads a positive integer, and trims" do
+      for {var, path} <- @counts do
+        assert get_in(eval(%{var => " 7 "}), path) == 7,
+               "#{var} did not read a positive integer through the shared reader"
+      end
+    end
+
+    test "zero and unparseable values are refused by every one of them" do
+      # The four used to differ here in principle — this is the assertion that
+      # keeps a fifth call site, or an edit to one of these four, from drifting.
+      for {var, path} <- @counts, value <- ["0", "-1", "seven", "7 days"] do
+        {config, stderr} = eval_io(%{var => value}, :prod)
+
+        refute get_in(config, path) == 0
+        assert stderr =~ var, "#{var}=#{inspect(value)} was swallowed without a warning"
+        assert stderr =~ "not a positive integer"
+      end
+    end
+
+    test "a refused count reaches :config_warnings, tagged as a count" do
+      # This is the part that did not work before: the hand-rolled `IO.warn`
+      # wrote to stderr and stopped there, so the #634 replay — the only path to
+      # Logger and Sentry — never saw a mistyped count.
+      for {var, _path} <- @counts do
+        assert {^var, "7 days", :positive_integer} =
+                 %{var => "7 days"}
+                 |> eval(:prod)
+                 |> get_in([:kiln_cms, :config_warnings])
+                 |> Enum.find(&(elem(&1, 0) == var)),
+               "#{var} did not reach the :config_warnings handoff"
+      end
+    end
+
+    test "the backup counts keep their documented defaults when refused" do
+      # `BACKUP_KEEP_DAYS=0` read literally would delete every backup it had
+      # just taken; falling back to 14 is the entire point of refusing it.
+      {config, _stderr} = eval_io(%{"BACKUP_KEEP_DAYS" => "0"}, :prod)
+      assert get_in(config, [:kiln_cms, KilnCMS.Backups, :keep_days]) == 14
+
+      {config, _stderr} = eval_io(%{"BACKUP_STALE_AFTER_HOURS" => "nope"}, :prod)
+      assert get_in(config, [:kiln_cms, KilnCMS.Backups, :stale_after_hours]) == 36
+    end
+
+    test "blank reads as unset for every one of them, silently" do
+      for {var, _path} <- @counts do
+        {config, stderr} = eval_io(%{var => ""}, :prod)
+
+        refute stderr =~ var
+        assert get_in(config, [:kiln_cms, :config_warnings]) == []
+      end
+    end
+  end
+
   describe ":config_warnings handoff (#634)" do
     defp config_warnings(vars, env \\ :prod),
       do: vars |> eval(env) |> get_in([:kiln_cms, :config_warnings])
@@ -492,22 +577,24 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
     test "an unrecognized value is carried out of runtime.exs, not just warned about" do
       warnings = config_warnings(%{"DATABASE_SSL" => "enabled"})
 
-      assert {"DATABASE_SSL", "enabled"} in warnings
+      assert {"DATABASE_SSL", "enabled", :boolean} in warnings
     end
 
     test "the raw value survives, not the normalized form" do
       # Same reason the stderr line quotes it: the trimming and downcasing are
       # what caused the mismatch, so the normalized string is the one the
       # operator cannot find in their compose file.
-      assert {"DATABASE_SSL", " Enabled "} in config_warnings(%{"DATABASE_SSL" => " Enabled "})
+      assert {"DATABASE_SSL", " Enabled ", :boolean} in config_warnings(%{
+               "DATABASE_SSL" => " Enabled "
+             })
     end
 
     test "several bad values are all carried, not just the first" do
       warnings =
         config_warnings(%{"DATABASE_SSL" => "enabled", "VISUAL_EDITING_ENABLED" => "ture"})
 
-      assert {"DATABASE_SSL", "enabled"} in warnings
-      assert {"VISUAL_EDITING_ENABLED", "ture"} in warnings
+      assert {"DATABASE_SSL", "enabled", :boolean} in warnings
+      assert {"VISUAL_EDITING_ENABLED", "ture", :boolean} in warnings
     end
 
     test "a clean boot writes an empty list, not nil" do
@@ -521,7 +608,10 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
       # `Config.Reader.read!/2` runs in the calling process, so the collector
       # would otherwise accumulate across evaluations and report a variable the
       # operator never set on this pass. `take_collected/0` drains for this.
-      assert {"DATABASE_SSL", "enabled"} in config_warnings(%{"DATABASE_SSL" => "enabled"})
+      assert {"DATABASE_SSL", "enabled", :boolean} in config_warnings(%{
+               "DATABASE_SSL" => "enabled"
+             })
+
       assert config_warnings(%{"DATABASE_SSL" => "true"}) == []
     end
 
@@ -529,7 +619,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
       # `VISUAL_EDITING_ENABLED`, not `DATABASE_SSL`: the latter is only read
       # inside runtime.exs's `:prod` branch, so under `:test` there is nothing to
       # warn about and the assertion would pass for the wrong reason.
-      assert {"VISUAL_EDITING_ENABLED", "ture"} in config_warnings(
+      assert {"VISUAL_EDITING_ENABLED", "ture", :boolean} in config_warnings(
                %{"VISUAL_EDITING_ENABLED" => "ture"},
                :test
              )

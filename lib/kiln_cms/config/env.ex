@@ -134,6 +134,19 @@ defmodule KilnCMS.Config.Env do
   """
   @type fetched :: {:ok, boolean()} | :unset | :unrecognized
 
+  @typedoc """
+  What a rejected value was being read *as*, so `replay_collected/0` can tell
+  the operator what to write instead. Recorded at the point of the failed parse
+  — nothing downstream can recover it from the raw string.
+  """
+  @type expectation :: :boolean | :positive_integer
+
+  @typedoc """
+  One unrecognized read: the variable, exactly what the operator typed, and what
+  it was being read as.
+  """
+  @type collected_warning :: {String.t(), String.t(), expectation()}
+
   @doc """
   Reads `var` as a boolean, falling back to `default`.
 
@@ -188,6 +201,71 @@ defmodule KilnCMS.Config.Env do
   end
 
   @doc """
+  Reads `var` as a **positive integer** without supplying a default (#1009).
+
+  Same contract as `fetch/1`, for the same reason: `{:ok, n}` only when the
+  operator set a usable value, so a caller can leave config untouched otherwise,
+  and an unusable one is warned about *and recorded* so it reaches the Sentry
+  replay rather than only container stdout.
+
+  `config/runtime.exs` had hand-rolled this four times —
+  `KILN_READING_TIME_WPM`, `KILN_EXPERIMENTS_STICKY_DAYS`,
+  `KILN_ANALYTICS_LOW_COUNT_THRESHOLD` and the `BACKUP_*` counts — each with its
+  own `IO.warn`, which is exactly the drift `fetch/1` exists to prevent for
+  booleans. A fifth copy would have been a fifth chance to get "unparseable means
+  the default, not a crash" wrong.
+
+  **Positive**, not merely non-negative: every count this reads is a rate, a
+  window or a retention, and zero is the value that reads as "do it never" or
+  "delete everything" rather than as "unset".
+
+      iex> System.put_env("KILN_INT_DOCTEST", "230")
+      iex> KilnCMS.Config.Env.positive_integer("KILN_INT_DOCTEST")
+      {:ok, 230}
+
+      iex> System.put_env("KILN_INT_DOCTEST", "0")
+      iex> KilnCMS.Config.Env.positive_integer("KILN_INT_DOCTEST")
+      :unrecognized
+
+      iex> System.delete_env("KILN_INT_DOCTEST")
+      iex> KilnCMS.Config.Env.positive_integer("KILN_INT_DOCTEST")
+      :unset
+  """
+  @spec positive_integer(String.t()) :: {:ok, pos_integer()} | :unset | :unrecognized
+  def positive_integer(var) when is_binary(var) do
+    raw = System.get_env(var, "")
+
+    case raw |> String.trim() |> Integer.parse() do
+      {parsed, ""} when parsed > 0 ->
+        {:ok, parsed}
+
+      # Blank — including whitespace-only — is `:unset`, exactly as in `fetch/1`.
+      # `BACKUP_MEDIA_DIR=` in a compose file is how an operator writes "leave
+      # this alone", and warning about it would be noise on every boot.
+      _other ->
+        blank_or_bad(var, raw)
+    end
+  end
+
+  defp blank_or_bad(var, raw) do
+    if String.trim(raw) == "" do
+      :unset
+    else
+      # `raw`, not the trimmed form — same reasoning as `fetch/1`: reporting
+      # `"12"` when the operator wrote `" 12 "` hides the only clue they can
+      # act on.
+      IO.warn(
+        "#{var} is set to #{inspect(raw)}, which is not a positive integer; " <>
+          "keeping the configured default.",
+        []
+      )
+
+      record_unrecognized(var, raw, :positive_integer)
+      :unrecognized
+    end
+  end
+
+  @doc """
   Reads `var` as a boolean without supplying a default.
 
   Returns `{:ok, boolean}` only when the operator set a recognized value, so a
@@ -223,7 +301,7 @@ defmodule KilnCMS.Config.Env do
           []
         )
 
-        record_unrecognized(var, raw)
+        record_unrecognized(var, raw, :boolean)
         :unrecognized
     end
   end
@@ -231,11 +309,15 @@ defmodule KilnCMS.Config.Env do
   @doc """
   The unrecognized reads this process has made, in the order they happened.
 
-  Values are safe to log: this module is flag-only by contract (see the
-  "Not for secrets" note above). Do not generalize the replay to arbitrary
-  variables without revisiting that.
+  Values are safe to log: this module reads **flags and counts** only (see the
+  "Not for secrets" note above). #1009 widened it from flags to counts, and that
+  was the question to answer first — a rejected boolean and a rejected
+  positive-integer are both operator-typed configuration with no credential
+  shape, so echoing them back is what makes the warning actionable. Do not
+  generalize the replay past that without revisiting it: the moment this module
+  reads a value that *could* be a secret, `collected/0` stops being safe to log.
   """
-  @spec collected() :: [{String.t(), String.t()}]
+  @spec collected() :: [collected_warning()]
   def collected, do: @collected_key |> Process.get([]) |> Enum.reverse()
 
   @doc """
@@ -253,7 +335,7 @@ defmodule KilnCMS.Config.Env do
   otherwise inherit the first's warnings and report variables the operator never
   set on that pass.
   """
-  @spec take_collected() :: [{String.t(), String.t()}]
+  @spec take_collected() :: [collected_warning()]
   def take_collected do
     collected = collected()
     Process.delete(@collected_key)
@@ -292,28 +374,36 @@ defmodule KilnCMS.Config.Env do
   """
   @spec replay_collected() :: :ok
   def replay_collected do
-    for {var, raw} <- Application.get_env(:kiln_cms, :config_warnings, []) do
-      Logger.warning(message_for(var, raw))
-      report_to_sentry(var, raw)
+    for {var, raw, expected} <- Application.get_env(:kiln_cms, :config_warnings, []) do
+      Logger.warning(message_for(var, raw, expected))
+      report_to_sentry(var, raw, expected)
     end
 
     :ok
   end
 
-  defp message_for(var, raw) do
+  defp message_for(var, raw, expected) do
     "#{var} is set to an unrecognized value (#{inspect(raw)}); the configured default " <>
-      "was kept, so this variable had no effect. Use one of: " <>
-      "#{Enum.join(@true_values, "/")}, #{Enum.join(@false_values, "/")}."
+      "was kept, so this variable had no effect. " <> advice(expected)
   end
+
+  # The advice has to match what the variable actually is. Before #1009 this
+  # module read booleans only, so one hardcoded spelling list was correct; a
+  # count replayed with "Use one of: true/1/yes/on" would send the operator to
+  # fix the one thing that was never wrong.
+  defp advice(:boolean),
+    do: "Use one of: #{Enum.join(@true_values, "/")}, #{Enum.join(@false_values, "/")}."
+
+  defp advice(:positive_integer), do: "Use a positive integer."
 
   # A stable message with the variable in `fingerprint`, so Sentry groups one
   # issue per variable rather than one per deployment — an operator wants "this
   # flag is still wrong", not a new issue each restart. The offending value goes
   # in `extra` for the same reason it is quoted on stderr: it is the only thing
   # they can act on. Safe to send — this module is flag-only by contract.
-  defp report_to_sentry(var, raw) do
+  defp report_to_sentry(var, raw, expected) do
     _ =
-      Sentry.capture_message(message_for(var, raw),
+      Sentry.capture_message(message_for(var, raw, expected),
         level: :warning,
         fingerprint: ["kiln-config-warning", var],
         extra: %{variable: var, value: raw}
@@ -324,6 +414,6 @@ defmodule KilnCMS.Config.Env do
 
   # Prepend + reverse in `collected/0`, so a boot reading dozens of flags does
   # not walk the list once per warning.
-  defp record_unrecognized(var, raw),
-    do: Process.put(@collected_key, [{var, raw} | Process.get(@collected_key, [])])
+  defp record_unrecognized(var, raw, expected),
+    do: Process.put(@collected_key, [{var, raw, expected} | Process.get(@collected_key, [])])
 end
