@@ -424,6 +424,74 @@ defmodule KilnCMSWeb.JsonApiTest do
       assert ids(published) == [live.id]
     end
 
+    test "admin bearer: the twin hides gated and locked rows too (#1013)" do
+      # The trap the twins exist for, one axis further along. An API key
+      # authorizes as the account that minted it, and the `OrgAdmin` policy
+      # BYPASS authorizes that account for everything — including the
+      # passphrase check every other reader has to satisfy. Pinning `state`
+      # alone left a front end holding an admin-minted delivery key enumerating
+      # member-only and locked documents straight out of `/search/published`.
+      # Metadata, not bodies — `blocks` is not public on any read action; the
+      # surface that leaked body text is `/api/search`, through its `highlight`
+      # over `search_text`, and that one is now actorless.
+      admin = user(:admin)
+      term = "pubgated#{System.unique_integer([:positive])}"
+
+      live = published_post(%{title: "#{term} live"}, admin)
+      gated = published_post(%{title: "#{term} members", audience: :member}, admin)
+
+      locked =
+        %{title: "#{term} locked"}
+        |> published_post(admin)
+        |> then(
+          &CMS.update_post!(&1, %{access_password: "shared secret"},
+            actor: admin,
+            tenant: &1.org_id
+          )
+        )
+
+      tok = token(admin)
+
+      # The base route still widens for this credential — that is what the
+      # twin is for, and the contrast is the point.
+      assert {200, base} = api_get("/api/json/posts/search?query=#{term}&locale=en", token: tok)
+      assert Enum.sort(ids(base)) == Enum.sort([live.id, gated.id, locked.id])
+
+      assert {200, published} =
+               api_get("/api/json/posts/search/published?query=#{term}&locale=en", token: tok)
+
+      assert ids(published) == [live.id]
+    end
+
+    test "admin bearer: autocomplete/published hides gated and locked titles too" do
+      admin = user(:admin)
+      term = "Pubgack#{System.unique_integer([:positive])}"
+
+      live = published_post(%{title: "#{term} live"}, admin)
+      _gated = published_post(%{title: "#{term} members", audience: :member}, admin)
+
+      locked =
+        %{title: "#{term} locked"}
+        |> published_post(admin)
+        |> then(
+          &CMS.update_post!(&1, %{access_password: "shared secret"},
+            actor: admin,
+            tenant: &1.org_id
+          )
+        )
+
+      assert {200, body} =
+               api_get("/api/json/posts/autocomplete/published?prefix=#{term}&locale=en",
+                 token: token(admin)
+               )
+
+      # Named in the test title, so actually asserted: without the locked row
+      # here, dropping the passphrase clause from `pinned_state` left this test
+      # green.
+      refute locked.id in ids(body)
+      assert ids(body) == [live.id]
+    end
+
     test "anonymous callers get published matches from the twin too" do
       admin = user(:admin)
       term = "pubanon#{System.unique_integer([:positive])}"

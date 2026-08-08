@@ -24,6 +24,18 @@ defmodule KilnCMSWeb.SearchApiTest do
 
   defp token, do: "tok#{System.unique_integer([:positive])}"
 
+  defp admin_token(user) do
+    strategy = AshAuthentication.Info.strategy!(KilnCMS.Accounts.User, :password)
+
+    {:ok, signed_in} =
+      AshAuthentication.Strategy.action(strategy, :sign_in, %{
+        "email" => user.email,
+        "password" => "password123456"
+      })
+
+    signed_in.__metadata__.token
+  end
+
   test "returns published hits with type, public path, and a safe highlight", %{conn: conn} do
     actor = admin()
     word = token()
@@ -41,6 +53,47 @@ defmodule KilnCMSWeb.SearchApiTest do
     assert hit["highlight"] =~ "<mark>"
     refute hit["highlight"] =~ "<script"
     assert body["suggestion"] == nil
+  end
+
+  test "an admin-minted key gets no gated or locked rows, and no highlight of them", %{conn: conn} do
+    # The exploit #1013 actually names. This endpoint used to pass
+    # `conn.assigns[:current_user]` as the actor, and the `OrgAdmin` policy
+    # BYPASS authorizes an admin past both the audience grant and the
+    # passphrase check — so a front end holding an admin-minted delivery key
+    # read gated and locked rows here. Worse than the JSON:API twins: every hit
+    # carries a `highlight` built from `search_text`, so the leak was a
+    # `<mark>`-ed extract of the body itself, not just a title.
+    actor = admin()
+    word = token()
+
+    live =
+      CMS.create_page!(%{title: "Open #{word}", slug: slug()}, actor: actor)
+      |> then(&CMS.publish_page!(&1, %{}, actor: actor))
+
+    _gated =
+      CMS.create_page!(%{title: "Members #{word}", slug: slug(), audience: :member}, actor: actor)
+      |> then(&CMS.publish_page!(&1, %{}, actor: actor))
+
+    _locked =
+      CMS.create_page!(%{title: "Locked #{word}", slug: slug()}, actor: actor)
+      |> then(&CMS.publish_page!(&1, %{}, actor: actor))
+      |> then(&CMS.update_page!(&1, %{access_password: "shared secret"}, actor: actor))
+
+    body =
+      conn
+      |> put_req_header("authorization", "Bearer #{admin_token(actor)}")
+      |> get("/api/search?q=#{word}&facets=true")
+      |> json_response(200)
+
+    assert [hit] = body["results"]["pages"]
+    assert hit["id"] == live.id
+
+    # And the two derived surfaces that take the same read opts: neither the
+    # facet counts nor the "did you mean" may be computed over rows this
+    # caller cannot see. `suggest/2` is the sharper of the two — it returns a
+    # TITLE with no result row to hang it on.
+    refute body["suggestion"]
+    assert Map.has_key?(body, "facets")
   end
 
   test "dynamic entries are tagged with their type and public path", %{conn: conn} do

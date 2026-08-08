@@ -47,9 +47,18 @@ defmodule KilnCMS.CMS.Audiences do
   shown to be public, and is therefore treated as not public. The alternative
   reads better and is wrong in exactly one direction.
 
-  Ash `expr` filters (`Content`'s `search_published`, `Slugs`, the feed
-  controller) express the same rule in SQL and cannot share this function; they
-  are policy-gated instead, which is the stronger enforcement.
+  Ash `expr` filters express the same rule in SQL and cannot share this
+  function. Two of them are the delivery twins — `read :published` and the
+  `pinned_state` behind `search_published` / `search_semantic_published` /
+  `autocomplete_published` — and they spell it out rather than leaning on the
+  read policy, because the `OrgAdmin` bypass authorizes an admin identity past
+  both the audience grant and the passphrase check, and an API key authorizes
+  as the account that minted it (#1013). `Slugs.find_published_by_alias/5` and
+  the feed controller carry it too.
+
+  So the rule now lives in one Elixir function and several `expr`s that cannot
+  call it. If you change what "public to an anonymous visitor" means, grep for
+  `access_password_hash` and change all of them.
   """
   @spec public_to_anonymous?(map()) :: boolean()
   def public_to_anonymous?(record) when is_map(record) do

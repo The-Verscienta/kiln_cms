@@ -118,7 +118,10 @@ The read policy authorizes **any editor/admin identity for every workflow
 state** — and that includes a service API key attached as a bearer token. A
 public frontend that sets its key "for rate limits" or "as a service identity"
 is *not* an anonymous caller: its plain-index reads (`GET /api/json/<plural>`)
-and **all search routes** silently include drafts.
+and **all search routes** silently include drafts. With an **admin** key it is
+worse than drafts — the admin policy bypass skips the audience and passphrase
+checks too, so the base routes also return audience-gated and passphrase-locked
+bodies (#1013).
 
 Two independent defenses; use both:
 
@@ -131,14 +134,15 @@ Two independent defenses; use both:
   table) rather than the plain index. Search has the same twins (#297):
   `/search/published`, `/semantic-search/published` and
   `/autocomplete/published` (GraphQL: `searchPublished*`,
-  `semanticSearchPublished*`, `autocompletePublished*`) pin
-  `state == :published` server-side — same query surface, minus the `state`
+  `semanticSearchPublished*`, `autocompletePublished*`) pin, server-side,
+  exactly what an anonymous visitor could read — published, `audience: :public`,
+  and no passphrase (#1013) — with the same query surface minus the `state`
   facet, so the filter cannot be widened by any credential. Prefer these over
   remembering to pass `state=published` on every call to the base routes.
 
-Treat "which states can this credential see" as part of the credential's blast
-radius: a leaked editor-keyed delivery config exposes drafts, not just
-rate-limit headroom.
+Treat "what can this credential see" as part of its blast radius: a leaked
+editor-keyed delivery config exposes drafts, and an admin-keyed one exposes
+every paying member's content as well — not just rate-limit headroom.
 
 ## Analytics: your fetches are what get counted
 

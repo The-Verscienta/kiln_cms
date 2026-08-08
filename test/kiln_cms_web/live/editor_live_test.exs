@@ -2358,6 +2358,41 @@ defmodule KilnCMSWeb.EditorLiveTest do
       end
     end
 
+    # The `<summary>` of the picker section with this label — where the
+    # "N of M" tick count lives.
+    defp tag_section_summary(html, label) do
+      html
+      |> String.split("<details")
+      |> Enum.find_value(fn chunk ->
+        [summary | _] = String.split(chunk, "</summary>", parts: 2)
+        if summary =~ "data-tag-section" and String.contains?(summary, label), do: summary
+      end)
+      |> case do
+        nil -> flunk(~s(no tag-picker section whose summary reads "#{label}"))
+        summary -> summary
+      end
+    end
+
+    # #528 moved the section skeleton off the render path — it is rebuilt only
+    # when the record changes, and only the per-section tick counts follow the
+    # live form. This pins the half that could regress silently: a count that
+    # stopped following the form would still render a plausible number.
+    # (The other half — a tag appearing mid-session still getting a checkbox —
+    # is already pinned by the #522 test above.)
+    test "a section's tick count follows the checkbox, not the saved record", %{conn: conn} do
+      editor = authed_user(:editor)
+      tag = Ash.Seed.seed!(Tag, %{name: "counted", slug: "t-#{uniq()}"})
+      post = CMS.create_post!(%{title: "T", slug: "p-#{uniq()}"}, actor: editor)
+
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+      assert tag_section_summary(html, "Ungrouped") =~ "0 of 1"
+
+      # Ticked but NOT saved: the count comes from the form, so it moves now.
+      html = lv |> form("#post-editor", form: %{tag_ids: [tag.id]}) |> render_change()
+
+      assert tag_section_summary(html, "Ungrouped") =~ "1 of 1"
+    end
+
     test "unchecking the last tag actually detaches it", %{conn: conn} do
       editor = authed_user(:editor)
       tag = Ash.Seed.seed!(Tag, %{name: "onlytag", slug: "t-#{uniq()}"})

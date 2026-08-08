@@ -98,9 +98,10 @@ defmodule KilnCMS.Search.MeilisearchWorker do
   #
   # Kiln's own Postgres search has no equivalent exposure **to an anonymous
   # caller**: `search`/`search_published` are policy-gated, so gated content is
-  # excluded by the same read policy that keeps it out of feeds and the sitemap.
-  # The `_published` twins pin `state` and not `audience`, though, so a caller
-  # holding an over-scoped API key is a different question — #1013.
+  # excluded by the same read policy that keeps it out of feeds and the sitemap
+  # — and, since #1013, the `_published` twins and the `/api/search` hybrid
+  # endpoint hold the same line against an over-scoped API key, which the read
+  # policy alone does not (an admin bypasses it).
   defp published({:ok, record}) do
     if KilnCMS.CMS.Audiences.public_to_anonymous?(record), do: {:ok, record}, else: :error
   end
