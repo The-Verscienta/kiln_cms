@@ -297,10 +297,26 @@ defmodule KilnCMSWeb.EditorLive do
     # unreachable id lands in the error branch instead of crashing the LiveView
     # (`duplicate/3` re-reads the record either way).
     case KilnCMS.CMS.Duplication.duplicate(kind, id, actor: actor, tenant: org) do
-      {:ok, copy} ->
+      {:ok, copy, []} ->
         {:noreply,
          socket
          |> put_flash(:info, gettext("Duplicated as a new draft."))
+         |> push_navigate(to: edit_path(kind, copy.id))}
+
+      # Some of the source did not travel — a field grant dropped attributes, or
+      # the block policy reset values this editor could not have set. Saying so
+      # is the difference between "duplication is broken" and "your role cannot
+      # copy those fields" (#929).
+      {:ok, copy, withheld} ->
+        {:noreply,
+         socket
+         |> put_flash(
+           :info,
+           gettext(
+             "Duplicated as a new draft. Not copied, because your role cannot set them: %{fields}.",
+             fields: Enum.join(withheld, ", ")
+           )
+         )
          |> push_navigate(to: edit_path(kind, copy.id))}
 
       {:error, _reason} ->

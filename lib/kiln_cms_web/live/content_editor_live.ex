@@ -2507,10 +2507,26 @@ defmodule KilnCMSWeb.ContentEditorLive do
     %{kind: kind, record: record, actor: actor} = socket.assigns
 
     case KilnCMS.CMS.Duplication.duplicate(kind, record, actor: actor, tenant: record.org_id) do
-      {:ok, copy} ->
+      {:ok, copy, []} ->
         {:noreply,
          socket
          |> put_flash(:info, gettext("Duplicated as a new draft."))
+         |> push_navigate(to: ~p"/editor/content/#{kind}/#{copy.id}")}
+
+      # Some of the source did not travel — a field grant dropped attributes, or
+      # the block policy reset values this editor could not have set. Saying so
+      # is the difference between "duplication is broken" and "your role cannot
+      # copy those fields" (#929).
+      {:ok, copy, withheld} ->
+        {:noreply,
+         socket
+         |> put_flash(
+           :info,
+           gettext(
+             "Duplicated as a new draft. Not copied, because your role cannot set them: %{fields}.",
+             fields: Enum.join(withheld, ", ")
+           )
+         )
          |> push_navigate(to: ~p"/editor/content/#{kind}/#{copy.id}")}
 
       {:error, _reason} ->

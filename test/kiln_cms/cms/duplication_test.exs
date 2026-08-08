@@ -9,6 +9,7 @@ defmodule KilnCMS.CMS.DuplicationTest do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.Duplication
+  alias KilnCMS.CMS.Translations
 
   require Ash.Query
 
@@ -387,5 +388,105 @@ defmodule KilnCMS.CMS.DuplicationTest do
   test "copy_title/1 appends the suffix to a trimmed title" do
     assert Duplication.copy_title("Guide ") == "Guide (copy)"
     assert Duplication.copy_title("") == "(copy)"
+  end
+
+  # `EnforceBlockFieldPolicy` runs on create as well as update, and on a create
+  # there is no stored tree to diff against — so every restricted field is
+  # judged against its DECLARED DEFAULT and any admin-set value trips it. An
+  # editor duplicating a page they were allowed to read got a refusal they could
+  # do nothing about (#890). The existing tests could not catch it: they use
+  # only `heading` blocks, and every block test runs as an admin, who is exempt.
+  describe "admin-restricted block fields (#890)" do
+    defp featured_quote_page!(admin) do
+      CMS.create_page!(
+        %{
+          title: "Quoted",
+          slug: slug(),
+          block_tree: [%{"_type" => "quote", "text" => "Wisdom", "featured" => true}]
+        },
+        actor: admin
+      )
+    end
+
+    defp quote_block(page) do
+      Enum.find_value(page.blocks, fn
+        %Ash.Union{type: :quote, value: value} -> value
+        _ -> nil
+      end)
+    end
+
+    test "an editor can duplicate a page carrying an admin-only field value" do
+      admin = user(:admin)
+      editor = user(:editor)
+      page = featured_quote_page!(admin)
+
+      assert {:ok, copy, withheld} = Duplication.duplicate(:page, page, actor: editor)
+
+      # The copy exists — that is the dead-end this fixes.
+      assert copy.id != page.id
+      # And the restricted flag came back to its default rather than travelling.
+      assert quote_block(copy).featured == false
+      assert quote_block(page).featured == true
+      # And the editor is told, rather than wondering where it went (#929).
+      assert "quote.featured" in withheld
+    end
+
+    test "an admin's duplicate keeps the restricted value" do
+      admin = user(:admin)
+      page = featured_quote_page!(admin)
+
+      assert {:ok, copy, withheld} = Duplication.duplicate(:page, page, actor: admin)
+
+      assert quote_block(copy).featured == true
+      assert withheld == []
+    end
+
+    test "an editor can translate one too" do
+      admin = user(:admin)
+      editor = user(:editor)
+      page = featured_quote_page!(admin)
+
+      assert %{} = translated = Translations.create_translation!(:page, page, "fr", actor: editor)
+      assert translated.locale == "fr"
+      assert quote_block(translated).featured == false
+    end
+
+    test "an unrestricted block field is untouched" do
+      admin = user(:admin)
+      editor = user(:editor)
+      page = featured_quote_page!(admin)
+
+      {:ok, copy, _} = Duplication.duplicate(:page, page, actor: editor)
+
+      assert quote_block(copy).text == "Wisdom"
+    end
+  end
+
+  describe "atomicity (#925)" do
+    # The links used to be cloned after the create with nothing tying them
+    # together, so a mid-loop failure left a committed copy the caller was told
+    # did not exist.
+    test "a copy and its links land together or not at all" do
+      admin = user(:admin)
+      target = CMS.create_page!(%{title: "Target", slug: slug()}, actor: admin)
+      source = CMS.create_page!(%{title: "Hub", slug: slug()}, actor: admin)
+
+      {:ok, _link} =
+        CMS.create_content_link(
+          %{source_id: source.id, target_id: target.id, kind: "related"},
+          actor: admin
+        )
+
+      before = CMS.list_pages!(actor: admin) |> length()
+
+      assert {:ok, copy, _} = Duplication.duplicate(:page, source, actor: admin)
+
+      assert CMS.list_pages!(actor: admin) |> length() == before + 1
+
+      links =
+        CMS.list_content_links!(actor: admin, query: [filter: [source_id: copy.id]])
+
+      assert length(links) == 1
+    end
   end
 end
