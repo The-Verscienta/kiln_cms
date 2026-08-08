@@ -4,7 +4,8 @@ defmodule KilnCMS.CMS.FragmentsTest do
   visibility rules, cycle and depth bounds, and the reference edge that makes
   editing a fragment re-fire everything embedding it.
   """
-  use KilnCMS.DataCase, async: true
+  use KilnCMS.DataCase, async: false
+  use Oban.Testing, repo: KilnCMS.Repo
 
   alias KilnCMS.CMS
   alias KilnCMS.CMS.Fragments
@@ -282,6 +283,191 @@ defmodule KilnCMS.CMS.FragmentsTest do
       {:ok, artifacts} = Engine.fire(host, mode: :preview)
 
       assert artifacts[:json]["blocks"] |> Enum.count(&(&1["text"] == "Own")) == 1
+    end
+  end
+
+  describe "the node budget (#917)" do
+    # The blowup the fetch budget did not bound: the memo returns a cached
+    # target without spending a fetch, and inlining re-runs the expansion over
+    # that target's whole tree at every occurrence — so the EMITTED tree grows
+    # as B^(depth+1) while `max_fetches/0` counts only distinct targets.
+    #
+    # Three chained pages holding `b` fragment blocks each cost 3 fetches and
+    # used to emit b³ blocks. With b=40 that is 64,000 from one anonymous GET;
+    # the issue's b=200 is eight million.
+    defp chain(breadth) do
+      leaf = page(%{blocks: [%{"_type" => "heading", "text" => "Leaf"}]})
+      mid = page(%{blocks: List.duplicate(fragment_block(leaf), breadth)})
+      top = page(%{blocks: List.duplicate(fragment_block(mid), breadth)})
+      top
+    end
+
+    test "a wide chain is capped instead of exploding" do
+      breadth = 40
+      top = chain(breadth)
+
+      expanded = expand(List.duplicate(fragment_block(top), breadth))
+
+      # Unbounded this is breadth³ = 64,000 (and the host multiplies it again).
+      assert length(expanded) <= Fragments.max_nodes()
+      refute length(expanded) >= breadth * breadth * breadth
+    end
+
+    test "the cap does not disturb an ordinary page" do
+      # The bound must be invisible to real content: a handful of fragments,
+      # nested, well under the ceiling.
+      inner = page(%{blocks: [%{"_type" => "heading", "text" => "Inner"}]})
+      outer = page(%{blocks: [fragment_block(inner), %{"_type" => "heading", "text" => "Own"}]})
+
+      expanded =
+        expand([
+          %{"_type" => "heading", "text" => "Before"},
+          fragment_block(outer),
+          fragment_block(inner),
+          %{"_type" => "heading", "text" => "After"}
+        ])
+
+      assert labels(expanded) == ["Before", "Inner", "Own", "Inner", "After"]
+    end
+
+    test "only inlined blocks are charged, so a long page is never truncated" do
+      # The host's OWN blocks must not be charged, however many there are —
+      # charging them would turn the budget into a page-length limit.
+      #
+      # There has to be a fragment in the list, or `expand/3` returns at the
+      # `any_fragment?/1` early exit and never reaches the charging code, which
+      # makes the assertion true for the wrong reason.
+      shared = page(%{blocks: [%{"_type" => "heading", "text" => "Shared"}]})
+
+      long =
+        for i <- 1..(Fragments.max_nodes() + 50), do: %{"_type" => "heading", "text" => "H#{i}"}
+
+      expanded = expand(long ++ [fragment_block(shared)])
+
+      # Every host block, plus the one inlined block.
+      assert length(expanded) == Fragments.max_nodes() + 51
+      assert List.last(labels(expanded)) == "Shared"
+    end
+
+    test "a Columns-wrapped target cannot bypass the budget" do
+      # `do_expand/5` maps a `Columns` to exactly ONE element however many
+      # children it holds, so charging the returned list's length let a target
+      # whose whole payload sat inside a column cost 1 node while emitting the
+      # lot: 400 refs at a 1200-child target emitted 480,400 blocks in 54s.
+      kids = for i <- 1..300, do: %{"_type" => "heading", "text" => "K#{i}"}
+      cols = %{"_type" => "columns", "columns" => for(_ <- 1..4, do: %{"blocks" => kids})}
+      target = page(%{blocks: [cols]})
+
+      expanded = expand(List.duplicate(fragment_block(target), 400))
+
+      # Each inlined container charges its 1200 children plus itself, so the
+      # budget stops this in single digits rather than after 400 of them.
+      assert length(expanded) < 20
+    end
+  end
+
+  test "a historical expansion is no more permissive than a live one (#917)" do
+    # `?as_of=` reaches `PointInTime.read/5` from an UNAUTHENTICATED route, and
+    # the response is served `cache-control: public, max-age=300`. A historical
+    # path that skipped the audience filter therefore let an anonymous caller
+    # append `?as_of=` to any public URL and read — and have a CDN cache — the
+    # body of a `:member` fragment embedded in it.
+    # A REAL published page — `Ash.Seed.seed!` writes no version rows, and with
+    # no history `snapshot_state/4` answers `:absent` whatever the audience
+    # check does, which makes the historical assertion true for the wrong
+    # reason.
+    actor = admin()
+
+    gated =
+      CMS.create_page!(
+        %{
+          title: "Gated",
+          slug: "fr-#{uniq()}",
+          audience: :member,
+          blocks: [%{"_type" => "heading", "text" => "Members only"}]
+        },
+        actor: actor
+      )
+
+    gated = CMS.publish_page!(gated, %{}, actor: actor)
+    as_of = DateTime.utc_now()
+
+    # Control: the history IS there, so a member reader gets it historically.
+    assert labels(expand([fragment_block(gated)], as_of: as_of, audiences: [:member])) ==
+             ["Members only"]
+
+    # A public reader gets nothing, live AND historically.
+    assert expand([fragment_block(gated)]) == []
+    assert expand([fragment_block(gated)], as_of: as_of) == []
+  end
+
+  describe "withdrawing a fragment (#917)" do
+    # The whole point of the feature's re-fire wave, and the one case it did not
+    # cover. A referrer INLINES what it points at, so the target's body sits in
+    # every referrer's artifacts too — and the wave was wired to the publish
+    # path only. Unpublishing a fragment therefore left every page embedding it
+    # serving the withdrawn body to anonymous callers, through feeds, static
+    # export and the newsletter.
+    #
+    # Withdrawing is the operation an editor reaches for to *retract*.
+    defp real_page(attrs, actor) do
+      page = CMS.create_page!(Map.put_new(attrs, :slug, "fr-#{uniq()}"), actor: actor)
+      CMS.publish_page!(page, %{}, actor: actor)
+    end
+
+    defp admin do
+      Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+        email: "frag-#{uniq()}@example.com",
+        hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+        confirmed_at: DateTime.utc_now(),
+        role: :admin
+      })
+    end
+
+    test "unpublishing enqueues a re-fire of every referrer" do
+      actor = admin()
+
+      shared =
+        real_page(
+          %{title: "Shared", blocks: [%{"_type" => "heading", "text" => "Retract"}]},
+          actor
+        )
+
+      host = real_page(%{title: "Host", blocks: [fragment_block(shared)]}, actor)
+
+      # The edge only exists once the host has fired.
+      drain_oban()
+
+      CMS.unpublish_page!(shared, %{}, actor: actor)
+
+      # The wave is enqueued, not run inline — assert on the job, then drain and
+      # assert the host's artifact no longer carries the withdrawn body.
+      assert Enum.any?(
+               all_enqueued(worker: KilnCMS.Firing.RefireWorker),
+               &(&1.args["id"] == host.id)
+             )
+
+      drain_oban()
+
+      {:ok, artifacts} = Engine.fire(Ash.reload!(host, authorize?: false), mode: :preview)
+      refute artifacts[:web]["html"] =~ "Retract"
+    end
+
+    test "archiving a fragment re-fires its referrers too" do
+      actor = admin()
+
+      shared =
+        real_page(%{title: "Shared", blocks: [%{"_type" => "heading", "text" => "Gone"}]}, actor)
+
+      host = real_page(%{title: "Host", blocks: [fragment_block(shared)]}, actor)
+      drain_oban()
+
+      CMS.archive_page!(shared, %{}, actor: actor)
+
+      assert Enum.any?(
+               all_enqueued(worker: KilnCMS.Firing.RefireWorker),
+               &(&1.args["id"] == host.id)
+             )
     end
   end
 end

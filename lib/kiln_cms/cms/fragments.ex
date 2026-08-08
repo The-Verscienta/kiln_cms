@@ -62,6 +62,30 @@ defmodule KilnCMS.CMS.Fragments do
   (`max_fetches/0`), past which further fragments expand to nothing rather than
   recursing. An anonymous page render is not a place to discover how many
   documents an editor chained together.
+
+  ## Fetches are not the cost that matters (#917)
+
+  Those two bounds together are not enough, because they bound the wrong
+  quantity. The memo returns a cached target **without spending budget**, and
+  inlining re-runs the expansion over that target's whole tree at *every*
+  occurrence — so the emitted tree still grows as `B^(depth+1)` while
+  `max_fetches/0` counts only *distinct* targets.
+
+  Four published pages, three of them holding 200 fragment blocks each pointing
+  at the next, cost **3** of 64 fetches and emit **eight million** block
+  structs — which then flow through `TypedBlocks.to_legacy/1`,
+  `flatten_block_tree/1` and `enrich_block/3`, and get cached. `blocks` carries
+  no length constraint and is writable over the headless API, so that is an
+  anonymous `GET` away.
+
+  So the real bound is `max_nodes/0`, charged against **blocks emitted by
+  inlining** — the quantity that actually grows. It is checked before each
+  inline and charged as each one returns, so exhaustion is detected part-way
+  through a wide tree rather than after it has been built. Past it, further
+  fragments expand to nothing, the same way an exhausted fetch budget behaves.
+
+  Only inlined blocks are charged. A legitimately long page is not the problem
+  this bounds, and charging its own blocks would truncate it.
   """
 
   require Ash.Query
@@ -71,6 +95,7 @@ defmodule KilnCMS.CMS.Fragments do
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.Slugs
   alias KilnCMS.CMS.TypedBlocks
+  alias KilnCMS.Firing.PointInTime
 
   # How deep fragments may nest. Three is already an unusual amount of
   # indirection for shared content; past that a page is assembled from pieces
@@ -82,6 +107,12 @@ defmodule KilnCMS.CMS.Fragments do
   # pathological tree costs a bounded number of queries rather than B³.
   @max_fetches 64
 
+  # Hard ceiling on blocks *produced by inlining*, whatever the shape (#917).
+  # A real page assembled from shared pieces contributes tens; this is three
+  # orders of magnitude past that, and still small enough that the worst case is
+  # a large list rather than an out-of-memory node.
+  @max_nodes 5_000
+
   @doc "Deepest fragment nesting expansion follows."
   @spec max_depth() :: pos_integer()
   def max_depth, do: @max_depth
@@ -89,6 +120,10 @@ defmodule KilnCMS.CMS.Fragments do
   @doc "Most target reads one expansion will perform."
   @spec max_fetches() :: pos_integer()
   def max_fetches, do: @max_fetches
+
+  @doc "Most blocks one expansion will produce by inlining."
+  @spec max_nodes() :: pos_integer()
+  def max_nodes, do: @max_nodes
 
   @doc """
   Replace every `Fragment` block in `typed_blocks` with its target's blocks.
@@ -99,6 +134,11 @@ defmodule KilnCMS.CMS.Fragments do
 
   ## Options
 
+    * `:as_of` — a `DateTime` making every target resolve to the body it
+      carried at that instant, via `KilnCMS.Firing.PointInTime.snapshot_state/4`,
+      instead of to its current published body (#917). Only point-in-time reads
+      pass it. A target that was not published then expands to nothing, exactly
+      as an unpublished one does today.
     * `:audiences` — the **gated** tiers the reader holds, on top of `:public`.
       A widening, exactly as `Content`'s `public_by_slug` treats the same
       option: an anonymous reader passes `[]`, and `[]` has to mean "public
@@ -117,7 +157,7 @@ defmodule KilnCMS.CMS.Fragments do
       ancestry = opts |> Keyword.get(:ancestry, []) |> List.wrap()
 
       key = {__MODULE__, make_ref()}
-      Process.put(key, %{targets: %{}, fetches: 0})
+      Process.put(key, %{targets: %{}, fetches: 0, emitted: 0})
 
       try do
         do_expand(blocks, org_id, Keyword.put(opts, :memo, key), ancestry, 0)
@@ -138,23 +178,52 @@ defmodule KilnCMS.CMS.Fragments do
   end
 
   defp do_expand(blocks, org_id, opts, ancestry, depth) do
-    Enum.flat_map(blocks, fn
-      %Fragment{} = block ->
-        inline(block, org_id, opts, ancestry, depth)
-
-      # A fragment inside a column is inlined in place, so a shared CTA can live
-      # in a layout cell. The children stay children — flattening them to the
-      # top level would move the content out of its column.
-      %Columns{} = block ->
-        [expand_columns(block, org_id, opts, ancestry, depth)]
-
-      block ->
-        [block]
+    Enum.flat_map(blocks, fn block ->
+      # Checked per sibling, so a wide list inside an already-exhausted
+      # expansion stops here rather than being built and then thrown away.
+      if inlined?(depth) and exhausted?(opts),
+        do: [],
+        else: emit(block, org_id, opts, ancestry, depth)
     end)
   end
 
+  # `depth > 0` means "inside an inlined target", which is exactly the content
+  # the node budget bounds. A host's own blocks are never charged — a long page
+  # is not what this bounds, and charging it would make the budget a page-length
+  # limit.
+  defp inlined?(depth), do: depth > 0
+
+  defp emit(%Fragment{} = block, org_id, opts, ancestry, depth),
+    do: inline(block, org_id, opts, ancestry, depth)
+
+  # A fragment inside a column is inlined in place, so a shared CTA can live in a
+  # layout cell. The children stay children — flattening them to the top level
+  # would move the content out of its column.
+  #
+  # Charged as ONE block; its children are charged by the `do_expand/5` inside
+  # `expand_columns/5`, at the same depth. Charging the *returned list's* length
+  # instead is what let a `Columns`-wrapped target bypass the budget: a `Columns`
+  # maps to exactly one element however many children it holds, so a target
+  # whose whole payload sat inside one column cost 1 node while emitting the lot.
+  defp emit(%Columns{} = block, org_id, opts, ancestry, depth) do
+    expanded = expand_columns(block, org_id, opts, ancestry, depth)
+    charge(opts, depth, 1)
+    [expanded]
+  end
+
+  defp emit(block, _org_id, opts, _ancestry, depth) do
+    charge(opts, depth, 1)
+    [block]
+  end
+
   defp inline(%Fragment{ref: ref}, org_id, opts, ancestry, depth) do
-    with false <- depth >= @max_depth,
+    # The node budget is checked FIRST, before the depth and reference guards:
+    # once the expansion has emitted its ceiling there is nothing any further
+    # fragment can legitimately add, and the check has to happen on the way in
+    # so a wide sibling list stops part-way rather than after it has all been
+    # built (#917).
+    with false <- exhausted?(opts),
+         false <- depth >= @max_depth,
          {type, id} when not is_nil(id) <- reference(ref),
          false <- {type, id} in ancestry,
          %{} = target <- fetch(type, id, org_id, opts) do
@@ -165,6 +234,24 @@ defmodule KilnCMS.CMS.Fragments do
     else
       _ -> []
     end
+  end
+
+  defp exhausted?(opts) do
+    opts |> Keyword.fetch!(:memo) |> Process.get() |> Map.fetch!(:emitted) >= @max_nodes
+  end
+
+  # Charged where a block is actually produced, once each. Charging the whole
+  # returned list as an inline unwound billed nested content once per level of
+  # the chain, so `max_nodes/0` cut in at roughly a (depth+1)-th of the number
+  # it names — the knob did not mean what its `@doc` said.
+  defp charge(opts, depth, count) do
+    if inlined?(depth) do
+      key = Keyword.fetch!(opts, :memo)
+      state = Process.get(key)
+      Process.put(key, %{state | emitted: state.emitted + count})
+    end
+
+    :ok
   end
 
   defp expand_columns(%Columns{} = block, org_id, opts, ancestry, depth) do
@@ -232,9 +319,12 @@ defmodule KilnCMS.CMS.Fragments do
       :error ->
         target = read_target(type, id, org_id, opts)
 
+        # `%{state | …}`, not a fresh map: the state also carries the node
+        # budget, and rebuilding it here silently dropped that key.
         Process.put(key, %{
-          targets: Map.put(state.targets, {type, id}, target),
-          fetches: state.fetches + 1
+          state
+          | targets: Map.put(state.targets, {type, id}, target),
+            fetches: state.fetches + 1
         })
 
         target
@@ -242,11 +332,63 @@ defmodule KilnCMS.CMS.Fragments do
   end
 
   defp read_target(type, id, org_id, opts) do
-    # `:public` is always in the set — `:audiences` widens, it doesn't replace.
-    # An anonymous reader arrives with `[]` (`reader_audiences/1`), and reading
-    # that as "no audiences match" would make every fragment on the public site
-    # render as nothing.
-    audiences = [:public | List.wrap(Keyword.get(opts, :audiences, []))] |> Enum.uniq()
+    case Keyword.get(opts, :as_of) do
+      %DateTime{} = as_of -> read_target_as_of(type, id, org_id, as_of, opts)
+      _live -> read_target_live(type, id, org_id, opts)
+    end
+  end
+
+  # The historical path. It re-applies the SAME visibility rules the live path
+  # applies, against the values that were live at `as_of` — publish state (via
+  # `last_transition/4` inside `snapshot_state/4`), audience, and the dynamic
+  # type scope.
+  #
+  # The first cut of this skipped the audience check, on the reasoning that
+  # point-in-time reads are admin-gated. They are not: `ArtifactController.show/2`
+  # dispatches to the point-in-time path on a bare `?as_of=` query parameter, on
+  # a route in the unauthenticated `:api` pipeline, and serves the result with
+  # `cache-control: public, max-age=300`. So an anonymous caller could append
+  # `?as_of=` to any public URL and read — and have a CDN cache — the body of a
+  # `:member` fragment embedded in it. A historical read must be no more
+  # permissive than a live one; the point of the feature is *when*, not *who*.
+  defp read_target_as_of(type, id, org_id, as_of, opts) do
+    with %{} = ct <- ContentTypes.get(type, org_id),
+         resource <- Slugs.storage_resource(ct),
+         {:ok, state} <- PointInTime.snapshot_state(org_id, resource, id, as_of),
+         true <- visible_then?(state, ct, opts) do
+      %{id: id, blocks: Map.get(state, "blocks") || []}
+    else
+      _ -> nil
+    end
+  end
+
+  # `audience` is on the version row's `changes` as a string. A replayed state
+  # with no `audience` fails closed: it means the fold could not establish what
+  # the target's audience was, and "unknown" must not read as "public" on a path
+  # whose output is publicly cacheable.
+  defp visible_then?(state, ct, opts) do
+    allowed = opts |> allowed_audiences() |> MapSet.new(&to_string/1)
+
+    MapSet.member?(allowed, Map.get(state, "audience")) and dynamic_scope_ok?(state, ct)
+  end
+
+  # Entries share one table, so a bare id read could otherwise cross dynamic
+  # types — the live path applies this as `scope_dynamic/2`, and the historical
+  # one has to as well, or a reference to a "recipe" resolves to an "event".
+  defp dynamic_scope_ok?(state, %{source: :dynamic, definition: definition}),
+    do: Map.get(state, "type_definition_id") == definition.id
+
+  defp dynamic_scope_ok?(_state, _compiled), do: true
+
+  # `:public` is always in the set — `:audiences` widens, it doesn't replace. An
+  # anonymous reader arrives with `[]` (`reader_audiences/1`), and reading that
+  # as "no audiences match" would make every fragment on the public site render
+  # as nothing. Shared by both paths so they cannot drift apart.
+  defp allowed_audiences(opts),
+    do: [:public | List.wrap(Keyword.get(opts, :audiences, []))] |> Enum.uniq()
+
+  defp read_target_live(type, id, org_id, opts) do
+    audiences = allowed_audiences(opts)
 
     with %{} = ct <- ContentTypes.get(type, org_id),
          resource <- Slugs.storage_resource(ct) do
