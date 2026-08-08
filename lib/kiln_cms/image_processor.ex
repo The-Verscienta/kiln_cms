@@ -390,17 +390,30 @@ defmodule KilnCMS.ImageProcessor do
   defp build_full(image, ext) do
     source = source_format(ext)
 
-    if source == :gif do
-      []
-    else
-      variant_formats()
-      |> Enum.reject(&(&1 == source))
-      |> Enum.map(fn format ->
-        {extension, _type} = Map.fetch!(@format_info, format)
-        write(image, "full.#{format}", format, extension)
-      end)
-      |> Enum.reject(&is_nil/1)
+    # Stripped for the same reason `thumb/4` and `focal_crop/7` strip (#215/#919):
+    # this is the one write path that encodes straight from the OPENED SOURCE
+    # rather than from a `thumbnail/2` result, so it is the most likely of the
+    # three to be handed an un-stripped original — a pre-#215 upload, or one
+    # where `MediaLive.stripped_source/2` fell back to `{path, false}`. Without
+    # it, `mix kiln.media.regenerate_variants` published a full-resolution
+    # `full.webp` carrying the original's GPS/EXIF, referenced from the
+    # `<source srcset>` of every page showing that image.
+    case strip(image) do
+      {:ok, stripped} -> alternates(stripped, source)
+      _unreadable -> []
     end
+  end
+
+  defp alternates(_image, :gif), do: []
+
+  defp alternates(image, source) do
+    variant_formats()
+    |> Enum.reject(&(&1 == source))
+    |> Enum.map(fn format ->
+      {extension, _type} = Map.fetch!(@format_info, format)
+      write(image, "full.#{format}", format, extension)
+    end)
+    |> Enum.reject(&is_nil/1)
   end
 
   defp clamp(value, low, high), do: value |> max(low) |> min(high)
@@ -481,6 +494,29 @@ defmodule KilnCMS.ImageProcessor do
   defp content_type(format) do
     {_ext, content_type} = Map.fetch!(@format_info, format)
     content_type
+  end
+
+  @doc """
+  The alternate formats a full-size re-encode would write for a source of this
+  content type — every configured variant format except the source's own.
+
+  Public so `KilnCMS.Media.Regeneration` can answer "would a run add anything to
+  this item?" without re-deriving the rule (#919). Empty for an animated source:
+  a GIF gets no alternates by design, since its variants are flattened stills.
+
+  This is the same set `build_full/2` writes, expressed once, so the two cannot
+  disagree about whether an item with no variants is already up to date.
+  """
+  @spec full_alternates(String.t() | nil) :: [atom()]
+  def full_alternates("image/gif"), do: []
+
+  def full_alternates(content_type) do
+    source =
+      Enum.find_value(@format_info, :jpg, fn {format, {_ext, type}} ->
+        if type == content_type, do: format
+      end)
+
+    Enum.reject(variant_formats(), &(&1 == source))
   end
 
   # The format a source extension names, for deduping against the alternates.

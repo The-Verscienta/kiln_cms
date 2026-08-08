@@ -5,6 +5,7 @@ defmodule KilnCMS.CMS.FragmentsTest do
   editing a fragment re-fire everything embedding it.
   """
   use KilnCMS.DataCase, async: true
+  use Oban.Testing, repo: KilnCMS.Repo
 
   alias KilnCMS.CMS
   alias KilnCMS.CMS.Fragments
@@ -204,6 +205,68 @@ defmodule KilnCMS.CMS.FragmentsTest do
       # Every level's own content is present; the one past the cap is not.
       assert "L#{Fragments.max_depth()}" in expanded
       refute "Bottom" in expanded
+    end
+  end
+
+  # #917: `max_fetches` bounds distinct READS, and the memo means a repeated
+  # target costs none — but the emitted tree is the product, not the sum.
+  describe "the emitted-block budget" do
+    test "a fan-out that stays within the fetch budget is still bounded" do
+      # Three levels of 40 fragment blocks each = 64_000 emitted if unbounded,
+      # while spending only 3 of the 64 fetches. `blocks` has no length
+      # constraint and is writable over the headless API, so an anonymous GET
+      # can reach this.
+      leaf = page(%{blocks: [%{"_type" => "heading", "text" => "L"}]})
+      mid = page(%{blocks: List.duplicate(fragment_block(leaf), 40)})
+      top = page(%{blocks: List.duplicate(fragment_block(mid), 40)})
+
+      emitted = expand(List.duplicate(fragment_block(top), 40))
+
+      assert length(emitted) <= Fragments.max_blocks(),
+             "expansion emitted #{length(emitted)} blocks, over the #{Fragments.max_blocks()} ceiling"
+    end
+
+    test "an ordinary page is untouched by the ceiling" do
+      # The budget must not change the common case: a handful of fragments
+      # inlines completely.
+      one = page(%{blocks: [%{"_type" => "heading", "text" => "One"}]})
+      two = page(%{blocks: [%{"_type" => "heading", "text" => "Two"}]})
+
+      assert labels(expand([fragment_block(one), fragment_block(two)])) == ["One", "Two"]
+    end
+  end
+
+  # #917. `Engine.purge/3` drops the fragment's OWN artifacts, but its body has
+  # been copied into every artifact that embeds it — so without a re-fire wave,
+  # withdrawing a fragment leaves the withdrawn text live in its referrers,
+  # served to anonymous callers indefinitely.
+  describe "withdrawing a fragment" do
+    test "unpublishing enqueues a re-fire for every referrer" do
+      target = page(%{blocks: [%{"_type" => "heading", "text" => "Withdrawn"}]})
+      host = page(%{title: "Host", blocks: [fragment_block(target)]})
+
+      # The edge is written when the HOST fires, so it has to fire first —
+      # otherwise there is no referrer to find and the test passes vacuously.
+      {:ok, _} = Engine.fire(host)
+
+      assert {:ok, [_edge | _]} =
+               KilnCMS.Firing.edges_to(:page, target.id, authorize?: false, tenant: org_id())
+
+      CMS.unpublish_page!(target, %{}, authorize?: false)
+
+      assert_enqueued(worker: KilnCMS.Firing.RefireWorker, args: %{"id" => host.id})
+    end
+
+    test "the wave does not re-fire the record being withdrawn" do
+      # `invalidate/4` is seeded with the document's own key, so the teardown
+      # can't enqueue a re-fire of the thing it just purged.
+      target = page(%{blocks: [%{"_type" => "heading", "text" => "Withdrawn"}]})
+      host = page(%{title: "Host", blocks: [fragment_block(target)]})
+      {:ok, _} = Engine.fire(host)
+
+      CMS.unpublish_page!(target, %{}, authorize?: false)
+
+      refute_enqueued(worker: KilnCMS.Firing.RefireWorker, args: %{"id" => target.id})
     end
   end
 

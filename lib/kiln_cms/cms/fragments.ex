@@ -82,6 +82,15 @@ defmodule KilnCMS.CMS.Fragments do
   # pathological tree costs a bounded number of queries rather than B³.
   @max_fetches 64
 
+  # A ceiling on blocks EMITTED, not targets read (#917). `@max_fetches` bounds
+  # distinct reads, and the memo means a repeated target costs none — but the
+  # emitted tree is the product, not the sum: three pages of 200 fragment blocks
+  # each pointing at the next spend 3 fetches and emit 200^3 structs, which then
+  # flow through `TypedBlocks.to_legacy/1`, `flatten_block_tree/1` and
+  # `enrich_block/3` and get cached. `blocks` has no length constraint and is
+  # writable over the headless API, so this is reachable by an anonymous GET.
+  @max_blocks 5_000
+
   @doc "Deepest fragment nesting expansion follows."
   @spec max_depth() :: pos_integer()
   def max_depth, do: @max_depth
@@ -89,6 +98,10 @@ defmodule KilnCMS.CMS.Fragments do
   @doc "Most target reads one expansion will perform."
   @spec max_fetches() :: pos_integer()
   def max_fetches, do: @max_fetches
+
+  @doc "The ceiling on blocks emitted by one expansion (#917)."
+  @spec max_blocks() :: pos_integer()
+  def max_blocks, do: @max_blocks
 
   @doc """
   Replace every `Fragment` block in `typed_blocks` with its target's blocks.
@@ -117,7 +130,7 @@ defmodule KilnCMS.CMS.Fragments do
       ancestry = opts |> Keyword.get(:ancestry, []) |> List.wrap()
 
       key = {__MODULE__, make_ref()}
-      Process.put(key, %{targets: %{}, fetches: 0})
+      Process.put(key, %{targets: %{}, fetches: 0, emitted: 0})
 
       try do
         do_expand(blocks, org_id, Keyword.put(opts, :memo, key), ancestry, 0)
@@ -157,13 +170,31 @@ defmodule KilnCMS.CMS.Fragments do
     with false <- depth >= @max_depth,
          {type, id} when not is_nil(id) <- reference(ref),
          false <- {type, id} in ancestry,
-         %{} = target <- fetch(type, id, org_id, opts) do
-      target
-      |> Map.get(:blocks)
-      |> TypedBlocks.to_typed()
-      |> do_expand(org_id, opts, [{type, id} | ancestry], depth + 1)
+         %{} = target <- fetch(type, id, org_id, opts),
+         typed = target |> Map.get(:blocks) |> TypedBlocks.to_typed(),
+         # Spent BEFORE recursing, so a runaway trips partway through the fan-out
+         # rather than after the whole tree is already in memory.
+         true <- spend_blocks(opts, length(typed)) do
+      do_expand(typed, org_id, opts, [{type, id} | ancestry], depth + 1)
     else
       _ -> []
+    end
+  end
+
+  # Returns false once the expansion has emitted `@max_blocks`, after which every
+  # further inline yields nothing. Deliberately not an error: a document that
+  # trips this is a runaway, and delivery degrading to "the fragment renders as
+  # nothing" is the same failure mode an unreadable target already has.
+  defp spend_blocks(opts, count) do
+    key = Keyword.fetch!(opts, :memo)
+    state = Process.get(key)
+    emitted = state.emitted + count
+
+    if emitted > @max_blocks do
+      false
+    else
+      Process.put(key, %{state | emitted: emitted})
+      true
     end
   end
 
@@ -233,8 +264,9 @@ defmodule KilnCMS.CMS.Fragments do
         target = read_target(type, id, org_id, opts)
 
         Process.put(key, %{
-          targets: Map.put(state.targets, {type, id}, target),
-          fetches: state.fetches + 1
+          state
+          | targets: Map.put(state.targets, {type, id}, target),
+            fetches: state.fetches + 1
         })
 
         target

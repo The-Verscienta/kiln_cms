@@ -115,12 +115,26 @@ defmodule KilnCMS.Media.Regeneration do
     end)
   end
 
-  # No variants at all. An image narrower than every responsive target
-  # legitimately produces none, and re-decoding it forever to produce none again
-  # is exactly the non-convergence above — so a *processed* item (one that has
-  # its intrinsic width recorded) counts as current. An unprocessed one
-  # (`width` still nil: mid-flight, or a failed run) is enqueued, which is the
-  # case a rollout most wants to catch.
+  # No variants at all. Before #473 that was a legitimate terminal state: an
+  # image narrower than every responsive target produced none, and re-decoding it
+  # forever to produce none again is exactly the non-convergence above.
+  #
+  # `build_full/2` changed that and this clause did not follow (#919). A full-size
+  # re-encode is unconditional on size, so any non-GIF source now yields at least
+  # one `full.<format>` — and declaring such an item current made the
+  # missing-only run, the documented rollout default, skip it for ever. A 150px
+  # JPEG never got its WebP.
+  #
+  # So an empty map is current only when a run genuinely would add nothing.
+  # `full_alternates/1` is `ImageProcessor`'s own answer to that, not a second
+  # copy of the rule. (GIFs never reach here — the `content_type` clause above
+  # matches first.)
+  def current?(%{variants: variants, content_type: content_type, width: width})
+      when is_map(variants) and map_size(variants) == 0 and is_integer(width),
+      do: KilnCMS.ImageProcessor.full_alternates(content_type) == []
+
+  # Unprocessed (`width` still nil: mid-flight, or a failed run) is enqueued,
+  # which is the case a rollout most wants to catch.
   def current?(%{width: width}) when is_integer(width), do: true
   def current?(_item), do: false
 

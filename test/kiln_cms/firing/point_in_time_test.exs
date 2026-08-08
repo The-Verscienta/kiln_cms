@@ -39,6 +39,49 @@ defmodule KilnCMS.Firing.PointInTimeTest do
     assert current["title"] == "Revised guidance"
   end
 
+  # #917: the historical version is replayed, but a fragment's target is read at
+  # today's `state == :published`. Inlining it makes the snapshot assert text
+  # that was never live at the requested instant.
+  test "a fragment block is not inlined from today's target" do
+    admin = admin()
+    org = KilnCMS.Accounts.default_org_id()
+
+    target =
+      CMS.create_page!(
+        %{title: "T", slug: slug(), blocks: [%{"_type" => "heading", "text" => "AS IT IS NOW"}]},
+        actor: admin
+      )
+
+    CMS.publish_page!(target, %{}, actor: admin)
+
+    host =
+      CMS.create_post!(
+        %{
+          title: "Host",
+          slug: slug(),
+          block_tree: [%{"_type" => "fragment", "ref" => %{"type" => "page", "id" => target.id}}]
+        },
+        actor: admin
+      )
+
+    CMS.publish_post!(host, %{}, actor: admin)
+    as_of = DateTime.utc_now()
+
+    # Positive control first: a LIVE fire of the same host does inline the
+    # target's body. Without this the refute below passes for any reason at all
+    # — a fragment that never resolved, a surface that omits block text.
+    reloaded = CMS.get_post!(host.id, actor: admin)
+    {:ok, live} = KilnCMS.Firing.Engine.fire(reloaded, mode: :preview)
+    assert inspect(live[:json]) =~ "AS IT IS NOW"
+
+    assert {:ok, historical, _} = PointInTime.read(org, CMS.Post, host.id, :json, as_of)
+
+    # The snapshot must not carry the target's current body. Rendering the
+    # fragment as nothing is the honest answer: what the target said at `as_of`
+    # is not reconstructible from the target's own live row.
+    refute inspect(historical) =~ "AS IT IS NOW"
+  end
+
   test "fires any surface for the historical state" do
     admin = admin()
     org = KilnCMS.Accounts.default_org_id()

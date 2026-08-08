@@ -349,6 +349,34 @@ defmodule KilnCMS.ImageProcessorTest do
       assert {:ok, %{width: 600, height: 400}} = ImageProcessor.process(stripped, ".jpg")
     end
 
+    # #919. `build_full/2` is the one write path that encodes straight from the
+    # OPENED SOURCE rather than from a `thumbnail/2` result, so it is the most
+    # likely of the three to be handed an un-stripped original — a pre-#215
+    # upload, or one where `MediaLive.stripped_source/2` fell back. It was also
+    # the only one not calling `strip/1`, so a regeneration run published a
+    # full-resolution alternate carrying the original's EXIF.
+    test "a full-size alternate carries no EXIF even from an un-stripped source" do
+      src = jpeg_with_exif()
+      on_exit(fn -> File.rm(src) end)
+      assert field?(src, @artist_field)
+
+      # Processed directly, WITHOUT strip_metadata/2 first — standing in for the
+      # un-stripped original the sibling paths' comments say to defend against.
+      assert {:ok, %{variants: variants}} = ImageProcessor.process(src, ".jpg")
+      on_exit(fn -> Enum.each(variants, &File.rm(&1.path)) end)
+
+      full = Enum.filter(variants, &String.starts_with?(&1.label, "full."))
+
+      # If the ladder ever stops producing one, this test must be re-pointed
+      # rather than silently passing over an empty list.
+      assert full != [], "expected a full.<format> variant to assert on"
+
+      for %{label: label, path: path} <- full do
+        refute field?(path, @artist_field), "#{label} still carries the EXIF Artist tag"
+        refute path |> File.read!() |> String.contains?("Secret Person")
+      end
+    end
+
     test "returns an error for non-image input (caller falls back to original)" do
       bad = Path.join(System.tmp_dir!(), "bad-#{System.unique_integer([:positive])}.jpg")
       File.write!(bad, "not an image")

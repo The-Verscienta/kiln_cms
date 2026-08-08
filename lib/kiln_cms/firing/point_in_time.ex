@@ -217,7 +217,7 @@ defmodule KilnCMS.Firing.PointInTime do
           # today's formulas, and projecting onto today's field definitions
           # would add fields defined since and drop fields since deleted, making
           # the historical artifact assert values that were never live then.
-          |> Engine.fire(mode: :preview, custom_fields: :as_stored)
+          |> Engine.fire(mode: :preview, custom_fields: :as_stored, fragments: :as_stored)
 
         {:ok, Map.fetch!(artifacts, surface), published_at}
 
