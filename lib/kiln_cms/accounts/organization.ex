@@ -72,6 +72,12 @@ defmodule KilnCMS.Accounts.Organization do
       # path threads a tenant (epic #336). The seeded default org is created by
       # the backfill migration, which bypasses this action.
       validate KilnCMS.Accounts.Validations.MultitenancyEnabled
+
+      # Creating the org that makes this deployment multi-tenant while
+      # TENANT_STRICT_HOST is off is the moment an unrecognized Host starts being
+      # served another tenant's site. Boot checks the same thing, but boot
+      # already happened — see the change's moduledoc (#660).
+      change KilnCMS.Accounts.Changes.WarnStrictHostGap
     end
 
     update :update, primary?: true

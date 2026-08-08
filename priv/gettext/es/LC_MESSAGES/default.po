@@ -73,7 +73,7 @@ msgstr[1] "%{count} seleccionados"
 #: lib/kiln_cms_web/live/governance_live.ex:233
 #: lib/kiln_cms_web/live/mail_settings_live.ex:372
 #: lib/kiln_cms_web/live/newsletter_live.ex:285
-#: lib/kiln_cms_web/live/system_live.ex:132
+#: lib/kiln_cms_web/live/system_live.ex:133
 #: lib/kiln_cms_web/live/taxonomy_live.ex:433
 #: lib/kiln_cms_web/live/team_live.ex:359
 #: lib/kiln_cms_web/live/translations_live.ex:140
@@ -1405,7 +1405,7 @@ msgstr "Ya ha iniciado sesión de otra manera, pero no ha confirmado su cuenta. 
 #: lib/kiln_cms_web/live/newsletter_live.ex:35
 #: lib/kiln_cms_web/live/redirect_live.ex:56
 #: lib/kiln_cms_web/live/slug_regen_live.ex:49
-#: lib/kiln_cms_web/live/system_live.ex:44
+#: lib/kiln_cms_web/live/system_live.ex:45
 #: lib/kiln_cms_web/live/team_live.ex:42
 #: lib/kiln_cms_web/live/trash_live.ex:38
 #: lib/kiln_cms_web/live/webhook_live.ex:34
@@ -6036,102 +6036,102 @@ msgstr "bloque %{position}"
 msgid "%{passed} of %{total} checks passing"
 msgstr "%{passed} de %{total} comprobaciones superadas"
 
-#: lib/kiln_cms_web/live/system_live.ex:147
+#: lib/kiln_cms_web/live/system_live.ex:169
 #, elixir-autogen, elixir-format
 msgid "Build"
 msgstr "Build"
 
-#: lib/kiln_cms_web/live/system_live.ex:152
+#: lib/kiln_cms_web/live/system_live.ex:174
 #, elixir-autogen, elixir-format
 msgid "Built"
 msgstr "Compilado el"
 
 #: lib/kiln_cms_web/live/link_report_live.ex:105
-#: lib/kiln_cms_web/live/system_live.ex:177
+#: lib/kiln_cms_web/live/system_live.ex:199
 #, elixir-autogen, elixir-format
 msgid "Check now"
 msgstr "Comprobar ahora"
 
-#: lib/kiln_cms_web/live/system_live.ex:252
+#: lib/kiln_cms_web/live/system_live.ex:274
 #, elixir-autogen, elixir-format
 msgid "Checking for updates..."
 msgstr "Buscando actualizaciones…"
 
-#: lib/kiln_cms_web/live/system_live.ex:333
+#: lib/kiln_cms_web/live/system_live.ex:355
 #, elixir-autogen, elixir-format
 msgid "Couldn't reach the upstream release feed. This says nothing about whether an update exists."
 msgstr "No se pudo acceder al feed de versiones upstream. Esto no indica si existe una actualización."
 
-#: lib/kiln_cms_web/live/system_live.ex:144
+#: lib/kiln_cms_web/live/system_live.ex:166
 #, elixir-autogen, elixir-format
 msgid "Kiln version"
 msgstr "Versión de Kiln"
 
-#: lib/kiln_cms_web/live/system_live.ex:161
+#: lib/kiln_cms_web/live/system_live.ex:183
 #, elixir-autogen, elixir-format
 msgid "No build stamp. Pass --build-arg GIT_SHA and --build-arg BUILD_DATE when building the image to record exactly which commit is deployed."
 msgstr "Sin marca de compilación. Pasa --build-arg GIT_SHA y --build-arg BUILD_DATE al construir la imagen para registrar exactamente qué commit se despliega."
 
 #: lib/kiln_cms_web/components/layouts.ex:667
 #: lib/kiln_cms_web/live/system_live.ex:36
-#: lib/kiln_cms_web/live/system_live.ex:134
+#: lib/kiln_cms_web/live/system_live.ex:135
 #, elixir-autogen, elixir-format
 msgid "System"
 msgstr "Sistema"
 
-#: lib/kiln_cms_web/live/system_live.ex:136
+#: lib/kiln_cms_web/live/system_live.ex:137
 #, elixir-autogen, elixir-format
 msgid "The Kiln core this instance is built from, and how to update it."
 msgstr "El núcleo de Kiln con el que se construyó esta instancia, y cómo actualizarlo."
 
-#: lib/kiln_cms_web/live/system_live.ex:289
+#: lib/kiln_cms_web/live/system_live.ex:311
 #, elixir-autogen, elixir-format
 msgid "The command reports new migrations and any required upgrade steps before it changes the pin. It does not deploy."
 msgstr "El comando informa de las nuevas migraciones y de los pasos de actualización necesarios antes de cambiar la referencia. No despliega."
 
-#: lib/kiln_cms_web/live/system_live.ex:311
+#: lib/kiln_cms_web/live/system_live.ex:333
 #, elixir-autogen, elixir-format
 msgid "This build reports no usable version, so it can't be compared against upstream."
 msgstr "Esta compilación no informa de una versión utilizable, por lo que no puede compararse con upstream."
 
-#: lib/kiln_cms_web/live/system_live.ex:141
+#: lib/kiln_cms_web/live/system_live.ex:163
 #, elixir-autogen, elixir-format
 msgid "This instance"
 msgstr "Esta instancia"
 
-#: lib/kiln_cms_web/live/system_live.ex:260
+#: lib/kiln_cms_web/live/system_live.ex:282
 #, elixir-autogen, elixir-format
 msgid "This is the newest released version of Kiln."
 msgstr "Esta es la versión publicada más reciente de Kiln."
 
-#: lib/kiln_cms_web/live/system_live.ex:259
+#: lib/kiln_cms_web/live/system_live.ex:281
 #, elixir-autogen, elixir-format
 msgid "Up to date"
 msgstr "Actualizado"
 
-#: lib/kiln_cms_web/live/system_live.ex:274
+#: lib/kiln_cms_web/live/system_live.ex:296
 #, elixir-autogen, elixir-format
 msgid "Update available"
 msgstr "Actualización disponible"
 
-#: lib/kiln_cms_web/live/system_live.ex:301
+#: lib/kiln_cms_web/live/system_live.ex:323
 #, elixir-autogen, elixir-format
 msgid "Update checks are turned off (KILN_UPDATE_CHECK=false). Compare this instance's version against the upstream releases page manually."
 msgstr "Las comprobaciones de actualización están desactivadas (KILN_UPDATE_CHECK=false). Compara manualmente la versión de esta instancia con la página de versiones upstream."
 
-#: lib/kiln_cms_web/live/system_live.ex:169
+#: lib/kiln_cms_web/live/system_live.ex:191
 #, elixir-autogen, elixir-format
 msgid "Updates"
 msgstr "Actualizaciones"
 
-#: lib/kiln_cms_web/live/system_live.ex:279
+#: lib/kiln_cms_web/live/system_live.ex:301
 #, elixir-autogen, elixir-format
 msgid "released"
 msgstr "publicada el"
 
 #: lib/kiln_cms_web/live/billing_live.ex:393
-#: lib/kiln_cms_web/live/system_live.ex:149
-#: lib/kiln_cms_web/live/system_live.ex:156
+#: lib/kiln_cms_web/live/system_live.ex:171
+#: lib/kiln_cms_web/live/system_live.ex:178
 #, elixir-autogen, elixir-format
 msgid "unknown"
 msgstr "desconocido"
@@ -6837,12 +6837,12 @@ msgstr "Tu suscripción al boletín está activa."
 msgid "You've been unsubscribed."
 msgstr "Se ha tramitado tu baja."
 
-#: lib/kiln_cms_web/live/system_live.ex:285
+#: lib/kiln_cms_web/live/system_live.ex:307
 #, elixir-autogen, elixir-format
 msgid "Apply it from your project's Kiln checkout, then rebuild and redeploy:"
 msgstr "Aplícala desde la copia de trabajo de Kiln de tu proyecto, luego reconstruye y vuelve a desplegar:"
 
-#: lib/kiln_cms_web/live/system_live.ex:323
+#: lib/kiln_cms_web/live/system_live.ex:345
 #, elixir-autogen, elixir-format
 msgid "The update check is misconfigured: KILN_UPDATE_REPO must be owner/name, and KILN_UPDATE_RELEASES_URL a full http(s) URL. No check was made."
 msgstr "La comprobación de actualizaciones está mal configurada: KILN_UPDATE_REPO debe tener el formato propietario/nombre y KILN_UPDATE_RELEASES_URL ser una URL http(s) completa. No se realizó ninguna comprobación."
@@ -7049,45 +7049,45 @@ msgstr[1] "%{count} min de lectura"
 msgid "Reading time is an estimate at %{wpm} words per minute."
 msgstr "El tiempo de lectura es una estimación a %{wpm} palabras por minuto."
 
-#: lib/kiln_cms_web/live/system_live.ex:187
+#: lib/kiln_cms_web/live/system_live.ex:209
 #, elixir-autogen, elixir-format
 msgid "Delivery cache"
 msgstr "Caché de entrega"
 
-#: lib/kiln_cms_web/live/system_live.ex:113
+#: lib/kiln_cms_web/live/system_live.ex:114
 #, elixir-autogen, elixir-format
 msgid "Delivery cache flushed."
 msgstr "Caché de entrega vaciada."
 
-#: lib/kiln_cms_web/live/system_live.ex:216
+#: lib/kiln_cms_web/live/system_live.ex:238
 #, elixir-autogen, elixir-format
 msgid "Dropped %{count} published entry and %{artifacts} artifact entries."
 msgid_plural "Dropped %{count} published entries and %{artifacts} artifact entries."
 msgstr[0] "Se eliminaron %{count} entrada publicada y %{artifacts} entradas de artefactos."
 msgstr[1] "Se eliminaron %{count} entradas publicadas y %{artifacts} entradas de artefactos."
 
-#: lib/kiln_cms_web/live/system_live.ex:196
+#: lib/kiln_cms_web/live/system_live.ex:218
 #, elixir-autogen, elixir-format
 msgid "Every request re-reads the database until the cache warms again, so on a busy site this is a deliberate load spike. This clears the cache for every organization on this deployment, not just the one you are viewing. The cache lives in this node's memory: on a multi-node deployment it clears the node serving you and leaves the others."
 msgstr "Cada petición vuelve a leer la base de datos hasta que la caché se calienta de nuevo, así que en un sitio con mucho tráfico esto es un pico de carga deliberado. Esto vacía la caché de todas las organizaciones de este despliegue, no solo la que estás viendo. La caché vive en la memoria de este nodo: en un despliegue de varios nodos vacía el nodo que te atiende y deja los demás."
 
-#: lib/kiln_cms_web/live/system_live.ex:212
+#: lib/kiln_cms_web/live/system_live.ex:234
 #, elixir-autogen, elixir-format
 msgid "Flush delivery cache"
 msgstr "Vaciar la caché de entrega"
 
-#: lib/kiln_cms_web/live/system_live.ex:206
+#: lib/kiln_cms_web/live/system_live.ex:228
 #, elixir-autogen, elixir-format
 msgid "Flush the delivery cache for every organization on this node? Reads will hit the database until it warms again."
 msgstr "¿Vaciar la caché de entrega de todas las organizaciones en este nodo? Las lecturas irán a la base de datos hasta que se caliente de nuevo."
 
-#: lib/kiln_cms_web/live/system_live.ex:190
+#: lib/kiln_cms_web/live/system_live.ex:212
 #, elixir-autogen, elixir-format
 msgid "Published content and fired artifacts are cached in memory and invalidated automatically when you edit. Flush them by hand when something changed that Kiln cannot see — a config change, a template deploy, or an external source feeding a custom block."
 msgstr "El contenido publicado y los artefactos generados se guardan en memoria y se invalidan automáticamente al editar. Vacíalos a mano cuando cambie algo que Kiln no puede ver: un cambio de configuración, un despliegue de plantillas o una fuente externa que alimente un bloque personalizado."
 
 #: lib/kiln_cms_web/live/media_live.ex:180
-#: lib/kiln_cms_web/live/system_live.ex:115
+#: lib/kiln_cms_web/live/system_live.ex:116
 #, elixir-autogen, elixir-format
 msgid "You need admin access to do that."
 msgstr "Necesitas acceso de administrador para hacer eso."
@@ -9708,3 +9708,18 @@ msgstr "Crear una cuenta"
 #, elixir-autogen, elixir-format
 msgid "Reset your password"
 msgstr "Restablecer su contraseña"
+
+#: lib/kiln_cms_web/live/system_live.ex:150
+#, elixir-autogen, elixir-format
+msgid "A request whose Host header matches no organization is served the default organization's content, branding and analytics — including a bare hostname, an IP address, or a Host a caller made up. With one organization that is the same site either way. With more than one it is another tenant's."
+msgstr "Una petición cuya cabecera Host no coincide con ninguna organización recibe el contenido, la marca y las analíticas de la organización predeterminada, incluidos un nombre de host simple, una dirección IP o un Host inventado por quien llama. Con una sola organización se trata del mismo sitio en cualquier caso. Con más de una es el de otro inquilino."
+
+#: lib/kiln_cms_web/live/system_live.ex:146
+#, elixir-autogen, elixir-format
+msgid "Host matching is off, and this deployment has more than one organization"
+msgstr "La coincidencia de host está desactivada y este despliegue tiene más de una organización"
+
+#: lib/kiln_cms_web/live/system_live.ex:156
+#, elixir-autogen, elixir-format
+msgid "Set TENANT_STRICT_HOST=true to reject unrecognized hosts instead, then restart. Leave it off only if an unmatched host reaching the default organization is what you want."
+msgstr "Establece TENANT_STRICT_HOST=true para rechazar los hosts no reconocidos y reinicia. Déjalo desactivado solo si quieres que un host sin coincidencia llegue a la organización predeterminada."
