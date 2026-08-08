@@ -154,6 +154,25 @@ defmodule KilnCMS.Portability.CLI do
     end)
   end
 
+  @doc """
+  Run the image-variant jobs the import just queued, then return.
+
+  `Ingest` enqueues `VariantWorker`/`AVWorker` and does not wait — normally
+  right, because a running node picks them up. But a migration is often run in a
+  one-off container with nothing else consuming the `media` queue, and there the
+  jobs sit `available` forever and every imported image renders full size. This
+  is the opt-in for that case; `nil`/`false` keeps the asynchronous default.
+  """
+  @spec maybe_drain_media(boolean() | nil) :: :ok
+  def maybe_drain_media(true) do
+    Mix.shell().info("\nDraining the media queue …")
+    result = Oban.drain_queue(queue: :media, with_recursion: true)
+    Mix.shell().info("Media jobs: #{inspect(result)}")
+    :ok
+  end
+
+  def maybe_drain_media(_other), do: :ok
+
   # Truncated: a failing import can fail thousands of times, and a wall of
   # identical messages buries the one line that explains why. The count in the
   # summary above is the complete number.
