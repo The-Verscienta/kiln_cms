@@ -57,6 +57,21 @@ defmodule KilnCMS.Governance.ChainTest do
     CMS.publish_page!(page, %{}, actor: actor)
   end
 
+  # An anchored page an editor can still autosave: published (so a publish
+  # anchor exists and the coalescing tests have a boundary to respect), then
+  # unpublished back to draft (`published -> draft` is the transition the state
+  # machine offers; `return_to_draft` only comes back from `:in_review`).
+  #
+  # `:autosave` refuses a published row outright (#1015) — the action writes
+  # content and fires nothing, which is safe for a draft and not for live
+  # content — so publish-then-autosave is no longer a sequence that can happen.
+  # This is what the tests were reaching for: an anchor already in the chain,
+  # followed by a run of autosaves.
+  defp anchored_draft(actor) do
+    page = published_page(actor)
+    CMS.unpublish_page!(page, actor: actor)
+  end
+
   # The debounced editor save, which is what `CoalesceAutosaveVersions` runs on.
   # There is no code interface for it — it is reached only from
   # `ContentEditorLive.do_autosave/1` — so the changeset is built directly.
@@ -473,7 +488,7 @@ defmodule KilnCMS.Governance.ChainTest do
     # audit surface stronger, and autosave is on by default in the editor.
     test "autosaving twice does not fake a tamper verdict" do
       actor = admin()
-      page = published_page(actor)
+      page = anchored_draft(actor)
       assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
 
       page = autosave!(page, "First autosave", actor)
@@ -490,7 +505,7 @@ defmodule KilnCMS.Governance.ChainTest do
 
     test "no anchored version row is destroyed or rewritten by coalescing" do
       actor = admin()
-      page = published_page(actor)
+      page = anchored_draft(actor)
 
       page = autosave!(page, "First autosave", actor)
       anchor = Chain.latest_anchor("page", page.id, page.org_id)
@@ -499,9 +514,10 @@ defmodule KilnCMS.Governance.ChainTest do
 
       # Or the comparison below is `%{} == %{}` and holds for the trivial
       # reason that it selected nothing. Cross-checked against a number the
-      # helper did not compute: create + publish + the first autosave.
+      # helper did not compute: create + publish + unpublish + the first
+      # autosave.
       assert length(anchored) == anchor.version_count
-      assert anchor.version_count == 3
+      assert anchor.version_count == 4
 
       _page = page |> autosave!("Second autosave", actor) |> autosave!("Third", actor)
 
@@ -533,7 +549,7 @@ defmodule KilnCMS.Governance.ChainTest do
 
     test "the cost is paid in version rows, not in a wrong verdict" do
       actor = admin()
-      page = published_page(actor)
+      page = anchored_draft(actor)
 
       _page =
         page
@@ -565,7 +581,7 @@ defmodule KilnCMS.Governance.ChainTest do
       refute Chain.every_write?()
 
       actor = admin()
-      page = published_page(actor)
+      page = anchored_draft(actor)
 
       page =
         page
@@ -579,7 +595,7 @@ defmodule KilnCMS.Governance.ChainTest do
 
     test "a boundary inside the run freezes the anchored rows and collapses the rest" do
       actor = admin()
-      page = published_page(actor)
+      page = anchored_draft(actor)
 
       page = autosave!(page, "One", actor)
       :ok = Chain.anchor(page)
@@ -605,7 +621,7 @@ defmodule KilnCMS.Governance.ChainTest do
 
     test "an anchor that recorded only a count still protects its rows" do
       actor = admin()
-      page = published_page(actor)
+      page = anchored_draft(actor)
 
       page = autosave!(page, "One", actor)
       :ok = Chain.anchor(page)
@@ -630,7 +646,7 @@ defmodule KilnCMS.Governance.ChainTest do
 
     test "an unresolvable count refuses to coalesce rather than guessing" do
       actor = admin()
-      page = published_page(actor)
+      page = anchored_draft(actor)
 
       page = autosave!(page, "One", actor)
       :ok = Chain.anchor(page)
@@ -655,7 +671,7 @@ defmodule KilnCMS.Governance.ChainTest do
 
     test "the master kill switch does not open the gate on rows already anchored" do
       actor = admin()
-      page = published_page(actor)
+      page = anchored_draft(actor)
 
       page = autosave!(page, "One", actor)
       :ok = Chain.anchor(page)
