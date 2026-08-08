@@ -677,6 +677,20 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    may resubmit a column holding an admin-set value unchanged — which the old
    per-child default rule refused outright.
 
+   That comparison is only sound if it sees a value exactly where a reader
+   would. It used to *search* the submitted term for maps carrying a `"blocks"`
+   key, which is a guess about where children live, and a guess is defeatable:
+   `{:array, :map}` fields carry no schema, so a whole child list could be
+   parked under any key — `%{"blocks" => [real], "trash" => [%{"blocks" =>
+   [parked]}]}`, or inside `gallery.images` with no `columns` block present at
+   all — and the parked copy was counted while nothing rendered it, offsetting
+   the removal of a real one. The traversal now **asks the block** for its
+   children (`Columns.child_maps/1`), so it reads the same positions the
+   renderer does (#956). A block type that nests children and does not declare
+   them is invisible to this check, which is the cost of mirroring rather than
+   guessing — and strictly better than a guess that failed open silently, for
+   content no reader ever sees.
+
    A multiset preserves the *count* of admin-set values, not their *binding*, so
    on its own it allowed a **re-target** — clearing the value on one child and
    setting it on another of the same type in one write. That is **narrowed, not

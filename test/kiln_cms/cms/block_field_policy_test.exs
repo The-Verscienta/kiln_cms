@@ -318,6 +318,61 @@ defmodule KilnCMS.CMS.BlockFieldPolicyTest do
       assert Exception.message(error) =~ "featured"
     end
 
+    test "a value parked under a non-rendered key cannot offset a removal (#956)" do
+      # The traversal used to hunt for maps carrying a `"blocks"` key, anywhere
+      # in the term. `field :columns, {:array, :map}` has no `fields`
+      # constraint, so an attacker could park a whole child list under a key of
+      # their choosing: the check counted it, the renderer never showed it, and
+      # it offset the removal of a real admin-set value.
+      admin = user(:admin)
+
+      {:ok, page} =
+        create_page(admin, [columns_children([quote_block(%{"featured" => true, "text" => "A"})])])
+
+      parked = %{
+        "_type" => "columns",
+        "columns" => [
+          %{
+            # What renders: the featured value is gone.
+            "blocks" => [quote_block(%{"text" => "editor content"})],
+            # What does not render, carrying the value to balance the books.
+            "trash" => [%{"blocks" => [quote_block(%{"featured" => true, "text" => "A"})]}]
+          }
+        ]
+      }
+
+      assert {:error, error} =
+               CMS.update_page(page, %{block_tree: [parked]}, actor: user(:editor))
+
+      assert Exception.message(error) =~ "featured"
+    end
+
+    test "the parking slot does not have to be a columns block (#956)" do
+      # `gallery.images` is `{:array, :map}` too, and unknown keys survive its
+      # sanitizer. So the old traversal could be satisfied without a `columns`
+      # block anywhere in the submission — the attacker deletes every one.
+      admin = user(:admin)
+
+      {:ok, page} =
+        create_page(admin, [columns_children([quote_block(%{"featured" => true, "text" => "A"})])])
+
+      gallery_park = %{
+        "_type" => "gallery",
+        "title" => "g",
+        "images" => [
+          %{
+            "url" => "https://example.com/a.png",
+            "blocks" => [quote_block(%{"featured" => true, "text" => "A"})]
+          }
+        ]
+      }
+
+      assert {:error, error} =
+               CMS.update_page(page, %{block_tree: [gallery_park]}, actor: user(:editor))
+
+      assert Exception.message(error) =~ "featured"
+    end
+
     test "an admin may still write a value in an unrendered slot without it counting" do
       # The mirror of the test above, so the fix can't be "reject anything with a
       # stray key": an admin write carrying the same decoy is accepted, and the
