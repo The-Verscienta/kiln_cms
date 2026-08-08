@@ -185,4 +185,86 @@ defmodule KilnCMS.MultitenancyDynamicTypesTest do
                )
     end
   end
+
+  describe "generic dispatch resolves the type under the caller's org (#972)" do
+    # `ContentTypes`' convention dispatch built its interface name and looked up
+    # the domain via `get!(type)` with NO org, so every path that goes through
+    # `call/4` — transition, update, restore, purge, destroy, list_versions —
+    # resolved a dynamic type against the DEFAULT org and raised "unknown
+    # content type" for one defined anywhere else.
+    setup %{b: b, actor: actor} do
+      name = type_name()
+
+      CMS.create_type_definition!(%{name: name, label: "Gadget"}, actor: actor, tenant: b)
+
+      entry =
+        ContentTypes.create!(
+          name,
+          %{title: "A gadget", slug: "gadget-#{System.unique_integer([:positive])}", blocks: []},
+          actor: actor,
+          tenant: b
+        )
+
+      %{name: name, entry: entry}
+    end
+
+    test "transition/4 publishes a dynamic type in a non-default org", %{
+      name: name,
+      entry: entry,
+      b: b,
+      actor: actor
+    } do
+      assert {:ok, published} =
+               ContentTypes.transition(name, "publish", entry, actor: actor, tenant: b)
+
+      assert published.state == :published
+    end
+
+    test "update/4 reaches the right domain too", %{name: name, entry: entry, b: b, actor: actor} do
+      assert {:ok, updated} =
+               ContentTypes.update(name, entry, %{title: "Renamed"}, actor: actor, tenant: b)
+
+      assert updated.title == "Renamed"
+    end
+
+    test "list_versions!/2 and destroy/3 resolve under the tenant", %{
+      name: name,
+      entry: entry,
+      b: b,
+      actor: actor
+    } do
+      assert is_list(ContentTypes.list_versions!(name, actor: actor, tenant: b))
+      assert :ok = ContentTypes.destroy(name, entry, actor: actor, tenant: b)
+    end
+
+    # The importer is the caller that made this visible: it wraps the publish in
+    # a rescue, so the raise became "every record silently stayed a draft while
+    # the report said published".
+    test "a dynamic type imports as PUBLISHED, not silently as a draft", %{
+      name: name,
+      b: b,
+      actor: actor
+    } do
+      slug = "imported-#{System.unique_integer([:positive])}"
+
+      {:ok, report} =
+        KilnCMS.Portability.Import.run_envelope(
+          %{
+            "records" => [
+              %{"type" => name, "title" => "Imported", "slug" => slug, "state" => "published"}
+            ]
+          },
+          actor: actor,
+          tenant: b,
+          skip_media: true
+        )
+
+      assert length(report.created) == 1
+
+      imported =
+        ContentTypes.list!(name, actor: actor, tenant: b) |> Enum.find(&(&1.slug == slug))
+
+      assert imported.state == :published
+    end
+  end
 end
