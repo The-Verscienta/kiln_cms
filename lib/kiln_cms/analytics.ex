@@ -113,4 +113,83 @@ defmodule KilnCMS.Analytics do
     threshold = low_count_threshold()
     if hits < threshold, do: "< #{threshold}", else: hits
   end
+
+  @doc """
+  The referrer categories, in display order — read off `ReferrerDay`'s own
+  `one_of` constraint rather than restated.
+
+  A category list that lives in two places is a category list that will
+  eventually disagree, and the failure is silent: a new source would simply
+  never appear in a chart or an export, and the suppression arithmetic below
+  would be computed over a set that no longer sums to the view total.
+  """
+  @spec referrer_sources() :: [atom()]
+  def referrer_sources do
+    KilnCMS.Analytics.ReferrerDay
+    |> Ash.Resource.Info.attribute(:source)
+    |> Map.fetch!(:constraints)
+    |> Keyword.fetch!(:one_of)
+  end
+
+  @doc """
+  Decide what a whole referrer breakdown may show, given `totals` — a map of
+  `source => hits` for **one** content item over one span (#620, #777).
+
+  Returns one `{source, hits, display}` per category in `referrer_sources/0`
+  order, including categories with no hits: a zero-hit source still needs a
+  place, or its absence reads as "we don't track this" rather than "nobody
+  arrived this way" — and, more importantly, it is a candidate partner below.
+
+  ## Complementary suppression, and why a per-category threshold is not enough
+
+  Every classified arrival writes exactly one referrer hit alongside its view
+  (`KilnCMSWeb.ViewTracking.record/4`), so these categories sum to the item's
+  own view total — which is shown, exactly, right next to them. If exactly one
+  category is naturally below the threshold, its value is fully determined by
+  subtracting the other four *exact* values from that total. Publishing `"< n"`
+  beside four exact numbers hides nothing at all.
+
+  So when that happens a second category is suppressed too, leaving the
+  equation with two unknowns. Two or more naturally-low categories need no
+  help: they are already underdetermined by the total alone.
+
+  The partner is the **smallest** other category, zero-hit ones included. If
+  every other category is a genuine zero the low one is exactly
+  `total - 0 - 0 - 0 - 0`, the single most recoverable case there is, and
+  excluding zeros from the pool would leave precisely that case unprotected.
+
+  ## The three display values
+
+    * an integer — the exact count, at or above the threshold (or a true zero,
+      which describes nobody and is never suppressed)
+    * `"< n"` — naturally below the threshold
+    * `"hidden"` — suppressed as a complement. Deliberately *not* `"< n"`: its
+      real value can be at or above the threshold, so that label would be false.
+  """
+  @spec suppress_referrer_group(%{optional(atom()) => non_neg_integer()}) ::
+          [{atom(), non_neg_integer(), non_neg_integer() | String.t()}]
+  def suppress_referrer_group(totals) do
+    threshold = low_count_threshold()
+    raw = Enum.map(referrer_sources(), fn source -> {source, Map.get(totals, source, 0)} end)
+    naturally_suppressed = for {source, hits} <- raw, hits > 0 and hits < threshold, do: source
+
+    forced =
+      case naturally_suppressed do
+        [only] -> complementary_partner(raw, only)
+        _other -> nil
+      end
+
+    Enum.map(raw, fn {source, hits} ->
+      {source, hits, if(source == forced, do: "hidden", else: suppress_low_count(hits))}
+    end)
+  end
+
+  defp complementary_partner(raw, already_suppressed) do
+    {source, _hits} =
+      raw
+      |> Enum.reject(fn {source, _hits} -> source == already_suppressed end)
+      |> Enum.min_by(fn {_source, hits} -> hits end)
+
+    source
+  end
 end

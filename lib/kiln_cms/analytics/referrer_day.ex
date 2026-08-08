@@ -109,19 +109,27 @@ defmodule KilnCMS.Analytics.ReferrerDay do
     end
 
     # The export's source read (#620, extending #618's `ContentViewDay.:in_range`
-    # precedent to referrer buckets). `id` breaks ties within a day for a
-    # stable keyset cursor — `day` alone is not unique. The caller is
-    # responsible for capping the span at `retention_days/0`, same contract
-    # as `ContentViewDay.:in_range`.
+    # precedent to referrer buckets). `id` breaks ties for a stable keyset
+    # cursor — nothing before it is unique. The caller is responsible for
+    # capping the span at `retention_days/0`, same contract as
+    # `ContentViewDay.:in_range`.
+    #
+    # Sorted so every bucket for one `(day, content)` is CONTIGUOUS (#777).
+    # That is not cosmetic: the export has to decide suppression over a whole
+    # breakdown at once — a single category below the threshold is recoverable
+    # by subtracting the others from the view total printed beside it — and
+    # deciding it per row leaks exactly what the threshold is for. Contiguity
+    # is what lets that decision be made in a stream, holding one content
+    # item's five categories rather than a window's worth of rows.
     read :in_range do
-      description "Daily referrer buckets between two days inclusive, oldest first, keyset-paginated."
+      description "Daily referrer buckets between two days inclusive, oldest first, grouped by content, keyset-paginated."
       argument :from, :date, allow_nil?: false
       argument :to, :date, allow_nil?: false
       pagination keyset?: true, required?: false
       filter expr(day >= ^arg(:from) and day <= ^arg(:to))
 
       prepare build(
-                sort: [day: :asc, id: :asc],
+                sort: [day: :asc, content_type: :asc, content_id: :asc, id: :asc],
                 select: [:id, :day, :content_type, :content_id, :source, :hits]
               )
     end

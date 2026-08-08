@@ -323,8 +323,143 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
         )
         |> Map.fetch!(:resp_body)
 
-      assert [row] = Jason.decode!(body)
+      rows = Jason.decode!(body)
+      assert row = Enum.find(rows, &(&1["source"] == "other"))
       assert row["hits"] == "< 5"
+    end
+
+    # ── #777: the arithmetic the per-row threshold never closed ──────────────
+    #
+    # Every classified arrival writes one referrer hit alongside its view, so an
+    # item's categories sum to the exact `views` this same file prints on the
+    # item's own view row. A single `"< n"` beside four exact numbers is not
+    # hidden at all — it is `total` minus the other four.
+
+    defp referrer_rows(conn, day \\ nil) do
+      day = day || today()
+
+      conn
+      |> log_in(authed_user(:admin))
+      |> get(
+        ~p"/editor/analytics/export.json?#{[from: Date.to_iso8601(day), to: Date.to_iso8601(day)]}"
+      )
+      |> Map.fetch!(:resp_body)
+      |> Jason.decode!()
+      |> Enum.filter(&(&1["kind"] == "referrer"))
+    end
+
+    test "a breakdown exports every category, not only the ones with hits", %{conn: conn} do
+      enable_referrers(5)
+      id = Ash.UUID.generate()
+      seed_referrer_bucket(%{content_id: id, day: today(), source: :search, hits: 9})
+
+      sources = conn |> referrer_rows() |> Enum.map(& &1["source"]) |> Enum.sort()
+
+      # Without the zero-hit categories there is nothing to suppress as a
+      # complement, so a breakdown with one real source can never be protected.
+      assert sources == ~w(direct internal other search social)
+    end
+
+    # The degenerate case, and the reason the export was worse than the pre-fix
+    # dashboard: its grain is per DAY, so one referrer row for a day means that
+    # row's count IS the day's view total. No subtraction required.
+    test "a lone low count cannot be read off the view total", %{conn: conn} do
+      enable_referrers(5)
+      admin = authed_user(:admin)
+      post = CMS.create_post!(%{title: "Quiet", slug: slug()}, actor: admin)
+      CMS.publish_post!(post, %{}, actor: admin)
+
+      seed_bucket(%{content_type: "post", content_id: post.id, day: today(), views: 3})
+
+      seed_referrer_bucket(%{
+        content_type: "post",
+        content_id: post.id,
+        day: today(),
+        source: :social,
+        hits: 3
+      })
+
+      rows = referrer_rows(conn)
+      shown = Map.new(rows, &{&1["source"], &1["hits"]})
+
+      # The low one is suppressed…
+      assert shown["social"] == "< 5"
+
+      # …and so is exactly one more, so `3 = social + ?` has two unknowns.
+      # Without the partner, `social` is `3 - 0 - 0 - 0 - 0`.
+      assert Enum.count(rows, &(&1["hits"] == "hidden")) == 1
+    end
+
+    # Two naturally-low categories are already underdetermined by the total, so
+    # forcing a third would cost information for nothing.
+    test "two low counts need no complement", %{conn: conn} do
+      enable_referrers(5)
+      id = Ash.UUID.generate()
+      seed_referrer_bucket(%{content_id: id, day: today(), source: :social, hits: 2})
+      seed_referrer_bucket(%{content_id: id, day: today(), source: :search, hits: 3})
+
+      rows = referrer_rows(conn)
+      shown = Map.new(rows, &{&1["source"], &1["hits"]})
+
+      assert shown["social"] == "< 5"
+      assert shown["search"] == "< 5"
+      refute Enum.any?(rows, &(&1["hits"] == "hidden"))
+    end
+
+    test "a breakdown with nothing to hide exports exact counts", %{conn: conn} do
+      enable_referrers(5)
+      id = Ash.UUID.generate()
+      seed_referrer_bucket(%{content_id: id, day: today(), source: :search, hits: 9})
+      seed_referrer_bucket(%{content_id: id, day: today(), source: :social, hits: 7})
+
+      shown = conn |> referrer_rows() |> Map.new(&{&1["source"], &1["hits"]})
+
+      assert shown["search"] == 9
+      assert shown["social"] == 7
+      # A true zero describes nobody, so it is never suppressed.
+      assert shown["direct"] == 0
+    end
+
+    # Suppression is decided per (day, content item). Two items in one export
+    # must not be pooled — that would both under- and over-suppress.
+    test "each content item is decided on its own", %{conn: conn} do
+      enable_referrers(5)
+      quiet = Ash.UUID.generate()
+      busy = Ash.UUID.generate()
+
+      seed_referrer_bucket(%{content_id: quiet, day: today(), source: :social, hits: 1})
+      seed_referrer_bucket(%{content_id: busy, day: today(), source: :search, hits: 40})
+      seed_referrer_bucket(%{content_id: busy, day: today(), source: :social, hits: 30})
+
+      rows = referrer_rows(conn)
+      by_item = Enum.group_by(rows, & &1["content_id"])
+
+      quiet_shown = Map.new(by_item[quiet], &{&1["source"], &1["hits"]})
+      assert quiet_shown["social"] == "< 5"
+      assert Enum.count(by_item[quiet], &(&1["hits"] == "hidden")) == 1
+
+      busy_shown = Map.new(by_item[busy], &{&1["source"], &1["hits"]})
+      assert busy_shown["search"] == 40
+      assert busy_shown["social"] == 30
+      refute Enum.any?(by_item[busy], &(&1["hits"] == "hidden"))
+    end
+
+    test "CSV carries the same decision", %{conn: conn} do
+      enable_referrers(5)
+      id = Ash.UUID.generate()
+      seed_referrer_bucket(%{content_id: id, day: today(), source: :social, hits: 2})
+
+      body =
+        conn
+        |> log_in(authed_user(:admin))
+        |> get(
+          ~p"/editor/analytics/export.csv?#{[from: Date.to_iso8601(today()), to: Date.to_iso8601(today())]}"
+        )
+        |> Map.fetch!(:resp_body)
+
+      assert body =~ ",social,< 5"
+      assert body =~ ",hidden"
+      refute body =~ ",social,2"
     end
   end
 
