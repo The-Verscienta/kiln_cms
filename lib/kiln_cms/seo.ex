@@ -114,26 +114,46 @@ defmodule KilnCMS.Seo do
   bucket is exhausted. A generator that raises degrades to `{:error, :crashed}`
   rather than taking the caller down — the same posture `KilnCMS.Ask` takes.
 
-  `opts` accepts `:org_id` and `:user_id` for rate limiting; both buckets are
-  skipped when they aren't supplied (a mix task or a test).
+  `opts` accepts `:org_id` and `:user_id` for rate limiting; each bucket is
+  skipped when its id isn't supplied (a mix task or a test).
+
+  `unattended?: true` marks a call nobody is waiting on — an automation
+  reaction rather than an editor's click. Those stop once the org has spent
+  `unattended_share/0` of its window, so an editor's "Suggest with AI" always
+  has the remainder available (#943). They can also come back
+  `{:error, :unattended_disabled}`, which is a configuration decision rather
+  than an overload to wait out.
   """
   @spec draft(Document.t(), keyword()) :: {:ok, Draft.t()} | {:error, term()}
   def draft(%Document{} = document, opts \\ []) do
     with :ok <- check_enabled(),
          :ok <- check_length(document),
-         :ok <- Budget.check("seo", opts[:org_id], opts[:user_id], budget_limits()) do
+         :ok <- Budget.check("seo", opts[:org_id], opts[:user_id], budget_limits(opts)) do
       run(document, opts)
     end
   end
 
   defp check_enabled, do: if(enabled?(), do: :ok, else: {:error, :disabled})
 
-  defp budget_limits do
+  defp budget_limits(opts) do
     [
       per_user: cfg(:per_user_limit, {20, :timer.minutes(1)}),
-      per_org: cfg(:per_org_limit, {200, :timer.hours(1)})
+      per_org: cfg(:per_org_limit, {200, :timer.hours(1)}),
+      unattended?: Keyword.get(opts, :unattended?, false),
+      unattended_share: unattended_share()
     ]
   end
+
+  @doc """
+  The share of the per-org window an unattended caller may let the org reach.
+
+  Everything above it is reserved for an editor clicking "Suggest with AI" —
+  see `KilnCMS.LLM.Budget`. Set it to `0.0` to stop automation drafting
+  metadata against this budget entirely; `1.0` restores the pre-#943
+  behaviour, where a background rule could take the last unit.
+  """
+  @spec unattended_share() :: float()
+  def unattended_share, do: cfg(:unattended_share, 0.5)
 
   defp check_length(document) do
     words = document.body_text |> String.split(~r/\s+/u, trim: true) |> length()

@@ -277,7 +277,14 @@ config :kiln_cms, KilnCMS.Seo,
   # Both buckets must pass: per-user stops a stuck button, per-org is the
   # actual spend ceiling.
   per_user_limit: {20, :timer.minutes(1)},
-  per_org_limit: {200, :timer.hours(1)}
+  per_org_limit: {200, :timer.hours(1)},
+  # The share of `per_org_limit` that UNATTENDED callers — the #942 automation
+  # reactions, which nobody is waiting on — may spend. The remainder is
+  # reserved for an editor clicking "Suggest with AI", so a background rule
+  # cannot leave them staring at a rate-limit error caused by something they
+  # can neither see nor inspect (#943). 0.0 stops automation drafting against
+  # this budget entirely; 1.0 restores the old shared-bucket behaviour.
+  unattended_share: 0.5
 
 # Block-level AI assist in the content editor (#60) — draft, continue,
 # summarize, rewrite, shorten or expand one rich-text block.

@@ -77,13 +77,33 @@ Two consequences worth knowing:
   relay is logged and dropped. Retrying a nice-to-have suggestion five times
   per document spends real tokens to tell an editor something they can ask for
   directly, and an Oban retry re-runs the generation, not just the send.
-- **The LLM budget is shared with the editor panel**, per org
-  (`KilnCMS.Seo` `per_org_limit`, default 200/hour). A `suggest_metadata` rule
-  gets its own per-rule ceiling on top (`per_user_limit`, default 20/minute) so
-  one runaway rule can't starve the others — but a hot rule can still consume
-  the org allowance an editor's "Suggest with AI" button draws on. Scope rules
-  to `in_review` rather than `updated`, and raise `per_org_limit` if you mean
-  to run them broadly.
+- **The SEO draft budget is shared with the editor panel, but people keep a
+  reserve.** The org ceiling is `KilnCMS.Seo` `per_org_limit` (default
+  200/hour) and every caller draws on it. A `suggest_metadata` rule is keyed
+  into its own per-rule bucket on top, so one runaway rule can't starve the
+  others — note that bucket's *size* is the same `per_user_limit` that sizes
+  every editor's, so there is no separate knob for how fast one rule may run.
+
+  Because it runs unattended, it also stops once the org has spent
+  `unattended_share` of the window (default `0.5`), counting **every** caller's
+  spend. At the defaults an editor clicking "Suggest with AI" always has at
+  least 100 of the 200 available. Without that, a busy day on a
+  `*.updated → suggest_metadata` rule ended with every editor getting a
+  rate-limit error caused by a rule they can't see and — since this page is
+  admin-only — can't inspect.
+
+  Reading the shared counter is deliberate: automation's room shrinks as
+  editors work, and a rule can be refused having spent nothing itself. That is
+  the priority order this is for. Set `unattended_share: 0.0` to keep
+  automation off this budget entirely, or `1.0` for the old shared-bucket
+  behaviour. Scope rules to `in_review` rather than `updated`, and raise
+  `per_org_limit` if you mean to run them broadly.
+
+  **This covers the SEO draft budget only.** `flag_duplicates` and
+  `suggest_tags` reach `KilnCMS.Search.Related`, which computes an embedding
+  per block for a document that has none stored — and that inference is on no
+  budget bucket at all (#1076). A rule scoped to `in_review` is exactly the
+  case that computes rather than reads.
 - **`suggest_metadata` needs `"allow_egress": true`** when the configured model
   provider is off-site (`KilnCMS.Seo.egress?/0`). The editor panel is one
   person deciding to spend one request; a rule is every matching document,
