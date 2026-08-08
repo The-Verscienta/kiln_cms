@@ -20,8 +20,7 @@ defmodule KilnCMS.Automation.ActionConfigTest do
     error
     |> Ash.Error.to_error_class()
     |> Map.get(:errors, [])
-    |> Enum.map(& &1.message)
-    |> Enum.join(" ")
+    |> Enum.map_join(" ", & &1.message)
   end
 
   describe "the shape table covers the resource" do
@@ -215,20 +214,55 @@ defmodule KilnCMS.Automation.ActionConfigTest do
   end
 
   describe "rules that predate the validation" do
-    test "still run — the executor's own guards are not replaced by this" do
-      # Ash.Seed writes the row directly, which is what an existing rule (or
-      # AshAdmin) looks like. The point of the save-time check is the form, not
-      # a claim that every stored config is now well-formed.
-      rule =
-        Ash.Seed.seed!(Rule, %{
-          name: "Legacy",
+    test "still exist and still read — this is a check on the form, not on the table" do
+      # Ash.Seed writes the row directly, which is what an existing rule (or an
+      # AshAdmin edit) looks like. The contrast is the point: the same attrs
+      # through the action are refused, so the executor's own runtime guards
+      # are still the thing standing between a legacy config and a crash.
+      attrs = %{
+        name: "Legacy #{System.unique_integer([:positive])}",
+        trigger_event: :published,
+        action: :send_email,
+        config: %{},
+        enabled: true
+      }
+
+      rule = Ash.Seed.seed!(Rule, attrs)
+
+      assert {:error, _} = create(Map.delete(attrs, :name))
+      assert {:ok, %{config: %{}}} = Automation.get_rule(rule.id, authorize?: false)
+    end
+  end
+
+  describe "shapes that are not just required keys" do
+    test "an optional key of the wrong type is refused" do
+      result =
+        create(%{
           trigger_event: :published,
-          action: :send_email,
-          config: %{},
-          enabled: true
+          action: :broadcast,
+          config: %{"topic" => 42}
         })
 
-      assert rule.config == %{}
+      assert {:error, _} = result
+      assert messages(result) =~ "must be a non-empty string"
+    end
+
+    test "newsletter's optional keys are accepted when well-typed" do
+      assert {:ok, _} =
+               create(%{
+                 trigger_event: :published,
+                 action: :newsletter,
+                 config: %{"segment_id" => Ash.UUID.generate(), "subject" => "New: {{title}}"}
+               })
+    end
+
+    test "social_post takes an optional template alongside its provider" do
+      assert {:ok, _} =
+               create(%{
+                 trigger_event: :published,
+                 action: :social_post,
+                 config: %{"provider" => "mastodon", "template" => "New: {{title}} {{url}}"}
+               })
     end
   end
 end

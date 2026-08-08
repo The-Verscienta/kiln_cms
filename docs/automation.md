@@ -174,8 +174,9 @@ Phase-1 slice:
   recognize are all refused beside the field rather than accepted and warned
   about at runtime — a rule that cannot work should not be able to sit in the
   list looking enabled. `ActionConfig.shapes/0` is the single description of
-  what each reaction accepts; the admin form's hint text and this validation
-  read the same table.
+  what each reaction accepts, and the admin form renders its per-action key
+  hint by reading that table — so the hint beside the field cannot drift from
+  what the save will allow.
 
   Two mistakes it exists to catch: `"allow_egress": "true"` (the string — every
   other key in that textarea is one, and the runtime gate correctly fails

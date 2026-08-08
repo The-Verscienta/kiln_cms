@@ -27,9 +27,12 @@ defmodule KilnCMS.Automation.Validations.ActionConfig do
   unrecognized key turns that into a message beside the field.
 
   The cost is that adding a config key to a reaction means adding it here too.
-  That is the intended coupling: `@shapes` is the one description of what a
-  reaction accepts, and `KilnCMSWeb.AutomationLive` builds its own hint text
-  from it rather than restating it.
+  That is the intended coupling, and it is one-way: `@shapes` is the single
+  description of what a reaction accepts, and `KilnCMSWeb.AutomationLive`
+  renders its per-action key hint by *reading* `shapes/0` rather than by
+  restating it. A hand-maintained list of the same keys beside the field would
+  be a doc that drifts from its own enforcement — the shape of the bug this
+  validation exists to end.
   """
   use Ash.Resource.Validation
 

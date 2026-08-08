@@ -185,6 +185,29 @@ defmodule KilnCMSWeb.AutomationLiveTest do
       assert Automation.list_rules!(authorize?: false) == []
     end
 
+    test "the accepted keys beside the field come from the enforcing table", %{conn: conn} do
+      # Rendered from ActionConfig.shapes/0, so it cannot drift from what the
+      # save allows — a hand-maintained list is the failure mode #944 is about.
+      {:ok, view, html} = live(conn, ~p"/editor/automation")
+
+      # The first action kind is what the untouched select displays.
+      assert html =~ "send_email accepts: to (required), subject, body"
+
+      html =
+        view
+        |> form("#new-rule-form", rule: %{action: "suggest_metadata"})
+        |> render_change()
+
+      assert html =~ "suggest_metadata accepts: to (required), allow_egress"
+
+      html =
+        view
+        |> form("#new-rule-form", rule: %{action: "reindex"})
+        |> render_change()
+
+      assert html =~ "reindex accepts: no config"
+    end
+
     test "an admin can toggle and delete a rule", %{conn: conn} do
       {:ok, rule} =
         Automation.create_rule(
