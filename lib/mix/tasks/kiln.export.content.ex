@@ -16,6 +16,8 @@ defmodule Mix.Tasks.Kiln.Export.Content do
   ## Options
 
       --out FILE         write here (default: stdout)
+      --format FORMAT    json (default) | csv. CSV needs exactly one --type and
+                         refuses a type whose records carry prose blocks.
       --type NAME        export only this type; repeatable
       --state STATE      published | draft | archived; repeatable
                          (default: published and draft)
@@ -32,12 +34,14 @@ defmodule Mix.Tasks.Kiln.Export.Content do
   use Mix.Task
 
   alias KilnCMS.Portability.CLI
+  alias KilnCMS.Portability.CSV
   alias KilnCMS.Portability.Export
 
   @requirements ["app.start"]
 
   @switches [
     out: :string,
+    format: :string,
     type: :keep,
     state: :keep,
     locale: :string,
@@ -62,10 +66,50 @@ defmodule Mix.Tasks.Kiln.Export.Content do
         maybe(:locale, opts[:locale]) ++
         maybe(:limit, opts[:limit])
 
-    case Export.to_json(types, export_opts) do
-      {:ok, json} -> emit(json, opts[:out])
-      {:error, reason} -> Mix.raise("Export failed: #{inspect(reason)}")
+    case format(opts) do
+      :json ->
+        case Export.to_json(types, export_opts) do
+          {:ok, json} -> emit(json, opts[:out])
+          {:error, reason} -> Mix.raise("Export failed: #{inspect(reason)}")
+        end
+
+      :csv ->
+        emit_csv(types, export_opts, opts[:out])
     end
+  end
+
+  defp format(opts) do
+    case opts[:format] do
+      nil -> :json
+      "json" -> :json
+      "csv" -> :csv
+      other -> Mix.raise("unknown --format #{inspect(other)} (expected json or csv)")
+    end
+  end
+
+  # One type per file: a CSV has one header row, so a file mixing posts and
+  # recipes cannot describe both.
+  defp emit_csv([type], export_opts, out) do
+    {:ok, envelope} = Export.run([type], export_opts)
+
+    case CSV.encode(envelope["records"], type, export_opts) do
+      {:ok, csv} ->
+        emit(csv, out)
+
+      {:error, {:has_blocks, slugs}} ->
+        Mix.raise("""
+        #{length(slugs)} record(s) of #{type} carry a block body, which CSV cannot
+        represent: #{Enum.take(slugs, 5) |> Enum.join(", ")}#{if length(slugs) > 5, do: " …"}
+
+        Flattening prose to a cell loses its structure, and re-importing that
+        file would silently delete the formatting. Use --format json for this
+        type.
+        """)
+    end
+  end
+
+  defp emit_csv(_types, _export_opts, _out) do
+    Mix.raise("--format csv needs exactly one --type (a CSV has one header row)")
   end
 
   defp states(opts) do
