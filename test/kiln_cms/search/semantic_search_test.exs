@@ -50,9 +50,11 @@ defmodule KilnCMS.Search.SemanticSearchTest do
   #
   # `:search_semantic` filters `not is_nil(embedding)`, so a record whose job
   # never completed is silently absent from every semantic read — and
-  # `Oban.drain_queue/1` runs only what is *available*: a job that failed once
-  # goes `retryable` with a future `scheduled_at` and is left behind. Under load
-  # that is a plausible way for a drain to come back having embedded nothing.
+  # `Oban.drain_queue/1` runs only what is *available*. A job that failed once
+  # goes `retryable`, and nothing promotes it back: `with_scheduled` defaults to
+  # false, and the Stager that would otherwise stage it does not run in tests.
+  # So it is not merely that a future `scheduled_at` is skipped — ANY retryable
+  # job is left behind, permanently, for the rest of the test.
   #
   # Checking it here is what separates the two failures #617 could not tell
   # apart. A missing embedding fails on this line, named as a timing problem;
@@ -65,11 +67,17 @@ defmodule KilnCMS.Search.SemanticSearchTest do
     for %resource{id: id} = record <- List.wrap(records) do
       reloaded = Ash.get!(resource, id, authorize?: false)
 
-      refute is_nil(reloaded.embedding),
-             "#{inspect(resource)} #{id} (#{record.title}) has no embedding after " <>
-               "embed_all/0. The embedding job did not complete, so this run says " <>
-               "nothing about read visibility. Jobs left in the queue: " <>
-               inspect(leftover_jobs())
+      # `flunk/1` inside an `unless`, not `refute/2`: `refute` is a function,
+      # so its message — including the query below — is built on every passing
+      # call. This one only runs when it is going to be read.
+      unless reloaded.embedding do
+        flunk(
+          "#{inspect(resource)} #{id} (#{record.title}) has no embedding after " <>
+            "embed_all/0. The embedding job did not complete, so this run says " <>
+            "nothing about read visibility. Embedding jobs left in the queue: " <>
+            inspect(leftover_jobs())
+        )
+      end
 
       reloaded
     end
@@ -79,12 +87,23 @@ defmodule KilnCMS.Search.SemanticSearchTest do
   # attempt count is the signature of a job that failed and was rescheduled out
   # of the drain's reach; an empty list means the job never got enqueued at all,
   # which is a different bug again.
+  #
+  # `errors` and `scheduled_at` are the two that actually name the cause —
+  # `errors` carries the exception and stacktrace Oban recorded on the failed
+  # attempt, which is the thing #617 says is currently impossible to get at.
+  # Scoped to the search queue: the other queues' jobs are noise in a message
+  # about embeddings.
   defp leftover_jobs do
-    import Ecto.Query, only: [from: 2]
-
     KilnCMS.Repo.all(
       from(j in "oban_jobs",
-        select: %{worker: j.worker, state: j.state, attempt: j.attempt, queue: j.queue}
+        where: j.queue == "search",
+        select: %{
+          worker: j.worker,
+          state: j.state,
+          attempt: j.attempt,
+          scheduled_at: j.scheduled_at,
+          errors: j.errors
+        }
       )
     )
   end
