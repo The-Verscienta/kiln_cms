@@ -270,8 +270,8 @@ defmodule KilnCMSWeb.MediaLiveTest do
 
       assert panel =~ ~s(role="dialog")
       assert panel =~ ~s(aria-modal="true")
-      assert panel =~ ~s(aria-labelledby="media-detail-title")
-      assert panel =~ ~s(id="media-detail-title")
+      assert panel =~ ~s(aria-labelledby="media-detail-dialog-title")
+      assert panel =~ ~s(id="media-detail-dialog-title")
       assert panel =~ ~s(phx-hook="FocusTrap")
     end
   end

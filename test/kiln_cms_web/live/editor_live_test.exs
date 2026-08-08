@@ -1068,8 +1068,8 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       assert picker =~ ~s(role="dialog")
       assert picker =~ ~s(aria-modal="true")
-      assert picker =~ ~s(aria-labelledby="image-picker-title")
-      assert picker =~ ~s(id="image-picker-title")
+      assert picker =~ ~s(aria-labelledby="image-picker-dialog-title")
+      assert picker =~ ~s(id="image-picker-dialog-title")
       assert picker =~ ~s(phx-hook="FocusTrap")
     end
 
