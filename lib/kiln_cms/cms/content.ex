@@ -1316,7 +1316,8 @@ defmodule KilnCMS.CMS.Content do
           :set_embedding,
           :set_published_version_id,
           :set_oembed_metadata,
-          :backdate_published_at
+          :backdate_published_at,
+          :reassign_author
         ])
 
         # No FK from version -> source, so a `:purge` can hard-delete a record
@@ -1966,6 +1967,22 @@ defmodule KilnCMS.CMS.Content do
         update :backdate_published_at do
           require_atomic? false
           accept [:published_at]
+        end
+
+        # Internal: attribute an imported record to its original author (#950).
+        #
+        # `:create` carries `relate_actor(:author)`, which stamps whoever is
+        # running the import — correct for authored content, wrong for migrated
+        # content, where the byline belongs to whoever wrote it on the old site.
+        # Its own action for the same reason the two above are: `:update` would
+        # fire `NotifyWebhooks` and `FireArtifacts` for what is bookkeeping.
+        #
+        # The create still runs under the OPERATOR's actor, so an import can
+        # never mint content a mapped author was not allowed to create; only the
+        # attribution moves afterwards.
+        update :reassign_author do
+          require_atomic? false
+          accept [:author_id]
         end
 
         # Internal: write resolved oEmbed metadata back onto the blocks (#489).
