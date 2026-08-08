@@ -102,6 +102,63 @@ defmodule KilnCMS.Config.EnvTest do
   # #634: the stderr line is the only signal an operator gets that a flag did not
   # take effect, and in a release it reaches container stdout and nothing else.
   # `collected/0` is what lets `KilnCMS.Application` replay it through `Logger`.
+  describe "positive_integer/1" do
+    test "a positive integer is returned as one" do
+      for {raw, parsed} <- [{"1", 1}, {"7", 7}, {"230", 230}, {" 90 ", 90}, {"\t5\n", 5}] do
+        put(raw)
+        assert Env.positive_integer(@var) == {:ok, parsed}
+      end
+    end
+
+    test "unset, blank and whitespace-only are :unset, not a value" do
+      for raw <- [nil, "", " ", "\t\n"] do
+        put(raw)
+
+        # `BACKUP_MEDIA_DIR=` in a compose file is how an operator writes "leave
+        # this alone". Warning about it would be noise on every boot, so this
+        # has to be `:unset` and not `:unrecognized`.
+        assert quietly(fn -> Env.positive_integer(@var) end) == :unset
+      end
+    end
+
+    test "zero and negatives are rejected, not read literally" do
+      # The whole reason for `positive_integer` rather than a plain parse:
+      # `BACKUP_KEEP_DAYS=0` taken at face value deletes every backup it had
+      # just taken, and `-1` is not a shorter way to say "off".
+      for raw <- ["0", "-1", "-230", "00"] do
+        put(raw)
+        assert quietly(fn -> Env.positive_integer(@var) end) == :unrecognized
+      end
+    end
+
+    test "a partly-numeric value is rejected rather than truncated" do
+      # `Integer.parse/1` alone returns `{7, " days"}` here. Reading that as 7
+      # is the silent half-application this exists to prevent — the operator
+      # meant a week and would never learn otherwise.
+      for raw <- ["7 days", "7d", "1_000", "12.5", "1e3", "many", "+"] do
+        put(raw)
+        assert quietly(fn -> Env.positive_integer(@var) end) == :unrecognized
+      end
+    end
+
+    test "a rejected value warns, quoting exactly what the operator typed" do
+      put(" 7 days ")
+
+      warning = capture_io(:stderr, fn -> Env.positive_integer(@var) end)
+
+      assert warning =~ @var
+      assert warning =~ ~s(" 7 days ")
+      assert warning =~ "positive integer"
+      # The default is what actually takes effect, so the line has to say so.
+      assert warning =~ "keeping the configured default"
+    end
+
+    test "a recognized value warns about nothing" do
+      put("230")
+      assert capture_io(:stderr, fn -> Env.positive_integer(@var) end) == ""
+    end
+  end
+
   describe "collected/0" do
     setup do
       # No `on_exit` drain: `on_exit` callbacks run in a separate process from
@@ -119,7 +176,7 @@ defmodule KilnCMS.Config.EnvTest do
       # The raw value, for the same reason the stderr line quotes it: the
       # trimming and downcasing are what caused the mismatch, so the normalized
       # form is the one string that isn't in their compose file.
-      assert Env.collected() == [{@var, " Enabled "}]
+      assert Env.collected() == [{@var, " Enabled ", :boolean}]
     end
 
     test "recognized values, blanks and unset reads record nothing" do
@@ -139,13 +196,35 @@ defmodule KilnCMS.Config.EnvTest do
         quietly(fn -> Env.fetch(@var) end)
       end
 
-      assert Env.collected() == [{@var, "ture"}, {@var, "yess"}, {@var, "of"}]
+      assert Env.collected() == [
+               {@var, "ture", :boolean},
+               {@var, "yess", :boolean},
+               {@var, "of", :boolean}
+             ]
     end
 
     test "flag/2 records too — it is the form most call sites use" do
       put("ture")
       assert quietly(fn -> Env.flag(@var, false) end) == false
-      assert Env.collected() == [{@var, "ture"}]
+      assert Env.collected() == [{@var, "ture", :boolean}]
+    end
+
+    test "positive_integer/1 records too, tagged as a count and not a flag" do
+      # The tag is not decoration: `replay_collected/0` turns it into the
+      # "write this instead" half of the message, and a count replayed with the
+      # boolean spellings sends the operator to fix the one thing that was fine.
+      put("7 days")
+      assert quietly(fn -> Env.positive_integer(@var) end) == :unrecognized
+      assert Env.collected() == [{@var, "7 days", :positive_integer}]
+    end
+
+    test "a blank count records nothing, the same as a blank flag" do
+      for raw <- ["", " ", nil] do
+        put(raw)
+        quietly(fn -> Env.positive_integer(@var) end)
+      end
+
+      assert Env.collected() == []
     end
 
     test "truthy?/1 records nothing, because it warns about nothing" do
@@ -177,7 +256,11 @@ defmodule KilnCMS.Config.EnvTest do
     test "each collected warning is re-emitted through Logger" do
       # The point of #634: `Logger` is what reaches Sentry and every other sink.
       # The stderr line `fetch/1` writes never leaves container stdout.
-      log = replay([{"DATABASE_SSL", "enabled"}, {"KILN_AUDIT_ANCHOR_EVERY_WRITE", "ture"}])
+      log =
+        replay([
+          {"DATABASE_SSL", "enabled", :boolean},
+          {"KILN_AUDIT_ANCHOR_EVERY_WRITE", "ture", :boolean}
+        ])
 
       assert log =~ "DATABASE_SSL is set to an unrecognized value"
       assert log =~ ~s("enabled")
@@ -189,15 +272,52 @@ defmodule KilnCMS.Config.EnvTest do
       # The operator's actual question is "did my flag apply?", and the answer
       # has to be in the line itself — they are reading it in Sentry, detached
       # from the config file that produced it.
-      log = replay([{"DATABASE_SSL", "enabled"}])
+      log = replay([{"DATABASE_SSL", "enabled", :boolean}])
 
       assert log =~ "had no effect"
       assert log =~ "true/1/yes/on"
       assert log =~ "false/0/no/off"
     end
 
+    test "a count is told to write an integer, not a boolean spelling" do
+      # Before #1009 this module read booleans only and the advice was one
+      # hardcoded list. Replaying `BACKUP_KEEP_DAYS` with "Use one of:
+      # true/1/yes/on" would point the operator at the one thing that was never
+      # wrong — and `1` being a valid *boolean* spelling makes the wrong advice
+      # look plausible enough to follow.
+      log = replay([{"BACKUP_KEEP_DAYS", "7 days", :positive_integer}])
+
+      assert log =~ "BACKUP_KEEP_DAYS"
+      assert log =~ "had no effect"
+      assert log =~ "Use a positive integer."
+      refute log =~ "true/1/yes/on"
+    end
+
+    test "flags and counts in one boot each get their own advice" do
+      log =
+        replay([
+          {"DATABASE_SSL", "enabled", :boolean},
+          {"BACKUP_KEEP_DAYS", "0", :positive_integer}
+        ])
+
+      assert log =~ "true/1/yes/on"
+      assert log =~ "Use a positive integer."
+    end
+
+    test "a two-element entry is still replayed, not silently dropped" do
+      # `for {a, b, c} <- list` FILTERS OUT what does not match rather than
+      # raising, so before #1009's shape change was handled explicitly a
+      # leftover two-element entry would have vanished without trace — a
+      # warning disappearing in silence being the one failure this module
+      # exists to prevent.
+      log = replay([{"DATABASE_SSL", "enabled"}])
+
+      assert log =~ "DATABASE_SSL"
+      assert log =~ "true/1/yes/on"
+    end
+
     test "it warns, not infos — this is a misconfiguration" do
-      assert replay([{"DATABASE_SSL", "enabled"}]) =~ "[warning]"
+      assert replay([{"DATABASE_SSL", "enabled", :boolean}]) =~ "[warning]"
     end
 
     # `Sentry.Test`'s collector needs `test_mode: true` in the :sentry app config,
@@ -234,7 +354,7 @@ defmodule KilnCMS.Config.EnvTest do
       # `:crash_reason` metadata is ignored even above that level. Without an
       # explicit `capture_message/2` this is inert for Sentry — the exact state
       # #634 was filed to end.
-      capturing_sentry(fn -> replay([{"DATABASE_SSL", "enabled"}]) end)
+      capturing_sentry(fn -> replay([{"DATABASE_SSL", "enabled", :boolean}]) end)
 
       assert_receive {:sentry_event, event}
       assert event.message.formatted =~ "DATABASE_SSL is set to an unrecognized value"
@@ -283,9 +403,9 @@ defmodule KilnCMS.Config.EnvTest do
       [_before, after_handoff] =
         String.split(source, "config :kiln_cms, :config_warnings", parts: 2)
 
-      refute after_handoff =~ ~r/\bEnv\.(flag|fetch|truthy\?)\(/,
+      refute after_handoff =~ ~r/\bEnv\.(flag|fetch|truthy\?|positive_integer)\(/,
              """
-             config/runtime.exs reads an environment flag below the \
+             config/runtime.exs reads an environment variable below the \
              `:config_warnings` handoff. Move the read above it, or that \
              variable's unrecognized-value warning reaches stderr only (#634).\
              """
