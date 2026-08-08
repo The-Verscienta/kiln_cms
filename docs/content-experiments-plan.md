@@ -219,10 +219,27 @@ on a counter.
   endpoint's rate limit. The point is that the blast radius stops at "an arm
   someone could see".
 
-- `content_view` — **not in v1.** Attributing a view that happens on a later page
-  needs a stable visitor key, which the built-in site does not have. Rather than
-  accept a goal that would silently never convert, the schema refuses it until
-  phase 3 brings the sticky-assignment cookie and its privacy review.
+- `content_view` — **phase 3 (#984), and only with sticky assignment on.**
+  Attributing a view that happens on a later page needs to know the visitor was
+  *exposed*, which the stateless built-in site cannot know. `KilnCMS.Experiments.Sticky`
+  supplies it: a second cookie recording which arm the visitor saw, cleared the
+  moment it converts, so one exposure counts once.
+
+  A bucket alone is **not** enough and this is the trap worth naming — every
+  visitor has a bucket, so counting off the bucket would count people who never
+  encountered the test.
+
+  `:start` refuses a `content_view` experiment while `sticky` is off, or with no
+  target document, or when the target *is* the experimented document (which
+  would convert every impression on the view that created it). Rather than
+  accept a goal that would silently never convert, it is refused at the only
+  moment there is still someone to tell.
+
+  **The cost, stated plainly:** the goal document also loses its shared cache
+  while the experiment runs. The conversion is counted at the origin, so a CDN
+  holding that page for `max-age=60` would swallow every conversion after the
+  first — invariant 4 applied to a second page. A `content_view` experiment
+  therefore takes *two* pages out of the CDN, not one.
 
 Results are a proportion comparison with a stated confidence, not a dashboard of
 knobs. No sequential testing, no peeking correction, no p-hacking surface — a
@@ -281,9 +298,12 @@ feature becomes usable by the people it is for.
 
 **Phase 3 — measurement depth**
 
-The `content_view` goal on the built-in site (needs the sticky-assignment cookie
-and its privacy review), funnel-completion as a goal, and a results panel with a
-sample-size floor.
+The sticky-assignment cookie and the `content_view` goal on top of it — **done**
+(#984); see [`data-flows.md`](data-flows.md#sticky-assignment-cookie-984) for
+what is stored and why. Still open: funnel-completion as a goal (#1010), a
+results panel with a sample-size floor (#982), bounding conversion abuse on the
+new GET path (#1007), and surfacing an experiment that can no longer convert
+(#1008).
 
 **Deliberately not planned:** per-visitor personalization rules, multi-armed
 bandits, traffic allocation ramps, and anything that needs a visitor profile.

@@ -65,7 +65,15 @@ defmodule KilnCMS.Experiments.Experiment do
   actions do
     defaults [:read]
 
-    default_accept [:name, :content_type, :document_id, :goal, :goal_form_id, :goal_document_id]
+    default_accept [
+      :name,
+      :content_type,
+      :document_id,
+      :goal,
+      :goal_form_id,
+      :goal_content_type,
+      :goal_document_id
+    ]
 
     create :create do
       primary? true
@@ -88,12 +96,10 @@ defmodule KilnCMS.Experiments.Experiment do
     update :start do
       require_atomic? false
       accept []
-      # Without a goal form nothing can ever convert: `Delivery.converts?/3`
-      # requires the submitted form to BE the goal. Starting anyway would cost
-      # the page its shared cache, accumulate impressions on every arm, and
-      # report 0.0% forever.
-      validate present(:goal_form_id),
-        message: "a form-submission experiment needs a goal form before it can start"
+      # The goal has to be able to fire. Starting an experiment that cannot
+      # convert costs the page its shared cache, accumulates impressions on
+      # every arm, and reports 0.0% forever — while looking fine.
+      validate KilnCMS.Experiments.Validations.GoalConfigured
 
       change transition_state(:running)
       change set_attribute(:started_at, &DateTime.utc_now/0)
@@ -166,14 +172,14 @@ defmodule KilnCMS.Experiments.Experiment do
 
     attribute :document_id, :uuid, allow_nil?: false, public?: true
 
-    # `:content_view` is deliberately NOT in this set yet. Attributing a view
-    # that happens on a later page needs a stable visitor key, which the
-    # built-in site does not have and will not until the sticky-assignment
-    # cookie gets its own privacy review (phase 3, see the plan doc). Accepting
-    # it here would let an operator create and start a test that silently never
-    # records a conversion — the worst failure mode a measurement feature has.
+    # `:content_view` attributes a view of a *different* document as the
+    # conversion, so it can only work where the site can tell a visitor who was
+    # exposed to the experiment from one who was not. On the built-in site that
+    # is the opt-in sticky cookie (#984) and nothing else, which is why
+    # `Validations.GoalConfigured` refuses to start such an experiment while
+    # `sticky` is off rather than letting it report 0.0% forever.
     attribute :goal, :atom do
-      constraints one_of: [:form_submission]
+      constraints one_of: [:form_submission, :content_view]
       default :form_submission
       allow_nil? false
       public? true
@@ -182,8 +188,10 @@ defmodule KilnCMS.Experiments.Experiment do
     # Which form counts as a conversion, for a `:form_submission` goal.
     attribute :goal_form_id, :uuid, public?: true
 
-    # Reserved for the `:content_view` goal (phase 3). The column exists so the
-    # migration that turns the goal on is additive; nothing reads it yet.
+    # The target document, for a `:content_view` goal — the same
+    # `(content_type, document_id)` pair the experiment itself targets, and for
+    # the same reason: a dynamic content type (D17) has no resource to key on.
+    attribute :goal_content_type, :string, public?: true
     attribute :goal_document_id, :uuid, public?: true
 
     attribute :winner_variant_id, :uuid, writable?: false, public?: true

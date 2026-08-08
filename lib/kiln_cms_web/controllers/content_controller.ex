@@ -115,11 +115,22 @@ defmodule KilnCMSWeb.ContentController do
     else
       ViewTracking.track(conn, :html, type_string, payload.record.id, payload.record.org_id)
 
-      # A/B experiments (#499). Stateless on this surface: a variant is drawn per
-      # request and nothing is stored about the visitor. `nil` — no experiment,
-      # or the feature is off — is the overwhelmingly common case and costs one
-      # cached lookup.
-      variant = Experiments.Delivery.assign(type_string, payload.record)
+      # A/B experiments (#499). Stateless by default on this surface: a variant
+      # is drawn per request and nothing is stored about the visitor. `nil` — no
+      # experiment, or the feature is off — is the overwhelmingly common case
+      # and costs one cached lookup.
+      #
+      # With `sticky: true` (#984, opt-in) the visitor keeps their arm across
+      # reloads via a bucket cookie, and the conn comes back carrying it. The
+      # page is `private, no-store` either way — stickiness changes which arm a
+      # visitor sees, not that the body differs between visitors.
+      {variant, conn} = Experiments.Delivery.assign_sticky(type_string, payload.record, conn)
+
+      # And this page may itself be some *other* experiment's `:content_view`
+      # goal — the conversion happens on a later page than the assignment, which
+      # is the whole reason that goal needs the sticky cookie (#984). A no-op
+      # unless the visitor carries an exposure this page converts.
+      conn = Experiments.Delivery.record_content_view(type_string, payload.record, conn)
 
       render_content(conn, view, payload, ct, audiences, variant)
     end
@@ -711,13 +722,19 @@ defmodule KilnCMSWeb.ContentController do
     # minute. The experiment then reports a 50/50 split that never happened.
     # `etag/1` has no variant dimension either, so a conditional request would
     # 304 a visitor into whichever arm the cache is holding.
-    # And a document behind a passphrase (#496) is private for the plainest
-    # reason of the three: with `public, max-age=60` the first unlocked visitor
-    # populates a shared cache, and the next sixty seconds of anonymous visitors
-    # read it without ever seeing the lock page. A shared secret is weak access
-    # control; a shared secret plus a shared cache is none.
+    # A document behind a passphrase (#496) is private for the plainest reason of
+    # the four: with `public, max-age=60` the first unlocked visitor populates a
+    # shared cache, and the next sixty seconds of anonymous visitors read it
+    # without ever seeing the lock page. A shared secret is weak access control;
+    # a shared secret plus a shared cache is none.
+    # And a `:content_view` goal document (#984) is private because the
+    # conversion is counted at the ORIGIN: a CDN holding this page would swallow
+    # every conversion after the first and report a fraction of the truth. See
+    # `KilnCMS.Experiments.Delivery.goal_page?/1`.
     private? =
-      audiences != [] or variant != nil or not is_nil(Map.get(record, :access_password_hash))
+      audiences != [] or variant != nil or
+        not is_nil(Map.get(record, :access_password_hash)) or
+        Experiments.Delivery.goal_page?(conn)
 
     conn =
       if private?,
