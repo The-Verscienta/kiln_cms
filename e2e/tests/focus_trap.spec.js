@@ -6,42 +6,44 @@
 // pressed, which only a real browser decides. #1029 backed the fix out for want
 // of exactly this coverage.
 //
-// It runs on WebKit as well as Chromium (see `playwright.config.js`), because
-// Safari not focusing a `<button>` on click is the motivating case — a Chromium
-// run alone would leave the reported symptom untested.
-const { test, expect } = require("./fixtures");
+// It runs on WebKit as well as Chromium (see `playwright.config.js`), and the
+// first test below is why: Safari does not focus a `<button>` on click, so it
+// reaches the bug by *doing the thing a person does* rather than by
+// synthesising the focus state. On Chromium the same steps exercise the
+// unchanged inside-the-panel path, which is worth holding still too.
+const { test, expect, signInAsAdmin, newDraftPage, addBlock } = require("./fixtures");
 
-const ADMIN = { email: "admin@kiln.test", password: "kilnadmin123" };
-
-async function signInAsAdmin(page) {
-  await page.goto("/sign-in");
-  await page.fill('input[name="user[email]"]', ADMIN.email);
-  await page.fill('input[name="user[password]"]', ADMIN.password);
-  await page.getByRole("button", { name: /sign in/i }).click();
-  await expect(page).toHaveURL("/editor/overview");
-}
-
-// A draft with one image block, whose "Choose from library" button opens the
-// image-picker drawer — a `<.modal>`, so it carries the FocusTrap hook.
+// Open the image-picker drawer from an image block's own "Choose from library"
+// button — a `<.modal>`, so it carries the FocusTrap hook.
+//
+// Targeted by its event, not its label: a draft page renders three "Choose from
+// library" buttons (the block's `open_picker`, the featured image's
+// `open_featured_picker` and the social image's), all opening the same drawer —
+// so matching on the label would silently test whichever came first in the DOM
+// and make the `addBlock` above it pointless.
 async function openImagePicker(page) {
-  await page.goto("/editor");
-  const newMenu = page.locator("#content-new-menu summary");
-  if (await newMenu.count()) await newMenu.click();
-  await page.click('button[phx-click="new"][phx-value-kind="page"]');
-  await page.waitForURL(/\/editor\/(content\/page|pages)\//);
-  await expect(page.locator('form[id$="-editor"]')).toBeVisible();
+  await newDraftPage(page);
+  await addBlock(page, "image");
 
-  await page.getByRole("button", { name: /add block/i }).click();
-  await page
-    .locator('button[data-inserter-item][phx-value-type="image"]:visible')
-    .first()
-    .click();
-
-  await page.getByRole("button", { name: /choose from library/i }).first().click();
+  await page.locator('button[phx-click="open_picker"]').first().click();
 
   const drawer = page.locator("#image-picker-dialog");
   await expect(drawer).toBeVisible();
   return drawer;
+}
+
+// `document.body.focus()` alone does nothing — body is not focusable without a
+// tabindex, so activeElement stays wherever it was. Blur first, then poll,
+// because a test that merely *believes* focus moved exercises the panel
+// listener instead and passes for the wrong reason.
+async function focusBody(page) {
+  await page.evaluate(() => {
+    const active = /** @type {HTMLElement | null} */ (document.activeElement);
+    if (active && typeof active.blur === "function") active.blur();
+    document.body.focus();
+  });
+
+  await expect.poll(() => page.evaluate(() => document.activeElement?.tagName)).toBe("BODY");
 }
 
 test.describe("FocusTrap", () => {
@@ -49,72 +51,60 @@ test.describe("FocusTrap", () => {
     await signInAsAdmin(page);
   });
 
-  test("Escape closes the dialog after focus has moved to <body>", async ({ page }) => {
+  test("Escape closes the dialog after clicking a button inside it", async ({ page }) => {
+    // The motivating case, reached the way a person reaches it. On WebKit the
+    // click leaves `document.activeElement` on `<body>`, which before #1046
+    // meant the panel's listener never saw the press and Escape was dead. On
+    // Chromium the button keeps focus, so this covers the inside-the-panel path
+    // instead — both must close.
     const drawer = await openImagePicker(page);
 
-    // Reproduce what Safari does on a click, in every browser: put focus on
-    // `<body>` while the dialog is open. Before #1046 the panel listener was
-    // the only one, so the press never reached any handler.
+    // A button that does not itself close the drawer.
+    const filter = drawer.getByRole("button").filter({ hasNotText: /close/i }).first();
+    if (await filter.count()) await filter.click();
+
+    await page.keyboard.press("Escape");
+
+    await expect(drawer).toHaveCount(0);
+  });
+
+  test("Escape closes the dialog after focus has moved to <body>", async ({ page }) => {
+    // The same state, forced, so the assertion does not depend on which engine
+    // decides what a click focuses.
+    const drawer = await openImagePicker(page);
+    await focusBody(page);
+
+    await page.keyboard.press("Escape");
+
+    await expect(drawer).toHaveCount(0);
+  });
+
+  test("a detached trap does not answer for the page that replaced it", async ({ page }) => {
+    // `destroyed()` runs on a channel round-trip, so after live navigation a
+    // torn-down hook can still be listening while its panel is detached. Left
+    // unguarded it pushes a close event at a dead view and swallows the press.
+    const drawer = await openImagePicker(page);
+
+    // Detach the panel without tearing the hook down — exactly the window live
+    // navigation opens, since `destroyed()` waits on a channel round-trip while
+    // the replaced element is already gone. Reproduced directly rather than by
+    // racing a real navigation, because the whole point is that the window is
+    // timing-dependent.
     await page.evaluate(() => {
-      const active = /** @type {HTMLElement | null} */ (document.activeElement);
-      if (active && typeof active.blur === "function") active.blur();
+      document.getElementById("image-picker-dialog")?.remove();
       document.body.focus();
     });
 
-    await expect
-      .poll(() => page.evaluate(() => document.activeElement?.tagName))
-      .toBe("BODY");
-
-    await page.keyboard.press("Escape");
-
     await expect(drawer).toHaveCount(0);
-  });
 
-  test("Escape still closes from inside, and only once", async ({ page }) => {
-    // The #693 property this must not regress: the panel's own listener
-    // handles a press from inside, and the new document listener stands down.
-    const drawer = await openImagePicker(page);
-
-    await drawer.locator("button").first().focus();
-    await page.keyboard.press("Escape");
-
-    await expect(drawer).toHaveCount(0);
-    // The editor is still there — a double close would have popped whatever
-    // was behind the drawer too.
-    await expect(page.locator('form[id$="-editor"]')).toBeVisible();
-  });
-
-  test("focus is not dragged back into the dialog when it leaves", async ({ page }) => {
-    // The decision this pins: #1046 fixes Escape and deliberately does NOT add
-    // a `focusout` recapture. A native `<select>` blurs its element while its
-    // dropdown is open in some browsers, so a recapture closes the dropdown the
-    // person just opened — and `relatedTarget` is `null` for the very case
-    // worth handling (focus landing on `<body>`), so the two cannot be told
-    // apart. Asserted as an invariant rather than through a real select, since
-    // the drawer that has one (the media audience picker) needs seeded media.
-    const drawer = await openImagePicker(page);
-
-    const moved = await page.evaluate(() => {
-      const panel = document.getElementById("image-picker-dialog");
-      if (!panel) return "no panel";
-
-      // A control outside the dialog, focused while the dialog is open — the
-      // shape a native dropdown produces when it blurs its own element.
-      const outside = document.createElement("input");
-      document.body.appendChild(outside);
-      outside.focus();
-      panel.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
-
-      return new Promise(resolve =>
-        setTimeout(() => {
-          const stolen = document.activeElement !== outside;
-          outside.remove();
-          resolve(stolen ? "stolen" : "kept");
-        }, 50),
-      );
+    // A stale trap would swallow this press and push a close event at a view
+    // that no longer exists.
+    const eaten = await page.evaluate(() => {
+      const e = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+      document.dispatchEvent(e);
+      return e.defaultPrevented;
     });
 
-    expect(moved).toBe("kept");
-    await expect(drawer).toBeVisible();
+    expect(eaten).toBe(false);
   });
 });

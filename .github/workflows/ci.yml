@@ -400,7 +400,12 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('e2e/package.json') }}
+          # The browser list is part of the key, not just the lockfile: adding
+          # webkit (#1046) while `e2e/package.json` happened to change was luck.
+          # Had only the workflow changed, a cache HIT would have restored a
+          # chromium-only store, `playwright install` would re-download webkit
+          # every run, and the save step would never fire.
+          key: ${{ runner.os }}-playwright-chromium-webkit-${{ hashFiles('e2e/package.json') }}
 
       - name: Install Elixir dependencies
         run: mix deps.get
