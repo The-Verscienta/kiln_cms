@@ -13,10 +13,13 @@ defmodule KilnCMS.FeedsTest do
   """
   use KilnCMS.DataCase, async: false
 
+  import KilnCMS.OrgFixtures, only: [org: 1]
+
   alias KilnCMS.Accounts
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Feeds
+  alias KilnCMS.Feeds.Policy
 
   setup do
     original = Application.get_env(:kiln_cms, :feeds, [])
@@ -27,7 +30,7 @@ defmodule KilnCMS.FeedsTest do
       KilnCMS.Cache.bust_feed_policy(Accounts.default_org_id())
     end)
 
-    org = seed_org()
+    org = org("feeds")
     on_exit(fn -> KilnCMS.Cache.bust_feed_policy(org.id) end)
 
     %{org: org, admin: admin()}
@@ -35,15 +38,17 @@ defmodule KilnCMS.FeedsTest do
 
   describe "fallback chain" do
     test "nothing is excluded and nothing is full-content out of the box", %{org: org} do
-      assert Feeds.policy(org) == %{exclude: [], full_content: []}
+      assert Feeds.policy(org) == %Policy{exclude: [], full_content: []}
     end
 
     test "the operator config is the layer beneath a site", %{org: org} do
       put_config(exclude: ["page"], full_content: ["post"])
 
-      assert Feeds.policy(org) == %{exclude: ["page"], full_content: ["post"]}
-      assert Feeds.full_content?(descriptor(:post), org)
-      refute Feeds.syndicated?(descriptor(:page), org)
+      policy = Feeds.policy(org)
+
+      assert policy == %Policy{exclude: ["page"], full_content: ["post"]}
+      assert Feeds.full_content?(descriptor(:post), policy)
+      refute Feeds.syndicated?(descriptor(:page), policy)
     end
 
     test "a per-site row overrides the operator config", ctx do
@@ -64,18 +69,14 @@ defmodule KilnCMS.FeedsTest do
       policy = Feeds.policy(ctx.org)
 
       # Only full content was said; the exclusion list still inherits.
+      #
+      # And an empty saved list means NONE, not "unset" — the distinction the
+      # nullable columns exist for. Collapsing `[]` into "inherit" would make an
+      # admin who cleared the full-content list fall back to a config that turns
+      # it on, the inversion #719 exists to remove.
       assert policy.full_content == []
       assert policy.exclude == ["page"]
-    end
-
-    test "an empty list means NONE, not 'unset'", ctx do
-      # The distinction the nullable columns exist for. Collapsing `[]` into
-      # "inherit" would make an admin who cleared the full-content list fall
-      # back to a config that turns it on — the inversion #719 exists to remove.
-      put_config(full_content: ["post"])
-      save(ctx, %{full_content_types: []})
-
-      refute Feeds.full_content?(descriptor(:post), Feeds.policy(ctx.org))
+      refute Feeds.full_content?(descriptor(:post), policy)
     end
 
     test "a site may syndicate a type the operator excluded deployment-wide", ctx do
@@ -89,7 +90,7 @@ defmodule KilnCMS.FeedsTest do
 
     test "accepts an org struct, a bare id, or nil, and always returns both keys", %{org: org} do
       for arg <- [org, org.id, nil] do
-        assert %{exclude: exclude, full_content: full_content} = Feeds.policy(arg)
+        assert %Policy{exclude: exclude, full_content: full_content} = Feeds.policy(arg)
         assert is_list(exclude) and is_list(full_content)
       end
     end
@@ -99,7 +100,7 @@ defmodule KilnCMS.FeedsTest do
     test "one site's full-content choice never reaches another's feed", ctx do
       # The scenario in the issue, in one test. Tenant A wants the whole body;
       # B and C share the compiled `post` type and must not be opted in for it.
-      other = seed_org()
+      other = org("feeds")
       on_exit(fn -> KilnCMS.Cache.bust_feed_policy(other.id) end)
 
       save(ctx, %{full_content_types: ["post"]})
@@ -109,7 +110,7 @@ defmodule KilnCMS.FeedsTest do
     end
 
     test "one site's exclusion never removes another's feed", ctx do
-      other = seed_org()
+      other = org("feeds")
       on_exit(fn -> KilnCMS.Cache.bust_feed_policy(other.id) end)
 
       save(ctx, %{excluded_types: ["post"]})
@@ -141,7 +142,7 @@ defmodule KilnCMS.FeedsTest do
       # `KilnCMS.Cache.fetch/3` never caches a nil, so caching the row lookup
       # would mean a DB hit on every feed fetch forever for the (common) site
       # with no settings of its own.
-      assert {:ok, %{exclude: _, full_content: _}} =
+      assert {:ok, %Policy{exclude: _, full_content: _}} =
                Cachex.get(KilnCMS.Cache.cache_name(), KilnCMS.Cache.feed_policy_key(ctx.org.id))
     end
 
@@ -155,7 +156,7 @@ defmodule KilnCMS.FeedsTest do
 
     test "a save also drops this site's cached feed documents", ctx do
       key = KilnCMS.Cache.feed_key(ctx.org.id, "post/category/news", :atom)
-      other_key = KilnCMS.Cache.feed_key(seed_org().id, nil, :atom)
+      other_key = KilnCMS.Cache.feed_key(org("feeds").id, nil, :atom)
       Cachex.put(KilnCMS.Cache.cache_name(), key, "<feed/>")
       Cachex.put(KilnCMS.Cache.cache_name(), other_key, "<feed/>")
 
@@ -200,13 +201,50 @@ defmodule KilnCMS.FeedsTest do
       # atoms used to match nothing at all, silently.
       put_config(exclude: [:page], full_content: [:post])
 
-      assert Feeds.policy(org) == %{exclude: ["page"], full_content: ["post"]}
+      assert Feeds.policy(org) == %Policy{exclude: ["page"], full_content: ["post"]}
     end
 
-    test "a config value that is not a list degrades to empty, not a crash", %{org: org} do
-      put_config(exclude: "page", full_content: nil)
+    test "a bare value means the type it names, rather than nothing", %{org: org} do
+      # An operator writing `exclude: "page"` instead of `["page"]` means page.
+      # Discarding it would fail OPEN — the type they took out of syndication
+      # keeps its public feed route — and silently, since nothing validates
+      # this config.
+      put_config(exclude: "page", full_content: "post")
 
-      assert Feeds.policy(org) == %{exclude: [], full_content: []}
+      assert Feeds.policy(org) == %Policy{exclude: ["page"], full_content: ["post"]}
+    end
+
+    test "a value that is not a name at all is dropped, not stringified", %{org: org} do
+      put_config(exclude: [42, {:page}], full_content: nil)
+
+      assert Feeds.policy(org) == %Policy{exclude: [], full_content: []}
+    end
+
+    test "the disclosure axis fails CLOSED when the row cannot be read" do
+      # A rolling deploy before the table exists, or a pool timeout. Falling back
+      # to the operator config here would discard the very opt-out this feature
+      # exists for: a tenant that saved `full_content_types: []` against a
+      # deployment configured `full_content: ["post"]` would start handing out
+      # complete articles for the duration of the fault.
+      put_config(exclude: ["page"], full_content: ["post"])
+
+      assert Feeds.unavailable() == %Policy{exclude: ["page"], full_content: []}
+      # And `exclude` keeps the operator default rather than excluding
+      # everything: taking every tenant's feeds down over a transient read
+      # error is the larger failure, and nothing in a feed is private.
+      refute Feeds.syndicated?(descriptor(:page), Feeds.unavailable())
+      assert Feeds.syndicated?(descriptor(:post), Feeds.unavailable())
+      refute Feeds.full_content?(descriptor(:post), Feeds.unavailable())
+    end
+
+    test "something that is not an org degrades instead of raising" do
+      # Every caller is on an anonymous delivery route, so a wrong argument must
+      # not 500 a public feed — and it must not be read as an org id either,
+      # since `Accounts.org_id/1` answers `nil` with the DEFAULT organization.
+      put_config(full_content: ["post"])
+
+      assert Feeds.policy(%{not: "an org"}) == Feeds.unavailable()
+      assert Feeds.policy(self()) == Feeds.unavailable()
     end
   end
 
@@ -255,14 +293,6 @@ defmodule KilnCMS.FeedsTest do
   end
 
   defp put_config(opts), do: Application.put_env(:kiln_cms, :feeds, opts)
-
-  defp seed_org do
-    Ash.Seed.seed!(Accounts.Organization, %{
-      name: "Feeds Org",
-      slug: "feeds-#{System.unique_integer([:positive])}",
-      status: :active
-    })
-  end
 
   defp admin do
     Ash.Seed.seed!(Accounts.User, %{

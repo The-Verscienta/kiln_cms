@@ -15,6 +15,7 @@ defmodule KilnCMSWeb.FeedSettingsLiveTest do
   """
   use KilnCMSWeb.ConnCase, async: false
 
+  import KilnCMS.OrgFixtures, only: [org: 1]
   import Phoenix.LiveViewTest
 
   alias KilnCMS.Accounts
@@ -28,7 +29,7 @@ defmodule KilnCMSWeb.FeedSettingsLiveTest do
     original = Application.get_env(:kiln_cms, :feeds, [])
     Application.put_env(:kiln_cms, :feeds, [])
 
-    org = seed_org()
+    org = org("feedslive")
 
     on_exit(fn ->
       Application.put_env(:kiln_cms, :feeds, original)
@@ -55,7 +56,7 @@ defmodule KilnCMSWeb.FeedSettingsLiveTest do
       user = authed_user(:editor)
       grant_tier(user, org, :admin)
 
-      {:ok, _lv, html} = org |> org_conn(conn) |> log_in(user) |> live(~p"/editor/feeds")
+      {:ok, _lv, html} = conn |> org_conn(org) |> log_in(user) |> live(~p"/editor/feeds")
 
       assert html =~ "Full content"
       # Every content type the site has, listed by name.
@@ -127,11 +128,85 @@ defmodule KilnCMSWeb.FeedSettingsLiveTest do
       assert row.full_content_types == ["post"]
     end
 
-    test "an all-unchecked column saves as NONE, not as 'inherit'", %{conn: conn, org: org} do
-      # The distinction the nullable columns exist for. If an empty column round
-      # -tripped to `nil` the site would fall back to a config that turns full
-      # text on — the inversion #719 exists to remove — and the admin would have
-      # no way to say "not here".
+    test "keeps a choice about a type the form no longer offers", %{conn: conn, org: org} do
+      # An archived type leaves the registry, so it is not on the page. A save
+      # that rebuilt the lists from the page alone would drop its name — and
+      # restoring the type would then bring it back *syndicating*, reversing an
+      # explicit "not in feeds" with nothing recording the change.
+      CMS.save_feed_settings!(%{excluded_types: ["post", "gone"]},
+        authorize?: false,
+        tenant: org
+      )
+
+      {:ok, lv, _html} = admin_live(conn, org)
+
+      lv
+      |> form("#feed-settings-form", feeds: %{syndicate: ["post", "page"], full_content: []})
+      |> render_submit()
+
+      assert {:ok, [row]} = CMS.list_feed_settings(tenant: org, authorize?: false)
+      assert "gone" in row.excluded_types
+      # And the types the page DID offer still follow the boxes.
+      refute "post" in row.excluded_types
+    end
+
+    test "a payload that is not the shape the form sends is ignored, not fatal", %{
+      conn: conn,
+      org: org
+    } do
+      # `phx-submit` params are decoded from a client-controlled string, so
+      # `feeds` need not be a map at all. Reading a field off a bare binary
+      # would crash the LiveView into a reconnect loop.
+      {:ok, lv, _html} = admin_live(conn, org)
+
+      assert render_submit(lv, "save", %{"feeds" => "not-a-map"}) =~ "Feed settings saved."
+
+      assert {:ok, [row]} = CMS.list_feed_settings(tenant: org, authorize?: false)
+      # Nothing was checked, so nothing syndicates — a legitimate answer.
+      assert "post" in row.excluded_types
+      assert row.full_content_types == []
+    end
+
+    test "resetting twice does not crash the page", %{conn: conn, org: org} do
+      # `@row` is assigned at mount, so a second click (or a second tab) would
+      # destroy an already-deleted record. A bang call there raises out of the
+      # handler and takes the LiveView with it.
+      {:ok, lv, _html} = admin_live(conn, org)
+
+      lv
+      |> form("#feed-settings-form", feeds: %{syndicate: ["post"], full_content: []})
+      |> render_submit()
+
+      render_click(lv, "reset")
+      html = render_click(lv, "reset")
+
+      assert html =~ "using the deployment defaults"
+      assert {:ok, []} = CMS.list_feed_settings(tenant: org, authorize?: false)
+    end
+
+    test "writes for the current site only", %{conn: conn, org: org} do
+      other = org("feedslive")
+      on_exit(fn -> KilnCMS.Cache.bust_feed_policy(other.id) end)
+
+      {:ok, lv, _html} = admin_live(conn, org)
+
+      lv
+      |> form("#feed-settings-form", feeds: %{syndicate: ["post"], full_content: ["post"]})
+      |> render_submit()
+
+      assert {:ok, []} = CMS.list_feed_settings(tenant: other, authorize?: false)
+      assert Feeds.policy(other) == %KilnCMS.Feeds.Policy{exclude: [], full_content: []}
+    end
+
+    test "an empty column saves as NONE, and resetting goes back to inheriting", %{
+      conn: conn,
+      org: org
+    } do
+      # The distinction the nullable columns exist for. An empty saved column
+      # must round-trip as `[]`, not `nil`: if it inherited, the site would fall
+      # back to a config that turns full text ON — the inversion #719 exists to
+      # remove — and the admin would have no way to say "not here". Dropping the
+      # row is the only thing that restores inheritance.
       Application.put_env(:kiln_cms, :feeds, full_content: ["post"])
 
       {:ok, lv, _html} = admin_live(conn, org)
@@ -143,32 +218,6 @@ defmodule KilnCMSWeb.FeedSettingsLiveTest do
       assert {:ok, [row]} = CMS.list_feed_settings(tenant: org, authorize?: false)
       assert row.full_content_types == []
       assert Feeds.policy(org).full_content == []
-    end
-
-    test "writes for the current site only", %{conn: conn, org: org} do
-      other = seed_org()
-      on_exit(fn -> KilnCMS.Cache.bust_feed_policy(other.id) end)
-
-      {:ok, lv, _html} = admin_live(conn, org)
-
-      lv
-      |> form("#feed-settings-form", feeds: %{syndicate: ["post"], full_content: ["post"]})
-      |> render_submit()
-
-      assert {:ok, []} = CMS.list_feed_settings(tenant: other, authorize?: false)
-      assert Feeds.policy(other) == %{exclude: [], full_content: []}
-    end
-
-    test "resetting drops the row and goes back to inheriting", %{conn: conn, org: org} do
-      Application.put_env(:kiln_cms, :feeds, full_content: ["post"])
-
-      {:ok, lv, _html} = admin_live(conn, org)
-
-      lv
-      |> form("#feed-settings-form", feeds: %{syndicate: ["post", "page"], full_content: []})
-      |> render_submit()
-
-      assert Feeds.policy(org).full_content == []
 
       render_click(lv, "reset")
 
@@ -179,7 +228,7 @@ defmodule KilnCMSWeb.FeedSettingsLiveTest do
 
   describe "cross-org write boundary" do
     test "an admin of one site cannot write another site's feed settings", %{org: org} do
-      other = seed_org()
+      other = org("feedslive")
       on_exit(fn -> KilnCMS.Cache.bust_feed_policy(other.id) end)
 
       user = authed_user(:editor)
@@ -190,7 +239,7 @@ defmodule KilnCMSWeb.FeedSettingsLiveTest do
     end
 
     test "a DEFAULT-org admin cannot write another site's feed settings" do
-      other = seed_org()
+      other = org("feedslive")
       on_exit(fn -> KilnCMS.Cache.bust_feed_policy(other.id) end)
 
       user = authed_user(:editor)
@@ -221,17 +270,7 @@ defmodule KilnCMSWeb.FeedSettingsLiveTest do
   end
 
   defp admin_live(conn, org) do
-    org |> org_conn(conn) |> log_in(authed_user(:admin)) |> live(~p"/editor/feeds")
-  end
-
-  defp org_conn(org, conn), do: %{conn | host: "#{org.slug}.#{KilnCMSWeb.Tenant.base_host()}"}
-
-  defp seed_org do
-    Ash.Seed.seed!(Accounts.Organization, %{
-      name: "Feeds Site",
-      slug: "feedslive-#{System.unique_integer([:positive])}",
-      status: :active
-    })
+    conn |> org_conn(org) |> log_in(authed_user(:admin)) |> live(~p"/editor/feeds")
   end
 
   defp grant_tier(user, org, tier) do

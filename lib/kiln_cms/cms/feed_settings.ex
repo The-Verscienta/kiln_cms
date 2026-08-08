@@ -29,6 +29,11 @@ defmodule KilnCMS.CMS.FeedSettings do
     authorizers: [Ash.Policy.Authorizer],
     extensions: [AshAdmin.Resource]
 
+  # A ceiling on how many type names one list may carry. Comfortably above any
+  # real site's type count, and there only so a settings row can never make a
+  # per-request `not in` scan unbounded.
+  @max_types 1_000
+
   admin do
     resource_group :content
     table_columns [:excluded_types, :full_content_types, :updated_at]
@@ -44,6 +49,15 @@ defmodule KilnCMS.CMS.FeedSettings do
 
     default_accept [:excluded_types, :full_content_types]
 
+    # On a conflict AshPostgres narrows `upsert_fields` to the attributes the
+    # changeset actually carries, so omitting one column leaves it alone rather
+    # than nulling it — which is what makes a partial
+    # `save_feed_settings(%{full_content_types: […]})` safe. That narrowing is
+    # computed across a whole *batch*, so a bulk upsert mixing rows that set
+    # different columns would write NULL into the one a given row omitted, and a
+    # NULL here does not mean "unchanged", it means "inherit the operator
+    # config" — the inversion #719 exists to remove. Write these one row at a
+    # time, which is all `/editor/feeds` and the code interface ever do.
     create :save do
       primary? true
       upsert? true
@@ -104,17 +118,24 @@ defmodule KilnCMS.CMS.FeedSettings do
     # dangling reference.
     #
     # Bounded like `FormSpamSettings`' keyword list: a settings value must never
-    # be able to make a per-request filter unbounded.
+    # be able to make a per-request filter unbounded. The bounds are sized to
+    # what a content type can actually be, not picked round: a name is a
+    # `TypeDefinition.name` (or a compiled type's), so it is held to
+    # `KilnCMS.Limits.line()` there and a tighter cap here would make a legally
+    # created type impossible to exclude — the save would fail with a length
+    # error naming a constraint no admin can see, on every subsequent visit to
+    # the page. The list bound is `@max_types` for the same reason: exclusions
+    # are derived by subtraction over *every* type a site has.
     attribute :excluded_types, {:array, :string} do
       allow_nil? true
       public? true
-      constraints max_length: 200, items: [max_length: 100]
+      constraints max_length: @max_types, items: [max_length: KilnCMS.Limits.line()]
     end
 
     attribute :full_content_types, {:array, :string} do
       allow_nil? true
       public? true
-      constraints max_length: 200, items: [max_length: 100]
+      constraints max_length: @max_types, items: [max_length: KilnCMS.Limits.line()]
     end
 
     timestamps()

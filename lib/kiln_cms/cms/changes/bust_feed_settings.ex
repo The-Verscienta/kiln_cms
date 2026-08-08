@@ -14,15 +14,36 @@ defmodule KilnCMS.CMS.Changes.BustFeedSettings do
 
   Every syndicated type's feed is dropped, not just one: unlike a publish, this
   write names no record and no type, so there is nothing narrower to aim at.
+
+  ## After the transaction, not after the action
+
+  Ash runs `after_action` hooks **inside** the write transaction. Busting there
+  looks right and is worse than not busting at all: between the delete and the
+  COMMIT, an anonymous `GET /feed.xml` misses the cache, reads the *pre-save*
+  row on its own snapshot, and re-caches the old policy — and a full-body feed
+  document built from it — with a fresh five-minute TTL. Nothing busts again, so
+  the admin is told the save succeeded while every scraper keeps receiving whole
+  articles for longer than if the hook had never run.
+
+  `after_transaction/2` fires after COMMIT, where the value it drops cannot be
+  replaced by a reader that still cannot see the write. It is also the right
+  place for `bust_all_feeds/1` on its own terms: that one walks the cache
+  keyspace, which has no business happening while a Postgres transaction is
+  open.
   """
   use Ash.Resource.Change
 
   @impl true
   def change(changeset, _opts, _context) do
-    Ash.Changeset.after_action(changeset, fn _changeset, record ->
-      KilnCMS.Cache.bust_feed_policy(record.org_id)
-      KilnCMS.Cache.bust_all_feeds(record.org_id)
-      {:ok, record}
-    end)
+    Ash.Changeset.after_transaction(changeset, &bust/2)
   end
+
+  defp bust(_changeset, {:ok, record} = result) do
+    KilnCMS.Cache.bust_feed_policy(record.org_id)
+    KilnCMS.Cache.bust_all_feeds(record.org_id)
+    result
+  end
+
+  # A failed write changed nothing, so there is nothing to invalidate.
+  defp bust(_changeset, other), do: other
 end

@@ -489,6 +489,10 @@ content type the site has with two switches each — whether it appears in the
 site's feeds at all, and whether its entries carry the rendered body rather than
 a summary. Both are org admin-only, and both are scoped to the site you are on.
 
+"In feeds" is the same switch ActivityPub reads, so a type taken out of a site's
+feeds also stops being announced to the fediverse and leaves that site's outbox
+— see [federation.md](federation.md). The page says so.
+
 Full content is opt-in because it hands the whole article to everything
 subscribed: with it on, every anonymous reader, aggregator and scraper fetching
 the feed receives the complete rendered body of every published entry of that
@@ -515,6 +519,13 @@ content off while the deployment default has it on.
 
 `entry_limit` stays deployment-wide, and deliberately: it bounds the work a feed
 request costs the server rather than expressing a publishing choice.
+
+If the settings row cannot be read at all — a rolling deploy before the table
+exists, a pool timeout — feeds fall back to **summaries only**, not to the
+config. Falling back to the config there would discard the opt-out this exists
+for, and hand out complete articles for the duration of the fault. Exclusions
+keep following the config in that state, because failing closed on *that* axis
+would mean no feeds at all, and nothing in a feed is private.
 
 ### Segments and locales (#720)
 

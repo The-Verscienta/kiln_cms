@@ -16,7 +16,18 @@ defmodule KilnCMSWeb.FeedControllerTest do
   setup do
     Cache.bust_published()
     previous = Application.get_env(:kiln_cms, :feeds, [])
-    on_exit(fn -> Application.put_env(:kiln_cms, :feeds, previous) end)
+
+    on_exit(fn ->
+      Application.put_env(:kiln_cms, :feeds, previous)
+      # And drop what this file cached for the DEFAULT org (#719). The sandbox
+      # rolls the `FeedSettings` row back; Cachex is process-independent and
+      # keeps the policy resolved from it for five minutes, so a later file
+      # asking whether `post` syndicates would answer from a row that no longer
+      # exists. Busting only at setup protects this file from itself, not its
+      # neighbours.
+      Cache.bust_feed_policy(KilnCMS.Accounts.default_org_id())
+    end)
+
     :ok
   end
 

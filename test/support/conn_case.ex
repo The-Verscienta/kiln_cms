@@ -35,4 +35,16 @@ defmodule KilnCMSWeb.ConnCase do
     KilnCMS.DataCase.setup_sandbox(tags)
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
+
+  @doc """
+  Point `conn` at an organization's own host, so the request resolves to that
+  tenant (epic #336).
+
+  Here rather than re-derived per test file: this one line encodes the
+  subdomain-tenancy contract — an org's `slug` under `KilnCMSWeb.Tenant.base_host/0`
+  — and every copy of it has to be found by grep the next time that spelling
+  changes.
+  """
+  @spec org_conn(Plug.Conn.t(), KilnCMS.Accounts.Organization.t()) :: Plug.Conn.t()
+  def org_conn(conn, org), do: %{conn | host: "#{org.slug}.#{KilnCMSWeb.Tenant.base_host()}"}
 end

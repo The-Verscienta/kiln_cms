@@ -71,6 +71,12 @@ migration, a rewritten column, a dropped config key).
   deployment default has it on. `entry_limit` stays deployment-wide — it bounds
   server work, not a publishing choice.
 
+  "In feeds" is the switch ActivityPub already read, so taking a type out of a
+  site's feeds also stops announcing it to the fediverse; the page says so. If
+  the settings row cannot be read at all, feeds fall back to summaries only
+  rather than to the config, so a transient fault cannot re-enable full text for
+  a site that turned it off.
+
 - **Content experiments — A/B testing published content** (#499, phase 1).
   An experiment holds two or more **variants** of part of a published document —
   a headline, a CTA block — and measures which converts. `mix kiln.experiment`

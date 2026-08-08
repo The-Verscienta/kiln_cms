@@ -919,33 +919,36 @@ defmodule KilnCMSWeb.ContentController do
   # has one. Same reason the paths come from `FeedController`: the advertised URL
   # and the routed one cannot drift.
   # Whether this type syndicates and whether *anything* does are the same
-  # question about the same site's policy (#719), so they are answered from one
-  # resolved list rather than two lookups that could disagree.
+  # question about the same site's policy (#719), so both are answered from one
+  # resolved policy rather than two lookups that could disagree. `syndicated?/2`
+  # rather than a membership test against the list: it is the predicate that owns
+  # the answer, and it compares names as strings — a descriptor's `type` is an
+  # atom for a compiled type and a string for a dynamic one.
   defp feed_alternates(ct, org, base_url, locale) do
-    case Feeds.syndicated_types(org.id) do
-      [] -> []
-      syndicated -> feed_alternates(ct, org, base_url, locale, syndicated)
-    end
-  end
+    policy = Feeds.policy(org.id)
 
-  defp feed_alternates(ct, org, base_url, locale, syndicated) do
-    site = KilnCMS.Branding.for_org(org.id).site_name
-    scope = %{locale: locale, taxonomy: nil}
+    case Feeds.syndicated_types(org.id, policy) do
+      [] ->
+        []
 
-    types =
-      if Enum.any?(syndicated, &(&1.type == ct.type)) do
-        [{nil, site}, {ct, "#{site} — #{ct.label}"}]
-      else
-        [{nil, site}]
-      end
+      _any ->
+        site = KilnCMS.Branding.for_org(org.id).site_name
+        scope = %{locale: locale, taxonomy: nil}
 
-    for {descriptor, title} <- types,
-        {format, mime} <- [{:atom, "application/atom+xml"}, {:json, "application/feed+json"}] do
-      %{
-        type: mime,
-        title: title,
-        href: base_url <> KilnCMSWeb.FeedController.scoped_path(descriptor, scope, format)
-      }
+        types =
+          if Feeds.syndicated?(ct, policy),
+            do: [{nil, site}, {ct, "#{site} — #{ct.label}"}],
+            else: [{nil, site}]
+
+        for {descriptor, title} <- types,
+            {format, mime} <-
+              [{:atom, "application/atom+xml"}, {:json, "application/feed+json"}] do
+          %{
+            type: mime,
+            title: title,
+            href: base_url <> KilnCMSWeb.FeedController.scoped_path(descriptor, scope, format)
+          }
+        end
     end
   end
 

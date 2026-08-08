@@ -47,17 +47,17 @@ defmodule KilnCMSWeb.FeedSettingsLive do
 
   @impl true
   def handle_event("save", params, socket) do
-    settings = Map.get(params, "feeds", %{})
     names = Enum.map(socket.assigns.types, &to_string(&1.type))
-
-    syndicate = checked(settings, "syndicate")
-    full_content = checked(settings, "full_content")
+    syndicate = checked(params, "syndicate")
+    full_content = checked(params, "full_content")
 
     attrs = %{
       # Derived by subtraction from the types the *form* offered, so a type
       # added since this page loaded is not silently excluded by a stale save.
-      excluded_types: Enum.reject(names, &(&1 in syndicate)),
-      full_content_types: Enum.filter(names, &(&1 in full_content))
+      excluded_types:
+        carried(socket, :excluded_types, names) ++ Enum.reject(names, &(&1 in syndicate)),
+      full_content_types:
+        carried(socket, :full_content_types, names) ++ Enum.filter(names, &(&1 in full_content))
     }
 
     case CMS.save_feed_settings(attrs,
@@ -76,20 +76,42 @@ defmodule KilnCMSWeb.FeedSettingsLive do
   end
 
   def handle_event("reset", _params, socket) do
-    case socket.assigns.row do
+    # Re-read rather than destroying the struct assigned at mount: a second tab
+    # (or a second click — this is a plain button) may already have dropped it,
+    # and `reset_feed_settings!/2` on a deleted row raises out of the handler
+    # and takes the LiveView process with it, reloading the page with no
+    # message. The sibling settings pages re-read for the same reason.
+    case current_row(socket) do
       nil ->
-        {:noreply, socket}
+        {:noreply, load_settings(socket)}
 
       row ->
-        CMS.reset_feed_settings!(row,
-          actor: socket.assigns.current_user,
-          tenant: socket.assigns.current_org
-        )
+        # A destroy answers `:ok`, not `{:ok, record}`.
+        case CMS.reset_feed_settings(row,
+               actor: socket.assigns.current_user,
+               tenant: socket.assigns.current_org
+             ) do
+          {:error, error} ->
+            {:noreply, socket |> put_flash(:error, error_message(error)) |> load_settings()}
 
-        {:noreply,
-         socket
-         |> put_flash(:info, gettext("Feed settings reset to the operator defaults."))
-         |> load_settings()}
+          _destroyed ->
+            {:noreply,
+             socket
+             |> put_flash(:info, gettext("Feed settings reset to the operator defaults."))
+             |> load_settings()}
+        end
+    end
+  end
+
+  # Names the form did NOT offer, kept from what the row already said. A type
+  # archived since the row was written is absent from the registry, so a plain
+  # rebuild would quietly drop its name from `excluded_types` — and restoring
+  # the type would then bring it back *syndicating*, reversing an explicit "not
+  # in feeds" with no write to feed settings and nothing recording it.
+  defp carried(socket, field, offered) do
+    case socket.assigns.row do
+      nil -> []
+      row -> row |> Map.get(field) |> List.wrap() |> Enum.reject(&(&1 in offered))
     end
   end
 
@@ -98,9 +120,13 @@ defmodule KilnCMSWeb.FeedSettingsLive do
   # string ever becomes a param key. An all-unchecked form omits the key
   # entirely, which is a legitimate answer ("nothing syndicates"), not a missing
   # one.
-  defp checked(settings, field) do
-    case Map.get(settings, field) do
-      names when is_list(names) -> names
+  #
+  # `params["feeds"]` is client-controlled and decoded from a query string, so
+  # it is not necessarily a map: `feeds=x` decodes to a bare binary, and reading
+  # a field off that would raise and crash the LiveView into a reconnect loop.
+  defp checked(params, field) do
+    case params do
+      %{"feeds" => %{^field => names}} when is_list(names) -> Enum.filter(names, &is_binary/1)
       _absent -> []
     end
   end
@@ -113,10 +139,16 @@ defmodule KilnCMSWeb.FeedSettingsLive do
     |> assign(:row, row)
     |> assign(:types, ContentTypes.all_for_org(org))
     # The *resolved* policy, so the boxes show what the site actually does today
-    # whether that comes from this row or from the operator config beneath it.
-    |> assign(:policy, Feeds.policy(org))
+    # whether that comes from this row or from the operator config beneath it —
+    # derived from the row already in hand rather than through `Feeds.policy/1`,
+    # which would read the same single row again (and always miss its cache on
+    # the save path, since the save just busted it).
+    |> assign(:policy, Feeds.for_row(row))
     |> assign(:defaults, Feeds.defaults())
     |> assign(:entry_limit, Feeds.entry_limit())
+    # An empty form only to give `<.form>` a source; every input here is named
+    # by hand because the two columns are checkbox *arrays*, not one field each.
+    |> assign(:form, to_form(%{}, as: :feeds))
   end
 
   defp current_row(socket) do
@@ -135,9 +167,10 @@ defmodule KilnCMSWeb.FeedSettingsLive do
   # silently staying out of the feeds after the admin later turned its index on.
   # This column says what this page owns; the index is `/editor/types`', and the
   # row says so in as many words.
-  defp included?(policy, descriptor), do: to_string(descriptor.type) not in policy.exclude
-
-  defp full_content?(policy, descriptor), do: Feeds.full_content?(descriptor, policy)
+  #
+  # Argument order matches `Feeds.syndicated?/2` and `Feeds.full_content?/2`,
+  # which the template calls directly beside it.
+  defp included?(descriptor, policy), do: to_string(descriptor.type) not in policy.exclude
 
   # A dynamic type with no public index of published entries never syndicates,
   # whatever this page says — `/editor/types` owns that switch. The row stays
@@ -181,6 +214,7 @@ defmodule KilnCMSWeb.FeedSettingsLive do
       flash={@flash}
       current_user={@current_user}
       current_org={@current_org}
+      page_title={@page_title}
       active={:feeds}
     >
       <.header>
@@ -204,7 +238,13 @@ defmodule KilnCMSWeb.FeedSettingsLive do
         </p>
       </div>
 
-      <form id="feed-settings-form" phx-submit="save" class="mt-8 space-y-8">
+      <!-- `<.form>` rather than a bare `<form>`, as every other settings page
+           here uses. Note it does NOT make the form work before the socket
+           connects: with no `action` it renders a plain GET form, so a click
+           during the dead render reloads the page and the ticks are lost. That
+           is true of every LiveView form in this app, and it is why the boxes
+           render from server state rather than from anything pending. -->
+      <.form for={@form} id="feed-settings-form" phx-submit="save" class="mt-8 space-y-8">
         <div class="overflow-x-auto">
           <table class="table">
             <thead>
@@ -232,7 +272,7 @@ defmodule KilnCMSWeb.FeedSettingsLive do
                     type="checkbox"
                     name="feeds[syndicate][]"
                     value={to_string(type.type)}
-                    checked={included?(@policy, type)}
+                    checked={included?(type, @policy)}
                     class="size-4 rounded border border-base-content/30 accent-primary"
                     aria-label={gettext("Include %{type} in this site's feeds", type: type.label)}
                   />
@@ -242,7 +282,7 @@ defmodule KilnCMSWeb.FeedSettingsLive do
                     type="checkbox"
                     name="feeds[full_content][]"
                     value={to_string(type.type)}
-                    checked={full_content?(@policy, type)}
+                    checked={Feeds.full_content?(type, @policy)}
                     class="size-4 rounded border border-base-content/30 accent-primary"
                     aria-label={gettext("Syndicate the full body of every %{type}", type: type.label)}
                   />
@@ -261,6 +301,15 @@ defmodule KilnCMSWeb.FeedSettingsLive do
           </p>
         </div>
 
+        <div class="rounded-lg border border-base-300 p-4 text-sm">
+          <p class="font-medium">{gettext("\"In feeds\" also covers the fediverse.")}</p>
+          <p class="mt-1 text-base-content/70">
+            {gettext(
+              "A type you take out of this site's feeds also stops being announced over ActivityPub, and drops out of the site's outbox. If this site has followers on Mastodon or another fediverse server, they stop receiving new entries of that type."
+            )}
+          </p>
+        </div>
+
         <div class="flex flex-wrap items-center gap-3">
           <.button phx-disable-with={gettext("Saving…")}>{gettext("Save")}</.button>
           <button
@@ -275,7 +324,7 @@ defmodule KilnCMSWeb.FeedSettingsLive do
             {gettext("Use the operator defaults")}
           </button>
         </div>
-      </form>
+      </.form>
 
       <section class="mt-10 rounded-lg bg-base-200 p-4 text-sm">
         <h2 class="font-medium">{gettext("Deployment defaults")}</h2>

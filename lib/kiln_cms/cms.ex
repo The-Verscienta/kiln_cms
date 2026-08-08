@@ -569,6 +569,7 @@ defmodule KilnCMS.CMS do
     resource KilnCMS.CMS.FeedSettings do
       define :list_feed_settings, action: :read
       define :save_feed_settings, action: :save
+      define :update_feed_settings, action: :update
       define :reset_feed_settings, action: :destroy
     end
 

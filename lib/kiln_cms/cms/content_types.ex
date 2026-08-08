@@ -119,9 +119,20 @@ defmodule KilnCMS.CMS.ContentTypes do
     |> Enum.sort_by(& &1.label)
   end
 
-  # Off in tests: the cache is a global Cachex key while test sandboxes are
-  # per-test, so a cached registry would leak one test's types into another.
-  defp cache_registry? do
+  @doc """
+  Whether type-registry-derived answers may be cached.
+
+  Off in tests: the cache is a global Cachex key while test sandboxes are
+  per-test, so a cached registry would leak one test's types into another —
+  as a *phantom* type, since the row it describes has been rolled back.
+
+  Public because this registry is not the only thing derived from it.
+  `KilnCMS.Feeds.syndicated_types/1` caches a filtered copy of the same
+  descriptors, `%TypeDefinition{}` structs and all, and has to honour the same
+  switch or it reintroduces the leak one layer up.
+  """
+  @spec cache_registry?() :: boolean()
+  def cache_registry? do
     :kiln_cms |> Application.get_env(__MODULE__, []) |> Keyword.get(:cache_registry?, true)
   end
 
