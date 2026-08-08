@@ -214,6 +214,48 @@ until a node picks them up.
 - A portable copy that does not depend on this database
 - Org-level content portability for the managed offering (#334)
 
+## CSV, for flat types
+
+The JSON envelope is lossless and unreadable; CSV is readable and lossy. It is
+the format an editor can actually round-trip through a spreadsheet, and it is
+deliberately narrow so the lossiness is never silent.
+
+```bash
+mix kiln.export.content --format csv --type listing --out listings.csv
+# edit in a spreadsheet
+mix kiln.import.content listings.csv --type listing --dry-run
+```
+
+```
+title,slug,locale,state,city,seats
+Leeds site,leeds,en,published,Leeds,40
+```
+
+`title`, `slug`, `locale`, `state`, then one column per field in its declared
+order.
+
+**One type per file.** A CSV has one header row, so `--type` is required in both
+directions.
+
+**Prose is refused, not flattened.** A type whose records carry blocks errors
+out and names the offending slugs. Rendering a rich-text body to a cell loses
+its structure, and the editor who then re-imports that file has silently deleted
+their own formatting — `--format json` is the answer for those types.
+
+**An unknown column is an error.** A header typo (`Seats`, or `city ` with a
+trailing space) would otherwise import every row with that field silently empty,
+which is the likeliest spreadsheet mistake and the hardest to spot afterwards.
+
+**Spreadsheet-safe both ways.** Values are RFC 4180 quoted, and a cell starting
+`=`, `+`, `-`, `@` is prefixed with `'` so no spreadsheet executes it as a
+formula. The reader undoes exactly that, so `=SUM(A1:A9)` survives a round trip
+unchanged while a genuine `'tis` keeps its apostrophe. A UTF-8 BOM — which both
+Excel and Google Sheets write — is stripped, and a quoted field that never
+closes (a truncated download) is refused rather than half-imported.
+
+Import goes through the same write path, conflict policy, dry run and report as
+every other import — so re-importing an unchanged file skips every row.
+
 ## Re-running, and what happens on a collision
 
 Matching is by `(slug, locale)` — the identity the database enforces.

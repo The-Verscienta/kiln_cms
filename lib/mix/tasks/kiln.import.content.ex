@@ -26,11 +26,14 @@ defmodule Mix.Tasks.Kiln.Import.Content do
       --skip-media       do not sideload media
       --no-redirects     do not create redirects (envelopes carry none anyway)
       --on-conflict      skip (default) | error
+      --type NAME        required for a .csv file — a CSV carries one type and
+                         no type column
   """
 
   use Mix.Task
 
   alias KilnCMS.Portability.CLI
+  alias KilnCMS.Portability.CSV
   alias KilnCMS.Portability.Import
 
   @requirements ["app.start"]
@@ -57,12 +60,42 @@ defmodule Mix.Tasks.Kiln.Import.Content do
         [] -> Mix.raise("Usage: mix kiln.import.content <export.json> [--dry-run]")
       end
 
-    path |> read_envelope!() |> import_envelope(opts)
+    path |> read_envelope!(opts) |> import_envelope(opts)
+  end
+
+  # CSV is one type per file and carries no type column, so `--type` names it.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp read_envelope!(path, opts) do
+    if String.ends_with?(path, ".csv"), do: read_csv!(path, opts), else: read_json!(path)
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp read_csv!(path, opts) do
+    type = opts[:type] || Mix.raise("--type is required for a CSV import")
+
+    with {:ok, text} <- File.read(path),
+         {:ok, records} <- CSV.decode(text, type, CLI.scope!(opts)) do
+      %{"records" => records}
+    else
+      {:error, :empty} ->
+        Mix.raise("#{path} has no rows")
+
+      {:error, {:unknown_columns, columns}} ->
+        Mix.raise("""
+        #{path} has columns this type does not define: #{Enum.join(columns, ", ")}
+
+        Expected: title, slug, locale, state, plus this type's fields. A header
+        typo would otherwise import every row with that field silently empty.
+        """)
+
+      {:error, reason} ->
+        Mix.raise("Could not read #{path}: #{inspect(reason)}")
+    end
   end
 
   # The path is an operator's own command-line argument.
   # sobelow_skip ["Traversal.FileModule"]
-  defp read_envelope!(path) do
+  defp read_json!(path) do
     with {:ok, json} <- File.read(path),
          {:ok, envelope} <- Jason.decode(json) do
       envelope
