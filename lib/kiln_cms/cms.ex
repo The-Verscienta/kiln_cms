@@ -27,6 +27,45 @@ defmodule KilnCMS.CMS do
   # and a model sends `add_tag_ids` to a create, which Ash rejects outright.
   @create_tag_hint "Tags: pass tag_ids (the merge verbs are update-only)."
 
+  # Load the links a tag write touches back onto the tool result (#640).
+  #
+  # `remove_tag_ids` is `on_no_match: :ignore` so removal stays idempotent — a
+  # retry, or a tag someone else already detached, must not fail. The cost is
+  # that it is silent about *everything*, including an id matching no tag at
+  # all: a hallucinated uuid, or a slug sent by mistake, returns the same 200
+  # as a real detach. (`add_tag_ids` is asymmetric here — it hard-errors on an
+  # unknown id.)
+  #
+  # Over MCP that is the difference between a model that can check its work and
+  # one that cannot. The tool result is the record's public attributes, and
+  # `tags` is a relationship, so without this a model asking to remove a tag
+  # gets a success payload it has no way to verify against — and reports
+  # "removed the Elixir tag" on a complete no-op. #521 exists precisely because
+  # LLM callers get tag writes wrong.
+  #
+  # `category` comes along for the same reason: `category_id` is echoed back as
+  # an attribute, but a uuid is not something a model can check a name against.
+  #
+  # Tags and category only, and only on the `update_*` tools:
+  #
+  #   * The sibling links (`related_post_ids` and friends, #637) come from the
+  #     same `merge_changes` macro with the same `:ignore` semantics, so their
+  #     removals are just as unverifiable — but loading them would put whole
+  #     related records, bodies included, into every write response. That needs
+  #     its own shape, so it is #996 rather than a line here.
+  #   * `create_*` gains nothing. On `:create`, `tag_ids` is `append_and_remove`
+  #     and hard-errors on an unknown id, and `category_id` is echoed already —
+  #     a create's links are fully determined by the request that made it.
+  #
+  # A bare relationship list, not `[tags: [:id, :name, :slug]]`: `load` cannot
+  # project. `AshAi.Serializer` emits `default_attributes(resource) ++
+  # load_fields`, an append, and Ash's load of an attribute is an
+  # ensure-selected no-op — so the field list read like a contract while the
+  # payload carried every public attribute of Tag and Category regardless.
+  # Writing it as it behaves keeps a later `KilnCMS.CMS.Taxonomy` attribute from
+  # widening this silently under a list that says otherwise.
+  @link_load [:tags, :category]
+
   # LLM-facing tools, served over the `/mcp` endpoint (see docs/mcp.md and
   # `KilnCMSWeb.Router`). Every call runs as the API-key's owning user through
   # the same policies as any other caller: reads are role/state/audience-scoped,
@@ -74,6 +113,7 @@ defmodule KilnCMS.CMS do
 
     tool :update_page, KilnCMS.CMS.Page, :update do
       description "Update a page's content/metadata (state unchanged). #{@tag_merge_hint}"
+      load @link_load
     end
 
     tool :submit_page_for_review, KilnCMS.CMS.Page, :submit_for_review do
@@ -86,6 +126,7 @@ defmodule KilnCMS.CMS do
 
     tool :update_post, KilnCMS.CMS.Post, :update do
       description "Update a blog post's content/metadata (state unchanged). #{@tag_merge_hint}"
+      load @link_load
     end
 
     tool :submit_post_for_review, KilnCMS.CMS.Post, :submit_for_review do
@@ -98,6 +139,7 @@ defmodule KilnCMS.CMS do
 
     tool :update_entry, KilnCMS.CMS.Entry, :update do
       description "Update a dynamic-type entry's content/metadata (state unchanged). #{@tag_merge_hint}"
+      load @link_load
     end
 
     tool :submit_entry_for_review, KilnCMS.CMS.Entry, :submit_for_review do
