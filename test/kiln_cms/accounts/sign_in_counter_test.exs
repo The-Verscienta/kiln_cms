@@ -26,8 +26,8 @@ defmodule KilnCMS.Accounts.SignInCounterTest do
   alias KilnCMS.Accounts.AccountThrottle
   alias KilnCMS.Accounts.RecoveryCodes
   alias KilnCMS.Accounts.SecondFactor
-  alias KilnCMS.Accounts.Totp
   alias KilnCMS.Accounts.User
+  alias KilnCMS.TwoFactorFixtures
 
   @password "password123456"
   @budget 3
@@ -147,7 +147,7 @@ defmodule KilnCMS.Accounts.SignInCounterTest do
       assert {:ok, _user} = password_sign_in(address)
       assert {:ok, _user} = password_sign_in(address)
 
-      code = Totp.code_at(secret, System.system_time(:second))
+      code = TwoFactorFixtures.current_code(secret)
       assert {:ok, _verified} = SecondFactor.check(user, code)
 
       assert :allow = AccountThrottle.consume(address)
@@ -225,7 +225,7 @@ defmodule KilnCMS.Accounts.SignInCounterTest do
       assert {:ok, _user} = password_sign_in(shouted)
       assert {:ok, _user} = password_sign_in(shouted)
 
-      code = Totp.code_at(secret, System.system_time(:second))
+      code = TwoFactorFixtures.current_code(secret)
       assert {:ok, _verified} = SecondFactor.check(user, code)
 
       assert :allow = AccountThrottle.consume(shouted)

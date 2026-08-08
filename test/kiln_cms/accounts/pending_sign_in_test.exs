@@ -15,29 +15,16 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
   use KilnCMS.DataCase, async: false
 
   alias KilnCMS.Accounts.PendingSignIn
-  alias KilnCMS.Accounts.User
+  alias KilnCMS.TwoFactorFixtures
 
   @endpoint KilnCMSWeb.Endpoint
 
   defp enabled_user(extra \\ %{}) do
-    secret = :crypto.strong_rand_bytes(20)
+    {user, secret} =
+      TwoFactorFixtures.enabled_user([role: :editor] ++ Enum.to_list(extra))
 
-    user =
-      Ash.Seed.seed!(
-        User,
-        Map.merge(
-          %{
-            email: "pending-#{System.unique_integer([:positive])}@example.com",
-            hashed_password: Bcrypt.hash_pwd_salt("password123456"),
-            confirmed_at: DateTime.utc_now(),
-            role: :editor,
-            totp_secret: secret,
-            totp_confirmed_at: DateTime.utc_now()
-          },
-          extra
-        )
-      )
-
+    # `PendingSignIn.mint/3` reads the first-factor token out of `__metadata__`,
+    # which a seeded user does not carry — the sign-in strategy puts it there.
     {%{user | __metadata__: Map.put(user.__metadata__, :token, "stub.jwt.token")}, secret}
   end
 

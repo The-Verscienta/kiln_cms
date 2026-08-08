@@ -22,8 +22,8 @@ defmodule KilnCMS.Accounts.SecondFactorTest do
   alias KilnCMS.Accounts.AccountThrottle
   alias KilnCMS.Accounts.RecoveryCodes
   alias KilnCMS.Accounts.SecondFactor
-  alias KilnCMS.Accounts.Totp
   alias KilnCMS.Accounts.User
+  alias KilnCMS.TwoFactorFixtures
 
   @budget 2
 
@@ -46,29 +46,17 @@ defmodule KilnCMS.Accounts.SecondFactorTest do
   end
 
   defp enabled_user(extra \\ %{}) do
-    secret = :crypto.strong_rand_bytes(20)
+    {user, secret} =
+      TwoFactorFixtures.enabled_user([role: :editor] ++ Enum.to_list(extra))
 
-    user =
-      Ash.Seed.seed!(
-        User,
-        Map.merge(
-          %{
-            email: "sf-#{System.unique_integer([:positive])}@example.com",
-            hashed_password: Bcrypt.hash_pwd_salt("password123456"),
-            confirmed_at: DateTime.utc_now(),
-            role: :editor,
-            totp_secret: secret,
-            totp_confirmed_at: DateTime.utc_now()
-          },
-          extra
-        )
-      )
-
+    # The budget is per account id and outlives the test, so it has to be
+    # released here rather than in the shared fixture — which knows nothing
+    # about throttling.
     on_exit(fn -> AccountThrottle.forgive_second_factor(user.id) end)
     {user, secret}
   end
 
-  defp current_code(secret), do: Totp.code_at(secret, System.system_time(:second))
+  defp current_code(secret), do: TwoFactorFixtures.current_code(secret)
 
   describe "the charge lands before the check" do
     test "a wrong code spends budget, so a spent budget refuses a correct one" do

@@ -3,7 +3,7 @@ defmodule KilnCMS.Accounts.TwoFactorTest do
   use KilnCMS.DataCase, async: true
 
   alias KilnCMS.Accounts
-  alias KilnCMS.Accounts.Totp
+  alias KilnCMS.TwoFactorFixtures
 
   defp user do
     Ash.Seed.seed!(KilnCMS.Accounts.User, %{
@@ -17,7 +17,7 @@ defmodule KilnCMS.Accounts.TwoFactorTest do
   # Pending during enrolment, live once confirmed — either way this is "the
   # code that should currently work".
   defp current_code(user),
-    do: Totp.code_at(user.totp_pending_secret || user.totp_secret, System.system_time(:second))
+    do: TwoFactorFixtures.current_code(user.totp_pending_secret || user.totp_secret)
 
   test "setup then confirm enables 2FA; a wrong code is rejected" do
     user = user()
@@ -88,7 +88,7 @@ defmodule KilnCMS.Accounts.TwoFactorTest do
       {:ok, user} = Accounts.setup_totp(user, %{}, actor: user)
       {:ok, enrolled} = Accounts.confirm_totp(user, %{code: current_code(user)}, actor: user)
 
-      live_code = Totp.code_at(enrolled.totp_secret, System.system_time(:second))
+      live_code = TwoFactorFixtures.current_code(enrolled.totp_secret)
 
       assert {:error, _} = Accounts.confirm_totp(enrolled, %{code: live_code}, actor: enrolled)
 
@@ -109,8 +109,8 @@ defmodule KilnCMS.Accounts.TwoFactorTest do
       %{
         enrolled: enrolled,
         restarted: restarted,
-        new_code: Totp.code_at(restarted.totp_pending_secret, System.system_time(:second)),
-        live_code: Totp.code_at(restarted.totp_secret, System.system_time(:second))
+        new_code: TwoFactorFixtures.current_code(restarted.totp_pending_secret),
+        live_code: TwoFactorFixtures.current_code(restarted.totp_secret)
       }
     end
 
@@ -176,7 +176,7 @@ defmodule KilnCMS.Accounts.TwoFactorTest do
       # secret over it.
       nil_secret = Ash.Seed.update!(enrolled, %{totp_secret: nil})
       {:ok, restarted} = Accounts.setup_totp(nil_secret, %{}, actor: nil_secret)
-      new_code = Totp.code_at(restarted.totp_pending_secret, System.system_time(:second))
+      new_code = TwoFactorFixtures.current_code(restarted.totp_pending_secret)
 
       # No current code is even possible (the secret is nil); without a recovery
       # session it must be refused rather than silently promoted.
@@ -212,7 +212,7 @@ defmodule KilnCMS.Accounts.TwoFactorTest do
       # Tab A submits a valid code for its now-superseded secret A. Because the
       # action re-reads the staged secret (B), A's code no longer matches and the
       # confirm is rejected — A is NOT promoted.
-      code_a = Totp.code_at(secret_a, System.system_time(:second))
+      code_a = TwoFactorFixtures.current_code(secret_a)
       assert {:error, _} = Accounts.confirm_totp(tab_a, %{code: code_a}, actor: tab_a)
 
       reloaded = Accounts.get_user!(user.id, authorize?: false)
@@ -220,7 +220,7 @@ defmodule KilnCMS.Accounts.TwoFactorTest do
       assert reloaded.totp_pending_secret == secret_b
 
       # Tab B can still finish its own enrolment.
-      code_b = Totp.code_at(secret_b, System.system_time(:second))
+      code_b = TwoFactorFixtures.current_code(secret_b)
       {:ok, confirmed} = Accounts.confirm_totp(tab_b, %{code: code_b}, actor: tab_b)
       assert Accounts.totp_enabled?(confirmed)
       assert confirmed.totp_secret == secret_b

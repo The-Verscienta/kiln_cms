@@ -18,6 +18,7 @@ defmodule KilnCMSWeb.RememberMeTest do
   import Phoenix.LiveViewTest
 
   alias KilnCMS.Accounts.User
+  alias KilnCMS.TwoFactorFixtures
 
   @password "password123456"
 
@@ -194,16 +195,8 @@ defmodule KilnCMSWeb.RememberMeTest do
     @secret :crypto.strong_rand_bytes(20)
 
     defp two_factor_account do
-      email = "remember-2fa-#{System.unique_integer([:positive])}@example.com"
-
-      Ash.Seed.seed!(User, %{
-        email: email,
-        hashed_password: Bcrypt.hash_pwd_salt(@password),
-        confirmed_at: DateTime.utc_now(),
-        role: :admin,
-        totp_secret: @secret,
-        totp_confirmed_at: DateTime.utc_now()
-      })
+      {user, _secret} = TwoFactorFixtures.enabled_user(secret: @secret)
+      user
     end
 
     defp verify(pending, code) do
@@ -244,7 +237,7 @@ defmodule KilnCMSWeb.RememberMeTest do
       verified =
         verify(
           Plug.Conn.get_session(first, :pending_2fa),
-          KilnCMS.Accounts.Totp.code_at(@secret, System.system_time(:second))
+          TwoFactorFixtures.current_code(@secret)
         )
 
       assert redirected_to(verified) == ~p"/editor/overview"
@@ -264,7 +257,7 @@ defmodule KilnCMSWeb.RememberMeTest do
       verified =
         verify(
           Plug.Conn.get_session(first, :pending_2fa),
-          KilnCMS.Accounts.Totp.code_at(@secret, System.system_time(:second))
+          TwoFactorFixtures.current_code(@secret)
         )
 
       assert redirected_to(verified) == ~p"/editor/overview"

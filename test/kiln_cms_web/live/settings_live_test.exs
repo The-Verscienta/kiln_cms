@@ -145,16 +145,12 @@ defmodule KilnCMSWeb.SettingsLiveTest do
   describe "two-factor enrolment (#331)" do
     alias KilnCMS.Accounts
     alias KilnCMS.Accounts.RecoveryCodes
-    alias KilnCMS.Accounts.Totp
+    alias KilnCMS.TwoFactorFixtures
 
-    defp current_code(user) do
-      reloaded = reload(user)
-
-      Totp.code_at(
-        reloaded.totp_pending_secret || reloaded.totp_secret,
-        System.system_time(:second)
-      )
-    end
+    # `current_code/1` takes the user and prefers the PENDING secret, which is
+    # what a mid-enrolment test needs — asking for `totp_secret` there produces a
+    # code for the factor being replaced.
+    defp current_code(user), do: TwoFactorFixtures.current_code(reload(user))
 
     test "enrolment shows a QR code; confirming mints show-once recovery codes", %{conn: conn} do
       user = authed_user(:editor)
@@ -180,7 +176,7 @@ defmodule KilnCMSWeb.SettingsLiveTest do
     test "regenerating replaces the set; disabling clears it", %{conn: conn} do
       user = authed_user(:editor)
       {:ok, user} = Accounts.setup_totp(user, %{}, actor: user)
-      code = Totp.code_at(user.totp_pending_secret, System.system_time(:second))
+      code = TwoFactorFixtures.current_code(user.totp_pending_secret)
       {:ok, user} = Accounts.confirm_totp(user, %{code: code}, actor: user)
       original = reload(user).totp_recovery_hashes
 
@@ -206,7 +202,7 @@ defmodule KilnCMSWeb.SettingsLiveTest do
 
       user = authed_user(:editor)
       {:ok, user} = Accounts.setup_totp(user, %{}, actor: user)
-      code = Totp.code_at(user.totp_pending_secret, System.system_time(:second))
+      code = TwoFactorFixtures.current_code(user.totp_pending_secret)
       {:ok, user} = Accounts.confirm_totp(user, %{code: code}, actor: user)
 
       {:ok, lv, _html} = live(log_in(conn, user), ~p"/editor/settings")

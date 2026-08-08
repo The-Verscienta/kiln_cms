@@ -8,9 +8,9 @@ defmodule KilnCMSWeb.ApiAuthControllerTest do
 
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.RecoveryCodes
-  alias KilnCMS.Accounts.Totp
   alias KilnCMS.Accounts.User
   alias KilnCMS.CMS
+  alias KilnCMS.TwoFactorFixtures
   alias KilnCMSWeb.BearerAuth
   alias KilnCMSWeb.Endpoint
 
@@ -52,14 +52,10 @@ defmodule KilnCMSWeb.ApiAuthControllerTest do
     )
   end
 
-  defp seed_totp_user(role \\ :editor) do
-    secret = :crypto.strong_rand_bytes(20)
-
-    user =
-      seed_user(role, %{totp_secret: secret, totp_confirmed_at: DateTime.utc_now()})
-
-    {user, secret}
-  end
+  # Delegates so the API's second-factor accounts are seeded the same way the
+  # browser controller's are; the local wrapper keeps this file's `role`-first
+  # calling convention, which its other `seed_user/2` calls share.
+  defp seed_totp_user(role \\ :editor), do: TwoFactorFixtures.enabled_user(role: role)
 
   defp post_sign_in(conn, body) do
     conn
@@ -105,7 +101,7 @@ defmodule KilnCMSWeb.ApiAuthControllerTest do
     pending
   end
 
-  defp current_code(secret), do: Totp.code_at(secret, System.system_time(:second))
+  defp current_code(secret), do: TwoFactorFixtures.current_code(secret)
 
   describe "single-factor accounts" do
     test "valid credentials return a usable bearer token + user", %{conn: conn} do

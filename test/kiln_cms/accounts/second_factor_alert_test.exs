@@ -32,8 +32,7 @@ defmodule KilnCMS.Accounts.SecondFactorAlertTest do
 
   alias KilnCMS.Accounts.AccountThrottle
   alias KilnCMS.Accounts.PendingSignIn
-  alias KilnCMS.Accounts.Totp
-  alias KilnCMS.Accounts.User
+  alias KilnCMS.TwoFactorFixtures
 
   @password "password123456"
   @budget 2
@@ -58,21 +57,7 @@ defmodule KilnCMS.Accounts.SecondFactorAlertTest do
     :ok
   end
 
-  defp enabled_user do
-    secret = :crypto.strong_rand_bytes(20)
-
-    user =
-      Ash.Seed.seed!(User, %{
-        email: "sfalert-#{System.unique_integer([:positive])}@example.com",
-        hashed_password: Bcrypt.hash_pwd_salt(@password),
-        confirmed_at: DateTime.utc_now(),
-        role: :editor,
-        totp_secret: secret,
-        totp_confirmed_at: DateTime.utc_now()
-      })
-
-    {user, secret}
-  end
+  defp enabled_user, do: TwoFactorFixtures.enabled_user(role: :editor)
 
   # The state a browser is in after the first factor and before the second —
   # first factor and before the second.
@@ -158,7 +143,7 @@ defmodule KilnCMS.Accounts.SecondFactorAlertTest do
       cleanup(user)
 
       exhaust(user)
-      code = Totp.code_at(secret, System.system_time(:second))
+      code = TwoFactorFixtures.current_code(secret)
       assert browser_verify(user, code).status == 429
       drain_oban()
 
@@ -259,7 +244,7 @@ defmodule KilnCMS.Accounts.SecondFactorAlertTest do
         KilnCMS.Accounts.disable_totp(user, %{code: "000000"}, actor: user)
       end)
 
-      code = Totp.code_at(secret, System.system_time(:second))
+      code = TwoFactorFixtures.current_code(secret)
       assert browser_verify(user, code).status == 429
       drain_oban()
 

@@ -5,20 +5,14 @@ defmodule KilnCMSWeb.TwoFactorControllerTest do
   import Plug.Conn
 
   alias KilnCMS.Accounts.PendingSignIn
-  alias KilnCMS.Accounts.Totp
+  alias KilnCMS.TwoFactorFixtures
 
   # A fixed secret so the test can compute the matching code.
   @secret :crypto.strong_rand_bytes(20)
 
   defp enabled_user do
-    Ash.Seed.seed!(KilnCMS.Accounts.User, %{
-      email: "gate-#{System.unique_integer([:positive])}@example.com",
-      hashed_password: Bcrypt.hash_pwd_salt("password123456"),
-      confirmed_at: DateTime.utc_now(),
-      role: :admin,
-      totp_secret: @secret,
-      totp_confirmed_at: DateTime.utc_now()
-    })
+    {user, _secret} = TwoFactorFixtures.enabled_user(secret: @secret)
+    user
   end
 
   # Simulate the post-first-factor state AuthController.success/4 sets: a signed
@@ -44,7 +38,7 @@ defmodule KilnCMSWeb.TwoFactorControllerTest do
 
   test "a valid code completes sign-in and clears the pending state", %{conn: conn} do
     user = enabled_user()
-    code = Totp.code_at(@secret, System.system_time(:second))
+    code = TwoFactorFixtures.current_code(@secret)
 
     conn = conn |> with_pending(user) |> post(~p"/sign-in/verify", %{"code" => code})
 
