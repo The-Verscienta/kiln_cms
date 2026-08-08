@@ -27,6 +27,27 @@ defmodule KilnCMS.CMS do
   # and a model sends `add_tag_ids` to a create, which Ash rejects outright.
   @create_tag_hint "Tags: pass tag_ids (the merge verbs are update-only)."
 
+  # Load the links a tag write touches back onto the tool result (#640).
+  #
+  # `remove_tag_ids` is `on_no_match: :ignore` so removal stays idempotent — a
+  # retry, or a tag someone else already detached, must not fail. The cost is
+  # that it is silent about *everything*, including an id matching no tag at
+  # all: a hallucinated uuid, or a slug sent by mistake, returns the same 200
+  # as a real detach. (`add_tag_ids` is asymmetric here — it hard-errors on an
+  # unknown id.)
+  #
+  # Over MCP that is the difference between a model that can check its work and
+  # one that cannot. The tool result is the record's public attributes, and
+  # `tags` is a relationship, so without this a model asking to remove a tag
+  # gets a success payload it has no way to verify against — and reports
+  # "removed the Elixir tag" on a complete no-op. #521 exists precisely because
+  # LLM callers get tag writes wrong.
+  #
+  # Cheap and useful past that one case: the same load makes `category` and the
+  # created record's links visible, so a model can confirm any relationship
+  # write rather than trusting the absence of an error.
+  @link_load [tags: [:id, :name, :slug], category: [:id, :name, :slug]]
+
   # LLM-facing tools, served over the `/mcp` endpoint (see docs/mcp.md and
   # `KilnCMSWeb.Router`). Every call runs as the API-key's owning user through
   # the same policies as any other caller: reads are role/state/audience-scoped,
@@ -70,10 +91,12 @@ defmodule KilnCMS.CMS do
     # Authoring — requires a read-write API key on an editor (or admin) account.
     tool :create_page, KilnCMS.CMS.Page, :create do
       description "Create a page as a draft. #{@create_tag_hint}"
+      load @link_load
     end
 
     tool :update_page, KilnCMS.CMS.Page, :update do
       description "Update a page's content/metadata (state unchanged). #{@tag_merge_hint}"
+      load @link_load
     end
 
     tool :submit_page_for_review, KilnCMS.CMS.Page, :submit_for_review do
@@ -82,10 +105,12 @@ defmodule KilnCMS.CMS do
 
     tool :create_post, KilnCMS.CMS.Post, :create do
       description "Create a blog post as a draft. #{@create_tag_hint}"
+      load @link_load
     end
 
     tool :update_post, KilnCMS.CMS.Post, :update do
       description "Update a blog post's content/metadata (state unchanged). #{@tag_merge_hint}"
+      load @link_load
     end
 
     tool :submit_post_for_review, KilnCMS.CMS.Post, :submit_for_review do
@@ -94,10 +119,12 @@ defmodule KilnCMS.CMS do
 
     tool :create_entry, KilnCMS.CMS.Entry, :create do
       description "Create a dynamic-type entry as a draft (requires type_definition_id). #{@create_tag_hint}"
+      load @link_load
     end
 
     tool :update_entry, KilnCMS.CMS.Entry, :update do
       description "Update a dynamic-type entry's content/metadata (state unchanged). #{@tag_merge_hint}"
+      load @link_load
     end
 
     tool :submit_entry_for_review, KilnCMS.CMS.Entry, :submit_for_review do

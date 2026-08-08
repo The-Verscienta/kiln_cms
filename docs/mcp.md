@@ -78,9 +78,14 @@ Authoring (require a write key + editor role): `create_page` / `update_page` /
 > alone; sending `add_tag_ids` to a create is an error.
 >
 > One asymmetry to plan around: `add_tag_ids` fails loudly on an id that
-> matches no tag, but `remove_tag_ids` swallows it. A successful `update_*` is
-> therefore not evidence a removal matched anything — call `read_tags` (or
-> re-read the record) if the outcome matters.
+> matches no tag, but `remove_tag_ids` swallows it, so removal stays idempotent
+> on a retry. A successful `update_*` is therefore not evidence a removal
+> matched anything.
+>
+> **Check the result rather than the status.** `create_*` and `update_*` load
+> the record's `tags` and `category` into their response (#640), so the links
+> after the write are in the payload you already have — a removal that matched
+> nothing leaves the tag listed. No follow-up `read_tags` needed.
 >
 > **The related-content links carry the same verbs (#637).** Alongside
 > `related_post_ids` (which replaces), `update_post` takes `add_related_post_ids`
