@@ -39,7 +39,10 @@ defmodule KilnCMS.CMS.Changes.EnforceFieldGrants do
     # Per-org tiers (#419): grants bind whoever is an EFFECTIVE editor here;
     # effective admins are exempt (mirroring the policy bypass).
     if Scoping.effective_tier(actor, changeset) == :editor do
-      type = KilnCMS.CMS.ContentTypes.type_name(changeset.resource)
+      # The RECORD's type, not its module: every dynamic type shares `Entry`,
+      # so asking the module returns "entry" for all of them and a per-type
+      # grant reads as no grant at all (#927).
+      type = KilnCMS.CMS.ContentTypes.type_name_for(changeset)
 
       case Scoping.field_grant(actor, changeset, type) do
         nil -> changeset

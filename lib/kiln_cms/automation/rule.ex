@@ -151,8 +151,14 @@ defmodule KilnCMS.Automation.Rule do
       public? false
     end
 
-    attribute :name, :string, allow_nil?: false, public?: true
-    attribute :description, :string, public?: true
+    attribute :name, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
+
+    attribute :description, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.paragraph()]
 
     attribute :trigger_event, :atom do
       allow_nil? false

@@ -98,7 +98,9 @@ defmodule KilnCMS.CMS.Taxonomy do
     description_attribute =
       if description? do
         quote do
-          attribute :description, :string, public?: true
+          attribute :description, :string,
+            public?: true,
+            constraints: [max_length: KilnCMS.Limits.paragraph()]
         end
       end
 
@@ -311,8 +313,15 @@ defmodule KilnCMS.CMS.Taxonomy do
           public? false
         end
 
-        attribute :name, :string, allow_nil?: false, public?: true
-        attribute :slug, :string, allow_nil?: false, public?: true
+        attribute :name, :string,
+          allow_nil?: false,
+          public?: true,
+          constraints: [max_length: KilnCMS.Limits.line()]
+
+        attribute :slug, :string,
+          allow_nil?: false,
+          public?: true,
+          constraints: [max_length: KilnCMS.Limits.identifier()]
 
         unquote(description_attribute)
 

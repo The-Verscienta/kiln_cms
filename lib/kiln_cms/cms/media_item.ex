@@ -333,8 +333,15 @@ defmodule KilnCMS.CMS.MediaItem do
       public? false
     end
 
-    attribute :filename, :string, allow_nil?: false, public?: true
-    attribute :content_type, :string, public?: true
+    attribute :filename, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.identifier()]
+
+    attribute :content_type, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.identifier()]
+
     attribute :byte_size, :integer, public?: true
 
     # Intrinsic pixel dimensions of the original. Written by
@@ -354,8 +361,11 @@ defmodule KilnCMS.CMS.MediaItem do
     # %{"thumb" => %{"key" => ..., "url" => ..., "width" => ..., "height" => ...}}
     attribute :variants, :map, default: %{}, public?: true
 
-    attribute :alt, :string, public?: true
-    attribute :caption, :string, public?: true
+    attribute :alt, :string, public?: true, constraints: [max_length: KilnCMS.Limits.line()]
+
+    attribute :caption, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.paragraph()]
 
     # Alt-text enforcement (#403). A decorative image — a divider, a texture, a
     # visual echo of adjacent text — correctly has NO alt text: a screen reader
@@ -374,7 +384,7 @@ defmodule KilnCMS.CMS.MediaItem do
     # through `@writable_fields` for the internal writes that set it
     # (upload, `Media.Transform`, `Changes.MigrateMediaStorage`).
     attribute :storage_key, :string, public?: false
-    attribute :url, :string, public?: true
+    attribute :url, :string, public?: true, constraints: [max_length: KilnCMS.Limits.url()]
 
     # Focal point (0.0–1.0) for smart cropping.
     attribute :focal_x, :float, default: 0.5, public?: true

@@ -181,33 +181,54 @@ defmodule KilnCMS.CMS.TypeDefinition do
     end
 
     # Permanent machine key, e.g. "recipe". Create-only (see `:update`).
-    attribute :name, :string, allow_nil?: false, public?: true
+    attribute :name, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
 
     # Human names for the editor UI and admin nav.
-    attribute :label, :string, allow_nil?: false, public?: true
-    attribute :plural_label, :string, public?: true
+    attribute :label, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
+
+    attribute :plural_label, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
 
     # First URL segment for public delivery. Defaults to `"#{name}s"` on create
     # (see `Changes.DefaultPathSegment`).
-    attribute :path_segment, :string, allow_nil?: false, public?: true
+    attribute :path_segment, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.identifier()]
 
     # Optional pathauto slug pattern (#454): tokens compose this type's entry
     # slugs, e.g. "[yyyy]-[mm]-[title]" — see `KilnCMS.Slug.Pattern`. Nil =
     # default derivation (focus keyphrase → title).
-    attribute :slug_pattern, :string, public?: true
+    attribute :slug_pattern, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
 
     # Optional pathauto alias pattern (#485): composes each entry's
     # multi-segment `path_alias`, e.g. "/acupuncture/needle/size/[field:size]".
     # Nil = no auto alias (flat URLs; aliases stay manual).
-    attribute :alias_pattern, :string, public?: true
+    attribute :alias_pattern, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
 
     # Mirror the Content macro's `:excerpt?` / `:published?` options.
     attribute :has_excerpt, :boolean, allow_nil?: false, default: false, public?: true
     attribute :has_published_feed, :boolean, allow_nil?: false, default: false, public?: true
 
     # Admin-nav niceties.
-    attribute :icon, :string, public?: true
-    attribute :description, :string, public?: true
+    attribute :icon, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.identifier()]
+
+    attribute :description, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.paragraph()]
 
     # The schema.org @type fired onto the :json_ld surface's main node (#357,
     # GEO) — lets a dynamic type declare itself e.g. a MedicalWebPage. Compiled
@@ -215,7 +236,8 @@ defmodule KilnCMS.CMS.TypeDefinition do
     attribute :schema_org_type, :string,
       allow_nil?: false,
       default: "Article",
-      public?: true
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.identifier()]
 
     timestamps()
   end

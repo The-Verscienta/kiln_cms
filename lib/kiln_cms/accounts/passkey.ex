@@ -82,6 +82,7 @@ defmodule KilnCMS.Accounts.Passkey do
 
     # A user-facing label ("MacBook Touch ID", "YubiKey").
     attribute :name, :string do
+      constraints max_length: KilnCMS.Limits.line()
       allow_nil? false
       default "Passkey"
       public? true

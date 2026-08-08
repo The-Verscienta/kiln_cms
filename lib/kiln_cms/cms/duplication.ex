@@ -235,7 +235,7 @@ defmodule KilnCMS.CMS.Duplication do
 
     with %{} <- actor,
          :editor <- Scoping.effective_tier(actor, subject) do
-      Scoping.field_grant(actor, subject, ContentTypes.type_name(source.__struct__))
+      Scoping.field_grant(actor, subject, ContentTypes.type_name_for(source))
     else
       _ -> nil
     end

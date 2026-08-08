@@ -91,6 +91,7 @@ defmodule KilnCMS.Federation.Delivery do
     # ledger row survives its retention window, and "delivered to whom" should
     # not become unanswerable because of that.
     attribute :inbox_uri, :string do
+      constraints max_length: KilnCMS.Limits.url()
       allow_nil? false
       public? true
     end
