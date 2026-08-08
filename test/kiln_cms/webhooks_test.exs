@@ -54,6 +54,74 @@ defmodule KilnCMS.WebhooksTest do
              Jason.decode!(body)
   end
 
+  test "the payload carries `audience`, so a subscriber can filter gated content" do
+    # A webhook fires for a members-only document exactly as it does for a
+    # public one, with the full block tree. That is deliberate — an endpoint is
+    # somewhere an operator chose to send content, HMAC-signed and SSRF-guarded,
+    # unlike the anonymously-queryable Meilisearch index (#1006). But it was not
+    # KNOWABLE: without this field a subscriber mirroring publishes to a public
+    # front end had nothing to filter on (#1014).
+    stub_capture()
+    admin = admin()
+    CMS.create_webhook_endpoint!(%{url: "https://example.test/hook"}, actor: admin)
+
+    page =
+      CMS.create_page!(%{title: "Members only", slug: slug(), audience: :member}, actor: admin)
+
+    CMS.publish_page!(page, %{}, actor: admin)
+    KilnCMS.DataCase.drain_oban()
+
+    assert_received {:delivered, "example.test", "/hook", _headers, body}
+
+    assert %{"data" => %{"audience" => "member", "title" => "Members only", "locked" => false}} =
+             Jason.decode!(body)
+  end
+
+  test "a passphrase-locked document says so, since `audience` cannot" do
+    # The half `audience` alone misses. Publish public, then lock: the payload
+    # still reads `"audience" => "public"` and carries the whole body, so a
+    # receiver reproducing Kiln's own three-part rule needs this flag or it
+    # mirrors a locked document to its public front end.
+    stub_capture()
+    admin = admin()
+    CMS.create_webhook_endpoint!(%{url: "https://example.test/hook"}, actor: admin)
+
+    page = CMS.create_page!(%{title: "Confidential", slug: slug()}, actor: admin)
+    page = CMS.publish_page!(page, %{}, actor: admin)
+    CMS.update_page!(page, %{access_password: "shared secret"}, actor: admin)
+    KilnCMS.DataCase.drain_oban()
+
+    payloads =
+      Stream.repeatedly(fn ->
+        receive do
+          {:delivered, _, _, _, body} -> Jason.decode!(body)["data"]
+        after
+          0 -> nil
+        end
+      end)
+      |> Enum.take_while(&(&1 != nil))
+
+    assert %{"locked" => true, "audience" => "public"} = List.last(payloads)
+
+    # And the hash itself never leaves.
+    refute Map.has_key?(List.last(payloads), "access_password_hash")
+    refute Map.has_key?(List.last(payloads), "password_fingerprint")
+  end
+
+  test "a public document says so rather than omitting the field" do
+    # An absent key and `"public"` must not be the same thing on the wire: a
+    # subscriber writing `if payload["audience"] not in [nil, "public"]` and one
+    # writing `if payload["audience"] != "public"` should both be right.
+    stub_capture()
+    admin = admin()
+    CMS.create_webhook_endpoint!(%{url: "https://example.test/hook"}, actor: admin)
+
+    publish_page(admin)
+
+    assert_received {:delivered, "example.test", "/hook", _headers, body}
+    assert %{"data" => %{"audience" => "public", "locked" => false}} = Jason.decode!(body)
+  end
+
   test "unpublishing dispatches an unpublished event" do
     stub_capture()
     admin = admin()

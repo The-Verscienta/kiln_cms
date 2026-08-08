@@ -483,6 +483,14 @@ build if a resource is ever registered without that authorizer.
   app.
 
 ### Webhooks (outbound)
+- **Gated content is delivered** — a content event carries the full block tree
+  whether the document is public, audience-gated, or passphrase-locked. That is
+  deliberate: an endpoint is operator-configured, HMAC-signed and SSRF-guarded,
+  unlike the anonymously-queryable Meilisearch index, which excludes gated
+  content outright (#1006). The payload marks both gates (`audience`, `locked`,
+  #1014) so a receiver can filter — but the filtering is the receiver's, and a
+  webhook endpoint's blast radius is therefore *every* document that fires an
+  event, not only the public ones. Treat an endpoint URL as a credential.
 - **SSRF** — mitigated by `SafeUrl` with IP pinning (see Controls).
 - **Forgery at the receiver** — deliveries are HMAC-SHA256-signed over the raw
   body; a receiver that verifies `x-kilncms-signature` knows a delivery is
@@ -839,9 +847,13 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
     origin and integrity, not its freshness — there is no timestamp or nonce
     binding it to a point in time, so anyone who captures one signed request
     (TLS would have to fail first) can replay it to the receiver indefinitely.
-    Accepted for now: the payload is either already-public content
-    (`published`/`unpublished`/`updated`) or a receiver-defined form submission,
-    so a replay re-announces old state rather than forging new access. A
+    Accepted for now: a replay re-announces old state rather than forging new
+    access — it delivers a payload the receiver was already sent once, to a
+    receiver the operator chose. Note this is **not** because the payload is
+    always public content: a content event carries an audience-gated or
+    passphrase-locked body too, marked by `audience`/`locked` (#1014), so the
+    replay window is bounded by the receiver's own retention of that body
+    rather than by the body being harmless. A
     receiver with exactly-once requirements should dedupe on its own terms
     (the content payload's `id`/`updated_at`, or a delivery id tracked out of
     band) — see [webhooks.md](webhooks.md#verifying-the-signature).
