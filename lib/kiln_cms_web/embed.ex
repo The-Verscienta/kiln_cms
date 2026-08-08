@@ -137,48 +137,19 @@ defmodule KilnCMSWeb.Embed do
   list, which would re-open the policy — discard the whole value for `[]` and
   warn on stderr, following the fail-to-default-and-say-so rule
   `KilnCMS.Config.Env` sets for the boolean variables.
+
+  The split/trim/wildcard half lives in `KilnCMS.Config.OriginList`, shared with
+  `CORS_ORIGINS` (#651); what stays here is the half that is actually about
+  CSP — `valid_source?/1`, and the rendering in `frame_ancestors/1`.
   """
   @spec parse_env(String.t() | nil) :: :all | [String.t()]
-  def parse_env(nil), do: []
-
-  def parse_env(value) when is_binary(value) do
-    case String.trim(value) do
-      "*" ->
-        :all
-
-      "" ->
-        []
-
-      trimmed ->
-        trimmed
-        |> String.split(",", trim: true)
-        |> Enum.map(&String.trim/1)
-        |> Enum.reject(&(&1 == ""))
-        |> reject_invalid(value)
-    end
-  end
-
-  defp reject_invalid(origins, raw) do
-    case Enum.reject(origins, &valid_source?/1) do
-      [] ->
-        origins
-
-      invalid ->
-        IO.warn(
-          """
-          EMBED_ORIGINS contains #{Enum.map_join(invalid, ", ", &inspect/1)}, which \
-          #{if length(invalid) == 1, do: "is not a valid", else: "are not valid"} \
-          frame-ancestors source#{if length(invalid) == 1, do: "", else: "s"}; \
-          keeping the default (same-origin only) rather than applying \
-          #{inspect(raw)} in part. Use a comma-separated list of origins, e.g. \
-          https://acme.com,https://blog.acme.com — or exactly `*` on its own to \
-          allow every site.\
-          """,
-          []
-        )
-
-        []
-    end
+  def parse_env(value) do
+    KilnCMS.Config.OriginList.parse(value,
+      name: "EMBED_ORIGINS",
+      validator: &valid_source?/1,
+      describe: "frame-ancestors source",
+      example: "https://acme.com,https://blog.acme.com"
+    )
   end
 
   # A bare `*` is rejected here on purpose: as a lone value `parse_env/1` has

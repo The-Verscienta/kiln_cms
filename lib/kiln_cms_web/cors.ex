@@ -62,20 +62,57 @@ defmodule KilnCMSWeb.CORS do
   Parses a `CORS_ORIGINS` env value into the config shape. `"*"` → `:all`;
   otherwise a comma-separated allowlist (blank entries dropped). Returns `[]`
   for a blank/empty value (deny all).
+
+  Shares the split/trim/wildcard half with `EMBED_ORIGINS` via
+  `KilnCMS.Config.OriginList` (#651). What differs, deliberately, is what a
+  malformed entry costs: `EMBED_ORIGINS` discards the whole value, because a bad
+  entry there can widen a CSP. A CORS origin is only ever compared for equality
+  (`allowed_origin?/2`, `check_socket_origin?/1`), so a malformed one can do
+  nothing but fail to match — failing the whole list closed over a stray typo
+  would take a working integration down to fix a nuisance. So the bad entries
+  are named on stderr and the rest are applied.
+
+  That warning is the point. An entry that can never match is invisible
+  otherwise: the browser reports a CORS failure, the server logs a clean 200,
+  and nothing connects the two to a trailing slash in an env var.
   """
   @spec parse_env(String.t() | nil) :: :all | [String.t()]
-  def parse_env(nil), do: []
+  def parse_env(value) do
+    KilnCMS.Config.OriginList.parse(value,
+      name: "CORS_ORIGINS",
+      validator: &valid_origin?/1,
+      on_invalid: :keep,
+      describe: "origin",
+      example: "https://app.acme.com or http://localhost:3000"
+    )
+  end
 
-  def parse_env(value) when is_binary(value) do
-    case String.trim(value) do
-      "*" ->
-        :all
+  @doc """
+  Whether `origin` has the shape a browser's `Origin` header actually takes:
+  scheme, host, optional port — and nothing else.
 
-      trimmed ->
-        trimmed
-        |> String.split(",", trim: true)
-        |> Enum.map(&String.trim/1)
-        |> Enum.reject(&(&1 == ""))
+  The mistakes this catches are the ones that produce a silent no-match: a
+  trailing slash (`https://acme.com/`), a path, a bare host with no scheme, or a
+  `*` mixed into a list. A browser never sends any of those, so an allowlist
+  entry in that shape is dead weight the operator believes is live.
+
+  `null` is rejected too. Browsers do send `Origin: null` — sandboxed iframes,
+  `file://`, some redirects — but allowlisting it grants every one of those at
+  once, so it is worth saying out loud rather than accepting quietly. The
+  warning does not remove it (`on_invalid: :keep`), so an operator who means it
+  keeps it.
+  """
+  @spec valid_origin?(String.t()) :: boolean()
+  def valid_origin?(origin) when is_binary(origin) do
+    case URI.parse(origin) do
+      %URI{scheme: scheme, host: host, path: path, query: nil, fragment: nil}
+      when scheme in ["http", "https"] and is_binary(host) and host != "" ->
+        path in [nil, ""]
+
+      _otherwise ->
+        false
     end
   end
+
+  def valid_origin?(_origin), do: false
 end

@@ -476,6 +476,14 @@ Allowed origins come from the `CORS_ORIGINS` env var, resolved at runtime:
 | `*`                                    | Echo any origin (dev default).                     |
 | `https://a.example,https://b.example`  | Allowlist of exact origins (comma-separated).      |
 
+Entries are matched by **exact equality** against the browser's `Origin` header,
+which is always `scheme://host[:port]` — no trailing slash, no path. An entry in
+any other shape can never match, so the CMS warns on stderr at boot naming it
+(#651) and applies the rest of the list. The common ones are a trailing slash
+(`https://acme.com/`), a bare host (`acme.com`), and a `*` mixed into a list —
+that last one grants nothing here, unlike in `EMBED_ORIGINS`, because there is
+no wildcard matching to widen.
+
 Preflight `OPTIONS` requests are answered ahead of routing and are **not**
 counted against the caller's rate-limit budget. Browser/HTML routes are
 unaffected — CORS applies to the API paths only.
