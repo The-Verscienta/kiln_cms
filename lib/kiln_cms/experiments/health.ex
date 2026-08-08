@@ -189,6 +189,10 @@ defmodule KilnCMS.Experiments.Health do
     {:no_goal_funnel, "no funnel is set, so nothing can complete this experiment"}
   end
 
+  # Through the same per-site cache `Delivery.goal_document?/3` resolves the goal
+  # from, deliberately: this reports what delivery will *actually* do on the next
+  # request. Reading the funnel fresh here would let the report say "healthy"
+  # while delivery still converts on the previous last step.
   defp funnel_completion(experiment) do
     case Experiments.funnel_target(experiment) do
       nil ->
