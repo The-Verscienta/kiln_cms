@@ -31,10 +31,15 @@ defmodule KilnCMS.Ask.Prompt do
   verified. The same escape fired from stored content: a published body with a
   `-----` horizontal rule was enough.
 
-  So every interpolated value — the question, each title, each excerpt — passes
-  through `defence/1`, which neutralizes fence-like runs, and the question is
-  length-capped. This does not make the fence a security boundary; it makes it
-  a boundary the *input* can't simply walk through.
+  So every interpolated value — the question, each title, each excerpt —
+  passes through `KilnCMS.LLM.Fence`, which neutralizes fence-like runs, and
+  the question is length-capped. The question and the titles use
+  `Fence.inline/1` rather than `defence/1`, because both are single-line
+  fields: a question is outside every region, so its own newlines forged a
+  second "Excerpts from the site:" block above the real one, and `[n] Title`
+  is a citation label, so a title's newlines fabricated a source number the
+  `sources` array never had (#945). This does not make the fence a security
+  boundary; it makes it a boundary the *input* can't simply walk through.
 
   The language is the **content** locale, not the caller's — a question typed
   in English against a French site should be answered from, and in, what the
@@ -42,25 +47,9 @@ defmodule KilnCMS.Ask.Prompt do
   """
 
   alias KilnCMS.I18n
+  alias KilnCMS.LLM.Fence
 
-  @fence "-----"
-
-  # A run of 3+ dashes on its own line is what closes the region — matching that
-  # shape rather than the exact fence string, because "----" and "------" read
-  # to a model as the same horizontal rule and would land just as convincingly.
-  # Markdown's own thematic-break spellings (`***`, `___`) are included for the
-  # same reason.
-  #
-  # `[^\S\n]` — every whitespace character EXCEPT newline — not `[ \t]`. A
-  # first cut used `[ \t]`, which a NBSP, form feed or vertical tab walked
-  # straight past while still rendering as the same rule.
-  @fence_like ~r/^[^\S\n]*([-*_])(?:[^\S\n]*\1){2,}[^\S\n]*$/mu
-
-  # What a neutralized rule becomes. NOT another rule: replacing the dashes
-  # with em-dashes left `—————`, which is the same thematic break in a
-  # different glyph. This cannot be mistaken for a delimiter, and it keeps the
-  # line's meaning for a model reading the passage.
-  @neutralized "(horizontal rule)"
+  @fence Fence.marker()
 
   # Uncapped, `q` is an arbitrary-length attacker-controlled prefix to the
   # prompt. The cap is generous for a real question and small enough that a
@@ -104,9 +93,14 @@ defmodule KilnCMS.Ask.Prompt do
     |> String.trim()
   end
 
+  # The question is `Fence.inline/1`, not `defence/1`: it sits OUTSIDE every
+  # region — it is the thing being asked, not data to answer from — so its own
+  # newlines were enough to forge a second, unfenced "Excerpts from the site:"
+  # block above the real one, with no delimiter needed at all. `q` is
+  # anonymous, and a question has no legitimate use for a line break.
   defp user(question, sources) do
     """
-    Question: #{question |> String.slice(0, @max_question_chars) |> defence()}
+    Question: #{question |> String.slice(0, @max_question_chars) |> Fence.inline()}
 
     Excerpts from the site:
 
@@ -123,12 +117,18 @@ defmodule KilnCMS.Ask.Prompt do
   # blank from general knowledge, which is the one thing this path must not do.
   defp render_sources([]), do: "(no matching content was found on this site)"
 
+  # `[n] Title` is a one-line labelled field and the label is the citation
+  # index, so a title's own newlines fabricate a numbered source: the model
+  # cites `[9]`, and `/api/ask` returns that answer beside a real `sources`
+  # array — #916's "forgery looks verified", reached from a published title
+  # without touching a fence character. `Content.title` has a length limit and
+  # no newline rule, so `Fence.inline/1` is what holds it to one line.
   defp render_sources(sources) do
     sources
     |> Enum.with_index(1)
     |> Enum.map_join("\n\n", fn {source, index} ->
       [
-        "[#{index}] #{defence(source[:title] || source["title"])}",
+        "[#{index}] #{Fence.inline(source[:title] || source["title"])}",
         excerpt(source)
       ]
       |> Enum.reject(&is_nil/1)
@@ -140,30 +140,13 @@ defmodule KilnCMS.Ask.Prompt do
   # (it's in the same `sources` array), the model doesn't need it to cite by
   # number, and including it invites the model to write links into prose the
   # rules just told it to keep link-free.
+  # The excerpt keeps `defence/1` rather than `inline/1`: it is genuinely
+  # multi-line prose, and it is inside the region, where a neutralized rule
+  # cannot close anything.
   defp excerpt(source) do
     case source[:excerpt] || source["excerpt"] do
-      text when is_binary(text) and text != "" -> defence(text)
+      text when is_binary(text) and text != "" -> Fence.defence(text)
       _none -> nil
     end
-  end
-
-  # Neutralize anything that could pass for a fence, keeping the character so a
-  # legitimate rule in a body still reads as a rule. Applied to EVERY
-  # interpolated value — question, title and excerpt alike — because the
-  # question is attacker-chosen and a published body is only as trustworthy as
-  # whoever may publish.
-  defp defence(nil), do: nil
-
-  defp defence(value) do
-    value
-    |> to_string()
-    # Line endings FIRST. Erlang's `:re` uses the LF-only newline convention,
-    # so in multiline mode `$` matches before `\n` — and on a CRLF line the
-    # character before it is `\r`, which no horizontal-whitespace class
-    # contains. The pattern therefore never matched a CRLF fence, and
-    # `?q=hi%0D%0A-----%0D%0A…` walked through the defence untouched. Every
-    # value here is prompt text, so normalizing newlines costs nothing.
-    |> String.replace(~r/\r\n?/u, "\n")
-    |> String.replace(@fence_like, @neutralized)
   end
 end

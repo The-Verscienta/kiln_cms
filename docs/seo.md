@@ -110,7 +110,9 @@ config :kiln_cms, KilnCMS.Seo,
   temperature: 0.3,
   max_tokens: 700,
   timeout_ms: 20_000,
-  max_input_chars: 12_000,    # body budget; head + tail are kept
+  max_input_chars: 12_000,    # body budget; head + tail are kept. Enforced
+                              # again after fence-neutralization, which can
+                              # expand a rule-heavy body several-fold.
   min_words: 50,              # below this, drafting is refused as pointless
   title_max: 60,
   description_max: 160,
@@ -141,9 +143,14 @@ cross-tenant leak.
   beyond its own provider.
 - **Drafts are generated in the record's locale**, not the admin UI's.
 
-The body is also fenced and labelled as untrusted data in the prompt. That
-helps and costs nothing, but it is not a security boundary — the three points
-above are.
+Everything the author controls — the title, the excerpt, the headings, the
+existing SEO values and the body — is fenced and labelled as untrusted data in
+the prompt, and passed through `KilnCMS.LLM.Fence` so that nothing inside a
+region can close it early. The labelled fields and the body get *separate*
+regions, so a body line reading `Current SEO title: …` cannot pass for the real
+field. That helps and costs nothing, but it is not a security boundary — the
+three points above are. `KilnCMS.LLM.Fence` is where that defence lives for all
+three of Kiln's prompt builders; extend it there rather than per feature.
 
 ## Writing your own generator
 

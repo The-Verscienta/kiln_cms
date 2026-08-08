@@ -146,9 +146,14 @@ cross-tenant leak.
   and undo stack and desynchronizing anyone collaborating on it.
 - **Prose is generated in the record's locale**, not the admin UI's.
 
-Both the passage and the author's instruction are fenced and labelled in the
-prompt. That helps and costs nothing, but it is not a security boundary — the
-points above are.
+The page context (title, content type, summary, headings), the passage and the
+author's instruction each get their own fenced, labelled region in the prompt,
+and every interpolated value passes through `KilnCMS.LLM.Fence` so that nothing
+inside a region can close it early — a passage carrying a `-----` line
+otherwise reopened as the *instruction* region, which is the one the rules say
+to follow. That helps and costs nothing, but it is not a security boundary —
+the points above are. `KilnCMS.LLM.Fence` is where that defence lives for all
+three of Kiln's prompt builders; extend it there rather than per feature.
 
 Bare URLs are deliberately left visible as text rather than dropped. In a
 `<meta>` tag a URL is pure payload and SEO drafting is right to refuse it; in
