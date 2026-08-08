@@ -93,6 +93,11 @@ defmodule KilnCMSWeb.AuthLive do
       # See the moduledoc: a compile-time list, not carried by delegation.
       on_mount AshAuthentication.Phoenix.Utils.Flash
 
+      # Titles the page from its `live_action`, on mount and on each patch
+      # (#559). A hook rather than a line in `mount/3` precisely so the
+      # delegation below stays a passthrough.
+      on_mount KilnCMSWeb.AuthPageTitle
+
       @upstream unquote(upstream)
 
       @impl true

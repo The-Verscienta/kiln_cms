@@ -20,9 +20,30 @@
 
           (This comment used to say `:authenticated_routes` had no
           `:assign_current_org`. It has had one since #563.) --%>
+    <%!-- The suffix is CONDITIONAL (#559). `live_title/1` renders
+          `prefix <> present(slot, default) <> suffix` — the suffix appended
+          whether or not the slot was empty — so a page that set no
+          `page_title` fell back to `default` and then had the brand appended
+          to it: `Acme Docs · Acme Docs` on a white-labelled tab.
+
+          Titling the pages that lacked one is the primary fix (see
+          `KilnCMSWeb.AuthPageTitle`, `PageController.home/2`, the error
+          templates). This is the second half: any page that is ever missed
+          degrades to the bare brand name, which is right, instead of to the
+          bug.
+
+          The cost, which is why the issue hesitated: LiveView carries `suffix`
+          to the client as `data-suffix` and reuses it for client-side title
+          updates, so a live session whose FIRST render sets no title emits no
+          `data-suffix`, and a later patch to a titled page would render without
+          it. That is why the primary fix matters and why
+          `auth_titles_test.exs` enumerates the auth session's routes rather
+          than trusting them — controller-rendered pages (`/`, the delivery
+          404, the error pages) do no live navigation, so for them the
+          conditional suffix is free. --%>
     <.live_title
       default={Layouts.brand_or_unbranded(assigns).site_name}
-      suffix={" · " <> Layouts.brand_or_unbranded(assigns).site_name}
+      suffix={assigns[:page_title] && " · " <> Layouts.brand_or_unbranded(assigns).site_name}
       phx-no-format
     >{assigns[:page_title]}</.live_title>
     <link rel="icon" href={Layouts.brand_or_unbranded(assigns).favicon_url} />

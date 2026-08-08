@@ -83,6 +83,11 @@ defmodule KilnCMSWeb.SignInLive do
   # confirmation at all, and the LiveView logs "undefined handle_info" at debug.
   on_mount AshAuthentication.Phoenix.Utils.Flash
 
+  # Titles `/sign-in`, `/register` and `/reset` from their `live_action`
+  # (#559). They are one view in one live session, patched between, so the
+  # hook retitles on `handle_params` as well as on mount.
+  on_mount KilnCMSWeb.AuthPageTitle
+
   alias AshAuthentication.Phoenix.SignInLive, as: Upstream
   alias KilnCMS.Accounts.Preparations.ThrottleSignIn
   alias KilnCMSWeb.Plugs.ClientIp

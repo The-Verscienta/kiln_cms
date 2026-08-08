@@ -758,7 +758,10 @@ defmodule KilnCMSWeb.Router do
     sign_out_route AuthController, "/sign-out",
       live_view: KilnCMSWeb.SignOutLive,
       layout: {KilnCMSWeb.Layouts, :auth},
-      on_mount: [{KilnCMSWeb.LiveUserAuth, :assign_current_org}],
+      on_mount: [
+        {KilnCMSWeb.LiveUserAuth, :restore_locale},
+        {KilnCMSWeb.LiveUserAuth, :assign_current_org}
+      ],
       overrides: [KilnCMSWeb.AuthOverrides]
 
     # Second-factor (TOTP) prompt after the first factor for a 2FA-enabled
@@ -784,6 +787,7 @@ defmodule KilnCMSWeb.Router do
                     live_view: KilnCMSWeb.SignInLive,
                     layout: {KilnCMSWeb.Layouts, :auth},
                     on_mount: [
+                      {KilnCMSWeb.LiveUserAuth, :restore_locale},
                       {KilnCMSWeb.LiveUserAuth, :assign_current_org},
                       {KilnCMSWeb.LiveUserAuth, :live_no_user}
                     ],
@@ -794,6 +798,7 @@ defmodule KilnCMSWeb.Router do
                     live_view: KilnCMSWeb.SignInLive,
                     layout: {KilnCMSWeb.Layouts, :auth},
                     on_mount: [
+                      {KilnCMSWeb.LiveUserAuth, :restore_locale},
                       {KilnCMSWeb.LiveUserAuth, :assign_current_org},
                       {KilnCMSWeb.LiveUserAuth, :live_no_user}
                     ],
@@ -811,21 +816,30 @@ defmodule KilnCMSWeb.Router do
     reset_route auth_routes_prefix: "/auth",
                 live_view: KilnCMSWeb.ResetLive,
                 layout: {KilnCMSWeb.Layouts, :auth},
-                on_mount: [{KilnCMSWeb.LiveUserAuth, :assign_current_org}],
+                on_mount: [
+                  {KilnCMSWeb.LiveUserAuth, :restore_locale},
+                  {KilnCMSWeb.LiveUserAuth, :assign_current_org}
+                ],
                 overrides: [KilnCMSWeb.AuthOverrides]
 
     confirm_route KilnCMS.Accounts.User, :confirm_new_user,
       auth_routes_prefix: "/auth",
       live_view: KilnCMSWeb.ConfirmLive,
       layout: {KilnCMSWeb.Layouts, :auth},
-      on_mount: [{KilnCMSWeb.LiveUserAuth, :assign_current_org}],
+      on_mount: [
+        {KilnCMSWeb.LiveUserAuth, :restore_locale},
+        {KilnCMSWeb.LiveUserAuth, :assign_current_org}
+      ],
       overrides: [KilnCMSWeb.AuthOverrides]
 
     magic_sign_in_route(KilnCMS.Accounts.User, :magic_link,
       auth_routes_prefix: "/auth",
       live_view: KilnCMSWeb.MagicSignInLive,
       layout: {KilnCMSWeb.Layouts, :auth},
-      on_mount: [{KilnCMSWeb.LiveUserAuth, :assign_current_org}],
+      on_mount: [
+        {KilnCMSWeb.LiveUserAuth, :restore_locale},
+        {KilnCMSWeb.LiveUserAuth, :assign_current_org}
+      ],
       overrides: [KilnCMSWeb.AuthOverrides]
     )
   end
