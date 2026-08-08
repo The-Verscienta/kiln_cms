@@ -58,7 +58,14 @@ defmodule KilnCMS.Search.MeilisearchWorker do
 
   defp load(_org_id, _type, _id), do: :error
 
-  defp published({:ok, %{state: :published} = record}), do: {:ok, record}
+  defp published({:ok, %{state: :published, access_password_hash: nil} = record}),
+    do: {:ok, record}
+
+  # A passphrase-locked document (#496) falls through to `:error`, and the caller
+  # turns that into a DELETE — so locking an already-indexed document removes it
+  # from the index rather than merely stopping future updates. Meilisearch has no
+  # audience or grant facet and its queries are anonymous, so anything indexed is
+  # readable by everyone: the only correct index entry for locked content is none.
   defp published(_), do: :error
 
   # Surface real transport failures so Oban retries; treat disabled/missing as done.

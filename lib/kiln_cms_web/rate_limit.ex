@@ -18,6 +18,12 @@ defmodule KilnCMSWeb.RateLimit do
     delivery: {300, :timer.minutes(1)},
     # Signed preview links — tight, to slow token enumeration / draft scraping.
     preview: {30, :timer.minutes(1)},
+    # Passphrase attempts against locked content (#496). Tighter than `:form`
+    # and separate from `:auth`, because this is the one bucket standing between
+    # a shared secret and a brute force: the passphrase is chosen by an editor
+    # for convenience, so it is short and guessable far more often than a
+    # password is, and there is no account to lock out instead.
+    unlock: {10, :timer.minutes(1)},
     # Public form submissions — tight per IP; a human fills a handful of
     # forms a minute, a spammer fills hundreds.
     form: {20, :timer.minutes(1)},

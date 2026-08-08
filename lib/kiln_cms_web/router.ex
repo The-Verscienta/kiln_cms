@@ -222,6 +222,13 @@ defmodule KilnCMSWeb.Router do
     plug KilnCMSWeb.Plugs.CodeInjection
   end
 
+  # Passphrase submissions against locked content (#496). CSRF applies (the form
+  # is server-rendered into the visitor's own session by the lock page), and the
+  # tight `:unlock` bucket is what bounds guessing at a shared secret.
+  pipeline :content_unlock do
+    plug KilnCMSWeb.Plugs.RateLimit, :unlock
+  end
+
   # Public form submissions (admin-defined forms). No CSRF — the endpoints
   # are anonymous and fired artifacts couldn't carry a token; abuse is
   # bounded by the honeypot + the tight :form rate bucket.
@@ -511,6 +518,16 @@ defmodule KilnCMSWeb.Router do
       tools: @mcp_tools,
       protocol_version_statement: "2024-11-05",
       otp_app: :kiln_cms
+  end
+
+  # Exchange a passphrase for a grant token (#496). Its own scope so it carries
+  # the tight `:unlock` bucket rather than the API's generous one — this endpoint
+  # is the guessing surface for a shared secret, and the rate limit is the only
+  # thing bounding it (there is no account to lock out).
+  scope "/api", KilnCMSWeb do
+    pipe_through [:api, :content_unlock]
+
+    post "/content/:type/:slug/unlock", ArtifactController, :unlock
   end
 
   # Headless delivery of fired artifacts (Kiln v2 — D9). The v2 content API serves
@@ -926,6 +943,16 @@ defmodule KilnCMSWeb.Router do
     # Inline, Range-capable playback — the `src` of every video/audio block
     # and of their caption `<track>`. Same authorization as the download.
     get "/media/:id/stream", MediaDownloadController, :stream
+  end
+
+  # Passphrase submission from a lock page (#496). Its own scope purely so it can
+  # carry the tight `:unlock` bucket without putting it on every content GET —
+  # `:delivery` still applies, so the failure re-render gets the same layout and
+  # code injection the lock page itself had.
+  scope "/", KilnCMSWeb do
+    pipe_through [:browser, :delivery, :content_unlock]
+
+    post "/_unlock", ContentController, :unlock
   end
 
   # Public content delivery (HTML). Defined last among "/" routes so the

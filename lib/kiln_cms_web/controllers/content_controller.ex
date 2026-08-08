@@ -14,10 +14,12 @@ defmodule KilnCMSWeb.ContentController do
 
   alias KilnCMS.Cache
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.ContentPassword
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Experiments
   alias KilnCMS.Feeds
   alias KilnCMS.I18n
+  alias KilnCMSWeb.ContentLock
   alias KilnCMSWeb.Params
   alias KilnCMSWeb.StructuredData
   alias KilnCMSWeb.ViewTracking
@@ -27,16 +29,17 @@ defmodule KilnCMSWeb.ContentController do
     ct = ContentTypes.get(:page)
     org_id = current_org_id(conn)
     audiences = reader_audiences(conn)
+    unlocks = ContentLock.grants(conn)
 
     fetch =
-      &CMS.get_published_page_by_slug!(slug, &1, %{audiences: audiences},
+      &CMS.get_published_page_by_slug!(slug, &1, %{audiences: audiences, unlocks: unlocks},
         not_found_error?: false,
         authorize?: false,
         tenant: org_id,
         load: [:author]
       )
 
-    case fetch_payload(org_id, "page", slug, locale, audiences, fn ->
+    case fetch_payload(org_id, "page", slug, locale, audiences, unlocks, fn ->
            payload(fetch, locale, ct, org_id, audiences)
          end) do
       nil ->
@@ -52,16 +55,17 @@ defmodule KilnCMSWeb.ContentController do
     ct = ContentTypes.get(:post)
     org_id = current_org_id(conn)
     audiences = reader_audiences(conn)
+    unlocks = ContentLock.grants(conn)
 
     fetch =
-      &CMS.get_published_post_by_slug!(slug, &1, %{audiences: audiences},
+      &CMS.get_published_post_by_slug!(slug, &1, %{audiences: audiences, unlocks: unlocks},
         not_found_error?: false,
         authorize?: false,
         tenant: org_id,
         load: [:author]
       )
 
-    case fetch_payload(org_id, "post", slug, locale, audiences, fn ->
+    case fetch_payload(org_id, "post", slug, locale, audiences, unlocks, fn ->
            payload(fetch, locale, ct, org_id, audiences)
          end) do
       nil ->
@@ -78,19 +82,21 @@ defmodule KilnCMSWeb.ContentController do
     locale = locale(conn)
     org_id = current_org_id(conn)
     audiences = reader_audiences(conn)
+    unlocks = ContentLock.grants(conn)
     ct = ContentTypes.get_by_path(type, org_id)
 
     with ct when not is_nil(ct) <- ct,
          fetch =
            &ContentTypes.get_published_by_slug(ct.type, slug, &1,
              audiences: audiences,
+             unlocks: unlocks,
              not_found_error?: false,
              authorize?: false,
              tenant: org_id,
              load: [:author]
            ),
          payload when not is_nil(payload) <-
-           fetch_payload(org_id, to_string(ct.type), slug, locale, audiences, fn ->
+           fetch_payload(org_id, to_string(ct.type), slug, locale, audiences, unlocks, fn ->
              payload(fetch, locale, ct, org_id, audiences)
            end) do
       serve(conn, :show, to_string(ct.type), payload, ct, audiences)
@@ -132,18 +138,145 @@ defmodule KilnCMSWeb.ContentController do
   # chains); anything unresolvable 404s as before.
   # `ct` (when known) lets the flat-slug miss try a paywall teaser for that type.
   #
-  # Order matters: alias, then the redirect table, then the teaser, then 404. The
-  # teaser is LAST so a gated document that also has a legacy redirect still
-  # redirects — a paywall must not shadow an editor's explicit routing decision.
+  # Order matters: alias, then the redirect table, then the lock page, then the
+  # teaser, then 404. Both interstitials come after the redirect table, so a
+  # document that also has a legacy redirect still redirects — neither may shadow
+  # an editor's explicit routing decision.
+  #
+  # Lock before teaser (#496), because the lock read already requires the reader
+  # to satisfy the audience axis. A locked members-only post therefore shows the
+  # paywall to a visitor who isn't a member and the passphrase form to one who
+  # is, which is the AND the two axes are supposed to compose to. The other order
+  # would have shown every member a paywall they had already paid past.
   defp follow_redirect_or_404(conn, path, ct \\ nil) do
     serve_alias(conn, path) ||
       case KilnCMS.CMS.Redirects.resolve(path, locale(conn), current_org_id(conn)) do
         nil ->
-          serve_teaser(conn, path, ct) || not_found(conn, path)
+          serve_lock(conn, path, ct) || serve_teaser(conn, path, ct) || not_found(conn, path)
 
         %{to: to} ->
           moved_permanently(conn, to)
       end
+  end
+
+  @doc """
+  Verify a passphrase submitted from a lock page (#496) and, on success, record
+  the grant and send the visitor back to the document.
+
+  A wrong passphrase re-renders the same lock page with an error and a `401`, so
+  the response is indistinguishable from a first visit to anything that isn't
+  watching the body — and identical whether the passphrase was wrong or the
+  document was never locked at all.
+  """
+  def unlock(conn, params) do
+    path = local_path(Params.string(params, "path", ""))
+    type = Params.string(params, "type", "")
+    locale = Params.string(params, "locale", I18n.default_locale())
+    ct = path && ContentTypes.get(type)
+
+    with ct when not is_nil(ct) <- ct,
+         record when not is_nil(record) <- locked_record(conn, path, ct, locale) do
+      verify_passphrase(conn, record, ct, path, params["passphrase"])
+    else
+      # No such type, an off-site path, or nothing locked there. Deliberately a
+      # 404 through the normal funnel rather than a distinct error: an unlock
+      # endpoint that answered differently for "not locked" than for "wrong
+      # passphrase" would enumerate which documents are locked.
+      _ -> not_found(conn, path || "/")
+    end
+  end
+
+  defp verify_passphrase(conn, record, ct, path, passphrase) do
+    if ContentPassword.verify(record.access_password_hash, passphrase) do
+      conn
+      |> ContentLock.grant(record.password_fingerprint)
+      # 303, not 302: this is a POST whose result is a page to GET. It also means
+      # the browser drops the form body, so a refresh on the document doesn't
+      # re-submit the passphrase.
+      |> put_status(:see_other)
+      |> redirect(to: I18n.localized_path(conn.assigns[:path_locale], path))
+    else
+      render_lock(conn, record, ct, path, :invalid)
+    end
+  end
+
+  # A submitted return path is only ever used as a local path. `//host` and
+  # `/\\host` are protocol-relative URLs that a browser resolves off-site, so
+  # "starts with a slash" is not enough of a check on its own.
+  defp local_path("/" <> rest = path) do
+    if String.starts_with?(rest, "/") or String.starts_with?(rest, "\\"), do: nil, else: path
+  end
+
+  defp local_path(_), do: nil
+
+  # Render the passphrase form for a LOCKED published document (#496).
+  #
+  # Same shape as the paywall below, and the same guarantee: the read never
+  # selects the block tree, and the record is projected onto `KilnCMSWeb.Teaser`
+  # — a struct with no `blocks` field — before anything reaches a template. A
+  # lock page describes a document precisely in order not to serve it.
+  defp serve_lock(_conn, _path, nil), do: nil
+
+  defp serve_lock(conn, path, ct) do
+    case locked_record(conn, path, ct, locale(conn)) do
+      nil -> nil
+      record -> render_lock(conn, record, ct, path)
+    end
+  end
+
+  # The locked document at `path`, or `nil`. Shared by the interstitial and by
+  # `unlock/2`, so the form and the check can never disagree about which document
+  # a request is talking about.
+  defp locked_record(conn, path, ct, locale) do
+    slug = path |> String.split("/") |> List.last()
+
+    fetch = fn loc ->
+      ContentTypes.get_locked_by_slug(ct.type, slug, loc,
+        audiences: reader_audiences(conn),
+        not_found_error?: false,
+        authorize?: false,
+        tenant: current_org_id(conn)
+      )
+    end
+
+    localized(fetch, locale)
+  rescue
+    # A content type compiled against an older macro has no locked read — no
+    # lock page rather than a 500, exactly as the teaser path degrades.
+    _ -> nil
+  end
+
+  defp render_lock(conn, record, ct, path, error \\ nil) do
+    org = KilnCMSWeb.Tenant.current_org(conn)
+    base_url = KilnCMSWeb.Tenant.base_url(org)
+    url = record.canonical_url || locale_url(ct, record.slug, record.locale, base_url)
+    teaser = KilnCMSWeb.Teaser.from_record(record, url)
+
+    conn
+    # Never shared-cached, and no ETag: the same URL returns the lock page to one
+    # visitor and the document to another, so a cache keyed on URL alone would
+    # eventually serve the document to someone who never typed the passphrase.
+    |> put_private_delivery_headers()
+    # A lock page is an interstitial, not the document. `noindex` keeps it from
+    # being indexed in the document's place — the canonical below still points at
+    # the document's own URL, so nothing about it moves in an index.
+    |> put_resp_header("x-robots-tag", "noindex, nofollow")
+    |> put_status(:unauthorized)
+    |> assign(:locale, teaser.locale)
+    |> assign(:page_title, teaser.seo_title || teaser.title)
+    |> assign(:meta_description, teaser.seo_description)
+    |> assign(:og_image, teaser.seo_image)
+    |> assign(:og_type, "article")
+    |> assign(:canonical_url, teaser.url)
+    |> assign(:json_ld, json_ld_script(StructuredData.teaser(teaser, record, org)))
+    |> put_view(KilnCMSWeb.ContentHTML)
+    |> render(:lock,
+      teaser: teaser,
+      unlock_path: path,
+      unlock_type: to_string(ct.type),
+      unlock_locale: record.locale,
+      error: error
+    )
   end
 
   # Render a paywall for a GATED published document the reader can't read.
@@ -469,10 +602,17 @@ defmodule KilnCMSWeb.ContentController do
   # that class of bug unreachable: gated payloads are never in the cache at all.
   # The cost is one query per gated page view, for the smallest and least
   # latency-sensitive slice of traffic.
-  defp fetch_payload(org_id, type, slug, locale, [], fun),
+  # Unlock grants (#496) bypass it for the same reason and by the same rule: the
+  # cached shape is what an anonymous visitor may read, and a request carrying a
+  # grant may read more. Bypassing on "carries ANY grant" rather than "this
+  # document is locked" is deliberate — the cache is consulted before the record
+  # is known, so the narrower test isn't available at the decision point, and the
+  # wrong guess would file a locked body under the anonymous key. The cost lands
+  # on the handful of visitors who unlocked something, for the life of the grant.
+  defp fetch_payload(org_id, type, slug, locale, [], [], fun),
     do: Cache.fetch_published_payload(org_id, type, slug, locale, fun)
 
-  defp fetch_payload(_org_id, _type, _slug, _locale, _audiences, fun), do: fun.()
+  defp fetch_payload(_org_id, _type, _slug, _locale, _audiences, _unlocks, fun), do: fun.()
 
   # The cached delivery payload: the published record, its media-enriched blocks,
   # and its published locale variants. All enrichment (the per-image media lookup
@@ -526,7 +666,13 @@ defmodule KilnCMSWeb.ContentController do
     # minute. The experiment then reports a 50/50 split that never happened.
     # `etag/1` has no variant dimension either, so a conditional request would
     # 304 a visitor into whichever arm the cache is holding.
-    private? = audiences != [] or variant != nil
+    # And a document behind a passphrase (#496) is private for the plainest
+    # reason of the three: with `public, max-age=60` the first unlocked visitor
+    # populates a shared cache, and the next sixty seconds of anonymous visitors
+    # read it without ever seeing the lock page. A shared secret is weak access
+    # control; a shared secret plus a shared cache is none.
+    private? =
+      audiences != [] or variant != nil or not is_nil(Map.get(record, :access_password_hash))
 
     conn =
       if private?,

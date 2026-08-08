@@ -1118,6 +1118,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # `<select>` options for the consumer-facing audience (KilnCMS.CMS.Audiences):
   # `{humanized label, atom value}`. The select is only rendered when more than
   # one audience is configured (see the template).
+  # Whether this record currently carries a passphrase (#496). Derived from the
+  # record rather than kept as an assign, so it cannot go stale against a save —
+  # the rail only ever needs to know *that* one is set, never what it is.
+  defp content_locked?(record), do: not is_nil(Map.get(record || %{}, :access_password_hash))
+
   defp audience_options do
     Enum.map(KilnCMS.CMS.Audiences.all(), &{Phoenix.Naming.humanize(&1), &1})
   end
@@ -7564,6 +7569,42 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   label={gettext("Audience")}
                   options={@audiences}
                 />
+
+                <%!-- Shared-passphrase lock (#496). Plain inputs on the enclosing
+                      form, never a nested <form> — the settings rail's parser
+                      drops one silently.
+
+                      The current passphrase is never echoed back: only whether
+                      one is set. So a blank field means "leave it alone" and
+                      clearing needs the explicit checkbox, which is what
+                      `Changes.ApplyAccessPassword` reads. --%>
+                <div class="space-y-2">
+                  <.input
+                    field={@form[:access_password]}
+                    type="password"
+                    value=""
+                    autocomplete="off"
+                    label={
+                      if content_locked?(@record),
+                        do: gettext("Replace passphrase"),
+                        else: gettext("Passphrase")
+                    }
+                    hint={
+                      gettext(
+                        "Anyone with this passphrase can read the published page. Weak protection, meant for convenience — use Audience for real access control."
+                      )
+                    }
+                  />
+                  <p :if={content_locked?(@record)} class="text-xs text-base-content/60">
+                    {gettext("A passphrase is set. Leave blank to keep it.")}
+                  </p>
+                  <.input
+                    :if={content_locked?(@record)}
+                    field={@form[:remove_access_password]}
+                    type="checkbox"
+                    label={gettext("Remove the passphrase")}
+                  />
+                </div>
 
                 <.tag_picker
                   form={@form}

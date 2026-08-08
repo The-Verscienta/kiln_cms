@@ -13,7 +13,9 @@ your deployment.
 - KilnCMS is **privacy-first by default**: HTML is delivered by the LiveView app
   itself, so there is **no third-party analytics, ad, or tag-manager script** on
   any page. Content analytics are aggregate counters only — no IP, user-agent, or
-  cookie is recorded for visitors.
+  cookie is recorded for visitors. The one visitor-side cookie that exists is
+  created only by a visitor who types a passphrase into a locked page, carries no
+  identifier, and is described under [Transport & at-rest notes](#transport--at-rest-notes).
 - The only personal data we store is **operator/editor account data** (email,
   optional display name, RBAC role, notification preferences) and **auth tokens**.
 - Data only leaves the system through integrations you explicitly enable
@@ -267,6 +269,20 @@ not impose one because it is jurisdiction- and policy-dependent.
   contents are neither tamperable nor readable client-side. Both salts derive
   keys from `secret_key_base`; rotating that invalidates existing sessions. The
   `__Host-` prefix keeps a sibling org's origin from shadowing it (#686).
+- **Content-unlock cookie** (`_kiln_unlock`, #496) — the only cookie a *visitor*
+  can end up with, and only ever by typing a passphrase into a page an editor
+  locked. It is signed and http-only, expires in 12 hours, and holds short-lived
+  grant tokens naming *documents' passphrases* — a `sha256` of a bcrypt hash.
+
+  It contains **no identifier of any kind**: two visitors who unlock the same
+  page hold byte-identical cookies, so it cannot distinguish them and there is
+  nothing in it to join to anything else. Nothing reads it but the unlock check;
+  no analytics counter is keyed on it. Rotating the passphrase (or
+  `secret_key_base`) invalidates every outstanding grant.
+
+  If your policy requires a cookie banner, this is strictly-necessary state for
+  a feature the visitor asked for. Deployments that never lock a page never set
+  it.
 - **Uploaded images are metadata-stripped on upload** (#215): EXIF/GPS, camera
   info, and the original client filename are removed from the stored original and
   every generated variant (`KilnCMS.ImageProcessor.strip_metadata/2`).

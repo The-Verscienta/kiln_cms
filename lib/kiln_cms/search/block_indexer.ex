@@ -19,13 +19,28 @@ defmodule KilnCMS.Search.BlockIndexer do
   @spec reindex(struct()) :: {:ok, non_neg_integer()}
   def reindex(document) do
     case Map.get(document, :blocks) do
-      blocks when is_list(blocks) -> reindex_blocks(document, blocks)
+      # A passphrase-locked document (#496) indexes as if it had no blocks, which
+      # means `prune_stale/3` deletes every row it already had. That is the point:
+      # `nearest_block_embeddings` is read unauthorized by design (it is an
+      # internal index), so the one durable way to keep locked text out of every
+      # present and future consumer of it is for the rows not to exist.
+      #
+      # Locking a published document re-fires it, and firing is what enqueues
+      # block indexing — so this runs on the edit that sets the passphrase, and
+      # again (re-indexing for real) on the edit that removes it.
+      _blocks when not is_nil(:erlang.map_get(:access_password_hash, document)) ->
+        reindex_blocks(document, [])
+
+      blocks when is_list(blocks) ->
+        reindex_blocks(document, blocks)
+
       # Not loaded (a select-limited read) or NULL (the column is nullable, and
       # an import can leave it so). Both used to be harmless; they are not any
       # more, because `prune_stale/3` would read "no blocks" as "every stored
       # row is stale" and delete the document's whole index. Answering "nothing
       # embedded" is the only safe reading of "I cannot see the blocks".
-      _unloaded_or_null -> {:ok, 0}
+      _unloaded_or_null ->
+        {:ok, 0}
     end
   end
 

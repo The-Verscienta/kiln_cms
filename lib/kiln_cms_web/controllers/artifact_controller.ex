@@ -17,6 +17,7 @@ defmodule KilnCMSWeb.ArtifactController do
   """
   use KilnCMSWeb, :controller
 
+  alias KilnCMS.CMS.ContentPassword
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Experiments
   alias KilnCMS.Firing.Delivery
@@ -48,7 +49,7 @@ defmodule KilnCMSWeb.ArtifactController do
     # all, so delivery keeps answering through a Postgres outage (#341).
     with ct when not is_nil(ct) <- ContentTypes.get(type),
          surface when not is_nil(surface) <- Map.get(@surfaces, params["surface"] || "json"),
-         {:ok, record} <- Delivery.published(org_id, ct.type, slug, locale),
+         {:ok, record} <- Delivery.published(org_id, ct.type, slug, locale, grants(conn, params)),
          {:ok, body} <- artifact(record, surface) do
       surface_name = params["surface"] || "json"
 
@@ -89,8 +90,86 @@ defmodule KilnCMSWeb.ArtifactController do
         variant
       )
     else
-      :backfilling -> backfilling(conn)
-      :unavailable -> unavailable(conn)
+      :backfilling ->
+        backfilling(conn)
+
+      :unavailable ->
+        unavailable(conn)
+
+      # Before answering 404, ask whether the miss was a lock (#496). Only a
+      # document that is published AND locked reaches this, so the 401 says
+      # nothing about content the caller couldn't already discover — an unlocked
+      # document at the same URL would have been served, and a nonexistent one
+      # still 404s.
+      _ ->
+        locked_or_not_found(conn, org_id, type, slug, locale)
+    end
+  end
+
+  @doc """
+  `POST /api/content/:type/:slug/unlock` — exchange a passphrase for a grant
+  token (#496).
+
+  The token goes back on subsequent reads as `x-kiln-unlock` (or `?unlock=`),
+  the same shape as the built-in site's cookie holds. It expires on its own and
+  stops working the moment an editor rotates the passphrase, because it names
+  the passphrase's fingerprint rather than the document.
+
+  A wrong passphrase and an unlocked document answer identically, so this cannot
+  be used to enumerate which documents are locked.
+  """
+  def unlock(conn, %{"type" => type, "slug" => slug} = params) do
+    locale = Params.string(params, "locale", KilnCMS.I18n.default_locale())
+    org_id = current_org_id(conn)
+
+    with ct when not is_nil(ct) <- ContentTypes.get(type),
+         {:ok, record} <- Delivery.locked(org_id, ct.type, slug, locale),
+         true <- ContentPassword.verify(record.access_password_hash, params["passphrase"]) do
+      conn
+      |> put_resp_header("cache-control", "private, no-store")
+      |> json(%{
+        token: ContentPassword.sign(record.password_fingerprint),
+        expires_in: ContentPassword.max_age_seconds()
+      })
+    else
+      _ ->
+        ApiError.send(
+          conn,
+          :unauthorized,
+          "invalid_passphrase",
+          "That passphrase is not valid for this content."
+        )
+    end
+  end
+
+  # The grants a headless request carries. The header is the documented channel;
+  # the query parameter exists for callers that cannot set headers (a static
+  # build step, an `<img>`-style fetch). Both are read here and nowhere else, so
+  # there is one place that decides what counts as a grant.
+  defp grants(conn, params) do
+    tokens = get_req_header(conn, "x-kiln-unlock") ++ List.wrap(Params.string(params, "unlock"))
+
+    Enum.flat_map(tokens, fn token ->
+      case ContentPassword.verify_grant(token) do
+        {:ok, fingerprint} -> [fingerprint]
+        {:error, _} -> []
+      end
+    end)
+  end
+
+  defp locked_or_not_found(conn, org_id, type, slug, locale) do
+    with ct when not is_nil(ct) <- ContentTypes.get(type),
+         {:ok, _record} <- Delivery.locked(org_id, ct.type, slug, locale) do
+      conn
+      # Never shared-cached: this response is a function of the caller's grant,
+      # not of the URL.
+      |> put_resp_header("cache-control", "private, no-store")
+      |> ApiError.send(
+        :unauthorized,
+        "password_required",
+        "This content is protected. POST the passphrase to /api/content/#{type}/#{slug}/unlock to get a token."
+      )
+    else
       _ -> ApiError.send(conn, :not_found, "not_found", "Content not found.")
     end
   end
@@ -202,7 +281,8 @@ defmodule KilnCMSWeb.ArtifactController do
     with {:ok, as_of} <- parse_as_of(params["as_of"]),
          ct when not is_nil(ct) <- ContentTypes.get(type, org_id),
          surface when not is_nil(surface) <- Map.get(@surfaces, params["surface"] || "json"),
-         record when not is_nil(record) <- published(org_id, ct.type, slug, locale),
+         record when not is_nil(record) <-
+           published(org_id, ct.type, slug, locale, grants(conn, params)),
          {:ok, body, published_at} <-
            PointInTime.read(org_id, record.__struct__, record.id, surface, as_of) do
       serve_point_in_time(conn, as_of, published_at, params["surface"] || "json", body)
@@ -273,20 +353,35 @@ defmodule KilnCMSWeb.ArtifactController do
   # matching `If-None-Match` with a 304 so revalidation skips the body.
   defp serve(conn, record, surface, body, variant) do
     etag = etag(record, surface, variant)
+    locked? = not is_nil(Map.get(record, :access_password_hash))
 
     conn =
       conn
-      |> put_resp_header("cache-control", "public, max-age=#{@max_age_seconds}")
-      |> put_resp_header("etag", etag)
-      |> put_resp_header("last-modified", http_date(record.updated_at))
+      |> put_cache_headers(record, etag, locked?)
       |> put_variant_headers(variant)
       |> maybe_provenance_header(record, surface)
 
-    if etag in get_req_header(conn, "if-none-match") do
+    # No conditional revalidation for a locked document either. The ETag has no
+    # grant dimension, so a cache holding the unlocked body would 304 a caller
+    # who presented nothing straight into it.
+    if not locked? and etag in get_req_header(conn, "if-none-match") do
       send_resp(conn, :not_modified, "")
     else
       respond(conn, surface, body)
     end
+  end
+
+  # A locked document (#496) reached here only because the caller presented a
+  # grant, so the body is a function of the request and not of the URL — the same
+  # rule the built-in site applies, for the same reason.
+  defp put_cache_headers(conn, _record, _etag, true),
+    do: put_resp_header(conn, "cache-control", "private, no-store")
+
+  defp put_cache_headers(conn, record, etag, false) do
+    conn
+    |> put_resp_header("cache-control", "public, max-age=#{@max_age_seconds}")
+    |> put_resp_header("etag", etag)
+    |> put_resp_header("last-modified", http_date(record.updated_at))
   end
 
   # The :llm surface is raw Markdown (#357) — LLM crawlers fetch it directly,
@@ -338,8 +433,12 @@ defmodule KilnCMSWeb.ArtifactController do
     Calendar.strftime(dt, "%a, %d %b %Y %H:%M:%S GMT")
   end
 
-  defp published(org_id, type, slug, locale) do
-    ContentTypes.get_published_by_slug(type, slug, locale, authorize?: false, tenant: org_id)
+  defp published(org_id, type, slug, locale, unlocks) do
+    ContentTypes.get_published_by_slug(type, slug, locale,
+      unlocks: unlocks,
+      authorize?: false,
+      tenant: org_id
+    )
   rescue
     _ -> nil
   end

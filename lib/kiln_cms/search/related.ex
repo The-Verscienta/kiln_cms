@@ -249,11 +249,20 @@ defmodule KilnCMS.Search.Related do
 
   # `published_only?` serves the reader-facing surfaces — `/api/related` and the
   # editor's internal-link suggestions — so it means "a page a reader can
-  # actually open", i.e. published AND public. Delivery draws the same line in
+  # actually open", i.e. published, public, and unlocked. Delivery draws the same line in
   # `Slugs.find_published_by_alias/3`; without the audience half, both surfaces
   # advertise member-gated pages to anonymous callers.
   defp neighbour_entry(doc, _distance, true) when doc.state != :published, do: []
   defp neighbour_entry(doc, _distance, true) when doc.audience != :public, do: []
+
+  # ...and neither is one behind a passphrase (#496). Third clause rather than a
+  # widened second, because the three exclusions are three different reasons and
+  # a reader hitting this surface has satisfied none of them: the vector query
+  # above runs unauthorized, so this is where the lock is actually enforced for
+  # related content.
+  defp neighbour_entry(doc, _distance, true)
+       when not is_nil(:erlang.map_get(:access_password_hash, doc)),
+       do: []
 
   defp neighbour_entry(doc, distance, _published_only?) do
     type = KilnCMS.Firing.Engine.public_type(doc)

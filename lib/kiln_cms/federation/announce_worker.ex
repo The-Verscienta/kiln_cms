@@ -81,6 +81,11 @@ defmodule KilnCMS.Federation.AnnounceWorker do
     with {:ok, record} <- load(descriptor, document_id, org_id),
          true <- record.state == :published,
          true <- Map.get(record, :audience, :public) == :public,
+         # A passphrase-locked document (#496) is not announced. An Announce is a
+         # push to strangers' timelines with the title and a link; a lock says
+         # this document is for whoever holds the passphrase, and federating it
+         # is the loudest possible way to ignore that.
+         true <- is_nil(Map.get(record, :access_password_hash)),
          true <- record.locale == KilnCMS.I18n.default_locale() do
       {:ok, record}
     else

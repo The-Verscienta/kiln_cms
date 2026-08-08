@@ -410,9 +410,10 @@ defmodule KilnCMS.CMS.ContentTypes do
   # nil rather than raising on a miss).
   #
   # `:audiences` (#337 Phase 2) widens the read to gated content the caller has
-  # already established the reader holds. Popped from `opts` into the action's
-  # params, so every existing caller — which passes none — keeps the `:public`-only
-  # behaviour exactly.
+  # already established the reader holds; `:unlocks` (#496) widens it to locked
+  # content the caller holds a verified grant for. Popped from `opts` into the
+  # action's params, so every existing caller — which passes neither — keeps the
+  # public, unlocked behaviour exactly.
   def get_published_by_slug(type, slug, locale, opts \\ []) do
     {params, opts} = audience_params(opts)
 
@@ -438,9 +439,30 @@ defmodule KilnCMS.CMS.ContentTypes do
     end
   end
 
+  # Locate a LOCKED published record (#496) in order to render its passphrase
+  # form, or to verify a submitted passphrase. Like the teaser, the projection
+  # never carries the block tree — see the `:locked_by_slug` action.
+  def get_locked_by_slug(type, slug, locale, opts \\ []) do
+    {audiences, opts} = Keyword.pop(opts, :audiences, [])
+    params = %{audiences: audiences}
+
+    case get!(type, org_from(opts)) do
+      %{source: :dynamic, definition: definition} ->
+        CMS.get_locked_entry_by_slug!(slug, locale, definition.id, params, opts)
+
+      _compiled ->
+        call(type, "get_locked_#{atom(type)}_by_slug!", [slug, locale, params, opts])
+    end
+  end
+
+  # `:audiences` widens the read across the audience axis; `:unlocks` widens it
+  # across the passphrase axis (#496). Both default to "nothing extra", so a
+  # caller that passes neither reads exactly what an anonymous visitor may:
+  # published, `:public`, unlocked.
   defp audience_params(opts) do
     {audiences, opts} = Keyword.pop(opts, :audiences, [])
-    {%{audiences: audiences}, opts}
+    {unlocks, opts} = Keyword.pop(opts, :unlocks, [])
+    {%{audiences: audiences, unlocks: unlocks}, opts}
   end
 
   # Every published locale variant of a slug (for hreflang / language switching).
