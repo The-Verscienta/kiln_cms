@@ -2,7 +2,11 @@
   <article class="prose max-w-none">
     <h1 class="text-3xl font-bold tracking-tight">{@record.title}</h1>
     <div class="mt-6 space-y-4">
-      <BlockComponents.render_block :for={block <- @blocks} block={block} />
+      <BlockComponents.render_block
+        :for={block <- @blocks}
+        block={block}
+        variant={assigns[:experiment_variant]}
+      />
     </div>
   </article>
 </Layouts.public>

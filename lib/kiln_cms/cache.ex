@@ -249,6 +249,30 @@ defmodule KilnCMS.Cache do
   def sitemap_key(org_id), do: "sitemap:#{org_id}:xml"
 
   @doc """
+  Cache key for a site's running content experiments (#499).
+
+  On the delivery hot path for **every** page: a site with no experiments must
+  not pay a query per request to find that out. Held as one entry per site
+  rather than one per document, because the set is small by construction — an
+  experiment costs its page the shared cache, so nobody runs many at once.
+  """
+  @spec experiments_key(Ash.UUID.t()) :: String.t()
+  def experiments_key(org_id), do: "experiments:running:#{org_id}"
+
+  @doc """
+  Drop a site's cached running-experiment set.
+
+  Called from every experiment and variant write. The TTL is a backstop, not the
+  freshness signal — an editor who starts an experiment expects it live on the
+  next request, not within five minutes.
+  """
+  @spec bust_experiments(Ash.UUID.t()) :: :ok
+  def bust_experiments(org_id) do
+    if enabled?(), do: Cachex.del(@cache, experiments_key(org_id))
+    :ok
+  end
+
+  @doc """
   Drop a site's cached sitemap XML so a new publish/unpublish is reflected on the
   next request rather than waiting out the sitemap's TTL. Per-record `bust/3`
   doesn't touch this key, so publish hooks call it explicitly.

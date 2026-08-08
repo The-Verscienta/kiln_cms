@@ -32,6 +32,8 @@ defmodule KilnCMS.Forms do
 
   @honeypot_field "website"
   @rendered_at_field "_kiln_rendered_at"
+  # Carries the experiment variant the page was rendered with (#499).
+  @variant_field "_kiln_variant"
   @rendered_at_salt "form_rendered_at"
   # Bounds how long a rendered-but-unsubmitted form is honored, so the token
   # can't be replayed indefinitely — not a security boundary (nothing sensitive
@@ -140,6 +142,14 @@ defmodule KilnCMS.Forms do
     end
   end
 
+  @doc """
+  The hidden field a rendered page uses to carry its assigned experiment variant
+  back on submission (#499). Named like the other machinery fields so an editor's
+  own field can never collide with it.
+  """
+  @spec variant_field() :: String.t()
+  def variant_field, do: @variant_field
+
   defp honeypot_tripped?(params) do
     case Map.get(params, @honeypot_field) do
       value when is_binary(value) -> String.trim(value) != ""
@@ -172,10 +182,25 @@ defmodule KilnCMS.Forms do
     unless submission.status == :spam do
       notify(form, data)
       autorespond(form, form_fields, data)
+      count_experiment_conversion(params, form.org_id)
       KilnCMS.Webhooks.dispatch("form.submitted", %{form: form.slug, data: data}, form.org_id)
     end
 
     submission
+  end
+
+  # A/B experiments (#499). The rendered page injected the variant it served as a
+  # hidden field, so the conversion is attributed to the arm the visitor actually
+  # saw — which is why a form submission is the one goal that needs no visitor
+  # state at all, and the goal v1 leads with.
+  #
+  # Inside the `unless` deliberately: a submission the spam scorer flagged is not
+  # a conversion, and counting it would let anyone move an experiment's numbers
+  # by posting at it. A tripped honeypot never reaches here for the same reason.
+  defp count_experiment_conversion(params, org_id) do
+    params
+    |> Map.get(@variant_field)
+    |> KilnCMS.Experiments.Delivery.record_conversion(org_id)
   end
 
   defp notify(%{notify_email: email} = form, data) when is_binary(email) and email != "" do

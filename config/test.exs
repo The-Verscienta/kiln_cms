@@ -40,6 +40,12 @@ config :kiln_cms, KilnCMS.Federation,
   enabled: false,
   req_options: [plug: {Req.Test, KilnCMS.Federation}]
 
+# Content experiments (#499). Off, like production — the experiment tests turn it
+# on for themselves. On globally it would make every delivery request in the
+# suite consult the running-experiment cache, and would flip experimented pages
+# to `no-store` under tests that assert cache headers.
+config :kiln_cms, KilnCMS.Experiments, enabled: false
+
 # Outbound link checking (#474). Every request goes to a Req.Test stub; nothing
 # in the suite may reach the real web. The per-host throttle is widened to
 # effectively off, because pacing is tested directly (`Links.Throttle`) and

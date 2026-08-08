@@ -18,6 +18,7 @@ defmodule KilnCMSWeb.ArtifactController do
   use KilnCMSWeb, :controller
 
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.Experiments
   alias KilnCMS.Firing.Delivery
   alias KilnCMS.Firing.Engine
   alias KilnCMS.Firing.PointInTime
@@ -65,7 +66,28 @@ defmodule KilnCMSWeb.ArtifactController do
       # surface deliberately do not.
       ViewTracking.track(conn, surface_name, to_string(ct.type), record.id, record.org_id)
 
-      serve(conn, record, surface_name, body)
+      # A/B experiments (#499). Deterministic on this surface: `?variant_key=`
+      # always resolves to the same arm, so the caller owns stickiness and an
+      # edge cache can vary on the answer. Only the `:json` surface is patched —
+      # `:json_ld` is the machine-readable graph and must stay canonical
+      # (invariant 3), and `:web`/`:llm` are pre-rendered.
+      variant =
+        if surface == :json,
+          do:
+            Experiments.Delivery.assign(
+              to_string(ct.type),
+              record,
+              Params.string(params, "variant_key")
+            ),
+          else: nil
+
+      serve(
+        conn,
+        record,
+        surface_name,
+        Experiments.Assignment.apply_to_artifact(body, variant),
+        variant
+      )
     else
       :backfilling -> backfilling(conn)
       :unavailable -> unavailable(conn)
@@ -249,14 +271,15 @@ defmodule KilnCMSWeb.ArtifactController do
 
   # Serve a fired artifact with CDN/static-build cache headers (#188). Honour a
   # matching `If-None-Match` with a 304 so revalidation skips the body.
-  defp serve(conn, record, surface, body) do
-    etag = etag(record, surface)
+  defp serve(conn, record, surface, body, variant) do
+    etag = etag(record, surface, variant)
 
     conn =
       conn
       |> put_resp_header("cache-control", "public, max-age=#{@max_age_seconds}")
       |> put_resp_header("etag", etag)
       |> put_resp_header("last-modified", http_date(record.updated_at))
+      |> put_variant_headers(variant)
       |> maybe_provenance_header(record, surface)
 
     if etag in get_req_header(conn, "if-none-match") do
@@ -289,9 +312,24 @@ defmodule KilnCMSWeb.ArtifactController do
   end
 
   # Strong ETag keyed on the record + surface + last-modified time, so it changes
-  # whenever the document is republished.
-  defp etag(record, surface) do
-    ~s("#{record.id}-#{surface}-#{DateTime.to_unix(record.updated_at)}")
+  # whenever the document is republished — and on the variant, so a conditional
+  # request can never 304 a caller into an arm it was not assigned.
+  defp etag(record, surface, variant) do
+    suffix = if variant, do: "-#{variant.id}", else: ""
+    ~s("#{record.id}-#{surface}-#{DateTime.to_unix(record.updated_at)}#{suffix}")
+  end
+
+  # `Vary: X-Kiln-Variant-Key` tells a shared cache that this response depends on
+  # the assignment key, so it stores one entry per variant instead of handing the
+  # first caller's arm to everyone. Unlike the HTML surface, headless delivery
+  # keeps its `public` cacheability: the key is the caller's, so the cache can
+  # key on it.
+  defp put_variant_headers(conn, nil), do: conn
+
+  defp put_variant_headers(conn, variant) do
+    conn
+    |> put_resp_header("x-kiln-variant", variant.id)
+    |> put_resp_header("vary", "X-Kiln-Variant-Key")
   end
 
   defp http_date(%DateTime{} = dt) do

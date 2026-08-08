@@ -10,7 +10,11 @@
       </p>
     </header>
     <div class="space-y-4">
-      <BlockComponents.render_block :for={block <- @blocks} block={block} />
+      <BlockComponents.render_block
+        :for={block <- @blocks}
+        block={block}
+        variant={assigns[:experiment_variant]}
+      />
     </div>
   </article>
 </Layouts.public>
