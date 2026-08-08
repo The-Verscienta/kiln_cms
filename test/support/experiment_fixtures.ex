@@ -76,6 +76,9 @@ defmodule KilnCMS.ExperimentFixtures do
           goal_document_id: Keyword.fetch!(opts, :goal_document_id)
         }
 
+      :funnel_completion ->
+        %{goal: :funnel_completion, goal_funnel_id: Keyword.fetch!(opts, :goal_funnel_id)}
+
       goal ->
         %{
           goal: goal,
@@ -97,6 +100,40 @@ defmodule KilnCMS.ExperimentFixtures do
       authorize?: false,
       tenant: org_id
     )
+  end
+
+  @doc """
+  A funnel ending on `last` — the shape a `:funnel_completion` goal converts on.
+
+  Two steps, because a one-step funnel is not a funnel and the interesting case
+  is that the goal follows the LAST one.
+  """
+  @spec funnel_ending_at(struct(), struct(), Ash.UUID.t()) :: struct()
+  def funnel_ending_at(first, last, org_id) do
+    funnel =
+      KilnCMS.Analytics.create_funnel!(
+        %{
+          name: "F#{System.unique_integer([:positive])}",
+          slug: "f-#{System.unique_integer([:positive])}"
+        },
+        authorize?: false,
+        tenant: org_id
+      )
+
+    for {record, position} <- Enum.with_index([first, last]) do
+      KilnCMS.Analytics.create_funnel_step!(
+        %{
+          funnel_id: funnel.id,
+          content_type: "page",
+          content_id: record.id,
+          position: position
+        },
+        authorize?: false,
+        tenant: org_id
+      )
+    end
+
+    funnel
   end
 
   @doc "Add a variant to an experiment."

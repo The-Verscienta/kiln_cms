@@ -87,15 +87,16 @@ defmodule KilnCMS.Experiments.Delivery do
     end
   end
 
-  # Only a `:content_view` goal needs to know the visitor was here — every other
-  # goal converts on the page that carried the variant, so exposure travels with
-  # the request and nothing has to be written down.
+  # Only a later-page goal needs to know the visitor was here — `:form_submission`
+  # converts on the page that carried the variant, so exposure travels with the
+  # request and nothing has to be written down.
   #
   # And that goal's impressions are counted **per exposed visitor**, not per page
   # view, because its conversions are: an exposure is spent once. Counting a
   # visitor's tenth reload of the landing page in the denominator would make the
   # arm that brings people back look worse for bringing them back.
-  defp count_exposure(%{goal: :content_view}, variant, org_id, conn) do
+  defp count_exposure(%{goal: goal}, variant, org_id, conn)
+       when goal in [:content_view, :funnel_completion] do
     case Sticky.remember_exposure(conn, variant.id) do
       {:new, conn} ->
         record_impression(variant, org_id)
@@ -112,8 +113,9 @@ defmodule KilnCMS.Experiments.Delivery do
   end
 
   @doc """
-  Count a `:content_view` conversion if this page is some running experiment's
-  goal document and the visitor was exposed to it (#984).
+  Count a conversion for a later-page goal — `:content_view`, or
+  `:funnel_completion` on its funnel's final step (#1010) — if this page is some
+  running experiment's goal document and the visitor was exposed to it (#984).
 
   Returns the conn, because a counted exposure is **removed** from the visitor's
   cookie: one exposure converts once. Without that a reload of the target page
@@ -164,8 +166,9 @@ defmodule KilnCMS.Experiments.Delivery do
   def record_content_view(_content_type, _record, conn), do: conn
 
   @doc """
-  Whether this response is the goal document of a running `:content_view`
-  experiment, and so must not be shared-cached (#984).
+  Whether this response is the goal document of a running later-page experiment
+  (`:content_view`, or `:funnel_completion` on its funnel's final step), and so
+  must not be shared-cached (#984, #1010).
 
   Set by `record_content_view/3`. Two independent reasons, and either alone
   would be enough:
@@ -238,10 +241,42 @@ defmodule KilnCMS.Experiments.Delivery do
     end)
   end
 
-  defp goal_document?(experiment, content_type, id) do
-    experiment.goal == :content_view and
-      experiment.goal_content_type == to_string(content_type) and
+  # Two goals convert on a later page, and they name that page differently.
+  # `:content_view` states it outright; `:funnel_completion` names a funnel and
+  # means its FINAL step (#1010), so if an editor reorders the funnel the goal
+  # follows without anyone editing the experiment.
+  defp goal_document?(%{goal: :content_view} = experiment, content_type, id) do
+    experiment.goal_content_type == to_string(content_type) and
       experiment.goal_document_id == id
+  end
+
+  # The self-conversion guard has to be HERE as well as in
+  # `Validations.GoalConfigured`, and that is a consequence of the feature
+  # rather than belt-and-braces: `:start` refuses a funnel whose last step is
+  # the experimented document, but the whole point of naming a funnel is that
+  # editing it moves the goal — so an editor can drag that document to the end
+  # afterwards, and nothing about a funnel write knows an experiment exists.
+  #
+  # Left unguarded it is not a small error. `assign_sticky` writes the exposure
+  # and `record_content_view/3` reads it back off the same conn a few lines
+  # later, so the impression would convert itself within one request, the
+  # exposure would be spent, and the next request would mint and convert another
+  # — every arm reporting 100% forever.
+  defp goal_document?(%{goal: :funnel_completion} = experiment, content_type, id) do
+    case Experiments.funnel_target(experiment) do
+      {type, document_id} ->
+        type == to_string(content_type) and document_id == id and
+          not experimented_document?(experiment, type, document_id)
+
+      nil ->
+        false
+    end
+  end
+
+  defp goal_document?(_experiment, _content_type, _id), do: false
+
+  defp experimented_document?(experiment, type, document_id) do
+    experiment.content_type == type and experiment.document_id == document_id
   end
 
   @doc """
@@ -294,7 +329,7 @@ defmodule KilnCMS.Experiments.Delivery do
   # a real effect on the built-in site is diluted by headless traffic nobody can
   # see. A headless caller's `variant_key` says which arm they *would* be in,
   # never that they fetched the experimented document.
-  defp attributable?(%{goal: :content_view}), do: false
+  defp attributable?(%{goal: goal}) when goal in [:content_view, :funnel_completion], do: false
   defp attributable?(_experiment), do: true
 
   @doc """

@@ -259,6 +259,24 @@ defmodule KilnCMS.Cache do
   @spec experiments_key(Ash.UUID.t()) :: String.t()
   def experiments_key(org_id), do: "experiments:running:#{org_id}"
 
+  @doc """
+  Cache key for a site's funnel targets — each funnel's final step (#1010).
+
+  Separate from `experiments_key/1` because the two are invalidated by different
+  writes: a funnel edit must move a `:funnel_completion` goal without touching
+  the experiment, which is the whole point of naming a funnel rather than a
+  document.
+  """
+  @spec funnel_targets_key(Ash.UUID.t()) :: String.t()
+  def funnel_targets_key(org_id), do: "experiments:funnel_targets:#{org_id}"
+
+  @doc "Drop a site's cached funnel targets. Called from every funnel/step write."
+  @spec bust_funnel_targets(Ash.UUID.t()) :: :ok
+  def bust_funnel_targets(org_id) do
+    if enabled?(), do: Cachex.del(@cache, funnel_targets_key(org_id))
+    :ok
+  end
+
   @doc "Cache key for a site's configured social accounts (#497)."
   @spec social_accounts_key(Ash.UUID.t()) :: String.t()
   def social_accounts_key(org_id), do: "social:accounts:#{org_id}"
