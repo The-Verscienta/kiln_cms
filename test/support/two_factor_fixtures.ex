@@ -9,13 +9,16 @@ defmodule KilnCMS.TwoFactorFixtures do
   seeding a TOTP user by hand and six were spelling out
   `Totp.code_at(secret, System.system_time(:second))`.
 
-  ## The clock is the whole point
+  ## The clock
 
-  A TOTP code is a function of a secret **and the current 30-second step**, so a
-  test that mints one has to mint it at the moment it is used. `current_code/1`
-  reads the clock on every call rather than taking a timestamp, which is what
-  the six hand-written copies did; anything that wants a code for a *different*
-  step should say so with `code_at/2` and mean it.
+  A TOTP code is a function of a secret **and the current 30-second step**, so
+  `current_code/1` reads the clock on every call rather than taking a timestamp.
+  Anything that wants a code for a *different* step should say so with
+  `KilnCMS.Accounts.Totp.code_at/2` and mean it — which is what `totp_test.exs`
+  does, and why it is left alone.
+
+  (What actually keeps these tests off a step boundary is `Totp`'s `@drift 1`,
+  which accepts ±30s. The per-call clock read is tidiness, not the protection.)
   """
 
   alias KilnCMS.Accounts.{RecoveryCodes, Totp, User}
@@ -29,14 +32,33 @@ defmodule KilnCMS.TwoFactorFixtures do
   A confirmed account with TOTP already enabled, plus the secret its codes come
   from.
 
-  Returns `{user, secret}` — the secret is not derivable from the struct in a
-  useful way once it is encrypted, and every caller needs it to make a code.
+  Returns `{user, secret}` — every caller needs the secret to make a code, and
+  taking it from the returned tuple rather than the struct keeps that true if the
+  attribute is ever encrypted at rest.
 
   `opts` are merged into the seed, so `role:` (default `:admin`) or any other
-  attribute can be set by a caller that cares.
+  attribute can be set by a caller that cares. To pin the secret, pass
+  `secret:` — **not** a non-nil `totp_secret:`, which raises: it would set the
+  column while the returned tuple still carried a freshly minted random one, so
+  `current_code/1` would produce a code that could never verify and a test
+  asserting a refusal would pass for entirely the wrong reason. Every helper this
+  replaced spelled the attribute name, so the mistake is the natural one to make.
+  (`totp_secret: nil` is fine — an account with recovery codes and no TOTP
+  factor, where the returned secret is meaningless anyway.)
   """
   @spec enabled_user(keyword()) :: {User.t(), binary()}
   def enabled_user(opts \\ []) do
+    # Only a NON-NIL one lies: `totp_secret: nil` is a legitimate "an account
+    # with recovery codes and no TOTP factor", where the returned secret is
+    # meaningless and the caller ignores it.
+    if is_binary(opts[:totp_secret]) do
+      raise ArgumentError, """
+      enabled_user/1 was passed `totp_secret:`, which would seed one secret and \
+      return another — `current_code/1` on the returned one could never verify. \
+      Pass `secret:` instead; it does both.\
+      """
+    end
+
     secret = Keyword.get_lazy(opts, :secret, fn -> :crypto.strong_rand_bytes(20) end)
 
     attrs =
