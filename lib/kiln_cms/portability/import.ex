@@ -451,36 +451,121 @@ defmodule KilnCMS.Portability.Import do
     (featured ++ body) |> Enum.uniq_by(& &1.url)
   end
 
-  defp sideload(wanted, opts) do
-    {by_url, by_source_id, failures} =
-      Enum.reduce(wanted, {%{}, %{}, []}, fn asset, {by_url, by_id, failures} ->
-        case Ingest.store_url(asset.url, scope(opts) ++ [alt: asset.alt]) do
-          {:ok, item} ->
-            {Map.put(by_url, asset.url, item), maybe_put(by_id, asset.source_id, item), failures}
+  # Fetches run concurrently, grouped so no single host sees more than one
+  # in-flight request at a time. Serially this was the longest phase of any real
+  # migration — 500 images at 0.5-2 s each is 8-25 minutes of a run that has not
+  # yet written a single record — and almost all of it was waiting on a socket.
+  #
+  # Grouping by host rather than a flat `max_concurrency` is what keeps it
+  # polite: a WordPress export points overwhelmingly at ONE origin, so a flat
+  # pool of 8 would be 8 parallel requests at the site being migrated away from.
+  @sideload_concurrency 8
+  @sideload_timeout 120_000
 
-          {:error, reason} ->
-            # A missing image is not a reason to abandon a migration — the post
-            # still imports, keeping the source URL, and the failure is reported
-            # so an operator can re-upload it.
-            Logger.warning("Import: could not sideload #{asset.url}: #{inspect(reason)}")
-            {by_url, by_id, [%{url: asset.url, reason: reason} | failures]}
-        end
+  defp sideload(wanted, opts) do
+    by_host = Enum.group_by(wanted, &host_of/1)
+    total = length(wanted)
+    progress = progress_fun(opts, total, "media")
+
+    results =
+      by_host
+      |> Map.values()
+      |> Task.async_stream(
+        fn assets -> Enum.map(assets, &fetch_one(&1, opts, progress)) end,
+        max_concurrency: @sideload_concurrency,
+        timeout: @sideload_timeout,
+        on_timeout: :kill_task,
+        ordered: false
+      )
+      |> Enum.flat_map(fn
+        {:ok, list} -> list
+        # A killed host-group loses its assets, not the run.
+        {:exit, reason} -> [{:error, %{url: "(host group)", reason: reason}}]
       end)
+
+    by_url = for {:ok, asset, item} <- results, into: %{}, do: {asset.url, item}
+
+    by_source_id =
+      Enum.reduce(results, %{}, fn
+        {:ok, asset, item}, acc -> maybe_put(acc, asset.source_id, item)
+        _other, acc -> acc
+      end)
+
+    failures = for {:error, failure} <- results, do: failure
 
     %{
       by_url: by_url,
       by_source_id: by_source_id,
-      report: %{imported: map_size(by_url), failed: Enum.reverse(failures)}
+      report: %{imported: map_size(by_url), failed: failures}
     }
+  end
+
+  defp fetch_one(asset, opts, progress) do
+    result =
+      case Ingest.store_url(asset.url, scope(opts) ++ [alt: asset.alt]) do
+        {:ok, item} ->
+          {:ok, asset, item}
+
+        {:error, reason} ->
+          # A missing image is not a reason to abandon a migration — the post
+          # still imports, keeping the source URL, and the failure is reported
+          # so an operator can re-upload it.
+          Logger.warning("Import: could not sideload #{asset.url}: #{inspect(reason)}")
+          {:error, %{url: asset.url, reason: reason}}
+      end
+
+    progress.()
+    result
+  end
+
+  defp host_of(%{url: url}) do
+    case URI.parse(url) do
+      %URI{host: host} when is_binary(host) -> host
+      _ -> "(unknown)"
+    end
   end
 
   defp maybe_put(map, nil, _value), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
+  # ── Progress ───────────────────────────────────────────────────────────────
+
+  # A bulk import is silent for its entire multi-hour body: the parse counts
+  # print, then nothing until the final report. An operator cannot distinguish
+  # "working" from "hung on a stalled fetch", which is the difference between
+  # waiting and killing the run.
+  #
+  # The caller supplies the sink (`:progress`), so the mix tasks print and the
+  # test suite and any library caller stay silent.
+  @progress_every 25
+
+  defp progress_fun(opts, total, label) do
+    case Keyword.get(opts, :progress) do
+      fun when is_function(fun, 1) ->
+        counter = :counters.new(1, [:write_concurrency])
+        fn -> tick(counter, fun, total, label) end
+
+      _absent ->
+        fn -> :ok end
+    end
+  end
+
+  defp tick(counter, fun, total, label) do
+    :counters.add(counter, 1, 1)
+    done = :counters.get(counter, 1)
+
+    if rem(done, @progress_every) == 0 or done == total do
+      fun.("#{label}: #{done}/#{total}")
+    end
+
+    :ok
+  end
+
   # ── Records ────────────────────────────────────────────────────────────────
 
   defp import_records(decided, taxonomy, media, dry_run?, opts) do
     redirects? = Keyword.get(opts, :redirects, true)
+    progress = progress_fun(opts, length(decided), "records")
 
     {results, redirects} =
       Enum.reduce(decided, {[], %{created: 0, skipped: 0}}, fn {record, disposition},
@@ -494,6 +579,7 @@ defmodule KilnCMS.Portability.Import do
         # Prepended, not appended: `results ++ [entry]` copies the accumulator
         # every iteration, which is O(n^2) — 1.25 billion cons cells at 50k
         # records.
+        progress.()
         {[entry | results], counted}
       end)
 

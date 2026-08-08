@@ -458,4 +458,52 @@ defmodule KilnCMS.Portability.ImportTest do
       assert length(second.skipped) == 1
     end
   end
+
+  describe "scale (#951)" do
+    test "progress is reported to the caller's sink", %{parsed: parsed, scope: scope} do
+      me = self()
+      import!(parsed, scope, progress: fn line -> send(me, {:progress, line}) end)
+
+      # 3 records, so the only tick is the final "records: 3/3".
+      assert_received {:progress, "records: 3/3"}
+    end
+
+    test "no sink means no output and no crash", %{parsed: parsed, scope: scope} do
+      report = import!(parsed, scope)
+      assert length(report.created) == 3
+    end
+
+    test "media failures survive the concurrent fetch", %{parsed: parsed, actor: actor} do
+      # The fixture's one image is unreachable, so this exercises the error path
+      # through Task.async_stream rather than the serial reduce it replaced.
+      report = import!(parsed, actor: actor)
+
+      assert length(report.created) == 3
+      assert [%{url: "https://old.example.com/wp-content/pic.jpg"}] = report.media.failed
+    end
+  end
+
+  describe "WXR size ceiling (#951)" do
+    test "a file past the parser's ceiling is refused with the size, not OOM-killed" do
+      path = Path.join(System.tmp_dir!(), "huge-#{System.unique_integer([:positive])}.xml")
+      # Sparse: allocates no real bytes but reports a large size to File.stat.
+      {:ok, file} = File.open(path, [:write, :binary])
+      :file.position(file, 100 * 1024 * 1024)
+      IO.binwrite(file, "x")
+      File.close(file)
+      on_exit(fn -> File.rm(path) end)
+
+      assert {:error, {:too_large, size, max}} = WXR.parse_file(path)
+      assert size > max
+    end
+
+    test "an ordinary file still parses" do
+      path = Path.join(System.tmp_dir!(), "ok-#{System.unique_integer([:positive])}.xml")
+      File.write!(path, WXRFixture.wxr())
+      on_exit(fn -> File.rm(path) end)
+
+      assert {:ok, parsed} = WXR.parse_file(path)
+      assert length(parsed.records) == 3
+    end
+  end
 end

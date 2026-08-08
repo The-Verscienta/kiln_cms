@@ -153,15 +153,37 @@ import, or `--skip-media` will keep the blocks pointing at it.
 
 The WXR parser reads the whole file into memory and hands it to `xmerl`, which
 expands it to a charlist first — roughly **16 bytes per source byte** before the
-document tree is built on top. That puts the practical ceiling somewhere around
-50 MB of XML on a normal box; past that you will hit an OOM kill with no partial
-progress. WordPress's exporter can split a large site into several files, and
-that is the supported way to import one — the importer is safe to run once per
-file, because re-running skips what already landed.
+document tree is built on top. Files past **64 MB are refused up front**, with
+the size and the remedy, rather than OOM-killing the VM with no error and no
+partial progress:
 
-Media sideloading is serial and runs before any record is written, so a site
-with thousands of images spends a long time apparently doing nothing. `--limit`
-is the way to try a slice first.
+```
+export.xml is 210 MB; the parser's ceiling is 64 MB.
+Use WordPress's own split export ... and run this task once per file —
+re-running is safe, because what already landed is skipped.
+```
+
+Media sideloading runs concurrently, grouped so **no single host sees more than
+one in-flight request**. A WordPress export points overwhelmingly at one origin,
+so a flat concurrency pool would just be eight parallel requests at the site
+you are migrating away from.
+
+Both phases print progress every 25 items:
+
+```
+media: 150/512
+records: 400/4000
+```
+
+Without that, the entire multi-hour body of a run is silent and there is no way
+to tell "working" from "hung on a stalled fetch".
+
+`--drain-media` runs the queued variant jobs before the task exits. Use it when
+importing in a one-off container where nothing else consumes the `media`
+queue — otherwise the jobs sit `available` and imported images render full size
+until a node picks them up.
+
+`--limit` is still the way to try a slice first.
 
 ### Uses
 
