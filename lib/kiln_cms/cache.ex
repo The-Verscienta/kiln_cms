@@ -9,11 +9,18 @@ defmodule KilnCMS.Cache do
 
   In keeping with the project's minimal-ops goal this is in-process only (no
   Redis/Dragonfly); a shared multi-node cache is deferred until measured (D2).
+  Two keys are the exception to what that costs on a cluster —
+  `bust_code_injection/1` and `bust_branding/1` invalidate on every node via
+  `KilnCMS.Cache.ClusterBust`, because an operator deleting an executing script
+  should not have to wait out a TTL on the nodes they did not happen to hit
+  (#739).
 
   Set `config :kiln_cms, KilnCMS.Cache, enabled: false` to bypass the cache
   (every read hits the source) without removing the supervised process.
   """
   import Cachex.Spec, only: [hook: 1]
+
+  alias KilnCMS.Cache.ClusterBust
 
   @cache :kiln_cms_content_cache
 
@@ -215,10 +222,14 @@ defmodule KilnCMS.Cache do
   Drop a site's cached branding so a settings save is visible on the next
   request instead of waiting out the TTL. Per-record `bust/3` doesn't touch this
   aggregate key, so `Changes.BustBranding` calls it explicitly.
+
+  Cluster-wide (#739), for the reason `bust_code_injection/1` gives: these two
+  keys hold the same shape of thing, and there is no reason for one of them to
+  reach every node and the other not to.
   """
   @spec bust_branding(Ash.UUID.t()) :: :ok
   def bust_branding(org_id) do
-    if enabled?(), do: Cachex.del(@cache, branding_key(org_id))
+    if enabled?(), do: ClusterBust.broadcast([branding_key(org_id)])
     :ok
   end
 
@@ -234,10 +245,14 @@ defmodule KilnCMS.Cache do
   Staler than branding would be: the struct carries the CSP sources as well as
   the HTML, so a stale entry serves the NEW snippet under the OLD policy — a
   blocked script and a console error rather than a visibly out-of-date page.
+
+  Cluster-wide (#739). The documented incident response for a bad snippet is
+  "delete the row", and a node-local `Cachex.del` left every *other* node
+  serving that script — under its widened CSP — until the TTL expired.
   """
   @spec bust_code_injection(Ash.UUID.t()) :: :ok
   def bust_code_injection(org_id) do
-    if enabled?(), do: Cachex.del(@cache, code_injection_key(org_id))
+    if enabled?(), do: ClusterBust.broadcast([code_injection_key(org_id)])
     :ok
   end
 
