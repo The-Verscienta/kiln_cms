@@ -349,4 +349,357 @@ defmodule KilnCMSWeb.FeedControllerTest do
       refute body =~ "/blog/"
     end
   end
+
+  # ── #720: taxonomy on entries, and feeds narrow enough to act on ───────────
+
+  defp category(name) do
+    n = System.unique_integer([:positive])
+
+    CMS.create_category!(%{name: "#{name} #{n}", slug: "feed-cat-#{n}"}, actor: admin())
+  end
+
+  defp tag(name) do
+    n = System.unique_integer([:positive])
+
+    CMS.create_tag!(%{name: "#{name} #{n}", slug: "feed-tag-#{n}"}, actor: admin())
+  end
+
+  describe "entries carry their taxonomy" do
+    test "Atom emits category term and label for the category and every tag", %{conn: conn} do
+      cat = category("News")
+      t = tag("Jazz")
+      post = published_post()
+      CMS.update_post!(post, %{category_id: cat.id, tag_ids: [t.id]}, actor: admin())
+      Cache.bust_published()
+
+      body = response(get(conn, ~p"/feed.xml"), 200)
+
+      # `term` is the slug and `label` the name: a campaign tool that filtered on
+      # a display name would break the day an editor renamed the tag.
+      assert body =~ ~s(<category term="#{cat.slug}" label="#{cat.name}"/>)
+      assert body =~ ~s(<category term="#{t.slug}" label="#{t.name}"/>)
+    end
+
+    test "JSON Feed emits a flat tags array of labels", %{conn: conn} do
+      cat = category("News")
+      post = published_post()
+      CMS.update_post!(post, %{category_id: cat.id}, actor: admin())
+      Cache.bust_published()
+
+      body = Jason.decode!(response(get(conn, ~p"/feed.json"), 200))
+      item = Enum.find(body["items"], &(&1["title"] == post.title))
+
+      assert item["tags"] == [cat.name]
+    end
+
+    # `tags` is optional in JSON Feed 1.1, and an empty array in every item is
+    # bytes on a route clients fetch on a timer.
+    test "an untagged entry carries no tags key at all", %{conn: conn} do
+      post = published_post()
+
+      body = Jason.decode!(response(get(conn, ~p"/feed.json"), 200))
+      item = Enum.find(body["items"], &(&1["title"] == post.title))
+
+      refute Map.has_key?(item, "tags")
+    end
+
+    # The bound exists because this document is cached and served to everyone: a
+    # hundred-tag record would otherwise put a hundred elements in front of every
+    # subscriber.
+    test "an absurdly tagged entry is capped", %{conn: conn} do
+      tags = for _ <- 1..25, do: tag("Bulk")
+      post = published_post()
+      CMS.update_post!(post, %{tag_ids: Enum.map(tags, & &1.id)}, actor: admin())
+      Cache.bust_published()
+
+      body = response(get(conn, ~p"/feed.xml"), 200)
+
+      assert body |> String.split("<category term=") |> length() == 21
+    end
+  end
+
+  # The one invariant `FeedController` claims to own, and the reason it is
+  # asserted on `filter/1` directly: the read policy ALSO filters
+  # published-and-public, so deleting `audience: :public` from the controller
+  # left every behavioural test green. The moduledoc says the filter "must not
+  # depend on a policy staying shaped the way it is today" — this is what makes
+  # that true.
+  describe "the audience filter" do
+    alias KilnCMSWeb.FeedController
+
+    test "every scope filters to public, and to its own locale" do
+      term = %{id: Ash.UUID.generate(), slug: "c", name: "C"}
+
+      for scope <- [
+            %{locale: "en", taxonomy: nil},
+            %{locale: "fr", taxonomy: nil},
+            %{locale: "en", taxonomy: {:category, term}},
+            %{locale: "fr", taxonomy: {:tag, term}}
+          ] do
+        filter = FeedController.filter(scope)
+
+        assert filter[:audience] == :public, "no audience filter for #{inspect(scope)}"
+        assert filter[:locale] == scope.locale
+      end
+    end
+
+    test "a gated record stays out of a segment feed too", %{conn: conn} do
+      cat = category("News")
+      gated = published_post(%{audience: :member, title: "Members only"})
+      CMS.update_post!(gated, %{category_id: cat.id}, actor: admin())
+      Cache.bust_published()
+
+      body = response(get(conn, "/blog/category/#{cat.slug}/feed.xml"), 200)
+
+      refute body =~ "Members only"
+      refute body =~ gated.slug
+    end
+  end
+
+  describe "segment feeds" do
+    test "a category feed carries only that category", %{conn: conn} do
+      cat = category("News")
+      other = category("Sport")
+      wanted = published_post()
+      unwanted = published_post()
+      CMS.update_post!(wanted, %{category_id: cat.id}, actor: admin())
+      CMS.update_post!(unwanted, %{category_id: other.id}, actor: admin())
+      Cache.bust_published()
+
+      body = response(get(conn, "/blog/category/#{cat.slug}/feed.xml"), 200)
+
+      assert body =~ wanted.title
+      refute body =~ unwanted.title
+      # Its own self link, not the type feed's — two documents, two ids.
+      assert body =~ ~s(href="http://localhost:4000/blog/category/#{cat.slug}/feed.xml")
+    end
+
+    test "a tag feed carries only that tag", %{conn: conn} do
+      t = tag("Jazz")
+      wanted = published_post()
+      unwanted = published_post()
+      CMS.update_post!(wanted, %{tag_ids: [t.id]}, actor: admin())
+      Cache.bust_published()
+
+      body = Jason.decode!(response(get(conn, "/blog/tags/#{t.slug}/feed.json"), 200))
+      titles = Enum.map(body["items"], & &1["title"])
+
+      assert wanted.title in titles
+      refute unwanted.title in titles
+    end
+
+    # 404 rather than an empty document, for the reason the type route gives: a
+    # reader who subscribes to a mistyped category gets something that will never
+    # have anything in it and no way to tell.
+    test "an unknown category or tag is a 404", %{conn: conn} do
+      assert response(get(conn, "/blog/category/no-such-thing/feed.xml"), 404)
+      assert response(get(conn, "/blog/tags/no-such-thing/feed.json"), 404)
+    end
+
+    test "a segment feed on a type that does not syndicate is a 404", %{conn: conn} do
+      cat = category("News")
+      put_config(exclude: ["post"])
+
+      assert response(get(conn, "/blog/category/#{cat.slug}/feed.xml"), 404)
+    end
+
+    test "the title names the segment", %{conn: conn} do
+      cat = category("News")
+      published_post()
+
+      body = response(get(conn, "/blog/category/#{cat.slug}/feed.xml"), 200)
+
+      assert body =~ "<title>KilnCMS — Post — #{cat.name}</title>"
+    end
+  end
+
+  describe "locale feeds" do
+    defp translated_post(locale) do
+      n = System.unique_integer([:positive])
+
+      Ash.Seed.seed!(Post, %{
+        title: "Post #{locale} #{n}",
+        slug: "feed-#{locale}-#{n}",
+        excerpt: "Summary #{n}",
+        locale: locale,
+        state: :published,
+        published_at: DateTime.utc_now()
+      })
+    end
+
+    # The whole reason the unscoped feed filters to one locale: three
+    # translations in one document re-notify every subscriber three times per
+    # publish. Which left non-default-locale readers with nothing.
+    test "the site-wide feed still carries the default locale only", %{conn: conn} do
+      en = translated_post("en")
+      fr = translated_post("fr")
+
+      body = response(get(conn, ~p"/feed.xml"), 200)
+
+      assert body =~ en.title
+      refute body =~ fr.title
+    end
+
+    test "a locale feed carries that locale, and links its prefixed URLs", %{conn: conn} do
+      en = translated_post("en")
+      fr = translated_post("fr")
+
+      body = response(get(conn, "/fr/feed.xml"), 200)
+
+      assert body =~ fr.title
+      refute body =~ en.title
+      assert body =~ ~s(href="http://localhost:4000/fr/blog/#{fr.slug}")
+      assert body =~ ~s(href="http://localhost:4000/fr/feed.xml")
+    end
+
+    # `record.locale` is a plain attribute on the struct the bust already
+    # receives, so dropping the locale feed costs no read — which is why it is
+    # NOT covered by the "cannot load relationships in an after_action" rule that
+    # keeps the taxonomy segments on a TTL. Without this, a French publish never
+    # invalidated the only feed its readers have.
+    test "publishing a translation drops that locale's feed", %{conn: conn} do
+      assert response(get(conn, "/fr/feed.xml"), 200)
+
+      n = System.unique_integer([:positive])
+
+      post =
+        CMS.create_post!(
+          %{title: "Nouveau #{n}", slug: "feed-pub-fr-#{n}", locale: "fr"},
+          actor: admin()
+        )
+
+      CMS.publish_post!(post, actor: admin())
+      KilnCMS.DataCase.drain_oban()
+
+      assert response(get(build_conn(), "/fr/feed.xml"), 200) =~ "Nouveau #{n}"
+    end
+
+    test "JSON Feed declares the language", %{conn: conn} do
+      translated_post("fr")
+
+      assert Jason.decode!(response(get(conn, "/fr/feed.json"), 200))["language"] == "fr"
+      assert Jason.decode!(response(get(conn, ~p"/feed.json"), 200))["language"] == "en"
+    end
+
+    # `/en/…` is stripped for the whole delivery site, not just here, so the
+    # default-locale prefix resolves rather than 404ing. What matters is that it
+    # does not become a SECOND thing to subscribe to: the self link is the
+    # canonical `/feed.xml`, so both URLs carry one feed id.
+    test "the default-locale prefix is the site-wide feed, under its canonical id",
+         %{conn: conn} do
+      post = published_post()
+      body = response(get(conn, "/en/feed.xml"), 200)
+
+      assert body =~ post.title
+      assert body =~ ~s(<id>http://localhost:4000/feed.xml</id>)
+      refute body =~ "/en/feed.xml"
+    end
+
+    # An unrecognised prefix is not stripped, so it reaches the type lookup as a
+    # plural and 404s like any other unknown segment.
+    test "an unconfigured locale is a 404", %{conn: conn} do
+      assert response(get(conn, "/de/feed.xml"), 404)
+    end
+
+    test "a type feed still resolves under a locale prefix", %{conn: conn} do
+      en = translated_post("en")
+      fr = translated_post("fr")
+
+      body = response(get(conn, "/fr/blog/feed.xml"), 200)
+
+      assert body =~ fr.title
+      refute body =~ en.title
+      assert body =~ ~s(href="http://localhost:4000/fr/blog/feed.xml")
+    end
+
+    # A French reader on a French article was being pointed at the default-locale
+    # feed, which carries no article they can read — while the feed that does is
+    # one prefix away.
+    test "a localized page advertises its own locale's feed", %{conn: conn} do
+      fr = translated_post("fr")
+
+      html = html_response(get(conn, "/fr/blog/#{fr.slug}"), 200)
+
+      assert html =~ ~s(href="http://localhost:4000/fr/feed.xml")
+      assert html =~ ~s(href="http://localhost:4000/fr/blog/feed.xml")
+    end
+
+    # The two axes compose, and they must both reach the cache key. Asserted by
+    # fetching BOTH URLs in one test: an earlier version fetched only the scoped
+    # one, which cannot detect a key collision at all — and the mutant that drops
+    # the locale from the key survived it.
+    test "a locale and a category compose, and do not share a key", %{conn: conn} do
+      cat = category("News")
+      fr = translated_post("fr")
+      en = translated_post("en")
+      CMS.update_post!(fr, %{category_id: cat.id}, actor: admin())
+      CMS.update_post!(en, %{category_id: cat.id}, actor: admin())
+      Cache.bust_published()
+
+      french = response(get(conn, "/fr/blog/category/#{cat.slug}/feed.xml"), 200)
+      english = response(get(build_conn(), "/blog/category/#{cat.slug}/feed.xml"), 200)
+
+      assert french =~ fr.title
+      refute french =~ en.title
+      assert english =~ en.title
+      refute english =~ fr.title
+    end
+
+    # A category and a tag can carry the SAME slug — they are different tables.
+    # The key has to keep them apart, and the earlier tests always minted
+    # distinct `feed-cat-N` / `feed-tag-N` slugs, so the mutant that dropped the
+    # kind from the key survived.
+    test "a category and a tag sharing a slug are different feeds", %{conn: conn} do
+      shared = "shared-#{System.unique_integer([:positive])}"
+      cat = CMS.create_category!(%{name: "Cat", slug: shared}, actor: admin())
+      t = CMS.create_tag!(%{name: "Tag", slug: shared}, actor: admin())
+
+      in_category = published_post()
+      tagged = published_post()
+      CMS.update_post!(in_category, %{category_id: cat.id}, actor: admin())
+      CMS.update_post!(tagged, %{tag_ids: [t.id]}, actor: admin())
+      Cache.bust_published()
+
+      by_category = response(get(conn, "/blog/category/#{shared}/feed.xml"), 200)
+      by_tag = response(get(build_conn(), "/blog/tags/#{shared}/feed.xml"), 200)
+
+      assert by_category =~ in_category.title
+      refute by_category =~ tagged.title
+      assert by_tag =~ tagged.title
+      refute by_tag =~ in_category.title
+    end
+
+    # Plug percent-decodes path segments, so `%2F` puts a literal `/` inside the
+    # slug. With the key built by joining on `/`, a category slugged
+    # `x/locale/fr` produced the SAME key as `/fr/blog/category/x/feed.xml` — two
+    # different public documents, one key, and five minutes of whichever was
+    # fetched first being served to everyone.
+    #
+    # Nothing validates taxonomy slugs today (#1044), so this is reachable by an
+    # editor, not only by a request.
+    test "a slug carrying a path separator cannot collide with another feed", %{conn: conn} do
+      n = System.unique_integer([:positive])
+      slug = "collide#{n}/locale/fr"
+      cat = CMS.create_category!(%{name: "Collide", slug: slug}, actor: admin())
+
+      english = published_post()
+      french = translated_post("fr")
+      CMS.update_post!(english, %{category_id: cat.id}, actor: admin())
+      CMS.update_post!(french, %{category_id: cat.id}, actor: admin())
+      Cache.bust_published()
+
+      forged = response(get(conn, "/blog/category/collide#{n}%2Flocale%2Ffr/feed.xml"), 200)
+      real = response(get(build_conn(), "/fr/blog/category/collide#{n}/feed.xml"), 404)
+
+      # The forged URL is the category's real (ugly) slug, so it serves that
+      # category's default-locale feed…
+      assert forged =~ english.title
+      refute forged =~ french.title
+      # …and the other URL names a category that does not exist.
+      assert real == ""
+
+      # The advertised id must not carry the separator either.
+      refute forged =~ "category/collide#{n}/locale/fr/feed.xml"
+    end
+  end
 end
