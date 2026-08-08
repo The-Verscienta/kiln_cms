@@ -171,7 +171,8 @@ FROM ${RUNNER_IMAGE}
 # Base packages FIRST, including curl/ca-certificates/gnupg — the pgdg step
 # below needs all three, and a `-slim` Debian ships none of them. (An earlier
 # revision fetched the signing key with curl three lines before installing
-# curl; CI doesn't build this image, so nothing would have caught it.)
+# curl. Nothing caught it at the time because CI did not build this image; the
+# `image` job added in #600 now does, so this class fails on the PR.)
 # `qpdf` strips `/Info` and XMP from uploaded PDFs (#807). It is NOT optional
 # the way ffmpeg is: `KilnCMS.DocumentProcessor` refuses a PDF it cannot strip,
 # because a privacy control that silently doesn't apply is worse than none.

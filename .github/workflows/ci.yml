@@ -106,11 +106,10 @@ jobs:
         # via setup-beam. The two places that *cannot* read it — mix.exs's
         # `elixir:` requirement and the Dockerfile's ARGs — are guarded here.
         #
-        # This is the cheap half of #600. The expensive half is that CI does not
-        # build the release image at all, so a Dockerfile broken any *other* way
-        # stays invisible until a deploy. #573 raised the elixir requirement and
-        # left the Dockerfile on 1.18.4, which cannot compile this project; every
-        # job stayed green because none of them builds that image.
+        # This is the cheap half of #600 — a declaration check, not a build.
+        # The `image` job below is the other half: it builds the release image,
+        # so a Dockerfile broken in a way no declaration can express fails on
+        # the PR rather than at a deploy.
         run: mix kiln.toolchain.check
 
       # NOTE (#419): the migration/snapshot drift check moved to the
@@ -585,3 +584,75 @@ jobs:
 
       - name: Check for migration/snapshot drift (overlay build)
         run: mix ash.codegen --check
+
+  image:
+    name: Release image (build only)
+    runs-on: ubuntu-latest
+
+    # The release image is the one artifact nothing else in CI exercises, and
+    # the failures it hides are total: #573 raised mix.exs's `elixir:`
+    # requirement past the version the Dockerfile pinned, so the builder could
+    # not compile the project at all — and every job stayed green for weeks,
+    # because none of them builds this image. An earlier revision fetched a
+    # signing key with `curl` three lines before installing `curl`. Both were
+    # found by reading, which is not a gate (#600).
+    #
+    # Build only, never push: this proves the image *builds*, which is the
+    # failure mode that reaches a deploy. Publishing stays a deliberate act
+    # outside CI (prod is a manual Coolify redeploy).
+    #
+    # NOT a required check, deliberately. The "Require CI on main" ruleset lists
+    # only `Compile, lint, scan & test`, so a red build here is visible on the
+    # PR but does not block it. That is the right starting position: this job
+    # depends on a precompiled NIF downloaded from GitHub at build time (see the
+    # flake note below), and a required check that can fail for reasons
+    # unrelated to the change blocks every merge until it passes. Promote it by
+    # adding the context `Release image (build only)` to that ruleset once its
+    # real pass rate and runtime are known.
+    #
+    # Generous timeout: a cold build compiles the whole dep set, and the
+    # Dockerfile deliberately caps the BEAM to 2 schedulers through it to stay
+    # inside a small host's RAM. `exla` is dev/test-only, so the XLA build — the
+    # one thing that would certainly blow this budget — is not in here.
+    #
+    # A cold compile is more common than "only when mix.lock changes" would
+    # suggest: `COPY mix.exs mix.lock` and `COPY config/config.exs` both precede
+    # `mix deps.compile`, so a version bump (every release) or a config edit
+    # (often) invalidates the whole dep layer.
+    #
+    # Known flake vector, worth naming before this is ever made a required
+    # check: `tokenizers` pulls a precompiled NIF from GitHub at compile time
+    # via `rustler_precompiled`, and the builder has no Rust toolchain to fall
+    # back on — so a transient 403 or rate-limit fails the job for reasons that
+    # have nothing to do with the change under test.
+    timeout-minutes: 60
+
+    env:
+      # v6 uploads a build record artifact and writes a job summary on every
+      # run. Neither is worth the storage for a build-only check.
+      DOCKER_BUILD_SUMMARY: false
+      DOCKER_BUILD_RECORD_UPLOAD: false
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the release image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          # Read the cache everywhere, WRITE it only on a push to main.
+          #
+          # GHA caches are ref-scoped: a PR branch reads main's scope but writes
+          # into its own, which nothing but a later push to that same PR will
+          # ever read. `mode=max` exports every layer of both stages — the dep
+          # tree alone is most of a gigabyte — into a scope that is then dead
+          # weight against the repository's shared cache budget, evicting the
+          # entries other jobs live on. `priv/plts` is the one that hurts: lose
+          # it and `mix dialyzer` rebuilds the PLT from scratch in the `build`
+          # job, which reads as an unexplained slow run on an unrelated PR.
+          cache-from: type=gha
+          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max' || '' }}
