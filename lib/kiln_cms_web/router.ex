@@ -695,9 +695,10 @@ defmodule KilnCMSWeb.Router do
     # category or one tag. `/tags/` matches the calendar's tag route, which the
     # delivery site already links.
     #
-    # `/<locale>/feed.xml` needs no route of its own: it arrives at `:type` as
-    # `plural = "fr"` and the controller resolves a configured locale before it
-    # tries the type lookup.
+    # `/<locale>/feed.xml` needs no route of its own: `KilnCMSWeb.Plugs.SetLocale`
+    # strips a supported-locale prefix before the router runs, so it arrives here
+    # as plain `/feed.xml` with the locale on the conn — the same mechanism that
+    # serves every other delivery URL in every locale off one set of routes.
     get "/:plural/category/:slug/feed.xml", FeedController, :category
     get "/:plural/category/:slug/feed.json", FeedController, :category_json
     get "/:plural/tags/:tag/feed.xml", FeedController, :tag

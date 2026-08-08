@@ -509,12 +509,17 @@ the router for every URL on the delivery site, so feeds get this the same way
 pages do. `/en/feed.xml` therefore resolves, and advertises `/feed.xml` as its
 own id, so the two URLs are one thing to subscribe to rather than two.
 
-Segment feeds are cached like any other, but they are **not** dropped on
-publish: computing which segments a record belongs to needs its tags and
+**Taxonomy** feeds are cached like any other, but they are **not** dropped on
+publish: computing which of them a record belongs to needs its tags and
 category, and the cache bust runs inside the publish transaction, where a
 relationship load can abort it and lose the publish (#660). They are five
-minutes stale at worst; the site-wide and per-type feeds — the ones people
-actually subscribe to — still drop immediately.
+minutes stale at worst.
+
+**Locale** feeds are dropped on publish, along with the site-wide and per-type
+ones. A record's locale is a plain attribute rather than a relationship, so it
+costs the bust nothing — and a locale feed that only ever refreshed on a TTL
+would leave the one reader these exist for as the only one without timely
+invalidation.
 
 Feeds are cached for five minutes and dropped on any publish/unpublish, so a new
 post is in the feed on the next fetch rather than after the TTL.

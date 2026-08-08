@@ -205,20 +205,31 @@ defmodule KilnCMSWeb.FeedController do
   # reaches the unscoped key on publish. Mirrors `CalendarController`'s
   # `cache_scope/2`, which solved the same problem for tag-scoped calendars.
   #
-  # The scoped keys are NOT enumerated by `bust_feeds/2`, and that is a decision
-  # rather than an omission. Computing them needs the record's tags and category,
+  # The TAXONOMY keys are not enumerated by `bust_feeds/3`, and that is a decision
+  # rather than an omission: computing them needs the record's tags and category,
   # and the bust runs in an `after_action` — a relationship load there is a
   # database read inside the publish transaction, which can abort it and lose the
   # publish (#660). Trading a five-minute TTL on a segment feed against losing a
   # publish is not a close call, and it is the trade the tag-scoped calendar
   # already makes.
+  #
+  # The LOCALE is not in that bargain. `record.locale` is a plain attribute,
+  # already on the struct the bust receives, so it costs no read at all — and a
+  # locale feed that only ever refreshed on a TTL would leave the one reader the
+  # feature exists for as the only one without timely invalidation.
+  #
+  # The slug is percent-encoded, and not as decoration. Plug decodes path
+  # segments, so `%2F` puts a literal `/` inside `:slug` — and a key built by
+  # joining on `/` then made `post/category/x/locale/fr` collide with
+  # `/fr/blog/category/x/feed.xml`. Two different public documents, one key, five
+  # minutes of whichever was fetched first being served to everyone.
   defp cache_scope(descriptor, scope) do
     [
       descriptor && to_string(descriptor.type),
       taxonomy_segment(scope.taxonomy),
       # Only when it differs from the default, so the site-wide feed's key —
-      # the one `bust_feeds/2` drops on publish — stays exactly what it was.
-      scope.locale != KilnCMS.I18n.default_locale() && "locale/#{scope.locale}"
+      # the one `bust_feeds/3` drops on publish — stays exactly what it was.
+      scope.locale != KilnCMS.I18n.default_locale() && "locale/#{encode(scope.locale)}"
     ]
     |> Enum.filter(&is_binary/1)
     |> case do
@@ -228,7 +239,9 @@ defmodule KilnCMSWeb.FeedController do
   end
 
   defp taxonomy_segment(nil), do: nil
-  defp taxonomy_segment({kind, term}), do: "#{kind}/#{term.slug}"
+  defp taxonomy_segment({kind, term}), do: "#{kind}/#{encode(term.slug)}"
+
+  defp encode(segment), do: URI.encode(segment, &URI.char_unreserved?/1)
 
   # ── entries ───────────────────────────────────────────────────────────────
 
@@ -279,7 +292,14 @@ defmodule KilnCMSWeb.FeedController do
   # One locale, too, for the reason the moduledoc gives. A locale feed swaps
   # which one rather than dropping the filter, so no record is ever in two feeds
   # a person could subscribe to at once.
-  defp filter(scope),
+  @doc false
+  # Public only so a test can assert on it directly. The read policy also filters
+  # published-and-public, which meant deleting `audience: :public` from here left
+  # the whole suite green — and this module's moduledoc says in as many words
+  # that the filter "must not depend on a policy staying shaped the way it is
+  # today". An invariant a module claims to own needs a test that fails when it
+  # is removed, not one that passes because something else happens to hold.
+  def filter(scope),
     do: [audience: :public, locale: scope.locale] ++ taxonomy_filter(scope.taxonomy)
 
   defp taxonomy_filter({:category, category}), do: [category_id: category.id]
@@ -548,8 +568,13 @@ defmodule KilnCMSWeb.FeedController do
   defp type_prefix(nil), do: ""
   defp type_prefix(descriptor), do: feed_prefix(descriptor)
 
-  defp taxonomy_prefix(%{taxonomy: {:category, category}}), do: "/category/#{category.slug}"
-  defp taxonomy_prefix(%{taxonomy: {:tag, tag}}), do: "/tags/#{tag.slug}"
+  # Encoded for the same reason the cache key is: a slug carrying `/` or `..`
+  # would otherwise put traversal segments into the `<id>` and `rel="self"` of a
+  # public document, and a feed id is supposed to be stable and unambiguous.
+  defp taxonomy_prefix(%{taxonomy: {:category, category}}),
+    do: "/category/" <> encode(category.slug)
+
+  defp taxonomy_prefix(%{taxonomy: {:tag, tag}}), do: "/tags/" <> encode(tag.slug)
   defp taxonomy_prefix(_scope), do: ""
 
   # The type's public prefix where it has one (`/blog/feed.xml` for posts), and
