@@ -49,7 +49,9 @@ defmodule KilnCMS.Experiments.Assignment do
 
     cond do
       total <= 0 -> nil
-      is_binary(key) and key != "" -> pick(ordered, rem(:erlang.phash2(key, total), total))
+      # `phash2/2`'s second argument is the RANGE, not a seed — the result is
+      # already in `[0, total)`, so there is nothing left to take a modulo of.
+      is_binary(key) and key != "" -> pick(ordered, :erlang.phash2(key, total))
       true -> pick(ordered, :rand.uniform(total) - 1)
     end
   end
@@ -82,6 +84,17 @@ defmodule KilnCMS.Experiments.Assignment do
       Map.put(acc, String.to_existing_atom(field), value)
     end)
   end
+
+  @doc """
+  Whether a variant patches any block at all.
+
+  The HTML path rebuilds the whole block pipeline to apply a block patch, which
+  is the expensive part of serving an experimented page. Most experiments are
+  headline tests and touch no block, so asking first is worth a function.
+  """
+  @spec patches_blocks?(Variant.t() | nil) :: boolean()
+  def patches_blocks?(nil), do: false
+  def patches_blocks?(%{patch: patch}), do: Map.get(patch, "blocks", %{}) != %{}
 
   @doc """
   Apply a variant's `blocks` patch to a stored block list.
@@ -128,10 +141,21 @@ defmodule KilnCMS.Experiments.Assignment do
   defp merge_patch(block, patches) do
     case patches[block_id(block)] do
       nil -> block
-      fields when is_map(fields) -> Map.merge(block, stringify(fields))
+      fields when is_map(fields) -> Map.merge(block, safe_fields(fields))
       _other -> block
     end
   end
+
+  # The struct path is gated by `Map.has_key?` — a struct simply has no field to
+  # write. A map-shaped block has no such shape to hide behind, so the
+  # structural keys are named and refused: `_type` drives union dispatch and
+  # renderer selection (setting it is arbitrary-markup injection into a headless
+  # consumer), and `id`/`_id` are the block's identity, which the patch is keyed
+  # by. A patch that reached the row some other way — a seed, a hand-written
+  # insert — still cannot use them.
+  @structural_keys ~w(_type _id _version id __struct__)
+
+  defp safe_fields(fields), do: fields |> stringify() |> Map.drop(@structural_keys)
 
   # `Map.has_key?` before writing, so a patch can only set fields the block
   # actually declares — it cannot graft an arbitrary key onto a typed struct.
@@ -143,9 +167,15 @@ defmodule KilnCMS.Experiments.Assignment do
   end
 
   defp put_declared_field({key, value}, block) do
-    case existing_atom(key) do
-      nil -> block
-      atom -> if Map.has_key?(block, atom), do: Map.put(block, atom, value), else: block
+    # `Map.has_key?` alone is not enough: a block struct genuinely HAS `:id`,
+    # `:_type` and `:_version`, so the structural keys have to be refused by
+    # name here as well.
+    with false <- to_string(key) in @structural_keys,
+         atom when not is_nil(atom) <- existing_atom(key),
+         true <- Map.has_key?(block, atom) do
+      Map.put(block, atom, value)
+    else
+      _not_declared -> block
     end
   end
 
@@ -217,7 +247,7 @@ defmodule KilnCMS.Experiments.Assignment do
 
   defp patch_artifact_block(%{"_id" => id} = block, patches) do
     block
-    |> then(fn b -> if fields = patches[id], do: Map.merge(b, stringify(fields)), else: b end)
+    |> then(fn b -> if fields = patches[id], do: Map.merge(b, safe_fields(fields)), else: b end)
     |> patch_artifact_columns(patches)
   end
 

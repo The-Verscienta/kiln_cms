@@ -587,15 +587,24 @@ defmodule KilnCMSWeb.ContentController do
   # than patching the enriched output: the patch addresses blocks by their `_id`
   # in typed-union terms, and everything downstream — fragment expansion, the
   # legacy conversion, the batched media and form preloads — then sees an
-  # ordinary tree with no idea experiments exist. The extra pipeline run is only
-  # paid on an experimented page, which is already uncached by design.
+  # ordinary tree with no idea experiments exist.
+  #
+  # That re-run is not cheap (fragment expansion plus the batched media and form
+  # loads), and an experimented page is `no-store`, so nothing absorbs it. So it
+  # is skipped entirely unless the variant actually patches a block — a headline
+  # or excerpt test, which is the common case, reuses the blocks already built
+  # for the canonical payload and costs nothing extra.
   defp variant_blocks(_record, blocks, nil, _org_id, _conn), do: blocks
 
-  defp variant_blocks(record, _blocks, variant, org_id, conn) do
-    patched = Experiments.Assignment.apply_to_blocks(record.blocks, variant)
+  defp variant_blocks(record, blocks, variant, org_id, conn) do
+    if Experiments.Assignment.patches_blocks?(variant) do
+      patched = Experiments.Assignment.apply_to_blocks(record.blocks, variant)
 
-    %{record | blocks: patched}
-    |> blocks(org_id, reader_audiences(conn))
+      %{record | blocks: patched}
+      |> blocks(org_id, reader_audiences(conn))
+    else
+      blocks
+    end
   end
 
   # Feed autodiscovery (#486): the site-wide feed plus this type's own, so a

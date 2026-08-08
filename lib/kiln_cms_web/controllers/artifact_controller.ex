@@ -74,7 +74,7 @@ defmodule KilnCMSWeb.ArtifactController do
       variant =
         if surface == :json,
           do:
-            Experiments.Delivery.assign(
+            Experiments.Delivery.assign_keyed(
               to_string(ct.type),
               record,
               Params.string(params, "variant_key")
@@ -319,18 +319,20 @@ defmodule KilnCMSWeb.ArtifactController do
     ~s("#{record.id}-#{surface}-#{DateTime.to_unix(record.updated_at)}#{suffix}")
   end
 
-  # `Vary: X-Kiln-Variant-Key` tells a shared cache that this response depends on
-  # the assignment key, so it stores one entry per variant instead of handing the
-  # first caller's arm to everyone. Unlike the HTML surface, headless delivery
-  # keeps its `public` cacheability: the key is the caller's, so the cache can
-  # key on it.
+  # No `Vary`. The assignment key is a **query parameter**, so it is already part
+  # of the cache key — every distinct `?variant_key=` is a distinct URL, and a
+  # shared cache stores one entry per arm without being told to. An earlier
+  # version advertised `Vary: X-Kiln-Variant-Key`, which was wrong twice over:
+  # nothing reads that header, so a caller who followed it would get no variant
+  # at all, and `put_resp_header/3` replaces rather than appends, so it would
+  # silently drop any `Vary` set upstream.
+  #
+  # This is also why headless keeps its `public` cacheability where the HTML
+  # surface cannot: the key is in the URL and belongs to the caller.
   defp put_variant_headers(conn, nil), do: conn
 
-  defp put_variant_headers(conn, variant) do
-    conn
-    |> put_resp_header("x-kiln-variant", variant.id)
-    |> put_resp_header("vary", "X-Kiln-Variant-Key")
-  end
+  defp put_variant_headers(conn, variant),
+    do: put_resp_header(conn, "x-kiln-variant", variant.id)
 
   defp http_date(%DateTime{} = dt) do
     Calendar.strftime(dt, "%a, %d %b %Y %H:%M:%S GMT")

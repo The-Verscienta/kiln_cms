@@ -20,23 +20,33 @@ defmodule KilnCMS.Experiments.Delivery do
   @doc """
   The variant to serve for a record on the built-in site, or `nil`.
 
-  Stateless: drawn per request, nothing stored. See `KilnCMS.Experiments` on why
-  this surface has no visitor key.
+  Stateless: drawn per request, nothing stored. Safe to draw randomly here only
+  because `KilnCMSWeb.ContentController` flips an experimented page to
+  `private, no-store` — see `KilnCMS.Experiments`.
   """
   @spec assign(String.t(), struct()) :: struct() | nil
-  def assign(content_type, record) do
-    assign(content_type, record, nil)
-  end
+  def assign(content_type, record), do: do_assign(content_type, record, nil)
 
   @doc """
-  The variant to serve, bucketed by a caller-supplied `key`.
+  The variant to serve a headless caller, bucketed by their `variant_key`.
 
-  A binary `key` makes the choice deterministic — the same key always resolves
-  to the same variant — which is what lets a headless caller own stickiness and
-  an edge cache vary on the result.
+  **No key means no variant.** Drawing one at random would be the mistake the
+  built-in site avoids by going `private, no-store`: a keyless headless request
+  is one URL for every caller under `public, max-age=300`, so a CDN would cache
+  whichever arm the first caller drew and serve it to everyone for five minutes
+  — a 100/0 split reported as a fair one. A caller who has not opted in with a
+  key gets the canonical document, which is also the honest default.
+
+  With a key the choice is deterministic, so the caller owns stickiness and an
+  edge cache can hold one entry per arm.
   """
-  @spec assign(String.t(), struct(), String.t() | nil) :: struct() | nil
-  def assign(content_type, %{id: id, org_id: org_id}, key) do
+  @spec assign_keyed(String.t(), struct(), String.t() | nil) :: struct() | nil
+  def assign_keyed(content_type, record, key) when is_binary(key) and key != "",
+    do: do_assign(content_type, record, key)
+
+  def assign_keyed(_content_type, _record, _key), do: nil
+
+  defp do_assign(content_type, %{id: id, org_id: org_id}, key) do
     with experiment when not is_nil(experiment) <-
            Experiments.for_document(org_id, content_type, id),
          variant when not is_nil(variant) <- Assignment.choose(experiment.variants, key) do
@@ -53,7 +63,7 @@ defmodule KilnCMS.Experiments.Delivery do
       nil
   end
 
-  def assign(_content_type, _record, _key), do: nil
+  defp do_assign(_content_type, _record, _key), do: nil
 
   @doc """
   Count one conversion against `variant_id`.
@@ -76,9 +86,11 @@ defmodule KilnCMS.Experiments.Delivery do
   is bounded by the form endpoint's own rate limit; the point here is that the
   blast radius stops at "an arm someone could see", not "any row in the table".
   """
-  @spec record_conversion(String.t() | nil, Ash.UUID.t()) :: :ok
-  def record_conversion(variant_id, org_id) when is_binary(variant_id) do
-    if running_variant?(variant_id, org_id) do
+  @spec record_conversion(String.t() | nil, Ash.UUID.t(), keyword()) :: :ok
+  def record_conversion(variant_id, org_id, opts \\ [])
+
+  def record_conversion(variant_id, org_id, opts) when is_binary(variant_id) do
+    if converts?(variant_id, org_id, Keyword.get(opts, :form_id)) do
       async(fn ->
         Experiments.record_conversion(variant_id, authorize?: false, tenant: org_id)
       end)
@@ -87,13 +99,35 @@ defmodule KilnCMS.Experiments.Delivery do
     :ok
   end
 
-  def record_conversion(_variant_id, _org_id), do: :ok
+  def record_conversion(_variant_id, _org_id, _opts), do: :ok
 
-  defp running_variant?(variant_id, org_id) do
+  # Two checks, and the second is the one that keeps a result meaningful.
+  #
+  # The variant must belong to a running experiment on this site — otherwise a
+  # random uuid mints a `VariantDay` row (there is no foreign key) and another
+  # org's id writes into their results.
+  #
+  # And the submitted form must be **that experiment's goal form**. Without it
+  # every form on the site converts every arm: an attacker reads a treatment's
+  # id off any page's hidden field, posts an unrelated newsletter form with it,
+  # and picks the winner. A `nil` goal form is treated as "no form converts this
+  # experiment" rather than "any form does" — an experiment whose goal was never
+  # configured has not been told what success looks like.
+  defp converts?(variant_id, org_id, form_id) do
+    # `enabled?()` here as well as in `for_document/3`: the switch is documented
+    # as "whether this deployment serves experiments at all", and a public form
+    # POST carrying a stale `_kiln_variant` is the other way in.
+    if Experiments.enabled?(), do: matching_experiment?(variant_id, org_id, form_id), else: false
+  end
+
+  defp matching_experiment?(variant_id, org_id, form_id) do
     org_id
     |> Experiments.running()
     |> Enum.any?(fn experiment ->
-      Enum.any?(experiment.variants, &(&1.id == variant_id))
+      experiment.goal == :form_submission and
+        not is_nil(experiment.goal_form_id) and
+        experiment.goal_form_id == form_id and
+        Enum.any?(experiment.variants, &(&1.id == variant_id))
     end)
   rescue
     _error -> false

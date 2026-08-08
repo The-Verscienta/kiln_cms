@@ -51,6 +51,13 @@ defmodule KilnCMS.Experiments.Variant do
   postgres do
     table "content_experiment_variants"
     repo KilnCMS.Repo
+
+    # Without this the FK defaults to NO ACTION and destroying an experiment
+    # that has variants raises a bare Postgres 23503 rather than doing the
+    # obvious thing. A variant has no meaning apart from its experiment.
+    references do
+      reference :experiment, on_delete: :delete
+    end
   end
 
   actions do
@@ -63,6 +70,9 @@ defmodule KilnCMS.Experiments.Variant do
       validate KilnCMS.Experiments.Validations.PatchShape
     end
 
+    # The weights and the patches live here, so this is where "only a draft is
+    # editable" has to be enforced — guarding the row that holds the name while
+    # leaving this one open would be a guard in name only.
     update :update do
       primary? true
       require_atomic? false
@@ -88,6 +98,16 @@ defmodule KilnCMS.Experiments.Variant do
   changes do
     change KilnCMS.Experiments.Changes.BustExperimentCache,
       on: [:create, :update, :destroy]
+
+    change KilnCMS.Experiments.Changes.RefuseWhenRunning, on: [:update]
+
+    # On create and destroy as well as update. Adding a third arm to a running
+    # 50/50 changes `total` from 2 to 3, which re-buckets every keyed visitor
+    # onto a different variant while the counters keep climbing; removing one
+    # orphans its `VariantDay` rows, since there is no foreign key on
+    # `variant_id`. Both make the accumulated numbers unreadable.
+    change KilnCMS.Experiments.Changes.RefuseWhenRunning,
+      on: [:create, :destroy]
   end
 
   multitenancy do

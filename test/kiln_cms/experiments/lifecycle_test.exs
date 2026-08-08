@@ -36,13 +36,25 @@ defmodule KilnCMS.Experiments.LifecycleTest do
         %{
           name: "exp-#{System.unique_integer([:positive])}",
           content_type: "page",
-          document_id: ctx.document_id
+          document_id: ctx.document_id,
+          # `:start` requires one, so every fixture here carries one; the tests
+          # that care about the goal override it.
+          goal_form_id: ExperimentFixtures.goal_form!(ctx.org_id).id
         },
         attrs
       ),
       authorize?: false,
       tenant: ctx.org_id
     )
+  end
+
+  # A form-submission experiment with no goal form converts nothing, so `:start`
+  # refuses it rather than letting someone read 0.0% forever.
+  defp assert_start_refused(experiment, ctx, message) do
+    assert {:error, error} =
+             Experiments.start_experiment(experiment, authorize?: false, tenant: ctx.org_id)
+
+    assert Exception.message(error) =~ message
   end
 
   describe "starting" do
@@ -238,7 +250,10 @@ defmodule KilnCMS.Experiments.LifecycleTest do
   # attacker-controlled and every one of these would otherwise be accepted.
   describe "conversion attribution refuses an id it did not serve" do
     setup ctx do
-      experiment = experiment!(ctx)
+      # The deployment switch gates conversion counting too, not just serving.
+      ExperimentFixtures.enable!()
+      form = ExperimentFixtures.goal_form!(ctx.org_id)
+      experiment = experiment!(ctx, %{goal_form_id: form.id})
       control = ExperimentFixtures.variant!(experiment, "Control", %{}, ctx.org_id, control: true)
       ExperimentFixtures.variant!(experiment, "B", %{}, ctx.org_id, [])
 
@@ -247,14 +262,19 @@ defmodule KilnCMS.Experiments.LifecycleTest do
 
       KilnCMS.Cache.bust_experiments(ctx.org_id)
 
-      %{experiment: running, control: control}
+      %{experiment: running, control: control, form: form}
     end
+
+    defp convert(variant_id, ctx), do: convert(variant_id, ctx, ctx.form.id)
+
+    defp convert(variant_id, ctx, form_id),
+      do: KilnCMS.Experiments.Delivery.record_conversion(variant_id, ctx.org_id, form_id: form_id)
 
     defp variant_days(org_id),
       do: Ash.read!(KilnCMS.Experiments.VariantDay, authorize?: false, tenant: org_id)
 
-    test "counts a variant of a running experiment", ctx do
-      KilnCMS.Experiments.Delivery.record_conversion(ctx.control.id, ctx.org_id)
+    test "counts a variant of a running experiment on its goal form", ctx do
+      convert(ctx.control.id, ctx)
 
       assert [day] = variant_days(ctx.org_id)
       assert day.variant_id == ctx.control.id
@@ -264,7 +284,18 @@ defmodule KilnCMS.Experiments.LifecycleTest do
     # There is no foreign key on `variant_id`, so without the check every
     # distinct uuid an attacker posts would mint a row.
     test "ignores an unknown variant id", ctx do
-      KilnCMS.Experiments.Delivery.record_conversion(Ash.UUID.generate(), ctx.org_id)
+      convert(Ash.UUID.generate(), ctx)
+
+      assert [] = variant_days(ctx.org_id)
+    end
+
+    # Otherwise every form on the site converts every arm: read a treatment id
+    # off any page's hidden field, post it with an unrelated newsletter form,
+    # and pick the winner.
+    test "ignores a submission of a form that is not the goal", ctx do
+      other = ExperimentFixtures.goal_form!(ctx.org_id)
+
+      convert(ctx.control.id, ctx, other.id)
 
       assert [] = variant_days(ctx.org_id)
     end
@@ -277,7 +308,9 @@ defmodule KilnCMS.Experiments.LifecycleTest do
           status: :active
         })
 
-      KilnCMS.Experiments.Delivery.record_conversion(ctx.control.id, other.id)
+      KilnCMS.Experiments.Delivery.record_conversion(ctx.control.id, other.id,
+        form_id: ctx.form.id
+      )
 
       assert [] = variant_days(other.id)
     end
@@ -292,14 +325,27 @@ defmodule KilnCMS.Experiments.LifecycleTest do
           tenant: ctx.org_id
         )
 
-      KilnCMS.Experiments.Delivery.record_conversion(ctx.control.id, ctx.org_id)
+      convert(ctx.control.id, ctx)
 
       assert [] = variant_days(ctx.org_id)
     end
 
     test "ignores a blank or missing field", ctx do
-      KilnCMS.Experiments.Delivery.record_conversion(nil, ctx.org_id)
-      KilnCMS.Experiments.Delivery.record_conversion("", ctx.org_id)
+      convert(nil, ctx)
+      convert("", ctx)
+
+      assert [] = variant_days(ctx.org_id)
+    end
+
+    # The switch is documented as "whether this deployment serves experiments at
+    # all", and a public form POST carrying a stale variant id is the other way
+    # in — so it has to gate counting as well as serving.
+    test "counts nothing when the deployment switch is off", ctx do
+      original = Application.get_env(:kiln_cms, KilnCMS.Experiments, [])
+      Application.put_env(:kiln_cms, KilnCMS.Experiments, Keyword.put(original, :enabled, false))
+      on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Experiments, original) end)
+
+      convert(ctx.control.id, ctx)
 
       assert [] = variant_days(ctx.org_id)
     end

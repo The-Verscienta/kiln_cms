@@ -17,8 +17,6 @@ defmodule KilnCMS.Experiments.Changes.RequireVariants do
   """
   use Ash.Resource.Change
 
-  require Ash.Query
-
   @impl true
   def change(changeset, _opts, context) do
     Ash.Changeset.before_action(changeset, fn changeset ->
@@ -52,18 +50,15 @@ defmodule KilnCMS.Experiments.Changes.RequireVariants do
   end
 
   defp load_variants(changeset, context) do
-    KilnCMS.Experiments.Variant
-    |> Ash.Query.filter(experiment_id == ^changeset.data.id)
-    |> Ash.read!(authorize?: false, tenant: context.tenant)
+    KilnCMS.Experiments.list_variants!(
+      query: [filter: [experiment_id: changeset.data.id]],
+      authorize?: false,
+      tenant: context.tenant
+    )
   end
 
   defp already_running?(changeset, context) do
-    KilnCMS.Experiments.Experiment
-    |> Ash.Query.filter(
-      state == :running and document_id == ^changeset.data.document_id and
-        id != ^changeset.data.id
-    )
-    |> Ash.read!(authorize?: false, tenant: context.tenant)
-    |> Enum.any?()
+    KilnCMS.Experiments.running_experiments!(authorize?: false, tenant: context.tenant)
+    |> Enum.any?(&(&1.document_id == changeset.data.document_id and &1.id != changeset.data.id))
   end
 end

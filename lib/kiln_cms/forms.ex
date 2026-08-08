@@ -182,7 +182,7 @@ defmodule KilnCMS.Forms do
     unless submission.status == :spam do
       notify(form, data)
       autorespond(form, form_fields, data)
-      count_experiment_conversion(params, form.org_id)
+      count_experiment_conversion(params, form)
       KilnCMS.Webhooks.dispatch("form.submitted", %{form: form.slug, data: data}, form.org_id)
     end
 
@@ -197,10 +197,10 @@ defmodule KilnCMS.Forms do
   # Inside the `unless` deliberately: a submission the spam scorer flagged is not
   # a conversion, and counting it would let anyone move an experiment's numbers
   # by posting at it. A tripped honeypot never reaches here for the same reason.
-  defp count_experiment_conversion(params, org_id) do
+  defp count_experiment_conversion(params, form) do
     params
     |> Map.get(@variant_field)
-    |> KilnCMS.Experiments.Delivery.record_conversion(org_id)
+    |> KilnCMS.Experiments.Delivery.record_conversion(form.org_id, form_id: form.id)
   end
 
   defp notify(%{notify_email: email} = form, data) when is_binary(email) and email != "" do

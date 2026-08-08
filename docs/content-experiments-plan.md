@@ -180,12 +180,19 @@ Deterministic on the headless path means the same `variant_key` always resolves
 to the same variant, which is what makes a caller-side sticky assignment work and
 what makes the response CDN-cacheable per variant.
 
-The chosen variant is surfaced to the caller either way:
+**No key means no variant on the headless surface.** Drawing one at random there
+would reintroduce constraint 2 on the one path that keeps its `public` caching:
+a keyless request is one URL for every caller, so a CDN would cache whichever
+arm the first caller drew. A caller who has not opted in gets the canonical
+document.
 
-- HTML: a `data-kiln-variant` attribute on the rendered body, and a hidden field
-  injected into any form block on the page.
-- Headless: an `experiment` object in the response body plus an
-  `x-kiln-variant` response header, so an edge cache can vary on it.
+That is also why headless needs no `Vary`: the key is a query parameter, so
+every distinct key is already a distinct URL and a shared cache stores one entry
+per arm on its own.
+
+The chosen variant is surfaced either way — a hidden field injected into any
+form block on the rendered page, and an `x-kiln-variant` response header on the
+headless one.
 
 ## Measurement
 
@@ -196,13 +203,26 @@ on a counter.
 **Conversion** — v1 supports two goals:
 
 - `form_submission` — the form block on an experimented page carries the variant
-  id as a hidden field; `FormSubmission` gains an optional `variant_id`. Works on
-  both surfaces and needs no visitor state, which is why it is the goal v1 leads
-  with.
-- `content_view` — a view of a named target document counts as a conversion.
-  Requires a stable key to attribute, so it is **headless-only in v1**; the
-  built-in site records impressions for it but cannot attribute conversions, and
-  the results panel says so rather than showing a misleading zero.
+  id as a hidden field, which travels back with the submission. Needs no visitor
+  state at all, which is why it is the goal v1 ships.
+
+  That field is **attacker-controlled**: it arrives on a public, CSRF-free POST.
+  So a conversion is counted only when the id names a variant of a *running*
+  experiment on this site **and** the submitted form is that experiment's goal
+  form. Without the first check any uuid mints a `VariantDay` row — there is no
+  foreign key on `variant_id` — and another site's id writes into their results.
+  Without the second, every form on the site converts every arm: read a
+  treatment id off any page and post it with an unrelated newsletter form.
+
+  What remains is a visitor replaying the arm they were legitimately served,
+  which is inherent to any client-reported conversion and is bounded by the form
+  endpoint's rate limit. The point is that the blast radius stops at "an arm
+  someone could see".
+
+- `content_view` — **not in v1.** Attributing a view that happens on a later page
+  needs a stable visitor key, which the built-in site does not have. Rather than
+  accept a goal that would silently never convert, the schema refuses it until
+  phase 3 brings the sticky-assignment cookie and its privacy review.
 
 Results are a proportion comparison with a stated confidence, not a dashboard of
 knobs. No sequential testing, no peeking correction, no p-hacking surface — a
@@ -226,7 +246,22 @@ than another statistic.
    still cuts the row. Only `ignore_actions` prevents that, and a separate
    resource is cleaner than a fourth carve-out action.)
 
-Each of these has a test whose name is the invariant.
+Each of these has a test whose name is the invariant, and the exclusions are
+asserted against the real surfaces — the sitemap, a feed, `llms.txt`, the fired
+`:web` artifact a feed reads, and the artifact row count — rather than argued
+for in prose.
+
+Two more guards fall out of the same reasoning, both about keeping a result
+readable rather than about leakage:
+
+6. **A running experiment's variants are immutable.** Adding an arm changes the
+   weight total and re-buckets every keyed visitor; removing one orphans its
+   counters; rebalancing makes counts before and after incomparable. None of
+   these announces itself, because the counters are integers that keep going up
+   either way.
+7. **One running experiment per document**, enforced by a partial unique index
+   rather than a read — two concurrent starts would both pass a check-then-act,
+   and two overlapping patches make both results uninterpretable.
 
 ## Phasing
 

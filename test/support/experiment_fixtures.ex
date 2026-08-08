@@ -40,13 +40,19 @@ defmodule KilnCMS.ExperimentFixtures do
           name: Keyword.get(opts, :name, "exp-#{System.unique_integer([:positive])}"),
           content_type: content_type,
           document_id: document.id,
-          goal: Keyword.get(opts, :goal, :form_submission)
+          goal: Keyword.get(opts, :goal, :form_submission),
+          goal_form_id: Keyword.get_lazy(opts, :goal_form_id, fn -> goal_form!(org_id).id end)
         },
         authorize?: false,
         tenant: org_id
       )
 
-    control = variant!(experiment, "Control", %{}, org_id, control: true)
+    control =
+      variant!(experiment, "Control", %{}, org_id,
+        control: true,
+        weight: Keyword.get(opts, :control_weight, 1)
+      )
+
     treatment = variant!(experiment, "Treatment", patch, org_id, [])
 
     {:ok, started} =
@@ -55,6 +61,21 @@ defmodule KilnCMS.ExperimentFixtures do
     KilnCMS.Cache.bust_experiments(org_id)
 
     {started, control, treatment}
+  end
+
+  @doc """
+  A form for an experiment's goal.
+
+  `:start` requires one, because a form-submission experiment with no goal form
+  converts nothing and would report 0.0% forever.
+  """
+  @spec goal_form!(Ash.UUID.t()) :: struct()
+  def goal_form!(org_id) do
+    KilnCMS.CMS.create_form!(
+      %{name: "Goal", slug: "goal-#{System.unique_integer([:positive])}"},
+      authorize?: false,
+      tenant: org_id
+    )
   end
 
   @doc "Add a variant to an experiment."
@@ -73,16 +94,18 @@ defmodule KilnCMS.ExperimentFixtures do
     )
   end
 
-  @doc "Force every request to resolve to one variant, by zeroing the others."
-  @spec pin!(struct(), [struct()], Ash.UUID.t()) :: :ok
-  def pin!(winner, others, org_id) do
-    Enum.each(others, fn variant ->
-      if variant.id != winner.id do
-        Experiments.update_variant!(variant, %{weight: 0}, authorize?: false, tenant: org_id)
-      end
-    end)
+  @doc """
+  A running experiment whose every request resolves to the **treatment**.
 
-    KilnCMS.Cache.bust_experiments(org_id)
-    :ok
+  Weights are set before `:start`, because a running experiment's variants are
+  immutable — the split is the experiment, and editing it mid-flight would make
+  the counts uninterpretable. A test that wants a deterministic arm therefore
+  has to say so up front, exactly as an editor would.
+
+  Returns `{experiment, control, treatment}`.
+  """
+  @spec pinned!(struct(), String.t(), map(), keyword()) :: {struct(), struct(), struct()}
+  def pinned!(document, content_type, patch, opts \\ []) do
+    running!(document, content_type, patch, Keyword.put(opts, :control_weight, 0))
   end
 end

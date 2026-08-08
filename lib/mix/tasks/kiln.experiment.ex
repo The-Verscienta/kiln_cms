@@ -5,7 +5,7 @@ defmodule Mix.Tasks.Kiln.Experiment do
 
       mix kiln.experiment list                          [--org-id UUID]
       mix kiln.experiment show    NAME                  [--org-id UUID]
-      mix kiln.experiment create  NAME --type post --document UUID [--goal form_submission]
+      mix kiln.experiment create  NAME --type post --document UUID --form FORM_UUID
       mix kiln.experiment variant NAME --variant "Control" --control
       mix kiln.experiment variant NAME --variant "Punchier" --patch '{"fields":{"title":"..."}}'
       mix kiln.experiment start   NAME
@@ -26,10 +26,7 @@ defmodule Mix.Tasks.Kiln.Experiment do
   use Mix.Task
 
   alias KilnCMS.Experiments
-  alias KilnCMS.Experiments.Experiment
   alias KilnCMS.Experiments.Variant
-
-  require Ash.Query
 
   @requirements ["app.start"]
 
@@ -38,6 +35,7 @@ defmodule Mix.Tasks.Kiln.Experiment do
     type: :string,
     document: :string,
     goal: :string,
+    form: :string,
     variant: :string,
     patch: :string,
     weight: :integer,
@@ -114,7 +112,8 @@ defmodule Mix.Tasks.Kiln.Experiment do
           name: name,
           content_type: type,
           document_id: document,
-          goal: goal(opts[:goal])
+          goal: goal(opts[:goal]),
+          goal_form_id: goal_form_id(opts)
         },
         authorize?: false,
         tenant: org_id
@@ -185,20 +184,18 @@ defmodule Mix.Tasks.Kiln.Experiment do
   # ── helpers ─────────────────────────────────────────────────────────────────
 
   defp experiments(org_id) do
-    Experiment
-    |> Ash.Query.load(:variants)
-    |> Ash.read!(authorize?: false, tenant: org_id)
+    Experiments.list_experiments!(query: [load: :variants], authorize?: false, tenant: org_id)
   end
 
   defp find(org_id, name), do: Enum.find(experiments(org_id), &(&1.name == name))
 
   defp totals(org_id, variant_id) do
-    KilnCMS.Experiments.VariantDay
-    |> Ash.Query.filter(variant_id == ^variant_id)
-    |> Ash.read!(authorize?: false, tenant: org_id)
-    |> Enum.reduce({0, 0}, fn day, {i, c} ->
-      {i + day.impressions, c + day.conversions}
-    end)
+    Experiments.list_variant_days!(
+      query: [filter: [variant_id: variant_id]],
+      authorize?: false,
+      tenant: org_id
+    )
+    |> Enum.reduce({0, 0}, fn day, {i, c} -> {i + day.impressions, c + day.conversions} end)
   end
 
   # Deliberately just the ratio, with no confidence claim. A significance number
@@ -211,8 +208,23 @@ defmodule Mix.Tasks.Kiln.Experiment do
 
   defp goal(nil), do: :form_submission
   defp goal("form_submission"), do: :form_submission
-  defp goal("content_view"), do: :content_view
-  defp goal(other), do: Mix.raise("Unknown goal #{inspect(other)} (form_submission|content_view)")
+
+  defp goal("content_view"),
+    do:
+      Mix.raise(
+        "The content_view goal is phase 3: attributing a view on a later page " <>
+          "needs a stable visitor key, which the built-in site does not have. " <>
+          "See docs/content-experiments-plan.md."
+      )
+
+  defp goal(other), do: Mix.raise("Unknown goal #{inspect(other)} (form_submission)")
+
+  # A form-submission experiment with no goal form counts nothing, so refusing
+  # here beats letting someone discover it from an empty results column.
+  defp goal_form_id(opts) do
+    opts[:form] ||
+      Mix.raise("--form FORM_UUID is required: it is the form whose submission counts")
+  end
 
   defp parse_patch(nil), do: %{}
 

@@ -37,6 +37,18 @@ defmodule KilnCMS.Experiments.Experiment do
   postgres do
     table "content_experiments"
     repo KilnCMS.Repo
+
+    # `RequireVariants` also checks this, for a readable error — but a read with
+    # no lock is a check-then-act: two `:start` calls on two drafts targeting the
+    # same document both see zero running rows, both pass, both commit. A partial
+    # unique index is the only thing that actually makes it true. It cannot be an
+    # Ash `identity` because those cannot carry a `WHERE`.
+    custom_indexes do
+      index [:org_id, :content_type, :document_id],
+        unique: true,
+        where: "state = 'running'",
+        name: "content_experiments_one_running_per_document"
+    end
   end
 
   state_machine do
@@ -76,6 +88,13 @@ defmodule KilnCMS.Experiments.Experiment do
     update :start do
       require_atomic? false
       accept []
+      # Without a goal form nothing can ever convert: `Delivery.converts?/3`
+      # requires the submitted form to BE the goal. Starting anyway would cost
+      # the page its shared cache, accumulate impressions on every arm, and
+      # report 0.0% forever.
+      validate present(:goal_form_id),
+        message: "a form-submission experiment needs a goal form before it can start"
+
       change transition_state(:running)
       change set_attribute(:started_at, &DateTime.utc_now/0)
       change KilnCMS.Experiments.Changes.RequireVariants
@@ -147,8 +166,14 @@ defmodule KilnCMS.Experiments.Experiment do
 
     attribute :document_id, :uuid, allow_nil?: false, public?: true
 
+    # `:content_view` is deliberately NOT in this set yet. Attributing a view
+    # that happens on a later page needs a stable visitor key, which the
+    # built-in site does not have and will not until the sticky-assignment
+    # cookie gets its own privacy review (phase 3, see the plan doc). Accepting
+    # it here would let an operator create and start a test that silently never
+    # records a conversion — the worst failure mode a measurement feature has.
     attribute :goal, :atom do
-      constraints one_of: [:form_submission, :content_view]
+      constraints one_of: [:form_submission]
       default :form_submission
       allow_nil? false
       public? true
@@ -157,9 +182,8 @@ defmodule KilnCMS.Experiments.Experiment do
     # Which form counts as a conversion, for a `:form_submission` goal.
     attribute :goal_form_id, :uuid, public?: true
 
-    # Which document's view counts, for a `:content_view` goal. Attribution
-    # needs a stable visitor key, so this goal is headless-only in v1 — see
-    # `KilnCMS.Experiments`.
+    # Reserved for the `:content_view` goal (phase 3). The column exists so the
+    # migration that turns the goal on is additive; nothing reads it yet.
     attribute :goal_document_id, :uuid, public?: true
 
     attribute :winner_variant_id, :uuid, writable?: false, public?: true
