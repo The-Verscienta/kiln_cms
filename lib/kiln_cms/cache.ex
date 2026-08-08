@@ -9,11 +9,11 @@ defmodule KilnCMS.Cache do
 
   In keeping with the project's minimal-ops goal this is in-process only (no
   Redis/Dragonfly); a shared multi-node cache is deferred until measured (D2).
-  Two keys are the exception to what that costs on a cluster —
-  `bust_code_injection/1` and `bust_branding/1` invalidate on every node via
-  `KilnCMS.Cache.ClusterBust`, because an operator deleting an executing script
-  should not have to wait out a TTL on the nodes they did not happen to hit
-  (#739).
+  A few keys are the exception to what that costs on a cluster —
+  `bust_code_injection/1`, `bust_branding/1` and `bust_feed_policy/1` invalidate
+  on every node via `KilnCMS.Cache.ClusterBust`, because an operator deleting an
+  executing script, or an admin turning off full-text syndication (#719), should
+  not have to wait out a TTL on the nodes they did not happen to hit (#739).
 
   Set `config :kiln_cms, KilnCMS.Cache, enabled: false` to bypass the cache
   (every read hits the source) without removing the supervised process.
@@ -437,6 +437,12 @@ defmodule KilnCMS.Cache do
   A failure to enumerate is logged rather than swallowed. Silently not busting
   here means a feed keeps serving whatever the previous policy allowed, while
   the admin is told the save succeeded.
+
+  **Node-local**, unlike `bust_feed_policy/1`. `KilnCMS.Cache.ClusterBust`
+  broadcasts a list of *keys*, and this is a prefix scan whose matching keys
+  differ per node — so making it cluster-wide needs an "intent" broadcast rather
+  than a key list. Tracked separately; the policy above is the half that decides
+  disclosure, and it does reach every node.
   """
   @spec bust_all_feeds(Ash.UUID.t()) :: :ok
   def bust_all_feeds(org_id) do
@@ -490,11 +496,16 @@ defmodule KilnCMS.Cache do
   """
   @spec bust_feed_policy(Ash.UUID.t()) :: :ok
   def bust_feed_policy(org_id) do
-    if enabled?() do
-      Cachex.del(@cache, feed_policy_key(org_id))
-      # The derived list is a function of the policy, so it can never outlive it.
-      Cachex.del(@cache, syndicated_types_key(org_id))
-    end
+    # Cluster-wide (#739), for the reason code injection is: the policy decides
+    # whether a site's complete article bodies go out to every anonymous
+    # subscriber, and on a multi-node deployment an admin who turns that off
+    # would otherwise watch roughly half of all fetches keep serving full text
+    # until the TTL — with no way to tell whether the switch worked.
+    #
+    # The derived type list rides along: it is a function of the policy, so it
+    # can never outlive it.
+    if enabled?(),
+      do: ClusterBust.broadcast([feed_policy_key(org_id), syndicated_types_key(org_id)])
 
     :ok
   end
