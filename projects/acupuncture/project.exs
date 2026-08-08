@@ -18,6 +18,12 @@ import Config
 # replaced, not appended). When bumping the core, diff this list against the
 # one in `config/config.exs` and re-sync (ours must be *core list + the
 # acupuncture additions*).
+#
+# Drifting is not harmless. A core domain missing here is a domain the overlay
+# build cannot see, so `mix ash.codegen` reads its tables as orphaned and offers
+# to DROP them — and declining writes `drop_table_opted_out` into the core's
+# snapshots, which then ships as an unrelated diff. Re-synced #497 after
+# Billing, Federation and Experiments had each fallen out.
 config :kiln_cms,
   ash_domains: [
     KilnCMS.Accounts,
@@ -29,6 +35,10 @@ config :kiln_cms,
     KilnCMS.Mail,
     KilnCMS.Newsletter,
     KilnCMS.Automation,
+    KilnCMS.Billing,
+    KilnCMS.Federation,
+    KilnCMS.Experiments,
+    KilnCMS.Social,
     Acupuncture.Catalog
   ],
   # Scanned by `KilnCMS.CMS.ContentTypes` for content types, and (via

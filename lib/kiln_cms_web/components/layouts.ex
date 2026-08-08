@@ -631,6 +631,12 @@ defmodule KilnCMSWeb.Layouts do
             icon: "hero-cpu-chip"
           },
           %{
+            key: :social,
+            label: gettext("Social"),
+            path: ~p"/editor/social",
+            icon: "hero-megaphone"
+          },
+          %{
             key: :backups,
             label: gettext("Backups"),
             path: ~p"/editor/backups",

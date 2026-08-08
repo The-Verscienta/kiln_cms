@@ -374,6 +374,9 @@ defmodule KilnCMSWeb.Router do
       live "/editor/team", TeamLive, :index
       # Editorial automation (#342) — no-code "when X happens, do Y" rules.
       live "/editor/automation", AutomationLive, :index
+      # Social accounts the `:social_post` automation reaction announces to
+      # (#497). Admin-only: the stored credentials are the site's public voice.
+      live "/editor/social", SocialLive, :index
       live "/editor/fields", FieldDefinitionLive, :index
       live "/editor/types", TypeDefinitionLive, :index
       # White-label branding for the current site (#48) — name, logo, colour.

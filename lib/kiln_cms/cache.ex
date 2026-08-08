@@ -259,6 +259,23 @@ defmodule KilnCMS.Cache do
   @spec experiments_key(Ash.UUID.t()) :: String.t()
   def experiments_key(org_id), do: "experiments:running:#{org_id}"
 
+  @doc "Cache key for a site's configured social accounts (#497)."
+  @spec social_accounts_key(Ash.UUID.t()) :: String.t()
+  def social_accounts_key(org_id), do: "social:accounts:#{org_id}"
+
+  @doc """
+  Drop a site's cached social-account set.
+
+  Called from every account write, for the same reason experiments bust on
+  every write: an admin who enables an account expects the next publish to
+  announce, not the one after the TTL expires.
+  """
+  @spec bust_social_accounts(Ash.UUID.t()) :: :ok
+  def bust_social_accounts(org_id) do
+    if enabled?(), do: Cachex.del(@cache, social_accounts_key(org_id))
+    :ok
+  end
+
   @doc """
   Drop a site's cached running-experiment set.
 
