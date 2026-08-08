@@ -58,17 +58,46 @@ defmodule KilnCMS.Experiments.Delivery do
   @doc """
   Count one conversion against `variant_id`.
 
-  Called from the form-submission path. Takes an id rather than a struct because
-  the caller has one: it arrived as a hidden field on the submitted form.
+  Called from the form-submission path, where the id arrived as a **hidden field
+  on a public, CSRF-free POST** — so it is attacker-controlled and is checked
+  before anything is written.
+
+  The id must name a variant of a currently-**running** experiment on *this*
+  site. Without that check the endpoint would accept any string: a random uuid
+  would mint a `VariantDay` row (there is no foreign key on `variant_id`, so the
+  table would grow without bound), and another org's variant id would write a
+  conversion into their results.
+
+  The check costs nothing — the running set is already cached for delivery, and
+  it is the same lookup that decided to serve a variant in the first place.
+
+  What this does **not** prevent is a visitor replaying the arm they were
+  legitimately served. That is inherent to any client-reported conversion and
+  is bounded by the form endpoint's own rate limit; the point here is that the
+  blast radius stops at "an arm someone could see", not "any row in the table".
   """
   @spec record_conversion(String.t() | nil, Ash.UUID.t()) :: :ok
   def record_conversion(variant_id, org_id) when is_binary(variant_id) do
-    async(fn ->
-      Experiments.record_conversion(variant_id, authorize?: false, tenant: org_id)
-    end)
+    if running_variant?(variant_id, org_id) do
+      async(fn ->
+        Experiments.record_conversion(variant_id, authorize?: false, tenant: org_id)
+      end)
+    end
+
+    :ok
   end
 
   def record_conversion(_variant_id, _org_id), do: :ok
+
+  defp running_variant?(variant_id, org_id) do
+    org_id
+    |> Experiments.running()
+    |> Enum.any?(fn experiment ->
+      Enum.any?(experiment.variants, &(&1.id == variant_id))
+    end)
+  rescue
+    _error -> false
+  end
 
   defp record_impression(variant, org_id) do
     async(fn ->

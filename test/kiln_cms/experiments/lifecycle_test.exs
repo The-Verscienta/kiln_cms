@@ -234,6 +234,77 @@ defmodule KilnCMS.Experiments.LifecycleTest do
     end
   end
 
+  # The variant id arrives on a public, CSRF-free form POST, so it is
+  # attacker-controlled and every one of these would otherwise be accepted.
+  describe "conversion attribution refuses an id it did not serve" do
+    setup ctx do
+      experiment = experiment!(ctx)
+      control = ExperimentFixtures.variant!(experiment, "Control", %{}, ctx.org_id, control: true)
+      ExperimentFixtures.variant!(experiment, "B", %{}, ctx.org_id, [])
+
+      {:ok, running} =
+        Experiments.start_experiment(experiment, authorize?: false, tenant: ctx.org_id)
+
+      KilnCMS.Cache.bust_experiments(ctx.org_id)
+
+      %{experiment: running, control: control}
+    end
+
+    defp variant_days(org_id),
+      do: Ash.read!(KilnCMS.Experiments.VariantDay, authorize?: false, tenant: org_id)
+
+    test "counts a variant of a running experiment", ctx do
+      KilnCMS.Experiments.Delivery.record_conversion(ctx.control.id, ctx.org_id)
+
+      assert [day] = variant_days(ctx.org_id)
+      assert day.variant_id == ctx.control.id
+      assert day.conversions == 1
+    end
+
+    # There is no foreign key on `variant_id`, so without the check every
+    # distinct uuid an attacker posts would mint a row.
+    test "ignores an unknown variant id", ctx do
+      KilnCMS.Experiments.Delivery.record_conversion(Ash.UUID.generate(), ctx.org_id)
+
+      assert [] = variant_days(ctx.org_id)
+    end
+
+    test "ignores a variant that belongs to another site", ctx do
+      other =
+        Ash.Seed.seed!(KilnCMS.Accounts.Organization, %{
+          name: "other",
+          slug: "other-#{System.unique_integer([:positive])}",
+          status: :active
+        })
+
+      KilnCMS.Experiments.Delivery.record_conversion(ctx.control.id, other.id)
+
+      assert [] = variant_days(other.id)
+    end
+
+    # A concluded experiment stops serving, so it must stop counting too —
+    # otherwise a stale page left open in a tab keeps moving the result after
+    # someone read it and decided.
+    test "ignores a variant whose experiment has concluded", ctx do
+      {:ok, _done} =
+        Experiments.conclude_experiment(ctx.experiment, nil,
+          authorize?: false,
+          tenant: ctx.org_id
+        )
+
+      KilnCMS.Experiments.Delivery.record_conversion(ctx.control.id, ctx.org_id)
+
+      assert [] = variant_days(ctx.org_id)
+    end
+
+    test "ignores a blank or missing field", ctx do
+      KilnCMS.Experiments.Delivery.record_conversion(nil, ctx.org_id)
+      KilnCMS.Experiments.Delivery.record_conversion("", ctx.org_id)
+
+      assert [] = variant_days(ctx.org_id)
+    end
+  end
+
   describe "the patch allowlist" do
     setup ctx, do: %{experiment: experiment!(ctx)}
 
