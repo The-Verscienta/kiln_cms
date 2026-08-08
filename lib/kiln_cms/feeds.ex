@@ -165,10 +165,10 @@ defmodule KilnCMS.Feeds do
   The content types this org syndicates, in `ContentTypes` descriptor form.
 
   Cached per org, like `KilnCMS.Events.calendar_types/1` and for the same
-  reason: this runs on the public feed routes *before* the response cache is
-  consulted (`KilnCMSWeb.FeedController.find_type/2`) and in the `<head>` of
-  every delivery page, and it costs a policy resolve plus a full content-type
-  registry walk. Busted by `Changes.BustFeedSettings` and `Changes.BustTypeRegistry`
+  reason: this runs on the public feed routes *before* `KilnCMSWeb.FeedController`
+  consults its response cache, and in the `<head>` of every delivery page, and it
+  costs a policy resolve plus a full content-type registry walk. Busted by
+  `KilnCMS.CMS.Changes.BustFeedSettings` and `KilnCMS.CMS.Changes.BustTypeRegistry`
   — the two writes that can change the answer.
   """
   @spec syndicated_types(Accounts.Organization.t() | Ash.UUID.t() | nil) :: [map()]
