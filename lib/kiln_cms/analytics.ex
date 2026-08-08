@@ -135,28 +135,51 @@ defmodule KilnCMS.Analytics do
   Decide what a whole referrer breakdown may show, given `totals` — a map of
   `source => hits` for **one** content item over one span (#620, #777).
 
+  Read the warning below before treating this as a privacy guarantee.
+
   Returns one `{source, hits, display}` per category in `referrer_sources/0`
   order, including categories with no hits: a zero-hit source still needs a
   place, or its absence reads as "we don't track this" rather than "nobody
   arrived this way" — and, more importantly, it is a candidate partner below.
 
-  ## Complementary suppression, and why a per-category threshold is not enough
+  ## Complementary suppression — what it does, and what it does NOT do
 
   Every classified arrival writes exactly one referrer hit alongside its view
-  (`KilnCMSWeb.ViewTracking`'s private `record/4`), so these categories sum to the item's
-  own view total — which is shown, exactly, right next to them. If exactly one
-  category is naturally below the threshold, its value is fully determined by
-  subtracting the other four *exact* values from that total. Publishing `"< n"`
-  beside four exact numbers hides nothing at all.
+  (`KilnCMSWeb.ViewTracking`'s private `record/4`), so these categories sum to
+  the item's own view total, which both the dashboard and the export publish
+  **exactly**, right next to them. When one category is naturally below the
+  threshold, a second is suppressed too — the smallest of the others, zero-hit
+  ones included.
 
-  So when that happens a second category is suppressed too, leaving the
-  equation with two unknowns. Two or more naturally-low categories need no
-  help: they are already underdetermined by the total alone.
-
-  The partner is the **smallest** other category, zero-hit ones included. If
-  every other category is a genuine zero the low one is exactly
-  `total - 0 - 0 - 0 - 0`, the single most recoverable case there is, and
-  excluding zeros from the pool would leave precisely that case unprotected.
+  > #### This does not prevent arithmetic recovery {: .warning}
+  >
+  > It reads as though it does, and #620 shipped it saying so. It does not.
+  > Brute-forcing every assignment consistent with the published projection
+  > *plus the published view total* (threshold 5):
+  >
+  > | breakdown | published | consistent assignments |
+  > |---|---|---|
+  > | `direct: 3`, rest zero | `"< 5"`, `hidden`, `0,0,0` | **1 — exact** |
+  > | `direct: 2, search: 40, social: 50, other: 60` | `"< 5"`, `hidden`, `40,50,60` | **1 — exact** |
+  > | `direct: 4`, others all `5` | `"< 5"`, `hidden`, `5,5,5` | **1 — exact** |
+  > | `direct: 1, internal: 1`, rest zero | `"< 5"`, `"< 5"`, `0,0,0` | **1 — exact** |
+  > | `direct: 4, internal: 100, …` | `"< 5"`, `hidden`, `200,300,400` | 4 — the range `"< 5"` already announced |
+  >
+  > The reader knows the algorithm. The partner is the *minimum* of the others,
+  > so it is bounded above by every published exact; and it is not naturally
+  > low, so it is `0` or `>= threshold`. With one equation and that constraint
+  > the pair is usually unique — and whenever the residual is below the
+  > threshold the partner **must** be zero, which pins the low value exactly.
+  >
+  > Choosing the smallest partner is what makes it predictable. Two
+  > naturally-low categories are not safe either, contrary to what #620
+  > claimed: small totals pin both.
+  >
+  > Closing this needs the exact total to stop being published beside the
+  > breakdown, or the whole breakdown suppressed together — a design change to
+  > both surfaces, tracked as #1073. What this function delivers today is a
+  > **consistent** decision across the dashboard and the export, which is the
+  > prerequisite for fixing it in one place rather than two.
 
   ## The three display values
 

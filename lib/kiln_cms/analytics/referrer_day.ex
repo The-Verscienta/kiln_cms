@@ -52,6 +52,13 @@ defmodule KilnCMS.Analytics.ReferrerDay do
     # should never touch an index.
     custom_indexes do
       index [:day], name: "referrer_days_trend_index"
+
+      # The export's grouped read (#777) sorts `(day, content_type, content_id,
+      # id)`. The pre-existing `(org_id, day)` index covers only the first key,
+      # so Postgres was left incremental-sorting every day's rows on the other
+      # three. The export is keyset-paginated, so that cost is paid per page.
+      index [:org_id, :day, :content_type, :content_id, :id],
+        name: "referrer_days_export_index"
     end
   end
 

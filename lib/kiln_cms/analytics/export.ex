@@ -91,9 +91,14 @@ defmodule KilnCMS.Analytics.Export do
 
   So the decision is made over a whole breakdown, by the same
   `Analytics.suppress_referrer_group/1` the dashboard uses, and every category
-  is emitted — **including ones with no hits**. That is what makes a
-  complementary partner available to suppress; without the zero rows, a
-  breakdown with one real category has nothing to hide behind.
+  is emitted — **including ones with no hits**, which is what makes a
+  complementary partner available at all.
+
+  That brings the export up to the dashboard's behaviour. It does **not** close
+  #777: the algorithm itself does not prevent arithmetic recovery while the
+  exact view total is published beside the breakdown — see the warning on
+  `Analytics.suppress_referrer_group/1`, and #1073. What changes here is that there is now
+  one decision to fix rather than two implementations to fix separately.
 
   ## Why this is still a stream
 
