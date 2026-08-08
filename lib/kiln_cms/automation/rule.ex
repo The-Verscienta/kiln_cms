@@ -129,6 +129,15 @@ defmodule KilnCMS.Automation.Rule do
     end
   end
 
+  validations do
+    # `config` is a free map read defensively by every reaction, so a rule with
+    # a missing or misspelled key saved fine, listed as enabled, and did
+    # nothing — forever, with the only evidence in a server log (#944). On
+    # create and update both: an action can be changed on an existing rule, and
+    # the config that suited the old one usually does not suit the new one.
+    validate KilnCMS.Automation.Validations.ActionConfig, on: [:create, :update]
+  end
+
   # Multi-tenancy (epic #336): a rule belongs to one site, so a lifecycle event
   # only fires its own org's rules. `global?: true` keeps the tenant optional;
   # the executor's `:matching` scan (`authorize?: false`) is scoped to the

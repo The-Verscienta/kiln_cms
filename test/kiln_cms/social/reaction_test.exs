@@ -61,6 +61,20 @@ defmodule KilnCMS.Social.ReactionTest do
     )
   end
 
+  # Straight to the row, skipping the #944 config validation — for the cases
+  # that are about what the executor does with a config the form would now
+  # refuse.
+  defp seed_rule(ctx, config) do
+    Ash.Seed.seed!(KilnCMS.Automation.Rule, %{
+      name: "Announce",
+      trigger_event: :published,
+      action: :social_post,
+      config: config,
+      enabled: true,
+      org_id: ctx.org_id
+    })
+  end
+
   defp publish(ctx, attrs \\ %{}) do
     post =
       CMS.create_post!(
@@ -120,7 +134,12 @@ defmodule KilnCMS.Social.ReactionTest do
 
   test "a rule naming an unknown provider announces nothing", ctx do
     account(ctx)
-    rule(ctx, %{"provider" => "myspace"})
+
+    # Seeded, not created: #944 refuses this config at save time now. The
+    # runtime guard still has to hold — rules predating that validation exist,
+    # and AshAdmin writes the attribute directly — so this exercises the leg
+    # the form no longer reaches.
+    seed_rule(ctx, %{"provider" => "myspace"})
 
     publish(ctx)
 

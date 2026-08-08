@@ -203,6 +203,14 @@ defmodule KilnCMSWeb.AutomationLive do
     end
   end
 
+  # The config textarea is hand-rolled rather than a `<.input>` — it holds JSON,
+  # not the attribute's own value — so it renders no errors of its own. Without
+  # this the #944 validation would refuse the save and the admin would see a
+  # form that simply did not submit.
+  defp config_errors(form) do
+    Enum.map(form[:config].errors, &KilnCMSWeb.CoreComponents.translate_error/1)
+  end
+
   defp editing?(nil, _id), do: false
   defp editing?(%{id: id}, id), do: true
   defp editing?(_edit, _id), do: false
@@ -348,6 +356,7 @@ defmodule KilnCMSWeb.AutomationLive do
       |> assign(:trigger_options, trigger_options())
       |> assign(:action_options, action_options())
       |> assign(:config_json, config_json(assigns.form))
+      |> assign(:config_errors, config_errors(assigns.form))
 
     ~H"""
     <.input field={@form[:name]} label={gettext("Name")} placeholder="Notify on publish" />
@@ -387,6 +396,10 @@ defmodule KilnCMSWeb.AutomationLive do
         class="mt-1 w-full rounded border border-base-content/20 bg-base-100 p-2 font-mono text-xs"
         placeholder={~s({"to": "team@example.com", "subject": "Live: {{title}}"})}
       >{@config_json}</textarea>
+      <p :for={msg <- @config_errors} class="mt-1.5 flex items-center gap-2 text-sm text-error">
+        <.icon name="hero-exclamation-circle" class="size-5" />
+        {msg}
+      </p>
       <p class="mt-1 text-xs text-base-content/60">
         {gettext(
           "send_email: to, subject, body. broadcast: topic. Templates support {{title}}, {{slug}}, {{type}}, {{event}}."
@@ -396,6 +409,9 @@ defmodule KilnCMSWeb.AutomationLive do
         {gettext(
           "flag_duplicates, suggest_tags, suggest_links, suggest_metadata: to. They email their findings and never write to the record. suggest_metadata additionally needs allow_egress: true when the configured model provider is off-site."
         )}
+      </p>
+      <p class="mt-1 text-xs text-base-content/60">
+        {gettext("social_post: provider, template. newsletter: segment_id, subject.")}
       </p>
     </div>
     """
