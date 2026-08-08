@@ -304,6 +304,18 @@ defmodule KilnCMS.Config.EnvTest do
       assert log =~ "Use a positive integer."
     end
 
+    test "a two-element entry is still replayed, not silently dropped" do
+      # `for {a, b, c} <- list` FILTERS OUT what does not match rather than
+      # raising, so before #1009's shape change was handled explicitly a
+      # leftover two-element entry would have vanished without trace — a
+      # warning disappearing in silence being the one failure this module
+      # exists to prevent.
+      log = replay([{"DATABASE_SSL", "enabled"}])
+
+      assert log =~ "DATABASE_SSL"
+      assert log =~ "true/1/yes/on"
+    end
+
     test "it warns, not infos — this is a misconfiguration" do
       assert replay([{"DATABASE_SSL", "enabled", :boolean}]) =~ "[warning]"
     end

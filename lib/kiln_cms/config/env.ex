@@ -239,14 +239,16 @@ defmodule KilnCMS.Config.Env do
       {parsed, ""} when parsed > 0 ->
         {:ok, parsed}
 
-      # Blank — including whitespace-only — is `:unset`, exactly as in `fetch/1`.
-      # `BACKUP_MEDIA_DIR=` in a compose file is how an operator writes "leave
-      # this alone", and warning about it would be noise on every boot.
+      # Blank and unusable land in the same clause because `Integer.parse/1`
+      # cannot tell them apart — `blank_or_bad/2` splits them.
       _other ->
         blank_or_bad(var, raw)
     end
   end
 
+  # Blank — including whitespace-only — is `:unset`, exactly as in `fetch/1`.
+  # `BACKUP_KEEP_DAYS=` in a compose file is how an operator writes "leave this
+  # alone", and warning about it would be noise on every boot.
   defp blank_or_bad(var, raw) do
     if String.trim(raw) == "" do
       :unset
@@ -374,13 +376,23 @@ defmodule KilnCMS.Config.Env do
   """
   @spec replay_collected() :: :ok
   def replay_collected do
-    for {var, raw, expected} <- Application.get_env(:kiln_cms, :config_warnings, []) do
+    for warning <- Application.get_env(:kiln_cms, :config_warnings, []) do
+      {var, raw, expected} = normalize(warning)
       Logger.warning(message_for(var, raw, expected))
       report_to_sentry(var, raw, expected)
     end
 
     :ok
   end
+
+  # A `for` comprehension filters out what its pattern does not match, so a
+  # two-element entry — the shape this list had before #1009 — would be dropped
+  # in silence. A warning that disappears without trace is the exact failure
+  # this module exists to prevent, so the old shape is matched rather than left
+  # to fall through, and anything else is reported as itself.
+  defp normalize({var, raw, expected}), do: {var, raw, expected}
+  defp normalize({var, raw}), do: {var, raw, :boolean}
+  defp normalize(other), do: {inspect(other), "", :unknown}
 
   defp message_for(var, raw, expected) do
     "#{var} is set to an unrecognized value (#{inspect(raw)}); the configured default " <>
@@ -396,11 +408,14 @@ defmodule KilnCMS.Config.Env do
 
   defp advice(:positive_integer), do: "Use a positive integer."
 
+  defp advice(:unknown),
+    do: "The collected warning had an unrecognized shape; see KilnCMS.Config.Env."
+
   # A stable message with the variable in `fingerprint`, so Sentry groups one
   # issue per variable rather than one per deployment — an operator wants "this
   # flag is still wrong", not a new issue each restart. The offending value goes
   # in `extra` for the same reason it is quoted on stderr: it is the only thing
-  # they can act on. Safe to send — this module is flag-only by contract.
+  # they can act on. Safe to send — this module reads flags and counts only.
   defp report_to_sentry(var, raw, expected) do
     _ =
       Sentry.capture_message(message_for(var, raw, expected),
