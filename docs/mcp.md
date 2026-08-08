@@ -82,10 +82,14 @@ Authoring (require a write key + editor role): `create_page` / `update_page` /
 > on a retry. A successful `update_*` is therefore not evidence a removal
 > matched anything.
 >
-> **Check the result rather than the status.** `create_*` and `update_*` load
-> the record's `tags` and `category` into their response (#640), so the links
-> after the write are in the payload you already have — a removal that matched
-> nothing leaves the tag listed. No follow-up `read_tags` needed.
+> **Check the result rather than the status.** `update_page` / `update_post` /
+> `update_entry` load the record's `tags` and `category` into their response
+> (#640), so a removal that matched nothing leaves the tag listed in the payload
+> you already have. No follow-up `read_tags` needed.
+>
+> This covers tags and category only. `create_*` does not load them and does not
+> need to: `tag_ids` on a create hard-errors on an unknown id, and `category_id`
+> is echoed back as an attribute.
 >
 > **The related-content links carry the same verbs (#637).** Alongside
 > `related_post_ids` (which replaces), `update_post` takes `add_related_post_ids`
@@ -93,6 +97,9 @@ Authoring (require a write key + editor role): `create_page` / `update_page` /
 > `remove_related_page_ids` (and `…_related_entry_ids` on `update_entry`). The
 > rules are identical — prefer the merge verbs for a partial update, don't
 > combine a complete-set argument with its verbs, and don't list one id in both.
+>
+> They are **not** in the response, so a `remove_related_*` no-op is still
+> unverifiable from the result alone; read the record back if it matters (#996).
 
 The tool set lives in the `tools` block on `KilnCMS.CMS` and the
 `config :kiln_cms, :mcp_tools` list in `config/config.exs` (read at compile

@@ -239,6 +239,81 @@ defmodule KilnCMSWeb.McpTest do
     refute after_text =~ keeper.id
   end
 
+  # `load` cannot project: `AshAi.Serializer` emits
+  # `default_attributes(resource) ++ load_fields`, an APPEND, and Ash's load of
+  # an attribute is an ensure-selected no-op. So a nested `[:id, :name, :slug]`
+  # would read like a contract while the payload carried every public attribute
+  # of Tag and Category regardless — and a later attribute on
+  # `KilnCMS.CMS.Taxonomy` would widen every write response with no test
+  # failing. `@link_load` is written as it behaves; this pins that, so the
+  # discovery is not re-lost.
+  test "the loaded links carry the whole related record, not a chosen few fields", %{conn: conn} do
+    editor = user(:editor)
+    plaintext = mint(editor, :read_write)
+    admin = user(:admin)
+
+    category =
+      KilnCMS.CMS.create_category!(
+        %{
+          name: "Described",
+          slug: "mcp-c-#{System.unique_integer([:positive])}",
+          description: "a field no load list mentions"
+        },
+        actor: admin
+      )
+
+    post =
+      KilnCMS.CMS.create_post!(
+        %{title: "Wide", slug: "mcp-w-#{System.unique_integer([:positive])}"},
+        actor: editor
+      )
+
+    conn =
+      rpc(conn, plaintext, "tools/call", %{
+        name: "update_post",
+        arguments: %{id: post.id, input: %{category_id: category.id}}
+      })
+
+    assert %{"result" => %{"isError" => false, "content" => [%{"text" => text}]}} =
+             json_response(conn, 200)
+
+    assert text =~ "a field no load list mentions"
+  end
+
+  # The three `create_*` tools deliberately do NOT load the links: `tag_ids` on
+  # a create hard-errors on an unknown id and `category_id` is echoed back as an
+  # attribute, so a create's links are fully determined by the request that made
+  # it — and an unconditional load costs every write response the full tag set
+  # (measured at 530 B -> 5.3 kB on a 60-tag post) to tell a model something it
+  # already knows.
+  test "a create_* result does not carry the tag records", %{conn: conn} do
+    editor = user(:editor)
+    plaintext = mint(editor, :read_write)
+
+    tag =
+      KilnCMS.CMS.create_tag!(
+        %{name: "uncarried", slug: "mcp-u-#{System.unique_integer([:positive])}"},
+        actor: user(:admin)
+      )
+
+    conn =
+      rpc(conn, plaintext, "tools/call", %{
+        name: "create_post",
+        arguments: %{
+          input: %{
+            title: "Created",
+            slug: "mcp-cr-#{System.unique_integer([:positive])}",
+            tag_ids: [tag.id]
+          }
+        }
+      })
+
+    assert %{"result" => %{"isError" => false, "content" => [%{"text" => text}]}} =
+             json_response(conn, 200)
+
+    refute text =~ "uncarried"
+  end
+
   test "a :read_write key on an editor account can create a draft page", %{conn: conn} do
     plaintext = mint(user(:editor), :read_write)
     slug = "mcp-#{System.unique_integer([:positive])}"
