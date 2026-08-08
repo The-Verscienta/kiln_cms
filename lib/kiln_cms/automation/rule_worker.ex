@@ -301,7 +301,10 @@ defmodule KilnCMS.Automation.RuleWorker do
           content_type: event_type(event)
         }
 
-        deliver_findings(finder.(record, context), config)
+        record
+        |> finder.(context)
+        |> attribute(context)
+        |> deliver_findings(config)
 
       {:error, error} ->
         {:error, error}
@@ -320,6 +323,18 @@ defmodule KilnCMS.Automation.RuleWorker do
       _ -> :skip
     end
   end
+
+  # Name the rule and the org in the skip reason. A rule refused by its
+  # unattended share (#943) is not a blip — it is a steady state that can hold
+  # for the rest of the window, every window — and an unattributed line leaves
+  # an admin with several `suggest_metadata` rules unable to tell which one is
+  # being refused, or for which site. That is #944's failure mode wearing a log
+  # message.
+  defp attribute({:skip, reason}, %{rule_id: rule_id, org_id: org_id}) do
+    {:skip, "#{reason} (rule #{rule_id}, org #{org_id})"}
+  end
+
+  defp attribute(findings, _context), do: findings
 
   defp deliver_findings(:none, _config), do: :ok
 
@@ -441,21 +456,51 @@ defmodule KilnCMS.Automation.RuleWorker do
   defp draft_findings(record, context) do
     document = KilnCMS.Seo.Document.from_record(record, content_type: context.content_type)
 
-    case KilnCMS.Seo.draft(document, org_id: context.org_id, user_id: budget_identity(context)) do
-      {:ok, draft} -> {metadata_subject(record), metadata_body(record, draft)}
-      {:error, reason} -> {:skip, "SEO draft failed: #{inspect(reason)}"}
+    opts = [
+      org_id: context.org_id,
+      user_id: budget_identity(context),
+      # Nobody is waiting on this one, so it draws on the sub-ceiling rather
+      # than the whole org allowance (#943).
+      unattended?: true
+    ]
+
+    case KilnCMS.Seo.draft(document, opts) do
+      {:ok, draft} ->
+        {metadata_subject(record), metadata_body(record, draft)}
+
+      # Spelled out rather than inspected: this one is a standing setting
+      # (`unattended_share: 0.0`), not an overload, and "rate limited, retry in
+      # 3600000ms" would send an operator to wait out a window that will never
+      # help.
+      {:error, :unattended_disabled} ->
+        {:skip,
+         "SEO drafting is switched off for unattended callers " <>
+           "(config :kiln_cms, KilnCMS.Seo, unattended_share: 0.0)"}
+
+      {:error, {:rate_limited, _ms}} ->
+        {:skip,
+         "SEO draft budget spent: unattended rules stop once the org reaches " <>
+           "#{KilnCMS.Seo.unattended_share()} of per_org_limit, so the rest stays " <>
+           "available to editors"}
+
+      {:error, reason} ->
+        {:skip, "SEO draft failed: #{inspect(reason)}"}
     end
   end
 
-  # There is no user, but the per-user bucket is the only per-caller ceiling
-  # `KilnCMS.LLM.Budget` offers — and without one, a single hot rule (say
-  # `*.updated → suggest_metadata`) drains the org's whole allowance, and the
-  # first an editor knows of it is their own "Suggest with AI" button returning
-  # a rate-limit error caused by a background rule they can't see.
+  # Two ceilings, for two different runaways.
   #
-  # Keying it by rule id gives each rule its own ceiling and keeps one runaway
-  # rule off the others. The shared per-org bucket still applies on top, so the
-  # operator's total ceiling is the one they configured.
+  # Keying the per-user bucket by rule id gives each rule its own ceiling, so
+  # one hot rule can't starve the *other rules*. That is all it does — every
+  # rule together could still drain the org's whole allowance, and the first an
+  # editor would know of it is their own "Suggest with AI" returning a
+  # rate-limit error caused by a background rule they can't see and (since
+  # `/editor/automation` is admin-only) can't inspect.
+  #
+  # `unattended?: true` is the other half: unattended callers additionally pass
+  # a bucket sized at `KilnCMS.Seo.unattended_share/0` of the per-org count, so
+  # the units past that share are reserved for people. The per-org bucket still
+  # applies on top, so the operator's total ceiling is the one they configured.
   defp budget_identity(%{rule_id: rule_id}), do: "automation:#{rule_id}"
 
   defp metadata_subject(record), do: "Suggested SEO metadata for \"#{record.title}\""

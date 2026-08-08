@@ -118,11 +118,34 @@ config :kiln_cms, KilnCMS.Seo,
   description_max: 160,
   keyword_max: 5,
   per_user_limit: {20, :timer.minutes(1)},
-  per_org_limit: {200, :timer.hours(1)}
+  per_org_limit: {200, :timer.hours(1)},
+  unattended_share: 0.5       # of per_org_limit, for callers with nobody
+                              # waiting on them (automation reactions)
 ```
 
 Both rate-limit buckets must pass. The per-user bucket stops a stuck button or
 a replayed event; the per-org bucket is the actual spend ceiling.
+
+**Unattended callers stop early, so people keep a reserve.** The
+`suggest_metadata` automation reaction ([`docs/automation.md`](automation.md))
+draws on the same per-org budget as the editor's button, so a busy rule could
+exhaust the hourly allowance and leave every editor with a rate-limit error
+caused by something they cannot see. A caller marked unattended may only
+proceed while the org has spent **less than `unattended_share` of its window** —
+counting every caller's spend, not just automation's. At the defaults that
+leaves at least 100 of the 200 available to a person at any moment in the hour.
+
+Reading the shared counter is the point. A sub-bucket that counted only
+unattended calls would still let a background rule take the last unit when
+editors sat at 199 of 200 and automation had spent nothing — which is the
+failure this exists to prevent. The consequence is that automation's room
+shrinks as editors work, which is the intended priority.
+
+`unattended_share: 0.0` keeps automation off this budget entirely, and reports
+itself as `{:error, :unattended_disabled}` rather than as a rate limit an
+operator would wait out. `1.0` restores the pre-#943 shared bucket. A value
+that isn't a number between 0 and 1 — `50`, meaning percent, is the natural
+mistake — fails closed to 0 and logs which key was wrong.
 
 There is deliberately **no draft cache**: a draft is per-document,
 per-revision and per-org, and a cache key loose enough to ever hit would be a
