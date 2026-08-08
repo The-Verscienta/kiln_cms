@@ -333,9 +333,22 @@ Notes that matter in practice:
   `invalid_passphrase` from the unlock endpoint), so it cannot be used to
   enumerate which documents are locked.
 - **Locked documents are absent from every discovery surface** — the sitemap,
-  feeds, `llms.txt`, keyword and semantic search, related content, and any
-  configured Meilisearch index. If a document is locked, the only way to reach
-  it is to know its URL *and* its passphrase.
+  feeds, `llms.txt`, the blog index, the `/published` collection routes,
+  keyword and semantic search, related content, and any configured Meilisearch
+  index. If a document is locked, the only way to reach it is to know its URL
+  *and* its passphrase.
+
+  The `:published` read carries that as a **filter**, not a policy clause, so
+  it holds for an authorized caller too — a locked document is absent from
+  `/published` and its GraphQL twin whatever credential is presented. Those are
+  delivery feeds; an editor reaches their own locked drafts through the editor
+  reads, which are unaffected.
+
+  Note the asymmetry with an **audience** gate, which the index does show, with
+  a "Members" badge: gated metadata is a marketing surface — you want a reader
+  to know members-only content exists and what they would get. A passphrase is
+  a shared secret handed to specific people, so disclosing the document's title
+  and URL is the one thing it must not do (#1032).
 
 The unlock endpoint has its own tight rate-limit bucket (see
 [Rate limits](#rate-limits)) — it is the guessing surface for a shared secret,
