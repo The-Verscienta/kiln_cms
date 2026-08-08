@@ -9939,4 +9939,4 @@ msgstr "Voir"
 #: lib/kiln_cms_web/live/content_editor_live.ex:8713
 #, elixir-autogen, elixir-format
 msgid "Someone else saved this page. Duplicating copies their version, not what you see. Continue?"
-msgstr ""
+msgstr "Quelqu'un d'autre a enregistré cette page. La duplication copiera sa version, pas ce que vous voyez. Continuer ?"
