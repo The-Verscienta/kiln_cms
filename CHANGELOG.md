@@ -29,6 +29,29 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **Events: "what's on, soonest first"** (#766). An event-shaped content type —
+  one carrying a `datetime_range` field (#480) — now has a paginated delivery
+  index ordered by each document's **next occurrence**, at `/<plural>` (HTML)
+  and `/<plural>/index.json`. Both take `?from=`/`?until=`/`?page=`; a bare date
+  is read as a local day in the deployment's event timezone. Details in
+  [docs/events.md](docs/events.md).
+
+  Same filter as the `.ics` routes, for the same reason: published **and**
+  `audience: :public`, one locale, unlocked. An anonymous listing that widened
+  any of that would be a leak rather than a listing.
+
+  "Next occurrence" is a function of `now()`, so it is stored: a
+  `next_occurrence_at` column written on save and advanced by an hourly Oban
+  sweep (`KILN_OCCURRENCE_SWEEP_CRON`, default `50 * * * *`). **That interval is
+  how stale the listing may be** — an event that has finished keeps its place
+  until the next run — so shorten it on a site whose events turn over during the
+  day.
+
+  What it deliberately does not do: only the *next* occurrence is stored, so a
+  window starting in the future selects documents whose next date falls inside
+  it, not every recurrence inside it. Making a single occurrence addressable in
+  its own right is a different feature and is named as such in the docs.
+
 - **Content experiments — A/B testing published content** (#499, phase 1).
   An experiment holds two or more **variants** of part of a published document —
   a headline, a CTA block — and measures which converts. `mix kiln.experiment`
@@ -2246,6 +2269,25 @@ migration, a rewritten column, a dropped config key).
   sighted and screen-reader users alike. The copyable media URL now says so too.
 
 ### Upgrading
+
+**If you already have event content, run the occurrence backfill once** (#766):
+
+```bash
+mix kiln.occurrences.backfill        # or, in a release image:
+bin/kiln_cms eval 'KilnCMS.Events.Backfill.run()'
+```
+
+The migration adds `next_occurrence_at` but cannot fill it — the value is the
+output of the recurrence engine, not a function of other columns — and the
+hourly sweep will not fill it either, because the sweep visits rows whose
+occurrence has **passed** and a `NULL` has not passed anything. Skip this and
+`/<plural>` and `/<plural>/index.json` are simply empty until every event
+happens to be re-saved. Nothing else is affected: the `.ics` routes, the feeds
+and the document pages do not read the column.
+
+Safe on a live site, and safe to re-run: it writes only the rows whose value
+actually changes, so a second pass writes nothing. Reversible by rolling the pin
+back — the column is additive and nothing else reads it.
 
 **`POST /api/auth/sign_in` can now answer `200` instead of `201`, and any client
 that branches on the presence of `token` will read that as a failure.** For an

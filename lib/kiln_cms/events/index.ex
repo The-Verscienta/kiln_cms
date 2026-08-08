@@ -127,6 +127,88 @@ defmodule KilnCMS.Events.Index do
   end
 
   @doc """
+  Recompute `record`'s sort key and store it, unless it is already right.
+
+  The one write path, shared by `KilnCMS.Events.Sweep` (rows whose occurrence
+  has gone by) and `KilnCMS.Events.Backfill` (every row, once). Returns
+  `:written`, `:unchanged`, or `{:error, reason}`.
+
+  ## Why "unless it is already right" is not an optimization
+
+  A backfill visits the whole archive. Writing every row would bump `updated_at`
+  on all of them — reordering the `updated_at`-sorted feeds and sitemap for no
+  reason — and fire `Changes.BustContentCache` once per row, each drop taking
+  the site's sitemap, `llms.txt` and feed caches with it. Skipping the no-ops is
+  what makes the pass safe to run, and re-run, on a live site.
+
+  The comparison is `DateTime.compare/2`, not `==`. A value read back from
+  Postgres as `:utc_datetime_usec` carries `{0, 6}` microsecond precision while
+  a freshly computed one carries `{0, 0}`, so struct equality calls every
+  unchanged row changed — which would have quietly turned the skip into a
+  no-op and rewritten the archive anyway.
+
+  An unloaded `next_occurrence_at` matches no clause of `changed?/2` and raises,
+  deliberately: a caller whose `select:` dropped it would otherwise compare
+  against `%Ash.NotLoaded{}` and rewrite every row it touched.
+  """
+  @spec refresh(struct(), Ash.UUID.t(), DateTime.t()) :: :written | :unchanged | {:error, term()}
+  def refresh(record, org_id, from) do
+    next = next_occurrence_at(record, org_id, from)
+
+    if changed?(record.next_occurrence_at, next) do
+      write(record, org_id, next)
+    else
+      :unchanged
+    end
+  end
+
+  defp changed?(%DateTime{} = stored, %DateTime{} = next),
+    do: DateTime.compare(stored, next) != :eq
+
+  defp changed?(nil, nil), do: false
+  defp changed?(nil, %DateTime{}), do: true
+  defp changed?(%DateTime{}, nil), do: true
+
+  # `:set_next_occurrence`, never `:update` — see that action's comment in
+  # `KilnCMS.CMS.Content`. `authorize?: false`: both callers are system passes
+  # that must maintain the value for drafts and gated events too, because a
+  # value that is only correct for public rows is wrong the moment one is
+  # published.
+  defp write(record, org_id, next) do
+    record
+    |> Ash.Changeset.for_update(:set_next_occurrence, %{next_occurrence_at: next},
+      authorize?: false,
+      tenant: org_id
+    )
+    |> Ash.update()
+    |> case do
+      {:ok, _record} -> :written
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Every attribute the refresh path reads, and nothing else.
+
+  Without a `select:` each row drags its whole `blocks` union tree and its
+  embedding vector into memory — the spike this whole feature exists to keep off
+  the request path, not to relocate into a background pass.
+
+  The list is not arbitrary: `custom_fields` (+ `type_definition_id` on the
+  dynamic tier) is the schedule; `next_occurrence_at` is what `refresh/3`
+  compares against; `slug`, `locale`, `state` and `org_id` are what
+  `Changes.BustContentCache` reads in its `after_action`. An attribute left out
+  of a `select:` arrives as `%Ash.NotLoaded{}`, which is truthy and
+  pattern-matches `%{state: state}` perfectly happily — so omitting `state`
+  would not raise, it would silently stop busting.
+  """
+  @spec refresh_fields(map()) :: [atom()]
+  def refresh_fields(descriptor) do
+    [:id, :org_id, :slug, :locale, :state, :custom_fields, :next_occurrence_at] ++
+      if(descriptor.source == :dynamic, do: [:type_definition_id], else: [])
+  end
+
+  @doc """
   Published, public, event-shaped documents of `descriptor`, soonest first.
 
   Returns an `Ash.Page.Offset`. Ordering and paging happen in Postgres over the

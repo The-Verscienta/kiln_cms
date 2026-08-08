@@ -144,45 +144,26 @@ defmodule KilnCMS.Events.Sweep do
         # order rather than whichever rows Postgres happened to return.
         sort: [next_occurrence_at: :asc],
         limit: batch,
-        select: select_fields(descriptor)
+        select: Index.refresh_fields(descriptor)
       ]
     )
   end
 
-  # Every attribute the write path reads, and nothing else — without a `select:`
-  # each row drags its whole `blocks` union tree and its embedding vector into
-  # memory, which is the spike this sweep exists to keep off the request path
-  # rather than move into a background job.
-  #
-  # The list is not arbitrary: `custom_fields` (+ `type_definition_id` on the
-  # dynamic tier) is the schedule; `slug`, `locale`, `state` and `org_id` are
-  # what `Changes.BustContentCache` reads in its `after_action`. An attribute
-  # left out of a `select:` arrives as `%Ash.NotLoaded{}`, which is truthy and
-  # pattern-matches `%{state: state}` perfectly happily — so omitting `state`
-  # would not raise, it would silently stop busting.
-  defp select_fields(descriptor) do
-    [:id, :org_id, :slug, :locale, :state, :custom_fields, :next_occurrence_at] ++
-      if(descriptor.source == :dynamic, do: [:type_definition_id], else: [])
-  end
-
+  # Every row here was selected BECAUSE its value has passed, so `refresh/3`'s
+  # skip can never fire: the recomputed value is at or after the anchor, or nil,
+  # and either way it differs from the stale one. `:unchanged` would therefore
+  # be a contradiction — and it is counted as "not advanced" so the runaway
+  # guard in `continue/6` catches it rather than looping.
   defp advance(record, org_id, anchor) do
-    next = Index.next_occurrence_at(record, org_id, anchor)
-
-    record
-    |> Ash.Changeset.for_update(:set_next_occurrence, %{next_occurrence_at: next},
-      authorize?: false,
-      tenant: org_id
-    )
-    |> Ash.update()
-    |> case do
-      {:ok, _record} ->
+    case Index.refresh(record, org_id, anchor) do
+      :written ->
         true
 
-      {:error, reason} ->
-        # One unwritable row must not abandon the batch: the rest of the site's
-        # listing is still wrong until they are advanced, and the next run picks
-        # this one up again.
-        Logger.warning("occurrence sweep: #{record.id} not advanced: #{inspect(reason)}")
+      # One unwritable row must not abandon the batch: the rest of the site's
+      # listing is still wrong until they are advanced, and the next run picks
+      # this one up again.
+      other ->
+        Logger.warning("occurrence sweep: #{record.id} not advanced: #{inspect(other)}")
         false
     end
   end
