@@ -300,12 +300,11 @@ defmodule KilnCMSWeb.VersionDiffComponents do
   defp truncate(text) when byte_size(text) <= @value_limit, do: text
   defp truncate(text), do: String.slice(text, 0, @value_limit) <> "…"
 
-  # One list, two derived things: the `field_label/1` clauses below and
-  # `labelled_fields/0`. Both have to cover every attribute `VersionDiff` can
-  # report, and a test asserts exactly that — the fall-through humanizes the
-  # attribute name and ships it untranslated with nothing going red, so a new
-  # content attribute has to fail loudly rather than quietly appear in English.
-  @field_labels [
+  # The labels, keyed rather than ordered (#712). Display order is
+  # `KilnCMS.CMS.VersionFields.field_order/0`'s business and is not restated
+  # here: the same nineteen names in the same order used to live in both places,
+  # independently maintained, with nothing to notice when they stopped agreeing.
+  @labels %{
     title: "Title",
     slug: "Slug",
     path_alias: "Path alias",
@@ -325,9 +324,41 @@ defmodule KilnCMSWeb.VersionDiffComponents do
     category_id: "Category",
     featured_image_id: "Featured image",
     custom_fields: "Custom fields"
-  ]
+  }
 
-  @doc "The attributes `field_label/1` has an explicit translated label for."
+  @field_order KilnCMS.CMS.VersionFields.field_order()
+
+  # A compile-time gate, in both directions. Reading `field_order/0` here makes
+  # this module recompile whenever that list moves, so neither drift survives a
+  # build:
+  #
+  #   * an ordered name with no label would fall through to
+  #     `Phoenix.Naming.humanize/1` — untranslated, with nothing going red
+  #   * a label for a name nobody orders is a dead clause that stays forever
+  #
+  # `content_editor_compare_test.exs` still gates the wider question this cannot
+  # see: an attribute a *resource* declares that reached neither list.
+  @unlabelled Enum.reject(@field_order, &Map.has_key?(@labels, &1))
+  @unordered @labels |> Map.keys() |> Enum.reject(&(&1 in @field_order))
+
+  if @unlabelled != [] or @unordered != [] do
+    raise """
+    KilnCMSWeb.VersionDiffComponents labels and \
+    KilnCMS.CMS.VersionFields.field_order/0 have drifted.
+
+      no label, would render untranslated: #{inspect(@unlabelled)}
+      labelled but never ordered (dead):   #{inspect(@unordered)}
+    """
+  end
+
+  @field_labels Enum.map(@field_order, &{&1, Map.fetch!(@labels, &1)})
+
+  @doc """
+  The attributes `field_label/1` has an explicit translated label for.
+
+  In `KilnCMS.CMS.VersionFields.field_order/0` order, and equal to it as a set —
+  see the compile-time gate above.
+  """
   @spec labelled_fields() :: [atom()]
   def labelled_fields, do: Keyword.keys(@field_labels)
 

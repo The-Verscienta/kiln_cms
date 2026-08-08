@@ -332,7 +332,7 @@ msgstr "Blocs"
 msgid "Cancel upload"
 msgstr "Annuler le téléversement"
 
-#: lib/kiln_cms_web/components/version_diff_components.ex:344
+#: lib/kiln_cms_web/components/version_diff_components.ex:375
 #: lib/kiln_cms_web/live/content_editor_live.ex:7880
 #, elixir-autogen, elixir-format
 msgid "Canonical URL"
@@ -352,7 +352,7 @@ msgstr "Légende"
 msgid "Categories"
 msgstr "Catégories"
 
-#: lib/kiln_cms_web/components/version_diff_components.ex:344
+#: lib/kiln_cms_web/components/version_diff_components.ex:375
 #: lib/kiln_cms_web/live/content_editor_live.ex:7611
 #: lib/kiln_cms_web/live/search_palette_live.ex:190
 #, elixir-autogen, elixir-format
@@ -491,13 +491,13 @@ msgstr "Modifier : %{kind}"
 msgid "Empty trash"
 msgstr "Vider la corbeille"
 
-#: lib/kiln_cms_web/components/version_diff_components.ex:344
+#: lib/kiln_cms_web/components/version_diff_components.ex:375
 #: lib/kiln_cms_web/live/content_editor_live.ex:7229
 #, elixir-autogen, elixir-format
 msgid "Excerpt"
 msgstr "Extrait"
 
-#: lib/kiln_cms_web/components/version_diff_components.ex:344
+#: lib/kiln_cms_web/components/version_diff_components.ex:375
 #: lib/kiln_cms_web/live/content_editor_live.ex:5433
 #: lib/kiln_cms_web/live/content_editor_live.ex:6066
 #, elixir-autogen, elixir-format
@@ -520,7 +520,7 @@ msgstr "Bibliothèque"
 msgid "Library (%{count})"
 msgstr "Bibliothèque (%{count})"
 
-#: lib/kiln_cms_web/components/version_diff_components.ex:344
+#: lib/kiln_cms_web/components/version_diff_components.ex:375
 #: lib/kiln_cms_web/live/content_editor_live.ex:7891
 #: lib/kiln_cms_web/live/menu_live.ex:470
 #: lib/kiln_cms_web/live/menu_live.ex:489
@@ -689,14 +689,14 @@ msgstr "Restauré."
 msgid "SEO & scheduling"
 msgstr "SEO et planification"
 
-#: lib/kiln_cms_web/components/version_diff_components.ex:344
+#: lib/kiln_cms_web/components/version_diff_components.ex:375
 #: lib/kiln_cms_web/live/content_editor_live.ex:4804
 #: lib/kiln_cms_web/live/content_editor_live.ex:7812
 #, elixir-autogen, elixir-format
 msgid "SEO description"
 msgstr "Description SEO"
 
-#: lib/kiln_cms_web/components/version_diff_components.ex:344
+#: lib/kiln_cms_web/components/version_diff_components.ex:375
 #: lib/kiln_cms_web/live/content_editor_live.ex:4803
 #: lib/kiln_cms_web/live/content_editor_live.ex:7797
 #, elixir-autogen, elixir-format
@@ -767,7 +767,7 @@ msgstr "Publication planifiée le"
 msgid "Size"
 msgstr "Taille"
 
-#: lib/kiln_cms_web/components/version_diff_components.ex:344
+#: lib/kiln_cms_web/components/version_diff_components.ex:375
 #: lib/kiln_cms_web/live/billing_live.ex:580
 #: lib/kiln_cms_web/live/content_editor_live.ex:7179
 #: lib/kiln_cms_web/live/form_builder_live.ex:768
@@ -823,7 +823,7 @@ msgstr "Cette action n'est pas autorisée pour le moment."
 msgid "That item no longer exists."
 msgstr "Cet élément n'existe plus."
 
-#: lib/kiln_cms_web/components/version_diff_components.ex:344
+#: lib/kiln_cms_web/components/version_diff_components.ex:375
 #: lib/kiln_cms_web/live/content_editor_live.ex:6635
 #: lib/kiln_cms_web/live/content_editor_live.ex:6698
 #: lib/kiln_cms_web/live/content_editor_live.ex:7169
@@ -1487,7 +1487,7 @@ msgstr "Tout"
 msgid "Archived"
 msgstr "Archivé"
 
-#: lib/kiln_cms_web/components/version_diff_components.ex:344
+#: lib/kiln_cms_web/components/version_diff_components.ex:375
 #: lib/kiln_cms_web/live/billing_live.ex:526
 #: lib/kiln_cms_web/live/billing_live.ex:585
 #: lib/kiln_cms_web/live/content_editor_live.ex:7620
@@ -1557,7 +1557,7 @@ msgstr "Mise à jour de votre profil impossible."
 msgid "Current password"
 msgstr "Mot de passe actuel"
 
-#: lib/kiln_cms_web/components/version_diff_components.ex:344
+#: lib/kiln_cms_web/components/version_diff_components.ex:375
 #: lib/kiln_cms_web/live/content_editor_live.ex:7679
 #: lib/kiln_cms_web/live/field_definition_live.ex:32
 #: lib/kiln_cms_web/live/field_definition_live.ex:288
@@ -4688,7 +4688,7 @@ msgstr "Règles"
 msgid "Run a reaction when content is published, updated, or unpublished — email, an internal broadcast, cache invalidation, or a re-index. HTTP/Slack notifications are the Webhooks page's job."
 msgstr "Déclenchez une réaction lorsqu'un contenu est publié, mis à jour ou dépublié — e-mail, diffusion interne, invalidation du cache ou réindexation. Les notifications HTTP/Slack relèvent de la page Webhooks."
 
-#: lib/kiln_cms_web/components/version_diff_components.ex:344
+#: lib/kiln_cms_web/components/version_diff_components.ex:375
 #: lib/kiln_cms_web/live/content_editor_live.ex:4805
 #: lib/kiln_cms_web/live/content_editor_live.ex:7826
 #, elixir-autogen, elixir-format
@@ -4892,7 +4892,7 @@ msgstr "Quelqu'un d'autre a enregistré des modifications sur ce contenu."
 msgid "Sourced claim with citation metadata"
 msgstr "Affirmation sourcée avec métadonnées de citation"
 
-#: lib/kiln_cms_web/components/version_diff_components.ex:344
+#: lib/kiln_cms_web/components/version_diff_components.ex:375
 #: lib/kiln_cms_web/live/release_live.ex:479
 #: lib/kiln_cms_web/live/slug_regen_live.ex:226
 #, elixir-autogen, elixir-format
@@ -7109,12 +7109,12 @@ msgstr "Vous avez besoin d'un accès administrateur pour faire cela."
 msgid "Added"
 msgstr "Ajouté"
 
-#: lib/kiln_cms_web/components/version_diff_components.ex:344
+#: lib/kiln_cms_web/components/version_diff_components.ex:375
 #, elixir-autogen, elixir-format
 msgid "Author"
 msgstr "Auteur"
 
-#: lib/kiln_cms_web/components/version_diff_components.ex:349
+#: lib/kiln_cms_web/components/version_diff_components.ex:380
 #, elixir-autogen, elixir-format
 msgid "Block"
 msgstr "Bloc"
@@ -7161,12 +7161,12 @@ msgstr "Déplacé %{from} → %{to}"
 msgid "No changes"
 msgstr "Aucune modification"
 
-#: lib/kiln_cms_web/components/version_diff_components.ex:344
+#: lib/kiln_cms_web/components/version_diff_components.ex:375
 #, elixir-autogen, elixir-format
 msgid "Path alias"
 msgstr "Alias de chemin"
 
-#: lib/kiln_cms_web/components/version_diff_components.ex:344
+#: lib/kiln_cms_web/components/version_diff_components.ex:375
 #, elixir-autogen, elixir-format
 msgid "Published at"
 msgstr "Publié le"
@@ -7177,12 +7177,12 @@ msgstr "Publié le"
 msgid "Removed"
 msgstr "Supprimé"
 
-#: lib/kiln_cms_web/components/version_diff_components.ex:344
+#: lib/kiln_cms_web/components/version_diff_components.ex:375
 #, elixir-autogen, elixir-format
 msgid "SEO image"
 msgstr "Image SEO"
 
-#: lib/kiln_cms_web/components/version_diff_components.ex:344
+#: lib/kiln_cms_web/components/version_diff_components.ex:375
 #, elixir-autogen, elixir-format
 msgid "Scheduled at"
 msgstr "Planifié pour"
@@ -7202,7 +7202,7 @@ msgstr "Ces deux versions sont identiques."
 msgid "Unchanged"
 msgstr "Inchangé"
 
-#: lib/kiln_cms_web/components/version_diff_components.ex:344
+#: lib/kiln_cms_web/components/version_diff_components.ex:375
 #, elixir-autogen, elixir-format
 msgid "Unpublish at"
 msgstr "Dépublier le"
