@@ -433,6 +433,34 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, assign(socket, :cursors, cursors)}
   end
 
+  # Another editor of this item persisted a write (#694).
+  #
+  # In a collaborative session only the elected persister autosaves — everyone
+  # else stands down, so their `assign_record/2` never runs again and their
+  # `@record` and `@versions` stay at whatever they were on mount. The version
+  # list silently stopped growing, and #467 turned that into a confidently wrong
+  # statement: pick the creation version against **Current draft** and the modal
+  # says "These two versions are identical" while the live document says
+  # otherwise. That is exactly the wrong-document diff the compare path refuses
+  # to show everywhere else.
+  #
+  # Only the read-only views derived from the SAVED record are refreshed —
+  # `@record`, the title, and the version list (which drags an open comparison
+  # along with it through `refresh_compare/2`). Not the form, the block children
+  # or the rich-text bodies: those are this session's own in-flight edits, and in
+  # a collab session the text among them lives in the shared Y.Doc rather than in
+  # the record that was just written. Rebuilding the form here would throw away
+  # whatever the person was typing, which is a worse bug than the one being
+  # fixed.
+  def handle_info({:record_saved, actor_id}, socket) do
+    if actor_id == socket.assigns.actor.id do
+      # Our own echo; `assign_record/2` already ran.
+      {:noreply, socket}
+    else
+      {:noreply, refresh_saved_record(socket)}
+    end
+  end
+
   # Debounced draft autosave fired by the timer scheduled in `validate`.
   def handle_info(:autosave, socket), do: {:noreply, perform_autosave(socket)}
 
@@ -2441,6 +2469,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         {:noreply,
          socket
          |> assign_record(reloaded)
+         |> broadcast_saved()
          |> assign(:save_state, :saved)
          |> put_flash(:info, gettext("Saved."))}
 
@@ -2582,6 +2611,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         {:noreply,
          socket
          |> assign_record(record)
+         |> broadcast_saved()
          |> reset_editors()
          |> assign(:save_state, :saved)
          # Restore can be fired from inside the compare modal; the diff it was
@@ -2850,6 +2880,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         socket
         |> cancel_autosave_timer()
         |> assign_record(record)
+        |> broadcast_saved()
         |> assign(:save_state, :saved)
         |> put_flash(:info, gettext("Updated to %{state}.", state: state_label(record.state)))
 
@@ -2964,7 +2995,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         reloaded =
           fetch!(socket.assigns.kind, record.id, socket.assigns.actor, socket.assigns.current_org)
 
-        socket |> assign_record(reloaded) |> assign(:save_state, :saved)
+        socket |> assign_record(reloaded) |> broadcast_saved() |> assign(:save_state, :saved)
 
       {:error, form} ->
         handle_autosave_error(socket, form)
@@ -3197,6 +3228,46 @@ defmodule KilnCMSWeb.ContentEditorLive do
          field: field
        }}
     )
+  end
+
+  # Tell the other editors of this item that the record on disk moved (#694).
+  # Reuses the Presence editing topic every session already subscribes to, so
+  # this costs no new subscription and no new fan-out.
+  #
+  # Carries the writer's id and nothing else. The payload is deliberately not the
+  # record: a broadcast body would have to be authorized per recipient, and each
+  # session re-reads through `fetch!/4` with its OWN actor and tenant anyway —
+  # so a session that may no longer read the record simply keeps what it has.
+  defp broadcast_saved(socket) do
+    Phoenix.PubSub.broadcast(
+      KilnCMS.PubSub,
+      Presence.topic(socket.assigns.kind, socket.assigns.record.id),
+      {:record_saved, socket.assigns.actor.id}
+    )
+
+    socket
+  end
+
+  # Re-read the persisted record and everything derived from it. See the
+  # `{:record_saved, _}` handler for what is deliberately left alone.
+  defp refresh_saved_record(socket) do
+    reloaded =
+      fetch!(
+        socket.assigns.kind,
+        socket.assigns.record.id,
+        socket.assigns.actor,
+        socket.assigns.current_org
+      )
+
+    socket
+    |> assign(:record, reloaded)
+    |> assign(:page_title, reloaded.title)
+    |> load_versions()
+  rescue
+    # The record went away, or this session may no longer read it. Keeping the
+    # last known state is the same thing every other read failure here does, and
+    # far better than crashing an editor over someone else's save.
+    _error -> socket
   end
 
   defp put_color(%{} = cursor), do: Map.put(cursor, :color, color_for(cursor.id))
