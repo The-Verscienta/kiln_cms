@@ -7116,14 +7116,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
               <.icon name="hero-pencil-square" class="mr-1 size-4" />{gettext("Edit on page")}
             </.link>
             <%!-- Duplicate into a new draft (#471). The copy is made from the
-                  saved row, so say so when the buffer is dirty. --%>
+                  SAVED row, which is the part worth warning about — and the
+                  warning has to cover two different reasons the saved row is not
+                  what is on screen. A dirty buffer is your own unsaved work; a
+                  conflict means the saved row is somebody ELSE's save, so the
+                  copy would be of content you have never seen (#928). --%>
             <button
               type="button"
               phx-click="duplicate"
-              data-confirm={
-                @save_state != :saved &&
-                  gettext("Unsaved changes won't be copied. Duplicate the last saved version?")
-              }
+              data-confirm={duplicate_confirm(@save_state, @conflict)}
               class="btn btn-sm btn-default"
             >
               <.icon name="hero-document-duplicate" class="mr-1 size-4" />{gettext("Duplicate")}
@@ -8703,4 +8704,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
     </button>
     """
   end
+
+  # Two reasons the saved row differs from what is on screen, and they need
+  # different words: unsaved work is yours to lose, a conflict is someone else's
+  # save you have not read.
+  defp duplicate_confirm(_save_state, true),
+    do:
+      gettext(
+        "Someone else saved this page. Duplicating copies their version, not what you see. Continue?"
+      )
+
+  defp duplicate_confirm(save_state, _conflict) when save_state != :saved,
+    do: gettext("Unsaved changes won't be copied. Duplicate the last saved version?")
+
+  defp duplicate_confirm(_save_state, _conflict), do: false
 end

@@ -9,6 +9,7 @@ defmodule KilnCMSWeb.EditorLive do
 
   import Ash.Expr, only: [expr: 1]
 
+  alias KilnCMS.Accounts.Scoping
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.I18n
@@ -110,7 +111,36 @@ defmodule KilnCMSWeb.EditorLive do
   # Scoped to the current site's org (epic #336), like every sibling page
   # (`trash_live`, `calendar_live`, …): the dynamic registry is per-org, so the
   # type filter and the "New …" buttons must offer *this* site's types.
-  defp editable_types(org_id), do: ContentTypes.all_for_org(org_id)
+  # Only the types this actor may actually author. `all_for_org/1` returned every
+  # type regardless of the actor, so the "New …" buttons, the type filter and the
+  # row actions all offered work the create policy would refuse — an editor
+  # scoped to `editable_types: ["post"]` saw a Duplicate button on every page row
+  # whose only possible outcome was an error flash (#926).
+  defp editable_types(org_id, actor) do
+    org_id
+    |> ContentTypes.all_for_org()
+    |> Enum.filter(&may_author?(actor, org_id, &1))
+  end
+
+  # The same question the create policy asks (`Checks.EditableContentType`), so
+  # the button and the action cannot disagree.
+  defp may_author?(actor, org_id, content_type) do
+    case Scoping.effective_tier(actor, org_id) do
+      :admin ->
+        true
+
+      :editor ->
+        Scoping.permitted?(actor, org_id, :editable_types, type_name_of(content_type))
+
+      _ ->
+        false
+    end
+  end
+
+  # `editable_types` groups every dynamic type under `entry` (see
+  # docs/granular-rbac.md) — deliberately, unlike field grants.
+  defp type_name_of(%{source: :dynamic}), do: "entry"
+  defp type_name_of(%{type: type}), do: to_string(type)
 
   # The types this page pulls rows from: every editable type, or just the one
   # the `type` filter names. Filtering here rather than after the merge keeps
@@ -375,7 +405,7 @@ defmodule KilnCMSWeb.EditorLive do
   @impl true
   def handle_params(params, _uri, socket) do
     status = if params["status"] in @statuses, do: params["status"], else: "all"
-    types = editable_types(socket.assigns.current_org.id)
+    types = editable_types(socket.assigns.current_org.id, socket.assigns.actor)
 
     # An unknown `type` (hand-edited URL, or a type deleted/archived since the
     # link was shared) falls back to "all" rather than listing nothing.
