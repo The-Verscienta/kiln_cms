@@ -16,9 +16,9 @@ defmodule KilnCMSWeb.CollabSocket do
   An *already-established* session used to keep whatever it was granted, since
   `join/3` runs once and nothing dropped the socket. `KilnCMS.Accounts.SessionEviction`
   now does, from the actions that demote, erase, or narrow a scope — the `id/1`
-  below is the topic it broadcasts on (#675). What remains is the change nobody
-  wired an eviction into; the backstop for that is periodic re-authorization
-  inside the channel, tracked as #775.
+  below is the topic it broadcasts on (#675). The change nobody wired an
+  eviction into is caught by `KilnCMSWeb.CollabChannel`'s own periodic re-check
+  (#775), which reloads the actor this module resolved and re-runs the join.
 
   The tenant comes from the connect URI's host, the same source `SetTenant`
   uses for HTTP (epic #336, #563). Sockets bypass the plug pipeline, so

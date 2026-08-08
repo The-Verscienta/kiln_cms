@@ -835,13 +835,72 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
     Evicting is not re-authorizing: the client reconnects and runs the full
     check again, which is the cheapest correct answer and costs nothing on the
     CRDT hot path.
-    *Residual:* it is prompt, not complete — it fires on the actions wired to
-    it, so an authorization change nobody remembered to wire in is still
-    invisible to a live socket. The backstop is periodic re-authorization inside
-    the channel, tracked as #775. The broadcast itself is cluster-wide —
-    `Phoenix.PubSub`'s default adapter carries it to every node — but nothing
-    verifies that, so treat multi-node eviction as untested rather than
-    unsupported.
+
+    **Periodic re-authorization is the backstop — *closed by #775.*** Eviction
+    is prompt but not complete: it fires on the actions wired to it, so an
+    authorization change nobody remembered to wire in — a new action that
+    narrows a grant, a role-resource edit, a direct `Ash.update` from a
+    migration or a mix task — was invisible to a live socket, and so was a
+    change to the *document* rather than to the user. `CollabChannel` now
+    re-runs `authorize/3` — the same function `join/3` runs, not a second
+    spelling of it — against a **reloaded actor**, on a timer and after every
+    200 inbound updates, and closes the channel when it no longer passes.
+    `BridgeSocket` does the same for its read on the same timer (no update
+    count: it accepts no writes). The reload is the mechanism: re-running the
+    policies against the actor struct the socket connected with would answer
+    from the same stale role, scopes and audiences forever.
+
+    **The exposure window an operator can rely on is 30 seconds** — the
+    interval in `KilnCMSWeb.SocketReauth` — plus the in-flight message. Both
+    ends of the bound are load-bearing: the timer covers a room that is
+    connected but idle, and the 200-update floor covers one that is busy, since
+    at typing speed a timer alone bounds the *time* a revoked editor keeps
+    writing but not the *number* of writes. The floor only binds above ~6.7
+    updates/second; below that the timer always fires first.
+
+    The interval comes from a measurement, not a round number —
+    `MIX_ENV=dev mix run priv/bench/socket_reauth.exs`, on a local Postgres:
+
+    | | | |
+    |---|---|---|
+    | actor reload | 1 query | 0.31–0.38 ms |
+    | document read + `Ash.can?(:autosave)` | 2 queries | 2.7–3.0 ms |
+    | **full check** | **3 queries** | **3.0–3.4 ms** |
+    | `Crdt.apply_update/2` | — | 0.002 ms |
+
+    Note what that says, because it is the opposite of the assumption the issue
+    started from: the check is **not** cheap relative to the CRDT work. It is
+    ~1,900x a single update apply, because Yjs runs in a NIF and the check is
+    three database round trips. One room's CPU was never the constraint though.
+    The binding cost is queries per second across the deployment, and the number
+    to reason about is the open-document ceiling (`Collab.Crdt.max_documents/0`,
+    500) at ~5 peers each: 2,500 channels checking every 30s is **+250
+    queries/s, or ~0.27 connection-seconds per second — under 3% of the default
+    `POOL_SIZE` of 10** — at a ceiling no real deployment sits at. Ten seconds
+    would be roughly three times that for a window an operator gains little
+    from; sixty would halve it for a window they reason about as "a minute" and
+    would have to round up. 30s is the value; it is overridable with
+    `config :kiln_cms, :socket_reauth_interval_ms` (and
+    `:socket_reauth_update_floor`), both validated so a bad value falls back to
+    the default rather than silently disabling the backstop.
+
+    This also makes the mechanism **cluster-safe by construction**, which
+    eviction is not: each channel re-checks itself against the database from
+    whichever node holds it, so it needs no message to cross a node boundary.
+    Eviction's own broadcast is cluster-wide in principle — `Phoenix.PubSub`'s
+    default adapter carries it to every node — but nothing verifies that, so
+    treat prompt multi-node eviction as untested rather than unsupported
+    (tracked in #1060; #743 records the same per-node assumption for the
+    pending-sign-in cache). The 30-second backstop applies either way.
+
+    *Residual:* the re-check re-runs the join's rule, so what it catches is
+    exactly what a *fresh join* would refuse — no more. A document publish under
+    an open room is the case that makes this concrete: `Ash.can?` on `:autosave`
+    does not consult the row-level `state == :draft` filter that action carries,
+    so publishing does not close the room, and collaborative prose no client
+    autosave captured is still lost at checkpoint. That is a data-loss bug
+    rather than an authorization one, and closing it belongs with the publish
+    path rather than with the authorization check — tracked in #1061.
 14. **Webhook deliveries have no anti-replay.** The signature
     (`x-kilncms-signature`, HMAC-SHA256 over the raw body) proves a delivery's
     origin and integrity, not its freshness — there is no timestamp or nonce

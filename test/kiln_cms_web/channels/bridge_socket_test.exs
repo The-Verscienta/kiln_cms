@@ -49,10 +49,14 @@ defmodule KilnCMSWeb.BridgeSocketTest do
                params: %{"type" => "post", "id" => post.id, "api_key" => key(admin)}
              })
 
-    # `actor_id` rides along so `init/1` can subscribe to that user's eviction
+    # The actor rides along so `init/1` can subscribe to that user's eviction
     # topic — this socket is a raw transport with no `id/1` callback, so it has
-    # to listen for its own disconnect (#675).
-    assert state == %{type: "post", id: post.id, actor_id: admin.id}
+    # to listen for its own disconnect (#675) — and the org so the periodic
+    # re-check re-reads the document under the tenant it was authorized against
+    # (#775).
+    assert %{type: "post", id: id, actor: %{id: actor_id}, org: %{}} = state
+    assert id == post.id
+    assert actor_id == admin.id
 
     # init subscribes THIS process to the editor's preview topic.
     assert {:ok, ^state} = BridgeSocket.init(state)
@@ -154,6 +158,82 @@ defmodule KilnCMSWeb.BridgeSocketTest do
              BridgeSocket.connect(%{
                params: %{"type" => "post", "id" => post.id, "api_key" => key(admin)}
              })
+  end
+
+  describe "periodic re-authorization (#775)" do
+    setup do
+      previous = Application.get_env(:kiln_cms, :socket_reauth_interval_ms)
+      Application.put_env(:kiln_cms, :socket_reauth_interval_ms, 50)
+
+      on_exit(fn ->
+        case previous do
+          nil -> Application.delete_env(:kiln_cms, :socket_reauth_interval_ms)
+          value -> Application.put_env(:kiln_cms, :socket_reauth_interval_ms, value)
+        end
+      end)
+
+      :ok
+    end
+
+    test "init schedules the check, and a still-authorized stream survives it" do
+      # A raw transport handles its own messages, so the timer lands here and
+      # `handle_info/2` is called directly — the same path the WebSock adapter
+      # takes. The negative control first: nothing about this connection has
+      # changed, so it keeps streaming.
+      admin = user(:admin)
+      post = draft(admin)
+
+      assert {:ok, state} =
+               BridgeSocket.connect(%{
+                 params: %{"type" => "post", "id" => post.id, "api_key" => key(admin)}
+               })
+
+      assert {:ok, state} = BridgeSocket.init(state)
+      assert_receive :reauthorize, 1_000
+      assert {:ok, state} = BridgeSocket.handle_info(:reauthorize, state)
+
+      # And it rescheduled, rather than checking once and going quiet.
+      assert_receive :reauthorize, 1_000
+      assert {:ok, _state} = BridgeSocket.handle_info(:reauthorize, state)
+    end
+
+    test "a stream stops when its actor's grant is narrowed, with nothing evicting" do
+      # `Ash.Seed.update!` writes the row directly, so no action runs and
+      # `SessionEviction` never fires. The demoted account can no longer read a
+      # draft, and the stream that was pushing it one stops.
+      admin = user(:admin)
+      post = draft(admin)
+
+      assert {:ok, state} =
+               BridgeSocket.connect(%{
+                 params: %{"type" => "post", "id" => post.id, "api_key" => key(admin)}
+               })
+
+      assert {:ok, state} = BridgeSocket.init(state)
+
+      Ash.Seed.update!(admin, %{role: :viewer})
+
+      assert_receive :reauthorize, 1_000
+      assert {:stop, :normal, _state} = BridgeSocket.handle_info(:reauthorize, state)
+    end
+
+    test "an ANONYMOUS stream stops when the document stops being public" do
+      # The case eviction can never reach: an anonymous watcher holds no grant to
+      # revoke, so a document unpublished under an open stream kept being pushed
+      # to them until the tab closed. Only the document-side re-read catches it.
+      admin = user(:admin)
+      post = draft(admin) |> then(&KilnCMS.CMS.publish_post!(&1, %{}, actor: admin))
+
+      assert {:ok, state} = BridgeSocket.connect(%{params: %{"type" => "post", "id" => post.id}})
+      assert state.actor == nil
+
+      assert {:ok, state} = BridgeSocket.init(state)
+
+      Ash.Seed.update!(post, %{state: :draft})
+
+      assert_receive :reauthorize, 1_000
+      assert {:stop, :normal, _state} = BridgeSocket.handle_info(:reauthorize, state)
+    end
   end
 
   describe "tenant scoping (#336)" do

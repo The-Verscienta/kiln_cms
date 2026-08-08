@@ -2,11 +2,11 @@ defmodule KilnCMS.Accounts.SessionEviction do
   @moduledoc """
   Drops a user's live socket connections when their authorization changes (#675).
 
-  Every socket here authorizes **once**, at connect and — for channels — at
-  join, and never again. `CollabChannel.handle_in("update", …)` re-checks
-  nothing; it only needs the `doc_server` its join resolved. `BridgeSocket`
-  authorizes the read once and then streams. `GraphqlSocket` puts the actor and
-  tenant into the Absinthe context at connect.
+  Every socket here authorized **once**, at connect and — for channels — at
+  join, and never again. `BridgeSocket` authorized the read once and then
+  streamed; `GraphqlSocket` puts the actor and tenant into the Absinthe context
+  at connect and still does. (`CollabChannel` and `BridgeSocket` have since
+  gained a periodic re-check of their own — see below.)
 
   So an account that was deleted, demoted to `:viewer`, removed from an
   organization, or had its `editable_types` / `readable_types` / audiences
@@ -29,9 +29,16 @@ defmodule KilnCMS.Accounts.SessionEviction do
   changed" and needs no per-message check on a CRDT hot path.
 
   It is a **prompt** mechanism, not a complete one: it fires on the events wired
-  to it, so an authorization change nobody remembered to wire in is still
-  invisible to a live socket. The backstop for that is periodic re-authorization
-  inside the channel, which is tracked separately (#775).
+  to it, so an authorization change nobody remembered to wire in — and a change
+  to the *document* rather than to the user — reaches a live socket only when
+  something else looks. `KilnCMSWeb.SocketReauth` is that something else (#775):
+  `CollabChannel` and `BridgeSocket` re-run their own check on a 30-second
+  timer, so the two mechanisms answer different questions and neither replaces
+  the other. This one bounds the window for the changes an operator makes
+  deliberately, to seconds; that one bounds every other change, to the interval.
+
+  Wiring a new grant-narrowing action to this module therefore remains the right
+  thing to do — the backstop is a floor under forgetting, not a licence to.
 
   ## Four sockets, three mechanisms
 
