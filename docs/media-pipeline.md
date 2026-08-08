@@ -79,6 +79,19 @@ cost the site its WebP variants, not its uploads. A format whose encoder is
 missing from the libvips build fails that one write and leaves the rest,
 including the source-format fallback.
 
+A failed **full-size** write is additionally *recorded*, on the item's
+`variant_failures` map (#1000) — full-size only, for now: a failed
+`thumb.avif` is still logged and nothing more, so an item can still be
+re-enqueued on every run when a responsive label's encoder is missing (#1036). Without that record, "no `full.webp`" is
+ambiguous: it means either "the write has not happened yet" — which a
+regeneration should repair — or "this source can never be encoded to WebP",
+which it should leave alone. A 17000px panorama is past libvips' 16383px WebP
+ceiling and will never gain one, and re-decoding it on every run is the standing
+tax `Regeneration` exists to avoid. The map is rewritten on every run rather
+than merged, so a libvips upgrade that gains an encoder, or a re-crop that
+brings the source under the ceiling, clears it. It is not part of the headless
+surface.
+
 ### Delivery renders `<picture>`
 
 `KilnCMS.Media.Presentation` exposes the two halves separately, and the split is

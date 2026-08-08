@@ -76,7 +76,7 @@ defmodule KilnCMS.Media.VariantWorker do
   defp generate(item, path, ext, tenant) do
     focal = %{x: item.focal_x || 0.5, y: item.focal_y || 0.5}
 
-    with {:ok, %{width: width, height: height, variants: files}} <-
+    with {:ok, %{width: width, height: height, variants: files} = result} <-
            ImageProcessor.process(path, ext, focal),
          variants = store_variants(files),
          :ok <- refuse_empty(variants, item) do
@@ -85,7 +85,17 @@ defmodule KilnCMS.Media.VariantWorker do
       {:ok, _item} =
         CMS.update_media_item(
           item,
-          %{width: width, height: height, variants: variants},
+          %{
+            width: width,
+            height: height,
+            variants: variants,
+            # Rewritten every run, not merged (#1000): a libvips upgrade that
+            # gains an encoder, or a re-crop that brings the source under a
+            # dimension ceiling, has to be able to CLEAR a failure. A merged map
+            # would remember "impossible" for ever and permanently opt the item
+            # out of the repair it just became eligible for.
+            variant_failures: failure_map(result)
+          },
           authorize?: false,
           tenant: tenant
         )
@@ -166,6 +176,17 @@ defmodule KilnCMS.Media.VariantWorker do
   after
     Enum.each(files, &rm(&1.path))
   end
+
+  # `%{"webp" => reason}` for the full-size alternates this source cannot be
+  # encoded to (#1000). The reason is not read by anything —
+  # `Regeneration.current?/1` only asks whether a key is present — but an
+  # operator looking at why an image has no WebP wants more than a boolean.
+  #
+  # One clause: `ImageProcessor.process/3` always reports `failed_full`, so a
+  # defensive fallback here would be unreachable code that dialyzer (rightly)
+  # rejects.
+  defp failure_map(%{failed_full: failed}) when is_list(failed),
+    do: Map.new(failed, &{to_string(&1), "encoder refused this source"})
 
   # sobelow_skip ["Traversal.FileModule"]
   defp rm(path), do: File.rm(path)
