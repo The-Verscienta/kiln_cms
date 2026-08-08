@@ -2310,7 +2310,7 @@ defmodule KilnCMS.Governance.ChainTest do
 
       KilnCMS.Repo.update_all(
         from(a in "history_anchors", where: a.id == type(^anchor.id, :binary_id)),
-        set: [signature: v4_signature, attribution_hash: nil]
+        set: [signature: v4_signature, attribution_hash: nil, payload_version: nil]
       )
 
       assert :verified = Chain.verify(Page, "page", page.id, page.org_id)

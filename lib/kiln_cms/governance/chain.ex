@@ -244,15 +244,22 @@ defmodule KilnCMS.Governance.Chain do
   only the first `count` (the prefix an earlier anchor covered). Returns
   `%{chain_hash, attribution_hash, version_count, last_version_id, last_version_at}`.
   """
-  @spec compute(module(), Ash.UUID.t(), Ash.UUID.t(), :all | non_neg_integer()) :: %{
-          chain_hash: String.t(),
-          attribution_hash: String.t(),
-          version_count: non_neg_integer(),
-          last_version_id: Ash.UUID.t() | nil,
-          last_version_at: DateTime.t() | nil
-        }
-  def compute(resource, source_id, org_id, count \\ :all) do
-    versions = versions(resource, source_id, count, org_id)
+  @spec compute(module(), Ash.UUID.t(), Ash.UUID.t(), :all | non_neg_integer(), [struct()] | nil) ::
+          %{
+            chain_hash: String.t(),
+            attribution_hash: String.t(),
+            version_count: non_neg_integer(),
+            last_version_id: Ash.UUID.t() | nil,
+            last_version_at: DateTime.t() | nil
+          }
+  def compute(resource, source_id, org_id, count \\ :all, anchors \\ nil) do
+    # THE recompute that decides the verdict, so it is the one that has to read
+    # the RECORDED order (#598). Taking the prefix here rather than with a SQL
+    # `LIMIT` is the point: the limit would apply to the timestamp sort, which
+    # is the ordering being replaced.
+    ordered = versions_asc(resource, source_id, org_id, anchors)
+    versions = if count == :all, do: ordered, else: Enum.take(ordered, count)
+
     with_attribution(fold(versions), versions)
   end
 
@@ -572,9 +579,12 @@ defmodule KilnCMS.Governance.Chain do
 
       sequence = next_sequence(previous)
 
+      # The order this anchor folded, recorded rather than re-derived (#598).
+      folded_ids = Enum.map(fresh, & &1.id)
+
       {signature, key_id} =
         sign(
-          anchor_payload_v5(
+          anchor_payload_v6(
             type,
             record.id,
             computed,
@@ -582,7 +592,8 @@ defmodule KilnCMS.Governance.Chain do
             prev_digest,
             boundary,
             sequence,
-            attribution
+            attribution,
+            folded_ids
           )
         )
 
@@ -601,7 +612,9 @@ defmodule KilnCMS.Governance.Chain do
           actor_id: opts[:actor_id],
           prev_anchor_id: previous && previous.id,
           prev_anchor_digest: prev_digest,
-          sequence: sequence
+          sequence: sequence,
+          folded_version_ids: folded_ids,
+          payload_version: 6
         },
         authorize?: false,
         tenant: record.org_id
@@ -725,14 +738,14 @@ defmodule KilnCMS.Governance.Chain do
            attested_baseline(
              anchor,
              newest_attested,
-             &compute(resource, source_id, org_id, &1),
+             &compute(resource, source_id, org_id, &1, all),
              &covered_by_query(scope, &1),
              type,
              source_id
            ) do
       verdict(
         anchor,
-        compute(resource, source_id, org_id, anchor.version_count),
+        compute(resource, source_id, org_id, anchor.version_count, all),
         type,
         source_id,
         covered_by_query(scope, anchor)
@@ -1381,6 +1394,19 @@ defmodule KilnCMS.Governance.Chain do
     prev = anchor.prev_anchor_id && %{id: anchor.prev_anchor_id}
     boundary = %{id: anchor.last_version_id, at: anchor.last_version_at}
 
+    v6 =
+      anchor_payload_v6(
+        type,
+        source_id,
+        computed,
+        prev,
+        anchor.prev_anchor_digest,
+        boundary,
+        anchor.sequence,
+        anchor.attribution_hash,
+        anchor.folded_version_ids
+      )
+
     v5 =
       anchor_payload_v5(
         type,
@@ -1421,6 +1447,14 @@ defmodule KilnCMS.Governance.Chain do
     v1 = legacy_anchor_payload(type, source_id, computed)
 
     cond do
+      # #598: the shape is recorded, not inferred. `folded_version_ids` cannot
+      # discriminate on its own — a v6 anchor that folded nothing has an empty
+      # list, and the backfill gives pre-#598 anchors a populated one — and
+      # offering a v6 anchor the v5 candidate would let its recorded fold order
+      # be cleared and still verify.
+      anchor.payload_version == 6 ->
+        [v6]
+
       # A recorded `attribution_hash` is the mark of a v5 anchor (#713) — `mint`
       # is now the only writer and always signs v5 with one. The v5 payload
       # differs byte for byte from every older shape, so this anchor can satisfy
@@ -1620,17 +1654,59 @@ defmodule KilnCMS.Governance.Chain do
   end
 
   @doc """
-  A document's versions in the order the chain folds them — ascending
-  `(version_inserted_at, id)`.
+  A document's versions in the order the chain folds them.
 
-  Public because `KilnCMS.Governance.trail/3` reads the same list once and hands
-  it to `verify_loaded/4`: the fold order has to be defined in one place, or the
-  trail and `verify/4` can reach different verdicts for the same document.
+  **The recorded order when the chain records one** (#598): every anchor since
+  this shipped carries the ids it folded, inside its signed payload, so the
+  order is a fact read back rather than a timestamp sort re-derived at
+  verification time. A version row that became visible late is in no anchor's
+  list, so it lands at the tail instead of displacing rows an earlier anchor
+  already committed to — which is the whole false-`{:tampered, …}` bug.
+
+  **The old timestamp order otherwise.** A chain with any pre-#598 anchor falls
+  back wholesale, deliberately: mixing the two would put an old anchor's
+  versions (which are in no list) after a newer anchor's recorded ids, i.e.
+  reorder them, and break the very verification this exists to protect. So an
+  existing document keeps exactly today's behaviour — including any verdict it
+  already has, which no amount of re-ordering can honestly repair — and
+  documents anchored from here on get the fix.
   """
-  @spec versions_asc(module(), Ash.UUID.t(), Ash.UUID.t() | nil) :: [struct()]
-  def versions_asc(resource, source_id, org_id) do
-    versions(resource, source_id, :all, org_id)
+  @spec versions_asc(module(), Ash.UUID.t(), Ash.UUID.t() | nil, [struct()] | nil) :: [struct()]
+  def versions_asc(resource, source_id, org_id, anchors \\ nil) do
+    loaded = versions(resource, source_id, :all, org_id)
+    anchors = anchors || anchors(type_of(resource), source_id, org_id)
+
+    case recorded_order(anchors) do
+      [] -> loaded
+      ids -> reorder(loaded, ids)
+    end
   end
+
+  # The ids every anchor folded, oldest first. `[]` unless EVERY anchor records
+  # one — see `versions_asc/4` for why a partial chain must not be mixed.
+  defp recorded_order([]), do: []
+
+  defp recorded_order(anchors) do
+    if Enum.all?(anchors, &(&1.payload_version == 6)) do
+      anchors |> Enum.reverse() |> Enum.flat_map(& &1.folded_version_ids)
+    else
+      []
+    end
+  end
+
+  # The recorded ids in their recorded order, then everything else in timestamp
+  # order. An id naming a version that no longer exists is skipped rather than
+  # erroring: a deleted row is exactly what the hash comparison exists to catch,
+  # and crashing here would replace a tamper verdict with a stacktrace.
+  defp reorder(loaded, ids) do
+    by_id = Map.new(loaded, &{&1.id, &1})
+    listed = Enum.flat_map(ids, fn id -> List.wrap(Map.get(by_id, id)) end)
+    seen = MapSet.new(ids)
+
+    listed ++ Enum.reject(loaded, &MapSet.member?(seen, &1.id))
+  end
+
+  defp type_of(resource), do: to_string(KilnCMS.Firing.Engine.document_type(struct(resource)))
 
   defp version_scope(resource, source_id) do
     Module.concat(resource, Version)
@@ -1727,6 +1803,38 @@ defmodule KilnCMS.Governance.Chain do
   # shapes stay so anchors minted by earlier releases keep verifying. Because the
   # encoded payloads differ byte for byte, a v5 anchor's signature can only ever
   # satisfy the v5 candidate — see `payload_candidates/3`.
+  # v6 (#598/#670) adds the FOLD ORDER. Signing it is the whole reason the order
+  # lives on the anchor rather than in a side table: an attacker who can rewrite
+  # `history_anchors` can rewrite a side table too, and an unsigned record of
+  # "what order we folded in" is worth nothing against the threat this feature
+  # exists for.
+  defp anchor_payload_v6(
+         type,
+         source_id,
+         computed,
+         prev,
+         prev_digest,
+         boundary,
+         sequence,
+         attr,
+         folded_ids
+       ) do
+    Canonical.encode(%{
+      "v" => 6,
+      "type" => type,
+      "source_id" => source_id,
+      "chain_hash" => computed.chain_hash,
+      "attribution_hash" => attr,
+      "version_count" => computed.version_count,
+      "prev_anchor_id" => prev && prev.id,
+      "prev_anchor_digest" => prev_digest,
+      "last_version_id" => boundary.id,
+      "last_version_at" => boundary.at && DateTime.to_iso8601(boundary.at),
+      "sequence" => sequence,
+      "folded_version_ids" => folded_ids
+    })
+  end
+
   defp anchor_payload_v5(type, source_id, computed, prev, prev_digest, boundary, sequence, attr) do
     Canonical.encode(%{
       "v" => 5,

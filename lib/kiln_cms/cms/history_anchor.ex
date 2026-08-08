@@ -88,7 +88,9 @@ defmodule KilnCMS.CMS.HistoryAnchor do
         :actor_id,
         :prev_anchor_id,
         :prev_anchor_digest,
-        :sequence
+        :sequence,
+        :folded_version_ids,
+        :payload_version
       ]
     end
 
@@ -227,6 +229,49 @@ defmodule KilnCMS.CMS.HistoryAnchor do
     # indistinguishable from a younger one. That needs a witness outside the
     # database; see `KilnCMS.Governance.Chain` and #666.
     attribute :sequence, :integer, allow_nil?: false, public?: true
+
+    # The version rows this anchor folded, IN THE ORDER IT FOLDED THEM
+    # (#598/#670). The fold order used to be implicit — re-derived at
+    # verification time by sorting on `(version_inserted_at, id)` — and that
+    # timestamp is stamped by whichever node performed the write, so it is not
+    # monotonic with commit order. A row that became visible late sorted INTO a
+    # range this anchor had already committed to, the recomputed prefix no
+    # longer matched, and the document read `{:tampered, …}` permanently with
+    # nothing having been tampered with.
+    #
+    # Recording it makes the order a fact rather than a re-derivation. A row
+    # that arrives late is in no anchor's list, so it is appended by the next
+    # anchor instead of displacing anything, and every earlier anchor keeps
+    # reproducing.
+    #
+    # It is inside the SIGNED payload (`anchor_payload_v6/9`), which is the
+    # reason it lives here rather than in a side table: rewriting the recorded
+    # order breaks the signature, so the order is exactly as tamper-evident as
+    # the hash it explains.
+    #
+    # Empty on every anchor written before this shipped, and on those the fold
+    # falls back to the old timestamp order — see `Chain.fold_order/3`.
+    attribute :folded_version_ids, {:array, :uuid} do
+      allow_nil? false
+      default []
+      public? true
+    end
+
+    # Which signed payload shape this anchor was minted with. `nil` for every
+    # anchor written before #598; `6` for those signed over `folded_version_ids`.
+    #
+    # It exists because the id list alone cannot discriminate. A v6 anchor that
+    # folded nothing has an empty list, and so does a pre-#598 anchor — and the
+    # BACKFILL gives old anchors a populated list too, so neither emptiness nor
+    # presence identifies the shape. Offering the wrong candidate is not a
+    # cosmetic error: handing a v6 anchor the v5 payload would let someone clear
+    # its recorded order and still verify, which is precisely the laundering the
+    # order was recorded to prevent.
+    #
+    # Clearing this column does not help an attacker: the shape is also inside
+    # the signed bytes (`"v" => 6`), so dropping to the v5 candidate produces a
+    # payload that never matches the signature. It fails closed.
+    attribute :payload_version, :integer, public?: true
 
     attribute :actor_id, :uuid, public?: true
 
