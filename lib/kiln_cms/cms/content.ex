@@ -341,7 +341,27 @@ defmodule KilnCMS.CMS.Content do
         # index. `blocks` is not a public attribute on any read action, so no
         # body rides along either way.
         read :published do
-          filter expr(^ref(:state) == :published)
+          # Published, any audience, but never passphrase-locked (#1032).
+          #
+          # The audience axis is deliberately open here: `blog_index/2` reads
+          # this with `authorize?: false` and renders a `:member` post with a
+          # "Members" badge, because gated metadata is a *marketing* surface —
+          # you want a reader to see that members-only content exists.
+          #
+          # A passphrase is not that. It is a shared secret handed to specific
+          # people, and `docs/api.md` says a locked document is "absent from
+          # every discovery surface … the only way to reach it is to know its
+          # URL *and* its passphrase" — which listing its title, excerpt and
+          # link in the index plainly defeats.
+          #
+          # It is a FILTER rather than a policy clause because the policy that
+          # sweeps locked content out of the sitemap, feeds, `llms.txt`, search
+          # and ActivityPub only fires for readers who fail
+          # `ReadableContentType`, i.e. anonymous ones — and this action's own
+          # caller passes `authorize?: false`, so no policy runs at all. #496
+          # already needed four per-path guards for exactly this reason; the
+          # index was a fifth path nobody had counted.
+          filter expr(^ref(:state) == :published and is_nil(^ref(:access_password_hash)))
 
           # Filter/sort by admin-defined custom fields (typed JSONB access —
           # see the preparation). Declared before the default-sort build so a

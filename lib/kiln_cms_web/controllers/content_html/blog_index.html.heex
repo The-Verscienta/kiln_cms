@@ -11,10 +11,15 @@
         <h2 class="text-xl font-semibold group-hover:underline">
           {post.title}
           <%!--
-            Gated posts already appeared on this index (the `:published` read
-            filters on state alone), but their links used to 404. With the paywall
-            they now lead somewhere useful, so label them rather than hiding them
-            — the index is the funnel.
+            Gated posts already appeared on this index, but their links used to
+            404. With the paywall they now lead somewhere useful, so label them
+            rather than hiding them — the index is the funnel.
+
+            The AUDIENCE axis is the only one this index is open on. The
+            `:published` read also filters out passphrase-locked documents
+            (#1032): a lock is a shared secret, not a funnel, and listing the
+            title and URL is the one thing it must not do. Don't read the badge
+            here as "this index shows everything gated".
           --%>
           <.badge :if={post.audience != :public} variant="primary">
             {gettext("Members")}

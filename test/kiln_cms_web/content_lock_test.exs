@@ -342,6 +342,47 @@ defmodule KilnCMSWeb.ContentLockTest do
       refute body =~ locked.slug
     end
 
+    # #1032. The blog index was the one discovery surface the sweep missed,
+    # because `ContentController.blog_index/2` reads `:published` with
+    # `authorize?: false` — deliberately, so an audience-gated post still shows
+    # with its "Members" badge — and no policy runs under that. The lock is not
+    # part of that exception: `docs/api.md` promises the only way to reach a
+    # locked document is to know its URL, and the index disclosed exactly that.
+    test "a locked post is not in the blog index, but a gated one still is", ctx do
+      locked =
+        CMS.create_post!(
+          %{
+            title: "Locked briefing",
+            slug: slug(),
+            access_password: @passphrase,
+            block_tree: [secret_block()]
+          },
+          actor: ctx.actor
+        )
+
+      CMS.publish_post!(locked, actor: ctx.actor)
+
+      gated =
+        CMS.create_post!(
+          %{title: "Members briefing", slug: slug(), audience: :member},
+          actor: ctx.actor
+        )
+
+      CMS.publish_post!(gated, actor: ctx.actor)
+
+      open = CMS.create_post!(%{title: "Open briefing", slug: slug()}, actor: ctx.actor)
+      CMS.publish_post!(open, actor: ctx.actor)
+      KilnCMS.DataCase.drain_oban()
+
+      html = ctx.conn |> get("/blog") |> html_response(200)
+
+      assert html =~ open.slug
+      # The paywall teaser stays — that axis is a marketing surface by design.
+      assert html =~ gated.slug
+      refute html =~ locked.slug
+      refute html =~ "Locked briefing"
+    end
+
     test "a locked post is not in the feed", ctx do
       locked =
         CMS.create_post!(

@@ -1286,7 +1286,7 @@ msgstr "Aucun média pour le moment"
 msgid "Notification preferences saved."
 msgstr "Préférences de notification enregistrées."
 
-#: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:54
+#: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:59
 #, elixir-autogen, elixir-format
 msgid "Older posts →"
 msgstr "Articles plus anciens →"
@@ -1434,7 +1434,7 @@ msgstr "Votre adresse e-mail a bien été confirmée"
 msgid "Your password has successfully been reset"
 msgstr "Votre mot de passe a bien été réinitialisé"
 
-#: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:42
+#: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:47
 #, elixir-autogen, elixir-format
 msgid "← Newer posts"
 msgstr "← Articles plus récents"
@@ -1770,7 +1770,7 @@ msgstr "Options"
 msgid "Options (one per line — select only)"
 msgstr "Options (une par ligne — champ de sélection uniquement)"
 
-#: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:46
+#: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:51
 #, elixir-autogen, elixir-format
 msgid "Page %{page}"
 msgstr "Page %{page}"
@@ -1787,7 +1787,7 @@ msgstr "Page introuvable"
 msgid "Pages"
 msgstr "Pages"
 
-#: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:34
+#: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:39
 #, elixir-autogen, elixir-format
 msgid "Pagination"
 msgstr "Pagination"
@@ -4036,7 +4036,7 @@ msgstr "Membre ajouté à ce site."
 msgid "Member removed."
 msgstr "Membre retiré."
 
-#: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:20
+#: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:25
 #: lib/kiln_cms_web/live/team_live.ex:370
 #, elixir-autogen, elixir-format
 msgid "Members"

@@ -63,19 +63,25 @@ defmodule KilnCMS.CMS.AnonymousRuleSurfacesTest do
     refute ctx.locked.id in ids, "#{surface} returned a passphrase-locked document"
   end
 
-  test "read :published is NOT one of these surfaces, deliberately", ctx do
-    # The exception, asserted so nobody "fixes" it into line. An index is a
-    # discovery surface, and gated metadata is public here by design:
-    # `ContentController.blog_index/2` reads this action with
-    # `authorize?: false` and renders a gated post with a "Members" badge
-    # rather than hiding it (`PaywallDeliveryTest`). Narrowing it to
-    # `audience == :public` takes the paywall teaser off the blog index.
+  # `read :published` is a PARTIAL exception, and the two axes differ (#1032).
+  test "read :published keeps gated posts but not locked ones", ctx do
+    # The AUDIENCE exception, asserted so nobody "fixes" it into line. Gated
+    # metadata is public here by design: `ContentController.blog_index/2` reads
+    # this action with `authorize?: false` and renders a gated post with a
+    # "Members" badge rather than hiding it (`PaywallDeliveryTest`). Narrowing
+    # it to `audience == :public` takes the paywall teaser off the blog index.
+    #
+    # The LOCK is not part of that exception, and used to be swept along with
+    # it. A passphrase is a shared secret, not a marketing surface, and
+    # `docs/api.md` promises a locked document is absent from every discovery
+    # surface — listing its title and link in the index defeats that.
     ids =
       CMS.list_published_posts!(actor: ctx.actor, tenant: ctx.open.org_id)
       |> Enum.map(& &1.id)
 
     assert ctx.open.id in ids
     assert ctx.gated.id in ids
+    refute ctx.locked.id in ids, "the blog index disclosed a passphrase-locked document"
   end
 
   test "search_published", ctx do
