@@ -730,6 +730,7 @@ defmodule KilnCMS.Accounts.User do
     # Public display name — used as the JSON-LD author on content this user
     # authored. Optional; falls back to no author when blank.
     attribute :name, :string do
+      constraints max_length: KilnCMS.Limits.line()
       public? true
     end
 

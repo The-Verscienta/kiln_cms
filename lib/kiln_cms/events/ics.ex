@@ -245,7 +245,9 @@ defmodule KilnCMS.Events.ICS do
   # down to zero after 75 chunks, at which point no grapheme fits, the chunk
   # comes back empty, the remainder never shrinks, and the recursion does not
   # terminate — a hang on any line past ~2850 octets, on an anonymous route,
-  # with `title` and `seo_description` both unbounded strings.
+  # with `title` and `seo_description` both unbounded strings. Both carry
+  # ceilings since #542, but `seo_description`'s is still above the threshold
+  # that used to hang, so the fold has to stay correct for any length.
   def fold(line) when byte_size(line) <= @fold_at, do: line
 
   def fold(line) do

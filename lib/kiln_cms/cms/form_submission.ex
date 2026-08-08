@@ -171,7 +171,9 @@ defmodule KilnCMS.CMS.FormSubmission do
     attribute :data, :map, allow_nil?: false, default: %{}, public?: true
 
     # The locale of the page the form was submitted from, when known.
-    attribute :locale, :string, public?: true
+    attribute :locale, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.identifier()]
 
     # Moderation status (#477). Not writable directly — only
     # `Changes.ScoreFormSubmission` (on create) and the `:mark_spam`/

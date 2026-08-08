@@ -164,7 +164,10 @@ defmodule KilnCMS.Experiments.Experiment do
       public? false
     end
 
-    attribute :name, :string, allow_nil?: false, public?: true
+    attribute :name, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
 
     # The public type name ("post", "recipe"), not the storage tier — a dynamic
     # type's documents all live in `:entry` but experiment per type name.

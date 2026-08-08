@@ -100,17 +100,21 @@ defmodule KilnCMS.Federation.Follower do
     end
 
     attribute :actor_uri, :string do
+      constraints max_length: KilnCMS.Limits.url()
       allow_nil? false
       public? true
     end
 
     attribute :inbox_uri, :string do
+      constraints max_length: KilnCMS.Limits.url()
       allow_nil? false
       public? true
     end
 
     # Preferred when present: one POST reaches every follower on that instance.
-    attribute :shared_inbox_uri, :string, public?: true
+    attribute :shared_inbox_uri, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.url()]
 
     attribute :consecutive_failures, :integer do
       default 0

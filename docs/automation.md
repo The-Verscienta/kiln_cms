@@ -125,8 +125,14 @@ When post.in_review        → suggest_metadata  {"to": "editors@site.com"}
   off-request, isolated, and retried by Oban. A slow email or a failing reaction
   affects neither the content action nor the other rules.
 - **Payload.** Reactions receive the same serialized content map webhooks get
-  (`KilnCMS.CMS.ContentSerializer`), so templates and broadcasts have the title,
-  slug, id, state, etc.
+  (`KilnCMS.CMS.ContentSerializer`), so it has the title, slug, id, state,
+  `audience`, `locked` and the block tree. Note the asymmetry: a **broadcast**
+  forwards that whole map, so a PubSub consumer can check `audience`/`locked`
+  the way a webhook subscriber does (#1014) — but the email and webhook
+  reactions render from a fixed variable whitelist (`title`, `slug`, `id`,
+  `type`, `event`), and rule matching is trigger + content type only. There is
+  no condition surface on which to say "only public documents", so a rule that
+  forwards content outward forwards gated content too.
 
 Modules: `KilnCMS.Automation` (domain + executor), `KilnCMS.Automation.Rule`
 (the admin-managed resource), `KilnCMS.Automation.RuleWorker` (the reactions),

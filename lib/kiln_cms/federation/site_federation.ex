@@ -145,19 +145,23 @@ defmodule KilnCMS.Federation.SiteFederation do
     # The scheme+host this site's actor is permanently named under. See the
     # moduledoc: this is identity, not configuration.
     attribute :origin, :string do
+      constraints max_length: KilnCMS.Limits.url()
       writable? false
       public? true
     end
 
     # The `preferredUsername` half of `@user@host`. Written once with `origin`.
     attribute :username, :string do
+      constraints max_length: KilnCMS.Limits.identifier()
       writable? false
       public? true
     end
 
-    attribute :display_name, :string, public?: true
+    attribute :display_name, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
 
-    attribute :summary, :string, public?: true
+    attribute :summary, :string, public?: true, constraints: [max_length: KilnCMS.Limits.line()]
 
     # Published verbatim in the actor document, so cleartext by design.
     attribute :public_key_pem, :string do

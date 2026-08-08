@@ -163,7 +163,10 @@ defmodule KilnCMS.CMS.Comment do
       public? true
     end
 
-    attribute :body, :string, allow_nil?: false, public?: true
+    attribute :body, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.paragraph()]
 
     # The user who wrote the comment — stamped from the acting user, not
     # accepted from input.

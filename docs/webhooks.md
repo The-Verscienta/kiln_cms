@@ -50,8 +50,8 @@ depends on the event:
 
 - **Content lifecycle events** (`published`/`unpublished`/`updated`/`in_review`/
   `returned_to_draft`) — the document's public fields (`id`, `title`, `slug`,
-  `excerpt`, `blocks`, `seo_*`, `canonical_url`, `locale`, `state`,
-  `published_at`, `scheduled_at`, `inserted_at`, `updated_at`); each block
+  `excerpt`, `blocks`, `seo_*`, `canonical_url`, `locale`, `state`, `audience`,
+  `locked`, `published_at`, `scheduled_at`, `inserted_at`, `updated_at`); each block
   trimmed to `type`, `content`, `data`, `order`, `children`. Internal-only
   fields (e.g. search text) are never included.
 - **`form.submitted`** — `{"form": "<slug>", "data": {...submitted fields...}}`.
@@ -63,11 +63,40 @@ depends on the event:
   "event": "page.published",
   "data": {
     "id": "…", "title": "Launch", "slug": "launch", "state": "published",
+    "audience": "public", "locked": false,
     "blocks": [{ "type": "paragraph", "content": "…", "data": {}, "order": 0, "children": [] }],
     "published_at": "2026-08-04T12:00:00Z", "…": "…"
   }
 }
 ```
+
+### Gated content is delivered too — check `audience`
+
+A webhook fires for an **audience-gated** document exactly as it does for a
+public one, and the payload carries the full block tree. That is deliberate: an
+endpoint is somewhere you chose to send content, the request is HMAC-signed and
+the URL is SSRF-guarded, so this is not the anonymously-queryable surface the
+Meilisearch index is (which *does* exclude gated content, [#1006](https://github.com/The-Verscienta/kiln_cms/issues/1006)).
+
+But it means **your receiver decides**, and the payload carries both halves of
+the decision Kiln makes for its own surfaces:
+
+| Field | Value when open | Filter if your sink is public |
+| --- | --- | --- |
+| `audience` | `"public"` | anything else (`"member"`, or whatever your deployment configures) is content a reader was supposed to pay for or be granted |
+| `locked` | `false` | `true` means a shared passphrase stands between the reader and this body ([#496](https://github.com/The-Verscienta/kiln_cms/issues/496)) |
+
+Both, not either. Kiln's own rule is three-part — published **and** `public`
+**and** unlocked — so a receiver checking only `audience` mirrors a document
+that was published openly and locked afterwards, which still arrives as
+`"audience": "public"`. `locked` is derived; the hash and the
+`password_fingerprint` never leave.
+
+**A narrowing `updated` event is a retraction.** Gating or locking a live
+document fires `<type>.updated` with the new values, so a receiver that filters
+only at ingest keeps serving the body it already mirrored. Treat an `updated`
+whose `audience` moved away from `"public"`, or whose `locked` became `true`, as
+an instruction to withdraw it.
 
 ## Verifying the signature
 

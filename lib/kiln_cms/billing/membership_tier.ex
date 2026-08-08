@@ -172,9 +172,19 @@ defmodule KilnCMS.Billing.MembershipTier do
       public? false
     end
 
-    attribute :name, :string, allow_nil?: false, public?: true
-    attribute :slug, :string, allow_nil?: false, public?: true
-    attribute :description, :string, public?: true
+    attribute :name, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
+
+    attribute :slug, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.identifier()]
+
+    attribute :description, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.paragraph()]
 
     # The entitlement this tier grants. The first live call site of
     # `Audiences.gated/0` — `:public` is not a purchasable entitlement.

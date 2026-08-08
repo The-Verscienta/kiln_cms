@@ -132,9 +132,19 @@ defmodule KilnCMS.Newsletter.Segment do
       public? false
     end
 
-    attribute :name, :string, allow_nil?: false, public?: true
-    attribute :slug, :string, allow_nil?: false, public?: true
-    attribute :description, :string, public?: true
+    attribute :name, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
+
+    attribute :slug, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.identifier()]
+
+    attribute :description, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.paragraph()]
 
     # For a hand-built segment this is a label and **not** an access boundary —
     # setting it grants nothing. For a `managed_by: :tier` segment it is derived

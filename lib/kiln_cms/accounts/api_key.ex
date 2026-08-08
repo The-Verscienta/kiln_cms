@@ -93,7 +93,10 @@ defmodule KilnCMS.Accounts.ApiKey do
     uuid_primary_key :id
 
     # Human-facing label so an admin can tell keys apart in the UI.
-    attribute :name, :string, allow_nil?: false, public?: true
+    attribute :name, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
 
     # SHA-256 of the plaintext key. Never returned by reads.
     attribute :api_key_hash, :binary do

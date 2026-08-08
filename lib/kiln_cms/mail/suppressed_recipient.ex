@@ -54,7 +54,9 @@ defmodule KilnCMS.Mail.SuppressedRecipient do
     attribute :email, :ci_string, allow_nil?: false, public?: true
 
     # The redacted SMTP reason for the bounce (never contains the address).
-    attribute :reason, :string, public?: true
+    attribute :reason, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.paragraph()]
 
     attribute :last_failure_at, :utc_datetime_usec, public?: true
 
