@@ -127,3 +127,14 @@ The settings page has a **Serve these snippets** switch, separate from clearing
 the fields, so an operator debugging a broken third-party script can disable it
 and re-enable it without losing the snippet — and without that round trip being
 invisible in the version trail. **Remove** deletes the row entirely.
+
+Either takes effect **immediately, on every node** (#739). The resolved snippet
+is cached per org, and the cached struct carries the CSP sources that let the
+script run as well as the HTML — so a node-local invalidation would have left
+every *other* node serving the revoked script, under its widened policy, until
+the five-minute TTL expired. The switch and Remove both broadcast the
+invalidation across the cluster.
+
+The broadcast is best-effort, not a distributed cache: a node that is
+partitioned or still booting misses it, and the TTL is what backstops those. On
+a healthy cluster the window is milliseconds rather than minutes.

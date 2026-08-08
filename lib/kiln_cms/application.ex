@@ -81,6 +81,10 @@ defmodule KilnCMS.Application do
          oban_config()
        )},
       {Phoenix.PubSub, name: KilnCMS.PubSub},
+      # Subscribes this node to cluster-wide cache invalidations (#739), so a
+      # deleted code-injection snippet stops executing everywhere rather than
+      # on whichever node served the delete. After PubSub, which it needs.
+      KilnCMS.Cache.ClusterBust,
       # Fire-and-forget tasks off the request hot path (best-effort page-view
       # analytics, search-query recording) so a DB write can't queue/slow
       # delivery. `max_children` bounds in-flight tasks: under a crawler/traffic
