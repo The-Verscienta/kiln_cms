@@ -62,20 +62,18 @@ defmodule KilnCMS.Firing.Engine do
     # callers, which is exactly the leak this feature must not have. Keeping the
     # host's own audience makes the artifact no more permissive than the
     # document carrying it — the rule delivery already enforces.
-    # `fragments: :as_stored` leaves `Fragment` blocks unexpanded, for the same
-    # reason `custom_fields: :as_stored` opts out of recomputation (#917): a
-    # point-in-time read composes a HISTORICAL version, but the target's blocks
-    # are read at today's `state == :published`. Inlining them would make the
-    # snapshot assert text that was never live at the requested instant — and if
-    # the target has since been unpublished or gated, would silently return an
-    # empty body where the content was. An unexpanded fragment renders as
-    # nothing, which is honest about what the snapshot cannot reconstruct.
     expanded =
-      if Keyword.get(opts, :fragments, :expand) == :expand do
-        expand_fragments(typed, document, org_id)
-      else
-        typed
-      end
+      Fragments.expand(typed, org_id,
+        audiences: host_audiences(document),
+        # `fragments: <DateTime>` makes expansion resolve each target as it was
+        # at that instant rather than as it is now (#917). Only point-in-time
+        # reads pass it; every other fire leaves it nil and reads live.
+        as_of: Keyword.get(opts, :fragments),
+        # Seeded with the document itself, so a page embedding *itself* doesn't
+        # inline its own body once before the cycle guard catches it a level
+        # down.
+        ancestry: [{public_type(document), document.id}]
+      )
 
     # Custom fields are resolved once and shared by every surface: the read is
     # one query, and computed fields (#429) are recomputed exactly once per
@@ -116,20 +114,6 @@ defmodule KilnCMS.Firing.Engine do
 
   # The gated tiers a document's own artifact may carry: its own, when gated.
   # A `:public` document carries public fragments only.
-  # Expanded with the **host document's own** audience, and nothing wider. An
-  # artifact is keyed to the host, and every artifact consumer resolves that host
-  # through a `:public`-only filter then serves the body verbatim — so firing
-  # with every audience would put a `:member` fragment's text into a `:public`
-  # page's artifact. `ancestry` is seeded with the document itself, so a page
-  # embedding *itself* doesn't inline its own body once before the cycle guard
-  # catches it a level down.
-  defp expand_fragments(typed, document, org_id) do
-    Fragments.expand(typed, org_id,
-      audiences: host_audiences(document),
-      ancestry: [{public_type(document), document.id}]
-    )
-  end
-
   defp host_audiences(document) do
     case Map.get(document, :audience) do
       nil -> []

@@ -121,18 +121,49 @@ defmodule KilnCMSWeb.ErrorHTMLTest do
       end
     end
 
-    test "a request with no resolved tenant still renders, on the operator defaults" do
-      # Not every error page has a tenant behind it: an exception raised before
-      # `SetTenant` runs, a template rendered directly. This guards the shape
-      # the issue proposed — `current_org={@conn.assigns[:current_org]}` — which
-      # raises `KeyError` on `@conn` for a render with no conn at all, turning
-      # an error page into a second error.
-      assert render_to_string(KilnCMSWeb.ErrorHTML, "404", "html", []) =~ "Powered by KilnCMS."
+    # Not every error page has a tenant behind it: an exception raised before
+    # `SetTenant` runs, a template rendered directly. This guards the shape the
+    # issue proposed — `current_org={@conn.assigns[:current_org]}` — which raises
+    # `KeyError` on `@conn` for a render with no conn at all, turning an error
+    # page into a second error.
+    #
+    # Every templated status, not just 404: the 500 page is the one that has to
+    # tolerate a half-built conn, because that is precisely the request that
+    # raised. A 500 renderer that itself raises is the loop (#558).
+    for status <- ["403", "404", "500"] do
+      test "#{status} with no resolved tenant still renders, on the operator defaults" do
+        assert render_to_string(KilnCMSWeb.ErrorHTML, unquote(status), "html", []) =~
+                 "Powered by KilnCMS."
 
-      bare = %{Phoenix.ConnTest.build_conn() | assigns: %{}}
+        bare = %{Phoenix.ConnTest.build_conn() | assigns: %{}}
 
-      assert render_to_string(KilnCMSWeb.ErrorHTML, "404", "html", conn: bare) =~
-               "Powered by KilnCMS."
+        assert render_to_string(KilnCMSWeb.ErrorHTML, unquote(status), "html", conn: bare) =~
+                 "Powered by KilnCMS."
+      end
+
+      # ...and the same through the ROOT layout, which is where the real risk
+      # lives: #681 put `Layouts.root` on the error path, and it runs the theme
+      # boot script and `Layouts.brand_tokens/1` against whatever assigns the
+      # failed request left behind. `render_to_string/4` above renders the inner
+      # template only, so it cannot see a root layout that raises.
+      #
+      # This reproduces what `Phoenix.Controller.RenderErrors` does on its last
+      # two lines. Going through the endpoint instead would need a route that
+      # raises on demand, which is a bigger fixture than the thing under test.
+      test "#{status} renders inside the root layout with a half-built conn" do
+        html =
+          %{Phoenix.ConnTest.build_conn() | assigns: %{}}
+          |> Plug.Conn.put_private(:phoenix_endpoint, KilnCMSWeb.Endpoint)
+          |> Phoenix.Controller.put_root_layout(html: {KilnCMSWeb.Layouts, :root})
+          |> Phoenix.Controller.put_layout(false)
+          |> Phoenix.Controller.put_view(KilnCMSWeb.ErrorHTML)
+          |> Phoenix.Controller.render(unquote(status) <> ".html", %{})
+          |> Map.fetch!(:resp_body)
+
+        assert html =~ "<!DOCTYPE html"
+        assert html =~ "/assets/css/app.css"
+        assert html =~ "Powered by KilnCMS."
+      end
     end
   end
 end

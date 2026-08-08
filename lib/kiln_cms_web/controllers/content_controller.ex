@@ -969,7 +969,11 @@ defmodule KilnCMSWeb.ContentController do
     |> put_resp_header("cache-control", "no-store")
     |> put_status(:not_found)
     |> put_view(KilnCMSWeb.ErrorHTML)
-    |> render(:"404")
+    # A title, so the tab reads "Page not found · Acme Docs" rather than the
+    # bare brand name. The endpoint-level `render_errors` twin cannot be given
+    # one — Phoenix builds those assigns itself — and renders the brand alone,
+    # which is correct if less specific (#559).
+    |> render(:"404", page_title: gettext("Page not found"))
   end
 
   # CDN/browser cache headers for published HTML: a short shared max-age with a

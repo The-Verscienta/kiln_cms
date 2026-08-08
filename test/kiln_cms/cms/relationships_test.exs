@@ -557,4 +557,126 @@ defmodule KilnCMS.CMS.RelationshipsTest do
                )
     end
   end
+
+  # #639: the merge machinery is emitted from one `mergeable` list in
+  # `KilnCMS.CMS.Content`, rather than hand-written per relationship per action.
+  # These assert the properties that hand-writing could break — and did come
+  # close to: `:update` and `:autosave` previously declared the same six
+  # arguments in two different orders, which is the same drift one step short of
+  # a missing one.
+  describe "the merge machinery is generated, not hand-written (#639)" do
+    @content_resources [KilnCMS.CMS.Page, KilnCMS.CMS.Post]
+
+    defp merge_arguments(resource, action) do
+      resource
+      |> Ash.Resource.Info.action(action)
+      |> Map.fetch!(:arguments)
+      |> Enum.map(& &1.name)
+      |> Enum.filter(&(to_string(&1) =~ ~r/_ids$/))
+    end
+
+    defp merge_entities(resource, action) do
+      resource
+      |> Ash.Resource.Info.action(action)
+      |> Map.fetch!(:changes)
+      |> Enum.flat_map(fn
+        %Ash.Resource.Change{change: {Ash.Resource.Change.ManageRelationship, opts}} ->
+          [{:manage, opts[:argument], opts[:relationship], opts[:opts]}]
+
+        %Ash.Resource.Change{change: {KilnCMS.CMS.Changes.NormalizeManagedArguments, opts}} ->
+          [{:normalize, opts[:arguments]}]
+
+        %Ash.Resource.Validation{validation: {KilnCMS.CMS.Validations.MergeArguments, opts}} ->
+          [{:merge_validation, opts[:complete], opts[:add], opts[:remove]}]
+
+        _other ->
+          []
+      end)
+    end
+
+    # The asymmetry that mattered: `ContentEditorLive` feeds `:autosave` the
+    # params it collected for the `:update` form, so a merge argument on one and
+    # not the other fails every debounce with `NoSuchInput` while explicit Save
+    # keeps working.
+    test ":update and :autosave accept the same merge arguments" do
+      for resource <- @content_resources do
+        assert merge_arguments(resource, :update) == merge_arguments(resource, :autosave),
+               "#{inspect(resource)}: :update and :autosave disagree on merge arguments"
+      end
+    end
+
+    test ":update and :autosave manage those relationships identically" do
+      for resource <- @content_resources do
+        assert merge_entities(resource, :update) == merge_entities(resource, :autosave),
+               "#{inspect(resource)}: :update and :autosave disagree on merge changes"
+      end
+    end
+
+    # Every complete-set argument gets all three changes and a validation, and
+    # every verb is derived from its own complete argument — the property that
+    # makes adding a relationship one list entry rather than eight edits.
+    test "each mergeable relationship gets the full quartet, with derived verbs" do
+      for resource <- @content_resources, action <- [:update, :autosave] do
+        entities = merge_entities(resource, action)
+
+        completes =
+          for {:merge_validation, complete, _add, _remove} <- entities, do: complete
+
+        assert length(completes) >= 2, "#{inspect(resource)}.#{action}: no merge validations"
+
+        for complete <- completes do
+          add = :"add_#{complete}"
+          remove = :"remove_#{complete}"
+
+          assert {:merge_validation, complete, add, remove} in entities,
+                 "#{inspect(resource)}.#{action}: #{complete}'s verbs are not derived from it"
+
+          relationship =
+            Enum.find_value(entities, fn
+              {:manage, ^complete, rel, _opts} -> rel
+              _ -> nil
+            end)
+
+          assert relationship, "#{inspect(resource)}.#{action}: #{complete} manages nothing"
+
+          assert {:manage, complete, relationship, [type: :append_and_remove]} in entities
+          assert {:manage, add, relationship, [type: :append]} in entities
+
+          # Not `type: :remove` — its `on_no_match: :error` would make removing
+          # an already-detached link a failure rather than a no-op.
+          assert {:manage, remove, relationship,
+                  [
+                    on_lookup: :ignore,
+                    on_match: :unrelate,
+                    on_no_match: :ignore,
+                    on_missing: :ignore
+                  ]} in entities
+        end
+      end
+    end
+
+    # `NormalizeManagedArguments` snapshots the argument onto the changeset, so
+    # a `manage_relationship` declared before it would read the raw value.
+    test "normalization covers every merge argument, and precedes every manage" do
+      for resource <- @content_resources, action <- [:update, :autosave] do
+        entities = merge_entities(resource, action)
+
+        normalize_at = Enum.find_index(entities, &match?({:normalize, _}, &1))
+        assert normalize_at, "#{inspect(resource)}.#{action}: nothing normalizes the arguments"
+
+        {:normalize, normalized} = Enum.at(entities, normalize_at)
+
+        for {entity, index} <- Enum.with_index(entities),
+            match?({:manage, _, _, _}, entity) do
+          {:manage, argument, _rel, _opts} = entity
+
+          assert index > normalize_at,
+                 "#{inspect(resource)}.#{action}: #{argument} is managed before normalization"
+
+          assert argument in normalized,
+                 "#{inspect(resource)}.#{action}: #{argument} is managed but never normalized"
+        end
+      end
+    end
+  end
 end
