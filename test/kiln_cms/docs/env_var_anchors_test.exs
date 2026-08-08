@@ -61,6 +61,11 @@ defmodule KilnCMS.Docs.EnvVarAnchorsTest do
              )
 
     assert [] = check_row("| not a variable row | at all |")
+
+    # And the comment rule specifically, since it is the one a re-pointing sweep
+    # will trip over.
+    refute reads?("  # PHX_HOST is meant to be a bare host", "PHX_HOST")
+    assert reads?(~S|  host = System.get_env("PHX_HOST")|, "PHX_HOST")
   end
 
   # `check_row/1` above only sees table rows (the `@row` regex requires a
@@ -120,9 +125,21 @@ defmodule KilnCMS.Docs.EnvVarAnchorsTest do
 
     case Enum.at(source, n - 1) do
       nil -> ["#{var}: #{path}:#{n} is past the end of the file"]
-      text -> if String.contains?(text, var), do: [], else: [miss(var, path, n, text)]
+      text -> if reads?(text, var), do: [], else: [miss(var, path, n, text)]
     end
   end
+
+  # A COMMENT mentioning the variable does not count (#733 review). "Mentions
+  # it" was the whole check, and it is also the obvious rule to re-point by — so
+  # a sweep that fixed the anchors after an insertion happily aimed them at the
+  # comment block *above* each read, and the gate said yes. Fifteen anchors that
+  # were correct went stale that way in one commit, all of them green.
+  #
+  # An anchor is meant to answer "where is this read?", and a comment is not
+  # where anything is read.
+  defp reads?(text, var), do: String.contains?(text, var) and not comment?(text)
+
+  defp comment?(text), do: text |> String.trim_leading() |> String.starts_with?("#")
 
   defp miss(var, path, n, text) do
     "#{var}: #{path}:#{n} reads #{inspect(String.trim(text) |> String.slice(0, 60))}"

@@ -116,6 +116,19 @@ defmodule KilnCMS.Governance.Witness.HTTPTest do
 
       assert {:error, :witness_url_not_configured} = HTTP.publish(key, "{}")
     end
+
+    # `Req` RAISES on a schemeless URL, and a raise here defeats the point of
+    # returning an error value: the publish worker's blanket rescue swallows it,
+    # the row never gets its `witness_error`, and a checkpoint silently stays
+    # unpublished. A missing scheme is an ordinary operator typo.
+    test "a schemeless url is an error value too, not a raise", %{key: key} do
+      for bad <- ["log.example/kiln", "ftp://log.example", "https://", "not a url"] do
+        Application.put_env(:kiln_cms, HTTP, url: bad)
+
+        assert {:error, :witness_url_invalid} = HTTP.publish(key, "{}"), bad
+        assert {:error, :witness_url_invalid} = HTTP.list(@org), bad
+      end
+    end
   end
 
   describe "fetch/1" do
@@ -125,14 +138,23 @@ defmodule KilnCMS.Governance.Witness.HTTPTest do
       assert {:ok, ~s({"sequence":7})} = HTTP.fetch(key)
     end
 
-    # A log that answers `application/json` makes Req decode the body, and the
-    # audit compares BYTES — so the adapter has to hand back a binary either way.
-    test "re-encodes a decoded JSON body so the audit compares bytes", %{key: key} do
-      stub(fn conn -> json(conn, 200, %{"sequence" => 7}) end)
+    # Byte-for-byte, not merely "decodes to the same thing". Both callers compare
+    # bytes — `Checkpoint.confirm/5` pattern-matches the published body against
+    # the one it sent — and letting Req decode and re-encode only round-tripped
+    # identically by accident, because every map in a checkpoint has under 32
+    # keys and Erlang flatmaps iterate in sorted order below that. One field more
+    # and every publish would have recorded a mismatch reading as "the sink
+    # accepted an overwrite it should have refused".
+    test "returns the stored bytes exactly, even for a JSON content type", %{key: key} do
+      stored = ~s({"zzz":1,"aaa":2})
 
-      assert {:ok, body} = HTTP.fetch(key)
-      assert is_binary(body)
-      assert Jason.decode!(body) == %{"sequence" => 7}
+      stub(fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.send_resp(200, stored)
+      end)
+
+      assert {:ok, ^stored} = HTTP.fetch(key)
     end
 
     test "a 404 is 'not published', which the audit reports as a gap", %{key: key} do
@@ -167,7 +189,9 @@ defmodule KilnCMS.Governance.Witness.HTTPTest do
     # attack wants the audit to reach. It must come from the log saying so, never
     # from a response this adapter failed to understand.
     test "a body that is not a list of keys is an error, not an empty list" do
-      stub(fn conn -> json(conn, 200, %{"keys" => ["000000000001.json"]}) end)
+      # `%{"keys" => [...]}` is a RECOGNISED paginated shape, so the malformed
+      # cases are an object that is neither, a list of non-strings, and non-JSON.
+      stub(fn conn -> json(conn, 200, %{"items" => ["000000000001.json"]}) end)
       assert {:error, {:invalid_listing, :not_a_list}} = HTTP.list(@org)
 
       stub(fn conn -> json(conn, 200, [1, 2, 3]) end)
@@ -189,6 +213,69 @@ defmodule KilnCMS.Governance.Witness.HTTPTest do
       stub(fn conn -> Plug.Conn.send_resp(conn, 404, "") end)
 
       assert {:ok, []} = HTTP.list(@org)
+    end
+
+    # The bug the S3 adapter's own comment warns about: a single request against
+    # a paginating log reports the sink as SMALLER than it is, and for this audit
+    # "smaller" reads as *no missing rows* — the answer a truncation attack
+    # wants. Both spellings a shim author is likely to reach for are followed.
+    test "a Link: rel=next header is followed" do
+      parent = self()
+
+      stub(fn conn ->
+        send(parent, {:page, conn.request_path, conn.query_string})
+
+        if conn.query_string == "page=2" do
+          json(conn, 200, ["000000000002.json"])
+        else
+          conn
+          |> Plug.Conn.put_resp_header("link", ~s(<#{@url}/#{@org}/?page=2>; rel="next"))
+          |> json(200, ["000000000001.json"])
+        end
+      end)
+
+      assert {:ok, keys} = HTTP.list(@org)
+      assert Enum.map(keys, &Witness.sequence_from_key/1) == [1, 2]
+      assert_receive {:page, _path, ""}
+      assert_receive {:page, _path, "page=2"}
+    end
+
+    test "a {keys, next} body is followed too" do
+      stub(fn conn ->
+        if conn.query_string == "page=2" do
+          json(conn, 200, %{"keys" => ["000000000002.json"]})
+        else
+          json(conn, 200, %{
+            "keys" => ["000000000001.json"],
+            "next" => "#{@url}/#{@org}/?page=2"
+          })
+        end
+      end)
+
+      assert {:ok, keys} = HTTP.list(@org)
+      assert Enum.map(keys, &Witness.sequence_from_key/1) == [1, 2]
+    end
+
+    # A `next` pointing at itself must not spin forever inside a Mix task.
+    test "a self-referential next is bounded, and says so" do
+      stub(fn conn ->
+        json(conn, 200, %{"keys" => ["000000000001.json"], "next" => "#{@url}/#{@org}/?p=1"})
+      end)
+
+      assert {:error, :witness_listing_too_long} = HTTP.list(@org)
+    end
+
+    # A false "the witness holds a checkpoint the database does not" is not
+    # free: it is how a real one stops being believed.
+    test "a key belonging to another org is not attributed to this one" do
+      other = "22222222-2222-4222-8222-222222222222"
+
+      stub(fn conn ->
+        json(conn, 200, ["#{@org}/000000000001.json", "#{other}/000000000002.json"])
+      end)
+
+      assert {:ok, keys} = HTTP.list(@org)
+      assert keys == ["#{@org}/000000000001.json"]
     end
 
     test "a server error is not mistaken for an empty log" do

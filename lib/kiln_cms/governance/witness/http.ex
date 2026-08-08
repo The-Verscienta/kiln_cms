@@ -21,6 +21,13 @@ defmodule KilnCMS.Governance.Witness.HTTP do
   | `fetch/1` | `GET <url>/<key>` | `200` with the exact bytes; `404` if absent |
   | `list/1` | `GET <url>/<org_id>/`, `Accept: application/json` | `200`, a JSON array of keys |
 
+  `list/1` **follows pagination**: an `RFC 8288` `Link: <…>; rel="next"` header,
+  or a `{"keys": […], "next": "…"}` body. A log that answers a bounded page and
+  says nothing about the rest would otherwise report the sink as smaller than it
+  is — and for this audit "smaller" reads as *no missing rows*, which is the
+  answer a truncation attack wants. `KilnCMS.Governance.Witness.S3` pages for
+  exactly this reason; an HTTP log is likelier to page, not less.
+
   Deliberately small. A log that speaks RFC 6962, or a homegrown append-only
   service, or an object store behind a signed-URL proxy can all satisfy it with
   a thin shim; requiring any one protocol would have made this adapter useful to
@@ -89,7 +96,14 @@ defmodule KilnCMS.Governance.Witness.HTTP do
   @impl true
   def fetch(key) do
     with {:ok, url} <- url() do
-      [method: :get, url: join(url, key), headers: headers([])]
+      # `decode_body: false` so this returns what the log stored, byte for byte.
+      # Both callers compare bytes — `Checkpoint.confirm/5` pattern-matches the
+      # published body against the one it sent — and letting Req decode meant
+      # re-encoding with `Jason`, which only round-trips identically because
+      # every map in a checkpoint has under 32 keys and Erlang flatmaps iterate
+      # in sorted order below that. One field more and every publish would
+      # record a mismatch that reads as "the sink accepted an overwrite".
+      [method: :get, url: join(url, key), headers: headers([]), decode_body: false]
       |> request()
       |> case do
         {:ok, %{status: 200, body: body}} -> {:ok, to_binary(body)}
@@ -100,21 +114,66 @@ defmodule KilnCMS.Governance.Witness.HTTP do
     end
   end
 
+  # A page count that cannot be reached by a well-behaved log, but bounds a
+  # broken or hostile one: a `next` that points at itself would otherwise spin
+  # forever inside a Mix task.
+  @max_pages 1_000
+
   @impl true
   def list(org_id) do
-    with {:ok, url} <- url() do
-      [
-        method: :get,
-        url: join(url, "#{org_id}/"),
-        headers: headers([{"accept", "application/json"}])
-      ]
-      |> request()
-      |> case do
-        {:ok, %{status: 200, body: body}} -> keys(body, org_id)
-        {:ok, %{status: 404}} -> {:ok, []}
-        {:ok, %{status: status}} -> {:error, {:http_error, status}}
-        {:error, reason} -> {:error, reason}
-      end
+    with {:ok, url} <- url(), do: list_pages(join(url, "#{org_id}/"), org_id, [], @max_pages)
+  end
+
+  defp list_pages(_url, _org_id, _acc, 0), do: {:error, :witness_listing_too_long}
+
+  defp list_pages(url, org_id, acc, remaining) do
+    [method: :get, url: url, headers: headers([{"accept", "application/json"}])]
+    |> request()
+    |> case do
+      {:ok, %{status: 200} = response} ->
+        with {:ok, keys} <- keys(response.body, org_id),
+             do: continue(next_page(response), org_id, acc ++ keys, remaining)
+
+      # A log that has never been written for this org 404s the collection
+      # rather than answering `[]`, and that is not a tampering signal. Only on
+      # the FIRST page: a `next` that 404s is a broken listing, not an empty one.
+      {:ok, %{status: 404}} when acc == [] ->
+        {:ok, []}
+
+      {:ok, %{status: status}} ->
+        {:error, {:http_error, status}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp continue(nil, _org_id, keys, _remaining), do: {:ok, keys}
+  defp continue(next, org_id, keys, remaining), do: list_pages(next, org_id, keys, remaining - 1)
+
+  # Two spellings, because a shim author will reach for whichever their store
+  # already speaks: the `Link` header, or a `next` alongside the keys.
+  defp next_page(response) do
+    case link_next(header(response, "link")) do
+      nil -> body_next(response.body)
+      next -> next
+    end
+  end
+
+  defp link_next(nil), do: nil
+
+  defp link_next(link) do
+    Regex.run(~r/<([^>]+)>\s*;\s*rel\s*=\s*"?next"?/i, link)
+    |> case do
+      [_full, url] -> url
+      _no_next -> nil
+    end
+  end
+
+  defp body_next(body) do
+    case decode(body) do
+      %{"next" => next} when is_binary(next) and next != "" -> next
+      _no_next -> nil
     end
   end
 
@@ -138,9 +197,15 @@ defmodule KilnCMS.Governance.Witness.HTTP do
   # can produce by accident.
   defp keys(body, org_id) do
     case decode(body) do
+      %{"keys" => list} when is_list(list) ->
+        keys(list, org_id)
+
       list when is_list(list) ->
         if Enum.all?(list, &is_binary/1) do
-          {:ok, Enum.map(list, &normalize_key(&1, org_id))}
+          {:ok,
+           list
+           |> Enum.map(&normalize_key(&1, org_id))
+           |> Enum.filter(&own_org?(&1, org_id))}
         else
           {:error, {:invalid_listing, :not_strings}}
         end
@@ -155,6 +220,14 @@ defmodule KilnCMS.Governance.Witness.HTTP do
 
     if String.contains?(trimmed, "/"), do: trimmed, else: "#{org_id}/#{trimmed}"
   end
+
+  # A listing is asked for one org and must answer for that org. A key naming a
+  # different one — a log that ignores the path, a shim that lists the whole
+  # bucket — would otherwise have its sequence attributed here, and the audit
+  # would report "the witness holds a checkpoint the database does not" about a
+  # checkpoint that belongs to somebody else. False alarms on a tamper-detection
+  # surface are not free: they are how a real one stops being believed.
+  defp own_org?(key, org_id), do: String.starts_with?(key, org_id <> "/")
 
   # Req decodes a JSON response by content-type; a service that answers
   # `text/plain` hands back the raw string, so both shapes are handled.
@@ -234,6 +307,11 @@ defmodule KilnCMS.Governance.Witness.HTTP do
 
   defp request(options) do
     options
+    # No client-side retry. `KilnCMS.Governance.CheckpointWorker` owns retrying a
+    # failed publication, and Req retrying underneath it would turn one 502 into
+    # several seconds of a worker's time and hide the failure count from the
+    # thing that reports it.
+    |> Keyword.put_new(:retry, false)
     |> Req.new()
     |> Req.merge(Keyword.get(Witness.config(__MODULE__), :req_options, []))
     |> Req.request()
@@ -246,9 +324,27 @@ defmodule KilnCMS.Governance.Witness.HTTP do
   # on a misconfiguration it can report.
   defp url do
     case Keyword.get(Witness.config(__MODULE__), :url) do
-      nil -> {:error, :witness_url_not_configured}
-      "" -> {:error, :witness_url_not_configured}
-      url -> {:ok, url}
+      url when url in [nil, ""] ->
+        {:error, :witness_url_not_configured}
+
+      url when is_binary(url) ->
+        # A scheme is checked, not assumed. `Req` RAISES on a schemeless URL —
+        # `log.example/kiln` is an ordinary typo — and a raise here defeats the
+        # whole point of returning an error value: the publish worker's blanket
+        # rescue swallows it, the row never gets its `witness_error`, and the
+        # operator's only signal is a checkpoint that silently stays
+        # unpublished.
+        case URI.parse(url) do
+          %URI{scheme: scheme, host: host}
+          when scheme in ["http", "https"] and is_binary(host) and host != "" ->
+            {:ok, url}
+
+          _otherwise ->
+            {:error, :witness_url_invalid}
+        end
+
+      _otherwise ->
+        {:error, :witness_url_invalid}
     end
   end
 end
