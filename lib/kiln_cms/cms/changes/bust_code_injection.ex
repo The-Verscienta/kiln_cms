@@ -13,9 +13,15 @@ defmodule KilnCMS.CMS.Changes.BustCodeInjection do
 
   @impl true
   def change(changeset, _opts, _context) do
-    Ash.Changeset.after_action(changeset, fn _changeset, record ->
-      KilnCMS.Cache.bust_code_injection(record.org_id)
-      {:ok, record}
+    # `after_transaction`, not `after_action` — the bust is now a cluster-wide
+    # broadcast (#739), and `after_action` runs INSIDE the transaction. A remote
+    # node receiving it before the commit deletes its entry, re-reads from a
+    # snapshot that does not yet contain the write, and re-caches the OLD
+    # snippet under a fresh TTL. That is the exposure this exists to close,
+    # reached by a shorter road.
+    Ash.Changeset.after_transaction(changeset, fn _changeset, result ->
+      with {:ok, record} <- result, do: KilnCMS.Cache.bust_code_injection(record.org_id)
+      result
     end)
   end
 end

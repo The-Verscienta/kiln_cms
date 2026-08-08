@@ -74,6 +74,25 @@ defmodule KilnCMS.Cache.ClusterBustTest do
     end
   end
 
+  # The JOINT, which the two halves below do not cover between them: nothing
+  # else asserts that the subscriber is actually ON the topic. Deleting the
+  # `Phoenix.PubSub.subscribe/2` call from `init/1` left every other test in this
+  # file green while making the whole feature inert — every node deaf, every bust
+  # landing nowhere.
+  #
+  # Broadcast directly rather than through `Cache.bust_*`: that function's own
+  # synchronous local delete would empty the key regardless, and mask exactly the
+  # failure this is for.
+  test "the subscriber is on the topic, so a broadcast alone empties the key", %{org: org} do
+    key = Cache.code_injection_key(org)
+    seed(key)
+
+    Phoenix.PubSub.broadcast(KilnCMS.PubSub, ClusterBust.topic(), {:bust_keys, [key]})
+    _ = :sys.get_state(ClusterBust)
+
+    refute cached?(key)
+  end
+
   describe "a receiving node" do
     # The half that matters on the node that did NOT serve the write: the same
     # message the broadcast above carries, delivered to the real subscriber.
