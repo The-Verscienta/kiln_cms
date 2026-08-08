@@ -168,5 +168,21 @@ Phase-1 slice:
 - **Pending-duplicate dedupe:** a re-fired duplicate event collapses onto the
   still-queued job for the same {rule, event, document}; an event arriving
   while the first job runs or retries is never dropped.
-- **Config** is entered as JSON; per-action structured form fields are a UI
-  refinement.
+- **Config** is entered as JSON, and **validated against the selected action at
+  save time** (`KilnCMS.Automation.Validations.ActionConfig`). A required key
+  that is missing, a value of the wrong type, and a key the action does not
+  recognize are all refused beside the field rather than accepted and warned
+  about at runtime — a rule that cannot work should not be able to sit in the
+  list looking enabled. `ActionConfig.shapes/0` is the single description of
+  what each reaction accepts, and the admin form renders its per-action key
+  hint by reading that table — so the hint beside the field cannot drift from
+  what the save will allow.
+
+  Two mistakes it exists to catch: `"allow_egress": "true"` (the string — every
+  other key in that textarea is one, and the runtime gate correctly fails
+  closed on it), and a missing `to` on `send_email` or on any of the four
+  intelligence reactions, all of which deliver by email and nothing else.
+
+  Rules written before this validation existed are not re-checked, and
+  AshAdmin writes the attribute directly, so the executor keeps its own
+  guards. Per-action structured form fields are still a UI refinement.

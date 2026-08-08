@@ -9,6 +9,7 @@ defmodule KilnCMSWeb.AutomationLive do
 
   alias KilnCMS.Automation
   alias KilnCMS.Automation.Rule
+  alias KilnCMS.Automation.Validations.ActionConfig
   alias KilnCMS.CMS.ContentTypes
 
   @impl true
@@ -203,6 +204,47 @@ defmodule KilnCMSWeb.AutomationLive do
     end
   end
 
+  # The config textarea is hand-rolled rather than a `<.input>` — it holds JSON,
+  # not the attribute's own value — so it renders no errors of its own. Without
+  # this the #944 validation would refuse the save and the admin would see a
+  # form that simply did not submit.
+  defp config_errors(form) do
+    Enum.map(form[:config].errors, &KilnCMSWeb.CoreComponents.translate_error/1)
+  end
+
+  # Derived from `ActionConfig.shapes/0`, not restated beside it: that table is
+  # what refuses a save, and a hand-maintained list of the same keys is a doc
+  # that drifts from its own enforcement — which is the failure #944 is about.
+  defp config_keys(form) do
+    case ActionConfig.shape(selected_action(form)) do
+      nil ->
+        gettext("nothing")
+
+      %{required: [], optional: []} ->
+        gettext("no config")
+
+      shape ->
+        [
+          Enum.map(shape.required, fn {key, _type} -> "#{key} (#{gettext("required")})" end),
+          Enum.map(shape.optional, fn {key, _type} -> key end)
+        ]
+        |> List.flatten()
+        |> Enum.join(", ")
+    end
+  end
+
+  # An untouched form has no `action` value yet, while the select already shows
+  # its first option — so fall back to that rather than describing a reaction
+  # the admin isn't looking at.
+  defp selected_action(form) do
+    case form[:action].value do
+      nil -> List.first(Rule.action_kinds())
+      "" -> List.first(Rule.action_kinds())
+      value when is_atom(value) -> value
+      value -> Enum.find(Rule.action_kinds(), &(to_string(&1) == to_string(value)))
+    end
+  end
+
   defp editing?(nil, _id), do: false
   defp editing?(%{id: id}, id), do: true
   defp editing?(_edit, _id), do: false
@@ -348,6 +390,9 @@ defmodule KilnCMSWeb.AutomationLive do
       |> assign(:trigger_options, trigger_options())
       |> assign(:action_options, action_options())
       |> assign(:config_json, config_json(assigns.form))
+      |> assign(:config_errors, config_errors(assigns.form))
+      |> assign(:config_action, to_string(selected_action(assigns.form)))
+      |> assign(:config_keys, config_keys(assigns.form))
 
     ~H"""
     <.input field={@form[:name]} label={gettext("Name")} placeholder="Notify on publish" />
@@ -387,6 +432,10 @@ defmodule KilnCMSWeb.AutomationLive do
         class="mt-1 w-full rounded border border-base-content/20 bg-base-100 p-2 font-mono text-xs"
         placeholder={~s({"to": "team@example.com", "subject": "Live: {{title}}"})}
       >{@config_json}</textarea>
+      <p :for={msg <- @config_errors} class="mt-1.5 flex items-center gap-2 text-sm text-error">
+        <.icon name="hero-exclamation-circle" class="size-5" />
+        {msg}
+      </p>
       <p class="mt-1 text-xs text-base-content/60">
         {gettext(
           "send_email: to, subject, body. broadcast: topic. Templates support {{title}}, {{slug}}, {{type}}, {{event}}."
@@ -396,6 +445,9 @@ defmodule KilnCMSWeb.AutomationLive do
         {gettext(
           "flag_duplicates, suggest_tags, suggest_links, suggest_metadata: to. They email their findings and never write to the record. suggest_metadata additionally needs allow_egress: true when the configured model provider is off-site."
         )}
+      </p>
+      <p class="mt-1 text-xs font-medium text-base-content/70">
+        {gettext("%{action} accepts: %{keys}", action: @config_action, keys: @config_keys)}
       </p>
     </div>
     """
