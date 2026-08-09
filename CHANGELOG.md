@@ -369,6 +369,37 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **The tag-suggestion threshold is measured now, and the old one was inert**
+  (#1086). #851 shipped `suggest_tags/2`'s cosine-distance ceiling with a
+  derived `0.25`, reasoned from bge-small's published behaviour on *sentence
+  pairs*, and said in as many words that it wanted calibrating against a real
+  embedder — which `KilnCMS.StubEmbedder` cannot stand in for, so no test could
+  tell a good suggestion from a bad one.
+
+  Measured against the shipped model over a labelled corpus (eight documents,
+  thirty-five tags, a human label on all 280 pairs), that band does not transfer:
+  a tag label against a whole-document centroid is not a sentence pair. An
+  unrelated tag sits at 0.35 and up; a wanted one can sit at 0.43. `0.25` kept
+  **3 of 27** tags a person would tick, so the panel was empty for most
+  documents — which reads to an editor as a broken feature, not as "nothing is
+  close".
+
+  The default is now **0.35**: 21 of 27 wanted tags kept, 10 of 253 unwanted
+  admitted, about four suggestions per document under the panel's own limit of
+  five. The bands overlap, so it is a judgement about which error to make, and
+  `docs/rag.md` records the measurement and the reasoning.
+
+  `near_duplicates/2`'s `0.1` was measured on the same corpus and holds — a
+  reworded copy sits at 0.04, another document on the same subject at 0.19-0.21
+  — but it is a config key (`:near_duplicate_threshold`) now rather than a
+  literal, because it is a property of the model and an operator who changes the
+  model had no way to change it.
+
+  The corpus and the recorded distances are `KilnCMS.TagSuggestionCorpus`, so
+  the shipped value is pinned by tests that need no model; the harness that
+  produced them re-runs against any configured embedder with
+  `mix test --include calibration`.
+
 - **A content type's default SEO description now reaches every surface that
   renders one** (#1102). #805 let a type default its `seo_title` /
   `seo_description` from a `[token]` pattern, resolved at render time — but only

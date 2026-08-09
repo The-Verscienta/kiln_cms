@@ -53,7 +53,11 @@ defmodule KilnCMS.Search.Related do
 
   @doc """
   Documents whose closest block sits within `:threshold` cosine distance of
-  this document (default 0.1) — near-duplicates, any workflow state.
+  this document — near-duplicates, any workflow state. Defaults to
+  `KilnCMS.Search.near_duplicate_threshold/0`, which carries the measurement
+  (#1086): a reworded copy of a document sits at 0.04 and another document on
+  the same subject at 0.19-0.21, so 0.1 separates "the same article rewritten"
+  from "another article about sourdough".
 
   Pass `:actor` and the neighbours are resolved as that user, so a document
   they may not read never appears. Omit it (the automation path, which has no
@@ -65,7 +69,7 @@ defmodule KilnCMS.Search.Related do
   """
   @spec near_duplicates(struct(), keyword()) :: [neighbour()]
   def near_duplicates(record, opts \\ []) do
-    threshold = Keyword.get(opts, :threshold, 0.1)
+    threshold = Keyword.get(opts, :threshold, Search.near_duplicate_threshold())
 
     record
     |> neighbours(Keyword.get(opts, :limit, 20))
@@ -91,6 +95,13 @@ defmodule KilnCMS.Search.Related do
   for every document (#851). The panel then offers "carburetors" for a page
   about herbal tea, in the same type, at the same size, as a good match — and
   a suggester that always suggests something is one an editor learns to ignore.
+
+  The ceiling is a **measured** number, not a derived one (#1086), and the two
+  bands it sits between overlap — see `KilnCMS.Search.suggest_tags_threshold/0`
+  for the measurement and `KilnCMS.TagSuggestionCorpus` for the corpus. So the
+  default admits a few tags a human would not tick, deliberately: the failure it
+  is tuned away from is the empty panel, which reads as a broken feature rather
+  than as "nothing is close".
 
   Returning `[]` is a real answer, and the same one `near_duplicates/2` gives.
   Pass `threshold: 2.0` to rank without filtering — cosine distance is
