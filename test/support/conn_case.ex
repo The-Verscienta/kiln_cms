@@ -79,4 +79,46 @@ defmodule KilnCMSWeb.ConnCase do
       | remote_ip: {127, rem(div(n, 62_500), 254) + 1, rem(div(n, 250), 250), rem(n, 250) + 1}
     }
   end
+
+  @doc """
+  Render `view` until `substring` is present (or absent, with `present?: false`),
+  or fail after `timeout_ms`.
+
+  For anything that arrives over PubSub — a Presence join/leave, a broadcast
+  patch — where the write and the render are in different processes and nothing
+  in the test can synchronise them.
+
+  Three files carried a copy of this budgeted `tries \\\\ 40` at `sleep(25)`:
+  **one second**, which is fine on a developer's machine and not fine on a
+  loaded CI runner. It failed `main` on 2026-08-09 (`PreviewLiveTest`, "leaving
+  drops a viewer") on a presence-leave diff that took longer than a second.
+
+  Expressed as a deadline rather than an iteration count, so shortening the poll
+  interval later cannot silently shrink the budget — which is how a `tries`
+  count decays into a flake. A generous timeout costs nothing when the condition
+  is met: the loop returns on the first successful render.
+  """
+  @spec eventually(term(), String.t(), boolean(), pos_integer()) :: String.t()
+  def eventually(view, substring, present? \\ true, timeout_ms \\ 5_000) do
+    poll(view, substring, present?, System.monotonic_time(:millisecond) + timeout_ms, timeout_ms)
+  end
+
+  defp poll(view, substring, present?, deadline, timeout_ms) do
+    html = Phoenix.LiveViewTest.render(view)
+
+    cond do
+      String.contains?(html, substring) == present? ->
+        html
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        ExUnit.Assertions.flunk(
+          "expected #{inspect(substring)} #{if present?, do: "in", else: "gone from"} " <>
+            "the render within #{timeout_ms}ms"
+        )
+
+      true ->
+        Process.sleep(25)
+        poll(view, substring, present?, deadline, timeout_ms)
+    end
+  end
 end
