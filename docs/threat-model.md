@@ -276,8 +276,11 @@ build if a resource is ever registered without that authorizer.
   and follow no redirects — a followed redirect is a fresh resolution the pin
   never sees. `KilnCMS.SafeFetch` packages that plus a streaming byte cap, since
   an attacker-influenced response has an attacker-influenced *length* too.
-  (`Webhooks.DeliveryWorker` still has its own copy of the pinning; folding it
-  onto `SafeFetch` is tracked in #753.)
+  Since #753 there is exactly one implementation: every caller that fetches a
+  URL the *content* chose — webhook delivery, oEmbed, link checking, federation,
+  social posting, portability import — goes through `SafeFetch`. A new caller
+  reaching for `Req` directly, or copying its `connect_options`, is the bug that
+  invariant exists to catch.
 - **Upload handling** — uploads validated from bytes rather than declared type,
   EXIF stripped, and blobs served with `Content-Disposition: attachment` and
   `X-Content-Type-Options: nosniff`.

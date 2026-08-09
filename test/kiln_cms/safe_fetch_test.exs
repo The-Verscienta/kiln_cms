@@ -158,4 +158,165 @@ defmodule KilnCMS.SafeFetchTest do
       assert byte_size(body) == 1_000
     end
   end
+
+  # #753's acceptance list. These are the properties the module exists for, as
+  # opposed to the redirect behaviour above, which is what it grew later.
+  describe "the address check" do
+    test "a private or link-local address is refused before anything is dialled" do
+      # No stub is installed: if any of these reached `Req` the test would hang
+      # or error on a real socket rather than returning a refusal.
+      for url <- [
+            "http://127.0.0.1/x",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://[::1]/x",
+            "http://10.0.0.1/x",
+            "http://192.168.1.1/x"
+          ] do
+        assert {:error, message} = SafeFetch.get(url, opts()),
+               "#{url} was not refused"
+
+        assert message =~ "blocked URL:", "#{url}: #{message}"
+      end
+    end
+
+    test "a URL with no host is refused rather than crashing" do
+      assert {:error, message} = SafeFetch.get("not a url", opts())
+      assert message =~ "blocked URL:"
+
+      assert {:error, _} = SafeFetch.get(nil, opts())
+    end
+  end
+
+  # `connect_target/3` and `host_header/2` are asserted as values, not through a
+  # request: every one of these options fails *open* when wrong (SNI aimed at an
+  # IP still connects, it just stops verifying the hostname), and `Req.Test`'s
+  # plug adapter never opens a socket, so a round-trip test would pass on all of
+  # them being absent.
+  describe "the pinned connection keeps TLS pointed at the real hostname" do
+    @pinned {93, 184, 216, 34}
+
+    test "https carries SNI and hostname verification for the ORIGINAL host" do
+      options = SafeFetch.connect_target("https://acme.test/webhooks", @pinned, 5_000)
+
+      # Dialled by literal address — that is the whole point of the pin.
+      assert options[:url] == "https://93.184.216.34/webhooks"
+
+      transport = options[:connect_options][:transport_opts]
+
+      assert transport[:verify] == :verify_peer
+      assert is_list(transport[:cacerts]) and transport[:cacerts] != []
+      # A charlist of the NAME. `~c"93.184.216.34"` here would still connect.
+      assert transport[:server_name_indication] == ~c"acme.test"
+      assert is_function(transport[:customize_hostname_check][:match_fun], 2)
+    end
+
+    # Regression: the host was bracketed by hand *and* by `URI.to_string/1`,
+    # yielding `https://[[2606:2800::1]]/x`. Unparseable, so a webhook to any
+    # endpoint whose DNS answer is IPv6 could never be delivered — and no test
+    # touched the pinning path, so it had never been seen.
+    test "an IPv6 pin is bracketed exactly once" do
+      options =
+        SafeFetch.connect_target("https://acme.test/x", {0x2606, 0x2800, 0, 0, 0, 0, 0, 1}, 5_000)
+
+      assert options[:url] == "https://[2606:2800::1]/x"
+      # And it round-trips: an unparseable URL is what the bug produced.
+      assert %URI{host: "2606:2800::1", scheme: "https", path: "/x"} = URI.parse(options[:url])
+
+      assert options[:connect_options][:transport_opts][:server_name_indication] == ~c"acme.test"
+    end
+
+    test "an IPv6 literal URL keeps its brackets in the Host header" do
+      pinned = {0x2606, 0x2800, 0, 0, 0, 0, 0, 1}
+
+      assert SafeFetch.host_header("https://[2606:2800::1]/x", pinned) ==
+               [{"host", "[2606:2800::1]"}]
+
+      # Without the brackets `2606:2800::1:8443` is neither a host nor a
+      # host:port — RFC 3986 needs them before the `:port` can mean anything.
+      assert SafeFetch.host_header("https://[2606:2800::1]:8443/x", pinned) ==
+               [{"host", "[2606:2800::1]:8443"}]
+    end
+
+    test "http pins the address and adds no TLS options" do
+      options = SafeFetch.connect_target("http://acme.test/x", @pinned, 5_000)
+
+      assert options[:url] == "http://93.184.216.34/x"
+      refute Keyword.has_key?(options[:connect_options], :transport_opts)
+    end
+
+    test "not pinning leaves the URL alone" do
+      options = SafeFetch.connect_target("https://acme.test/x", nil, 5_000)
+
+      assert options[:url] == "https://acme.test/x"
+      refute Keyword.has_key?(options[:connect_options], :transport_opts)
+    end
+
+    test "the original Host is restored, including a non-default port" do
+      assert SafeFetch.host_header("https://acme.test/x", @pinned) == [{"host", "acme.test"}]
+      assert SafeFetch.host_header("http://acme.test/x", @pinned) == [{"host", "acme.test"}]
+
+      assert SafeFetch.host_header("https://acme.test:8443/x", @pinned) ==
+               [{"host", "acme.test:8443"}]
+
+      assert SafeFetch.host_header("http://acme.test:8080/x", @pinned) ==
+               [{"host", "acme.test:8080"}]
+
+      # Default ports are elided rather than spelled out — `acme.test:443` is a
+      # different `Host` to a vhost that matches on the literal string.
+      assert SafeFetch.host_header("https://acme.test:443/x", @pinned) == [{"host", "acme.test"}]
+      assert SafeFetch.host_header("http://acme.test:80/x", @pinned) == [{"host", "acme.test"}]
+
+      # Nothing to restore when the URL was never rewritten.
+      assert SafeFetch.host_header("https://acme.test/x", nil) == []
+    end
+  end
+
+  describe "the byte cap" do
+    test "an over-length body is an error, and the default cap applies unasked" do
+      stub(fn conn -> Plug.Conn.send_resp(conn, 200, String.duplicate("x", 300 * 1024)) end)
+
+      assert {:error, message} = SafeFetch.get(@url, opts())
+      assert message =~ "exceeded #{256 * 1024} bytes"
+    end
+
+    test "a body at exactly the cap is not an error" do
+      stub(fn conn -> Plug.Conn.send_resp(conn, 200, String.duplicate("x", 1_000)) end)
+
+      assert {:ok, %{body: body}} = SafeFetch.get(@url, opts(max_bytes: 1_000))
+      assert byte_size(body) == 1_000
+    end
+
+    # The cap has to hold while the bytes are still arriving. A `content-length`
+    # is written by the far end, so trusting it is trusting the attacker.
+    test "a lying content-length does not raise the cap" do
+      stub(fn conn ->
+        conn
+        |> Plug.Conn.put_resp_header("content-length", "10")
+        |> Plug.Conn.send_resp(200, String.duplicate("x", 5_000))
+      end)
+
+      assert {:error, message} = SafeFetch.get(@url, opts(max_bytes: 1_000))
+      assert message =~ "exceeded 1000 bytes"
+    end
+  end
+
+  describe "the caller always gets bytes" do
+    # `decode_body: false`. Req otherwise decodes by content-type, so `body`
+    # would be a map on a JSON response and a binary on everything else — two
+    # shapes for the caller to handle, and decoding happening *before* the size
+    # cap rather than after it.
+    test "a JSON response comes back as an undecoded binary" do
+      stub(fn conn -> Req.Test.json(conn, %{ok: true, n: 1}) end)
+
+      assert {:ok, %{body: body}} = SafeFetch.get(@url, opts())
+      assert is_binary(body)
+      assert body == ~s({"ok":true,"n":1}) or body == ~s({"n":1,"ok":true})
+    end
+
+    test "an empty body is an empty binary, not nil" do
+      stub(fn conn -> Plug.Conn.send_resp(conn, 204, "") end)
+
+      assert {:ok, %{status: 204, body: ""}} = SafeFetch.get(@url, opts())
+    end
+  end
 end
