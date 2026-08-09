@@ -106,9 +106,14 @@ defmodule Mix.Tasks.Kiln.Experiment do
     # sentence and a truncated one would send an operator to the wrong cause.
     # Absent for a healthy experiment — a marker on every row is one nobody
     # reads (#1008).
+    #
+    # NOT "cannot convert": two reasons mean the opposite (a goal that is the
+    # experimented document converts every impression), and the marker used to
+    # contradict the sentence it introduced on the same line. What they share is
+    # that the numbers are not a result.
     case Experiments.blocked_reason(experiment) do
       nil -> :ok
-      {_reason, sentence} -> Mix.shell().info("           ! cannot convert: #{sentence}")
+      {_reason, sentence} -> Mix.shell().info("           ! no usable result: #{sentence}")
     end
   end
 
@@ -121,7 +126,7 @@ defmodule Mix.Tasks.Kiln.Experiment do
         :ok
 
       {_reason, sentence} ->
-        Mix.shell().info("Blocked:  CANNOT CONVERT — #{sentence}")
+        Mix.shell().info("Blocked:  NO USABLE RESULT — #{sentence}")
     end
   end
 
@@ -323,10 +328,11 @@ defmodule Mix.Tasks.Kiln.Experiment do
     end
   end
 
-  # The same predicate `Health.blocked_reason/1` reads, so this command and the
-  # `!` marker in `list` cannot disagree about what sticky means (#1008). Kept
-  # here as a fail-fast on `create`, where there is no experiment to ask about
-  # yet and an operator is still at the keyboard.
+  # The same predicate `Health.blocked_reason/1` reads (`Sticky.enabled?/0`), so
+  # this command and the `!` marker in `list` cannot disagree about whether
+  # sticky is on — the sentences differ, the rule does not (#1008). Kept here as
+  # a fail-fast on `create`, where there is no experiment to ask about yet and
+  # an operator is still at the keyboard.
   defp require_sticky! do
     unless KilnCMS.Experiments.Sticky.enabled?() do
       Mix.raise(

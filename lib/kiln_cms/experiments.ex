@@ -166,9 +166,15 @@ defmodule KilnCMS.Experiments do
   @doc "Every funnel's final step for a site, as `%{funnel_id => {type, id}}`. Cached."
   @spec funnel_targets(Ash.UUID.t()) :: %{optional(Ash.UUID.t()) => {String.t(), Ash.UUID.t()}}
   def funnel_targets(org_id) do
+    # `|| %{}` is load-bearing with the `nil` the loader returns on a failed
+    # read: `Cache.fetch/3` commits every non-nil value for the full TTL, so
+    # returning `%{}` from the rescue used to CACHE the failure — five minutes
+    # of "this funnel is gone" on every surface, and five minutes of real
+    # conversions silently uncounted, from one blip (#1008 review). `nil` is the
+    # one value the cache declines to keep, so the next call retries.
     KilnCMS.Cache.fetch(KilnCMS.Cache.funnel_targets_key(org_id), @cache_ttl, fn ->
       load_funnel_targets(org_id)
-    end)
+    end) || %{}
   end
 
   # One read for the whole site rather than one per experiment: funnels are few
@@ -190,9 +196,12 @@ defmodule KilnCMS.Experiments do
     # Same posture and the same reason as `load_running/1`: delivery survives a
     # database that cannot answer, and it says so — "no funnel targets" and
     # "every funnel experiment stopped converting" look identical from outside.
+    #
+    # `nil`, not `%{}`, so the failure is NOT committed to the cache — see
+    # `funnel_targets/1`.
     error ->
       Logger.warning("Experiments.funnel_targets/1 could not read: #{Exception.message(error)}")
-      %{}
+      nil
   end
 
   defp load_running(org_id) do

@@ -333,6 +333,39 @@ defmodule KilnCMS.Experiments.StickyTest do
       assert conversions(ctx, ctx.treatment.id) == 1
     end
 
+    test "an experiment goaled at its OWN document converts nothing", ctx do
+      # The self-conversion failure, on the `:content_view` branch. `assign_sticky`
+      # writes the exposure and `record_content_view/3` reads it back off the SAME
+      # conn a few lines later, so without the guard the impression converts itself
+      # within one request, the exposure is spent, and the next request mints and
+      # converts another — every arm reporting 100% forever, which is worse than
+      # reporting nothing because it looks like a result.
+      #
+      # `:start` refuses a self-goal and a running experiment cannot be edited, so
+      # this is seeded — "unreachable" is a property of the WRITE layer, and the
+      # guard being tested is in the DELIVERY layer. `/editor/experiments` (#982)
+      # adds an editing surface. `Health.blocked_reason/1` also reports this as
+      # `:goal_is_self`, and that report is only true if delivery agrees.
+      Ash.Seed.update!(ctx.experiment, %{
+        goal_content_type: "page",
+        goal_document_id: ctx.landing.id
+      })
+
+      KilnCMS.Cache.bust_experiments(ctx.landing.org_id)
+
+      conn =
+        build_conn()
+        |> put_req_cookie(Sticky.exposure_cookie(), ctx.treatment.id)
+        |> get("/#{ctx.landing.slug}")
+
+      assert html_response(conn, 200)
+      assert conversions(ctx, ctx.treatment.id) == 0
+
+      # And the exposure is NOT spent — the visitor is still in the experiment,
+      # they simply have not reached anything that converts.
+      refute match?(%{max_age: 0}, Map.get(conn.resp_cookies, Sticky.exposure_cookie(), %{}))
+    end
+
     test "the goal page leaves the shared cache while the experiment runs", ctx do
       # Invariant 4 applied to a SECOND page. The conversion is counted at the
       # origin, so a CDN holding this page for max-age=60 swallows every
@@ -376,14 +409,30 @@ defmodule KilnCMS.Experiments.StickyTest do
       # sites' worth of documents can share neither, but a dynamic type (D17)
       # and a compiled one can hold rows the other's uuid would otherwise be
       # compared against by id alone.
-      other = published_page(admin())
+      actor = admin()
+      other = published_page(actor)
 
-      {_experiment, _control, treatment} =
+      # `:start` now refuses a goal document that does not resolve (#1008
+      # review), so the mismatched pair cannot be created through the write
+      # layer any more — which is the point of that gate. Delivery's own
+      # type-AND-id comparison still has to hold for a row that reached this
+      # state some other way, so the experiment starts with a real post as its
+      # goal and is then seeded onto the page's id.
+      post =
+        CMS.create_post!(
+          %{title: "Goal", slug: "sticky-post-#{System.unique_integer([:positive])}"},
+          actor: actor
+        )
+
+      {experiment, _control, treatment} =
         ExperimentFixtures.pinned!(other, "page", %{"fields" => %{"title" => @variant_headline}},
           goal: :content_view,
           goal_content_type: "post",
-          goal_document_id: ctx.target.id
+          goal_document_id: post.id
         )
+
+      Ash.Seed.update!(experiment, %{goal_document_id: ctx.target.id})
+      KilnCMS.Cache.bust_experiments(KilnCMS.Accounts.default_org_id())
 
       build_conn()
       |> put_req_cookie(Sticky.exposure_cookie(), treatment.id)

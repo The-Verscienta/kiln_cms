@@ -237,18 +237,26 @@ defmodule KilnCMSWeb.OverviewLive do
               Absent when every running experiment is healthy, and absent
               entirely on a site with none. --%>
         <div
-          :if={@blocked_experiments != []}
+          :if={@experiments_off? or @blocked_experiments != []}
           id="overview-experiment-warning"
           class="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/5 p-4"
         >
-          <.icon name="hero-beaker" class="mt-0.5 size-5 shrink-0 text-warning" />
+          <.icon name="hero-beaker" class="mt-0.5 size-5 shrink-0 text-warning-ink" />
           <div class="min-w-0">
-            <span class="block text-sm font-medium">
+            <%!-- The deployment switch is site-wide, so it is said once, here,
+                  rather than repeated under every experiment (#1008 review). --%>
+            <span :if={@experiments_off?} class="block text-sm font-medium">
+              {gettext("Experiments are switched off for this deployment, so no arm is served.")}
+            </span>
+            <%!-- NOT "cannot convert": two of the reasons below mean the
+                  opposite — a goal that is the experimented document converts
+                  every impression on the view that created it. What they share
+                  is that the numbers are not a result. --%>
+            <span :if={@blocked_experiments != []} class="block text-sm font-medium">
               {ngettext(
-                "A running experiment cannot convert.",
-                "%{count} running experiments cannot convert.",
-                length(@blocked_experiments),
-                count: length(@blocked_experiments)
+                "A running experiment is not producing usable results.",
+                "%{count} running experiments are not producing usable results.",
+                length(@blocked_experiments)
               )}
             </span>
             <ul class="mt-1 space-y-0.5 text-xs text-base-content/70">
@@ -372,35 +380,53 @@ defmodule KilnCMSWeb.OverviewLive do
   # seen by an editor, or coverage on a single-locale site).
   @tile_order [:xun, :li, :kun, :zhen, :dui, :gen, :kan, :qian]
 
-  # Reads the backup manifest — one small file, no query. Computed at mount
-  # rather than per render, and only the two values the strip needs, so the
-  # whole `Backups.status/0` map isn't held in the socket for a banner that is
-  # usually absent.
   # Only the name and the reason atom reach the socket — never the experiment
   # structs, which carry every variant's patch. The English sentence
   # `Health.blocked_reason/1` also returns is for the terminal; this surface
   # phrases its own so the strip translates (#1008).
+  #
+  # `experiments_off?` is the site-wide half, kept separate from the per-row
+  # reasons: `Health` deliberately no longer folds the deployment switch into a
+  # per-experiment verdict, because doing so said the same thing on every row
+  # and hid the real reasons behind it.
   defp assign_blocked_experiments(socket) do
-    blocked =
-      if socket.assigns.admin? do
-        socket.assigns.current_org.id
-        |> KilnCMS.Experiments.blocked()
-        |> Enum.map(fn {experiment, {reason, _sentence}} -> {experiment.name, reason} end)
-      else
-        []
-      end
+    if socket.assigns.admin? do
+      running = KilnCMS.Experiments.running(socket.assigns.current_org.id)
 
-    assign(socket, :blocked_experiments, blocked)
+      socket
+      |> assign(:blocked_experiments, Enum.flat_map(running, &blocked_row/1))
+      |> assign(:experiments_off?, running != [] and not KilnCMS.Experiments.enabled?())
+    else
+      socket
+      |> assign(:blocked_experiments, [])
+      |> assign(:experiments_off?, false)
+    end
   rescue
     # The overview must render even when the experiments layer cannot answer.
     # Same posture as `Experiments.running/1`, and logged for the same reason.
     error ->
       Logger.warning("Overview could not check experiment health: #{Exception.message(error)}")
-      assign(socket, :blocked_experiments, [])
+
+      socket
+      |> assign(:blocked_experiments, [])
+      |> assign(:experiments_off?, false)
   end
 
-  defp blocked_headline(:deployment_disabled),
-    do: gettext("experiments are switched off for this deployment")
+  # Restored to the function it documents — a later insertion split it from
+  # `assign_backup_warning/1` and left this reading as though the experiment
+  # check were the cheap one (#1008 review).
+  #
+  # Reads the backup manifest — one small file, no query. Computed at mount
+  # rather than per render, and only the two values the strip needs, so the
+  # whole `Backups.status/0` map isn't held in the socket for a banner that is
+  # usually absent.
+
+  defp blocked_row(experiment) do
+    case KilnCMS.Experiments.blocked_reason(experiment) do
+      nil -> []
+      {reason, _sentence} -> [{experiment.name, reason}]
+    end
+  end
 
   defp blocked_headline(:sticky_off),
     do: gettext("its goal converts on a later page, and sticky assignment is off")
@@ -424,6 +450,27 @@ defmodule KilnCMSWeb.OverviewLive do
 
   defp blocked_headline(:funnel_target_missing),
     do: gettext("its funnel no longer resolves to a document")
+
+  defp blocked_headline(:document_missing),
+    do: gettext("the document under test has been deleted")
+
+  defp blocked_headline(:document_unpublished),
+    do: gettext("the document under test is not published, so no arm is served")
+
+  defp blocked_headline(:goal_document_unpublished),
+    do: gettext("its goal document is not published")
+
+  defp blocked_headline(:goal_form_inactive),
+    do: gettext("its goal form is no longer accepting submissions")
+
+  # "could not be read" is deliberately NOT "has been deleted": a pool timeout
+  # and a deletion are the same tuple at the call site, and telling an admin a
+  # form was removed sends them to restore something nobody touched.
+  defp blocked_headline(:goal_unreadable),
+    do: gettext("its goal could not be read — this may be temporary")
+
+  defp blocked_headline(:unknown_goal),
+    do: gettext("its goal is one this version cannot check")
 
   # Deliberately total: a reason added to `Health` and not here would otherwise
   # crash the overview, which is a worse outcome than a vaguer sentence.
