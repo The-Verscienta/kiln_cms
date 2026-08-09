@@ -231,9 +231,10 @@ defmodule KilnCMS.Experiments.Health do
   # is one comparison and the alternative is trusting that no legacy row, seed
   # or direct-SQL write ever produced one.
   #
-  # NOTE for delivery: `Delivery.goal_document?/3` does NOT guard this case on
-  # the `:content_view` branch (the funnel branch does), so if it were ever
-  # reached the experiment would convert every impression rather than none.
+  # `Delivery.goal_document?/3` guards this case on both goal branches, so what
+  # this reports and what delivery does now agree: nothing converts. Before that
+  # guard the `:content_view` branch would have converted EVERY impression —
+  # the opposite of what this says — which is why the two were fixed together.
   defp target_elsewhere(%{
          goal_content_type: type,
          goal_document_id: id,
@@ -242,8 +243,9 @@ defmodule KilnCMS.Experiments.Health do
        }) do
     {:blocked,
      {:goal_is_self,
-      "the goal document is the experimented document itself, so every " <>
-        "impression would convert on the view that created it"}}
+      "the goal document is the experimented document itself, so nothing " <>
+        "converts — a view cannot be a conversion of the impression that same " <>
+        "view created, and delivery refuses to count it"}}
   end
 
   defp target_elsewhere(_experiment), do: :ok
@@ -302,7 +304,8 @@ defmodule KilnCMS.Experiments.Health do
   defp funnel_target_usable(%{content_type: type, document_id: id} = experiment, type, id) do
     {:funnel_ends_here,
      "funnel #{experiment.goal_funnel_id} now ends on the experimented document " <>
-       "itself, so every impression would convert on the view that created it"}
+       "itself, so nothing converts — a view cannot be a conversion of the " <>
+       "impression that same view created, and delivery refuses to count it"}
   end
 
   defp funnel_target_usable(experiment, type, id) do

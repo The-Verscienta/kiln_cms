@@ -245,9 +245,15 @@ defmodule KilnCMS.Experiments.Delivery do
   # `:content_view` states it outright; `:funnel_completion` names a funnel and
   # means its FINAL step (#1010), so if an editor reorders the funnel the goal
   # follows without anyone editing the experiment.
+  #
+  # BOTH carry the self-conversion guard below, for the reason spelled out over
+  # the funnel clause. The two differ only in how reachable the state is today —
+  # not in what happens if it is reached — so they are guarded the same way.
   defp goal_document?(%{goal: :content_view} = experiment, content_type, id) do
-    experiment.goal_content_type == to_string(content_type) and
-      experiment.goal_document_id == id
+    type = to_string(content_type)
+
+    experiment.goal_content_type == type and experiment.goal_document_id == id and
+      not experimented_document?(experiment, type, id)
   end
 
   # The self-conversion guard has to be HERE as well as in
@@ -262,6 +268,14 @@ defmodule KilnCMS.Experiments.Delivery do
   # later, so the impression would convert itself within one request, the
   # exposure would be spent, and the next request would mint and convert another
   # — every arm reporting 100% forever.
+  #
+  # The `:content_view` clause above is the same failure with a narrower way in.
+  # `:start` refuses a self-goal and a running experiment cannot be edited, so
+  # today it takes a seed or a direct write — but "unreachable" is a property of
+  # the *write* layer, and this is the *delivery* layer. `/editor/experiments`
+  # (#982) adds an editing surface, and `Health.blocked_reason/1` (#1008) reports
+  # `:goal_is_self` as "no usable result", which is the opposite of what an
+  # unguarded delivery would do. Guarding here is what makes that report true.
   defp goal_document?(%{goal: :funnel_completion} = experiment, content_type, id) do
     case Experiments.funnel_target(experiment) do
       {type, document_id} ->
