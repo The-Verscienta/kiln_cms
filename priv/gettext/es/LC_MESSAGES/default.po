@@ -24,7 +24,7 @@ msgid "Attempting to reconnect"
 msgstr "Intentando reconectar"
 
 #: lib/kiln_cms_web/components/layouts.ex:811
-#: lib/kiln_cms_web/controllers/content_controller.ex:490
+#: lib/kiln_cms_web/controllers/content_controller.ex:499
 #: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:2
 #, elixir-autogen, elixir-format
 msgid "Blog"
@@ -114,7 +114,7 @@ msgstr "Archivar"
 #: lib/kiln_cms_web/live/team_live.ex:476
 #: lib/kiln_cms_web/live/team_live.ex:568
 #: lib/kiln_cms_web/live/trash_live.ex:290
-#: lib/kiln_cms_web/live/type_definition_live.ex:388
+#: lib/kiln_cms_web/live/type_definition_live.ex:438
 #: lib/kiln_cms_web/live/webhook_live.ex:393
 #, elixir-autogen, elixir-format
 msgid "Cancel"
@@ -152,7 +152,7 @@ msgstr "Eliminar"
 #: lib/kiln_cms_web/live/taxonomy_live.ex:633
 #: lib/kiln_cms_web/live/team_live.ex:434
 #: lib/kiln_cms_web/live/team_live.ex:536
-#: lib/kiln_cms_web/live/type_definition_live.ex:312
+#: lib/kiln_cms_web/live/type_definition_live.ex:337
 #: lib/kiln_cms_web/live/webhook_live.ex:351
 #, elixir-autogen, elixir-format
 msgid "Edit"
@@ -461,7 +461,7 @@ msgstr "Describa la imagen para los lectores de pantalla"
 #: lib/kiln_cms_web/live/team_live.ex:502
 #: lib/kiln_cms_web/live/team_live.ex:562
 #: lib/kiln_cms_web/live/type_definition_live.ex:206
-#: lib/kiln_cms_web/live/type_definition_live.ex:342
+#: lib/kiln_cms_web/live/type_definition_live.ex:367
 #, elixir-autogen, elixir-format
 msgid "Description"
 msgstr "Descripción"
@@ -568,7 +568,7 @@ msgstr "%{name} se movió a la papelera."
 #: lib/kiln_cms_web/live/team_live.ex:499
 #: lib/kiln_cms_web/live/team_live.ex:561
 #: lib/kiln_cms_web/live/type_definition_live.ex:189
-#: lib/kiln_cms_web/live/type_definition_live.ex:339
+#: lib/kiln_cms_web/live/type_definition_live.ex:364
 #, elixir-autogen, elixir-format
 msgid "Name"
 msgstr "Nombre"
@@ -654,7 +654,7 @@ msgstr "Variantes responsivas"
 #: lib/kiln_cms_web/live/content_editor_live.ex:8302
 #: lib/kiln_cms_web/live/media_live.ex:1261
 #: lib/kiln_cms_web/live/trash_live.ex:328
-#: lib/kiln_cms_web/live/type_definition_live.ex:414
+#: lib/kiln_cms_web/live/type_definition_live.ex:464
 #, elixir-autogen, elixir-format
 msgid "Restore"
 msgstr "Restaurar"
@@ -715,7 +715,7 @@ msgstr "Título SEO"
 #: lib/kiln_cms_web/live/taxonomy_live.ex:670
 #: lib/kiln_cms_web/live/team_live.ex:474
 #: lib/kiln_cms_web/live/team_live.ex:566
-#: lib/kiln_cms_web/live/type_definition_live.ex:382
+#: lib/kiln_cms_web/live/type_definition_live.ex:432
 #: lib/kiln_cms_web/live/webhook_live.ex:391
 #, elixir-autogen, elixir-format
 msgid "Save"
@@ -1695,7 +1695,7 @@ msgstr "JSON:API"
 msgid "Label"
 msgstr "Etiqueta"
 
-#: lib/kiln_cms_web/controllers/content_controller.ex:491
+#: lib/kiln_cms_web/controllers/content_controller.ex:500
 #, elixir-autogen, elixir-format
 msgid "Latest posts."
 msgstr "Últimas entradas."
@@ -1778,7 +1778,7 @@ msgstr "Opciones (una por línea — solo para tipo selección)"
 msgid "Page %{page}"
 msgstr "Página %{page}"
 
-#: lib/kiln_cms_web/controllers/content_controller.ex:1339
+#: lib/kiln_cms_web/controllers/content_controller.ex:1356
 #: lib/kiln_cms_web/controllers/error_html/404.html.heex:7
 #, elixir-autogen, elixir-format
 msgid "Page not found"
@@ -1896,7 +1896,7 @@ msgstr "Guardando…"
 #: lib/kiln_cms_web/components/layouts.ex:361
 #: lib/kiln_cms_web/components/layouts.ex:447
 #: lib/kiln_cms_web/components/layouts.ex:814
-#: lib/kiln_cms_web/controllers/content_controller.ex:630
+#: lib/kiln_cms_web/controllers/content_controller.ex:639
 #: lib/kiln_cms_web/controllers/content_html/search.html.heex:2
 #: lib/kiln_cms_web/live/analytics_live.ex:230
 #: lib/kiln_cms_web/live/analytics_live.ex:465
@@ -2018,7 +2018,7 @@ msgstr "— Ninguno —"
 msgid "%B %-d, %Y"
 msgstr "%-d de %B de %Y"
 
-#: lib/kiln_cms_web/live/type_definition_live.ex:295
+#: lib/kiln_cms_web/live/type_definition_live.ex:320
 #, elixir-autogen, elixir-format
 msgid "%{count} field"
 msgid_plural "%{count} fields"
@@ -2081,12 +2081,12 @@ msgstr "abril"
 msgid "Archive %{count} selected item(s)? Archived content leaves the site; you can unarchive it later."
 msgstr "¿Archivar %{count} elemento(s) seleccionado(s)? El contenido archivado sale del sitio; puede desarchivarlo más tarde."
 
-#: lib/kiln_cms_web/live/type_definition_live.ex:323
+#: lib/kiln_cms_web/live/type_definition_live.ex:348
 #, elixir-autogen, elixir-format
 msgid "Archive content type"
 msgstr "Archivar tipo de contenido"
 
-#: lib/kiln_cms_web/live/type_definition_live.ex:319
+#: lib/kiln_cms_web/live/type_definition_live.ex:344
 #, elixir-autogen, elixir-format
 msgid "Archive this content type? Its entries stop being served but are kept, and you can restore it later."
 msgstr "¿Archivar este tipo de contenido? Sus entradas dejan de servirse pero se conservan, y puede restaurarlo más tarde."
@@ -2096,7 +2096,7 @@ msgstr "¿Archivar este tipo de contenido? Sus entradas dejan de servirse pero s
 msgid "Archived type"
 msgstr "Tipo archivado"
 
-#: lib/kiln_cms_web/live/type_definition_live.ex:397
+#: lib/kiln_cms_web/live/type_definition_live.ex:447
 #, elixir-autogen, elixir-format
 msgid "Archived types"
 msgstr "Tipos archivados"
@@ -2151,7 +2151,7 @@ msgstr "No se pudo archivar ese tipo de contenido."
 msgid "Couldn't restore that content type."
 msgstr "No se pudo restaurar ese tipo de contenido."
 
-#: lib/kiln_cms_web/live/type_definition_live.ex:262
+#: lib/kiln_cms_web/live/type_definition_live.ex:287
 #, elixir-autogen, elixir-format
 msgid "Create content type"
 msgstr "Crear tipo de contenido"
@@ -2178,7 +2178,7 @@ msgstr "diciembre"
 msgid "Define a new content type without a code change, then add its fields under Custom fields. Built-in types (pages, posts) are defined in code and don't appear here."
 msgstr "Defina un nuevo tipo de contenido sin cambiar el código y luego añada sus campos en Campos personalizados. Los tipos integrados (páginas, entradas) se definen en el código y no aparecen aquí."
 
-#: lib/kiln_cms_web/live/type_definition_live.ex:268
+#: lib/kiln_cms_web/live/type_definition_live.ex:293
 #, elixir-autogen, elixir-format
 msgid "Defined types"
 msgstr "Tipos definidos"
@@ -2215,22 +2215,22 @@ msgstr "Filtrar por nombre de archivo, texto alternativo o leyenda"
 msgid "Filter by filename, alt text or caption"
 msgstr "Filtrar por nombre de archivo, texto alternativo o leyenda"
 
-#: lib/kiln_cms_web/live/type_definition_live.ex:379
+#: lib/kiln_cms_web/live/type_definition_live.ex:429
 #, elixir-autogen, elixir-format
 msgid "Has a public index"
 msgstr "Tiene un índice público"
 
-#: lib/kiln_cms_web/live/type_definition_live.ex:259
+#: lib/kiln_cms_web/live/type_definition_live.ex:284
 #, elixir-autogen, elixir-format
 msgid "Has a public index of published entries"
 msgstr "Tiene un índice público de entradas publicadas"
 
-#: lib/kiln_cms_web/live/type_definition_live.ex:368
+#: lib/kiln_cms_web/live/type_definition_live.ex:418
 #, elixir-autogen, elixir-format
 msgid "Has an excerpt"
 msgstr "Tiene extracto"
 
-#: lib/kiln_cms_web/live/type_definition_live.ex:248
+#: lib/kiln_cms_web/live/type_definition_live.ex:273
 #, elixir-autogen, elixir-format
 msgid "Has an excerpt (for listings and feeds)"
 msgstr "Tiene extracto (para listados y feeds)"
@@ -2266,7 +2266,7 @@ msgstr "Cargar más"
 msgid "Loading…"
 msgstr "Cargando…"
 
-#: lib/kiln_cms_web/live/type_definition_live.ex:301
+#: lib/kiln_cms_web/live/type_definition_live.ex:326
 #, elixir-autogen, elixir-format
 msgid "Manage fields"
 msgstr "Gestionar campos"
@@ -2311,7 +2311,7 @@ msgstr "Nuevo tipo de contenido"
 msgid "No categories yet."
 msgstr "Aún no hay categorías."
 
-#: lib/kiln_cms_web/live/type_definition_live.ex:271
+#: lib/kiln_cms_web/live/type_definition_live.ex:296
 #, elixir-autogen, elixir-format
 msgid "No custom content types yet."
 msgstr "Aún no hay tipos de contenido personalizados."
@@ -2332,7 +2332,7 @@ msgid "October"
 msgstr "octubre"
 
 #: lib/kiln_cms_web/live/type_definition_live.ex:192
-#: lib/kiln_cms_web/live/type_definition_live.ex:340
+#: lib/kiln_cms_web/live/type_definition_live.ex:365
 #, elixir-autogen, elixir-format
 msgid "Plural name"
 msgstr "Nombre en plural"
@@ -2396,7 +2396,7 @@ msgstr "Demasiadas solicitudes"
 msgid "Types"
 msgstr "Tipos"
 
-#: lib/kiln_cms_web/live/type_definition_live.ex:341
+#: lib/kiln_cms_web/live/type_definition_live.ex:366
 #, elixir-autogen, elixir-format
 msgid "URL segment"
 msgstr "Segmento de URL"
@@ -4380,7 +4380,7 @@ msgid "Path alias (optional)"
 msgstr "Alias de ruta (opcional)"
 
 #: lib/kiln_cms_web/live/type_definition_live.ex:224
-#: lib/kiln_cms_web/live/type_definition_live.ex:350
+#: lib/kiln_cms_web/live/type_definition_live.ex:375
 #, elixir-autogen, elixir-format
 msgid "Path alias pattern (optional)"
 msgstr "Patrón de alias de ruta (opcional)"
@@ -4867,7 +4867,7 @@ msgid "Site tier"
 msgstr "Nivel del sitio"
 
 #: lib/kiln_cms_web/live/type_definition_live.ex:211
-#: lib/kiln_cms_web/live/type_definition_live.ex:345
+#: lib/kiln_cms_web/live/type_definition_live.ex:370
 #, elixir-autogen, elixir-format
 msgid "Slug pattern (optional)"
 msgstr "Patrón de slug (opcional)"
@@ -5484,12 +5484,12 @@ msgstr "visualizaciones de contenido registradas"
 msgid "scheduled"
 msgstr "programado"
 
-#: lib/kiln_cms_web/live/type_definition_live.ex:356
+#: lib/kiln_cms_web/live/type_definition_live.ex:406
 #, elixir-autogen, elixir-format
 msgid "schema.org type"
 msgstr "tipo de schema.org"
 
-#: lib/kiln_cms_web/live/type_definition_live.ex:236
+#: lib/kiln_cms_web/live/type_definition_live.ex:261
 #, elixir-autogen, elixir-format
 msgid "schema.org type (structured data)"
 msgstr "tipo de schema.org (datos estructurados)"
@@ -9989,7 +9989,7 @@ msgstr "No hay nada próximamente."
 msgid "Repeats"
 msgstr "Se repite"
 
-#: lib/kiln_cms_web/controllers/content_controller.ex:534
+#: lib/kiln_cms_web/controllers/content_controller.ex:543
 #, elixir-autogen, elixir-format
 msgid "What's on, soonest first."
 msgstr "Qué hay, lo más próximo primero."
@@ -10483,3 +10483,27 @@ msgstr "archivo desconocido"
 #, elixir-autogen, elixir-format
 msgid "unreadable"
 msgstr "ilegible"
+
+#: lib/kiln_cms_web/live/type_definition_live.ex:249
+#: lib/kiln_cms_web/live/type_definition_live.ex:394
+#, elixir-autogen, elixir-format
+msgid "Default SEO description (optional)"
+msgstr "Descripción SEO predeterminada (opcional)"
+
+#: lib/kiln_cms_web/live/type_definition_live.ex:236
+#: lib/kiln_cms_web/live/type_definition_live.ex:381
+#, elixir-autogen, elixir-format
+msgid "Default SEO title (optional)"
+msgstr "Título SEO predeterminado (opcional)"
+
+#: lib/kiln_cms_web/live/type_definition_live.ex:253
+#: lib/kiln_cms_web/live/type_definition_live.ex:398
+#, elixir-autogen, elixir-format
+msgid "Same tokens. Used only where an entry leaves its own meta description blank."
+msgstr "Los mismos comodines. Solo se usa cuando una entrada deja en blanco su propia meta descripción."
+
+#: lib/kiln_cms_web/live/type_definition_live.ex:240
+#: lib/kiln_cms_web/live/type_definition_live.ex:385
+#, elixir-autogen, elixir-format
+msgid "Tokens: %{tokens}, [field:<name>]. Used only where an entry leaves its own SEO title blank — nothing is written to the entry, so editing this re-titles those entries immediately."
+msgstr "Comodines: %{tokens}, [field:<name>]. Solo se usa cuando una entrada deja en blanco su propio título SEO; no se escribe nada en la entrada, así que al editar esto se retitulan esas entradas de inmediato."
