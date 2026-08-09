@@ -153,7 +153,8 @@ defmodule KilnCMS.Accounts.User do
       :role,
       :notify_on_review_request,
       :notify_on_publish,
-      :notify_on_return_to_draft
+      :notify_on_return_to_draft,
+      :notify_on_comment
     ] do
       authorize_if actor_attribute_equals(:role, :admin)
       authorize_if expr(id == ^actor(:id))
@@ -193,7 +194,12 @@ defmodule KilnCMS.Accounts.User do
     # Self-service workflow-notification preferences (issue #46). A user can
     # toggle their own; admins can edit anyone's via the policy bypass.
     update :update_notification_prefs do
-      accept [:notify_on_review_request, :notify_on_publish, :notify_on_return_to_draft]
+      accept [
+        :notify_on_review_request,
+        :notify_on_publish,
+        :notify_on_return_to_draft,
+        :notify_on_comment
+      ]
     end
 
     # Admin-only: assign a user's editorial role (authoring privilege) and the
@@ -829,6 +835,17 @@ defmodule KilnCMS.Accounts.User do
     end
 
     attribute :notify_on_return_to_draft, :boolean do
+      default true
+      allow_nil? false
+      public? true
+    end
+
+    # Editorial comments (#801). One switch for the whole feature — a reply on
+    # a thread you are in, a thread of yours being resolved, and being
+    # @mentioned. Split per-event and the useful setting ("stop the chatter,
+    # keep the mentions") would still need all three toggled together, which is
+    # the setting nobody finds.
+    attribute :notify_on_comment, :boolean do
       default true
       allow_nil? false
       public? true

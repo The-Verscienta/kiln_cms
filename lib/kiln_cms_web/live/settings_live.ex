@@ -580,6 +580,11 @@ defmodule KilnCMSWeb.SettingsLive do
               type="checkbox"
               label={gettext("Changes requested — content I authored was returned to draft")}
             />
+            <.input
+              field={@form[:notify_on_comment]}
+              type="checkbox"
+              label={gettext("Comments — replies on threads I'm in, and when someone @mentions me")}
+            />
 
             <.button type="submit" variant="primary">
               {gettext("Save preferences")}

@@ -49,6 +49,35 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
       <p>It has been moved back to draft so you can revise and resubmit.</p>
       <p><a href="[url]">Open it in the editor</a>.</p>
       """
+    },
+    # Editorial comments (#801). `[url]` carries `?comment=<block_id>`, so the
+    # link lands on the thread rather than on the document — the same deep link
+    # the shared preview's pins use (#802).
+    "comment_added" => %{
+      subject: "New comment on [title]",
+      body: """
+      <p>[actor-name] commented on the [kind] <strong>[title]</strong>:</p>
+      <blockquote>[excerpt]</blockquote>
+      <p><a href="[url]">Open the thread in the editor</a>.</p>
+      """
+    },
+    "comment_resolved" => %{
+      subject: "Comment resolved on [title]",
+      body: """
+      <p>[actor-name] marked a comment thread resolved on the [kind]
+      <strong>[title]</strong>:</p>
+      <blockquote>[excerpt]</blockquote>
+      <p><a href="[url]">Open it in the editor</a> if it needs reopening.</p>
+      """
+    },
+    "comment_mention" => %{
+      subject: "[actor-name] mentioned you on [title]",
+      body: """
+      <p>[actor-name] mentioned you in a comment on the [kind]
+      <strong>[title]</strong>:</p>
+      <blockquote>[excerpt]</blockquote>
+      <p><a href="[url]">Open the thread in the editor</a>.</p>
+      """
     }
   }
 
@@ -84,7 +113,8 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
       title: title,
       kind: kind,
       actor_display: actor_display(event, args["actor_name"]),
-      url: editor_url(kind, id)
+      excerpt: args["excerpt"] || "",
+      url: editor_url(kind, id, args["block_id"])
     }
 
     base(to)
@@ -97,6 +127,12 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
   # "reviewer", it only ever interpolates whatever display string it's given.
   defp actor_display("submitted_for_review", who), do: submitter(who)
   defp actor_display("returned_to_draft", who), do: reviewer(who)
+  # A comment always has a human behind it, but `name` is optional (#214 keeps
+  # us from falling back to the email local-part), so this needs its own
+  # neutral stand-in rather than rendering an empty subject line.
+  defp actor_display(event, nil) when event in ~w(comment_added comment_resolved comment_mention),
+    do: "An editor"
+
   defp actor_display(_event, who), do: who
 
   # Raw values — a mail header, never HTML. Still stripped of embedded
@@ -108,6 +144,7 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
       %{match: "title", resolve: fn _token, ctx -> plain(ctx.title) end},
       %{match: "kind", resolve: fn _token, ctx -> plain(ctx.kind) end},
       %{match: "actor-name", resolve: fn _token, ctx -> plain(ctx.actor_display) end},
+      %{match: "excerpt", resolve: fn _token, ctx -> plain(ctx.excerpt) end},
       %{match: "url", resolve: fn _token, ctx -> ctx.url end}
     ]
   end
@@ -119,6 +156,11 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
       %{match: "title", resolve: fn _token, ctx -> h(ctx.title) end},
       %{match: "kind", resolve: fn _token, ctx -> h(ctx.kind) end},
       %{match: "actor-name", resolve: fn _token, ctx -> h(ctx.actor_display) end},
+      # A comment body is whatever an editor typed, so this is the one token
+      # carrying free user input into the mail. It takes the same per-value
+      # escape as every other — the reason the body is escaped per token rather
+      # than as one string is exactly so a value cannot bring its own markup.
+      %{match: "excerpt", resolve: fn _token, ctx -> h(ctx.excerpt) end},
       %{match: "url", resolve: fn _token, ctx -> ctx.url end}
     ]
   end
@@ -145,6 +187,14 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
 
   defp reviewer(nil), do: "A reviewer"
   defp reviewer(who), do: who
+
+  # A comment notification links to the THREAD, not just the document — the
+  # `?comment=<block_id>` deep link the editor reads at mount, and the same one
+  # the shared preview's pins use (#802).
+  defp editor_url(kind, id, nil), do: editor_url(kind, id)
+
+  defp editor_url(kind, id, block_id),
+    do: editor_url(kind, id) <> "?" <> URI.encode_query(comment: block_id)
 
   defp editor_url("page", id), do: url(~p"/editor/pages/#{id}")
   defp editor_url("post", id), do: url(~p"/editor/posts/#{id}")

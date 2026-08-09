@@ -70,12 +70,28 @@ delivered to the public or headless API — they're editorial-only.
   Still open: whether pins should appear on the **external stakeholder token
   preview** (`/preview/:token/live`, #379). Token holders have no account or
   role, so that needs its own decision; today they see no pins.
-- **No notifications.** Adding or resolving a comment doesn't email anyone.
-  The existing workflow-notification machinery
-  (`KilnCMS.CMS.Changes.NotifyWorkflowEmail` /
-  `KilnCMS.Notifications.dispatch/3`) is the natural place to hook this in
-  later; @mentions would be net-new (no generic mention/notification-target
-  system exists elsewhere in the codebase).
+- **Notifications and @mentions** (#801, done). Adding a comment emails
+  everyone already on that block's thread plus the content's author; resolving
+  one emails the thread. Nobody is ever emailed about something they did
+  themselves — and that means the *actor*, so resolving someone else's thread
+  does tell them.
+
+  Writing `@name` in a body notifies that person instead of (not as well as)
+  the thread email — being named is the stronger signal, and two emails for one
+  comment is how people mute a feature. There is no handle column: a mention
+  matches a user's **name** with case and punctuation removed, so `@alicesmith`,
+  `@alice-smith` and `@Alice.Smith` all find Alice Smith, and `@alice` does too
+  while it is unambiguous. **An ambiguous handle notifies nobody** — two people
+  called Alice, and `@alice` reaches neither, because guessing would send
+  someone's review feedback to the wrong person.
+
+  Candidates are the org's members plus any user belonging to no org, so a
+  mention cannot carry another tenant's content title into an outsider's inbox.
+
+  One switch covers all of it — **Comments** under notification preferences —
+  and the email links straight to the thread (`?comment=<block_id>`), the same
+  deep link the preview's pins use. Only a short excerpt of the body travels;
+  the conversation stays in the editor.
 - **Nested (columns child) blocks** carry their own stable ids and so *can*
   be commented on in principle, but nothing in the editor UI currently treats
   a nested block's id as an independently addressable comment target beyond
