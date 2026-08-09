@@ -1,11 +1,13 @@
-// Service worker for the installable editor PWA (issue #65).
+// Service worker for the installable editor PWA (issues #65, #628).
 //
-// Deliberately minimal. Two jobs, and nothing else:
+// Deliberately minimal. Three jobs, and nothing else:
 //
 //   1. Exist, with a `fetch` handler — Chromium won't offer "Install" without
 //      one, so this is the price of admission for an installable app.
 //   2. Show a readable offline page instead of the browser's error page when a
 //      navigation fails.
+//   3. Show a notification when the review queue gains something, and focus the
+//      already-open editor when it's tapped (#628).
 //
 // It caches NO application HTML and NO API responses, on purpose. Every editor
 // page is per-user and per-org (epic #336) and most of it is unpublished draft
@@ -72,6 +74,81 @@ self.addEventListener("fetch", (event) => {
           headers: {"Content-Type": "text/plain; charset=utf-8"}
         })
       )
+    })
+  )
+})
+
+// ── Push (#628) ─────────────────────────────────────────────────────────────
+//
+// The payload is JSON encrypted end-to-end by KilnCMS.Push.Encryption and
+// carries NO draft content — a kind, a canned line, and a link to a filtered
+// queue. See the KilnCMS.Push moduledoc for why.
+
+self.addEventListener("push", (event) => {
+  // `showNotification` is not optional. A browser that grants push permission
+  // and then receives a push the worker does not surface will, after a couple
+  // of times, show its own "This site has been updated in the background"
+  // notification — or revoke the permission outright. So every branch here,
+  // including a malformed payload, ends in one.
+  let data = {}
+  try {
+    data = event.data ? event.data.json() : {}
+  } catch (_error) {
+    // Not JSON. Fall through to the defaults rather than throwing, which would
+    // leave the promise rejected and the notification unshown.
+  }
+
+  const title = data.title || "KilnCMS"
+  const options = {
+    body: data.body || "Something needs your attention.",
+    // One tag PER EVENT KIND, not one overall. Coalescing repeated review
+    // requests is the point — a reviewer who was away returns to one
+    // notification rather than nine. Coalescing *different* events is a bug:
+    // with `renotify: false`, a "Changes requested" would silently overwrite an
+    // undismissed "Review requested" with no sound and no re-alert, and the
+    // reviewer would never learn the second thing happened.
+    tag: data.tag || "kiln",
+    renotify: false,
+    icon: "/images/app-icon-192.png",
+    badge: "/images/app-icon-192.png",
+    data: {url: data.url || "/editor"}
+  }
+
+  event.waitUntil(self.registration.showNotification(title, options))
+})
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close()
+
+  const target = new URL(
+    (event.notification.data && event.notification.data.url) || "/editor",
+    self.location.origin
+  )
+
+  // Only ever navigate within our own origin: `data.url` arrives over the
+  // network, and an absolute URL to somewhere else would turn a notification
+  // into an open redirect out of the installed app.
+  if (target.origin !== self.location.origin) return
+
+  event.waitUntil(
+    self.clients.matchAll({type: "window", includeUncontrolled: true}).then((clients) => {
+      // Focus a window that is already ours rather than opening a second one —
+      // an installed PWA has exactly one.
+      //
+      // Focus, and *only* focus: `client.navigate()` is a full-page navigation
+      // of that very window, which would tear down an editor the reviewer had
+      // unsaved work in — the opposite of what reusing the window is for. It
+      // also rejects for a client this worker does not control, which
+      // `includeUncontrolled` deliberately admits. So the reviewer lands in the
+      // app and taps through from there; only when there is no window at all do
+      // we open one at the target.
+      for (const client of clients) {
+        if (new URL(client.url).origin === self.location.origin && "focus" in client) {
+          return client.focus()
+        }
+      }
+
+      return self.clients.openWindow(target.href)
     })
   )
 })

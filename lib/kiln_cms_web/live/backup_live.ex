@@ -286,27 +286,6 @@ defmodule KilnCMSWeb.BackupLive do
 
   # Coarse on purpose: "3 days" is the fact an admin acts on, and a precise
   # duration invites reading it as a schedule.
-  defp ago(nil), do: gettext("an unknown time")
-
-  defp ago(%DateTime{} = at) do
-    seconds = DateTime.diff(DateTime.utc_now(), at, :second)
-
-    cond do
-      seconds < 60 ->
-        gettext("less than a minute")
-
-      seconds < 3600 ->
-        ngettext("%{count} minute", "%{count} minutes", div(seconds, 60), count: div(seconds, 60))
-
-      seconds < 86_400 ->
-        ngettext("%{count} hour", "%{count} hours", div(seconds, 3600), count: div(seconds, 3600))
-
-      true ->
-        ngettext("%{count} day", "%{count} days", div(seconds, 86_400),
-          count: div(seconds, 86_400)
-        )
-    end
-  end
 
   defp humanize_bytes(b) when not is_integer(b) or b < 0, do: "—"
   defp humanize_bytes(b) when b < 1_024, do: "#{b} B"

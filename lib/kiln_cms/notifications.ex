@@ -1,6 +1,7 @@
 defmodule KilnCMS.Notifications do
   @moduledoc """
-  Outbound email notifications for content-workflow events.
+  Outbound notifications for content-workflow events — email, and Web Push to
+  an installed editor PWA (#628).
 
   Mirrors the webhook pipeline (`KilnCMS.Webhooks`): a lifecycle change calls
   `dispatch/3`, which resolves recipients (as a system read) and enqueues one
@@ -28,11 +29,25 @@ defmodule KilnCMS.Notifications do
   (`User.notify_on_*`, issue #46) before a job is enqueued: a user who has
   muted an event for their account is skipped. Preferences default on, so
   existing behaviour is unchanged until someone opts out.
+
+  ## Push rides the same recipient decision
+
+  `KilnCMS.Push.notify/2` is called with the *same* filtered recipient list the
+  mail jobs are enqueued for, from the one place that computes it. That is the
+  point of putting it here rather than at the call sites: a reviewer who muted
+  an event must not have it arrive on their phone anyway, and two independent
+  recipient rules would drift the first time one of them changed.
+
+  Push is off unless the deployment has VAPID keys, and carries no draft
+  content — see `KilnCMS.Push`.
   """
   require Ash.Query
 
+  use Gettext, backend: KilnCMSWeb.Gettext
+
   alias KilnCMS.Accounts.User
   alias KilnCMS.Notifications.WorkflowMailWorker
+  alias KilnCMS.Push
 
   @type event ::
           :submitted_for_review
@@ -48,7 +63,7 @@ defmodule KilnCMS.Notifications do
     |> Ash.read!(authorize?: false)
     |> Enum.reject(&same_user?(&1, actor))
     |> Enum.filter(&wants?(&1, :submitted_for_review))
-    |> Enum.each(&enqueue(email_of(&1), :submitted_for_review, record, actor))
+    |> notify(:submitted_for_review, record, actor)
   end
 
   def dispatch(:published, record, _actor) do
@@ -236,11 +251,54 @@ defmodule KilnCMS.Notifications do
     author = record |> Ash.load!(:author, authorize?: false) |> Map.get(:author)
 
     if author && wants?(author, event) do
-      enqueue(email_of(author), event, record, actor)
+      notify([author], event, record, actor)
     else
       :ok
     end
   end
+
+  # One recipient list, both channels. Push first because it is a cheap enqueue
+  # that cannot fail the caller; either way the editorial action is already
+  # committed and neither channel may raise into it.
+  defp notify(recipients, event, record, actor) do
+    Push.notify(recipients, push_payload(event, record))
+    Enum.each(recipients, &enqueue(email_of(&1), event, record, actor))
+  end
+
+  # Deliberately content-free beyond the type name — see `KilnCMS.Push`. No
+  # title, no excerpt, no id, and the link is the filtered queue rather than
+  # the document, so nothing here identifies an unpublished record to the push
+  # service or to anyone reading a lock screen over a shoulder.
+  # Translated, because a lock screen is the one place a reviewer definitely
+  # reads these. `kind/1` is a content-type name, which has no catalog entry —
+  # it goes in as an interpolation so the sentence around it can still be
+  # translated, which is the best available without a per-type message.
+  #
+  # A distinct `tag` per event: the service worker coalesces on it, and
+  # coalescing two *different* events would silently replace one with the other.
+  defp push_payload(:submitted_for_review, record),
+    do: %{
+      "title" => gettext("Review requested"),
+      "body" => gettext("A %{kind} is waiting for review.", kind: kind(record)),
+      "tag" => "kiln-review",
+      "url" => "/editor?status=in_review"
+    }
+
+  defp push_payload(:published, record),
+    do: %{
+      "title" => gettext("Published"),
+      "body" => gettext("A %{kind} you authored is now live.", kind: kind(record)),
+      "tag" => "kiln-published",
+      "url" => "/editor"
+    }
+
+  defp push_payload(:returned_to_draft, record),
+    do: %{
+      "title" => gettext("Changes requested"),
+      "body" => gettext("A %{kind} you authored was returned to draft.", kind: kind(record)),
+      "tag" => "kiln-returned",
+      "url" => "/editor?status=draft"
+    }
 
   # Per-user opt-out (issue #46). Unknown/legacy users default to opted-in.
   defp wants?(%{notify_on_review_request: enabled?}, :submitted_for_review), do: enabled?

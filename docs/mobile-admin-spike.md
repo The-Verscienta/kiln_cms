@@ -237,10 +237,13 @@ Delivered with this document, because it reaches the goal the issue names:
 
 Honest limits. Each is filed, so closing #65 doesn't bury them:
 
-- **No push notifications for the review queue.** Web Push works on Android and
-  on iOS 16.4+ *for installed* PWAs, but it needs VAPID keys, a subscription
-  store and a server-side sender. None of that exists here —
-  [#628](https://github.com/The-Verscienta/kiln_cms/issues/628).
+- ~~**No push notifications for the review queue.**~~ **Done** —
+  [#628](https://github.com/The-Verscienta/kiln_cms/issues/628). A reviewer can
+  turn notifications on per device in `/editor/settings`, and a submission for
+  review reaches their home screen. Off unless the deployment sets a VAPID pair
+  (`mix kiln.vapid.gen`, then `KILN_VAPID_*`), and the payload never carries
+  draft content — see `KilnCMS.Push`. iOS still needs 16.4+ *and* the app added
+  to the home screen; the toggle hides itself where the browser cannot honour it.
 - **No offline reading or queued approvals.** By design — see the caching note
   above. Offline authoring is a substantially larger design problem than a cache
   entry, and is not filed as a follow-up because it is not obviously wanted.
