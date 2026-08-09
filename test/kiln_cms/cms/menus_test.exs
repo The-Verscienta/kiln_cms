@@ -402,4 +402,106 @@ defmodule KilnCMS.CMS.MenusTest do
       assert CMS.list_menu_items!(authorize?: false) == []
     end
   end
+
+  # #900. `build/3` descends from the roots and emits each item under its single
+  # parent, so an item in a parent cycle renders nowhere — it and its subtree
+  # vanish from the served menu and from the editor's own tree, with no error and
+  # no row deleted. `detached/2` is what makes that recoverable.
+  #
+  # The cycle is written with `Ash.Seed.update!`, which goes straight to the row:
+  # `Validations.MenuItemPlacement` refuses this at the write, and the point of
+  # the issue is that two concurrent writers can each pass that validation
+  # against pre-commit state and commit one anyway.
+  describe "detached items (#900)" do
+    test "a parent cycle is reported, and its members are absent from the tree" do
+      actor = user(:editor)
+      menu = menu(actor)
+
+      a = item(actor, menu, %{label: "A", link_type: :none})
+      d = item(actor, menu, %{label: "D", link_type: :none, parent_id: a.id})
+      kept = item(actor, menu, %{label: "Top", link_type: :none})
+
+      # A.parent_id = D, completing A → D → A.
+      Ash.Seed.update!(a, %{parent_id: d.id})
+
+      detached = Menus.detached(menu, org_id())
+      assert Enum.map(detached, & &1.label) |> Enum.sort() == ["A", "D"]
+
+      # And they really are missing from the tree, which is the damage.
+      assert [%{label: "Top"}] = Menus.tree(menu, org_id(), include_hidden?: true)
+      refute Enum.find(detached, &(&1.id == kept.id))
+    end
+
+    test "a child of a cycle member is detached too" do
+      actor = user(:editor)
+      menu = menu(actor)
+
+      a = item(actor, menu, %{label: "A", link_type: :none})
+      d = item(actor, menu, %{label: "D", link_type: :none, parent_id: a.id})
+      leaf = item(actor, menu, %{label: "Leaf", link_type: :none, parent_id: d.id})
+
+      Ash.Seed.update!(a, %{parent_id: d.id})
+
+      assert Menus.detached(menu, org_id()) |> Enum.map(& &1.label) |> Enum.sort() ==
+               ["A", "D", "Leaf"]
+
+      assert Menus.tree(menu, org_id(), include_hidden?: true) == []
+      assert leaf.parent_id == d.id
+    end
+
+    test "a healthy menu reports nothing, hidden and unpublished items included" do
+      actor = user(:editor)
+      menu = menu(actor)
+
+      top = item(actor, menu, %{label: "Top", link_type: :none})
+      item(actor, menu, %{label: "Nested", link_type: :none, parent_id: top.id})
+      # Hidden, and a :content item whose target is a draft: both are legitimately
+      # absent from a rendered tree and neither is detached — `detached/2` asks a
+      # structural question, not a visibility one.
+      item(actor, menu, %{label: "Hidden", link_type: :none, visible: false})
+
+      draft = Ash.Seed.seed!(KilnCMS.CMS.Page, %{title: "D", slug: "md-#{uniq()}", state: :draft})
+
+      item(actor, menu, %{
+        label: "Draft target",
+        link_type: :content,
+        target_type: "page",
+        target_id: draft.id
+      })
+
+      assert Menus.detached(menu, org_id()) == []
+    end
+
+    # A `parent_id` pointing at a row that does not exist is impossible — the
+    # foreign key refuses it, verified by `Ash.Seed.update!` raising "would leave
+    # records behind". What the key does *not* require is that the parent share
+    # this item's menu, and nothing renders through a parent in another tree.
+    test "an item parented outside this menu is detached" do
+      actor = user(:editor)
+      menu = menu(actor)
+      elsewhere = menu(actor, %{key: "other-#{uniq()}"})
+
+      foreign_parent = item(actor, elsewhere, %{label: "Elsewhere", link_type: :none})
+      orphan = item(actor, menu, %{label: "Orphan", link_type: :none})
+      Ash.Seed.update!(orphan, %{parent_id: foreign_parent.id})
+
+      assert [%{label: "Orphan"}] = Menus.detached(menu, org_id())
+      # And the other menu is unaffected — this is not a global scan.
+      assert Menus.detached(elsewhere, org_id()) == []
+    end
+
+    test "a long chain terminates rather than recursing forever" do
+      actor = user(:editor)
+      menu = menu(actor)
+
+      # Three in a ring: the walk must stop on the revisit, not on a depth cap.
+      a = item(actor, menu, %{label: "A", link_type: :none})
+      b = item(actor, menu, %{label: "B", link_type: :none, parent_id: a.id})
+      c = item(actor, menu, %{label: "C", link_type: :none, parent_id: b.id})
+      Ash.Seed.update!(a, %{parent_id: c.id})
+
+      assert Menus.detached(menu, org_id()) |> Enum.map(& &1.label) |> Enum.sort() ==
+               ["A", "B", "C"]
+    end
+  end
 end

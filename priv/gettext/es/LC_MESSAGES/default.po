@@ -3111,6 +3111,11 @@ msgstr "Describe qué debe decir esta sección y vuelve a intentarlo."
 msgid "Description"
 msgstr "Descripción"
 
+#: lib/kiln_cms_web/live/menu_live.ex
+#, elixir-autogen, elixir-format
+msgid "Detached items"
+msgstr "Elementos desconectados"
+
 #: lib/kiln_cms_web/controllers/page_controller.ex
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
@@ -5009,6 +5014,11 @@ msgstr "Bajar la imagen"
 #, elixir-autogen, elixir-format
 msgid "Move image up"
 msgstr "Subir la imagen"
+
+#: lib/kiln_cms_web/live/menu_live.ex
+#, elixir-autogen, elixir-format
+msgid "Move to top level"
+msgstr "Mover al primer nivel"
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
@@ -8648,6 +8658,11 @@ msgstr "Todavía no hay suficiente contenido para deducir metadatos."
 #, elixir-autogen, elixir-format
 msgid "These addresses hard-bounced and are skipped on future sends. Remove one to let it receive mail again."
 msgstr "Estas direcciones rebotaron de forma permanente y se omiten en los próximos envíos. Quite una para que vuelva a recibir correo."
+
+#: lib/kiln_cms_web/live/menu_live.ex
+#, elixir-autogen, elixir-format
+msgid "These items are not reachable from the top level, so they do not appear in the menu above or on the site. Moving one to the top level brings it back, along with anything nested under it — start with the outermost, and the rest may return on their own."
+msgstr "No se puede llegar a estos elementos desde el primer nivel, así que no aparecen ni en el menú de arriba ni en el sitio. Mover uno al primer nivel lo recupera junto con todo lo que contenga: empiece por el más externo, y puede que los demás vuelvan solos."
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #, elixir-autogen, elixir-format

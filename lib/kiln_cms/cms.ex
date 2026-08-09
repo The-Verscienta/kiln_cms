@@ -345,6 +345,7 @@ defmodule KilnCMS.CMS do
       define :get_menu_item, action: :read, get_by: [:id]
       define :create_menu_item, action: :create
       define :update_menu_item, action: :update
+      define :reparent_menu_item, action: :reparent
       define :destroy_menu_item, action: :destroy
     end
 

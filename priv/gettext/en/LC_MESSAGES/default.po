@@ -3111,6 +3111,11 @@ msgstr ""
 msgid "Description"
 msgstr ""
 
+#: lib/kiln_cms_web/live/menu_live.ex
+#, elixir-autogen, elixir-format
+msgid "Detached items"
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/page_controller.ex
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
@@ -5008,6 +5013,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Move image up"
+msgstr ""
+
+#: lib/kiln_cms_web/live/menu_live.ex
+#, elixir-autogen, elixir-format
+msgid "Move to top level"
 msgstr ""
 
 #: lib/kiln_cms_web/live/editor_live.ex
@@ -8647,6 +8657,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "These addresses hard-bounced and are skipped on future sends. Remove one to let it receive mail again."
+msgstr ""
+
+#: lib/kiln_cms_web/live/menu_live.ex
+#, elixir-autogen, elixir-format, fuzzy
+msgid "These items are not reachable from the top level, so they do not appear in the menu above or on the site. Moving one to the top level brings it back, along with anything nested under it — start with the outermost, and the rest may return on their own."
 msgstr ""
 
 #: lib/kiln_cms_web/components/version_diff_components.ex

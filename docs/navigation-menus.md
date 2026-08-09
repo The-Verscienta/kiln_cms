@@ -57,8 +57,27 @@ The *read* path is safe regardless of what is stored. Two editors re-parenting
 concurrently can commit a cycle (each validates against pre-commit state), but
 the walk descends only from the roots and emits each node under its single
 parent — so a cycle's members become unreachable and vanish from the served
-tree rather than looping. That is silent data loss, which is what the write-time
-guards are actually protecting against.
+tree rather than looping.
+
+**That is no longer silent** (#900). The builder shows a **Detached items**
+section listing anything no chain of parents reaches a root from, with a *Move
+to top level* button per item that breaks the cycle by making it a root; its
+children come back with it. Nothing is deleted and nothing else moves, so the
+editor can then drag or indent it where it belongs through the paths that do
+validate. Only the top level is offered as a destination on purpose: the item is
+unreachable precisely because no parent of it is currently trustworthy, and
+re-parenting to a chosen one could be another cycle.
+
+The section covers any cause of orphaning, not just the race — a restore, a
+direct `UPDATE`, or a `parent_id` pointing into a different menu. It is
+deliberately a *structural* question and is not filtered by visibility: an item
+an editor switched off, or one whose target is unpublished, is legitimately
+absent from a rendered tree and is not detached.
+
+The race itself is still open: closing it needs a recursive-CTE ancestry check
+inside the write transaction, or `SELECT … FOR UPDATE` over the ancestor chain.
+Making the outcome recoverable was the better first move, because it also covers
+the causes a lock would not.
 
 In the builder, drag reorders within a level and **indent/outdent** changes
 depth. Depth is buttons rather than drag on purpose: dropping *into* a sibling
