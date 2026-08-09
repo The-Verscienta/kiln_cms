@@ -71,6 +71,50 @@ defmodule KilnCMS.AVProcessor do
   # 500 MB source on a slow disk and still finite for a hostile one.
   @cpu_seconds "120"
 
+  # The containers `strip_metadata/2` knows how to remux. Anything else is
+  # refused rather than guessed at — `ext` is interpolated into the output
+  # path, so an allowlist is also what keeps that path a path.
+  @strippable_exts [".mp4", ".m4a", ".webm", ".mp3"]
+
+  # Per-stream metadata is named explicitly rather than left to the plain
+  # `-map_metadata -1`. Reading ffmpeg's source, the bare form appears to set
+  # the per-stream and per-chapter "manual" flags too, which would make these
+  # redundant — but "appears to, in the version we read" is not what a privacy
+  # control should rest on, and stating each one costs nothing. That is where
+  # an iPhone's per-track `creation_time` (local wall-clock) and `handler_name`
+  # live.
+  #
+  # `-fflags +bitexact` is doing distinct work: it zeroes the `mdhd`/`tkhd`
+  # creation times and suppresses the `encoder` tag ffmpeg would otherwise
+  # stamp in, which leaks the server's build. On a stream copy it touches
+  # neither timestamps nor the bitstreams.
+  @strip_metadata_args [
+    "-map_metadata",
+    "-1",
+    "-map_metadata:s:v",
+    "-1",
+    "-map_metadata:s:a",
+    "-1",
+    "-map_metadata:s:s",
+    "-1",
+    "-map_chapters",
+    "-1",
+    "-fflags",
+    "+bitexact"
+  ]
+
+  # Without an explicit `-map`, ffmpeg applies *default stream selection* and
+  # keeps one best video, audio and subtitle stream — so a lecture with an
+  # English and a Spanish track would silently lose one, permanently, since the
+  # original is deleted straight after. `?` makes each optional so a container
+  # missing that type isn't an error.
+  #
+  # Deliberately absent: `0:d` and `0:t`. Data and attachment streams are
+  # exactly where GoPro GPMF and Apple `mebx` timed telemetry — GPS tracks —
+  # ride along, so dropping them IS the strip. `-dn` says so explicitly rather
+  # than leaving it to the absence of a flag.
+  @keep_streams_args ["-map", "0:v?", "-map", "0:a?", "-map", "0:s?", "-dn"]
+
   # ISO-BMFF major brands (bytes 8..11, immediately after the `ftyp` box tag).
   # Deny-by-default, like `ImageProcessor`'s libvips-loader allowlist: a `ftyp`
   # alone is not enough, because QuickTime (`qt  `), 3GPP and the various
@@ -346,5 +390,85 @@ defmodule KilnCMS.AVProcessor do
   # dependency, so a deployment can gain them (a new base image, an operator
   # `apt install ffmpeg`) without this application being rebuilt.
   defp ffprobe, do: System.find_executable("ffprobe")
+
+  @doc """
+  A copy of `path` with its container metadata removed (#820).
+
+  `-map_metadata -1 -c copy` — a **stream copy**, so no re-encode: the audio and
+  video bitstreams are written through untouched and only the container's
+  metadata atoms are dropped. Cheap enough to run on every upload.
+
+  What this is removing, on a file type where phone-recorded footage is the
+  common case rather than the exception:
+
+    * `©xyz` GPS coordinates, which iOS writes on every recording
+    * `com.apple.quicktime.model` / `.software` — device and OS version
+    * creation-date atoms, often in local wall-clock
+    * the original filename, in some encoders' `©nam`
+    * editing-application metadata from the export
+
+  Returns `{:error, :unavailable}` when ffmpeg is not installed. **That is a
+  real hole, not a formality** — ffmpeg is an optional dependency here, so on a
+  host without it an A/V upload is stored exactly as it arrived. The caller
+  decides what to do about that; see `KilnCMS.Media.Ingest`, which fails closed
+  when the operator has asked it to.
+  """
+  @spec strip_metadata(Path.t(), String.t()) :: {:ok, Path.t()} | {:error, term()}
+  def strip_metadata(path, ext) when is_binary(path) and is_binary(ext) do
+    cond do
+      ext not in @strippable_exts -> {:error, :unsupported_ext}
+      is_nil(ffmpeg()) -> {:error, :unavailable}
+      true -> run_strip(ffmpeg(), path, ext)
+    end
+  end
+
+  # `out` is this function's own generated temp path: a UUID under tmp_dir with
+  # an extension already checked against `@strippable_exts`, never caller input.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp run_strip(exe, path, ext) do
+    out = Path.join(System.tmp_dir!(), "kiln-avstrip-#{Ecto.UUID.generate()}#{ext}")
+
+    args =
+      ["-v", "error", "-nostdin", "-timelimit", @cpu_seconds] ++
+        @scan_limits ++
+        ["-i", path] ++
+        @strip_metadata_args ++
+        @keep_streams_args ++
+        faststart_args(ext) ++
+        [
+          # Copy the streams rather than re-encoding: this is a remux.
+          "-c",
+          "copy",
+          "-y",
+          out
+        ]
+
+    case cmd(exe, args) do
+      {:ok, _output} ->
+        strip_result(out)
+
+      {:error, reason} ->
+        File.rm(out)
+        {:error, reason}
+    end
+  end
+
+  # `+faststart` is a private option of the mov/mp4 muxer, so passing it to the
+  # matroska or mp3 muxer is a hard error, not a no-op.
+  defp faststart_args(ext) when ext in [".mp4", ".m4a"], do: ["-movflags", "+faststart"]
+  defp faststart_args(_ext), do: []
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp strip_result(out) do
+    case File.stat(out) do
+      {:ok, %{size: size}} when size > 0 ->
+        {:ok, out}
+
+      _ ->
+        File.rm(out)
+        {:error, :strip_failed}
+    end
+  end
+
   defp ffmpeg, do: System.find_executable("ffmpeg")
 end

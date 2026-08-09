@@ -203,11 +203,19 @@ defmodule KilnCMS.Media.Ingest do
     end
   end
 
+  # Takes the classification MAP, and every clause says so — including the
+  # document one, which used to be a bare catch-all.
+  #
+  # That catch-all was a trap: `cap_for(:video)` (the kind atom, an easy thing
+  # to reach for, and a mistake #820 actually made) matched it silently and
+  # capped video at the 25 MB document limit, refusing every video above it.
+  # A wrong-shaped call now raises instead of quietly returning the smallest
+  # cap in the module.
   defp cap_for(%{kind: :image}), do: @max_image_size
   defp cap_for(%{kind: :video}), do: @max_video_size
   defp cap_for(%{kind: :audio}), do: @max_audio_size
   defp cap_for(%{kind: :captions}), do: @max_captions_size
-  defp cap_for(_document), do: @max_document_size
+  defp cap_for(%{kind: :document}), do: @max_document_size
 
   # Measured from the RECEIVED FILE, never from a declared length: the caller's
   # own transport may enforce only one outer ceiling, so trusting a claimed size
@@ -266,10 +274,89 @@ defmodule KilnCMS.Media.Ingest do
     end
   end
 
-  # No metadata-stripping step for A/V: an MP4's metadata atoms need
-  # container-specific tooling this codebase doesn't have (tracked separately).
+  # A/V is stripped too (#820), via an ffmpeg stream copy — no re-encode, so it
+  # is cheap enough to run on every upload. An MP4 off a phone carries GPS
+  # coordinates, the device model and OS version, and often a local wall-clock
+  # creation date: the same privacy story as #215's EXIF strip, on the file type
+  # where the recording is most likely to be personal.
+  #
+  # ffmpeg is an OPTIONAL dependency here, so this cannot be an unconditional
+  # guarantee. What an operator gets is therefore stated exactly:
+  #
+  #   * ffmpeg present — stripped, always.
+  #   * ffmpeg absent — stored as it arrived, and logged at :warning so the gap
+  #     is visible rather than assumed away.
+  #   * `require_av_metadata_strip: true` — REFUSED rather than stored
+  #     unstripped, for a deployment that needs the strong guarantee. Off by
+  #     default: turning it on without ffmpeg installed breaks A/V upload
+  #     entirely, which is not a change to make on someone's behalf.
+  #
+  # `stripped` is `AVProcessor`'s own generated temp path.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp persist(path, %{kind: kind, ext: ext, content_type: content_type} = spec, filename, opts)
+       when kind in [:video, :audio] do
+    case AVProcessor.strip_metadata(path, ext) do
+      {:ok, stripped} ->
+        try do
+          # The cap was checked against the file as uploaded, but a remux is
+          # not size-preserving in the safe direction: a fragmented MP4 comes
+          # back non-fragmented with a full `moov` index, which can be larger.
+          # Without this, `max_upload_size/0` — advertised in the docs and used
+          # as the client-side ceiling — would stop being the ceiling on what
+          # actually lands in the bucket.
+          #
+          # `cap_for/1` takes the classification MAP, not the kind atom — an
+          # atom falls through to the catch-all document clause and caps video
+          # at 25 MB, which would refuse every video over that on any host
+          # where the strip actually runs.
+          with :ok <- check_size(stripped, Keyword.get(opts, :max_bytes) || cap_for(spec)) do
+            store_and_create(stripped, ext, content_type, filename, opts)
+          end
+        after
+          File.rm(stripped)
+        end
+
+      {:error, reason} ->
+        store_unstripped_av(path, ext, content_type, filename, opts, reason)
+    end
+  end
+
+  # A caption track is text this codebase already parsed — no container, nothing
+  # to strip, and no reason to hand it to ffmpeg.
   defp persist(path, %{ext: ext, content_type: content_type}, filename, opts),
     do: store_and_create(path, ext, content_type, filename, opts)
+
+  defp store_unstripped_av(path, ext, content_type, filename, opts, reason) do
+    if require_av_strip?() do
+      Logger.warning("Refused an A/V upload: metadata could not be stripped (#{inspect(reason)})")
+
+      # The two causes need different words in front of an editor: one is
+      # "this server can't do it", which retrying will never fix, and the
+      # other is "this file couldn't be remuxed", which a re-export might.
+      if reason == :unavailable,
+        do: {:error, :av_strip_unavailable},
+        else: {:error, :strip_failed}
+    else
+      Logger.warning(
+        "Storing #{filename} with its container metadata intact: #{inspect(reason)}. " <>
+          remedy_for(reason) <>
+          " Set require_av_metadata_strip: true to refuse such uploads instead."
+      )
+
+      store_and_create(path, ext, content_type, filename, opts)
+    end
+  end
+
+  # Naming the wrong remedy is worse than naming none: telling an operator to
+  # install ffmpeg on a host that already has it sends them after the one thing
+  # that isn't broken.
+  defp remedy_for(:unavailable), do: "Install ffmpeg to strip it."
+
+  defp remedy_for(_reason),
+    do: "ffmpeg is installed but could not remux this container; the upload kept its metadata."
+
+  defp require_av_strip?,
+    do: Application.get_env(:kiln_cms, :require_av_metadata_strip, false) == true
 
   defp store_and_create(source, ext, content_type, filename, opts) do
     key = Storage.generate_key_with_ext(ext)

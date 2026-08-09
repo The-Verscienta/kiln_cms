@@ -291,6 +291,51 @@ worse than no control, because the operator believes it did. The editor sees
 "PDF metadata stripping isn't available on this server" rather than a
 misleading "unsupported format".
 
+### A/V metadata stripping (#820)
+
+An MP4 or M4A is remuxed through `ffmpeg -map_metadata -1 -map_chapters -1 -c
+copy` before it is stored: a **stream copy**, so the bitstreams pass through
+untouched and only the container's metadata atoms are dropped. Cheap enough to
+run on every upload.
+
+What that removes, on the file type where the recording is most likely to be
+personal:
+
+- `©xyz` GPS coordinates, which iOS writes on every phone recording
+- `com.apple.quicktime.model` / `.software` — device and OS version
+- creation-date atoms, often in local wall-clock
+- the original filename, in some encoders' `©nam`
+- editing-application metadata from the export
+
+**Unlike the PDF strip above, this is best-effort by default, and that is a
+weaker guarantee.** The argument in the previous section — that a control which
+silently does not apply is worse than no control — applies here too, and the
+only reason the default differs is that ffmpeg is optional today: requiring it
+would stop A/V upload working on every deployment that does not have it, on
+upgrade, with no warning. That is a migration, not a default.
+
+So the behaviour is stated exactly rather than implied:
+
+| ffmpeg | `REQUIRE_AV_METADATA_STRIP` | Result |
+|---|---|---|
+| present, remux succeeds | either | stripped |
+| present, remux fails | `false` (default) | stored as it arrived, logged at `:warning` |
+| present, remux fails | `true` | upload refused |
+| absent | `false` (default) | stored as it arrived, logged at `:warning` |
+| absent | `true` | upload refused |
+
+Note the middle rows: having ffmpeg is not the same as the strip succeeding.
+A container ffmpeg cannot remux under `-c copy` (pcm_s16le audio in MP4, from
+some screen recorders) fails the same way a missing binary does, and the
+default stores it. The log line names which of the two happened, because
+telling an operator to install ffmpeg on a host that already has it sends
+them after the one thing that is not broken.
+
+**If you rely on the privacy guarantee, set `REQUIRE_AV_METADATA_STRIP=true`
+and install ffmpeg.** That gets you the same contract PDFs already have. The
+`:warning` exists so the gap is visible in logs rather than assumed away — but a
+log line is not a control, and nobody should treat the default as one.
+
 **A password-protected PDF is refused**, with `is password-protected, so its
 metadata can't be removed — upload an unlocked copy`. qpdf cannot open a
 user-password-encrypted file, so it cannot strip one, and storing it unstripped
@@ -465,7 +510,9 @@ A video or audio item gates exactly like a document. One extra step applies:
 **gating discards the generated poster frame**, row and blob. A poster is
 written to *public* storage (it renders as a plain `<img>`), and a still from
 a members-only video should not stay world-readable once the video isn't.
-Un-gating does not bring it back — pick a poster image on the block.
+Un-gating re-derives it (#821), so a re-published video does not open on a
+black frame. A poster picked by hand on the block still wins — it is a
+different field, and `Blocks.Video.poster_src/1` prefers it.
 
 If you serve media from a CDN on another hostname, note that `CSP_IMG_SRC`
 widens the browser CSP's `media-src` as well as its `img-src`; without it,
