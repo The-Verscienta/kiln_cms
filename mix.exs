@@ -6,6 +6,28 @@ defmodule KilnCMS.MixProject do
 
   def project do
     [
+      # Gettext catalogs are generated files that nearly every PR touches, so
+      # their *format* decides how often two PRs collide. Two settings do the
+      # work, and both were measured rather than guessed — a five-line shift in
+      # `content_editor_live.ex` churned 3,296 catalog lines before this, and 0
+      # after; two PRs adding unrelated strings conflicted before, and merge
+      # cleanly after.
+      #
+      #   * `write_reference_line_numbers: false` — a `#: lib/foo.ex:8777`
+      #     comment changes whenever any line above it moves, so an edit
+      #     rewrites entries it has nothing to do with. That is what made every
+      #     open PR conflict on every merge, and what made even a conflict-free
+      #     merge fail the drift gate. The file name is kept: it is the part
+      #     anyone reads, and it changes only when a string really moves file.
+      #
+      #   * `sort_by_msgid: :case_sensitive` — without it new messages are
+      #     appended in source-walk order, so where a string lands depends on
+      #     which file it came from. Sorted, two PRs adding unrelated strings
+      #     touch different regions of the file.
+      #
+      # Read from `Mix.Project.config()[:gettext]` — a `config :gettext, …` in
+      # `config/config.exs` is silently ignored, which costs an hour to notice.
+      gettext: [write_reference_line_numbers: false, sort_by_msgid: :case_sensitive],
       app: :kiln_cms,
       version: @version,
       elixir: "~> 1.19",
