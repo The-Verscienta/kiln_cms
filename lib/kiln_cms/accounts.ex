@@ -14,7 +14,6 @@ defmodule KilnCMS.Accounts do
       # The one action on this resource that is ours rather than
       # AshAuthentication's (#743) — see `:spend_jti`.
       define :spend_pending_sign_in, action: :spend_jti
-      define :get_token, action: :get_token, args: [:jti]
     end
 
     # External IdP links for OIDC SSO (#331) — managed by AshAuthentication.

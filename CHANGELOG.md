@@ -27,24 +27,6 @@ migration, a rewritten column, a dropped config key).
 
 ## [Unreleased]
 
-### Fixed
-
-- **A headless two-factor pending token is now single-use exactly, not
-  best-effort** (#743). The record of a redeemed blob was a node-local `Cachex`
-  entry, so a replay landing on a node that had not seen the redemption was
-  accepted — and, less obviously, two requests arriving *together* on a single
-  node both resolved the blob before either recorded it and both received a
-  bearer token. Nothing rejects a reused TOTP code, so they only had to be
-  simultaneous.
-
-  The record is now a `KilnCMS.Accounts.Token` row keyed on the blob's `jti`, so
-  the INSERT is the check: concurrent redemptions race at Postgres and the loser
-  is refused. It survives restarts, needs no new table, and is swept by the
-  nightly expired-token job that resource already runs.
-
-  No API change — `pending_token` is the same opaque string with the same
-  five-minute lifetime.
-
 ### Added
 
 - **Events: "what's on, soonest first"** (#766). An event-shaped content type —
@@ -370,6 +352,27 @@ migration, a rewritten column, a dropped config key).
   [Navigation menus](docs/navigation-menus.md).
 
 ### Fixed
+
+- **A headless two-factor pending token is now single-use exactly, not
+  best-effort** (#743). The record of a redeemed blob was a node-local `Cachex`
+  entry, so a replay landing on a node that had not seen the redemption was
+  accepted — and, less obviously, two requests arriving *together* on a single
+  node both resolved the blob before either recorded it and both received a
+  bearer token. Nothing rejects a reused TOTP code, so they only had to be
+  simultaneous.
+
+  The record is now a `KilnCMS.Accounts.Token` row keyed on the blob's `jti`, so
+  the INSERT is the check: concurrent redemptions race at Postgres and the loser
+  is refused. It survives restarts, needs no new table, and is swept by the
+  nightly expired-token job that resource already runs.
+
+  A claim that cannot be *recorded* (a database outage, as opposed to losing the
+  race) now answers `503 sign_in_unavailable` — "try again in a moment" —
+  instead of telling the client its sign-in expired and to start over, which
+  would have been wrong advice and a wasted trip through the password throttle.
+
+  No other API change — `pending_token` is the same opaque string with the same
+  five-minute lifetime.
 
 - **A client-chosen payload shape no longer crashes any editor LiveView**
   (#764, completing the sweep #894 started). A `handle_event/3` payload is

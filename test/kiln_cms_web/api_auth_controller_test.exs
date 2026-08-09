@@ -7,6 +7,7 @@ defmodule KilnCMSWeb.ApiAuthControllerTest do
   use KilnCMSWeb.ConnCase, async: true
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.PendingSignIn
   alias KilnCMS.Accounts.RecoveryCodes
   alias KilnCMS.Accounts.User
   alias KilnCMS.CMS
@@ -396,36 +397,34 @@ defmodule KilnCMSWeb.ApiAuthControllerTest do
       assert %{"errors" => [%{"code" => "pending_expired"}]} = json_response(replay, 401)
     end
 
-    test "two simultaneous redemptions of one blob yield exactly one token", %{conn: conn} do
-      # The replay test above passes even when the single-use record is a
-      # per-node cache, because it redeems twice in sequence. This is the case
-      # that record could not answer (#743): both requests resolve the blob
-      # before either records it, both hold the same valid code — nothing here
-      # rejects a reused TOTP code — and both would have been told they were
-      # first. On a cluster the two need not even share a node.
+    test "a second redemption that got past resolve is still refused", %{conn: conn} do
+      # The replay test above redeems twice in sequence, so the second request
+      # could be refused by anything — it never reaches the claim. This one
+      # reproduces the interleaving that made the old node-local record useless
+      # (#743): BOTH requests resolve the blob before either records it, and
+      # both hold the same valid code, because nothing rejects a reused TOTP
+      # code. On a cluster they need not even share a node.
       #
-      # The claim is now an INSERT keyed on the blob's `jti`, so one of them
-      # loses at Postgres and is refused rather than handed a bearer token.
+      # Staged deterministically rather than with two Tasks: the Ecto sandbox
+      # hands both processes one connection, so "concurrent" requests actually
+      # serialize and a race test would be measuring the scheduler. Resolving
+      # twice up front is the same interleaving with a repeatable outcome.
       {user, secret} = seed_totp_user()
       pending = begin_two_factor(conn, user)
       code = current_code(secret)
-      owner = self()
 
-      statuses =
-        1..2
-        |> Enum.map(fn _ ->
-          Task.async(fn ->
-            Ecto.Adapters.SQL.Sandbox.allow(KilnCMS.Repo, owner, self())
+      assert {:ok, _first} = PendingSignIn.resolve(:encrypted, Endpoint, pending)
+      assert {:ok, second} = PendingSignIn.resolve(:encrypted, Endpoint, pending)
 
-            build_conn()
-            |> post_verify(%{pending_token: pending, code: code})
-            |> Map.fetch!(:status)
-          end)
-        end)
-        |> Task.await_many(15_000)
-        |> Enum.sort()
+      # The first request completes and claims the blob.
+      assert %{"token" => _} =
+               build_conn()
+               |> post_verify(%{pending_token: pending, code: code})
+               |> json_response(201)
 
-      assert statuses == [201, 401]
+      # The second already holds a resolved blob, so it cannot be turned away by
+      # a lookup — only the claim can refuse it, and it must.
+      assert :taken = PendingSignIn.claim(second)
     end
 
     test "a wrong code does NOT burn the pending token", %{conn: conn} do

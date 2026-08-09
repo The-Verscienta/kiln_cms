@@ -41,7 +41,7 @@ defmodule KilnCMS.Accounts.PendingSignIn do
 
   ## Single use
 
-  `:encrypted` blobs are burned on redemption, so a captured verify request
+  `:encrypted` blobs are spent on redemption, so a captured verify request
   cannot be replayed — and a *successful* request is the one most likely to be
   sitting in a log, a CI transcript or a crash report.
 
@@ -58,8 +58,8 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   valid code, and a captured *headless* blob is the same. The difference is
   reach — the headless blob is handed to the client, printed in logs and CI
   transcripts and crash reports, where a session cookie is not. That is what
-  the `jti` is for, and why paying a cache write per browser sign-in for it
-  would be paying for the wrong threat.
+  the `jti` is for, and why paying a row write per browser sign-in for it would
+  be paying for the wrong threat.
 
   The record is a row on `KilnCMS.Accounts.Token` (#743), and single use is
   **exact** — on one node and on a cluster.
@@ -71,9 +71,15 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   exactly one wins, wherever each request landed.
 
   The ordering that matters: the row is written after the code verifies, not on
-  resolve — see `spend/1`. The cheap `spent?` read in `resolve/3` stays, because
-  rejecting a replayed blob before spending a TOTP check against it is the
-  friendlier answer, but it is not what makes this exact. The INSERT is.
+  resolve — see `claim/1`.
+
+  There is no "is it spent?" read before it, deliberately. One would only ever
+  be an optimisation — the INSERT decides either way — and it cost more than it
+  saved: a second query on every verify, a public read interface over a table of
+  live session tokens, and a *distinguishable* fast rejection for a spent blob,
+  which is an unauthenticated oracle for "has this account finished signing in
+  yet?". A replay now takes the same path and the same time as a wrong code, and
+  is refused by the write.
 
   `KilnCMS.Accounts.WebAuthn.take_challenge/1` and
   `KilnCMS.Accounts.AccountThrottle` still make the node-local trade for their
@@ -89,12 +95,14 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   one thing `SignInLive` submits that would then be silently lost. Whoever
   builds it should decide that, not discover it.
 
-  Burning is deliberately **not** done on a wrong code or a spent budget. The
+  Spending is deliberately **not** done on a wrong code or a spent budget. The
   caller has not failed authentication there, and destroying their pending state
   would turn "that code isn't valid" into "start over".
   """
 
   alias KilnCMS.Accounts
+
+  require Logger
 
   # `jti?` and `remember_me?` are per-mode because each answers a question only
   # one door has: single use (the session gate gets it free by deleting the
@@ -179,7 +187,7 @@ defmodule KilnCMS.Accounts.PendingSignIn do
 
     with {:ok, %{"user_id" => user_id, "token" => token} = payload} <-
            unwrap(mode, context, blob),
-         {:ok, jti} <- claim(jti?, payload),
+         {:ok, jti} <- minted_jti(jti?, payload),
          user when not is_nil(user) <-
            Accounts.get_user!(user_id, authorize?: false, not_found_error?: false),
          # Re-checked rather than trusted from the first step: an account that
@@ -206,13 +214,18 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   def resolve(mode, _context, _blob) when is_map_key(@modes, mode), do: :error
 
   @doc """
-  Claim this attempt, so the blob cannot be redeemed again — `:ok` if this
-  caller got it, `:error` if it was already spent.
+  Claim this attempt, so the blob cannot be redeemed again.
+
+    * `:ok` — this caller got it.
+    * `:taken` — someone else already did. The exchange is over.
+    * `:unavailable` — the claim could not be recorded. **Not** the same answer:
+      the blob may well still be redeemable, and telling the caller to start
+      again would be wrong advice as well as a wasted sign-in attempt.
 
   **The return value is the single-use guarantee, and a caller that ignores it
   has none.** The row's primary key is the `jti`, so two concurrent redemptions
   of one blob both reach here and exactly one INSERT succeeds; the loser gets
-  `:error` and must refuse the sign-in rather than issue a token. That is the
+  `:taken` and must refuse the sign-in rather than issue a token. That is the
   whole difference from the node-local cache this replaced, where both would
   have been told they were first.
 
@@ -220,39 +233,47 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   budget is not a failed authentication, and spending the blob there would turn
   "that code isn't valid" into "start over".
 
-  Fails **closed**. A database error is indistinguishable here from "someone
-  else already has it", and for a single-use check the safe reading of "I don't
-  know" is "no".
-
-  The row outlives the blob by a second, so there is no window in which the blob
-  is still inside its `max_age` but the record of its use has expired. It is
-  swept by the nightly `:expunge_expired` trigger the resource already runs.
-
   A `nil` `jti` is a `:session` blob, whose single use is the deleted session
-  key — so this is `:ok` rather than an error, and a caller can spend what it
-  resolved without asking which door it came through.
+  key — so this is `:ok` rather than an error, and a caller can claim what it
+  resolved without asking which door it came through. The clause matches `nil`
+  specifically: a `:encrypted` blob that somehow reached here *without* a jti is
+  a bug, and answering `:ok` to it would report a claim that never happened.
   """
-  @spec spend(t() | nil) :: :ok | :error
-  def spend(%__MODULE__{jti: jti, user: user}) when is_binary(jti) do
-    expires_at = DateTime.add(DateTime.utc_now(), @max_age + 1, :second)
-
+  @spec claim(t()) :: :ok | :taken | :unavailable
+  def claim(%__MODULE__{jti: jti, user: %Accounts.User{} = user}) when is_binary(jti) do
     # `authorize?: false` because there is no actor to authorize: the whole
-    # point of this step is that the caller has *not* finished signing in.
+    # point of this step is that the caller has *not* finished signing in. The
+    # action is `forbid_if always()` so nothing else can reach it.
     case Accounts.spend_pending_sign_in(
-           %{
-             jti: jti,
-             subject: AshAuthentication.user_to_subject(user),
-             expires_at: expires_at
-           },
+           %{jti: jti, subject: AshAuthentication.user_to_subject(user)},
            authorize?: false
          ) do
-      {:ok, _row} -> :ok
-      {:error, _already_spent_or_unavailable} -> :error
+      {:ok, _row} ->
+        :ok
+
+      {:error, error} ->
+        if already_claimed?(error) do
+          :taken
+        else
+          # Anything that is not the primary-key conflict is a defect or an
+          # outage, and silence here would render a total failure of the
+          # headless second factor as ordinary replay traffic: every sign-in
+          # answering "start again", nothing in the log to say why.
+          Logger.error("could not record a spent pending sign-in: #{Exception.message(error)}")
+          :unavailable
+        end
     end
   end
 
-  def spend(%__MODULE__{}), do: :ok
-  def spend(nil), do: :ok
+  def claim(%__MODULE__{jti: nil}), do: :ok
+
+  # The conflict Postgres raises when the blob has already been claimed. Ash
+  # surfaces the primary key's implicit unique constraint as an invalid-changes
+  # error on the field; anything else is not "someone beat us to it".
+  defp already_claimed?(%Ash.Error.Invalid{errors: errors}),
+    do: Enum.any?(errors, &match?(%{field: :jti}, &1))
+
+  defp already_claimed?(_other), do: false
 
   defp wrap(:session, context, payload),
     do: Phoenix.Token.sign(context, salt(:session), payload, max_age: @max_age)
@@ -268,36 +289,21 @@ defmodule KilnCMS.Accounts.PendingSignIn do
 
   defp salt(mode), do: @modes |> Map.fetch!(mode) |> Map.fetch!(:salt)
 
-  # A mode that carries a `jti` must have one, and it must be unspent. A mode
-  # that does not carries `nil` — and, importantly, is not allowed to *supply*
-  # one: a payload is only ever built by `mint/4`, but reading a jti the mode
-  # did not mint would let a future single-use check pass on a value nothing
-  # ever burns.
-  defp claim(true, payload) do
+  # A mode that carries a `jti` must have one. A mode that does not carries
+  # `nil` — and, importantly, is not allowed to *supply* one: a payload is only
+  # ever built by `mint/4`, but reading a jti the mode did not mint would let
+  # `claim/1` record a value nothing ever checks against.
+  defp minted_jti(true, payload) do
     case Map.get(payload, "jti") do
-      jti when is_binary(jti) -> if spent?(jti), do: :error, else: {:ok, jti}
+      jti when is_binary(jti) -> {:ok, jti}
       _ -> :error
     end
   end
 
-  defp claim(false, _payload), do: {:ok, nil}
+  defp minted_jti(false, _payload), do: {:ok, nil}
 
   defp put_if(map, false, _key, _fun), do: map
   defp put_if(map, true, key, fun), do: Map.put(map, key, fun.())
 
   defp random_jti, do: 16 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
-
-  # A cheap pre-check, not the guarantee — `spend/1` is. Rejecting a replayed
-  # blob here saves spending a TOTP check (and a slice of the second-factor
-  # budget) against an exchange that is already over.
-  #
-  # Unknown reads as *unspent*, deliberately: this is an optimisation, and
-  # failing closed on a transient read error would break sign-ins that `spend/1`
-  # would have allowed. The write below is where "I don't know" means "no".
-  defp spent?(jti) do
-    case Accounts.get_token(jti, authorize?: false, not_found_error?: false) do
-      {:ok, %{purpose: "pending_sign_in"}} -> true
-      _other -> false
-    end
-  end
 end

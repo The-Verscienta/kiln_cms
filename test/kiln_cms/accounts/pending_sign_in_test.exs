@@ -10,7 +10,8 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
   other's fields — because a shared module that quietly merged the two would be
   worse than the duplication it replaced.
 
-  `async: false`: the burn record is a node-wide Cachex instance.
+  `async: false`: the single-use record is a row in the shared `tokens` table,
+  keyed on the blob's jti (#743).
   """
   use KilnCMS.DataCase, async: false
 
@@ -114,15 +115,19 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
   end
 
   describe "single use" do
-    test "an encrypted blob is refused once spent" do
+    test "an encrypted blob carries a jti, and claiming it succeeds once" do
       {user, _secret} = enabled_user()
       blob = PendingSignIn.mint(:encrypted, @endpoint, user)
 
       assert {:ok, %{jti: jti} = resolved} = PendingSignIn.resolve(:encrypted, @endpoint, blob)
       assert is_binary(jti)
+      assert :ok = PendingSignIn.claim(resolved)
 
-      assert :ok = PendingSignIn.spend(resolved)
-      assert :error = PendingSignIn.resolve(:encrypted, @endpoint, blob)
+      # `resolve/3` still succeeds on a spent blob — there is deliberately no
+      # "is it spent?" read (see the moduledoc). The claim is the gate, and it
+      # is what refuses the second redemption.
+      assert {:ok, again} = PendingSignIn.resolve(:encrypted, @endpoint, blob)
+      assert :taken = PendingSignIn.claim(again)
     end
 
     test "spending the SAME blob twice loses the second time" do
@@ -135,28 +140,16 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
 
       assert {:ok, resolved} = PendingSignIn.resolve(:encrypted, @endpoint, blob)
 
-      assert :ok = PendingSignIn.spend(resolved)
-      assert :error = PendingSignIn.spend(resolved)
+      assert :ok = PendingSignIn.claim(resolved)
+      assert :taken = PendingSignIn.claim(resolved)
     end
 
-    test "the spend record outlives the blob it retires" do
+    test "the claim record outlives the blob it retires" do
       # Otherwise there is a window in which the blob is still inside its
       # `max_age` but the record of its use has expired — a replay that only has
-      # to be patient.
-      {user, _secret} = enabled_user()
-      blob = PendingSignIn.mint(:encrypted, @endpoint, user)
-      {:ok, resolved} = PendingSignIn.resolve(:encrypted, @endpoint, blob)
-
-      minted_at = DateTime.utc_now()
-      :ok = PendingSignIn.spend(resolved)
-
-      {:ok, row} = KilnCMS.Accounts.get_token(resolved.jti, authorize?: false)
-
-      assert row.purpose == "pending_sign_in"
-      # `>=` rather than `>`: the column is second-precision, so the one-second
-      # margin can round down to exactly the blob's own lifetime. What must
-      # never happen is the record expiring FIRST.
-      assert DateTime.diff(row.expires_at, minted_at) >= PendingSignIn.max_age()
+      # to be patient. The two constants live in different modules, so nothing
+      # but this stops one being changed without the other.
+      assert KilnCMS.Accounts.Token.pending_sign_in_ttl() > PendingSignIn.max_age()
     end
 
     test "a session blob carries no jti, and spending it is a no-op" do
@@ -167,8 +160,7 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
       blob = PendingSignIn.mint(:session, @endpoint, user)
 
       assert {:ok, %{jti: nil} = resolved} = PendingSignIn.resolve(:session, @endpoint, blob)
-      assert :ok = PendingSignIn.spend(resolved)
-      assert :ok = PendingSignIn.spend(nil)
+      assert :ok = PendingSignIn.claim(resolved)
     end
   end
 
