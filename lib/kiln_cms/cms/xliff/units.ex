@@ -126,9 +126,17 @@ defmodule KilnCMS.CMS.Xliff.Units do
 
   Every id in `translations` lands in exactly one of `applied`, `unchanged` and
   `unknown` — nothing is dropped quietly, which is the point. `by_position` is
-  a *qualifier* over the first two, not a fourth bucket: it lists the ids that
-  only resolved through the positional fallback and therefore deserve a human
-  look (see the moduledoc).
+  a *qualifier* over the first two, not a fourth bucket: it lists the ids whose
+  match depended on ordering rather than identity, and therefore deserve a
+  human look (see the moduledoc).
+
+  `aliases` maps the file's positional addresses back to its unit ids, and is
+  consulted **only when not one unit id in the file matches a slot in this
+  record** — i.e. when the two trees genuinely do not share block identity.
+  Mixing the two per unit is what makes positional matching dangerous: a block
+  the target no longer holds frees its index for its neighbour, and that
+  neighbour's slot then matches an alias belonging to a different paragraph,
+  overwriting prose the file never addressed and applying one unit twice.
   """
   @spec apply_translations(struct(), %{String.t() => [run()]}, %{String.t() => String.t()}) ::
           {%{atom() => term()},
@@ -140,6 +148,8 @@ defmodule KilnCMS.CMS.Xliff.Units do
            }}
   def apply_translations(record, translations, aliases \\ %{})
       when is_map(translations) and is_map(aliases) do
+    aliases = if identity_matches?(record, translations), do: %{}, else: aliases
+
     {attrs, state} =
       Enum.reduce(@record_fields, {%{}, new_state()}, fn field, {attrs, state} ->
         apply_record_field(record, field, translations, attrs, state)
@@ -151,6 +161,24 @@ defmodule KilnCMS.CMS.Xliff.Units do
     attrs = if state.blocks_changed?, do: Map.put(attrs, :blocks, blocks), else: attrs
 
     {attrs, report(state, translations)}
+  end
+
+  # Does this record share BLOCK identity with the file at all? One matching
+  # block unit id is enough — ids are minted per record, so a collision by
+  # accident is not a thing. Record-level fields (`title`, `seo_title`, …) are
+  # excluded because their ids are the field name and always match, which would
+  # make this answer "yes" for every file ever produced.
+  #
+  # When none match, the file was written against a translation
+  # created before ids were carried across locales and the positional addresses
+  # are the only way in; when some match, they are the *wrong* way in.
+  defp identity_matches?(record, translations) do
+    {units, _warnings} = extract(record)
+    record_ids = MapSet.new(@record_fields, &Atom.to_string/1)
+
+    units
+    |> Enum.reject(&MapSet.member?(record_ids, &1.id))
+    |> Enum.any?(&Map.has_key?(translations, &1.id))
   end
 
   # ── record-level fields ────────────────────────────────────────────────────
@@ -193,7 +221,7 @@ defmodule KilnCMS.CMS.Xliff.Units do
         # unusable.
         cond do
           blank?(runs) -> {attrs, consume(state, :unchanged, id)}
-          text == current -> {attrs, consume(state, :unchanged, id)}
+          same_text?(text, current) -> {attrs, consume(state, :unchanged, id)}
           true -> {Map.put(attrs, field, text), consume(state, :applied, id)}
         end
 
@@ -218,7 +246,7 @@ defmodule KilnCMS.CMS.Xliff.Units do
 
   defp blocks_input(_record), do: []
 
-  defp walk(blocks, fun, acc), do: walk_blocks(blocks, ctx("", ""), fun, acc)
+  defp walk(blocks, fun, acc), do: walk_blocks(blocks, ctx(), fun, acc)
 
   defp walk_blocks(blocks, ctx, fun, acc) do
     blocks
@@ -232,7 +260,8 @@ defmodule KilnCMS.CMS.Xliff.Units do
   # raise before any clause got to decline it. Anything unrecognized travels
   # through untouched.
   defp walk_block(block, index, ctx, fun, acc) when is_map(block) do
-    ctx = push(ctx, block_segment(block, index), "b##{index}")
+    {id_segment, positional?} = block_segment(block, index)
+    ctx = push(ctx, id_segment, "b-#{index}", positional?)
 
     case block_module(block) do
       nil ->
@@ -265,10 +294,10 @@ defmodule KilnCMS.CMS.Xliff.Units do
       |> List.wrap()
       |> Enum.with_index()
       |> Enum.map_reduce(acc, fn {item, index}, acc ->
-        walk_item(item, kind, push(ctx, "i#{index}", "i#{index}"), fun, acc)
+        walk_item(item, kind, push(ctx, "i-#{index}", "i-#{index}", true), fun, acc)
       end)
 
-    {Map.put(block, key, items), acc}
+    {put_existing(block, key, items), acc}
   end
 
   defp walk_field(block, field, :rich_text, ctx, fun, acc) do
@@ -281,17 +310,18 @@ defmodule KilnCMS.CMS.Xliff.Units do
       |> List.wrap()
       |> Enum.with_index()
       |> Enum.map_reduce(acc, fn {pt, index}, acc ->
-        walk_pt(pt, push(ctx, pt_segment(pt, index), "p##{index}"), fun, acc)
+        {id_segment, positional?} = pt_segment(pt, index)
+        walk_pt(pt, push(ctx, id_segment, "p-#{index}", positional?), fun, acc)
       end)
 
-    {Map.put(block, key, body), acc}
+    {put_existing(block, key, body), acc}
   end
 
   defp walk_field(block, field, :text, ctx, fun, acc),
     do: walk_text(block, Atom.to_string(field.name), ctx, fun, acc)
 
   defp walk_field(block, field, :unsupported, ctx, fun, acc) do
-    if present?(block, Atom.to_string(field.name)) do
+    if carries_content?(block, Atom.to_string(field.name)) do
       {_keep, acc} = fun.(unsupported(ctx, field.name), acc)
       {block, acc}
     else
@@ -300,6 +330,15 @@ defmodule KilnCMS.CMS.Xliff.Units do
   end
 
   defp walk_field(block, _field, _kind, _ctx, _fun, acc), do: {block, acc}
+
+  # `TypedBlocks.input_map/1` drops nil values, so a field that was never set is
+  # simply absent — and `List.wrap(nil)` is `[]`. Putting that back would add an
+  # explicit `[]` the record never had, turning a translation import into a
+  # write on blocks the file never addressed: a version row, a re-fire and a
+  # spurious entry in the version-compare diff, per import.
+  defp put_existing(map, key, value) do
+    if Map.has_key?(map, key), do: Map.put(map, key, value), else: map
+  end
 
   # One item of an `{:array, :map}` field: its declared translatable keys, and
   # any child blocks parked under a `"blocks"` list (the container convention
@@ -328,26 +367,41 @@ defmodule KilnCMS.CMS.Xliff.Units do
   defp walk_item_keys(item, _kind, _ctx, _fun, acc), do: {item, acc}
 
   # One plain-text slot at `key` of `map` — a block field or a map-array item's
-  # key, which behave identically once the path is built. Blank stays blank in
-  # both directions: it is not a translation job going out and it is not a
-  # field to clear coming back.
+  # key, which behave identically once the path is built.
+  #
+  # The slot is built even when the stored value is blank or absent, and it is
+  # the *callback* that decides: extraction skips blanks (an empty
+  # `seo_description` is not a translation job, and a vendor charging per unit
+  # should not be billed for it), while application must not, or a caption
+  # added to the source after the target draft was created could never be
+  # imported — the returned prose would be dropped and reported as an id this
+  # record does not have.
   defp walk_text(map, key, ctx, fun, acc) do
-    if present?(map, key) do
-      slot = slot(ctx, key, key, [%{text: Map.fetch!(map, key), marks: []}], [])
+    slot = slot(ctx, key, key, [%{text: value_at(map, key), marks: []}], [])
 
-      case fun.(slot, acc) do
-        {:keep, acc} -> {map, acc}
-        {runs, acc} -> {Map.put(map, key, plain(runs)), acc}
-      end
-    else
-      {map, acc}
+    case fun.(slot, acc) do
+      {:keep, acc} -> {map, acc}
+      {runs, acc} -> {Map.put(map, key, plain(runs)), acc}
     end
   end
 
-  defp present?(map, key) do
+  defp value_at(map, key) do
+    case Map.get(map, key) do
+      value when is_binary(value) -> value
+      _absent -> ""
+    end
+  end
+
+  # Is there anything here to report as *not* exported? Type-agnostic, because
+  # `:unsupported` is allowed on any field — `custom.data` is a map, and it is
+  # exactly where an unmapped legacy block's prose ends up.
+  defp carries_content?(map, key) do
     case Map.get(map, key) do
       value when is_binary(value) -> String.trim(value) != ""
-      _absent -> false
+      value when is_map(value) -> map_size(value) > 0
+      value when is_list(value) -> value != []
+      nil -> false
+      _other -> true
     end
   end
 
@@ -360,9 +414,6 @@ defmodule KilnCMS.CMS.Xliff.Units do
     case runs_from_children(Map.get(pt, "children")) do
       :unsupported ->
         {pt, fun.(unsupported(ctx, :children), acc) |> elem(1)}
-
-      [] ->
-        {pt, acc}
 
       runs ->
         case fun.(slot(ctx, nil, label_for(pt), runs, defs), acc) do
@@ -393,7 +444,7 @@ defmodule KilnCMS.CMS.Xliff.Units do
       |> List.wrap()
       |> Enum.with_index()
       |> Enum.map_reduce(acc, fn {cell, c}, acc ->
-        walk_pt_cell(cell, push(ctx, "r#{r}c#{c}", "r#{r}c#{c}"), fun, acc)
+        walk_pt_cell(cell, push(ctx, "r#{r}c#{c}", "r#{r}c#{c}", true), fun, acc)
       end)
 
     {Map.put(row, "cells", cells), acc}
@@ -407,9 +458,6 @@ defmodule KilnCMS.CMS.Xliff.Units do
     case runs_from_children(Map.get(cell, "children")) do
       :unsupported ->
         {cell, fun.(unsupported(ctx, :children), acc) |> elem(1)}
-
-      [] ->
-        {cell, acc}
 
       runs ->
         case fun.(slot(ctx, nil, "table cell", runs, defs), acc) do
@@ -442,12 +490,32 @@ defmodule KilnCMS.CMS.Xliff.Units do
         {:halt, :unsupported}
     end)
     |> case do
-      :unsupported -> :unsupported
-      runs -> if Enum.all?(runs, &(&1.text == "")), do: [], else: runs
+      :unsupported ->
+        :unsupported
+
+      runs ->
+        # Merged, because `Document.merge_runs/1` merges on the way back in: a
+        # vendor tool re-serializing the same sentence as two text nodes must
+        # not read as a change, and neither must our own hard breaks, which are
+        # stored as their own unmarked span. Without this an untouched echo of
+        # the exported file rewrote every paragraph holding one.
+        if Enum.all?(runs, &(&1.text == "")), do: [], else: merge_runs(runs)
     end
   end
 
   defp runs_from_children(_other), do: []
+
+  defp merge_runs(runs) do
+    runs
+    |> Enum.reduce([], fn
+      run, [%{marks: marks} = previous | rest] when marks == run.marks ->
+        [%{previous | text: previous.text <> run.text} | rest]
+
+      run, acc ->
+        [run | acc]
+    end)
+    |> Enum.reverse()
+  end
 
   defp marks_of(span) do
     span
@@ -456,56 +524,86 @@ defmodule KilnCMS.CMS.Xliff.Units do
     |> Enum.filter(&is_binary/1)
   end
 
+  # The inverse of `runs_from_children/1`. A newline is re-split into the bare
+  # unmarked span Portable Text uses for a hard break — `PortableText`'s HTML
+  # renderer matches `%{"text" => "\n"}` exactly to emit `<br/>`, so leaving it
+  # inside a longer span would render the line break away.
   defp children_from_runs(runs) do
-    Enum.map(runs, fn run ->
-      %{"_type" => "span", "text" => run.text, "marks" => run.marks}
+    Enum.flat_map(runs, fn run ->
+      run.text
+      |> String.split("\n")
+      |> Enum.map(&span(&1, run.marks))
+      |> Enum.intersperse(span("\n", []))
+      |> Enum.reject(&(&1["text"] == "" and &1["marks"] == run.marks))
     end)
   end
 
+  defp span(text, marks), do: %{"_type" => "span", "text" => text, "marks" => marks}
+
   # ── slot plumbing ──────────────────────────────────────────────────────────
 
-  defp ctx(id, position), do: %{id: id, position: position, labels: []}
+  defp ctx, do: %{id: "", position: "", positional?: false}
 
-  defp push(ctx, id_segment, position_segment) do
+  # `positional?` is sticky: once any segment of the path is an index rather
+  # than an identity, the whole slot is positionally addressed and a match on
+  # it deserves the same "check this" flag an explicit fallback gets.
+  defp push(ctx, id_segment, position_segment, positional? \\ false) do
     %{
       ctx
       | id: join(ctx.id, id_segment),
-        position: join(ctx.position, position_segment)
+        position: join(ctx.position, position_segment),
+        positional?: ctx.positional? or positional?
     }
   end
 
+  # `.` and every character `segment/1` admits are XML `NameChar`s, because
+  # XLIFF 2.0 types `unit/@id` as `xsd:NMTOKEN`. `/` and `#` — the obvious
+  # separators — are not, and a tool that validates against the core schema on
+  # ingest rejects the whole document rather than the offending unit.
   defp join("", segment), do: segment
-  defp join(prefix, segment), do: prefix <> "/" <> segment
+  defp join(prefix, segment), do: prefix <> "." <> segment
 
-  # `segment` is nil for a slot that *is* the current path (a Portable Text
+  # Anything outside the NMTOKEN character set becomes `_`. Stored Portable Text
+  # keys and block ids never need it; a hand-authored `_key` might.
+  defp segment(value), do: String.replace(to_string(value), ~r/[^A-Za-z0-9_:.-]/u, "_")
+
+  # `key` is nil for a slot that *is* the current path (a Portable Text
   # paragraph, a table cell) rather than a named field under it.
-  defp slot(ctx, segment, label, runs, mark_defs) do
-    {id, position_id} =
-      case segment do
-        nil -> {ctx.id, ctx.position}
-        segment -> {join(ctx.id, segment), join(ctx.position, segment)}
-      end
+  defp slot(ctx, key, label, runs, mark_defs) do
+    ctx = if key, do: push(ctx, key, key), else: ctx
 
-    %{id: id, position_id: position_id, label: label, runs: runs, mark_defs: mark_defs}
+    %{
+      id: ctx.id,
+      position_id: ctx.position,
+      positional?: ctx.positional?,
+      label: label,
+      runs: runs,
+      mark_defs: mark_defs
+    }
   end
 
   defp unsupported(ctx, field), do: %{unsupported: %{path: ctx.id, field: field}}
 
+  # `{id segment, positional?}`. A block with no readable `id` — every `columns`
+  # child written by anything but the content editor (#865/#954) — has nothing
+  # to address it by but its index, and saying so is what keeps the import
+  # report honest: without the flag, `slot.id == slot.position_id` and a match
+  # that is only as good as the ordering reports as an identity match.
   defp block_segment(block, index) do
     case Map.get(block, "id") do
-      id when is_binary(id) and id != "" -> "b:" <> id
-      _none -> "b##{index}"
+      id when is_binary(id) and id != "" -> {"b:" <> segment(id), false}
+      _none -> {"b-#{index}", true}
     end
   end
 
   defp pt_segment(pt, index) when is_map(pt) do
     case Map.get(pt, "_key") do
-      key when is_binary(key) and key != "" -> "k:" <> key
-      _none -> "p##{index}"
+      key when is_binary(key) and key != "" -> {"k:" <> segment(key), false}
+      _none -> {"p-#{index}", true}
     end
   end
 
-  defp pt_segment(_other, index), do: "p##{index}"
+  defp pt_segment(_other, index), do: {"p-#{index}", true}
 
   defp block_module(block) do
     with type when is_binary(type) <- Map.get(block, "_type"),
@@ -533,12 +631,38 @@ defmodule KilnCMS.CMS.Xliff.Units do
 
   defp blank?(runs), do: runs |> plain() |> String.trim() == ""
 
+  # "Did the vendor actually change this?", answered modulo line endings.
+  #
+  # A carriage return cannot survive the round trip: XML 1.0 normalizes a
+  # literal CR to LF before the parser sees it, and `xmerl` folds a `&#13;`
+  # character reference the same way (non-conformantly, but it is the parser we
+  # have). So a record holding CRLF — pasted from Word, or imported through
+  # WXR — would compare unequal to an *untouched echo of its own export* and be
+  # rewritten, bumping `updated_at` and clearing the document's staleness
+  # marker for a translation nobody made. Comparing normalized means an echo is
+  # correctly `unchanged`; a real translation still writes, in the LF form the
+  # file actually carried.
+  defp same_text?(a, b), do: newlines(a) == newlines(to_string(b))
+
+  defp same_runs?(a, b) do
+    Enum.map(a, &%{&1 | text: newlines(&1.text)}) == Enum.map(b, &%{&1 | text: newlines(&1.text)})
+  end
+
+  defp newlines(text), do: String.replace(text, "\r\n", "\n") |> String.replace("\r", "\n")
+
   # ── extraction / application callbacks ─────────────────────────────────────
 
   defp collect_slot(%{unsupported: warning}, {units, warnings}),
     do: {:keep, {units, [Map.put(warning, :reason, :unsupported_field) | warnings]}}
 
-  defp collect_slot(slot, {units, warnings}), do: {:keep, {[slot | units], warnings}}
+  # Blank slots exist in the walk so that `apply_translations/3` can fill one
+  # the target does not have yet; they are not translation jobs, so extraction
+  # drops them here rather than billing a vendor per empty unit.
+  defp collect_slot(slot, {units, warnings}) do
+    if blank?(slot.runs),
+      do: {:keep, {units, warnings}},
+      else: {:keep, {[slot | units], warnings}}
+  end
 
   defp collect({units, warnings}, nil), do: {units, warnings}
   defp collect({units, warnings}, unit), do: {[unit | units], warnings}
@@ -561,9 +685,17 @@ defmodule KilnCMS.CMS.Xliff.Units do
 
       {:ok, id, runs, matched_by} ->
         runs = restore_marks(runs, slot.runs)
-        state = if matched_by == :position, do: consume(state, :by_position, id), else: state
 
-        if runs == slot.runs or blank?(runs) do
+        # Either an explicit fallback *or* an id whose own path is positional —
+        # a map-array item, a table cell, an id-less nested child. Both are only
+        # as good as the ordering having held, and the operator has no way to
+        # tell them apart from the outside.
+        state =
+          if matched_by == :position or slot.positional?,
+            do: consume(state, :by_position, id),
+            else: state
+
+        if same_runs?(runs, slot.runs) or blank?(runs) do
           {:keep, consume(state, :unchanged, id)}
         else
           {runs, %{consume(state, :applied, id) | blocks_changed?: true}}

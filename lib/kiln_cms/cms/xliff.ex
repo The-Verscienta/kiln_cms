@@ -68,6 +68,12 @@ defmodule KilnCMS.CMS.Xliff do
   alias KilnCMS.CMS.Xliff.Units
   alias KilnCMS.I18n
 
+  # One document is assembled in memory as a single binary, and a translation
+  # vendor is quoted per job rather than per thousand pages. The dashboard and
+  # the download controller both read this rather than each carrying their own
+  # number kept in sync by a comment.
+  @max_batch 50
+
   @note_type "kiln:type"
   @note_slug "kiln:slug"
   @note_source_locale "kiln:sourceLocale"
@@ -121,10 +127,13 @@ defmodule KilnCMS.CMS.Xliff do
 
   def export_many(entries, target_locale, opts) when is_list(entries) do
     with :ok <- validate_locale(target_locale),
+         :ok <- validate_batch(entries),
          {:ok, source_locale} <- single_source_locale(entries, target_locale) do
+      variants = target_variants(entries, target_locale, opts)
+
       {files, warnings} =
         Enum.map_reduce(entries, [], fn {kind, record}, warnings ->
-          {file, record_warnings} = export_file(kind, record, target_locale, opts)
+          {file, record_warnings} = export_file(kind, record, variants, opts)
           {file, warnings ++ record_warnings}
         end)
 
@@ -145,6 +154,10 @@ defmodule KilnCMS.CMS.Xliff do
        }}
     end
   end
+
+  @doc "The largest number of records one exported document may carry."
+  @spec max_batch() :: pos_integer()
+  def max_batch, do: @max_batch
 
   @doc """
   A filename for an export, stable enough to recognize in a downloads folder
@@ -177,10 +190,15 @@ defmodule KilnCMS.CMS.Xliff do
 
   # ── export ─────────────────────────────────────────────────────────────────
 
-  defp export_file(kind, record, target_locale, opts) do
+  defp export_file(kind, record, variants, _opts) do
     {units, warnings} = Units.extract(record)
-    targets = target_runs(kind, record, target_locale, opts)
     type = type_name(kind)
+
+    targets =
+      case Map.get(variants, {type, record.slug}) do
+        nil -> %{}
+        variant -> target_index(units, variant)
+      end
 
     file = %{
       id: "f-" <> record.id,
@@ -214,34 +232,68 @@ defmodule KilnCMS.CMS.Xliff do
   # is — and a vendor tool that trusts the state ships the source back as the
   # translation.
   defp pending_target(unit, targets) do
-    case Map.get(targets, unit.id) || Map.get(targets, unit.position_id) do
+    case Map.get(targets, unit.id) do
       nil -> nil
       runs -> if runs == unit.runs, do: nil, else: runs
     end
   end
 
-  # The existing target-locale variant's own units, indexed by both addresses so
-  # a variant created before ids were shared across locales still pairs up.
-  defp target_runs(kind, record, target_locale, opts) do
-    case sibling(kind, record, target_locale, opts) do
-      nil ->
-        %{}
+  # The existing target-locale variant's own units, keyed by the address this
+  # pair actually shares.
+  #
+  # Identity when the two trees share block ids, position only when they share
+  # none — the same all-or-nothing rule `Units.apply_translations/3` applies on
+  # the way back in, and for the same reason. Mixing per unit is what puts the
+  # wrong paragraph in the file: a source block the target no longer holds frees
+  # its index for its neighbour, whose text is then emitted as
+  # `<target state="translated">` for a paragraph it has nothing to do with —
+  # and unlike the import side, an export says nothing about how it matched.
+  defp target_index(units, variant) do
+    {target_units, _warnings} = Units.extract(variant)
+    by_id = Map.new(target_units, &{&1.id, &1.runs})
 
-      variant ->
-        {units, _warnings} = Units.extract(variant)
-
-        Enum.reduce(units, %{}, fn unit, acc ->
-          acc
-          |> Map.put_new(unit.id, unit.runs)
-          |> Map.put_new(unit.position_id, unit.runs)
-        end)
-    end
+    if Enum.any?(units, &Map.has_key?(by_id, &1.id)),
+      do: by_id,
+      else: Map.new(target_units, &{&1.position_id, &1.runs}) |> position_keyed(units)
   end
 
-  defp sibling(kind, record, locale, opts) do
-    kind
-    |> Translations.siblings(record, opts)
-    |> Enum.find(&(&1.locale == locale))
+  # Re-key a positional index onto the source's own ids, so `pending_target/2`
+  # only ever does an identity lookup.
+  defp position_keyed(by_position, units) do
+    Enum.reduce(units, %{}, fn unit, acc ->
+      case Map.fetch(by_position, unit.position_id) do
+        {:ok, runs} -> Map.put(acc, unit.id, runs)
+        :error -> acc
+      end
+    end)
+  end
+
+  # Every entry's target-locale variant, in one read per content type.
+  #
+  # The obvious shape — ask `Translations.siblings/3` per record — is a query
+  # per record that also loads every *other* locale's full row, block tree
+  # included. On a 50-record batch with three locales configured that is 50
+  # round trips materializing 150 documents to use 50, on the synchronous path
+  # of a file download.
+  defp target_variants(entries, target_locale, opts) do
+    entries
+    |> Enum.group_by(fn {kind, _record} -> kind end, fn {_kind, record} -> record.slug end)
+    |> Enum.flat_map(fn {kind, slugs} ->
+      kind
+      |> ContentTypes.list!(
+        Keyword.merge(opts,
+          query: [filter: [slug: [in: Enum.uniq(slugs)], locale: target_locale]]
+        )
+      )
+      |> Enum.map(&{{type_name(kind), &1.slug}, &1})
+    end)
+    |> Map.new()
+  end
+
+  defp validate_batch(entries) do
+    if length(entries) > @max_batch,
+      do: {:error, {:too_many_records, length(entries), @max_batch}},
+      else: :ok
   end
 
   defp single_source_locale(entries, target_locale) do
@@ -258,7 +310,7 @@ defmodule KilnCMS.CMS.Xliff do
   defp validate_locale(locale) do
     cond do
       is_nil(locale) or locale == "" -> {:error, :missing_locale}
-      locale in I18n.locales() -> :ok
+      I18n.supported?(locale) -> :ok
       true -> {:error, {:unknown_locale, locale}}
     end
   end

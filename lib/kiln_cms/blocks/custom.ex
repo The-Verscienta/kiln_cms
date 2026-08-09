@@ -14,7 +14,10 @@ defmodule KilnCMS.Blocks.Custom do
     # be a serialized blob. The XLIFF exporter reports every `custom` block it
     # skipped rather than dropping it silently.
     field :content, :string, translatable: :unsupported
-    field :data, :map, default: %{}
+    # Reported, not exported, for the same reason as `content` above: this is
+    # where `TypedBlocks.one_from_legacy/1` parks an unmapped block's whole
+    # payload, so it is frequently where the prose actually is.
+    field :data, :map, default: %{}, translatable: :unsupported
   end
 
   # Match a plain variable, not %__MODULE__{}. Block modules are Ash embedded

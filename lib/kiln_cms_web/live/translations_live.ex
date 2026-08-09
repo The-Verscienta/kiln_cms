@@ -28,9 +28,9 @@ defmodule KilnCMSWeb.TranslationsLive do
   # translation team works from.
   @per_type_limit 200
 
-  # Matches `TranslationsExportController`'s cap: the link would 400 past it,
-  # and a disabled button beats a download that fails after the click.
-  @max_export_rows 50
+  # `KilnCMS.CMS.Xliff` owns what an export is, cap included — the link would
+  # 400 past it, and this page must not offer a download that fails on click.
+  @max_export_rows Xliff.max_batch()
 
   # The parser refuses anything larger anyway (`Xliff.Document`), so the upload
   # is capped at the same number and the operator hears about it before the
@@ -128,6 +128,9 @@ defmodule KilnCMSWeb.TranslationsLive do
 
   def handle_event("dismiss_import", _params, socket),
     do: {:noreply, assign(socket, :import_reports, nil)}
+
+  def handle_event("cancel_import", %{"ref" => ref}, socket) when is_binary(ref),
+    do: {:noreply, cancel_upload(socket, :xliff, ref)}
 
   # The upload lives in Phoenix's own temporary directory and is named by it,
   # so the path is never operator- or attacker-supplied.
@@ -401,12 +404,34 @@ defmodule KilnCMSWeb.TranslationsLive do
             </form>
           </div>
 
-          <p
-            :for={error <- upload_errors(@uploads.xliff)}
-            class="text-sm text-error"
-          >
+          <%!-- `upload_errors/1` only ever returns upload-scoped errors
+                (`:too_many_files`); `:too_large` and `:not_accepted` are keyed
+                on the ENTRY and need the arity-2 form over a rendered entry.
+                Without the entry row an oversized or wrong-typed file showed no
+                error at all, could not be cleared, and answered the Import
+                button with "choose a file first" while one was plainly
+                selected. --%>
+          <p :for={error <- upload_errors(@uploads.xliff)} class="text-sm text-error">
             {upload_error_message(error)}
           </p>
+
+          <div
+            :for={entry <- @uploads.xliff.entries}
+            class="flex flex-wrap items-center gap-2 text-sm"
+          >
+            <span class="font-mono">{entry.client_name}</span>
+            <span :for={error <- upload_errors(@uploads.xliff, entry)} class="text-error">
+              {upload_error_message(error)}
+            </span>
+            <button
+              type="button"
+              phx-click="cancel_import"
+              phx-value-ref={entry.ref}
+              class="btn btn-sm btn-ghost"
+            >
+              {gettext("Remove")}
+            </button>
+          </div>
 
           <p :if={@export_overflow > 0} class="text-sm text-warning">
             {gettext(

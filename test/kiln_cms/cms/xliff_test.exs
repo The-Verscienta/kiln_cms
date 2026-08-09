@@ -101,23 +101,24 @@ defmodule KilnCMS.CMS.XliffTest do
 
       [heading, rich, faq, columns] = page.blocks
 
-      assert "b:#{heading.value.id}/text" in ids
-      assert "b:#{rich.value.id}/body/k:b0" in ids
-      assert "b:#{rich.value.id}/body/k:b1" in ids
-      assert "b:#{faq.value.id}/title" in ids
-      assert "b:#{faq.value.id}/items/i0/question" in ids
-      assert "b:#{faq.value.id}/items/i0/answer" in ids
+      assert "b:#{heading.value.id}.text" in ids
+      assert "b:#{rich.value.id}.body.k:b0" in ids
+      assert "b:#{rich.value.id}.body.k:b1" in ids
+      assert "b:#{faq.value.id}.title" in ids
+      assert "b:#{faq.value.id}.items.i-0.question" in ids
+      assert "b:#{faq.value.id}.items.i-0.answer" in ids
 
       # The nested child inside the first column is addressed under its parent.
       # Its own segment is positional: `columns` children are raw maps and only
       # the content editor stamps them an id, so a block tree written by any
       # other path has none to address by (#865/#954). The *parent* is still
-      # addressed by identity, so reordering top-level blocks is still safe.
-      assert "b:#{columns.value.id}/columns/i0/b#0/text" in ids
+      # addressed by identity, so reordering top-level blocks is still safe —
+      # and every path here is NMTOKEN-legal, which `unit/@id` requires.
+      assert "b:#{columns.value.id}.columns.i-0.b-0.text" in ids
 
       # Structural fields are not offered to a translator.
-      refute Enum.any?(ids, &String.ends_with?(&1, "/layout"))
-      refute Enum.any?(ids, &String.ends_with?(&1, "/level"))
+      refute Enum.any?(ids, &String.ends_with?(&1, ".layout"))
+      refute Enum.any?(ids, &String.ends_with?(&1, ".level"))
     end
 
     test "carries Portable Text marks as runs, with the link's markDefs alongside" do
@@ -125,7 +126,7 @@ defmodule KilnCMS.CMS.XliffTest do
       page = actor |> rich_page() |> then(&CMS.get_page!(&1.id, actor: actor))
       {units, _warnings} = Units.extract(page)
 
-      link_unit = Enum.find(units, &String.ends_with?(&1.id, "/body/k:b1"))
+      link_unit = Enum.find(units, &String.ends_with?(&1.id, ".body.k:b1"))
 
       assert link_unit.runs == [
                %{text: "See ", marks: []},
@@ -274,10 +275,182 @@ defmodule KilnCMS.CMS.XliffTest do
       assert {:error, :not_an_xliff_file} = Document.parse("<html><body>hi</body></html>")
       assert {:error, {:malformed_xml, _}} = Document.parse("<xliff><file>")
     end
+  end
+
+  describe "unit ids" do
+    test "unit ids are valid NMTOKENs, as unit/@id requires" do
+      actor = admin()
+      page = actor |> rich_page() |> then(&CMS.get_page!(&1.id, actor: actor))
+      {units, _warnings} = Units.extract(page)
+
+      # NameChar excludes `/` and `#`, so a tool validating against
+      # xliff_core_2.0.xsd on ingest rejects the whole document, not one unit.
+      for unit <- units do
+        assert unit.id =~ ~r/\A[A-Za-z0-9_:.-]+\z/, "not an NMTOKEN: #{unit.id}"
+        assert unit.position_id =~ ~r/\A[A-Za-z0-9_:.-]+\z/
+      end
+    end
+
+    test "reports prose in a non-string field it cannot round-trip" do
+      actor = admin()
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Legacy map",
+            slug: slug(),
+            locale: "en",
+            blocks: [%{"_type" => "custom", "data" => %{"body" => "Old prose"}}]
+          },
+          actor: actor
+        )
+
+      {_units, warnings} = Units.extract(CMS.get_page!(page.id, actor: actor))
+
+      assert [%{field: :data, reason: :unsupported_field}] = warnings
+    end
+  end
+
+  describe "codec hardening" do
+    test "<ignorable> whitespace between re-segmented sentences survives" do
+      xml =
+        ~s(<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" version="2.0" srcLang="en" trgLang="fr">) <>
+          ~s(<file id="f1" original="page/x"><unit id="u">) <>
+          ~s(<segment><source>Hello there.</source><target>Bonjour.</target></segment>) <>
+          ~s(<ignorable><source> </source></ignorable>) <>
+          ~s(<segment><source>Goodbye.</source><target>Au revoir.</target></segment>) <>
+          ~s(</unit></file></xliff>)
+
+      assert {:ok, %{files: [%{translations: %{"u" => runs}}]}} = Document.parse(xml)
+      assert runs == [%{text: "Bonjour. Au revoir.", marks: []}]
+    end
+
+    test "a half-translated unit is untranslated, not truncated" do
+      xml =
+        ~s(<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" version="2.0" srcLang="en" trgLang="fr">) <>
+          ~s(<file id="f1" original="page/x"><unit id="u">) <>
+          ~s(<segment><source>Hello.</source><target>Bonjour.</target></segment>) <>
+          ~s(<segment><source>Goodbye.</source></segment>) <>
+          ~s(</unit></file></xliff>)
+
+      assert {:ok, %{files: [file]}} = Document.parse(xml)
+      assert file.translations == %{}
+      assert file.untranslated == ["u"]
+    end
+
+    test "a whitespace-only target is untranslated, not delivered" do
+      xml =
+        ~s(<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" version="2.0" srcLang="en" trgLang="fr">) <>
+          ~s(<file id="f1" original="page/x"><unit id="u"><segment>) <>
+          ~s(<source>Hello</source><target>\n      </target>) <>
+          ~s(</segment></unit></file></xliff>)
+
+      assert {:ok, %{files: [file]}} = Document.parse(xml)
+      assert file.translations == %{}
+      assert file.untranslated == ["u"]
+    end
+
+    test "<sc>/<ec> spanning codes keep their mark over sibling text" do
+      xml =
+        ~s(<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0") <>
+          ~s( xmlns:kiln="urn:kiln-cms:xliff:1.0" version="2.0" srcLang="en" trgLang="fr">) <>
+          ~s(<file id="f1" original="page/x"><unit id="u"><segment>) <>
+          ~s(<source>a</source>) <>
+          ~s(<target>Voir <sc id="1" kiln:mark="lk0"/>la doc<ec startRef="1"/>.</target>) <>
+          ~s(</segment></unit></file></xliff>)
+
+      assert {:ok, %{files: [%{translations: %{"u" => runs}}]}} = Document.parse(xml)
+
+      assert runs == [
+               %{text: "Voir ", marks: []},
+               %{text: "la doc", marks: ["lk0"]},
+               %{text: ".", marks: []}
+             ]
+    end
+
+    test "a unit-level note cannot retarget the import" do
+      xml =
+        ~s(<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" version="2.0" srcLang="en" trgLang="fr">) <>
+          ~s(<file id="f1" original="page/real">) <>
+          ~s(<notes><note category="kiln:slug">real</note></notes>) <>
+          ~s(<unit id="u"><notes><note category="kiln:slug">hijacked</note></notes>) <>
+          ~s(<segment><source>a</source><target>b</target></segment></unit>) <>
+          ~s(</file></xliff>)
+
+      assert {:ok, %{files: [file]}} = Document.parse(xml)
+      assert file.notes == %{"kiln:slug" => "real"}
+    end
+
+    test "a rebound namespace prefix still reads kiln:pos and kiln:mark" do
+      xml =
+        ~s(<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0") <>
+          ~s( xmlns:k="urn:kiln-cms:xliff:1.0" version="2.0" srcLang="en" trgLang="fr">) <>
+          ~s(<file id="f1" original="page/x"><unit id="b:new.text" k:pos="b-0.text"><segment>) <>
+          ~s(<source>a</source>) <>
+          ~s(<target><pc id="1" k:mark="strong">Gras</pc></target>) <>
+          ~s(</segment></unit></file></xliff>)
+
+      assert {:ok, %{files: [file]}} = Document.parse(xml)
+      assert file.aliases == %{"b-0.text" => "b:new.text"}
+      assert file.translations["b:new.text"] == [%{text: "Gras", marks: ["strong"]}]
+    end
+
+    test "a carriage return survives the round trip instead of being normalized" do
+      actor = admin()
+
+      page =
+        CMS.create_page!(
+          %{title: "Two\r\nlines", slug: slug(), locale: "en"},
+          actor: actor
+        )
+
+      page = CMS.get_page!(page.id, actor: actor)
+      {:ok, %{xliff: xml}} = Xliff.export(:page, page, "fr", actor: actor)
+
+      # Echo the source back verbatim as the target. Nothing was translated, so
+      # nothing may be written. A CR cannot survive the parser at all (xmerl
+      # folds `&#13;` to LF along with literal line endings), so the CRLF the
+      # record holds used to compare unequal to its own echo and be rewritten.
+      echoed =
+        Regex.replace(~r{<source([^>]*)>(.*?)</source>}s, xml, fn _w, attrs, inner ->
+          "<source#{attrs}>#{inner}</source><target#{attrs}>#{inner}</target>"
+        end)
+
+      assert {:ok, [report]} = Xliff.import(echoed, actor: actor)
+      assert report.applied == []
+      assert "title" in report.unchanged
+    end
+
+    test "target inline codes reuse the source's ids" do
+      actor = admin()
+      shared = slug()
+      en = rich_page(actor, slug: shared)
+      en = CMS.get_page!(en.id, actor: actor)
+
+      {:ok, %{xliff: first}} = Xliff.export(:page, en, "fr", actor: actor)
+      {:ok, _reports} = Xliff.import(pseudo_translate(first), actor: actor)
+
+      # The second round pre-fills <target>; every code id it uses must exist in
+      # the same unit's <source>, or a CAT tool reports a tag mismatch.
+      {:ok, %{xliff: second}} = Xliff.export(:page, en, "fr", actor: actor)
+
+      for unit <- Regex.scan(~r{<unit .*?</unit>}s, second) |> Enum.map(&hd/1) do
+        [source] = Regex.run(~r{<source[^>]*>(.*?)</source>}s, unit, capture: :all_but_first)
+        target = Regex.run(~r{<target[^>]*>(.*?)</target>}s, unit, capture: :all_but_first)
+
+        if target do
+          source_ids = Regex.scan(~r{<pc id="(\d+)"}, source) |> Enum.map(&List.last/1)
+          target_ids = Regex.scan(~r{<pc id="(\d+)"}, hd(target)) |> Enum.map(&List.last/1)
+          assert target_ids -- source_ids == [], "target code id absent from source: #{unit}"
+        end
+      end
+    end
 
     test "refuses a file too large to expand into an xmerl tree" do
-      assert {:error, {:too_large, _size, _max}} =
-               Document.parse(String.duplicate("x", 17 * 1024 * 1024))
+      assert {:error, {:too_large, _size, max}} =
+               Document.parse(String.duplicate("x", 5 * 1024 * 1024))
+
+      assert max == 4 * 1024 * 1024
     end
   end
 
@@ -320,7 +493,12 @@ defmodule KilnCMS.CMS.XliffTest do
     assert report.error == nil
     assert report.created?, "the target draft is created by the import"
     assert report.unknown == []
-    assert report.by_position == [], "ids are shared across locales, so nothing needs position"
+    # Shared block ids mean nothing falls back to the positional address — but
+    # map-array items and nested children are addressed by index even so, and
+    # say so rather than passing as identity matches.
+    assert Enum.all?(report.by_position, &(&1 =~ ~r/\.(i|b)-\d/))
+    refute Enum.any?(report.by_position, &String.contains?(&1, ".body.k:"))
+    refute "title" in report.by_position
     assert length(report.applied) == unit_count
 
     fr = CMS.get_page!(report.record.id, actor: actor)
@@ -439,10 +617,10 @@ defmodule KilnCMS.CMS.XliffTest do
     en = actor |> rich_page() |> then(&CMS.get_page!(&1.id, actor: actor))
 
     {:ok, %{xliff: xml}} = Xliff.export(:page, en, "fr", actor: actor)
-    stale = xml |> pseudo_translate() |> String.replace(~s(id="title"), ~s(id="b:gone/text"))
+    stale = xml |> pseudo_translate() |> String.replace(~s(id="title"), ~s(id="b:gone.text"))
 
     assert {:ok, [report]} = Xliff.import(stale, actor: actor)
-    assert report.unknown == ["b:gone/text"]
+    assert report.unknown == ["b:gone.text"]
     refute "title" in report.applied
   end
 
@@ -483,6 +661,9 @@ defmodule KilnCMS.CMS.XliffTest do
     assert report.by_position != []
     assert Enum.all?(report.by_position, &(&1 in report.applied))
     refute "title" in report.by_position, "record-level fields never need position"
+
+    assert Enum.any?(report.by_position, &String.contains?(&1, ".body.k:")),
+           "a paragraph in a variant with unshared ids can only match by position"
 
     fr = CMS.get_page!(fr.id, actor: actor)
     assert Enum.at(fr.blocks, 0).value.text == "«Cirrus»"

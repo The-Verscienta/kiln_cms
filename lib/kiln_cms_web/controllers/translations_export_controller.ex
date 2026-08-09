@@ -17,17 +17,15 @@ defmodule KilnCMSWeb.TranslationsExportController do
     * `target` — the target locale (required; must be a configured locale)
     * `record` — repeated `"<type>:<uuid>"`, the source records to export
 
-  A batch is capped at 50 records (`@max_records`): the whole document is assembled in
-  memory as one binary, and a translation vendor is quoted per job, not per
-  thousand pages.
+  A batch is capped at `KilnCMS.CMS.Xliff.max_batch/0` records — the facade owns
+  what an export is, so the cap lives there and both this route and the
+  dashboard's selection read it rather than each carrying their own number.
   """
   use KilnCMSWeb, :controller
 
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.Xliff
   alias KilnCMSWeb.Params
-
-  @max_records 50
 
   def export(conn, params) do
     with :ok <- require_editor(conn),
@@ -88,9 +86,6 @@ defmodule KilnCMSWeb.TranslationsExportController do
 
   defp load(_conn, []), do: {:error, :no_records}
 
-  defp load(_conn, records) when length(records) > @max_records,
-    do: {:error, {:too_many_records, length(records), @max_records}}
-
   defp load(conn, records) do
     scope = scope(conn)
 
@@ -100,20 +95,31 @@ defmodule KilnCMSWeb.TranslationsExportController do
         {:error, reason} -> {:halt, {:error, reason}}
       end
     end)
-  rescue
-    # An unknown content type raises out of the dispatcher rather than
-    # returning — a hand-edited query string should be a 400, not a 500.
-    _error -> {:error, :no_records}
   end
 
   defp load_one(record, scope) do
     with [kind, id] <- String.split(record, ":", parts: 2),
-         {:ok, found} <- ContentTypes.get_record(kind, id, scope) do
+         {:ok, found} <- fetch_record(kind, id, scope) do
       {:ok, {kind, found}}
     else
-      {:error, _reason} -> {:error, {:record_not_found, record}}
+      {:error, reason} -> {:error, reason}
       _malformed -> {:error, {:malformed_record, record}}
     end
+  end
+
+  # The rescue is around the dispatcher lookup only. Wrapping the whole load
+  # turned a `Forbidden`, a malformed uuid and a pool timeout all into "no
+  # records selected" — an editor missing read on one of fifty ticked rows was
+  # told the selection was empty, and a genuine 500 never reached Sentry.
+  defp fetch_record(kind, id, scope) do
+    case ContentTypes.get_record(kind, id, scope) do
+      {:ok, found} -> {:ok, found}
+      {:error, _reason} -> {:error, {:record_not_found, "#{kind}:#{id}"}}
+    end
+  rescue
+    # An unknown content type raises out of the dispatcher rather than
+    # returning — a hand-edited query string should be a 400, not a 500.
+    _error -> {:error, {:unknown_type, kind}}
   end
 
   defp scope(conn),
@@ -124,6 +130,7 @@ defmodule KilnCMSWeb.TranslationsExportController do
   defp message(:no_records), do: "no records selected"
   defp message({:record_not_found, record}), do: "record not found: #{record}"
   defp message({:malformed_record, record}), do: "malformed record: #{record}"
+  defp message({:unknown_type, kind}), do: "unknown content type: #{kind}"
 
   defp message({:too_many_records, given, max}),
     do: "too many records: #{given} (max #{max})"

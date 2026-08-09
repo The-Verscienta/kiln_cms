@@ -60,6 +60,8 @@ defmodule KilnCMS.CMS.Xliff.Document do
 
   require Record
 
+  alias KilnCMS.Xml
+
   Record.defrecordp(
     :xml_element,
     :xmlElement,
@@ -81,15 +83,19 @@ defmodule KilnCMS.CMS.Xliff.Document do
   @xliff_ns "urn:oasis:names:tc:xliff:document:2.0"
   @kiln_ns "urn:kiln-cms:xliff:1.0"
 
-  # Same ceiling and the same reasoning as the WXR importer: `xmerl` builds the
-  # whole tree in memory off a charlist expansion of the input, so the honest
-  # failure is an up-front refusal naming the limit, not an OOM kill.
-  @max_bytes 16 * 1024 * 1024
-
-  # Characters XML 1.0 cannot represent at all. Stored prose should never hold
-  # one, but a single stray control byte would otherwise produce a document no
-  # vendor tool can open, which is a worse failure than dropping the byte.
-  @illegal_xml ~r/[\x{0000}-\x{0008}\x{000B}\x{000C}\x{000E}-\x{001F}\x{FFFE}\x{FFFF}]/u
+  # `xmerl` builds the whole tree in memory off a charlist expansion of the
+  # input, so the honest failure is an up-front refusal naming the limit rather
+  # than an OOM kill — the same reasoning as `KilnCMS.Portability.Wxr`, at a
+  # quarter of its ceiling because a translation job is prose, not a site dump.
+  #
+  # The cap is also the only bound on a second, sharper cost: `xmerl_scan`
+  # interns every distinct element and attribute name with `list_to_atom/1`,
+  # and atoms are never reclaimed. A crafted document of unique tag names
+  # therefore leaks the atom table, and exhausting it aborts the whole node
+  # rather than raising anything this module could catch. 4 MB keeps a single
+  # upload well inside the default 1,048,576-atom limit; the general problem
+  # belongs to every xmerl caller, not just this one, and is tracked separately.
+  @max_bytes 4 * 1024 * 1024
 
   # Portable Text mark name → the `<pc>` type/subType a vendor tool renders.
   # `xlf:` subTypes are the ones XLIFF 2.0 defines; the rest are ours, and the
@@ -144,7 +150,7 @@ defmodule KilnCMS.CMS.Xliff.Document do
 
   defp build_file(file) do
     [
-      ~s(  <file id="#{escape(file.id)}" original="#{escape(file.original)}">\n),
+      ~s(  <file id="#{attr(file.id)}" original="#{attr(file.original)}">\n),
       build_notes(Map.get(file, :notes, [])),
       Enum.map(file.units, &build_unit/1),
       "  </file>\n"
@@ -157,7 +163,7 @@ defmodule KilnCMS.CMS.Xliff.Document do
     [
       "    <notes>\n",
       Enum.map(notes, fn {category, value} ->
-        ~s(      <note category="#{escape(category)}">#{escape(value)}</note>\n)
+        ~s(      <note category="#{attr(category)}">#{escape(value)}</note>\n)
       end),
       "    </notes>\n"
     ]
@@ -166,8 +172,17 @@ defmodule KilnCMS.CMS.Xliff.Document do
   defp build_unit(unit) do
     data = original_data(unit)
 
+    # Inline-code ids are allocated from the SOURCE and reused by the target.
+    # XLIFF 2.0 pairs a target's codes to the source's *by id*, so numbering the
+    # two independently — which is what restarting the counter did — hands a CAT
+    # tool a target code that either names a different mark or has no source
+    # counterpart at all. Trados, memoQ and Phrase all treat that as a tag
+    # mismatch and refuse the segment.
+    pool = code_pool(unit.source)
+    {source, _left, next} = inline(unit.source, data, pool, pool_next(pool))
+
     [
-      ~s(    <unit id="#{escape(unit.id)}" name="#{escape(unit.name)}"),
+      ~s(    <unit id="#{attr(unit.id)}" name="#{attr(unit.name)}"),
       position_attribute(unit),
       ">\n",
       build_original_data(data),
@@ -175,12 +190,26 @@ defmodule KilnCMS.CMS.Xliff.Document do
       segment_state(unit),
       ">\n",
       "        <source xml:space=\"preserve\">",
-      inline(unit.source, data),
+      source,
       "</source>\n",
-      build_target(unit, data),
+      build_target(unit, data, pool, next),
       "      </segment>\n",
       "    </unit>\n"
     ]
+  end
+
+  # `mark name => [id, ...]`, allocated in source order.
+  defp code_pool(runs) do
+    {pairs, _next} =
+      runs
+      |> Enum.flat_map(& &1.marks)
+      |> Enum.map_reduce(1, fn mark, id -> {{mark, id}, id + 1} end)
+
+    Enum.group_by(pairs, &elem(&1, 0), &elem(&1, 1))
+  end
+
+  defp pool_next(pool) do
+    pool |> Map.values() |> List.flatten() |> Enum.max(fn -> 0 end) |> Kernel.+(1)
   end
 
   # The unit's positional address, when it differs from its id. This is the
@@ -190,17 +219,19 @@ defmodule KilnCMS.CMS.Xliff.Document do
   # thing in the file that can still reach it. `Units.apply_translations/3`
   # tries it strictly second, and reports every unit that needed it.
   defp position_attribute(%{position_id: position, id: id}) when position != id,
-    do: ~s( kiln:pos="#{escape(position)}")
+    do: ~s( kiln:pos="#{attr(position)}")
 
   defp position_attribute(_unit), do: []
 
   defp segment_state(%{target: nil}), do: []
   defp segment_state(_unit), do: ~s( state="translated")
 
-  defp build_target(%{target: nil}, _data), do: []
+  defp build_target(%{target: nil}, _data, _pool, _next), do: []
 
-  defp build_target(%{target: target}, data),
-    do: ["        <target xml:space=\"preserve\">", inline(target, data), "</target>\n"]
+  defp build_target(%{target: target}, data, pool, next) do
+    {iodata, _left, _next} = inline(target, data, pool, next)
+    ["        <target xml:space=\"preserve\">", iodata, "</target>\n"]
+  end
 
   # `markDefs` key → {data id, href}. Only link definitions get one; a mark with
   # no resolvable href still round-trips through `kiln:mark`, it just has no
@@ -229,7 +260,7 @@ defmodule KilnCMS.CMS.Xliff.Document do
       |> Map.values()
       |> Enum.sort()
       |> Enum.map(fn {id, href} ->
-        ~s(        <data id="#{escape(id)}">#{escape(href)}</data>\n)
+        ~s(        <data id="#{attr(id)}">#{escape(href)}</data>\n)
       end),
       "      </originalData>\n"
     ]
@@ -238,47 +269,47 @@ defmodule KilnCMS.CMS.Xliff.Document do
   # Runs → mixed content. Each run's marks nest outermost-first in the order
   # they appear on the span, so the code structure a translator sees matches
   # the order the marks were authored in.
-  defp inline(runs, data) do
-    {iodata, _next_id} =
-      Enum.map_reduce(runs, 1, fn run, next_id ->
-        wrap(run.marks, escape(run.text), data, next_id)
-      end)
-
-    iodata
+  defp inline(runs, data, pool, next) do
+    Enum.reduce(runs, {[], pool, next}, fn run, {acc, pool, next} ->
+      {iodata, pool, next} = wrap(run.marks, escape(run.text), data, pool, next)
+      {acc ++ [iodata], pool, next}
+    end)
   end
 
-  defp wrap([], text, _data, next_id), do: {text, next_id}
+  defp wrap([], text, _data, pool, next), do: {text, pool, next}
 
-  defp wrap([mark | rest], text, data, id) do
-    {inner, next_id} = wrap(rest, text, data, id + 1)
+  defp wrap([mark | rest], text, data, pool, next) do
+    {id, pool, next} = take_code_id(pool, mark, next)
+    {inner, pool, next} = wrap(rest, text, data, pool, next)
 
     {[
-       "<pc id=\"#{id}\" kiln:mark=\"#{escape(mark)}\"",
+       "<pc id=\"#{id}\" kiln:mark=\"#{attr(mark)}\"",
        pc_type(mark, data),
        ">",
        inner,
        "</pc>"
-     ], next_id}
+     ], pool, next}
+  end
+
+  # The id the source gave this mark, in source order. A mark the source never
+  # carried mints a fresh id past the end rather than colliding with one.
+  defp take_code_id(pool, mark, next) do
+    case Map.get(pool, mark) do
+      [id | rest] -> {id, Map.put(pool, mark, rest), next}
+      _exhausted -> {next, pool, next + 1}
+    end
   end
 
   defp pc_type(mark, data) do
     case {Map.get(@mark_types, mark), Map.get(data, mark)} do
-      {_known, {id, _href}} -> ~s( type="link" dataRefStart="#{escape(id)}")
+      {_known, {id, _href}} -> ~s( type="link" dataRefStart="#{attr(id)}")
       {{type, subtype}, nil} -> ~s( type="#{type}" subType="#{subtype}")
       {nil, nil} -> ~s( type="other" subType="kiln:mark")
     end
   end
 
-  defp escape(value) do
-    value
-    |> to_string()
-    |> String.replace(@illegal_xml, "")
-    |> String.replace("&", "&amp;")
-    |> String.replace("<", "&lt;")
-    |> String.replace(">", "&gt;")
-    |> String.replace("\"", "&quot;")
-    |> String.replace("'", "&apos;")
-  end
+  defdelegate escape(value), to: Xml
+  defdelegate attr(value), to: Xml, as: :escape_attribute
 
   # ── parsing ────────────────────────────────────────────────────────────────
 
@@ -379,9 +410,15 @@ defmodule KilnCMS.CMS.Xliff.Document do
     end
   end
 
+  # `<file>`'s own `<notes>` only. `descendants/2` would walk into `<unit>`, and
+  # a per-unit `<note>` is the ordinary XLIFF slot for a translator comment —
+  # with `Map.new/1` being last-wins and units coming after `<notes>` in
+  # document order, one commented unit could retarget the whole import at a
+  # different record.
   defp parse_notes(element) do
     element
-    |> descendants("note")
+    |> children("notes")
+    |> Enum.flat_map(&children(&1, "note"))
     |> Enum.flat_map(fn note ->
       case attribute(note, "category") do
         nil -> []
@@ -391,51 +428,135 @@ defmodule KilnCMS.CMS.Xliff.Document do
     |> Map.new()
   end
 
-  # A unit's target is the concatenation of its segments' targets: XLIFF 2.0
-  # lets a tool re-segment a unit into several `<segment>`s, and a file that
+  # A unit's target is the concatenation of its parts, in document order: XLIFF
+  # 2.0 lets a tool re-segment a unit into several `<segment>`s, and a file that
   # came back split into sentences must still restore as one slot of prose.
+  #
+  # `<ignorable>` counts. A unit's content model is `(segment | ignorable)+`,
+  # and `<ignorable>` is exactly where a segmenter parks the whitespace
+  # *between* sentences — reading only the segments fuses "Bonjour." and
+  # "Au revoir." into one word. Its content is non-translatable by definition,
+  # so its source stands in when it carries no target of its own.
+  #
+  # A unit where some segment has no target at all is **not** partially
+  # applied: writing the translated half and dropping the rest would silently
+  # truncate the paragraph, so the whole unit reads as untranslated.
   defp unit_target(unit) do
-    targets =
+    parts =
       unit
-      |> children("segment")
-      |> Enum.flat_map(&children(&1, "target"))
-      |> Enum.flat_map(&runs_of(&1, []))
+      |> xml_element(:content)
+      |> Enum.filter(
+        &(Record.is_record(&1, :xmlElement) and local_name(&1) in ~w(segment ignorable))
+      )
 
-    if targets == [], do: nil, else: merge_runs(targets)
+    cond do
+      parts == [] -> nil
+      Enum.any?(parts, &missing_target?/1) -> nil
+      true -> parts |> Enum.flat_map(&part_runs/1) |> blank_to_nil()
+    end
   end
 
+  defp missing_target?(part) do
+    local_name(part) == "segment" and children(part, "target") == []
+  end
+
+  defp part_runs(part) do
+    case {children(part, "target"), local_name(part)} do
+      {[_ | _] = targets, _kind} -> Enum.flat_map(targets, &runs_of(&1, []))
+      {[], "ignorable"} -> part |> children("source") |> Enum.flat_map(&runs_of(&1, []))
+      {[], _segment} -> []
+    end
+  end
+
+  # A `<target>` holding nothing but the tool's own indentation is not a
+  # translation. `xmerl` preserves whitespace, so without this every unit of a
+  # pretty-printed but untranslated file reports as delivered.
+  defp blank_to_nil(runs) do
+    if runs |> Enum.map_join(& &1.text) |> String.trim() == "",
+      do: nil,
+      else: merge_runs(runs)
+  end
+
+  # `open` is the stack of marks opened by an `<sc>` that has not been closed by
+  # its `<ec>` yet — see `element_runs/4`.
   defp runs_of(element, marks) do
-    element
-    |> xml_element(:content)
-    |> Enum.flat_map(&node_runs(&1, marks))
+    {runs, _open} =
+      element
+      |> xml_element(:content)
+      |> Enum.reduce({[], []}, fn node, {runs, open} -> node_runs(node, marks, runs, open) end)
+
+    runs
   end
 
-  defp node_runs(node, marks) do
+  defp node_runs(node, marks, runs, open) do
     cond do
       Record.is_record(node, :xmlText) ->
         text = node |> xml_text(:value) |> List.to_string()
-        if text == "", do: [], else: [%{text: text, marks: marks}]
+
+        if text == "",
+          do: {runs, open},
+          else: {runs ++ [%{text: text, marks: marks ++ open_marks(open)}], open}
 
       Record.is_record(node, :xmlElement) ->
-        element_runs(node, local_name(node), marks)
+        element_runs(node, local_name(node), marks, runs, open)
 
       true ->
-        []
+        {runs, open}
     end
   end
 
-  # `<pc>` opens a mark; `<mrk>` (and anything else with content we do not
-  # model) is transparent so its text survives; standalone codes carry no text
-  # and are dropped.
-  defp element_runs(element, "pc", marks) do
+  defp open_marks(open), do: open |> Enum.reverse() |> Enum.map(&elem(&1, 1))
+
+  # `<pc>` wraps its own content. `<sc>`/`<ec>` are the *spanning* pair — the
+  # spec-sanctioned form a CAT tool emits when a translator moves a code or when
+  # one crosses a re-segmentation boundary — so they open and close a mark over
+  # their *siblings*, not their children. Treating them as standalone dropped
+  # the mark and kept the text, which deleted every link and every bold run in
+  # exactly the re-segmented files `unit_target/1` exists to support.
+  defp element_runs(element, "pc", marks, runs, open) do
+    inner_marks = marks ++ open_marks(open)
+
+    inner =
+      case mark_of(element) do
+        nil -> runs_of(element, inner_marks)
+        mark -> runs_of(element, inner_marks ++ [mark])
+      end
+
+    {runs ++ inner, open}
+  end
+
+  defp element_runs(element, "sc", _marks, runs, open) do
     case mark_of(element) do
-      nil -> runs_of(element, marks)
-      mark -> runs_of(element, marks ++ [mark])
+      nil -> {runs, open}
+      mark -> {runs, [{attribute(element, "id"), mark} | open]}
     end
   end
 
-  defp element_runs(_element, name, _marks) when name in ~w(ph sc ec cp), do: []
-  defp element_runs(element, _name, marks), do: runs_of(element, marks)
+  defp element_runs(element, "ec", _marks, runs, open) do
+    {runs, close_span(open, attribute(element, "startRef"))}
+  end
+
+  # A standalone placeholder carries no text of its own.
+  defp element_runs(_element, name, _marks, runs, open) when name in ~w(ph cp), do: {runs, open}
+
+  # `<mrk>`, `<sm>`/`<em>` annotations and anything else we do not model are
+  # transparent: their text is content, and losing it would lose the sentence.
+  defp element_runs(element, _name, marks, runs, open),
+    do: {runs ++ runs_of(element, marks ++ open_marks(open)), open}
+
+  # `startRef` names the `<sc>` being closed. A tool that omits it (or names one
+  # that was never opened) closes the innermost span, which is what a
+  # well-formed nesting would have done anyway.
+  defp close_span([], _start_ref), do: []
+
+  defp close_span(open, nil), do: tl(open)
+
+  defp close_span(open, start_ref) do
+    case Enum.find_index(open, fn {id, _mark} -> id == start_ref end) do
+      nil -> tl(open)
+      index -> List.delete_at(open, index)
+    end
+  end
 
   # `kiln:mark` is authoritative. `subType` is the fallback for a file that has
   # been through a tool which dropped foreign-namespace attributes; a link's
@@ -496,15 +617,27 @@ defmodule KilnCMS.CMS.Xliff.Document do
     end)
   end
 
+  # Exact name first, then the local part — the same prefix-insensitivity
+  # `local_name/1` gives elements, and for the same reason: a namespace prefix
+  # is not part of a name, so a tool that re-serializes the document binding
+  # `kiln:` to `k:` must still be readable. Without it, a rebound prefix silently
+  # loses every `kiln:pos` and every link's `kiln:mark`.
   defp attribute(element, name) do
-    element
-    |> xml_element(:attributes)
-    |> Enum.find_value(fn attribute ->
-      attribute_name = attribute |> xml_attribute(:name) |> Atom.to_string()
+    attributes = xml_element(element, :attributes)
+    wanted = local_part(name)
 
-      if attribute_name == name, do: attribute |> xml_attribute(:value) |> value_to_string()
+    find_attribute(attributes, &(&1 == name)) ||
+      find_attribute(attributes, &(local_part(&1) == wanted))
+  end
+
+  defp find_attribute(attributes, match?) do
+    Enum.find_value(attributes, fn attribute ->
+      if match?.(attribute |> xml_attribute(:name) |> Atom.to_string()),
+        do: attribute |> xml_attribute(:value) |> value_to_string()
     end)
   end
+
+  defp local_part(name), do: name |> String.split(":") |> List.last()
 
   defp value_to_string(value) when is_list(value), do: List.to_string(value)
   defp value_to_string(value) when is_binary(value), do: value

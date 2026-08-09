@@ -132,8 +132,9 @@ defmodule KilnCMSWeb.TranslationsExportControllerTest do
              |> get_export(%{"target" => "fr", "record" => %{"x" => "1"}})
              |> json_response(400)
 
-    # An unknown content type raises out of the dispatcher; it must not 500.
-    assert %{"error" => "no records selected"} =
+    # An unknown content type raises out of the dispatcher; it must not 500, and
+    # it must say which of the fifty ticked rows was the problem.
+    assert %{"error" => "unknown content type: nope"} =
              conn
              |> get_export(%{"target" => "fr", "record" => ["nope:#{page.id}"]})
              |> json_response(400)

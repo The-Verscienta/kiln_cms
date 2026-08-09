@@ -59,19 +59,27 @@ migration, a rewritten column, a dropped config key).
 
   Trans-unit ids are built on **identity, not position** — a block's stable
   uuid and a Portable Text block's `_key` — so a file that comes back after the
-  source has been reordered still lands every string. Nested `columns` children
-  are the one positional segment, because they are raw maps with no readable id
-  (#865/#954); their parent is still addressed by identity.
+  source has been reordered still lands every string. Map-array items, table
+  cells and nested `columns` children are addressed by index (the last because
+  they are raw maps with no readable id, #865/#954), and a unit whose path
+  contains one says so in the report rather than passing as an identity match.
+  Every id is a valid `xsd:NMTOKEN`, which `unit/@id` requires — a tool that
+  validates on ingest rejects the whole document, not the offending unit.
 
   Nothing is applied silently: every unit id in the returned file is reported
   as `applied`, `unchanged` or `unknown`, plus the ones the vendor left empty
-  and the ones that only matched by position. An empty `<target>` never clears
-  a field — a partial delivery is normal mid-job.
+  and the ones whose match depended on ordering. An empty `<target>` never
+  clears a field — a partial delivery is normal mid-job — and the whole-record
+  positional fallback is all-or-nothing, because mixing it in per unit is what
+  puts a paragraph in the wrong block.
 
   A returned file can reword an anchor but **cannot retarget a link**: hrefs
   travel into `<originalData>` as translator context, and the importer restores
   links from the `markDefs` the record already holds. Marks a file invents are
-  filtered out rather than stored dangling.
+  filtered out rather than stored dangling. The reader handles what a real CAT
+  tool sends back: re-segmented units (including the `<ignorable>` whitespace
+  between sentences), `<sc>`/`<ec>` spanning codes, `<mrk>` annotations, and a
+  rebound namespace prefix.
 
   **Which fields are prose is now declared on the block field**, so a plugin
   block (D18) gets the same round trip as a core one:
@@ -309,6 +317,13 @@ migration, a rewritten column, a dropped config key).
   an embed block, and other shortcodes are removed rather than left as literal
   `[gallery ids="1,2"]` text in the middle of a sentence.
 
+### Fixed
+
+- **The sitemap escaped three characters where the feeds escaped five** (#502).
+  Its copy of the XML escaper let a C0 control byte through, and one of those
+  makes the whole sitemap unparseable rather than one URL. All three
+  serializers now share `KilnCMS.Xml`.
+
 ### Changed
 
 - **A translation now keeps the source's block ids** (#502). `create_translation!`
@@ -319,6 +334,13 @@ migration, a rewritten column, a dropped config key).
   **Duplicate** is unaffected — a duplicate is a different document and still
   mints fresh ids. Translations created before this release match by position on
   import, and are reported as having done so.
+
+  One consumer was *not* record-scoped: the visual-editing consoles resolved a
+  record by slug alone and then matched the clicked block by id, so on a
+  multi-locale site a click on a French page could open — and save into — the
+  English record. Both now pin the default locale, and the presentation console
+  refuses a payload naming a record other than the one it loaded. Editing a
+  non-default locale in place still needs the locale in the route.
 
 - **The media ingest pipeline is one module.** Sniff → size-cap → strip →
   store → `MediaItem` → enqueue derivation lived twice inside

@@ -96,17 +96,24 @@ segmented per Portable Text block, with tables segmented per cell.
 A unit id is a path built on identity, not position, so a file that comes back
 after the source has been edited still lands:
 
-    title                        a record field
-    b:9f3c…/text                 a block field, by the block's stable id
-    b:9f3c…/body/k:b2            one Portable Text block, by its _key
-    b:9f3c…/body/k:b2/r0c1       one table cell
-    b:9f3c…/items/i0/question    one key of one map-array item
-    b:9f3c…/columns/i0/b#0/text  a nested `columns` child
+    title                          a record field
+    b:9f3c….text                   a block field, by the block's stable id
+    b:9f3c….body.k:b2              one Portable Text block, by its _key
+    b:9f3c….body.k:b2.r0c1         one table cell
+    b:9f3c….items.i-0.question     one key of one map-array item
+    b:9f3c….columns.i-0.b-0.text   a nested `columns` child
 
-Nested `columns` children are the one positional segment: they are raw maps
-and only the content editor stamps them an id (#865/#954), so there is nothing
-stable to address them by. Their *parent* is still addressed by identity, so
-reordering top-level blocks is safe either way.
+Every character is an XML `NameChar`, because XLIFF 2.0 types `unit/@id` as
+`xsd:NMTOKEN` — a tool that validates on ingest rejects the whole document, not
+the offending unit, so `/` and `#` are not available as separators.
+
+Three segments are positional rather than identity-based: map-array items
+(`i-0`), table cells (`r0c1`), and nested `columns` children (`b-0`, because
+they are raw maps and only the content editor stamps them an id — #865/#954).
+A unit whose path contains one is reported under `by_position` even when it
+matched exactly, because the match was only as good as the ordering having
+held. Their *parents* are still addressed by identity, so reordering top-level
+blocks is safe either way.
 
 Formatting travels as XLIFF inline codes (`<pc>`) carrying the Portable Text
 mark name. A link's href goes into `<originalData>` as context only: the
@@ -119,10 +126,21 @@ Every unit id in the file lands in exactly one of `applied`, `unchanged` or
 `unknown`, and the dashboard renders all of them. `untranslated` counts the
 units the vendor left empty — an empty `<target>` never clears a field,
 because a partial delivery is normal while a job is in progress.
-`by_position` flags units that only matched through the positional fallback
-(a translation created before block ids were shared across locales); those are
-worth a look, because position is right only while the two trees are shaped
-the same.
+`by_position` flags units whose match depended on ordering rather than
+identity — a positional path segment, or the whole-record fallback used for a
+translation created before block ids were shared across locales. Those are
+worth a look, because position is right only while the two trees are shaped the
+same.
+
+That fallback is **all or nothing per record**: it applies only when not one
+unit id in the file matches a block in the target. Mixing the two per unit is
+what puts a paragraph in the wrong place — a block the target no longer holds
+frees its index for its neighbour, whose slot then matches an address belonging
+to something else.
+
+Formatting is protected but not free: a returned file can move an inline code
+around a sentence, and a code it drops takes its mark with it. Marks the file
+invents are filtered out rather than stored dangling.
 
 Applying a file moves the target's `updated_at`, so the document stops
 reporting as *Outdated*. Staleness is document-level here by design — Kiln
