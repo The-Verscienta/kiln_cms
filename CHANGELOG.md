@@ -29,6 +29,35 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **A white-labelled site installs under its own icon, and its offline page
+  carries its own name** (#629). The editor PWA already installed under each
+  org's name and colour; the two assets that stayed stock KilnCMS were the
+  install icons and `priv/static/offline.html`.
+
+  A site now sets an **App icon URL** under `/editor/branding`. The server
+  fetches it on save and measures it (`KilnCMS.Branding.AppIcon`): a square PNG
+  or JPEG of at least 512×512, with the format read from the decoded bytes
+  rather than the URL's extension. Only a measured icon is ever declared,
+  because `icons[].sizes` is a claim Chromium's installability check believes —
+  a manifest that mis-states it does not degrade, it removes the install prompt
+  with nothing said anywhere. An icon that fails verification is still saved
+  (a briefly-down CDN should not discard what an admin typed) but is not
+  declared, and the form says which of the reasons it was.
+
+  The offline fallback moved from `priv/static/offline.html` to
+  `KilnCMSWeb.OfflineController`, so it carries the site's name and brand
+  colour. It stays entirely self-contained — no stylesheet, script, image or
+  font — because it renders from the service worker's cache exactly when
+  nothing can be fetched.
+
+  Two things here are easy to get backwards, and are documented at more length
+  in `docs/mobile-admin-spike.md` §5.1: a verified icon is declared `any` and
+  the stock **maskable** entry is withdrawn while one is in use (a maskable
+  icon is cropped, and Android *prefers* one for the home screen, so leaving
+  the stock entry would put the KilnCMS flame on a white-labelled home screen);
+  and PNG/JPEG is narrower than the media library on purpose, because
+  `apple-touch-icon` has no fallback and iOS ignores a WebP.
+
 - **The governance dashboard says whether history is actually being witnessed**
   (#731). `chain_checkpoints.witness_error` was written on every failed
   publication and surfaced nowhere, so the only way to learn a deployment had

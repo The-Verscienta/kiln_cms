@@ -739,6 +739,17 @@ defmodule KilnCMSWeb.Router do
     # branding lookup — so `:probe` is the right ceiling.
     get "/manifest.webmanifest", ManifestController, :show
 
+    # The service worker's offline fallback (#629). Was `priv/static/offline.html`
+    # and is now per-org for the same reason the manifest is: a white-labelled
+    # site should not show the KilnCMS mark the moment the network drops. Same
+    # ceiling, and the same one-segment placement — declared here, ahead of the
+    # `[:browser, :delivery]` content scopes, so a document could not shadow it.
+    #
+    # The `.html` is kept from the static path it replaces: an already-installed
+    # service worker precached that exact URL, and keeping it means those clients
+    # resolve rather than 404 until they update.
+    get "/offline.html", OfflineController, :show
+
     # ActivityPub discovery (#491). Unauthenticated machine fetches of per-org
     # documents — the same shape as the manifest above, so the same ceiling.
     # All four 404 unless federation is on for both the deployment and the site.

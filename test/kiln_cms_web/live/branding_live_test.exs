@@ -91,6 +91,91 @@ defmodule KilnCMSWeb.BrandingLiveTest do
     end
   end
 
+  # #629. The measurement and the URL have to be written by the same save: an
+  # `app_icon_size` left over from a previous icon is a wrong `sizes` in the
+  # manifest, and a wrong `sizes` removes the install prompt outright.
+  describe "the app icon is measured on save" do
+    setup %{conn: conn, org: org} do
+      {:ok, lv, _html} =
+        conn |> org_conn(org) |> log_in(authed_user(:admin)) |> live(~p"/editor/branding")
+
+      %{lv: lv}
+    end
+
+    defp save_icon(lv, url) do
+      lv
+      |> form("#branding-form", branding: %{site_name: "Icon Co", app_icon_url: url})
+      |> render_submit()
+    end
+
+    defp row!(org) do
+      {:ok, [row]} = CMS.list_site_branding(tenant: org, authorize?: false)
+      row
+    end
+
+    test "a verified icon stores the measured edge", ctx do
+      stub_icon(512, 512)
+
+      save_icon(ctx.lv, "/uploads/icon.png")
+
+      row = row!(ctx.org)
+      assert row.app_icon_url == "/uploads/icon.png"
+      assert row.app_icon_size == 512
+    end
+
+    test "an icon that fails verification is still saved, but with no size", ctx do
+      # Deliberate: rejecting the field would make a briefly-down CDN throw away
+      # what the admin typed. Withholding the *size* is what keeps the unusable
+      # icon out of the manifest.
+      stub_icon(300, 300)
+
+      html = save_icon(ctx.lv, "/uploads/small.png")
+
+      row = row!(ctx.org)
+      assert row.app_icon_url == "/uploads/small.png"
+      assert row.app_icon_size == nil
+
+      # And the admin is told which of the reasons it was. Asserted on the
+      # MEASURED edge, not on "at least 512" — the form's own static hint
+      # carries that phrase on every render, so it would pass with the whole
+      # explanation deleted.
+      assert html =~ "300×300"
+    end
+
+    test "a non-square icon names both dimensions", ctx do
+      stub_icon(1200, 300)
+
+      html = save_icon(ctx.lv, "/uploads/wordmark.png")
+
+      assert row!(ctx.org).app_icon_size == nil
+      assert html =~ "1200×300"
+    end
+
+    test "clearing the URL clears the size with it", ctx do
+      stub_icon(512, 512)
+      save_icon(ctx.lv, "/uploads/icon.png")
+      assert row!(ctx.org).app_icon_size == 512
+
+      save_icon(ctx.lv, "")
+
+      row = row!(ctx.org)
+      assert row.app_icon_url == nil
+      # The size is a claim ABOUT the URL. Left behind, it would be a claim
+      # about nothing, and the next icon would inherit it.
+      assert row.app_icon_size == nil
+    end
+
+    test "a URL the image policy forbids is never fetched", ctx do
+      # No stub is installed, so a fetch here would go to the real adapter. The
+      # save must fail on the validation, not on a network round trip: the
+      # probe must not become a way to make the server dial an arbitrary host.
+      html = save_icon(ctx.lv, "https://evil.example.com/icon.png")
+
+      assert html =~ "not allowed"
+      assert {:ok, []} = CMS.list_site_branding(tenant: ctx.org, authorize?: false)
+    end
+  end
+
   describe "cross-org write boundary" do
     test "an admin of one site cannot write another site's branding", %{org: org} do
       other = seed_org()
@@ -124,6 +209,23 @@ defmodule KilnCMSWeb.BrandingLiveTest do
       assert {:error, %Ash.Error.Forbidden{}} =
                CMS.save_site_branding(%{site_name: "Nope"}, actor: user, tenant: org)
     end
+  end
+
+  # `/uploads/...` is read through `KilnCMS.Storage`, not over HTTP, so the
+  # fixture is a real file at a real key — libvips reads its actual header, which
+  # is the whole point of the probe.
+  defp stub_icon(width, height) do
+    {:ok, image} = Image.new(width, height, color: :green)
+    path = Path.join(System.tmp_dir!(), "icon-#{System.unique_integer([:positive])}.png")
+    {:ok, _image} = Image.write(image, path)
+
+    for key <- ~w(icon.png small.png wordmark.png) do
+      {:ok, _stored} = KilnCMS.Storage.store(key, path)
+      on_exit(fn -> KilnCMS.Storage.delete(key) end)
+    end
+
+    File.rm(path)
+    :ok
   end
 
   defp seed_org do

@@ -622,6 +622,11 @@ msgstr "Un lancement doit avoir un nom."
 msgid "A request whose Host header matches no organization is served the default organization's content, branding and analytics — including a bare hostname, an IP address, or a Host a caller made up. With one organization that is the same site either way. With more than one it is another tenant's."
 msgstr "Une requête dont l'en-tête Host ne correspond à aucune organisation reçoit le contenu, l'identité visuelle et les statistiques de l'organisation par défaut — y compris un nom d'hôte nu, une adresse IP ou un Host inventé par l'appelant. Avec une seule organisation, c'est le même site dans les deux cas. Avec plusieurs, c'est celui d'un autre locataire."
 
+#: lib/kiln_cms/branding/app_icon.ex
+#, elixir-autogen, elixir-format
+msgid "A same-origin icon has to come from the media library. Upload it there and use the /uploads/… path it gives you."
+msgstr "Une icône de même origine doit provenir de la médiathèque. Téléversez-la là-bas et utilisez le chemin /uploads/… qu'elle vous donne."
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "A shareable link showing the site as this release would leave it."
@@ -1128,6 +1133,26 @@ msgstr "Un compte associé à cette adresse e-mail existe déjà. Nous avons env
 msgid "An administrator can switch it on."
 msgstr "Un administrateur peut l'activer."
 
+#: lib/kiln_cms/branding/app_icon.ex
+#, elixir-autogen, elixir-format
+msgid "An app icon must be a PNG or JPEG image."
+msgstr "Une icône d'application doit être une image PNG ou JPEG."
+
+#: lib/kiln_cms/branding/app_icon.ex
+#, elixir-autogen, elixir-format
+msgid "An app icon must be at least %{min}×%{min}; that one is %{edge}×%{edge}."
+msgstr "Une icône d'application doit faire au moins %{min}×%{min} ; celle-ci fait %{edge}×%{edge}."
+
+#: lib/kiln_cms/branding/app_icon.ex
+#, elixir-autogen, elixir-format
+msgid "An app icon must be square; that one is %{width}×%{height}."
+msgstr "Une icône d'application doit être carrée ; celle-ci fait %{width}×%{height}."
+
+#: lib/kiln_cms/branding/app_icon.ex
+#, elixir-autogen, elixir-format
+msgid "An app icon must be under %{max} MB; that one is larger."
+msgstr "Une icône d'application doit peser moins de %{max} Mo ; celle-ci est plus lourde."
+
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "An export is capped at %{max} records — %{over} selected rows are not in this file."
@@ -1201,6 +1226,11 @@ msgstr "Toute personne disposant de cette phrase secrète peut lire la page publ
 #, elixir-autogen, elixir-format
 msgid "Anything you paste here is served to every visitor, exactly as written, with no filtering. Only add snippets from a source you trust — an analytics tag, a verification meta tag, a support widget. Every change is recorded with your name against it."
 msgstr "Tout ce que vous collez ici est servi à chaque visiteur, exactement tel quel et sans aucun filtrage. N'ajoutez que des extraits provenant d'une source de confiance : une balise d'analyse, une métabalise de vérification, un widget d'assistance. Chaque modification est enregistrée à votre nom."
+
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "App icon URL"
+msgstr "URL de l'icône de l'application"
 
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
@@ -2338,6 +2368,11 @@ msgstr "Duplication de ce formulaire impossible."
 #, elixir-autogen, elixir-format
 msgid "Couldn't edit that image."
 msgstr "Modification de cette image impossible."
+
+#: lib/kiln_cms/branding/app_icon.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't fetch that URL. Check it is publicly reachable, then save again."
+msgstr "Impossible de récupérer cette URL. Vérifiez qu'elle est accessible publiquement, puis enregistrez à nouveau."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -5174,6 +5209,11 @@ msgstr "Aucun compte n'existe avec cette adresse e-mail."
 msgid "No accounts connected yet."
 msgstr "Aucun compte connecté pour l'instant."
 
+#: lib/kiln_cms/branding/app_icon.ex
+#, elixir-autogen, elixir-format
+msgid "No app icon set."
+msgstr "Aucune icône d'application définie."
+
 #: lib/kiln_cms_web/live/automation_live.ex
 #, elixir-autogen, elixir-format
 msgid "No automation rules yet."
@@ -5719,6 +5759,11 @@ msgstr "octobre"
 #, elixir-autogen, elixir-format
 msgid "Off-site"
 msgstr "Hors site"
+
+#: lib/kiln_cms_web/controllers/offline_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Offline"
+msgstr "Hors ligne"
 
 #: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex
 #, elixir-autogen, elixir-format
@@ -8258,6 +8303,11 @@ msgstr "Merci — nous avons bien reçu votre message."
 msgid "Thanks — your subscription to %{email} is confirmed."
 msgstr "Merci — votre abonnement pour %{email} est confirmé."
 
+#: lib/kiln_cms/branding/app_icon.ex
+#, elixir-autogen, elixir-format
+msgid "That URL is not allowed by the site's image policy. Upload the icon to the media library, or ask an operator to add the host to CSP_IMG_SRC."
+msgstr "Cette URL n'est pas autorisée par la politique d'images du site. Téléversez l'icône dans la médiathèque, ou demandez à un opérateur d'ajouter l'hôte à CSP_IMG_SRC."
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
@@ -8409,6 +8459,11 @@ msgstr "Le titre SEO ne fait que répéter le titre de la page — un titre dist
 msgid "The account must already exist — invite people via sign-up or SSO first."
 msgstr "Le compte doit déjà exister — invitez d'abord les personnes via l'inscription ou le SSO."
 
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "The app icon was saved but isn't installable yet: %{reason}"
+msgstr "L'icône de l'application a été enregistrée mais n'est pas encore installable : %{reason}"
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "The backup status can't be determined."
@@ -8463,6 +8518,11 @@ msgstr "L'expression clé cible n'apparaît pas dans le paragraphe d'introductio
 #, elixir-autogen, elixir-format
 msgid "The focus keyphrase doesn't appear in the title or SEO title."
 msgstr "L'expression clé cible n'apparaît ni dans le titre ni dans le titre SEO."
+
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "The icon for the installed editor app on a phone home screen. Must be a square PNG or JPEG of at least %{min}×%{min} pixels — it is checked on save, and the stock mark is used until it passes."
+msgstr "L'icône de l'application d'édition installée sur l'écran d'accueil du téléphone. Doit être un PNG ou JPEG carré d'au moins %{min}×%{min} pixels : elle est vérifiée à l'enregistrement, et la marque par défaut est utilisée tant qu'elle ne passe pas."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -8685,6 +8745,11 @@ msgstr "Cet article est réservé aux membres"
 msgid "This page has no text blocks to edit inline yet."
 msgstr "Cette page n'a pas encore de blocs de texte modifiables sur place."
 
+#: lib/kiln_cms_web/controllers/offline_controller.ex
+#, elixir-autogen, elixir-format
+msgid "This page needs a connection. Your work isn't lost — reconnect and the editor picks up where it left off."
+msgstr "Cette page nécessite une connexion. Votre travail n'est pas perdu : reconnectez-vous et l'éditeur reprendra où il s'était arrêté."
+
 #: lib/kiln_cms_web/controllers/content_html/lock.html.heex
 #, elixir-autogen, elixir-format
 msgid "This page needs a passphrase"
@@ -8883,6 +8948,11 @@ msgstr "La corbeille est vide."
 #, elixir-autogen, elixir-format
 msgid "Trend range"
 msgstr "Plage de tendance"
+
+#: lib/kiln_cms_web/controllers/offline_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Try again"
+msgstr "Réessayer"
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
@@ -9618,6 +9688,11 @@ msgstr "Vous ne recevrez plus de newsletters à l'adresse %{email}."
 #, elixir-autogen, elixir-format
 msgid "You're not receiving the newsletter."
 msgstr "Vous ne recevez pas la newsletter."
+
+#: lib/kiln_cms_web/controllers/offline_controller.ex
+#, elixir-autogen, elixir-format
+msgid "You're offline"
+msgstr "Vous êtes hors ligne"
 
 #: lib/kiln_cms_web/live/account_live.ex
 #, elixir-autogen, elixir-format

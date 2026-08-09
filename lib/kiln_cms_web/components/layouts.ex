@@ -167,6 +167,32 @@ defmodule KilnCMSWeb.Layouts do
   end
 
   @doc """
+  The home-screen icon for iOS (`apple-touch-icon`): the site's verified app
+  icon, else the stock mark (#629).
+
+  Through `Branding.verified_app_icon/1`, which is also what the manifest's
+  icons and shortcuts gate on — so this link and the manifest can never
+  disagree about whether the site has a usable icon.
+
+  Two caveats worth knowing, because this surface is less forgiving than the
+  manifest. iOS accepts only PNG and JPEG here, which is why
+  `KilnCMS.Branding.AppIcon` refuses a WebP or GIF that the media library would
+  otherwise allow. And unlike the manifest — which keeps the stock entries
+  alongside a brand icon precisely so an icon that 404s after verification
+  cannot make the app uninstallable — `apple-touch-icon` is a single href with
+  no second candidate. Verification happens at save time and is not repeated,
+  so an icon whose URL later dies degrades to iOS's own fallback (a screenshot
+  of the page). Re-verifying on a schedule is filed rather than done.
+  """
+  @spec app_icon_href(map()) :: String.t()
+  def app_icon_href(assigns) do
+    case assigns |> brand_or_unbranded() |> Branding.verified_app_icon() do
+      {url, _size} -> url
+      nil -> ~p"/images/apple-touch-icon.png"
+    end
+  end
+
+  @doc """
   The `og:image` for this page: the page's own, else the site's branding image
   (#560).
 

@@ -18,9 +18,10 @@ defmodule KilnCMSWeb.BrandingLive do
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.Branding
+  alias KilnCMS.Branding.AppIcon
   alias KilnCMS.CMS
 
-  @fields ~w(site_name logo_url favicon_url social_image_url brand_color show_attribution)
+  @fields ~w(site_name logo_url favicon_url social_image_url app_icon_url brand_color show_attribution)
 
   @impl true
   def mount(_params, _session, socket) do
@@ -37,8 +38,9 @@ defmodule KilnCMSWeb.BrandingLive do
 
   def handle_event("save", %{"branding" => params}, socket) when is_map(params) do
     attrs = Map.new(@fields, fn field -> {field, blank_to_nil(params[field])} end)
+    {icon_size, icon_problem} = measure_app_icon(attrs, socket.assigns.row)
 
-    case CMS.save_site_branding(attrs,
+    case CMS.save_site_branding(Map.put(attrs, "app_icon_size", icon_size),
            actor: socket.assigns.current_user,
            tenant: socket.assigns.current_org
          ) do
@@ -46,6 +48,7 @@ defmodule KilnCMSWeb.BrandingLive do
         {:noreply,
          socket
          |> put_flash(:info, gettext("Branding saved."))
+         |> flash_icon_problem(icon_problem)
          |> load_branding()}
 
       {:error, error} ->
@@ -74,6 +77,55 @@ defmodule KilnCMSWeb.BrandingLive do
          |> put_flash(:info, gettext("Branding reset to the site defaults."))
          |> load_branding()}
     end
+  end
+
+  # `app_icon_size` is not an attribute — it is an argument the resource only
+  # honours alongside the URL it measured (`KilnCMS.CMS.Changes.PairAppIcon`).
+  # So this returns the measurement to pass along, and the resource is what
+  # makes it impossible for a stale one to outlive its icon.
+  #
+  # Verification is a server-side fetch, so this blocks the LiveView for the
+  # length of one bounded HTTP request (`AppIcon` caps it at 3s connect + 5s
+  # receive for this reason). That is deliberate on an explicit Save: an admin
+  # who pasted a 300px logo learns so in the same interaction, rather than
+  # saving what looks like success and discovering weeks later that nobody can
+  # install the app. The unchanged-URL short-circuit keeps it off every *other*
+  # save.
+  defp measure_app_icon(attrs, row) do
+    url = attrs["app_icon_url"]
+
+    cond do
+      is_nil(url) ->
+        {nil, nil}
+
+      # Same URL, already measured — the bytes behind it could have changed, but
+      # re-fetching on every unrelated branding save would make editing the site
+      # name depend on a third-party CDN being up.
+      row && row.app_icon_url == url && is_integer(row.app_icon_size) ->
+        {row.app_icon_size, nil}
+
+      true ->
+        case AppIcon.verify(url) do
+          {:ok, edge} -> {edge, nil}
+          {:error, reason} -> {nil, reason}
+        end
+    end
+  end
+
+  # The URL is saved either way, so a transient CDN outage does not throw away
+  # what the admin typed; only the *size* is withheld, which is what keeps the
+  # unusable icon out of the manifest. The flash says which of the reasons it
+  # was, because "invalid image" sends someone to re-export a fine file.
+  defp flash_icon_problem(socket, nil), do: socket
+
+  defp flash_icon_problem(socket, reason) do
+    put_flash(
+      socket,
+      :error,
+      gettext("The app icon was saved but isn't installable yet: %{reason}",
+        reason: AppIcon.explain(reason)
+      )
+    )
   end
 
   defp load_branding(socket) do
@@ -212,6 +264,17 @@ defmodule KilnCMSWeb.BrandingLive do
             field={@form[:social_image_url]}
             label={gettext("Default social image URL")}
             hint={gettext("Used for link previews when a page has no image of its own.")}
+          />
+
+          <.input
+            field={@form[:app_icon_url]}
+            label={gettext("App icon URL")}
+            hint={
+              gettext(
+                "The icon for the installed editor app on a phone home screen. Must be a square PNG or JPEG of at least %{min}×%{min} pixels — it is checked on save, and the stock mark is used until it passes.",
+                min: AppIcon.min_edge()
+              )
+            }
           />
 
           <.input
