@@ -91,6 +91,12 @@ config :kiln_cms, KilnCMS.Governance.Witness.HTTP,
 # configured account, so this is a safety net rather than the gate.
 config :kiln_cms, KilnCMS.Social, req_options: [plug: {Req.Test, KilnCMS.Social}]
 
+# Web Push (#628). No VAPID keys by default, so `KilnCMS.Push.enabled?/0` is
+# false and the suite's editorial actions enqueue no push jobs — the push tests
+# configure a pair explicitly. `req_options` points the sender at a stub for
+# when they do.
+config :kiln_cms, KilnCMS.Push, req_options: [plug: {Req.Test, KilnCMS.Push}]
+
 # Route payment-provider HTTP through a Req.Test stub, so no test ever reaches
 # api.stripe.com. Billing still stays inert unless a test configures credentials
 # on the `KilnCMS.Billing.Settings` singleton — `configured?/0` gates every

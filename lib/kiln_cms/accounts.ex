@@ -32,6 +32,17 @@ defmodule KilnCMS.Accounts do
       define :bump_passkey_usage, action: :bump_usage
     end
 
+    # Web Push subscriptions (#628) — one row per browser per account.
+    # `subscribe`/`for_users` are system calls: the first runs from the
+    # controller after it has the actor, the second is the sender's read.
+    resource KilnCMS.Accounts.PushSubscription do
+      define :list_push_subscriptions, action: :for_user, args: [:user_id]
+      define :push_subscriptions_for, action: :for_users, args: [:user_ids]
+      define :subscribe_to_push, action: :subscribe
+      define :remove_push_subscription, action: :destroy
+      define :unsubscribe_from_push, action: :unsubscribe, args: [:endpoint]
+    end
+
     # The tenant registry (epic #336) + the user↔org membership join. The org is
     # not itself multitenant — it *is* the tenant list every scoped resource is
     # partitioned by.

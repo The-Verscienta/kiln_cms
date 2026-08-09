@@ -11,6 +11,7 @@ defmodule KilnCMSWeb.SettingsLive do
   alias KilnCMS.Accounts.Errors.SecondFactorThrottled
   alias KilnCMS.Accounts.Totp
   alias KilnCMS.Accounts.WebAuthn
+  alias KilnCMS.Push
 
   @impl true
   def mount(_params, session, socket) do
@@ -34,7 +35,41 @@ defmodule KilnCMSWeb.SettingsLive do
      # Passkeys (#331): registered credentials + the in-flight enrolment
      # challenge (parked in LV state between the JS create() round-trip).
      |> assign(:passkeys, WebAuthn.list(user))
-     |> assign(:passkey_challenge, nil)}
+     |> assign(:passkey_challenge, nil)
+     # Web Push (#628). `push_available?` is the *server* half — VAPID keys are
+     # configured; `push_supported?` is the browser half, which only the hook
+     # can answer, so it starts optimistic and is corrected on mount.
+     |> assign(:push_available?, Push.enabled?())
+     |> assign(:push_key, Push.public_key())
+     |> assign(:push_supported?, true)
+     |> assign(:push_subscribed?, false)
+     |> assign(:push_note, nil)
+     |> assign(:push_devices, push_devices(user))}
+  end
+
+  defp push_devices(user), do: Push.list(user)
+
+  # Same shape as `KilnCMSWeb.BackupLive.ago/1` — coarse on purpose: the exact
+  # timestamp of a push delivery is noise, and "3 days" is what tells a reviewer
+  # a device has gone quiet.
+  defp ago(%DateTime{} = at) do
+    seconds = DateTime.diff(DateTime.utc_now(), at, :second)
+
+    cond do
+      seconds < 60 ->
+        gettext("less than a minute")
+
+      seconds < 3600 ->
+        ngettext("%{count} minute", "%{count} minutes", div(seconds, 60), count: div(seconds, 60))
+
+      seconds < 86_400 ->
+        ngettext("%{count} hour", "%{count} hours", div(seconds, 3600), count: div(seconds, 3600))
+
+      true ->
+        ngettext("%{count} day", "%{count} days", div(seconds, 86_400),
+          count: div(seconds, 86_400)
+        )
+    end
   end
 
   # --- passkeys (#331) -------------------------------------------------------
@@ -287,6 +322,98 @@ defmodule KilnCMSWeb.SettingsLive do
 
   # The otpauth URI as an inline QR SVG (eqrcode, pure Elixir). `nil` if
   # encoding fails for any reason — the setup key remains as the fallback.
+
+  # --- web push (#628) -------------------------------------------------------
+  #
+  # The browser is the source of truth for whether *this* device is subscribed:
+  # a reviewer can revoke permission or clear site data and nothing tells us.
+  # So the hook reports what it finds on mount and after every change, and the
+  # server reconciles rather than assuming its rows are current.
+
+  @impl true
+  def handle_event("push_state", %{"subscribed" => subscribed?}, socket)
+      when is_boolean(subscribed?) do
+    {:noreply, assign(socket, push_subscribed?: subscribed?, push_note: nil)}
+  end
+
+  def handle_event("push_unsupported", _params, socket),
+    do: {:noreply, assign(socket, push_supported?: false)}
+
+  def handle_event("push_denied", _params, socket) do
+    {:noreply,
+     assign(socket,
+       push_subscribed?: false,
+       push_note:
+         gettext(
+           "Your browser is blocking notifications for this site. Allow them in the site settings, then try again."
+         )
+     )}
+  end
+
+  def handle_event("push_failed", _params, socket) do
+    {:noreply,
+     assign(socket,
+       push_subscribed?: false,
+       push_note: gettext("Couldn't register this device for notifications.")
+     )}
+  end
+
+  def handle_event(
+        "push_subscribed",
+        %{"endpoint" => endpoint, "p256dh" => p256dh, "auth" => auth} = params,
+        socket
+      )
+      when is_binary(endpoint) and is_binary(p256dh) and is_binary(auth) do
+    user = socket.assigns.current_user
+
+    case Push.subscribe(params, user, socket.assigns.current_org) do
+      {:ok, _subscription} ->
+        {:noreply,
+         socket
+         |> assign(push_subscribed?: true, push_note: nil)
+         |> assign(:push_devices, push_devices(user))
+         |> put_flash(:info, gettext("Notifications are on for this device."))}
+
+      {:error, _reason} ->
+        {:noreply,
+         assign(socket,
+           push_subscribed?: false,
+           push_note: gettext("Couldn't register this device for notifications.")
+         )}
+    end
+  end
+
+  def handle_event("push_unsubscribed", %{"endpoint" => endpoint}, socket)
+      when is_binary(endpoint) do
+    user = socket.assigns.current_user
+    Push.unsubscribe(endpoint, user)
+
+    {:noreply,
+     socket
+     |> assign(push_subscribed?: false, push_note: nil)
+     |> assign(:push_devices, push_devices(user))
+     |> put_flash(:info, gettext("Notifications are off for this device."))}
+  end
+
+  def handle_event("remove_push_device", %{"id" => id}, socket) when is_binary(id) do
+    user = socket.assigns.current_user
+
+    socket =
+      case Enum.find(push_devices(user), &(&1.id == id)) do
+        nil ->
+          socket
+
+        device ->
+          Ash.destroy!(device, actor: user)
+
+          socket
+          |> assign(:push_devices, push_devices(user))
+          |> put_flash(:info, gettext("Device removed."))
+      end
+
+    {:noreply, socket}
+  end
+
   defp qr_svg(uri) do
     uri |> EQRCode.encode() |> EQRCode.svg(width: 176)
   rescue
@@ -590,6 +717,74 @@ defmodule KilnCMSWeb.SettingsLive do
               {gettext("Save preferences")}
             </.button>
           </.form>
+        </section>
+
+        <section :if={@push_available?} id="push-settings" class="card card-pad max-w-xl">
+          <h2 class="mb-1 text-lg font-medium">{gettext("Push notifications")}</h2>
+          <p class="mb-4 text-sm text-base-content/60">
+            {gettext(
+              "Get a notification on this device when something needs your review. Install KilnCMS to your home screen first — on iPhone and iPad, notifications only work for the installed app."
+            )}
+          </p>
+
+          <p class="mb-3 text-xs text-base-content/60">
+            {gettext(
+              "Notifications never contain draft content — only that something is waiting, and what kind."
+            )}
+          </p>
+
+          <button
+            id="push-toggle"
+            type="button"
+            phx-hook="PushToggle"
+            data-vapid-key={@push_key}
+            data-enabled={to_string(@push_subscribed?)}
+            disabled={not @push_supported?}
+            class={[
+              "btn btn-sm",
+              if(@push_subscribed?, do: "btn-default", else: "btn-primary"),
+              not @push_supported? && "opacity-50"
+            ]}
+          >
+            {if @push_subscribed?,
+              do: gettext("Turn off on this device"),
+              else: gettext("Turn on for this device")}
+          </button>
+
+          <p :if={not @push_supported?} class="mt-2 text-sm text-base-content/60">
+            {gettext(
+              "This browser can't receive push notifications. On iPhone and iPad they need iOS 16.4 or later and the app added to your home screen."
+            )}
+          </p>
+
+          <p :if={@push_note} class="mt-2 text-sm text-warning">{@push_note}</p>
+
+          <div :if={@push_devices != []} class="mt-4">
+            <h3 class="mb-2 text-sm font-medium">{gettext("Devices receiving notifications")}</h3>
+            <ul class="space-y-2">
+              <li
+                :for={device <- @push_devices}
+                class="flex items-center justify-between gap-3 rounded border border-base-content/10 px-3 py-2 text-sm"
+              >
+                <span>
+                  {device.label}
+                  <span class="ml-2 text-xs text-base-content/50">
+                    {if device.last_delivered_at,
+                      do: gettext("last used %{ago} ago", ago: ago(device.last_delivered_at)),
+                      else: gettext("not used yet")}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  phx-click="remove_push_device"
+                  phx-value-id={device.id}
+                  class="btn btn-sm btn-ghost"
+                >
+                  {gettext("Remove")}
+                </button>
+              </li>
+            </ul>
+          </div>
         </section>
 
         <section class="card card-pad max-w-xl">

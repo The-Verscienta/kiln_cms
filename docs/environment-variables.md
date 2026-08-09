@@ -452,6 +452,23 @@ digest sweep enqueues nothing.
 |----------|---------|---------|-----------------|
 | `KILN_TASK_DIGEST_CRON` | `0 8 * * *` | Oban cron expression for the daily due-soon/overdue task digest email. `false` (or an unparseable value, which warns on stderr) leaves it unscheduled, for a deployment driving the equivalent itself. | [`config/runtime.exs`](../config/runtime.exs) |
 
+## Optional — Web Push notifications (#628)
+
+Unset ⇒ push is **off**: `/editor/settings` never offers the toggle and nothing
+is sent. Generate a pair with `mix kiln.vapid.gen` (the same format
+`npx web-push generate-vapid-keys` emits, so an existing pair carries over).
+
+Rotating the pair invalidates every live subscription — the push service answers
+`403`, the row is pruned, and reviewers must re-enable notifications on each
+device. Notifications never carry draft content; see
+[`KilnCMS.Push`](../lib/kiln_cms/push.ex).
+
+| Variable | Default | Purpose | Where it's read |
+|----------|---------|---------|-----------------|
+| `KILN_VAPID_PUBLIC_KEY` | unset | base64url, unpadded, uncompressed P-256 point (65 bytes). Handed to the browser as `applicationServerKey` when it subscribes, and published in the VAPID header so a push service can verify the signature. Must be the public half of `KILN_VAPID_PRIVATE_KEY` — a mismatched pair disables push and logs an error at the first send rather than failing per message months later. | [`config/runtime.exs`](../config/runtime.exs) |
+| `KILN_VAPID_PRIVATE_KEY` | unset | base64url, unpadded, the 32-byte scalar. **A secret**: anyone holding it can push a notification to every subscriber of this deployment. Keep it with the rest of the secret store, not in shell history or a committed `.env`. | [`config/runtime.exs`](../config/runtime.exs) |
+| `KILN_VAPID_SUBJECT` | the deployment's public base URL | A contactable `mailto:` or `https:` URL, so a push service operator can reach whoever is sending (RFC 8292 §2.1). | [`config/runtime.exs`](../config/runtime.exs) |
+
 ## Optional — events, the "what's on" index (#766)
 
 Safe to leave scheduled everywhere: a site with no event-shaped content does one
@@ -652,8 +669,8 @@ production.
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `MIX_TEST_PARTITION` | unset | Suffix appended to the test database name for partitioned test runs — also what keeps two concurrent worktrees off the same database. | [`config/test.exs:178`](../config/test.exs#L178) |
-| `KILN_STRICT_TEST` | unset | Set to an on-spelling (`true`/`1`/`yes`/`on`) to select the strict-tenancy CI leg: `:strict_tenancy` is flipped on so tenancy scoping compiles fail-closed, and the suite runs **only** the `strict_tenancy`-tagged tests. Uses the same spellings as every other flag in this document, via the standalone [`config/strict_test_flag.exs`](../config/strict_test_flag.exs) (#646) — it can't call `KilnCMS.Config.Env` directly because it's read in `config/test.exs`, which cannot call project modules. An unrecognized value stays non-strict **and warns on stderr**, like every other flag: without that the strict leg runs zero tests and exits 0, which is indistinguishable from never having invoked it. | [`config/test.exs:268`](../config/test.exs#L268) |
+| `MIX_TEST_PARTITION` | unset | Suffix appended to the test database name for partitioned test runs — also what keeps two concurrent worktrees off the same database. | [`config/test.exs:184`](../config/test.exs#L184) |
+| `KILN_STRICT_TEST` | unset | Set to an on-spelling (`true`/`1`/`yes`/`on`) to select the strict-tenancy CI leg: `:strict_tenancy` is flipped on so tenancy scoping compiles fail-closed, and the suite runs **only** the `strict_tenancy`-tagged tests. Uses the same spellings as every other flag in this document, via the standalone [`config/strict_test_flag.exs`](../config/strict_test_flag.exs) (#646) — it can't call `KilnCMS.Config.Env` directly because it's read in `config/test.exs`, which cannot call project modules. An unrecognized value stays non-strict **and warns on stderr**, like every other flag: without that the strict leg runs zero tests and exits 0, which is indistinguishable from never having invoked it. | [`config/test.exs:274`](../config/test.exs#L274) |
 | `POSTGRES_USER` | `postgres` | E2E database user. | [`config/e2e.exs:11`](../config/e2e.exs#L11) |
 | `POSTGRES_PASSWORD` | `postgres` | E2E database password. | [`config/e2e.exs:12`](../config/e2e.exs#L12) |
 | `POSTGRES_HOST` | `localhost` | E2E database host. | [`config/e2e.exs:13`](../config/e2e.exs#L13) |

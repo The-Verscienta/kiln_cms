@@ -27,6 +27,7 @@ import topbar from "../vendor/topbar"
 import Sortable from "../vendor/sortable"
 import {FocusTrap} from "./focus_trap"
 import {PasskeyEnroll, initPasskeySignIn} from "./passkeys"
+import {PushToggle} from "./push"
 
 const clamp01 = (n) => Math.min(Math.max(n, 0), 1)
 
@@ -39,6 +40,8 @@ const Hooks = {
   FocusTrap,
   // Passkey enrolment on /editor/settings (#331) — see assets/js/passkeys.js.
   PasskeyEnroll,
+  // Web Push opt-in on /editor/settings (#628) — see assets/js/push.js.
+  PushToggle,
   // Presentation console (#355): relay the framed external front end's
   // click-to-edit `postMessage` up to the LiveView, and nudge the iframe to
   // refresh after a save. Mirrors embed.js's parent-side security check —
