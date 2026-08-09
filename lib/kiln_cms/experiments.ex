@@ -136,6 +136,21 @@ defmodule KilnCMS.Experiments do
   @spec blocked(Ash.UUID.t()) :: [{Experiment.t(), KilnCMS.Experiments.Health.reason()}]
   defdelegate blocked(org_id), to: KilnCMS.Experiments.Health
 
+  @doc "Whether running experiments exist that the deployment switch is stopping."
+  @spec switched_off?(Ash.UUID.t()) :: boolean()
+  defdelegate switched_off?(org_id), to: KilnCMS.Experiments.Health
+
+  @doc """
+  Whether `experiment`'s goal converts on a page **later** than the assignment.
+
+  The one statement of that list (#1115). It is not arbitrary: a later-page goal
+  is exactly the set that needs sticky assignment to attribute anything, cannot
+  be attributed headlessly at all, and counts impressions per exposed visitor
+  rather than per page view. Adding a goal to it changes all three.
+  """
+  @spec later_page_goal?(Experiment.t() | %{goal: atom()}) :: boolean()
+  def later_page_goal?(%{goal: goal}), do: goal in [:content_view, :funnel_completion]
+
   @doc "Drop a site's cached running set. Called from every experiment write."
   @spec bust(Ash.UUID.t()) :: :ok
   defdelegate bust(org_id), to: KilnCMS.Cache, as: :bust_experiments

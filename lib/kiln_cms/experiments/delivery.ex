@@ -95,21 +95,22 @@ defmodule KilnCMS.Experiments.Delivery do
   # view, because its conversions are: an exposure is spent once. Counting a
   # visitor's tenth reload of the landing page in the denominator would make the
   # arm that brings people back look worse for bringing them back.
-  defp count_exposure(%{goal: goal}, variant, org_id, conn)
-       when goal in [:content_view, :funnel_completion] do
-    case Sticky.remember_exposure(conn, variant.id) do
-      {:new, conn} ->
-        record_impression(variant, org_id)
-        conn
+  defp count_exposure(experiment, variant, org_id, conn) do
+    # A body check rather than a guard, so the list itself lives in one place
+    # (#1115) — `Experiments.later_page_goal?/1`.
+    if Experiments.later_page_goal?(experiment) do
+      case Sticky.remember_exposure(conn, variant.id) do
+        {:new, conn} ->
+          record_impression(variant, org_id)
+          conn
 
-      {:repeat, conn} ->
-        conn
+        {:repeat, conn} ->
+          conn
+      end
+    else
+      record_impression(variant, org_id)
+      conn
     end
-  end
-
-  defp count_exposure(_experiment, variant, org_id, conn) do
-    record_impression(variant, org_id)
-    conn
   end
 
   @doc """
@@ -348,8 +349,7 @@ defmodule KilnCMS.Experiments.Delivery do
   # *this request's surface* can be attributed, answered on the hot path with no
   # query. `Health` answers whether the experiment can convert on any surface,
   # for the operator, and is deliberately allowed a lookup (#1008).
-  defp attributable?(%{goal: goal}) when goal in [:content_view, :funnel_completion], do: false
-  defp attributable?(_experiment), do: true
+  defp attributable?(experiment), do: not Experiments.later_page_goal?(experiment)
 
   @doc """
   Count one conversion against `variant_id`.

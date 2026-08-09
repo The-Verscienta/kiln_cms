@@ -195,6 +195,13 @@ msgstr "%{count} résultats pour « %{query} »."
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
+msgid "%{count} running experiment is not producing usable results."
+msgid_plural "%{count} running experiments are not producing usable results."
+msgstr[0] "%{count} expérience en cours ne produit pas de résultats exploitables."
+msgstr[1] "%{count} expériences en cours ne produisent pas de résultats exploitables."
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
 msgid "%{count} scheduled this week"
 msgstr "%{count} planifié(s) cette semaine"
 
@@ -614,13 +621,6 @@ msgstr "Un lancement doit avoir un nom."
 #, elixir-autogen, elixir-format
 msgid "A request whose Host header matches no organization is served the default organization's content, branding and analytics — including a bare hostname, an IP address, or a Host a caller made up. With one organization that is the same site either way. With more than one it is another tenant's."
 msgstr "Une requête dont l'en-tête Host ne correspond à aucune organisation reçoit le contenu, l'identité visuelle et les statistiques de l'organisation par défaut — y compris un nom d'hôte nu, une adresse IP ou un Host inventé par l'appelant. Avec une seule organisation, c'est le même site dans les deux cas. Avec plusieurs, c'est celui d'un autre locataire."
-
-#: lib/kiln_cms_web/live/overview_live.ex
-#, elixir-autogen, elixir-format
-msgid "A running experiment is not producing usable results."
-msgid_plural "%{count} running experiments are not producing usable results."
-msgstr[0] "Une expérience en cours ne produit pas de résultats exploitables."
-msgstr[1] "%{count} expériences en cours ne produisent pas de résultats exploitables."
 
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format

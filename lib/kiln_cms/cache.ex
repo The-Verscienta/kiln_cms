@@ -293,7 +293,12 @@ defmodule KilnCMS.Cache do
   @doc "Drop a site's cached funnel targets. Called from every funnel/step write."
   @spec bust_funnel_targets(Ash.UUID.t()) :: :ok
   def bust_funnel_targets(org_id) do
-    if enabled?(), do: Cachex.del(@cache, funnel_targets_key(org_id))
+    # Cluster-wide for the same reason as `bust_experiments/1` (#1113), and one
+    # more of its own: the whole point of a funnel goal is that editing the
+    # funnel moves the goal (#1010). A node that has not seen the edit keeps
+    # converting on the PREVIOUS last step, so the same visit counts on one node
+    # and not another.
+    if enabled?(), do: ClusterBust.broadcast([funnel_targets_key(org_id)])
     :ok
   end
 
@@ -323,7 +328,13 @@ defmodule KilnCMS.Cache do
   """
   @spec bust_experiments(Ash.UUID.t()) :: :ok
   def bust_experiments(org_id) do
-    if enabled?(), do: Cachex.del(@cache, experiments_key(org_id))
+    # Cluster-wide, like `bust_branding/1` and for the reason stated there
+    # (#1113). A node-local `Cachex.del` left every OTHER node splitting traffic
+    # on a concluded experiment for up to the TTL — and, since #1008, reporting
+    # its health from a stale row: node A says the experiment is over, node B
+    # says it cannot convert. Two nodes disagreeing intermittently is the
+    # hardest shape of this bug to report.
+    if enabled?(), do: ClusterBust.broadcast([experiments_key(org_id)])
     :ok
   end
 

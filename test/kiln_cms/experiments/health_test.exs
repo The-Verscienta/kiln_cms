@@ -133,6 +133,29 @@ defmodule KilnCMS.Experiments.HealthTest do
 
       assert {:goal_form_missing, _sentence} = Experiments.blocked_reason(experiment)
     end
+
+    test "blocked/1 keeps reporting goal reasons while the switch is off", ctx do
+      # The tempting optimisation — skip the lookups, nothing is served anyway —
+      # is the masking in a different place (#1114). An operator who flips the
+      # flag on must not then discover a second round of problems that were
+      # hidden the whole time, so the reasons are computed either way.
+      form = ExperimentFixtures.goal_form!(ctx.org_id)
+
+      {experiment, _control, _treatment} =
+        ExperimentFixtures.running!(page(ctx.actor), "page", %{},
+          org_id: ctx.org_id,
+          goal_form_id: form.id
+        )
+
+      CMS.destroy_form!(form, authorize?: false, tenant: ctx.org_id)
+      put_experiments(enabled: false)
+
+      assert [{listed, {:goal_form_missing, _}}] = Experiments.blocked(ctx.org_id)
+      assert listed.id == experiment.id
+
+      # …and the site-wide fact is available separately, not folded in.
+      assert Experiments.switched_off?(ctx.org_id)
+    end
   end
 
   describe "the experimented document" do
