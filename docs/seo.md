@@ -56,15 +56,20 @@ consistent `<title>` without an author typing one, give the type a **pattern**:
 Editor → Content types (/editor/types) → a type → Default SEO title
 ```
 
-`[title] | [site-name]` is the usual one. Compiled types declare the same thing
+`[category]: [title]` is a typical one. Compiled types declare the same thing
 in code:
 
 ```elixir
 use KilnCMS.CMS.Content,
   type: :post,
-  seo_title_pattern: "[title] | [site-name]",
+  seo_title_pattern: "[category]: [title]",
   seo_description_pattern: "[excerpt]"
 ```
+
+**Don't put `[site-name]` in a title pattern.** The layout already appends
+` · <your site name>` to every page title, so `"[title] | [site-name]"` renders
+`Sourdough basics | Acme · Acme`. The token exists for description patterns and
+for the rare title that needs the name somewhere other than the end.
 
 Tokens are the same bracket syntax the slug and path-alias patterns use, and
 validated the same way — a typo like `[titel]` is rejected when you
@@ -74,7 +79,7 @@ save the type, not discovered in a search result:
 |---|---|
 | `[title]` | The record's title, as written |
 | `[excerpt]` | The excerpt, on types that have one |
-| `[category]` | The category's **name** (not its slug) [^teaser] |
+| `[category]` | The category's **name** (not its slug) |
 | `[site-name]` | Your site name, from white-label branding |
 | `[yyyy]` `[mm]` `[dd]` | Publish date, else scheduled date, else created |
 | `[field:<name>]` | A custom field's value, as written |
@@ -90,8 +95,9 @@ knowing:
 - An author who types a title keeps it. The pattern only fills a field the
   record left blank.
 - Nothing is written to the record — the expansion happens when the page is
-  rendered. So changing a type's pattern re-titles every record that never had
-  one, immediately, with no backfill and nothing to re-publish.
+  rendered, and the page's ETag covers the resolved values. So changing a
+  type's pattern re-titles every record that never had one, immediately, with
+  no backfill and nothing to re-publish.
 - The editor's SEO panel scores what the record itself holds. A record relying
   on the pattern shows an empty title there and the length check says so, which
   is the honest reading: the pattern is the type's, not the record's. Type a
@@ -101,14 +107,27 @@ The export (and the JSON:API/GraphQL representation of a record) also reports
 the stored fields, for the same reason — a patterned title re-imported as an
 author-typed one would be a silent override.
 
+**Patterns reach the delivered HTML page**: its `<title>`, its meta
+description, its Open Graph and Twitter tags, and its inline JSON-LD. They do
+**not** currently reach feeds, `.ics` calendars, `llms.txt`, auto-posted social
+text, ActivityPub, or the fired `:json_ld` artifact — those still carry the
+record's own stored fields. Tracked in #1102.
+
 Implementation: `KilnCMS.Seo.Pattern` (the vocabulary) and
 `KilnCMS.Seo.Patterns` (resolution at render time).
 
-[^teaser]: On a **paywall teaser** `[category]` expands to nothing, because that
-    read is pinned to a fixed set of columns with no relationships — the same
-    restriction that keeps the block tree away from a teaser. The separator
-    beside it drops out with it, so the teaser's title is shorter than the full
-    page's, never malformed.
+### On a paywall teaser, some tokens go quiet
+
+A gated document's teaser is read through a pinned set of columns with no
+relationships and no `custom_fields` — the same restriction that keeps the
+block tree away from a teaser. So on a teaser (and on a passphrase lock page)
+`[category]` and `[field:<name>]` expand to nothing, and the separator beside
+them drops out with them. The teaser's title is shorter than the full page's,
+never malformed.
+
+The teaser's *visible* summary is unaffected either way: that stays the
+author's own excerpt or description, never a pattern, because it is body copy
+a locked-out reader reads rather than a meta tag.
 
 ## Drafting (optional)
 

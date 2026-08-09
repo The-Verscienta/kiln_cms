@@ -11,6 +11,8 @@ defmodule KilnCMS.Seo.PatternTest do
 
   alias KilnCMS.Seo.Pattern
 
+  defp prose_context, do: %{title: "Kiln guide", site_name: "Acme"}
+
   describe "expand/2" do
     test "keeps the title as written, unlike a slug pattern" do
       context = %{title: "A Guide to the Kiln", site_name: "Acme"}
@@ -33,6 +35,48 @@ defmodule KilnCMS.Seo.PatternTest do
 
       assert Pattern.expand("[site-name] | [category] | [title]", context) ==
                "Acme | Kiln guide"
+    end
+
+    # The first implementation repaired the expanded STRING, which only worked
+    # when every separator was its own split part. Each of the cases below
+    # shipped malformed output; they are the review's own reproductions.
+
+    test "a preposition between tokens goes with the empty one" do
+      assert Pattern.expand("[title] in [category]", prose_context()) == "Kiln guide"
+      assert Pattern.expand("[title] - a [category] post", prose_context()) == "Kiln guide"
+    end
+
+    test "a parenthetical around an empty token does not survive" do
+      assert Pattern.expand("[title] (in [category]) | [site-name]", prose_context()) ==
+               "Kiln guide | Acme"
+    end
+
+    test "leading prose attached to an empty token drops with it" do
+      assert Pattern.expand("Guides: [category] | [title]", prose_context()) == "Kiln guide"
+      assert Pattern.expand("[excerpt] — Acme Pottery", prose_context()) == nil
+    end
+
+    test "an unusual separator is still elided" do
+      assert Pattern.expand("[category] » [title]", prose_context()) == "Kiln guide"
+      assert Pattern.expand("[title] • [site-name]", prose_context()) == "Kiln guide • Acme"
+    end
+
+    # Adjacent tokens produce a ZERO-WIDTH gap. The run-collapse used to pick
+    # it over the real separator beside it and fuse two values into one word.
+    test "an empty token between two adjacent tokens still separates them" do
+      assert Pattern.expand("[title][category] | [site-name]", prose_context()) ==
+               "Kiln guide | Acme"
+    end
+
+    # ...but genuinely adjacent tokens must stay adjacent.
+    test "two present adjacent tokens are not pushed apart" do
+      assert Pattern.expand("[title][site-name]", prose_context()) == "Kiln guideAcme"
+    end
+
+    # The regression that motivated the rewrite: a separator between two
+    # PRESENT tokens is the operator's, and load-bearing.
+    test "a date pattern keeps its own hyphens" do
+      assert Pattern.expand("[yyyy]-[mm]-[dd]", %{date: ~D[2026-01-05]}) == "2026-01-05"
     end
 
     test "literal prose between tokens survives" do

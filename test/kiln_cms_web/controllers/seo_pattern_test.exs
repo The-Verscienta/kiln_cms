@@ -53,27 +53,43 @@ defmodule KilnCMSWeb.SeoPatternTest do
   end
 
   describe "delivery" do
+    # `==`, not `=~`. The substring form passed while the real title was
+    # "Kiln Care | KilnCMS · KilnCMS" — the layout appends its own
+    # " · <site name>" suffix, so the docs used to teach a pattern that printed
+    # the site name twice (#559 all over again). The whole string, always.
     test "a type's pattern supplies the title an entry never typed", %{conn: conn} do
       actor = admin()
-      type = patterned_type(actor, %{seo_title_pattern: "[title] | [site-name]"})
-      entry = publish!(type, actor, %{title: "Kiln Care"})
+      type = patterned_type(actor, %{seo_title_pattern: "[category]: [title]"})
+
+      category =
+        CMS.create_category!(%{name: "Kiln Care", slug: "kc-#{uniq()}"}, actor: actor)
+
+      entry = publish!(type, actor, %{title: "Firing", category_id: category.id})
 
       html = conn |> get("/#{type.path_segment}/#{entry.slug}") |> html_response(200)
 
-      assert title_of(html) =~ "Kiln Care | KilnCMS"
+      assert title_of(html) == "Kiln Care: Firing · KilnCMS"
+    end
+
+    # The site name appears exactly once, from the layout.
+    test "a title pattern does not need [site-name]", %{conn: conn} do
+      actor = admin()
+      type = patterned_type(actor, %{seo_title_pattern: "[title]"})
+      entry = publish!(type, actor, %{title: "Firing"})
+
+      html = conn |> get("/#{type.path_segment}/#{entry.slug}") |> html_response(200)
+
+      assert title_of(html) == "Firing · KilnCMS"
     end
 
     test "an entry's own SEO title wins over the pattern", %{conn: conn} do
       actor = admin()
-      type = patterned_type(actor, %{seo_title_pattern: "[title] | [site-name]"})
+      type = patterned_type(actor, %{seo_title_pattern: "Guides: [title]"})
       entry = publish!(type, actor, %{title: "Kiln Care", seo_title: "Chosen by hand"})
 
       html = conn |> get("/#{type.path_segment}/#{entry.slug}") |> html_response(200)
 
-      assert title_of(html) =~ "Chosen by hand"
-      # The pattern's own expansion is nowhere in it. (The layout appends its
-      # own " · <site name>" suffix, which is not what this is about.)
-      refute title_of(html) =~ "Kiln Care"
+      assert title_of(html) == "Chosen by hand · KilnCMS"
     end
 
     test "the description pattern reaches the meta tag", %{conn: conn} do
@@ -96,15 +112,15 @@ defmodule KilnCMSWeb.SeoPatternTest do
     # so the operator's edit is the only change needed.
     test "changing the pattern re-titles existing entries with no backfill", %{conn: conn} do
       actor = admin()
-      type = patterned_type(actor, %{seo_title_pattern: "[title] | [site-name]"})
+      type = patterned_type(actor, %{seo_title_pattern: "[title]"})
       entry = publish!(type, actor, %{title: "Kiln Care"})
 
       url = "/#{type.path_segment}/#{entry.slug}"
-      assert conn |> get(url) |> html_response(200) |> title_of() =~ "Kiln Care | KilnCMS"
+      assert conn |> get(url) |> html_response(200) |> title_of() == "Kiln Care · KilnCMS"
 
       CMS.update_type_definition!(type, %{seo_title_pattern: "Guides: [title]"}, actor: actor)
 
-      assert conn |> get(url) |> html_response(200) |> title_of() =~ "Guides: Kiln Care"
+      assert conn |> get(url) |> html_response(200) |> title_of() == "Guides: Kiln Care · KilnCMS"
 
       # And the row itself never learned about either pattern.
       assert ContentTypes.get_record!(type.name, entry.id, actor: actor).seo_title == nil
@@ -138,6 +154,37 @@ defmodule KilnCMSWeb.SeoPatternTest do
     end
   end
 
+  # A gated page's teaser is served from a pinned column set, and its `summary`
+  # is BODY COPY a locked-out reader reads — not a meta tag.
+  describe "a paywall teaser" do
+    @tag :capture_log
+    test "takes the pattern in its meta tag but never in its visible summary", %{conn: conn} do
+      actor = admin()
+
+      type =
+        patterned_type(actor, %{
+          seo_title_pattern: "[title]",
+          seo_description_pattern: "[title] — subscribe to read"
+        })
+
+      gated = hd(KilnCMS.CMS.Audiences.gated())
+
+      entry =
+        publish!(type, actor, %{title: "Firing", audience: gated})
+
+      html = conn |> get("/#{type.path_segment}/#{entry.slug}") |> html_response(200)
+
+      # It really is the teaser, not the document.
+      assert html =~ "kiln-paywalled"
+
+      # The meta tag gets the type's default...
+      assert description_of(html) == "Firing — subscribe to read"
+
+      # ...and the reader is never shown that string as the article's own lede.
+      refute html =~ ~r{<p[^>]*class="text-lg[^>]*>\s*Firing — subscribe to read}
+    end
+  end
+
   describe "validation" do
     test "a typo is rejected when the type is saved" do
       actor = admin()
@@ -149,6 +196,30 @@ defmodule KilnCMSWeb.SeoPatternTest do
                )
 
       assert Exception.message(error) =~ "unknown token"
+    end
+
+    # `[excerpt]` on a type with no excerpt can only ever expand to nothing —
+    # the same class of mistake as `[titel]`, and likelier, since the input's
+    # placeholder suggests it and the checkbox sits right beside it.
+    test "[excerpt] is rejected on a type that has no excerpt" do
+      actor = admin()
+      type = patterned_type(actor, %{})
+
+      assert {:error, error} =
+               CMS.update_type_definition(
+                 type,
+                 %{seo_description_pattern: "[excerpt]"},
+                 actor: actor
+               )
+
+      assert Exception.message(error) =~ "Has an excerpt"
+
+      assert {:ok, _updated} =
+               CMS.update_type_definition(
+                 type,
+                 %{has_excerpt: true, seo_description_pattern: "[excerpt]"},
+                 actor: actor
+               )
     end
 
     test "the description pattern is validated too" do
@@ -171,6 +242,7 @@ defmodule KilnCMSWeb.SeoPatternTest do
                  %{
                    name: "ok#{uniq()}",
                    label: "Ok",
+                   has_excerpt: true,
                    seo_title_pattern: "[title] [excerpt] [category] [site-name]",
                    seo_description_pattern: "[yyyy]-[mm]-[dd] [field:anything]"
                  },
@@ -213,6 +285,22 @@ defmodule KilnCMSWeb.SeoPatternTest do
 
       assert result.seo_title == "T"
       refute Map.has_key?(result, :seo_description)
+    end
+
+    # The expansion goes where an authored value would, so it obeys the same
+    # ceiling; `[excerpt]` is a legal token in a TITLE pattern, which is how a
+    # paragraph reached a <title>.
+    test "an over-long expansion is clamped to the field's own limit" do
+      ct = %{seo_title_pattern: "[title]", seo_description_pattern: nil}
+      long = String.duplicate("kiln ", 200)
+      record = %{seo_title: nil, title: long, org_id: nil}
+
+      title = Patterns.apply_to(record, ct).seo_title
+
+      assert byte_size(title) <= KilnCMS.Limits.line()
+      assert String.starts_with?(title, "kiln kiln")
+      # Cut on a word boundary rather than mid-word.
+      refute String.ends_with?(title, "kil")
     end
 
     test "a pattern that expands to nothing leaves the field blank" do

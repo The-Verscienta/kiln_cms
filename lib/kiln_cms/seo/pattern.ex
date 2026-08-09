@@ -51,11 +51,6 @@ defmodule KilnCMS.Seo.Pattern do
   @whole_token ~r/\A\[[a-z0-9:._-]+\]\z/
   @token_part ~r/\[[a-z0-9:._-]+\]/
 
-  # A literal that exists only to sit between two parts. Deliberately narrow:
-  # only whitespace and the punctuation people actually put between title parts,
-  # so a pattern's own prose is never dropped.
-  @separator ~r/\A[\s|\-–—·:,]*\z/u
-
   @type context :: %{
           optional(:title) => String.t() | nil,
           optional(:excerpt) => String.t() | nil,
@@ -82,56 +77,72 @@ defmodule KilnCMS.Seo.Pattern do
   def expand(pattern, context) do
     @token_part
     |> Regex.split(pattern, include_captures: true, trim: false)
-    |> Enum.map(&classify(&1, context))
-    |> assemble()
+    |> Enum.reduce(%{out: "", pending: "", elided?: false}, &absorb(&1, &2, context))
+    |> finish()
   end
 
-  # Each part is either a token (resolved now, and remembered as *empty* if it
-  # resolved to nothing), a separator literal, or the pattern's own prose.
-  defp classify(part, context) do
+  # One left-to-right fold. `out` is what has been emitted, `pending` the
+  # literal text seen since the last emitted value, `elided?` whether a token
+  # in that gap expanded to nothing.
+  #
+  # The rule, stated once: **a literal beside an empty token is dropped, and if
+  # it was joining two parts that both survived, only its separator characters
+  # are kept.** So `"[a] | [b]"` without `b` loses the bar, `"[a] | [b] | [c]"`
+  # without `b` keeps exactly one, and `"[title] (in [category]) | [site]"`
+  # without a category reads `Kiln guide | Acme` rather than `Kiln guide (in ) | Acme`.
+  #
+  # This replaces a first attempt that repaired the expanded STRING afterwards.
+  # That could not tell `"[yyyy]-[mm]"`'s hyphen — the operator's, and
+  # load-bearing — from one left dangling by an empty token, and rendered
+  # `2026 - 01 - 05`. Structure is the only place the difference exists.
+  defp absorb(part, state, context) do
     if Regex.match?(@whole_token, part) do
       case part |> Tokens.expand(definitions(), context) |> String.trim() do
-        "" -> :empty
-        value -> {:value, value}
+        "" -> %{state | elided?: true}
+        value -> emit(state, value)
       end
     else
-      if Regex.match?(@separator, part), do: {:separator, part}, else: {:value, part}
+      %{state | pending: state.pending <> part}
     end
   end
 
-  # Elide the separators an empty token orphaned — structurally, on the parts,
-  # never by rewriting the expanded string. Repairing the string afterwards
-  # cannot tell `"[yyyy]-[mm]"`'s hyphen (the operator's, and load-bearing) from
-  # one left dangling by an empty `[category]`, and mangled the first.
-  #
-  # Edge separators go entirely; a run of them left adjacent by an empty token
-  # in the middle collapses to the first, so `"[a] | [b] | [c]"` without `b`
-  # reads `A | C` rather than `A | | C` or `AC`.
-  defp assemble(parts) do
-    parts
-    |> Enum.reject(&(&1 == :empty))
-    |> trim_separators()
-    |> Enum.chunk_by(&elem(&1, 0))
-    |> Enum.flat_map(fn
-      [{:separator, _text} = first | _rest] -> [first]
-      chunk -> chunk
-    end)
-    |> Enum.map_join("", fn {_kind, text} -> text end)
+  defp emit(%{out: "", elided?: true}, value), do: %{out: value, pending: "", elided?: false}
+
+  defp emit(%{out: out, pending: pending, elided?: elided?}, value) do
+    joiner = if elided?, do: separators(pending), else: pending
+    %{out: out <> joiner <> value, pending: "", elided?: false}
+  end
+
+  # A dropped literal still has to hold two survivors apart, so keep its
+  # separator characters and nothing else. Whitespace-only (or empty, as
+  # between two adjacent tokens) becomes a single space rather than fusing the
+  # two values into one word.
+  defp separators(pending) do
+    pending
+    |> String.replace(~r/[^\s|\-–—·:,\/]/u, "")
+    |> String.replace(~r/\s/u, "")
+    |> String.first()
+    |> case do
+      # Whitespace-only, or empty as between two adjacent tokens.
+      nil -> " "
+      # The FIRST separator only. Two elided-away literals contribute one run
+      # each, and emitting both gave `"Acme | | Kiln guide"`.
+      separator -> " " <> separator <> " "
+    end
+  end
+
+  # Trailing literals follow the same rule: kept when every token before them
+  # survived, dropped when one did not (there is nothing left for them to
+  # join).
+  defp finish(%{out: out, pending: pending, elided?: elided?}) do
+    out
+    |> Kernel.<>(if elided?, do: "", else: pending)
+    |> String.replace(~r/\s+/, " ")
     |> String.trim()
     |> case do
       "" -> nil
       text -> text
     end
-  end
-
-  defp trim_separators(parts) do
-    separator? = &match?({:separator, _text}, &1)
-
-    parts
-    |> Enum.drop_while(separator?)
-    |> Enum.reverse()
-    |> Enum.drop_while(separator?)
-    |> Enum.reverse()
   end
 
   @doc """

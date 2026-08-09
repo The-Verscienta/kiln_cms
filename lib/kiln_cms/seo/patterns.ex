@@ -37,13 +37,16 @@ defmodule KilnCMS.Seo.Patterns do
   the read-time rule above exists to prevent.
   """
 
-  alias Kiln.Tokens
   alias KilnCMS.Branding
   alias KilnCMS.Seo.Pattern
 
-  # {record field, the descriptor key holding its pattern}. Spelled out rather
-  # than derived, so no atom is ever built from a string at runtime.
-  @fields [{:seo_title, :seo_title_pattern}, {:seo_description, :seo_description_pattern}]
+  # {record field, the descriptor key holding its pattern, its length ceiling}.
+  # Spelled out rather than derived, so no atom is ever built from a string at
+  # runtime — and so the ceiling sits beside the field it governs.
+  @fields [
+    {:seo_title, :seo_title_pattern, KilnCMS.Limits.line()},
+    {:seo_description, :seo_description_pattern, KilnCMS.Limits.paragraph()}
+  ]
 
   @doc """
   Fill blank `seo_title` / `seo_description` on `record` from `ct`'s patterns.
@@ -57,10 +60,7 @@ defmodule KilnCMS.Seo.Patterns do
   def apply_to(record, nil, _org), do: record
 
   def apply_to(record, ct, org) do
-    patterns =
-      Enum.reject(pattern_pairs(ct), fn {field, pattern} -> skip?(record, field, pattern) end)
-
-    case patterns do
+    case Enum.reject(pattern_pairs(ct), &skip?(record, &1)) do
       [] -> record
       pairs -> fill(record, pairs, org)
     end
@@ -69,52 +69,51 @@ defmodule KilnCMS.Seo.Patterns do
   defp fill(record, pairs, org) do
     context = context(record, org)
 
-    Enum.reduce(pairs, record, fn {field, pattern}, acc ->
+    Enum.reduce(pairs, record, fn {field, pattern, limit}, acc ->
       case Pattern.expand(pattern, context) do
         nil -> acc
-        expanded -> Map.put(acc, field, expanded)
+        expanded -> Map.put(acc, field, clamp(expanded, limit))
       end
     end)
   end
 
+  # The expansion goes where an authored value would, so it lives under the same
+  # ceiling. `Map.put/3` writes past the attribute's `max_length` constraint —
+  # nothing validates a value that is never saved — and `[excerpt]` is a legal
+  # token in a TITLE pattern, so `"[title] — [excerpt]"` otherwise emitted a
+  # paragraph-length `<title>` on every page of the type. Cut on a word boundary
+  # where one is near the end, since a title severed mid-word reads as broken
+  # rather than as long.
+  defp clamp(text, limit) when byte_size(text) <= limit, do: text
+
+  defp clamp(text, limit) do
+    cut = binary_part(text, 0, limit)
+
+    case :binary.matches(cut, " ") do
+      [] -> cut
+      matches -> at_word_boundary(cut, elem(List.last(matches), 0), limit)
+    end
+  end
+
+  defp at_word_boundary(cut, last_space, limit) do
+    if limit - last_space <= div(limit, 10),
+      do: binary_part(cut, 0, last_space),
+      else: cut
+  end
+
   # Nothing to do when the type sets no pattern for the field, when the record
   # carries its own value, or when the resource has no such attribute at all.
-  defp skip?(record, field, pattern) do
+  defp skip?(record, {field, pattern, _limit}) do
     is_nil(pattern) or not Map.has_key?(record, field) or present?(Map.get(record, field))
   end
 
   defp present?(value) when is_binary(value), do: String.trim(value) != ""
   defp present?(value), do: not is_nil(value)
 
-  @doc "The type's `{field, pattern}` pairs, from a `KilnCMS.CMS.ContentTypes` descriptor."
-  @spec pattern_pairs(map()) :: [{atom(), String.t() | nil}]
+  @doc "The type's `{field, pattern, limit}` triples, from a `ContentTypes` descriptor."
+  @spec pattern_pairs(map()) :: [{atom(), String.t() | nil, pos_integer()}]
   def pattern_pairs(ct) do
-    Enum.map(@fields, fn {field, key} -> {field, Map.get(ct, key)} end)
-  end
-
-  @doc """
-  The relationship loads `ct`'s patterns need on a delivery read, or `[]`.
-
-  Only `[category]` needs one, and only when a pattern actually names it — so a
-  type with no pattern, or the usual `"[title] | [site-name]"`, adds no join to
-  any page view. A delivery read that skips this still renders: the token
-  expands empty (see `category_name/1`), which is also what the paywall teaser
-  gets, since its read is pinned to a fixed column set with no relationships.
-  """
-  @spec loads(map() | nil) :: [atom()]
-  def loads(nil), do: []
-
-  def loads(ct) do
-    uses_category? = Enum.any?(pattern_pairs(ct), &Tokens.uses?(elem(&1, 1), "category"))
-
-    if uses_category? and has_category?(ct), do: [:category], else: []
-  end
-
-  defp has_category?(ct) do
-    case KilnCMS.CMS.Slugs.storage_resource(ct) do
-      nil -> false
-      resource -> not is_nil(Ash.Resource.Info.relationship(resource, :category))
-    end
+    Enum.map(@fields, fn {field, key, limit} -> {field, Map.get(ct, key), limit} end)
   end
 
   @doc """
@@ -132,12 +131,21 @@ defmodule KilnCMS.Seo.Patterns do
       excerpt: Map.get(record, :excerpt),
       category_name: category_name(record),
       site_name: Branding.for_org(org_id(record, org)).site_name,
-      custom_fields: Map.get(record, :custom_fields),
+      custom_fields: loaded(Map.get(record, :custom_fields)),
       date:
-        Map.get(record, :published_at) || Map.get(record, :scheduled_at) ||
-          Map.get(record, :inserted_at)
+        loaded(Map.get(record, :published_at)) || loaded(Map.get(record, :scheduled_at)) ||
+          loaded(Map.get(record, :inserted_at))
     }
   end
+
+  # `%Ash.NotLoaded{}` is TRUTHY, so an unselected column short-circuits a `||`
+  # chain and hands the struct on as if it were a value. For the date chain that
+  # was the worst possible failure: `Pattern.date/1` matches neither `%Date{}`
+  # nor `%DateTime{}`, falls through to `Date.utc_today()`, and a 2019 post's
+  # paywall teaser rendered `[yyyy]` as the CURRENT year. An unloaded field must
+  # read as absent, so the next link in the chain gets its turn.
+  defp loaded(%Ash.NotLoaded{}), do: nil
+  defp loaded(value), do: value
 
   # An unloaded relationship is `%Ash.NotLoaded{}`, which has no `:name` key, so
   # this clause simply doesn't match and `[category]` expands empty rather than
@@ -148,8 +156,6 @@ defmodule KilnCMS.Seo.Patterns do
   defp category_name(%{category: %{name: name}}) when is_binary(name), do: name
   defp category_name(_record), do: nil
 
-  defp org_id(record, nil), do: Map.get(record, :org_id)
   defp org_id(_record, %{id: id}), do: id
-  defp org_id(_record, org_id) when is_binary(org_id), do: org_id
   defp org_id(record, _org), do: Map.get(record, :org_id)
 end

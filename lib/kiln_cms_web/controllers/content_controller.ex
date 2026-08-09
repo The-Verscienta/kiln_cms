@@ -19,6 +19,7 @@ defmodule KilnCMSWeb.ContentController do
   alias KilnCMS.Experiments
   alias KilnCMS.Feeds
   alias KilnCMS.I18n
+  alias KilnCMS.Seo.Patterns
   alias KilnCMSWeb.ContentLock
   alias KilnCMSWeb.EventIndex
   alias KilnCMSWeb.Params
@@ -37,7 +38,7 @@ defmodule KilnCMSWeb.ContentController do
         not_found_error?: false,
         authorize?: false,
         tenant: org_id,
-        load: [:author | KilnCMS.Seo.Patterns.loads(ct)]
+        load: [:author, :category]
       )
 
     case fetch_payload(org_id, "page", slug, locale, audiences, unlocks, fn ->
@@ -73,7 +74,7 @@ defmodule KilnCMSWeb.ContentController do
         not_found_error?: false,
         authorize?: false,
         tenant: org_id,
-        load: [:author | KilnCMS.Seo.Patterns.loads(ct)]
+        load: [:author, :category]
       )
 
     case fetch_payload(org_id, "post", slug, locale, audiences, unlocks, fn ->
@@ -104,7 +105,7 @@ defmodule KilnCMSWeb.ContentController do
              not_found_error?: false,
              authorize?: false,
              tenant: org_id,
-             load: [:author | KilnCMS.Seo.Patterns.loads(ct)]
+             load: [:author, :category]
            ),
          payload when not is_nil(payload) <-
            fetch_payload(org_id, to_string(ct.type), slug, locale, audiences, unlocks, fn ->
@@ -303,11 +304,11 @@ defmodule KilnCMSWeb.ContentController do
     org = KilnCMSWeb.Tenant.current_org(conn)
     base_url = KilnCMSWeb.Tenant.base_url(org)
     url = record.canonical_url || locale_url(ct, record.slug, record.locale, base_url)
-    # Before the projection, so a teaser's metadata matches what an entitled
-    # reader's render would show (#805) — the property `KilnCMSWeb.Teaser`'s
-    # moduledoc asks for.
-    record = KilnCMS.Seo.Patterns.apply_to(record, ct, org)
-    teaser = KilnCMSWeb.Teaser.from_record(record, url)
+    # AFTER the projection, not before: the teaser's `summary` is body copy a
+    # locked-out reader reads, and must stay the author's own words, while its
+    # `seo_title`/`seo_description` are meta tags and should carry the type's
+    # #805 default. Applying to the projection gives each what it needs.
+    teaser = record |> KilnCMSWeb.Teaser.from_record(url) |> Patterns.apply_to(ct, org)
 
     conn
     # Never shared-cached, and no ETag: the same URL returns the lock page to one
@@ -372,11 +373,11 @@ defmodule KilnCMSWeb.ContentController do
     org = KilnCMSWeb.Tenant.current_org(conn)
     base_url = KilnCMSWeb.Tenant.base_url(org)
     url = record.canonical_url || locale_url(ct, record.slug, record.locale, base_url)
-    # Before the projection, so a teaser's metadata matches what an entitled
-    # reader's render would show (#805) — the property `KilnCMSWeb.Teaser`'s
-    # moduledoc asks for.
-    record = KilnCMS.Seo.Patterns.apply_to(record, ct, org)
-    teaser = KilnCMSWeb.Teaser.from_record(record, url)
+    # AFTER the projection, not before: the teaser's `summary` is body copy a
+    # locked-out reader reads, and must stay the author's own words, while its
+    # `seo_title`/`seo_description` are meta tags and should carry the type's
+    # #805 default. Applying to the projection gives each what it needs.
+    teaser = record |> KilnCMSWeb.Teaser.from_record(url) |> Patterns.apply_to(ct, org)
 
     conn
     # Same rule as a member render: this body depends on who asked, and the same
@@ -806,6 +807,14 @@ defmodule KilnCMSWeb.ContentController do
          audiences,
          variant
        ) do
+    # Resolve the type's SEO patterns (#805) here, ahead of the cache headers,
+    # so `etag/1` below hashes the values a visitor will actually be served.
+    # Applied later, a pattern change was invisible to every client holding a
+    # validator: `updated_at` and `published_version_id` do not move when only
+    # the TYPE is edited, so a revalidating browser or CDN got a 304 and kept
+    # the old `<title>` indefinitely.
+    record = Patterns.apply_to(record, ct, KilnCMSWeb.Tenant.current_org(conn))
+
     # A render that depended on WHO asked must never be shared-cached. The public
     # headers carry `public, max-age=60, stale-while-revalidate=300`, so a CDN in
     # front would happily serve one member's gated render to every anonymous
@@ -864,10 +873,6 @@ defmodule KilnCMSWeb.ContentController do
   defp render_content_body(conn, template, record, blocks, translations, ct, variant) do
     org = KilnCMSWeb.Tenant.current_org(conn)
     base_url = KilnCMSWeb.Tenant.base_url(org)
-    # The type's SEO patterns (#805) fill only the fields this record left
-    # blank, here rather than at each assign, so the `<title>`, the meta
-    # description and the schema.org graph below cannot disagree about them.
-    record = KilnCMS.Seo.Patterns.apply_to(record, ct, org)
 
     conn
     |> assign(:locale, record.locale)
@@ -1370,8 +1375,15 @@ defmodule KilnCMSWeb.ContentController do
     |> put_resp_header("etag", etag(record))
   end
 
+  # The resolved SEO fields are part of the raw string, not just the record's
+  # own timestamps: with a type-level pattern (#805) two responses can differ
+  # while every column on the record is identical. `render_content/6` resolves
+  # before this is called, so what is hashed is what is sent.
   defp etag(record) do
-    raw = "#{record.id}:#{record.updated_at}:#{record.published_version_id}"
+    raw =
+      "#{record.id}:#{record.updated_at}:#{record.published_version_id}" <>
+        ":#{record.seo_title}:#{record.seo_description}"
+
     digest = :sha256 |> :crypto.hash(raw) |> Base.encode16(case: :lower) |> binary_part(0, 16)
     ~s("#{digest}")
   end

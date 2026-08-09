@@ -234,7 +234,7 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
               <.input
                 field={@form[:seo_title_pattern]}
                 label={gettext("Default SEO title (optional)")}
-                placeholder="[title] | [site-name]"
+                placeholder="[category]: [title]"
               />
               <p class="mt-1 text-xs text-base-content/60">
                 {gettext(
@@ -375,16 +375,31 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
                   label={gettext("Path alias pattern (optional)")}
                   placeholder="/kiln/care/[slug]"
                 />
-                <.input
-                  field={@edit.form[:seo_title_pattern]}
-                  label={gettext("Default SEO title (optional)")}
-                  placeholder="[title] | [site-name]"
-                />
-                <.input
-                  field={@edit.form[:seo_description_pattern]}
-                  label={gettext("Default SEO description (optional)")}
-                  placeholder="[excerpt]"
-                />
+                <div class="sm:col-span-2">
+                  <.input
+                    field={@edit.form[:seo_title_pattern]}
+                    label={gettext("Default SEO title (optional)")}
+                    placeholder="[category]: [title]"
+                  />
+                  <p class="mt-1 text-xs text-base-content/60">
+                    {gettext(
+                      "Tokens: %{tokens}, [field:<name>]. Used only where an entry leaves its own SEO title blank — nothing is written to the entry, so editing this re-titles those entries immediately.",
+                      tokens: Enum.map_join(KilnCMS.Seo.Pattern.tokens(), ", ", &"[#{&1}]")
+                    )}
+                  </p>
+                </div>
+                <div class="sm:col-span-2">
+                  <.input
+                    field={@edit.form[:seo_description_pattern]}
+                    label={gettext("Default SEO description (optional)")}
+                    placeholder="[excerpt]"
+                  />
+                  <p class="mt-1 text-xs text-base-content/60">
+                    {gettext(
+                      "Same tokens. Used only where an entry leaves its own meta description blank."
+                    )}
+                  </p>
+                </div>
                 <.input
                   field={@edit.form[:schema_org_type]}
                   type="select"
