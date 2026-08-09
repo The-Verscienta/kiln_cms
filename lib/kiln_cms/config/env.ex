@@ -138,8 +138,14 @@ defmodule KilnCMS.Config.Env do
   What a rejected value was being read *as*, so `replay_collected/0` can tell
   the operator what to write instead. Recorded at the point of the failed parse
   — nothing downstream can recover it from the raw string.
+
+  `{:one_of, spellings}` carries the allowed list rather than a pre-rendered
+  sentence, so the advice cannot drift from the list the reader actually
+  checked against. `{:expected, phrase}` is the escape hatch for a shape this
+  module has no reader for — see `record_unusable/3`.
   """
-  @type expectation :: :boolean | :positive_integer
+  @type expectation ::
+          :boolean | :positive_integer | {:one_of, [String.t()]} | {:expected, String.t()}
 
   @typedoc """
   One unrecognized read: the variable, exactly what the operator typed, and what
@@ -265,6 +271,89 @@ defmodule KilnCMS.Config.Env do
       record_unrecognized(var, raw, :positive_integer)
       :unrecognized
     end
+  end
+
+  @doc """
+  Reads `var` as one of `allowed`, trimmed and downcased (#912).
+
+  The enum counterpart of `fetch/1` and `positive_integer/1`, with the same
+  three-way contract. `allowed` is checked against and *carried into* the
+  collected warning, so the "use one of…" advice an operator eventually reads
+  is generated from the list the value was actually rejected against — a
+  hand-written phrase beside the check is free to drift from it.
+
+  `KILN_PROVENANCE_AI_DISCLOSURE` is the caller, and it is the reason this is a
+  reader rather than a bare warning: the value rides into a **signed**
+  provenance claim, so an operator who misspells it ships the compiled default
+  in every manifest a consumer verifies. Before this it warned with a plain
+  `IO.warn/1`, which in a release reaches container stdout and nothing else —
+  the gap #634 closed for flags and left open here.
+
+      iex> System.put_env("KILN_ENUM_DOCTEST", " Human ")
+      iex> KilnCMS.Config.Env.one_of("KILN_ENUM_DOCTEST", ~w(human ai_assisted))
+      {:ok, "human"}
+
+      iex> System.delete_env("KILN_ENUM_DOCTEST")
+      iex> KilnCMS.Config.Env.one_of("KILN_ENUM_DOCTEST", ~w(human ai_assisted))
+      :unset
+  """
+  @spec one_of(String.t(), [String.t()]) :: {:ok, String.t()} | :unset | :unrecognized
+  def one_of(var, allowed) when is_binary(var) and is_list(allowed) do
+    raw = System.get_env(var, "")
+
+    case raw |> String.trim() |> String.downcase() do
+      "" ->
+        :unset
+
+      value ->
+        if value in allowed do
+          {:ok, value}
+        else
+          # `raw`, not the normalized form — `fetch/1`'s reasoning: the trimming
+          # and downcasing are candidate explanations for the mismatch, so
+          # echoing the normalized string hands back the one spelling that is
+          # not in the operator's compose file.
+          IO.warn(
+            "#{var} is set to an unrecognized value (#{inspect(raw)}); keeping the " <>
+              "configured default. #{advice({:one_of, allowed})}",
+            []
+          )
+
+          record_unrecognized(var, raw, {:one_of, allowed})
+          :unrecognized
+        end
+    end
+  end
+
+  @doc """
+  Warns about, and collects, a value this module has no reader for (#912).
+
+  The collector without a parser. `expected` completes the sentence "Expected …"
+  — a phrase, not a sentence: `"a comma-separated list of PEM file paths"`.
+
+  One caller, and it earns the exception: `KILN_PROVENANCE_RETIRED_KEY_FILES` is
+  a path list whose failure mode is "parsed to no paths at all", which no
+  general reader here would model. Left as a bare `IO.warn/1` it was stderr-only
+  on a value that decides which retired keys still verify — a typo silently
+  deregisters every one of them, which is the failure the variable exists to
+  prevent.
+
+  Always returns `:unrecognized`, so a `case`/`cond` branch can end on it.
+
+  Reach for a real reader first — `fetch/1`, `positive_integer/1`, `one_of/2`.
+  A second caller here means the shape wants one of its own.
+  """
+  @spec record_unusable(String.t(), String.t(), String.t()) :: :unrecognized
+  def record_unusable(var, raw, expected)
+      when is_binary(var) and is_binary(raw) and is_binary(expected) do
+    IO.warn(
+      "#{var} is set to an unrecognized value (#{inspect(raw)}); keeping the " <>
+        "configured default. #{advice({:expected, expected})}",
+      []
+    )
+
+    record_unrecognized(var, raw, {:expected, expected})
+    :unrecognized
   end
 
   @doc """
@@ -407,6 +496,10 @@ defmodule KilnCMS.Config.Env do
     do: "Use one of: #{Enum.join(@true_values, "/")}, #{Enum.join(@false_values, "/")}."
 
   defp advice(:positive_integer), do: "Use a positive integer."
+
+  defp advice({:one_of, allowed}), do: "Use one of: #{Enum.join(allowed, "/")}."
+
+  defp advice({:expected, phrase}), do: "Expected #{phrase}."
 
   defp advice(:unknown),
     do: "The collected warning had an unrecognized shape; see KilnCMS.Config.Env."

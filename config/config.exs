@@ -178,7 +178,14 @@ config :kiln_cms, KilnCMS.Search,
   # right value is model- and corpus-specific, so there is no safe default to
   # ship: measure with `KilnCMS.Search.semantic_distances/3` and set it just
   # above where real matches stop. See `KilnCMS.Search.semantic_max_distance/0`.
-  semantic_max_distance: nil
+  semantic_max_distance: nil,
+  # Cosine-distance ceiling on a tag suggestion (#851). Unlike the ceiling
+  # above this ships a number, because the candidate set is the site's whole
+  # tag list: with no ceiling, a site with five tags suggests all five for
+  # every document, however unrelated. Model-specific, and NOT `nil`-able the
+  # way its neighbour is — see `KilnCMS.Search.suggest_tags_threshold/0` for
+  # why, and for how to measure your own.
+  suggest_tags_threshold: 0.25
 
 # AI-assisted SEO drafting (#60). The deterministic analysis and score in the
 # editor are ALWAYS on and need none of this — the block below gates the

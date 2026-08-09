@@ -85,6 +85,40 @@ defmodule KilnCMS.Config.RuntimeProvenanceTest do
     end
   end
 
+  # What runtime.exs hands to `:kiln_cms, :config_warnings` for
+  # `KilnCMS.Application` to replay through `Logger`/Sentry once observability
+  # is attached (#634). The provenance block's own reads are the two here that
+  # reach it through `Env.record_unrecognized/3` rather than a parser (#912).
+  # The collected entry for one variable, or nil. Scoped to the variable rather
+  # than asserting on the whole list: this file only clears the provenance vars,
+  # so a developer with `DATABASE_SSL=enabled` exported would otherwise fail a
+  # `== []` assertion for a reason that has nothing to do with provenance.
+  defp collected_for(env, var),
+    do: env |> config_warnings() |> Enum.find(&match?({^var, _raw, _expected}, &1))
+
+  defp config_warnings(env, config_env \\ :prod) do
+    Enum.each(@prod_env, fn {k, v} -> System.put_env(k, v) end)
+
+    Enum.each(@vars, fn var ->
+      case Map.get(env, var) do
+        nil -> System.delete_env(var)
+        value -> System.put_env(var, value)
+      end
+    end)
+
+    parent = self()
+
+    capture_io(:stderr, fn ->
+      send(parent, {:warnings, Config.Reader.read!(@runtime, env: config_env)})
+    end)
+
+    receive do
+      {:warnings, config} -> get_in(config, [:kiln_cms, :config_warnings])
+    after
+      0 -> flunk("runtime.exs did not evaluate")
+    end
+  end
+
   describe "KILN_PROVENANCE_ENABLED" do
     test "on-spellings enable it, in any case and with surrounding space" do
       for value <- ["true", "TRUE", "True", " true ", "1", "yes", "YES", "on", "On"] do
@@ -284,6 +318,66 @@ defmodule KilnCMS.Config.RuntimeProvenanceTest do
 
       assert written == :not_written
       assert stderr =~ "KILN_PROVENANCE_AI_DISCLOSURE is set to an unrecognized value"
+      # "Use one of:", the same phrasing every other spelling-list warning in
+      # this module uses — the point of routing this through `Env.one_of/2` is
+      # that the operator sees one sentence shape whatever the variable is.
+      assert stderr =~ "Use one of: #{Enum.join(KilnCMS.Provenance.disclosures(), "/")}."
+    end
+
+    # #912. The stderr line above is the only signal this block used to produce,
+    # and in a release stderr is container stdout and nothing else — no Sentry,
+    # no log sink. That is the failure #634 exists to close, and it lands harder
+    # here than on a flag: the value rides into a SIGNED claim, so an operator
+    # who misspells it ships the compiled default in every manifest a consumer
+    # verifies, and hears about it once, at boot, in a scrolling deploy log.
+    test "the unrecognized value is collected, so the replay reaches Sentry" do
+      assert {"KILN_PROVENANCE_AI_DISCLOSURE", "sometimes", expected} =
+               collected_for(
+                 %{"KILN_PROVENANCE_AI_DISCLOSURE" => "sometimes"},
+                 "KILN_PROVENANCE_AI_DISCLOSURE"
+               )
+
+      # The allowed list itself, not a rendered sentence: `replay_collected/0`
+      # generates the advice from it, so the operator's "use one of…" can never
+      # drift from the list the value was actually checked against.
+      assert expected == {:one_of, KilnCMS.Provenance.disclosures()}
+    end
+
+    test "the collected value is what the operator typed, not the normalized form" do
+      assert {_var, " Sometimes ", _expected} =
+               collected_for(
+                 %{"KILN_PROVENANCE_AI_DISCLOSURE" => " Sometimes "},
+                 "KILN_PROVENANCE_AI_DISCLOSURE"
+               )
+    end
+
+    test "a recognized value collects nothing" do
+      refute collected_for(
+               %{"KILN_PROVENANCE_AI_DISCLOSURE" => "ai_assisted"},
+               "KILN_PROVENANCE_AI_DISCLOSURE"
+             )
+    end
+  end
+
+  # The same class as the disclosure above: a value that parses to no paths
+  # would deregister every retired verification key, which is the failure the
+  # variable exists to prevent — so its warning has to reach Sentry too (#912).
+  describe "KILN_PROVENANCE_RETIRED_KEY_FILES collection (#912)" do
+    test "a value with no paths in it is collected, not warned about on stderr only" do
+      assert {"KILN_PROVENANCE_RETIRED_KEY_FILES", ",,,", expected} =
+               collected_for(
+                 %{"KILN_PROVENANCE_RETIRED_KEY_FILES" => ",,,"},
+                 "KILN_PROVENANCE_RETIRED_KEY_FILES"
+               )
+
+      assert expected == {:expected, "a comma-separated list of PEM file paths"}
+    end
+
+    test "a real list collects nothing" do
+      refute collected_for(
+               %{"KILN_PROVENANCE_RETIRED_KEY_FILES" => "/a.pem,/b.pem"},
+               "KILN_PROVENANCE_RETIRED_KEY_FILES"
+             )
     end
   end
 end

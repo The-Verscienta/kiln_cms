@@ -159,6 +159,84 @@ defmodule KilnCMS.Config.EnvTest do
     end
   end
 
+  # #912: the two variables `config/runtime.exs` reads that are neither a flag
+  # nor a count, and used to warn with a bare `IO.warn` — stderr only.
+  describe "one_of/2" do
+    @disclosures ~w(human ai_assisted ai_generated)
+
+    test "an allowed spelling is returned, trimmed and downcased" do
+      for {value, parsed} <- [
+            {"human", "human"},
+            {" Human ", "human"},
+            {"AI_ASSISTED", "ai_assisted"}
+          ] do
+        put(value)
+        assert Env.one_of(@var, @disclosures) == {:ok, parsed}
+      end
+    end
+
+    test "unset, blank and whitespace-only are :unset" do
+      for value <- [nil, "", " ", "\t\n"] do
+        put(value)
+        assert Env.one_of(@var, @disclosures) == :unset, "#{inspect(value)} should be unset"
+      end
+    end
+
+    test "a spelling outside the list is :unrecognized and warns" do
+      for value <- ["sometimes", "ai-assisted", "Human!"] do
+        put(value)
+
+        stderr =
+          capture_io(:stderr, fn -> assert Env.one_of(@var, @disclosures) == :unrecognized end)
+
+        assert stderr =~ "#{@var} is set to an unrecognized value"
+        assert stderr =~ "Use one of: human/ai_assisted/ai_generated."
+      end
+    end
+
+    test "the warning quotes what was typed, not the normalized form" do
+      put(" Sometimes ")
+      assert capture_io(:stderr, fn -> Env.one_of(@var, @disclosures) end) =~ ~s(" Sometimes ")
+    end
+
+    test "it records the allowed list, so the replay cannot drift from it" do
+      # The point of carrying `{:one_of, allowed}` rather than a rendered
+      # sentence: the advice an operator reads is generated from the same list
+      # the value was rejected against.
+      Env.take_collected()
+      put("sometimes")
+      quietly(fn -> Env.one_of(@var, @disclosures) end)
+
+      assert Env.collected() == [{@var, "sometimes", {:one_of, @disclosures}}]
+    end
+
+    test "an allowed value records nothing" do
+      Env.take_collected()
+      put("human")
+      assert capture_io(:stderr, fn -> Env.one_of(@var, @disclosures) end) == ""
+      assert Env.collected() == []
+    end
+  end
+
+  describe "record_unusable/3" do
+    test "it warns, records the phrase, and returns :unrecognized" do
+      Env.take_collected()
+
+      stderr =
+        capture_io(:stderr, fn ->
+          assert Env.record_unusable(@var, " , ", "a comma-separated list of PEM file paths") ==
+                   :unrecognized
+        end)
+
+      assert stderr =~ "#{@var} is set to an unrecognized value"
+      assert stderr =~ ~s(" , ")
+      assert stderr =~ "Expected a comma-separated list of PEM file paths."
+
+      assert Env.collected() ==
+               [{@var, " , ", {:expected, "a comma-separated list of PEM file paths"}}]
+    end
+  end
+
   describe "collected/0" do
     setup do
       # No `on_exit` drain: `on_exit` callbacks run in a separate process from
@@ -304,6 +382,32 @@ defmodule KilnCMS.Config.EnvTest do
       assert log =~ "Use a positive integer."
     end
 
+    test "an enum is told the spellings it was actually checked against (#912)" do
+      # The advice is generated from the recorded list, so it cannot say
+      # something the reader did not enforce — which is the failure a
+      # hand-written phrase beside the check invites.
+      log =
+        replay([
+          {"KILN_PROVENANCE_AI_DISCLOSURE", "sometimes",
+           {:one_of, ~w(human ai_assisted ai_generated)}}
+        ])
+
+      assert log =~ "KILN_PROVENANCE_AI_DISCLOSURE"
+      assert log =~ "Use one of: human/ai_assisted/ai_generated."
+      refute log =~ "true/1/yes/on"
+    end
+
+    test "a shape with no reader replays the phrase its caller supplied (#912)" do
+      log =
+        replay([
+          {"KILN_PROVENANCE_RETIRED_KEY_FILES", ",,,",
+           {:expected, "a comma-separated list of PEM file paths"}}
+        ])
+
+      assert log =~ "had no effect"
+      assert log =~ "Expected a comma-separated list of PEM file paths."
+    end
+
     test "a two-element entry is still replayed, not silently dropped" do
       # `for {a, b, c} <- list` FILTERS OUT what does not match rather than
       # raising, so before #1009's shape change was handled explicitly a
@@ -393,6 +497,29 @@ defmodule KilnCMS.Config.EnvTest do
                "config :kiln_cms, :config_warnings, Env.take_collected()"
     end
 
+    # Every public function on `Env` that can put an entry in the collector.
+    # A literal list, so `covers every collecting reader` below fails when the
+    # module grows one that is not here — which is how `positive_integer/1` and
+    # then `one_of/2` each arrived after the guard was written.
+    @collecting_readers ~w(flag fetch truthy? positive_integer one_of record_unusable)
+
+    test "the guard below covers every reader on the module" do
+      exported =
+        KilnCMS.Config.Env.__info__(:functions)
+        |> Enum.map(fn {name, _arity} -> to_string(name) end)
+        |> Enum.uniq()
+        |> Enum.reject(
+          &(&1 in ~w(collected take_collected replay_collected true_values false_values))
+        )
+
+      assert Enum.sort(exported) == Enum.sort(@collecting_readers),
+             """
+             KilnCMS.Config.Env's reader surface changed. Add the new function to \
+             @collecting_readers so the below-the-handoff guard covers it, or to \
+             the exclusion list above if it cannot collect.\
+             """
+    end
+
     test "nothing reads a flag after the handoff line" do
       # Ordering is the whole correctness argument: a variable read below the
       # handoff is warned about on stderr and nowhere else, which is exactly the
@@ -403,11 +530,34 @@ defmodule KilnCMS.Config.EnvTest do
       [_before, after_handoff] =
         String.split(source, "config :kiln_cms, :config_warnings", parts: 2)
 
-      refute after_handoff =~ ~r/\bEnv\.(flag|fetch|truthy\?|positive_integer)\(/,
+      pattern = ~r/\bEnv\.(#{Enum.map_join(@collecting_readers, "|", &Regex.escape/1)})\(/
+
+      refute after_handoff =~ pattern,
              """
              config/runtime.exs reads an environment variable below the \
              `:config_warnings` handoff. Move the read above it, or that \
              variable's unrecognized-value warning reaches stderr only (#634).\
+             """
+    end
+
+    test "no bare IO.warn survives in runtime.exs" do
+      # #912: an `IO.warn` there is a warning that reaches container stdout and
+      # nothing else, which is what the collector exists to replace. The two
+      # variables that had no parser now go through `one_of/2` and
+      # `record_unusable/3`; a new bare call is the regression.
+      source = File.read!(@runtime_exs)
+
+      code =
+        source
+        |> String.split("\n")
+        |> Enum.reject(&String.starts_with?(String.trim_leading(&1), "#"))
+        |> Enum.join("\n")
+
+      refute code =~ "IO.warn",
+             """
+             config/runtime.exs warns with `IO.warn`, which never reaches Logger \
+             or Sentry. Use a reader on `KilnCMS.Config.Env`, or \
+             `Env.record_unusable/3` when the shape has none (#912).\
              """
     end
   end

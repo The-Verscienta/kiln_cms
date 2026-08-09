@@ -32,6 +32,16 @@ import Config
 # the warning, so "unparseable means the default, not a crash" was four
 # opportunities to disagree — and `IO.warn` alone never reached the Sentry
 # replay that #634 added, so a typo warned on container stdout and nowhere else.
+#
+# ## Everything else
+#
+# Same rule, and it is the rule rather than the parser that matters: a rejected
+# value owes the operator a *collected* warning, never a bare `IO.warn` (#912).
+# `Env.one_of/2` covers an enum — `KILN_PROVENANCE_AI_DISCLOSURE` is the only
+# one — and `Env.record_unusable/3` is the escape hatch for a shape with no
+# reader, which today means `KILN_PROVENANCE_RETIRED_KEY_FILES` alone. There
+# should be no `IO.warn` left in this file; a new one is a warning that reaches
+# container stdout and nothing else.
 alias KilnCMS.Config.Env
 
 # ## Using releases
@@ -458,16 +468,23 @@ if config_env() != :test do
   # variable into a bare separator — otherwise clears the list, and silently
   # deregistering every retired key is precisely the failure this feature exists
   # to prevent.
-  retired_key_files =
-    "KILN_PROVENANCE_RETIRED_KEY_FILES" |> System.get_env("") |> String.trim()
+  retired_key_files_raw = System.get_env("KILN_PROVENANCE_RETIRED_KEY_FILES", "")
+  retired_key_files = String.trim(retired_key_files_raw)
 
   case KilnCMS.Provenance.parse_key_files(retired_key_files) do
     [] when retired_key_files != "" ->
-      IO.warn("""
-      KILN_PROVENANCE_RETIRED_KEY_FILES is set to #{inspect(retired_key_files)}, \
-      which contains no paths; keeping the configured default. Expected a \
-      comma-separated list of PEM file paths.\
-      """)
+      # Collected rather than stderr-only, for the same reason as the
+      # disclosure below (#912) — and the RAW value, because with
+      # `KILN_PROVENANCE_RETIRED_KEY_FILES=" , "` the trimmed form is `","`, a
+      # string that appears nowhere in the operator's compose file.
+      #
+      # `record_unusable/3`, not a reader: the failure here is "parsed to no
+      # paths", which is not a shape `Env` models.
+      Env.record_unusable(
+        "KILN_PROVENANCE_RETIRED_KEY_FILES",
+        retired_key_files_raw,
+        "a comma-separated list of PEM file paths"
+      )
 
     [] ->
       :ok
@@ -1194,22 +1211,17 @@ if config_env() != :test do
   # being written — `KilnCMS.Provenance.normalize_disclosure/1` coerces unknown
   # to "human" for per-document reads, the wrong direction for a value an
   # operator set on purpose.
-  provenance_disclosure =
-    "KILN_PROVENANCE_AI_DISCLOSURE" |> System.get_env("") |> String.trim() |> String.downcase()
-
-  cond do
-    provenance_disclosure == "" ->
-      :ok
-
-    provenance_disclosure in KilnCMS.Provenance.disclosures() ->
-      config :kiln_cms, KilnCMS.Provenance, ai_disclosure: provenance_disclosure
-
-    true ->
-      IO.warn("""
-      KILN_PROVENANCE_AI_DISCLOSURE is set to an unrecognized value \
-      (#{inspect(provenance_disclosure)}); keeping the configured default. \
-      Expected one of: #{Enum.join(KilnCMS.Provenance.disclosures(), "/")}.\
-      """)
+  #
+  # `Env.one_of/2` rather than a hand-rolled `cond` (#912): the block used to
+  # trim, downcase and match itself and then warn with a bare `IO.warn`, which
+  # in a release reaches container stdout and nothing else — no Logger, no
+  # Sentry. That is the gap #634 closed for flags, and it lands harder here
+  # than on a flag, because the operator's only notice that their spelling was
+  # rejected scrolls past once during a deploy while every manifest a consumer
+  # verifies carries the compiled default instead.
+  with {:ok, disclosure} <-
+         Env.one_of("KILN_PROVENANCE_AI_DISCLOSURE", KilnCMS.Provenance.disclosures()) do
+    config :kiln_cms, KilnCMS.Provenance, ai_disclosure: disclosure
   end
 end
 

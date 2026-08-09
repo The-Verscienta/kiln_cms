@@ -186,12 +186,56 @@ defmodule KilnCMS.Seo.LinksTest do
       refute Enum.any?(suggestions, &(&1.id == anchor.id))
     end
 
+    # #1066. This stays end-to-end — the fallback is only worth anything if the
+    # words it picks reach `Search.global/2` — but it no longer competes for
+    # rank against the rest of the corpus.
+    #
+    # The old version searched for "Kiln firing" and asserted that a target
+    # whose ONLY match was its title came back. `keyword/2` fetches `limit * 2`
+    # hits and `suggest/2` then takes `limit`, so that target had to out-rank
+    # every other post in the tenant on `ts_rank` — including the sibling case
+    # above, whose body says "a thorough guide to kiln firing". Which of them
+    # placed depended on what else the run had inserted, so the test passed
+    # under some seeds and failed under others with nothing naming a cause.
+    #
+    # A nonce in the title gives the case a corpus it owns: no other row can
+    # contain the term, so rank is not a variable and a failure means the
+    # fallback itself broke.
     test "falls back to the title when no focus keyphrase is set" do
       actor = admin()
-      anchor = post(actor, "unrelated body text", title: "Kiln firing", index?: false)
-      target = post(actor, "a thorough guide", title: "Kiln firing guide", index?: false)
+      nonce = "kilnfire#{System.unique_integer([:positive])}"
 
-      assert Enum.any?(Links.suggest(anchor), &(&1.id == target.id))
+      anchor = post(actor, "unrelated body text", title: nonce, index?: false)
+      target = post(actor, "a thorough guide", title: "#{nonce} guide", index?: false)
+
+      suggestions = Links.suggest(anchor)
+
+      assert Enum.any?(suggestions, &(&1.id == target.id))
+      assert Enum.all?(suggestions, &(&1.source == :keyword))
+    end
+
+    test "the focus keyphrase wins over the title when both are set" do
+      # The other half of the same decision, and it needs both terms present in
+      # the corpus to mean anything: if only the keyphrase target existed, a
+      # fallback-to-title regression would still return it by accident.
+      actor = admin()
+      key = "rakuglaze#{System.unique_integer([:positive])}"
+      title = "kilnfire#{System.unique_integer([:positive])}"
+
+      anchor =
+        post(actor, "unrelated body text",
+          title: title,
+          index?: false,
+          attrs: %{seo_keywords: key}
+        )
+
+      keyphrase_target = post(actor, "notes on #{key}", title: "#{key} notes", index?: false)
+      title_target = post(actor, "a thorough guide", title: "#{title} guide", index?: false)
+
+      suggestions = Links.suggest(anchor)
+
+      assert Enum.any?(suggestions, &(&1.id == keyphrase_target.id))
+      refute Enum.any?(suggestions, &(&1.id == title_target.id))
     end
 
     test "never suggests a page from another organization (#869)" do

@@ -55,7 +55,13 @@ defmodule KilnCMS.AutomationIntelligenceTest do
     Application.put_env(
       :kiln_cms,
       KilnCMS.Search,
-      Keyword.merge(original, semantic: true, embedder: StubEmbedder)
+      # This file's own `StubEmbedder` predates `KilnCMS.StubEmbedder` and is
+      # byte-identical to it; the shared `search_env/0` carries the settings a
+      # stub-backed suite needs (notably #851's ceiling, which hash-seeded
+      # distances would otherwise decide at random).
+      original
+      |> Keyword.merge(KilnCMS.StubEmbedder.search_env())
+      |> Keyword.put(:embedder, StubEmbedder)
     )
 
     :ok

@@ -76,15 +76,49 @@ defmodule KilnCMS.Search.Related do
   @doc """
   Existing tags ranked by similarity to the document's content, excluding the
   ones already applied. Returns `[%{tag, distance}]`, best first. Options:
-  `:limit` (default 5) and `:actor`.
+  `:limit` (default 5), `:threshold` and `:actor`.
 
   With `:actor` the taxonomy is read as that user. Beyond the policy question,
   that keeps an editor-facing caller honest: a suggestion for a tag the
   editor's own tag picker doesn't list is a control with nothing to tick.
+
+  ## A weak match is no match
+
+  `:threshold` is a cosine-distance ceiling, like `near_duplicates/2`'s,
+  defaulting to `KilnCMS.Search.suggest_tags_threshold/0`. Ranking alone is not
+  enough here and the reason is structural: the candidate set is the site's
+  entire tag list, so taking the top five of five means every tag is suggested
+  for every document (#851). The panel then offers "carburetors" for a page
+  about herbal tea, in the same type, at the same size, as a good match — and
+  a suggester that always suggests something is one an editor learns to ignore.
+
+  Returning `[]` is a real answer, and the same one `near_duplicates/2` gives.
+  Pass `threshold: 2.0` to rank without filtering — cosine distance is
+  `1 - cos θ`, so it tops out at 2 for exactly-opposed vectors — which is what
+  this did before #851 and is the way to measure a ceiling for a non-default
+  embedder.
+
+  A non-numeric `:threshold`, or a non-numeric `:suggest_tags_threshold` in
+  config, **raises** rather than being ignored. It has to: Erlang orders
+  `number < atom < bitstring`, so `0.9 <= nil` is `true` and a `nil` ceiling
+  would pass every candidate — silently restoring the exact behaviour this
+  option exists to end, with no crash and no warning to say so. `nil` is a
+  tempting thing to write here because `:semantic_max_distance` sits three
+  lines above it in `config/config.exs` and does mean "no ceiling"; this one
+  does not have that spelling.
   """
   @spec suggest_tags(struct(), keyword()) :: [%{tag: struct(), distance: float()}]
   def suggest_tags(record, opts \\ []) do
     actor = opts[:actor]
+    threshold = Keyword.get(opts, :threshold, Search.suggest_tags_threshold())
+
+    unless is_number(threshold) do
+      raise ArgumentError,
+            "suggest_tags/2 needs a numeric :threshold, got #{inspect(threshold)}. " <>
+              "Cosine distance runs 0..2; pass 2.0 to rank without filtering. " <>
+              "(`nil` does not mean \"no ceiling\" here — it would compare as " <>
+              "greater than every distance and quietly admit everything.)"
+    end
 
     with true <- Search.semantic?(),
          centroid when is_list(centroid) <- centroid(record) do
@@ -110,6 +144,7 @@ defmodule KilnCMS.Search.Related do
             []
         end
       end)
+      |> Enum.filter(&(&1.distance <= threshold))
       |> Enum.sort_by(& &1.distance)
       |> Enum.take(Keyword.get(opts, :limit, 5))
     else

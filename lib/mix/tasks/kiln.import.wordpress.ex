@@ -58,7 +58,13 @@ defmodule Mix.Tasks.Kiln.Import.Wordpress do
     skip_media: :boolean,
     redirects: :boolean,
     on_conflict: :string,
-    author_map: :keep
+    author_map: :keep,
+    # Documented at the top of this moduledoc and read at the bottom of
+    # `run/1`, but never declared — so `parse!/2` rejected `--drain-media` as
+    # an unknown option and `opts[:drain_media]` was permanently nil. The #931
+    # class, found by the sweep that issue asked for; `kiln.import.content.ex`
+    # declares the same switch.
+    drain_media: :boolean
   ]
 
   @impl Mix.Task

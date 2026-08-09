@@ -47,7 +47,12 @@ defmodule Mix.Tasks.Kiln.Import.Content do
     skip_media: :boolean,
     redirects: :boolean,
     on_conflict: :string,
-    drain_media: :boolean
+    drain_media: :boolean,
+    # Same #931 class as `--drain-media` in `kiln.import.wordpress.ex`:
+    # documented above, read by `import_csv/2`, never declared — so `--type`
+    # raised as an unknown option and the "required for a CSV import" error
+    # below it was unreachable.
+    type: :string
   ]
 
   @impl Mix.Task

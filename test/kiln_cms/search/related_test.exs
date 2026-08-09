@@ -231,10 +231,13 @@ defmodule KilnCMS.Search.RelatedTest do
 
     post = indexed_post(actor, "brewing herbal tea slowly")
 
-    suggestions = Related.suggest_tags(post)
+    # `threshold: 2.0` ranks without filtering — cosine distance is `1 - cos θ`,
+    # so 2 is its ceiling — which is what this asserted before #851 added one.
+    # Kept that way on purpose: the stub embedder can't attest semantic
+    # ordering, so "which of these two is closer" is a model property, not a
+    # code property, and pinning it would be pinning `:erlang.phash2/1`.
+    suggestions = Related.suggest_tags(post, threshold: 2.0)
     suggested_ids = Enum.map(suggestions, & &1.tag.id)
-    # Both candidate tags are scored (the stub embedder can't attest semantic
-    # ordering — ranking quality is a model property, not a code property).
     assert tea.id in suggested_ids
     assert cars.id in suggested_ids
     assert Enum.all?(suggestions, &is_float(&1.distance))
@@ -242,7 +245,88 @@ defmodule KilnCMS.Search.RelatedTest do
     # Once applied, a tag is no longer suggested.
     post = CMS.update_post!(post, %{tag_ids: [tea.id]}, actor: actor)
     post = KilnCMS.CMS.get_post!(post.id, authorize?: false, load: [:tags])
-    refute Enum.any?(Related.suggest_tags(post), &(&1.tag.id == tea.id))
+    refute Enum.any?(Related.suggest_tags(post, threshold: 2.0), &(&1.tag.id == tea.id))
+  end
+
+  # #851: ranking alone always suggests something, because the candidate set is
+  # the site's whole tag list. On a five-tag site the top five were all five.
+  describe "suggest_tags relevance ceiling (#851)" do
+    setup do
+      actor = admin()
+      uniq = System.unique_integer([:positive])
+
+      CMS.create_tag!(%{name: "herbal tea", slug: "tea-#{uniq}"}, actor: actor)
+      CMS.create_tag!(%{name: "carburetors", slug: "cars-#{uniq}"}, actor: actor)
+
+      %{post: indexed_post(actor, "brewing herbal tea slowly")}
+    end
+
+    # The file `setup` already owns the app-env swap and its restore; this only
+    # layers a threshold on top. No `on_exit` — `setup`'s restores it.
+    defp put_threshold(value) do
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Search,
+        Application.get_env(:kiln_cms, KilnCMS.Search, [])
+        |> Keyword.put(:suggest_tags_threshold, value)
+      )
+    end
+
+    test "the configured ceiling decides, and an explicit one overrides it", %{post: post} do
+      # Nothing here is an exact text match, so under the stub every candidate
+      # sits at some positive distance: a zero ceiling admits none and a
+      # maximal one admits all. That is the mechanism — the *value* of the
+      # shipped default is a model property and is deliberately not asserted.
+      put_threshold(0.0)
+      assert Related.suggest_tags(post) == []
+
+      put_threshold(2.0)
+      refute Related.suggest_tags(post) == []
+
+      # The option wins over config, which is what makes the measuring recipe
+      # in `KilnCMS.Search.suggest_tags_threshold/0` work on a tuned install.
+      put_threshold(0.0)
+      refute Related.suggest_tags(post, threshold: 2.0) == []
+    end
+
+    # #851's whole value is in the shipped default, and every test above and
+    # below overrides it — so without this, `config/config.exs` could carry
+    # `nil`, a string, or nothing at all and the suite would stay green while
+    # the ceiling silently admitted everything in production.
+    test "the shipped default is a number in the range cosine distance can produce" do
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Search,
+        Keyword.delete(
+          Application.get_env(:kiln_cms, KilnCMS.Search, []),
+          :suggest_tags_threshold
+        )
+      )
+
+      threshold = KilnCMS.Search.suggest_tags_threshold()
+
+      assert is_number(threshold)
+      assert threshold > 0 and threshold < 2
+    end
+
+    # Erlang orders `number < atom < bitstring`, so `0.9 <= nil` is `true` and
+    # a `nil` ceiling would pass every candidate — the pre-#851 behaviour, with
+    # nothing to say it had happened. `nil` is a plausible thing to write:
+    # `semantic_max_distance: nil` sits three lines above it in config.exs and
+    # does mean "no ceiling".
+    test "a non-numeric ceiling raises instead of quietly admitting everything", %{post: post} do
+      for bad <- [nil, "0.25", :none] do
+        put_threshold(bad)
+
+        assert_raise ArgumentError, ~r/numeric :threshold/, fn ->
+          Related.suggest_tags(post)
+        end
+
+        assert_raise ArgumentError, ~r/numeric :threshold/, fn ->
+          Related.suggest_tags(post, threshold: bad)
+        end
+      end
+    end
   end
 
   test "content_gaps surfaces zero-result queries, most-searched first" do
