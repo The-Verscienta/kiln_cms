@@ -34,8 +34,11 @@ defmodule KilnCMS.CMS.Promotion do
   on insert.
   """
 
+  require Logger
+
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.Governance.Checkpoint
   alias KilnCMS.Repo
 
   # Never copied: the type scope column is meaningless on a compiled table, and
@@ -51,7 +54,12 @@ defmodule KilnCMS.CMS.Promotion do
       `name` itself, i.e. the compiled type the generator created for it.
 
   Returns `{:ok, %{entries: n, versions: n}}` or raises on any inconsistency —
-  everything runs in one transaction, so a failure moves nothing.
+  the move runs in one transaction, so a failure moves nothing.
+
+  Two things happen *after* that transaction commits and cannot roll it back:
+  the delivery caches are busted, and a checkpoint is minted over the
+  re-attested anchors (#849). A failure in either is logged, not raised, so a
+  successful promotion is never reported as a failure.
   """
   @spec promote!(String.t(), keyword()) ::
           {:ok, %{entries: non_neg_integer(), versions: non_neg_integer()}}
@@ -73,16 +81,19 @@ defmodule KilnCMS.CMS.Promotion do
 
     target_table = table_for(target.resource)
 
-    {:ok, {result, notifications}} =
+    # `reattested` rides alongside the result rather than inside it: it decides
+    # whether a checkpoint is worth minting, and is not something a caller of
+    # `promote!/2` asked for — the returned map is a documented shape.
+    {:ok, {result, reattested, notifications}} =
       Repo.transaction(fn ->
         entry_count = move_rows("entries", target_table, definition.id)
         version_count = move_versions(target_table)
-        reattest_anchors(target_table, target, definition.org_id)
+        reattested = reattest_anchors(target_table, target, definition.org_id)
         purge_artifacts_and_edges()
         rescope_field_definitions(definition, target)
         notifications = archive_definition(definition)
 
-        {%{entries: entry_count, versions: version_count}, notifications}
+        {%{entries: entry_count, versions: version_count}, reattested, notifications}
       end)
 
     # Dispatch the archive's Ash notifications now that the transaction
@@ -92,8 +103,15 @@ defmodule KilnCMS.CMS.Promotion do
     # The type moved tiers: delivery must re-resolve it as compiled, and any
     # cached payloads/artifact bodies for it are stale. Bust the definition's own
     # site (epic #336).
+    #
+    # Before the checkpoint, deliberately. Minting reaches the witness sink, so
+    # it is both slow (a PUT plus `confirm/5`'s read-back) and able to raise —
+    # and the busts are what stop delivery serving a type whose rows have just
+    # moved out from under it. Nothing about witnessing is worth delaying them.
     KilnCMS.Cache.bust_type_registry(definition.org_id)
     KilnCMS.Cache.bust_published()
+
+    recheckpoint(reattested, definition.org_id)
 
     {:ok, result}
   end
@@ -190,8 +208,88 @@ defmodule KilnCMS.CMS.Promotion do
       to_string(target.type),
       org_id
     )
+  end
+
+  # ── checkpoint coverage (#849) ────────────────────────────────────────────
+
+  # Re-attesting the anchors moves them to a `resource_type` no checkpoint entry
+  # mentions, so `Checkpoint.witnessed_head/3` — which reads entries by
+  # `{resource_type, source_id}` — finds nothing for a promoted document until
+  # the next scheduled checkpoint. That is a real window in which a truncation
+  # of the newest anchors would not be caught, and it is silent. Minting here
+  # closes it at promotion time instead of one interval later.
+  #
+  # **After the commit, not inside it.** `mint/1` publishes to the witness sink,
+  # so calling it in the transaction would hold a DB transaction open across a
+  # network call — and worse, it would commit to *uncommitted* heads: a rollback
+  # would leave an immutable published object attesting a state that never
+  # existed, which is the exact fingerprint `publish/2` treats as an attack.
+  # A crash between commit and mint costs the window we already had.
+  #
+  # The old `("entry", source_id)` entries are deliberately left alone. Their
+  # Merkle leaves commit to `resource_type` (`Checkpoint.leaf_content/2`), so
+  # re-keying them would invalidate every stored proof against its published
+  # root — and they are a true record of what that chain's head was under the
+  # old type. Superseding history is not the same as rewriting it.
+  #
+  # A mint failure does not fail the promotion: the data move has already
+  # committed, and the scheduled checkpoint will cover these heads on its next
+  # run. It is logged rather than swallowed.
+  defp recheckpoint(0, _org_id), do: :ok
+
+  defp recheckpoint(_reattested, org_id) do
+    if Checkpoint.enabled?() do
+      mint_and_report(org_id)
+    end
 
     :ok
+  end
+
+  # Rescued, like `CheckpointWorker.run_for_org/1` rescues the identical call.
+  # `mint/1` raises on paths `{:error, _}` never reaches — a `Repo.query` match
+  # in `current_heads/1`, a `create_chain_checkpoint_entry!` bang, and
+  # `ExAws.request()` inside the S3 witness on bad adapter config. The promotion
+  # has already committed by here, so letting one of those escape would report a
+  # failure for work that succeeded, and `promote!/2` is documented as
+  # all-or-nothing. Losing the checkpoint costs the window this change closes;
+  # the scheduled run still covers these heads.
+  defp mint_and_report(org_id) do
+    case Checkpoint.mint(org_id) do
+      {:ok, %{witnessed_at: nil} = checkpoint} ->
+        # `mint/1` returns `{:ok, _}` when the row lands and *publication*
+        # fails, by design — a sink that is briefly unreachable must not cost
+        # the commitment. Saying "witnessed" here would contradict the
+        # `witness_error` `publish/2` just logged, in the one place where
+        # overstating coverage is the whole bug being fixed.
+        Logger.warning(
+          "Promotion minted checkpoint #{checkpoint.sequence} over the re-attested " <>
+            "anchors, but it is NOT witnessed: #{inspect(checkpoint.witness_error)}. " <>
+            "The commitment exists locally; the next checkpoint run retries publication."
+        )
+
+      {:ok, checkpoint} ->
+        Logger.info(
+          "Promotion minted checkpoint #{checkpoint.sequence} so the re-attested " <>
+            "anchors are witnessed under their new type immediately (#849)."
+        )
+
+      {:error, reason} ->
+        Logger.error(unwitnessed_message(inspect(reason)))
+    end
+  rescue
+    error -> Logger.error(unwitnessed_message(Exception.message(error)))
+  end
+
+  # Deliberately does NOT point at `mix kiln.audit.checkpoint`: that task never
+  # walks `chain_checkpoint_entries` (its reconciliation compares witness-sink
+  # keys to checkpoint rows), so it would report green while the promoted
+  # documents have no entry under their new type at all — advice that confirms
+  # the opposite of what it claims to check.
+  defp unwitnessed_message(reason) do
+    "Promotion could not mint a checkpoint over the re-attested anchors: #{reason}. " <>
+      "The promotion itself committed. The promoted documents stay unwitnessed under " <>
+      "their new type until the next scheduled checkpoint — force one now with " <>
+      "`KilnCMS.Governance.CheckpointWorker.run_for_org/1` if that window matters."
   end
 
   # Fired :entry artifacts and reference edges point at the old storage type —

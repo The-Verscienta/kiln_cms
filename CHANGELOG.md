@@ -319,6 +319,28 @@ migration, a rewritten column, a dropped config key).
 
 ### Security
 
+- **Promoting a dynamic type no longer leaves its documents unwitnessed for a
+  checkpoint interval** (#849). Promotion re-attests a document's history
+  anchors under the compiled type (#704), but `Checkpoint.witnessed_head/3`
+  resolves entries by `{resource_type, source_id}` — so from the moment
+  promotion committed until the next scheduled checkpoint, a promoted document
+  had no witness coverage, and a truncation of its newest anchors inside that
+  window would not have been caught. Silent, because nothing reports an absent
+  entry. Promotion now mints a checkpoint over the re-attested heads.
+
+  Minted **after** the transaction commits, not inside it: minting publishes to
+  an immutable witness sink, and committing to heads a rollback could take away
+  would leave a published object attesting a state that never existed — the
+  exact fingerprint `Checkpoint.publish/2` already treats as an attack. A mint
+  failure is logged and does not fail the promotion, since the data move has
+  already committed and the scheduled checkpoint still covers those heads.
+
+  The old `("entry", …)` checkpoint entries are deliberately left untouched.
+  Their Merkle leaves commit to `resource_type`, so re-keying them — the fix
+  the issue first suggested — would invalidate every stored proof against its
+  published root, and they are a true record of what that chain's head was
+  under the old type. Superseding history is not the same as rewriting it.
+
 - **A form's embed allowlist is now the form's, not the deployment's** (#648).
   `EMBED_ORIGINS` has no tenant dimension, so on a multi-org instance it had to
   be the *union* of every org's embedders — and that union was what every org's

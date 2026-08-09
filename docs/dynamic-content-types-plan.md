@@ -305,7 +305,16 @@ Each phase lands independently green (precommit + tests) and is useful on its ow
    `mix kiln.promote_data <name>` (`KilnCMS.CMS.Promotion`) transactionally
    moves entries (ids preserved — taggings/links survive), version history,
    re-scopes field definitions to the compiled type, purges stale `:entry`
-   artifacts/edges, and archives the TypeDefinition. **Design correction vs
+   artifacts/edges, and archives the TypeDefinition. History anchors are
+   re-attested under the compiled type (#704), and a checkpoint is minted
+   immediately afterwards so the moved chains are witnessed under their new
+   type at promotion time rather than one checkpoint interval later (#849) —
+   after the commit, since a checkpoint publishes to an immutable sink and must
+   never commit to heads a rollback could take away. The old `("entry", …)`
+   checkpoint entries are left in place: their Merkle leaves commit to
+   `resource_type`, so re-keying them would invalidate every published proof,
+   and they remain a true record of that chain under its old type.
+   **Design correction vs
    §2.8:** fields deliberately stay data-driven after promotion — the editor
    renders inputs from FieldDefinition rows, not resource attributes, so
    attribute-level promotion is a documented manual follow-up per field.
