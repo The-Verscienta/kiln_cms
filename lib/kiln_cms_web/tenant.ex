@@ -362,11 +362,17 @@ defmodule KilnCMSWeb.Tenant do
 
   # The org this host names, or `nil` if it names none.
   #
-  # Only KNOWN hosts (the base host + real org subdomains/custom domains) are
-  # cached; an unknown/unresolved host returns `nil` here (uncached). This keeps
-  # a flood of distinct attacker Host headers under `*.<base>` from inserting
-  # per-host entries into the shared, size-capped content cache and evicting hot
-  # published pages (#336 review, resolution-cache DoS).
+  # Both outcomes are cached, in `KilnCMS.Cache.Hosts` — a cache of its own, not
+  # the content one. That separation is what makes caching a miss safe: a flood
+  # of distinct attacker Host headers under `*.<base>` evicts only other host
+  # entries, never hot published pages (#659). Before it, `nil` was deliberately
+  # never committed, so every unknown host cost a database round trip for ever,
+  # unmetered — tenant refusal halts in the endpoint above every rate limiter
+  # (#336 review, resolution-cache DoS).
+  #
+  # A miss is held for one minute against five for a hit, so a host configured
+  # moments after someone probed it starts working promptly. See that module for
+  # what a negative entry does and does not cost.
   defp known_org(host) when is_binary(host) do
     case normalize(host) do
       "" -> nil
@@ -393,8 +399,15 @@ defmodule KilnCMSWeb.Tenant do
   end
 
   # A real org (by subdomain slug or custom domain), or the default org when the
-  # host IS the canonical base host. `nil` for anything else — a `nil` is not
-  # cached (see `KilnCMS.Cache.commit/2`), so unknown hosts never pollute the cache.
+  # host IS the canonical base host. `nil` for anything else — which `Cache.Hosts`
+  # stores as its own `:unresolved` sentinel, because Cachex uses `nil` for "not
+  # present" and a cached miss has to be distinguishable from never having asked.
+  #
+  # This function is the ONLY thing that writes a negative entry, and it only
+  # runs on a real lookup that really found nothing. So a cached miss can never
+  # refuse a host the database would have resolved — the property that separates
+  # this from bounding the work with a rate limit, which cannot tell a flood
+  # from a legitimate request behind the same address.
   defp resolve_known(host) do
     cond do
       host == base_host() -> Accounts.default_org()

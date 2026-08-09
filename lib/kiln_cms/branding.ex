@@ -187,11 +187,23 @@ defmodule KilnCMS.Branding do
   # The brand colour is held to the same grammar wherever it comes from, so an
   # environment variable can't become the injection vector the database column
   # isn't.
+  #
+  # Since #1089 the BRAND_PRIMARY_COLOR path is checked at boot in
+  # `config/runtime.exs`, through `KilnCMS.Config.Env`, so a bad value there is
+  # dropped before it reaches this key AND reaches Sentry rather than only
+  # container stdout. What can still arrive here is a `:branding` colour set by
+  # a project overlay's compile-time config, which no boot-time reader sees — so
+  # this stays a real guard, not a vestige, and the message says which layer to
+  # go look at.
   defp config(:primary_color) do
     case BrandTokens.normalize_color(configured(:primary_color)) do
       nil ->
         if present(configured(:primary_color)) do
-          Logger.warning("BRAND_PRIMARY_COLOR is not a hex colour; ignoring it")
+          Logger.warning(
+            "configured :branding primary_color is not a hex colour; ignoring it. " <>
+              "BRAND_PRIMARY_COLOR is validated at boot, so this is a compiled " <>
+              "`config :kiln_cms, :branding` value from an overlay."
+          )
         end
 
         nil

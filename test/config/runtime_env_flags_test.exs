@@ -57,6 +57,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             BACKUP_ENABLED OEMBED_ENABLED
             KILN_READING_TIME_WPM BACKUP_KEEP_DAYS BACKUP_STALE_AFTER_HOURS
             KILN_EXPERIMENTS_STICKY_DAYS REQUIRE_AV_METADATA_STRIP
+            BRAND_PRIMARY_COLOR
           ) ++ Map.keys(@prod_env)
 
   setup do
@@ -567,6 +568,64 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
         refute stderr =~ var
         assert get_in(config, [:kiln_cms, :config_warnings]) == []
       end
+    end
+  end
+
+  # #1089: this used to be validated only in `KilnCMS.Branding`, whose rejection
+  # is a bare `Logger.warning` — dropped by `Sentry.LoggerHandler`'s defaults, so
+  # container stdout and nowhere else, for a value that changes what every page
+  # looks like.
+  describe "BRAND_PRIMARY_COLOR (#48, #1089)" do
+    defp brand_color(value),
+      do:
+        %{"BRAND_PRIMARY_COLOR" => value}
+        |> eval()
+        |> get_in([:kiln_cms, :branding, :primary_color])
+
+    test "a hex colour is written, normalized to the canonical form" do
+      # Shorthand expansion and downcasing happen once here rather than on every
+      # render, and mean the value echoed back on a later warning matches what
+      # the theme tokens were built from.
+      assert brand_color("#1d4ed8") == "#1d4ed8"
+      assert brand_color("#1D4ED8") == "#1d4ed8"
+      assert brand_color("#1d4") == "#11dd44"
+    end
+
+    test "unset and blank write nothing and warn about nothing" do
+      for value <- [nil, "", "   "] do
+        {config, stderr} = eval_io(%{"BRAND_PRIMARY_COLOR" => value}, :prod)
+
+        assert get_in(config, [:kiln_cms, :branding, :primary_color]) == nil
+        refute stderr =~ "BRAND_PRIMARY_COLOR"
+        assert get_in(config, [:kiln_cms, :config_warnings]) == []
+      end
+    end
+
+    test "a value that is not a hex colour is dropped, warned about, and COLLECTED" do
+      # The collection is the point of #1089 — a stderr line alone is the
+      # failure mode #634 exists to close.
+      for value <- ["blue", "1d4ed8", "#12345", "#1d4ed8; content:", "rgb(1,2,3)"] do
+        {config, stderr} = eval_io(%{"BRAND_PRIMARY_COLOR" => value}, :prod)
+
+        assert get_in(config, [:kiln_cms, :branding, :primary_color]) == nil,
+               "#{inspect(value)} must not reach the theme tokens"
+
+        assert stderr =~ "BRAND_PRIMARY_COLOR"
+
+        assert {"BRAND_PRIMARY_COLOR", value, {:expected, "a hex colour such as #1d4ed8 or #1d4"}} in get_in(
+                 config,
+                 [:kiln_cms, :config_warnings]
+               )
+      end
+    end
+
+    test "the collected value is what the operator typed, not a trimmed form" do
+      {config, _stderr} = eval_io(%{"BRAND_PRIMARY_COLOR" => "  blue  "}, :prod)
+
+      assert {"BRAND_PRIMARY_COLOR", "  blue  ", _} =
+               config
+               |> get_in([:kiln_cms, :config_warnings])
+               |> Enum.find(&match?({"BRAND_PRIMARY_COLOR", _, _}, &1))
     end
   end
 
