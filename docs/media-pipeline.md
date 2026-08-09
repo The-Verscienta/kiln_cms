@@ -321,6 +321,7 @@ So the behaviour is stated exactly rather than implied:
 | present, remux succeeds | either | stripped |
 | present, remux fails | `false` (default) | stored as it arrived, logged at `:warning` |
 | present, remux fails | `true` | upload refused |
+| present, **no temp space** | either | **upload refused** |
 | absent | `false` (default) | stored as it arrived, logged at `:warning` |
 | absent | `true` | upload refused |
 
@@ -330,6 +331,29 @@ some screen recorders) fails the same way a missing binary does, and the
 default stores it. The log line names which of the two happened, because
 telling an operator to install ffmpeg on a host that already has it sends
 them after the one thing that is not broken.
+
+And note the row that ignores the setting entirely (#1100). The strip writes a
+second full copy of the upload to the temp filesystem while the original is
+still there, so peak usage is roughly **twice the file** — a gigabyte for one
+500 MB video, three gigabytes for three of them at once. When that runs out,
+ffmpeg fails with `No space left on device`, and under the default every row
+above would have stored the file **unstripped**: the privacy guarantee lapsing
+precisely under disk pressure, which is when nobody is looking at it.
+
+So a full temp disk is refused whatever the setting says. Every other failure
+in the table is a standing property of the host or the file — ffmpeg is absent,
+or this container will never remux — where storing the upload is the better of
+two bad answers, because the alternative is that it can never be uploaded at
+all. A full disk is neither: it is transient, retrying works, and the editor is
+told exactly that. Free space up, or point `TMPDIR` at a larger filesystem.
+
+The check runs *before* ffmpeg starts, but it cannot be the whole answer —
+concurrent uploads can each see enough room and then exhaust the disk together
+— so an ENOSPC that happens anyway is recognised in ffmpeg's output and
+refused identically. If free space cannot be measured at all (no `df`, or
+output we cannot parse), the strip proceeds rather than refusing: refusing on
+an unknown would be an outage in exchange for a guess, and the ENOSPC path
+still catches the real thing one step later.
 
 **If you rely on the privacy guarantee, set `REQUIRE_AV_METADATA_STRIP=true`
 and install ffmpeg.** That gets you the same contract PDFs already have. The
@@ -387,6 +411,31 @@ one to strip it.
 A document is placed on content with the **`file` block** (title,
 description, and a download link) — separate from the `image` block, which
 never renders a document.
+
+### Bounding ffmpeg
+
+Four limits, covering different failure modes:
+
+| Limit | Bounds |
+|---|---|
+| `-probesize` / `-analyzeduration` | how far ffmpeg may scan before deciding what a file is |
+| `-nostdin` | blocking forever on input that will never arrive |
+| `-timelimit` | **CPU** seconds, via `setrlimit` |
+| wall-clock deadline | elapsed time, by killing the OS process |
+
+The last one is not redundant with `-timelimit` (#1100). A `-c copy` remux is
+I/O-bound: it burns almost no CPU, so the rlimit essentially never fires while
+a stalled disk can hold the process for hours. And nothing outside ffmpeg could
+stop it either — neither `System.cmd/3` nor the enclosing Oban job timeout,
+because closing an Erlang port shuts the pipes but sends the child no signal.
+Only the OS pid a port hands back can be signalled, which is what
+`KilnCMS.ExternalCommand` exists to do. It is shared with the qpdf path, which
+needed the same thing first (#918).
+
+Two minutes, and that number is doing two jobs: a 500 MB stream copy finishes
+inside 100 seconds even at 10 MB/s, so anything past it is stuck rather than
+slow — and because the strip runs inline on the LiveView handling the upload,
+it is also the longest an editor's media page can be blocked.
 
 ### Gated documents
 

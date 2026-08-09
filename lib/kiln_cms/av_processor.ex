@@ -32,19 +32,48 @@ defmodule KilnCMS.AVProcessor do
 
   ## Bounding a foreign program
 
-  This is the only place in the codebase that hands a user-supplied file to an
-  external binary, so the containment is spelled out rather than inherited.
-  Neither `System.cmd/3` nor the calling Oban job's timeout can stop a running
-  ffmpeg — closing an Erlang port shuts the pipes but signals nothing — so the
-  limits have to be ones ffmpeg imposes on itself: `-timelimit` (CPU seconds),
-  `-probesize`/`-analyzeduration` (how far it may scan before deciding what a
-  file is), and `-nostdin` so it can never block waiting for input. See
-  `@scan_limits` and `@cpu_seconds`.
+  This hands a user-supplied file to an external binary, so the containment is
+  spelled out rather than inherited. Four limits, and they cover different
+  failure modes:
+
+    * `-probesize`/`-analyzeduration` — how far ffmpeg may scan before deciding
+      what a file is. A few kilobytes can declare an arbitrarily long stream.
+    * `-nostdin` — so it can never block waiting for input it will never get.
+    * `-timelimit` (`@cpu_seconds`) — a **CPU-second** rlimit, which bounds a
+      hostile file that spins.
+    * `@wall_clock_ms` — a **wall-clock** deadline, enforced by
+      `KilnCMS.ExternalCommand` killing the OS process.
+
+  The last one exists because the fourth failure mode is the common one and the
+  first three all miss it (#1100). A `-c copy` remux is I/O-bound, so it burns
+  almost no CPU and `-timelimit` essentially never fires; and neither
+  `System.cmd/3` nor the calling Oban job's timeout can stop a running ffmpeg,
+  because closing an Erlang port shuts the pipes but sends the child no signal.
+  Only the OS pid a port hands back can be signalled, which is what
+  `ExternalCommand` is for.
+
+  ## Temp disk
+
+  `strip_metadata/2` writes a second full copy of the upload to
+  `System.tmp_dir!()` while the source is still there, so peak usage is roughly
+  **twice** the file — up to 1 GB for one 500 MB video, and more with concurrent
+  uploads. It therefore checks free space before starting and returns
+  `{:error, :insufficient_space}` rather than letting ffmpeg fail ENOSPC
+  half-written, because under the caller's default configuration that failure
+  used to mean *stored unstripped* — the privacy guarantee lapsing precisely
+  under disk pressure, when nobody is looking at it (#1100).
+
+  The precheck cannot be the whole answer: concurrent uploads can each pass it
+  and then collectively exhaust the disk. So an ENOSPC that happens anyway is
+  recognised in ffmpeg's own output and reported as the same
+  `:insufficient_space`, which is the reason the caller refuses on.
   """
 
   require Logger
 
   import Bitwise, only: [&&&: 2]
+
+  alias KilnCMS.ExternalCommand
 
   # Bytes read from the head of an upload for signature matching. Large enough
   # to cover an EBML header's DocType (which is not at a fixed offset) with
@@ -63,13 +92,38 @@ defmodule KilnCMS.AVProcessor do
 
   # CPU-seconds ffmpeg may burn before it exits on its own (`setrlimit`).
   #
-  # This is the ONLY bound that actually reaches the external process. Neither
-  # `System.cmd/3` nor the Oban job timeout can kill it: closing an Erlang port
-  # shuts the pipes but sends the OS child no signal, so an ffmpeg spinning on
-  # CPU without writing output survives both. Extracting one frame from a
-  # web-ready file is a fraction of a second; two minutes is generous for a
-  # 500 MB source on a slow disk and still finite for a hostile one.
+  # This is the bound ffmpeg imposes on ITSELF, and it is the only one that
+  # survives ffmpeg being started some other way. It catches the process that
+  # spins: extracting one frame from a web-ready file is a fraction of a second,
+  # so two minutes is generous for a 500 MB source on a slow disk and still
+  # finite for a hostile one.
+  #
+  # It does NOT catch the process that stalls, which is the common case — see
+  # `@wall_clock_ms` below. It was the only bound here until #1100.
   @cpu_seconds "120"
+
+  # Wall-clock milliseconds any one ffmpeg/ffprobe run may take before it is
+  # killed. Distinct from `@cpu_seconds` and *not* redundant with it: a `-c copy`
+  # remux is I/O-bound, so it can sit on a stalled disk for hours having burned
+  # two seconds of CPU, and the rlimit never fires (#1100).
+  #
+  # Two minutes, chosen from both ends. A 500 MB remux is a straight read+write,
+  # so even at 10 MB/s it finishes inside 100 s — anything past that is not
+  # slow, it is stuck. And `strip_metadata/2` runs inline on the LiveView
+  # handling the upload, so this is also the longest an editor's media page can
+  # be blocked. It sits below `KilnCMS.Media.AVWorker`'s 5-minute Oban timeout
+  # deliberately, so a stuck poster job is killed and logged here rather than
+  # having the job reaped around a child that keeps running.
+  @wall_clock_ms :timer.minutes(2)
+
+  # Free temp space `strip_metadata/2` wants before it starts: the input's size
+  # again (the output of a stream copy is the same order as its input), plus a
+  # tenth for a remux that grows — a fragmented MP4 comes back with a full
+  # `moov` index — plus a fixed floor so a small file on a nearly-full disk is
+  # still refused rather than squeaking through on a percentage.
+  @space_margin_numerator 11
+  @space_margin_denominator 10
+  @space_floor_bytes 16_000_000
 
   # The containers `strip_metadata/2` knows how to remux. Anything else is
   # refused rather than guessed at — `ext` is interpolated into the output
@@ -362,28 +416,51 @@ defmodule KilnCMS.AVProcessor do
 
   # ffmpeg's exit status is the only success signal; stderr is folded into the
   # captured output so a failure can be logged with its actual reason rather
-  # than a bare status code.
+  # than a bare status code — and, below, so the reason can be *classified*.
   #
   # `exe` is always a `System.find_executable/1` result for a literal
   # `"ffprobe"`/`"ffmpeg"` (see below), never anything a caller supplies, and
-  # `System.cmd/3` execs directly rather than through a shell — so neither the
-  # program nor the argument list can be injected into. `args` carries a
+  # `ExternalCommand` execs directly rather than through a shell — so neither
+  # the program nor the argument list can be injected into. `args` carries a
   # server-generated temp path plus fixed flags; even a hostile *filename*
   # would arrive as one exec argv entry, not as shell syntax.
-  # sobelow_skip ["CI.System"]
   defp cmd(exe, args) do
-    case System.cmd(exe, args, stderr_to_stdout: true) do
+    case ExternalCommand.run(exe, args, @wall_clock_ms) do
       {output, 0} ->
         {:ok, output}
 
+      {_output, :timeout} ->
+        Logger.warning(
+          "#{Path.basename(exe)} exceeded its #{@wall_clock_ms}ms limit and was killed"
+        )
+
+        {:error, :timeout}
+
       {output, status} ->
         Logger.warning("#{Path.basename(exe)} exited #{status}: #{String.slice(output, 0, 500)}")
-        {:error, {:exit_status, status}}
+        {:error, classify_failure(output, status)}
     end
   rescue
     e ->
       Logger.warning("#{Path.basename(exe)} failed: #{inspect(e)}")
       {:error, e}
+  end
+
+  # A disk that filled up mid-write has to be told apart from a container ffmpeg
+  # cannot remux, because the caller's answer differs: one is transient and
+  # retryable and is refused, the other will never succeed and (by default)
+  # falls back to storing the file as it arrived. The precheck in
+  # `strip_metadata/2` catches most of these before ffmpeg starts, but not
+  # concurrent uploads that each pass it and then exhaust the disk together —
+  # this is the backstop for that race.
+  #
+  # ffmpeg's diagnostics are not localized, so matching the message is stable.
+  # It reaches us because `-v error` still prints write failures and stderr is
+  # folded into the captured output.
+  defp classify_failure(output, status) do
+    if String.contains?(output, "No space left on device"),
+      do: :insufficient_space,
+      else: {:exit_status, status}
   end
 
   # Resolved per call rather than at compile time: the binaries are a *system*
@@ -412,13 +489,87 @@ defmodule KilnCMS.AVProcessor do
   host without it an A/V upload is stored exactly as it arrived. The caller
   decides what to do about that; see `KilnCMS.Media.Ingest`, which fails closed
   when the operator has asked it to.
+
+  Returns `{:error, :insufficient_space}` when the temp filesystem has no room
+  for the copy, either because the precheck said so or because ffmpeg hit
+  ENOSPC anyway. Unlike the two above, the caller refuses that one
+  unconditionally — see the "Temp disk" section of this module's docs.
+
+  Returns `{:error, :timeout}` when the remux exceeded `@wall_clock_ms` and the
+  process was killed.
   """
   @spec strip_metadata(Path.t(), String.t()) :: {:ok, Path.t()} | {:error, term()}
   def strip_metadata(path, ext) when is_binary(path) and is_binary(ext) do
     cond do
-      ext not in @strippable_exts -> {:error, :unsupported_ext}
-      is_nil(ffmpeg()) -> {:error, :unavailable}
-      true -> run_strip(ffmpeg(), path, ext)
+      ext not in @strippable_exts ->
+        {:error, :unsupported_ext}
+
+      # Before the space check, not after: on a host with no ffmpeg there is no
+      # copy to make room for, and answering "out of disk" would send the
+      # operator after the wrong thing entirely.
+      is_nil(ffmpeg()) ->
+        {:error, :unavailable}
+
+      not enough_temp_space?(path) ->
+        {:error, :insufficient_space}
+
+      true ->
+        run_strip(ffmpeg(), path, ext)
+    end
+  end
+
+  # Whether `System.tmp_dir!()` has room for a stripped copy of the file at
+  # `path`. Public only so the arithmetic and the threshold can be asserted
+  # directly — the alternative is a test that fills a disk.
+  @doc false
+  @spec enough_temp_space?(Path.t()) :: boolean()
+  # sobelow_skip ["Traversal.FileModule"]
+  def enough_temp_space?(path) do
+    with {:ok, %{size: size}} <- File.stat(path),
+         {:ok, available} <- available_bytes(System.tmp_dir!()) do
+      available >= required_bytes(size)
+    else
+      # Fail direction, stated on purpose: when we cannot *measure* free space
+      # we proceed rather than refuse. Refusing on an unknown would break A/V
+      # upload on every host whose `df` we cannot read — an outage in exchange
+      # for a guess — and the ENOSPC classification in `classify_failure/2`
+      # still catches the case this was meant to catch, just later.
+      _unmeasurable -> true
+    end
+  end
+
+  @doc false
+  @spec required_bytes(non_neg_integer()) :: non_neg_integer()
+  def required_bytes(size) when is_integer(size) and size >= 0,
+    do: div(size * @space_margin_numerator, @space_margin_denominator) + @space_floor_bytes
+
+  # `df -Pk`: POSIX output, so exactly one line per filesystem (without `-P`,
+  # a long device name wraps onto two and the fields shift), in 1024-byte
+  # blocks. Available is the fourth field from the left on both GNU and BSD df,
+  # which is the pair this has to work on — Linux in production, macOS locally.
+  #
+  # `dir` is always `System.tmp_dir!()`, never caller input, and `System.cmd/3`
+  # execs directly rather than through a shell.
+  # sobelow_skip ["CI.System"]
+  defp available_bytes(dir) do
+    case System.cmd("df", ["-Pk", dir]) do
+      {output, 0} -> parse_available(output)
+      _nonzero -> :error
+    end
+  rescue
+    # No `df` on this host. Handled the same as unparseable output.
+    _error -> :error
+  end
+
+  @doc false
+  @spec parse_available(String.t()) :: {:ok, non_neg_integer()} | :error
+  def parse_available(output) do
+    with [_header, line | _rest] <- String.split(output, "\n", trim: true),
+         [_filesystem, _blocks, _used, available | _rest] <- String.split(line),
+         {kbytes, ""} <- Integer.parse(available) do
+      {:ok, kbytes * 1024}
+    else
+      _unparseable -> :error
     end
   end
 

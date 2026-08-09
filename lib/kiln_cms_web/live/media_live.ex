@@ -767,6 +767,16 @@ defmodule KilnCMSWeb.MediaLive do
         "can't be stored — video and audio metadata stripping isn't available on this server"
       )
 
+  # #1100. The one A/V refusal that is worth retrying: the strip needs a second
+  # full copy of the upload on temp disk and there was not room for it. So the
+  # message says "try again" — the others above never resolve by retrying, and
+  # this one usually does.
+  defp upload_failure_reason(:av_strip_no_space),
+    do:
+      gettext(
+        "can't be stored right now — the server is out of temporary disk space. Try again shortly."
+      )
+
   # #918. Unlike the two above, this one IS about the file, and it is the only
   # refusal here the uploader can actually resolve — so it says what to do
   # instead of blaming the server.

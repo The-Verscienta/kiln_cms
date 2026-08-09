@@ -160,6 +160,44 @@ defmodule KilnCMS.Media.IngestTest do
                Ingest.store_file(mp4_path(), "clip.mp4", actor: actor())
     end
 
+    # #1100. Every other strip failure is a standing property of the host or the
+    # file — ffmpeg is absent, or this container will never remux — and the
+    # default stores the upload rather than making it permanently unuploadable.
+    # Running out of temp disk is none of those: it is transient, retrying
+    # works, and it is the one condition under which the privacy guarantee
+    # lapses while nobody is watching. So it is refused whatever the flag says,
+    # and this test asserts that with the flag explicitly OFF.
+    @tag :ffmpeg
+    test "no temp space refuses the upload even with the strip not required" do
+      previous = Application.fetch_env(:kiln_cms, :require_av_metadata_strip)
+      Application.put_env(:kiln_cms, :require_av_metadata_strip, false)
+
+      on_exit(fn ->
+        case previous do
+          {:ok, value} -> Application.put_env(:kiln_cms, :require_av_metadata_strip, value)
+          :error -> Application.delete_env(:kiln_cms, :require_av_metadata_strip)
+        end
+      end)
+
+      # A file whose `stat` size no disk can hold a copy of, written as a hole
+      # rather than 8 TB of bytes. `max_bytes` is raised past it so the size cap
+      # — which is checked first, and would otherwise refuse this as
+      # `:too_large` — is not what the assertion ends up measuring.
+      size = 8_000_000_000_000
+      path = Path.join(System.tmp_dir!(), "ingest-#{System.unique_integer([:positive])}.mp4")
+
+      {:ok, fd} = :file.open(path, [:write, :binary])
+      :ok = :file.write(fd, <<0, 0, 0, 24>> <> "ftyp" <> "isom" <> String.duplicate("\0", 64))
+      :ok = :file.pwrite(fd, size, <<0>>)
+      :ok = :file.close(fd)
+      on_exit(fn -> File.rm(path) end)
+
+      assert File.stat!(path).size == size + 1
+
+      assert {:error, :av_strip_no_space} =
+               Ingest.store_file(path, "huge.mp4", actor: actor(), max_bytes: size + 2)
+    end
+
     # A caption track is text this codebase already parsed — there is no
     # container metadata, and it must not be routed through ffmpeg.
     test "a WebVTT track is stored without a strip attempt" do

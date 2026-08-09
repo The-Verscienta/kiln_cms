@@ -291,6 +291,15 @@ defmodule KilnCMS.Media.Ingest do
   #     default: turning it on without ffmpeg installed breaks A/V upload
   #     entirely, which is not a change to make on someone's behalf.
   #
+  # With one exception, which is not gated on that setting: running out of temp
+  # disk is REFUSED whatever it is set to (#1100). Every other failure above is
+  # a standing property of the host or the file — ffmpeg is absent, or this
+  # container will never remux — and storing the upload is the better of two
+  # bad answers because the alternative is that it can never be uploaded at
+  # all. A full disk is neither: it is transient, retrying works, and it is
+  # exactly the condition under which the privacy guarantee would otherwise
+  # lapse silently and unobserved. So it fails closed and says to try again.
+  #
   # `stripped` is `AVProcessor`'s own generated temp path.
   # sobelow_skip ["Traversal.FileModule"]
   defp persist(path, %{kind: kind, ext: ext, content_type: content_type} = spec, filename, opts)
@@ -315,6 +324,18 @@ defmodule KilnCMS.Media.Ingest do
         after
           File.rm(stripped)
         end
+
+      # Not routed through `store_unstripped_av/6`, because there is no
+      # unstripped-store branch to reach: this refuses under every setting.
+      {:error, :insufficient_space} ->
+        Logger.warning(
+          "Refused #{filename}: not enough free space in #{System.tmp_dir!()} to strip " <>
+            "its metadata. The strip writes a second full copy of the upload there while " <>
+            "the original is still on disk, so peak usage is about twice the file. " <>
+            "Free space up, or point TMPDIR at a larger filesystem."
+        )
+
+        {:error, :av_strip_no_space}
 
       {:error, reason} ->
         store_unstripped_av(path, ext, content_type, filename, opts, reason)
@@ -351,6 +372,15 @@ defmodule KilnCMS.Media.Ingest do
   # install ffmpeg on a host that already has it sends them after the one thing
   # that isn't broken.
   defp remedy_for(:unavailable), do: "Install ffmpeg to strip it."
+
+  # A timeout is not "this container can't be remuxed" — the remux was fine and
+  # simply did not finish in time, which points at the disk or at a file far
+  # bigger than the host can move, not at the codec. Telling an operator their
+  # container is unsupported would send them re-exporting a file that is fine.
+  defp remedy_for(:timeout),
+    do:
+      "ffmpeg did not finish remuxing within its wall-clock limit and was stopped; " <>
+        "the upload kept its metadata."
 
   defp remedy_for(_reason),
     do: "ffmpeg is installed but could not remux this container; the upload kept its metadata."

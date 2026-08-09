@@ -66,6 +66,8 @@ defmodule KilnCMS.DocumentProcessor do
 
   require Logger
 
+  alias KilnCMS.ExternalCommand
+
   # How long qpdf may run before it is abandoned. A PDF is a container: a small
   # file can describe a very large amount of work, the same class of problem
   # `ImageProcessor`'s pixel cap and `AVProcessor`'s scan limits address.
@@ -343,95 +345,15 @@ defmodule KilnCMS.DocumentProcessor do
   defp prune_dict(list) when is_list(list), do: Enum.map(list, &prune_dict/1)
   defp prune_dict(other), do: other
 
-  # `Port.open/2` with `:spawn_executable` execs directly rather than through a
-  # shell, so neither the program nor the argument list can be injected into.
-  # `args` is fixed flags plus paths this server generated; even a hostile
-  # *filename* would arrive as one exec argv entry, not as shell syntax.
-  #
-  # A port rather than `System.cmd/3` because the timeout has to be able to KILL
-  # the child, and only a port hands back its OS pid. Closing the port alone
-  # leaves qpdf running (#918).
-  # sobelow_skip ["CI.System"]
+  # `KilnCMS.ExternalCommand`, not `System.cmd/3`, because the timeout has to be
+  # able to KILL the child, and only a port hands back its OS pid — closing the
+  # port alone leaves qpdf running (#918). That runner used to live here; #1100
+  # moved it out when the A/V path needed the identical containment, and its
+  # moduledoc carries the reasoning that was in these comments.
   defp qpdf(args) do
     case System.find_executable("qpdf") do
-      nil ->
-        {"qpdf not found", :enoent}
-
-      exe ->
-        port =
-          Port.open({:spawn_executable, exe}, [
-            :binary,
-            :exit_status,
-            :stderr_to_stdout,
-            {:args, args}
-          ])
-
-        os_pid =
-          case Port.info(port, :os_pid) do
-            {:os_pid, pid} -> pid
-            _closed -> nil
-          end
-
-        collect(port, os_pid, [], System.monotonic_time(:millisecond) + @timeout_ms)
+      nil -> {"qpdf not found", :enoent}
+      exe -> ExternalCommand.run(exe, args, @timeout_ms)
     end
-  end
-
-  # `acc` is an iodata LIST, not a binary being appended to. `acc <> chunk` in a
-  # receive loop is quadratic — it reallocates the whole accumulated output per
-  # chunk — which on a large `--json-output` dump was the difference between
-  # tens of megabytes and most of a gigabyte of resident memory, in the
-  # LiveView process handling the upload.
-  #
-  # The deadline is absolute rather than a per-message `after`: qpdf streams its
-  # output, so a per-message timeout resets on every chunk and a slow but chatty
-  # run could outlive the budget indefinitely.
-  defp collect(port, os_pid, acc, deadline) do
-    remaining = max(deadline - System.monotonic_time(:millisecond), 0)
-
-    receive do
-      {^port, {:data, chunk}} -> collect(port, os_pid, [acc | chunk], deadline)
-      {^port, {:exit_status, code}} -> {IO.iodata_to_binary(acc), code}
-    after
-      remaining ->
-        kill(os_pid)
-        close(port)
-        drain(port)
-        {"qpdf timed out after #{@timeout_ms}ms", :timeout}
-    end
-  end
-
-  # `Port.close/1` stops delivery but does not purge what the port already sent,
-  # and this runs in the LiveView process handling the upload — `MediaLive` has
-  # no catch-all `handle_info/2`, so one stray `{port, {:data, _}}` left in the
-  # mailbox crashes the editor's media page instead of showing them the
-  # refusal. Under the previous `Task`-based design the strays died with the
-  # task; a port makes them the caller's problem.
-  defp drain(port) do
-    receive do
-      {^port, _anything} -> drain(port)
-    after
-      0 -> :ok
-    end
-  end
-
-  # SIGKILL, because the point is that the process stops now: it is holding CPU
-  # on an upload the caller has already given up on, and qpdf has no cleanup
-  # worth waiting for. Closing the port does not signal the child.
-  # sobelow_skip ["CI.System"]
-  defp kill(nil), do: :ok
-
-  defp kill(os_pid) do
-    System.cmd("kill", ["-9", to_string(os_pid)], stderr_to_stdout: true)
-    :ok
-  rescue
-    _error -> :ok
-  end
-
-  defp close(port) do
-    Port.close(port)
-    :ok
-  rescue
-    # Already closed because the child exited in the race with the timeout.
-    ArgumentError -> :ok
   end
 end
