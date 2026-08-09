@@ -93,6 +93,63 @@ defmodule KilnCMS.Cache.ClusterBustTest do
     refute cached?(key)
   end
 
+  # A feed bust names no keys: which ones exist differs per node, and the writer
+  # cannot enumerate what it never served. So it travels as a rule instead
+  # (#1078) — and until it did, turning full content off dropped the syndication
+  # policy everywhere and the cached feed BODIES only on the writing node.
+  describe "a prefix bust" do
+    test "empties the writing node's matching keys and no others", %{org: org} do
+      mine = Cache.feed_key(org, "post", :atom)
+      site_wide = Cache.feed_key(org, nil, :json)
+      another_org = Cache.feed_key(Ash.UUID.generate(), "post", :atom)
+      unrelated = Cache.branding_key(org)
+
+      Enum.each([mine, site_wide, another_org, unrelated], &seed/1)
+
+      Cache.bust_all_feeds(org)
+
+      refute cached?(mine)
+      refute cached?(site_wide)
+      assert cached?(another_org)
+      assert cached?(unrelated)
+    end
+
+    test "tells the other nodes the rule, not a key list", %{org: org} do
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, ClusterBust.topic())
+
+      Cache.bust_all_feeds(org)
+
+      assert_receive {:bust_prefix, prefix}
+      assert String.starts_with?(Cache.feed_key(org, "post", :atom), prefix)
+      refute String.starts_with?(Cache.feed_key(Ash.UUID.generate(), "post", :atom), prefix)
+    end
+
+    # The half that matters on the node that did not serve the write: it holds
+    # feed keys the writer has never heard of, and runs the scan itself.
+    test "is applied by a receiving node against its own keyspace", %{org: org} do
+      # A scoped feed only this "node" ever built.
+      scoped = Cache.feed_key(org, "post", :atom) <> ":category/news"
+      seed(scoped)
+      assert cached?(scoped)
+
+      send(ClusterBust, {:bust_prefix, "feed:#{org}:"})
+      _ = :sys.get_state(ClusterBust)
+
+      refute cached?(scoped)
+    end
+
+    test "leaves another org's feeds alone on a receiving node", %{org: org} do
+      other_org = Ash.UUID.generate()
+      theirs = Cache.feed_key(other_org, "post", :atom)
+      seed(theirs)
+
+      send(ClusterBust, {:bust_prefix, "feed:#{org}:"})
+      _ = :sys.get_state(ClusterBust)
+
+      assert cached?(theirs)
+    end
+  end
+
   describe "a receiving node" do
     # The half that matters on the node that did NOT serve the write: the same
     # message the broadcast above carries, delivered to the real subscriber.

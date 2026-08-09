@@ -369,6 +369,22 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **Turning off full-content feeds now empties the cached feed bodies on every
+  node** (#1078). #719's `bust_feed_policy/1` already reached the cluster, so the
+  *policy* — the value deciding whether whole article bodies go out to anonymous
+  subscribers — was consistent everywhere. The cached feed **documents** were
+  not: `bust_all_feeds/1` was node-local, so on a two-node deployment roughly
+  half of all `/feed.xml` fetches went on serving complete article text,
+  rendered under the old policy, until the five-minute TTL.
+
+  It could not use the existing broadcast, which names keys: a prefix scan's
+  matching keys differ per node, and a node that never served
+  `/blog/category/news/feed.xml` has no key for the writer to name. So
+  `KilnCMS.Cache.ClusterBust` gained `broadcast_prefix/1`, which carries the
+  rule instead and lets each node run its own scan. Receivers stay as dumb as
+  they were — a string and "forget what starts with this", not a name for the
+  thing being invalidated.
+
 - **The tag-suggestion threshold is measured now, and the old one was inert**
   (#1086). #851 shipped `suggest_tags/2`'s cosine-distance ceiling with a
   derived `0.25`, reasoned from bge-small's published behaviour on *sentence
