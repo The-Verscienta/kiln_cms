@@ -78,7 +78,7 @@ msgstr[1] "%{count} seleccionados"
 #: lib/kiln_cms_web/live/taxonomy_live.ex:435
 #: lib/kiln_cms_web/live/team_live.ex:360
 #: lib/kiln_cms_web/live/translations_live.ex:141
-#: lib/kiln_cms_web/live/trash_live.ex:249
+#: lib/kiln_cms_web/live/trash_live.ex:263
 #: lib/kiln_cms_web/live/type_definition_live.ex:170
 #: lib/kiln_cms_web/live/webhook_live.ex:239
 #, elixir-autogen, elixir-format
@@ -113,7 +113,7 @@ msgstr "Archivar"
 #: lib/kiln_cms_web/live/taxonomy_live.ex:657
 #: lib/kiln_cms_web/live/team_live.ex:476
 #: lib/kiln_cms_web/live/team_live.ex:568
-#: lib/kiln_cms_web/live/trash_live.ex:276
+#: lib/kiln_cms_web/live/trash_live.ex:290
 #: lib/kiln_cms_web/live/type_definition_live.ex:388
 #: lib/kiln_cms_web/live/webhook_live.ex:393
 #, elixir-autogen, elixir-format
@@ -254,7 +254,7 @@ msgstr "Visualizaciones totales"
 #: lib/kiln_cms_web/components/layouts.ex:723
 #: lib/kiln_cms_web/live/media_live.ex:805
 #: lib/kiln_cms_web/live/trash_live.ex:28
-#: lib/kiln_cms_web/live/trash_live.ex:251
+#: lib/kiln_cms_web/live/trash_live.ex:265
 #, elixir-autogen, elixir-format
 msgid "Trash"
 msgstr "Papelera"
@@ -399,7 +399,7 @@ msgstr "El contenido puede llevar cualquier número de etiquetas."
 msgid "Copy"
 msgstr "Copiar"
 
-#: lib/kiln_cms_web/live/trash_live.ex:109
+#: lib/kiln_cms_web/live/trash_live.ex:123
 #, elixir-autogen, elixir-format
 msgid "Couldn't restore that item."
 msgstr "No se pudo restaurar ese elemento."
@@ -425,13 +425,13 @@ msgstr "Eliminar %{name}"
 msgid "Delete %{name}?"
 msgstr "¿Eliminar %{name}?"
 
-#: lib/kiln_cms_web/live/trash_live.ex:273
+#: lib/kiln_cms_web/live/trash_live.ex:287
 #, elixir-autogen, elixir-format
 msgid "Delete everything"
 msgstr "Eliminar todo"
 
 #: lib/kiln_cms_web/live/media_live.ex:1229
-#: lib/kiln_cms_web/live/trash_live.ex:326
+#: lib/kiln_cms_web/live/trash_live.ex:340
 #, elixir-autogen, elixir-format
 msgid "Delete permanently"
 msgstr "Eliminar permanentemente"
@@ -482,7 +482,7 @@ msgstr "Arrastre para reordenar"
 msgid "Edit %{kind}"
 msgstr "Editar %{kind}"
 
-#: lib/kiln_cms_web/live/trash_live.ex:242
+#: lib/kiln_cms_web/live/trash_live.ex:256
 #, elixir-autogen, elixir-format
 msgid "Empty trash"
 msgstr "Vaciar papelera"
@@ -599,17 +599,17 @@ msgstr "Organización y relaciones"
 msgid "Permanently delete %{name}? This can't be undone."
 msgstr "¿Eliminar permanentemente %{name}? Esta acción no se puede deshacer."
 
-#: lib/kiln_cms_web/live/trash_live.ex:265
+#: lib/kiln_cms_web/live/trash_live.ex:279
 #, elixir-autogen, elixir-format
 msgid "Permanently delete everything in the trash? This can't be undone."
 msgstr "¿Eliminar permanentemente todo lo que hay en la papelera? Esta acción no se puede deshacer."
 
-#: lib/kiln_cms_web/live/trash_live.ex:162
+#: lib/kiln_cms_web/live/trash_live.ex:176
 #, elixir-autogen, elixir-format
 msgid "Permanently deleted %{count}"
 msgstr "Se eliminaron permanentemente %{count}"
 
-#: lib/kiln_cms_web/live/trash_live.ex:161
+#: lib/kiln_cms_web/live/trash_live.ex:175
 #, elixir-autogen, elixir-format
 msgid "Permanently deleted %{count}, %{skipped} skipped"
 msgstr "Se eliminaron permanentemente %{count}, %{skipped} omitidos"
@@ -653,7 +653,7 @@ msgstr "Variantes responsivas"
 #: lib/kiln_cms_web/components/version_diff_components.ex:158
 #: lib/kiln_cms_web/live/content_editor_live.ex:8270
 #: lib/kiln_cms_web/live/media_live.ex:1218
-#: lib/kiln_cms_web/live/trash_live.ex:314
+#: lib/kiln_cms_web/live/trash_live.ex:328
 #: lib/kiln_cms_web/live/type_definition_live.ex:414
 #, elixir-autogen, elixir-format
 msgid "Restore"
@@ -675,7 +675,7 @@ msgstr "Se restauró %{name}."
 msgid "Restored that version."
 msgstr "Se restauró esa versión."
 
-#: lib/kiln_cms_web/live/trash_live.ex:106
+#: lib/kiln_cms_web/live/trash_live.ex:120
 #, elixir-autogen, elixir-format
 msgid "Restored."
 msgstr "Restaurado."
@@ -780,7 +780,7 @@ msgstr "Tamaño"
 msgid "Slug"
 msgstr "Slug"
 
-#: lib/kiln_cms_web/live/trash_live.ex:253
+#: lib/kiln_cms_web/live/trash_live.ex:267
 #, elixir-autogen, elixir-format
 msgid "Soft-deleted content. Restore brings it back to where it was. Trash is purged automatically after %{days} days."
 msgstr "Contenido eliminado de forma reversible. Restaurar lo devuelve a donde estaba. La papelera se vacía automáticamente después de %{days} días."
@@ -836,7 +836,7 @@ msgid "Trash (%{count})"
 msgstr "Papelera (%{count})"
 
 #: lib/kiln_cms_web/live/media_live.ex:1179
-#: lib/kiln_cms_web/live/trash_live.ex:282
+#: lib/kiln_cms_web/live/trash_live.ex:296
 #, elixir-autogen, elixir-format
 msgid "Trash is empty."
 msgstr "La papelera está vacía."
@@ -1540,7 +1540,7 @@ msgid "Couldn't delete that field."
 msgstr "No se pudo eliminar ese campo."
 
 #: lib/kiln_cms_web/live/menu_live.ex:167
-#: lib/kiln_cms_web/live/trash_live.ex:131
+#: lib/kiln_cms_web/live/trash_live.ex:145
 #, elixir-autogen, elixir-format
 msgid "Couldn't delete that item."
 msgstr "No se pudo eliminar ese elemento."
@@ -1806,12 +1806,12 @@ msgstr "Contraseña"
 msgid "Password changed."
 msgstr "Contraseña cambiada."
 
-#: lib/kiln_cms_web/live/trash_live.ex:322
+#: lib/kiln_cms_web/live/trash_live.ex:336
 #, elixir-autogen, elixir-format
 msgid "Permanently delete “%{title}”? This can't be undone."
 msgstr "¿Eliminar permanentemente «%{title}»? Esta acción no se puede deshacer."
 
-#: lib/kiln_cms_web/live/trash_live.ex:128
+#: lib/kiln_cms_web/live/trash_live.ex:142
 #, elixir-autogen, elixir-format
 msgid "Permanently deleted."
 msgstr "Eliminado permanentemente."
@@ -2252,7 +2252,7 @@ msgstr "junio"
 #: lib/kiln_cms_web/live/editor_live.ex:996
 #: lib/kiln_cms_web/live/media_live.ex:1055
 #: lib/kiln_cms_web/live/media_live.ex:1156
-#: lib/kiln_cms_web/live/trash_live.ex:338
+#: lib/kiln_cms_web/live/trash_live.ex:352
 #, elixir-autogen, elixir-format
 msgid "Load more"
 msgstr "Cargar más"
@@ -2260,7 +2260,7 @@ msgstr "Cargar más"
 #: lib/kiln_cms_web/live/editor_live.ex:993
 #: lib/kiln_cms_web/live/media_live.ex:1052
 #: lib/kiln_cms_web/live/media_live.ex:1156
-#: lib/kiln_cms_web/live/trash_live.ex:335
+#: lib/kiln_cms_web/live/trash_live.ex:349
 #, elixir-autogen, elixir-format
 msgid "Loading…"
 msgstr "Cargando…"
@@ -2465,7 +2465,7 @@ msgid "couldn't be stored"
 msgstr "no se pudo almacenar"
 
 #: lib/kiln_cms_web/live/media_live.ex:1204
-#: lib/kiln_cms_web/live/trash_live.ex:300
+#: lib/kiln_cms_web/live/trash_live.ex:314
 #, elixir-autogen, elixir-format
 msgid "deleted"
 msgstr "eliminado"
