@@ -369,6 +369,21 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **The collab-editor flake is checked for, not just fixed** (#1067). Filed as a
+  presence race in `CollabPersisterTest` — one failure in three full-suite runs,
+  never in isolation — it turned out to be a VM-global one:
+  `:collab_prototype` is `Application.get_env/2`, re-read on every editor mount,
+  and an `async: true` test flipping it off turned collaboration off for every
+  concurrent test that mounted an editor. PR #1090 fixed the one offender; this
+  makes the next one impossible.
+
+  A static check now fails if any `async: true` module writes that flag, and the
+  two collab live-view files assert it is on before their own assertions run —
+  so the failure says which class of problem it is instead of presenting as a
+  broken election. The three lines the issue suggested hardening are hardened
+  too: they sampled a single render where presence is eventually consistent,
+  and they poll now.
+
 - **Referrer suppression now actually suppresses** (#1073). #620 hid a
   low referrer count behind `"< n"` and pulled a second category into `hidden`
   so the low one was not the sole unknown. Brute-forcing every assignment
