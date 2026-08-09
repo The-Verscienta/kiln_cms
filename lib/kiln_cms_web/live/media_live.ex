@@ -1024,8 +1024,16 @@ defmodule KilnCMSWeb.MediaLive do
                         correctly marked a divider must not watch the badge stay
                         lit, or they learn to ignore it on the images that
                         really are missing alt. --%>
+                  <%!-- Images only (#822). A document is reached through a
+                        download link whose accessible name is the `file`
+                        block's title; a video/audio item has no `alt` in its
+                        rendered markup at all; a WebVTT track IS an
+                        accessibility artifact. Flagging those permanently is
+                        the failure #403 warned about — a badge that is
+                        sometimes noise is one editors learn to ignore on the
+                        images that really are missing alt. --%>
                   <span
-                    :if={!item.alt && !item.decorative}
+                    :if={(image?(item) and !item.alt) && !item.decorative}
                     class="text-warning"
                     title={gettext("Missing alt text")}
                   >
@@ -1397,7 +1405,10 @@ defmodule KilnCMSWeb.MediaLive do
         </div>
 
         <form phx-submit="save_meta" class="mt-5 space-y-3">
-          <div>
+          <%!-- Images only (#822): `MediaItem.alt` reaches rendered markup for
+                nothing else. Offering the field on a PDF or an MP4 invites an
+                editor to write a description that is never read out. --%>
+          <div :if={image?(@item)}>
             <label for="media-alt" class="text-sm font-medium">{gettext("Alt text")}</label>
             <input
               id="media-alt"
@@ -1411,7 +1422,7 @@ defmodule KilnCMSWeb.MediaLive do
                 field (#403): a divider or a texture correctly has no alt text,
                 and without somewhere to say so it is indistinguishable from an
                 oversight. The publish check reads this. --%>
-          <label class="flex items-start gap-2 text-sm">
+          <label :if={image?(@item)} class="flex items-start gap-2 text-sm">
             <input type="hidden" name="decorative" value="false" />
             <input
               type="checkbox"

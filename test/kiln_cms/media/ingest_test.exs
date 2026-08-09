@@ -102,4 +102,69 @@ defmodule KilnCMS.Media.IngestTest do
       assert Ingest.max_upload_size() == 500_000_000
     end
   end
+
+  # #820: an MP4 off a phone carries GPS, device model, OS version and often a
+  # local wall-clock creation date. ffmpeg is an OPTIONAL dependency, so the
+  # guarantee is conditional — and these two tests pin exactly what the
+  # condition is, which is the part an operator has to be able to rely on.
+  #
+  # They run WITHOUT ffmpeg on purpose: that is the branch where the privacy
+  # promise is weakest, and it is the one worth being sure about. The
+  # strip-succeeds path needs ffmpeg and is covered by `AVProcessorTest`.
+  describe "A/V metadata stripping (#820)" do
+    # Minimal ISO-BMFF: a 4-byte size, `ftyp`, then an allowlisted brand.
+    defp mp4_path do
+      path = Path.join(System.tmp_dir!(), "ingest-#{System.unique_integer([:positive])}.mp4")
+      File.write!(path, <<0, 0, 0, 24>> <> "ftyp" <> "isom" <> String.duplicate("\0", 64))
+      on_exit(fn -> File.rm(path) end)
+      path
+    end
+
+    @tag :skip_if_ffmpeg
+    test "without ffmpeg the upload still lands, and says so" do
+      if KilnCMS.AVProcessor.available?() do
+        :ok
+      else
+        log =
+          ExUnit.CaptureLog.capture_log(fn ->
+            assert {:ok, item} = Ingest.store_file(mp4_path(), "clip.mp4", actor: actor())
+            assert item.content_type == "video/mp4"
+          end)
+
+        # The gap must be visible rather than assumed away.
+        assert log =~ "container metadata intact"
+        assert log =~ "Install ffmpeg"
+      end
+    end
+
+    test "require_av_metadata_strip refuses rather than storing unstripped" do
+      if KilnCMS.AVProcessor.available?() do
+        :ok
+      else
+        previous = Application.fetch_env(:kiln_cms, :require_av_metadata_strip)
+        Application.put_env(:kiln_cms, :require_av_metadata_strip, true)
+
+        on_exit(fn ->
+          case previous do
+            {:ok, value} -> Application.put_env(:kiln_cms, :require_av_metadata_strip, value)
+            :error -> Application.delete_env(:kiln_cms, :require_av_metadata_strip)
+          end
+        end)
+
+        assert {:error, :strip_failed} =
+                 Ingest.store_file(mp4_path(), "clip.mp4", actor: actor())
+      end
+    end
+
+    # A caption track is text this codebase already parsed — there is no
+    # container metadata, and it must not be routed through ffmpeg.
+    test "a WebVTT track is stored without a strip attempt" do
+      path = Path.join(System.tmp_dir!(), "ingest-#{System.unique_integer([:positive])}.vtt")
+      File.write!(path, "WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nHello\n")
+      on_exit(fn -> File.rm(path) end)
+
+      assert {:ok, item} = Ingest.store_file(path, "captions.vtt", actor: actor())
+      assert item.content_type == "text/vtt"
+    end
+  end
 end

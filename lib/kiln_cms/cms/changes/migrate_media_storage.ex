@@ -59,10 +59,48 @@ defmodule KilnCMS.CMS.Changes.MigrateMediaStorage do
       changeset
       |> Ash.Changeset.before_action(&migrate/1)
       |> Ash.Changeset.after_transaction(&cleanup_old_blob/2)
+      |> Ash.Changeset.after_transaction(&requeue_poster_if_ungated/2)
     else
       changeset
     end
   end
+
+  # Gating a video deletes its poster — row and blob — because a poster renders
+  # as a plain `<img>` from PUBLIC storage, and a still of a members-only video
+  # must not stay world-readable (`AVWorker.revoke_poster_if_gated/2`).
+  #
+  # Nothing brought it back on the way out, so a video that was gated and then
+  # made public again had no poster for the rest of its life and opened on a
+  # black frame (#821). Re-derive it.
+  #
+  # `after_transaction`, like the blob cleanup above: enqueuing from
+  # `after_action` would put a job on the queue that a rolled-back transaction
+  # never justified, and the worker would then find the item still gated.
+  defp requeue_poster_if_ungated(_changeset, {:ok, record}) do
+    if ungated_playable?(record) and not generated_poster?(record) do
+      KilnCMS.Media.Ingest.enqueue_processing(record)
+    end
+
+    {:ok, record}
+  end
+
+  defp requeue_poster_if_ungated(_changeset, other), do: other
+
+  defp ungated_playable?(%{audience: :public, content_type: type}),
+    do: KilnCMS.MediaKind.playable?(type)
+
+  defp ungated_playable?(_record), do: false
+
+  # Only skips work already done. This deliberately does NOT try to detect a
+  # hand-picked poster, because it cannot and does not need to: a poster an
+  # editor chose lives on the BLOCK (`poster_media_id`), `Blocks.Video`'s
+  # `poster_src/1` prefers it over anything else, and it never reads the
+  # library item's `variants` at all. So re-deriving here cannot replace an
+  # editor's choice — the two are different fields and the block's wins.
+  defp generated_poster?(%{variants: variants}) when is_map(variants),
+    do: Map.has_key?(variants, "poster")
+
+  defp generated_poster?(_record), do: false
 
   defp migrate(changeset) do
     from = changeset.data.audience

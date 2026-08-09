@@ -291,6 +291,42 @@ worse than no control, because the operator believes it did. The editor sees
 "PDF metadata stripping isn't available on this server" rather than a
 misleading "unsupported format".
 
+### A/V metadata stripping (#820)
+
+An MP4 or M4A is remuxed through `ffmpeg -map_metadata -1 -map_chapters -1 -c
+copy` before it is stored: a **stream copy**, so the bitstreams pass through
+untouched and only the container's metadata atoms are dropped. Cheap enough to
+run on every upload.
+
+What that removes, on the file type where the recording is most likely to be
+personal:
+
+- `©xyz` GPS coordinates, which iOS writes on every phone recording
+- `com.apple.quicktime.model` / `.software` — device and OS version
+- creation-date atoms, often in local wall-clock
+- the original filename, in some encoders' `©nam`
+- editing-application metadata from the export
+
+**Unlike the PDF strip above, this is best-effort by default, and that is a
+weaker guarantee.** The argument in the previous section — that a control which
+silently does not apply is worse than no control — applies here too, and the
+only reason the default differs is that ffmpeg is optional today: requiring it
+would stop A/V upload working on every deployment that does not have it, on
+upgrade, with no warning. That is a migration, not a default.
+
+So the behaviour is stated exactly rather than implied:
+
+| ffmpeg | `require_av_metadata_strip` | Result |
+|---|---|---|
+| present | either | stripped, always |
+| absent | `false` (default) | stored as it arrived, logged at `:warning` |
+| absent | `true` | upload refused |
+
+**If you rely on the privacy guarantee, set `require_av_metadata_strip: true`
+and install ffmpeg.** That gets you the same contract PDFs already have. The
+`:warning` exists so the gap is visible in logs rather than assumed away — but a
+log line is not a control, and nobody should treat the default as one.
+
 **A password-protected PDF is refused**, with `is password-protected, so its
 metadata can't be removed — upload an unlocked copy`. qpdf cannot open a
 user-password-encrypted file, so it cannot strip one, and storing it unstripped

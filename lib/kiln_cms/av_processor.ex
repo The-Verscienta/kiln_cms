@@ -346,5 +346,81 @@ defmodule KilnCMS.AVProcessor do
   # dependency, so a deployment can gain them (a new base image, an operator
   # `apt install ffmpeg`) without this application being rebuilt.
   defp ffprobe, do: System.find_executable("ffprobe")
+
+  @doc """
+  A copy of `path` with its container metadata removed (#820).
+
+  `-map_metadata -1 -c copy` — a **stream copy**, so no re-encode: the audio and
+  video bitstreams are written through untouched and only the container's
+  metadata atoms are dropped. Cheap enough to run on every upload.
+
+  What this is removing, on a file type where phone-recorded footage is the
+  common case rather than the exception:
+
+    * `©xyz` GPS coordinates, which iOS writes on every recording
+    * `com.apple.quicktime.model` / `.software` — device and OS version
+    * creation-date atoms, often in local wall-clock
+    * the original filename, in some encoders' `©nam`
+    * editing-application metadata from the export
+
+  Returns `{:error, :unavailable}` when ffmpeg is not installed. **That is a
+  real hole, not a formality** — ffmpeg is an optional dependency here, so on a
+  host without it an A/V upload is stored exactly as it arrived. The caller
+  decides what to do about that; see `KilnCMS.Media.Ingest`, which fails closed
+  when the operator has asked it to.
+  """
+  # `out`, when removed, is this function's own generated temp path.
+  # sobelow_skip ["Traversal.FileModule"]
+  @spec strip_metadata(Path.t(), String.t()) :: {:ok, Path.t()} | {:error, term()}
+  def strip_metadata(path, ext) when is_binary(path) and is_binary(ext) do
+    case ffmpeg() do
+      nil ->
+        {:error, :unavailable}
+
+      exe ->
+        out = Path.join(System.tmp_dir!(), "kiln-avstrip-#{Ecto.UUID.generate()}#{ext}")
+
+        args =
+          ["-v", "error", "-nostdin", "-timelimit", @cpu_seconds] ++
+            @scan_limits ++
+            [
+              "-i",
+              path,
+              # Drop container-level and per-stream metadata, and any chapter
+              # list — chapters carry free text too.
+              "-map_metadata",
+              "-1",
+              "-map_chapters",
+              "-1",
+              # Copy the streams rather than re-encoding: this is a remux.
+              "-c",
+              "copy",
+              "-y",
+              out
+            ]
+
+        case cmd(exe, args) do
+          {:ok, _output} ->
+            strip_result(out)
+
+          {:error, reason} ->
+            File.rm(out)
+            {:error, reason}
+        end
+    end
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp strip_result(out) do
+    case File.stat(out) do
+      {:ok, %{size: size}} when size > 0 ->
+        {:ok, out}
+
+      _ ->
+        File.rm(out)
+        {:error, :strip_failed}
+    end
+  end
+
   defp ffmpeg, do: System.find_executable("ffmpeg")
 end
