@@ -33,7 +33,12 @@ defmodule KilnCMS.CMS.Changes.DeriveSlug do
   # empty-expansion and no-usable-text guard rails in Slugs.derive_base/2.
   defp derived_base(changeset) do
     pattern = Slugs.pattern_for(changeset, :slug)
-    Slugs.derive_base(pattern, Slugs.changeset_context(changeset, pattern))
+
+    Slugs.derive_base(
+      pattern,
+      Slugs.changeset_context(changeset, pattern),
+      Slugs.changeset_token_definitions(changeset, pattern, :slug)
+    )
   end
 
   # The `unique_slug` scope of the record being written, plus the root-segment

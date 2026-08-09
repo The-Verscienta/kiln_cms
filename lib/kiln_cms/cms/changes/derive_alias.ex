@@ -20,7 +20,11 @@ defmodule KilnCMS.CMS.Changes.DeriveAlias do
     with blank when blank in [nil, ""] <- Ash.Changeset.get_attribute(changeset, :path_alias),
          pattern when is_binary(pattern) <- Slugs.pattern_for(changeset, :alias),
          alias_path when is_binary(alias_path) <-
-           Pattern.expand_path(pattern, Slugs.changeset_context(changeset, pattern)) do
+           Pattern.expand_path(
+             pattern,
+             Slugs.changeset_context(changeset, pattern),
+             Slugs.changeset_token_definitions(changeset, pattern, :alias)
+           ) do
       Ash.Changeset.force_change_attribute(
         changeset,
         :path_alias,

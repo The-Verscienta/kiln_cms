@@ -28,7 +28,13 @@ defmodule Kiln.Tokens do
   rejecting them.
   """
 
-  @token_regex ~r/\[([a-z0-9:_-]+)\]/
+  # `.` is in the grammar for the sake of a field type's own tokens (#804):
+  # `c:Kiln.FieldType.tokens/1` documents `[field:location.lat]` as the shape a
+  # composite exposes its parts under, and without the dot that token was
+  # unparseable — `expand/3` left the brackets alone and the surrounding
+  # slug-ification turned them into literal text. `validate/2` already rejected
+  # it as unknown, so no saved pattern can have relied on the old behaviour.
+  @token_regex ~r/\[([a-z0-9:._-]+)\]/
   @capture_regex ~r/\[([^\]]*)\]/
 
   @type token :: String.t()

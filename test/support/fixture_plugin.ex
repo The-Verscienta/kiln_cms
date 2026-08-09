@@ -63,6 +63,43 @@ defmodule KilnCMS.FixturePlugin.FieldTypes.Rating do
 
   @impl Kiln.FieldType
   def input_attrs(_definition), do: %{min: 1, max: 5}
+
+  @doc """
+  A word form of the rating, for slug/alias patterns (#804).
+
+  The generic `[field:<name>]` token already gives `3`. This is the thing the
+  generic path cannot produce — a value derived from the stored one — and it is
+  scoped to *this field's* name, so two rating fields on one type each get their
+  own token rather than fighting over a shared one.
+  """
+  @impl Kiln.FieldType
+  def tokens(definition) do
+    [
+      %{
+        match: ~r/\Afield:#{Regex.escape(definition.name)}\.word\z/,
+        resolve: fn _token, context ->
+          context
+          |> Map.get(:custom_fields, %{})
+          |> Kernel.||(%{})
+          |> Map.get(definition.name)
+          |> word()
+        end
+      }
+    ]
+  end
+
+  @words %{1 => "one", 2 => "two", 3 => "three", 4 => "four", 5 => "five"}
+
+  defp word(value) when is_integer(value), do: Map.get(@words, value, "")
+
+  defp word(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {n, ""} -> word(n)
+      _other -> ""
+    end
+  end
+
+  defp word(_value), do: ""
 end
 
 defmodule KilnCMS.FixturePlugin.PanelLive do

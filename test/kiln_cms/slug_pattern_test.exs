@@ -36,6 +36,78 @@ defmodule KilnCMS.Slug.PatternTest do
     end
   end
 
+  # #804. `[field:<name>]` gives every custom field a slugified scalar for free
+  # and expands a map or list to "". A type that wants more — a composite's named
+  # parts, or a derived form like the word below — says so through
+  # `c:Kiln.FieldType.tokens/1`, and these are the definitions that reach the
+  # engine.
+  describe "extra definitions from a field type" do
+    defp word_token do
+      [
+        %{
+          match: ~r/\Afield:rating\.word\z/,
+          resolve: fn _token, ctx -> Map.get(ctx[:custom_fields] || %{}, "rating_word", "") end
+        }
+      ]
+    end
+
+    test "a type-declared token expands" do
+      context = %{title: "Kiln", custom_fields: %{"rating_word" => "three"}}
+
+      assert Pattern.expand("[title]-[field:rating.word]", context, word_token()) ==
+               "kiln-three"
+    end
+
+    test "without them the same token expands empty, and the pattern is invalid" do
+      context = %{title: "Kiln", custom_fields: %{"rating_word" => "three"}}
+
+      assert Pattern.expand("[title]-[field:rating.word]", context) == "kiln"
+      assert {:error, message} = Pattern.validate("[field:rating.word]")
+      assert message =~ "unknown token"
+    end
+
+    test "validate accepts them when they are supplied" do
+      assert Pattern.validate("[field:rating.word]", extra_definitions: word_token()) == :ok
+    end
+
+    # `Kiln.Tokens.expand/3` takes the FIRST matching definition, so a plugin
+    # cannot redefine `[title]` out from under a pattern that already relies on
+    # it — for every content type that happens to use that field type.
+    test "a built-in name cannot be shadowed" do
+      shadow = [%{match: "title", resolve: fn _token, _ctx -> "hijacked" end}]
+
+      assert Pattern.expand("[title]", %{title: "Real Title"}, shadow) == "real-title"
+    end
+
+    test "they reach alias expansion too" do
+      context = %{title: "Kiln", custom_fields: %{"rating_word" => "three"}}
+
+      assert Pattern.expand_path("/rated/[field:rating.word]", context, word_token()) ==
+               "/rated/three"
+    end
+  end
+
+  # The cheap pre-check that keeps a field-definition lookup off the write path
+  # for the overwhelming majority of patterns, which use built-ins only.
+  describe "unknown_tokens/2" do
+    test "is empty for a built-in-only pattern, and for nil" do
+      assert Pattern.unknown_tokens(nil, :slug) == []
+      assert Pattern.unknown_tokens("[yyyy]-[title]-[field:size]", :slug) == []
+    end
+
+    test "names what the built-ins do not cover" do
+      assert Pattern.unknown_tokens("[title]-[field:rating.word]", :slug) == ["field:rating.word"]
+    end
+
+    # `[slug]` is circular in a slug pattern and legal in an alias — so "unknown"
+    # is relative to the usage, and asking with the wrong one would send the
+    # write path looking for a field type that owns `[slug]`.
+    test "is usage-aware" do
+      assert Pattern.unknown_tokens("[slug]", :slug) == ["slug"]
+      assert Pattern.unknown_tokens("[slug]", :alias) == []
+    end
+  end
+
   describe "validate/1" do
     test "accepts known tokens and nil" do
       assert Pattern.validate(nil) == :ok

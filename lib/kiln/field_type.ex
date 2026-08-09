@@ -120,12 +120,26 @@ defmodule Kiln.FieldType do
   named parts (`[field:location.lat]`) or a custom string form instead of
   going blank.
 
-  Defaults to `[]`. **Not wired into `KilnCMS.Slug.Pattern` yet** — doing so
-  needs the slug engine's context-building step
-  (`KilnCMS.CMS.Slugs.record_context/1`) to carry each custom field's *type*
-  alongside its value, which it doesn't today (it only sees the field's
-  stored value, not which `Kiln.FieldType` produced it). This callback is the
-  extension point issue #468 asked for; connecting it is tracked separately.
+  Defaults to `[]`. **Live since #804**: `KilnCMS.CMS.Slugs.type_token_definitions/1`
+  collects these from the field definitions attached to a content type, and both
+  the slug/alias derivation and the save-time pattern validation expand against
+  them alongside the built-in vocabulary.
+
+  Two rules worth knowing when you write one:
+
+    * **Scope the match to the field's own name.** `definition.name` is in
+      scope, so `~r/\Afield:#{definition.name}\.lat\z/` rather than a bare
+      `"field:lat"` — two fields of the same type on one content type would
+      otherwise fight over a shared token.
+    * **A built-in name cannot be shadowed.** `Kiln.Tokens.expand/3` takes the
+      first matching definition and the built-ins come first, so a type
+      redefining `[title]` is ignored rather than surprising a pattern author.
+
+  The field must exist before a pattern may name its token — until then nothing
+  claims it and save-time validation truthfully rejects it as unknown.
+
+  A raise here cannot fail a save: the collector rescues, and the token expands
+  empty like any unmatched one.
   """
   @callback tokens(definition :: struct()) :: [Kiln.Tokens.definition()]
 
