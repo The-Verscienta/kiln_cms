@@ -66,7 +66,7 @@ defmodule KilnCMS.Analytics.Export do
     query
     |> Ash.stream!(actor: actor, tenant: org, batch_size: @batch_size)
     |> Stream.chunk_every(@batch_size)
-    |> Stream.map(fn rows -> {rows, Titles.resolve(rows, org, actor)} end)
+    |> Stream.map(fn rows -> {:view, rows, Titles.resolve(rows, org, actor)} end)
   end
 
   @doc """
@@ -121,7 +121,7 @@ defmodule KilnCMS.Analytics.Export do
       |> Stream.chunk_every(@groups_per_batch)
       |> Stream.map(fn groups ->
         rows = List.flatten(groups)
-        {rows, Titles.resolve(rows, org, actor)}
+        {:referrer, rows, Titles.resolve(rows, org, actor)}
       end)
     else
       []
@@ -181,13 +181,24 @@ defmodule KilnCMS.Analytics.Export do
             |> Enum.map(&Map.put(&1, :funnel_slug, funnel.slug))
           end)
 
-        [{rows, %{}}]
+        [{:funnel_step, rows, %{}}]
     end
   end
 
-  @doc "One CSV row's fields — a view bucket, a referrer bucket, or a funnel step, kind-tagged."
-  @spec csv_row(map(), map(), term()) :: [term()]
-  def csv_row(%{views: views} = row, titles, org) do
+  @doc """
+  One CSV row's fields, for a row of the named `kind`.
+
+  The kind is passed in rather than inferred from the row's shape (#778). The
+  streams above already know it — they read one table each — and inferring it
+  back out meant matching on which keys happened to be present: `%{views: _}`
+  for a view bucket, `%{source: _}` for a referrer one. That is an implicit
+  contract dialyzer cannot check (the spec had to widen to `map()` to admit all
+  three), and it silently mis-dispatches: a `KilnCMS.Analytics.ContentView` row
+  — the all-time counter, which has `:views` and no `:day` — matched the view
+  clause and raised a `KeyError` naming a field rather than the mistake.
+  """
+  @spec csv_row(:view | :referrer | :funnel_step, map(), map(), term()) :: [term()]
+  def csv_row(:view, %{views: views} = row, titles, org) do
     [
       "view",
       Date.to_iso8601(row.day),
@@ -205,7 +216,7 @@ defmodule KilnCMS.Analytics.Export do
   # `display` was decided over the whole breakdown by `stream_referrer_rows/4`
   # and is written as-is. Calling `suppress_low_count/1` on `hits` here instead
   # would reinstate exactly the per-row decision #777 is about.
-  def csv_row(%{source: source, display: display} = row, titles, org) do
+  def csv_row(:referrer, %{source: source, display: display} = row, titles, org) do
     [
       "referrer",
       Date.to_iso8601(row.day),
@@ -220,7 +231,7 @@ defmodule KilnCMS.Analytics.Export do
     ]
   end
 
-  def csv_row(%{funnel_slug: funnel_slug} = row, _titles, _org) do
+  def csv_row(:funnel_step, %{funnel_slug: funnel_slug} = row, _titles, _org) do
     [
       "funnel_step",
       nil,
@@ -235,9 +246,9 @@ defmodule KilnCMS.Analytics.Export do
     ]
   end
 
-  @doc "One JSON row (a plain map) — a view bucket, a referrer bucket, or a funnel step, kind-tagged."
-  @spec json_row(map(), map(), term()) :: map()
-  def json_row(%{views: views} = row, titles, org) do
+  @doc "One JSON row (a plain map), for a row of the named `kind` — see `csv_row/4`."
+  @spec json_row(:view | :referrer | :funnel_step, map(), map(), term()) :: map()
+  def json_row(:view, %{views: views} = row, titles, org) do
     %{
       kind: "view",
       day: row.day,
@@ -248,7 +259,7 @@ defmodule KilnCMS.Analytics.Export do
     }
   end
 
-  def json_row(%{source: source, display: display} = row, titles, org) do
+  def json_row(:referrer, %{source: source, display: display} = row, titles, org) do
     %{
       kind: "referrer",
       day: row.day,
@@ -260,7 +271,7 @@ defmodule KilnCMS.Analytics.Export do
     }
   end
 
-  def json_row(%{funnel_slug: funnel_slug} = row, _titles, _org) do
+  def json_row(:funnel_step, %{funnel_slug: funnel_slug} = row, _titles, _org) do
     %{
       kind: "funnel_step",
       funnel_slug: funnel_slug,
@@ -273,7 +284,7 @@ defmodule KilnCMS.Analytics.Export do
   end
 
   @doc """
-  The fixed CSV header for `csv_row/3`'s field order (view, referrer and
+  The fixed CSV header for `csv_row/4`'s field order (view, referrer and
   funnel-step rows share it — `funnel_slug`/`ratio` are blank outside the
   `funnel_step` kind, and `day`/`source`/`hits` are blank within it).
   """
