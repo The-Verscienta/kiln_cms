@@ -11,7 +11,7 @@ msgstr ""
 "Language: fr\n"
 "Plural-Forms: nplurals=2; plural=(n>1);\n"
 
-#: lib/kiln_cms_web/components/core_components.ex:790
+#: lib/kiln_cms_web/components/core_components.ex:792
 #: lib/kiln_cms_web/live/billing_live.ex:529
 #, elixir-autogen, elixir-format
 msgid "Actions"
@@ -377,7 +377,7 @@ msgstr "Choisir une image"
 msgid "Choose from library"
 msgstr "Choisir dans la bibliothèque"
 
-#: lib/kiln_cms_web/components/core_components.ex:408
+#: lib/kiln_cms_web/components/core_components.ex:410
 #: lib/kiln_cms_web/live/content_editor_live.ex:5067
 #: lib/kiln_cms_web/live/content_editor_live.ex:5435
 #: lib/kiln_cms_web/live/presentation_live.ex:321
@@ -1869,7 +1869,7 @@ msgstr "Rechargez pour résoudre le conflit d'édition avant d'enregistrer."
 msgid "Remove"
 msgstr "Retirer"
 
-#: lib/kiln_cms_web/components/core_components.ex:681
+#: lib/kiln_cms_web/components/core_components.ex:683
 #: lib/kiln_cms_web/live/field_definition_live.ex:379
 #: lib/kiln_cms_web/live/field_definition_live.ex:505
 #: lib/kiln_cms_web/live/form_builder_live.ex:700
