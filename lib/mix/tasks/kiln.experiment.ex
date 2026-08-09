@@ -74,12 +74,7 @@ defmodule Mix.Tasks.Kiln.Experiment do
         Mix.shell().info("No experiments on this site.")
 
       experiments ->
-        Enum.each(experiments, fn experiment ->
-          Mix.shell().info(
-            "#{experiment.state |> to_string() |> String.pad_trailing(10)} " <>
-              "#{experiment.name}  (#{experiment.content_type} #{experiment.document_id})"
-          )
-        end)
+        Enum.each(experiments, &list_row/1)
     end
   end
 
@@ -94,9 +89,39 @@ defmodule Mix.Tasks.Kiln.Experiment do
         Mix.shell().info("State:    #{experiment.state}")
         Mix.shell().info("Target:   #{experiment.content_type} #{experiment.document_id}")
         Mix.shell().info("Goal:     #{goal_line(experiment)}")
+        blocked_line(experiment)
         Mix.shell().info("")
 
         Enum.each(experiment.variants, &Mix.shell().info(variant_line(&1, org_id)))
+    end
+  end
+
+  defp list_row(experiment) do
+    Mix.shell().info(
+      "#{experiment.state |> to_string() |> String.pad_trailing(10)} " <>
+        "#{experiment.name}  (#{experiment.content_type} #{experiment.document_id})"
+    )
+
+    # Indented under the row rather than given a column, because the reason is a
+    # sentence and a truncated one would send an operator to the wrong cause.
+    # Absent for a healthy experiment — a marker on every row is one nobody
+    # reads (#1008).
+    case Experiments.blocked_reason(experiment) do
+      nil -> :ok
+      {_reason, sentence} -> Mix.shell().info("           ! cannot convert: #{sentence}")
+    end
+  end
+
+  # The numbers below this line are meaningless when it prints: impressions
+  # accumulate on a denominator the numerator can never reach, so a 0.0% rate is
+  # not a result. Said before the variants for that reason (#1008).
+  defp blocked_line(experiment) do
+    case Experiments.blocked_reason(experiment) do
+      nil ->
+        :ok
+
+      {_reason, sentence} ->
+        Mix.shell().info("Blocked:  CANNOT CONVERT — #{sentence}")
     end
   end
 
@@ -298,6 +323,10 @@ defmodule Mix.Tasks.Kiln.Experiment do
     end
   end
 
+  # The same predicate `Health.blocked_reason/1` reads, so this command and the
+  # `!` marker in `list` cannot disagree about what sticky means (#1008). Kept
+  # here as a fail-fast on `create`, where there is no experiment to ask about
+  # yet and an operator is still at the keyboard.
   defp require_sticky! do
     unless KilnCMS.Experiments.Sticky.enabled?() do
       Mix.raise(

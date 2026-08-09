@@ -126,7 +126,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/editor_live.ex:616
 #: lib/kiln_cms_web/live/editor_live.ex:661
 #: lib/kiln_cms_web/live/menu_live.ex:421
-#: lib/kiln_cms_web/live/overview_live.ex:238
+#: lib/kiln_cms_web/live/overview_live.ex:275
 #: lib/kiln_cms_web/live/release_live.ex:586
 #: lib/kiln_cms_web/live/translations_live.ex:163
 #, elixir-autogen, elixir-format
@@ -1163,7 +1163,7 @@ msgid "Webhook deleted."
 msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex:664
-#: lib/kiln_cms_web/live/overview_live.ex:445
+#: lib/kiln_cms_web/live/overview_live.ex:535
 #: lib/kiln_cms_web/live/webhook_live.ex:22
 #: lib/kiln_cms_web/live/webhook_live.ex:241
 #, elixir-autogen, elixir-format
@@ -1714,7 +1714,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex:572
 #: lib/kiln_cms_web/live/backup_live.ex:237
-#: lib/kiln_cms_web/live/overview_live.ex:432
+#: lib/kiln_cms_web/live/overview_live.ex:522
 #: lib/kiln_cms_web/live/search_palette_live.ex:169
 #, elixir-autogen, elixir-format
 msgid "Media"
@@ -2860,7 +2860,7 @@ msgstr ""
 msgid "%{count} failing"
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:266
+#: lib/kiln_cms_web/live/overview_live.ex:303
 #, elixir-autogen, elixir-format
 msgid "%{count} published untouched for %{days}+ days"
 msgstr ""
@@ -2870,7 +2870,7 @@ msgstr ""
 msgid "%{count} renames failed — re-run the preview to see what's left."
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:274
+#: lib/kiln_cms_web/live/overview_live.ex:311
 #, elixir-autogen, elixir-format
 msgid "%{count} scheduled this week"
 msgstr ""
@@ -2885,7 +2885,7 @@ msgstr ""
 msgid "%{count} submissions"
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:466
+#: lib/kiln_cms_web/live/overview_live.ex:556
 #, elixir-autogen, elixir-format
 msgid "%{count} submissions this week"
 msgstr ""
@@ -2901,22 +2901,22 @@ msgstr ""
 msgid "%{count} viewing"
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:261
+#: lib/kiln_cms_web/live/overview_live.ex:298
 #, elixir-autogen, elixir-format
 msgid "%{count} waiting for review"
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:279
+#: lib/kiln_cms_web/live/overview_live.ex:316
 #, elixir-autogen, elixir-format
 msgid "%{count} webhook failures in 24h"
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:403
+#: lib/kiln_cms_web/live/overview_live.ex:493
 #, elixir-autogen, elixir-format
 msgid "%{covered} of %{total} fully translated"
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:449
+#: lib/kiln_cms_web/live/overview_live.ex:539
 #, elixir-autogen, elixir-format
 msgid "%{failed} failed in 24h · %{disabled} auto-disabled"
 msgstr ""
@@ -2926,7 +2926,7 @@ msgstr ""
 msgid "%{name} (copy)"
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:242
+#: lib/kiln_cms_web/live/overview_live.ex:279
 #, elixir-autogen, elixir-format
 msgid "%{published} published · %{in_review} in review · %{draft} drafts"
 msgstr ""
@@ -2993,7 +2993,7 @@ msgstr ""
 msgid "API keys"
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:515
+#: lib/kiln_cms_web/live/overview_live.ex:605
 #, elixir-autogen, elixir-format
 msgid "API keys · %{count} plugins active"
 msgstr ""
@@ -3128,12 +3128,12 @@ msgstr ""
 msgid "All forms"
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:290
+#: lib/kiln_cms_web/live/overview_live.ex:327
 #, elixir-autogen, elixir-format
 msgid "All quiet."
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:419
+#: lib/kiln_cms_web/live/overview_live.ex:509
 #, elixir-autogen, elixir-format
 msgid "Analytics & search"
 msgstr ""
@@ -3208,7 +3208,7 @@ msgstr ""
 #: lib/kiln_cms_web/components/layouts.ex:577
 #: lib/kiln_cms_web/components/layouts.ex:977
 #: lib/kiln_cms_web/live/calendar_live.ex:23
-#: lib/kiln_cms_web/live/overview_live.ex:498
+#: lib/kiln_cms_web/live/overview_live.ex:588
 #, elixir-autogen, elixir-format
 msgid "Calendar"
 msgstr ""
@@ -3852,7 +3852,7 @@ msgstr ""
 #: lib/kiln_cms_web/components/layouts.ex:1009
 #: lib/kiln_cms_web/live/form_live.ex:22
 #: lib/kiln_cms_web/live/form_live.ex:163
-#: lib/kiln_cms_web/live/overview_live.ex:463
+#: lib/kiln_cms_web/live/overview_live.ex:553
 #, elixir-autogen, elixir-format
 msgid "Forms"
 msgstr ""
@@ -4258,13 +4258,13 @@ msgstr ""
 msgid "Only published posts can be sent."
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:326
+#: lib/kiln_cms_web/live/overview_live.ex:363
 #: lib/kiln_cms_web/live/release_live.ex:381
 #, elixir-autogen, elixir-format
 msgid "Open"
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:323
+#: lib/kiln_cms_web/live/overview_live.ex:360
 #, elixir-autogen, elixir-format
 msgid "Open %{title}"
 msgstr ""
@@ -4274,7 +4274,7 @@ msgstr ""
 msgid "Open Swagger UI"
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:297
+#: lib/kiln_cms_web/live/overview_live.ex:334
 #, elixir-autogen, elixir-format
 msgid "Open content"
 msgstr ""
@@ -4325,9 +4325,9 @@ msgid "Outdated"
 msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex:567
-#: lib/kiln_cms_web/live/overview_live.ex:50
-#: lib/kiln_cms_web/live/overview_live.ex:188
-#: lib/kiln_cms_web/live/overview_live.ex:193
+#: lib/kiln_cms_web/live/overview_live.ex:53
+#: lib/kiln_cms_web/live/overview_live.ex:191
+#: lib/kiln_cms_web/live/overview_live.ex:196
 #, elixir-autogen, elixir-format
 msgid "Overview"
 msgstr ""
@@ -4803,7 +4803,7 @@ msgstr ""
 msgid "Set name"
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:511
+#: lib/kiln_cms_web/live/overview_live.ex:601
 #, elixir-autogen, elixir-format
 msgid "Settings & keys"
 msgstr ""
@@ -4918,7 +4918,7 @@ msgstr ""
 msgid "Stop sending newsletters to %{email}?"
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:477
+#: lib/kiln_cms_web/live/overview_live.ex:567
 #, elixir-autogen, elixir-format
 msgid "Structure"
 msgstr ""
@@ -5062,7 +5062,7 @@ msgstr ""
 msgid "The path must start with /."
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:195
+#: lib/kiln_cms_web/live/overview_live.ex:198
 #, elixir-autogen, elixir-format
 msgid "The site at a glance — eight domains arranged around your content."
 msgstr ""
@@ -5168,7 +5168,7 @@ msgstr ""
 #: lib/kiln_cms_web/components/layouts.ex:593
 #: lib/kiln_cms_web/components/layouts.ex:988
 #: lib/kiln_cms_web/live/content_editor_live.ex:8176
-#: lib/kiln_cms_web/live/overview_live.ex:398
+#: lib/kiln_cms_web/live/overview_live.ex:488
 #: lib/kiln_cms_web/live/translations_live.ex:26
 #: lib/kiln_cms_web/live/translations_live.ex:143
 #, elixir-autogen, elixir-format
@@ -5354,8 +5354,8 @@ msgstr ""
 msgid "by"
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:231
-#: lib/kiln_cms_web/live/overview_live.ex:232
+#: lib/kiln_cms_web/live/overview_live.ex:268
+#: lib/kiln_cms_web/live/overview_live.ex:269
 #, elixir-autogen, elixir-format
 msgid "centre"
 msgstr ""
@@ -5365,12 +5365,12 @@ msgstr ""
 msgid "confirmed"
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:482
+#: lib/kiln_cms_web/live/overview_live.ex:572
 #, elixir-autogen, elixir-format
 msgid "content types · %{fields} fields · %{terms} taxonomy terms"
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:486
+#: lib/kiln_cms_web/live/overview_live.ex:576
 #, elixir-autogen, elixir-format
 msgid "content types · %{terms} taxonomy terms"
 msgstr ""
@@ -5416,7 +5416,7 @@ msgstr ""
 msgid "in review"
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:434
+#: lib/kiln_cms_web/live/overview_live.ex:524
 #, elixir-autogen, elixir-format
 msgid "items in the library"
 msgstr ""
@@ -5472,7 +5472,7 @@ msgstr ""
 msgid "read"
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:421
+#: lib/kiln_cms_web/live/overview_live.ex:511
 #, elixir-autogen, elixir-format
 msgid "recorded content views"
 msgstr ""
@@ -5502,12 +5502,12 @@ msgstr ""
 msgid "since"
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:407
+#: lib/kiln_cms_web/live/overview_live.ex:497
 #, elixir-autogen, elixir-format
 msgid "single-locale site"
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:235
+#: lib/kiln_cms_web/live/overview_live.ex:272
 #, elixir-autogen, elixir-format
 msgid "taiji · centre"
 msgstr ""
@@ -5527,7 +5527,7 @@ msgstr ""
 msgid "to add blocks."
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:500
+#: lib/kiln_cms_web/live/overview_live.ex:590
 #, elixir-autogen, elixir-format
 msgid "transitions in the next 7 days"
 msgstr ""
@@ -8032,7 +8032,7 @@ msgstr ""
 msgid "unsupported file format"
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:251
+#: lib/kiln_cms_web/live/overview_live.ex:288
 #, elixir-autogen, elixir-format
 msgid "%{count} task assigned to you"
 msgid_plural "%{count} tasks assigned to you"
@@ -8487,7 +8487,7 @@ msgstr ""
 msgid "No backup has ever been recorded"
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:358
+#: lib/kiln_cms_web/live/overview_live.ex:448
 #, elixir-autogen, elixir-format
 msgid "No backup has ever been recorded for this deployment."
 msgstr ""
@@ -8507,7 +8507,7 @@ msgstr ""
 msgid "Off-site"
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:220
+#: lib/kiln_cms_web/live/overview_live.ex:223
 #, elixir-autogen, elixir-format
 msgid "Open Backups to check the schedule or take one now."
 msgstr ""
@@ -8527,7 +8527,7 @@ msgstr ""
 msgid "Retention"
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:388
+#: lib/kiln_cms_web/live/overview_live.ex:478
 #, elixir-autogen, elixir-format
 msgid "The backup status can't be determined."
 msgstr ""
@@ -8542,12 +8542,12 @@ msgstr ""
 msgid "The last backup failed"
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:361
+#: lib/kiln_cms_web/live/overview_live.ex:451
 #, elixir-autogen, elixir-format
 msgid "The last backup failed."
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:379
+#: lib/kiln_cms_web/live/overview_live.ex:469
 #, elixir-autogen, elixir-format
 msgid "The last backup was %{count} day ago."
 msgid_plural "The last backup was %{count} days ago."
@@ -8584,7 +8584,7 @@ msgstr ""
 msgid "Listed with pg_restore after writing, so it is a real backup"
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex:370
+#: lib/kiln_cms_web/live/overview_live.ex:460
 #, elixir-autogen, elixir-format
 msgid "The last backup was %{count} hour ago."
 msgid_plural "The last backup was %{count} hours ago."
@@ -10142,4 +10142,71 @@ msgstr ""
 #: lib/kiln_cms_web/live/feed_settings_live.ex:360
 #, elixir-autogen, elixir-format
 msgid "none"
+msgstr ""
+
+#: lib/kiln_cms_web/live/overview_live.ex:247
+#, elixir-autogen, elixir-format
+msgid "A running experiment cannot convert."
+msgid_plural "%{count} running experiments cannot convert."
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms_web/live/overview_live.ex:403
+#, elixir-autogen, elixir-format
+msgid "experiments are switched off for this deployment"
+msgstr ""
+
+#: lib/kiln_cms_web/live/overview_live.ex:426
+#, elixir-autogen, elixir-format
+msgid "its funnel no longer resolves to a document"
+msgstr ""
+
+#: lib/kiln_cms_web/live/overview_live.ex:423
+#, elixir-autogen, elixir-format
+msgid "its funnel now ends on the experimented document itself"
+msgstr ""
+
+#: lib/kiln_cms_web/live/overview_live.ex:430
+#, elixir-autogen, elixir-format
+msgid "its goal can no longer be reached"
+msgstr ""
+
+#: lib/kiln_cms_web/live/overview_live.ex:417
+#, elixir-autogen, elixir-format
+msgid "its goal content type is not a type on this site"
+msgstr ""
+
+#: lib/kiln_cms_web/live/overview_live.ex:406
+#, elixir-autogen, elixir-format
+msgid "its goal converts on a later page, and sticky assignment is off"
+msgstr ""
+
+#: lib/kiln_cms_web/live/overview_live.ex:420
+#, elixir-autogen, elixir-format
+msgid "its goal document has been deleted"
+msgstr ""
+
+#: lib/kiln_cms_web/live/overview_live.ex:414
+#, elixir-autogen, elixir-format
+msgid "its goal document is the experimented document itself"
+msgstr ""
+
+#: lib/kiln_cms_web/live/overview_live.ex:409
+#, elixir-autogen, elixir-format
+msgid "its goal form has been deleted"
+msgstr ""
+
+#: lib/kiln_cms_web/live/overview_live.ex:410
+#, elixir-autogen, elixir-format
+msgid "no goal document is set"
+msgstr ""
+
+#: lib/kiln_cms_web/live/overview_live.ex:408
+#, elixir-autogen, elixir-format
+msgid "no goal form is set"
+msgstr ""
+
+#: lib/kiln_cms_web/live/overview_live.ex:411
+#, elixir-autogen, elixir-format
+msgid "no goal funnel is set"
 msgstr ""

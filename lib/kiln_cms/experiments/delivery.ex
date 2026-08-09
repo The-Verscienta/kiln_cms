@@ -329,6 +329,11 @@ defmodule KilnCMS.Experiments.Delivery do
   # a real effect on the built-in site is diluted by headless traffic nobody can
   # see. A headless caller's `variant_key` says which arm they *would* be in,
   # never that they fetched the experimented document.
+  #
+  # Not `Health.blocked_reason/1`: this is the narrower question of whether
+  # *this request's surface* can be attributed, answered on the hot path with no
+  # query. `Health` answers whether the experiment can convert on any surface,
+  # for the operator, and is deliberately allowed a lookup (#1008).
   defp attributable?(%{goal: goal}) when goal in [:content_view, :funnel_completion], do: false
   defp attributable?(_experiment), do: true
 

@@ -31,6 +31,8 @@ defmodule KilnCMSWeb.OverviewLive do
 
   alias KilnCMS.I18n
 
+  require Logger
+
   # Published this long ago with no edit since → the centre tile's "stale"
   # nudge (same heuristic family as translation staleness: updated_at only).
   @stale_days 90
@@ -47,6 +49,7 @@ defmodule KilnCMSWeb.OverviewLive do
      |> assign(:actor, socket.assigns.current_user)
      |> assign(:admin?, KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin)
      |> assign_backup_warning()
+     |> assign_blocked_experiments()
      |> assign(:page_title, gettext("Overview"))
      |> load_metrics()}
   end
@@ -222,6 +225,40 @@ defmodule KilnCMSWeb.OverviewLive do
           </span>
         </.link>
 
+        <%!-- An experiment that cannot convert (#1008). Distinct from the
+              backup strip above and deliberately a *warning*, not an error: the
+              site is fine, the measurement is not. Admin-only for the same
+              reason — the fixes are a config flag or a deleted goal document,
+              neither of which an editor can act on. That gate lives in
+              `assign_blocked_experiments/1`, where it also saves an editor the
+              queries; the list is empty for them, so there is nothing to
+              re-check here.
+
+              Absent when every running experiment is healthy, and absent
+              entirely on a site with none. --%>
+        <div
+          :if={@blocked_experiments != []}
+          id="overview-experiment-warning"
+          class="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/5 p-4"
+        >
+          <.icon name="hero-beaker" class="mt-0.5 size-5 shrink-0 text-warning" />
+          <div class="min-w-0">
+            <span class="block text-sm font-medium">
+              {ngettext(
+                "A running experiment cannot convert.",
+                "%{count} running experiments cannot convert.",
+                length(@blocked_experiments),
+                count: length(@blocked_experiments)
+              )}
+            </span>
+            <ul class="mt-1 space-y-0.5 text-xs text-base-content/70">
+              <li :for={{name, reason} <- @blocked_experiments}>
+                <span class="font-medium">{name}</span> — {blocked_headline(reason)}
+              </li>
+            </ul>
+          </div>
+        </div>
+
         <div class="grid gap-4 lg:grid-cols-3">
           <div
             id="bagua-center"
@@ -339,6 +376,59 @@ defmodule KilnCMSWeb.OverviewLive do
   # rather than per render, and only the two values the strip needs, so the
   # whole `Backups.status/0` map isn't held in the socket for a banner that is
   # usually absent.
+  # Only the name and the reason atom reach the socket — never the experiment
+  # structs, which carry every variant's patch. The English sentence
+  # `Health.blocked_reason/1` also returns is for the terminal; this surface
+  # phrases its own so the strip translates (#1008).
+  defp assign_blocked_experiments(socket) do
+    blocked =
+      if socket.assigns.admin? do
+        socket.assigns.current_org.id
+        |> KilnCMS.Experiments.blocked()
+        |> Enum.map(fn {experiment, {reason, _sentence}} -> {experiment.name, reason} end)
+      else
+        []
+      end
+
+    assign(socket, :blocked_experiments, blocked)
+  rescue
+    # The overview must render even when the experiments layer cannot answer.
+    # Same posture as `Experiments.running/1`, and logged for the same reason.
+    error ->
+      Logger.warning("Overview could not check experiment health: #{Exception.message(error)}")
+      assign(socket, :blocked_experiments, [])
+  end
+
+  defp blocked_headline(:deployment_disabled),
+    do: gettext("experiments are switched off for this deployment")
+
+  defp blocked_headline(:sticky_off),
+    do: gettext("its goal converts on a later page, and sticky assignment is off")
+
+  defp blocked_headline(:no_goal_form), do: gettext("no goal form is set")
+  defp blocked_headline(:goal_form_missing), do: gettext("its goal form has been deleted")
+  defp blocked_headline(:no_target), do: gettext("no goal document is set")
+  defp blocked_headline(:no_goal_funnel), do: gettext("no goal funnel is set")
+
+  defp blocked_headline(:goal_is_self),
+    do: gettext("its goal document is the experimented document itself")
+
+  defp blocked_headline(:goal_type_unknown),
+    do: gettext("its goal content type is not a type on this site")
+
+  defp blocked_headline(:goal_document_missing),
+    do: gettext("its goal document has been deleted")
+
+  defp blocked_headline(:funnel_ends_here),
+    do: gettext("its funnel now ends on the experimented document itself")
+
+  defp blocked_headline(:funnel_target_missing),
+    do: gettext("its funnel no longer resolves to a document")
+
+  # Deliberately total: a reason added to `Health` and not here would otherwise
+  # crash the overview, which is a worse outcome than a vaguer sentence.
+  defp blocked_headline(_other), do: gettext("its goal can no longer be reached")
+
   defp assign_backup_warning(socket) do
     status = KilnCMS.Backups.status()
 

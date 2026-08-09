@@ -121,6 +121,21 @@ defmodule KilnCMS.Experiments do
     end)
   end
 
+  @doc """
+  `nil` if `experiment` can still convert, `{reason, sentence}` if it cannot
+  (#1008).
+
+  The one authoritative statement of that rule, read at the moment it is asked —
+  `Validations.GoalConfigured` answers the same question at `:start` and cannot
+  answer it again afterwards. See `KilnCMS.Experiments.Health`.
+  """
+  @spec blocked_reason(Experiment.t()) :: KilnCMS.Experiments.Health.reason() | nil
+  defdelegate blocked_reason(experiment), to: KilnCMS.Experiments.Health
+
+  @doc "Every running experiment for a site that cannot convert, as `[{experiment, reason}]`."
+  @spec blocked(Ash.UUID.t()) :: [{Experiment.t(), KilnCMS.Experiments.Health.reason()}]
+  defdelegate blocked(org_id), to: KilnCMS.Experiments.Health
+
   @doc "Drop a site's cached running set. Called from every experiment write."
   @spec bust(Ash.UUID.t()) :: :ok
   defdelegate bust(org_id), to: KilnCMS.Cache, as: :bust_experiments

@@ -52,6 +52,12 @@ defmodule Mix.Tasks.Kiln.ExperimentTest do
     on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Experiments, original) end)
   end
 
+  defp sticky_off do
+    original = Application.get_env(:kiln_cms, KilnCMS.Experiments, [])
+    Application.put_env(:kiln_cms, KilnCMS.Experiments, Keyword.put(original, :sticky, false))
+    on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Experiments, original) end)
+  end
+
   defp find(org_id, name) do
     Experiments.list_experiments!(authorize?: false, tenant: org_id, load: [:variants])
     |> Enum.find(&(&1.name == name))
@@ -368,6 +374,58 @@ defmodule Mix.Tasks.Kiln.ExperimentTest do
       assert out =~ "Control"
       assert out =~ "served"
       assert out =~ "converted"
+    end
+
+    test "list marks a running experiment that cannot convert, and says why", ctx do
+      # #1008: the failure this closes is an experiment that reads `running`
+      # while nothing it needs is in place, so the marker has to hang off the
+      # row an operator is already looking at.
+      ExperimentFixtures.enable!()
+      sticky_on()
+      goal = page(ctx.actor)
+
+      {experiment, _control, _treatment} =
+        ExperimentFixtures.running!(page(ctx.actor), "page", %{},
+          org_id: ctx.org_id,
+          goal: :content_view,
+          goal_content_type: "page",
+          goal_document_id: goal.id
+        )
+
+      refute run(["list"]) =~ "cannot convert"
+
+      sticky_off()
+
+      out = run(["list"])
+      assert out =~ experiment.name
+      assert out =~ "cannot convert"
+      assert out =~ "sticky"
+    end
+
+    test "show states it before the numbers it invalidates", ctx do
+      ExperimentFixtures.enable!()
+      sticky_on()
+      goal = page(ctx.actor)
+
+      {experiment, _control, _treatment} =
+        ExperimentFixtures.running!(page(ctx.actor), "page", %{},
+          org_id: ctx.org_id,
+          goal: :content_view,
+          goal_content_type: "page",
+          goal_document_id: goal.id
+        )
+
+      refute run(["show", experiment.name]) =~ "CANNOT CONVERT"
+
+      sticky_off()
+
+      out = run(["show", experiment.name])
+      assert out =~ "CANNOT CONVERT"
+
+      # Before the variants: a 0.0% rate under this experiment is not a result,
+      # and reading the numbers first is how an operator concludes "no effect".
+      [before_variants, _rest] = String.split(out, "Control", parts: 2)
+      assert before_variants =~ "CANNOT CONVERT"
     end
 
     test "show raises on an unknown name", _ctx do
