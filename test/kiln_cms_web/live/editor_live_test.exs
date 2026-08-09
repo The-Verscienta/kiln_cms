@@ -3014,6 +3014,80 @@ defmodule KilnCMSWeb.EditorLiveTest do
       refute render(lv) =~ ~s(name="form[col_child)
     end
 
+    # `field` arrives from a client event and used to reach a bare `Map.put/3`,
+    # so a payload could name a *structural* key. `_type` rewrites the union
+    # discriminator: the next save fails its typed cast, and on the autosave
+    # path that surfaces as an error with no field to point at, leaving the
+    # document unsaveable until the block is deleted.
+    test "a field the child's editor does not render is ignored", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      add_columns_block(lv)
+      id = columns_block_id(lv)
+
+      lv
+      |> element("button[phx-click='col_add_child'][phx-value-col='0'][phx-value-type='heading']")
+      |> render_click()
+
+      [_, child_id] = Regex.run(~r/data-child-id="([^"]+)"/, render(lv))
+
+      for bad <- ["_type", "id"] do
+        render_hook(lv, "col_update_child", %{
+          "id" => id,
+          "child" => child_id,
+          "field" => bad,
+          "value" => "tampered"
+        })
+      end
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert [%{"blocks" => [child]}, %{"blocks" => []}] = block.data["columns"]
+      assert child["_type"] == "heading"
+      assert child["id"] == child_id
+    end
+
+    # A child with no stored level showed H1 in the select while delivery renders
+    # h2 (`Blocks.Heading.clamp/1`'s default). Harmless while the control was
+    # inert; a lie once it works, and an editor "confirming" H1 would get h2.
+    test "a heading with no usable level shows the level it will publish at",
+         %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      add_columns_block(lv)
+      id = columns_block_id(lv)
+
+      lv
+      |> element("button[phx-click='col_add_child'][phx-value-col='0'][phx-value-type='heading']")
+      |> render_click()
+
+      [_, child_id] = Regex.run(~r/data-child-id="([^"]+)"/, render(lv))
+
+      # `to_int("")` is 0 — the same value a legacy child with no `level` key
+      # produces, and the one that used to leave no option selected so the
+      # browser displayed H1 while delivery rendered h2.
+      lv
+      |> element(~s(select[name="col_child[#{id}][#{child_id}][level]"]))
+      |> render_change(%{"col_child" => %{id => %{child_id => %{"level" => ""}}}})
+
+      selector =
+        ~s(select[name="col_child[#{id}][#{child_id}][level]"] option[value="2"][selected])
+
+      assert has_element?(lv, selector)
+
+      refute has_element?(
+               lv,
+               ~s(select[name="col_child[#{id}][#{child_id}][level]"] option[value="1"][selected])
+             )
+    end
+
     test "the nested block renders in the live preview", %{conn: conn} do
       page = draft_page(%{blocks: []})
 

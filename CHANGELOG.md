@@ -492,7 +492,7 @@ migration, a rewritten column, a dropped config key).
   any cause of orphaning — a restore, direct SQL, a `parent_id` pointing into
   another menu — not only the race, which stays open and is documented.
 
-- **Changing a nested heading's level in a Columns block does something**
+- **Changing a nested heading's level in a Columns block now takes effect**
   (#893). The per-child level `<select>` had no `name`, and a `phx-change` on a
   form-associated element routes through LiveView's `pushInput`, which
   serializes the form filtered to the changed input's name and reads

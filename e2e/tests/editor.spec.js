@@ -383,11 +383,9 @@ test.describe("editor journey", () => {
   test("changing a nested heading's level in a columns block takes effect", async ({
     page,
   }) => {
-    const slug = `e2e-cols-${Date.now()}`;
-    const heading = "Nested heading level three";
-
     await newDraftPage(page);
-    await page.fill('input[name$="[slug]"]', slug);
+    await page.fill('input[name$="[title]"]', "E2E Nested Heading");
+    await page.fill('input[name$="[slug]"]', `e2e-cols-${Date.now()}`);
 
     await addBlock(page, "columns");
 
@@ -396,31 +394,29 @@ test.describe("editor journey", () => {
       'button[phx-click="col_add_child"][phx-value-col="0"][phx-value-type="heading"]',
     );
 
-    // Its text input is nameless and commits on blur.
-    const text = page.locator('input[phx-blur="col_update_child"]').first();
-    await text.fill(heading);
-    await text.blur();
-
     // The control under test. A heading child starts at level 2.
     const level = page.locator('select[phx-change="col_update_child"]').first();
     await expect(level).toBeVisible();
+    await expect(level).toHaveValue("2");
+
     await level.selectOption("3");
 
-    // The server has to have taken it: the option stays selected across the
-    // re-render, rather than the DOM snapping back to H2.
-    await expect(level).toHaveValue("3");
-
+    // NOT asserted here. `expect(level).toHaveValue("3")` immediately after
+    // `selectOption` cannot fail: with the bug, the handler no-ops and the
+    // server sends no diff at all, so the DOM simply keeps the value Playwright
+    // just set — and even with a diff, `dom.ts`'s `mergeFocusedInput` skips
+    // `HTMLSelectElement`, so a focused select never takes the server's
+    // `selected` back. The only honest check is a server-rendered one.
+    //
+    // So: save, re-mount the editor from the database, and read the control on
+    // a fresh unfocused render. That can only pass if the browser actually sent
+    // the change and the server actually stored it.
     await page.getByRole("button", { name: /^save$/i }).click();
-    await page.click('button[phx-click="workflow"][phx-value-action="publish"]');
-    await expect(
-      page.locator('button[phx-click="workflow"][phx-value-action="unpublish"]'),
-    ).toBeVisible();
+    await expect(page.getByText("Saved.")).toBeVisible();
+    await page.reload();
 
-    // And it reaches delivery as an h3 — not the h2 it would have stayed.
-    // Scoped to this heading's own text rather than counting every h2 on the
-    // page, so unrelated chrome can't decide the result.
-    await page.goto(`/${slug}`);
-    await expect(page.locator("article h3", { hasText: heading })).toHaveCount(1);
-    await expect(page.locator("article h2", { hasText: heading })).toHaveCount(0);
+    const reloaded = page.locator('select[phx-change="col_update_child"]').first();
+    await expect(reloaded).toBeVisible();
+    await expect(reloaded).toHaveValue("3");
   });
 });

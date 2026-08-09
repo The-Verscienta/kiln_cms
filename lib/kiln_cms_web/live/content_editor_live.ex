@@ -2502,7 +2502,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
       {:noreply, apply_children(socket, bc)}
     else
-      _unexpected -> {:noreply, socket}
+      # Logged, not swallowed. This head matches before `MalformedEvent`'s
+      # catch-all can, so a payload that fails the shape below would otherwise
+      # die here in total silence — which is the condition #893 was, and the
+      # reason it survived. Same level and same non-prod gate as that fallback.
+      unexpected ->
+        KilnCMSWeb.MalformedEvent.log(__MODULE__, {"col_update_child", unexpected})
+        {:noreply, socket}
     end
   end
 
@@ -3645,10 +3651,24 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   # Apply `fun` to every column's child-block list of a block.
+  # `Map.update/4`'s default would *create* an entry for a block id that is not
+  # in the tree. The id comes from a client event, and on a published record —
+  # which never autosaves, so `assign_record/2` never re-seeds this map — a
+  # fabricated one would sit in socket state for the whole session.
+  #
+  # Defensive, and deliberately untested: a phantom entry matches no block, so
+  # `inject_children/2` blanks nothing and there is no observable damage to
+  # assert on today. A test for it could not fail, and one that cannot fail is
+  # worse than none. The guard is here because the *next* reader of this map
+  # should not have to re-derive that argument.
   defp update_columns(block_children, block_id, fun) do
-    Map.update(block_children, block_id, [], fn cols ->
-      Enum.map(cols, &update_col_blocks(&1, fun))
-    end)
+    if Map.has_key?(block_children, block_id) do
+      Map.update!(block_children, block_id, fn cols ->
+        Enum.map(cols, &update_col_blocks(&1, fun))
+      end)
+    else
+      block_children
+    end
   end
 
   defp update_col_blocks(col, fun) do
@@ -3800,7 +3820,22 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # render, so an out-of-range value is harmless, but a non-integer would fail the
   # embedded cast).
   defp put_child_field(child, "level", value), do: Map.put(child, "level", to_int(value))
-  defp put_child_field(child, field, value), do: Map.put(child, field, value)
+
+  # Only the fields this child's own editor renders. `field` arrives from a
+  # client event, and a bare `Map.put/3` let one name a *structural* key:
+  # `_type` rewrites the union discriminator, so the next save fails its typed
+  # cast — and on the autosave path that surfaces as `save_state: :error` with
+  # no field to point at, leaving the document unsaveable until the block is
+  # deleted; `id` collides two children's DOM ids and their drag addressing.
+  # Neither is reachable from the rendered markup, which is exactly why nothing
+  # would have noticed.
+  defp put_child_field(child, field, value) do
+    if field in Enum.map(nested_fields_for(child["_type"]), &elem(&1, 0)) do
+      Map.put(child, field, value)
+    else
+      child
+    end
+  end
 
   defp to_int(value) when is_integer(value), do: value
 
@@ -7289,10 +7324,28 @@ defmodule KilnCMSWeb.ContentEditorLive do
         phx-change="col_update_child"
         class="rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
       >
-        <option :for={n <- 1..6} value={n} selected={to_int(@child["level"]) == n}>H{n}</option>
+        <%!-- Matched to what will actually publish. A child with no stored `level`
+        (a legacy one, or an empty string) made `to_int/1` return 0, so no option
+        was `selected` and the browser showed the first — H1 — while delivery
+        renders `h2`, because `Blocks.Heading.clamp/1` falls back to its default.
+        Harmless while the control was inert; a lie now that it works. --%>
+        <option :for={n <- 1..6} value={n} selected={child_heading_level(@child) == n}>H{n}</option>
       </select>
     </div>
     """
+  end
+
+  # The level the select must show: what `KilnCMS.Blocks.Heading` will render,
+  # not what happens to be stored. Anything outside 1..6 — including a missing
+  # or unparseable value — resolves to the same default that block clamps to, so
+  # the control and the published page cannot disagree.
+  @heading_default_level 2
+
+  defp child_heading_level(child) do
+    case to_int(child["level"]) do
+      n when n in 1..6 -> n
+      _out_of_range -> @heading_default_level
+    end
   end
 
   # {field, placeholder} pairs for a nested child type's text inputs.
