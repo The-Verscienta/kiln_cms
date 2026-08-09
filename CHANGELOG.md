@@ -481,8 +481,9 @@ migration, a rewritten column, a dropped config key).
   nested under them simply **vanish** from the served menu *and* from the
   builder's own tree, with no error and no row deleted. The editor's only signal
   was a section disappearing, with nothing to click — the items aren't rendered,
-  so they can't be selected, edited or outdented back. Adding to them fails too,
-  because the depth check's walk cannot terminate either.
+  so they can't be selected, edited or outdented back. Adding to them fails too:
+  the depth check bounds its ancestor walk rather than following the cycle
+  round, so every new child under one is refused as *is nested too deeply*.
 
   The builder now lists them under **Detached items** with a *Move to top level*
   action that breaks the cycle by making the item a root; its children come back

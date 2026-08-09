@@ -108,12 +108,22 @@ defmodule KilnCMS.CMS.Menus do
   """
   @spec detached(Menu.t(), Ash.UUID.t()) :: [MenuItem.t()]
   def detached(menu, org_id) do
-    items =
-      MenuItem
-      |> Ash.Query.filter(menu_id == ^menu.id)
-      |> Ash.Query.sort(position: :asc, label: :asc)
-      |> Ash.read!(authorize?: false, tenant: org_id)
+    MenuItem
+    |> Ash.Query.filter(menu_id == ^menu.id)
+    |> Ash.Query.sort(position: :asc, label: :asc)
+    |> Ash.read!(authorize?: false, tenant: org_id)
+    |> detached()
+  end
 
+  @doc """
+  `detached/2` over rows the caller already has.
+
+  The builder reads this menu's items to render the tree anyway, and reading
+  them a second time to answer a purely in-memory question would be a query per
+  reorder, indent, outdent and save.
+  """
+  @spec detached([MenuItem.t()]) :: [MenuItem.t()]
+  def detached(items) when is_list(items) do
     by_id = Map.new(items, &{&1.id, &1})
     Enum.reject(items, &rooted?(&1, by_id, MapSet.new()))
   end
@@ -124,17 +134,15 @@ defmodule KilnCMS.CMS.Menus do
   defp rooted?(%{parent_id: nil}, _by_id, _seen), do: true
 
   defp rooted?(%{id: id, parent_id: parent_id}, by_id, seen) do
-    cond do
-      MapSet.member?(seen, id) ->
-        false
-
-      true ->
-        # A parent outside this menu's item set (deleted, or belonging to another
-        # menu) is not a root either — nothing renders through it.
-        case Map.get(by_id, parent_id) do
-          nil -> false
-          parent -> rooted?(parent, by_id, MapSet.put(seen, id))
-        end
+    if MapSet.member?(seen, id) do
+      false
+    else
+      # A parent outside this menu's item set (deleted, or belonging to another
+      # menu) is not a root either — nothing renders through it.
+      case Map.get(by_id, parent_id) do
+        nil -> false
+        parent -> rooted?(parent, by_id, MapSet.put(seen, id))
+      end
     end
   end
 

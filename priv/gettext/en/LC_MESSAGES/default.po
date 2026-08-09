@@ -8660,8 +8660,8 @@ msgid "These addresses hard-bounced and are skipped on future sends. Remove one 
 msgstr ""
 
 #: lib/kiln_cms_web/live/menu_live.ex
-#, elixir-autogen, elixir-format
-msgid "These items are not reachable from the top level, so they do not appear in the menu above or on the site. Reattach one to bring it and anything nested under it back."
+#, elixir-autogen, elixir-format, fuzzy
+msgid "These items are not reachable from the top level, so they do not appear in the menu above or on the site. Moving one to the top level brings it back, along with anything nested under it — start with the outermost, and the rest may return on their own."
 msgstr ""
 
 #: lib/kiln_cms_web/components/version_diff_components.ex

@@ -8661,8 +8661,8 @@ msgstr "Ces adresses ont renvoyé un rejet définitif et sont ignorées lors des
 
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
-msgid "These items are not reachable from the top level, so they do not appear in the menu above or on the site. Reattach one to bring it and anything nested under it back."
-msgstr "Ces éléments ne sont accessibles depuis aucun élément de premier niveau : ils n'apparaissent ni dans le menu ci-dessus, ni sur le site. Rattachez-en un pour le rétablir, avec tout ce qu'il contient."
+msgid "These items are not reachable from the top level, so they do not appear in the menu above or on the site. Moving one to the top level brings it back, along with anything nested under it — start with the outermost, and the rest may return on their own."
+msgstr "Ces éléments ne sont accessibles depuis aucun élément de premier niveau : ils n'apparaissent ni dans le menu ci-dessus, ni sur le site. En remonter un au premier niveau le rétablit, avec tout ce qu'il contient — commencez par le plus externe, les autres reviendront peut-être d'eux-mêmes."
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #, elixir-autogen, elixir-format

@@ -269,9 +269,10 @@ defmodule KilnCMSWeb.MenuLiveTest do
       m = menu()
 
       # The subtree is built BEFORE the cycle is closed: once it exists, the
-      # depth validation's ancestor walk cannot terminate and refuses every new
-      # child under it ("is nested too deeply"). That is itself the shape of the
-      # damage — the section is not just invisible, it is unusable.
+      # depth validation bounds its ancestor walk rather than following the
+      # cycle round, so every new child under one is refused as "is nested too
+      # deeply". That is itself the shape of the damage — the section is not
+      # just invisible, it is unusable.
       a = item(m, %{label: "Products", link_type: :none})
       d = item(m, %{label: "Widgets", link_type: :none, parent_id: a.id})
       leaf = item(m, %{label: "Blue widget", link_type: :none, parent_id: d.id})
@@ -297,6 +298,100 @@ defmodule KilnCMSWeb.MenuLiveTest do
       assert leaf_parent == d.id
 
       assert KilnCMS.CMS.Menus.detached(m, KilnCMS.Accounts.default_org_id()) == []
+    end
+
+    # The `position:` half. Labels chosen so the assertion can actually fail:
+    # without repositioning, the reattached item keeps position 0, ties with the
+    # existing root, and the label tiebreak sorts "Alpha" ahead of "Zebra".
+    test "a reattached item lands at the end of the top level", %{conn: conn} do
+      m = menu()
+      item(m, %{label: "Zebra", link_type: :none, position: 0})
+
+      a = item(m, %{label: "Alpha", link_type: :none, position: 0})
+      d = item(m, %{label: "Nested", link_type: :none, parent_id: a.id})
+      Ash.Seed.update!(a, %{parent_id: d.id})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/menus/#{m.id}")
+
+      lv
+      |> element(~s(button[phx-click="reattach_item"][phx-value-id="#{a.id}"]))
+      |> render_click()
+
+      roots =
+        items(m)
+        |> Enum.filter(&is_nil(&1.parent_id))
+        |> Enum.sort_by(&{&1.position, &1.label})
+        |> Enum.map(& &1.label)
+
+      assert roots == ["Zebra", "Alpha"]
+    end
+
+    # A `:url` item with a blank url, or a `:content` item whose type is gone,
+    # is exactly what a restore or a direct UPDATE leaves behind — the causes
+    # this section claims to cover. Running the general update's destination
+    # validation on the repair would refuse it to the items that most need it,
+    # with a message about links that has nothing to do with being stranded.
+    test "an item whose destination no longer validates can still be rescued",
+         %{conn: conn} do
+      m = menu()
+      a = item(m, %{label: "Products", link_type: :none})
+
+      d =
+        item(m, %{label: "Widgets", link_type: :url, url: "https://example.com", parent_id: a.id})
+
+      Ash.Seed.update!(a, %{parent_id: d.id})
+      # Blank the url behind the validation's back.
+      Ash.Seed.update!(d, %{url: ""})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/menus/#{m.id}")
+
+      lv
+      |> element(~s(button[phx-click="reattach_item"][phx-value-id="#{d.id}"]))
+      |> render_click()
+
+      assert %{parent_id: nil} = CMS.get_menu_item!(d.id, authorize?: false)
+    end
+
+    # This page has no PubSub subscription, so `@detached` is only as fresh as
+    # this session's own last event. A peer who repairs the cycle leaves a
+    # button here that would otherwise re-root an item now sitting happily under
+    # a parent — causing the damage the section exists to repair.
+    test "a button left stale by a peer's repair does not re-root the item",
+         %{conn: conn} do
+      m = menu()
+      home = item(m, %{label: "Home", link_type: :none})
+      a = item(m, %{label: "Products", link_type: :none})
+      d = item(m, %{label: "Widgets", link_type: :none, parent_id: a.id})
+      Ash.Seed.update!(a, %{parent_id: d.id})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/menus/#{m.id}")
+
+      assert has_element?(lv, ~s(button[phx-click="reattach_item"][phx-value-id="#{a.id}"]))
+
+      # Out of band: a peer breaks the cycle and parks Products under Home.
+      Ash.Seed.update!(a, %{parent_id: home.id})
+
+      render_click(lv, "reattach_item", %{"id" => a.id})
+
+      assert %{parent_id: parent} = CMS.get_menu_item!(a.id, authorize?: false)
+      assert parent == home.id
+    end
+
+    # The event is client-sent and the index view assigns neither `:menu` nor
+    # `:detached`, so an unguarded handler would take the LiveView down.
+    test "the event is inert on the menu index", %{conn: conn} do
+      m = menu()
+      only = item(m, %{label: "Home", link_type: :none})
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/menus")
+
+      render_click(lv, "reattach_item", %{"id" => only.id})
+
+      assert render(lv) =~ "Menus"
+      assert %{parent_id: nil} = CMS.get_menu_item!(only.id, authorize?: false)
     end
 
     # The button only ever names a detached item, but the event is client-sent.

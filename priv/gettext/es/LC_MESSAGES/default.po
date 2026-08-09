@@ -8661,8 +8661,8 @@ msgstr "Estas direcciones rebotaron de forma permanente y se omiten en los próx
 
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
-msgid "These items are not reachable from the top level, so they do not appear in the menu above or on the site. Reattach one to bring it and anything nested under it back."
-msgstr "No se puede llegar a estos elementos desde el primer nivel, así que no aparecen ni en el menú de arriba ni en el sitio. Vuelva a conectar uno para recuperarlo junto con todo lo que contenga."
+msgid "These items are not reachable from the top level, so they do not appear in the menu above or on the site. Moving one to the top level brings it back, along with anything nested under it — start with the outermost, and the rest may return on their own."
+msgstr "No se puede llegar a estos elementos desde el primer nivel, así que no aparecen ni en el menú de arriba ni en el sitio. Mover uno al primer nivel lo recupera junto con todo lo que contenga: empiece por el más externo, y puede que los demás vuelvan solos."
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #, elixir-autogen, elixir-format
