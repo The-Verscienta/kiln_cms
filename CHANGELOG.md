@@ -369,6 +369,32 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **Referrer suppression now actually suppresses** (#1073). #620 hid a
+  low referrer count behind `"< n"` and pulled a second category into `hidden`
+  so the low one was not the sole unknown. Brute-forcing every assignment
+  consistent with the published breakdown *plus the view total shown beside it*
+  found that most of them had exactly one solution: the partner was chosen as
+  the **smallest** of the others, which bounds it above by every published exact
+  — and whenever the residual falls under the threshold the partner must be
+  zero, which recovers the hidden count exactly. `direct: 3` with four genuine
+  zeros gave the count away outright.
+
+  The partner is the **largest** of the others now, so it is bounded below by
+  every published exact and unbounded above and the residual splits many ways.
+  Where no partner makes it ambiguous — a handful of views against genuine zeros
+  — the whole breakdown is hidden, zeros included, because a published `0` is a
+  term in the equation rather than a courtesy. Both the dashboard and the export
+  read the same decision, as they have since #777.
+
+  The property is now a test rather than an argument: it brute-forces the
+  assignments a reader who knows the algorithm could construct and asserts there
+  is more than one, across every small breakdown and at three thresholds. It
+  fails on the old algorithm.
+
+  The cost is exactness on the lowest-traffic days, which
+  `docs/environment-variables.md` states next to
+  `KILN_ANALYTICS_LOW_COUNT_THRESHOLD`.
+
 - **Turning off full-content feeds now empties the cached feed bodies on every
   node** (#1078). #719's `bust_feed_policy/1` already reached the cluster, so the
   *policy* — the value deciding whether whole article bodies go out to anonymous

@@ -142,44 +142,53 @@ defmodule KilnCMS.Analytics do
   place, or its absence reads as "we don't track this" rather than "nobody
   arrived this way" — and, more importantly, it is a candidate partner below.
 
-  ## Complementary suppression — what it does, and what it does NOT do
+  ## Complementary suppression, and the equation it has to defeat
 
   Every classified arrival writes exactly one referrer hit alongside its view
   (`KilnCMSWeb.ViewTracking`'s private `record/4`), so these categories sum to
-  the item's own view total, which both the dashboard and the export publish
-  **exactly**, right next to them. When one category is naturally below the
-  threshold, a second is suppressed too — the smallest of the others, zero-hit
-  ones included.
+  the item's own view total — which both the dashboard and the export publish
+  **exactly**, right beside them. That equation is what suppression here has to
+  survive, and #620's first version did not:
 
-  > #### This does not prevent arithmetic recovery {: .warning}
+  > #### The version this replaced {: .warning}
   >
-  > It reads as though it does, and #620 shipped it saying so. It does not.
-  > Brute-forcing every assignment consistent with the published projection
-  > *plus the published view total* (threshold 5):
+  > It suppressed one partner, chosen as the **smallest** of the other
+  > categories. That is precisely what made the partner predictable: the
+  > smallest is bounded above by every published exact, and it is not naturally
+  > low, so it is `0` or at least the threshold. One equation plus those two
+  > constraints usually pins the pair — and whenever the residual falls below
+  > the threshold, the partner *must* be zero, which recovers the hidden count
+  > exactly (#1073). Brute force found `direct: 3, rest zero` and
+  > `direct: 2, search: 40, social: 50, other: 60` each admitting exactly one
+  > consistent assignment.
+
+  Two changes close it.
+
+  **The partner is the largest of the others, not the smallest.** A partner
+  chosen as the maximum is bounded *below* by every published exact and
+  unbounded above, so the residual splits many ways instead of one. It costs
+  the breakdown its biggest category, which is the price of the biggest hiding
+  place.
+
+  **When the split is still unique, the whole breakdown goes.** Some
+  breakdowns have nowhere to hide — `direct: 3` with four genuine zeros is
+  three views total, and no choice of partner makes three ambiguous. Those are
+  published as five `"hidden"` values against a view total that can be split
+  #{"C(T+4, 4)"} ways, and they are exactly the breakdowns with nothing worth
+  reading in them anyway.
+
+  `ambiguous?/3` decides which case this is by counting the assignments a
+  reader who knows this algorithm could construct. Knowing the rule gains them
+  nothing: a partial publication is only emitted when that count is at least
+  two.
+
+  > #### What this still does not do {: .neutral}
   >
-  > | breakdown | published | consistent assignments |
-  > |---|---|---|
-  > | `direct: 3`, rest zero | `"< 5"`, `hidden`, `0,0,0` | **1 — exact** |
-  > | `direct: 2, search: 40, social: 50, other: 60` | `"< 5"`, `hidden`, `40,50,60` | **1 — exact** |
-  > | `direct: 4`, others all `5` | `"< 5"`, `hidden`, `5,5,5` | **1 — exact** |
-  > | `direct: 1, internal: 1`, rest zero | `"< 5"`, `"< 5"`, `0,0,0` | **1 — exact** |
-  > | `direct: 4, internal: 100, …` | `"< 5"`, `hidden`, `200,300,400` | 4 — the range `"< 5"` already announced |
-  >
-  > The reader knows the algorithm. The partner is the *minimum* of the others,
-  > so it is bounded above by every published exact; and it is not naturally
-  > low, so it is `0` or `>= threshold`. With one equation and that constraint
-  > the pair is usually unique — and whenever the residual is below the
-  > threshold the partner **must** be zero, which pins the low value exactly.
-  >
-  > Choosing the smallest partner is what makes it predictable. Two
-  > naturally-low categories are not safe either, contrary to what #620
-  > claimed: small totals pin both.
-  >
-  > Closing this needs the exact total to stop being published beside the
-  > breakdown, or the whole breakdown suppressed together — a design change to
-  > both surfaces, tracked as #1073. What this function delivers today is a
-  > **consistent** decision across the dashboard and the export, which is the
-  > prerequisite for fixing it in one place rather than two.
+  > It does not make a suppressed count unknowable — it makes it *not uniquely
+  > determined*. A `"< n"` category still announces its own range, and where
+  > the residual admits only the four values that range already published, the
+  > breakdown is published as-is: nothing was learned that the label did not
+  > already say.
 
   ## The three display values
 
@@ -194,25 +203,113 @@ defmodule KilnCMS.Analytics do
   def suppress_referrer_group(totals) do
     threshold = low_count_threshold()
     raw = Enum.map(referrer_sources(), fn source -> {source, Map.get(totals, source, 0)} end)
-    naturally_suppressed = for {source, hits} <- raw, hits > 0 and hits < threshold, do: source
+    natural = for {source, hits} <- raw, hits > 0 and hits < threshold, do: source
 
-    forced =
-      case naturally_suppressed do
-        [only] -> complementary_partner(raw, only)
-        _other -> nil
-      end
+    cond do
+      # Nothing is small, so nothing needs hiding and the equation reveals
+      # nothing anyone could not already read off the chart.
+      natural == [] ->
+        Enum.map(raw, fn {source, hits} -> {source, hits, hits} end)
 
+      ambiguous?(raw, natural ++ List.wrap(partner(raw, natural)), threshold) ->
+        partial(raw, partner(raw, natural))
+
+      # Nowhere to hide: every zero published is one unknown removed from an
+      # equation that already has only one. The whole breakdown goes, zeros
+      # included — a published `0` is not a courtesy here, it is a term.
+      true ->
+        Enum.map(raw, fn {source, hits} -> {source, hits, "hidden"} end)
+    end
+  end
+
+  # The naturally-low ones by their own range, the partner as `"hidden"`,
+  # everything else exactly.
+  defp partial(raw, forced) do
     Enum.map(raw, fn {source, hits} ->
-      {source, hits, if(source == forced, do: "hidden", else: suppress_low_count(hits))}
+      display = if source == forced, do: "hidden", else: suppress_low_count(hits)
+      {source, hits, display}
     end)
   end
 
-  defp complementary_partner(raw, already_suppressed) do
-    {source, _hits} =
-      raw
-      |> Enum.reject(fn {source, _hits} -> source == already_suppressed end)
-      |> Enum.min_by(fn {_source, hits} -> hits end)
-
-    source
+  # The LARGEST of the categories that are not naturally low — see the
+  # moduledoc. `nil` when every category is naturally low or zero, in which
+  # case the naturally-low ones are the whole suppressed set.
+  defp partner(raw, natural) do
+    raw
+    |> Enum.reject(fn {source, _hits} -> source in natural end)
+    |> case do
+      [] -> nil
+      candidates -> candidates |> Enum.max_by(fn {_source, hits} -> hits end) |> elem(0)
+    end
   end
+
+  @doc """
+  Whether more than one assignment of the suppressed categories is consistent
+  with everything published beside them (#1073).
+
+  Public so a test can brute-force against it rather than trusting the
+  arithmetic below — which is the only way this claim has ever been checked
+  honestly.
+
+  What a reader knows, given they know the algorithm:
+
+    * the view total, published exactly beside the breakdown, and the exact
+      value of every category that is not suppressed
+    * a `"< n"` category holds `1..n-1` — it says so
+    * the `"hidden"` partner is the largest of the categories that are not
+      naturally low, so it is at least every published exact, and being not
+      naturally low it is `0` or at least the threshold
+
+  Counted rather than reasoned about: the naturally-low categories range over
+  a small interval each, so their sum is enumerable, and the partner is then
+  determined. Saturating at two, because "more than one" is the whole question.
+  """
+  @spec ambiguous?([{atom(), non_neg_integer()}], [atom()], pos_integer()) :: boolean()
+  def ambiguous?(raw, suppressed, threshold) do
+    hidden = for {source, hits} <- raw, source in suppressed, do: hits
+    published = for {source, hits} <- raw, source not in suppressed, do: hits
+    residual = Enum.sum(hidden)
+
+    low_count = Enum.count(hidden, &(&1 > 0 and &1 < threshold))
+    floor = Enum.max([threshold | published])
+
+    partner? = length(hidden) > low_count
+
+    low_count
+    |> sums(threshold - 1)
+    |> Enum.reduce_while(0, fn {sum, ways}, total ->
+      cond do
+        not partner_fits?(partner?, residual - sum, floor) -> {:cont, total}
+        total + ways >= 2 -> {:halt, 2}
+        true -> {:cont, total + ways}
+      end
+    end)
+    |> Kernel.>=(2)
+  end
+
+  # With no partner in the suppressed set the naturally-low values must sum to
+  # the residual exactly; with one, it takes up the slack and must itself be a
+  # value the algorithm could have produced.
+  defp partner_fits?(false, slack, _floor), do: slack == 0
+  defp partner_fits?(true, slack, floor), do: slack == 0 or slack >= floor
+
+  # `{sum, ways}` for `count` parts each in `1..max`, by the obvious DP.
+  # Bounded by `count <= length(referrer_sources())` and `max = threshold - 1`,
+  # so this is a few thousand steps at the most generous threshold anyone would
+  # set — and the whole thing is skipped when nothing is naturally low.
+  defp sums(0, _max), do: [{0, 1}]
+
+  defp sums(count, max) do
+    2..count//1
+    |> Enum.reduce(one_part(max), fn _n, acc -> add_part(acc, max) end)
+    |> Enum.sort()
+  end
+
+  defp add_part(sums, max) do
+    Enum.reduce(sums, %{}, fn {sum, ways}, next ->
+      Enum.reduce(1..max//1, next, &Map.update(&2, sum + &1, ways, fn w -> w + ways end))
+    end)
+  end
+
+  defp one_part(max), do: Map.new(1..max//1, &{&1, 1})
 end
