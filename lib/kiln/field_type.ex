@@ -128,7 +128,7 @@ defmodule Kiln.FieldType do
   Two rules worth knowing when you write one:
 
     * **Scope the match to the field's own name.** `definition.name` is in
-      scope, so `~r/\Afield:#{definition.name}\.lat\z/` rather than a bare
+      scope, so `~r/\Afield:\#{definition.name}\.lat\z/` rather than a bare
       `"field:lat"` — two fields of the same type on one content type would
       otherwise fight over a shared token.
     * **A built-in name cannot be shadowed.** `Kiln.Tokens.expand/3` takes the
