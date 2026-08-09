@@ -2,7 +2,7 @@ defmodule KilnCMS.CMS.SlugRegeneration do
   @moduledoc """
   Bulk slug regeneration (#455) — pathauto's "update all aliases".
 
-  Re-derives every record's slug through the same `Slugs.derive_base/2` chain
+  Re-derives every record's slug through the same `Slugs.derive_base/3` chain
   the editor and `DeriveSlug` use (per-type pattern, else focus keyphrase →
   title), with the same dedupe. `preview/3` is the dry run: it reports every
   record whose slug would change, plus how many were skipped as author-pinned
@@ -130,7 +130,11 @@ defmodule KilnCMS.CMS.SlugRegeneration do
   end
 
   defp candidate(ct, record, tenant, include_pinned?) do
-    base = Slugs.derive_base(ct.slug_pattern, Slugs.record_context(record))
+    # The type's own tokens (#804) must be in scope here, or `underived?/2`
+    # below compares the stored slug against a derivation that never had them
+    # and calls every record author-pinned.
+    extra = Slugs.descriptor_token_definitions(ct, ct.slug_pattern, :slug, tenant)
+    base = Slugs.derive_base(ct.slug_pattern, Slugs.record_context(record), extra)
     pinned? = not Slugs.underived?(record.slug, base)
 
     cond do

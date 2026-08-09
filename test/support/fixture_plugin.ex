@@ -102,6 +102,40 @@ defmodule KilnCMS.FixturePlugin.FieldTypes.Rating do
   defp word(_value), do: ""
 end
 
+defmodule KilnCMS.FixturePlugin.FieldTypes.Tokenless do
+  @moduledoc """
+  A plugin field type that implements the behaviour but NOT the optional
+  `c:Kiln.FieldType.tokens/1` (test fixture).
+
+  Exists so `KilnCMS.CMS.Slugs.type_token_definitions/1`'s
+  `Code.ensure_loaded?/1 and function_exported?/3` probe has a case that
+  actually reaches it. A CORE field type cannot: `FieldTypes.get/1` returns
+  `nil` for those, so a `:text` field exercises the nil clause and never the
+  probe — which is why the branch shipped uncovered.
+  """
+  use Kiln.FieldType
+
+  @impl Kiln.FieldType
+  def cast(value, _definition), do: {:ok, to_string(value)}
+end
+
+defmodule KilnCMS.FixturePlugin.FieldTypes.Exploding do
+  @moduledoc """
+  A plugin field type whose `c:Kiln.FieldType.tokens/1` raises (test fixture).
+
+  A third party's token list must never be able to fail the save it was merely
+  decorating, so `type_token_definitions/1` rescues. This is the case that
+  proves the rescue is still there.
+  """
+  use Kiln.FieldType
+
+  @impl Kiln.FieldType
+  def cast(value, _definition), do: {:ok, to_string(value)}
+
+  @impl Kiln.FieldType
+  def tokens(_definition), do: raise("plugin token list blew up")
+end
+
 defmodule KilnCMS.FixturePlugin.PanelLive do
   @moduledoc "A plugin admin panel (test fixture) mounted via `admin_routes/0`."
   use KilnCMSWeb, :live_view
@@ -146,7 +180,12 @@ defmodule KilnCMS.FixturePlugin do
   def blocks, do: [KilnCMS.FixturePlugin.CalloutBlock]
 
   @impl true
-  def field_types, do: [KilnCMS.FixturePlugin.FieldTypes.Rating]
+  def field_types,
+    do: [
+      KilnCMS.FixturePlugin.FieldTypes.Rating,
+      KilnCMS.FixturePlugin.FieldTypes.Tokenless,
+      KilnCMS.FixturePlugin.FieldTypes.Exploding
+    ]
 
   @impl true
   def nav_items, do: [%{label: "Fixture", path: "/editor/fixture", role: :admin}]

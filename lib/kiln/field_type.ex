@@ -110,7 +110,7 @@ defmodule Kiln.FieldType do
   """
   @callback input_parts(definition :: struct()) :: [input_part()]
 
-  @doc """
+  @doc ~S"""
   Extra `Kiln.Tokens` (#468) definitions this type can offer beyond the
   generic `[field:<name>]` substitution the slug/alias pattern engine
   (`KilnCMS.Slug.Pattern`) already gives every custom field for free — that
@@ -125,21 +125,34 @@ defmodule Kiln.FieldType do
   the slug/alias derivation and the save-time pattern validation expand against
   them alongside the built-in vocabulary.
 
-  Two rules worth knowing when you write one:
+  Three rules, and the first two are traps rather than niceties:
 
-    * **Scope the match to the field's own name.** `definition.name` is in
-      scope, so `~r/\Afield:\#{definition.name}\.lat\z/` rather than a bare
-      `"field:lat"` — two fields of the same type on one content type would
-      otherwise fight over a shared token.
-    * **A built-in name cannot be shadowed.** `Kiln.Tokens.expand/3` takes the
-      first matching definition and the built-ins come first, so a type
-      redefining `[title]` is ignored rather than surprising a pattern author.
+    * **Scope the match to the field's own name, anchored.** `definition.name`
+      is in scope, so `~r/\Afield:#{definition.name}\.lat\z/` rather than a
+      bare `"field:lat"` or an unanchored `~r/field:lat/`. Nothing enforces
+      this: `Kiln.Tokens.expand/3` takes the *first* matching definition, so a
+      loose matcher on a type used by two fields of one content type
+      deterministically resolves both to whichever field is collected first,
+      with no error anywhere.
+    * **Your name must contain a `.`, or the built-in swallows it.** The
+      built-in `[field:<name>]` family matches `~r/\Afield:[a-z0-9_]+\z/` and
+      is tried first, so a definition matching `"field:price_amount"` never
+      runs — the generic path resolves it to the (absent) custom-field value
+      and expands empty, and validation still answers `:ok`, so the operator
+      sees no error. Dotted names like `field:price.amount` are outside the
+      built-in's character class and reach you.
+    * **Built-ins cannot be shadowed the other way either.** A type redefining
+      `[title]` is ignored rather than surprising a pattern author.
 
   The field must exist before a pattern may name its token — until then nothing
   claims it and save-time validation truthfully rejects it as unknown.
 
-  A raise here cannot fail a save: the collector rescues, and the token expands
-  empty like any unmatched one.
+  Building the list cannot fail a save: `KilnCMS.CMS.Slugs.type_token_definitions/1`
+  rescues, and the type contributes nothing. **The `resolve` closures you return
+  are also rescued per token** (`Kiln.Tokens.expand/3`), so one that raises on an
+  unexpected context expands empty rather than taking down the write — but write
+  them total anyway, since an expansion that silently vanishes becomes a slug
+  that silently changes shape.
   """
   @callback tokens(definition :: struct()) :: [Kiln.Tokens.definition()]
 

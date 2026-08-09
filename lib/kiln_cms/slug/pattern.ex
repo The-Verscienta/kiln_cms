@@ -57,7 +57,13 @@ defmodule KilnCMS.Slug.Pattern do
   @spec uses?(String.t() | nil, String.t()) :: boolean()
   def uses?(pattern, token), do: Tokens.uses?(pattern, token)
 
-  @field_in_pattern ~r/\[field:([a-z0-9_]+)\]/
+  # Same character class as `Kiln.Tokens`' own grammar, dot included (#804).
+  # Narrower here and `field_names/1` goes blind to `[field:location.lat]`,
+  # which sends `Slugs.changeset_custom_fields/2` down its "no field tokens"
+  # branch — skipping the computed-field derivation AND `stringify_keys/1`, so
+  # an atom-keyed payload from an Elixir/MCP caller derived a different slug
+  # than the same record posted through the JSON API.
+  @field_in_pattern ~r/\[field:([a-z0-9._]+)\]/
 
   @doc """
   The custom-field names referenced by `[field:<name>]` tokens in `pattern`,
@@ -132,7 +138,7 @@ defmodule KilnCMS.Slug.Pattern do
     usage = Keyword.get(opts, :usage, :slug)
     extra = Keyword.get(opts, :extra_definitions, [])
 
-    case Tokens.validate(pattern, allowed_definitions(usage) ++ extra) do
+    case Tokens.validate(pattern, allowed_definitions(usage, extra)) do
       {:error, unknown} ->
         {:error,
          "unknown token(s) #{Enum.map_join(unknown, ", ", &"[#{&1}]")} — supported: " <>
@@ -173,7 +179,7 @@ defmodule KilnCMS.Slug.Pattern do
   def unknown_tokens(nil, _usage), do: []
 
   def unknown_tokens(pattern, usage) do
-    case Tokens.validate(pattern, allowed_definitions(usage)) do
+    case Tokens.validate(pattern, allowed_definitions(usage, [])) do
       :ok -> []
       {:error, unknown} -> unknown
     end
@@ -183,7 +189,7 @@ defmodule KilnCMS.Slug.Pattern do
   # the first matching definition, and a plugin field type redefining `[title]`
   # for every content type that happens to use it is not a thing a pattern
   # author could debug.
-  defp definitions(extra \\ []) do
+  defp definitions(extra) do
     [
       %{match: "title", resolve: fn _token, ctx -> Slug.derive(ctx[:title] || "") end},
       %{match: "focus-keyphrase", resolve: &focus_keyphrase/2},
@@ -201,8 +207,24 @@ defmodule KilnCMS.Slug.Pattern do
 
   # The subset a *pattern* may validly contain for `usage`. `[slug]` is
   # circular in a slug pattern, so it's excluded there — alias-only.
-  defp allowed_definitions(:alias), do: definitions()
-  defp allowed_definitions(_usage), do: Enum.reject(definitions(), &(&1.match == "slug"))
+  # The save-time vocabulary for `usage`, extras included.
+  #
+  # `extra` is filtered by the SAME rule rather than concatenated after it. A
+  # plugin's `c:Kiln.FieldType.tokens/1` list is third-party data, and appending
+  # it to an already-filtered list let a definition matching `"slug"` re-admit
+  # the very token `:slug` usage removes as circular — validation would then
+  # accept `"[slug]-x"` as a slug pattern. Expansion was never at risk (built-ins
+  # come first there); this closes the validation half.
+  defp allowed_definitions(usage, extra) do
+    case usage do
+      :alias -> definitions(extra)
+      _slug -> Enum.reject(definitions(extra), &matches_slug?/1)
+    end
+  end
+
+  defp matches_slug?(%{match: match}) when is_binary(match), do: match == "slug"
+  defp matches_slug?(%{match: %Regex{} = regex}), do: Regex.match?(regex, "slug")
+  defp matches_slug?(_definition), do: false
 
   defp focus_keyphrase(_token, ctx) do
     case Slug.focus_keyphrase(ctx[:seo_keywords]) do

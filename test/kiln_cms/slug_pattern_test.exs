@@ -170,6 +170,52 @@ defmodule KilnCMS.Slug.PatternTest do
     end
   end
 
+  # Review findings from #804 — each of these was a real defect the first pass
+  # shipped, so each gets the case that would have caught it.
+  describe "the extras boundary (#804 review)" do
+    test "an extra definition cannot re-admit [slug] in a slug pattern" do
+      # `allowed_definitions(:slug)` drops the built-in `slug` token because it
+      # is circular. A plugin's token list is third-party data; appending it
+      # after that filter let a loose matcher put the token back.
+      loose = [%{match: ~r/slug/, resolve: fn _token, _ctx -> "x" end}]
+
+      assert {:error, message} =
+               Pattern.validate("[slug]-x", usage: :slug, extra_definitions: loose)
+
+      assert message =~ "unknown token"
+
+      # An alias pattern may still name it, with or without extras.
+      assert Pattern.validate("/a/[slug]", usage: :alias, extra_definitions: loose) == :ok
+    end
+
+    test "an extra definition is still admitted for every other token" do
+      word = [%{match: ~r/\Afield:rating\.word\z/, resolve: fn _t, _c -> "three" end}]
+
+      assert Pattern.validate("[title]-[field:rating.word]",
+               usage: :slug,
+               extra_definitions: word
+             ) == :ok
+    end
+
+    test "field_names/1 sees a dotted token" do
+      # Blind to it, `Slugs.changeset_custom_fields/2` took its "no field
+      # tokens" branch and skipped key stringification, so the same record
+      # slugged differently through MCP (atom keys) than through the JSON API.
+      assert Pattern.field_names("[title]-[field:rating.word]") == ["rating.word"]
+      assert Pattern.field_names("[field:size]-[field:location.lat]") == ["size", "location.lat"]
+    end
+
+    test "a resolver that raises expands empty instead of failing the write" do
+      exploding = [
+        # Reads a context key the caller never set — the shape of a plugin
+        # resolver that assumes its custom field is present.
+        %{match: ~r/\Afield:boom\z/, resolve: fn _token, ctx -> String.upcase(ctx[:nope]) end}
+      ]
+
+      assert Pattern.expand("[title]-[field:boom]", %{title: "Guide"}, exploding) == "guide"
+    end
+  end
+
   describe "Slugs.derive_base/2 (shared entry point)" do
     alias KilnCMS.CMS.Slugs
 

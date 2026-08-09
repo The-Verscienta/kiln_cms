@@ -119,6 +119,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:kind, kind)
          |> assign(:content_type, content_type)
          |> assign(:slug_targets, slug_targets(content_type))
+         # The type's own field-type tokens (#804), off the definitions this
+         # mount already loaded — so the live preview derives through exactly
+         # the vocabulary `Changes.DeriveSlug` uses, at no extra query.
+         |> assign(
+           :slug_token_definitions,
+           KilnCMS.CMS.Slugs.type_token_definitions(field_definitions)
+         )
          |> assign(:has_excerpt, content_type.excerpt?)
          |> assign(:actor, actor)
          |> assign(:tier, KilnCMSWeb.LiveUserAuth.effective_tier(socket))
@@ -631,7 +638,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
       derived =
         KilnCMS.CMS.Slugs.derive_base(
           socket.assigns.content_type.slug_pattern,
-          slug_context(socket)
+          slug_context(socket),
+          slug_token_definitions(socket)
         )
 
       not KilnCMS.CMS.Slugs.underived?(record.slug, derived)
@@ -657,6 +665,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  # The type's extra token definitions (#804), resolved at mount and kept in
+  # assigns: `Slugs.descriptor_token_definitions/4` can read FieldDefinition
+  # rows, and this is consulted on every keystroke that touches a slug source.
+  defp slug_token_definitions(socket), do: socket.assigns[:slug_token_definitions] || []
+
   defp slug_targets(ct) do
     [["form", "title"], ["form", "seo_keywords"]] ++
       if(Slug.Pattern.uses?(ct.slug_pattern, "category"),
@@ -668,12 +681,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Derivation + pathauto-style dedupe, so the slug shown live is the one that
   # will actually save ("guide-kiln-2" when "guide-kiln" is taken). Shares
-  # `Slugs.derive_base/2` with the resource-level `DeriveSlug` change.
+  # `Slugs.derive_base/3` with the resource-level `DeriveSlug` change —
+  # including the type's own field-type tokens (#804), without which the
+  # preview and the save disagreed and every draft read as author-pinned.
   defp derive_unique_slug(socket, params) do
     base =
       KilnCMS.CMS.Slugs.derive_base(
         socket.assigns.content_type.slug_pattern,
-        slug_context(socket, params)
+        slug_context(socket, params),
+        slug_token_definitions(socket)
       )
 
     if base == "",
@@ -693,9 +709,25 @@ defmodule KilnCMSWeb.ContentEditorLive do
       title: param_or(params, "title", record.title),
       seo_keywords: param_or(params, "seo_keywords", Map.get(record, :seo_keywords)),
       category_slug: category_slug(socket, param_or(params, "category_id", record.category_id)),
+      # String keys, matching `Slugs.changeset_custom_fields/2` and what a
+      # `[field:<name>]` resolver looks up. Omitted entirely before #804, so a
+      # field-token pattern never previewed the same slug it saved.
+      custom_fields: slug_custom_fields(record, params),
       date: slug_date(record, params)
     }
   end
+
+  defp slug_custom_fields(record, params) do
+    case params && params["custom_fields"] do
+      %{} = posted -> Map.new(posted, fn {key, value} -> {to_string(key), value} end)
+      _absent -> stringify_custom_fields(Map.get(record, :custom_fields))
+    end
+  end
+
+  defp stringify_custom_fields(%{} = fields),
+    do: Map.new(fields, fn {key, value} -> {to_string(key), value} end)
+
+  defp stringify_custom_fields(_other), do: %{}
 
   defp param_or(nil, _key, fallback), do: fallback
   defp param_or(params, key, fallback), do: params[key] || fallback

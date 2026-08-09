@@ -145,7 +145,135 @@ defmodule KilnCMS.CMS.FieldTypeTokensTest do
     end
   end
 
+  # The shipped composite. #804's own motivating example is `[field:location.lat]`,
+  # and until the review it was cited in four docstrings while no in-tree type
+  # implemented the callback — so on a real install the token was still
+  # rejected at save time.
+  describe "the shipped geolocation type" do
+    defp located_type!(actor, pattern) do
+      type =
+        CMS.create_type_definition!(
+          %{name: "venue#{System.unique_integer([:positive])}", label: "Venue"},
+          actor: actor
+        )
+
+      CMS.create_field_definition!(
+        %{
+          type_definition_id: type.id,
+          name: "location",
+          label: "Location",
+          field_type: :geolocation
+        },
+        actor: actor
+      )
+
+      CMS.update_type_definition!(type, %{slug_pattern: pattern}, actor: actor)
+    end
+
+    test "a coordinate part reaches a derived slug" do
+      actor = admin()
+      type = located_type!(actor, "[title]-[field:location.label]")
+
+      entry =
+        ContentTypes.create!(
+          type.name,
+          %{
+            title: "Autumn Show",
+            custom_fields: %{
+              "location" => %{"lat" => "51.5074", "lng" => "-0.1278", "label" => "London"}
+            }
+          },
+          actor: actor
+        )
+
+      assert entry.slug == "autumn-show-london"
+    end
+
+    test "latitude and longitude are offered, zoom is not" do
+      actor = admin()
+      type = located_type!(actor, nil)
+
+      assert {:ok, _updated} =
+               CMS.update_type_definition(
+                 type,
+                 %{slug_pattern: "[field:location.lat]-[field:location.lng]"},
+                 actor: actor
+               )
+
+      assert {:error, _error} =
+               CMS.update_type_definition(
+                 type,
+                 %{slug_pattern: "[field:location.zoom]"},
+                 actor: actor
+               )
+    end
+
+    test "a token is scoped to its own field, so two fields never contend" do
+      actor = admin()
+      type = located_type!(actor, nil)
+
+      CMS.create_field_definition!(
+        %{
+          type_definition_id: type.id,
+          name: "meeting",
+          label: "Meeting",
+          field_type: :geolocation
+        },
+        actor: actor
+      )
+
+      entry =
+        ContentTypes.create!(
+          type.name,
+          %{
+            title: "Show",
+            custom_fields: %{
+              "location" => %{"lat" => 1.0, "lng" => 2.0, "label" => "London"},
+              "meeting" => %{"lat" => 3.0, "lng" => 4.0, "label" => "Leeds"}
+            }
+          },
+          actor: actor
+        )
+
+      updated =
+        CMS.update_type_definition!(
+          type,
+          %{slug_pattern: "[field:meeting.label]"},
+          actor: actor
+        )
+
+      assert updated.slug_pattern == "[field:meeting.label]"
+
+      # And the entry created above still resolves each field separately.
+      definitions = CMS.field_definitions_for_definition!(type.id, authorize?: false)
+      extra = Slugs.type_token_definitions(definitions)
+      context = Slugs.record_context(entry)
+
+      assert KilnCMS.Slug.Pattern.expand("[field:location.label]", context, extra) == "london"
+      assert KilnCMS.Slug.Pattern.expand("[field:meeting.label]", context, extra) == "leeds"
+    end
+  end
+
   describe "type_token_definitions/1" do
+    # The probe branch. A module that implements the behaviour but NOT the
+    # optional callback must contribute nothing rather than raise — the branch
+    # `Code.ensure_loaded?/1 and function_exported?/3` guards.
+    test "a field-type module without the callback contributes nothing" do
+      definition = %{name: "plain", field_type: :tokenless}
+      assert KilnCMS.CMS.FieldTypes.get(:tokenless)
+
+      assert Slugs.type_token_definitions([definition]) == []
+    end
+
+    # The rescue. A plugin whose `tokens/1` raises must not fail the save that
+    # was merely deriving a slug.
+    test "a field type whose tokens/1 raises contributes nothing" do
+      definition = %{name: "boom", field_type: :exploding}
+      assert KilnCMS.CMS.FieldTypes.get(:exploding)
+
+      assert Slugs.type_token_definitions([definition]) == []
+    end
+
     test "collects from a plugin type and ignores core ones" do
       actor = admin()
       type = rated_type!(actor, nil)
