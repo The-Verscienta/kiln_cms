@@ -141,6 +141,24 @@ defmodule KilnCMS.Config.EnvTest do
       end
     end
 
+    # #1091. Elixir integers are arbitrary-precision, so before the ceiling a
+    # *digit* slip was accepted where a *letter* slip warned: `144444444444444`
+    # is a fat-fingered `14`, and it parsed cleanly into a retention window of
+    # four billion years.
+    test "a value past the ceiling is rejected, so a digit slip warns like a letter slip" do
+      for raw <- ["2147483648", "144444444444444", "99999999999999999999999999"] do
+        put(raw)
+
+        assert quietly(fn -> Env.positive_integer(@var) end) == :unrecognized,
+               "#{raw} is past the ceiling and must not be interpreted"
+      end
+    end
+
+    test "the ceiling itself is accepted — it is a bound, not an exclusion" do
+      put("2147483647")
+      assert Env.positive_integer(@var) == {:ok, 2_147_483_647}
+    end
+
     test "a rejected value warns, quoting exactly what the operator typed" do
       put(" 7 days ")
 
@@ -151,6 +169,16 @@ defmodule KilnCMS.Config.EnvTest do
       assert warning =~ "positive integer"
       # The default is what actually takes effect, so the line has to say so.
       assert warning =~ "keeping the configured default"
+    end
+
+    test "an over-ceiling value's warning names the bound" do
+      # Without the number, "not a positive integer" reads as nonsense to
+      # someone looking at a value that is plainly a positive integer.
+      put("144444444444444")
+
+      warning = capture_io(:stderr, fn -> Env.positive_integer(@var) end)
+
+      assert warning =~ "2147483647"
     end
 
     test "a recognized value warns about nothing" do
@@ -367,7 +395,7 @@ defmodule KilnCMS.Config.EnvTest do
 
       assert log =~ "BACKUP_KEEP_DAYS"
       assert log =~ "had no effect"
-      assert log =~ "Use a positive integer."
+      assert log =~ "Use a positive integer up to 2147483647."
       refute log =~ "true/1/yes/on"
     end
 
@@ -379,7 +407,7 @@ defmodule KilnCMS.Config.EnvTest do
         ])
 
       assert log =~ "true/1/yes/on"
-      assert log =~ "Use a positive integer."
+      assert log =~ "Use a positive integer up to 2147483647."
     end
 
     test "an enum is told the spellings it was actually checked against (#912)" do

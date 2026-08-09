@@ -67,7 +67,8 @@ Two places, because one of them is not enough (#634):
   `Logger.warning` never reaches it. Issues are grouped per variable, so a flag
   that stays misspelled is one issue rather than a new one on every restart.
 
-Only variables that hold a **flag or a count** go through this. Nothing here echoes a
+Only variables that hold a **flag**, a **count**, or a short constrained value
+like an enum spelling or a colour go through this. Nothing here echoes a
 credential; a variable carrying a secret is read elsewhere and its value is
 never logged.
 
@@ -92,6 +93,12 @@ as `Env.positive_integer/1` (#1009). Before that each had hand-rolled its own
 * **A partly-numeric value is refused, not truncated.** `BACKUP_KEEP_DAYS=7 days`
   keeps the default rather than quietly becoming 7 — the operator meant a week
   and would otherwise never learn the unit was wrong.
+* **Anything above 2147483647 is refused** (#1091). Elixir integers have no
+  upper bound, so without this a *digit* slip was accepted where a *letter* slip
+  warned — `BACKUP_KEEP_DAYS=144444444444444` parsed cleanly into a
+  four-billion-year retention. The ceiling is not a claim about a sensible
+  value; every real one here is smaller by orders of magnitude, so what it
+  catches is a typo.
 * **Anything refused keeps the default and warns**, through all three sinks
   above. The count case is what #1009 added to that replay: the hand-rolled
   parsers wrote to stderr and stopped there, so a mistyped count reached neither
@@ -108,7 +115,7 @@ These must be set when running a production release. Missing `DATABASE_URL`,
 | `PHX_SERVER` | Set to start the web server in a release; without it the release boots but does not serve HTTP. The generated `bin/server` script sets this for you. **Presence-checked, not parsed** — the partial exception to the on/off rules above. *Any* value starts the server, including a blank `PHX_SERVER=` and an unrecognized one, because Phoenix documents this as "any truthy value" and reading a declared-but-empty variable as "serve nothing" is a silent outage. The one rule it does honour is the off-spellings: `false`/`0`/`no`/`off` keep the server off, where they used to start it anyway. | [`config/runtime.exs:65`](../config/runtime.exs#L65) |
 | `DATABASE_URL` | Postgres connection string, e.g. `ecto://USER:PASS@HOST/DATABASE`. Raises if missing. | [`config/runtime.exs:641`](../config/runtime.exs#L641) |
 | `SECRET_KEY_BASE` | Signs/encrypts session cookies and other secrets. Generate with `mix phx.gen.secret`. Raises if missing. | [`config/runtime.exs:694`](../config/runtime.exs#L694) |
-| `TOKEN_SIGNING_SECRET` | Signs authentication tokens (AshAuthentication). Raises if missing. | [`config/runtime.exs:820`](../config/runtime.exs#L820) |
+| `TOKEN_SIGNING_SECRET` | Signs authentication tokens (AshAuthentication). Raises if missing. | [`config/runtime.exs:858`](../config/runtime.exs#L858) |
 | `PHX_HOST` | Public hostname used to generate URLs and validate socket origins (defaults to `example.com`, so effectively required — wrong values break links, emails, **and LiveView socket connections**). Bare hostname; any `https://` prefix or trailing `/` is stripped. | [`config/runtime.exs:707`](../config/runtime.exs#L707) |
 
 ## Optional — server & networking
@@ -228,10 +235,10 @@ KilnCMS defaults. All four are read only under `:prod`; for dev or test, set
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `SITE_NAME` | `KilnCMS` | Instance name in the admin chrome, page titles and outbound email. Also the default provenance `signer` identity when `KilnCMS.Provenance`'s `:signer` is unset. | [`config/runtime.exs:801`](../config/runtime.exs#L801) |
-| `BRAND_LOGO_URL` | unset | Logo shown in the admin chrome and on branded error pages. If the host differs from the site's origin it must also be in `CSP_IMG_SRC`, or the browser blocks the image. | [`config/runtime.exs:802`](../config/runtime.exs#L802) |
-| `BRAND_FAVICON_URL` | unset | Favicon URL. Same `CSP_IMG_SRC` caveat as the logo. | [`config/runtime.exs:803`](../config/runtime.exs#L803) |
-| `BRAND_PRIMARY_COLOR` | unset | Hex colour (`#1d4ed8`) driving the emitted OKLCH theme tokens. Anything that isn't a hex colour is **ignored with a warning** rather than interpreted, since the value feeds contrast computation. | [`config/runtime.exs:804`](../config/runtime.exs#L804) |
+| `SITE_NAME` | `KilnCMS` | Instance name in the admin chrome, page titles and outbound email. Also the default provenance `signer` identity when `KilnCMS.Provenance`'s `:signer` is unset. | [`config/runtime.exs:839`](../config/runtime.exs#L839) |
+| `BRAND_LOGO_URL` | unset | Logo shown in the admin chrome and on branded error pages. If the host differs from the site's origin it must also be in `CSP_IMG_SRC`, or the browser blocks the image. | [`config/runtime.exs:840`](../config/runtime.exs#L840) |
+| `BRAND_FAVICON_URL` | unset | Favicon URL. Same `CSP_IMG_SRC` caveat as the logo. | [`config/runtime.exs:841`](../config/runtime.exs#L841) |
+| `BRAND_PRIMARY_COLOR` | unset | Hex colour driving the emitted OKLCH theme tokens — `#1d4ed8` or the `#1d4` shorthand, stored in canonical long lowercase form. Anything else is **ignored with a warning** rather than interpreted, since the value feeds contrast computation. Validated at boot alongside every other variable here, so a bad value reaches `Logger` and Sentry and not just container stdout (#1089); before that it was checked only at render time, where a bare `Logger.warning` never reaches Sentry. | [`config/runtime.exs:808`](../config/runtime.exs#L808) |
 
 ## Optional — Unsplash (media library)
 
@@ -257,16 +264,16 @@ CDN deployment guide.
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `S3_BUCKET` | unset | Enables the S3 adapter. Leave unset to use local storage. | [`config/runtime.exs:914`](../config/runtime.exs#L914) |
-| `S3_PUBLIC_BASE_URL` | — | Public base URL objects are served from — the CDN hostname, including the bucket path if the provider's URLs carry one. **Required when `S3_BUCKET` is set** (raises otherwise). | [`config/runtime.exs:921`](../config/runtime.exs#L921) |
-| `AWS_ACCESS_KEY_ID` | — | S3 access key. **Required when `S3_BUCKET` is set** (`fetch_env!`). | [`config/runtime.exs:947`](../config/runtime.exs#L947) |
-| `AWS_SECRET_ACCESS_KEY` | — | S3 secret key. **Required when `S3_BUCKET` is set** (`fetch_env!`). | [`config/runtime.exs:948`](../config/runtime.exs#L948) |
-| `AWS_REGION` | `us-east-1` | Region. Use `auto` for Cloudflare R2; a real region for B2/Wasabi/AWS. | [`config/runtime.exs:950`](../config/runtime.exs#L950) |
-| `S3_ACL` | unset | Per-object canned ACL (e.g. `public_read`). Only needed if the bucket isn't public at the bucket level. | [`config/runtime.exs:928`](../config/runtime.exs#L928) |
-| `S3_PRIVATE_BUCKET` | unset | A separate bucket for gated documents (#481) — this app's own AWS credentials read it directly, so it needs no public-read config, CDN, or public-base-URL equivalent. Without it, gating a document is refused rather than silently falling back to the public bucket. | [`config/runtime.exs:939`](../config/runtime.exs#L939) |
-| `S3_ENDPOINT_HOST` | unset | Custom endpoint host for non-AWS stores (R2/B2/Wasabi/MinIO). Leave unset for AWS S3. | [`config/runtime.exs:954`](../config/runtime.exs#L954) |
-| `S3_ENDPOINT_SCHEME` | `https://` | Scheme for the custom endpoint. | [`config/runtime.exs:956`](../config/runtime.exs#L956) |
-| `S3_ENDPOINT_PORT` | `443` | Port for the custom endpoint. | [`config/runtime.exs:958`](../config/runtime.exs#L958) |
+| `S3_BUCKET` | unset | Enables the S3 adapter. Leave unset to use local storage. | [`config/runtime.exs:952`](../config/runtime.exs#L952) |
+| `S3_PUBLIC_BASE_URL` | — | Public base URL objects are served from — the CDN hostname, including the bucket path if the provider's URLs carry one. **Required when `S3_BUCKET` is set** (raises otherwise). | [`config/runtime.exs:959`](../config/runtime.exs#L959) |
+| `AWS_ACCESS_KEY_ID` | — | S3 access key. **Required when `S3_BUCKET` is set** (`fetch_env!`). | [`config/runtime.exs:985`](../config/runtime.exs#L985) |
+| `AWS_SECRET_ACCESS_KEY` | — | S3 secret key. **Required when `S3_BUCKET` is set** (`fetch_env!`). | [`config/runtime.exs:986`](../config/runtime.exs#L986) |
+| `AWS_REGION` | `us-east-1` | Region. Use `auto` for Cloudflare R2; a real region for B2/Wasabi/AWS. | [`config/runtime.exs:988`](../config/runtime.exs#L988) |
+| `S3_ACL` | unset | Per-object canned ACL (e.g. `public_read`). Only needed if the bucket isn't public at the bucket level. | [`config/runtime.exs:966`](../config/runtime.exs#L966) |
+| `S3_PRIVATE_BUCKET` | unset | A separate bucket for gated documents (#481) — this app's own AWS credentials read it directly, so it needs no public-read config, CDN, or public-base-URL equivalent. Without it, gating a document is refused rather than silently falling back to the public bucket. | [`config/runtime.exs:977`](../config/runtime.exs#L977) |
+| `S3_ENDPOINT_HOST` | unset | Custom endpoint host for non-AWS stores (R2/B2/Wasabi/MinIO). Leave unset for AWS S3. | [`config/runtime.exs:992`](../config/runtime.exs#L992) |
+| `S3_ENDPOINT_SCHEME` | `https://` | Scheme for the custom endpoint. | [`config/runtime.exs:994`](../config/runtime.exs#L994) |
+| `S3_ENDPOINT_PORT` | `443` | Port for the custom endpoint. | [`config/runtime.exs:996`](../config/runtime.exs#L996) |
 
 Media objects are uploaded with `Cache-Control: public, max-age=31536000,
 immutable` — there is no env var for it, because storage keys are write-once
@@ -286,11 +293,11 @@ cron's backups, not only ones taken from the app.
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `BACKUP_ENABLED` | `true` | Set to an off-spelling to disable the **in-app** backup path — the console explains why and the button is disabled. Cron backups on the host are unaffected, which is the point: turning off the button is not turning off backups. Parsed by the shared [on/off rules](#onoff-variables). | [`config/runtime.exs:873`](../config/runtime.exs#L873) |
-| `BACKUP_DIR` | `/var/backups/kiln` | Where backups land, for both paths. | [`config/runtime.exs:874`](../config/runtime.exs#L874) |
-| `BACKUP_KEEP_DAYS` | `14` | Local retention in days, enforced by both paths. A non-positive or unparseable value keeps the default and warns — read literally, `0` would delete the backup it had just taken. | [`config/runtime.exs:875`](../config/runtime.exs#L875) |
-| `BACKUP_STALE_AFTER_HOURS` | `36` | How old the newest backup may be before the console warns and the overview shows a red strip. Deliberately longer than a daily cadence: a warning that fires because a nightly job ran at 03:20 instead of 03:17 is one an admin learns to ignore. | [`config/runtime.exs:876`](../config/runtime.exs#L876) |
-| `MEDIA_DIR` | unset | Uploads root to archive — **Local storage adapter only**. Leave unset on S3/R2, where the bucket is backed up provider-side: tarring a directory that doesn't hold the media produces an archive that looks like a media backup and restores nothing. | [`config/runtime.exs:902`](../config/runtime.exs#L902) |
+| `BACKUP_ENABLED` | `true` | Set to an off-spelling to disable the **in-app** backup path — the console explains why and the button is disabled. Cron backups on the host are unaffected, which is the point: turning off the button is not turning off backups. Parsed by the shared [on/off rules](#onoff-variables). | [`config/runtime.exs:911`](../config/runtime.exs#L911) |
+| `BACKUP_DIR` | `/var/backups/kiln` | Where backups land, for both paths. | [`config/runtime.exs:912`](../config/runtime.exs#L912) |
+| `BACKUP_KEEP_DAYS` | `14` | Local retention in days, enforced by both paths. A non-positive or unparseable value keeps the default and warns — read literally, `0` would delete the backup it had just taken. | [`config/runtime.exs:913`](../config/runtime.exs#L913) |
+| `BACKUP_STALE_AFTER_HOURS` | `36` | How old the newest backup may be before the console warns and the overview shows a red strip. Deliberately longer than a daily cadence: a warning that fires because a nightly job ran at 03:20 instead of 03:17 is one an admin learns to ignore. | [`config/runtime.exs:914`](../config/runtime.exs#L914) |
+| `MEDIA_DIR` | unset | Uploads root to archive — **Local storage adapter only**. Leave unset on S3/R2, where the bucket is backed up provider-side: tarring a directory that doesn't hold the media produces an archive that looks like a media backup and restores nothing. | [`config/runtime.exs:940`](../config/runtime.exs#L940) |
 
 > **The runtime image needs `pg_dump`.** It installs `postgresql-client-17`,
 > and the **major version must match your Postgres server** — `pg_dump` refuses
@@ -332,16 +339,16 @@ outbound port 25.
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `MAIL_MODE` | unset | `smtp` = relay through an SMTP server; `direct` = deliver straight to each recipient domain's MX hosts (built-in MTA, no relay). Anything else raises at boot. | [`config/runtime.exs:1135`](../config/runtime.exs#L1135) |
-| `MAIL_FROM_EMAIL` | unset | From address for all outbound mail. **Required when `MAIL_MODE=direct`** (raises otherwise) — its domain is the sending/DKIM domain. | [`config/runtime.exs:1175`](../config/runtime.exs#L1175) |
-| `MAIL_FROM_NAME` | `KilnCMS` | Display name for the From address. | [`config/runtime.exs:1207`](../config/runtime.exs#L1207) |
-| `SMTP_HOST` | unset | Relay host. **Required when `MAIL_MODE=smtp`**; setting it without `MAIL_MODE` also selects smtp mode. | [`config/runtime.exs:1136`](../config/runtime.exs#L1136) |
-| `SMTP_PORT` | `587` | Relay port. 587 (STARTTLS) is the right default, and 25 belongs to `MAIL_MODE=direct`. **465 will not work**: that port expects implicit TLS from the first byte, and the adapter is configured for STARTTLS only (`tls:`, never gen_smtp's `ssl:`) with no environment variable to change it — a relay that offers both ports should be pointed at 587. | [`config/runtime.exs:1167`](../config/runtime.exs#L1167) |
-| `SMTP_USERNAME` | unset | Relay username (`auth: :always`). **From the relay provider's dashboard** — providers name the pair differently: Postmark issues one Server API Token used as *both* username and password; SES issues dedicated SMTP credentials, which are **not** your AWS access keys; Gmail requires an App Password rather than the account password. | [`config/runtime.exs:1168`](../config/runtime.exs#L1168) |
-| `SMTP_PASSWORD` | unset | Relay password; see `SMTP_USERNAME` for where it comes from. | [`config/runtime.exs:1169`](../config/runtime.exs#L1169) |
-| `SMTP_TLS` | `true` | STARTTLS to the relay. Set to an off-spelling only for a local dev/test relay. | [`config/runtime.exs:1153`](../config/runtime.exs#L1153) |
-| `SMTP_TLS_VERIFY` | `true` | Verify the relay's certificate against [CAStore](https://hex.pm/packages/castore)'s bundle, with SNI. Set to an off-spelling for a relay with a self-signed or mismatched certificate: the connection stays encrypted but the peer is not verified (`verify_none`). | [`config/runtime.exs:1153`](../config/runtime.exs#L1153) |
-| `MAIL_HELO_HOST` | `PHX_HOST` | Direct mode only: HELO/EHLO hostname. Deliverability requires the sending IP's PTR record to resolve to this name. | [`config/runtime.exs:1183`](../config/runtime.exs#L1183) |
+| `MAIL_MODE` | unset | `smtp` = relay through an SMTP server; `direct` = deliver straight to each recipient domain's MX hosts (built-in MTA, no relay). Anything else raises at boot. | [`config/runtime.exs:1173`](../config/runtime.exs#L1173) |
+| `MAIL_FROM_EMAIL` | unset | From address for all outbound mail. **Required when `MAIL_MODE=direct`** (raises otherwise) — its domain is the sending/DKIM domain. | [`config/runtime.exs:1213`](../config/runtime.exs#L1213) |
+| `MAIL_FROM_NAME` | `KilnCMS` | Display name for the From address. | [`config/runtime.exs:1245`](../config/runtime.exs#L1245) |
+| `SMTP_HOST` | unset | Relay host. **Required when `MAIL_MODE=smtp`**; setting it without `MAIL_MODE` also selects smtp mode. | [`config/runtime.exs:1174`](../config/runtime.exs#L1174) |
+| `SMTP_PORT` | `587` | Relay port. 587 (STARTTLS) is the right default, and 25 belongs to `MAIL_MODE=direct`. **465 will not work**: that port expects implicit TLS from the first byte, and the adapter is configured for STARTTLS only (`tls:`, never gen_smtp's `ssl:`) with no environment variable to change it — a relay that offers both ports should be pointed at 587. | [`config/runtime.exs:1205`](../config/runtime.exs#L1205) |
+| `SMTP_USERNAME` | unset | Relay username (`auth: :always`). **From the relay provider's dashboard** — providers name the pair differently: Postmark issues one Server API Token used as *both* username and password; SES issues dedicated SMTP credentials, which are **not** your AWS access keys; Gmail requires an App Password rather than the account password. | [`config/runtime.exs:1206`](../config/runtime.exs#L1206) |
+| `SMTP_PASSWORD` | unset | Relay password; see `SMTP_USERNAME` for where it comes from. | [`config/runtime.exs:1207`](../config/runtime.exs#L1207) |
+| `SMTP_TLS` | `true` | STARTTLS to the relay. Set to an off-spelling only for a local dev/test relay. | [`config/runtime.exs:1191`](../config/runtime.exs#L1191) |
+| `SMTP_TLS_VERIFY` | `true` | Verify the relay's certificate against [CAStore](https://hex.pm/packages/castore)'s bundle, with SNI. Set to an off-spelling for a relay with a self-signed or mismatched certificate: the connection stays encrypted but the peer is not verified (`verify_none`). | [`config/runtime.exs:1191`](../config/runtime.exs#L1191) |
+| `MAIL_HELO_HOST` | `PHX_HOST` | Direct mode only: HELO/EHLO hostname. Deliverability requires the sending IP's PTR record to resolve to this name. | [`config/runtime.exs:1221`](../config/runtime.exs#L1221) |
 | `DKIM_PRIVATE_KEY` | unset | Direct mode's DKIM signing key (PKCS#1 RSA PEM, same shape as the provenance key). **Most deployments should not set this**: `/editor/mail` generates the keypair, picks a selector, prints the TXT record to publish and then verifies it against DNS alongside SPF, DMARC, PTR and outbound port 25. This variable exists for a deployment whose policy forbids a private key in the database — select the env provider on that page (it falls back to this variable name when none is given, [`KilnCMS.Keys.Providers.Env`](../lib/kiln_cms/keys/providers/env.ex#L4)) and supply the PEM yourself, because that provider is read-only and the Generate button can no longer help. A blank value counts as unset. Being a multi-line PEM, it takes the same forms as `KILN_PROVENANCE_PRIVATE_KEY` — an escaped one-line double-quoted value (literal `\n`, unescaped on read, #609), a true multi-line double-quoted value, or the file provider. Generate with `openssl genrsa -traditional -out kiln-dkim.pem 2048`, and stay at 2048 bits — a 4096-bit public half overflows the 255-byte TXT string limit. See [direct-email-delivery.md](direct-email-delivery.md). | [`KilnCMS.Keys.Providers.Env`](../lib/kiln_cms/keys/providers/env.ex) |
 
 ## Optional — search (Meilisearch)
@@ -352,9 +359,9 @@ after enabling. See [`docs/meilisearch.md`](meilisearch.md).
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `MEILI_URL` | unset | Meilisearch server URL. Enables the backend when set. | [`config/runtime.exs:967`](../config/runtime.exs#L967) |
-| `MEILI_MASTER_KEY` | unset | Meilisearch API master key. | [`config/runtime.exs:971`](../config/runtime.exs#L971), [`lib/kiln_cms/search/meilisearch.ex:14`](../lib/kiln_cms/search/meilisearch.ex#L14) |
-| `MEILI_INDEX` | `kiln_content` | Index name. | [`config/runtime.exs:972`](../config/runtime.exs#L972) |
+| `MEILI_URL` | unset | Meilisearch server URL. Enables the backend when set. | [`config/runtime.exs:1005`](../config/runtime.exs#L1005) |
+| `MEILI_MASTER_KEY` | unset | Meilisearch API master key. | [`config/runtime.exs:1009`](../config/runtime.exs#L1009), [`lib/kiln_cms/search/meilisearch.ex:14`](../lib/kiln_cms/search/meilisearch.ex#L14) |
+| `MEILI_INDEX` | `kiln_content` | Index name. | [`config/runtime.exs:1010`](../config/runtime.exs#L1010) |
 
 ## Optional — AI-assisted SEO drafting
 
@@ -368,8 +375,8 @@ and should be added to your DPA's subprocessor list. See [`docs/seo.md`](seo.md)
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `SEO_MODEL` | unset | `req_llm` model spec, e.g. `ollama:llama3.1` or `anthropic:claude-sonnet-5`. Enables drafting when set. | [`config/runtime.exs:987`](../config/runtime.exs#L987) |
-| `SEO_GENERATOR` | `KilnCMS.Seo.Generator.ReqLLM` | Override the adapter module with your own `KilnCMS.Seo.Generator`. | [`config/runtime.exs:989`](../config/runtime.exs#L989) |
+| `SEO_MODEL` | unset | `req_llm` model spec, e.g. `ollama:llama3.1` or `anthropic:claude-sonnet-5`. Enables drafting when set. | [`config/runtime.exs:1025`](../config/runtime.exs#L1025) |
+| `SEO_GENERATOR` | `KilnCMS.Seo.Generator.ReqLLM` | Override the adapter module with your own `KilnCMS.Seo.Generator`. | [`config/runtime.exs:1027`](../config/runtime.exs#L1027) |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, … | unset | Provider credentials. **Read by `req_llm`, never by Kiln** — they don't enter Kiln's config or database. | `req_llm` |
 
 ## Optional — AI block assist in the editor
@@ -382,8 +389,8 @@ boot warning for a hosted provider. See [`docs/ai-assist.md`](ai-assist.md).
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `ASSIST_MODEL` | unset | `req_llm` model spec, e.g. `ollama:llama3.1`. Enables block assist when set. | [`config/runtime.exs:1010`](../config/runtime.exs#L1010) |
-| `ASSIST_GENERATOR` | `KilnCMS.Assist.Generator.ReqLLM` | Override the adapter module with your own `KilnCMS.Assist.Generator`. | [`config/runtime.exs:1012`](../config/runtime.exs#L1012) |
+| `ASSIST_MODEL` | unset | `req_llm` model spec, e.g. `ollama:llama3.1`. Enables block assist when set. | [`config/runtime.exs:1048`](../config/runtime.exs#L1048) |
+| `ASSIST_GENERATOR` | `KilnCMS.Assist.Generator.ReqLLM` | Override the adapter module with your own `KilnCMS.Assist.Generator`. | [`config/runtime.exs:1050`](../config/runtime.exs#L1050) |
 
 ## Optional — generated answers for `/api/ask`
 
@@ -404,8 +411,8 @@ preference and same boot warning for a hosted provider. See
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `ASK_MODEL` | unset | `req_llm` model spec, e.g. `ollama:llama3.1`. Enables generated answers when set. | [`config/runtime.exs:1038`](../config/runtime.exs#L1038) |
-| `ASK_GENERATOR` | `KilnCMS.Ask.Generator.ReqLLM` | Override the adapter module with your own `KilnCMS.Ask.Generator`. | [`config/runtime.exs:1040`](../config/runtime.exs#L1040) |
+| `ASK_MODEL` | unset | `req_llm` model spec, e.g. `ollama:llama3.1`. Enables generated answers when set. | [`config/runtime.exs:1076`](../config/runtime.exs#L1076) |
+| `ASK_GENERATOR` | `KilnCMS.Ask.Generator.ReqLLM` | Override the adapter module with your own `KilnCMS.Ask.Generator`. | [`config/runtime.exs:1078`](../config/runtime.exs#L1078) |
 
 ## Optional — rich embed cards (oEmbed, #489)
 
@@ -423,8 +430,8 @@ thumbnail are stored, and the thumbnail must be on that provider's own CDN.
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `OEMBED_ENABLED` | `false` | Resolve oEmbed metadata so embeds render as cards. | [`config/runtime.exs:1067`](../config/runtime.exs#L1067) |
-| `OEMBED_PROVIDERS` | unset (all) | Comma-separated provider names to **narrow** the built-in list. Cannot add one — a new provider is a host this server dials, so it is a code change. | [`config/runtime.exs:1069`](../config/runtime.exs#L1069) |
+| `OEMBED_ENABLED` | `false` | Resolve oEmbed metadata so embeds render as cards. | [`config/runtime.exs:1105`](../config/runtime.exs#L1105) |
+| `OEMBED_PROVIDERS` | unset (all) | Comma-separated provider names to **narrow** the built-in list. Cannot add one — a new provider is a host this server dials, so it is a code change. | [`config/runtime.exs:1107`](../config/runtime.exs#L1107) |
 
 ## Optional — outbound link checking (#474)
 
@@ -523,9 +530,9 @@ configured. See [editorial-consent.md](editorial-consent.md) and
 | `KILN_EXPERIMENTS_ENABLED` | `false` | Set to `true`/`1`/`yes`/`on` to serve A/B content experiments (#499). OFF by default, and the deployment gets a say because a page under a running experiment is served `private, no-store` — with the usual `public, max-age=60` a CDN would cache one arm and hand it to every visitor, which is a 100/0 split reported as 50/50. No visitor is tracked unless you also set `KILN_EXPERIMENTS_STICKY` below: on-site assignment is stateless and headless callers supply their own `?variant_key=`. Parsed by the shared [on/off rules](#onoff-variables). Ignored under `MIX_ENV=test`. See [content-experiments-plan.md](content-experiments-plan.md). | [`config/runtime.exs:450`](../config/runtime.exs#L450) |
 | `KILN_EXPERIMENTS_STICKY` | `false` | Set to `true`/`1`/`yes`/`on` to keep a visitor in the same A/B arm across page loads (#984). **This is the one switch that puts a cookie on visitors**, so it is deliberately separate from `KILN_EXPERIMENTS_ENABLED` rather than implied by it. What is stored is a *bucket* — one integer in `0..99`, shared by a crowd, joined to nothing server-side — plus, for a goal that converts on a later page (`content_view`, `funnel_completion`), a second cookie `_kiln_ab_x` naming the arm the visitor was shown (up to 4, each cleared the moment it converts) — the weaker of the two claims, since a combination of arms starts to narrow a visitor down. Both are `__Host-`-prefixed wherever your cookies are `Secure`, and are only minted on a page actually under experiment. Whether your regime wants consent for it is your call; see [data-flows.md](data-flows.md#sticky-assignment-cookie-984). Parsed by the shared [on/off rules](#onoff-variables). | [`config/runtime.exs:460`](../config/runtime.exs#L460) |
 | `KILN_EXPERIMENTS_STICKY_DAYS` | `30` | Lifetime of the sticky cookies above, in days. Long enough to outlive the experiment a visitor is in, short enough not to be a standing marker — a year is the reflex default and would be one. A non-positive or unparseable value warns and keeps the default. | [`config/runtime.exs:466`](../config/runtime.exs#L466) |
-| `KILN_PROVENANCE_SIGNER` | `:site_name` | Human-readable signer identity recorded in every manifest a consumer verifies — part of what the deployment publicly asserts about its content (#644). Unset falls back to the site name (which a released image can already set), so it is lower stakes than the three above; set it only to override the claim's signer without a rebuild. A blank value counts as unset. Ignored under `MIX_ENV=test`. | [`config/runtime.exs:1229`](../config/runtime.exs#L1229) |
-| `KILN_PROVENANCE_ORIGIN` | `:public_base_url` | Origin URL recorded in the manifest claim (#644). Unset falls back to the public base URL a released image already configures; set it only to override. A blank value counts as unset. Ignored under `MIX_ENV=test`. | [`config/runtime.exs:1235`](../config/runtime.exs#L1235) |
-| `KILN_PROVENANCE_AI_DISCLOSURE` | `human` | Default AI-generation disclosure embedded when a document declares none (an editor can override per-document via `custom_fields["ai_disclosure"]`). One of `human`/`ai_assisted`/`ai_generated` (case-insensitive). **An unrecognized value warns and keeps the default** rather than being coerced — it rides into a signed claim, so a typo must not silently rewrite what the deployment asserts (#644). A blank value counts as unset. Ignored under `MIX_ENV=test`. | [`config/runtime.exs:1256`](../config/runtime.exs#L1256) |
+| `KILN_PROVENANCE_SIGNER` | `:site_name` | Human-readable signer identity recorded in every manifest a consumer verifies — part of what the deployment publicly asserts about its content (#644). Unset falls back to the site name (which a released image can already set), so it is lower stakes than the three above; set it only to override the claim's signer without a rebuild. A blank value counts as unset. Ignored under `MIX_ENV=test`. | [`config/runtime.exs:1267`](../config/runtime.exs#L1267) |
+| `KILN_PROVENANCE_ORIGIN` | `:public_base_url` | Origin URL recorded in the manifest claim (#644). Unset falls back to the public base URL a released image already configures; set it only to override. A blank value counts as unset. Ignored under `MIX_ENV=test`. | [`config/runtime.exs:1273`](../config/runtime.exs#L1273) |
+| `KILN_PROVENANCE_AI_DISCLOSURE` | `human` | Default AI-generation disclosure embedded when a document declares none (an editor can override per-document via `custom_fields["ai_disclosure"]`). One of `human`/`ai_assisted`/`ai_generated` (case-insensitive). **An unrecognized value warns and keeps the default** rather than being coerced — it rides into a signed claim, so a typo must not silently rewrite what the deployment asserts (#644). A blank value counts as unset. Ignored under `MIX_ENV=test`. | [`config/runtime.exs:1294`](../config/runtime.exs#L1294) |
 
 > **Rotating the signing key.** Verification resolves the key named by each
 > signature's `key_id`, so pre-rotation anchors and manifests keep verifying —
