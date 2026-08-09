@@ -1,6 +1,8 @@
 # SEO analysis and drafting
 
 Kiln's SEO support has two halves, and they are deliberately independent.
+(A third, smaller piece — [per-type default patterns](#per-type-default-patterns)
+— needs neither.)
 
 | | Analysis | Drafting |
 |---|---|---|
@@ -44,6 +46,69 @@ Two honest limitations:
 Implementation: `KilnCMS.Seo.Analyzer` (pure) over `KilnCMS.Seo.BodyStats` (the
 body walk). Findings carry codes and numbers, never prose — messages live in
 `KilnCMSWeb.SeoComponents.finding_message/2`, so they translate.
+
+## Per-type default patterns
+
+Neither half above writes anything. If you want every record of a type to get a
+consistent `<title>` without an author typing one, give the type a **pattern**:
+
+```
+Editor → Content types (/editor/types) → a type → Default SEO title
+```
+
+`[title] | [site-name]` is the usual one. Compiled types declare the same thing
+in code:
+
+```elixir
+use KilnCMS.CMS.Content,
+  type: :post,
+  seo_title_pattern: "[title] | [site-name]",
+  seo_description_pattern: "[excerpt]"
+```
+
+Tokens are the same bracket syntax the slug and path-alias patterns use, and
+validated the same way — a typo like `[titel]` is rejected when you
+save the type, not discovered in a search result:
+
+| Token | Expands to |
+|---|---|
+| `[title]` | The record's title, as written |
+| `[excerpt]` | The excerpt, on types that have one |
+| `[category]` | The category's **name** (not its slug) [^teaser] |
+| `[site-name]` | Your site name, from white-label branding |
+| `[yyyy]` `[mm]` `[dd]` | Publish date, else scheduled date, else created |
+| `[field:<name>]` | A custom field's value, as written |
+
+Unlike a slug, nothing is slugified: this is prose, and the separators are
+whatever you typed between the brackets. A token that expands to nothing takes
+its neighbouring separator with it, so `[title] | [category]` on an
+uncategorized record renders `Kiln guide`, not `Kiln guide | `.
+
+**A pattern is a default, never an overwrite.** Three consequences worth
+knowing:
+
+- An author who types a title keeps it. The pattern only fills a field the
+  record left blank.
+- Nothing is written to the record — the expansion happens when the page is
+  rendered. So changing a type's pattern re-titles every record that never had
+  one, immediately, with no backfill and nothing to re-publish.
+- The editor's SEO panel scores what the record itself holds. A record relying
+  on the pattern shows an empty title there and the length check says so, which
+  is the honest reading: the pattern is the type's, not the record's. Type a
+  title if you want it analysed.
+
+The export (and the JSON:API/GraphQL representation of a record) also reports
+the stored fields, for the same reason — a patterned title re-imported as an
+author-typed one would be a silent override.
+
+Implementation: `KilnCMS.Seo.Pattern` (the vocabulary) and
+`KilnCMS.Seo.Patterns` (resolution at render time).
+
+[^teaser]: On a **paywall teaser** `[category]` expands to nothing, because that
+    read is pinned to a fixed set of columns with no relationships — the same
+    restriction that keeps the block tree away from a teaser. The separator
+    beside it drops out with it, so the teaser's title is shorter than the full
+    page's, never malformed.
 
 ## Drafting (optional)
 

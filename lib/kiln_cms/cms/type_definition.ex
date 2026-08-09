@@ -50,6 +50,8 @@ defmodule KilnCMS.CMS.TypeDefinition do
         :path_segment,
         :slug_pattern,
         :alias_pattern,
+        :seo_title_pattern,
+        :seo_description_pattern,
         :has_excerpt,
         :has_published_feed,
         :icon,
@@ -59,6 +61,7 @@ defmodule KilnCMS.CMS.TypeDefinition do
 
       change KilnCMS.CMS.Changes.DefaultPathSegment
       validate KilnCMS.CMS.Validations.SlugPatternTokens
+      validate KilnCMS.CMS.Validations.SeoPatternTokens
     end
 
     # `name` is deliberately not updatable — it keys entries, delivery URLs and
@@ -73,6 +76,8 @@ defmodule KilnCMS.CMS.TypeDefinition do
         :path_segment,
         :slug_pattern,
         :alias_pattern,
+        :seo_title_pattern,
+        :seo_description_pattern,
         :has_excerpt,
         :has_published_feed,
         :icon,
@@ -81,6 +86,7 @@ defmodule KilnCMS.CMS.TypeDefinition do
       ]
 
       validate KilnCMS.CMS.Validations.SlugPatternTokens
+      validate KilnCMS.CMS.Validations.SeoPatternTokens
     end
 
     # Soft-delete (AshArchival): the type disappears from the registry but its
@@ -214,6 +220,18 @@ defmodule KilnCMS.CMS.TypeDefinition do
     # multi-segment `path_alias`, e.g. "/acupuncture/needle/size/[field:size]".
     # Nil = no auto alias (flat URLs; aliases stay manual).
     attribute :alias_pattern, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
+
+    # Optional default `<title>` / meta-description patterns (#805), e.g.
+    # "[title] | [site-name]" — see `KilnCMS.Seo.Pattern`. Resolved at RENDER
+    # time by `KilnCMS.Seo.Patterns` for records whose own SEO field is blank,
+    # never written into the entry. Nil = the record's own fields, as before.
+    attribute :seo_title_pattern, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
+
+    attribute :seo_description_pattern, :string,
       public?: true,
       constraints: [max_length: KilnCMS.Limits.line()]
 

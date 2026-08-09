@@ -144,6 +144,15 @@ defmodule KilnCMS.CMS.Content do
     alias_pattern =
       opts |> Keyword.get(:alias_pattern) |> KilnCMS.Slug.Pattern.validate!(usage: :alias)
 
+    # Optional default SEO patterns (#805), e.g. "[title] | [site-name]" — see
+    # `KilnCMS.Seo.Pattern`. Unknown tokens fail the build here. Resolved at
+    # render time for records whose own field is blank; nil = no default.
+    seo_title_pattern =
+      opts |> Keyword.get(:seo_title_pattern) |> KilnCMS.Seo.Pattern.validate!()
+
+    seo_description_pattern =
+      opts |> Keyword.get(:seo_description_pattern) |> KilnCMS.Seo.Pattern.validate!()
+
     # `published?:` is accepted for backward compatibility but ignored: the
     # `/published` feed (read + route + GraphQL query) is universal since the
     # official client (#300) — every delivery consumer needs a server-side
@@ -1253,6 +1262,12 @@ defmodule KilnCMS.CMS.Content do
 
           # Optional pathauto alias pattern (#485); nil = no auto alias.
           def __kiln_content_alias_pattern__, do: unquote(alias_pattern)
+
+          # Optional default SEO patterns (#805); nil = the record's own
+          # fields. Dynamic entries carry theirs on the TypeDefinition row.
+          def __kiln_seo_title_pattern__, do: unquote(seo_title_pattern)
+
+          def __kiln_seo_description_pattern__, do: unquote(seo_description_pattern)
         end
       end
 

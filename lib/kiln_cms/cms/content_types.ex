@@ -29,6 +29,8 @@ defmodule KilnCMS.CMS.ContentTypes do
           path_segment: String.t() | nil,
           slug_pattern: String.t() | nil,
           alias_pattern: String.t() | nil,
+          seo_title_pattern: String.t() | nil,
+          seo_description_pattern: String.t() | nil,
           published_feed?: boolean(),
           source: :compiled | :dynamic,
           definition: struct() | nil
@@ -300,6 +302,14 @@ defmodule KilnCMS.CMS.ContentTypes do
         if(function_exported?(resource, :__kiln_content_alias_pattern__, 0),
           do: resource.__kiln_content_alias_pattern__()
         ),
+      seo_title_pattern:
+        if(function_exported?(resource, :__kiln_seo_title_pattern__, 0),
+          do: resource.__kiln_seo_title_pattern__()
+        ),
+      seo_description_pattern:
+        if(function_exported?(resource, :__kiln_seo_description_pattern__, 0),
+          do: resource.__kiln_seo_description_pattern__()
+        ),
       # Compiled types (Page/Post) all have a public index of published records;
       # a dynamic type says so per type (#486 reads this to decide syndication).
       published_feed?: true,
@@ -321,6 +331,8 @@ defmodule KilnCMS.CMS.ContentTypes do
       path_segment: definition.path_segment,
       slug_pattern: definition.slug_pattern,
       alias_pattern: definition.alias_pattern,
+      seo_title_pattern: definition.seo_title_pattern,
+      seo_description_pattern: definition.seo_description_pattern,
       published_feed?: definition.has_published_feed,
       source: :dynamic,
       definition: definition

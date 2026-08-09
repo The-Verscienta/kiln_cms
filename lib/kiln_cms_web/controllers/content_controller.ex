@@ -37,7 +37,7 @@ defmodule KilnCMSWeb.ContentController do
         not_found_error?: false,
         authorize?: false,
         tenant: org_id,
-        load: [:author]
+        load: [:author | KilnCMS.Seo.Patterns.loads(ct)]
       )
 
     case fetch_payload(org_id, "page", slug, locale, audiences, unlocks, fn ->
@@ -73,7 +73,7 @@ defmodule KilnCMSWeb.ContentController do
         not_found_error?: false,
         authorize?: false,
         tenant: org_id,
-        load: [:author]
+        load: [:author | KilnCMS.Seo.Patterns.loads(ct)]
       )
 
     case fetch_payload(org_id, "post", slug, locale, audiences, unlocks, fn ->
@@ -104,7 +104,7 @@ defmodule KilnCMSWeb.ContentController do
              not_found_error?: false,
              authorize?: false,
              tenant: org_id,
-             load: [:author]
+             load: [:author | KilnCMS.Seo.Patterns.loads(ct)]
            ),
          payload when not is_nil(payload) <-
            fetch_payload(org_id, to_string(ct.type), slug, locale, audiences, unlocks, fn ->
@@ -303,6 +303,10 @@ defmodule KilnCMSWeb.ContentController do
     org = KilnCMSWeb.Tenant.current_org(conn)
     base_url = KilnCMSWeb.Tenant.base_url(org)
     url = record.canonical_url || locale_url(ct, record.slug, record.locale, base_url)
+    # Before the projection, so a teaser's metadata matches what an entitled
+    # reader's render would show (#805) — the property `KilnCMSWeb.Teaser`'s
+    # moduledoc asks for.
+    record = KilnCMS.Seo.Patterns.apply_to(record, ct, org)
     teaser = KilnCMSWeb.Teaser.from_record(record, url)
 
     conn
@@ -368,6 +372,10 @@ defmodule KilnCMSWeb.ContentController do
     org = KilnCMSWeb.Tenant.current_org(conn)
     base_url = KilnCMSWeb.Tenant.base_url(org)
     url = record.canonical_url || locale_url(ct, record.slug, record.locale, base_url)
+    # Before the projection, so a teaser's metadata matches what an entitled
+    # reader's render would show (#805) — the property `KilnCMSWeb.Teaser`'s
+    # moduledoc asks for.
+    record = KilnCMS.Seo.Patterns.apply_to(record, ct, org)
     teaser = KilnCMSWeb.Teaser.from_record(record, url)
 
     conn
@@ -856,6 +864,10 @@ defmodule KilnCMSWeb.ContentController do
   defp render_content_body(conn, template, record, blocks, translations, ct, variant) do
     org = KilnCMSWeb.Tenant.current_org(conn)
     base_url = KilnCMSWeb.Tenant.base_url(org)
+    # The type's SEO patterns (#805) fill only the fields this record left
+    # blank, here rather than at each assign, so the `<title>`, the meta
+    # description and the schema.org graph below cannot disagree about them.
+    record = KilnCMS.Seo.Patterns.apply_to(record, ct, org)
 
     conn
     |> assign(:locale, record.locale)
