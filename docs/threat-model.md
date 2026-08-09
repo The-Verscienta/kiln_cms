@@ -128,7 +128,8 @@ build if a resource is ever registered without that authorizer.
   no account yet and the address being registered is attacker-chosen: keying on
   it would let anyone deny a specific address its first registration. Password sign-in is limited on a second axis by
   `KilnCMS.Accounts.AccountThrottle` (#478): a flat per-**account** budget,
-  which IP rotation cannot escape. The IP is charged first and a refusal spends
+  which IP rotation cannot escape (twenty attempts per fifteen minutes — see the
+  #762 note below on why it is not ten). The IP is charged first and a refusal spends
   no account budget — otherwise a flood from one address could lock out every
   account it named. Deliberately flat rather than escalating —
   a lockout that lengthens each time an attacker burns a window is a denial of
@@ -159,12 +160,19 @@ build if a resource is ever registered without that authorizer.
   retry — and both controllers tell a refused user to do exactly that. The
   owner can reach this state alone, because #727 shares the second-factor
   bucket with `/editor/settings`: fumble five codes regenerating recovery
-  codes, then retry the password ten times, and the first factor locks too, for
-  the tail of its own window. A password reset clears both and is the remedy to
-  offer. The alternative — refunding the first-factor unit when the second
-  factor refuses — reopens the unbounded token-minting loop #742 exists to
-  close, so it is not a free change; the lever, if this is judged too harsh, is
-  the budget itself.
+  codes, then retry the password, and the first factor can lock too for the tail
+  of its own window. A password reset clears both and is the remedy to offer.
+
+  **#762 pulled that lever**: the sign-in budget is now **twenty** per fifteen
+  minutes, not ten. Twenty keeps an attacker bound in the same order of
+  magnitude — still not unlimited guesses, still one window's tail at worst —
+  while putting the self-inflicted compounding case out of practical reach, since
+  it now takes twenty password retries inside one window rather than ten. The
+  alternatives were rejected as riskier than moving a number: refunding the
+  first-factor unit when the second factor refuses reopens the unbounded
+  token-minting loop #742 exists to close, and a "hand back one unit" primitive
+  would mean `hit/3` is no longer one atomic increment-and-compare, which is
+  what stops a simultaneous burst all reading "under budget" and all proceeding.
 
   A lockout at either sign-in gate **mails the owner** (#728), and it is a much
   stronger signal than the password alert above: reaching that prompt requires

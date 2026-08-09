@@ -122,7 +122,32 @@ defmodule KilnCMS.Accounts.AccountThrottle do
 
   require Logger
 
-  @budget 10
+  # Twenty, not ten (#762). Since #742 a successful password no longer clears
+  # this counter for an account that owes a second factor — deliberately, because
+  # a first factor that stops at the code prompt is exactly what an attacker
+  # holding a stuffed password produces. The side effect is that this budget and
+  # the second-factor one now COMPOSE, and one cause can fill both.
+  #
+  # The realistic trigger has no attacker in it. #727 shares the second-factor
+  # bucket with `/editor/settings`, so an owner who fumbles five codes
+  # regenerating their recovery set is denied at the code prompt, re-enters
+  # their password across the fifteen-minute window as the controller's own
+  # comment tells them to, spends all ten units, and is refused the FIRST factor
+  # as well — then mailed "Repeated sign-in attempts to your account have not
+  # succeeded" about themselves. Their only escape is a password reset they do
+  # not need.
+  #
+  # That is the hard-lockout shape this moduledoc argues against, arriving by
+  # composition rather than by design. Twenty keeps an attacker bound in the same
+  # order of magnitude — still not unlimited guesses, still one window's tail at
+  # worst — while putting the self-inflicted case out of practical reach.
+  #
+  # The alternatives were considered and rejected: refunding the first factor on
+  # a second-factor denial reopens #742's unbounded token-minting loop, and a
+  # "hand back one unit" primitive would mean `hit/3` is no longer one atomic
+  # increment-and-compare, which is load-bearing (see below). Moving a number
+  # adds no new failure mode; both of those do.
+  @budget 20
   @window :timer.minutes(15)
 
   @second_factor_budget 5
@@ -226,6 +251,29 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   """
   @spec forget_second_factor_alert(String.t()) :: :ok
   def forget_second_factor_alert(user_id), do: drop(key("2fa:alert", user_id), @alert_window)
+
+  @doc """
+  Whether another *settings* second-factor alert may go to this user (#757).
+
+  A third bucket, for the same reason `second_factor_alert_allowed?/1` is a
+  second one: a weaker signal must not suppress a stronger one, and these three
+  are strictly ordered. A sign-in lockout means someone is guessing a password.
+  A second-factor lockout at sign-in means they have it. A lockout at
+  `/editor/settings` means they are **already inside a session** and are working
+  on the second factor — reaching those forms needs no password at all.
+
+  Sharing any of the three would let the earliest event in an attack silence the
+  latest, which is exactly the wrong way round.
+  """
+  @spec settings_second_factor_alert_allowed?(String.t()) :: boolean()
+  def settings_second_factor_alert_allowed?(user_id) do
+    match?({:allow, _count}, hit(key("2fa:settings-alert", user_id), @alert_window, 1))
+  end
+
+  @doc "Hands back a settings-alert window that was claimed but never used."
+  @spec forget_settings_second_factor_alert(String.t()) :: :ok
+  def forget_settings_second_factor_alert(user_id),
+    do: drop(key("2fa:settings-alert", user_id), @alert_window)
 
   @doc """
   Whether another `purpose` mail may be sent to this address.

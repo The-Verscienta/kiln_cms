@@ -109,6 +109,12 @@ defmodule KilnCMS.Accounts.Changes.ThrottleSecondFactor do
         end)
 
       {:deny, retry_after_ms} ->
+        # Tell the owner (#757). A lockout HERE means someone is using their
+        # live session — these forms need no password — so it is a different
+        # message from the sign-in alerts, with its own budget so the weaker
+        # signal cannot suppress it.
+        alert(changeset.data)
+
         Ash.Changeset.add_error(
           changeset,
           SecondFactorThrottled.exception(
@@ -117,4 +123,19 @@ defmodule KilnCMS.Accounts.Changes.ThrottleSecondFactor do
         )
     end
   end
+
+  # This runs inside an `Ash.Changeset` build, so it must not be able to break
+  # the action OR the build. `settings_second_factor_locked/1` already swallows
+  # everything including exits, but it is called here through one more layer of
+  # the same discipline: the refusal must land whatever the mailer does.
+  defp alert(%KilnCMS.Accounts.User{} = user) do
+    KilnCMS.Accounts.SignInAlert.settings_second_factor_locked(user)
+    :ok
+  rescue
+    _error -> :ok
+  catch
+    _kind, _reason -> :ok
+  end
+
+  defp alert(_other), do: :ok
 end
