@@ -125,23 +125,32 @@ defmodule KilnCMS.CMS.Menus do
   @spec detached([MenuItem.t()]) :: [MenuItem.t()]
   def detached(items) when is_list(items) do
     by_id = Map.new(items, &{&1.id, &1})
-    Enum.reject(items, &rooted?(&1, by_id, MapSet.new()))
+    Enum.reject(items, &rooted?(&1, by_id, []))
   end
 
   # Walks up rather than down, so it answers per item without building a tree.
   # `seen` is what makes it terminate: a cycle revisits an id it already passed
   # through, which is exactly the condition being detected.
+  #
+  # A plain list, not a `MapSet`. Threading one through a recursive call means
+  # two construction paths reach the same parameter — `MapSet.new/0` at the top
+  # and `MapSet.put/2` below — and OTP 29's dialyzer reads that as an opacity
+  # violation. `.tool-versions` records why that matters: CI runs OTP 27, whose
+  # opacity checking is weaker, so this class is invisible there and only a
+  # local `mix dialyzer` catches it. A chain here is `max_depth()` long when the
+  # data is sound and terminates on the revisit when it is not, so a linear
+  # membership test costs nothing worth a MapSet.
   defp rooted?(%{parent_id: nil}, _by_id, _seen), do: true
 
   defp rooted?(%{id: id, parent_id: parent_id}, by_id, seen) do
-    if MapSet.member?(seen, id) do
+    if id in seen do
       false
     else
       # A parent outside this menu's item set (deleted, or belonging to another
       # menu) is not a root either — nothing renders through it.
       case Map.get(by_id, parent_id) do
         nil -> false
-        parent -> rooted?(parent, by_id, MapSet.put(seen, id))
+        parent -> rooted?(parent, by_id, [id | seen])
       end
     end
   end

@@ -166,6 +166,66 @@ defmodule KilnCMSWeb.ContentEditorSuggestTest do
       assert render_async(lv, 2_000) =~ "Suggestions"
     end
 
+    # #868. A per-field grant is enforced by `Changes.EnforceFieldGrants`, which
+    # is a *change* — and `Ash.can?` builds its changeset with empty input, so
+    # no attribute is ever `supplied?`, no violation is added, and the record
+    # -level `may_write?` gate passes. This editor could therefore spend the
+    # org's LLM budget on three fields the save would then refuse one by one.
+    defp title_only_editor,
+      do: authed_user(:editor, %{field_grants: %{"page" => ["title"]}})
+
+    test "the Suggest control is hidden from an editor granted only other fields",
+         %{conn: conn} do
+      enable_stub()
+      page = page(authed_user(:admin))
+
+      {_lv, html} = open_editor(conn, title_only_editor(), page)
+
+      refute html =~ "Suggest with AI"
+    end
+
+    test "a forged seo_suggest from a field-granted editor bills nothing", %{conn: conn} do
+      put_seo(generator: KilnCMS.StubSeoGenerator.Counting, model: "stub:stub")
+      {:ok, _} = KilnCMS.StubSeoGenerator.Counting.start_link()
+      KilnCMS.StubSeoGenerator.Counting.reset()
+
+      page = page(authed_user(:admin))
+      {lv, _html} = open_editor(conn, title_only_editor(), page)
+
+      render_click(lv, "seo_suggest", %{})
+      render_async(lv, 2_000)
+
+      assert KilnCMS.StubSeoGenerator.Counting.count() == 0
+    end
+
+    # The grant covers exactly what the suggestion writes, so nothing is
+    # withheld — without this the fix could be "hide it from every granted
+    # editor", which is a different bug.
+    test "an editor granted the SEO fields still gets the control", %{conn: conn} do
+      enable_stub()
+
+      editor =
+        authed_user(:editor, %{
+          field_grants: %{"page" => ["seo_title", "seo_description", "seo_keywords"]}
+        })
+
+      {_lv, html} = open_editor(conn, editor, page(authed_user(:admin)))
+
+      assert html =~ "Suggest with AI"
+    end
+
+    # Grants bind an effective editor; admins are exempt (the policy bypass),
+    # and `EnforceFieldGrants` skips them. Hiding the control from an admin who
+    # happens to carry a grants entry would be the mirror-image mistake.
+    test "an admin carrying a field grant is unaffected", %{conn: conn} do
+      enable_stub()
+      admin = authed_user(:admin, %{field_grants: %{"page" => ["title"]}})
+
+      {_lv, html} = open_editor(conn, admin, page(admin))
+
+      assert html =~ "Suggest with AI"
+    end
+
     # The content-intelligence section is the same shape as Suggest and was
     # missing the same guard (#916): "Analyze content" is an unbounded
     # `list_tags!` plus an embedding per unapplied tag on a cold 6h cache, and
