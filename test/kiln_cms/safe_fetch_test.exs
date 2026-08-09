@@ -1,12 +1,18 @@
 defmodule KilnCMS.SafeFetchTest do
   @moduledoc """
-  The redirect-following surface added for the link checker (#474).
+  `KilnCMS.SafeFetch`: the redirect following added for the link checker (#474),
+  and the address pinning and byte cap the module exists for (#753).
 
-  `SafeFetch` still has no general test suite (#753); these cover the part that
-  is new and the part that is dangerous, which is the same part. Following a
-  redirect means dialling an address the caller never chose, so every hop has to
-  go back through `SafeUrl` — the moment it does not, an open redirect on a
-  trusted host is a path to the metadata service.
+  Following a redirect means dialling an address the caller never chose, so
+  every hop has to go back through `SafeUrl` — the moment it does not, an open
+  redirect on a trusted host is a path to the metadata service.
+
+  The pinning is asserted as a **value** (`connect_target/3`, `host_header/2`)
+  rather than through a request, because a `Req.Test` round trip cannot see any
+  of it: the plug adapter never opens a socket, so a request-level test passes
+  identically with `verify: :verify_none`, no SNI and no cacerts. Those options
+  all fail *open* when wrong, which is why they went untested long enough to
+  hide the IPv6 double-bracketing that made every IPv6 endpoint unreachable.
   """
   use ExUnit.Case, async: false
 
@@ -162,9 +168,15 @@ defmodule KilnCMS.SafeFetchTest do
   # #753's acceptance list. These are the properties the module exists for, as
   # opposed to the redirect behaviour above, which is what it grew later.
   describe "the address check" do
+    # Compared whole, not with `=~ "blocked URL:"`. All five refusals name the
+    # same reason, and a substring assertion would stay green if one of them
+    # started failing as *unparseable* instead of as link-local — which is a
+    # different control, and one of them not running is the thing worth
+    # catching. No stub is registered for this module in these two tests, so an
+    # escaped request raises `Req.Test`'s "cannot find mock/stub" rather than
+    # reaching a socket — the plug is always injected by `opts/1`, so "it would
+    # open a real connection" would not have been true.
     test "a private or link-local address is refused before anything is dialled" do
-      # No stub is installed: if any of these reached `Req` the test would hang
-      # or error on a real socket rather than returning a refusal.
       for url <- [
             "http://127.0.0.1/x",
             "http://169.254.169.254/latest/meta-data/",
@@ -172,18 +184,27 @@ defmodule KilnCMS.SafeFetchTest do
             "http://10.0.0.1/x",
             "http://192.168.1.1/x"
           ] do
-        assert {:error, message} = SafeFetch.get(url, opts()),
-               "#{url} was not refused"
-
-        assert message =~ "blocked URL:", "#{url}: #{message}"
+        assert SafeFetch.get(url, opts()) ==
+                 {:error, "blocked URL: must not target private or link-local addresses"},
+               "#{url} was not refused as a private address"
       end
     end
 
     test "a URL with no host is refused rather than crashing" do
-      assert {:error, message} = SafeFetch.get("not a url", opts())
-      assert message =~ "blocked URL:"
+      no_host = {:error, "blocked URL: must be a valid URL with a host"}
 
-      assert {:error, _} = SafeFetch.get(nil, opts())
+      assert SafeFetch.get("not a url", opts()) == no_host
+      assert SafeFetch.get(nil, opts()) == no_host
+      assert SafeFetch.get("mailto:a@b.test", opts()) == no_host
+    end
+
+    # `host_header/2` is public since #753 so the pinning can be asserted, and a
+    # public function should not raise on a shape `dispatch/4` merely happens
+    # never to hand it.
+    test "host_header tolerates a URL it could never actually have pinned" do
+      assert SafeFetch.host_header("not a url", {127, 0, 0, 1}) == []
+      assert SafeFetch.host_header("mailto:a@b.test", {127, 0, 0, 1}) == []
+      assert SafeFetch.host_header(nil, {127, 0, 0, 1}) == []
     end
   end
 

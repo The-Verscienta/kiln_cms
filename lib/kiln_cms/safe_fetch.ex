@@ -314,15 +314,10 @@ defmodule KilnCMS.SafeFetch do
     end
   end
 
-  # `url:` + `connect_options:` pinning the connection to the address `SafeUrl`
-  # validated: the URL host becomes the literal address, and (for HTTPS) SNI and
-  # certificate hostname verification are pointed back at the real hostname so
-  # TLS still validates against the name rather than the IP.
-  #
-  # `pinned_ip` is `nil` when DNS resolution is disabled (test env) — fall back
-  # to the original URL so a `Req.Test` stub still matches by host.
-  # The `url:` + `connect_options:` that dial `pinned_ip` while keeping TLS
-  # pointed at the URL's real hostname.
+  # The `url:` + `connect_options:` pinning the connection to the address
+  # `SafeUrl` validated: the URL host becomes the literal address, and (for
+  # HTTPS) SNI and certificate hostname verification are pointed back at the
+  # real hostname so TLS still validates against the name rather than the IP.
   #
   # Public (and `@doc false`) **so it can be asserted directly**. This is the
   # fifteen lines the moduledoc warns about: every one of them fails *open* when
@@ -380,15 +375,27 @@ defmodule KilnCMS.SafeFetch do
   @spec host_header(String.t(), :inet.ip_address() | nil) :: [{String.t(), String.t()}]
   def host_header(_url, nil), do: []
 
-  def host_header(url, _pinned_ip) do
-    uri = URI.parse(url)
+  # A URL with no host cannot be pinned, so `dispatch/4` never reaches this with
+  # one — `SafeUrl` refused it first. Stated as a clause rather than left to
+  # raise inside `String.contains?/2`, because the function is public now and a
+  # direct caller deserves `[]` (send no override) over a FunctionClauseError.
+  def host_header(url, _pinned_ip) when is_binary(url) do
+    case URI.parse(url) do
+      %URI{host: host} = uri when is_binary(host) and host != "" -> [host_tuple(uri, host)]
+      _no_host -> []
+    end
+  end
+
+  def host_header(_url, _pinned_ip), do: []
+
+  defp host_tuple(uri, host) do
     default_port = if uri.scheme == "https", do: 443, else: 80
 
     # `URI.parse/1` strips the brackets off an IPv6 literal, and a bare
     # `2606:2800::1:8443` is not a host and a port — it is ambiguous, and RFC
     # 3986 requires the brackets back before the `:port` can mean anything.
-    host = if String.contains?(uri.host, ":"), do: "[#{uri.host}]", else: uri.host
+    host = if String.contains?(host, ":"), do: "[#{host}]", else: host
 
-    [{"host", if(uri.port in [nil, default_port], do: host, else: "#{host}:#{uri.port}")}]
+    {"host", if(uri.port in [nil, default_port], do: host, else: "#{host}:#{uri.port}")}
   end
 end

@@ -374,7 +374,15 @@ migration, a rewritten column, a dropped config key).
   `SafeFetch` and once in the `Webhooks.DeliveryWorker` it was extracted from.
   Fifteen lines of TLS options that fail *open* when mistyped, in two places,
   with `SafeFetch`'s own moduledoc claiming there should be one. There is now
-  one, and the worker also picks up the streaming byte cap it never had.
+  one, and the worker also picks up the streaming byte cap it never had — with
+  truncation, so a receiver that answers 200 with a large body stays a delivered
+  200 rather than becoming a permanent failure the cap invented.
+
+  The ledger's `last_error` vocabulary is unchanged. `SafeFetch` writes for its
+  own callers and prefixes differently, so each of its shapes is *translated*
+  rather than wrapped — wrapping read `delivery failed: request failed:
+  %Req.TransportError{…}`, the documented wording with somebody else's inside
+  it.
 
   **An IPv6 endpoint could never be delivered to.** The pinned host was
   bracketed by hand *and* by `URI.to_string/1`, producing
@@ -1356,6 +1364,8 @@ migration, a rewritten column, a dropped config key).
   metadata they were uploaded with. The companion `X-Content-Type-Options:
   nosniff` **cannot** be set as S3 object metadata and remains an operator
   task; `docs/media-pipeline.md` now documents it per CDN.
+
+### Security
 
 - **`mix kiln.audit.verify` can now fail a run it previously passed, and no
   longer calls a chain "intact" when its attestation stops short of the head.**
