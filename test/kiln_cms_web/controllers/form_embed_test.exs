@@ -40,10 +40,6 @@ defmodule KilnCMSWeb.FormEmbedTest do
   end
 
   # Every test gets its own IP so rate buckets never cross tests.
-  defp unique_ip(conn) do
-    Map.put(conn, :remote_ip, {127, 2, rem(System.unique_integer([:positive]), 250), 1})
-  end
-
   defp csp(conn), do: conn |> get_resp_header("content-security-policy") |> List.first()
 
   describe "GET /forms/:slug/embed" do

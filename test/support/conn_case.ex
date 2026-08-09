@@ -47,4 +47,36 @@ defmodule KilnCMSWeb.ConnCase do
   """
   @spec org_conn(Plug.Conn.t(), KilnCMS.Accounts.Organization.t()) :: Plug.Conn.t()
   def org_conn(conn, org), do: %{conn | host: "#{org.slug}.#{KilnCMSWeb.Tenant.base_host()}"}
+
+  @doc """
+  Give `conn` a client address no other request in the run will reuse, so a
+  per-IP rate limiter cannot couple two unrelated tests.
+
+  Three octets of the unique integer, not one. Three test files each had their
+  own copy spelled `rem(System.unique_integer([:positive]), 250)`, which is 250
+  addresses — and 250 is small enough that a file making twenty requests has a
+  **54% chance** of drawing the same address twice (birthday). When it happens
+  the second request shares a bucket with the first and comes back `429`, which
+  surfaces as `expected response with status 200, got: 429` inside whatever the
+  test was actually asserting. That is not a hypothetical: it broke `main` on
+  2026-08-09 (`KilnCMSWeb.FormEmbedTest`, run 31287147181).
+
+  The files also hand-separated themselves by second octet (127.1/127.2/127.3)
+  to avoid colliding with *each other* — unnecessary once the space is wide
+  enough, and a thing every new file would have had to know to do.
+
+  `127.0.0.0/8` throughout: loopback is inert, and `RateLimit.client_key/1`
+  treats it as any other address.
+  """
+  @spec unique_ip(Plug.Conn.t()) :: Plug.Conn.t()
+  def unique_ip(conn) do
+    n = System.unique_integer([:positive])
+
+    # 254 × 250 × 250 ≈ 15.9M addresses, and `unique_integer` is monotonic per
+    # VM, so the low octets vary fastest and a run never wraps in practice.
+    %{
+      conn
+      | remote_ip: {127, rem(div(n, 62_500), 254) + 1, rem(div(n, 250), 250), rem(n, 250) + 1}
+    }
+  end
 end
