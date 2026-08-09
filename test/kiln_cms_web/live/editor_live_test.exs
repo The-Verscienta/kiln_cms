@@ -2931,6 +2931,89 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert child["text"] == "Nested heading"
     end
 
+    # #893. Changing a nested heading's level did nothing: the `<select>` had no
+    # `name`, and a form-associated `phx-change` routes through LiveView's
+    # `pushInput`, which serializes the form filtered to the changed input's name
+    # and scrapes `phx-value-*` off the form rather than the element. With an
+    # empty name, neither the chosen level nor the three identifiers arrived.
+    #
+    # Asserted on the MARKUP, not only through the handler: `render_hook/3` and a
+    # hand-built `render_change/2` payload both supply params directly, so they
+    # pass just as happily against the nameless select that shipped. The `name`
+    # is the thing that makes the browser send anything at all.
+    test "the nested heading level select carries its identifiers in its name",
+         %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      add_columns_block(lv)
+      id = columns_block_id(lv)
+
+      lv
+      |> element("button[phx-click='col_add_child'][phx-value-col='0'][phx-value-type='heading']")
+      |> render_click()
+
+      [_, child_id] = Regex.run(~r/data-child-id="([^"]+)"/, render(lv))
+
+      assert has_element?(
+               lv,
+               ~s(select[name="col_child[#{id}][#{child_id}][level]"][phx-change="col_update_child"])
+             )
+    end
+
+    test "changing a nested heading's level persists it", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      add_columns_block(lv)
+      id = columns_block_id(lv)
+
+      lv
+      |> element("button[phx-click='col_add_child'][phx-value-col='0'][phx-value-type='heading']")
+      |> render_click()
+
+      [_, child_id] = Regex.run(~r/data-child-id="([^"]+)"/, render(lv))
+
+      # A heading child starts at level 2, so 3 is a real change.
+      lv
+      |> element(~s(select[name="col_child[#{id}][#{child_id}][level]"]))
+      |> render_change(%{"col_child" => %{id => %{child_id => %{"level" => "3"}}}})
+
+      # Reflected in the control, so a reload does not silently revert it.
+      assert has_element?(
+               lv,
+               ~s(select[name="col_child[#{id}][#{child_id}][level]"] option[value="3"][selected])
+             )
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert [%{"blocks" => [child]}, %{"blocks" => []}] = block.data["columns"]
+      assert child["level"] == 3
+    end
+
+    # The select is named outside the `form[...]` namespace so it stays out of
+    # the content changeset, the way the nameless sibling inputs do. If it ever
+    # lands inside it, the level would be cast as a content attribute.
+    test "the level select does not enter the content form's params", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      add_columns_block(lv)
+
+      lv
+      |> element("button[phx-click='col_add_child'][phx-value-col='0'][phx-value-type='heading']")
+      |> render_click()
+
+      refute render(lv) =~ ~s(name="form[col_child)
+    end
+
     test "the nested block renders in the live preview", %{conn: conn} do
       page = draft_page(%{blocks: []})
 

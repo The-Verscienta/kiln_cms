@@ -371,4 +371,56 @@ test.describe("editor journey", () => {
     await page.waitForTimeout(2500);
     await expect(section).toHaveJSProperty("open", true);
   });
+
+  // #893. The nested heading-level `<select>` had no `name`, so LiveView routed
+  // its form-associated `phx-change` through `pushInput`, which serializes the
+  // form filtered to the changed input's name and reads `phx-value-*` off the
+  // form rather than the element — nothing arrived and the level never changed.
+  //
+  // Only a real browser exercises that path: an ExUnit `render_change` supplies
+  // params directly and passes against the broken markup too. This is the test
+  // that would have caught it.
+  test("changing a nested heading's level in a columns block takes effect", async ({
+    page,
+  }) => {
+    const slug = `e2e-cols-${Date.now()}`;
+    const heading = "Nested heading level three";
+
+    await newDraftPage(page);
+    await page.fill('input[name$="[slug]"]', slug);
+
+    await addBlock(page, "columns");
+
+    // Nest a heading in the first column.
+    await page.click(
+      'button[phx-click="col_add_child"][phx-value-col="0"][phx-value-type="heading"]',
+    );
+
+    // Its text input is nameless and commits on blur.
+    const text = page.locator('input[phx-blur="col_update_child"]').first();
+    await text.fill(heading);
+    await text.blur();
+
+    // The control under test. A heading child starts at level 2.
+    const level = page.locator('select[phx-change="col_update_child"]').first();
+    await expect(level).toBeVisible();
+    await level.selectOption("3");
+
+    // The server has to have taken it: the option stays selected across the
+    // re-render, rather than the DOM snapping back to H2.
+    await expect(level).toHaveValue("3");
+
+    await page.getByRole("button", { name: /^save$/i }).click();
+    await page.click('button[phx-click="workflow"][phx-value-action="publish"]');
+    await expect(
+      page.locator('button[phx-click="workflow"][phx-value-action="unpublish"]'),
+    ).toBeVisible();
+
+    // And it reaches delivery as an h3 — not the h2 it would have stayed.
+    // Scoped to this heading's own text rather than counting every h2 on the
+    // page, so unrelated chrome can't decide the result.
+    await page.goto(`/${slug}`);
+    await expect(page.locator("article h3", { hasText: heading })).toHaveCount(1);
+    await expect(page.locator("article h2", { hasText: heading })).toHaveCount(0);
+  });
 });

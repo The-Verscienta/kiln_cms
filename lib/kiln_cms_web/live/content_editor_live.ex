@@ -2481,6 +2481,31 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, apply_children(socket, bc)}
   end
 
+  # The form-serialized shape (#893). A `<select>` inside the editor's form
+  # cannot deliver `phx-value-*` — LiveView routes a form-associated
+  # `phx-change` through `pushInput`, which scrapes those off the form rather
+  # than the element — so the nested-child select carries its identifiers in its
+  # `name` instead, and they arrive here as ordinary nested params.
+  #
+  # One entry at every level, because `pushInput` filters the serialized form to
+  # the changed input's name. Anything else is a payload this event did not
+  # send, and is refused rather than guessed at.
+  def handle_event("col_update_child", %{"col_child" => payload}, socket)
+      when is_map(payload) do
+    with [{id, children}] when is_map(children) <- Map.to_list(payload),
+         [{child_id, fields}] when is_map(fields) <- Map.to_list(children),
+         [{field, value}] when is_binary(value) <- Map.to_list(fields) do
+      bc =
+        update_columns(socket.assigns.block_children, id, fn blocks ->
+          Enum.map(blocks, &maybe_put_field(&1, child_id, field, value))
+        end)
+
+      {:noreply, apply_children(socket, bc)}
+    else
+      _unexpected -> {:noreply, socket}
+    end
+  end
+
   def handle_event(
         "col_update_child",
         %{"id" => id, "child" => child_id, "field" => field} = p,
@@ -7245,12 +7270,23 @@ defmodule KilnCMSWeb.ContentEditorLive do
         phx-value-field={field}
         class="w-full rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
       />
+      <%!-- Named, unlike its nameless siblings above, and the name carries the
+      identifiers (#893). A `<select>` inside a form routes its own `phx-change`
+      through LiveView's `pushInput`, which serializes the form filtered to the
+      changed input's `name` and scrapes `phx-value-*` off the FORM, not the
+      element — so a nameless select sends neither its value nor its ids, and
+      the handler head could not match. The text inputs beside it work because
+      `phx-blur` is not a form binding and goes through `pushEvent`, which does
+      carry `phx-value-*`; that asymmetry is what hid this.
+
+      Named outside the `form[...]` namespace on purpose, so it stays out of the
+      content changeset exactly as the nameless inputs do: `validate` matches
+      `%{"form" => params}` and never sees this key, and the nested tree is
+      re-injected from socket state by `inject_children/2` regardless. --%>
       <select
         :if={@child["_type"] == "heading"}
+        name={"col_child[#{@block_id}][#{@child["id"]}][level]"}
         phx-change="col_update_child"
-        phx-value-id={@block_id}
-        phx-value-child={@child["id"]}
-        phx-value-field="level"
         class="rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
       >
         <option :for={n <- 1..6} value={n} selected={to_int(@child["level"]) == n}>H{n}</option>

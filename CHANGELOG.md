@@ -492,6 +492,22 @@ migration, a rewritten column, a dropped config key).
   any cause of orphaning — a restore, direct SQL, a `parent_id` pointing into
   another menu — not only the race, which stays open and is documented.
 
+- **Changing a nested heading's level in a Columns block does something**
+  (#893). The per-child level `<select>` had no `name`, and a `phx-change` on a
+  form-associated element routes through LiveView's `pushInput`, which
+  serializes the form filtered to the changed input's name and reads
+  `phx-value-*` off the **form** rather than the element. With an empty name
+  neither the chosen level nor the block/child/field identifiers arrived, so the
+  handler could not match and H1→H3 silently did nothing. The sibling text
+  inputs work because `phx-blur` is not a form binding and goes through
+  `pushEvent`, which does carry `phx-value-*` — that asymmetry is what hid it.
+
+  The select now carries its identifiers in its `name`, outside the `form[...]`
+  namespace so it still stays out of the content changeset the way the nameless
+  inputs do. Covered by an end-to-end test, because that is the only layer where
+  the bug existed: an ExUnit `render_change` supplies params directly and passes
+  against the broken markup too.
+
 - **The collab-editor flake is checked for, not just fixed** (#1067). Filed as a
   presence race in `CollabPersisterTest` — one failure in three full-suite runs,
   never in isolation — it turned out to be a VM-global one:
