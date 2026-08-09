@@ -16,7 +16,20 @@ defmodule KilnCMSWeb.CollabSavedRefreshTest do
   would throw away what the person is typing, a worse bug than the one being
   fixed.
   """
-  use KilnCMSWeb.ConnCase, async: true
+  # async: false — "a peer's save cannot be silently clobbered by a session
+  # mid-edit" flips `:collab_prototype` off, and that flag is global application
+  # env read at mount by every editor session in the VM (`Crdt.enabled?/0`), not
+  # something scoped to this test's processes. Run async, that flip switched
+  # collaboration off underneath whatever else happened to be mounting an editor
+  # at that moment. A session that mounts with the flag off never stands down,
+  # so `KilnCMSWeb.CollabPersisterTest` got an ordinary autosave where it
+  # expected "Synced live", and `KilnCMSWeb.CollabFragmentTest` lost its
+  # `data-collab-fragment` attributes entirely (`@collab_token` is nil, so the
+  # attribute is not rendered at all). Both failed only under a full run, passed
+  # in isolation, and moved between tests with the seed — the shape a
+  # global-state leak takes, not the presence race it reads as.
+  # `KilnCMSWeb.CollabChannelTest` is sync for the same reason.
+  use KilnCMSWeb.ConnCase, async: false
 
   @moduletag :capture_log
 
@@ -161,6 +174,11 @@ defmodule KilnCMSWeb.CollabSavedRefreshTest do
   # (`KilnCMS.Collab.CRDT.enabled?/0`). With it on, a non-persisting session
   # stands down instead of saving, so the lock is never reached and the bug is
   # invisible — the config the suite happens to run under was hiding it.
+  #
+  # The flag is VM-global, so this flip is only safe because the module is
+  # `async: false` (see the note above `use`). Keep it that way: turning this
+  # module async again silently breaks every other collab test that happens to
+  # overlap it.
   #
   # Both sides edit the SAME field: `AshPhoenix.Form.params/1` is touched-only,
   # so sessions editing different fields merge harmlessly and prove nothing.
