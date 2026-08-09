@@ -265,8 +265,8 @@ defmodule KilnCMSWeb.Router do
 
   # The iframe page for an embeddable form. A page load, not a submission, so it
   # gets the generous `:delivery` ceiling rather than the tight `:form` bucket.
-  # The controller replaces the CSP with `KilnCMSWeb.Embed.content_security_policy/0`,
-  # whose `frame-ancestors` permits third-party parents.
+  # The controller replaces the CSP with `KilnCMSWeb.Embed.content_security_policy/1`,
+  # whose `frame-ancestors` permits the parents that form allows (#648).
   pipeline :form_embed do
     plug :accepts, ["html"]
     plug :put_secure_browser_headers, @browser_csp_headers

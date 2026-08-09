@@ -24,6 +24,15 @@ defmodule KilnCMSWeb.FormController do
 
   # The embed page is public and changes only when an admin edits the form, so a
   # short shared-cache window is safe; a deactivated form disappears within it.
+  #
+  # Since #648 the response also carries a `frame-ancestors` the admin can edit
+  # at runtime, and a `Cache-Control` window is a window on the *revocation*
+  # too: for up to this long after an org narrows its allowlist, a shared cache
+  # can still hand the removed parent the permissive policy. Kept at 60s rather
+  # than dropped, because that is the same exposure a deactivated form already
+  # had and shortening it would not remove the class — a purge would, and there
+  # is no CDN API here to purge with. Stated in docs/forms.md so an operator
+  # revoking a partner knows to wait a minute rather than assume instant.
   @embed_max_age_seconds 60
 
   @doc """
@@ -37,21 +46,39 @@ defmodule KilnCMSWeb.FormController do
   # every interpolation anyway. No request data reaches the markup raw.
   # sobelow_skip ["XSS.HTML"]
   def embed(conn, %{"slug" => slug}) do
-    conn = put_embed_csp(conn)
+    # The deployment-wide policy goes on FIRST, then the form's replaces it once
+    # the form is known. Two headers where one would do, but the first one is
+    # what a 500 carries: `Tenant.current_org_id/1` raises by design when the
+    # tenant is unresolved (#563), and `RenderErrors` re-uses this conn — so
+    # without it a crash renders the error page under the site-wide
+    # `frame-ancestors 'self'`, i.e. blank inside the iframe, which is exactly
+    # the invisible failure #650 exists to stop.
+    conn = put_embed_csp(conn, nil)
+
+    # Since #648 it is the form that says who may frame it. A 404 keeps the
+    # deployment-wide policy already on the conn: naming a form's own allowlist
+    # for a slug that does not exist would answer whether it exists.
+    form = Forms.get_active(slug, Tenant.current_org_id(conn))
+    conn = put_embed_csp(conn, form)
 
     # The response is about to be 200 and then discarded by the browser if this
     # is a cross-origin frame and the policy is closed. Say so once, server-side,
     # so an operator whose embeds broke on upgrade finds out from their own logs
     # rather than from someone else's console (#650).
-    Embed.warn_if_framing_blocked(conn)
+    Embed.warn_if_framing_blocked(conn, form)
 
-    case Forms.get_active(slug, Tenant.current_org_id(conn)) do
+    case form do
       nil ->
         conn |> put_status(404) |> html(page(gettext("Form not found."), nil, embed: true))
 
       form ->
         conn
         |> put_resp_header("cache-control", "public, max-age=#{@embed_max_age_seconds}")
+        # The page is rendered through gettext, and the locale can come from
+        # `Accept-Language` rather than the path — without this a shared cache
+        # serves the first visitor's language to everyone for the window. Same
+        # rule published HTML already follows (docs/performance.md).
+        |> put_resp_header("vary", "accept-language")
         |> put_view(KilnCMSWeb.FormHTML)
         |> render(:embed, form: form)
     end
@@ -59,8 +86,8 @@ defmodule KilnCMSWeb.FormController do
 
   # Replace the site-wide CSP (frame-ancestors 'self') with the embed policy.
   # `put_resp_header/3` overwrites, so this wins over `put_secure_browser_headers`.
-  defp put_embed_csp(conn) do
-    put_resp_header(conn, "content-security-policy", Embed.content_security_policy())
+  defp put_embed_csp(conn, form) do
+    put_resp_header(conn, "content-security-policy", Embed.content_security_policy(form))
   end
 
   # An embedded form marks its submission so the thank-you page keeps a framing-
@@ -107,12 +134,24 @@ defmodule KilnCMSWeb.FormController do
   # sobelow_skip ["XSS.HTML"]
   def submit(conn, %{"slug" => slug} = params) do
     embedded? = embedded?(params)
-    conn = if embedded?, do: put_embed_csp(conn), else: conn
     # Inside an iframe the referer is the embed page itself, so a "Back" link
     # would just reload the empty form — omit it there.
     back_href = if embedded?, do: nil, else: back(conn)
 
-    case run(conn, slug, params) do
+    # Deployment-wide policy up front, the form's over the top of it once known.
+    # The first one is what a raise inside `run/3` — a DB error, a failed notify
+    # enqueue — carries into the 500, so the error page still renders inside the
+    # iframe instead of being discarded as a framing violation.
+    conn = if embedded?, do: put_embed_csp(conn, nil), else: conn
+
+    # The thank-you page has to stay framable by the same parents as the form it
+    # was posted from, and since #648 that is the *form's* policy — which needs
+    # the form. `run/3` reads `conn` and returns a result; it does not build one,
+    # so nothing is lost by resolving the header after it.
+    result = run(conn, slug, params)
+    conn = if embedded?, do: put_embed_csp(conn, submitted_form(result)), else: conn
+
+    case result do
       :not_found ->
         conn
         |> put_status(404)
@@ -148,6 +187,16 @@ defmodule KilnCMSWeb.FormController do
         conn |> put_status(422) |> json(%{ok: false, errors: errors})
     end
   end
+
+  # The form a `run/3` result was about, if it found one — the thank-you page's
+  # framing policy comes from it (#648).
+  #
+  # No catch-all: `run/3` is twenty lines below and returns exactly these three,
+  # and a fourth one added later should fail loudly in the suite rather than
+  # quietly fall back to the deployment policy on a public route.
+  defp submitted_form({:ok, form}), do: form
+  defp submitted_form({:error, form, _errors}), do: form
+  defp submitted_form(:not_found), do: nil
 
   defp run(conn, slug, params) do
     case Forms.get_active(slug, Tenant.current_org_id(conn)) do

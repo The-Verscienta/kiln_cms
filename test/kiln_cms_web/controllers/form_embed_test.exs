@@ -160,10 +160,12 @@ defmodule KilnCMSWeb.FormEmbedTest do
              ]
     end
 
+    # `nil` in place of a form is the deployment-wide question, asked on purpose
+    # — there is no arity that asks it by omission (#648).
     test "frame_ancestors reflects the configured origins" do
-      assert Embed.frame_ancestors() == "'self' https://embedder.test"
-      assert Embed.cross_site?()
-      assert Embed.allowed_origins_label() == "https://embedder.test"
+      assert Embed.frame_ancestors_for(nil) == "'self' https://embedder.test"
+      assert Embed.cross_site?(nil)
+      assert Embed.allowed_origins_label(nil) == "https://embedder.test"
     end
 
     test "frame_ancestors renders each setting" do

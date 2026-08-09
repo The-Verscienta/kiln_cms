@@ -829,6 +829,11 @@ msgstr "Añadir un webhook"
 msgid "Add an item"
 msgstr "Añadir un elemento"
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Add at least one site to embed on, or choose “This site only”."
+msgstr "Añade al menos un sitio, o elige «Solo este sitio»."
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Add block"
@@ -1828,6 +1833,11 @@ msgstr "Elegir contenido publicado…"
 msgid "Choose video"
 msgstr "Elegir vídeo"
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Choose “Only these sites” to use the list you typed, or clear the box."
+msgstr "Elige «Solo estos sitios» para usar la lista que escribiste, o vacía el campo."
+
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Choose…"
@@ -1911,6 +1921,11 @@ msgstr "Columna %{n}"
 #, elixir-autogen, elixir-format
 msgid "Coming off the site"
 msgstr "Se retira del sitio"
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Comma-separated origins (scheme and host, optionally a port). Pages on this form's own site may always frame it."
+msgstr "Orígenes separados por comas (esquema y host, opcionalmente un puerto). Las páginas del propio sitio de este formulario siempre pueden incrustarlo."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -2632,8 +2647,8 @@ msgstr "Credenciales borradas. Ya no se ofrece ninguna superficie de pago."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
-msgid "Cross-site embedding is off: this form may only be framed by pages on its own site. Set the EMBED_ORIGINS environment variable to the sites that should be allowed to embed it."
-msgstr "La incrustación entre sitios está desactivada: este formulario solo puede mostrarse en páginas de su propio sitio. Define la variable de entorno EMBED_ORIGINS con los sitios que deben poder incrustarlo."
+msgid "Cross-site embedding is off: this form may only be framed by pages on its own site. List the sites that should be allowed to embed it below."
+msgstr "La incrustación entre sitios está desactivada: este formulario solo puede mostrarse en páginas de su propio sitio. Indica a continuación los sitios que deben poder incrustarlo."
 
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
@@ -5771,6 +5786,11 @@ msgstr "Solo se pueden enviar entradas publicadas."
 msgid "Only sends when the form has an email field and the visitor filled it in."
 msgstr "Solo se envía cuando el formulario tiene un campo de correo electrónico y el visitante lo completó."
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Only these sites:"
+msgstr "Solo estos sitios:"
+
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Only: %{types}"
@@ -7761,8 +7781,13 @@ msgstr "Nivel del sitio"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
-msgid "Sites allowed to embed: %{origins}"
-msgstr "Sitios autorizados a incrustarlo: %{origins}"
+msgid "Sites allowed to embed this form"
+msgstr "Sitios autorizados a incrustar este formulario"
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sites allowed to embed this form: %{origins}"
+msgstr "Sitios autorizados a incrustar este formulario: %{origins}"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -8441,8 +8466,8 @@ msgstr "La frase clave principal no aparece en el título ni en el título SEO."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
-msgid "The iframe sizes itself to the form. Which sites may embed it is set by the EMBED_ORIGINS environment variable."
-msgstr "El iframe se ajusta al tamaño del formulario. Los sitios que pueden incrustarlo se definen con la variable de entorno EMBED_ORIGINS."
+msgid "The iframe sizes itself to the form."
+msgstr "El iframe se ajusta al tamaño del formulario."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -8701,10 +8726,20 @@ msgstr "Este lanzamiento está casi lleno (%{count} de %{cap})."
 msgid "This runs code on your public site."
 msgstr "Esto ejecuta código en tu sitio público."
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "This setting applies to this form only — another site's forms are unaffected by what you allow here."
+msgstr "Este ajuste se aplica solo a este formulario: los formularios de otros sitios no se ven afectados por lo que permitas aquí."
+
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "This site is using the deployment defaults."
 msgstr "Este sitio está usando los valores predeterminados del despliegue."
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site only"
+msgstr "Solo este sitio"
 
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
@@ -9167,6 +9202,11 @@ msgstr "Usar tema claro"
 msgid "Use system theme"
 msgstr "Usar tema del sistema"
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Use the deployment default"
+msgstr "Usar el valor predeterminado del despliegue"
+
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Use the operator defaults"
@@ -9408,6 +9448,11 @@ msgstr "Quién"
 #, elixir-autogen, elixir-format
 msgid "Who can author what on this site: members, their capability tier, and granular scope — assigned directly or through a custom role."
 msgstr "Quién puede crear qué en este sitio: los miembros, su nivel de capacidad y su alcance granular, asignado directamente o mediante un rol personalizado."
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Who may embed this form"
+msgstr "Quién puede incrustar este formulario"
 
 #: lib/kiln_cms_web/controllers/content_html/lock.html.heex
 #, elixir-autogen, elixir-format
