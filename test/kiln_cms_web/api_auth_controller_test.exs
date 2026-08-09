@@ -7,6 +7,7 @@ defmodule KilnCMSWeb.ApiAuthControllerTest do
   use KilnCMSWeb.ConnCase, async: true
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.PendingSignIn
   alias KilnCMS.Accounts.RecoveryCodes
   alias KilnCMS.Accounts.User
   alias KilnCMS.CMS
@@ -394,6 +395,36 @@ defmodule KilnCMSWeb.ApiAuthControllerTest do
       # the session key.
       replay = post_verify(build_conn(), %{pending_token: pending, code: code})
       assert %{"errors" => [%{"code" => "pending_expired"}]} = json_response(replay, 401)
+    end
+
+    test "a second redemption that got past resolve is still refused", %{conn: conn} do
+      # The replay test above redeems twice in sequence, so the second request
+      # could be refused by anything — it never reaches the claim. This one
+      # reproduces the interleaving that made the old node-local record useless
+      # (#743): BOTH requests resolve the blob before either records it, and
+      # both hold the same valid code, because nothing rejects a reused TOTP
+      # code. On a cluster they need not even share a node.
+      #
+      # Staged deterministically rather than with two Tasks: the Ecto sandbox
+      # hands both processes one connection, so "concurrent" requests actually
+      # serialize and a race test would be measuring the scheduler. Resolving
+      # twice up front is the same interleaving with a repeatable outcome.
+      {user, secret} = seed_totp_user()
+      pending = begin_two_factor(conn, user)
+      code = current_code(secret)
+
+      assert {:ok, _first} = PendingSignIn.resolve(:encrypted, Endpoint, pending)
+      assert {:ok, second} = PendingSignIn.resolve(:encrypted, Endpoint, pending)
+
+      # The first request completes and claims the blob.
+      assert %{"token" => _} =
+               build_conn()
+               |> post_verify(%{pending_token: pending, code: code})
+               |> json_response(201)
+
+      # The second already holds a resolved blob, so it cannot be turned away by
+      # a lookup — only the claim can refuse it, and it must.
+      assert :taken = PendingSignIn.claim(second)
     end
 
     test "a wrong code does NOT burn the pending token", %{conn: conn} do

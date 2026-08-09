@@ -10,7 +10,11 @@ defmodule KilnCMS.Accounts do
     otp_app: :kiln_cms
 
   resources do
-    resource KilnCMS.Accounts.Token
+    resource KilnCMS.Accounts.Token do
+      # The one action on this resource that is ours rather than
+      # AshAuthentication's (#743) — see `:spend_jti`.
+      define :spend_pending_sign_in, action: :spend_jti
+    end
 
     # External IdP links for OIDC SSO (#331) — managed by AshAuthentication.
     resource KilnCMS.Accounts.UserIdentity

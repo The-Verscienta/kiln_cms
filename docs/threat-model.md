@@ -361,13 +361,19 @@ build if a resource is ever registered without that authorizer.
     report. The browser flow gets this by deleting the session key. A wrong code
     or a spent budget does *not* burn it, because neither is a failed
     authentication.
-    *Residual:* that record is node-local (`Cachex`, the same trade
-    `WebAuthn.take_challenge/1` and `AccountThrottle` already make) and fails
-    **open**, so on a cluster a replay landing on a node that never saw the
-    redemption still succeeds. Fail-open is deliberate: failing closed would
-    break legitimate clients whose two requests are balanced onto different
-    nodes, which is a worse outcome than the replay it would prevent. Exactness
-    needs shared state; tracked in #743.
+    Single use is **exact**, on one node and on a cluster (#743): the record is
+    a `KilnCMS.Accounts.Token` row whose primary key is the blob's `jti`, so the
+    INSERT *is* the check and two redemptions of one blob race at Postgres. The
+    loser is refused rather than issued a token.
+
+    It was a node-local `Cachex` entry, which failed **open** across nodes — a
+    replay landing on a node that never saw the redemption was accepted — and,
+    less obviously, could hand out two tokens for one blob on a *single* node
+    when both requests resolved before either recorded. Nothing rejects a reused
+    TOTP code, so the two only had to arrive together.
+
+    `WebAuthn.take_challenge/1` and `AccountThrottle` still make the node-local
+    trade for their own state; residual risk #9 below covers the throttle.
   - Codes are charged `AccountThrottle.consume_second_factor/1` on the **same
     per-account bucket** the browser prompt charges. Per-surface budgets would
     let an attacker double their guesses by alternating endpoints, and the

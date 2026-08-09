@@ -186,8 +186,17 @@ editor/admin only (privacy-first: no per-user data is stored anyway).
 Field policy: the `role` field is visible only to **admins or the user
 themselves**; other readers see the record without `role`.
 
-`Token` — every action is gated to the AshAuthentication interaction bypass; there
-are no caller-facing token actions.
+`Token` — every AshAuthentication action is gated to the AshAuthentication
+interaction bypass, and the nightly expunge trigger to the AshOban one. There are
+no caller-facing token actions.
+
+One action is ours rather than AshAuthentication's: `:spend_jti` (#743), which
+records a redeemed headless two-factor blob. It is `forbid_if always()` — no
+actor may reach it. `KilnCMS.Accounts.PendingSignIn` calls it with
+`authorize?: false`, because the whole point of the step is that the caller has
+not finished signing in. **The headless single-use guarantee depends on that
+flag**, so a change that tightens `authorize?` handling has to keep this call
+working.
 
 ## Platform accounts — `Organization`, `OrgMembership`, `Role`, `ApiKey`, `Passkey`, `UserIdentity`
 

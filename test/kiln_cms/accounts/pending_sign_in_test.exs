@@ -10,7 +10,8 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
   other's fields — because a shared module that quietly merged the two would be
   worse than the duplication it replaced.
 
-  `async: false`: the burn record is a node-wide Cachex instance.
+  `async: false`: the single-use record is a row in the shared `tokens` table,
+  keyed on the blob's jti (#743).
   """
   use KilnCMS.DataCase, async: false
 
@@ -114,26 +115,52 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
   end
 
   describe "single use" do
-    test "an encrypted blob is refused once burned" do
+    test "an encrypted blob carries a jti, and claiming it succeeds once" do
       {user, _secret} = enabled_user()
       blob = PendingSignIn.mint(:encrypted, @endpoint, user)
 
-      assert {:ok, %{jti: jti}} = PendingSignIn.resolve(:encrypted, @endpoint, blob)
+      assert {:ok, %{jti: jti} = resolved} = PendingSignIn.resolve(:encrypted, @endpoint, blob)
       assert is_binary(jti)
+      assert :ok = PendingSignIn.claim(resolved)
 
-      PendingSignIn.burn(jti)
-      assert :error = PendingSignIn.resolve(:encrypted, @endpoint, blob)
+      # `resolve/3` still succeeds on a spent blob — there is deliberately no
+      # "is it spent?" read (see the moduledoc). The claim is the gate, and it
+      # is what refuses the second redemption.
+      assert {:ok, again} = PendingSignIn.resolve(:encrypted, @endpoint, blob)
+      assert :taken = PendingSignIn.claim(again)
     end
 
-    test "a session blob carries no jti, and burning nil is a no-op" do
+    test "spending the SAME blob twice loses the second time" do
+      # The guarantee, and the whole point of #743: the record is an INSERT on
+      # the jti, so a replay that also holds a valid code cannot be told it was
+      # first. A node-local cache answered "unspent" on every node that had not
+      # seen the redemption.
+      {user, _secret} = enabled_user()
+      blob = PendingSignIn.mint(:encrypted, @endpoint, user)
+
+      assert {:ok, resolved} = PendingSignIn.resolve(:encrypted, @endpoint, blob)
+
+      assert :ok = PendingSignIn.claim(resolved)
+      assert :taken = PendingSignIn.claim(resolved)
+    end
+
+    test "the claim record outlives the blob it retires" do
+      # Otherwise there is a window in which the blob is still inside its
+      # `max_age` but the record of its use has expired — a replay that only has
+      # to be patient. The two constants live in different modules, so nothing
+      # but this stops one being changed without the other.
+      assert KilnCMS.Accounts.Token.pending_sign_in_ttl() > PendingSignIn.max_age()
+    end
+
+    test "a session blob carries no jti, and spending it is a no-op" do
       # Its single use is the deleted session key. Minting a jti anyway would
-      # add a cache write per browser sign-in against a replay that already
-      # requires the session cookie.
+      # add a write per browser sign-in against a replay that already requires
+      # the session cookie.
       {user, _secret} = enabled_user()
       blob = PendingSignIn.mint(:session, @endpoint, user)
 
-      assert {:ok, %{jti: nil}} = PendingSignIn.resolve(:session, @endpoint, blob)
-      assert :ok = PendingSignIn.burn(nil)
+      assert {:ok, %{jti: nil} = resolved} = PendingSignIn.resolve(:session, @endpoint, blob)
+      assert :ok = PendingSignIn.claim(resolved)
     end
   end
 

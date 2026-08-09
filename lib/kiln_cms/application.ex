@@ -60,16 +60,11 @@ defmodule KilnCMS.Application do
       KilnCMS.Search.VectorCache,
       # Small dedicated store for in-flight WebAuthn challenges (#331) —
       # TTL-only, isolated from the content cache's busts/eviction pressure.
-      # `child_spec/1` ids on the module, so two Cachex instances need explicit
-      # ids or the supervisor refuses to start with a duplicate-id error.
+      # `child_spec/1` ids on the module, so a bare `{Cachex, …}` child needs an
+      # explicit id: add a second one without it and the supervisor refuses to
+      # start with a duplicate-id error.
       Supervisor.child_spec({Cachex, [name: KilnCMS.Accounts.WebAuthn.challenge_cache()]},
         id: KilnCMS.Accounts.WebAuthn.challenge_cache()
-      ),
-      # Spent headless pending-sign-in blobs, so a captured verify request
-      # cannot be replayed (#726). TTL-only and tiny — one boolean per completed
-      # two-factor API sign-in, for five minutes.
-      Supervisor.child_spec({Cachex, [name: KilnCMS.Accounts.PendingSignIn.cache()]},
-        id: KilnCMS.Accounts.PendingSignIn.cache()
       ),
       # Bounded LRW firing-artifact cache (see `KilnCMS.Firing.Cache.child_spec/1`).
       KilnCMS.Firing.Cache,

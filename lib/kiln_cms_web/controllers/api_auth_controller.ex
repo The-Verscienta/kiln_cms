@@ -135,26 +135,45 @@ defmodule KilnCMSWeb.ApiAuthController do
     code = params["code"]
 
     with :ok <- require_params([{"pending_token", pending}, {"code", code}]),
-         {:ok, %{user: user, jti: jti}} <- PendingSignIn.resolve(:encrypted, conn, pending),
-         {:ok, user} <- SecondFactor.check(user, code) do
-      # Only now, and only on success: a wrong code or a spent budget leaves the
-      # blob alive, because neither is a failed authentication and neither
-      # should turn "that code isn't valid" into "start over".
-      PendingSignIn.burn(jti)
+         {:ok, resolved} <- PendingSignIn.resolve(:encrypted, conn, pending),
+         {:ok, user} <- SecondFactor.check(resolved.user, code),
+         # Only now, and only on success: a wrong code or a spent budget leaves
+         # the blob alive, because neither is a failed authentication and
+         # neither should turn "that code isn't valid" into "start over".
+         #
+         # In the `with`, not beside it (#743). Claiming the blob is an INSERT
+         # keyed on its `jti`, so a concurrent replay that also had a valid code
+         # loses that race and lands here as `:taken` — and must be refused
+         # rather than handed a token. Calling this and ignoring the answer
+         # would leave exactly the replay the claim exists to stop.
+         :ok <- PendingSignIn.claim(resolved) do
       issue_token(conn, user)
     else
       {:missing, detail} ->
         missing_params(conn, detail)
 
-      # Missing, malformed, expired, already spent, or naming an account that
-      # has since turned two-factor off. All of them mean the same thing to a
-      # client: this exchange is over, start again at `POST /api/auth/sign_in`.
-      :error ->
+      # Missing, malformed, expired, or naming an account that has since turned
+      # two-factor off — plus `:taken`, a blob some other request has already
+      # redeemed. All of them mean the same thing to a client: this exchange is
+      # over, start again at `POST /api/auth/sign_in`.
+      answer when answer in [:error, :taken] ->
         ApiError.send(
           conn,
           :unauthorized,
           "pending_expired",
           "Sign-in is no longer pending. Start again."
+        )
+
+      # Not the same answer (#743). The claim could not be *recorded* — the
+      # blob may well still be redeemable, so "start again" would be wrong
+      # advice as well as a wasted trip through the password step and its
+      # throttle. A 503 says what is true: try this again shortly.
+      :unavailable ->
+        ApiError.send(
+          conn,
+          :service_unavailable,
+          "sign_in_unavailable",
+          "Sign-in could not be completed right now. Try again in a moment."
         )
 
       # Alerting the owner is `SecondFactor.check/2`'s job, shared with the

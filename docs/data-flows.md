@@ -137,6 +137,14 @@ link, confirmation, and the revocation markers) is persisted in `tokens` so it c
 be individually verified and revoked. Each row holds the jti, subject
 (`user?id=<uuid>`), purpose, expiry, and any `extra_data`.
 
+One row in that table is **not** an issued token: `purpose: "pending_sign_in"`
+(#743), written once per completed *headless* two-factor sign-in to make the
+pending blob single-use. It carries no credential — the jti is a random nonce,
+not a JWT — but it is still a timestamped record that a given account completed
+a second factor, so it counts as personal data for a DSAR or an erasure review.
+It is written independently of `store_all_tokens?`, expires 301 seconds after
+the sign-in, and is removed by the same nightly sweep below.
+
 Without cleanup these rows would accumulate forever, so the nightly
 `:expunge_expired` trigger (`lib/kiln_cms/accounts/token.ex`) deletes every token
 whose `expires_at` has passed. **Operator-visible policy: an expired token is
