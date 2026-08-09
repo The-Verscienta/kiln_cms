@@ -239,7 +239,7 @@ defmodule KilnCMS.Config.Env do
   retention. That is the one class this module still interpreted, against its
   own thesis that an unusable value must never be guessed at.
 
-  The bound is `#{2_147_483_647}` (2³¹-1). It is arbitrary in the sense that any
+  The bound is `#{@max_integer}` (2³¹-1). It is arbitrary in the sense that any
   bound would be, but it is not a judgement about what a *sensible* value is —
   every real value for every variable this reads is smaller by orders of
   magnitude, so what it actually catches is a typo, which is the failure that

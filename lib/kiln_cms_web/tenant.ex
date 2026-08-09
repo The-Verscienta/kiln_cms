@@ -368,10 +368,7 @@ defmodule KilnCMSWeb.Tenant do
   # entries, never hot published pages (#659). Before it, `nil` was deliberately
   # never committed, so every unknown host cost a database round trip for ever,
   # unmetered — tenant refusal halts in the endpoint above every rate limiter
-  # (#336 review, resolution-cache DoS).
-  #
-  # A miss is held for one minute against five for a hit, so a host configured
-  # moments after someone probed it starts working promptly. See that module for
+  # (#336 review, resolution-cache DoS). See that module for the TTLs and for
   # what a negative entry does and does not cost.
   defp known_org(host) when is_binary(host) do
     case normalize(host) do
@@ -403,11 +400,16 @@ defmodule KilnCMSWeb.Tenant do
   # stores as its own `:unresolved` sentinel, because Cachex uses `nil` for "not
   # present" and a cached miss has to be distinguishable from never having asked.
   #
-  # This function is the ONLY thing that writes a negative entry, and it only
-  # runs on a real lookup that really found nothing. So a cached miss can never
-  # refuse a host the database would have resolved — the property that separates
-  # this from bounding the work with a rate limit, which cannot tell a flood
-  # from a legitimate request behind the same address.
+  # This function is the only thing that writes a negative entry.
+  #
+  # NOTE it cannot tell "no such org" from "the read failed": `lookup/2` below
+  # and `Accounts.default_org/0` both collapse `{:error, _}` to `nil`. So one
+  # Postgres blip while resolving a REAL tenant's host caches `:unresolved` and
+  # 404s them for up to the negative TTL after the database is healthy again
+  # (#1124). Pre-#659 that was harmless, because a `nil` was never committed —
+  # caching the miss is what turned an error into a sticky one. Do not read
+  # `Cache.Hosts`' "only ever written from a real lookup that really found
+  # nothing" as true of this path until that is fixed.
   defp resolve_known(host) do
     cond do
       host == base_host() -> Accounts.default_org()

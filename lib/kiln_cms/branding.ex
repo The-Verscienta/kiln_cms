@@ -189,20 +189,26 @@ defmodule KilnCMS.Branding do
   # isn't.
   #
   # Since #1089 the BRAND_PRIMARY_COLOR path is checked at boot in
-  # `config/runtime.exs`, through `KilnCMS.Config.Env`, so a bad value there is
-  # dropped before it reaches this key AND reaches Sentry rather than only
-  # container stdout. What can still arrive here is a `:branding` colour set by
-  # a project overlay's compile-time config, which no boot-time reader sees — so
-  # this stays a real guard, not a vestige, and the message says which layer to
-  # go look at.
+  # `config/runtime.exs`, through `KilnCMS.Config.Env`, so on a prod release a
+  # bad value is dropped before it reaches this key AND reaches Sentry rather
+  # than only container stdout.
+  #
+  # This stays a real guard for everything that is not that path: a compiled
+  # `config :kiln_cms, :branding` from a project overlay, an
+  # `Application.put_env/3` at runtime, and dev/test — where the runtime.exs
+  # block is inside `if config_env() == :prod` and BRAND_PRIMARY_COLOR is never
+  # read at all. So the message must NOT tell the reader the value came from an
+  # overlay; in the environments where this can fire, that is the one thing it
+  # probably did not.
   defp config(:primary_color) do
     case BrandTokens.normalize_color(configured(:primary_color)) do
       nil ->
         if present(configured(:primary_color)) do
           Logger.warning(
             "configured :branding primary_color is not a hex colour; ignoring it. " <>
-              "BRAND_PRIMARY_COLOR is validated at boot, so this is a compiled " <>
-              "`config :kiln_cms, :branding` value from an overlay."
+              "Source is a `config :kiln_cms, :branding` value — an overlay, a " <>
+              "runtime put_env, or dev/test config. On a prod release " <>
+              "BRAND_PRIMARY_COLOR itself is validated at boot (#1089)."
           )
         end
 

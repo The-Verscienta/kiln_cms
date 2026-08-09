@@ -597,7 +597,15 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
 
         assert get_in(config, [:kiln_cms, :branding, :primary_color]) == nil
         refute stderr =~ "BRAND_PRIMARY_COLOR"
-        assert get_in(config, [:kiln_cms, :config_warnings]) == []
+
+        # Scoped to this variable rather than asserting the whole collector is
+        # empty: the list is shared with every other variable runtime.exs reads
+        # under :prod, so a future default that records a warning would fail
+        # this case with a message pointing at branding.
+        refute Enum.any?(
+                 get_in(config, [:kiln_cms, :config_warnings]),
+                 &match?({"BRAND_PRIMARY_COLOR", _, _}, &1)
+               )
       end
     end
 

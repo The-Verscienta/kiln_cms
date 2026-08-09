@@ -67,7 +67,8 @@ Two places, because one of them is not enough (#634):
   `Logger.warning` never reaches it. Issues are grouped per variable, so a flag
   that stays misspelled is one issue rather than a new one on every restart.
 
-Only variables that hold a **flag or a count** go through this. Nothing here echoes a
+Only variables that hold a **flag**, a **count**, or a short constrained value
+like an enum spelling or a colour go through this. Nothing here echoes a
 credential; a variable carrying a secret is read elsewhere and its value is
 never logged.
 
@@ -92,6 +93,12 @@ as `Env.positive_integer/1` (#1009). Before that each had hand-rolled its own
 * **A partly-numeric value is refused, not truncated.** `BACKUP_KEEP_DAYS=7 days`
   keeps the default rather than quietly becoming 7 — the operator meant a week
   and would otherwise never learn the unit was wrong.
+* **Anything above 2147483647 is refused** (#1091). Elixir integers have no
+  upper bound, so without this a *digit* slip was accepted where a *letter* slip
+  warned — `BACKUP_KEEP_DAYS=144444444444444` parsed cleanly into a
+  four-billion-year retention. The ceiling is not a claim about a sensible
+  value; every real one here is smaller by orders of magnitude, so what it
+  catches is a typo.
 * **Anything refused keeps the default and warns**, through all three sinks
   above. The count case is what #1009 added to that replay: the hand-rolled
   parsers wrote to stderr and stopped there, so a mistyped count reached neither
@@ -231,7 +238,7 @@ KilnCMS defaults. All four are read only under `:prod`; for dev or test, set
 | `SITE_NAME` | `KilnCMS` | Instance name in the admin chrome, page titles and outbound email. Also the default provenance `signer` identity when `KilnCMS.Provenance`'s `:signer` is unset. | [`config/runtime.exs:839`](../config/runtime.exs#L839) |
 | `BRAND_LOGO_URL` | unset | Logo shown in the admin chrome and on branded error pages. If the host differs from the site's origin it must also be in `CSP_IMG_SRC`, or the browser blocks the image. | [`config/runtime.exs:840`](../config/runtime.exs#L840) |
 | `BRAND_FAVICON_URL` | unset | Favicon URL. Same `CSP_IMG_SRC` caveat as the logo. | [`config/runtime.exs:841`](../config/runtime.exs#L841) |
-| `BRAND_PRIMARY_COLOR` | unset | Hex colour (`#1d4ed8`) driving the emitted OKLCH theme tokens. Anything that isn't a hex colour is **ignored with a warning** rather than interpreted, since the value feeds contrast computation. | [`config/runtime.exs:808`](../config/runtime.exs#L808) |
+| `BRAND_PRIMARY_COLOR` | unset | Hex colour driving the emitted OKLCH theme tokens — `#1d4ed8` or the `#1d4` shorthand, stored in canonical long lowercase form. Anything else is **ignored with a warning** rather than interpreted, since the value feeds contrast computation. Validated at boot alongside every other variable here, so a bad value reaches `Logger` and Sentry and not just container stdout (#1089); before that it was checked only at render time, where a bare `Logger.warning` never reaches Sentry. | [`config/runtime.exs:808`](../config/runtime.exs#L808) |
 
 ## Optional — Unsplash (media library)
 

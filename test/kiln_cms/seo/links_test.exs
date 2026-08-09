@@ -190,22 +190,34 @@ defmodule KilnCMS.Seo.LinksTest do
       foreign =
         post(actor, "brewing herbal tea slowly", title: @twin_title, tenant: other)
 
+      # A same-org twin, so the semantic leg has something legitimate to return.
+      # Without it `suggestions` is `[]`, and an empty list satisfies BOTH the
+      # `refute Enum.any?` below and the `Enum.all?` guard under it — the first
+      # draft of this test asserted `source == :semantic` on nothing and passed
+      # with the predicate changed to a source that does not exist.
+      twin = post(actor, "brewing herbal tea slowly", title: @twin_title)
       anchor = post(actor, "brewing herbal tea slowly", title: @twin_title)
 
       suggestions = Links.suggest(anchor)
 
+      # Non-emptiness FIRST: every other assertion here is vacuous without it.
+      assert Enum.any?(suggestions, &(&1.id == twin.id)),
+             "the same-org twin should be suggested; with no suggestions at all " <>
+               "the org-boundary assertion below proves nothing"
+
+      # ...and it came from the leg this test is named for, not the keyword
+      # fallback that `candidates/2` drops to when the semantic leg is empty.
+      assert Enum.all?(suggestions, &(&1.source == :semantic))
+
       refute Enum.any?(suggestions, &(&1.id == foreign.id)),
              "a semantic suggestion must not cross the org boundary"
-
-      # The leg really did run — otherwise this passes for the same reason the
-      # keyword-fallback case did, and pins nothing.
-      assert Enum.all?(suggestions, &(&1.source == :semantic))
     end
 
-    test "the org boundary holds even when the only neighbour is foreign" do
-      # The case above still has a same-org twin to return. This one has none,
-      # so the semantic leg comes back empty and `candidates/2` falls through to
-      # the keyword leg — which must not surface the foreign page either.
+    test "the keyword fall-through does not leak the foreign page either" do
+      # No same-org twin, so the semantic leg returns nothing and `candidates/2`
+      # falls through to the keyword leg. Asserted explicitly, because that is
+      # what distinguishes this case from the one above — the first draft
+      # claimed the difference and did not have it, so the two were identical.
       actor = admin()
       other = other_org()
 
@@ -214,7 +226,10 @@ defmodule KilnCMS.Seo.LinksTest do
 
       anchor = post(actor, "brewing herbal tea slowly", title: @twin_title)
 
-      refute Enum.any?(Links.suggest(anchor), &(&1.id == foreign.id))
+      suggestions = Links.suggest(anchor)
+
+      refute Enum.any?(suggestions, &(&1.id == foreign.id))
+      refute Enum.any?(suggestions, &(&1.source == :semantic))
     end
 
     test "respects :limit" do
