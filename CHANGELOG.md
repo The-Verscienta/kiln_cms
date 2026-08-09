@@ -49,6 +49,47 @@ migration, a rewritten column, a dropped config key).
   anything published since the last checkpoint, and a badge on every one of them
   would teach an operator to stop reading badges.
 
+- **XLIFF 2.0 export/import for translation vendors** (#502). `/editor/translations`
+  can now send content out as XLIFF 2.0 — the format Smartling, Lokalise,
+  Crowdin, Phrase, memoQ and Trados all read — and apply the file that comes
+  back. Tick rows, pick a target locale, **Export**; upload the returned file
+  with **Import XLIFF**. A direct vendor-API connector is now a thin plugin on
+  top of this seam instead of a second content pipeline.
+  See [docs/localization-workflows.md](docs/localization-workflows.md).
+
+  Trans-unit ids are built on **identity, not position** — a block's stable
+  uuid and a Portable Text block's `_key` — so a file that comes back after the
+  source has been reordered still lands every string. Map-array items, table
+  cells and nested `columns` children are addressed by index (the last because
+  they are raw maps with no readable id, #865/#954), and a unit whose path
+  contains one says so in the report rather than passing as an identity match.
+  Every id is a valid `xsd:NMTOKEN`, which `unit/@id` requires — a tool that
+  validates on ingest rejects the whole document, not the offending unit.
+
+  Nothing is applied silently: every unit id in the returned file is reported
+  as `applied`, `unchanged` or `unknown`, plus the ones the vendor left empty
+  and the ones whose match depended on ordering. An empty `<target>` never
+  clears a field — a partial delivery is normal mid-job — and the whole-record
+  positional fallback is all-or-nothing, because mixing it in per unit is what
+  puts a paragraph in the wrong block.
+
+  A returned file can reword an anchor but **cannot retarget a link**: hrefs
+  travel into `<originalData>` as translator context, and the importer restores
+  links from the `markDefs` the record already holds. Marks a file invents are
+  filtered out rather than stored dangling. The reader handles what a real CAT
+  tool sends back: re-segmented units (including the `<ignorable>` whitespace
+  between sentences), `<sc>`/`<ec>` spanning codes, `<mrk>` annotations, and a
+  rebound namespace prefix.
+
+  **Which fields are prose is now declared on the block field**, so a plugin
+  block (D18) gets the same round trip as a core one:
+  `translatable: false` for an identifier-ish `:string`,
+  `translatable: [:question, :answer]` for the keys of an `{:array, :map}`
+  field, and `translatable: :unsupported` for text this exporter cannot
+  round-trip safely (`rich_text.legacy_html`, `custom.content`) — which the
+  export *reports* rather than dropping quietly. `:string` and `:rich_text`
+  are prose by default, so most fields need no annotation.
+
 - **Events: "what's on, soonest first"** (#766). An event-shaped content type —
   one carrying a `datetime_range` field (#480) — now has a paginated delivery
   index ordered by each document's **next occurrence**, at `/<plural>` (HTML)
@@ -276,7 +317,30 @@ migration, a rewritten column, a dropped config key).
   an embed block, and other shortcodes are removed rather than left as literal
   `[gallery ids="1,2"]` text in the middle of a sentence.
 
+### Fixed
+
+- **The sitemap escaped three characters where the feeds escaped five** (#502).
+  Its copy of the XML escaper let a C0 control byte through, and one of those
+  makes the whole sitemap unparseable rather than one URL. All three
+  serializers now share `KilnCMS.Xml`.
+
 ### Changed
+
+- **A translation now keeps the source's block ids** (#502). `create_translation!`
+  used to mint fresh ids for the copy. A locale variant is the same document in
+  another language, every consumer of a block id is already scoped to one record
+  (collab locks, version folds, experiment patches, the fired `_id`), and shared
+  identity is what lets an XLIFF trans-unit address a paragraph across the pair.
+  **Duplicate** is unaffected — a duplicate is a different document and still
+  mints fresh ids. Translations created before this release match by position on
+  import, and are reported as having done so.
+
+  One consumer was *not* record-scoped: the visual-editing consoles resolved a
+  record by slug alone and then matched the clicked block by id, so on a
+  multi-locale site a click on a French page could open — and save into — the
+  English record. Both now pin the default locale, and the presentation console
+  refuses a payload naming a record other than the one it loaded. Editing a
+  non-default locale in place still needs the locale in the route.
 
 - **The media ingest pipeline is one module.** Sniff → size-cap → strip →
   store → `MediaItem` → enqueue derivation lived twice inside

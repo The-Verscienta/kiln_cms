@@ -444,6 +444,11 @@ defmodule KilnCMSWeb.Router do
     # to be reachable as a controller download while keeping the same tier).
     get "/editor/analytics/export.json", AnalyticsExportController, :export
     get "/editor/analytics/export.csv", AnalyticsExportController, :export_csv
+
+    # XLIFF export for translation vendors (#502) — a file download, so a
+    # controller route; editor-gated in the controller for the same reason as
+    # the analytics exports above (`TranslationsLive` is editor-visible).
+    get "/editor/translations/export.xlf", TranslationsExportController, :export
   end
 
   # Headless GraphQL — always available; the interactive playground is dev-only

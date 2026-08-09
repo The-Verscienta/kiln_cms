@@ -41,9 +41,9 @@ defmodule KilnCMS.Blocks.Columns do
     # array (not a union member) to avoid a recursive-type compile cycle.
     field :columns, {:array, :map}, default: []
     # Width-ratio preset (see @presets); nil renders equal-width columns.
-    field :layout, :string
+    field :layout, :string, translatable: false
     # Inter-column gap keyword (see @gaps); nil renders the default gap.
-    field :gap, :string
+    field :gap, :string, translatable: false
   end
 
   # Width-ratio presets → CSS `grid-template-columns` fractions. The preset is

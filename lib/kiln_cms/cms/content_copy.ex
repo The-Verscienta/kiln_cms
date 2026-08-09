@@ -12,9 +12,11 @@ defmodule KilnCMS.CMS.ContentCopy do
   wrong:
 
     * **blocks** must go back through the union's storage shape so the create
-      action re-casts (and re-sanitizes) them, minus their stable ids — at
-      *every* depth, since `columns` children carry ids of their own — so the
-      copy gets fresh ones;
+      action re-casts (and re-sanitizes) them. A duplicate strips their stable
+      ids at *every* depth, since `columns` children carry ids of their own, so
+      it gets fresh ones; a translation keeps them (`:keep_ids?` on
+      `dump_blocks/2`), because a locale variant is the same document in
+      another language;
     * **tags** are a `manage_relationship` argument on `:create`, not an
       attribute, so they travel as an id list — and the load that reads them
       must project ids only, or one click drags every tag's full row into the
@@ -81,6 +83,27 @@ defmodule KilnCMS.CMS.ContentCopy do
   action re-casts it, with every block's stable id stripped so the copy mints
   fresh ones.
 
+  `:keep_ids?` suppresses the strip. Only the translation path passes it, and
+  only because a locale variant is the *same document in another language*:
+  it is what lets a translation vendor's XLIFF file (#502) address a paragraph
+  by identity instead of by position. A **duplicate** is a different document
+  and keeps minting fresh ids; that is the whole difference between the two
+  callers here.
+
+  Sharing ids is safe because every consumer reads them **inside one record**:
+  version folds (`KilnCMS.History`), experiment patches, block comments
+  (keyed `(content_type, content_id, block_id)`), the CRDT document key
+  (`collab:<type>:<record id>`), and the `_id` a fired `:json` artifact carries.
+  There is no unique index on anything derived from a block id.
+
+  The one place that was *not* record-scoped is worth knowing about, because it
+  is what this option would otherwise have broken: the visual-editing consoles
+  resolved a record by slug alone and then matched the clicked block by id, so
+  with shared ids a click on a French page could open — and save into — the
+  English record. Both now pin the locale (`KilnCMSWeb.PresentationLive`,
+  `KilnCMSWeb.InContextEditLive`), and the presentation console additionally
+  refuses a stega payload naming a record other than the one it loaded.
+
   `:role` resets every block field that role may not edit to its declared
   default, and returns which ones were reset.
 
@@ -102,7 +125,9 @@ defmodule KilnCMS.CMS.ContentCopy do
       Ash.Type.dump_to_embedded(attribute.type, record.blocks || [], attribute.constraints)
 
     dumped
-    |> Enum.map(&strip_ids/1)
+    |> then(fn blocks ->
+      if Keyword.get(opts, :keep_ids?, false), do: blocks, else: Enum.map(blocks, &strip_ids/1)
+    end)
     |> reset_restricted(Keyword.get(opts, :role))
   end
 

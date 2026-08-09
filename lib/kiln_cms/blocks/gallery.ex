@@ -50,9 +50,9 @@ defmodule KilnCMS.Blocks.Gallery do
     # Optional heading rendered above the grid.
     field :title, :string
     # Each entry: `%{"media_id", "url", "alt", "caption"}` (string keys, stored).
-    field :images, {:array, :map}, default: []
+    field :images, {:array, :map}, default: [], translatable: [:alt, :caption]
     # Presentation intent — see @layouts. nil renders the default grid.
-    field :layout, :string
+    field :layout, :string, translatable: false
   end
 
   # Layout intent → container style. An unknown or nil value falls back to

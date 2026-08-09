@@ -46,17 +46,17 @@ defmodule KilnCMS.Blocks.Video do
   block :video do
     # Not required — the editor inserts a placeholder, then fills it from the
     # media library (same pattern as image.ex's optional `url`).
-    field :media_id, :string
+    field :media_id, :string, translatable: false
     # An external direct URL, used ONLY when `media_id` is blank — see the
     # moduledoc on why a library item never gets its URL baked in here.
-    field :url, :string
+    field :url, :string, translatable: false
     field :title, :string
     field :caption, :string
-    field :poster_media_id, :string
-    field :poster_url, :string
-    field :captions_media_id, :string
+    field :poster_media_id, :string, translatable: false
+    field :poster_url, :string, translatable: false
+    field :captions_media_id, :string, translatable: false
     field :captions_label, :string
-    field :captions_lang, :string
+    field :captions_lang, :string, translatable: false
     # Snapshot of the item's probed duration at pick time — used for the
     # `:json_ld` VideoObject and the editor's summary line, not for playback.
     field :duration_seconds, :float

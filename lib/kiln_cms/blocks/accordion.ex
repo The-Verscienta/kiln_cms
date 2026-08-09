@@ -36,7 +36,7 @@ defmodule KilnCMS.Blocks.Accordion do
     # Optional section heading rendered above the panels.
     field :title, :string
     # Each entry: `%{"title" => t, "content" => c}` (string keys, as stored).
-    field :panels, {:array, :map}, default: []
+    field :panels, {:array, :map}, default: [], translatable: [:title, :content]
     # Whether the first panel renders expanded. Editors kept asking; the
     # alternative is a page that opens looking empty.
     field :first_open, :boolean, default: false

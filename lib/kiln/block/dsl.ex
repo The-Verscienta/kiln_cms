@@ -1,7 +1,17 @@
 defmodule Kiln.Block.Field do
   @moduledoc "Target struct for a `field` DSL entry (Kiln v2 — D10)."
   # __spark_metadata__ is required by Spark for source annotations.
-  defstruct [:name, :type, :required, :default, :description, :editable_by, :__spark_metadata__]
+  defstruct [
+    :name,
+    :type,
+    :required,
+    :default,
+    :description,
+    :editable_by,
+    :translatable,
+    :__spark_metadata__
+  ]
+
   @type t :: %__MODULE__{}
 end
 
@@ -60,6 +70,17 @@ defmodule Kiln.Block.Dsl do
         required: false,
         doc:
           "Roles allowed to edit this field (block-/field-level policy, D-J). nil = any editor."
+      ],
+      translatable: [
+        type: {:or, [:boolean, {:literal, :unsupported}, {:list, :atom}]},
+        required: false,
+        doc:
+          "Whether this field carries prose a translator should see (#502). Omit to take " <>
+            "the type-derived default (`:string` and `:rich_text` yes, everything else no); " <>
+            "`false` opts an identifier-ish string out; `:unsupported` marks prose this " <>
+            "exporter cannot safely round-trip, which is *reported* rather than silently " <>
+            "skipped; a **key list** names the translatable keys of an `{:array, :map}` " <>
+            "field. See `Kiln.Block.Info.translatable/1`."
       ]
     ]
   }

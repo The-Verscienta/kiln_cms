@@ -8,9 +8,16 @@ defmodule KilnCMS.Blocks.Custom do
   use Kiln.Block
 
   block :custom do
-    field :legacy_type, :string
-    field :content, :string
-    field :data, :map, default: %{}
+    field :legacy_type, :string, translatable: false
+    # Not offered to a translation vendor (#502): this is the *preserved
+    # payload* of an unmapped block, so it may be prose, may be HTML, and may
+    # be a serialized blob. The XLIFF exporter reports every `custom` block it
+    # skipped rather than dropping it silently.
+    field :content, :string, translatable: :unsupported
+    # Reported, not exported, for the same reason as `content` above: this is
+    # where `TypedBlocks.one_from_legacy/1` parks an unmapped block's whole
+    # payload, so it is frequently where the prose actually is.
+    field :data, :map, default: %{}, translatable: :unsupported
   end
 
   # Match a plain variable, not %__MODULE__{}. Block modules are Ash embedded

@@ -597,25 +597,10 @@ defmodule KilnCMSWeb.FeedController do
 
   defp feed_prefix(%{plural: plural}), do: "/" <> plural
 
-  # XML 1.0 has no escape form for the C0 control characters, so a title
-  # containing one — a form feed pasted out of Word, say — makes the *whole
-  # document* unparseable for every subscriber, not just its own entry. Postgres
-  # stores them happily and nothing upstream rejects them, so they are dropped
-  # here. Tab, newline and carriage return are the three that are legal.
-  @illegal_xml ~r/[\x{0000}-\x{0008}\x{000B}\x{000C}\x{000E}-\x{001F}\x{FFFE}\x{FFFF}]/u
-
-  # `"` and `'` are escaped as well as the three that matter in element text:
-  # this output also lands in quoted *attribute* values (`href="…"`), and the
-  # serializer must not depend on a validation elsewhere staying shaped as it is
-  # — the same argument the moduledoc makes for the audience filter.
-  defp escape(value) do
-    value
-    |> to_string()
-    |> String.replace(@illegal_xml, "")
-    |> String.replace("&", "&amp;")
-    |> String.replace("<", "&lt;")
-    |> String.replace(">", "&gt;")
-    |> String.replace("\"", "&quot;")
-    |> String.replace("'", "&apos;")
-  end
+  # `KilnCMS.Xml.escape/1` drops the C0 control characters XML 1.0 cannot
+  # represent (a form feed pasted out of Word makes the *whole document*
+  # unparseable for every subscriber, not just its own entry), and escapes `"`
+  # and `'` alongside the three that matter in element text because this output
+  # also lands in quoted attribute values (`href="…"`).
+  defdelegate escape(value), to: KilnCMS.Xml
 end

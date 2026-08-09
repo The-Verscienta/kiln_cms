@@ -18,7 +18,7 @@ defmodule KilnCMS.Blocks.Faq do
     # Optional section heading rendered above the list.
     field :title, :string
     # Each entry: `%{"question" => q, "answer" => a}` (string keys, as stored).
-    field :items, {:array, :map}, default: []
+    field :items, {:array, :map}, default: [], translatable: [:question, :answer]
   end
 
   # Match a plain variable, not %__MODULE__{} — see the note in divider.ex: the

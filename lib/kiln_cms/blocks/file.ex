@@ -25,13 +25,13 @@ defmodule KilnCMS.Blocks.File do
   block :file do
     # Not required — the editor inserts a placeholder, then fills it from the
     # media library (same pattern as image.ex's optional `url`).
-    field :media_id, :string
+    field :media_id, :string, translatable: false
     # Display title; defaults to `filename` when blank (set at insert time by
     # the picker, not re-derived here, so an editor can still override it).
     field :title, :string
     field :description, :string
-    field :filename, :string
-    field :content_type, :string
+    field :filename, :string, translatable: false
+    field :content_type, :string, translatable: false
     field :byte_size, :integer
   end
 

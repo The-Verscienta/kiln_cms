@@ -19,8 +19,8 @@ defmodule KilnCMS.Blocks.Audio do
   alias KilnCMS.HTMLSanitizer
 
   block :audio do
-    field :media_id, :string
-    field :url, :string
+    field :media_id, :string, translatable: false
+    field :url, :string, translatable: false
     field :title, :string
     field :caption, :string
     # Snapshot of the item's probed duration at pick time — display only.

@@ -59,10 +59,21 @@ defmodule KilnCMSWeb.PresentationLive do
   # Scope to the current site's org (epic #336) so the Presentation console on
   # one site's host only resolves that site's content.
   defp fetch_by_slug(kind, slug, actor, org) do
+    # Pinned to the default locale. `[slug, locale]` is the identity, so a
+    # slug-only read on a multi-locale site returned whichever variant Postgres
+    # handed back first — and once locale variants share block ids (#502), the
+    # block a stega payload names resolves inside the *wrong* record and an
+    # inline save writes one locale's prose into another's. Deterministic and
+    # wrong beats arbitrary and wrong; editing a non-default locale in place
+    # needs the locale in the route, which is tracked separately.
     case ContentTypes.list!(kind,
            actor: actor,
            tenant: org,
-           query: [filter: [slug: slug], select: [:id], limit: 1]
+           query: [
+             filter: [slug: slug, locale: KilnCMS.I18n.default_locale()],
+             select: [:id],
+             limit: 1
+           ]
          ) do
       [%{id: id} | _] ->
         ContentTypes.get_record!(kind, id, actor: actor, tenant: org, load: [:featured_image])
