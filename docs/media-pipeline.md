@@ -316,13 +316,22 @@ upgrade, with no warning. That is a migration, not a default.
 
 So the behaviour is stated exactly rather than implied:
 
-| ffmpeg | `require_av_metadata_strip` | Result |
+| ffmpeg | `REQUIRE_AV_METADATA_STRIP` | Result |
 |---|---|---|
-| present | either | stripped, always |
+| present, remux succeeds | either | stripped |
+| present, remux fails | `false` (default) | stored as it arrived, logged at `:warning` |
+| present, remux fails | `true` | upload refused |
 | absent | `false` (default) | stored as it arrived, logged at `:warning` |
 | absent | `true` | upload refused |
 
-**If you rely on the privacy guarantee, set `require_av_metadata_strip: true`
+Note the middle rows: having ffmpeg is not the same as the strip succeeding.
+A container ffmpeg cannot remux under `-c copy` (pcm_s16le audio in MP4, from
+some screen recorders) fails the same way a missing binary does, and the
+default stores it. The log line names which of the two happened, because
+telling an operator to install ffmpeg on a host that already has it sends
+them after the one thing that is not broken.
+
+**If you rely on the privacy guarantee, set `REQUIRE_AV_METADATA_STRIP=true`
 and install ffmpeg.** That gets you the same contract PDFs already have. The
 `:warning` exists so the gap is visible in logs rather than assumed away — but a
 log line is not a control, and nobody should treat the default as one.
@@ -501,7 +510,9 @@ A video or audio item gates exactly like a document. One extra step applies:
 **gating discards the generated poster frame**, row and blob. A poster is
 written to *public* storage (it renders as a plain `<img>`), and a still from
 a members-only video should not stay world-readable once the video isn't.
-Un-gating does not bring it back — pick a poster image on the block.
+Un-gating re-derives it (#821), so a re-published video does not open on a
+black frame. A poster picked by hand on the block still wins — it is a
+different field, and `Blocks.Video.poster_src/1` prefers it.
 
 If you serve media from a CDN on another hostname, note that `CSP_IMG_SRC`
 widens the browser CSP's `media-src` as well as its `img-src`; without it,

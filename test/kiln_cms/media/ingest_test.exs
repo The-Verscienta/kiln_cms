@@ -108,9 +108,16 @@ defmodule KilnCMS.Media.IngestTest do
   # guarantee is conditional — and these two tests pin exactly what the
   # condition is, which is the part an operator has to be able to rely on.
   #
-  # They run WITHOUT ffmpeg on purpose: that is the branch where the privacy
-  # promise is weakest, and it is the one worth being sure about. The
-  # strip-succeeds path needs ffmpeg and is covered by `AVProcessorTest`.
+  # The no-ffmpeg branch is where the privacy promise is weakest, so it is
+  # pinned here; the strip-succeeds branch is pinned in `AVProcessorTest`
+  # behind the `:ffmpeg` tag, where ffprobe can read the output back and show
+  # the GPS is actually gone.
+  #
+  # Both of the no-ffmpeg tests below are `:no_ffmpeg`-tagged rather than
+  # wrapped in `if available?() do :ok else ... end`. The wrapped form was the
+  # first cut and it was wrong: on any machine with ffmpeg it reported green
+  # having asserted nothing, which is precisely what `test/test_helper.exs`
+  # warns about two comments running.
   describe "A/V metadata stripping (#820)" do
     # Minimal ISO-BMFF: a 4-byte size, `ftyp`, then an allowlisted brand.
     defp mp4_path do
@@ -120,40 +127,37 @@ defmodule KilnCMS.Media.IngestTest do
       path
     end
 
-    @tag :skip_if_ffmpeg
+    @tag :no_ffmpeg
     test "without ffmpeg the upload still lands, and says so" do
-      if KilnCMS.AVProcessor.available?() do
-        :ok
-      else
-        log =
-          ExUnit.CaptureLog.capture_log(fn ->
-            assert {:ok, item} = Ingest.store_file(mp4_path(), "clip.mp4", actor: actor())
-            assert item.content_type == "video/mp4"
-          end)
-
-        # The gap must be visible rather than assumed away.
-        assert log =~ "container metadata intact"
-        assert log =~ "Install ffmpeg"
-      end
-    end
-
-    test "require_av_metadata_strip refuses rather than storing unstripped" do
-      if KilnCMS.AVProcessor.available?() do
-        :ok
-      else
-        previous = Application.fetch_env(:kiln_cms, :require_av_metadata_strip)
-        Application.put_env(:kiln_cms, :require_av_metadata_strip, true)
-
-        on_exit(fn ->
-          case previous do
-            {:ok, value} -> Application.put_env(:kiln_cms, :require_av_metadata_strip, value)
-            :error -> Application.delete_env(:kiln_cms, :require_av_metadata_strip)
-          end
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, item} = Ingest.store_file(mp4_path(), "clip.mp4", actor: actor())
+          assert item.content_type == "video/mp4"
         end)
 
-        assert {:error, :strip_failed} =
-                 Ingest.store_file(mp4_path(), "clip.mp4", actor: actor())
-      end
+      # The gap must be visible rather than assumed away.
+      assert log =~ "container metadata intact"
+      assert log =~ "Install ffmpeg"
+    end
+
+    @tag :no_ffmpeg
+    test "require_av_metadata_strip refuses, and blames the server not the file" do
+      previous = Application.fetch_env(:kiln_cms, :require_av_metadata_strip)
+      Application.put_env(:kiln_cms, :require_av_metadata_strip, true)
+
+      on_exit(fn ->
+        case previous do
+          {:ok, value} -> Application.put_env(:kiln_cms, :require_av_metadata_strip, value)
+          :error -> Application.delete_env(:kiln_cms, :require_av_metadata_strip)
+        end
+      end)
+
+      # `:av_strip_unavailable`, not `:strip_failed` — the two get different
+      # words in front of an editor, because retrying fixes exactly one of
+      # them and the PDF-flavoured `:unavailable` copy names the wrong
+      # subsystem entirely.
+      assert {:error, :av_strip_unavailable} =
+               Ingest.store_file(mp4_path(), "clip.mp4", actor: actor())
     end
 
     # A caption track is text this codebase already parsed — there is no

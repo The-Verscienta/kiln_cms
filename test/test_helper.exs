@@ -49,10 +49,48 @@ qpdf_exclusion =
     [:qpdf]
   end
 
+# A/V metadata stripping (#820), on the same reasoning again: the claim is that
+# an uploaded MP4 comes back with no GPS and no device model, and only ffmpeg's
+# actual output shows that. `ffprobe` is needed to *read* the result back, so
+# both binaries gate this tag even though `strip_metadata/2` itself needs only
+# ffmpeg.
+#
+# This one is worth the extra sentence: the first cut of #820 wrapped these in
+# `if AVProcessor.available?() do :ok else … end`, which made the whole feature
+# a green no-op on every machine that HAD ffmpeg — the exact shape the pg_dump
+# comment above warns about, and it went in anyway.
+ffmpeg_exclusion =
+  if KilnCMS.AVProcessor.available?() do
+    []
+  else
+    IO.puts(
+      :stderr,
+      "note: excluding :ffmpeg tests — needs ffmpeg and ffprobe on PATH " <>
+        "(A/V uploads are stored unstripped without ffmpeg)"
+    )
+
+    [:ffmpeg]
+  end
+
+# The mirror image: the tests that pin what happens WITHOUT ffmpeg can only run
+# where there is none. Between the two tags, one of the pair always runs, and
+# neither ever passes by asserting nothing.
+#
+# Gated on ffmpeg ALONE, not `available?/0`. `strip_metadata/2` branches on
+# ffmpeg only, so on a host carrying ffmpeg but no ffprobe these tests would
+# otherwise run and fail: the strip actually shells out and reports "could not
+# remux" rather than the "no ffmpeg" answer they assert.
+no_ffmpeg_exclusion =
+  if System.find_executable("ffmpeg"), do: [:no_ffmpeg], else: []
+
 if KilnCMS.Config.StrictTestFlag.strict?(System.get_env("KILN_STRICT_TEST")) do
   ExUnit.start(include: [strict_tenancy: true], exclude: [:test])
 else
-  ExUnit.start(exclude: [strict_tenancy: true] ++ pg_tools_exclusion ++ qpdf_exclusion)
+  ExUnit.start(
+    exclude:
+      [strict_tenancy: true] ++
+        pg_tools_exclusion ++ qpdf_exclusion ++ ffmpeg_exclusion ++ no_ffmpeg_exclusion
+  )
 end
 
 Ecto.Adapters.SQL.Sandbox.mode(KilnCMS.Repo, :manual)

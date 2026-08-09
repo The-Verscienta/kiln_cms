@@ -173,6 +173,73 @@ defmodule KilnCMSWeb.MediaLiveTest do
       assert saved.caption == "At dusk"
     end
 
+    # #822 hid the alt field on non-images. The first cut hid it without
+    # touching the handler, whose only clause required an "alt" key — so the
+    # form for a PDF or an MP4 submitted caption alone, matched nothing, and
+    # "Save details" became a button that did nothing, forever, with no error.
+    # A narrowing that breaks the surface it narrows is worse than the noise it
+    # removed.
+    test "a non-image can still have its caption saved", %{conn: conn} do
+      item =
+        Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+          filename: "report.pdf",
+          url: "/uploads/report",
+          content_type: "application/pdf"
+        })
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
+
+      panel =
+        lv |> element(~s(button[phx-click="select"][phx-value-id="#{item.id}"])) |> render_click()
+
+      # The premise: no alt field is offered for a PDF with nothing set.
+      refute panel =~ ~s(name="alt")
+
+      lv
+      |> form("form[phx-submit=save_meta]", %{caption: "Q3 numbers"})
+      |> render_submit()
+
+      saved = CMS.get_media_item!(item.id, authorize?: false)
+      assert saved.caption == "Q3 numbers"
+    end
+
+    # The other half: absent must mean *unchanged*, not empty. A non-image that
+    # already carries alt/decorative — settable before #822, and still settable
+    # over the JSON API, where `alt` is public and accepted — keeps them, and
+    # keeps a way to see and clear them. Otherwise the value stays in the search
+    # tsvector and on the public API with no UI left to reach it.
+    test "a non-image with a stored alt keeps the field, and saving preserves decorative", %{
+      conn: conn
+    } do
+      item =
+        Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+          filename: "legacy.pdf",
+          url: "/uploads/legacy",
+          content_type: "application/pdf",
+          alt: "left over from before #822",
+          decorative: true
+        })
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
+
+      panel =
+        lv |> element(~s(button[phx-click="select"][phx-value-id="#{item.id}"])) |> render_click()
+
+      assert panel =~ "left over from before #822"
+      assert panel =~ "nothing reads this out"
+
+      lv
+      |> form("form[phx-submit=save_meta]", %{alt: "", caption: "cleared"})
+      |> render_submit()
+
+      saved = CMS.get_media_item!(item.id, authorize?: false)
+      # Cleared (Ash casts the empty string to nil) — the point is that there
+      # WAS a way to reach it. And the decorative flag rode along untouched.
+      assert saved.alt == nil
+      assert saved.caption == "cleared"
+      assert saved.decorative == true
+    end
+
     test "clicking the preview sets the focal point (clamped) and re-queues variants", %{
       conn: conn
     } do

@@ -335,27 +335,20 @@ defmodule KilnCMSWeb.MediaLive do
 
   def handle_event("save_meta", %{"alt" => alt, "caption" => caption} = params, socket)
       when is_binary(alt) and is_binary(caption) do
-    actor = socket.assigns.actor
-    decorative = params["decorative"] in [true, "true"]
+    save_meta(socket, %{
+      alt: alt,
+      caption: caption,
+      decorative: params["decorative"] in [true, "true"]
+    })
+  end
 
-    socket =
-      case CMS.update_media_item(
-             socket.assigns.selected,
-             %{alt: alt, caption: caption, decorative: decorative},
-             actor: actor,
-             tenant: socket.assigns.current_org
-           ) do
-        {:ok, item} ->
-          socket
-          |> assign(:selected, item)
-          |> reload_media()
-          |> put_flash(:info, gettext("Saved details."))
-
-        _ ->
-          put_flash(socket, :error, gettext("Couldn't save those details."))
-      end
-
-    {:noreply, socket}
+  # #822 renders the alt field only where it can mean something, so a plain
+  # non-image row submits caption alone. Absent has to mean *unchanged* here,
+  # not empty: passing `alt: nil` would clear a stored value, and reading the
+  # missing `decorative` hidden input as `false` would silently un-mark a
+  # decorative row. Caption is the only thing this form can still edit.
+  def handle_event("save_meta", %{"caption" => caption}, socket) when is_binary(caption) do
+    save_meta(socket, %{caption: caption})
   end
 
   def handle_event("copied", _params, socket),
@@ -527,7 +520,40 @@ defmodule KilnCMSWeb.MediaLive do
   defp image_thumb_url(%{width: nil}), do: nil
   defp image_thumb_url(item), do: item.url
 
+  defp save_meta(socket, params) do
+    actor = socket.assigns.actor
+
+    socket =
+      case CMS.update_media_item(
+             socket.assigns.selected,
+             params,
+             actor: actor,
+             tenant: socket.assigns.current_org
+           ) do
+        {:ok, item} ->
+          socket
+          |> assign(:selected, item)
+          |> reload_media()
+          |> put_flash(:info, gettext("Saved details."))
+
+        _ ->
+          put_flash(socket, :error, gettext("Couldn't save those details."))
+      end
+
+    {:noreply, socket}
+  end
+
   defp image?(item), do: MediaKind.of(item.content_type) == :image
+
+  # #822 narrowed the alt field to images, but a non-image row can already
+  # carry an `alt` — it was unconditional before, `Ingest` takes it as an
+  # option, and it is `public?` and in `default_accept`, so the JSON API and
+  # MCP can set it. Hiding the input on those rows would leave the value
+  # indexed (the search tsvector coalesces filename || alt || caption) and
+  # served, with nowhere left to see or clear it. So: images always, plus any
+  # row that already has something to show.
+  defp alt_editable?(item),
+    do: image?(item) or (is_binary(item.alt) and item.alt != "") or item.decorative == true
 
   # `nil` (rather than "—") when there's nothing measured, so the caller can
   # drop the whole row: an unprobed video with no ffmpeg installed shouldn't
@@ -731,6 +757,15 @@ defmodule KilnCMSWeb.MediaLive do
 
   defp upload_failure_reason(:strip_failed),
     do: gettext("couldn't have its metadata removed, so it wasn't stored")
+
+  # #820. Same shape as `:unavailable` above, but for A/V — and it has to be
+  # its own message, because the PDF wording names the wrong subsystem and an
+  # editor reading "PDF" about their MP4 learns nothing.
+  defp upload_failure_reason(:av_strip_unavailable),
+    do:
+      gettext(
+        "can't be stored — video and audio metadata stripping isn't available on this server"
+      )
 
   # #918. Unlike the two above, this one IS about the file, and it is the only
   # refusal here the uploader can actually resolve — so it says what to do
@@ -1408,7 +1443,7 @@ defmodule KilnCMSWeb.MediaLive do
           <%!-- Images only (#822): `MediaItem.alt` reaches rendered markup for
                 nothing else. Offering the field on a PDF or an MP4 invites an
                 editor to write a description that is never read out. --%>
-          <div :if={image?(@item)}>
+          <div :if={alt_editable?(@item)}>
             <label for="media-alt" class="text-sm font-medium">{gettext("Alt text")}</label>
             <input
               id="media-alt"
@@ -1417,12 +1452,17 @@ defmodule KilnCMSWeb.MediaLive do
               placeholder={gettext("Describe the image for screen readers")}
               class="field-input mt-1"
             />
+            <p :if={!image?(@item)} class="mt-1 text-[11px] text-base-content/50">
+              {gettext(
+                "This isn't an image, so nothing reads this out. It's shown because a value was set — clear it if it doesn't belong."
+              )}
+            </p>
           </div>
           <%!-- Decorative is a recorded decision, not an inference from a blank
                 field (#403): a divider or a texture correctly has no alt text,
                 and without somewhere to say so it is indistinguishable from an
                 oversight. The publish check reads this. --%>
-          <label :if={image?(@item)} class="flex items-start gap-2 text-sm">
+          <label :if={alt_editable?(@item)} class="flex items-start gap-2 text-sm">
             <input type="hidden" name="decorative" value="false" />
             <input
               type="checkbox"

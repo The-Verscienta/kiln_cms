@@ -177,6 +177,18 @@ jobs:
                  ":qpdf tests (#807 PDF metadata stripping) will be EXCLUDED"
           fi
 
+      # Same reasoning as qpdf above, for A/V (#820). Without ffmpeg here, the
+      # :ffmpeg tests are excluded everywhere that matters and the strip — a
+      # privacy control — would be pinned by nothing: a change to the argv that
+      # silently stopped removing GPS would merge green. The `:no_ffmpeg` pair
+      # is excluded once this is installed, which is the intent; between the
+      # two tags, one always runs.
+      - name: Install ffmpeg (A/V metadata stripping tests)
+        run: |
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -version | head -1
+          ffprobe -version | head -1
+
       - name: Run tests
         run: mix test
 

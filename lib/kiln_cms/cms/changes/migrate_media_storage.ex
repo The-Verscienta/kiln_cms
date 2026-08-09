@@ -32,8 +32,9 @@ defmodule KilnCMS.CMS.Changes.MigrateMediaStorage do
   gating deletes those blobs and clears the map rather than relocating them —
   a poster has no reader that could fetch it privately (`<img>` sends no
   Range, needs no counter, and would need a whole second gated route to serve
-  from). Un-gating does not bring it back; the editor picks a poster image by
-  hand, which the `video` block already supports.
+  from). Un-gating re-derives it (#821) — see `requeue_poster_if_ungated/2`
+  below. An editor can still pick a poster by hand on the `video` block, and
+  that choice always wins: it lives on the block, not on this row.
 
   ## Copy-then-delete, not move
 
@@ -86,8 +87,21 @@ defmodule KilnCMS.CMS.Changes.MigrateMediaStorage do
 
   defp requeue_poster_if_ungated(_changeset, other), do: other
 
+  # Video, not `playable?/1`. Audio is playable but `AVWorker.put_poster/4`
+  # only writes a poster for video, so an audio item can never satisfy the
+  # skip below — every un-gate would stream the whole blob out of storage to
+  # re-probe a duration it already has and write nothing. A job that cannot
+  # produce the thing it is enqueued to produce should not be enqueued.
+  #
+  # Deliberately NOT also gated on `AVProcessor.available?()`. That asks
+  # whether ffmpeg is on *this* node, and this runs in the web process while
+  # the job runs wherever the `:media` queue lives — a deployment that keeps
+  # ffmpeg on the worker image and off the web image (a normal split, since it
+  # is an optional dependency) would silently never re-derive, with no log
+  # line, because the guard's whole job is to enqueue nothing. The worker
+  # already tolerates a missing binary; that is where the question belongs.
   defp ungated_playable?(%{audience: :public, content_type: type}),
-    do: KilnCMS.MediaKind.playable?(type)
+    do: KilnCMS.MediaKind.of(type) == :video
 
   defp ungated_playable?(_record), do: false
 
@@ -98,7 +112,7 @@ defmodule KilnCMS.CMS.Changes.MigrateMediaStorage do
   # library item's `variants` at all. So re-deriving here cannot replace an
   # editor's choice — the two are different fields and the block's wins.
   defp generated_poster?(%{variants: variants}) when is_map(variants),
-    do: Map.has_key?(variants, "poster")
+    do: Map.has_key?(variants, KilnCMS.AVProcessor.poster_label())
 
   defp generated_poster?(_record), do: false
 

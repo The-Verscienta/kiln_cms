@@ -195,6 +195,22 @@ with {:ok, enabled?} <- Env.fetch("VISUAL_EDITING_ENABLED") do
   config :kiln_cms, :visual_editing_enabled, enabled?
 end
 
+# ## A/V metadata stripping — fail closed (#820)
+#
+# An MP4 off a phone carries GPS, device model and a local wall-clock date, and
+# Kiln remuxes those away with ffmpeg. ffmpeg is an OPTIONAL dependency, so the
+# default is best-effort: no ffmpeg means the file is stored as it arrived and
+# a warning is logged.
+#
+# Set REQUIRE_AV_METADATA_STRIP=true to refuse such an upload instead, which is
+# the same contract PDFs already have. Do that only WITH ffmpeg installed —
+# on a host without it, every video and audio upload starts failing. Default
+# off precisely because flipping it for existing deployments would be that
+# outage, silently, on upgrade.
+with {:ok, required?} <- Env.fetch("REQUIRE_AV_METADATA_STRIP") do
+  config :kiln_cms, :require_av_metadata_strip, required?
+end
+
 # ## Tamper-evident history — master kill switch (#356, #611)
 #
 # `:audit_anchors_enabled` gates BOTH publish-time anchor minting AND the
