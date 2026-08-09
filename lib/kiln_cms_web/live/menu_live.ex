@@ -239,6 +239,27 @@ defmodule KilnCMSWeb.MenuLive do
     end
   end
 
+  # Breaks whatever cycle or dangling link stranded this item by making it a
+  # root (#900). Deliberately the only repair offered: reattaching to a *chosen*
+  # parent could be another cycle, and the item is unreachable precisely because
+  # no parent of it is trustworthy right now. From the top level the editor can
+  # drag or indent it wherever it belongs, through the paths that do validate.
+  #
+  # Only items the walk actually reports are accepted, so a stale button — or a
+  # crafted id — cannot re-parent an item that is attached and fine where it is.
+  def handle_event("reattach_item", %{"id" => id}, socket) when is_binary(id) do
+    case Enum.find(socket.assigns.detached, &(&1.id == id)) do
+      nil ->
+        {:noreply, socket}
+
+      item ->
+        case update_item(socket, item, %{parent_id: nil, position: next_position(socket, nil)}) do
+          {:ok, _} -> {:noreply, load_items(socket)}
+          {:error, error} -> {:noreply, put_flash(socket, :error, error_message(error, nil))}
+        end
+    end
+  end
+
   # --- data ------------------------------------------------------------------
 
   defp load_menus(socket) do
@@ -263,6 +284,7 @@ defmodule KilnCMSWeb.MenuLive do
     socket
     |> assign(:items, items)
     |> assign(:tree, Menus.tree(menu, Accounts.org_id(org), include_hidden?: true))
+    |> assign(:detached, Menus.detached(menu, Accounts.org_id(org)))
     |> assign(:max_depth, MenuItem.max_depth())
   end
 
@@ -564,6 +586,39 @@ defmodule KilnCMSWeb.MenuLive do
           current_org: @current_org
         })}
       </div>
+
+      <%!-- #900. Items no chain of parents reaches a root from — a parent cycle
+      (two editors re-parenting at once can commit one), or a parent outside
+      this menu. `render_level/1` descends from the roots, so these render
+      nowhere: without this section they are invisible in the served menu AND in
+      the tree above, which leaves an editor watching a navigation section
+      vanish with nothing to click to get it back. --%>
+      <section :if={@detached != []} class="card card-pad mt-6 border-warning/40">
+        <h2 class="text-sm font-medium text-warning">
+          {gettext("Detached items")}
+        </h2>
+        <p class="mt-1 text-xs text-base-content/70">
+          {gettext(
+            "These items are not reachable from the top level, so they do not appear in the menu above or on the site. Reattach one to bring it and anything nested under it back."
+          )}
+        </p>
+        <ul class="mt-3 space-y-2">
+          <li
+            :for={item <- @detached}
+            class="flex items-center justify-between gap-3 rounded border border-base-content/10 px-3 py-2"
+          >
+            <span class="min-w-0 truncate text-sm">{item.label}</span>
+            <button
+              type="button"
+              phx-click="reattach_item"
+              phx-value-id={item.id}
+              class="btn btn-sm btn-default shrink-0"
+            >
+              {gettext("Move to top level")}
+            </button>
+          </li>
+        </ul>
+      </section>
 
       <div class="card card-pad mt-6">
         <h2 class="text-sm font-medium">{gettext("Add an item")}</h2>

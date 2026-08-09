@@ -85,6 +85,60 @@ defmodule KilnCMS.CMS.Menus do
   end
 
   @doc """
+  The menu's items that **no chain of parents reaches a root from** (#900).
+
+  `build/3` descends from `parent_id == nil` and emits each item under its one
+  parent, so an item in a parent cycle is not rendered anywhere: it and its
+  whole subtree disappear from the served menu *and* from the editor's tree, with
+  no error and no row deleted. The editor's only signal is "my navigation section
+  vanished", and because the items aren't rendered they cannot be selected,
+  edited or outdented back into place.
+
+  A cycle can be committed by two editors re-parenting at the same time —
+  `Validations.MenuItemPlacement` walks the ancestor chain with plain reads
+  outside any lock, so under READ COMMITTED each validates against pre-commit
+  state and neither sees the other's write. This does not close that race; it
+  makes the outcome visible and recoverable, which also covers a cycle arriving
+  from a restore or direct SQL.
+
+  Purely structural, and deliberately **not** filtered by `keep?/3`: an item
+  hidden by an editor, or one whose target is unpublished, is legitimately
+  absent from a rendered tree and is not detached. The question here is only
+  whether following `parent_id` terminates at a root within this menu.
+  """
+  @spec detached(Menu.t(), Ash.UUID.t()) :: [MenuItem.t()]
+  def detached(menu, org_id) do
+    items =
+      MenuItem
+      |> Ash.Query.filter(menu_id == ^menu.id)
+      |> Ash.Query.sort(position: :asc, label: :asc)
+      |> Ash.read!(authorize?: false, tenant: org_id)
+
+    by_id = Map.new(items, &{&1.id, &1})
+    Enum.reject(items, &rooted?(&1, by_id, MapSet.new()))
+  end
+
+  # Walks up rather than down, so it answers per item without building a tree.
+  # `seen` is what makes it terminate: a cycle revisits an id it already passed
+  # through, which is exactly the condition being detected.
+  defp rooted?(%{parent_id: nil}, _by_id, _seen), do: true
+
+  defp rooted?(%{id: id, parent_id: parent_id}, by_id, seen) do
+    cond do
+      MapSet.member?(seen, id) ->
+        false
+
+      true ->
+        # A parent outside this menu's item set (deleted, or belonging to another
+        # menu) is not a root either — nothing renders through it.
+        case Map.get(by_id, parent_id) do
+          nil -> false
+          parent -> rooted?(parent, by_id, MapSet.put(seen, id))
+        end
+    end
+  end
+
+  @doc """
   The resolved tree for an already-loaded `menu`. Takes the same options as
   `resolve/4`.
   """

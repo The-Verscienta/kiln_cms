@@ -472,6 +472,25 @@ migration, a rewritten column, a dropped config key).
   attached" section stays, but as information and a control rather than as the
   thing standing between a scoped-away tag group and data loss.
 
+- **A navigation subtree that goes missing can be got back** (#900). Two editors
+  re-parenting at the same time can commit a parent cycle — the placement
+  validation walks the ancestor chain with plain reads outside any lock, so
+  under READ COMMITTED each validates against pre-commit state and neither sees
+  the other's write. The read path does not loop: it descends from the roots and
+  emits each item under its single parent, so the cycle's members and everything
+  nested under them simply **vanish** from the served menu *and* from the
+  builder's own tree, with no error and no row deleted. The editor's only signal
+  was a section disappearing, with nothing to click — the items aren't rendered,
+  so they can't be selected, edited or outdented back. Adding to them fails too,
+  because the depth check's walk cannot terminate either.
+
+  The builder now lists them under **Detached items** with a *Move to top level*
+  action that breaks the cycle by making the item a root; its children come back
+  with it, and nothing else moves. Only the top level is offered, because the
+  item is unreachable precisely when no parent of it is trustworthy. This covers
+  any cause of orphaning — a restore, direct SQL, a `parent_id` pointing into
+  another menu — not only the race, which stays open and is documented.
+
 - **The collab-editor flake is checked for, not just fixed** (#1067). Filed as a
   presence race in `CollabPersisterTest` — one failure in three full-suite runs,
   never in isolation — it turned out to be a VM-global one:

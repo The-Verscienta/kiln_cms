@@ -223,4 +223,98 @@ defmodule KilnCMSWeb.MenuLiveTest do
 
     assert items(m) == []
   end
+
+  # #900. A parent cycle makes `build/3` skip the items entirely, so they vanish
+  # from the served menu AND from the builder's tree — the editor sees a section
+  # disappear with nothing to click, because the items aren't rendered and so
+  # can't be selected, edited or outdented back.
+  describe "detached items (#900)" do
+    # `Ash.Seed.update!` writes the row directly: the placement validation
+    # refuses this, and the issue is that two concurrent writers can each pass
+    # it against pre-commit state and commit a cycle anyway.
+    defp cycle(m) do
+      a = item(m, %{label: "Products", link_type: :none})
+      d = item(m, %{label: "Widgets", link_type: :none, parent_id: a.id})
+      Ash.Seed.update!(a, %{parent_id: d.id})
+      {a, d}
+    end
+
+    test "the builder surfaces them instead of showing nothing", %{conn: conn} do
+      m = menu()
+      item(m, %{label: "Home", link_type: :none})
+      cycle(m)
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/menus/#{m.id}")
+
+      assert html =~ "Detached items"
+      assert html =~ "Products"
+      assert html =~ "Widgets"
+      # The healthy item still renders in the tree above.
+      assert html =~ "Home"
+    end
+
+    test "a healthy menu shows no such section", %{conn: conn} do
+      m = menu()
+      top = item(m, %{label: "Home", link_type: :none})
+      item(m, %{label: "Nested", link_type: :none, parent_id: top.id})
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/menus/#{m.id}")
+
+      refute html =~ "Detached items"
+    end
+
+    test "reattaching one brings it and its subtree back into the tree", %{conn: conn} do
+      m = menu()
+
+      # The subtree is built BEFORE the cycle is closed: once it exists, the
+      # depth validation's ancestor walk cannot terminate and refuses every new
+      # child under it ("is nested too deeply"). That is itself the shape of the
+      # damage — the section is not just invisible, it is unusable.
+      a = item(m, %{label: "Products", link_type: :none})
+      d = item(m, %{label: "Widgets", link_type: :none, parent_id: a.id})
+      leaf = item(m, %{label: "Blue widget", link_type: :none, parent_id: d.id})
+      Ash.Seed.update!(a, %{parent_id: d.id})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/menus/#{m.id}")
+
+      html =
+        lv
+        |> element(~s(button[phx-click="reattach_item"][phx-value-id="#{a.id}"]))
+        |> render_click()
+
+      # The cycle is broken, so nothing is detached any more and the whole
+      # subtree is reachable again.
+      refute html =~ "Detached items"
+
+      assert %{parent_id: nil} = CMS.get_menu_item!(a.id, authorize?: false)
+      # Only the one item moved — its children keep their parents.
+      assert %{parent_id: parent} = CMS.get_menu_item!(d.id, authorize?: false)
+      assert parent == a.id
+      assert %{parent_id: leaf_parent} = CMS.get_menu_item!(leaf.id, authorize?: false)
+      assert leaf_parent == d.id
+
+      assert KilnCMS.CMS.Menus.detached(m, KilnCMS.Accounts.default_org_id()) == []
+    end
+
+    # The button only ever names a detached item, but the event is client-sent.
+    # Re-parenting an attached item on request would be a way to *cause* the
+    # damage this section exists to repair.
+    test "an id that is not detached is refused", %{conn: conn} do
+      m = menu()
+      cycle(m)
+      top = item(m, %{label: "Home", link_type: :none})
+      nested = item(m, %{label: "Nested", link_type: :none, parent_id: top.id})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/menus/#{m.id}")
+
+      render_click(lv, "reattach_item", %{"id" => nested.id})
+
+      assert %{parent_id: still} = CMS.get_menu_item!(nested.id, authorize?: false)
+      assert still == top.id
+    end
+  end
 end
