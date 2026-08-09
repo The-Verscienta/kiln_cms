@@ -780,7 +780,17 @@ defmodule KilnCMSWeb.FeedControllerTest do
     test "a slug carrying a path separator cannot collide with another feed", %{conn: conn} do
       n = System.unique_integer([:positive])
       slug = "collide#{n}/locale/fr"
-      cat = CMS.create_category!(%{name: "Collide", slug: slug}, actor: admin())
+
+      # Seeded, not created: #1044 added a shape validation, so this slug can no
+      # longer be written through the action. The encoding still has to hold for
+      # it — a validation guards new writes and does nothing for rows already
+      # stored, which is exactly the population this test is about.
+      cat =
+        Ash.Seed.seed!(KilnCMS.CMS.Category, %{
+          name: "Collide",
+          slug: slug,
+          org_id: KilnCMS.Accounts.default_org_id()
+        })
 
       english = published_post()
       french = translated_post("fr")
