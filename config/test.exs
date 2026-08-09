@@ -73,6 +73,11 @@ config :kiln_cms, :unsplash, req_options: [plug: {Req.Test, KilnCMS.Unsplash}]
 # both be exercised by overriding this per-test.
 config :kiln_cms, Kiln.Updates, req_options: [plug: {Req.Test, Kiln.Updates}]
 
+# The HTTP governance witness (#733) reaches an operator-configured transparency
+# log. Never dialled for real in tests; the stub stands in for the log.
+config :kiln_cms, KilnCMS.Governance.Witness.HTTP,
+  req_options: [plug: {Req.Test, KilnCMS.Governance.Witness.HTTP}]
+
 # Route social-provider HTTP (#497) through a Req.Test stub, so no test ever
 # reaches bsky.social or somebody's Mastodon instance. Nothing posts without a
 # configured account, so this is a safety net rather than the gate.

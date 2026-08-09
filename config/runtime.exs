@@ -266,13 +266,16 @@ if config_env() != :test do
           "s3" ->
             KilnCMS.Governance.Witness.S3
 
+          "http" ->
+            KilnCMS.Governance.Witness.HTTP
+
           other ->
             # ASCII only: config providers write to stderr before Logger exists,
             # and non-ASCII comes back escaped in exactly the line an operator
             # needs to read.
             IO.puts(
               :standard_error,
-              "KILN_GOVERNANCE_WITNESS=#{inspect(other)} is not one of none|file|s3 - " <>
+              "KILN_GOVERNANCE_WITNESS=#{inspect(other)} is not one of none|file|s3|http - " <>
                 "governance checkpoints will NOT be published outside the database, " <>
                 "which is the weaker side of the default. See #666."
             )
@@ -293,6 +296,19 @@ if config_env() != :test do
     config :kiln_cms, KilnCMS.Governance.Witness.S3,
       bucket: bucket,
       prefix: System.get_env("KILN_GOVERNANCE_WITNESS_PREFIX", "")
+  end
+
+  if witness_url = System.get_env("KILN_GOVERNANCE_WITNESS_URL") do
+    # The token stays a `{:env, …}` provider tuple rather than being read here,
+    # so it resolves through `KilnCMS.Keys` at call time like every other
+    # credential — an operator can point it at a file or a secret manager
+    # instead by configuring the tuple directly.
+    config :kiln_cms, KilnCMS.Governance.Witness.HTTP,
+      url: witness_url,
+      token:
+        if(System.get_env("KILN_GOVERNANCE_WITNESS_TOKEN"),
+          do: {:env, %{"var" => "KILN_GOVERNANCE_WITNESS_TOKEN"}}
+        )
   end
 
   # How often the commitment is refreshed. The exposure window for a truncated

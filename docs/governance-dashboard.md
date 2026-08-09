@@ -90,7 +90,7 @@ Phase 1 was a read model over what the cluster already produces. Phase 2
     exposure window is one `KILN_GOVERNANCE_CHECKPOINT_CRON` interval wide.
   - The default witness keeps the commitment **in the database**. That catches
     the attack in its ordinary form and not an attacker who remembers the second
-    table; set `KILN_GOVERNANCE_WITNESS` to `file` or `s3` for the real
+    table; set `KILN_GOVERNANCE_WITNESS` to `file`, `s3` or `http` for the real
     property.
   - Publishing is half of it. `mix kiln.audit.checkpoint --audit` is what
     compares the sink to the database, and it wants to run somewhere the
