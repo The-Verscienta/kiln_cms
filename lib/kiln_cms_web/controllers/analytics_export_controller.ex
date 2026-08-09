@@ -66,8 +66,8 @@ defmodule KilnCMSWeb.AnalyticsExportController do
         Export.stream_funnel_rows(from, to, org, actor)
       ]
       |> Stream.concat()
-      |> Stream.map(fn {rows, titles} ->
-        Enum.map_join(rows, &CSV.line(Export.csv_row(&1, titles, org)))
+      |> Stream.map(fn {kind, rows, titles} ->
+        Enum.map_join(rows, &CSV.line(Export.csv_row(kind, &1, titles, org)))
       end)
 
     [CSV.line(Export.csv_header())]
@@ -95,9 +95,9 @@ defmodule KilnCMSWeb.AnalyticsExportController do
         Export.stream_funnel_rows(from, to, org, actor)
       ]
       |> Stream.concat()
-      |> Stream.transform(false, fn {rows, titles}, sent_any? ->
+      |> Stream.transform(false, fn {kind, rows, titles}, sent_any? ->
         prefix = if sent_any?, do: ",", else: ""
-        json = Enum.map_join(rows, ",", &Jason.encode!(Export.json_row(&1, titles, org)))
+        json = Enum.map_join(rows, ",", &Jason.encode!(Export.json_row(kind, &1, titles, org)))
         {[prefix <> json], true}
       end)
 

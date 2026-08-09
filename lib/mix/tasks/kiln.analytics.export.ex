@@ -124,8 +124,8 @@ defmodule Mix.Tasks.Kiln.Analytics.Export do
 
     from
     |> rows(to, org_id)
-    |> Enum.each(fn {batch, titles} ->
-      IO.write(device, Enum.map_join(batch, &CSV.line(Export.csv_row(&1, titles, org_id))))
+    |> Enum.each(fn {kind, batch, titles} ->
+      IO.write(device, Enum.map_join(batch, &CSV.line(Export.csv_row(kind, &1, titles, org_id))))
     end)
   end
 
@@ -135,9 +135,12 @@ defmodule Mix.Tasks.Kiln.Analytics.Export do
     _ =
       from
       |> rows(to, org_id)
-      |> Enum.reduce(false, fn {batch, titles}, sent_any? ->
+      |> Enum.reduce(false, fn {kind, batch, titles}, sent_any? ->
         prefix = if sent_any?, do: ",", else: ""
-        json = Enum.map_join(batch, ",", &Jason.encode!(Export.json_row(&1, titles, org_id)))
+
+        json =
+          Enum.map_join(batch, ",", &Jason.encode!(Export.json_row(kind, &1, titles, org_id)))
+
         IO.write(device, prefix <> json)
         true
       end)

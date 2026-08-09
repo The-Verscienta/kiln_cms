@@ -34,71 +34,30 @@ defmodule KilnCMSWeb.ChartComponents do
   attr :class, :any, default: nil
 
   def bar_chart(assigns) do
-    # Module attributes aren't in scope inside ~H (there, `@x` means
-    # `assigns.x`), so the geometry constants are assigned rather than inlined.
     assigns =
-      assigns
-      |> assign(:max, assigns.series |> Enum.map(& &1.views) |> Enum.max(fn -> 0 end))
-      |> assign(:width, max(length(assigns.series) * @slot, @slot))
-      |> assign(:bar, @bar)
-      |> assign(:height, @height)
-      |> assign(:baseline_y, @height - 1)
-      |> assign(:value_header, assigns.value_header || gettext("Views"))
+      assign(assigns, :entries, Enum.map(assigns.series, &day_entry/1))
 
     ~H"""
-    <div class={@class}>
-      <%!-- preserveAspectRatio="none" lets the bars stretch to any container
-            width. Safe only because every mark is a filled rect — a stroked
-            line or circle would distort under non-uniform scaling. --%>
-      <svg
-        viewBox={"0 0 #{@width} #{@height}"}
-        preserveAspectRatio="none"
-        class="h-40 w-full"
-        aria-hidden="true"
-        focusable="false"
-      >
-        <g class="text-primary-ink" fill="currentColor">
-          <rect
-            :for={{point, i} <- Enum.with_index(@series)}
-            x={bar_x(i)}
-            y={@height - bar_height(point.views, @max)}
-            width={@bar}
-            height={bar_height(point.views, @max)}
-            rx="1"
-          >
-            <title>{Date.to_iso8601(point.day)}: {point.views}</title>
-          </rect>
-        </g>
-        <rect
-          x="0"
-          y={@baseline_y}
-          width={@width}
-          height="1"
-          class="text-base-content/20"
-          fill="currentColor"
-        />
-      </svg>
-
-      <%!-- The accessible representation. `sr-only` rather than `hidden` so it
-            stays in the accessibility tree; a real table (caption + scope) means
-            a screen reader can walk the values instead of hearing a summary. --%>
-      <table class="sr-only">
-        <caption>{@label}</caption>
-        <thead>
-          <tr>
-            <th scope="col">{gettext("Day")}</th>
-            <th scope="col">{@value_header}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr :for={point <- @series}>
-            <th scope="row">{Date.to_iso8601(point.day)}</th>
-            <td>{point.views}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    <.chart
+      entries={@entries}
+      label={@label}
+      key_header={gettext("Day")}
+      value_header={@value_header || gettext("Views")}
+      class={@class}
+    />
     """
+  end
+
+  # A day in the shared entry shape. `display` and `bar_value` are the same
+  # number here: a view count has nothing to suppress, unlike a referrer
+  # breakdown where the two deliberately diverge.
+  defp day_entry(point) do
+    %{
+      label: Date.to_iso8601(point.day),
+      display: point.views,
+      bar_value: point.views,
+      class: "text-primary-ink"
+    }
   end
 
   defp bar_x(index), do: index * @slot + div(@slot - @bar, 2)
@@ -129,6 +88,41 @@ defmodule KilnCMSWeb.ChartComponents do
   attr :class, :any, default: nil
 
   def category_chart(assigns) do
+    assigns = assign(assigns, :entries, Enum.map(assigns.entries, &source_entry/1))
+
+    ~H"""
+    <.chart
+      entries={@entries}
+      label={@label}
+      key_header={gettext("Source")}
+      value_header={@value_header || gettext("Count")}
+      class={@class}
+    />
+    """
+  end
+
+  defp source_entry(entry), do: Map.put(entry, :class, source_class(entry.source))
+
+  @doc false
+  # The one chart both of the above render (#778). They were two ~45-line copies
+  # of the same geometry, baseline and `sr-only` table, and had already drifted:
+  # `bar_chart/1` put its colour on a wrapping `<g>` while `category_chart/1` put
+  # it on each `<rect>`. Colour now lives on the rect in both, which is where the
+  # category chart needs it and where the day series does not mind it.
+  #
+  # `entries` is `[%{label:, display:, bar_value:, class:}]` in render order.
+  # `display` is what a person reads and may already be a suppressed `"< n"`
+  # string; `bar_value` drives the geometry, and the CALLER is responsible for
+  # clamping it wherever `display` is suppressed — see `category_chart/1`.
+  attr :entries, :list, required: true
+  attr :label, :string, required: true
+  attr :key_header, :string, required: true
+  attr :value_header, :string, required: true
+  attr :class, :any, default: nil
+
+  def chart(assigns) do
+    # Module attributes aren't in scope inside ~H (there, `@x` means
+    # `assigns.x`), so the geometry constants are assigned rather than inlined.
     assigns =
       assigns
       |> assign(:max, assigns.entries |> Enum.map(& &1.bar_value) |> Enum.max(fn -> 0 end))
@@ -136,10 +130,12 @@ defmodule KilnCMSWeb.ChartComponents do
       |> assign(:bar, @bar)
       |> assign(:height, @height)
       |> assign(:baseline_y, @height - 1)
-      |> assign(:value_header, assigns.value_header || gettext("Count"))
 
     ~H"""
     <div class={@class}>
+      <%!-- preserveAspectRatio="none" lets the bars stretch to any container
+            width. Safe only because every mark is a filled rect — a stroked
+            line or circle would distort under non-uniform scaling. --%>
       <svg
         viewBox={"0 0 #{@width} #{@height}"}
         preserveAspectRatio="none"
@@ -154,7 +150,7 @@ defmodule KilnCMSWeb.ChartComponents do
           width={@bar}
           height={bar_height(entry.bar_value, @max)}
           rx="1"
-          class={source_class(entry.source)}
+          class={entry.class}
           fill="currentColor"
         >
           <title>{entry.label}: {entry.display}</title>
@@ -169,11 +165,14 @@ defmodule KilnCMSWeb.ChartComponents do
         />
       </svg>
 
+      <%!-- The accessible representation. `sr-only` rather than `hidden` so it
+            stays in the accessibility tree; a real table (caption + scope) means
+            a screen reader can walk the values instead of hearing a summary. --%>
       <table class="sr-only">
         <caption>{@label}</caption>
         <thead>
           <tr>
-            <th scope="col">{gettext("Source")}</th>
+            <th scope="col">{@key_header}</th>
             <th scope="col">{@value_header}</th>
           </tr>
         </thead>

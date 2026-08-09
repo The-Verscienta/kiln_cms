@@ -4,12 +4,23 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
   governance's export — `AnalyticsLive` itself is editor-visible), streamed
   CSV/JSON downloads of daily view buckets with titles resolved.
   """
-  # async: false — the "referrer export" describe block below mutates the
-  # global :analytics_referrers Application env, which an async: true sibling
-  # test (e.g. KilnCMS.AnalyticsTest's "off by default" assertion, or this
-  # file's own "off by default" test) could observe mid-mutation. See #620
-  # review.
+  # async: false — `enable_referrers/1` below mutates the global
+  # :analytics_referrers Application env, which an async: true sibling test
+  # (e.g. KilnCMS.AnalyticsTest's "off by default" assertion, or this file's
+  # own) could observe mid-mutation. See #620 review.
   use KilnCMSWeb.ConnCase, async: false
+
+  # ...and `async: false` alone is not enough: it stops a CONCURRENT read, not a
+  # value left behind. A block that enabled referrers and never restored them
+  # turned every later "off by default" assertion in the whole run red — in this
+  # file, in KilnCMS.AnalyticsTest, in ReferrerViewTrackingTest, and in the
+  # analytics dashboard's row counts. So the restore lives at module level,
+  # where no describe block can forget it.
+  setup do
+    original = Application.get_env(:kiln_cms, :analytics_referrers, [])
+    on_exit(fn -> Application.put_env(:kiln_cms, :analytics_referrers, original) end)
+    :ok
+  end
 
   alias KilnCMS.Accounts.User
   alias KilnCMS.Analytics
@@ -211,12 +222,6 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
 
   describe "referrer export (#620)" do
     alias KilnCMS.Analytics.ReferrerDay
-
-    setup do
-      original = Application.get_env(:kiln_cms, :analytics_referrers, [])
-      on_exit(fn -> Application.put_env(:kiln_cms, :analytics_referrers, original) end)
-      :ok
-    end
 
     defp enable_referrers(threshold \\ 5) do
       Application.put_env(:kiln_cms, :analytics_referrers,
@@ -460,6 +465,53 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
       assert body =~ ",social,< 5"
       assert body =~ ",hidden"
       refute body =~ ",social,2"
+    end
+  end
+
+  # #778: the row builders used to infer their kind from which keys a row
+  # happened to carry (`%{views: _}` vs `%{source: _}`). That is an implicit
+  # contract dialyzer cannot check — the spec had to widen to `map()` to admit
+  # all three shapes — and it mis-dispatches silently: a
+  # `KilnCMS.Analytics.ContentView` row (the all-time counter: has `:views`, has
+  # NO `:day`) matched the view clause and raised a `KeyError` naming a field
+  # rather than the mistake.
+  describe "row kinds are passed, not inferred (#778)" do
+    alias KilnCMS.Analytics.Export
+
+    test "each stream tags the kind it read" do
+      admin = authed_user(:admin)
+      enable_referrers()
+      post = CMS.create_post!(%{title: "Tagged", slug: slug()}, actor: admin)
+      CMS.publish_post!(post, %{}, actor: admin)
+
+      seed_bucket(%{content_type: "post", content_id: post.id, day: today(), views: 4})
+      seed_referrer_bucket(%{content_id: post.id, day: today(), source: :search, hits: 9})
+
+      org = KilnCMS.Accounts.default_org_id()
+
+      assert [{:view, _rows, _titles} | _] =
+               Enum.to_list(Export.stream_rows(today(), today(), org, admin))
+
+      assert [{:referrer, _rows, _titles} | _] =
+               Enum.to_list(Export.stream_referrer_rows(today(), today(), org, admin))
+    end
+
+    # The row that used to be mis-dispatched. It is not part of any export —
+    # what matters is that asking for the wrong kind is now a FunctionClauseError
+    # naming `csv_row/4`, rather than a KeyError about `:day` from three frames
+    # away.
+    test "an all-time counter row does not masquerade as a view bucket" do
+      all_time = %{views: 12, content_type: "post", content_id: Ash.UUID.generate()}
+
+      assert_raise FunctionClauseError, fn ->
+        Export.csv_row(:referrer, all_time, %{}, KilnCMS.Accounts.default_org_id())
+      end
+
+      # And the view clause still needs the `:day` a real bucket carries, so the
+      # shape mismatch surfaces at the boundary rather than deeper in.
+      assert_raise KeyError, fn ->
+        Export.csv_row(:view, all_time, %{}, KilnCMS.Accounts.default_org_id())
+      end
     end
   end
 

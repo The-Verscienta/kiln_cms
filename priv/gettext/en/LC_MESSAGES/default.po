@@ -279,7 +279,7 @@ msgstr ""
 msgid "Unpublish"
 msgstr ""
 
-#: lib/kiln_cms_web/components/chart_components.ex:46
+#: lib/kiln_cms_web/components/chart_components.ex:45
 #, elixir-autogen, elixir-format
 msgid "Views"
 msgstr ""
@@ -6184,7 +6184,7 @@ msgstr[1] ""
 msgid "Daily buckets use UTC calendar days; today's bar is still filling. History starts when this feature was deployed."
 msgstr ""
 
-#: lib/kiln_cms_web/components/chart_components.ex:89
+#: lib/kiln_cms_web/components/chart_components.ex:44
 #, elixir-autogen, elixir-format
 msgid "Day"
 msgstr ""
@@ -7526,7 +7526,7 @@ msgstr ""
 msgid "\"Direct\" is a catch-all: it includes a referrer the visitor's browser or the referring site chose not to send, not just a typed-in URL."
 msgstr ""
 
-#: lib/kiln_cms_web/components/chart_components.ex:139
+#: lib/kiln_cms_web/components/chart_components.ex:98
 #, elixir-autogen, elixir-format
 msgid "Count"
 msgstr ""
@@ -7572,7 +7572,7 @@ msgstr ""
 msgid "Social"
 msgstr ""
 
-#: lib/kiln_cms_web/components/chart_components.ex:176
+#: lib/kiln_cms_web/components/chart_components.ex:97
 #, elixir-autogen, elixir-format
 msgid "Source"
 msgstr ""
