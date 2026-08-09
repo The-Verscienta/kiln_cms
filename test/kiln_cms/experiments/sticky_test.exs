@@ -376,14 +376,30 @@ defmodule KilnCMS.Experiments.StickyTest do
       # sites' worth of documents can share neither, but a dynamic type (D17)
       # and a compiled one can hold rows the other's uuid would otherwise be
       # compared against by id alone.
-      other = published_page(admin())
+      actor = admin()
+      other = published_page(actor)
 
-      {_experiment, _control, treatment} =
+      # `:start` now refuses a goal document that does not resolve (#1008
+      # review), so the mismatched pair cannot be created through the write
+      # layer any more — which is the point of that gate. Delivery's own
+      # type-AND-id comparison still has to hold for a row that reached this
+      # state some other way, so the experiment starts with a real post as its
+      # goal and is then seeded onto the page's id.
+      post =
+        CMS.create_post!(
+          %{title: "Goal", slug: "sticky-post-#{System.unique_integer([:positive])}"},
+          actor: actor
+        )
+
+      {experiment, _control, treatment} =
         ExperimentFixtures.pinned!(other, "page", %{"fields" => %{"title" => @variant_headline}},
           goal: :content_view,
           goal_content_type: "post",
-          goal_document_id: ctx.target.id
+          goal_document_id: post.id
         )
+
+      Ash.Seed.update!(experiment, %{goal_document_id: ctx.target.id})
+      KilnCMS.Cache.bust_experiments(KilnCMS.Accounts.default_org_id())
 
       build_conn()
       |> put_req_cookie(Sticky.exposure_cookie(), treatment.id)
