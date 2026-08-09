@@ -11,6 +11,8 @@ defmodule KilnCMS.Governance do
   require Ash.Query
 
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.Governance.Checkpoint
+  alias KilnCMS.Governance.Witness
 
   @publish_actions [:publish, :publish_scheduled]
 
@@ -92,6 +94,69 @@ defmodule KilnCMS.Governance do
       |> Ash.read!(authorize?: false, tenant: org_id)
       |> Map.new(&{&1.id, &1.name})
     end
+  end
+
+  @typedoc "The witness panel's read model — see `witness_status/1`."
+  @type witness_status :: %{
+          checkpointing?: boolean(),
+          witnessing?: boolean(),
+          adapter: String.t(),
+          latest: map() | nil,
+          unwitnessed_count: non_neg_integer(),
+          oldest_unwitnessed: map() | nil
+        }
+
+  @doc """
+  Whether this site's history is actually being witnessed, and what the sink
+  last said about it (#731).
+
+  `chain_checkpoints.witness_error` is written on every failed publication and
+  was surfaced nowhere: the only way to learn that a deployment had been
+  silently unwitnessed for weeks was `mix kiln.audit.checkpoint`, or a log line
+  from whenever it started. A healthy dashboard and an unwitnessed one looked
+  identical, which is the failure `KilnCMS.Governance.Chain`'s moduledoc warns
+  about — an operator infers from a green page that the witness is working.
+
+  Two switches, reported separately, because they fail differently and an
+  operator's next move is not the same:
+
+    * `checkpointing?` — the kill switch. Off means no checkpoints are being
+      minted at all, so there is nothing to publish and an empty panel is
+      correct rather than alarming.
+    * `witnessing?` — whether a real sink is configured. Off is a deliberate
+      single-machine posture (checkpoints stay in the database), not a fault.
+
+  `unwitnessed_count` is the number that matters when both are on: checkpoints
+  minted and never accepted. One is a sink that was briefly unreachable and will
+  be retried. A growing count is an outage nobody has noticed.
+  """
+  @spec witness_status(Ash.UUID.t()) :: witness_status()
+  def witness_status(org_id) do
+    unwitnessed = Checkpoint.unwitnessed(org_id)
+
+    %{
+      checkpointing?: Checkpoint.enabled?(),
+      witnessing?: Witness.enabled?(),
+      adapter: Witness.adapter().describe(),
+      latest: describe_checkpoint(Checkpoint.latest(org_id)),
+      unwitnessed_count: length(unwitnessed),
+      # The oldest, not the newest: it dates the outage. "Unwitnessed since
+      # Tuesday" is actionable in a way that "3 unwitnessed" is not.
+      oldest_unwitnessed: describe_checkpoint(List.first(unwitnessed))
+    }
+  end
+
+  defp describe_checkpoint(nil), do: nil
+
+  defp describe_checkpoint(checkpoint) do
+    %{
+      sequence: checkpoint.sequence,
+      covered_at: checkpoint.covered_at,
+      document_count: checkpoint.document_count,
+      witness: checkpoint.witness,
+      witnessed_at: checkpoint.witnessed_at,
+      witness_error: checkpoint.witness_error
+    }
   end
 
   @doc """
@@ -233,6 +298,9 @@ defmodule KilnCMS.Governance do
           end,
         # Edits since the last anchor — covered at the next publish.
         unanchored_tail: KilnCMS.Governance.Chain.unanchored_tail(versions, anchor),
+        # Which checkpoint currently witnesses this document, and how strongly
+        # (#731). Keyed on the STORAGE type for the reason the anchors are.
+        witnessed: describe_witnessed(storage, id, record.org_id),
         # Scoped to the record's own site (epic #336) so the trail only shows
         # consents from the same org as the content.
         consents:
@@ -243,6 +311,38 @@ defmodule KilnCMS.Governance do
       }
     else
       _ -> nil
+    end
+  end
+
+  # `Checkpoint.witnessed_head/3`'s verdict, flattened for display (#731).
+  #
+  # Pre-resolved here rather than pattern-matched in HEEx, for the reason
+  # `chain_gap_range` above is: a function component that destructures the tuple
+  # inside a template is opaque enough that dialyzer cannot see the clause is
+  # reachable.
+  #
+  # `:none` is deliberately not an error state. It is what a document younger
+  # than the last checkpoint reads, and what every document reads on a
+  # deployment with no witness configured — neither is a fault, and rendering
+  # them as one would train an operator to ignore the panel that matters.
+  defp describe_witnessed(storage, id, org_id) do
+    case Checkpoint.witnessed_head(storage, id, org_id) do
+      {:ok, entry, attestation} ->
+        %{
+          state: :witnessed,
+          sequence: entry.checkpoint_sequence,
+          anchor_position: entry.head_sequence,
+          attestation: attestation
+        }
+
+      :none ->
+        %{state: :none}
+
+      :unreadable ->
+        %{state: :unreadable}
+
+      {:tampered, reason} ->
+        %{state: :tampered, reason: reason}
     end
   end
 

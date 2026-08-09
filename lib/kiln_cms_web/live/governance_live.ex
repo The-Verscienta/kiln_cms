@@ -30,6 +30,7 @@ defmodule KilnCMSWeb.GovernanceLive do
     socket
     |> assign(:trail, nil)
     |> assign(:content, Governance.content_index(socket.assigns.current_org.id))
+    |> assign(:witness, Governance.witness_status(socket.assigns.current_org.id))
   end
 
   defp apply_action(socket, :show, %{"type" => type, "id" => id}) do
@@ -167,6 +168,53 @@ defmodule KilnCMSWeb.GovernanceLive do
     """
   end
 
+  attr :witnessed, :map, required: true
+
+  # Which checkpoint currently witnesses THIS document, and at what anchor
+  # position (#731). The chain badge above says the document's own history holds
+  # together; this says whether anything outside the database vouches for it.
+  #
+  # `:none` renders nothing at all. A document younger than the last checkpoint
+  # is unwitnessed for a perfectly ordinary reason, and so is every document on
+  # a deployment that has not configured a sink — a badge on each of them would
+  # be noise that teaches an operator to stop reading badges.
+  defp witnessed_badge(assigns) do
+    ~H"""
+    <p :if={@witnessed.state != :none} class="mt-1 text-sm" data-role="witness-position">
+      <span
+        :if={@witnessed.state == :witnessed}
+        class="rounded bg-success/10 px-1.5 py-0.5 text-xs font-medium text-success/80"
+      >
+        {gettext("Witnessed by checkpoint #%{sequence} at anchor position %{position}",
+          sequence: @witnessed.sequence,
+          position: @witnessed.anchor_position
+        )}
+        <span :if={@witnessed.attestation != :ok} class="text-base-content/60">
+          · {witness_attestation_label(@witnessed.attestation)}
+        </span>
+      </span>
+      <span
+        :if={@witnessed.state == :unreadable}
+        class="rounded bg-warning/15 px-1.5 py-0.5 text-xs font-medium text-warning"
+      >
+        <.icon name="hero-exclamation-triangle" class="size-3.5" />
+        {gettext("This document's checkpoint entry could not be read — it cannot be verified")}
+      </span>
+      <span
+        :if={@witnessed.state == :tampered}
+        class="rounded bg-error/15 px-1.5 py-0.5 text-xs font-medium text-error"
+      >
+        <.icon name="hero-exclamation-triangle" class="size-3.5" />
+        {gettext("CHECKPOINT TAMPERED: %{reason}", reason: @witnessed.reason)}
+      </span>
+    </p>
+    """
+  end
+
+  defp witness_attestation_label(:unsigned), do: gettext("checkpoint unsigned")
+  defp witness_attestation_label(:unverifiable), do: gettext("signed by a key we no longer hold")
+  defp witness_attestation_label(_other), do: nil
+
   # --- render ----------------------------------------------------------------
 
   @impl true
@@ -179,13 +227,121 @@ defmodule KilnCMSWeb.GovernanceLive do
       page_title={@page_title}
       active={:governance}
     >
-      <.index :if={is_nil(@trail)} content={@content} />
+      <.index :if={is_nil(@trail)} content={@content} witness={@witness} />
       <.detail :if={@trail} trail={@trail} consent_form={@consent_form} />
     </Layouts.console>
     """
   end
 
+  attr :witness, :map, required: true
+
+  # Whether this deployment's history is actually being witnessed (#731).
+  #
+  # It leads the dashboard rather than sitting at the bottom, because the whole
+  # point is that an operator should not be able to read a healthy-looking page
+  # and infer a working witness. A silently unwitnessed deployment used to be
+  # indistinguishable from a healthy one here — `witness_error` was written on
+  # every failed publication and shown nowhere.
+  #
+  # "Off" and "broken" are rendered differently on purpose. Checkpointing
+  # disabled, or no sink configured, are deliberate postures and get a neutral
+  # note; a configured sink that is refusing publications is the alarming case
+  # and is the only one that gets a warning tone.
+  defp witness_panel(assigns) do
+    ~H"""
+    <section class="card card-pad space-y-3" data-role="witness-status">
+      <div class="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 class="text-lg font-medium">{gettext("History witness")}</h2>
+        <span class="font-mono text-xs text-base-content/60">{@witness.adapter}</span>
+      </div>
+
+      <p :if={not @witness.checkpointing?} class="text-sm text-base-content/70">
+        {gettext(
+          "Checkpointing is switched off, so no checkpoints are being minted and nothing is published to a witness."
+        )}
+      </p>
+
+      <p
+        :if={@witness.checkpointing? and not @witness.witnessing?}
+        class="text-sm text-base-content/70"
+      >
+        {gettext(
+          "No external witness is configured. Checkpoints are minted and stored in this database only, so they attest history against edits — but not against someone who can write to the database itself."
+        )}
+      </p>
+
+      <p
+        :if={@witness.checkpointing? and is_nil(@witness.latest)}
+        class="text-sm text-base-content/60"
+      >
+        {gettext("No checkpoint has been minted yet.")}
+      </p>
+
+      <dl :if={@witness.latest} class="grid gap-3 text-sm sm:grid-cols-3">
+        <div>
+          <dt class="text-xs text-base-content/60">{gettext("Last checkpoint")}</dt>
+          <dd class="tabular-nums">#{@witness.latest.sequence}</dd>
+        </div>
+        <div>
+          <dt class="text-xs text-base-content/60">{gettext("Covering")}</dt>
+          <dd>
+            {gettext("%{count} document(s)", count: @witness.latest.document_count)}
+            <span class="text-base-content/60">· {when_str(@witness.latest.covered_at)}</span>
+          </dd>
+        </div>
+        <div>
+          <dt class="text-xs text-base-content/60">{gettext("Published to the witness")}</dt>
+          <dd>
+            <span :if={@witness.latest.witnessed_at}>{when_str(@witness.latest.witnessed_at)}</span>
+            <span :if={is_nil(@witness.latest.witnessed_at)} class="text-base-content/60">
+              {gettext("not yet")}
+            </span>
+          </dd>
+        </div>
+      </dl>
+
+      <%!-- The number that matters. One is a sink that was briefly unreachable
+            and will be retried on the next run; a growing count is an outage
+            nobody has noticed, which is why the oldest one is dated here. --%>
+      <div
+        :if={@witness.witnessing? and @witness.unwitnessed_count > 0}
+        class="rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-warning-ink"
+      >
+        <p class="font-medium">
+          {gettext("%{count} checkpoint(s) have not been accepted by the witness.",
+            count: @witness.unwitnessed_count
+          )}
+        </p>
+        <p :if={@witness.oldest_unwitnessed} class="mt-1">
+          {gettext("The oldest covers history up to %{at}.",
+            at: when_str(@witness.oldest_unwitnessed.covered_at)
+          )}
+        </p>
+        <p :if={last_error(@witness)} class="mt-1 font-mono text-xs break-words">
+          {last_error(@witness)}
+        </p>
+      </div>
+
+      <p
+        :if={@witness.witnessing? and @witness.unwitnessed_count == 0 and @witness.latest}
+        class="text-sm text-success"
+      >
+        <.icon name="hero-shield-check" class="size-4" />
+        {gettext("Every checkpoint has been accepted by the witness.")}
+      </p>
+    </section>
+    """
+  end
+
+  # The error from the oldest failure rather than the newest: it is the one that
+  # says what first went wrong, and a later run's message is often just the
+  # symptom of the same outage.
+  defp last_error(%{oldest_unwitnessed: %{witness_error: error}}) when is_binary(error), do: error
+  defp last_error(%{latest: %{witness_error: error}}) when is_binary(error), do: error
+  defp last_error(_witness), do: nil
+
   attr :content, :list, required: true
+  attr :witness, :map, required: true
 
   defp index(assigns) do
     ~H"""
@@ -196,6 +352,8 @@ defmodule KilnCMSWeb.GovernanceLive do
           {gettext("Audit trail, consent records, and point-in-time history for your content.")}
         </p>
       </div>
+
+      <.witness_panel witness={@witness} />
 
       <p :if={@content == []} class="text-sm text-base-content/60">{gettext("No content yet.")}</p>
 
@@ -237,6 +395,7 @@ defmodule KilnCMSWeb.GovernanceLive do
           {@trail.item.type} · {@trail.item.state}
         </p>
         <.chain_badge chain={@trail.chain} gap_range={@trail.chain_gap_range} />
+        <.witnessed_badge witnessed={@trail.witnessed} />
         <p :if={@trail.unanchored_tail > 0} class="mt-1 text-xs text-base-content/60">
           {gettext("%{count} edit(s) since the last anchor — covered at the next publish.",
             count: @trail.unanchored_tail

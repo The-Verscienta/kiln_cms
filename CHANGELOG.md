@@ -29,6 +29,26 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **The governance dashboard says whether history is actually being witnessed**
+  (#731). `chain_checkpoints.witness_error` was written on every failed
+  publication and surfaced nowhere, so the only way to learn a deployment had
+  been silently unwitnessed for weeks was `mix kiln.audit.checkpoint` or a log
+  line from whenever it started — a healthy dashboard and an unwitnessed one
+  looked identical.
+
+  `/editor/governance` now leads with a witness panel: the configured adapter,
+  the last checkpoint (sequence, what it covers, when it was published), and the
+  count of checkpoints the sink has never accepted, dated by the oldest so the
+  outage has a start. A document's trail names the checkpoint witnessing it and
+  at what anchor position.
+
+  "Off" and "broken" read differently on purpose. Checkpointing disabled, or no
+  sink configured, are deliberate postures and get a neutral note; only a
+  configured sink refusing publications is shown as a warning. A document no
+  checkpoint covers gets no badge at all — that is the ordinary case for
+  anything published since the last checkpoint, and a badge on every one of them
+  would teach an operator to stop reading badges.
+
 - **Events: "what's on, soonest first"** (#766). An event-shaped content type —
   one carrying a `datetime_range` field (#480) — now has a paginated delivery
   index ordered by each document's **next occurrence**, at `/<plural>` (HTML)
