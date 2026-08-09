@@ -53,6 +53,7 @@ defmodule KilnCMS.CMS.Comment do
 
       change KilnCMS.CMS.Changes.RouteToBlockThread
       change KilnCMS.CMS.Changes.BroadcastComment
+      change {KilnCMS.CMS.Changes.NotifyComment, event: :comment_added}
 
       change fn changeset, context ->
         case context.actor do
@@ -71,6 +72,7 @@ defmodule KilnCMS.CMS.Comment do
 
       change set_attribute(:resolved_at, &DateTime.utc_now/0)
       change KilnCMS.CMS.Changes.BroadcastComment
+      change {KilnCMS.CMS.Changes.NotifyComment, event: :comment_resolved}
 
       change fn changeset, context ->
         case context.actor do

@@ -1205,7 +1205,7 @@ msgstr "Cree su primera página o entrada para comenzar."
 msgid "Custom block payload"
 msgstr "Carga útil de bloque personalizada"
 
-#: lib/kiln_cms_web/live/settings_live.ex:593
+#: lib/kiln_cms_web/live/settings_live.ex:598
 #, elixir-autogen, elixir-format
 msgid "Download a copy of your account profile and notification preferences as JSON."
 msgstr "Descargue una copia del perfil de su cuenta y sus preferencias de notificación en formato JSON."
@@ -1226,7 +1226,7 @@ msgid "Embedded HTML or external content"
 msgstr "HTML incrustado o contenido externo"
 
 #: lib/kiln_cms_web/live/account_live.ex:349
-#: lib/kiln_cms_web/live/settings_live.ex:602
+#: lib/kiln_cms_web/live/settings_live.ex:607
 #, elixir-autogen, elixir-format
 msgid "Export my data"
 msgstr "Exportar mis datos"
@@ -1339,7 +1339,7 @@ msgstr "Bloque de texto enriquecido"
 msgid "Rich text editor"
 msgstr "Editor de texto enriquecido"
 
-#: lib/kiln_cms_web/live/settings_live.ex:585
+#: lib/kiln_cms_web/live/settings_live.ex:590
 #, elixir-autogen, elixir-format
 msgid "Save preferences"
 msgstr "Guardar preferencias"
@@ -1420,7 +1420,7 @@ msgid "You need admin access to view that page."
 msgstr "Necesita acceso de administrador para ver esa página."
 
 #: lib/kiln_cms_web/live/account_live.ex:343
-#: lib/kiln_cms_web/live/settings_live.ex:591
+#: lib/kiln_cms_web/live/settings_live.ex:596
 #, elixir-autogen, elixir-format
 msgid "Your data"
 msgstr "Sus datos"
@@ -7492,7 +7492,7 @@ msgstr "Quitar la imagen"
 msgid "Several images with captions, fired as ImageGallery structured data"
 msgstr "Varias imágenes con pies de foto, publicadas como datos estructurados ImageGallery"
 
-#: lib/kiln_cms_web/live/settings_live.ex:617
+#: lib/kiln_cms_web/live/settings_live.ex:622
 #, elixir-autogen, elixir-format
 msgid "Too many attempts — try again in %{seconds} seconds."
 msgstr "Demasiados intentos: inténtalo de nuevo en %{seconds} segundos."
@@ -10514,3 +10514,8 @@ msgid "%{count} open comment — open it in the editor"
 msgid_plural "%{count} open comments — open them in the editor"
 msgstr[0] "%{count} comentario abierto — ábrelo en el editor"
 msgstr[1] "%{count} comentarios abiertos — ábrelos en el editor"
+
+#: lib/kiln_cms_web/live/settings_live.ex:586
+#, elixir-autogen, elixir-format
+msgid "Comments — replies on threads I'm in, and when someone @mentions me"
+msgstr "Comentarios — respuestas en hilos en los que participo, y cuando alguien me menciona con @"
