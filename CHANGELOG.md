@@ -394,6 +394,94 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **The collab-editor flake is checked for, not just fixed** (#1067). Filed as a
+  presence race in `CollabPersisterTest` — one failure in three full-suite runs,
+  never in isolation — it turned out to be a VM-global one:
+  `:collab_prototype` is `Application.get_env/2`, re-read on every editor mount,
+  and an `async: true` test flipping it off turned collaboration off for every
+  concurrent test that mounted an editor. PR #1090 fixed the one offender; this
+  makes the next one impossible.
+
+  A static check now fails if any `async: true` module writes that flag, and the
+  two collab live-view files assert it is on before their own assertions run —
+  so the failure says which class of problem it is instead of presenting as a
+  broken election. The three lines the issue suggested hardening are hardened
+  too: they sampled a single render where presence is eventually consistent,
+  and they poll now.
+
+- **Referrer suppression now actually suppresses** (#1073). #620 hid a
+  low referrer count behind `"< n"` and pulled a second category into `hidden`
+  so the low one was not the sole unknown. Brute-forcing every assignment
+  consistent with the published breakdown *plus the view total shown beside it*
+  found that most of them had exactly one solution: the partner was chosen as
+  the **smallest** of the others, which bounds it above by every published exact
+  — and whenever the residual falls under the threshold the partner must be
+  zero, which recovers the hidden count exactly. `direct: 3` with four genuine
+  zeros gave the count away outright.
+
+  The partner is the **largest** of the others now, so it is bounded below by
+  every published exact and unbounded above and the residual splits many ways.
+  Where no partner makes it ambiguous — a handful of views against genuine zeros
+  — the whole breakdown is hidden, zeros included, because a published `0` is a
+  term in the equation rather than a courtesy. Both the dashboard and the export
+  read the same decision, as they have since #777.
+
+  The property is now a test rather than an argument: it brute-forces the
+  assignments a reader who knows the algorithm could construct and asserts there
+  is more than one, across every small breakdown and at three thresholds. It
+  fails on the old algorithm.
+
+  The cost is exactness on the lowest-traffic days, which
+  `docs/environment-variables.md` states next to
+  `KILN_ANALYTICS_LOW_COUNT_THRESHOLD`.
+
+- **Turning off full-content feeds now empties the cached feed bodies on every
+  node** (#1078). #719's `bust_feed_policy/1` already reached the cluster, so the
+  *policy* — the value deciding whether whole article bodies go out to anonymous
+  subscribers — was consistent everywhere. The cached feed **documents** were
+  not: `bust_all_feeds/1` was node-local, so on a two-node deployment roughly
+  half of all `/feed.xml` fetches went on serving complete article text,
+  rendered under the old policy, until the five-minute TTL.
+
+  It could not use the existing broadcast, which names keys: a prefix scan's
+  matching keys differ per node, and a node that never served
+  `/blog/category/news/feed.xml` has no key for the writer to name. So
+  `KilnCMS.Cache.ClusterBust` gained `broadcast_prefix/1`, which carries the
+  rule instead and lets each node run its own scan. Receivers stay as dumb as
+  they were — a string and "forget what starts with this", not a name for the
+  thing being invalidated.
+
+- **The tag-suggestion threshold is measured now, and the old one was inert**
+  (#1086). #851 shipped `suggest_tags/2`'s cosine-distance ceiling with a
+  derived `0.25`, reasoned from bge-small's published behaviour on *sentence
+  pairs*, and said in as many words that it wanted calibrating against a real
+  embedder — which `KilnCMS.StubEmbedder` cannot stand in for, so no test could
+  tell a good suggestion from a bad one.
+
+  Measured against the shipped model over a labelled corpus (eight documents,
+  thirty-five tags, a human label on all 280 pairs), that band does not transfer:
+  a tag label against a whole-document centroid is not a sentence pair. An
+  unrelated tag sits at 0.35 and up; a wanted one can sit at 0.43. `0.25` kept
+  **3 of 27** tags a person would tick, so the panel was empty for most
+  documents — which reads to an editor as a broken feature, not as "nothing is
+  close".
+
+  The default is now **0.35**: 21 of 27 wanted tags kept, 10 of 253 unwanted
+  admitted, about four suggestions per document under the panel's own limit of
+  five. The bands overlap, so it is a judgement about which error to make, and
+  `docs/rag.md` records the measurement and the reasoning.
+
+  `near_duplicates/2`'s `0.1` was measured on the same corpus and holds — a
+  reworded copy sits at 0.04, another document on the same subject at 0.19-0.21
+  — but it is a config key (`:near_duplicate_threshold`) now rather than a
+  literal, because it is a property of the model and an operator who changes the
+  model had no way to change it.
+
+  The corpus and the recorded distances are `KilnCMS.TagSuggestionCorpus`, so
+  the shipped value is pinned by tests that need no model; the harness that
+  produced them re-runs against any configured embedder with
+  `mix test --include calibration`.
+
 - **A content type's default SEO description now reaches every surface that
   renders one** (#1102). #805 let a type default its `seo_title` /
   `seo_description` from a `[token]` pattern, resolved at render time — but only

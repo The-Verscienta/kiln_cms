@@ -274,6 +274,10 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
       enable_referrers(5)
       id = Ash.UUID.generate()
       seed_referrer_bucket(%{content_id: id, day: today(), source: :social, hits: 2})
+      # Something for it to hide behind — a lone low count with four genuine
+      # zeros loses the whole breakdown instead (#1073).
+      seed_referrer_bucket(%{content_id: id, day: today(), source: :search, hits: 40})
+      seed_referrer_bucket(%{content_id: id, day: today(), source: :other, hits: 50})
 
       body =
         conn
@@ -319,6 +323,8 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
       enable_referrers(5)
       id = Ash.UUID.generate()
       seed_referrer_bucket(%{content_id: id, day: today(), source: :other, hits: 1})
+      seed_referrer_bucket(%{content_id: id, day: today(), source: :search, hits: 40})
+      seed_referrer_bucket(%{content_id: id, day: today(), source: :social, hits: 50})
 
       body =
         conn
@@ -385,19 +391,17 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
       })
 
       rows = referrer_rows(conn)
-      shown = Map.new(rows, &{&1["source"], &1["hits"]})
 
-      # The low one is suppressed…
-      assert shown["social"] == "< 5"
-
-      # …and so is exactly one more, so `3 = social + ?` has two unknowns.
-      # Without the partner, `social` is `3 - 0 - 0 - 0 - 0`.
-      assert Enum.count(rows, &(&1["hits"] == "hidden")) == 1
+      # Three views total against four genuine zeros: no partner makes that
+      # ambiguous, so the whole breakdown goes — zeros included, because each
+      # published `0` removes an unknown from an equation that has only one.
+      assert Enum.all?(rows, &(&1["hits"] == "hidden"))
     end
 
-    # Two naturally-low categories are already underdetermined by the total, so
-    # forcing a third would cost information for nothing.
-    test "two low counts need no complement", %{conn: conn} do
+    # #620 claimed two naturally-low categories were already underdetermined by
+    # the total. #1073's brute force found `social: 2, search: 3` with three
+    # zeros admitting exactly one assignment, so they are not.
+    test "two low counts still need somewhere to hide", %{conn: conn} do
       enable_referrers(5)
       id = Ash.UUID.generate()
       seed_referrer_bucket(%{content_id: id, day: today(), source: :social, hits: 2})
@@ -406,9 +410,11 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
       rows = referrer_rows(conn)
       shown = Map.new(rows, &{&1["source"], &1["hits"]})
 
+      # Five views split five ways, with a partner that may be 0 or >= 5: ten
+      # assignments, so the two ranges may still be published.
       assert shown["social"] == "< 5"
       assert shown["search"] == "< 5"
-      refute Enum.any?(rows, &(&1["hits"] == "hidden"))
+      assert Enum.count(rows, &(&1["hits"] == "hidden")) == 1
     end
 
     test "a breakdown with nothing to hide exports exact counts", %{conn: conn} do
@@ -439,9 +445,8 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
       rows = referrer_rows(conn)
       by_item = Enum.group_by(rows, & &1["content_id"])
 
-      quiet_shown = Map.new(by_item[quiet], &{&1["source"], &1["hits"]})
-      assert quiet_shown["social"] == "< 5"
-      assert Enum.count(by_item[quiet], &(&1["hits"] == "hidden")) == 1
+      # One hit with four genuine zeros: nowhere to hide, so all of it goes.
+      assert Enum.all?(by_item[quiet], &(&1["hits"] == "hidden"))
 
       busy_shown = Map.new(by_item[busy], &{&1["source"], &1["hits"]})
       assert busy_shown["search"] == 40
@@ -453,6 +458,8 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
       enable_referrers(5)
       id = Ash.UUID.generate()
       seed_referrer_bucket(%{content_id: id, day: today(), source: :social, hits: 2})
+      seed_referrer_bucket(%{content_id: id, day: today(), source: :search, hits: 40})
+      seed_referrer_bucket(%{content_id: id, day: today(), source: :other, hits: 50})
 
       body =
         conn

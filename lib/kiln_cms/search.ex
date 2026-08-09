@@ -159,29 +159,68 @@ defmodule KilnCMS.Search do
   says "consider these" costs the panel its credibility.
 
   The number is model-specific, which is why it is a knob rather than a
-  literal. `0.25` is derived from the default `BAAI/bge-small-en-v1.5`, whose
-  cosine similarities sit high and compressed: unrelated pairs cluster around
-  0.6-0.8 similarity and related ones above 0.8, which in **distance**
-  (`1 - cos θ`) is 0.2-0.4 for unrelated and below 0.2 for related. 0.25 sits
-  just inside that boundary. Note how narrow the usable band is — this is why a
-  plausible-sounding "distance under 1.0" would filter nothing at all.
+  literal. `0.35` is **measured** against the default `BAAI/bge-small-en-v1.5`
+  (#1086) over `KilnCMS.TagSuggestionCorpus` — eight documents, thirty-five
+  tags, human labels for which of them a person would actually tick:
 
-  > #### Derived, not measured {: .warning}
+  | | cosine distance |
+  |---|---|
+  | tags a human would tick | 0.2119 – 0.4292 |
+  | tags they would not | 0.2828 – 0.5626 |
+
+  The bands **overlap**, and that is the result. No ceiling keeps every wanted
+  tag and admits no unwanted one, so this is a choice about which error to make.
+  0.35 keeps 21 of 27 wanted and admits 10 of 253 unwanted — about four
+  suggestions per document, under `suggest_tags/2`'s `limit: 5`, so the ceiling
+  rather than the limit is what decides what an editor sees.
+
+  > #### What this replaced, and why it was wrong {: .warning}
   >
-  > That band is the model's published behaviour on sentence pairs, not a
-  > measurement of *this* comparison, which is asymmetric: a one- or two-word
-  > tag label against a whole-document centroid. #851 says as much — the number
-  > wants calibrating against a real embedder and a real corpus, which
-  > `KilnCMS.StubEmbedder` cannot stand in for. Treat it as a starting point and
-  > expect to move it.
+  > The first number came from the model's published behaviour on **sentence
+  > pairs** — unrelated around 0.6-0.8 similarity, i.e. 0.2-0.4 distance — and
+  > #1086 warned that band might not transfer to a one- or two-word tag label
+  > against a whole-document centroid.
+  >
+  > It does not. Measured, an unrelated tag sits at 0.35 and up, and a wanted
+  > one can sit at 0.43. Reasoning from the sentence-pair band produced `0.25`,
+  > which keeps **3 of 27** wanted tags: the panel is empty for most documents,
+  > which reads to an editor exactly like a broken feature.
 
   Measure your own with
   `KilnCMS.Search.Related.suggest_tags(record, threshold: 2.0)` — the ceiling of
   cosine distance, so nothing is filtered — which restores the pre-#851
-  behaviour, and read the distances off the result.
+  behaviour, and read the distances off the result. For a whole corpus at once,
+  `test/kiln_cms/search/tag_suggestion_calibration_test.exs` carries the harness
+  behind `--include calibration`.
   """
   @spec suggest_tags_threshold() :: float()
-  def suggest_tags_threshold, do: cfg(:suggest_tags_threshold, 0.25)
+  def suggest_tags_threshold, do: cfg(:suggest_tags_threshold, 0.35)
+
+  @doc """
+  Cosine-distance ceiling on a near-duplicate — see
+  `KilnCMS.Search.Related.near_duplicates/2`.
+
+  Measured on the same corpus as `suggest_tags_threshold/0` (#1086), on the axis
+  this one actually compares — document centroid against document centroid,
+  which behaves nothing like a tag label against a centroid:
+
+  | | cosine distance |
+  |---|---|
+  | the same document | 0.0000 |
+  | a reworded copy of it | 0.0376 |
+  | another document on the same subject | 0.1938 – 0.2097 |
+  | an unrelated document | 0.3690 |
+
+  `0.1` sits in the gap with room on both sides, which is what this feature
+  needs it to do: "this is the same article rewritten" is a duplicate an editor
+  wants flagged, "this is another article about sourdough" is not.
+
+  A knob rather than the literal it used to be, for the reason its sibling is
+  one: the number is a property of the model, and an operator who changes the
+  model had no way to change this.
+  """
+  @spec near_duplicate_threshold() :: float()
+  def near_duplicate_threshold, do: cfg(:near_duplicate_threshold, 0.1)
 
   @doc """
   Nx `defn_options` for the local Bumblebee servings. Uses the EXLA compiler when

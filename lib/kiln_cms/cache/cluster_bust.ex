@@ -25,6 +25,10 @@ defmodule KilnCMS.Cache.ClusterBust do
   subscriber on every node that deletes the named keys locally. The writing node
   *also* deletes synchronously before broadcasting — see below.
 
+  Two shapes: `broadcast/1` names the keys, `broadcast_prefix/1` names a rule
+  for finding them. The second exists because a prefix scan's matching keys
+  differ per node, so there is nothing for the writer to enumerate (#1078).
+
   This is not a distributed cache and does not pretend to be. It is a best-effort
   "forget this key" signal: PubSub delivery is at-most-once, a node that is
   partitioned or booting misses it, and the TTL remains the guarantee. What it
@@ -71,6 +75,36 @@ defmodule KilnCMS.Cache.ClusterBust do
     :ok
   end
 
+  @doc """
+  Drop every key starting with `prefix` on this node, and ask every other node
+  to do the same (#1078).
+
+  The sibling of `broadcast/1` for a bust whose *keys* the sender cannot name.
+  `KilnCMS.Cache.bust_all_feeds/1` drops one org's cached feed documents by
+  prefix, and which keys match differs per node — a node that never served
+  `/blog/category/news/feed.xml` has no key for it — so a key list broadcast
+  from the writer would leave every other node's feeds untouched. That was the
+  gap: turning full content off dropped the syndication *policy* on every node
+  (`bust_feed_policy/1`, above) while the cached bodies rendered under the old
+  policy survived everywhere but the writer.
+
+  Receivers stay as dumb as they are for `broadcast/1`. This carries a string
+  and a rule — "forget what starts with this" — not a name for the thing being
+  invalidated, so a node running older code drops a message it does not
+  recognise rather than guessing at one.
+
+  Same guarantees as `broadcast/1`: best effort, at-most-once, TTL is the
+  backstop.
+  """
+  @spec broadcast_prefix(String.t()) :: :ok
+  def broadcast_prefix(prefix) when is_binary(prefix) do
+    KilnCMS.Cache.drop_prefix(prefix)
+
+    Phoenix.PubSub.broadcast(KilnCMS.PubSub, @topic, {:bust_prefix, prefix})
+
+    :ok
+  end
+
   @impl true
   def init(_opts) do
     Phoenix.PubSub.subscribe(KilnCMS.PubSub, @topic)
@@ -80,6 +114,18 @@ defmodule KilnCMS.Cache.ClusterBust do
   @impl true
   def handle_info({:bust_keys, keys}, state) when is_list(keys) do
     Enum.each(keys, &Cachex.del(KilnCMS.Cache.cache_name(), &1))
+    {:noreply, state}
+  end
+
+  # Synchronous, and worth one line about why: this walks the keyspace, which is
+  # more work than the key-list clause above and blocks the next bust behind it
+  # — including a code-injection one, which is the one that matters most. It is
+  # the same walk the writing node already does inline, and its callers are
+  # settings and content-type writes, so the pile-up needs an operator saving in
+  # a loop. A `Task` here would trade that for an unsupervised process in the
+  # module whose whole job is being dependable.
+  def handle_info({:bust_prefix, prefix}, state) when is_binary(prefix) do
+    KilnCMS.Cache.drop_prefix(prefix)
     {:noreply, state}
   end
 

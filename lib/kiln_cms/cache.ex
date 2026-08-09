@@ -449,21 +449,34 @@ defmodule KilnCMS.Cache do
   here means a feed keeps serving whatever the previous policy allowed, while
   the admin is told the save succeeded.
 
-  **Node-local**, unlike `bust_feed_policy/1`. `KilnCMS.Cache.ClusterBust`
-  broadcasts a list of *keys*, and this is a prefix scan whose matching keys
-  differ per node — so making it cluster-wide needs an "intent" broadcast rather
-  than a key list. Tracked separately; the policy above is the half that decides
-  disclosure, and it does reach every node.
+  **Cluster-wide** (#1078), like `bust_feed_policy/1`. The two halves of a
+  syndication change have to travel together: turning full content off dropped
+  the *policy* on every node but only the writing node's cached feed **bodies**,
+  so roughly half of a two-node deployment went on serving complete article text
+  — rendered under the old policy — for the whole five-minute TTL.
+
+  It could not ride `ClusterBust.broadcast/1`, which takes a list of keys: the
+  keys matching this prefix differ per node, and a node that never served
+  `/blog/category/news/feed.xml` has no such key for the writer to name. So it
+  goes as an *intent* (`ClusterBust.broadcast_prefix/1`) and each node runs its
+  own scan.
   """
   @spec bust_all_feeds(Ash.UUID.t()) :: :ok
   def bust_all_feeds(org_id) do
-    if enabled?(), do: drop_feed_keys(org_id)
+    if enabled?(), do: ClusterBust.broadcast_prefix(feed_key_prefix(org_id))
     :ok
   end
 
-  defp drop_feed_keys(org_id) do
-    prefix = feed_key_prefix(org_id)
+  @doc """
+  Drop every cached key starting with `prefix`, on **this node**.
 
+  Public only because `KilnCMS.Cache.ClusterBust` runs it on the receiving side
+  of `broadcast_prefix/1`; every writer should go through that, so the bust
+  reaches the rest of the cluster too. The keyspace walk is bounded but real —
+  see `bust_all_feeds/1` for why no caller may do this before COMMIT.
+  """
+  @spec drop_prefix(String.t()) :: :ok
+  def drop_prefix(prefix) when is_binary(prefix) do
     case Cachex.keys(@cache) do
       {:ok, keys} ->
         # `is_binary/1` is load-bearing: not every cached key is a string (the
@@ -473,8 +486,10 @@ defmodule KilnCMS.Cache do
         end
 
       other ->
-        Logger.warning("could not enumerate feed cache keys to bust: #{inspect(other)}")
+        Logger.warning("could not enumerate cache keys under #{prefix}: #{inspect(other)}")
     end
+
+    :ok
   end
 
   @doc """

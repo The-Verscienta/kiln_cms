@@ -13,6 +13,21 @@ defmodule KilnCMSWeb.CollabFragmentTest do
 
   @password "password123456"
 
+  # The other victim of the same leak (#1067, PR #1090): with
+  # `:collab_prototype` off the editor renders no `collab_token`, so
+  # `data-collab-fragment` is simply absent and every assertion here fails
+  # describing a fragment-keying bug that is not there. The flag is VM-global,
+  # so an `async: true` neighbour flipping it is all it takes — see the fuller
+  # note in `KilnCMSWeb.CollabPersisterTest`.
+  setup do
+    assert KilnCMS.Collab.Crdt.enabled?(),
+           ":collab_prototype is off — a concurrent async test flipped this " <>
+             "VM-global flag, and every assertion in this file is downstream of " <>
+             "it. See KilnCMSWeb.CollabPersisterTest's setup (#1067)."
+
+    :ok
+  end
+
   defp authed_user do
     email = "cf-#{System.unique_integer([:positive])}@example.com"
 

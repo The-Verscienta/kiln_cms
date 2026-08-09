@@ -15,6 +15,36 @@ defmodule KilnCMSWeb.CollabPersisterTest do
 
   @password "password123456"
 
+  # Every assertion below is downstream of collaboration being ON, and the flag
+  # is `Application.get_env(:kiln_cms, :collab_prototype)` — **VM-global**, set
+  # true by `config/test.exs` and re-read on every editor mount. An `async: true`
+  # neighbour that flips it off turns `collab_active?/1` false here, the
+  # co-editor never stands down, and the failure lands on `"Synced live"` with
+  # nothing pointing at the cause.
+  #
+  # That is not hypothetical: it is what #1067 was filed as (a presence race,
+  # 1 failure in 3 full-suite runs, never in isolation) and PR #1090 found and
+  # fixed — by making `KilnCMSWeb.CollabSavedRefreshTest`, the only test that
+  # turns the flag off, `async: false`. Nothing stops the next one, so this
+  # check stands in front of the assertions and says which class of failure it
+  # is. Cheap, and it fails on the right line.
+  setup do
+    assert KilnCMS.Collab.Crdt.enabled?(),
+           """
+           :collab_prototype is off, so every collaboration assertion in this file
+           would fail for a reason that has nothing to do with what it tests.
+
+           config/test.exs sets it true at boot, and the flag is VM-global — so a
+           concurrent `async: true` test flipped it and did not put it back, or
+           put it back after this one had already mounted. Find the test that
+           writes `:collab_prototype` and make its module `async: false`, as
+           KilnCMSWeb.CollabSavedRefreshTest and KilnCMSWeb.CollabChannelTest are
+           (#1067, PR #1090).
+           """
+
+    :ok
+  end
+
   defp authed_user(role) do
     email = "cp-#{System.unique_integer([:positive])}@example.com"
 
@@ -82,9 +112,15 @@ defmodule KilnCMSWeb.CollabPersisterTest do
     await(lv_high, &(&1 =~ "2 editing"))
 
     # The non-persister's edit does NOT autosave — indicator says synced.
+    #
+    # `await/2`, not a bare `render/1`. Presence is eventually consistent: the
+    # `await` above proves two editors were present at *some* instant, and
+    # nothing holds them there across the edit. Sampling one render makes a diff
+    # in flight decide the test; polling tolerates it and still fails, with the
+    # same message, when the co-editor genuinely autosaved.
     lv_high |> form("#page-editor", form: %{title: "From high"}) |> render_change()
     send(lv_high.pid, :autosave)
-    assert render(lv_high) =~ "Synced live"
+    await(lv_high, &(&1 =~ "Synced live"))
     assert CMS.get_page!(page.id, actor: low).title == "Original"
 
     # The persister's autosave works as always.
@@ -116,7 +152,7 @@ defmodule KilnCMSWeb.CollabPersisterTest do
 
     # Pending edits are only "synced" while the persister is around…
     lv_high |> form("#page-editor", form: %{title: "Now mine"}) |> render_change()
-    assert render(lv_high) =~ "Synced live"
+    await(lv_high, &(&1 =~ "Synced live"))
 
     # …but when they leave, the survivor is elected and saves them.
     GenServer.stop(lv_low.pid)

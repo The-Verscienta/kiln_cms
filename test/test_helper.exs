@@ -83,13 +83,27 @@ ffmpeg_exclusion =
 no_ffmpeg_exclusion =
   if System.find_executable("ffmpeg"), do: [:no_ffmpeg], else: []
 
+# The embedding-threshold calibration (#1086). Excluded unconditionally rather
+# than gated on a capability, unlike everything above: it downloads a model from
+# Hugging Face and spends minutes compiling and running it, which is not a thing
+# to do on every `mix test` or on every CI run.
+#
+# Nothing is left unasserted by excluding it. It is the *generator* of
+# `KilnCMS.TagSuggestionCorpus`'s recorded distances, and the assertions that
+# pin the shipped ceiling against those numbers run always, in the same file.
+# Re-measure with:
+#
+#     mix test --include calibration test/kiln_cms/search/tag_suggestion_calibration_test.exs
+calibration_exclusion = [:calibration]
+
 if KilnCMS.Config.StrictTestFlag.strict?(System.get_env("KILN_STRICT_TEST")) do
   ExUnit.start(include: [strict_tenancy: true], exclude: [:test])
 else
   ExUnit.start(
     exclude:
       [strict_tenancy: true] ++
-        pg_tools_exclusion ++ qpdf_exclusion ++ ffmpeg_exclusion ++ no_ffmpeg_exclusion
+        pg_tools_exclusion ++
+        qpdf_exclusion ++ ffmpeg_exclusion ++ no_ffmpeg_exclusion ++ calibration_exclusion
   )
 end
 

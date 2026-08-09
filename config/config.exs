@@ -190,7 +190,23 @@ config :kiln_cms, KilnCMS.Search,
   # every document, however unrelated. Model-specific, and NOT `nil`-able the
   # way its neighbour is — see `KilnCMS.Search.suggest_tags_threshold/0` for
   # why, and for how to measure your own.
-  suggest_tags_threshold: 0.25
+  #
+  # MEASURED against the model above, not derived (#1086): over a labelled
+  # corpus, tags a human would tick land at 0.21-0.43 and tags they would not
+  # at 0.35-0.56. The bands overlap, so this is a choice about which error to
+  # make — 0.35 keeps 21 of 27 wanted tags and admits 10 of 253 unwanted,
+  # roughly four suggestions per document against a `limit: 5` ceiling. The
+  # corpus and the numbers are `KilnCMS.TagSuggestionCorpus`; the reasoning is
+  # in docs/rag.md.
+  suggest_tags_threshold: 0.35,
+  # Cosine-distance ceiling on a near-duplicate (#1086). Measured on the same
+  # corpus: a reworded copy of a document sits at 0.04, another document on the
+  # same subject at 0.19-0.21, an unrelated one at 0.37. 0.1 separates "this is
+  # the same article" from "this is about the same thing" with room on both
+  # sides. A config key rather than a literal for the reason its sibling is one:
+  # the number is a property of the model, and an operator who changes the model
+  # has no way to change this.
+  near_duplicate_threshold: 0.1
 
 # AI-assisted SEO drafting (#60). The deterministic analysis and score in the
 # editor are ALWAYS on and need none of this — the block below gates the
