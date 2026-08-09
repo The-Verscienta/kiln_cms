@@ -188,7 +188,14 @@ when semantic search is off:
   distance threshold (default 0.1), any workflow state — catches a draft
   duplicating live content.
 - **Tag suggestions** — `suggest_tags/2`: existing tags ranked by similarity
-  to the document's centroid, minus the ones already applied.
+  to the document's centroid, minus the ones already applied, and minus
+  anything past a cosine-distance ceiling (`:suggest_tags_threshold`, default
+  0.35). The ceiling is not optional decoration: the candidate set is the
+  site's whole tag list, so ranking alone meant a five-tag site suggested all
+  five tags for every document (#851). Returning nothing is the right answer
+  when nothing is close. Tune it for your embedder — measure with
+  `suggest_tags(record, threshold: 2.0)` (the ceiling of cosine distance, so
+  nothing is filtered) and read the distances off the result.
 - **Content gaps** — `content_gaps/2`: recorded zero-result search queries
   (the search-analytics log), most-searched first — what readers looked for
   and didn't get. The one function here that needs no embeddings, so it works

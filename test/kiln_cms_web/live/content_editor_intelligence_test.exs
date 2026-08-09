@@ -26,7 +26,7 @@ defmodule KilnCMSWeb.ContentEditorIntelligenceTest do
     Application.put_env(
       :kiln_cms,
       KilnCMS.Search,
-      Keyword.merge(original, semantic: true, embedder: KilnCMS.StubEmbedder)
+      Keyword.merge(original, KilnCMS.StubEmbedder.search_env())
     )
 
     :ok

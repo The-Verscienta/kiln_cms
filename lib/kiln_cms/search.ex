@@ -148,6 +148,42 @@ defmodule KilnCMS.Search do
   def semantic_max_distance, do: cfg(:semantic_max_distance, nil)
 
   @doc """
+  Cosine-distance ceiling on a tag suggestion — see
+  `KilnCMS.Search.Related.suggest_tags/2`.
+
+  Unlike `semantic_max_distance/0` this ships a real number rather than `nil`,
+  because "no ceiling" is not a neutral choice here: the candidate set is the
+  site's whole tag list, so on a site with five tags every tag is always
+  suggested, however unrelated (#851). A wrong suggestion in a ranked list of
+  search results costs a scroll; a wrong suggestion in a five-item panel that
+  says "consider these" costs the panel its credibility.
+
+  The number is model-specific, which is why it is a knob rather than a
+  literal. `0.25` is derived from the default `BAAI/bge-small-en-v1.5`, whose
+  cosine similarities sit high and compressed: unrelated pairs cluster around
+  0.6-0.8 similarity and related ones above 0.8, which in **distance**
+  (`1 - cos θ`) is 0.2-0.4 for unrelated and below 0.2 for related. 0.25 sits
+  just inside that boundary. Note how narrow the usable band is — this is why a
+  plausible-sounding "distance under 1.0" would filter nothing at all.
+
+  > #### Derived, not measured {: .warning}
+  >
+  > That band is the model's published behaviour on sentence pairs, not a
+  > measurement of *this* comparison, which is asymmetric: a one- or two-word
+  > tag label against a whole-document centroid. #851 says as much — the number
+  > wants calibrating against a real embedder and a real corpus, which
+  > `KilnCMS.StubEmbedder` cannot stand in for. Treat it as a starting point and
+  > expect to move it.
+
+  Measure your own with
+  `KilnCMS.Search.Related.suggest_tags(record, threshold: 2.0)` — the ceiling of
+  cosine distance, so nothing is filtered — which restores the pre-#851
+  behaviour, and read the distances off the result.
+  """
+  @spec suggest_tags_threshold() :: float()
+  def suggest_tags_threshold, do: cfg(:suggest_tags_threshold, 0.25)
+
+  @doc """
   Nx `defn_options` for the local Bumblebee servings. Uses the EXLA compiler when
   the `:exla` dependency is compiled in (dev/test); otherwise returns `[]` so the
   servings fall back to Nx's default backend instead of crashing on a missing
