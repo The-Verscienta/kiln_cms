@@ -4,12 +4,23 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
   governance's export — `AnalyticsLive` itself is editor-visible), streamed
   CSV/JSON downloads of daily view buckets with titles resolved.
   """
-  # async: false — the "referrer export" describe block below mutates the
-  # global :analytics_referrers Application env, which an async: true sibling
-  # test (e.g. KilnCMS.AnalyticsTest's "off by default" assertion, or this
-  # file's own "off by default" test) could observe mid-mutation. See #620
-  # review.
+  # async: false — `enable_referrers/1` below mutates the global
+  # :analytics_referrers Application env, which an async: true sibling test
+  # (e.g. KilnCMS.AnalyticsTest's "off by default" assertion, or this file's
+  # own) could observe mid-mutation. See #620 review.
   use KilnCMSWeb.ConnCase, async: false
+
+  # ...and `async: false` alone is not enough: it stops a CONCURRENT read, not a
+  # value left behind. A block that enabled referrers and never restored them
+  # turned every later "off by default" assertion in the whole run red — in this
+  # file, in KilnCMS.AnalyticsTest, in ReferrerViewTrackingTest, and in the
+  # analytics dashboard's row counts. So the restore lives at module level,
+  # where no describe block can forget it.
+  setup do
+    original = Application.get_env(:kiln_cms, :analytics_referrers, [])
+    on_exit(fn -> Application.put_env(:kiln_cms, :analytics_referrers, original) end)
+    :ok
+  end
 
   alias KilnCMS.Accounts.User
   alias KilnCMS.Analytics
@@ -211,12 +222,6 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
 
   describe "referrer export (#620)" do
     alias KilnCMS.Analytics.ReferrerDay
-
-    setup do
-      original = Application.get_env(:kiln_cms, :analytics_referrers, [])
-      on_exit(fn -> Application.put_env(:kiln_cms, :analytics_referrers, original) end)
-      :ok
-    end
 
     defp enable_referrers(threshold \\ 5) do
       Application.put_env(:kiln_cms, :analytics_referrers,
