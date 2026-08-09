@@ -88,6 +88,24 @@ defmodule KilnCMS.Accounts.Token do
       change AshAuthentication.TokenResource.StoreTokenChange
     end
 
+    # Not an AshAuthentication action (#743). `KilnCMS.Accounts.PendingSignIn`
+    # needs "this attempt is now spent, exactly once, across every node", and
+    # `jti` is this table's primary key — so the INSERT *is* the check. A second
+    # redemption of the same blob, on any node, loses the race at Postgres
+    # rather than at a cache each node keeps its own copy of.
+    #
+    # It rides on this resource rather than a table of its own because the shape
+    # is already right (jti, subject, expires_at, purpose) and the nightly
+    # `:expunge_expired` trigger above already sweeps it. The purpose is its own
+    # string, so `AshAuthentication.TokenResource.IsRevoked` — which looks for
+    # `"revocation"` — never sees these rows.
+    create :spend_jti do
+      description "Record a pending sign-in blob as redeemed. Fails if already spent."
+      accept [:jti, :subject, :expires_at]
+
+      change set_attribute(:purpose, "pending_sign_in")
+    end
+
     destroy :expunge_expired do
       description "Deletes expired tokens."
       change filter(expr(expires_at < now()))

@@ -114,26 +114,61 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
   end
 
   describe "single use" do
-    test "an encrypted blob is refused once burned" do
+    test "an encrypted blob is refused once spent" do
       {user, _secret} = enabled_user()
       blob = PendingSignIn.mint(:encrypted, @endpoint, user)
 
-      assert {:ok, %{jti: jti}} = PendingSignIn.resolve(:encrypted, @endpoint, blob)
+      assert {:ok, %{jti: jti} = resolved} = PendingSignIn.resolve(:encrypted, @endpoint, blob)
       assert is_binary(jti)
 
-      PendingSignIn.burn(jti)
+      assert :ok = PendingSignIn.spend(resolved)
       assert :error = PendingSignIn.resolve(:encrypted, @endpoint, blob)
     end
 
-    test "a session blob carries no jti, and burning nil is a no-op" do
+    test "spending the SAME blob twice loses the second time" do
+      # The guarantee, and the whole point of #743: the record is an INSERT on
+      # the jti, so a replay that also holds a valid code cannot be told it was
+      # first. A node-local cache answered "unspent" on every node that had not
+      # seen the redemption.
+      {user, _secret} = enabled_user()
+      blob = PendingSignIn.mint(:encrypted, @endpoint, user)
+
+      assert {:ok, resolved} = PendingSignIn.resolve(:encrypted, @endpoint, blob)
+
+      assert :ok = PendingSignIn.spend(resolved)
+      assert :error = PendingSignIn.spend(resolved)
+    end
+
+    test "the spend record outlives the blob it retires" do
+      # Otherwise there is a window in which the blob is still inside its
+      # `max_age` but the record of its use has expired — a replay that only has
+      # to be patient.
+      {user, _secret} = enabled_user()
+      blob = PendingSignIn.mint(:encrypted, @endpoint, user)
+      {:ok, resolved} = PendingSignIn.resolve(:encrypted, @endpoint, blob)
+
+      minted_at = DateTime.utc_now()
+      :ok = PendingSignIn.spend(resolved)
+
+      {:ok, row} = KilnCMS.Accounts.get_token(resolved.jti, authorize?: false)
+
+      assert row.purpose == "pending_sign_in"
+      # `>=` rather than `>`: the column is second-precision, so the one-second
+      # margin can round down to exactly the blob's own lifetime. What must
+      # never happen is the record expiring FIRST.
+      assert DateTime.diff(row.expires_at, minted_at) >= PendingSignIn.max_age()
+    end
+
+    test "a session blob carries no jti, and spending it is a no-op" do
       # Its single use is the deleted session key. Minting a jti anyway would
-      # add a cache write per browser sign-in against a replay that already
-      # requires the session cookie.
+      # add a write per browser sign-in against a replay that already requires
+      # the session cookie.
       {user, _secret} = enabled_user()
       blob = PendingSignIn.mint(:session, @endpoint, user)
 
-      assert {:ok, %{jti: nil}} = PendingSignIn.resolve(:session, @endpoint, blob)
-      assert :ok = PendingSignIn.burn(nil)
+      assert {:ok, %{jti: nil} = resolved} = PendingSignIn.resolve(:session, @endpoint, blob)
+      assert :ok = PendingSignIn.spend(resolved)
+      assert :ok = PendingSignIn.spend(nil)
     end
   end
 

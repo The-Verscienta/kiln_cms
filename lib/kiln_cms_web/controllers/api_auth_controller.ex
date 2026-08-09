@@ -135,12 +135,18 @@ defmodule KilnCMSWeb.ApiAuthController do
     code = params["code"]
 
     with :ok <- require_params([{"pending_token", pending}, {"code", code}]),
-         {:ok, %{user: user, jti: jti}} <- PendingSignIn.resolve(:encrypted, conn, pending),
-         {:ok, user} <- SecondFactor.check(user, code) do
-      # Only now, and only on success: a wrong code or a spent budget leaves the
-      # blob alive, because neither is a failed authentication and neither
-      # should turn "that code isn't valid" into "start over".
-      PendingSignIn.burn(jti)
+         {:ok, resolved} <- PendingSignIn.resolve(:encrypted, conn, pending),
+         {:ok, user} <- SecondFactor.check(resolved.user, code),
+         # Only now, and only on success: a wrong code or a spent budget leaves
+         # the blob alive, because neither is a failed authentication and
+         # neither should turn "that code isn't valid" into "start over".
+         #
+         # In the `with`, not beside it (#743). Claiming the blob is an INSERT
+         # keyed on its `jti`, so a concurrent replay that also had a valid code
+         # loses that race and lands here as `:error` — and must be refused
+         # rather than handed a token. Calling this and ignoring the answer
+         # would leave exactly the replay the claim exists to stop.
+         :ok <- PendingSignIn.spend(resolved) do
       issue_token(conn, user)
     else
       {:missing, detail} ->

@@ -61,15 +61,23 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   the `jti` is for, and why paying a cache write per browser sign-in for it
   would be paying for the wrong threat.
 
-  The burn record is `Cachex`, node-local, the same trade
-  `KilnCMS.Accounts.WebAuthn.take_challenge/1` makes for the passkey ceremony
-  and the same one `KilnCMS.Accounts.AccountThrottle` makes for its budgets. It
-  is deliberately **fail-open across nodes**: the blob stays independently
-  decryptable, so a legitimate client whose two requests are balanced onto
-  different nodes still completes, and a replay that lands on a node which never
-  saw the redemption still succeeds. On a single-node deployment single use is
-  exact; on a cluster it is a strong filter rather than a guarantee. Making it
-  exact needs shared state and is tracked as #743.
+  The record is a row on `KilnCMS.Accounts.Token` (#743), and single use is
+  **exact** — on one node and on a cluster.
+
+  It used to be a node-local `Cachex` entry, which made it fail *open* across
+  nodes: a replay landing on a node that never saw the redemption was accepted.
+  That is now a Postgres INSERT whose primary key is the `jti`, so the write
+  **is** the check. Two redemptions of the same blob race at the database, and
+  exactly one wins, wherever each request landed.
+
+  The ordering that matters: the row is written after the code verifies, not on
+  resolve — see `spend/1`. The cheap `spent?` read in `resolve/3` stays, because
+  rejecting a replayed blob before spending a TOTP check against it is the
+  friendlier answer, but it is not what makes this exact. The INSERT is.
+
+  `KilnCMS.Accounts.WebAuthn.take_challenge/1` and
+  `KilnCMS.Accounts.AccountThrottle` still make the node-local trade for their
+  own state; this fixes the one whose failure mode was a replayable credential.
 
   ## A third surface would need a decision first
 
@@ -87,8 +95,6 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   """
 
   alias KilnCMS.Accounts
-
-  @cache :kiln_cms_pending_sign_ins
 
   # `jti?` and `remember_me?` are per-mode because each answers a question only
   # one door has: single use (the session gate gets it free by deleting the
@@ -122,10 +128,6 @@ defmodule KilnCMS.Accounts.PendingSignIn do
         }
 
   defstruct [:user, :jti, remember_me?: false]
-
-  @doc "The dedicated Cachex instance for spent blobs (supervised)."
-  @spec cache() :: atom()
-  def cache, do: @cache
 
   @doc "How long a minted blob stays redeemable, in seconds. Both gates."
   @spec max_age() :: pos_integer()
@@ -204,23 +206,53 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   def resolve(mode, _context, _blob) when is_map_key(@modes, mode), do: :error
 
   @doc """
-  Record this attempt as spent, so the blob cannot be redeemed again.
+  Claim this attempt, so the blob cannot be redeemed again — `:ok` if this
+  caller got it, `:error` if it was already spent.
 
-  Called once the sign-in has actually completed. The marker outlives the blob
-  by a second so there is no window in which the blob is still inside its
-  `max_age` but the record of its use has expired.
+  **The return value is the single-use guarantee, and a caller that ignores it
+  has none.** The row's primary key is the `jti`, so two concurrent redemptions
+  of one blob both reach here and exactly one INSERT succeeds; the loser gets
+  `:error` and must refuse the sign-in rather than issue a token. That is the
+  whole difference from the node-local cache this replaced, where both would
+  have been told they were first.
+
+  Called once the code has verified, never on resolve: a wrong code or a spent
+  budget is not a failed authentication, and spending the blob there would turn
+  "that code isn't valid" into "start over".
+
+  Fails **closed**. A database error is indistinguishable here from "someone
+  else already has it", and for a single-use check the safe reading of "I don't
+  know" is "no".
+
+  The row outlives the blob by a second, so there is no window in which the blob
+  is still inside its `max_age` but the record of its use has expired. It is
+  swept by the nightly `:expunge_expired` trigger the resource already runs.
 
   A `nil` `jti` is a `:session` blob, whose single use is the deleted session
-  key — so this is a no-op rather than an error, and a caller can burn what it
+  key — so this is `:ok` rather than an error, and a caller can spend what it
   resolved without asking which door it came through.
   """
-  @spec burn(String.t() | nil) :: :ok
-  def burn(jti) when is_binary(jti) do
-    Cachex.put(@cache, jti, true, expire: :timer.seconds(@max_age + 1))
-    :ok
+  @spec spend(t() | nil) :: :ok | :error
+  def spend(%__MODULE__{jti: jti, user: user}) when is_binary(jti) do
+    expires_at = DateTime.add(DateTime.utc_now(), @max_age + 1, :second)
+
+    # `authorize?: false` because there is no actor to authorize: the whole
+    # point of this step is that the caller has *not* finished signing in.
+    case Accounts.spend_pending_sign_in(
+           %{
+             jti: jti,
+             subject: AshAuthentication.user_to_subject(user),
+             expires_at: expires_at
+           },
+           authorize?: false
+         ) do
+      {:ok, _row} -> :ok
+      {:error, _already_spent_or_unavailable} -> :error
+    end
   end
 
-  def burn(nil), do: :ok
+  def spend(%__MODULE__{}), do: :ok
+  def spend(nil), do: :ok
 
   defp wrap(:session, context, payload),
     do: Phoenix.Token.sign(context, salt(:session), payload, max_age: @max_age)
@@ -255,5 +287,17 @@ defmodule KilnCMS.Accounts.PendingSignIn do
 
   defp random_jti, do: 16 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
 
-  defp spent?(jti), do: match?({:ok, true}, Cachex.get(@cache, jti))
+  # A cheap pre-check, not the guarantee — `spend/1` is. Rejecting a replayed
+  # blob here saves spending a TOTP check (and a slice of the second-factor
+  # budget) against an exchange that is already over.
+  #
+  # Unknown reads as *unspent*, deliberately: this is an optimisation, and
+  # failing closed on a transient read error would break sign-ins that `spend/1`
+  # would have allowed. The write below is where "I don't know" means "no".
+  defp spent?(jti) do
+    case Accounts.get_token(jti, authorize?: false, not_found_error?: false) do
+      {:ok, %{purpose: "pending_sign_in"}} -> true
+      _other -> false
+    end
+  end
 end

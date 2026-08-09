@@ -65,12 +65,10 @@ defmodule KilnCMS.Application do
       Supervisor.child_spec({Cachex, [name: KilnCMS.Accounts.WebAuthn.challenge_cache()]},
         id: KilnCMS.Accounts.WebAuthn.challenge_cache()
       ),
-      # Spent headless pending-sign-in blobs, so a captured verify request
-      # cannot be replayed (#726). TTL-only and tiny — one boolean per completed
-      # two-factor API sign-in, for five minutes.
-      Supervisor.child_spec({Cachex, [name: KilnCMS.Accounts.PendingSignIn.cache()]},
-        id: KilnCMS.Accounts.PendingSignIn.cache()
-      ),
+      # (Spent pending-sign-in blobs used to be a Cachex instance here. They are
+      # a `KilnCMS.Accounts.Token` row now — #743: a node-local record made
+      # single use fail open across a cluster.)
+      #
       # Bounded LRW firing-artifact cache (see `KilnCMS.Firing.Cache.child_spec/1`).
       KilnCMS.Firing.Cache,
       KilnCMS.Repo,

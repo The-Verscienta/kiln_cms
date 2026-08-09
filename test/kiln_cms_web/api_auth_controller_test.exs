@@ -396,6 +396,38 @@ defmodule KilnCMSWeb.ApiAuthControllerTest do
       assert %{"errors" => [%{"code" => "pending_expired"}]} = json_response(replay, 401)
     end
 
+    test "two simultaneous redemptions of one blob yield exactly one token", %{conn: conn} do
+      # The replay test above passes even when the single-use record is a
+      # per-node cache, because it redeems twice in sequence. This is the case
+      # that record could not answer (#743): both requests resolve the blob
+      # before either records it, both hold the same valid code — nothing here
+      # rejects a reused TOTP code — and both would have been told they were
+      # first. On a cluster the two need not even share a node.
+      #
+      # The claim is now an INSERT keyed on the blob's `jti`, so one of them
+      # loses at Postgres and is refused rather than handed a bearer token.
+      {user, secret} = seed_totp_user()
+      pending = begin_two_factor(conn, user)
+      code = current_code(secret)
+      owner = self()
+
+      statuses =
+        1..2
+        |> Enum.map(fn _ ->
+          Task.async(fn ->
+            Ecto.Adapters.SQL.Sandbox.allow(KilnCMS.Repo, owner, self())
+
+            build_conn()
+            |> post_verify(%{pending_token: pending, code: code})
+            |> Map.fetch!(:status)
+          end)
+        end)
+        |> Task.await_many(15_000)
+        |> Enum.sort()
+
+      assert statuses == [201, 401]
+    end
+
     test "a wrong code does NOT burn the pending token", %{conn: conn} do
       {user, secret} = seed_totp_user()
 
