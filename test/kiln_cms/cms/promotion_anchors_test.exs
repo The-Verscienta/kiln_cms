@@ -13,6 +13,7 @@ defmodule KilnCMS.CMS.PromotionAnchorsTest do
   alias KilnCMS.CMS.Page
   alias KilnCMS.CMS.Promotion
   alias KilnCMS.Governance.Chain
+  alias KilnCMS.Governance.Checkpoint
   alias KilnCMS.Repo
 
   defp admin do
@@ -244,5 +245,84 @@ defmodule KilnCMS.CMS.PromotionAnchorsTest do
     assert [_ | _] = ContentTypes.list!(definition.name, actor: actor)
     assert [_ | _] = Chain.anchors("entry", entry.id, entry.org_id)
     assert ContentTypes.get_dynamic(definition.name)
+  end
+
+  # #849. Re-attesting moves the anchors to a `resource_type` no checkpoint
+  # entry mentions, and `Checkpoint.witnessed_head/3` reads entries by
+  # `{resource_type, source_id}` — so without a mint at promotion time the
+  # document is unwitnessed until the next scheduled checkpoint, and a
+  # truncation of its newest anchors inside that window goes uncaught.
+  describe "checkpoint coverage across promotion (#849)" do
+    test "the promoted document is witnessed under its new type immediately" do
+      actor = admin()
+      definition = define_type!(actor)
+      entry = anchored_entry(actor, definition, 2)
+
+      # Covered under the old type before the move, so the assertion below is
+      # about the move rather than about checkpointing being on at all.
+      {:ok, _} = Checkpoint.mint(entry.org_id)
+
+      assert {:ok, %{resource_type: "entry"}, _} =
+               Checkpoint.witnessed_head("entry", entry.id, entry.org_id)
+
+      assert {:ok, %{entries: 1}} = Promotion.promote!(definition.name, into: :page)
+
+      assert {:ok, %{resource_type: "page"} = head, attestation} =
+               Checkpoint.witnessed_head("page", entry.id, entry.org_id)
+
+      # The entry attests the chain's real head, not a stale one.
+      assert head.head_sequence == 2
+      # `{:tampered, _}` is a valid third shape here and must not read as ok.
+      assert attestation in [:ok, :unsigned, :unverifiable]
+    end
+
+    test "the old 'entry' checkpoint entries are left exactly as they were" do
+      actor = admin()
+      definition = define_type!(actor)
+      entry = anchored_entry(actor, definition, 2)
+
+      {:ok, _} = Checkpoint.mint(entry.org_id)
+
+      before =
+        CMS.list_checkpoint_entries_for!("entry", entry.id,
+          authorize?: false,
+          tenant: entry.org_id
+        )
+
+      assert [_ | _] = before
+
+      assert {:ok, %{entries: 1}} = Promotion.promote!(definition.name, into: :page)
+
+      # Their Merkle leaves commit to `resource_type`, so re-keying them would
+      # invalidate every stored proof against its published root — and they are
+      # a true record of what that chain's head was under the old type.
+      # Superseding history is not the same as rewriting it.
+      after_promotion =
+        CMS.list_checkpoint_entries_for!("entry", entry.id,
+          authorize?: false,
+          tenant: entry.org_id
+        )
+
+      assert Enum.map(after_promotion, & &1.id) == Enum.map(before, & &1.id)
+
+      assert Enum.map(after_promotion, &{&1.resource_type, &1.chain_hash, &1.proof}) ==
+               Enum.map(before, &{&1.resource_type, &1.chain_hash, &1.proof})
+    end
+
+    test "a promotion that re-attests nothing mints no checkpoint" do
+      actor = admin()
+      definition = define_type!(actor)
+      # A document with no anchors at all: nothing to re-attest, so nothing to
+      # re-witness, and an extra checkpoint row per promotion would be noise in
+      # the sequence the link walk verifies.
+      ContentTypes.create!(definition.name, %{title: "unanchored", slug: slug()}, actor: actor)
+
+      org_id = KilnCMS.Accounts.default_org_id()
+      {:ok, baseline} = Checkpoint.mint(org_id)
+
+      assert {:ok, %{entries: 1}} = Promotion.promote!(definition.name, into: :page)
+
+      assert Checkpoint.latest(org_id).sequence == baseline.sequence
+    end
   end
 end
