@@ -157,15 +157,26 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
   end
 
   # The ledger's `last_error` is read by humans and its vocabulary is documented
-  # on `KilnCMS.CMS.WebhookDelivery`, so the two shapes it already had are kept
-  # verbatim. Matching `SafeFetch`'s own prefix is a deliberate coupling to a
-  # display string: getting it wrong costs a less specific message, never a
-  # wrong delivery outcome, because the last clause is correct either way.
+  # on `KilnCMS.CMS.WebhookDelivery` — `"endpoint returned HTTP 500"`,
+  # `"delivery failed: timeout"`, `"blocked webhook URL: …"`. `SafeFetch` writes
+  # for its own callers and prefixes differently, so each of its shapes is
+  # translated rather than wrapped: wrapping produced
+  # `"delivery failed: request failed: %Req.TransportError{…}"`, which is the
+  # documented vocabulary with somebody else's inside it.
+  #
+  # Matching on another module's message text is a deliberate coupling to a
+  # display string. Getting it wrong costs a less specific message, never a
+  # wrong delivery outcome — every clause below settles the same way. The
+  # translations are pinned by tests so a reworded `SafeFetch` goes red here
+  # instead of quietly double-prefixing again.
   defp classify({:ok, %{status: status}}) when status in 200..299, do: {:ok, status}
   defp classify({:ok, %{status: status}}), do: {:error, "endpoint returned HTTP #{status}"}
 
   defp classify({:error, "blocked URL: " <> reason}),
     do: {:error, "blocked webhook URL: #{reason}"}
+
+  defp classify({:error, "request failed: " <> reason}),
+    do: {:error, "delivery failed: #{reason}"}
 
   defp classify({:error, reason}), do: {:error, "delivery failed: #{reason}"}
 end

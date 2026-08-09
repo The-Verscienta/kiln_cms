@@ -137,6 +137,46 @@ defmodule KilnCMS.WebhookReliabilityTest do
     assert delivery.last_status == nil
   end
 
+  # `truncate_body: true` is the one line of the #753 move that can change a
+  # delivery outcome, and deleting it left the whole suite green. `SafeFetch`
+  # imposes a 256KB cap the worker never had; without truncation an over-cap
+  # response becomes `{:error, "response exceeded 262144 bytes"}` — a receiver
+  # that answered 200 recorded as a permanent failure, counting toward
+  # auto-disable. Only the status decides the ledger, so the body is irrelevant.
+  test "a receiver that answers 200 with a huge body is still a delivered 200" do
+    Req.Test.stub(KilnCMS.Webhooks, fn conn ->
+      Plug.Conn.send_resp(conn, 200, String.duplicate("x", 300 * 1024))
+    end)
+
+    endpoint!()
+    Webhooks.dispatch("page.published", %{})
+    drain_with_retries()
+
+    assert [delivery] = deliveries()
+    assert delivery.status == :succeeded
+    assert delivery.last_status == 200
+    assert delivery.attempts == 1
+  end
+
+  # `SafeFetch` prefixes its own transport failures with "request failed: ", so
+  # wrapping them produced "delivery failed: request failed: %Mint.…{}" — the
+  # ledger's documented vocabulary with somebody else's inside it. Each shape is
+  # translated, and this pins the translation so a reworded SafeFetch goes red.
+  test "a transport failure reads the way the ledger documents it" do
+    Req.Test.stub(KilnCMS.Webhooks, fn conn ->
+      Req.Test.transport_error(conn, :timeout)
+    end)
+
+    endpoint!()
+    Webhooks.dispatch("page.published", %{})
+    drain_with_retries()
+
+    assert [delivery] = deliveries()
+    assert delivery.status == :failed
+    assert delivery.last_error == "delivery failed: %Req.TransportError{reason: :timeout}"
+    refute delivery.last_error =~ "request failed:"
+  end
+
   test "a failing delivery retries, exhausts onto the ledger, and counts against the endpoint" do
     stub_status(503)
     endpoint = endpoint!()
