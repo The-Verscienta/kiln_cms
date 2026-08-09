@@ -325,6 +325,144 @@ defmodule KilnCMSWeb.CollabChannelTest do
     assert_push "awareness", %{"cursor" => %{"anchor" => 3}, "name" => "A"}
   end
 
+  describe "periodic re-authorization (#775)" do
+    setup do
+      previous = %{
+        interval: Application.get_env(:kiln_cms, :socket_reauth_interval_ms),
+        floor: Application.get_env(:kiln_cms, :socket_reauth_update_floor)
+      }
+
+      on_exit(fn ->
+        restore(:socket_reauth_interval_ms, previous.interval)
+        restore(:socket_reauth_update_floor, previous.floor)
+      end)
+
+      # `subscribe_and_join/3` LINKS the channel to the test process, so a room
+      # that closes itself takes the test with it — which is the whole behaviour
+      # under test here. Trapping turns that into the `{:EXIT, …}` message these
+      # tests assert on, and is also how a real client learns: Phoenix pushes
+      # `phx_error` on the channel exiting, and `phoenix.js` retries the join.
+      Process.flag(:trap_exit, true)
+
+      :ok
+    end
+
+    # Nothing sets these at boot, so `nil` is genuinely "absent" here and putting
+    # it back would be wrong for the next test — the opposite of the
+    # `:collab_prototype` case above, where the config file DOES set a value.
+    defp restore(key, nil), do: Application.delete_env(:kiln_cms, key)
+    defp restore(key, value), do: Application.put_env(:kiln_cms, key, value)
+
+    defp yjs_update(text) do
+      doc = Yex.Doc.new()
+      doc |> Yex.Doc.get_text("block-0") |> Yex.Text.insert(0, text)
+      {:ok, update} = Yex.encode_state_as_update(doc)
+      Base.encode64(update)
+    end
+
+    test "an open room closes when the actor's grant is narrowed, with nothing evicting",
+         %{page: page} do
+      # THE test for this issue. `Ash.Seed.update!` writes the row directly, so
+      # no action runs and `SessionEviction` never fires — this is the gap
+      # direction (1) cannot close: the change nobody remembered to wire in.
+      #
+      # It is also the test that fails if the check stops reloading the actor.
+      # Re-running the policies against the struct the socket connected with
+      # re-derives the same answer from the same stale scopes forever.
+      Application.put_env(:kiln_cms, :socket_reauth_interval_ms, 50)
+
+      editor = user(:editor)
+      {_reply, socket} = join!(editor, topic(page))
+      channel = socket.channel_pid
+
+      Ash.Seed.update!(editor, %{editable_types: ["post"]})
+
+      assert_receive {:EXIT, ^channel, {:shutdown, :unauthorized}}, 2_000
+    end
+
+    test "a room whose authorization still holds survives its checks and keeps relaying",
+         %{actor: actor, page: page} do
+      # The negative control, and not a formality: a mechanism that closed every
+      # room would pass the test above while making the feature useless.
+      Application.put_env(:kiln_cms, :socket_reauth_interval_ms, 50)
+
+      {_reply, socket} = join!(actor, topic(page))
+      channel = socket.channel_pid
+
+      refute_receive {:EXIT, ^channel, _reason}, 400
+
+      ref = push(socket, "update", %{"update" => yjs_update("still here")})
+      assert_reply ref, :ok
+    end
+
+    test "a document moved out of the actor's audience under an open room is caught",
+         %{actor: admin} do
+      # The other half of the acceptance: a change to the DOCUMENT, not the user.
+      #
+      # This editor reads pages only as a consumer does — `readable_types` covers
+      # posts, so the page policy's `published and public` grant is what admits
+      # the read — while `editable_types` still authorizes the `:autosave` write
+      # the room is gated on. So the room is theirs at join, and the audience
+      # alone decides whether it stays theirs.
+      Application.put_env(:kiln_cms, :socket_reauth_interval_ms, 50)
+
+      published =
+        admin |> draft_page!() |> then(&CMS.publish_page!(&1, %{}, actor: admin))
+
+      restricted = user(:editor, readable_types: ["post"])
+      {_reply, socket} = join!(restricted, topic(published))
+      channel = socket.channel_pid
+
+      Ash.Seed.update!(published, %{audience: :member})
+
+      assert_receive {:EXIT, ^channel, {:shutdown, :unauthorized}}, 2_000
+    end
+
+    test "a document whose state changes under an open room is caught", %{actor: admin} do
+      # Same editor, same room, the other attribute the acceptance names: taking
+      # the page back out of `:published` withdraws the grant their read stood on.
+      Application.put_env(:kiln_cms, :socket_reauth_interval_ms, 50)
+
+      published =
+        admin |> draft_page!() |> then(&CMS.publish_page!(&1, %{}, actor: admin))
+
+      restricted = user(:editor, readable_types: ["post"])
+      {_reply, socket} = join!(restricted, topic(published))
+      channel = socket.channel_pid
+
+      Ash.Seed.update!(published, %{state: :draft})
+
+      assert_receive {:EXIT, ^channel, {:shutdown, :unauthorized}}, 2_000
+    end
+
+    test "the update floor refuses a busy room without waiting for the timer", %{page: page} do
+      # A timer alone bounds the exposure window but not the number of writes: at
+      # typing speed a room emits several updates a second. The floor is what
+      # makes that a bounded number, so the interval is set out of reach here to
+      # prove the count is doing the work and not the clock.
+      Application.put_env(:kiln_cms, :socket_reauth_interval_ms, 60_000)
+      Application.put_env(:kiln_cms, :socket_reauth_update_floor, 3)
+
+      editor = user(:editor)
+      {_reply, socket} = join!(editor, topic(page))
+      channel = socket.channel_pid
+
+      Ash.Seed.update!(editor, %{editable_types: ["post"]})
+
+      # Two ride the authorization the join established.
+      for text <- ["one", "two"] do
+        ref = push(socket, "update", %{"update" => yjs_update(text)})
+        assert_reply ref, :ok
+      end
+
+      # The third trips the floor, and is refused rather than being the last one
+      # through — the check runs before the update is applied.
+      push(socket, "update", %{"update" => yjs_update("three")})
+
+      assert_receive {:EXIT, ^channel, {:shutdown, :unauthorized}}, 2_000
+    end
+  end
+
   test "a newcomer's awareness_request is relayed so peers re-announce", %{
     actor: actor,
     page: page

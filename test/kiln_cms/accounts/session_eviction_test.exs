@@ -115,7 +115,11 @@ defmodule KilnCMS.Accounts.SessionEvictionTest do
       # socket ever *receives* one — and deleting the subscription in `init/1`
       # left that version of this test green.
       user = user!()
-      state = %{type: "page", id: Ecto.UUID.generate(), actor_id: user.id}
+
+      # `org: nil` is a placeholder: `init/1` also schedules the periodic
+      # re-check (#775), which is 30s away and so never fires inside this test.
+      # `KilnCMSWeb.BridgeSocketTest` is where that half is exercised.
+      state = %{type: "page", id: Ecto.UUID.generate(), actor: user, org: nil}
 
       assert {:ok, ^state} = KilnCMSWeb.BridgeSocket.init(state)
 
@@ -127,7 +131,7 @@ defmodule KilnCMS.Accounts.SessionEvictionTest do
     end
 
     test "an anonymous bridge socket subscribes to nothing" do
-      state = %{type: "page", id: Ecto.UUID.generate(), actor_id: nil}
+      state = %{type: "page", id: Ecto.UUID.generate(), actor: nil, org: nil}
 
       assert {:ok, ^state} = KilnCMSWeb.BridgeSocket.init(state)
 
@@ -136,7 +140,7 @@ defmodule KilnCMS.Accounts.SessionEvictionTest do
     end
 
     test "an unrelated message does not stop the bridge socket" do
-      state = %{type: "page", id: Ecto.UUID.generate(), actor_id: nil}
+      state = %{type: "page", id: Ecto.UUID.generate(), actor: nil, org: nil}
 
       assert {:ok, ^state} = KilnCMSWeb.BridgeSocket.handle_info(:something_else, state)
     end
