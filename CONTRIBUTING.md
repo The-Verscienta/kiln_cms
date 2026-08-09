@@ -106,12 +106,25 @@ see below), `kiln.plugins.doctor`, and the test suite. CI
 `mix dialyzer` (the first local run builds a PLT and is slow; it's cached
 afterwards), and a **gettext catalog gate** — `mix gettext.extract --merge`
 must leave `priv/gettext` unchanged. That gate is CI-only and is not part of
-`mix precommit`, so run it yourself before pushing any change to a file
-containing `gettext(...)`; drifting line references alone will fail CI:
+`mix precommit`, so run it yourself before pushing any change that adds,
+removes or rewords a `gettext(...)` string:
 
 ```bash
 mix gettext.extract --merge && git diff --exit-code -- priv/gettext
 ```
+
+Merely *moving* code no longer drifts the catalogs. `mix.exs` sets
+`gettext: [write_reference_line_numbers: false, sort_by_msgid: :case_sensitive]`
+for exactly that reason: reference comments keep the file name but not the line
+number, and entries are sorted by msgid rather than by wherever the extractor
+happened to find them.
+
+Before that, a five-line shift in a large LiveView rewrote ~3,300 catalog lines
+and re-conflicted every other open PR — which made merging strictly serial and
+cost several branches three rebases each.
+
+So if your diff touches no `gettext(...)` string, expect `priv/gettext` to come
+back clean, and treat churn there as a signal that something really did change.
 
 ### Documentation
 
