@@ -54,7 +54,12 @@ defmodule KilnCMS.CMS.Promotion do
       `name` itself, i.e. the compiled type the generator created for it.
 
   Returns `{:ok, %{entries: n, versions: n}}` or raises on any inconsistency —
-  everything runs in one transaction, so a failure moves nothing.
+  the move runs in one transaction, so a failure moves nothing.
+
+  Two things happen *after* that transaction commits and cannot roll it back:
+  the delivery caches are busted, and a checkpoint is minted over the
+  re-attested anchors (#849). A failure in either is logged, not raised, so a
+  successful promotion is never reported as a failure.
   """
   @spec promote!(String.t(), keyword()) ::
           {:ok, %{entries: non_neg_integer(), versions: non_neg_integer()}}
@@ -76,7 +81,10 @@ defmodule KilnCMS.CMS.Promotion do
 
     target_table = table_for(target.resource)
 
-    {:ok, {result, notifications}} =
+    # `reattested` rides alongside the result rather than inside it: it decides
+    # whether a checkpoint is worth minting, and is not something a caller of
+    # `promote!/2` asked for — the returned map is a documented shape.
+    {:ok, {result, reattested, notifications}} =
       Repo.transaction(fn ->
         entry_count = move_rows("entries", target_table, definition.id)
         version_count = move_versions(target_table)
@@ -85,20 +93,25 @@ defmodule KilnCMS.CMS.Promotion do
         rescope_field_definitions(definition, target)
         notifications = archive_definition(definition)
 
-        {%{entries: entry_count, versions: version_count, reattested: reattested}, notifications}
+        {%{entries: entry_count, versions: version_count}, reattested, notifications}
       end)
 
     # Dispatch the archive's Ash notifications now that the transaction
     # committed (holding them avoids the missed-notifications warning).
     Ash.Notifier.notify(notifications)
 
-    recheckpoint(result.reattested, definition.org_id)
-
     # The type moved tiers: delivery must re-resolve it as compiled, and any
     # cached payloads/artifact bodies for it are stale. Bust the definition's own
     # site (epic #336).
+    #
+    # Before the checkpoint, deliberately. Minting reaches the witness sink, so
+    # it is both slow (a PUT plus `confirm/5`'s read-back) and able to raise —
+    # and the busts are what stop delivery serving a type whose rows have just
+    # moved out from under it. Nothing about witnessing is worth delaying them.
     KilnCMS.Cache.bust_type_registry(definition.org_id)
     KilnCMS.Cache.bust_published()
+
+    recheckpoint(reattested, definition.org_id)
 
     {:ok, result}
   end
@@ -226,24 +239,57 @@ defmodule KilnCMS.CMS.Promotion do
 
   defp recheckpoint(_reattested, org_id) do
     if Checkpoint.enabled?() do
-      case Checkpoint.mint(org_id) do
-        {:ok, checkpoint} ->
-          Logger.info(
-            "Promotion minted checkpoint #{checkpoint.sequence} so the re-attested " <>
-              "anchors are witnessed under their new type immediately (#849)."
-          )
-
-        {:error, reason} ->
-          Logger.error(
-            "Promotion could not mint a checkpoint over the re-attested anchors: " <>
-              "#{inspect(reason)}. The promoted documents stay unwitnessed under " <>
-              "their new type until the next scheduled checkpoint; run " <>
-              "`mix kiln.audit.checkpoint` to confirm it lands."
-          )
-      end
+      mint_and_report(org_id)
     end
 
     :ok
+  end
+
+  # Rescued, like `CheckpointWorker.run_for_org/1` rescues the identical call.
+  # `mint/1` raises on paths `{:error, _}` never reaches — a `Repo.query` match
+  # in `current_heads/1`, a `create_chain_checkpoint_entry!` bang, and
+  # `ExAws.request()` inside the S3 witness on bad adapter config. The promotion
+  # has already committed by here, so letting one of those escape would report a
+  # failure for work that succeeded, and `promote!/2` is documented as
+  # all-or-nothing. Losing the checkpoint costs the window this change closes;
+  # the scheduled run still covers these heads.
+  defp mint_and_report(org_id) do
+    case Checkpoint.mint(org_id) do
+      {:ok, %{witnessed_at: nil} = checkpoint} ->
+        # `mint/1` returns `{:ok, _}` when the row lands and *publication*
+        # fails, by design — a sink that is briefly unreachable must not cost
+        # the commitment. Saying "witnessed" here would contradict the
+        # `witness_error` `publish/2` just logged, in the one place where
+        # overstating coverage is the whole bug being fixed.
+        Logger.warning(
+          "Promotion minted checkpoint #{checkpoint.sequence} over the re-attested " <>
+            "anchors, but it is NOT witnessed: #{inspect(checkpoint.witness_error)}. " <>
+            "The commitment exists locally; the next checkpoint run retries publication."
+        )
+
+      {:ok, checkpoint} ->
+        Logger.info(
+          "Promotion minted checkpoint #{checkpoint.sequence} so the re-attested " <>
+            "anchors are witnessed under their new type immediately (#849)."
+        )
+
+      {:error, reason} ->
+        Logger.error(unwitnessed_message(inspect(reason)))
+    end
+  rescue
+    error -> Logger.error(unwitnessed_message(Exception.message(error)))
+  end
+
+  # Deliberately does NOT point at `mix kiln.audit.checkpoint`: that task never
+  # walks `chain_checkpoint_entries` (its reconciliation compares witness-sink
+  # keys to checkpoint rows), so it would report green while the promoted
+  # documents have no entry under their new type at all — advice that confirms
+  # the opposite of what it claims to check.
+  defp unwitnessed_message(reason) do
+    "Promotion could not mint a checkpoint over the re-attested anchors: #{reason}. " <>
+      "The promotion itself committed. The promoted documents stay unwitnessed under " <>
+      "their new type until the next scheduled checkpoint — force one now with " <>
+      "`KilnCMS.Governance.CheckpointWorker.run_for_org/1` if that window matters."
   end
 
   # Fired :entry artifacts and reference edges point at the old storage type —

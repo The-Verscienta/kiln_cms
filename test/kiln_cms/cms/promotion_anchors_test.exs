@@ -315,14 +315,62 @@ defmodule KilnCMS.CMS.PromotionAnchorsTest do
       # A document with no anchors at all: nothing to re-attest, so nothing to
       # re-witness, and an extra checkpoint row per promotion would be noise in
       # the sequence the link walk verifies.
-      ContentTypes.create!(definition.name, %{title: "unanchored", slug: slug()}, actor: actor)
+      doc =
+        ContentTypes.create!(definition.name, %{title: "unanchored", slug: slug()}, actor: actor)
 
-      org_id = KilnCMS.Accounts.default_org_id()
+      # Read the org off the document, not from `default_org_id/0`: the code
+      # mints for `definition.org_id`, and the two coincide only while type
+      # definitions land in the default org. Watching the wrong one would make
+      # this assertion unable to fail.
+      org_id = doc.org_id
+
+      # Pinned rather than inherited from `:audit_anchor_every_write` being off
+      # by default — with it on, the create anchors and this stops testing zero.
+      assert Chain.anchors("entry", doc.id, org_id) == []
+
       {:ok, baseline} = Checkpoint.mint(org_id)
 
       assert {:ok, %{entries: 1}} = Promotion.promote!(definition.name, into: :page)
 
       assert Checkpoint.latest(org_id).sequence == baseline.sequence
+    end
+
+    # The mint runs after the transaction committed, so it must never turn a
+    # succeeded promotion into a raised failure. `mint/1` raises on paths
+    # `{:error, _}` never reaches — a `Repo.query` match, a `create_…!` bang,
+    # and `ExAws.request()` inside the S3 witness on bad adapter config — which
+    # is why `CheckpointWorker` rescues the identical call. A broken witness
+    # adapter stands in for all of them.
+    test "a raising mint does not fail a promotion that already committed" do
+      actor = admin()
+      definition = define_type!(actor)
+      entry = anchored_entry(actor, definition, 1)
+
+      previous = Application.get_env(:kiln_cms, KilnCMS.Governance.Witness)
+
+      Application.put_env(:kiln_cms, KilnCMS.Governance.Witness,
+        adapter: __MODULE__.NoSuchAdapter,
+        enabled: true
+      )
+
+      on_exit(fn ->
+        if previous,
+          do: Application.put_env(:kiln_cms, KilnCMS.Governance.Witness, previous),
+          else: Application.delete_env(:kiln_cms, KilnCMS.Governance.Witness)
+      end)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, %{entries: 1}} = Promotion.promote!(definition.name, into: :page)
+        end)
+
+      # The data move stands, and the operator is told what they lost and how
+      # to get it back — not pointed at `mix kiln.audit.checkpoint`, which never
+      # walks checkpoint entries and would report green.
+      assert Chain.anchors("page", entry.id, entry.org_id) != []
+      assert log =~ "The promotion itself committed"
+      assert log =~ "CheckpointWorker.run_for_org/1"
+      refute log =~ "kiln.audit.checkpoint"
     end
   end
 end
