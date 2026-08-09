@@ -12,10 +12,10 @@ defmodule KilnCMS.SafeFetch do
   way nothing tests for if you retype them — SNI pointed at an IP still
   *connects*, it just stops verifying the hostname.
 
-  **`DeliveryWorker` has not been moved onto this yet**, so there are currently
-  two copies and the next TLS-option edit will touch one. That, and this
-  module's own missing tests, are tracked in #753. Do not read the paragraph
-  above as "the duplication is gone".
+  `DeliveryWorker` was moved onto this in #753, so there is now one copy. That
+  is the claim this moduledoc is here to keep true: **anything in this repo that
+  fetches a URL the content chose goes through this module.** A new caller that
+  reaches for `Req` directly, or copies the `connect_options` below, is the bug.
 
   ## Why the address is pinned
 
@@ -321,12 +321,34 @@ defmodule KilnCMS.SafeFetch do
   #
   # `pinned_ip` is `nil` when DNS resolution is disabled (test env) — fall back
   # to the original URL so a `Req.Test` stub still matches by host.
-  defp connect_target(url, nil, timeout), do: [url: url, connect_options: [timeout: timeout]]
+  # The `url:` + `connect_options:` that dial `pinned_ip` while keeping TLS
+  # pointed at the URL's real hostname.
+  #
+  # Public (and `@doc false`) **so it can be asserted directly**. This is the
+  # fifteen lines the moduledoc warns about: every one of them fails *open* when
+  # mistyped — SNI aimed at an IP still connects, it just stops verifying the
+  # hostname, and `verify: :verify_none` is a working request too. A test that
+  # goes through `Req.Test` cannot see any of it, because the plug adapter never
+  # opens a socket. So the options are checked as a value.
+  #
+  # `nil` for `pinned_ip` is the not-pinning case (no address could be resolved,
+  # or DNS resolution is off in the test env) and falls back to the URL as given.
+  @doc false
+  @spec connect_target(String.t(), :inet.ip_address() | nil, pos_integer()) :: keyword()
+  def connect_target(url, pinned_ip, timeout \\ @default_connect_timeout)
 
-  defp connect_target(url, pinned_ip, timeout) do
+  def connect_target(url, nil, timeout), do: [url: url, connect_options: [timeout: timeout]]
+
+  def connect_target(url, pinned_ip, timeout) do
     uri = URI.parse(url)
-    ip_string = pinned_ip |> :inet.ntoa() |> to_string()
-    url_host = if tuple_size(pinned_ip) == 8, do: "[#{ip_string}]", else: ip_string
+
+    # NOT bracketed here for IPv6. `URI.to_string/1` brackets a host containing
+    # `:` itself, so doing it here produced `https://[[2606:2800::1]]/x` — an
+    # unparseable URL, and therefore a webhook to any IPv6-resolving endpoint
+    # that could never be delivered. Inherited from the `DeliveryWorker` copy
+    # this module was extracted from, and invisible until #753 asked for the
+    # test. The round-trip is pinned in `KilnCMS.SafeFetchTest`.
+    url_host = pinned_ip |> :inet.ntoa() |> to_string()
 
     connect_options =
       if uri.scheme == "https" do
@@ -348,15 +370,25 @@ defmodule KilnCMS.SafeFetch do
     [url: URI.to_string(%{uri | host: url_host}), connect_options: connect_options]
   end
 
-  # Pinning replaces the URL host with a literal, so the real `Host` has to be
-  # restored for the receiving vhost. Not needed when not pinning — Req derives
-  # it from the URL.
-  defp host_header(_url, nil), do: []
+  # The `Host` header to restore when the URL host has been replaced by a pinned
+  # literal. Empty when not pinning — Req derives `Host` from the URL then.
+  #
+  # Public for the same reason as `connect_target/3`: a wrong `Host` reaches a
+  # vhost that serves somebody else's site, and nothing about the request looks
+  # broken.
+  @doc false
+  @spec host_header(String.t(), :inet.ip_address() | nil) :: [{String.t(), String.t()}]
+  def host_header(_url, nil), do: []
 
-  defp host_header(url, _pinned_ip) do
+  def host_header(url, _pinned_ip) do
     uri = URI.parse(url)
     default_port = if uri.scheme == "https", do: 443, else: 80
-    host = if uri.port in [nil, default_port], do: uri.host, else: "#{uri.host}:#{uri.port}"
-    [{"host", host}]
+
+    # `URI.parse/1` strips the brackets off an IPv6 literal, and a bare
+    # `2606:2800::1:8443` is not a host and a port — it is ambiguous, and RFC
+    # 3986 requires the brackets back before the `:port` can mean anything.
+    host = if String.contains?(uri.host, ":"), do: "[#{uri.host}]", else: uri.host
+
+    [{"host", if(uri.port in [nil, default_port], do: host, else: "#{host}:#{uri.port}")}]
   end
 end

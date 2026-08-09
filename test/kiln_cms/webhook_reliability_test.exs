@@ -71,6 +71,72 @@ defmodule KilnCMS.WebhookReliabilityTest do
     assert delivery.event == "page.published"
   end
 
+  # #753 moved the worker onto `KilnCMS.SafeFetch`, deleting its own copy of the
+  # address pinning and TLS options. These two pin the seam: the request the
+  # receiver sees still carries what the worker is responsible for, and a URL
+  # the address check refuses still lands on the ledger in the vocabulary
+  # `KilnCMS.CMS.WebhookDelivery` documents.
+  test "the signed request still reaches the receiver intact" do
+    test_pid = self()
+
+    Req.Test.stub(KilnCMS.Webhooks, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+      send(
+        test_pid,
+        {:received, conn.method, body,
+         %{
+           signature: Plug.Conn.get_req_header(conn, Webhooks.signature_header()),
+           event: Plug.Conn.get_req_header(conn, Webhooks.event_header()),
+           content_type: Plug.Conn.get_req_header(conn, "content-type")
+         }}
+      )
+
+      Plug.Conn.send_resp(conn, 200, "{}")
+    end)
+
+    endpoint = endpoint!()
+
+    Webhooks.dispatch("page.published", %{"title" => "Hello"})
+    drain_with_retries()
+
+    assert_received {:received, "POST", body, headers}
+
+    assert Jason.decode!(body) == %{"event" => "page.published", "data" => %{"title" => "Hello"}}
+    assert headers.event == ["page.published"]
+    assert headers.content_type == ["application/json"]
+    assert headers.signature == [Webhooks.signature(endpoint.secret, body)]
+  end
+
+  test "a URL the address check refuses is recorded, not dialled" do
+    # Seeded rather than created: `Validations.WebhookUrl` refuses this at the
+    # write, which is the point — the worker's own check is the second line, for
+    # a row that predates the validation or a name that changed answer since.
+    endpoint =
+      Ash.Seed.seed!(KilnCMS.CMS.WebhookEndpoint, %{
+        url: "http://169.254.169.254/latest/meta-data/",
+        secret: "s3cret",
+        events: ["page.published"],
+        active: true
+      })
+
+    # No stub installed: reaching Req at all would be the failure.
+    Webhooks.dispatch("page.published", %{})
+    drain_with_retries()
+
+    assert [delivery] = deliveries()
+    assert delivery.endpoint_id == endpoint.id
+    assert delivery.status == :failed
+    # The ledger's documented wording, kept verbatim across the move to
+    # SafeFetch. Compared whole: a `=~ "blocked webhook URL:"` passed on
+    # "blocked webhook blocked URL: …", which is what the first attempt at the
+    # prefix rewrite actually produced.
+    assert delivery.last_error ==
+             "blocked webhook URL: must not target private or link-local addresses"
+
+    assert delivery.last_status == nil
+  end
+
   test "a failing delivery retries, exhausts onto the ledger, and counts against the endpoint" do
     stub_status(503)
     endpoint = endpoint!()
