@@ -320,8 +320,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # without a `select:`, and the picker reads exactly `id`, `name` and
          # `tag_group_id` — the rest were `%Ash.NotLoaded{}` placeholders held
          # for the socket's lifetime. Deliberately still UNPAGINATED: an
-         # unrendered checkbox is a detach (see `tag_picker/1`), so the list has
-         # to stay whole until the picker moves to the merge verbs (#638).
+         # unrendered tag can no longer be detached by omission (#638 moved the
+         # picker to the merge verbs), so paginating is now *safe* — it is
+         # simply not done yet, because the filter box is client-side and would
+         # only search the page it has.
          |> assign(
            :tags,
            CMS.list_tags!(
@@ -337,11 +339,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # suite says so: with no groups loaded, `bucket_for/3` files a tag
          # whose group does not resolve under "Ungrouped", so a tag a
          # collaborator attaches after mount from an out-of-scope group lands
-         # there instead of in "Also attached". That section exists precisely to
-         # make such a tag visible and undoable before the next
-         # `append_and_remove` save silently detaches it (#522) — and it carries
-         # the note explaining where the tag came from, which "Ungrouped" does
-         # not. One small indexed read is the cheaper side of that trade.
+         # there instead of in "Also attached", losing the note explaining where
+         # the tag came from. Since #638 a mis-filed tag is no longer *detached*
+         # by the next save — the merge verbs only remove what was rendered and
+         # unticked — so this is now a labelling question rather than a
+         # data-loss one. Still worth one small indexed read: "Ungrouped" tells
+         # an editor nothing about why a tag they cannot find in any group is on
+         # their post.
          |> assign(:tag_groups, CMS.list_tag_groups!(actor: actor, tenant: org))
          # Which tag-picker sections render expanded, and which have rendered at
          # all (#523). Both start empty and are filled by `assign_record/2`
@@ -1316,6 +1320,35 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  # Which tags the picker should show ticked, as a MapSet of id strings.
+  #
+  # Two shapes reach it, which is why this is not just `selected_ids/3` (#638).
+  # While editing, the form carries `tag_ids` — the raw checkbox state from the
+  # last `validate`. But a **failed submit** leaves the form holding what Save
+  # sent, and Save sends the merge verbs instead. Reading only `tag_ids` there
+  # would fall through to the persisted tags and silently roll every unsaved
+  # tick back, on the one screen where the editor is already being told to fix
+  # something else.
+  defp selected_tag_ids(form, record) do
+    attached = record.tags |> current_ids() |> MapSet.new(&to_string/1)
+
+    case form[:tag_ids].value do
+      nil -> apply_merge_verbs(form, attached)
+      value -> value |> List.wrap() |> MapSet.new(&to_string/1)
+    end
+  end
+
+  defp apply_merge_verbs(form, attached) do
+    added = form |> merge_verb_ids(:add_tag_ids) |> MapSet.new()
+    removed = form |> merge_verb_ids(:remove_tag_ids) |> MapSet.new()
+
+    attached |> MapSet.union(added) |> MapSet.difference(removed)
+  end
+
+  defp merge_verb_ids(form, field) do
+    form[field].value |> List.wrap() |> Enum.map(&to_string/1)
+  end
+
   defp list_versions(kind, opts), do: ContentTypes.list_versions!(kind, opts)
 
   defp restore_version(kind, record, vid, actor),
@@ -1411,7 +1444,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> inject_children(socket.assigns.block_children)
       |> inject_rich_bodies(socket.assigns.rich_bodies)
       |> normalize_item_rows()
-      |> normalize_tag_ids()
+      |> merge_tag_params(socket)
 
     {params, socket} = sync_slug(params, event["_target"], socket)
     socket = assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
@@ -2502,7 +2535,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> inject_children(socket.assigns.block_children)
       |> inject_rich_bodies(socket.assigns.rich_bodies)
       |> normalize_item_rows()
-      |> normalize_tag_ids()
+      |> merge_tag_params(socket)
 
     result =
       EditorTelemetry.span(:save, %{kind: socket.assigns.kind}, fn ->
@@ -3035,6 +3068,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> AshPhoenix.Form.params()
       |> inject_children(socket.assigns.block_children)
       |> inject_rich_bodies(socket.assigns.rich_bodies)
+
+    # Autosave carried the identical defect and was never named in #638: it
+    # submits the live form's params, so a debounced save detached an
+    # out-of-scope tag just as an explicit one did — and did it without
+    # anyone pressing anything. `:autosave` accepts the same verbs (#636
+    # mirrored them there for this change).
+    #
+    # No rewrite here: these params come from the form, which `validate`
+    # already normalized, not from the browser. `merge_tag_params/2` refuses
+    # to run twice for this reason, but not calling it at all is clearer
+    # about where the one rewrite happens.
 
     result =
       EditorTelemetry.span(:autosave, %{kind: socket.assigns.kind}, fn ->
@@ -3649,14 +3693,83 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
-  # Drop the tag picker's hidden sentinel (see `tag_picker/1`). It exists so an
-  # all-unchecked group still submits `tag_ids`, which is the difference between
-  # "detach every tag" and "the field was never touched" — but `""` is not a
-  # uuid, so it must not reach the changeset.
-  defp normalize_tag_ids(%{"tag_ids" => ids} = params) when is_list(ids),
-    do: Map.put(params, "tag_ids", Enum.reject(ids, &(&1 == "")))
+  # Rewrite the picker's ticks into the merge verbs (#638).
+  #
+  # No create branch, because this LiveView has none: `for_update/3` is its only
+  # form constructor (content is created elsewhere and edited here). That
+  # matters, because `:create` rejects the verbs outright — it has nothing to
+  # merge against — so a create path added later has to come back through here
+  # rather than inherit this by accident.
+  #
+  # `tag_ids` is the COMPLETE set, so submitting it means "these are the only
+  # tags" — and a checkbox that was never rendered was never submitted, so
+  # narrowing a tag group's content types silently stripped tags off existing
+  # content on the next Save. That is what the "Also attached" rescue section,
+  # the hidden `""` sentinel and `normalize_tag_ids/1` all existed to work
+  # around; #636 gave the resource `add_tag_ids`/`remove_tag_ids`, and this is
+  # the caller finally using them.
+  #
+  # The diff is taken against what the server chose to RENDER, not against the
+  # record's current tags:
+  #
+  #   * `remove` is rendered-minus-ticked. A tag with no checkbox cannot appear
+  #     here, which is exactly the property that was missing — it survives
+  #     instead of being detached by omission.
+  #   * `add` is every ticked id, not ticked-minus-attached. `:append` is
+  #     `on_match: :ignore`, so re-adding is free, and diffing against a
+  #     possibly-stale `record.tags` would drop a tick for a tag a collaborator
+  #     detached since this page loaded.
+  #
+  # Deriving `rendered` server-side rather than posting it as a hidden field is
+  # also what bounds the blast radius: a forged payload can only tick ids, and
+  # what may be *removed* stays whatever this server put on the page.
+  #
+  # An all-unchecked group now submits no `tag_ids` key at all and needs none —
+  # `ticked` is empty, so every rendered tag lands in `remove`. That is the
+  # sentinel's whole job, done by the diff instead.
+  # NB this is not idempotent, and must only ever see BROWSER params. It
+  # consumes `tag_ids`, so a second pass over its own output reads as "nothing
+  # ticked" and removes everything the first pass just added — which is exactly
+  # what happened when autosave (which forwards the *form's* params, already
+  # rewritten by `validate`) also called it. Autosave therefore does not, and
+  # "a section already on screen stays closed once its tag is saved" is the test
+  # that catches it coming back.
+  #
+  # An earlier version guarded that with a shape check — "if it already has the
+  # verbs, pass it through". That was worse than useless: it also let a crafted
+  # payload post its own `remove_tag_ids` and skip the rewrite entirely, which
+  # is precisely the bound this function exists to impose.
+  defp merge_tag_params(params, socket) do
+    ticked = ticked_tag_ids(params)
+    ticked_set = MapSet.new(ticked)
 
-  defp normalize_tag_ids(params), do: params
+    # `rendered` is every tag the picker put a checkbox on, precomputed in
+    # `refresh_tag_index/1`. `tag_picker/1` renders the sections and nothing
+    # else (an empty `sections` renders no controls at all), so it is the
+    # rendered set exactly — which has to be true rather than approximately
+    # true, because it is the ceiling on what this save may detach.
+    removed =
+      socket.assigns.tag_index.rendered
+      |> Enum.reject(&MapSet.member?(ticked_set, &1))
+
+    params
+    |> Map.delete("tag_ids")
+    |> Map.put("add_tag_ids", ticked)
+    |> Map.put("remove_tag_ids", removed)
+  end
+
+  # Blanks are dropped, and that is not the old sentinel coming back: nothing
+  # renders a `""` any more, so the only way one arrives is a page that was
+  # loaded before this deployment and submitted after it. Reading it as an id
+  # would fail the uuid cast and turn a routine save into an error the editor
+  # cannot act on; reading it as "nothing ticked" is what that page meant.
+  defp ticked_tag_ids(params) do
+    params
+    |> Map.get("tag_ids", [])
+    |> List.wrap()
+    |> Enum.map(&to_string/1)
+    |> Enum.reject(&(&1 == ""))
+  end
 
   # Coerce an editable child field, keeping `level` an integer (headings clamp on
   # render, so an out-of-range value is harmless, but a non-integer would fail the
@@ -3804,13 +3917,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
       true ->
         current =
           socket.assigns.form
-          |> selected_ids(:tag_ids, current_ids(socket.assigns.record.tags))
-          |> Enum.map(&to_string/1)
+          |> selected_tag_ids(socket.assigns.record)
+          |> MapSet.to_list()
 
+        # Written back as `tag_ids` and immediately rewritten by
+        # `merge_tag_params/2` — leaving `tag_ids` in the form's params
+        # beside the verbs would make the next save contradictory, and
+        # `MergeArguments` refuses that combination outright rather than
+        # resolving it by declaration order.
         params =
           socket.assigns.form
           |> AshPhoenix.Form.params()
+          |> Map.drop(["add_tag_ids", "remove_tag_ids"])
           |> Map.put("tag_ids", Enum.uniq(current ++ [tag_id]))
+          |> merge_tag_params(socket)
 
         socket
         |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
@@ -4269,10 +4389,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # A **MapSet**, not a list (#528). Membership is tested three times per tag
     # — the checkbox, the section count, and the filter — and this component
     # re-renders on every `validate`, i.e. per keystroke anywhere in the form.
-    selected =
-      assigns.form
-      |> selected_ids(:tag_ids, current_ids(assigns.record.tags))
-      |> MapSet.new(&to_string/1)
+    selected = selected_tag_ids(assigns.form, assigns.record)
 
     # The skeleton — which tag sits in which section, and its downcased filter
     # key — is computed once per RECORD change (`refresh_tag_index/1`), not per
@@ -4284,6 +4401,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
       assigns
       |> assign(:selected, selected)
       |> assign(:sections, sections)
+      # The checkboxes still post under `tag_ids[]`; `merge_tag_params/2`
+      # rewrites that into `add_tag_ids`/`remove_tag_ids` at submit time, so the
+      # wire name the browser posts and the argument the changeset takes are
+      # deliberately not the same thing (#638).
+      |> assign(:name, assigns.form[:tag_ids].name <> "[]")
       # Why an empty picker is empty, which is not one question but two, and the
       # difference is what the editor should do next (#524). `pickable` and
       # `sections` are narrowed independently — every tag in the org can sit in
@@ -4299,7 +4421,6 @@ defmodule KilnCMSWeb.ContentEditorLive do
           true -> nil
         end
       )
-      |> assign(:name, assigns.form[:tag_ids].name <> "[]")
 
     ~H"""
     <fieldset id="tag-picker" phx-hook="TagFilter" data-tag-filter>
@@ -4319,19 +4440,6 @@ defmodule KilnCMSWeb.ContentEditorLive do
           class="underline"
         >{gettext("taxonomy")}</.link>.
       </p>
-
-      <%!-- Browsers omit an all-unchecked checkbox group from the payload
-            entirely, which `selected_ids/3` can only read as "untouched" — so
-            the last tag could never be removed. This sentinel keeps the key
-            present; `normalize_tag_ids/1` drops it before the changeset.
-
-            Gated on the sections, not on `pickable`: with nothing rendered to
-            tick, submitting the key at all would post an empty `tag_ids` that
-            `append_and_remove` reads as "detach everything". (Unreachable
-            today — every attached tag lands in some section, so no sections
-            means no attached tags — but the sentinel's whole job is to make an
-            empty submission meaningful, and it must not do that here.) --%>
-      <input :if={@sections != []} type="hidden" name={@name} value="" />
 
       <div :if={@sections != []} class="space-y-2">
         <%!-- Unnamed so it never serializes into the changeset, and wrapped in
@@ -4421,11 +4529,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # for tags already on the record, which are collected into a trailing
   # "Also attached" section.
   #
-  # That last part is load-bearing, not a nicety: tags are written with
+  # That section used to be load-bearing: tags were written with
   # `manage_relationship(:tag_ids, :tags, type: :append_and_remove)`, so a
-  # checkbox that isn't rendered isn't submitted, and the link is *removed*.
-  # Narrowing a group's content types after the fact would otherwise silently
-  # strip tags off existing content the next time someone hit Save.
+  # checkbox that was not rendered was not submitted and the link was *removed*
+  # — and without this section, narrowing a group's content types silently
+  # stripped tags off existing content on the next Save.
+  #
+  # Since #638 the picker submits `add_tag_ids`/`remove_tag_ids` diffed against
+  # what it rendered, so an unrendered tag simply survives and the section is no
+  # longer holding anything up. It stays for the two things it was always also
+  # doing, which are worth keeping on their own: telling an editor that a tag
+  # from a group scoped elsewhere is on this item, and giving them a control to
+  # take it off. Note the consequence of keeping the checkboxes — these tags ARE
+  # rendered, so unticking one does now remove it, which is the point.
   defp tag_sections(tags, groups, kind, attached) do
     kind = to_string(kind)
     known_ids = MapSet.new(groups, & &1.id)
@@ -4444,7 +4560,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # Keyed on `attached` (the persisted set) rather than `selected` (the live
     # ticks): keying on the latter meant unchecking a tag here emptied the
     # section, `Enum.reject` deleted it, and there was no control left to undo
-    # with — an irreversible detach one mis-click away.
+    # with. Still true and still the reason — and now doubly so, because the
+    # removal diff is taken against what was rendered: a control that vanishes
+    # mid-edit would take its tag out of `remove_tag_ids` and quietly cancel the
+    # detach the editor just asked for.
     orphaned_tags =
       by_bucket
       |> Map.get(:out_of_scope, [])
@@ -4463,9 +4582,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Which section a tag belongs in. A `tag_group_id` that resolves to no loaded
   # group — a dangling pointer, or one written across tenants (the FK has no
-  # org component) — falls back to "Ungrouped" rather than vanishing: an
-  # unrendered checkbox is a checkbox that isn't submitted, and
-  # `append_and_remove` reads that as "detach me".
+  # org component) — falls back to "Ungrouped" rather than vanishing. That was
+  # originally about data loss (an unsubmitted checkbox was a detach); since
+  # #638 it is about reach: a tag with no control cannot be *removed*, so
+  # vanishing would strand it on the record with no way to take it off.
   defp bucket_for(%{tag_group_id: nil}, _known_ids, _applicable_ids), do: :ungrouped
 
   defp bucket_for(%{tag_group_id: id}, known_ids, applicable_ids) do
@@ -4557,7 +4677,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
           do: section.key
 
     socket
-    |> assign(:tag_index, %{sections: sections, pickable?: pickable != []})
+    # `rendered` is stamped here for the same reason `tag_view/1` downcases
+    # here: the section list is built once per record change, and the thing
+    # that reads this runs on every keystroke (`validate` rewrites the tag
+    # params on each one). Walking every section's tags per keystroke to
+    # rebuild a set that only changes with the record is the exact cost this
+    # module already refuses to pay elsewhere.
+    |> assign(:tag_index, %{
+      sections: sections,
+      pickable?: pickable != [],
+      # `tag_view/1` already stringified the ids, so this is comparable to the
+      # form params without further coercion.
+      rendered: MapSet.new(for section <- sections, tag <- section.tags, do: tag.id)
+    })
     |> update(:tag_sections_open, &MapSet.union(&1, fresh))
     |> assign(:tag_sections_seen, MapSet.union(seen, MapSet.new(sections, & &1.key)))
   end

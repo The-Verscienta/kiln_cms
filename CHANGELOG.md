@@ -453,6 +453,25 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **The editor's tag picker no longer detaches tags it never showed you**
+  (#638). Tags were written with the complete-set `tag_ids` argument, so a
+  checkbox that was not rendered was not submitted and `append_and_remove` read
+  the omission as "detach me". The picker now submits `add_tag_ids` /
+  `remove_tag_ids` (added to the resource in #636) diffed against what it
+  actually rendered, so removal is bounded by what was on the page: a tag
+  attached out of band — by a collaborator, an API call, an automation — after
+  the page loaded now survives the next save instead of being silently dropped.
+
+  Autosave carried the identical defect and was never named in the issue, which
+  made it the worse of the two: it fired on a debounce with nobody pressing
+  anything.
+
+  The workarounds this retires go with it — the hidden empty-string sentinel
+  that made an all-unchecked group distinguishable from an untouched one, and
+  `normalize_tag_ids/1`, which existed only to strip it back out. The "Also
+  attached" section stays, but as information and a control rather than as the
+  thing standing between a scoped-away tag group and data loss.
+
 - **The collab-editor flake is checked for, not just fixed** (#1067). Filed as a
   presence race in `CollabPersisterTest` — one failure in three full-suite runs,
   never in isolation — it turned out to be a VM-global one:
