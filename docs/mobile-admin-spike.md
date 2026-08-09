@@ -220,10 +220,16 @@ Delivered with this document, because it reaches the goal the issue names:
   a mismatched id makes a browser discard the whole manifest update rather than
   rename the app.
 - **App icons** at 192/512 plus a separate maskable 512 and an iOS
-  `apple-touch-icon`, all derived from the ember mark.
+  `apple-touch-icon`, derived from the ember mark — or the site's own icon where
+  one has been verified (#629, below).
+- **`KilnCMSWeb.OfflineController`** serves `/offline.html` per org (#629). It is
+  rendered from the service worker's cache with no network at all, so it carries
+  the site name and brand colour *inline* and references nothing it would have to
+  fetch — no stylesheet, no script, no image. That constraint is why the branding
+  here is a name and a colour rather than the logo.
 - **`priv/static/sw.js`** — a deliberately minimal service worker. It exists
   because Chromium will not offer "Install" without a `fetch` handler, and it
-  serves `offline.html` when a *GET navigation* fails. It caches **no**
+  serves `/offline.html` when a *GET navigation* fails. It caches **no**
   application HTML and no API responses: every editor page is per-user and
   per-org and mostly unpublished drafts, so a cache there would be a
   cross-account leak on a shared device and a stale-content bug on every deploy.
@@ -247,10 +253,42 @@ Honest limits. Each is filed, so closing #65 doesn't bury them:
 - **No offline reading or queued approvals.** By design — see the caching note
   above. Offline authoring is a substantially larger design problem than a cache
   entry, and is not filed as a follow-up because it is not obviously wanted.
-- **Install icons and the offline page are stock KilnCMS on every org**, even a
-  white-labelled one: the manifest cannot honestly declare `sizes` for a logo of
-  unknown dimensions, and the offline page is a static file with no org context
-  — [#629](https://github.com/The-Verscienta/kiln_cms/issues/629).
+- ~~**Install icons and the offline page are stock KilnCMS on every org**~~
+  **Done** — [#629](https://github.com/The-Verscienta/kiln_cms/issues/629). A
+  site sets an **App icon URL** in `/editor/branding`; the server fetches it on
+  save and measures it (`KilnCMS.Branding.AppIcon`), and only a **square PNG or
+  JPEG of at least 512×512** is used. The measured edge is stored alongside the
+  URL and is what the manifest declares.
+
+  PNG or JPEG is narrower than the media library accepts, and iOS is the reason:
+  `apple-touch-icon` has no format negotiation and no second candidate, and iOS
+  answers a WebP or GIF there by ignoring it and showing a screenshot of the
+  page. The format is read from the decoded bytes, never from the URL's
+  extension — an image CDN will serve WebP from a `.png` path.
+
+  A verified icon is declared `purpose: "any"`, and the stock **maskable** entry
+  is withdrawn while one is in use. That pairing is deliberate and easy to get
+  backwards: a maskable icon is *cropped* to the platform shape (Android keeps
+  roughly the inner 80%), and an operator's square logo has no safe zone, so
+  declaring it maskable would clip it. But leaving the stock maskable declared
+  is worse — Android *prefers* a maskable icon for the home screen, so the
+  white-labelled site would get the KilnCMS flame there, which is the whole
+  complaint. With no maskable declared, Android letterboxes the `any` icon into
+  the adaptive shape instead.
+
+  The verification is the feature, not a nicety around it: `icons[].sizes` is a
+  claim Chromium's installability check believes, so a manifest declaring
+  `512x512` about a 1200×300 wordmark does not degrade — the install prompt
+  disappears with nothing said anywhere. An icon that fails is still *saved*
+  (a briefly-down CDN must not discard what the admin typed) but is not
+  declared, and the settings form says which of the reasons it was. The stock
+  trio stays alongside a verified icon so a launcher picking by size still finds
+  a 192, and so an icon that 404s after verification cannot make the app
+  uninstallable.
+
+  The offline page moved from `priv/static/offline.html` to a controller for the
+  same reason the manifest is one, and `sw.js` precaches it by the same URL it is
+  served from.
 - ~~**The manifest is not localized**~~ **Done** —
   [#630](https://github.com/The-Verscienta/kiln_cms/issues/630). The link now
   carries `?locale=`, so `name`, `description` and the shortcut labels are

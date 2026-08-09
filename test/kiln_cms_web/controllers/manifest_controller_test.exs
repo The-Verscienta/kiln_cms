@@ -288,5 +288,150 @@ defmodule KilnCMSWeb.ManifestControllerTest do
     end
   end
 
+  # #629. The rule that governs every case below: `icons[].sizes` is a claim
+  # Chromium's installability check believes, so an icon may only appear here
+  # once `KilnCMS.Branding.AppIcon` has measured it. A verified size is therefore
+  # not a nicety — it is the whole gate.
+  describe "the brand app icon (#629)" do
+    setup do
+      org =
+        Ash.Seed.seed!(Accounts.Organization, %{
+          name: "Icon Org",
+          slug: "icon-#{System.unique_integer([:positive])}",
+          status: :active
+        })
+
+      admin =
+        Ash.Seed.seed!(Accounts.User, %{
+          email: "icon-admin-#{System.unique_integer([:positive])}@example.com",
+          hashed_password: Bcrypt.hash_pwd_salt("password1234!"),
+          confirmed_at: DateTime.utc_now(),
+          role: :admin
+        })
+
+      on_exit(fn -> KilnCMS.Cache.bust_branding(org.id) end)
+
+      %{org: org, admin: admin}
+    end
+
+    defp icons_for(ctx, attrs) do
+      Ash.Seed.seed!(
+        KilnCMS.CMS.SiteBranding,
+        Map.merge(%{org_id: ctx.org.id, site_name: "Icon Co"}, attrs)
+      )
+
+      KilnCMS.Cache.bust_branding(ctx.org.id)
+
+      ctx.conn
+      |> org_host(ctx.org)
+      |> get(~p"/manifest.webmanifest")
+      |> json_response(200)
+      |> Map.fetch!("icons")
+    end
+
+    test "a verified icon is declared at the size that was measured", ctx do
+      icons = icons_for(ctx, %{app_icon_url: "/uploads/icon.png", app_icon_size: 1024})
+
+      assert %{"sizes" => "1024x1024", "purpose" => "any"} =
+               Enum.find(icons, &(&1["src"] == "/uploads/icon.png"))
+    end
+
+    test "it is declared `any`, never maskable — a maskable icon gets cropped", ctx do
+      # Android keeps roughly the inner 80% of a maskable icon and discards the
+      # rest. The form asks for a square image, not one padded with a safe zone,
+      # so declaring the operator's logo maskable would clip it on every Android
+      # home screen.
+      icons = icons_for(ctx, %{app_icon_url: "/uploads/icon.png", app_icon_size: 512})
+
+      brand = Enum.find(icons, &(&1["src"] == "/uploads/icon.png"))
+      refute brand["purpose"] =~ "maskable"
+    end
+
+    test "and the stock maskable is withdrawn, so Android cannot prefer it", ctx do
+      # The counter-intuitive half, and the one that decides what a phone
+      # actually shows: Android prefers a maskable icon for the home screen. Leave
+      # the stock one declared and a white-labelled site's home-screen icon is the
+      # KilnCMS flame — the exact symptom this issue is about. With no maskable at
+      # all, Android letterboxes the `any` icon instead: the operator's mark,
+      # uncropped.
+      icons = icons_for(ctx, %{app_icon_url: "/uploads/icon.png", app_icon_size: 512})
+
+      refute Enum.any?(icons, &(&1["purpose"] =~ "maskable"))
+    end
+
+    test "an unbranded site keeps its maskable, which is drawn with a safe zone", ctx do
+      icons = icons_for(ctx, %{app_icon_url: nil, app_icon_size: nil})
+
+      assert Enum.any?(icons, &(&1["purpose"] == "maskable"))
+    end
+
+    test "no `type` is declared for it — the URL's extension is not evidence", ctx do
+      # `type` is the second declaration browsers believe, alongside `sizes`. The
+      # only thing available at render time is the extension, and an image CDN
+      # will serve WebP from a `.png` path all day. Omitting the key is valid and
+      # means "decode it to find out"; a wrong one makes a launcher skip an icon
+      # it could have rendered.
+      icons = icons_for(ctx, %{app_icon_url: "/uploads/icon.png", app_icon_size: 512})
+
+      refute Map.has_key?(Enum.find(icons, &(&1["src"] == "/uploads/icon.png")), "type")
+    end
+
+    test "the stock set stays alongside it", ctx do
+      # Two reasons. A launcher that picks by size still needs a 192, and if the
+      # brand icon 404s after verification (a CDN rotated, a bucket emptied) the
+      # install stays possible instead of the app becoming uninstallable.
+      icons = icons_for(ctx, %{app_icon_url: "/uploads/icon.png", app_icon_size: 512})
+
+      sizes = icons |> Enum.map(& &1["sizes"]) |> Enum.uniq() |> Enum.sort()
+      assert "192x192" in sizes
+      assert length(icons) > 1
+    end
+
+    test "an unverified URL is not declared at all", ctx do
+      # The failure this prevents: a manifest asserting 512x512 about a 300px
+      # wordmark makes the install prompt disappear, with nothing said anywhere.
+      icons = icons_for(ctx, %{app_icon_url: "/uploads/wordmark.png", app_icon_size: nil})
+
+      refute Enum.any?(icons, &(&1["src"] == "/uploads/wordmark.png"))
+      assert Enum.all?(icons, &String.starts_with?(&1["src"], "/images/"))
+    end
+
+    test "a size with no URL is ignored rather than declared against nothing", ctx do
+      icons = icons_for(ctx, %{app_icon_url: nil, app_icon_size: 512})
+
+      assert Enum.all?(icons, &String.starts_with?(&1["src"], "/images/"))
+    end
+
+    test "the stock entries keep their type, because those bytes ship with the app",
+         ctx do
+      icons = icons_for(ctx, %{app_icon_url: "/uploads/icon.png", app_icon_size: 512})
+
+      for stock <- Enum.filter(icons, &String.starts_with?(&1["src"], "/images/")) do
+        assert stock["type"] == "image/png"
+      end
+    end
+
+    test "the shortcuts use it too", ctx do
+      Ash.Seed.seed!(KilnCMS.CMS.SiteBranding, %{
+        org_id: ctx.org.id,
+        site_name: "Icon Co",
+        app_icon_url: "/uploads/icon.png",
+        app_icon_size: 512
+      })
+
+      KilnCMS.Cache.bust_branding(ctx.org.id)
+
+      body =
+        ctx.conn
+        |> org_host(ctx.org)
+        |> get(~p"/manifest.webmanifest")
+        |> json_response(200)
+
+      for shortcut <- body["shortcuts"] do
+        assert Enum.any?(shortcut["icons"], &(&1["src"] == "/uploads/icon.png"))
+      end
+    end
+  end
+
   defp org_host(conn, org), do: %{conn | host: "#{org.slug}.#{Tenant.base_host()}"}
 end

@@ -132,8 +132,8 @@ defmodule KilnCMSWeb.ManifestController do
       theme_color: brand.brand_color || @default_theme_color,
       background_color: @background_color,
       categories: ["productivity", "business"],
-      icons: icons(),
-      shortcuts: shortcuts()
+      icons: icons(brand),
+      shortcuts: shortcuts(brand)
     }
   end
 
@@ -141,34 +141,80 @@ defmodule KilnCMSWeb.ManifestController do
   # a maskable icon is drawn with a 40% safe zone, so reusing it as `any` would
   # render a small mark floating in a large tile everywhere the mask isn't
   # applied.
-  defp icons do
+  #
+  # ## The brand icon, when there is a verified one (#629)
+  #
+  # `Branding.verified_app_icon/1` is the gate, and it is the same gate the
+  # shortcuts and the `apple-touch-icon` use. A size is present only once this
+  # deployment has *measured* the image, which is the whole precondition for
+  # declaring it: `sizes` is a declaration, and a manifest that mis-states it
+  # does not degrade — Chromium stops offering the install prompt and says
+  # nothing about why.
+  #
+  # ## Why the brand icon is `any` and the stock maskable disappears
+  #
+  # A maskable icon is **cropped** to the platform's shape, not letterboxed:
+  # Android keeps roughly the inner 80% and throws the rest away. An operator's
+  # icon has no safe zone — the form asks for a square image, not a padded one —
+  # so declaring it `maskable` would clip their logo on every Android home
+  # screen. It is therefore `any` only.
+  #
+  # But then the stock maskable cannot stay either, and that is the
+  # counter-intuitive half. Android *prefers* a maskable icon for the home
+  # screen, so leaving `/images/app-icon-maskable-512.png` in the list would
+  # make a white-labelled site's home-screen icon the KilnCMS flame — the exact
+  # symptom #629 is about, and worse than having no maskable at all. With none
+  # declared, Android letterboxes the `any` icon into the adaptive shape: the
+  # operator's mark, uncropped, on a generated background.
+  defp icons(brand) do
+    case Branding.verified_app_icon(brand) do
+      {url, size} -> [%{src: url, sizes: "#{size}x#{size}", purpose: "any"} | stock_any_icons()]
+      nil -> stock_any_icons() ++ [stock_maskable_icon()]
+    end
+  end
+
+  # No `type` on the brand entry above, deliberately. It is a hint a browser
+  # uses to skip formats it cannot decode, and the only thing available at
+  # render time is the URL's extension — which an image CDN will happily
+  # contradict by serving WebP from a `.png` path. Omitting the key is valid and
+  # means "decode it to find out"; declaring it wrong can make a launcher skip
+  # an icon it could have rendered. This module refuses to guess `sizes`; the
+  # same argument applies to `type`.
+  defp stock_any_icons do
     [
       %{src: "/images/app-icon-192.png", sizes: "192x192", type: "image/png", purpose: "any"},
-      %{src: "/images/app-icon-512.png", sizes: "512x512", type: "image/png", purpose: "any"},
-      %{
-        src: "/images/app-icon-maskable-512.png",
-        sizes: "512x512",
-        type: "image/png",
-        purpose: "maskable"
-      }
+      %{src: "/images/app-icon-512.png", sizes: "512x512", type: "image/png", purpose: "any"}
     ]
+  end
+
+  defp stock_maskable_icon do
+    %{
+      src: "/images/app-icon-maskable-512.png",
+      sizes: "512x512",
+      type: "image/png",
+      purpose: "maskable"
+    }
   end
 
   # Translated on the same terms as `name`/`description` — these are OS-surfaced
   # labels (long-press the home-screen icon), so they belong in the installing
   # user's language for exactly the same reason.
-  defp shortcuts do
+  defp shortcuts(brand) do
+    icon = shortcut_icon(brand)
+
     [
-      %{
-        name: gettext("Review queue"),
-        url: "/editor?status=in_review",
-        icons: [%{src: "/images/app-icon-192.png", sizes: "192x192", type: "image/png"}]
-      },
-      %{
-        name: gettext("Drafts"),
-        url: "/editor?status=draft",
-        icons: [%{src: "/images/app-icon-192.png", sizes: "192x192", type: "image/png"}]
-      }
+      %{name: gettext("Review queue"), url: "/editor?status=in_review", icons: [icon]},
+      %{name: gettext("Drafts"), url: "/editor?status=draft", icons: [icon]}
     ]
+  end
+
+  # The brand icon here too, at its measured size — a shortcut menu showing the
+  # stock flame beside a branded app icon is exactly the mismatch #629 is about.
+  # Same gate as `icons/1`, so the two can never disagree.
+  defp shortcut_icon(brand) do
+    case Branding.verified_app_icon(brand) do
+      {url, size} -> %{src: url, sizes: "#{size}x#{size}"}
+      nil -> %{src: "/images/app-icon-192.png", sizes: "192x192", type: "image/png"}
+    end
   end
 end

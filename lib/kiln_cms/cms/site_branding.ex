@@ -40,6 +40,7 @@ defmodule KilnCMS.CMS.SiteBranding do
       :logo_url,
       :favicon_url,
       :social_image_url,
+      :app_icon_url,
       :brand_color,
       :show_attribution
     ]
@@ -60,11 +61,24 @@ defmodule KilnCMS.CMS.SiteBranding do
       upsert? true
       upsert_identity :one_per_org
 
+      # Not an attribute: the measured edge may only be written together with
+      # the URL it measured. See `KilnCMS.CMS.Changes.PairAppIcon`.
+      argument :app_icon_size, :integer
+
+      change KilnCMS.CMS.Changes.PairAppIcon
+
       upsert_fields [
         :site_name,
         :logo_url,
         :favicon_url,
         :social_image_url,
+        # Listing both here does NOT pair them — AshPostgres filters
+        # `upsert_fields` down to the attributes actually in the changeset, so
+        # a write carrying only the URL would leave the old size in place.
+        # `Changes.PairAppIcon` is what makes them one decision; these two
+        # entries only say the columns are upsertable at all.
+        :app_icon_url,
+        :app_icon_size,
         :brand_color,
         :show_attribution
       ]
@@ -73,6 +87,10 @@ defmodule KilnCMS.CMS.SiteBranding do
     update :update do
       primary? true
       require_atomic? false
+
+      argument :app_icon_size, :integer
+
+      change KilnCMS.CMS.Changes.PairAppIcon
     end
   end
 
@@ -133,6 +151,27 @@ defmodule KilnCMS.CMS.SiteBranding do
     attribute :social_image_url, :string,
       public?: true,
       constraints: [max_length: KilnCMS.Limits.url()]
+
+    # The home-screen icon for the installable editor PWA (#629). Same shape as
+    # the fields above — a path or an absolute URL — but with one extra
+    # requirement the others do not have: it must be square, because
+    # `icons[].sizes` in the web app manifest is a *declaration* Chromium's
+    # installability check believes.
+    attribute :app_icon_url, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.url()]
+
+    # The measured square edge of `app_icon_url`, in pixels — written by the
+    # server from `KilnCMS.Branding.AppIcon.verify/1`, never typed by an
+    # operator. `writable? false` is what makes that true rather than merely
+    # intended: the only way in is the `:app_icon_size` argument, and
+    # `Changes.PairAppIcon` refuses to carry it across a URL change.
+    #
+    # `nil` is the load-bearing state: it means "we have not seen this image, or
+    # it was not usable", and the manifest then serves the stock icon rather
+    # than declaring a size it cannot vouch for. A wrong `sizes` does not
+    # degrade the install prompt — it removes it, silently.
+    attribute :app_icon_size, :integer, public?: true, writable?: false
 
     # Normalized lowercase `#rrggbb`. Every emitted CSS token is re-derived from
     # the parsed channels by `KilnCMS.Branding.Color`, so no user-supplied byte

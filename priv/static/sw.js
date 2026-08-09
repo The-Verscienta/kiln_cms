@@ -20,17 +20,56 @@
 // reader never gets a service worker.
 
 const CACHE_PREFIX = "kiln-offline-"
-const CACHE = `${CACHE_PREFIX}v1`
+// v2: the offline page became per-org (#629). The bump is what makes an already
+// installed worker drop its precached copy of the old unbranded page — without
+// it the URL is unchanged, so the existing cache entry would just keep serving.
+const CACHE = `${CACHE_PREFIX}v2`
+// Served by KilnCMSWeb.OfflineController, not from `priv/static`. Precached by
+// the SAME URL it is served from, so the copy in the cache is the one this
+// origin's org would have rendered — the worker is per-origin, and subdomain
+// tenancy makes the origin the org.
 const OFFLINE_URL = "/offline.html"
 
+// How stale a precached offline page may get before a successful navigation
+// refreshes it in the background. Cache Storage ignores `Cache-Control`
+// entirely and `install` only re-runs when the bytes of THIS file change — so
+// without a refresh, a site that rebrands after a device installed the app
+// would show that device the old name and colour forever. Which is the bug
+// #629 exists to fix, just frozen per-device instead of per-build.
+const OFFLINE_MAX_AGE_MS = 24 * 60 * 60 * 1000
+
+// Never rejects. `/offline.html` used to be a `priv/static` file, which could
+// not fail; it is now a router route behind a rate limiter and a branding
+// lookup, so it CAN 429 or 5xx. A rejected `cache.add` inside `waitUntil`
+// fails the whole installation — no fetch handler, no install prompt, and no
+// web push (#628) — over a fallback page that is by definition optional. So the
+// failure is swallowed and retried on the first successful navigation instead.
+async function cacheOffline() {
+  try {
+    const cache = await caches.open(CACHE)
+    // `cache: "reload"` so a stale HTTP-cached copy can't be what we precache.
+    await cache.add(new Request(OFFLINE_URL, {cache: "reload"}))
+  } catch (_error) {
+    // Nothing to do here: `refreshOffline` will try again later.
+  }
+}
+
+// Re-fetch the offline page if the cached copy is older than OFFLINE_MAX_AGE_MS,
+// or missing because the install-time attempt failed.
+async function refreshOffline() {
+  const cache = await caches.open(CACHE)
+  const cached = await cache.match(OFFLINE_URL)
+
+  if (cached) {
+    const date = Date.parse(cached.headers.get("date") || "")
+    if (Number.isFinite(date) && Date.now() - date < OFFLINE_MAX_AGE_MS) return
+  }
+
+  await cacheOffline()
+}
+
 self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches
-      .open(CACHE)
-      // `cache: "reload"` so a stale HTTP-cached copy can't be what we precache.
-      .then((cache) => cache.add(new Request(OFFLINE_URL, {cache: "reload"})))
-      .then(() => self.skipWaiting())
-  )
+  event.waitUntil(cacheOffline().then(() => self.skipWaiting()))
 })
 
 self.addEventListener("activate", (event) => {
@@ -60,21 +99,31 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET" || request.mode !== "navigate") return
 
   event.respondWith(
-    fetch(request).catch(async () => {
-      // Scoped to our own cache: a bare `caches.match` searches every cache on
-      // the origin and would happily serve someone else's `/offline.html`.
-      const offline = await caches.open(CACHE).then((cache) => cache.match(OFFLINE_URL))
+    fetch(request)
+      .then((response) => {
+        // The network is up, so this is the moment to top up the fallback: it
+        // is the only hook that runs without `sw.js` itself changing. Off the
+        // response path via `waitUntil`, and a no-op unless the copy is stale.
+        event.waitUntil(refreshOffline())
+        return response
+      })
+      .catch(async () => {
+        // Scoped to our own cache: a bare `caches.match` searches every cache
+        // on the origin and would happily serve someone else's `/offline.html`.
+        const offline = await caches.open(CACHE).then((cache) => cache.match(OFFLINE_URL))
 
-      // The precache can be missing if storage was evicted. Better a terse
-      // response than a broken promise, which surfaces as a generic network error.
-      return (
-        offline ||
-        new Response("Offline.", {
-          status: 503,
-          headers: {"Content-Type": "text/plain; charset=utf-8"}
-        })
-      )
-    })
+        // The precache can be missing if storage was evicted, or if the
+        // install-time fetch failed and no navigation has succeeded since.
+        // Better a terse response than a broken promise, which surfaces as a
+        // generic network error.
+        return (
+          offline ||
+          new Response("Offline.", {
+            status: 503,
+            headers: {"Content-Type": "text/plain; charset=utf-8"}
+          })
+        )
+      })
   )
 })
 
