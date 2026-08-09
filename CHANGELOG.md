@@ -49,6 +49,39 @@ migration, a rewritten column, a dropped config key).
   anything published since the last checkpoint, and a badge on every one of them
   would teach an operator to stop reading badges.
 
+- **XLIFF 2.0 export/import for translation vendors** (#502). `/editor/translations`
+  can now send content out as XLIFF 2.0 — the format Smartling, Lokalise,
+  Crowdin, Phrase, memoQ and Trados all read — and apply the file that comes
+  back. Tick rows, pick a target locale, **Export**; upload the returned file
+  with **Import XLIFF**. A direct vendor-API connector is now a thin plugin on
+  top of this seam instead of a second content pipeline.
+  See [docs/localization-workflows.md](docs/localization-workflows.md).
+
+  Trans-unit ids are built on **identity, not position** — a block's stable
+  uuid and a Portable Text block's `_key` — so a file that comes back after the
+  source has been reordered still lands every string. Nested `columns` children
+  are the one positional segment, because they are raw maps with no readable id
+  (#865/#954); their parent is still addressed by identity.
+
+  Nothing is applied silently: every unit id in the returned file is reported
+  as `applied`, `unchanged` or `unknown`, plus the ones the vendor left empty
+  and the ones that only matched by position. An empty `<target>` never clears
+  a field — a partial delivery is normal mid-job.
+
+  A returned file can reword an anchor but **cannot retarget a link**: hrefs
+  travel into `<originalData>` as translator context, and the importer restores
+  links from the `markDefs` the record already holds. Marks a file invents are
+  filtered out rather than stored dangling.
+
+  **Which fields are prose is now declared on the block field**, so a plugin
+  block (D18) gets the same round trip as a core one:
+  `translatable: false` for an identifier-ish `:string`,
+  `translatable: [:question, :answer]` for the keys of an `{:array, :map}`
+  field, and `translatable: :unsupported` for text this exporter cannot
+  round-trip safely (`rich_text.legacy_html`, `custom.content`) — which the
+  export *reports* rather than dropping quietly. `:string` and `:rich_text`
+  are prose by default, so most fields need no annotation.
+
 - **Events: "what's on, soonest first"** (#766). An event-shaped content type —
   one carrying a `datetime_range` field (#480) — now has a paginated delivery
   index ordered by each document's **next occurrence**, at `/<plural>` (HTML)
@@ -277,6 +310,15 @@ migration, a rewritten column, a dropped config key).
   `[gallery ids="1,2"]` text in the middle of a sentence.
 
 ### Changed
+
+- **A translation now keeps the source's block ids** (#502). `create_translation!`
+  used to mint fresh ids for the copy. A locale variant is the same document in
+  another language, every consumer of a block id is already scoped to one record
+  (collab locks, version folds, experiment patches, the fired `_id`), and shared
+  identity is what lets an XLIFF trans-unit address a paragraph across the pair.
+  **Duplicate** is unaffected — a duplicate is a different document and still
+  mints fresh ids. Translations created before this release match by position on
+  import, and are reported as having done so.
 
 - **The media ingest pipeline is one module.** Sniff → size-cap → strip →
   store → `MediaItem` → enqueue derivation lived twice inside

@@ -37,23 +37,27 @@ defmodule KilnCMS.Blocks.Embed do
     # Not required — an unparseable URL is blanked on save, so an empty embed is
     # a valid (no-op) placeholder. What is stored is what the author typed
     # (absolute http(s) only); which URLs may be *framed* is decided at render.
-    field :url, :string
+    field :url, :string, translatable: false
     # Cached oEmbed metadata (#489). All optional: an embed that resolved to
     # nothing renders the bare figure it always did.
-    field :title, :string
-    field :author_name, :string
-    field :provider_name, :string
-    field :thumbnail_url, :string
+    #
+    # None of it is translatable (#502): it is a cache of what the provider
+    # said, replaced wholesale the next time the URL resolves, so a paid
+    # translation of it is work thrown away on a schedule nobody controls.
+    field :title, :string, translatable: false
+    field :author_name, :string, translatable: false
+    field :provider_name, :string, translatable: false
+    field :thumbnail_url, :string, translatable: false
     # The URL the metadata above actually describes. Metadata is only shown when
     # this still matches `url` — an editor who pastes a different link into an
     # existing block would otherwise keep the first video's title and thumbnail
     # over the second one's href, forever, because nothing else notices that the
     # cached values became wrong.
-    field :resolved_url, :string
+    field :resolved_url, :string, translatable: false
     # ISO8601 of the last successful resolution, for staleness. A string rather
     # than a datetime because every other block field is a scalar the jsonb
     # round-trip carries unchanged.
-    field :resolved_at, :string
+    field :resolved_at, :string, translatable: false
   end
 
   # Match a plain variable, not %__MODULE__{} — see the note in divider.ex: the

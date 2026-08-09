@@ -101,11 +101,14 @@ defmodule KilnCMS.CMS.TranslationsTest do
     assert fr.custom_fields == %{field.name => "alsace"}
     assert fr.category_id == category.id
 
-    # Blocks copied through the storage shape, with fresh stable ids.
+    # Blocks copied through the storage shape, keeping the source's stable ids:
+    # a locale variant is the same document in another language, and shared
+    # block identity is what lets an XLIFF trans-unit address a paragraph
+    # across the pair (#502). A *duplicate* still mints fresh ones.
     assert [%Ash.Union{type: :heading, value: heading}] = fr.blocks
     assert heading.text == "Top"
     [%Ash.Union{value: source_heading}] = CMS.get_page!(en.id, actor: actor).blocks
-    refute heading.id == source_heading.id
+    assert heading.id == source_heading.id
 
     # Tags carried over.
     fr_tags = CMS.get_page!(fr.id, actor: actor, load: [:tags]).tags

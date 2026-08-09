@@ -18,7 +18,7 @@ defmodule KilnCMS.Blocks.HowTo do
     field :name, :string
     field :description, :string
     # Each entry: `%{"name" => label, "text" => instruction}` (string keys).
-    field :steps, {:array, :map}, default: []
+    field :steps, {:array, :map}, default: [], translatable: [:name, :text]
   end
 
   # Match a plain variable, not %__MODULE__{} — see the note in divider.ex: the

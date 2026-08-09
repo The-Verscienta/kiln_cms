@@ -8,8 +8,12 @@ defmodule KilnCMS.Blocks.Custom do
   use Kiln.Block
 
   block :custom do
-    field :legacy_type, :string
-    field :content, :string
+    field :legacy_type, :string, translatable: false
+    # Not offered to a translation vendor (#502): this is the *preserved
+    # payload* of an unmapped block, so it may be prose, may be HTML, and may
+    # be a serialized blob. The XLIFF exporter reports every `custom` block it
+    # skipped rather than dropping it silently.
+    field :content, :string, translatable: :unsupported
     field :data, :map, default: %{}
   end
 

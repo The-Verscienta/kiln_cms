@@ -36,13 +36,94 @@ Two UIs surface it:
 `Translations.create_translation!(kind, record, "fr", actor: user)` (the
 "Create translation" buttons) duplicates the source's content into a new
 **draft** in the target locale: title, slug, blocks (copied through their
-storage shape with fresh stable block ids), excerpt, SEO fields, audience,
-custom fields, category, and tags. Workflow state, schedules, and published
-artifacts start fresh; `canonical_url` is locale-specific and intentionally
-not carried over. Creating a variant that already exists fails on the
-`[slug, locale]` identity.
+storage shape, **keeping the source's stable block ids**), excerpt, SEO
+fields, audience, custom fields, category, and tags. Workflow state,
+schedules, and published artifacts start fresh; `canonical_url` is
+locale-specific and intentionally not carried over. Creating a variant that
+already exists fails on the `[slug, locale]` identity.
+
+Block ids are shared across locale variants on purpose: a variant is the
+*same document in another language*, every consumer of a block id is already
+scoped to one record, and shared identity is what lets an XLIFF trans-unit
+address a paragraph across the pair (see below).
 
 The payload mechanics live in `KilnCMS.CMS.ContentCopy`, shared with the
 **Duplicate** action (`KilnCMS.CMS.Duplication`, #471) — the same clone the
 other way round: a duplicate keeps the locale and regenerates the slug, where
-a translation keeps the slug and changes the locale.
+a translation keeps the slug and changes the locale. A duplicate *is* a
+different document, so it still mints fresh block ids.
+
+## Translation vendors — XLIFF 2.0 export/import
+
+Everything above is in-house translation. To send content to Smartling,
+Lokalise, Crowdin, Phrase, or a freelancer with a CAT tool, the coverage
+dashboard also speaks **XLIFF 2.0** (`KilnCMS.CMS.Xliff`, #502) — the
+interchange format all of them read. A direct vendor-API connector is then a
+thin plugin on top of this seam rather than a second content pipeline.
+
+On `/editor/translations`: pick a target locale, tick the rows to send, and
+**Export** downloads one XLIFF document with a `<file>` per record. Upload the
+returned file with **Import XLIFF** and it is applied to the target-locale
+draft — created through the same one-click path if it does not exist yet.
+
+    {:ok, %{xliff: xml}} = Xliff.export("post", post, "fr", actor: user, tenant: org)
+    {:ok, [report]}      = Xliff.import(xml, actor: user, tenant: org)
+
+### What becomes a trans-unit
+
+Title, excerpt and the SEO fields, plus every block field a block declares as
+prose. Translatability is a property of the **field**, declared in the block
+DSL, so a plugin block (D18) gets the same round trip as a core one:
+
+```elixir
+block :callout do
+  field :heading, :string                                  # prose by default
+  field :body, :rich_text                                  # prose by default
+  field :media_id, :string, translatable: false            # an identifier
+  field :items, {:array, :map}, translatable: [:label]     # named map keys
+  field :legacy_html, :string, translatable: :unsupported  # reported, not sent
+end
+```
+
+`:string` and `:rich_text` are prose unless a field says otherwise;
+`{:array, :map}` fields opt in by naming their keys; `:unsupported` marks text
+this exporter cannot round-trip safely (raw HTML, an opaque legacy payload)
+and makes the export **report** it rather than drop it silently. Rich text is
+segmented per Portable Text block, with tables segmented per cell.
+
+### Unit ids
+
+A unit id is a path built on identity, not position, so a file that comes back
+after the source has been edited still lands:
+
+    title                        a record field
+    b:9f3c…/text                 a block field, by the block's stable id
+    b:9f3c…/body/k:b2            one Portable Text block, by its _key
+    b:9f3c…/body/k:b2/r0c1       one table cell
+    b:9f3c…/items/i0/question    one key of one map-array item
+    b:9f3c…/columns/i0/b#0/text  a nested `columns` child
+
+Nested `columns` children are the one positional segment: they are raw maps
+and only the content editor stamps them an id (#865/#954), so there is nothing
+stable to address them by. Their *parent* is still addressed by identity, so
+reordering top-level blocks is safe either way.
+
+Formatting travels as XLIFF inline codes (`<pc>`) carrying the Portable Text
+mark name. A link's href goes into `<originalData>` as context only: the
+importer restores links from the `markDefs` the record already holds, so a
+returned file can reword an anchor but **cannot retarget a link**.
+
+### What an import tells you
+
+Every unit id in the file lands in exactly one of `applied`, `unchanged` or
+`unknown`, and the dashboard renders all of them. `untranslated` counts the
+units the vendor left empty — an empty `<target>` never clears a field,
+because a partial delivery is normal while a job is in progress.
+`by_position` flags units that only matched through the positional fallback
+(a translation created before block ids were shared across locales); those are
+worth a look, because position is right only while the two trees are shaped
+the same.
+
+Applying a file moves the target's `updated_at`, so the document stops
+reporting as *Outdated*. Staleness is document-level here by design — Kiln
+does not track it per unit, and an import cannot invent that.

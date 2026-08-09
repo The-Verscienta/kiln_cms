@@ -559,7 +559,12 @@ config :mime,
   types: %{
     "application/vnd.api+json" => ["json"],
     "audio/mp4" => ["m4a"],
-    "text/vtt" => ["vtt"]
+    "text/vtt" => ["vtt"],
+    # XLIFF 2.0, the translation-vendor interchange format (#502). Registered
+    # because `allow_upload(accept: ~w(.xlf .xliff))` refuses an extension MIME
+    # cannot resolve — and because the export's `content-type` should name what
+    # the file is rather than fall back to octet-stream.
+    "application/xliff+xml" => ["xlf", "xliff"]
   }
 
 config :ash_json_api,

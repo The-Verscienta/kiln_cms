@@ -50,7 +50,7 @@ defmodule KilnCMS.Blocks.Fragment do
     # which fragment it points at, instead of a bare uuid. Never rendered —
     # expansion replaces the block entirely — and never trusted: the target's
     # own title is what any surface would show.
-    field :label, :string
+    field :label, :string, translatable: false
   end
 
   @impl Kiln.Block.Renderer

@@ -81,6 +81,16 @@ defmodule KilnCMS.CMS.ContentCopy do
   action re-casts it, with every block's stable id stripped so the copy mints
   fresh ones.
 
+  `:keep_ids?` suppresses the strip. Only the translation path passes it, and
+  only because a locale variant is the *same document in another language*:
+  every consumer of a block id is already scoped to one record (collab locks
+  key on `{document_key, block_id}`, version folds and experiment patches read
+  one record's tree, `_id` is emitted per fired document), so sharing ids
+  across variants collides with nothing — and it is what lets a translation
+  vendor's XLIFF file (#502) address a paragraph by identity instead of by
+  position. A **duplicate** is a different document and keeps minting fresh
+  ids; that is the whole difference between the two callers here.
+
   `:role` resets every block field that role may not edit to its declared
   default, and returns which ones were reset.
 
@@ -102,7 +112,9 @@ defmodule KilnCMS.CMS.ContentCopy do
       Ash.Type.dump_to_embedded(attribute.type, record.blocks || [], attribute.constraints)
 
     dumped
-    |> Enum.map(&strip_ids/1)
+    |> then(fn blocks ->
+      if Keyword.get(opts, :keep_ids?, false), do: blocks, else: Enum.map(blocks, &strip_ids/1)
+    end)
     |> reset_restricted(Keyword.get(opts, :role))
   end
 

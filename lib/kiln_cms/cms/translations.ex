@@ -99,7 +99,13 @@ defmodule KilnCMS.CMS.Translations do
     # an error they could do nothing about — `EnforceBlockFieldPolicy` runs on
     # create, where there is no stored tree to diff against, so every admin-set
     # value trips it (#890).
-    {blocks, _withheld} = ContentCopy.dump_blocks(record, role: role(opts))
+    # `keep_ids?`: a locale variant is the same document in another language, so
+    # its blocks keep the source's stable ids. That is what makes a paragraph
+    # addressable across the pair — the XLIFF vendor round-trip (#502) matches
+    # trans-units on block identity, and without shared ids it would have to
+    # fall back to matching on position, which is wrong the moment either side
+    # is reordered. See `ContentCopy.dump_blocks/2` for why sharing them is safe.
+    {blocks, _withheld} = ContentCopy.dump_blocks(record, role: role(opts), keep_ids?: true)
 
     attrs =
       record

@@ -77,7 +77,7 @@ msgstr[1] "%{count} seleccionados"
 #: lib/kiln_cms_web/live/system_live.ex:133
 #: lib/kiln_cms_web/live/taxonomy_live.ex:450
 #: lib/kiln_cms_web/live/team_live.ex:360
-#: lib/kiln_cms_web/live/translations_live.ex:141
+#: lib/kiln_cms_web/live/translations_live.ex:310
 #: lib/kiln_cms_web/live/trash_live.ex:263
 #: lib/kiln_cms_web/live/type_definition_live.ex:170
 #: lib/kiln_cms_web/live/webhook_live.ex:239
@@ -128,7 +128,7 @@ msgstr "Cancelar"
 #: lib/kiln_cms_web/live/menu_live.ex:421
 #: lib/kiln_cms_web/live/overview_live.ex:275
 #: lib/kiln_cms_web/live/release_live.ex:586
-#: lib/kiln_cms_web/live/translations_live.ex:163
+#: lib/kiln_cms_web/live/translations_live.ex:465
 #, elixir-autogen, elixir-format
 msgid "Content"
 msgstr "Contenido"
@@ -263,7 +263,7 @@ msgstr "Papelera"
 #: lib/kiln_cms_web/live/form_builder_live.ex:664
 #: lib/kiln_cms_web/live/media_live.ex:1374
 #: lib/kiln_cms_web/live/slug_regen_live.ex:222
-#: lib/kiln_cms_web/live/translations_live.ex:164
+#: lib/kiln_cms_web/live/translations_live.ex:466
 #, elixir-autogen, elixir-format
 msgid "Type"
 msgstr "Tipo"
@@ -3316,7 +3316,7 @@ msgid "Couldn't create that key. Give it a name."
 msgstr "No se pudo crear esa clave. Póngale un nombre."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:2545
-#: lib/kiln_cms_web/live/translations_live.ex:53
+#: lib/kiln_cms_web/live/translations_live.ex:86
 #, elixir-autogen, elixir-format
 msgid "Couldn't create that translation."
 msgstr "No se pudo crear esa traducción."
@@ -3426,7 +3426,7 @@ msgstr "No se pudo actualizar esa regla."
 msgid "Couldn't verify that passkey — try again."
 msgstr "No se pudo verificar esa clave de acceso: inténtelo de nuevo."
 
-#: lib/kiln_cms_web/live/translations_live.ex:145
+#: lib/kiln_cms_web/live/translations_live.ex:314
 #, elixir-autogen, elixir-format
 msgid "Coverage per locale for every piece of content. Click a chip to edit; a missing chip creates the draft translation."
 msgstr "Cobertura por idioma de cada contenido. Haga clic en una etiqueta para editarla; una etiqueta ausente crea la traducción en borrador."
@@ -3557,6 +3557,7 @@ msgstr "API para desarrolladores"
 #: lib/kiln_cms_web/live/content_editor_live.ex:4898
 #: lib/kiln_cms_web/live/content_editor_live.ex:4925
 #: lib/kiln_cms_web/live/content_editor_live.ex:5119
+#: lib/kiln_cms_web/live/translations_live.ex:425
 #, elixir-autogen, elixir-format
 msgid "Dismiss"
 msgstr "Descartar"
@@ -3572,7 +3573,7 @@ msgid "Done: %{changed} renamed, %{pinned} hand-picked skipped, %{scanned} scann
 msgstr "Listo: %{changed} renombrados, %{pinned} definidos manualmente omitidos, %{scanned} analizados."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:2541
-#: lib/kiln_cms_web/live/translations_live.ex:49
+#: lib/kiln_cms_web/live/translations_live.ex:82
 #, elixir-autogen, elixir-format
 msgid "Draft translation created (%{locale})."
 msgstr "Traducción en borrador creada (%{locale})."
@@ -4132,7 +4133,7 @@ msgid "No consent recorded for this content."
 msgstr "No hay ningún consentimiento registrado para este contenido."
 
 #: lib/kiln_cms_web/live/governance_live.ex:379
-#: lib/kiln_cms_web/live/translations_live.ex:156
+#: lib/kiln_cms_web/live/translations_live.ex:325
 #, elixir-autogen, elixir-format
 msgid "No content yet."
 msgstr "Aún no hay contenido."
@@ -4248,7 +4249,7 @@ msgstr "Correo de notificación"
 msgid "Number"
 msgstr "Número"
 
-#: lib/kiln_cms_web/live/translations_live.ex:152
+#: lib/kiln_cms_web/live/translations_live.ex:321
 #, elixir-autogen, elixir-format
 msgid "Only one locale is configured — add locales to config :kiln_cms, :i18n."
 msgstr "Solo hay un idioma configurado: añada idiomas en config :kiln_cms, :i18n."
@@ -4319,7 +4320,7 @@ msgid "Options — one per line"
 msgstr "Opciones: una por línea"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:8195
-#: lib/kiln_cms_web/live/translations_live.ex:189
+#: lib/kiln_cms_web/live/translations_live.ex:508
 #, elixir-autogen, elixir-format
 msgid "Outdated"
 msgstr "Desactualizado"
@@ -5083,7 +5084,7 @@ msgid "The slug doesn't contain the focus keyphrase."
 msgstr "El slug no contiene la frase clave principal."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:8193
-#: lib/kiln_cms_web/live/translations_live.ex:187
+#: lib/kiln_cms_web/live/translations_live.ex:506
 #, elixir-autogen, elixir-format
 msgid "The source locale was updated after this translation."
 msgstr "El idioma de origen se actualizó después de esta traducción."
@@ -5169,8 +5170,8 @@ msgstr "Auditoría"
 #: lib/kiln_cms_web/components/layouts.ex:988
 #: lib/kiln_cms_web/live/content_editor_live.ex:8176
 #: lib/kiln_cms_web/live/overview_live.ex:488
-#: lib/kiln_cms_web/live/translations_live.ex:26
-#: lib/kiln_cms_web/live/translations_live.ex:143
+#: lib/kiln_cms_web/live/translations_live.ex:44
+#: lib/kiln_cms_web/live/translations_live.ex:312
 #, elixir-autogen, elixir-format
 msgid "Translations"
 msgstr "Traducciones"
@@ -5344,7 +5345,7 @@ msgstr "Su nombre"
 msgid "Your recovery codes — save them now, they won't be shown again."
 msgstr "Sus códigos de recuperación: guárdelos ahora, no se volverán a mostrar."
 
-#: lib/kiln_cms_web/live/translations_live.ex:123
+#: lib/kiln_cms_web/live/translations_live.ex:283
 #, elixir-autogen, elixir-format
 msgid "archived"
 msgstr "archivado"
@@ -5375,7 +5376,7 @@ msgstr "tipos de contenido · %{fields} campos · %{terms} términos de taxonom�
 msgid "content types · %{terms} taxonomy terms"
 msgstr "tipos de contenido · %{terms} términos de taxonomía"
 
-#: lib/kiln_cms_web/live/translations_live.ex:124
+#: lib/kiln_cms_web/live/translations_live.ex:284
 #, elixir-autogen, elixir-format
 msgid "draft"
 msgstr "borrador"
@@ -5411,7 +5412,7 @@ msgstr "rebote permanente"
 msgid "hybrid keyword + semantic search across all content types."
 msgstr "búsqueda híbrida por palabras clave y semántica en todos los tipos de contenido."
 
-#: lib/kiln_cms_web/live/translations_live.ex:122
+#: lib/kiln_cms_web/live/translations_live.ex:282
 #, elixir-autogen, elixir-format
 msgid "in review"
 msgstr "en revisión"
@@ -5431,7 +5432,7 @@ msgstr "último uso el %{date}"
 msgid "locale discovery for building language switchers."
 msgstr "descubrimiento de idiomas para construir selectores de idioma."
 
-#: lib/kiln_cms_web/live/translations_live.ex:120
+#: lib/kiln_cms_web/live/translations_live.ex:280
 #, elixir-autogen, elixir-format
 msgid "missing"
 msgstr "ausente"
@@ -5457,7 +5458,7 @@ msgid "post, page — empty = all"
 msgstr "entrada, página — vacío = todos"
 
 #: lib/kiln_cms_web/components/core_components.ex:294
-#: lib/kiln_cms_web/live/translations_live.ex:121
+#: lib/kiln_cms_web/live/translations_live.ex:281
 #, elixir-autogen, elixir-format
 msgid "published"
 msgstr "publicado"
@@ -7904,6 +7905,7 @@ msgid "Write a comment…"
 msgstr "Escribe un comentario…"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex:993
+#: lib/kiln_cms_web/live/translations_live.ex:386
 #, elixir-autogen, elixir-format
 msgid "Clear"
 msgstr "Borrar"
@@ -10314,3 +10316,169 @@ msgstr "Esto no es una imagen, así que nadie lo lee en voz alta. Se muestra por
 #, elixir-autogen, elixir-format
 msgid "can't be stored — video and audio metadata stripping isn't available on this server"
 msgstr "no se puede almacenar: la eliminación de metadatos de vídeo y audio no está disponible en este servidor"
+
+#: lib/kiln_cms_web/live/translations_live.ex:171
+#, elixir-autogen, elixir-format
+msgid "%{locale} is not a configured locale"
+msgstr "%{locale} no es una configuración regional configurada"
+
+#: lib/kiln_cms_web/live/translations_live.ex:435
+#, elixir-autogen, elixir-format
+msgid "%{n} applied"
+msgstr "%{n} aplicadas"
+
+#: lib/kiln_cms_web/live/translations_live.ex:440
+#, elixir-autogen, elixir-format
+msgid "%{n} left untranslated"
+msgstr "%{n} sin traducir"
+
+#: lib/kiln_cms_web/live/translations_live.ex:449
+#, elixir-autogen, elixir-format
+msgid "%{n} matched by position, not identity — check them"
+msgstr "%{n} coincidieron por posición, no por identidad — revísalas"
+
+#: lib/kiln_cms_web/live/translations_live.ex:435
+#, elixir-autogen, elixir-format
+msgid "%{n} unchanged"
+msgstr "%{n} sin cambios"
+
+#: lib/kiln_cms_web/live/translations_live.ex:443
+#, elixir-autogen, elixir-format
+msgid "%{n} unit(s) matched nothing: %{ids}"
+msgstr "%{n} unidad(es) no coincidieron con nada: %{ids}"
+
+#: lib/kiln_cms_web/live/translations_live.ex:412
+#, elixir-autogen, elixir-format
+msgid "An export is capped at %{max} records — %{over} selected rows are not in this file."
+msgstr "Una exportación se limita a %{max} registros — %{over} filas seleccionadas no están en este archivo."
+
+#: lib/kiln_cms_web/live/translations_live.ex:143
+#, elixir-autogen, elixir-format
+msgid "Choose an XLIFF file first."
+msgstr "Elige primero un archivo XLIFF."
+
+#: lib/kiln_cms_web/live/translations_live.ex:162
+#, elixir-autogen, elixir-format
+msgid "Couldn't read %{name}: %{reason}."
+msgstr "No se pudo leer %{name}: %{reason}."
+
+#: lib/kiln_cms_web/live/translations_live.ex:463
+#, elixir-autogen, elixir-format
+msgid "Export"
+msgstr "Exportar"
+
+#: lib/kiln_cms_web/live/translations_live.ex:375
+#, elixir-autogen, elixir-format
+msgid "Export %{count} selected"
+msgstr "Exportar %{count} seleccionadas"
+
+#: lib/kiln_cms_web/live/translations_live.ex:400
+#, elixir-autogen, elixir-format
+msgid "Import XLIFF"
+msgstr "Importar XLIFF"
+
+#: lib/kiln_cms_web/live/translations_live.ex:188
+#, elixir-autogen, elixir-format
+msgid "Import one file at a time."
+msgstr "Importa un archivo cada vez."
+
+#: lib/kiln_cms_web/live/translations_live.ex:422
+#, elixir-autogen, elixir-format
+msgid "Import result — %{filename}"
+msgstr "Resultado de la importación — %{filename}"
+
+#: lib/kiln_cms_web/live/translations_live.ex:152
+#, elixir-autogen, elixir-format
+msgid "Imported %{name}: %{count} translations applied."
+msgstr "Importado %{name}: %{count} traducciones aplicadas."
+
+#: lib/kiln_cms_web/live/translations_live.ex:480
+#, elixir-autogen, elixir-format
+msgid "Include in the XLIFF export"
+msgstr "Incluir en la exportación XLIFF"
+
+#: lib/kiln_cms_web/live/translations_live.ex:482
+#, elixir-autogen, elixir-format
+msgid "No %{locale} source to translate from"
+msgstr "No hay origen en %{locale} desde el que traducir"
+
+#: lib/kiln_cms_web/live/translations_live.ex:186
+#, elixir-autogen, elixir-format
+msgid "Only .xlf, .xliff and .xml files can be imported."
+msgstr "Solo se pueden importar archivos .xlf, .xliff y .xml."
+
+#: lib/kiln_cms_web/live/translations_live.ex:338
+#, elixir-autogen, elixir-format
+msgid "Send content out as XLIFF 2.0 and apply the file that comes back. Tick rows below, pick the target locale, then export."
+msgstr "Envía contenido como XLIFF 2.0 y aplica el archivo que vuelve. Marca filas abajo, elige la configuración regional de destino y exporta."
+
+#: lib/kiln_cms_web/live/translations_live.ex:350
+#: lib/kiln_cms_web/live/translations_live.ex:355
+#, elixir-autogen, elixir-format
+msgid "Target locale"
+msgstr "Configuración regional de destino"
+
+#: lib/kiln_cms_web/live/translations_live.ex:189
+#, elixir-autogen, elixir-format
+msgid "That file could not be uploaded."
+msgstr "No se pudo subir ese archivo."
+
+#: lib/kiln_cms_web/live/translations_live.ex:181
+#, elixir-autogen, elixir-format
+msgid "That file is larger than the %{max} MB limit."
+msgstr "Ese archivo supera el límite de %{max} MB."
+
+#: lib/kiln_cms_web/live/translations_live.ex:378
+#, elixir-autogen, elixir-format
+msgid "Tick a row to export."
+msgstr "Marca una fila para exportar."
+
+#: lib/kiln_cms_web/live/translations_live.ex:335
+#, elixir-autogen, elixir-format
+msgid "Translation vendors (XLIFF)"
+msgstr "Proveedores de traducción (XLIFF)"
+
+#: lib/kiln_cms_web/live/translations_live.ex:437
+#, elixir-autogen, elixir-format
+msgid "draft created"
+msgstr "borrador creado"
+
+#: lib/kiln_cms_web/live/translations_live.ex:432
+#, elixir-autogen, elixir-format
+msgid "failed"
+msgstr "falló"
+
+#: lib/kiln_cms_web/live/translations_live.ex:174
+#, elixir-autogen, elixir-format
+msgid "larger than the %{max} MB limit"
+msgstr "supera el límite de %{max} MB"
+
+#: lib/kiln_cms_web/live/translations_live.ex:166
+#, elixir-autogen, elixir-format
+msgid "not an XLIFF 2.0 file"
+msgstr "no es un archivo XLIFF 2.0"
+
+#: lib/kiln_cms_web/live/translations_live.ex:176
+#, elixir-autogen, elixir-format
+msgid "the XML could not be parsed"
+msgstr "no se pudo analizar el XML"
+
+#: lib/kiln_cms_web/live/translations_live.ex:167
+#, elixir-autogen, elixir-format
+msgid "the file is empty"
+msgstr "el archivo está vacío"
+
+#: lib/kiln_cms_web/live/translations_live.ex:168
+#, elixir-autogen, elixir-format
+msgid "the file names no target locale"
+msgstr "el archivo no indica ninguna configuración regional de destino"
+
+#: lib/kiln_cms_web/live/translations_live.ex:430
+#, elixir-autogen, elixir-format
+msgid "unknown file"
+msgstr "archivo desconocido"
+
+#: lib/kiln_cms_web/live/translations_live.ex:177
+#, elixir-autogen, elixir-format
+msgid "unreadable"
+msgstr "ilegible"

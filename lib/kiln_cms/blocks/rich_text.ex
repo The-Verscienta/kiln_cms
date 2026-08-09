@@ -10,7 +10,11 @@ defmodule KilnCMS.Blocks.RichText do
 
   block :rich_text do
     field :body, :rich_text, default: []
-    field :legacy_html, :string
+    # Transitional stored TipTap HTML. Deliberately **not** translatable
+    # (#502): segmenting HTML into trans-units is a different problem from
+    # segmenting Portable Text, and a vendor editing raw markup writes broken
+    # tags back. The XLIFF exporter reports blocks whose text lives here.
+    field :legacy_html, :string, translatable: :unsupported
   end
 
   @impl Kiln.Block.Renderer
