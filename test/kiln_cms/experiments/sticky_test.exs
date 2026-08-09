@@ -333,6 +333,39 @@ defmodule KilnCMS.Experiments.StickyTest do
       assert conversions(ctx, ctx.treatment.id) == 1
     end
 
+    test "an experiment goaled at its OWN document converts nothing", ctx do
+      # The self-conversion failure, on the `:content_view` branch. `assign_sticky`
+      # writes the exposure and `record_content_view/3` reads it back off the SAME
+      # conn a few lines later, so without the guard the impression converts itself
+      # within one request, the exposure is spent, and the next request mints and
+      # converts another — every arm reporting 100% forever, which is worse than
+      # reporting nothing because it looks like a result.
+      #
+      # `:start` refuses a self-goal and a running experiment cannot be edited, so
+      # this is seeded — "unreachable" is a property of the WRITE layer, and the
+      # guard being tested is in the DELIVERY layer. `/editor/experiments` (#982)
+      # adds an editing surface. `Health.blocked_reason/1` also reports this as
+      # `:goal_is_self`, and that report is only true if delivery agrees.
+      Ash.Seed.update!(ctx.experiment, %{
+        goal_content_type: "page",
+        goal_document_id: ctx.landing.id
+      })
+
+      KilnCMS.Cache.bust_experiments(ctx.landing.org_id)
+
+      conn =
+        build_conn()
+        |> put_req_cookie(Sticky.exposure_cookie(), ctx.treatment.id)
+        |> get("/#{ctx.landing.slug}")
+
+      assert html_response(conn, 200)
+      assert conversions(ctx, ctx.treatment.id) == 0
+
+      # And the exposure is NOT spent — the visitor is still in the experiment,
+      # they simply have not reached anything that converts.
+      refute match?(%{max_age: 0}, Map.get(conn.resp_cookies, Sticky.exposure_cookie(), %{}))
+    end
+
     test "the goal page leaves the shared cache while the experiment runs", ctx do
       # Invariant 4 applied to a SECOND page. The conversion is counted at the
       # origin, so a CDN holding this page for max-age=60 swallows every
