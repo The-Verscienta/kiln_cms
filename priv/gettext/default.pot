@@ -829,6 +829,11 @@ msgstr ""
 msgid "Add an item"
 msgstr ""
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Add at least one site to embed on, or choose “This site only”."
+msgstr ""
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Add block"
@@ -1828,6 +1833,11 @@ msgstr ""
 msgid "Choose video"
 msgstr ""
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Choose “Only these sites” to use the list you typed, or clear the box."
+msgstr ""
+
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Choose…"
@@ -1910,6 +1920,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/release_preview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Coming off the site"
+msgstr ""
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Comma-separated origins (scheme and host, optionally a port). Pages on this form's own site may always frame it."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -2632,7 +2647,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
-msgid "Cross-site embedding is off: this form may only be framed by pages on its own site. Set the EMBED_ORIGINS environment variable to the sites that should be allowed to embed it."
+msgid "Cross-site embedding is off: this form may only be framed by pages on its own site. List the sites that should be allowed to embed it below."
 msgstr ""
 
 #: lib/kiln_cms_web/live/slug_regen_live.ex
@@ -5771,6 +5786,11 @@ msgstr ""
 msgid "Only sends when the form has an email field and the visitor filled it in."
 msgstr ""
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Only these sites:"
+msgstr ""
+
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Only: %{types}"
@@ -7761,7 +7781,12 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
-msgid "Sites allowed to embed: %{origins}"
+msgid "Sites allowed to embed this form"
+msgstr ""
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sites allowed to embed this form: %{origins}"
 msgstr ""
 
 #: lib/kiln_cms_web/live/media_live.ex
@@ -8441,7 +8466,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
-msgid "The iframe sizes itself to the form. Which sites may embed it is set by the EMBED_ORIGINS environment variable."
+msgid "The iframe sizes itself to the form."
 msgstr ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
@@ -8701,9 +8726,19 @@ msgstr ""
 msgid "This runs code on your public site."
 msgstr ""
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "This setting applies to this form only — another site's forms are unaffected by what you allow here."
+msgstr ""
+
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "This site is using the deployment defaults."
+msgstr ""
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site only"
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
@@ -9167,6 +9202,11 @@ msgstr ""
 msgid "Use system theme"
 msgstr ""
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Use the deployment default"
+msgstr ""
+
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Use the operator defaults"
@@ -9407,6 +9447,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "Who can author what on this site: members, their capability tier, and granular scope — assigned directly or through a custom role."
+msgstr ""
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Who may embed this form"
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/content_html/lock.html.heex

@@ -60,6 +60,35 @@ defmodule KilnCMS.Config.OriginList do
   @type t :: :all | [String.t()]
 
   @doc """
+  Splits a list an **admin typed into a settings form**, rather than one an
+  operator set in the environment.
+
+  Same split/trim/drop-blanks half as `parse/2`, and deliberately none of the
+  other half: no `"*"` → `:all` (these lists are stored as `{:array, :string}`,
+  so an atom would be a type error), and no validation — a settings form has a
+  resource validation behind it, which can name the offending entry back at the
+  person who typed it instead of warning on a stderr they will never read.
+
+  Whitespace separates as well as commas, because "one per line" is what a
+  person pastes. That also means an entry can never contain a space, which for
+  a value destined for a CSP directive is the right accident to have.
+
+      iex> KilnCMS.Config.OriginList.parse_list("https://a.test, https://b.test")
+      ["https://a.test", "https://b.test"]
+
+      iex> KilnCMS.Config.OriginList.parse_list("  ")
+      []
+
+      iex> KilnCMS.Config.OriginList.parse_list(nil)
+      []
+  """
+  @spec parse_list(String.t() | nil) :: [String.t()]
+  def parse_list(value) when is_binary(value),
+    do: String.split(value, ~r/[\s,]+/, trim: true)
+
+  def parse_list(_value), do: []
+
+  @doc """
   Parses an origin-list env value.
 
   ## Options

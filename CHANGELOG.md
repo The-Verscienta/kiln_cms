@@ -317,6 +317,56 @@ migration, a rewritten column, a dropped config key).
   an embed block, and other shortcodes are removed rather than left as literal
   `[gallery ids="1,2"]` text in the middle of a sentence.
 
+### Security
+
+- **A form's embed allowlist is now the form's, not the deployment's** (#648).
+  `EMBED_ORIGINS` has no tenant dimension, so on a multi-org instance it had to
+  be the *union* of every org's embedders — and that union was what every org's
+  forms became framable by. An operator allowlisting `https://partner-a.com` for
+  one site also authorised it to frame every other site's forms, which is the
+  overlay-and-harvest attack #562 closed, one tenant boundary over. The builder's
+  Embed tab could not be accurate either: it answered a deployment-wide question,
+  so an admin checking "may my embedders frame this?" before pasting a snippet
+  got an approximation of the answer.
+
+  Forms carry an `embed_origins` allowlist, set in the Embed tab, and the embed
+  page's `frame-ancestors` comes from it. Three states: **use the deployment
+  default** (unset — unchanged behaviour, and the whole single-org story),
+  **this site only** (closed for this form whatever the deployment allows), and
+  **only these sites**. A form's list *replaces* the deployment's rather than
+  extending it, so an org can also narrow below what another org needed added
+  globally. The tab's banner and allowlist line now read the policy that will
+  actually be served for that form, read back out of the rendered directive so
+  they cannot name an origin the header does not grant.
+
+  Entries are validated on save with the same predicate as the per-site CSP
+  additions in Code Injection (`KilnCMS.CMS.Validations.CspOrigins`): a full
+  origin, no keyword sources, no bare `*`, and nothing that could end the
+  directive or the header. A bad entry is **refused, naming itself**, rather
+  than dropped — a shorter allowlist than the admin typed is indistinguishable
+  from a deliberate one. `EMBED_ORIGINS` keeps its own looser grammar and its
+  fail-closed parsing; nothing about a single-org deployment changes.
+
+  **On a multi-org deployment, set the allowlist per form and leave
+  `EMBED_ORIGINS` unset** — a form that has not been given one still inherits
+  the deployment's, so the shared union governs every untouched form exactly as
+  before. `docs/threat-model.md` records what that leaves open.
+
+- **A CSP source may no longer wildcard a public suffix.**
+  `KilnCMS.CMS.Validations.CspOrigins` accepted `https://*.com`, which is
+  syntactically a leftmost-label wildcard and semantically every `.com` site —
+  a bare `*` wearing a hat, in the validation that refuses bare `*`. A wildcard
+  now needs at least two labels after it (`https://*.acme.com`). Affects the
+  per-site Code Injection lists as well as the new embed allowlist; a stored
+  value in the old shape keeps working until the next save of that settings
+  form, which then refuses it.
+
+- **A form's embed allowlist survives duplication.** `duplicate_form` copied a
+  hand-written list of attributes that had already drifted (the autoresponder
+  fields were never copied), so a duplicate lost `embed_origins` and silently
+  fell back to the deployment-wide allowlist. It now copies every attribute the
+  create action accepts.
+
 ### Fixed
 
 - **A content type's default SEO description now reaches every surface that
@@ -348,6 +398,21 @@ migration, a rewritten column, a dropped config key).
   excerpt, it stays out of a paywall teaser's visible body copy, and on a teaser
   the two tokens needing columns the paywall-safe select omits go quiet rather
   than widening that select. See [docs/seo.md](docs/seo.md).
+
+- **The form builder showed `%{value}` instead of the value it was refusing.**
+  Splode interpolates an error's `vars` only inside `Exception.message/1`, and
+  the builder read `.message` off the struct — so a rejected setting reported
+  which field was wrong but never which entry. Affects every validation message
+  in `/editor/forms/:id`.
+
+- **The embed page now sends `Vary: Accept-Language`.** It renders through
+  gettext and is served `Cache-Control: public`, so a shared cache could hand
+  the first visitor's language to everyone for the cache window. Published HTML
+  already did this.
+
+- **Two separators in the form builder rendered as nothing.** `class="divider"`
+  is a DaisyUI class, and this repo has no DaisyUI (`docs/design-language.md`).
+
 
 - **The sitemap escaped three characters where the feeds escaped five** (#502).
   Its copy of the XML escaper let a C0 control byte through, and one of those

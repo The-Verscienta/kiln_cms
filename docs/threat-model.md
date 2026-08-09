@@ -475,9 +475,13 @@ build if a resource is ever registered without that authorizer.
 - **CSRF** — deliberately absent: forms are meant to be posted from third-party
   pages. Abuse is bounded by the `:form` bucket and a honeypot field, and a
   tripped honeypot returns success so a bot cannot distinguish rejection.
-- **Framing** — the embed route sets its own `frame-ancestors` from
-  `EMBED_ORIGINS`, which defaults to same-origin only (#562), so cross-site
-  embedding is opt-in.
+- **Framing** — the embed route sets its own `frame-ancestors` from the form's
+  `embed_origins` (#648), falling back to the deployment-wide `EMBED_ORIGINS`,
+  which defaults to same-origin only (#562), so cross-site embedding is opt-in.
+  Per form because a deployment-wide allowlist has to be the union of every
+  org's embedders, and that union is what every org's forms become framable by.
+  A form's list is written by an org admin — the party whose submissions an
+  overlay would harvest — and grants nothing across the tenant boundary.
 - **Submission contents** — treat as untrusted PII; retention is covered in
   [`data-flows.md`](data-flows.md).
 
@@ -560,9 +564,20 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    opt-in, and a malformed value closes the policy rather than widening it.
    `EMBED_ORIGINS=*` restores the old any-site behaviour if a deployment
    genuinely wants it. See [forms.md](forms.md#embedding-on-another-site).
-   **Remainder:** the allowlist is deployment-global while forms are org-scoped,
-   so on a multi-org instance an origin added for one org may frame every org's
-   forms. Tracked in #648.
+   **Remainder, narrowed in #648:** the allowlist can now be set **on the
+   form**, and a form's list replaces the deployment's rather than extending it,
+   so an entry made for one org reaches no other org's forms. What is *not*
+   closed is the default: a form that has not been given a list still inherits
+   `EMBED_ORIGINS`, which has no tenant dimension — so on a multi-org instance
+   the shared union governs every untouched form. **A multi-org deployment
+   should set the allowlist per form and leave `EMBED_ORIGINS` unset**; the
+   variable remains the single-org convenience. Two things would close it
+   outright: a per-org default so an operator decides once per org rather than
+   once per form, and an operator ceiling — today an org admin can open framing
+   on their own forms that the operator had left closed. That is deliberate (a
+   form's `frame-ancestors` governs who may overlay *that org's* form and
+   harvest *that org's* submissions, and grants nothing across the tenant
+   boundary), but it is a change of who holds the control and worth stating.
 2. **Passphrase-locked content is weak by construction (#496).** A shared secret
    typed into a public form is not access control in the sense the rest of this
    document uses the phrase: there is no per-reader identity, so no audit trail

@@ -89,14 +89,10 @@ defmodule KilnCMSWeb.CodeInjectionLive do
 
   # One origin per line, which is what someone pastes. Blank lines and stray
   # whitespace are dropped rather than validated into an error — a trailing
-  # newline is not a mistake worth a red form.
-  defp parse_origins(nil), do: []
-
-  defp parse_origins(value) do
-    value
-    |> String.split(~r/[\s,]+/, trim: true)
-    |> Enum.reject(&(&1 == ""))
-  end
+  # newline is not a mistake worth a red form. Shared with the form builder's
+  # Embed tab (#648) so two panels feeding the same `CspOrigins` validation do
+  # not disagree about what counts as a separator.
+  defp parse_origins(value), do: KilnCMS.Config.OriginList.parse_list(value)
 
   defp load_injection(socket) do
     row = current_row(socket)

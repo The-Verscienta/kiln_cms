@@ -43,7 +43,8 @@ defmodule KilnCMS.CMS.Form do
       :submit_label,
       :autoresponder_enabled,
       :autoresponder_subject,
-      :autoresponder_body
+      :autoresponder_body,
+      :embed_origins
     ]
 
     create :create, primary?: true
@@ -100,6 +101,12 @@ defmodule KilnCMS.CMS.Form do
     end
 
     validate KilnCMS.CMS.Validations.FormAutoresponderTokens
+
+    # `embed_origins` is concatenated into this form's `frame-ancestors` (#648),
+    # so it is checked with the same predicate as the per-site CSP lists rather
+    # than a looser one: full origin, no keyword sources, no bare `*`, and no
+    # character that could end the directive or the header.
+    validate {KilnCMS.CMS.Validations.CspOrigins, fields: [:embed_origins]}
   end
 
   # Multi-tenancy (epic #336): a form belongs to one site, so its slug is unique
@@ -180,6 +187,23 @@ defmodule KilnCMS.CMS.Form do
     attribute :autoresponder_body, :string,
       public?: true,
       constraints: [max_length: KilnCMS.Limits.paragraph()]
+
+    # Which parent sites may frame *this* form's embed page (#648) — `nil` to
+    # inherit the deployment's `EMBED_ORIGINS`, `[]` for same-origin only
+    # whatever the deployment allows, or this form's own allowlist instead of
+    # the deployment's. `KilnCMSWeb.Embed` holds the argument for why the
+    # allowlist belongs on the form and not on one deployment-wide variable;
+    # `nil` vs `[]` is the distinction to preserve when touching this.
+    #
+    # Bounded because these are concatenated into a response HEADER, and a
+    # reverse proxy answers 502 rather than truncating: nginx's default
+    # `proxy_buffer_size` is 4 KB. 16 origins at the 253-byte DNS name limit is
+    # ~4 KB of sources — already more than any real allowlist and near the
+    # smallest limit in the wild, so the cap is 16 rather than the 32
+    # `SiteCodeInjection` uses across three lists on a different header.
+    attribute :embed_origins, {:array, :string},
+      public?: true,
+      constraints: [max_length: 16, items: [max_length: 253]]
 
     timestamps()
   end
