@@ -2316,24 +2316,24 @@ migration, a rewritten column, a dropped config key).
 
 ### Upgrading
 
-**If you already have event content, run the occurrence backfill once** (#766):
+**The occurrence backfill runs itself** (#766) — no step to perform, but worth
+knowing it happens. The migration adds `next_occurrence_at` and cannot fill it
+(the value is the recurrence engine's output, not a function of other columns),
+and the hourly sweep will not fill it either, because it visits rows whose
+occurrence has **passed** and a `NULL` has not passed anything. So booting
+enqueues a one-off backfill job on the `:default` queue.
 
-```bash
-mix kiln.occurrences.backfill        # or, in a release image:
-bin/kiln_cms eval 'KilnCMS.Events.Backfill.run()'
-```
+What that means on your first deploy after upgrading: one background pass over
+your event-shaped content, writing only the rows whose value changes. It is
+deduplicated for a day at the database level, so a rolling deploy queues one job
+across all replicas. Nothing else reads the column — the `.ics` routes, the
+feeds and the document pages are unaffected either way — so the blast radius is
+the new `/<plural>` and `/<plural>/index.json` routes only.
 
-The migration adds `next_occurrence_at` but cannot fill it — the value is the
-output of the recurrence engine, not a function of other columns — and the
-hourly sweep will not fill it either, because the sweep visits rows whose
-occurrence has **passed** and a `NULL` has not passed anything. Skip this and
-`/<plural>` and `/<plural>/index.json` are simply empty until every event
-happens to be re-saved. Nothing else is affected: the `.ics` routes, the feeds
-and the document pages do not read the column.
-
-Safe on a live site, and safe to re-run: it writes only the rows whose value
-actually changes, so a second pass writes nothing. Reversible by rolling the pin
-back — the column is additive and nothing else reads it.
+Set `KILN_OCCURRENCE_BACKFILL_ON_BOOT=false` if you would rather run
+`mix kiln.occurrences.backfill` (or `bin/kiln_cms eval
+'KilnCMS.Events.Backfill.run()'`) at a time you choose. Reversible by rolling
+the pin back — the column is additive and nothing else reads it.
 
 **`POST /api/auth/sign_in` can now answer `200` instead of `201`, and any client
 that branches on the presence of `token` will read that as a failure.** For an

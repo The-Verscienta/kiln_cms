@@ -9,7 +9,7 @@ import Config
 #
 # ## Boolean environment variables
 #
-# All eight on/off variables below go through `KilnCMS.Config.Env` — one
+# Every on/off variable below goes through `KilnCMS.Config.Env` — one
 # parser, one set of accepted spellings, one rule for a value it cannot read
 # (#607). Do not hand-roll an eighth: matching the raw value is how
 # `DATABASE_SSL=True` came to silently disable Postgres TLS (#606) and
@@ -361,6 +361,23 @@ end
 # `KilnCMS.Events.Sweep.run/0` from your own scheduler) to turn it off.
 if cron = System.get_env("KILN_OCCURRENCE_SWEEP_CRON") do
   config :kiln_cms, :occurrence_sweep_cron, cron
+end
+
+# And whether booting queues the one-off backfill that gives pre-existing
+# content its first value. On by default because the alternative is an upgrade
+# step someone has to remember, and the index is simply empty until they do.
+# Deduplicated for a day, and a redundant run writes nothing — so the honest
+# reason to turn this off is wanting to run `mix kiln.occurrences.backfill`
+# yourself, at a time you choose.
+#
+# `Env.fetch/1` rather than `Env.flag/2`, and that is load-bearing: this file is
+# evaluated in EVERY environment and AFTER `config/test.exs`, so a `flag(…,
+# true)` default would overwrite the `false` the test config sets — turning the
+# suite's application boot back into a committed `oban_jobs` row. Only a
+# recognized spelling writes anything here; unset leaves whichever default is
+# already configured.
+with {:ok, enabled?} <- Env.fetch("KILN_OCCURRENCE_BACKFILL_ON_BOOT") do
+  config :kiln_cms, :occurrence_backfill_on_boot, enabled?
 end
 
 if user_agent = System.get_env("KILN_LINK_CHECK_USER_AGENT") do
