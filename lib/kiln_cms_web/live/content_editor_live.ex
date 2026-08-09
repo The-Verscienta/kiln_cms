@@ -2481,6 +2481,37 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, apply_children(socket, bc)}
   end
 
+  # The form-serialized shape (#893). A `<select>` inside the editor's form
+  # cannot deliver `phx-value-*` — LiveView routes a form-associated
+  # `phx-change` through `pushInput`, which scrapes those off the form rather
+  # than the element — so the nested-child select carries its identifiers in its
+  # `name` instead, and they arrive here as ordinary nested params.
+  #
+  # One entry at every level, because `pushInput` filters the serialized form to
+  # the changed input's name. Anything else is a payload this event did not
+  # send, and is refused rather than guessed at.
+  def handle_event("col_update_child", %{"col_child" => payload}, socket)
+      when is_map(payload) do
+    with [{id, children}] when is_map(children) <- Map.to_list(payload),
+         [{child_id, fields}] when is_map(fields) <- Map.to_list(children),
+         [{field, value}] when is_binary(value) <- Map.to_list(fields) do
+      bc =
+        update_columns(socket.assigns.block_children, id, fn blocks ->
+          Enum.map(blocks, &maybe_put_field(&1, child_id, field, value))
+        end)
+
+      {:noreply, apply_children(socket, bc)}
+    else
+      # Logged, not swallowed. This head matches before `MalformedEvent`'s
+      # catch-all can, so a payload that fails the shape below would otherwise
+      # die here in total silence — which is the condition #893 was, and the
+      # reason it survived. Same level and same non-prod gate as that fallback.
+      unexpected ->
+        KilnCMSWeb.MalformedEvent.log(__MODULE__, {"col_update_child", unexpected})
+        {:noreply, socket}
+    end
+  end
+
   def handle_event(
         "col_update_child",
         %{"id" => id, "child" => child_id, "field" => field} = p,
@@ -3620,10 +3651,24 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   # Apply `fun` to every column's child-block list of a block.
+  # `Map.update/4`'s default would *create* an entry for a block id that is not
+  # in the tree. The id comes from a client event, and on a published record —
+  # which never autosaves, so `assign_record/2` never re-seeds this map — a
+  # fabricated one would sit in socket state for the whole session.
+  #
+  # Defensive, and deliberately untested: a phantom entry matches no block, so
+  # `inject_children/2` blanks nothing and there is no observable damage to
+  # assert on today. A test for it could not fail, and one that cannot fail is
+  # worse than none. The guard is here because the *next* reader of this map
+  # should not have to re-derive that argument.
   defp update_columns(block_children, block_id, fun) do
-    Map.update(block_children, block_id, [], fn cols ->
-      Enum.map(cols, &update_col_blocks(&1, fun))
-    end)
+    if Map.has_key?(block_children, block_id) do
+      Map.update!(block_children, block_id, fn cols ->
+        Enum.map(cols, &update_col_blocks(&1, fun))
+      end)
+    else
+      block_children
+    end
   end
 
   defp update_col_blocks(col, fun) do
@@ -3775,7 +3820,22 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # render, so an out-of-range value is harmless, but a non-integer would fail the
   # embedded cast).
   defp put_child_field(child, "level", value), do: Map.put(child, "level", to_int(value))
-  defp put_child_field(child, field, value), do: Map.put(child, field, value)
+
+  # Only the fields this child's own editor renders. `field` arrives from a
+  # client event, and a bare `Map.put/3` let one name a *structural* key:
+  # `_type` rewrites the union discriminator, so the next save fails its typed
+  # cast — and on the autosave path that surfaces as `save_state: :error` with
+  # no field to point at, leaving the document unsaveable until the block is
+  # deleted; `id` collides two children's DOM ids and their drag addressing.
+  # Neither is reachable from the rendered markup, which is exactly why nothing
+  # would have noticed.
+  defp put_child_field(child, field, value) do
+    if field in Enum.map(nested_fields_for(child["_type"]), &elem(&1, 0)) do
+      Map.put(child, field, value)
+    else
+      child
+    end
+  end
 
   defp to_int(value) when is_integer(value), do: value
 
@@ -7245,18 +7305,47 @@ defmodule KilnCMSWeb.ContentEditorLive do
         phx-value-field={field}
         class="w-full rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
       />
+      <%!-- Named, unlike its nameless siblings above, and the name carries the
+      identifiers (#893). A `<select>` inside a form routes its own `phx-change`
+      through LiveView's `pushInput`, which serializes the form filtered to the
+      changed input's `name` and scrapes `phx-value-*` off the FORM, not the
+      element — so a nameless select sends neither its value nor its ids, and
+      the handler head could not match. The text inputs beside it work because
+      `phx-blur` is not a form binding and goes through `pushEvent`, which does
+      carry `phx-value-*`; that asymmetry is what hid this.
+
+      Named outside the `form[...]` namespace on purpose, so it stays out of the
+      content changeset exactly as the nameless inputs do: `validate` matches
+      `%{"form" => params}` and never sees this key, and the nested tree is
+      re-injected from socket state by `inject_children/2` regardless. --%>
       <select
         :if={@child["_type"] == "heading"}
+        name={"col_child[#{@block_id}][#{@child["id"]}][level]"}
         phx-change="col_update_child"
-        phx-value-id={@block_id}
-        phx-value-child={@child["id"]}
-        phx-value-field="level"
         class="rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
       >
-        <option :for={n <- 1..6} value={n} selected={to_int(@child["level"]) == n}>H{n}</option>
+        <%!-- Matched to what will actually publish. A child with no stored `level`
+        (a legacy one, or an empty string) made `to_int/1` return 0, so no option
+        was `selected` and the browser showed the first — H1 — while delivery
+        renders `h2`, because `Blocks.Heading.clamp/1` falls back to its default.
+        Harmless while the control was inert; a lie now that it works. --%>
+        <option :for={n <- 1..6} value={n} selected={child_heading_level(@child) == n}>H{n}</option>
       </select>
     </div>
     """
+  end
+
+  # The level the select must show: what `KilnCMS.Blocks.Heading` will render,
+  # not what happens to be stored. Anything outside 1..6 — including a missing
+  # or unparseable value — resolves to the same default that block clamps to, so
+  # the control and the published page cannot disagree.
+  @heading_default_level 2
+
+  defp child_heading_level(child) do
+    case to_int(child["level"]) do
+      n when n in 1..6 -> n
+      _out_of_range -> @heading_default_level
+    end
   end
 
   # {field, placeholder} pairs for a nested child type's text inputs.
