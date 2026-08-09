@@ -9,7 +9,19 @@ defmodule KilnCMS.Config.OriginListTest do
   question had never been asked on the CORS side. `form_embed_test.exs` was the
   only `parse_env` coverage in the repo.
   """
-  use ExUnit.Case, async: true
+  # async: false, like every other file here that captures `:stderr`
+  # (`env_test.exs`, `strict_test_flag_test.exs`, `runtime_env_flags_test.exs`,
+  # …). `capture_io(:stderr, …)` replaces the **global** `:standard_error`
+  # device, so it swallows whatever any concurrently-running async test happens
+  # to write — and the `== ""` assertions below then fail on somebody else's
+  # output. That is not theoretical: this file broke `main` on 2026-08-09 by
+  # capturing a LiveView "form has no id" warning emitted by
+  # `remember_me_test.exs` (run 31287147181).
+  #
+  # `== ""` is kept rather than weakened to `refute … =~ "CORS_ORIGINS"`,
+  # because the regression it guards (#651) is a parser that warns *at all*
+  # about a valid browser-extension origin — wording included.
+  use ExUnit.Case, async: false
 
   import ExUnit.CaptureIO
 

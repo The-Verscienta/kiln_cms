@@ -58,22 +58,6 @@ defmodule KilnCMSWeb.PreviewLiveTest do
     )
   end
 
-  # Presence/cursor diffs propagate asynchronously; retry the render briefly.
-  defp eventually(view, substring, present? \\ true, tries \\ 40) do
-    html = render(view)
-
-    cond do
-      String.contains?(html, substring) == present? ->
-        html
-
-      tries == 0 ->
-        flunk("expected #{substring} #{if present?, do: "in", else: "gone from"} render")
-
-      true ->
-        Process.sleep(25) && eventually(view, substring, present?, tries - 1)
-    end
-  end
-
   test "co-viewers see each other in the presence bar" do
     page = a_page()
     path = ~p"/editor/preview/page/#{page.id}"

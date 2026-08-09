@@ -44,21 +44,6 @@ defmodule KilnCMSWeb.TokenPreviewLiveTest do
     })
   end
 
-  defp eventually(view, substring, present? \\ true, tries \\ 40) do
-    html = render(view)
-
-    cond do
-      String.contains?(html, substring) == present? ->
-        html
-
-      tries == 0 ->
-        flunk("expected #{substring} #{if present?, do: "in", else: "gone from"} render")
-
-      true ->
-        Process.sleep(25) && eventually(view, substring, present?, tries - 1)
-    end
-  end
-
   test "a valid token renders the draft with the shared ribbon", %{conn: conn} do
     page = draft_page()
     token = PreviewToken.sign(page)

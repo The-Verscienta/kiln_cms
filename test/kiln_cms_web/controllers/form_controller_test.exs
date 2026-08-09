@@ -45,10 +45,6 @@ defmodule KilnCMSWeb.FormControllerTest do
   end
 
   # Every test gets its own IP so the tight :form bucket never crosses tests.
-  defp unique_ip(conn) do
-    Map.put(conn, :remote_ip, {127, 1, rem(System.unique_integer([:positive]), 250), 1})
-  end
-
   test "GET /api/forms/:slug returns the schema", %{conn: conn} do
     form = form!()
 

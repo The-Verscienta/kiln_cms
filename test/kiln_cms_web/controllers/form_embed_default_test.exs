@@ -65,10 +65,6 @@ defmodule KilnCMSWeb.FormEmbedDefaultTest do
     form
   end
 
-  defp unique_ip(conn) do
-    Map.put(conn, :remote_ip, {127, 3, rem(System.unique_integer([:positive]), 250), 1})
-  end
-
   defp csp(conn), do: conn |> get_resp_header("content-security-policy") |> List.first()
 
   test "with EMBED_ORIGINS unset the embed page is same-origin only", %{conn: conn} do
