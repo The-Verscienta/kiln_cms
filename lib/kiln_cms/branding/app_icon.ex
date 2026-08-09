@@ -241,8 +241,10 @@ defmodule KilnCMS.Branding.AppIcon do
   # rather than silently folding the case back into `:unreachable`, which is
   # the regression it exists to prevent: an operator told to check their DNS
   # about a file their CDN serves perfectly.
+  # One clause, no fallback: `SafeFetch`'s error is always a message string
+  # (`{:error, String.t()}`), so a catch-all here is unreachable — dialyzer says
+  # so, and a dead clause would hide it if that ever stopped being true.
   defp too_large?(reason) when is_binary(reason), do: reason =~ "exceeded"
-  defp too_large?(_reason), do: false
 
   # The seam the suite stubs through, matching every other outbound caller
   # (`config :kiln_cms, KilnCMS.Branding.AppIcon, req_options: [plug: …]`). Empty
