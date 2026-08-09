@@ -52,6 +52,7 @@ defmodule KilnCMS.CMS.Comment do
       accept [:content_type, :content_id, :block_id, :body]
 
       change KilnCMS.CMS.Changes.RouteToBlockThread
+      change KilnCMS.CMS.Changes.BroadcastComment
 
       change fn changeset, context ->
         case context.actor do
@@ -69,6 +70,7 @@ defmodule KilnCMS.CMS.Comment do
       validate KilnCMS.CMS.Validations.CommentIsThreadRoot
 
       change set_attribute(:resolved_at, &DateTime.utc_now/0)
+      change KilnCMS.CMS.Changes.BroadcastComment
 
       change fn changeset, context ->
         case context.actor do
@@ -87,6 +89,7 @@ defmodule KilnCMS.CMS.Comment do
 
       change set_attribute(:resolved_at, nil)
       change set_attribute(:resolved_by_id, nil)
+      change KilnCMS.CMS.Changes.BroadcastComment
     end
 
     read :for_content do

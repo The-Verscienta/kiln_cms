@@ -57,10 +57,19 @@ delivered to the public or headless API — they're editorial-only.
 
 ## Scope & follow-ons
 
-- **Not delivered anywhere but the editor.** The shared/multiplayer preview
-  (#343/#372) renders blocks with no `data-block-id` on the DOM today, so
-  there's nothing to anchor a marker to yet — surfacing comment pins there is
-  deliberately left for a follow-up rather than folded into this change.
+- **Pins in the shared preview** (#802, done). Every block now carries
+  `data-block-id` through `render_block/1` and the thin-block shape, so the
+  multiplayer preview (#343/#372) marks each block that has an unresolved
+  thread with a pin showing the conversation's size. Clicking one lands in the
+  editor with that block's thread already open. Pins move live for everyone
+  watching — the broadcast hangs off the `Comment` resource's own actions, not
+  the editor's event handlers, so a comment added through the API moves them
+  too. The thread UI itself deliberately stays in the editor: the preview is
+  meant to read like the published page.
+
+  Still open: whether pins should appear on the **external stakeholder token
+  preview** (`/preview/:token/live`, #379). Token holders have no account or
+  role, so that needs its own decision; today they see no pins.
 - **No notifications.** Adding or resolving a comment doesn't email anyone.
   The existing workflow-notification machinery
   (`KilnCMS.CMS.Changes.NotifyWorkflowEmail` /

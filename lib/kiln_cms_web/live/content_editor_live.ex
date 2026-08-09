@@ -196,7 +196,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # thread panel is open (nil = closed, one at a time — same pattern as
          # `assist_block`); `comment_draft` is that panel's textarea value.
          |> assign(:comments, load_comments(kind, record.id, actor, org))
-         |> assign(:comment_block, nil)
+         # `?comment=<block_id>` opens that block's thread on arrival — the
+         # landing side of the shared preview's comment pins (#802).
+         |> assign(:comment_block, params["comment"])
          |> assign(:comment_draft, nil)
          # Internal-link suggestions (#377). `nil` = never opened; loading is
          # deferred to first open because it costs a pgvector query plus a

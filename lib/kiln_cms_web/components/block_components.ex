@@ -21,7 +21,18 @@ defmodule KilnCMSWeb.BlockComponents do
     assigns = assign(assigns, :type, type)
 
     ~H"""
-    <div class="kiln-block">
+    <%!-- `data-block-id` is the anchor every surface that wants to point AT a
+          block needs — comment pins in the shared preview (#802) first, and
+          `KilnCMSWeb.InContextEditLive` already does the same thing with its
+          own wrapper. `@block[:id]`, not `@block.id`: a legacy or hand-built
+          block map may carry none, and Phoenix omits a nil attribute rather
+          than emitting an empty one.
+
+          It rides on public delivery too, since this is the shared render
+          path. That is a block's own opaque id and nothing else — no comment,
+          author or state travels with it, and `KilnCMS.CMS.Comment` stays
+          unreachable from the public and headless surfaces. --%>
+    <div class="kiln-block" data-block-id={@block[:id]}>
       <%= cond do %>
         <% @type == "heading" -> %>
           <h2 class="text-xl font-bold">{@block.content}</h2>
@@ -382,7 +393,15 @@ defmodule KilnCMSWeb.BlockComponents do
   Shared by `PreviewLive` and the editor's decoupled preview so both agree.
   """
   @spec thin_blocks([map()]) :: [map()]
-  def thin_blocks(legacy_maps), do: Enum.map(legacy_maps, &thin_block/1)
+  def thin_blocks(legacy_maps), do: Enum.map(legacy_maps, &keep_id/1)
+
+  # Every `thin_block/1` clause builds a fresh map for its own type, so the
+  # block's id was dropped on the way through — which meant the thin surfaces
+  # (the pop-out preview, the in-context overlay) rendered without the
+  # `data-block-id` anchor even after `render_block/1` learned to emit it.
+  # Re-attached once here rather than in each of a dozen clauses, so a new
+  # block type cannot forget it.
+  defp keep_id(legacy), do: legacy |> thin_block() |> Map.put(:id, Map.get(legacy, :id))
 
   defp thin_block(%{type: :columns, data: data}) do
     cols =
