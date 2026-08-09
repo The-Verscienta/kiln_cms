@@ -70,7 +70,7 @@ msgstr[1] "%{count} seleccionados"
 #: lib/kiln_cms_web/live/content_editor_live.ex:7170
 #: lib/kiln_cms_web/live/field_definition_live.ex:287
 #: lib/kiln_cms_web/live/form_live.ex:161
-#: lib/kiln_cms_web/live/governance_live.ex:391
+#: lib/kiln_cms_web/live/governance_live.ex:412
 #: lib/kiln_cms_web/live/mail_settings_live.ex:373
 #: lib/kiln_cms_web/live/newsletter_live.ex:286
 #: lib/kiln_cms_web/live/social_live.ex:213
@@ -2850,7 +2850,7 @@ msgstr "categoría"
 msgid "tag"
 msgstr "etiqueta"
 
-#: lib/kiln_cms_web/live/governance_live.ex:400
+#: lib/kiln_cms_web/live/governance_live.ex:421
 #, elixir-autogen, elixir-format
 msgid "%{count} edit(s) since the last anchor — covered at the next publish."
 msgstr "%{count} edición(es) desde el último anclaje — se incluirán en la próxima publicación."
@@ -3004,7 +3004,7 @@ msgstr "Claves API · %{count} plugins activos"
 msgid "Access"
 msgstr "Acceso"
 
-#: lib/kiln_cms_web/live/governance_live.ex:485
+#: lib/kiln_cms_web/live/governance_live.ex:506
 #, elixir-autogen, elixir-format
 msgid "Action"
 msgstr "Acción"
@@ -3168,7 +3168,7 @@ msgstr "Aplicando cambios de nombre…"
 msgid "Attempts"
 msgstr "Intentos"
 
-#: lib/kiln_cms_web/live/governance_live.ex:352
+#: lib/kiln_cms_web/live/governance_live.ex:373
 #, elixir-autogen, elixir-format
 msgid "Audit trail, consent records, and point-in-time history for your content."
 msgstr "Registro de auditoría, registros de consentimiento e historial puntual de su contenido."
@@ -3214,7 +3214,7 @@ msgid "Calendar"
 msgstr "Calendario"
 
 #: lib/kiln_cms_web/components/version_diff_components.ex:247
-#: lib/kiln_cms_web/live/governance_live.ex:487
+#: lib/kiln_cms_web/live/governance_live.ex:508
 #, elixir-autogen, elixir-format
 msgid "Changed"
 msgstr "Modificado"
@@ -3280,7 +3280,7 @@ msgstr "Confirmaciones"
 msgid "Consent recorded."
 msgstr "Consentimiento registrado."
 
-#: lib/kiln_cms_web/live/governance_live.ex:423
+#: lib/kiln_cms_web/live/governance_live.ex:444
 #, elixir-autogen, elixir-format
 msgid "Consent records"
 msgstr "Registros de consentimiento"
@@ -3765,12 +3765,12 @@ msgstr "Caducidad"
 msgid "Expires in"
 msgstr "Caduca en"
 
-#: lib/kiln_cms_web/live/governance_live.ex:417
+#: lib/kiln_cms_web/live/governance_live.ex:438
 #, elixir-autogen, elixir-format
 msgid "Export trail (CSV)"
 msgstr "Exportar el registro (CSV)"
 
-#: lib/kiln_cms_web/live/governance_live.ex:410
+#: lib/kiln_cms_web/live/governance_live.ex:431
 #, elixir-autogen, elixir-format
 msgid "Export trail (JSON)"
 msgstr "Exportar el registro (JSON)"
@@ -3894,7 +3894,7 @@ msgstr "General"
 
 #: lib/kiln_cms_web/components/layouts.ex:713
 #: lib/kiln_cms_web/live/governance_live.ex:15
-#: lib/kiln_cms_web/live/governance_live.ex:350
+#: lib/kiln_cms_web/live/governance_live.ex:371
 #, elixir-autogen, elixir-format
 msgid "Governance"
 msgstr "Gobernanza"
@@ -3904,7 +3904,7 @@ msgstr "Gobernanza"
 msgid "Grant headless / third-party access to the delivery API and the MCP authoring endpoint. A key acts as its owning user; read-only keys can never modify content, while read + write keys can author content within the owner's role. For public-only access, mint a read-only key on a viewer account; for an LLM author, mint a read + write key on an editor account."
 msgstr "Conceda acceso headless o de terceros a la API de entrega y al endpoint de creación MCP. Una clave actúa como el usuario que la posee; las claves de solo lectura nunca pueden modificar contenido, mientras que las de lectura + escritura pueden crear contenido dentro del rol del propietario. Para acceso solo público, genere una clave de solo lectura en una cuenta de espectador; para un autor LLM, genere una clave de lectura + escritura en una cuenta de editor."
 
-#: lib/kiln_cms_web/live/governance_live.ex:461
+#: lib/kiln_cms_web/live/governance_live.ex:482
 #, elixir-autogen, elixir-format
 msgid "Grantor"
 msgstr "Otorgante"
@@ -4001,7 +4001,7 @@ msgstr "Claves"
 msgid "Keys this field's value in submissions — renaming orphans old entries."
 msgstr "Identifica el valor de este campo en los envíos: renombrarlo deja huérfanas las entradas antiguas."
 
-#: lib/kiln_cms_web/live/governance_live.ex:451
+#: lib/kiln_cms_web/live/governance_live.ex:472
 #, elixir-autogen, elixir-format
 msgid "Kind"
 msgstr "Tipo"
@@ -4126,12 +4126,12 @@ msgstr "Aún no hay reglas de automatización."
 msgid "No campaigns yet."
 msgstr "Aún no hay campañas."
 
-#: lib/kiln_cms_web/live/governance_live.ex:425
+#: lib/kiln_cms_web/live/governance_live.ex:446
 #, elixir-autogen, elixir-format
 msgid "No consent recorded for this content."
 msgstr "No hay ningún consentimiento registrado para este contenido."
 
-#: lib/kiln_cms_web/live/governance_live.ex:358
+#: lib/kiln_cms_web/live/governance_live.ex:379
 #: lib/kiln_cms_web/live/translations_live.ex:156
 #, elixir-autogen, elixir-format
 msgid "No content yet."
@@ -4203,7 +4203,7 @@ msgstr "No existe ese contenido para editar."
 msgid "No suppressed addresses."
 msgstr "No hay direcciones bloqueadas."
 
-#: lib/kiln_cms_web/live/governance_live.ex:478
+#: lib/kiln_cms_web/live/governance_live.ex:499
 #, elixir-autogen, elixir-format
 msgid "No versions recorded."
 msgstr "No hay versiones registradas."
@@ -4223,7 +4223,7 @@ msgstr "¿No sabe qué superficie usar? Empiece por la guía del consumidor:"
 msgid "Not yet anchored — anchors are minted at publish"
 msgstr "Aún sin anclar: los anclajes se generan al publicar"
 
-#: lib/kiln_cms_web/live/governance_live.ex:465
+#: lib/kiln_cms_web/live/governance_live.ex:486
 #, elixir-autogen, elixir-format
 msgid "Note"
 msgstr "Nota"
@@ -4404,7 +4404,7 @@ msgstr "Probar"
 msgid "Placeholder"
 msgstr "Marcador de posición"
 
-#: lib/kiln_cms_web/live/governance_live.ex:488
+#: lib/kiln_cms_web/live/governance_live.ex:509
 #, elixir-autogen, elixir-format
 msgid "Point in time"
 msgstr "Momento"
@@ -4509,12 +4509,12 @@ msgstr "Fallos recientes"
 msgid "Recent permanent failures and the addresses KilnCMS has stopped mailing as a result."
 msgstr "Fallos permanentes recientes y direcciones a las que KilnCMS ha dejado de enviar correo como consecuencia."
 
-#: lib/kiln_cms_web/live/governance_live.ex:442
+#: lib/kiln_cms_web/live/governance_live.ex:463
 #, elixir-autogen, elixir-format
 msgid "Record a consent"
 msgstr "Registrar un consentimiento"
 
-#: lib/kiln_cms_web/live/governance_live.ex:469
+#: lib/kiln_cms_web/live/governance_live.ex:490
 #, elixir-autogen, elixir-format
 msgid "Record consent"
 msgstr "Registrar consentimiento"
@@ -4547,7 +4547,7 @@ msgstr "Redirección desde %{path} creada."
 msgid "Redirects"
 msgstr "Redirecciones"
 
-#: lib/kiln_cms_web/live/governance_live.ex:457
+#: lib/kiln_cms_web/live/governance_live.ex:478
 #, elixir-autogen, elixir-format
 msgid "Reference (ticket / document id)"
 msgstr "Referencia (ticket / id de documento)"
@@ -5160,7 +5160,7 @@ msgstr "Hoy"
 msgid "Tokens: %{tokens}, [field:<name>]. Composes the last URL segment; blank = derive from the SEO keyphrase or title."
 msgstr "Tokens: %{tokens}, [field:<name>]. Compone el último segmento de la URL; en blanco = se deriva de la frase clave SEO o del título."
 
-#: lib/kiln_cms_web/live/governance_live.ex:375
+#: lib/kiln_cms_web/live/governance_live.ex:396
 #, elixir-autogen, elixir-format
 msgid "Trail"
 msgstr "Auditoría"
@@ -5260,12 +5260,12 @@ msgstr "Usuario"
 msgid "Verify"
 msgstr "Verificar"
 
-#: lib/kiln_cms_web/live/governance_live.ex:476
+#: lib/kiln_cms_web/live/governance_live.ex:497
 #, elixir-autogen, elixir-format
 msgid "Version timeline"
 msgstr "Cronología de versiones"
 
-#: lib/kiln_cms_web/live/governance_live.ex:539
+#: lib/kiln_cms_web/live/governance_live.ex:560
 #, elixir-autogen, elixir-format
 msgid "View as of then"
 msgstr "Ver tal como estaba entonces"
@@ -5287,14 +5287,14 @@ msgstr "Puesto en línea"
 
 #: lib/kiln_cms_web/live/automation_live.ex:311
 #: lib/kiln_cms_web/live/automation_live.ex:403
-#: lib/kiln_cms_web/live/governance_live.ex:484
+#: lib/kiln_cms_web/live/governance_live.ex:505
 #: lib/kiln_cms_web/live/newsletter_live.ex:434
 #: lib/kiln_cms_web/live/webhook_live.ex:419
 #, elixir-autogen, elixir-format
 msgid "When"
 msgstr "Cuándo"
 
-#: lib/kiln_cms_web/live/governance_live.ex:486
+#: lib/kiln_cms_web/live/governance_live.ex:507
 #, elixir-autogen, elixir-format
 msgid "Who"
 msgstr "Quién"
@@ -5349,7 +5349,7 @@ msgstr "Sus códigos de recuperación: guárdelos ahora, no se volverán a mostr
 msgid "archived"
 msgstr "archivado"
 
-#: lib/kiln_cms_web/live/governance_live.ex:432
+#: lib/kiln_cms_web/live/governance_live.ex:453
 #, elixir-autogen, elixir-format
 msgid "by"
 msgstr "por"
@@ -10211,62 +10211,47 @@ msgstr "no hay formulario de objetivo definido"
 msgid "no goal funnel is set"
 msgstr "no hay embudo de objetivo definido"
 
-#: lib/kiln_cms_web/live/governance_live.ex:311
-#, elixir-autogen, elixir-format
-msgid "%{count} checkpoint(s) have not been accepted by the witness."
-msgstr "El testigo no ha aceptado %{count} punto(s) de control."
-
-#: lib/kiln_cms_web/live/governance_live.ex:288
-#, elixir-autogen, elixir-format
-msgid "%{count} document(s)"
-msgstr "%{count} documento(s)"
-
 #: lib/kiln_cms_web/live/governance_live.ex:208
 #, elixir-autogen, elixir-format
 msgid "CHECKPOINT TAMPERED: %{reason}"
 msgstr "PUNTO DE CONTROL MANIPULADO: %{reason}"
 
-#: lib/kiln_cms_web/live/governance_live.ex:259
+#: lib/kiln_cms_web/live/governance_live.ex:261
 #, elixir-autogen, elixir-format
 msgid "Checkpointing is switched off, so no checkpoints are being minted and nothing is published to a witness."
 msgstr "Los puntos de control están desactivados, así que no se emite ninguno ni se publica nada en un testigo."
 
-#: lib/kiln_cms_web/live/governance_live.ex:286
+#: lib/kiln_cms_web/live/governance_live.ex:288
 #, elixir-autogen, elixir-format
 msgid "Covering"
 msgstr "Cubre"
 
-#: lib/kiln_cms_web/live/governance_live.ex:330
-#, elixir-autogen, elixir-format
-msgid "Every checkpoint has been accepted by the witness."
-msgstr "El testigo ha aceptado todos los puntos de control."
-
-#: lib/kiln_cms_web/live/governance_live.ex:254
+#: lib/kiln_cms_web/live/governance_live.ex:256
 #, elixir-autogen, elixir-format
 msgid "History witness"
 msgstr "Testigo del historial"
 
-#: lib/kiln_cms_web/live/governance_live.ex:282
+#: lib/kiln_cms_web/live/governance_live.ex:284
 #, elixir-autogen, elixir-format
 msgid "Last checkpoint"
 msgstr "Último punto de control"
 
-#: lib/kiln_cms_web/live/governance_live.ex:277
+#: lib/kiln_cms_web/live/governance_live.ex:279
 #, elixir-autogen, elixir-format
 msgid "No checkpoint has been minted yet."
 msgstr "Todavía no se ha emitido ningún punto de control."
 
-#: lib/kiln_cms_web/live/governance_live.ex:268
+#: lib/kiln_cms_web/live/governance_live.ex:270
 #, elixir-autogen, elixir-format
 msgid "No external witness is configured. Checkpoints are minted and stored in this database only, so they attest history against edits — but not against someone who can write to the database itself."
 msgstr "No hay ningún testigo externo configurado. Los puntos de control se emiten y se guardan solo en esta base de datos, así que dan fe del historial frente a ediciones, pero no frente a alguien que pueda escribir en la propia base de datos."
 
-#: lib/kiln_cms_web/live/governance_live.ex:293
+#: lib/kiln_cms_web/live/governance_live.ex:297
 #, elixir-autogen, elixir-format
 msgid "Published to the witness"
 msgstr "Publicado en el testigo"
 
-#: lib/kiln_cms_web/live/governance_live.ex:316
+#: lib/kiln_cms_web/live/governance_live.ex:332
 #, elixir-autogen, elixir-format
 msgid "The oldest covers history up to %{at}."
 msgstr "El más antiguo cubre el historial hasta %{at}."
@@ -10286,7 +10271,7 @@ msgstr "Atestiguado por el punto de control n.º %{sequence} en la posición de 
 msgid "checkpoint unsigned"
 msgstr "punto de control sin firmar"
 
-#: lib/kiln_cms_web/live/governance_live.ex:297
+#: lib/kiln_cms_web/live/governance_live.ex:301
 #, elixir-autogen, elixir-format
 msgid "not yet"
 msgstr "todavía no"
@@ -10295,3 +10280,27 @@ msgstr "todavía no"
 #, elixir-autogen, elixir-format
 msgid "signed by a key we no longer hold"
 msgstr "firmado con una clave que ya no conservamos"
+
+#: lib/kiln_cms_web/live/governance_live.ex:324
+#, elixir-autogen, elixir-format
+msgid "%{count} checkpoint has not been published to the witness."
+msgid_plural "%{count} checkpoints have not been published to the witness."
+msgstr[0] "%{count} punto de control no se ha publicado en el testigo."
+msgstr[1] "%{count} puntos de control no se han publicado en el testigo."
+
+#: lib/kiln_cms_web/live/governance_live.ex:290
+#, elixir-autogen, elixir-format
+msgid "%{count} document"
+msgid_plural "%{count} documents"
+msgstr[0] "%{count} documento"
+msgstr[1] "%{count} documentos"
+
+#: lib/kiln_cms_web/live/governance_live.ex:353
+#, elixir-autogen, elixir-format
+msgid "Every checkpoint has been published to the witness."
+msgstr "El testigo ha recibido todos los puntos de control."
+
+#: lib/kiln_cms_web/live/governance_live.ex:341
+#, elixir-autogen, elixir-format
+msgid "checkpoint #%{sequence}: %{message}"
+msgstr "punto de control n.º %{sequence}: %{message}"

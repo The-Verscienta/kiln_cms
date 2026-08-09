@@ -41,7 +41,55 @@ defmodule KilnCMSWeb.GovernanceWitnessPanelTest do
 
       assert html =~ "History witness"
       assert html =~ "No external witness is configured"
-      refute html =~ "have not been accepted by the witness"
+      # The adapter names itself, which is one of the four things #731 asks for.
+      assert html =~ "checkpoints are stored in the database only"
+      refute html =~ "not been published to the witness"
+    end
+
+    test "counts an unpublished backlog even with the sink resolved to None", %{conn: conn} do
+      # Gating the backlog on "is a witness configured?" rebuilds the hole this
+      # issue closes: an unrecognised KILN_GOVERNANCE_WITNESS falls back to None
+      # with a warning that only reaches stderr, so a typo would render a real
+      # outage as a deliberate posture. The count is reported either way; only
+      # the tone depends on whether anything refused.
+      admin = authed_user(:admin)
+      post = published_post(admin)
+      use_adapter(Witness.None)
+
+      {:ok, checkpoint} = Checkpoint.mint(post.org_id)
+      assert is_nil(checkpoint.witnessed_at)
+
+      {:ok, _view, html} = live(log_in(conn, admin), ~p"/editor/governance")
+
+      assert html =~ "not been published to the witness"
+    end
+
+    test "reports the last checkpoint's sequence, coverage and publication time", %{conn: conn} do
+      # Three of the four bullets the issue asks for, and none of them were
+      # asserted by the states-only tests around this one.
+      admin = authed_user(:admin)
+      post = published_post(admin)
+      use_file_sink()
+
+      {:ok, checkpoint} = Checkpoint.mint(post.org_id)
+
+      {:ok, _view, html} = live(log_in(conn, admin), ~p"/editor/governance")
+
+      assert html =~ "Last checkpoint"
+      assert html =~ "##{checkpoint.sequence}"
+      assert html =~ "Covering"
+      assert html =~ "#{checkpoint.document_count} document"
+      assert html =~ "Published to the witness"
+    end
+
+    test "an empty panel when checkpointing is switched off", %{conn: conn} do
+      prev = Application.get_env(:kiln_cms, :governance_checkpoints_enabled)
+      Application.put_env(:kiln_cms, :governance_checkpoints_enabled, false)
+      on_exit(fn -> restore_flag(prev) end)
+
+      {:ok, _view, html} = live(log_in(conn, authed_user(:admin)), ~p"/editor/governance")
+
+      assert html =~ "Checkpointing is switched off"
     end
 
     test "surfaces a failed publication and dates it", %{conn: conn} do
@@ -61,9 +109,9 @@ defmodule KilnCMSWeb.GovernanceWitnessPanelTest do
 
       {:ok, _view, html} = live(log_in(conn, admin), ~p"/editor/governance")
 
-      assert html =~ "have not been accepted by the witness"
+      assert html =~ "not been published to the witness"
       assert html =~ "witness_dir_not_configured"
-      refute html =~ "Every checkpoint has been accepted"
+      refute html =~ "Every checkpoint has been published"
     end
 
     test "reports a healthy witness once the checkpoint lands", %{conn: conn} do
@@ -76,8 +124,8 @@ defmodule KilnCMSWeb.GovernanceWitnessPanelTest do
 
       {:ok, _view, html} = live(log_in(conn, admin), ~p"/editor/governance")
 
-      assert html =~ "Every checkpoint has been accepted"
-      refute html =~ "have not been accepted by the witness"
+      assert html =~ "Every checkpoint has been published"
+      refute html =~ "not been published to the witness"
     end
   end
 
@@ -100,9 +148,18 @@ defmodule KilnCMSWeb.GovernanceWitnessPanelTest do
       # so is every document on a deployment with no sink. A badge on each would
       # be noise that teaches an operator to stop reading badges.
       admin = authed_user(:admin)
-      post = published_post(admin)
+      use_file_sink()
 
-      {:ok, _view, html} = live(log_in(conn, admin), ~p"/editor/governance/post/#{post.id}")
+      # A checkpoint exists and covers an EARLIER document, so this exercises
+      # the real `:none` branch — a document younger than the last checkpoint —
+      # rather than the "no witness configured" short-circuit, which is what a
+      # version of this test without the mint would have measured.
+      covered = published_post(admin)
+      {:ok, _checkpoint} = Checkpoint.mint(covered.org_id)
+
+      later = published_post(admin)
+
+      {:ok, _view, html} = live(log_in(conn, admin), ~p"/editor/governance/post/#{later.id}")
 
       refute html =~ "Witnessed by checkpoint"
       refute html =~ "witness-position"
@@ -119,6 +176,11 @@ defmodule KilnCMSWeb.GovernanceWitnessPanelTest do
     use_adapter(Witness.File)
     Application.put_env(:kiln_cms, Witness.File, dir: dir)
   end
+
+  defp restore_flag(nil), do: Application.delete_env(:kiln_cms, :governance_checkpoints_enabled)
+
+  defp restore_flag(value),
+    do: Application.put_env(:kiln_cms, :governance_checkpoints_enabled, value)
 
   defp restore(key, nil), do: Application.delete_env(:kiln_cms, key)
   defp restore(key, value), do: Application.put_env(:kiln_cms, key, value)

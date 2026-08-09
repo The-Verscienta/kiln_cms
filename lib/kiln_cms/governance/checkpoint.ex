@@ -98,10 +98,18 @@ defmodule KilnCMS.Governance.Checkpoint do
 
   @typedoc "What a document's strongest checkpoint entry says, or why it says nothing."
   @type witnessed ::
-          {:ok, entry :: struct(), attestation :: :ok | :unsigned | :unverifiable}
+          {:ok, entry :: struct(),
+           attestation :: :ok | :unsigned | :unverifiable | {:tampered, String.t()}}
           | :none
           | :unreadable
           | {:tampered, String.t()}
+
+  # The attestation element carries `{:tampered, reason}` as well as the three
+  # atoms, because `checkpoint_attestation/2` returns it when a signature
+  # demonstrably fails to verify. It was declared as atoms only, and the first
+  # consumer written against the declaration (#731's dashboard badge) rendered a
+  # tampered checkpoint as a *green* one — dialyzer could not catch the missing
+  # clause, because the declared success typing never contained the tuple.
 
   @doc "Whether checkpointing is enabled (default true; kill switch in config)."
   @spec enabled?() :: boolean()
@@ -561,10 +569,21 @@ defmodule KilnCMS.Governance.Checkpoint do
     CMS.list_chain_checkpoints!(authorize?: false, tenant: org_id, query: query)
   end
 
-  @doc "Checkpoints minted but never accepted by the sink, oldest first."
-  @spec unwitnessed(Ash.UUID.t()) :: [struct()]
-  def unwitnessed(org_id) do
-    CMS.list_unwitnessed_checkpoints!(authorize?: false, tenant: org_id)
+  @doc """
+  Checkpoints minted but never published to the sink, oldest first.
+
+  `limit` bounds the read. The backing action is an unpaginated
+  `is_nil(witnessed_at)`, and on the `None` adapter *every* checkpoint an org has
+  ever minted matches — forever. A caller that only needs a count and the oldest
+  row (the dashboard panel, #731) must not load a year of them to get it, and the
+  page that reports an outage is exactly the page that would get slowest as the
+  outage lengthened.
+  """
+  @spec unwitnessed(Ash.UUID.t(), pos_integer() | nil) :: [struct()]
+  def unwitnessed(org_id, limit \\ nil) do
+    query = if limit, do: [limit: limit], else: []
+
+    CMS.list_unwitnessed_checkpoints!(authorize?: false, tenant: org_id, query: query)
   end
 
   @doc """

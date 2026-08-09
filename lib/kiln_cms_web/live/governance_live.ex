@@ -183,26 +183,26 @@ defmodule KilnCMSWeb.GovernanceLive do
     <p :if={@witnessed.state != :none} class="mt-1 text-sm" data-role="witness-position">
       <span
         :if={@witnessed.state == :witnessed}
-        class="rounded bg-success/10 px-1.5 py-0.5 text-xs font-medium text-success/80"
+        class="rounded bg-success/15 px-1.5 py-0.5 text-xs font-medium text-success-ink"
       >
         {gettext("Witnessed by checkpoint #%{sequence} at anchor position %{position}",
           sequence: @witnessed.sequence,
           position: @witnessed.anchor_position
         )}
-        <span :if={@witnessed.attestation != :ok} class="text-base-content/60">
+        <span :if={witness_attestation_label(@witnessed.attestation)} class="text-base-content/60">
           · {witness_attestation_label(@witnessed.attestation)}
         </span>
       </span>
       <span
         :if={@witnessed.state == :unreadable}
-        class="rounded bg-warning/15 px-1.5 py-0.5 text-xs font-medium text-warning"
+        class="rounded bg-warning/15 px-1.5 py-0.5 text-xs font-medium text-warning-ink"
       >
         <.icon name="hero-exclamation-triangle" class="size-3.5" />
         {gettext("This document's checkpoint entry could not be read — it cannot be verified")}
       </span>
       <span
         :if={@witnessed.state == :tampered}
-        class="rounded bg-error/15 px-1.5 py-0.5 text-xs font-medium text-error"
+        class="rounded bg-error/15 px-1.5 py-0.5 text-xs font-medium text-error-ink"
       >
         <.icon name="hero-exclamation-triangle" class="size-3.5" />
         {gettext("CHECKPOINT TAMPERED: %{reason}", reason: @witnessed.reason)}
@@ -213,6 +213,8 @@ defmodule KilnCMSWeb.GovernanceLive do
 
   defp witness_attestation_label(:unsigned), do: gettext("checkpoint unsigned")
   defp witness_attestation_label(:unverifiable), do: gettext("signed by a key we no longer hold")
+  # `:ok` and anything unrecognised add nothing — and returning nil is what
+  # stops the template rendering a dangling separator with no label after it.
   defp witness_attestation_label(_other), do: nil
 
   # --- render ----------------------------------------------------------------
@@ -285,7 +287,9 @@ defmodule KilnCMSWeb.GovernanceLive do
         <div>
           <dt class="text-xs text-base-content/60">{gettext("Covering")}</dt>
           <dd>
-            {gettext("%{count} document(s)", count: @witness.latest.document_count)}
+            {ngettext("%{count} document", "%{count} documents", @witness.latest.document_count,
+              count: @witness.latest.document_count
+            )}
             <span class="text-base-content/60">· {when_str(@witness.latest.covered_at)}</span>
           </dd>
         </div>
@@ -300,16 +304,28 @@ defmodule KilnCMSWeb.GovernanceLive do
         </div>
       </dl>
 
-      <%!-- The number that matters. One is a sink that was briefly unreachable
-            and will be retried on the next run; a growing count is an outage
-            nobody has noticed, which is why the oldest one is dated here. --%>
+      <%!-- Shown whichever way the switch resolved, and NOT gated on
+            `witnessing?`. An unrecognised `KILN_GOVERNANCE_WITNESS` falls back
+            to `None` with a warning that only reaches stderr, so gating here
+            would present a real outage as a deliberate posture — a dashboard
+            that reads exactly as healthy, which is the hole #731 closes. Only
+            the tone depends on whether anything actually refused. --%>
       <div
-        :if={@witness.witnessing? and @witness.unwitnessed_count > 0}
-        class="rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-warning-ink"
+        :if={@witness.unwitnessed_count > 0}
+        class={[
+          "rounded-lg p-3 text-sm",
+          if(@witness.error,
+            do: "border border-warning/40 bg-warning/10 text-warning-ink",
+            else: "bg-base-200 text-base-content/70"
+          )
+        ]}
       >
         <p class="font-medium">
-          {gettext("%{count} checkpoint(s) have not been accepted by the witness.",
-            count: @witness.unwitnessed_count
+          {ngettext(
+            "%{count} checkpoint has not been published to the witness.",
+            "%{count} checkpoints have not been published to the witness.",
+            @witness.unwitnessed_count,
+            count: backlog_count(@witness)
           )}
         </p>
         <p :if={@witness.oldest_unwitnessed} class="mt-1">
@@ -317,28 +333,33 @@ defmodule KilnCMSWeb.GovernanceLive do
             at: when_str(@witness.oldest_unwitnessed.covered_at)
           )}
         </p>
-        <p :if={last_error(@witness)} class="mt-1 font-mono text-xs break-words">
-          {last_error(@witness)}
+        <%!-- Attributed to its own checkpoint. The oldest outstanding one often
+              has no error at all — a backlog from before a sink was configured
+              — and printing last night's failure under February's date says
+              something untrue. --%>
+        <p :if={@witness.error} class="mt-1 font-mono text-xs break-words">
+          {gettext("checkpoint #%{sequence}: %{message}",
+            sequence: @witness.error.sequence,
+            message: @witness.error.message
+          )}
         </p>
       </div>
 
       <p
         :if={@witness.witnessing? and @witness.unwitnessed_count == 0 and @witness.latest}
-        class="text-sm text-success"
+        class="text-sm text-success-ink"
       >
         <.icon name="hero-shield-check" class="size-4" />
-        {gettext("Every checkpoint has been accepted by the witness.")}
+        {gettext("Every checkpoint has been published to the witness.")}
       </p>
     </section>
     """
   end
 
-  # The error from the oldest failure rather than the newest: it is the one that
-  # says what first went wrong, and a later run's message is often just the
-  # symptom of the same outage.
-  defp last_error(%{oldest_unwitnessed: %{witness_error: error}}) when is_binary(error), do: error
-  defp last_error(%{latest: %{witness_error: error}}) when is_binary(error), do: error
-  defp last_error(_witness), do: nil
+  # "50+" past the probe bound, rather than loading a year of rows to be exact
+  # about a number nobody acts on.
+  defp backlog_count(%{more_unwitnessed?: true, unwitnessed_count: n}), do: "#{n}+"
+  defp backlog_count(%{unwitnessed_count: n}), do: n
 
   attr :content, :list, required: true
   attr :witness, :map, required: true
