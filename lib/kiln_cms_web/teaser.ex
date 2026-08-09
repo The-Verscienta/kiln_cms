@@ -58,6 +58,13 @@ defmodule KilnCMSWeb.Teaser do
     %__MODULE__{
       title: record.title,
       # `Map.get/2`: `excerpt` only exists on types that opted into it.
+      #
+      # This runs on the record BEFORE any #805 pattern is resolved, and the
+      # controller then resolves the pattern onto the projection below. That
+      # order is deliberate: `summary` is the paragraph a locked-out reader
+      # READS (`teaser.html.heex`, `lock.html.heex`), not a meta tag. Resolving
+      # first would let a type patterned `"[title] — subscribe to read"` show
+      # that string as if it were the article's own lede.
       summary: blank_to_nil(Map.get(record, :excerpt)) || blank_to_nil(record.seo_description),
       audience: record.audience,
       url: url,
