@@ -179,7 +179,16 @@ defmodule KilnCMS.Automation.RuleWorker do
          provider when not is_nil(provider) <- social_provider(config),
          true <- KilnCMS.Social.configured?(org_id),
          storage when not is_nil(storage) <- ContentTypes.storage_type(type, org_id),
-         {:ok, record} <- ContentTypes.get_record(type, id, authorize?: false, tenant: org_id) do
+         {:ok, record} <-
+           ContentTypes.get_record(type, id,
+             authorize?: false,
+             tenant: org_id,
+             # `KilnCMS.Social.Composer` posts the type's #805 default where the
+             # record has no description of its own (#1102); the calculation's
+             # `load/3` is what makes `[category]` resolve to the same name the
+             # document's own page shows.
+             load: KilnCMS.Seo.Patterns.loads()
+           ) do
       announce_to(record, provider, org_id, rule_id, config["template"])
     else
       # A transient read failure (a DB blip) is worth retrying — nothing was

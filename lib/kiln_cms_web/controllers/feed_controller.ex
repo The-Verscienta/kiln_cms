@@ -60,6 +60,7 @@ defmodule KilnCMSWeb.FeedController do
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Feeds
   alias KilnCMS.Firing
+  alias KilnCMS.Seo.Patterns
   alias KilnCMSWeb.Tenant
 
   # Short, like the sitemap's: this aggregate key isn't a `{type, slug}`, so
@@ -285,7 +286,15 @@ defmodule KilnCMSWeb.FeedController do
         # Ash resolves a `load` across the result set. Bounded on the way OUT
         # (`@max_categories`) rather than here, because a `limit` inside a load
         # is per-record and Postgres has no cheap way to express it.
-        load: [:category, :tags]
+        #
+        # `effective_seo_description` (#1102) is what `summary/1` reads: the
+        # type's #805 pattern is resolved for the delivered HTML page, and a
+        # feed carrying the stored column instead published an empty `<summary>`
+        # for the same document whose `<meta name="description">` had text. The
+        # calculation's own `load/3` folds `custom_fields` and the date chain
+        # into the pinned `select:` above, so `[field:<name>]` and `[yyyy]`
+        # resolve here rather than expanding empty.
+        load: [:category, :tags] ++ Patterns.loads()
       ]
     )
     |> Enum.map(&entry(&1, descriptor, org, resolved))
@@ -330,7 +339,7 @@ defmodule KilnCMSWeb.FeedController do
       id: entry_id(record, descriptor, base_url, published_at),
       url: url,
       title: record.title,
-      summary: summary(record),
+      summary: summary(record, descriptor, org),
       content: content(record, descriptor, org, policy),
       categories: categories(record),
       published_at: published_at,
@@ -380,8 +389,15 @@ defmodule KilnCMSWeb.FeedController do
   # `excerpt` where the type has one, else the SEO description — the two fields
   # an editor already writes as "what this is about". Never a truncated body:
   # a machine-cut sentence reads worse than nothing in a reader's list view.
-  defp summary(record) do
-    [Map.get(record, :excerpt), Map.get(record, :seo_description)]
+  #
+  # The *effective* description (#1102), so a type that defaults one through a
+  # #805 pattern says the same thing here as on its own page. Loaded above, so
+  # this is a map read rather than a registry lookup per entry.
+  defp summary(record, descriptor, org) do
+    [
+      Map.get(record, :excerpt),
+      Patterns.effective(record, :seo_description, type: descriptor, org: org)
+    ]
     |> Enum.find("", &(is_binary(&1) and &1 != ""))
   end
 

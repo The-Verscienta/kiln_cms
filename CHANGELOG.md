@@ -319,6 +319,36 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **A content type's default SEO description now reaches every surface that
+  renders one** (#1102). #805 let a type default its `seo_title` /
+  `seo_description` from a `[token]` pattern, resolved at render time — but only
+  for the delivered HTML page. Eight other surfaces kept rendering the record's
+  stored column, so the same document carried a meta description on its own page
+  and an empty `<summary>` in the feed that linked to it: RSS/Atom/JSON Feed, the
+  `.ics` `DESCRIPTION`, the event index's `index.json`, `llms.txt`, auto-posted
+  social text, the ActivityPub `Note`, the fired `:json_ld` artifact and the
+  preview payload.
+
+  Two new public calculations, `effective_seo_title` and
+  `effective_seo_description`, carry the resolved value; the stored columns still
+  say exactly what a human typed, which is what the editor's SEO panel, the
+  analyzer and the export read them as. Headless consumers get both. Each
+  calculation declares the data its own tokens need, so `[category]` and
+  `[field:<name>]` resolve on reads that pin a column set — where they used to
+  expand empty with nothing to explain why.
+
+  The fired artifact was the sharpest case: `KilnCMSWeb.StructuredData` documents
+  itself as mirroring the fired producer's rule, and the two emitted different
+  `description` for one document — permanently, because re-firing re-read the
+  same column. It now re-fires to agreement. Artifacts fired before this change
+  keep their old description until that document is published again or re-fired
+  (`mix kiln.refire_all`).
+
+  A pattern still only ever fills a blank: it never outranks an author's own
+  excerpt, it stays out of a paywall teaser's visible body copy, and on a teaser
+  the two tokens needing columns the paywall-safe select omits go quiet rather
+  than widening that select. See [docs/seo.md](docs/seo.md).
+
 - **The sitemap escaped three characters where the feeds escaped five** (#502).
   Its copy of the XML escaper let a C0 control byte through, and one of those
   makes the whole sitemap unparseable rather than one URL. All three

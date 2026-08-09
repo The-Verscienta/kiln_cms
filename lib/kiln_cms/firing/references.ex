@@ -384,24 +384,32 @@ defmodule KilnCMS.Firing.References do
   @spec load_published(Ash.UUID.t(), atom(), term()) ::
           {:ok, struct()} | :absent | :unknown_type | {:error, term()}
   def load_published(org_id, :page, id),
-    do: published(CMS.get_page(id, authorize?: false, tenant: org_id))
+    do: published(CMS.get_page(id, [authorize?: false, tenant: org_id] ++ fire_opts()))
 
   def load_published(org_id, :post, id),
-    do: published(CMS.get_post(id, authorize?: false, tenant: org_id))
+    do: published(CMS.get_post(id, [authorize?: false, tenant: org_id] ++ fire_opts()))
 
   def load_published(org_id, :entry, id),
-    do: published(CMS.get_entry(id, authorize?: false, tenant: org_id))
+    do: published(CMS.get_entry(id, [authorize?: false, tenant: org_id] ++ fire_opts()))
 
   # Any other compiled content type: resolve its resource from the registry.
   def load_published(org_id, type, id) do
     case CMS.ContentTypes.get(type) do
       %{source: :compiled, resource: resource} ->
-        published(Ash.get(resource, id, authorize?: false, tenant: org_id))
+        published(Ash.get(resource, id, [authorize?: false, tenant: org_id] ++ fire_opts()))
 
       _ ->
         :unknown_type
     end
   end
+
+  # `KilnCMS.Firing.SchemaOrg.main_node/2` fires the type's #805 default
+  # description where the record has no description of its own (#1102), and the
+  # calculation's `load/3` is what makes `[category]` resolve to the same name
+  # the delivered page shows. Without it the fired `:json_ld` and the page's
+  # inline JSON-LD would disagree again — one token narrower, and just as
+  # permanent, since re-firing would re-read the same unloaded relationship.
+  defp fire_opts, do: [load: KilnCMS.Seo.Patterns.loads()]
 
   defp published({:ok, %{state: :published} = doc}), do: {:ok, doc}
 

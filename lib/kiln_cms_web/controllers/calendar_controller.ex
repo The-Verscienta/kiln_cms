@@ -232,7 +232,8 @@ defmodule KilnCMSWeb.CalendarController do
         # subscriber's past events every time a new one is published.
         sort: [published_at: :desc],
         limit: limit,
-        select: select_fields(descriptor)
+        select: select_fields(descriptor),
+        load: seo_loads()
       ]
     )
   end
@@ -255,11 +256,19 @@ defmodule KilnCMSWeb.CalendarController do
       query: [
         filter: [slug: slug, audience: :public, locale: KilnCMS.I18n.default_locale()],
         limit: 1,
-        select: select_fields(descriptor)
+        select: select_fields(descriptor),
+        load: seo_loads()
       ]
     )
     |> List.first()
   end
+
+  # `DESCRIPTION` is the type's #805 pattern where the record has no description
+  # of its own (#1102), and the calculation's `load/3` folds the tokens' own
+  # dependencies — `custom_fields`, the category, the date chain — into the
+  # pinned `select:` above. Without it `[field:<name>]` expanded empty on this
+  # route and nowhere else, which is the kind of difference nobody reports.
+  defp seo_loads, do: KilnCMS.Seo.Patterns.loads()
 
   # ── urls ──────────────────────────────────────────────────────────────────
 

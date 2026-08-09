@@ -35,7 +35,39 @@ defmodule KilnCMS.CMS.ContentSerializer do
 
   Both are additive, so no subscriber breaks; `state` was already here for the
   same reason.
+
+  ## `effective_seo_*` beside the stored fields, not instead of them (#1102)
+
+  A content type can default its `seo_title` / `seo_description` from a pattern
+  (#805), resolved when the page is rendered and never written to the column. A
+  payload carrying only the column therefore disagreed with the page it
+  describes: a preview showed a blank description for a document whose
+  `<meta name="description">` had a sentence in it, and a subscriber mirroring
+  publishes onto its own front end reproduced the blank.
+
+  Both spellings ship, because they answer different questions.
+  `seo_description` is what a human typed — blank means *nobody wrote one*,
+  which is what the editor's SEO panel and the export (#487) read it as, and
+  overwriting it here would reimport as an author-typed override.
+  `effective_seo_description` is what a renderer should print. Additive, like
+  the two above.
+
+  Read, never resolved: `KilnCMS.Seo.Patterns.effective/3` is called with
+  `resolve: false`, so it reports the loaded calculation where a caller asked for
+  one — the preview endpoint does — and the stored column otherwise. It must not
+  reach the type registry here, because `Changes.NotifyWebhooks` builds this
+  payload in an `after_action`, inside the publishing transaction: a query that
+  fails there aborts the commit and the record is lost, which is a bad trade for
+  a field on a notification.
+
+  So a webhook payload can still carry a stored blank where the page carries the
+  type's default. That is a smaller gap than the one #1102 closed — the field is
+  present, additive, and correct on every surface that reads through a query —
+  and closing it properly means moving the dispatch to `after_transaction`, which
+  is a change to when a webhook fires, not to what it says.
   """
+
+  alias KilnCMS.Seo.Patterns
 
   @public_fields [
     :id,
@@ -70,6 +102,11 @@ defmodule KilnCMS.CMS.ContentSerializer do
       blocks |> List.wrap() |> Enum.map(&Map.take(&1, @block_fields))
     end)
     |> Map.put(:locked, locked?(record))
+    |> Map.put(:effective_seo_title, Patterns.effective(record, :seo_title, resolve: false))
+    |> Map.put(
+      :effective_seo_description,
+      Patterns.effective(record, :seo_description, resolve: false)
+    )
   end
 
   # Derived, so the hash never leaves — see the moduledoc.
