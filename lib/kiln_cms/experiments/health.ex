@@ -100,7 +100,7 @@ defmodule KilnCMS.Experiments.Health do
     # Sticky first because it is the one that changes under a running
     # experiment's feet: it is a config read, not a row, so nothing about the
     # experiment itself looks different afterwards.
-    if later_page_goal?(experiment) and not Sticky.enabled?() do
+    if Experiments.later_page_goal?(experiment) and not Sticky.enabled?() do
       {:sticky_off,
        "this goal converts on a later page, and sticky assignment is off, so " <>
          "the site cannot tell a visitor who saw the experiment from one who " <>
@@ -119,6 +119,16 @@ defmodule KilnCMS.Experiments.Health do
   Ordered as `Experiments.running/1` returns them, so two calls in a row list
   them the same way.
   """
+  # DO NOT short-circuit this on `Experiments.enabled?()`. It looks like free
+  # efficiency — no arm is served, so why compute a goal reason — and #1114
+  # proposed exactly that. It reintroduces the masking #1008's review removed:
+  # the operator sees only "experiments are switched off", flips the flag, and
+  # *then* discovers the goal form was deleted three weeks ago. Surfacing both
+  # at once is the whole point, and `OverviewExperimentWarningTest` pins it.
+  #
+  # The cost this was meant to save is also smaller than it looks: `running/1`
+  # caches `[]` like any other value, so a site with no experiments pays one
+  # load per TTL, not one per mount.
   @spec blocked(Ash.UUID.t()) :: [{Experiment.t(), reason()}]
   def blocked(org_id) do
     org_id
@@ -131,7 +141,18 @@ defmodule KilnCMS.Experiments.Health do
     end)
   end
 
-  defp later_page_goal?(%{goal: goal}), do: goal in [:content_view, :funnel_completion]
+  @doc """
+  Whether this site has running experiments that the deployment switch is
+  stopping from being served.
+
+  The site-wide half of what the surfaces report, kept apart from `blocked/1`
+  for the reason in the moduledoc: it is one fact about the deployment, not a
+  verdict on each experiment.
+  """
+  @spec switched_off?(Ash.UUID.t()) :: boolean()
+  def switched_off?(org_id) do
+    not Experiments.enabled?() and Experiments.running(org_id) != []
+  end
 
   # The EXPERIMENTED document, checked before any goal. `Delivery` only ever
   # reaches `Experiments.for_document/3` from a published-content render, so a
@@ -207,21 +228,21 @@ defmodule KilnCMS.Experiments.Health do
     error -> unreadable_reason(log_unreadable(error))
   end
 
+  # One convention throughout this module: a check returns `nil` when it passes
+  # and a `reason` when it does not, so they chain with `||` (#1117). The `with`
+  # this replaced mixed `:ok`/`{:blocked, r}` against `nil`/`r`, which meant a
+  # fifth check written in the majority style raised `WithClauseError` — fatal
+  # to `mix kiln.experiment list`, and silently empty on the overview.
   defp content_view(experiment) do
-    with :ok <- target_named(experiment),
-         :ok <- target_elsewhere(experiment) do
-      goal_document(experiment)
-    else
-      {:blocked, reason} -> reason
-    end
+    target_named(experiment) || target_elsewhere(experiment) || goal_document(experiment)
   end
 
   defp target_named(%{goal_content_type: type, goal_document_id: id})
        when is_binary(type) and type != "" and not is_nil(id),
-       do: :ok
+       do: nil
 
   defp target_named(_experiment) do
-    {:blocked, {:no_target, "no goal document is set, so no view can be counted as a conversion"}}
+    {:no_target, "no goal document is set, so no view can be counted as a conversion"}
   end
 
   # Defensive, not reachable by any supported write: `GoalConfigured` refuses
@@ -241,14 +262,13 @@ defmodule KilnCMS.Experiments.Health do
          content_type: type,
          document_id: id
        }) do
-    {:blocked,
-     {:goal_is_self,
-      "the goal document is the experimented document itself, so nothing " <>
-        "converts — a view cannot be a conversion of the impression that same " <>
-        "view created, and delivery refuses to count it"}}
+    {:goal_is_self,
+     "the goal document is the experimented document itself, so nothing " <>
+       "converts — a view cannot be a conversion of the impression that same " <>
+       "view created, and delivery refuses to count it"}
   end
 
-  defp target_elsewhere(_experiment), do: :ok
+  defp target_elsewhere(_experiment), do: nil
 
   defp goal_document(%{goal_content_type: type, goal_document_id: id, org_id: org_id}) do
     case published_document(type, id, org_id) do

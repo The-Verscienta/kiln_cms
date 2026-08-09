@@ -210,20 +210,19 @@ defmodule KilnCMSWeb.OverviewLive do
               entirely when backups are healthy — a permanent green banner is
               one nobody reads, and its absence is what makes the red one
               land. --%>
-        <.link
+        <.overview_strip
           :if={@admin? and @backup_alarming?}
           id="overview-backup-warning"
           navigate={~p"/editor/backups"}
-          class="flex items-start gap-3 rounded-lg border border-error/30 bg-error/5 p-4 hover:bg-error/10"
+          tone_class="border-error/30 bg-error/5 hover:bg-error/10"
+          icon="hero-exclamation-triangle"
+          icon_class="text-error"
         >
-          <.icon name="hero-exclamation-triangle" class="mt-0.5 size-5 shrink-0 text-error" />
-          <span class="min-w-0">
-            <span class="block text-sm font-medium">{@backup_headline}</span>
-            <span class="block text-xs text-base-content/70">
-              {gettext("Open Backups to check the schedule or take one now.")}
-            </span>
+          <span class="block text-sm font-medium">{@backup_headline}</span>
+          <span class="block text-xs text-base-content/70">
+            {gettext("Open Backups to check the schedule or take one now.")}
           </span>
-        </.link>
+        </.overview_strip>
 
         <%!-- An experiment that cannot convert (#1008). Distinct from the
               backup strip above and deliberately a *warning*, not an error: the
@@ -236,36 +235,35 @@ defmodule KilnCMSWeb.OverviewLive do
 
               Absent when every running experiment is healthy, and absent
               entirely on a site with none. --%>
-        <div
+        <.overview_strip
           :if={@experiments_off? or @blocked_experiments != []}
           id="overview-experiment-warning"
-          class="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/5 p-4"
+          tone_class="border-warning/30 bg-warning/5"
+          icon="hero-beaker"
+          icon_class="text-warning-ink"
         >
-          <.icon name="hero-beaker" class="mt-0.5 size-5 shrink-0 text-warning-ink" />
-          <div class="min-w-0">
-            <%!-- The deployment switch is site-wide, so it is said once, here,
-                  rather than repeated under every experiment (#1008 review). --%>
-            <span :if={@experiments_off?} class="block text-sm font-medium">
-              {gettext("Experiments are switched off for this deployment, so no arm is served.")}
-            </span>
-            <%!-- NOT "cannot convert": two of the reasons below mean the
-                  opposite — a goal that is the experimented document converts
-                  every impression on the view that created it. What they share
-                  is that the numbers are not a result. --%>
-            <span :if={@blocked_experiments != []} class="block text-sm font-medium">
-              {ngettext(
-                "A running experiment is not producing usable results.",
-                "%{count} running experiments are not producing usable results.",
-                length(@blocked_experiments)
-              )}
-            </span>
-            <ul class="mt-1 space-y-0.5 text-xs text-base-content/70">
-              <li :for={{name, reason} <- @blocked_experiments}>
-                <span class="font-medium">{name}</span> — {blocked_headline(reason)}
-              </li>
-            </ul>
-          </div>
-        </div>
+          <%!-- The deployment switch is site-wide, so it is said once, here,
+                rather than repeated under every experiment (#1008 review). --%>
+          <span :if={@experiments_off?} class="block text-sm font-medium">
+            {gettext("Experiments are switched off for this deployment, so no arm is served.")}
+          </span>
+          <%!-- NOT "cannot convert": the reasons below do not share an outcome
+                — some mean nothing converts, and `:goal_is_self` means a goal
+                that would convert its own impression if delivery let it. What
+                they share is that the numbers are not a result. --%>
+          <span :if={@blocked_experiments != []} class="block text-sm font-medium">
+            {ngettext(
+              "%{count} running experiment is not producing usable results.",
+              "%{count} running experiments are not producing usable results.",
+              length(@blocked_experiments)
+            )}
+          </span>
+          <ul class="mt-1 space-y-0.5 text-xs text-base-content/70">
+            <li :for={{name, reason} <- @blocked_experiments}>
+              <span class="font-medium">{name}</span> — {blocked_headline(reason)}
+            </li>
+          </ul>
+        </.overview_strip>
 
         <div class="grid gap-4 lg:grid-cols-3">
           <div
@@ -391,11 +389,19 @@ defmodule KilnCMSWeb.OverviewLive do
   # and hid the real reasons behind it.
   defp assign_blocked_experiments(socket) do
     if socket.assigns.admin? do
-      running = KilnCMS.Experiments.running(socket.assigns.current_org.id)
+      org_id = socket.assigns.current_org.id
 
+      # Back through `Experiments.blocked/1` rather than re-deriving it here
+      # (#1114): it is the single entry point, and it short-circuits when the
+      # deployment switch is off so a disabled site pays neither the
+      # running-set load nor a lookup per experiment. `switched_off?/1` is the
+      # site-wide half, and reads the same cache.
       socket
-      |> assign(:blocked_experiments, Enum.flat_map(running, &blocked_row/1))
-      |> assign(:experiments_off?, running != [] and not KilnCMS.Experiments.enabled?())
+      |> assign(
+        :blocked_experiments,
+        Enum.map(KilnCMS.Experiments.blocked(org_id), &blocked_row/1)
+      )
+      |> assign(:experiments_off?, KilnCMS.Experiments.switched_off?(org_id))
     else
       socket
       |> assign(:blocked_experiments, [])
@@ -421,12 +427,59 @@ defmodule KilnCMSWeb.OverviewLive do
   # whole `Backups.status/0` map isn't held in the socket for a banner that is
   # usually absent.
 
-  defp blocked_row(experiment) do
-    case KilnCMS.Experiments.blocked_reason(experiment) do
-      nil -> []
-      {reason, _sentence} -> [{experiment.name, reason}]
-    end
+  attr :id, :string, required: true
+  attr :icon, :string, required: true
+
+  attr :tone_class, :string,
+    required: true,
+    doc: """
+    Border/background utilities, passed as a LITERAL from the call site. Not
+    built from a tone name: Tailwind's JIT only emits a class it can see spelled
+    out in source, so an interpolated `border-<tone>/30` would compile to markup with no CSS
+    behind it (#1116).
+    """
+
+  attr :icon_class, :string, required: true
+  attr :navigate, :string, default: nil
+  slot :inner_block, required: true
+
+  # An alert strip above the bagua grid.
+  #
+  # A strip rather than a ninth tile: the grid is a fixed 3×3 with the centre
+  # taken, and an alert wants to be read before the eight steady-state numbers
+  # rather than alongside them.
+  #
+  # Rendered as a link when `navigate` is given and a plain `div` otherwise —
+  # which is the one place the two strips legitimately differ, so the hover
+  # state belongs to the navigable variant only rather than being an
+  # inconsistency to reconcile.
+  defp overview_strip(assigns) do
+    ~H"""
+    <.link
+      :if={@navigate}
+      id={@id}
+      navigate={@navigate}
+      class={["flex items-start gap-3 rounded-lg border p-4", @tone_class]}
+    >
+      <.icon name={@icon} class={["mt-0.5 size-5 shrink-0", @icon_class]} />
+      <span class="min-w-0">{render_slot(@inner_block)}</span>
+    </.link>
+    <div
+      :if={is_nil(@navigate)}
+      id={@id}
+      class={["flex items-start gap-3 rounded-lg border p-4", @tone_class]}
+    >
+      <.icon name={@icon} class={["mt-0.5 size-5 shrink-0", @icon_class]} />
+      <div class="min-w-0">{render_slot(@inner_block)}</div>
+    </div>
+    """
   end
+
+  # Only the name and the reason atom reach the socket — never the experiment
+  # struct, which carries every variant's patch. The English sentence
+  # `blocked_reason/1` also returns is for the terminal; this surface phrases
+  # its own so the strip translates.
+  defp blocked_row({experiment, {reason, _sentence}}), do: {experiment.name, reason}
 
   defp blocked_headline(:sticky_off),
     do: gettext("its goal converts on a later page, and sticky assignment is off")
