@@ -352,10 +352,17 @@ their consent mechanism, and the goal form, the goal document and the funnel's
 last step are all rows an editor can delete without ever seeing the experiment
 that depends on them.
 
-Delivery already refused to serve an arm it could not attribute, so nothing was
-being measured wrongly. The gap was that nothing **said so**: the experiment
-read `running`, impressions sat where they were, and a flat result is
-indistinguishable from a genuine null.
+A blocked experiment is **not** a free one. Only `:sticky_off` is refused by
+delivery — `attributable?/1` gates `do_assign/3` and nothing else. For every
+other reason the arm is served normally: `assign_sticky/3` never consults
+`attributable?/1`, `count_exposure/4` books an impression, and the page still
+drops to `private, no-store`. So the experiment goes on splitting traffic,
+accumulating impressions on a denominator the numerator can never reach, and
+costing both its pages the CDN — and clearing the block does not make the
+numbers gathered meanwhile usable.
+
+The gap was that nothing **said so**: the experiment read `running`, and a flat
+result is indistinguishable from a genuine null.
 
 `KilnCMS.Experiments.blocked_reason/1` is the one runtime statement of that rule
 — read live, not recorded at `:start` — and it is surfaced on the two places an

@@ -44,6 +44,21 @@ defmodule KilnCMS.Experiments.Validations.GoalConfigured do
   funnel's ordering — so `KilnCMS.Experiments.Health` asks the same question of
   a **running** experiment, live, and the surfaces report what it answers
   (#1008). Adding a case here means adding one there.
+
+  The two are **not** identical, and the differences are deliberate:
+
+    * `Health` additionally requires each document to be **published**, and the
+      goal form to be **active**. This gate does not, because a publish is a
+      normal next step — refusing to start an experiment on a document you are
+      about to publish would be an obstacle, not a guard;
+    * `Health` additionally checks the **experimented** document, which cannot
+      have gone anywhere between `create` and `start`;
+    * this gate reports through `field:` so the error lands on the form field;
+      `Health` reports an atom a UI phrases itself.
+
+  Anything else — a missing form, a missing goal document, an unknown type, a
+  self-goal, a stepless funnel — must be caught by **both**, or `:start` accepts
+  what the first `show` condemns.
   """
   use Ash.Resource.Validation
 
@@ -54,7 +69,7 @@ defmodule KilnCMS.Experiments.Validations.GoalConfigured do
     case Ash.Changeset.get_attribute(changeset, :goal) do
       :content_view -> content_view(changeset, context)
       :funnel_completion -> funnel_completion(changeset, context)
-      _form_submission -> form_submission(changeset)
+      _form_submission -> form_submission(changeset, context)
     end
   end
 
@@ -152,22 +167,75 @@ defmodule KilnCMS.Experiments.Validations.GoalConfigured do
     end
   end
 
-  defp form_submission(changeset) do
-    if Ash.Changeset.get_attribute(changeset, :goal_form_id) do
-      :ok
-    else
-      {:error,
-       field: :goal_form_id,
-       message: "a form-submission experiment needs a goal form before it can start"}
+  defp form_submission(changeset, context) do
+    case Ash.Changeset.get_attribute(changeset, :goal_form_id) do
+      nil ->
+        {:error,
+         field: :goal_form_id,
+         message: "a form-submission experiment needs a goal form before it can start"}
+
+      id ->
+        goal_form_usable(id, context)
     end
+  end
+
+  # Present is not enough: a mistyped or another site's uuid starts cleanly and
+  # converts nothing, and an inactive form refuses every submission before it
+  # can be counted. This is the same pair `Health.blocked_reason/1` checks at
+  # read time, done here so `:start` cannot accept what `show` immediately
+  # condemns (#1008 review) — and it is what `funnel_target_exists/2` below has
+  # always done for the sibling goal.
+  defp goal_form_usable(id, context) do
+    case KilnCMS.CMS.get_form(id, authorize?: false, tenant: context.tenant) do
+      {:ok, %{active: true}} ->
+        :ok
+
+      {:ok, _inactive} ->
+        {:error,
+         field: :goal_form_id,
+         message: "that form is not accepting submissions, so nothing could convert"}
+
+      _missing ->
+        {:error, field: :goal_form_id, message: "no form #{inspect(id)} on this site"}
+    end
+  rescue
+    _error ->
+      {:error, field: :goal_form_id, message: "that goal form could not be resolved"}
   end
 
   defp content_view(changeset, context) do
     with :ok <- target_present(changeset),
          :ok <- target_type_exists(changeset, context),
-         :ok <- target_is_elsewhere(changeset) do
+         :ok <- target_is_elsewhere(changeset),
+         :ok <- target_document_exists(changeset, context) do
       sticky_on()
     end
+  end
+
+  # The type existing does not mean the DOCUMENT does. `funnel_target_exists/2`
+  # already resolves the funnel's last step this way, under a comment claiming
+  # it is done "the same way `content_view`'s target is" — which was not true
+  # until now: a transposed uuid of a valid type passed every gate here and was
+  # then reported blocked by `Health` on the first `show` (#1008 review).
+  defp target_document_exists(changeset, context) do
+    type = Ash.Changeset.get_attribute(changeset, :goal_content_type)
+    id = Ash.Changeset.get_attribute(changeset, :goal_document_id)
+
+    case KilnCMS.CMS.ContentTypes.get_record(type, id,
+           authorize?: false,
+           tenant: context.tenant
+         ) do
+      {:ok, _record} ->
+        :ok
+
+      _missing ->
+        {:error,
+         field: :goal_document_id,
+         message: "#{type} #{id} is not a document on this site, so nothing could convert"}
+    end
+  rescue
+    _error ->
+      {:error, field: :goal_document_id, message: "that goal document could not be resolved"}
   end
 
   defp target_present(changeset) do
