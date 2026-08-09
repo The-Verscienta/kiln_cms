@@ -186,8 +186,11 @@ defmodule KilnCMS.CMS.Slugs do
       uncategorized entry) falls back to the default chain instead of failing
       the write.
   """
-  @spec derive_base(String.t() | nil, KilnCMS.Slug.Pattern.context()) :: String.t()
-  def derive_base(pattern, context) do
+  @spec derive_base(String.t() | nil, KilnCMS.Slug.Pattern.context(), [Kiln.Tokens.definition()]) ::
+          String.t()
+  def derive_base(pattern, context, extra \\ []) do
+    # The default chain is built-ins only by construction — it is this module's
+    # own literal — so it never needs a type's extra tokens.
     default = KilnCMS.Slug.Pattern.expand(@default_pattern, context)
 
     cond do
@@ -198,7 +201,7 @@ defmodule KilnCMS.CMS.Slugs do
         default
 
       true ->
-        case KilnCMS.Slug.Pattern.expand(pattern, context) do
+        case KilnCMS.Slug.Pattern.expand(pattern, context, extra) do
           "" -> default
           base -> base
         end
@@ -409,6 +412,112 @@ defmodule KilnCMS.CMS.Slugs do
   # their content-type marker, dynamic entries by their TypeDefinition id. Mirror
   # of `ApplyCustomFields`'s own lookup; kept private since only the computed-slug
   # path here needs it.
+  @doc """
+  The extra `Kiln.Tokens` definitions the custom field types attached to
+  `field_definitions` contribute (#804).
+
+  `[field:<name>]` already slugifies any scalar custom-field value for free, and
+  expands a map or list one to `""`. That is the honest answer for most types
+  and the wrong one for a **composite**: a coordinate pair or a
+  price-and-currency wants to expose its own named parts
+  (`[field:location.lat]`) rather than go blank. `c:Kiln.FieldType.tokens/1` is
+  where a type says so; this is what asks it.
+
+  Core field types have no module (the host coerces them) and contribute
+  nothing. A plugin type that hand-rolls `@behaviour Kiln.FieldType` without
+  the callback contributes nothing either — `tokens/1` is an optional callback,
+  so it is probed rather than assumed.
+  """
+  @spec type_token_definitions([struct()]) :: [Kiln.Tokens.definition()]
+  def type_token_definitions(field_definitions) do
+    Enum.flat_map(field_definitions, fn definition ->
+      case KilnCMS.CMS.FieldTypes.get(definition.field_type) do
+        nil -> []
+        module -> type_tokens(module, definition)
+      end
+    end)
+  end
+
+  # `Code.ensure_loaded?/1` is load-bearing, not decoration. `FieldTypes.get/1`
+  # returns a module atom out of a compile-baked map and never loads it, so
+  # under interactive code loading (dev, test, any release not in `:embedded`
+  # mode) `function_exported?/3` answers **false** for a plugin type nobody has
+  # touched yet — and `DeriveSlug` runs before `ApplyCustomFields`, which is
+  # what would otherwise have loaded it. The result was a silently wrong slug
+  # PERSISTED on the first write after boot, and the right one on the second.
+  # `KilnCMS.SchemaExport` guards the identical probe for the identical reason.
+  defp type_tokens(module, definition) do
+    if Code.ensure_loaded?(module) and function_exported?(module, :tokens, 1) do
+      module.tokens(definition)
+    else
+      []
+    end
+  rescue
+    # A plugin's token list must not be able to fail a save. A slug derivation
+    # that raised here would take down the write it was decorating, and the
+    # token simply expanding empty is the same outcome the generic
+    # `[field:<name>]` path already gives a value it cannot render.
+    _error -> []
+  end
+
+  @doc """
+  Extra token definitions for a pattern being expanded on `changeset`, or `[]`.
+
+  Gated on the pattern actually mentioning a token the built-in vocabulary does
+  not cover, which is almost never — so the field-definition read this needs is
+  not paid for by the overwhelming majority of slug derivations.
+  """
+  @spec changeset_token_definitions(Ash.Changeset.t(), String.t() | nil, atom()) ::
+          [Kiln.Tokens.definition()]
+  def changeset_token_definitions(changeset, pattern, usage) do
+    case KilnCMS.Slug.Pattern.unknown_tokens(pattern, usage) do
+      [] -> []
+      _unknown -> changeset |> field_definitions() |> type_token_definitions()
+    end
+  end
+
+  @doc """
+  Extra token definitions for a **type descriptor**'s pattern, or `[]`.
+
+  The `changeset_token_definitions/3` twin for the two callers that hold a
+  descriptor rather than a changeset — the content editor's live slug preview
+  and the bulk regenerator. Both must derive exactly what the write path
+  derives: the editor because `slug_customized?/1` decides "did the author pin
+  this?" by comparing the stored slug against a fresh derivation, and the
+  regenerator because it decides the same thing and then rewrites live URLs.
+
+  Without it, a type using a `c:Kiln.FieldType.tokens/1` token derived
+  `guide-kiln` in the editor while the save wrote `guide-kiln-three`, so every
+  draft of that type read as author-pinned and stopped tracking its title —
+  and `mix kiln.slugs.regenerate --include-pinned`, the workflow recommended
+  after a pattern change, rewrote each of those URLs to the token-less form.
+
+  Gated on the pattern naming something the built-ins don't cover, so an
+  ordinary pattern pays no field-definition read.
+  """
+  @spec descriptor_token_definitions(map(), String.t() | nil, atom(), term()) ::
+          [Kiln.Tokens.definition()]
+  def descriptor_token_definitions(ct, pattern, usage, tenant) do
+    case KilnCMS.Slug.Pattern.unknown_tokens(pattern, usage) do
+      [] -> []
+      _unknown -> ct |> descriptor_field_definitions(tenant) |> type_token_definitions()
+    end
+  rescue
+    # An unreadable definition set must not crash the editor's mount or abort a
+    # regeneration run; degrade to the built-ins, as the save-time validation
+    # does. The cost is that the preview can disagree with the save again — but
+    # only while the read is failing, which is an outage, not a steady state.
+    _error -> []
+  end
+
+  defp descriptor_field_definitions(%{source: :dynamic, definition: %{id: id}}, tenant),
+    do: KilnCMS.CMS.field_definitions_for_definition!(id, authorize?: false, tenant: tenant)
+
+  defp descriptor_field_definitions(%{type: type}, tenant) when not is_nil(type),
+    do: KilnCMS.CMS.field_definitions_for!(type, authorize?: false, tenant: tenant)
+
+  defp descriptor_field_definitions(_ct, _tenant), do: []
+
   defp field_definitions(%{resource: resource} = changeset) do
     tenant = changeset.to_tenant
 

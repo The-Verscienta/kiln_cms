@@ -28,7 +28,15 @@ defmodule Kiln.Tokens do
   rejecting them.
   """
 
-  @token_regex ~r/\[([a-z0-9:_-]+)\]/
+  require Logger
+
+  # `.` is in the grammar for the sake of a field type's own tokens (#804):
+  # `c:Kiln.FieldType.tokens/1` documents `[field:location.lat]` as the shape a
+  # composite exposes its parts under, and without the dot that token was
+  # unparseable — `expand/3` left the brackets alone and the surrounding
+  # slug-ification turned them into literal text. `validate/2` already rejected
+  # it as unknown, so no saved pattern can have relied on the old behaviour.
+  @token_regex ~r/\[([a-z0-9:._-]+)\]/
   @capture_regex ~r/\[([^\]]*)\]/
 
   @type token :: String.t()
@@ -62,8 +70,29 @@ defmodule Kiln.Tokens do
   defp resolve(token, definitions, context) do
     case Enum.find(definitions, &matches?(&1, token)) do
       nil -> nil
-      %{resolve: resolve} -> resolve.(token, context)
+      %{resolve: resolve} -> safe_resolve(resolve, token, context)
     end
+  end
+
+  # A resolver that raises expands empty, exactly like an unmatched token.
+  #
+  # Definitions are supplied by callers *and by plugins* — `c:Kiln.FieldType.tokens/1`
+  # lets a third-party field type hand us a closure — and a pattern is expanded
+  # in the middle of a write. Without this, a plugin resolver that assumed a
+  # custom field was present would turn "the slug lost a token" into "the create
+  # action 500s". `KilnCMS.CMS.Slugs.type_token_definitions/1` already rescues
+  # around *building* the list for the same reason; this is the other half, and
+  # the one the callback's own documentation promises.
+  defp safe_resolve(resolve, token, context) do
+    resolve.(token, context)
+  rescue
+    error ->
+      Logger.warning("token #{inspect(token)} resolver raised: #{Exception.message(error)}")
+      nil
+  catch
+    :exit, reason ->
+      Logger.warning("token #{inspect(token)} resolver exited: #{inspect(reason)}")
+      nil
   end
 
   defp matches?(%{match: match}, token) when is_binary(match), do: match == token

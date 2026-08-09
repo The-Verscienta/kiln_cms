@@ -63,6 +63,77 @@ defmodule KilnCMS.FixturePlugin.FieldTypes.Rating do
 
   @impl Kiln.FieldType
   def input_attrs(_definition), do: %{min: 1, max: 5}
+
+  @doc """
+  A word form of the rating, for slug/alias patterns (#804).
+
+  The generic `[field:<name>]` token already gives `3`. This is the thing the
+  generic path cannot produce — a value derived from the stored one — and it is
+  scoped to *this field's* name, so two rating fields on one type each get their
+  own token rather than fighting over a shared one.
+  """
+  @impl Kiln.FieldType
+  def tokens(definition) do
+    [
+      %{
+        match: ~r/\Afield:#{Regex.escape(definition.name)}\.word\z/,
+        resolve: fn _token, context ->
+          context
+          |> Map.get(:custom_fields, %{})
+          |> Kernel.||(%{})
+          |> Map.get(definition.name)
+          |> word()
+        end
+      }
+    ]
+  end
+
+  @words %{1 => "one", 2 => "two", 3 => "three", 4 => "four", 5 => "five"}
+
+  defp word(value) when is_integer(value), do: Map.get(@words, value, "")
+
+  defp word(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {n, ""} -> word(n)
+      _other -> ""
+    end
+  end
+
+  defp word(_value), do: ""
+end
+
+defmodule KilnCMS.FixturePlugin.FieldTypes.Tokenless do
+  @moduledoc """
+  A plugin field type that implements the behaviour but NOT the optional
+  `c:Kiln.FieldType.tokens/1` (test fixture).
+
+  Exists so `KilnCMS.CMS.Slugs.type_token_definitions/1`'s
+  `Code.ensure_loaded?/1 and function_exported?/3` probe has a case that
+  actually reaches it. A CORE field type cannot: `FieldTypes.get/1` returns
+  `nil` for those, so a `:text` field exercises the nil clause and never the
+  probe — which is why the branch shipped uncovered.
+  """
+  use Kiln.FieldType
+
+  @impl Kiln.FieldType
+  def cast(value, _definition), do: {:ok, to_string(value)}
+end
+
+defmodule KilnCMS.FixturePlugin.FieldTypes.Exploding do
+  @moduledoc """
+  A plugin field type whose `c:Kiln.FieldType.tokens/1` raises (test fixture).
+
+  A third party's token list must never be able to fail the save it was merely
+  decorating, so `type_token_definitions/1` rescues. This is the case that
+  proves the rescue is still there.
+  """
+  use Kiln.FieldType
+
+  @impl Kiln.FieldType
+  def cast(value, _definition), do: {:ok, to_string(value)}
+
+  @impl Kiln.FieldType
+  def tokens(_definition), do: raise("plugin token list blew up")
 end
 
 defmodule KilnCMS.FixturePlugin.PanelLive do
@@ -109,7 +180,12 @@ defmodule KilnCMS.FixturePlugin do
   def blocks, do: [KilnCMS.FixturePlugin.CalloutBlock]
 
   @impl true
-  def field_types, do: [KilnCMS.FixturePlugin.FieldTypes.Rating]
+  def field_types,
+    do: [
+      KilnCMS.FixturePlugin.FieldTypes.Rating,
+      KilnCMS.FixturePlugin.FieldTypes.Tokenless,
+      KilnCMS.FixturePlugin.FieldTypes.Exploding
+    ]
 
   @impl true
   def nav_items, do: [%{label: "Fixture", path: "/editor/fixture", role: :admin}]
