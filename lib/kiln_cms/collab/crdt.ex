@@ -25,7 +25,18 @@ defmodule KilnCMS.Collab.Crdt do
 
   alias KilnCMS.Collab.Crdt.DocServer
 
-  @doc "Whether the collaborative-editing CRDT prototype is enabled."
+  @doc """
+  Whether the collaborative-editing CRDT prototype is enabled.
+
+  Read fresh on every editor mount, from **VM-global** application env. A test
+  that flips `:collab_prototype` therefore flips it for every session in the
+  node, not just its own — so any such test must be `async: false`, or it
+  disables collaboration underneath whatever else is mounting an editor at that
+  moment (`KilnCMSWeb.CollabSavedRefreshTest`, `KilnCMSWeb.CollabChannelTest`).
+  Restore the previous value rather than deleting the key: `config/test.exs`
+  sets it at boot, and `Application.delete_env/2` would leave every later module
+  on the `false` default here.
+  """
   @spec enabled?() :: boolean()
   def enabled?, do: Application.get_env(:kiln_cms, :collab_prototype, false)
 

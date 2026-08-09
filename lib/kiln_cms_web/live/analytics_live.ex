@@ -25,7 +25,6 @@ defmodule KilnCMSWeb.AnalyticsLive do
   # Render order for the referrer breakdown — shared by the site-wide chart
   # and every per-row bar, so a source's position (and colour, in
   # `ChartComponents`) is consistent everywhere it appears.
-  @source_order [:direct, :internal, :search, :social, :other]
 
   @impl true
   def mount(_params, _session, socket) do
@@ -191,60 +190,17 @@ defmodule KilnCMSWeb.AnalyticsLive do
     Map.put(row, :referrer_entries, chart_entries(sources))
   end
 
-  # One entry per known source, in a fixed order, whether or not this window
-  # saw any hits for it — a zero-hit source still needs a bar (height 0) and
-  # a row in the sr-only breakdown, or its absence would read as "we don't
-  # track this category" rather than "nobody arrived this way".
-  #
-  # Complementary suppression (#620 review): every classified arrival writes
-  # exactly one referrer hit alongside its view (`ViewTracking.record/4`), so
-  # the five categories here sum to the row's own exact view total shown
-  # beside them. If exactly one category is naturally below the threshold,
-  # its value is fully determined by subtracting the other four EXACT values
-  # from that total — publishing "< n" next to four exact numbers doesn't
-  # hide anything. When that happens, a second category (the smallest
-  # nonzero exact one) is suppressed too, so the equation has two unknowns
-  # instead of one. Two or more naturally-suppressed categories need no help:
-  # their individual values are already underdetermined by the total alone.
+  # The decision itself is `Analytics.suppress_referrer_group/1` — shared with
+  # the export (#777), which had the same arithmetic gap and no fix for it
+  # because the algorithm lived here. This is only the rendering.
   defp chart_entries(totals) do
-    threshold = Analytics.low_count_threshold()
-    raw = Enum.map(@source_order, fn source -> {source, Map.get(totals, source, 0)} end)
-    naturally_suppressed = for {source, hits} <- raw, hits > 0 and hits < threshold, do: source
-
-    forced_source =
-      case naturally_suppressed do
-        [only] -> complementary_partner(raw, only)
-        _ -> nil
-      end
-
-    Enum.map(raw, fn {source, hits} -> chart_entry(source, hits, source == forced_source) end)
+    totals
+    |> Analytics.suppress_referrer_group()
+    |> Enum.map(fn {source, hits, display} -> chart_entry(source, hits, display) end)
   end
 
-  # The smallest not-already-suppressed category — suppressing it too means
-  # the one naturally-low category can no longer be pinned down by
-  # subtracting the other three "exact" values from the row's total.
-  #
-  # Deliberately includes zero-hit categories as candidates: if every OTHER
-  # category is a genuine zero, the naturally-suppressed one is exactly
-  # `total − 0 − 0 − 0 − 0`, the single most recoverable case there is.
-  # Excluding zeros from the candidate pool (as an earlier version of this
-  # function did) would leave exactly that case unprotected. Turning an
-  # honest "0" into "hidden" costs real information, but there are always
-  # four other categories to choose from, so this never returns `nil`.
-  defp complementary_partner(raw, already_suppressed) do
-    {source, _hits} =
-      raw
-      |> Enum.reject(fn {source, _hits} -> source == already_suppressed end)
-      |> Enum.min_by(fn {_source, hits} -> hits end)
-
-    source
-  end
-
-  # `display` is the only number a person ever sees. A naturally low count
-  # renders as `Analytics.suppress_low_count/1`'s "< n"; a count forced into
-  # suppression for complementary reasons (see `chart_entries/1`) is NOT
-  # labelled "< n" — its real value can be at or above the threshold, so that
-  # would be false — it renders as a plain "hidden" instead.
+  # `display` is the only number a person ever sees, and it arrives already
+  # decided by `Analytics.suppress_referrer_group/1`.
   #
   # `bar_value` drives the bar's height/width and is deliberately never the
   # raw hit count for a suppressed entry, natural or forced: comparing two
@@ -254,20 +210,19 @@ defmodule KilnCMSWeb.AnalyticsLive do
   # roughly proportionate without ever distinguishing one suppressed count
   # from another. A true zero still renders as a flat bar: there is nothing
   # to describe, so nothing to hide.
-  defp chart_entry(source, hits, forced_suppress?) do
-    natural = Analytics.suppress_low_count(hits)
+  defp chart_entry(source, hits, display) do
     threshold = Analytics.low_count_threshold()
+    bar_value = if is_binary(display), do: threshold - 1, else: hits
 
-    display =
-      cond do
-        is_binary(natural) -> natural
-        forced_suppress? -> gettext("hidden")
-        true -> natural
-      end
-
-    bar_value = if is_binary(natural) or forced_suppress?, do: threshold - 1, else: hits
-
-    %{source: source, label: source_label(source), display: display, bar_value: bar_value}
+    %{
+      source: source,
+      label: source_label(source),
+      # The shared decision returns the untranslated `"hidden"` sentinel — it
+      # is a value an export writes into a file as well as a word a person
+      # reads, so the translation belongs at the render, not in the algorithm.
+      display: if(display == "hidden", do: gettext("hidden"), else: display),
+      bar_value: bar_value
+    }
   end
 
   defp source_label(:direct), do: gettext("Direct")

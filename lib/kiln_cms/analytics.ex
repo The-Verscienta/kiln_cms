@@ -113,4 +113,106 @@ defmodule KilnCMS.Analytics do
     threshold = low_count_threshold()
     if hits < threshold, do: "< #{threshold}", else: hits
   end
+
+  @doc """
+  The referrer categories, in display order — read off `ReferrerDay`'s own
+  `one_of` constraint rather than restated.
+
+  A category list that lives in two places is a category list that will
+  eventually disagree, and the failure is silent: a new source would simply
+  never appear in a chart or an export, and the suppression arithmetic below
+  would be computed over a set that no longer sums to the view total.
+  """
+  @spec referrer_sources() :: [atom()]
+  def referrer_sources do
+    KilnCMS.Analytics.ReferrerDay
+    |> Ash.Resource.Info.attribute(:source)
+    |> Map.fetch!(:constraints)
+    |> Keyword.fetch!(:one_of)
+  end
+
+  @doc """
+  Decide what a whole referrer breakdown may show, given `totals` — a map of
+  `source => hits` for **one** content item over one span (#620, #777).
+
+  Read the warning below before treating this as a privacy guarantee.
+
+  Returns one `{source, hits, display}` per category in `referrer_sources/0`
+  order, including categories with no hits: a zero-hit source still needs a
+  place, or its absence reads as "we don't track this" rather than "nobody
+  arrived this way" — and, more importantly, it is a candidate partner below.
+
+  ## Complementary suppression — what it does, and what it does NOT do
+
+  Every classified arrival writes exactly one referrer hit alongside its view
+  (`KilnCMSWeb.ViewTracking`'s private `record/4`), so these categories sum to
+  the item's own view total, which both the dashboard and the export publish
+  **exactly**, right next to them. When one category is naturally below the
+  threshold, a second is suppressed too — the smallest of the others, zero-hit
+  ones included.
+
+  > #### This does not prevent arithmetic recovery {: .warning}
+  >
+  > It reads as though it does, and #620 shipped it saying so. It does not.
+  > Brute-forcing every assignment consistent with the published projection
+  > *plus the published view total* (threshold 5):
+  >
+  > | breakdown | published | consistent assignments |
+  > |---|---|---|
+  > | `direct: 3`, rest zero | `"< 5"`, `hidden`, `0,0,0` | **1 — exact** |
+  > | `direct: 2, search: 40, social: 50, other: 60` | `"< 5"`, `hidden`, `40,50,60` | **1 — exact** |
+  > | `direct: 4`, others all `5` | `"< 5"`, `hidden`, `5,5,5` | **1 — exact** |
+  > | `direct: 1, internal: 1`, rest zero | `"< 5"`, `"< 5"`, `0,0,0` | **1 — exact** |
+  > | `direct: 4, internal: 100, …` | `"< 5"`, `hidden`, `200,300,400` | 4 — the range `"< 5"` already announced |
+  >
+  > The reader knows the algorithm. The partner is the *minimum* of the others,
+  > so it is bounded above by every published exact; and it is not naturally
+  > low, so it is `0` or `>= threshold`. With one equation and that constraint
+  > the pair is usually unique — and whenever the residual is below the
+  > threshold the partner **must** be zero, which pins the low value exactly.
+  >
+  > Choosing the smallest partner is what makes it predictable. Two
+  > naturally-low categories are not safe either, contrary to what #620
+  > claimed: small totals pin both.
+  >
+  > Closing this needs the exact total to stop being published beside the
+  > breakdown, or the whole breakdown suppressed together — a design change to
+  > both surfaces, tracked as #1073. What this function delivers today is a
+  > **consistent** decision across the dashboard and the export, which is the
+  > prerequisite for fixing it in one place rather than two.
+
+  ## The three display values
+
+    * an integer — the exact count, at or above the threshold (or a true zero,
+      which describes nobody and is never suppressed)
+    * `"< n"` — naturally below the threshold
+    * `"hidden"` — suppressed as a complement. Deliberately *not* `"< n"`: its
+      real value can be at or above the threshold, so that label would be false.
+  """
+  @spec suppress_referrer_group(%{optional(atom()) => non_neg_integer()}) ::
+          [{atom(), non_neg_integer(), non_neg_integer() | String.t()}]
+  def suppress_referrer_group(totals) do
+    threshold = low_count_threshold()
+    raw = Enum.map(referrer_sources(), fn source -> {source, Map.get(totals, source, 0)} end)
+    naturally_suppressed = for {source, hits} <- raw, hits > 0 and hits < threshold, do: source
+
+    forced =
+      case naturally_suppressed do
+        [only] -> complementary_partner(raw, only)
+        _other -> nil
+      end
+
+    Enum.map(raw, fn {source, hits} ->
+      {source, hits, if(source == forced, do: "hidden", else: suppress_low_count(hits))}
+    end)
+  end
+
+  defp complementary_partner(raw, already_suppressed) do
+    {source, _hits} =
+      raw
+      |> Enum.reject(fn {source, _hits} -> source == already_suppressed end)
+      |> Enum.min_by(fn {_source, hits} -> hits end)
+
+    source
+  end
 end

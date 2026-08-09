@@ -30,6 +30,11 @@ defmodule KilnCMS.Analytics.Export do
   # window without a round trip per row.
   @batch_size 500
 
+  # Referrer breakdowns per title-resolution batch (#777). A breakdown is at
+  # most one row per category, so this is the same ~500-row ceiling
+  # `@batch_size` sets for view rows, and the same number of title queries.
+  @groups_per_batch 100
+
   @doc "The bucket retention window — the cap both callers enforce on a requested span."
   @spec max_days() :: pos_integer()
   def max_days, do: ContentViewDay.retention_days()
@@ -65,11 +70,44 @@ defmodule KilnCMS.Analytics.Export do
   end
 
   @doc """
-  Streams `ReferrerDay.:in_range` the same way `stream_rows/4` streams
-  `ContentViewDay` — same batching, same title resolution. Empty (no query
-  issued) when referrer attribution is disabled: mirrors the dashboard, which
-  hides the breakdown entirely rather than showing an empty one, and there is
-  genuinely nothing to page through — a disabled deployment never wrote a row.
+  Streams `ReferrerDay.:in_range` as **whole breakdowns**, one per
+  `(day, content item)`, with each category's exported value already decided.
+
+  Empty (no query issued) when referrer attribution is disabled: mirrors the
+  dashboard, which hides the breakdown entirely rather than showing an empty
+  one, and there is genuinely nothing to page through — a disabled deployment
+  never wrote a row.
+
+  ## Why a group and not a row (#777)
+
+  #620 suppressed a low count per row, which the dashboard later learned is not
+  enough: every classified arrival writes one referrer hit alongside its view,
+  so an item's categories sum to the exact `views` this same export prints on
+  the item's own view row. One `"< n"` beside four exact numbers is not hidden
+  at all — it is `total` minus the other four. The export was worse than the
+  pre-fix dashboard, because its grain is per *day*: an item with a single
+  referrer row that day has that row's count equal to the day's views outright,
+  with no subtraction needed.
+
+  So the decision is made over a whole breakdown, by the same
+  `Analytics.suppress_referrer_group/1` the dashboard uses, and every category
+  is emitted — **including ones with no hits**, which is what makes a
+  complementary partner available at all.
+
+  That brings the export up to the dashboard's behaviour. It does **not** close
+  #777: the algorithm itself does not prevent arithmetic recovery while the
+  exact view total is published beside the breakdown — see the warning on
+  `Analytics.suppress_referrer_group/1`, and #1073. What changes here is that there is now
+  one decision to fix rather than two implementations to fix separately.
+
+  ## Why this is still a stream
+
+  `ReferrerDay.:in_range` sorts `(day, content_type, content_id, id)`, so a
+  group is contiguous and `chunk_by/2` holds at most one item's categories at a
+  time. Groups are then batched for title resolution exactly as rows were, so
+  this costs the same query count and the same bounded memory as before — the
+  design constraint #618 set, and the reason #620 deferred this rather than
+  buffering the window.
   """
   @spec stream_referrer_rows(Date.t(), Date.t(), term(), term()) :: Enumerable.t()
   def stream_referrer_rows(from, to, org, actor) do
@@ -78,11 +116,38 @@ defmodule KilnCMS.Analytics.Export do
 
       query
       |> Ash.stream!(actor: actor, tenant: org, batch_size: @batch_size)
-      |> Stream.chunk_every(@batch_size)
-      |> Stream.map(fn rows -> {rows, Titles.resolve(rows, org, actor)} end)
+      |> Stream.chunk_by(&group_key/1)
+      |> Stream.map(&decide_group/1)
+      |> Stream.chunk_every(@groups_per_batch)
+      |> Stream.map(fn groups ->
+        rows = List.flatten(groups)
+        {rows, Titles.resolve(rows, org, actor)}
+      end)
     else
       []
     end
+  end
+
+  defp group_key(row), do: {row.day, row.content_type, row.content_id}
+
+  # One breakdown's rows, expanded to every category and stamped with what may
+  # be shown. The stamped `:display` is what `csv_row/3` and `json_row/3` write
+  # — they must never re-derive it from `:hits`, which is the whole point.
+  defp decide_group([first | _rest] = rows) do
+    totals = Map.new(rows, &{&1.source, &1.hits})
+
+    totals
+    |> Analytics.suppress_referrer_group()
+    |> Enum.map(fn {source, hits, display} ->
+      %{
+        day: first.day,
+        content_type: first.content_type,
+        content_id: first.content_id,
+        source: source,
+        hits: hits,
+        display: display
+      }
+    end)
   end
 
   @doc """
@@ -137,7 +202,10 @@ defmodule KilnCMS.Analytics.Export do
     ]
   end
 
-  def csv_row(%{source: source, hits: hits} = row, titles, org) do
+  # `display` was decided over the whole breakdown by `stream_referrer_rows/4`
+  # and is written as-is. Calling `suppress_low_count/1` on `hits` here instead
+  # would reinstate exactly the per-row decision #777 is about.
+  def csv_row(%{source: source, display: display} = row, titles, org) do
     [
       "referrer",
       Date.to_iso8601(row.day),
@@ -146,7 +214,7 @@ defmodule KilnCMS.Analytics.Export do
       Titles.title_for(row, titles, org),
       nil,
       source,
-      Analytics.suppress_low_count(hits),
+      display,
       nil,
       nil
     ]
@@ -180,7 +248,7 @@ defmodule KilnCMS.Analytics.Export do
     }
   end
 
-  def json_row(%{source: source, hits: hits} = row, titles, org) do
+  def json_row(%{source: source, display: display} = row, titles, org) do
     %{
       kind: "referrer",
       day: row.day,
@@ -188,7 +256,7 @@ defmodule KilnCMS.Analytics.Export do
       content_id: row.content_id,
       title: Titles.title_for(row, titles, org),
       source: source,
-      hits: Analytics.suppress_low_count(hits)
+      hits: display
     }
   end
 

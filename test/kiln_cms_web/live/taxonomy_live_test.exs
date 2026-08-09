@@ -97,6 +97,36 @@ defmodule KilnCMSWeb.TaxonomyLiveTest do
       assert Enum.any?(CMS.list_tags!(authorize?: false), &(&1.slug == "ex-lang"))
     end
 
+    test "a slug carrying a path separator is refused, and the editor says why", %{conn: conn} do
+      # #1044's second acceptance criterion. The validation is worth little if
+      # the editor drops it on the floor — an editor who typed a slug with a `/`
+      # would see the row simply not appear.
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/taxonomy")
+
+      html =
+        lv
+        |> form("#new-category-form", category: %{name: "News", slug: "news/locale/fr"})
+        |> render_submit()
+
+      assert html =~ "lowercase"
+      refute Enum.any?(CMS.list_categories!(authorize?: false), &(&1.slug == "news/locale/fr"))
+    end
+
+    test "a name in a non-Latin script still gets a usable slug", %{conn: conn} do
+      # `slugify/1` filters to ASCII, so this name yields "" — which since
+      # #1044 is a rejected write rather than a silently empty slug. Without a
+      # fallback a Chinese- or Russian-language site could not add a category
+      # at all without inventing a Latin slug by hand.
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/taxonomy")
+
+      lv |> form("#new-category-form", category: %{name: "北京", slug: ""}) |> render_submit()
+
+      created = Enum.find(CMS.list_categories!(authorize?: false), &(&1.name == "北京"))
+
+      assert created, "the category was not created"
+      assert created.slug =~ ~r/\A[a-z0-9]+(-[a-z0-9]+)*\z/
+    end
+
     test "a duplicate slug surfaces a validation error instead of crashing", %{conn: conn} do
       seed_category(%{name: "Existing", slug: "dupe-slug"})
 

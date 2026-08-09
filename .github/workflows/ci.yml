@@ -400,16 +400,26 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('e2e/package.json') }}
+          # The browser list is part of the key, not just the lockfile: adding
+          # webkit (#1046) while `e2e/package.json` happened to change was luck.
+          # Had only the workflow changed, a cache HIT would have restored a
+          # chromium-only store, `playwright install` would re-download webkit
+          # every run, and the save step would never fire.
+          key: ${{ runner.os }}-playwright-chromium-webkit-${{ hashFiles('e2e/package.json') }}
 
       - name: Install Elixir dependencies
         run: mix deps.get
 
-      - name: Install E2E dependencies + browser
+      - name: Install E2E dependencies + browsers
         working-directory: e2e
         run: |
           npm ci
-          npx playwright install --with-deps chromium
+          # WebKit as well as Chromium: `focus_trap.spec.js` runs on both,
+          # because Safari not focusing a `<button>` on click is the case that
+          # motivated #1046 and a Chromium-only run leaves it untested. Only
+          # that one spec uses it (see the `webkit-focus` project), so this buys
+          # a download rather than a doubled suite.
+          npx playwright install --with-deps chromium webkit
 
       # Compile the app in MIX_ENV=e2e up front, as a normal (uncapped) step, so
       # the potentially-cold dep build lands in the cached _build BEFORE

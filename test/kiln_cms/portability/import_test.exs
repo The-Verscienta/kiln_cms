@@ -139,6 +139,54 @@ defmodule KilnCMS.Portability.ImportTest do
       assert Enum.map(post.tags, & &1.slug) |> Enum.sort() == ["beginner", "how-to"]
     end
 
+    test "a term whose source slug Kiln cannot store is re-slugified, not dropped", %{
+      scope: scope,
+      actor: actor
+    } do
+      # WordPress and Kiln disagree about what a slug may contain: WP keeps
+      # underscores, and `WXR.decode_slug/1` deliberately percent-DECODES a
+      # non-ASCII `nicename` (`%d0%bf…` → `при`). Taking either verbatim fails
+      # the #1044 shape validation — and `resolve_terms/4` maps a failed term
+      # create to `:failed` and then drops it with no counter and no report
+      # entry. A Cyrillic blog would import with every category missing and a
+      # success report.
+      parsed = %{
+        records: [
+          %{
+            kind: :post,
+            title: "Translated",
+            slug: "translated",
+            blocks: [],
+            excerpt: nil,
+            state: :published,
+            published_at: DateTime.utc_now(),
+            source_url: nil,
+            source_id: "1",
+            author: nil,
+            # WordPress keeps underscores, and `WXR.decode_slug/1` percent-
+            # DECODES a non-ASCII nicename — neither is a shape Kiln stores.
+            categories: [%{name: "Привет", slug: "привет"}],
+            tags: [%{name: "How To", slug: "how_to"}],
+            featured_source_id: nil,
+            image_urls: []
+          }
+        ]
+      }
+
+      report = Import.run(parsed, scope) |> elem(1)
+
+      assert report.taxonomy.categories.created == 1
+      assert report.taxonomy.tags.created == 1
+
+      post = CMS.list_posts!(actor: actor, load: [:tags, :category]) |> find("translated")
+
+      # Attached, not lost — and under slugs Kiln can actually put in a URL.
+      assert post.category
+      assert post.category.name == "Привет"
+      assert post.category.slug =~ ~r/\A[a-z0-9]+(-[a-z0-9]+)*\z/
+      assert Enum.map(post.tags, & &1.slug) == ["how-to"]
+    end
+
     test "an existing term is matched, not duplicated", %{
       parsed: parsed,
       scope: scope,
