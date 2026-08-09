@@ -55,12 +55,14 @@ defmodule KilnCMS.Push do
   deployment rotates its pair.
   """
 
-  require Ash.Query
   require Logger
 
   alias KilnCMS.Accounts
-  alias KilnCMS.Accounts.PushSubscription
   alias KilnCMS.Push.Vapid
+
+  # Matches the resource's `max_length` — one number, so the constraint can
+  # actually fire rather than being unreachable behind this truncation.
+  @label_bytes 60
 
   @doc "Is web push configured on this deployment?"
   @spec enabled?() :: boolean()
@@ -91,15 +93,25 @@ defmodule KilnCMS.Push do
     )
   end
 
-  @doc "Forget one browser's subscription. Scoped to the actor's own rows."
+  @doc """
+  Forget one browser's subscription, by the endpoint the browser knows.
+
+  Read then destroy, both under the actor, so the resource's own policies do
+  the scoping — the caller passing its own id is not what keeps one user from
+  deleting another's device.
+  """
   @spec unsubscribe(String.t(), struct()) :: :ok
   def unsubscribe(endpoint, actor) when is_binary(endpoint) do
-    PushSubscription
-    |> Ash.Query.for_read(:for_user, %{user_id: actor.id}, actor: actor)
-    |> Ash.Query.filter(endpoint == ^endpoint)
-    |> Ash.read!(authorize?: false)
-    |> Enum.each(&Ash.destroy!(&1, authorize?: false))
+    actor
+    |> list()
+    |> Enum.filter(&(&1.endpoint == endpoint))
+    |> Enum.each(&remove(&1, actor))
+  end
 
+  @doc "Forget one device by id, for the settings list."
+  @spec remove(struct(), struct()) :: :ok
+  def remove(subscription, actor) do
+    Accounts.remove_push_subscription!(subscription, actor: actor)
     :ok
   end
 
@@ -116,9 +128,9 @@ defmodule KilnCMS.Push do
   """
   @spec notify([struct()], map()) :: :ok
   def notify(users, payload) when is_list(users) and is_map(payload) do
-    with true <- enabled?(),
-         [_ | _] = ids <- Enum.map(users, & &1.id) do
-      ids
+    if enabled?() do
+      users
+      |> Enum.map(& &1.id)
       |> subscriptions_for()
       |> Enum.each(&enqueue(&1, payload))
     end
@@ -126,20 +138,18 @@ defmodule KilnCMS.Push do
     :ok
   end
 
-  @doc false
   # The sender's read: system-scoped, because the recipients are decided by the
   # workflow rather than by whoever is acting.
-  @spec subscriptions_for([Ash.UUID.t()]) :: [struct()]
-  def subscriptions_for([]), do: []
+  defp subscriptions_for([]), do: []
 
-  def subscriptions_for(user_ids),
+  defp subscriptions_for(user_ids),
     do: Accounts.push_subscriptions_for!(user_ids, authorize?: false)
 
   @doc "Delete a subscription a push service has told us is gone."
   @spec prune(struct(), term()) :: :ok
   def prune(subscription, reason) do
     Logger.info("Pruning dead push subscription #{subscription.id}: #{inspect(reason)}")
-    Ash.destroy!(subscription, authorize?: false)
+    Accounts.remove_push_subscription!(subscription, authorize?: false)
     :ok
   end
 
@@ -158,7 +168,7 @@ defmodule KilnCMS.Push do
   defp label(value) when is_binary(value) do
     case String.trim(value) do
       "" -> "Browser"
-      trimmed -> String.slice(trimmed, 0, 60)
+      trimmed -> String.slice(trimmed, 0, @label_bytes)
     end
   end
 

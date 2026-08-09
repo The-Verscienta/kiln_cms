@@ -12,29 +12,35 @@
 // a controller would mean a route, a CSRF token and a second authorization
 // path for no gain.
 
+import {b64uToBuf, bufToB64u} from "./passkeys"
+
 const supported = () =>
   "serviceWorker" in navigator && "PushManager" in window && "Notification" in window
 
-// base64url → Uint8Array. `applicationServerKey` predates the API accepting a
-// string, and every browser still wants the bytes.
-function decodeKey(base64url) {
-  const padded = (base64url + "=".repeat((4 - (base64url.length % 4)) % 4))
-    .replace(/-/g, "+")
-    .replace(/_/g, "/")
-  const raw = window.atob(padded)
-  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)))
+// `navigator.serviceWorker.ready` resolves only once an active worker controls
+// the scope — and it NEVER rejects. app.js registers behind a `.catch(() => {})`,
+// so on a browser that refuses registration (Firefox private browsing, storage
+// disabled) awaiting it hangs forever: the reviewer grants the OS notification
+// permission and then nothing happens, with the toggle stuck off and no error.
+// Race it against a deadline so that dead end becomes a message.
+const READY_TIMEOUT_MS = 5000
+
+function registration() {
+  return Promise.race([
+    navigator.serviceWorker.ready,
+    new Promise((_resolve, reject) =>
+      setTimeout(() => reject(new Error("service worker not ready")), READY_TIMEOUT_MS)
+    )
+  ])
 }
 
-// The subscription's keys arrive as ArrayBuffers; the server stores base64url.
-function encodeKey(buffer) {
-  const bytes = new Uint8Array(buffer)
-  let binary = ""
-  bytes.forEach(byte => (binary += String.fromCharCode(byte)))
-  return window
-    .btoa(binary)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "")
+// `getKey` returns null when a key is unavailable, and an empty string passes
+// every server-side `is_binary/1` guard — the row stores, the UI says
+// notifications are on, and the first delivery prunes it silently.
+function requireKey(subscription, name, fromJson) {
+  const encoded = fromJson || (subscription.getKey(name) && bufToB64u(subscription.getKey(name)))
+  if (!encoded) throw new Error(`push subscription has no ${name}`)
+  return encoded
 }
 
 // A coarse family so the settings list can say "the phone" from "the laptop".
@@ -82,16 +88,22 @@ export const PushToggle = {
   // They drift: a reviewer can revoke permission in browser settings, or clear
   // site data, and neither tells the server.
   async syncState() {
-    const subscription = await this.current()
-    this.pushEvent("push_state", {
-      subscribed: !!subscription,
-      permission: Notification.permission
-    })
+    try {
+      const subscription = await this.current()
+      this.pushEvent("push_state", {
+        subscribed: !!subscription,
+        permission: Notification.permission
+      })
+    } catch (_error) {
+      // No usable service worker: the capability is not there, so say so
+      // rather than leaving an enabled control that goes nowhere.
+      this.pushEvent("push_unsupported", {})
+    }
   },
 
   async current() {
-    const registration = await navigator.serviceWorker.ready
-    return registration.pushManager.getSubscription()
+    const ready = await registration()
+    return ready.pushManager.getSubscription()
   },
 
   async enable() {
@@ -106,20 +118,20 @@ export const PushToggle = {
     }
 
     try {
-      const registration = await navigator.serviceWorker.ready
-      const subscription = await registration.pushManager.subscribe({
+      const ready = await registration()
+      const subscription = await ready.pushManager.subscribe({
         // Required by every browser for a payload-bearing push, and true: every
         // push this app sends results in a visible notification.
         userVisibleOnly: true,
-        applicationServerKey: decodeKey(this.applicationServerKey)
+        applicationServerKey: new Uint8Array(b64uToBuf(this.applicationServerKey))
       })
 
       const keys = subscription.toJSON().keys || {}
 
       this.pushEvent("push_subscribed", {
         endpoint: subscription.endpoint,
-        p256dh: keys.p256dh || encodeKey(subscription.getKey("p256dh")),
-        auth: keys.auth || encodeKey(subscription.getKey("auth")),
+        p256dh: requireKey(subscription, "p256dh", keys.p256dh),
+        auth: requireKey(subscription, "auth", keys.auth),
         label: deviceLabel()
       })
     } catch (_error) {

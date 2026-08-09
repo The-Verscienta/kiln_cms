@@ -37,10 +37,11 @@ defmodule KilnCMS.Accounts do
     # controller after it has the actor, the second is the sender's read.
     resource KilnCMS.Accounts.PushSubscription do
       define :list_push_subscriptions, action: :for_user, args: [:user_id]
+      define :get_push_subscription, action: :read, get_by: [:id]
+      define :touch_push_subscription, action: :touch_delivered
       define :push_subscriptions_for, action: :for_users, args: [:user_ids]
       define :subscribe_to_push, action: :subscribe
       define :remove_push_subscription, action: :destroy
-      define :unsubscribe_from_push, action: :unsubscribe, args: [:endpoint]
     end
 
     # The tenant registry (epic #336) + the user↔org membership join. The org is

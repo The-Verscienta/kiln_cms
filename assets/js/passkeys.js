@@ -14,13 +14,13 @@
 //
 // All binary fields cross the wire as unpadded base64url.
 
-const b64uToBuf = (s) => {
+export const b64uToBuf = (s) => {
   const pad = "=".repeat((4 - (s.length % 4)) % 4)
   const bin = atob(s.replace(/-/g, "+").replace(/_/g, "/") + pad)
   return Uint8Array.from(bin, (c) => c.charCodeAt(0)).buffer
 }
 
-const bufToB64u = (buf) => {
+export const bufToB64u = (buf) => {
   // Chunked: spreading a large buffer into fromCharCode's arguments hits the
   // JS engine's argument limit (attestation objects can be multi-KB).
   const bytes = new Uint8Array(buf)

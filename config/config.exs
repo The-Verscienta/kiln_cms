@@ -47,6 +47,11 @@ config :kiln_cms, Oban,
     # Like `link_check`, deliberately narrow: every job is a signed request to
     # somebody else's server, and a fediverse fan-out is many of them at once.
     federation: 3,
+    # Web Push (#628). Its own queue rather than `:mail`: a push is a
+    # third-party HTTP call with connect + receive timeouts and five attempts,
+    # and a reviewer with several devices multiplies it — none of which may
+    # queue in front of a password-reset email.
+    push: 3,
     # In-app backups (#484). Concurrency ONE: two simultaneous `pg_dump`s of
     # the same database is never what anyone wanted, and the panel's whole
     # premise is that there is a most-recent backup. Its own queue so a dump

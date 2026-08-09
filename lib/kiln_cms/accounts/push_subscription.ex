@@ -80,6 +80,21 @@ defmodule KilnCMS.Accounts.PushSubscription do
       upsert? true
       upsert_identity :unique_endpoint
       upsert_fields [:user_id, :org_id, :p256dh, :auth, :label]
+
+      # `allow_nil? false` does not reject `""`, and the browser hands back an
+      # empty string whenever `getKey/1` returned null. Without these the row
+      # stores, the UI says notifications are on, and the first delivery fails
+      # the encryption's own length check and prunes the row — so the reviewer
+      # is told it worked and never hears anything again.
+      validate string_length(:endpoint, min: 1)
+      validate string_length(:p256dh, min: 1)
+      validate string_length(:auth, min: 1)
+
+      # The push service URL we will POST to. `SafeFetch` refuses a private
+      # address at dial time; this refuses a shape that was never a push
+      # endpoint, so a bad row is rejected where somebody can see it rather
+      # than once per notification in a worker log.
+      validate match(:endpoint, ~r{\Ahttps://})
     end
 
     # Delivery bookkeeping, and the only update this resource has. A general
@@ -88,12 +103,6 @@ defmodule KilnCMS.Accounts.PushSubscription do
     update :touch_delivered do
       accept []
       change set_attribute(:last_delivered_at, &DateTime.utc_now/0)
-    end
-
-    destroy :unsubscribe do
-      description "Remove one device, by endpoint (the browser knows its own)."
-      argument :endpoint, :string, allow_nil?: false
-      change filter(expr(endpoint == ^arg(:endpoint)))
     end
   end
 
@@ -148,11 +157,14 @@ defmodule KilnCMS.Accounts.PushSubscription do
     # What the settings page shows instead of the endpoint. The browser cannot
     # tell us the device name, so this is a coarse user-agent family the client
     # derives — enough to recognize "the phone" from "the laptop".
+    # 60 rather than `Limits.line()`: this is a device name in a list, not
+    # prose, and the writer truncates to the same number — one limit, in one
+    # place, so the constraint can actually fire.
     attribute :label, :string do
       allow_nil? false
       default "Browser"
       public? true
-      constraints max_length: KilnCMS.Limits.line()
+      constraints max_length: 60
     end
 
     # Set when a push service last accepted a message. Nil means "registered but

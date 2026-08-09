@@ -58,9 +58,15 @@ defmodule KilnCMS.Push.Encryption do
   # advertises; a review notification is nowhere near it.
   @record_size 4096
 
-  # The largest plaintext that fits one record: the delimiter and the tag come
-  # out of the same budget.
-  @max_plaintext @record_size - 1 - 16
+  # salt(16) + record size(4) + key id length(1) + our public key(65).
+  @header_bytes @salt_bytes + 4 + 1 + @public_key_bytes
+
+  # The largest plaintext whose *encoded body* still fits the 4096-byte cap a
+  # push service enforces. The delimiter and the GCM tag come out of the same
+  # budget, and so does the RFC 8188 header — which is what makes this 86 bytes
+  # smaller than the record size alone suggests. A caller that trusted the
+  # looser number got a 413 after this function had said the size was fine.
+  @max_plaintext @record_size - @header_bytes - 1 - 16
 
   @typedoc "The `p256dh` and `auth` a browser's `PushSubscription` exposes, raw."
   @type keys :: %{p256dh: binary(), auth: binary()}
@@ -77,11 +83,23 @@ defmodule KilnCMS.Push.Encryption do
   """
   @spec encrypt(binary(), keys(), keyword()) :: {:ok, binary()} | {:error, term()}
   def encrypt(plaintext, keys, opts \\ []) when is_binary(plaintext) do
+    do_encrypt(plaintext, keys, opts)
+  rescue
+    # `:crypto.compute_key/4` RAISES for a 65-byte, `0x04`-prefixed point that
+    # is not actually on the curve — there is no arithmetic check we can do
+    # cheaply here, and OpenSSL does it inside. Without this the exception
+    # escapes a function whose contract is `{:ok, _} | {:error, _}`, the
+    # caller's `else` never sees it, and the poisoned row is never pruned: it
+    # burns every retry and every Sentry report, per notification, forever.
+    error -> {:error, {:invalid_key, :p256dh, Exception.message(error)}}
+  end
+
+  defp do_encrypt(plaintext, keys, opts) do
     with :ok <- validate(keys, plaintext) do
       salt = Keyword.get_lazy(opts, :salt, fn -> :crypto.strong_rand_bytes(@salt_bytes) end)
       {public, private} = Keyword.get_lazy(opts, :key_pair, &generate_key_pair/0)
 
-      shared = :crypto.compute_key(:ecdh, keys.p256dh, private, :prime256v1)
+      shared = compute_shared(keys.p256dh, private)
       prk = hkdf(keys.auth, shared, key_info(keys.p256dh, public), @sha256_bytes)
       content_key = hkdf(salt, prk, "Content-Encoding: aes128gcm\0", @key_bytes)
       nonce = hkdf(salt, prk, "Content-Encoding: nonce\0", @nonce_bytes)
@@ -103,6 +121,9 @@ defmodule KilnCMS.Push.Encryption do
          public::binary, ciphertext::binary, tag::binary>>}
     end
   end
+
+  defp compute_shared(their_public, our_private),
+    do: :crypto.compute_key(:ecdh, their_public, our_private, :prime256v1)
 
   @doc "A fresh ephemeral P-256 key pair, as `{uncompressed public point, private}`."
   @spec generate_key_pair() :: {binary(), binary()}

@@ -7,6 +7,12 @@ defmodule KilnCMS.Push.Worker do
   request never blocks on a third-party HTTP call, and one dead device does not
   hold up the others.
 
+  On its **own queue**, not `:mail`. A push is a third-party HTTP call that can
+  sit on a 5s connect plus a 10s receive timeout, five times over, and a
+  reviewer with six devices multiplies that. `:mail`'s three slots are reserved
+  so nothing starves transactional email — a password reset must not queue
+  behind a push service having a bad afternoon.
+
   ## Which failures are terminal
 
   A push service's status codes divide cleanly, and getting the division wrong
@@ -35,11 +41,11 @@ defmodule KilnCMS.Push.Worker do
   the job. The row is loaded at perform time instead; a subscription deleted in
   between simply has nothing to deliver to.
   """
-  use Oban.Worker, queue: :mail, max_attempts: 5
+  use Oban.Worker, queue: :push, max_attempts: 5
 
   require Logger
 
-  alias KilnCMS.Accounts.PushSubscription
+  alias KilnCMS.Accounts
   alias KilnCMS.Push
   alias KilnCMS.Push.Encryption
   alias KilnCMS.Push.Vapid
@@ -50,13 +56,11 @@ defmodule KilnCMS.Push.Worker do
   # delivered as though it were news.
   @ttl_seconds 4 * 60 * 60
 
-  # A push service accepts a body up to its own limit; this is well inside every
-  # one of them and inside `Encryption`'s single record.
   @gone_statuses [404, 410]
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"subscription_id" => id, "payload" => payload}}) do
-    case Ash.get(PushSubscription, id, authorize?: false, not_found_error?: false) do
+    case Accounts.get_push_subscription(id, authorize?: false, not_found_error?: false) do
       {:ok, nil} -> :ok
       {:ok, subscription} -> deliver(subscription, payload)
       # A read failure is infrastructure, not a dead device — let Oban retry.
@@ -72,14 +76,45 @@ defmodule KilnCMS.Push.Worker do
       |> post(body, authorization)
       |> handle(subscription)
     else
-      {:error, reason} ->
-        # An unencryptable subscription is malformed storage, not a transient
-        # fault: retrying cannot fix a 12-byte auth secret. Prune it, so the
-        # reviewer's next opt-in writes a good row instead of colliding with a
-        # bad one on the endpoint identity.
-        Logger.warning("Dropping unsendable push subscription: #{inspect(reason)}")
-        Push.prune(subscription, reason)
+      {:error, reason} -> failed_before_sending(subscription, reason)
     end
+  end
+
+  # Whose fault is it? The distinction is the difference between "re-opt-in on
+  # your phone" and "every reviewer in the database has to".
+  #
+  # A malformed *row* — keys that will not decode, or are the wrong length — is
+  # storage that no retry can fix, so it is pruned and the reviewer's next
+  # opt-in writes a good one. A malformed *deployment* — no VAPID keys, a
+  # mismatched pair, a typo mid-rotation — says nothing about the device, and
+  # pruning on it would let ten minutes of a bad env var permanently delete
+  # every subscription on the site, one queued job at a time. And a payload we
+  # built too large is a bug in the sender, which the row should outlive.
+  defp failed_before_sending(subscription, {:invalid_key, _which} = reason),
+    do: prune_malformed(subscription, reason)
+
+  # `Encryption.encrypt/3` rescues an off-curve point into this shape.
+  defp failed_before_sending(subscription, {:invalid_key, _which, _detail} = reason),
+    do: prune_malformed(subscription, reason)
+
+  defp failed_before_sending(subscription, :undecodable_keys = reason),
+    do: prune_malformed(subscription, reason)
+
+  defp failed_before_sending(_subscription, {:payload_too_large, size, max}) do
+    Logger.error("Push payload is #{size} bytes, over the #{max}-byte limit — sender bug.")
+    {:cancel, :payload_too_large}
+  end
+
+  defp failed_before_sending(_subscription, reason) do
+    # Deployment-level: leave the row alone and let Oban retry, so the
+    # subscriptions survive an operator fixing the config.
+    Logger.error("Cannot send push notifications: #{inspect(reason)}")
+    {:error, reason}
+  end
+
+  defp prune_malformed(subscription, reason) do
+    Logger.warning("Dropping push subscription with unusable keys: #{inspect(reason)}")
+    Push.prune(subscription, reason)
   end
 
   defp post(subscription, body, authorization) do
@@ -123,8 +158,8 @@ defmodule KilnCMS.Push.Worker do
   end
 
   defp handle({:ok, %{status: 413}}, _subscription) do
-    # Ours to fix, not the device's. Discarding rather than retrying: the same
-    # payload will be the same size on attempt five.
+    # Ours to fix, not the device's. Cancelled rather than retried: the same
+    # payload is the same size on attempt five. The row is left alone.
     Logger.error("Push payload rejected as too large (413) — this is a bug in the sender.")
     {:cancel, :payload_too_large}
   end
@@ -162,7 +197,7 @@ defmodule KilnCMS.Push.Worker do
   # makes a never-deliverable subscription visible in the settings list, and it
   # must not turn a delivered notification into a failed job.
   defp touch_delivered(subscription) do
-    Ash.update(subscription, %{}, action: :touch_delivered, authorize?: false)
+    Accounts.touch_push_subscription!(subscription, authorize?: false)
     :ok
   rescue
     _error -> :ok

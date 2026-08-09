@@ -919,4 +919,34 @@ defmodule KilnCMSWeb.CoreComponents do
   def translate_errors(errors, field) when is_list(errors) do
     for {^field, {msg, opts}} <- errors, do: translate_error({msg, opts})
   end
+
+  @doc """
+  A coarse "how long ago", for a timestamp where the exact value is noise.
+
+  Shared by the backup panel and the push-device list (#628): both want
+  "3 days", neither wants a timestamp, and two copies meant four translated
+  msgids with two call sites that could drift in wording.
+  """
+  @spec ago(DateTime.t() | nil) :: String.t()
+  def ago(nil), do: gettext("an unknown time")
+
+  def ago(%DateTime{} = at) do
+    seconds = DateTime.diff(DateTime.utc_now(), at, :second)
+
+    cond do
+      seconds < 60 ->
+        gettext("less than a minute")
+
+      seconds < 3600 ->
+        ngettext("%{count} minute", "%{count} minutes", div(seconds, 60), count: div(seconds, 60))
+
+      seconds < 86_400 ->
+        ngettext("%{count} hour", "%{count} hours", div(seconds, 3600), count: div(seconds, 3600))
+
+      true ->
+        ngettext("%{count} day", "%{count} days", div(seconds, 86_400),
+          count: div(seconds, 86_400)
+        )
+    end
+  end
 end

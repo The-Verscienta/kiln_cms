@@ -11,6 +11,8 @@ defmodule KilnCMS.Push.EncryptionTest do
   """
   use ExUnit.Case, async: true
 
+  import Bitwise, only: []
+
   alias KilnCMS.Push.Encryption
 
   describe "RFC 8291 §5" do
@@ -102,10 +104,30 @@ defmodule KilnCMS.Push.EncryptionTest do
     test "refuses a plaintext that will not fit one record", %{keys: keys} do
       max = Encryption.max_plaintext_bytes()
 
-      assert {:ok, _body} = Encryption.encrypt(String.duplicate("a", max), keys)
+      assert {:ok, body} = Encryption.encrypt(String.duplicate("a", max), keys)
+
+      # The advertised maximum must produce a BODY inside the 4096-byte cap push
+      # services enforce — not just a record inside it. Counting only the record
+      # overstated the limit by the 86-byte header, so a caller that trusted it
+      # got a 413 after this function said the size was fine.
+      assert byte_size(body) <= 4096
 
       assert {:error, {:payload_too_large, _size, ^max}} =
                Encryption.encrypt(String.duplicate("a", max + 1), keys)
+    end
+
+    test "an off-curve point is an error, not a raise", %{keys: keys} do
+      # 65 bytes and 0x04-prefixed, so it passes every cheap check — but it is
+      # not on the curve, and `:crypto.compute_key/4` raises for it. Escaping
+      # the ok/error contract means the caller's else never runs and the
+      # poisoned row is never pruned: five Oban attempts and five Sentry
+      # reports, per notification, forever.
+      <<4, x::binary-32, y::binary-32>> = keys.p256dh
+      <<first, rest::binary>> = y
+      off_curve = <<4, x::binary, Bitwise.bxor(first, 1), rest::binary>>
+
+      assert {:error, {:invalid_key, :p256dh, _detail}} =
+               Encryption.encrypt("x", %{keys | p256dh: off_curve})
     end
   end
 end

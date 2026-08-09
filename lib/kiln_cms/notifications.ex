@@ -43,6 +43,8 @@ defmodule KilnCMS.Notifications do
   """
   require Ash.Query
 
+  use Gettext, backend: KilnCMSWeb.Gettext
+
   alias KilnCMS.Accounts.User
   alias KilnCMS.Notifications.WorkflowMailWorker
   alias KilnCMS.Push
@@ -267,24 +269,34 @@ defmodule KilnCMS.Notifications do
   # title, no excerpt, no id, and the link is the filtered queue rather than
   # the document, so nothing here identifies an unpublished record to the push
   # service or to anyone reading a lock screen over a shoulder.
+  # Translated, because a lock screen is the one place a reviewer definitely
+  # reads these. `kind/1` is a content-type name, which has no catalog entry —
+  # it goes in as an interpolation so the sentence around it can still be
+  # translated, which is the best available without a per-type message.
+  #
+  # A distinct `tag` per event: the service worker coalesces on it, and
+  # coalescing two *different* events would silently replace one with the other.
   defp push_payload(:submitted_for_review, record),
     do: %{
-      "title" => "Review requested",
-      "body" => "A #{kind(record)} is waiting for review.",
+      "title" => gettext("Review requested"),
+      "body" => gettext("A %{kind} is waiting for review.", kind: kind(record)),
+      "tag" => "kiln-review",
       "url" => "/editor?status=in_review"
     }
 
   defp push_payload(:published, record),
     do: %{
-      "title" => "Published",
-      "body" => "A #{kind(record)} you authored is now live.",
+      "title" => gettext("Published"),
+      "body" => gettext("A %{kind} you authored is now live.", kind: kind(record)),
+      "tag" => "kiln-published",
       "url" => "/editor"
     }
 
   defp push_payload(:returned_to_draft, record),
     do: %{
-      "title" => "Changes requested",
-      "body" => "A #{kind(record)} you authored was returned to draft.",
+      "title" => gettext("Changes requested"),
+      "body" => gettext("A %{kind} you authored was returned to draft.", kind: kind(record)),
+      "tag" => "kiln-returned",
       "url" => "/editor?status=draft"
     }
 

@@ -112,6 +112,40 @@ defmodule KilnCMS.PushTest do
       actor = user()
       assert subscribe(actor, label: "   ").label == "Browser"
     end
+
+    test "refuses a blank key rather than storing a row that can never deliver" do
+      actor = user()
+
+      # `getKey()` returns null when a key is unavailable and the client encodes
+      # that as "". `allow_nil? false` does not reject an empty string, so
+      # without an explicit validation the row stores, the UI says notifications
+      # are on, and the first delivery prunes it silently.
+      for blank <- ["p256dh", "auth", "endpoint"] do
+        params =
+          %{
+            "endpoint" => "https://push.example.com/x/#{System.unique_integer([:positive])}",
+            "p256dh" => "BB3G",
+            "auth" => "AAAA",
+            "label" => "Test"
+          }
+          |> Map.put(blank, "")
+
+        assert {:error, _invalid} = Push.subscribe(params, actor, nil)
+      end
+    end
+
+    test "refuses an endpoint that was never a push service URL" do
+      actor = user()
+
+      params = %{
+        "endpoint" => "file:///etc/passwd",
+        "p256dh" => "BB3G",
+        "auth" => "AAAA",
+        "label" => "Test"
+      }
+
+      assert {:error, _invalid} = Push.subscribe(params, actor, nil)
+    end
   end
 
   describe "policies" do
@@ -276,6 +310,19 @@ defmodule KilnCMS.PushTest do
 
       assert :ok = run(subscription)
       assert {:ok, nil} = reload(subscription)
+    end
+
+    test "a deployment-level VAPID failure retries and keeps every subscription" do
+      actor = user()
+      subscription = subscribe(actor)
+
+      # An operator mid-rotation, or a redeploy that dropped the private key.
+      # Pruning here would let ten minutes of a bad env var delete every
+      # subscription on the site, one queued job at a time.
+      Application.put_env(:kiln_cms, KilnCMS.Push, req_options: [])
+
+      assert {:error, {:not_configured, _}} = run(subscription)
+      assert {:ok, %{}} = reload(subscription)
     end
 
     test "the request carries the headers a push service requires" do

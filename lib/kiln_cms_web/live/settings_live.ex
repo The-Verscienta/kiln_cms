@@ -49,29 +49,6 @@ defmodule KilnCMSWeb.SettingsLive do
 
   defp push_devices(user), do: Push.list(user)
 
-  # Same shape as `KilnCMSWeb.BackupLive.ago/1` — coarse on purpose: the exact
-  # timestamp of a push delivery is noise, and "3 days" is what tells a reviewer
-  # a device has gone quiet.
-  defp ago(%DateTime{} = at) do
-    seconds = DateTime.diff(DateTime.utc_now(), at, :second)
-
-    cond do
-      seconds < 60 ->
-        gettext("less than a minute")
-
-      seconds < 3600 ->
-        ngettext("%{count} minute", "%{count} minutes", div(seconds, 60), count: div(seconds, 60))
-
-      seconds < 86_400 ->
-        ngettext("%{count} hour", "%{count} hours", div(seconds, 3600), count: div(seconds, 3600))
-
-      true ->
-        ngettext("%{count} day", "%{count} days", div(seconds, 86_400),
-          count: div(seconds, 86_400)
-        )
-    end
-  end
-
   # --- passkeys (#331) -------------------------------------------------------
 
   @impl true
@@ -404,7 +381,7 @@ defmodule KilnCMSWeb.SettingsLive do
           socket
 
         device ->
-          Ash.destroy!(device, actor: user)
+          Push.remove(device, user)
 
           socket
           |> assign(:push_devices, push_devices(user))

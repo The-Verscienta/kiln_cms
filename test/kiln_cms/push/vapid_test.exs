@@ -134,6 +134,19 @@ defmodule KilnCMS.Push.VapidTest do
       assert token(header).claims["aud"] == "https://updates.push.services.mozilla.com"
     end
 
+    test "a non-default port stays in the audience" do
+      configure([])
+
+      # An origin includes a non-default port. Dropping it makes a self-hosted
+      # or staging push service reject every token with 403 — which the worker
+      # reads as terminal and answers by deleting the subscription.
+      {:ok, header} = Vapid.authorization("https://push.internal:8443/wpush/v2/xyz")
+      assert token(header).claims["aud"] == "https://push.internal:8443"
+
+      {:ok, default} = Vapid.authorization("https://push.internal:443/wpush/v2/xyz")
+      assert token(default).claims["aud"] == "https://push.internal"
+    end
+
     test "the token expires inside the 24 hours a push service may cap at" do
       configure([])
       {:ok, header} = Vapid.authorization("https://example.com/push/1")

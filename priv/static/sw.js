@@ -101,9 +101,13 @@ self.addEventListener("push", (event) => {
   const title = data.title || "KilnCMS"
   const options = {
     body: data.body || "Something needs your attention.",
-    // Same tag for every review request, so a reviewer who was away returns to
-    // one notification saying something is waiting rather than to nine.
-    tag: data.tag || "kiln-review",
+    // One tag PER EVENT KIND, not one overall. Coalescing repeated review
+    // requests is the point — a reviewer who was away returns to one
+    // notification rather than nine. Coalescing *different* events is a bug:
+    // with `renotify: false`, a "Changes requested" would silently overwrite an
+    // undismissed "Review requested" with no sound and no re-alert, and the
+    // reviewer would never learn the second thing happened.
+    tag: data.tag || "kiln",
     renotify: false,
     icon: "/images/app-icon-192.png",
     badge: "/images/app-icon-192.png",
@@ -128,12 +132,18 @@ self.addEventListener("notificationclick", (event) => {
 
   event.waitUntil(
     self.clients.matchAll({type: "window", includeUncontrolled: true}).then((clients) => {
-      // Reuse a window that is already on the editor rather than opening a
-      // second one — an installed PWA has exactly one, and `openWindow` in it
-      // would replace the reviewer's place in whatever they were editing.
+      // Focus a window that is already ours rather than opening a second one —
+      // an installed PWA has exactly one.
+      //
+      // Focus, and *only* focus: `client.navigate()` is a full-page navigation
+      // of that very window, which would tear down an editor the reviewer had
+      // unsaved work in — the opposite of what reusing the window is for. It
+      // also rejects for a client this worker does not control, which
+      // `includeUncontrolled` deliberately admits. So the reviewer lands in the
+      // app and taps through from there; only when there is no window at all do
+      // we open one at the target.
       for (const client of clients) {
         if (new URL(client.url).origin === self.location.origin && "focus" in client) {
-          client.navigate(target.href).catch(() => {})
           return client.focus()
         }
       }

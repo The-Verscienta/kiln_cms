@@ -26,14 +26,18 @@ defmodule KilnCMS.Push.Vapid do
   Generate a pair with `mix kiln.vapid.gen`. The format is the one
   `web-push generate-vapid-keys` emits, so an existing pair carries over.
 
-  ## The public key is checked against the private one at boot
+  ## The public key is checked against the private one
 
   A deployment that publishes one public key to browsers while signing with a
   different private key produces subscriptions that can never be delivered to —
   and the failure surfaces months later as a 403 from the push service, per
   message, with nothing pointing at the config. `configured?/0` derives the
-  public point from the private scalar and refuses a mismatched pair, so the
-  error lands at the one moment somebody can act on it.
+  public point from the private scalar and refuses a mismatched pair, naming
+  the remedy, rather than letting the deployment look configured.
+
+  Checked per call rather than cached, because a cache would mean a key
+  rotation needed a restart; the derivation is a single point multiplication
+  (~13 µs here). The error is logged once per process, not once per call.
 
   ## Why the signature needs converting
 
@@ -180,13 +184,25 @@ defmodule KilnCMS.Push.Vapid do
     if derived == public do
       :ok
     else
+      warn_once()
+      {:error, :mismatched_keys}
+    end
+  end
+
+  # `keys/0` runs on every settings render and every workflow event, so an
+  # unconditional `Logger.error` here floods the log with the same paragraph
+  # rather than saying it once. Latched in the process dictionary — good enough
+  # for "stop repeating yourself in this worker/LiveView", and it deliberately
+  # re-arms in a fresh process so a restart after a fix still reports.
+  defp warn_once do
+    unless Process.get(:kiln_vapid_mismatch_warned) do
+      Process.put(:kiln_vapid_mismatch_warned, true)
+
       Logger.error(
         "VAPID keys do not match: the configured public key is not the public half of " <>
           "the configured private key. Push notifications are disabled — regenerate the " <>
           "pair with `mix kiln.vapid.gen`."
       )
-
-      {:error, :mismatched_keys}
     end
   end
 
@@ -203,10 +219,19 @@ defmodule KilnCMS.Push.Vapid do
     end
   end
 
+  defp keep_port("https", 443), do: nil
+  defp keep_port("http", 80), do: nil
+  defp keep_port(_scheme, port), do: port
+
   defp origin(endpoint) do
     case URI.parse(endpoint) do
-      %URI{scheme: scheme, host: host} when scheme in ["http", "https"] and is_binary(host) ->
-        {:ok, URI.to_string(%URI{scheme: scheme, host: host, port: nil})}
+      %URI{scheme: scheme, host: host, port: port}
+      when scheme in ["http", "https"] and is_binary(host) ->
+        # The port is part of an origin when it is not the scheme's default. A
+        # self-hosted or staging push service on :8443 rejects a token whose
+        # `aud` omits it — and the worker reads that 403 as terminal, so it
+        # would delete every subscription pointed at that service.
+        {:ok, URI.to_string(%URI{scheme: scheme, host: host, port: keep_port(scheme, port)})}
 
       _malformed ->
         {:error, {:invalid_endpoint, endpoint}}
