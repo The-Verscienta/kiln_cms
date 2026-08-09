@@ -250,16 +250,28 @@ defmodule KilnCMSWeb.AnalyticsLiveTest do
          %{conn: conn} do
       enable_referrers(5)
       page = new_page("Bar Sizes")
+      # EVERY category non-zero, so the forced partner is a real 50 rather than
+      # a zero. With a zero partner its bar is dropped entirely by the `> 0`
+      # filter, and "all remaining widths are equal" then passes even when the
+      # clamp is gone — which is exactly what let a mutation removing it survive.
       record_referrers(page, :social, 2)
+      record_referrers(page, :direct, 50)
+      record_referrers(page, :internal, 60)
+      record_referrers(page, :search, 70)
+      record_referrers(page, :other, 80)
 
       {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/analytics")
 
-      # Both the naturally-suppressed and the complementarily-suppressed
-      # segment must be identically sized — a regression that clamped only
-      # one of them (or clamped to the raw hit count) would produce two
-      # different `width:` percentages here instead of one repeated value.
       widths = Regex.scan(~r/width: ([\d.]+)%/, html) |> Enum.map(&List.last/1)
-      assert length(Enum.uniq(widths)) == 1
+
+      # Five bars, and the two suppressed ones share a width no exact one has.
+      # Without the clamp the hidden 50 would render half again the size of the
+      # exact 80's neighbour — the label says hidden, the pixels say 50.
+      assert length(widths) == 5
+
+      suppressed = widths |> Enum.frequencies() |> Enum.filter(&(elem(&1, 1) == 2))
+      assert [{shared, 2}] = suppressed
+      assert Enum.count(widths, &(&1 == shared)) == 2
     end
 
     test "the per-row table gains a Referrers column with each row's breakdown", %{conn: conn} do
