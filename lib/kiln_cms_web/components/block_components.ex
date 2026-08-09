@@ -393,7 +393,15 @@ defmodule KilnCMSWeb.BlockComponents do
   Shared by `PreviewLive` and the editor's decoupled preview so both agree.
   """
   @spec thin_blocks([map()]) :: [map()]
-  def thin_blocks(legacy_maps), do: Enum.map(legacy_maps, &thin_block/1)
+  def thin_blocks(legacy_maps), do: Enum.map(legacy_maps, &keep_id/1)
+
+  # Every `thin_block/1` clause builds a fresh map for its own type, so the
+  # block's id was dropped on the way through — which meant the thin surfaces
+  # (the pop-out preview, the in-context overlay) rendered without the
+  # `data-block-id` anchor even after `render_block/1` learned to emit it.
+  # Re-attached once here rather than in each of a dozen clauses, so a new
+  # block type cannot forget it.
+  defp keep_id(legacy), do: legacy |> thin_block() |> Map.put(:id, Map.get(legacy, :id))
 
   defp thin_block(%{type: :columns, data: data}) do
     cols =
