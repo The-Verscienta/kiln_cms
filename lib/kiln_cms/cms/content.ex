@@ -2594,6 +2594,32 @@ defmodule KilnCMS.CMS.Content do
           public? true
         end
 
+        # The SEO fields as anything *rendering* them should read them: the
+        # author's own value, else the type's #805 pattern expanded (#1102).
+        # The stored `seo_title`/`seo_description` keep saying exactly what a
+        # human typed — which is what the editor's SEO panel, the analyzer and
+        # the export need them to say — so this is a second field rather than a
+        # change to the first.
+        calculate :effective_seo_title,
+                  :string,
+                  {KilnCMS.CMS.Calculations.EffectiveSeo, field: :seo_title} do
+          public? true
+          # No `expression/2` — the pattern lives in the type registry, not in a
+          # column — so a filter or sort on this would raise out of AshSql as a
+          # 500. Declaring them unusable rejects at the query layer instead,
+          # exactly as `word_count` and `related_links` do.
+          filterable? false
+          sortable? false
+        end
+
+        calculate :effective_seo_description,
+                  :string,
+                  {KilnCMS.CMS.Calculations.EffectiveSeo, field: :seo_description} do
+          public? true
+          filterable? false
+          sortable? false
+        end
+
         # The curated related links, projected to `[%{id, title, slug}]` (#996).
         # A calculation rather than `load [related_*s: [...]]` because `load`
         # cannot project — see `KilnCMS.CMS.Calculations.RelatedLinks`.

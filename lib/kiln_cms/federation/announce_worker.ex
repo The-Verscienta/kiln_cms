@@ -96,14 +96,32 @@ defmodule KilnCMS.Federation.AnnounceWorker do
     end
   end
 
+  # `effective_seo_description` (#1102) is what `summary/1` reads: a type that
+  # defaults a description through a #805 pattern renders it on the document's
+  # own page, and an Announce carrying the stored column instead landed in
+  # strangers' timelines with no summary at all — irrevocably, since an Announce
+  # is not re-sent when the pattern is noticed.
   defp load(%{resource: resource}, document_id, org_id) when not is_nil(resource) do
-    case Ash.get(resource, document_id, authorize?: false, tenant: org_id) do
+    case Ash.get(resource, document_id,
+           authorize?: false,
+           tenant: org_id,
+           load: seo_loads(resource)
+         ) do
       {:ok, record} -> {:ok, record}
       _other -> :skip
     end
   end
 
   defp load(_descriptor, _document_id, _org_id), do: :skip
+
+  # Filtered against the resource rather than named flat: Ash *raises*
+  # `NoSuchField` for an unknown load, which the `_other -> :skip` above cannot
+  # catch — so a federating resource that did not come from the `Content` macro
+  # would burn its Oban retries instead of skipping. An Announce is irrevocable;
+  # its failure modes should stay boring.
+  defp seo_loads(resource) do
+    Enum.filter(KilnCMS.Seo.Patterns.loads(), &Ash.Resource.Info.calculation(resource, &1))
+  end
 
   # ── fan-out ─────────────────────────────────────────────────────────────────
 
@@ -187,7 +205,7 @@ defmodule KilnCMS.Federation.AnnounceWorker do
   end
 
   defp summary(record) do
-    [Map.get(record, :excerpt), Map.get(record, :seo_description)]
+    [Map.get(record, :excerpt), KilnCMS.Seo.Patterns.effective(record, :seo_description)]
     |> Enum.find(nil, &(is_binary(&1) and &1 != ""))
   end
 

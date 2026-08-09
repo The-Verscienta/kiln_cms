@@ -304,11 +304,14 @@ defmodule KilnCMSWeb.ContentController do
     org = KilnCMSWeb.Tenant.current_org(conn)
     base_url = KilnCMSWeb.Tenant.base_url(org)
     url = record.canonical_url || locale_url(ct, record.slug, record.locale, base_url)
-    # AFTER the projection, not before: the teaser's `summary` is body copy a
-    # locked-out reader reads, and must stay the author's own words, while its
-    # `seo_title`/`seo_description` are meta tags and should carry the type's
-    # #805 default. Applying to the projection gives each what it needs.
-    teaser = record |> KilnCMSWeb.Teaser.from_record(url) |> Patterns.apply_to(ct, org)
+    # `KilnCMSWeb.Teaser.from_record/3` owns the split now (#1102): the `summary`
+    # a locked-out reader READS stays the author's own words, while the meta tags
+    # carry the type's #805 default. `ct` and `org` are passed rather than
+    # re-derived — the alias funnel reaches the same renderer with a record whose
+    # pinned select omits nothing needed to look them up, but paying a registry
+    # scan per paywall render on a route that exists to keep queries off it would
+    # be the wrong trade.
+    teaser = KilnCMSWeb.Teaser.from_record(record, url, type: ct, org: org)
 
     conn
     # Never shared-cached, and no ETag: the same URL returns the lock page to one
@@ -373,11 +376,14 @@ defmodule KilnCMSWeb.ContentController do
     org = KilnCMSWeb.Tenant.current_org(conn)
     base_url = KilnCMSWeb.Tenant.base_url(org)
     url = record.canonical_url || locale_url(ct, record.slug, record.locale, base_url)
-    # AFTER the projection, not before: the teaser's `summary` is body copy a
-    # locked-out reader reads, and must stay the author's own words, while its
-    # `seo_title`/`seo_description` are meta tags and should carry the type's
-    # #805 default. Applying to the projection gives each what it needs.
-    teaser = record |> KilnCMSWeb.Teaser.from_record(url) |> Patterns.apply_to(ct, org)
+    # `KilnCMSWeb.Teaser.from_record/3` owns the split now (#1102): the `summary`
+    # a locked-out reader READS stays the author's own words, while the meta tags
+    # carry the type's #805 default. `ct` and `org` are passed rather than
+    # re-derived — the alias funnel reaches the same renderer with a record whose
+    # pinned select omits nothing needed to look them up, but paying a registry
+    # scan per paywall render on a route that exists to keep queries off it would
+    # be the wrong trade.
+    teaser = KilnCMSWeb.Teaser.from_record(record, url, type: ct, org: org)
 
     conn
     # Same rule as a member render: this body depends on who asked, and the same

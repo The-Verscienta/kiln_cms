@@ -79,9 +79,16 @@ defmodule KilnCMS.Firing.SchemaOrg do
 
     # Only `description` and `inLanguage` are shared: both are properties every
     # Thing carries. Everything else is family-specific.
+    # The *effective* description (#1102). `KilnCMSWeb.StructuredData`'s moduledoc
+    # says it "mirrors `Firing.SchemaOrg.base_node/3`, the fired producer's own
+    # rule" — and once #805 let a type default a description, the delivered page
+    # resolved the pattern while this read the stored column, so the same
+    # document's inline JSON-LD and its fired `:json_ld` artifact carried
+    # different `description`s. That divergence was permanent rather than stale:
+    # re-firing could not close it, because re-firing re-read the same column.
     type
     |> base_node(document, body)
-    |> put_if("description", Map.get(document, :seo_description))
+    |> put_if("description", KilnCMS.Seo.Patterns.effective(document, :seo_description))
     |> put_if("inLanguage", Map.get(document, :locale))
   end
 

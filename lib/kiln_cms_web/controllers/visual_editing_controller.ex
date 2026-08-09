@@ -63,7 +63,16 @@ defmodule KilnCMSWeb.VisualEditingController do
            query: [filter: [slug: slug, locale: locale], select: [:id], limit: 1]
          ) do
       [%{id: id} | _] ->
-        ContentTypes.get_record!(kind, id, actor: actor, tenant: org_id, load: [:featured_image])
+        ContentTypes.get_record!(kind, id,
+          actor: actor,
+          tenant: org_id,
+          # `:effective_seo_description` (#1102) for the same reason
+          # `KilnCMS.Firing.References.load_published/3` carries it: a preview
+          # fire that resolved the type's pattern against an unloaded category
+          # would show the overlay a `description` the published artifact
+          # disagrees with, which is what this bridge exists to prevent.
+          load: [:featured_image] ++ KilnCMS.Seo.Patterns.loads()
+        )
 
       _ ->
         nil

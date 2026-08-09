@@ -25,6 +25,7 @@ defmodule KilnCMSWeb.EventIndex do
   alias KilnCMS.CMS.FieldTypes.DatetimeRange
   alias KilnCMS.Events
   alias KilnCMS.Events.Index
+  alias KilnCMS.Seo.Patterns
   alias KilnCMSWeb.Params
   alias KilnCMSWeb.Tenant
 
@@ -188,7 +189,7 @@ defmodule KilnCMSWeb.EventIndex do
       title: record.title,
       path: path,
       url: Tenant.base_url(org) <> path,
-      summary: summary(record),
+      summary: summary(record, descriptor, org),
       starts_at: record.next_occurrence_at,
       ends_at: ends_at(record.next_occurrence_at, value),
       all_day?: DatetimeRange.all_day?(value),
@@ -234,8 +235,15 @@ defmodule KilnCMSWeb.EventIndex do
   # `excerpt` where the type has one, else the SEO description — the two fields
   # an editor already writes as "what this is about", exactly as the feeds pick
   # them. Never a truncated body.
-  defp summary(record) do
-    [Map.get(record, :excerpt), Map.get(record, :seo_description)]
+  #
+  # The *effective* description (#1102), loaded by `Index.upcoming/3`, so a type
+  # that defaults one through a #805 pattern reads the same in this listing as
+  # on the page it links to.
+  defp summary(record, descriptor, org) do
+    [
+      Map.get(record, :excerpt),
+      Patterns.effective(record, :seo_description, type: descriptor, org: org)
+    ]
     |> Enum.find("", &(is_binary(&1) and &1 != ""))
   end
 

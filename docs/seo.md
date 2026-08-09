@@ -103,31 +103,48 @@ knowing:
   is the honest reading: the pattern is the type's, not the record's. Type a
   title if you want it analysed.
 
-The export (and the JSON:API/GraphQL representation of a record) also reports
-the stored fields, for the same reason — a patterned title re-imported as an
-author-typed one would be a silent override.
+**Patterns reach every surface that renders a description.** The delivered
+HTML page (`<title>`, meta description, Open Graph and Twitter tags, inline
+JSON-LD), and also: RSS/Atom/JSON Feed summaries, the `.ics` `DESCRIPTION`, the
+event index's `index.json`, `llms.txt`, auto-posted social text, the ActivityPub
+`Note` summary, the fired `:json_ld` artifact, and the preview/webhook payload.
+A document does not describe itself one way on its own page and another way in
+the feed that links to it.
 
-**Patterns reach the delivered HTML page**: its `<title>`, its meta
-description, its Open Graph and Twitter tags, and its inline JSON-LD. They do
-**not** currently reach feeds, `.ics` calendars, `llms.txt`, auto-posted social
-text, ActivityPub, or the fired `:json_ld` artifact — those still carry the
-record's own stored fields. Tracked in #1102.
+Surfaces that report a record's fields as **stored data** still report the
+stored ones, and deliberately: the export (#487) and the version history. A
+patterned title re-imported as an author-typed one would be a silent override.
 
-Implementation: `KilnCMS.Seo.Pattern` (the vocabulary) and
-`KilnCMS.Seo.Patterns` (resolution at render time).
+The headless read APIs report both. `seo_title` / `seo_description` are the
+columns — blank means nobody typed one — and `effective_seo_title` /
+`effective_seo_description` are what a renderer should print. The
+preview/webhook payload carries both for the same reason.
+
+Implementation: `KilnCMS.Seo.Pattern` (the vocabulary), `KilnCMS.Seo.Patterns`
+(resolution) and `KilnCMS.CMS.Calculations.EffectiveSeo` (the two calculations,
+which carry their own tokens' data dependencies into any read that names them).
 
 ### On a paywall teaser, some tokens go quiet
 
 A gated document's teaser is read through a pinned set of columns with no
-relationships and no `custom_fields` — the same restriction that keeps the
-block tree away from a teaser. So on a teaser (and on a passphrase lock page)
-`[category]` and `[field:<name>]` expand to nothing, and the separator beside
-them drops out with them. The teaser's title is shorter than the full page's,
-never malformed.
+relationships and no `custom_fields` — the same restriction that keeps the block
+tree away from a teaser, and widening it for these two tokens would widen it for
+every other consumer of that record too. So on a teaser (and on a passphrase
+lock page) `[category]` and `[field:<name>]` expand to nothing, and the
+separator beside them drops out with them. The teaser's title is shorter than
+the full page's, never malformed.
 
 The teaser's *visible* summary is unaffected either way: that stays the
 author's own excerpt or description, never a pattern, because it is body copy
 a locked-out reader reads rather than a meta tag.
+
+### On a fired artifact, from the next publish
+
+The `:json_ld` surface is a stored artifact, fired when a document is published.
+Editing a type's pattern re-titles every *page* at once, but an artifact already
+on disk keeps the description it was fired with until that document is published
+again or re-fired (`mix kiln.refire_all`, or `KilnCMS.Firing.Sweep.run/0` on a
+release). Stale, in other words, where it used to be permanently wrong.
 
 ## Drafting (optional)
 
