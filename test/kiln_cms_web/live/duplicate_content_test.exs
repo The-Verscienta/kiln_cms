@@ -153,15 +153,29 @@ defmodule KilnCMSWeb.DuplicateContentTest do
       {:ok, reader} =
         KilnCMS.Accounts.manage_user_access(reader, %{editable_types: ["post"]}, actor: admin)
 
-      # The premise the rest of this block rests on: they can open it.
-      {:ok, lv, _html} =
+      # The premise the rest of this block rests on: they can open it, and what
+      # they get is the real editor for THIS record. `{:ok, lv, _html}` already
+      # fails on a redirect; the title assertion is what would catch a stub page
+      # rendered for readers, which would make every refute below vacuous.
+      {:ok, lv, html} =
         conn |> log_in(reader) |> live(~p"/editor/content/page/#{source.id}")
+
+      assert html =~ "Someone else&#39;s draft"
 
       %{lv: lv, source: source}
     end
 
     test "is not offered", %{lv: lv} do
       refute has_element?(lv, "button[phx-click='duplicate']")
+    end
+
+    # The translations panel renders for this reader — `en` is linked and
+    # `fr`/`es` have no record yet — so its "Create translation" buttons are in
+    # the reader's DOM unless the same gate removes them. Without this the
+    # panel half of the fix was unpinned: reverting `and @may_write?` on that
+    # button left 251 tests green across seven files.
+    test "nor is Create translation", %{lv: lv} do
+      refute has_element?(lv, "button[phx-click='create_translation']")
     end
 
     # The hidden button is not the boundary — a replayed or forged event arrives
@@ -173,19 +187,18 @@ defmodule KilnCMSWeb.DuplicateContentTest do
     # that assertion could not fail. What the gate changes is that the refusal
     # happens before any work, rather than as an error the reader is shown for
     # an action they were never offered.
-    test "a forged duplicate event is refused without reaching the create", %{
-      lv: lv,
-      source: source
-    } do
-      refute render_click(lv, "duplicate", %{}) =~ "Couldn&#39;t duplicate that content."
-      assert is_nil(copy_of(source))
+    test "a forged duplicate event is refused", %{lv: lv} do
+      render_click(lv, "duplicate", %{})
+
+      refute has_element?(lv, "#flash-error")
     end
 
     # Same shape, same file: `create_translation` forks the record's payload
     # into a new draft too, and was the other affordance offered to a reader.
     test "a forged create_translation event is refused", %{lv: lv} do
-      refute render_click(lv, "create_translation", %{"locale" => "fr"}) =~
-               "Couldn&#39;t create that translation."
+      render_click(lv, "create_translation", %{"locale" => "fr"})
+
+      refute has_element?(lv, "#flash-error")
     end
   end
 

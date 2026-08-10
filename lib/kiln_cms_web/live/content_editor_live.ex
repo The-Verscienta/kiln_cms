@@ -2730,13 +2730,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
   #
   # Refused server-side too (#922), for the reason `seo_suggest` states: the
   # hidden button is not the boundary, a replayed or forged event arrives here
-  # regardless. Today the type's `:create` policy refuses this actor as well —
-  # `Checks.EditableContentType` gates authoring and updating alike, so
-  # `may_write?` and "may create one of these" are the same question, and this
-  # only turns an error flash into no button. It is here so the two cannot
-  # drift: the moment `:autosave` gains a per-record condition (a lock, an
-  # assignment, an ownership rule), copying the record would otherwise be the
-  # way around it.
+  # regardless. It closes no hole today — `Checks.EditableContentType` gates
+  # authoring and updating alike, so `may_write?` and "may create one of these"
+  # are the same question and the create refuses this actor anyway. What shipped
+  # was a button whose only possible outcome was an error flash.
+  #
+  # Be precise about what this gate can see, because the obvious claim for it is
+  # wrong: `may_write?` is `Ash.can?`, which evaluates the POLICY chain only.
+  # `:autosave` already carries a per-record condition — `change filter(state ==
+  # :draft)` — and `Ash.can?` is blind to it. That blindness is load-bearing
+  # here (a published record stays duplicable, which is right), but it also
+  # means a future per-record rule written as a change or a validation would be
+  # just as invisible; only one written as a policy check would reach this gate.
+  # So the reason to refuse here is not "it catches whatever comes next" — it is
+  # that a forged event now gets the same answer the UI gave.
   def handle_event("duplicate", _params, socket) do
     %{kind: kind, record: record, actor: actor} = socket.assigns
 
