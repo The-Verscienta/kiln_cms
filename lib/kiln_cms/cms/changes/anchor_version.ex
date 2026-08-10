@@ -39,11 +39,17 @@ defmodule KilnCMS.CMS.Changes.AnchorVersion do
   # ignores it, so there is no version to fold — and it fires on a SCHEDULE over
   # rows nobody touched, so without this entry an hourly sweep would mint an
   # anchor per finished event, each attributed to `actor_id: nil`.
+  # `:reindex_search_text` (#910) is here for the same reason again:
+  # PaperTrail ignores it too, and it runs from `Engine.fire/2` on every fire
+  # or re-fire — including a re-fire wave visiting a document with no prior
+  # anchor — so without this entry it would mint one attributed to
+  # `actor_id: nil` for a write that isn't an edit at all.
   @versionless_actions [
     :set_embedding,
     :set_published_version_id,
     :set_oembed_metadata,
-    :set_next_occurrence
+    :set_next_occurrence,
+    :reindex_search_text
   ]
 
   @impl true
