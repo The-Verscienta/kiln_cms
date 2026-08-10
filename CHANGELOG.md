@@ -56,6 +56,20 @@ migration, a rewritten column, a dropped config key).
   cannot publish, and it would be refusing on rules nobody could confirm.
 ### Fixed
 
+- **Taking a backup now needs a platform admin, and is re-checked when the
+  button is pressed** (#1160). `BackupLive` did no tier check of its own, and
+  `Backups.enqueue/1` takes no actor and authorizes nothing — so the route's
+  `:live_admin_required` was the only gate, and it runs once, at mount. An admin
+  whose role was revoked mid-session kept triggering backups for the life of the
+  socket.
+
+  It was also the wrong question. `:live_admin_required` is an *effective
+  per-org* admin, while a backup is a `pg_dump` of the whole instance covering
+  every tenant — so a user granted admin on one site could take one. The panel
+  now asks the global question instead, and asks it again in the handler. The
+  slug-regeneration console's `apply`, whose worker likewise authorizes nothing,
+  gained the same re-check at its own (correctly per-org) tier.
+
 - **404 capture no longer evicts real misses before attacker junk** (#920). At
   the per-org cap a new path evicts the least-requested row, and the tie among
   equal counts was broken by `last_seen_at` **ascending** — so the oldest

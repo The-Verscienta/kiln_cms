@@ -98,6 +98,51 @@ defmodule KilnCMSWeb.BackupLiveTest do
       {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/backups")
       assert html =~ "Backups"
     end
+
+    # #1160. The route carries `:live_admin_required`, which is an EFFECTIVE
+    # PER-ORG tier (#419) — so a user granted admin on one site passes it while
+    # being an ordinary editor globally. A backup is a `pg_dump` of the whole
+    # instance, covering every tenant, which is not theirs to take.
+    #
+    # This is the only case that distinguishes the route guard from the mount
+    # guard: for everyone else the two agree, which is why the tests above pass
+    # either way.
+    test "an org admin who is not a platform admin is turned away", %{conn: conn} do
+      user = authed_user(:editor)
+
+      Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+        user_id: user.id,
+        organization_id: KilnCMS.Accounts.default_org_id(),
+        role: :admin
+      })
+
+      # The premise: they really do clear the route's per-org gate.
+      assert KilnCMS.Accounts.Scoping.effective_tier(user, KilnCMS.Accounts.default_org_id()) ==
+               :admin
+
+      # `:live_redirect`, not `:redirect` — and the distinction is the assertion.
+      # The route guard refuses with `Phoenix.LiveView.redirect/2`; `mount/3`
+      # refuses with `push_navigate/2`. Matching the loose `{:redirect, _}` here
+      # would pass even if the mount guard were deleted and the route had
+      # somehow turned them away instead.
+      assert {:error, {:live_redirect, %{to: "/"}}} =
+               conn |> log_in(user) |> live(~p"/editor/backups")
+    end
+
+    # `Backups.enqueue/1` takes no actor and authorizes nothing, so the mount
+    # guard is the only thing in front of it — and a mount guard is evaluated
+    # once. Called directly because a refused mount leaves no socket to push an
+    # event down: the question here is what the handler does on its own.
+    test "the handler refuses on its own, without the mount guard in front of it" do
+      socket = %Phoenix.LiveView.Socket{
+        assigns: %{__changed__: %{}, current_user: %{role: :editor}}
+      }
+
+      assert {:noreply, ^socket} =
+               KilnCMSWeb.BackupLive.handle_event("backup_now", %{}, socket)
+
+      assert KilnCMS.Repo.all(Oban.Job) == []
+    end
   end
 
   describe "what it says when there is no backup" do

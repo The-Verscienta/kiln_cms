@@ -9854,6 +9854,7 @@ msgstr "Necesitas acceso de administrador para ejecutar una comprobación."
 
 #: lib/kiln_cms_web/live/api_key_live.ex
 #: lib/kiln_cms_web/live/automation_live.ex
+#: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
