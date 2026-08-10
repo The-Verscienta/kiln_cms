@@ -175,6 +175,121 @@ defmodule KilnCMS.Collab.PublishCheckpointTest do
     refute_receive %Phoenix.Socket.Broadcast{event: "published"}, 200
   end
 
+  # THE regression this change could have introduced, and did on the first
+  # attempt. The publish gates (#377 claim checking, #403 alt text) are
+  # validations, and a validation runs inline during `for_action` — before any
+  # `before_action` hook. So merging the room's prose in a hook left the gates
+  # judging the STORED blocks while the ROOM's blocks were what published:
+  # type the banned phrase into the shared doc, never let autosave land, publish.
+  #
+  # Both gates are deferred to the before_action phase now, and the checkpoint
+  # is declared first so its hook registers first.
+  describe "the publish gates judge what actually publishes" do
+    setup do
+      previous = Application.get_env(:kiln_cms, KilnCMS.Compliance)
+
+      Application.put_env(:kiln_cms, KilnCMS.Compliance,
+        enabled: true,
+        require_at_publish: true,
+        rules: :default
+      )
+
+      on_exit(fn ->
+        if previous,
+          do: Application.put_env(:kiln_cms, KilnCMS.Compliance, previous),
+          else: Application.delete_env(:kiln_cms, KilnCMS.Compliance)
+      end)
+
+      :ok
+    end
+
+    test "a claim typed only into the room is refused, not published" do
+      actor = admin()
+      page = draft_page!(actor)
+      server = open_room(page)
+
+      type_into_room(server, rich_block(page).id, "Our formula is FDA approved.")
+
+      assert {:error, error} = CMS.publish_page(page, %{}, actor: actor)
+      assert Exception.message(error) =~ "unreviewed claim"
+
+      assert CMS.get_page!(page.id, actor: actor).state == :draft
+    end
+
+    # The mirror, and the reason this is a correctness fix rather than only a
+    # security one: `ComplianceClaims` promises the gate can never disagree with
+    # the panel the author is reading, and the panel reads the live editor. A
+    # gate judging the stored blocks would refuse a publish over a phrase the
+    # editor had already deleted in the room.
+    test "a claim the room has already removed does not refuse the publish" do
+      actor = admin()
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Pub",
+            slug: "pubchk-#{System.unique_integer([:positive])}",
+            blocks: [
+              %{"_type" => "rich_text", "body" => pt("Our formula is FDA approved.")}
+            ]
+          },
+          actor: actor
+        )
+
+      server = open_room(page)
+      type_into_room(server, rich_block(page).id, "Our formula is gentle.")
+
+      assert {:ok, published} = CMS.publish_page(page, %{}, actor: actor)
+      assert prose(CMS.get_page!(published.id, actor: actor)) =~ "gentle"
+    end
+  end
+
+  # The scheduler path is the same publish. "A scheduled publish is never under
+  # an open room" is false — schedule for 09:00, keep editing collaboratively,
+  # and the cron fires at 09:00 into a live room. `:publish_scheduled` also
+  # carries no compare-and-swap filter, so the room is even likelier to still be
+  # attached.
+  test "a scheduled publish carries the room's prose too" do
+    actor = admin()
+    page = draft_page!(actor)
+    server = open_room(page)
+
+    type_into_room(server, rich_block(page).id, "scheduled prose")
+
+    {:ok, published} = CMS.publish_scheduled_page(page, %{}, actor: actor)
+
+    assert published.state == :published
+    assert prose(CMS.get_page!(published.id, actor: actor)) == "scheduled prose"
+  end
+
+  # A publish never used to change content, so `:publish` carried none of the
+  # derived-column changes. Now that it can, a document published with the
+  # room's prose would otherwise be unfindable by its own published words —
+  # `search_text` is the full-text column delivery searches.
+  test "the published document is findable by the prose the room contributed" do
+    actor = admin()
+    page = draft_page!(actor)
+    server = open_room(page)
+
+    type_into_room(server, rich_block(page).id, "zebrafish quarterly")
+
+    {:ok, published} = CMS.publish_page(page, %{}, actor: actor)
+
+    assert CMS.get_page!(published.id, actor: actor).search_text =~ "zebrafish quarterly"
+  end
+
+  # The doc key must be the topic the channel joins, or the announcement lands
+  # nowhere and the room is never told. The tests above build both sides from
+  # `Crdt.doc_key/2`, so they are self-consistent by construction and blind to
+  # this — a key that drifts from `CollabChannel`'s would ship green.
+  test "the doc key is the topic the channel actually joins" do
+    page = draft_page!(admin())
+    ct = KilnCMS.CMS.ContentTypes.get("page", page.org_id)
+
+    # `CollabChannel.authorize/3` builds exactly this.
+    assert Crdt.doc_key(ct.type, page.id) == "collab:#{ct.type}:#{page.id}"
+  end
+
   # A room that holds nothing new must not rewrite the record: the checkpoint
   # path already treats a no-change materialization as a skip, and a publish
   # should not differ.

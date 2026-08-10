@@ -125,6 +125,13 @@ defmodule KilnCMS.Collab.Crdt do
       [{pid, _value} | _] -> {:ok, DocServer.converged_blocks(pid, record)}
       [] -> :none
     end
+  rescue
+    # `Registry.lookup/2` RAISES on an unknown registry rather than exiting, so
+    # the `catch` below cannot see it. Reachable in a release with the prototype
+    # flag on and the collab subtree not started — where, without this, every
+    # publish would log the deliberately-loud checkpoint warning and drown the
+    # signal it exists for.
+    ArgumentError -> :none
   catch
     # An `exit` from a server that stopped between the lookup and the call.
     :exit, _reason -> :none

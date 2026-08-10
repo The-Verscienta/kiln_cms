@@ -72,6 +72,16 @@ migration, a rewritten column, a dropped config key).
   document nothing will persist. A publish for a document nobody is editing is
   unchanged, and never starts a room.
 
+  The publish gates judge what actually publishes: `ComplianceClaims` and
+  `MediaAltText` are evaluated after the room's prose is merged, so a claim
+  typed into a shared document and never autosaved is refused rather than
+  published — and a claim the room has already deleted no longer refuses a
+  publish over text the author cannot see. A scheduled publish gets the same
+  treatment, since "keep editing until the cron fires" is the ordinary case.
+  And because a publish can now change content, it recomputes the search text
+  and re-enqueues the embedding, so a document is findable by the words it
+  actually went live with.
+
 - **The in-context and Presentation editors no longer accept edits they cannot
   save** (#1159). Both mounted a record through an actor-scoped read and then
   offered `contenteditable` regions, drag-reorder and a Save button, with no

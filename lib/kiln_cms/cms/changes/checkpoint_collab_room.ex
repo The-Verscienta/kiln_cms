@@ -20,12 +20,16 @@ defmodule KilnCMS.CMS.Changes.CheckpointCollabRoom do
   ## Why it rides in the publish's own changeset
 
   The obvious alternative — flush through `:autosave` first, then publish — is
-  wrong twice over. It is two writes, so the flush bumps `lock_version` and the
-  publish built from the pre-flush record fails its optimistic lock. And they
-  are not atomic: a publish that succeeded after a flush that failed would still
-  lose the text. Force-changing `:blocks` here means the converged prose is
-  what gets published, versioned (`RecordPublishedVersion`) and fired
+  not atomic: a publish that succeeded after a flush that failed would still
+  lose the text, which is the failure being fixed. Force-changing `:blocks` here
+  means the converged prose is what gets published, versioned
+  (`RecordPublishedVersion`), indexed (`SetSearchText`) and fired
   (`FireArtifacts`) — one write, or none.
+
+  (An earlier version of this note also claimed a flush would break the
+  publish's optimistic lock. That is false: `:publish` carries no
+  `optimistic_lock` — only `:update` and `:autosave` do — and flush-then-publish
+  works on the happy path. Atomicity is the reason; the lock never was.)
 
   `:publish` declares `accept []`, deliberately: a publish takes no content
   input *from the caller*. This is not caller input. It is the server reading
@@ -53,18 +57,25 @@ defmodule KilnCMS.CMS.Changes.CheckpointCollabRoom do
 
   @impl true
   def change(changeset, _opts, _context) do
+    # Resolved HERE, at build time, and closed over — never inside the hooks.
+    # `type_name_for/1` goes through the dynamic-type registry for a D17 record,
+    # which is a `Cachex.fetch` whose miss reads the database, and a cached
+    # resolve inside a write transaction is the courier-wants-a-second-connection
+    # hazard this codebase has hit before. `Validations.ComplianceClaims` avoids
+    # it by the same means.
+    kind = ContentTypes.type_name_for(changeset.data)
+
     changeset
-    |> Ash.Changeset.before_action(&merge_converged_prose/1)
-    |> Ash.Changeset.after_transaction(&announce/2)
+    |> Ash.Changeset.before_action(&merge_converged_prose(&1, kind))
+    |> Ash.Changeset.after_transaction(fn _changeset, result -> announce(result, kind) end)
   end
 
   # After the transaction, so the room is never told about a publish that then
   # rolled back — `after_action` would broadcast before the commit (the trap
   # this codebase has hit before). Best-effort: an editor who misses this still
   # has their prose, because the write above already took it.
-  defp announce(_changeset, {:ok, record} = result) do
-    with true <- Crdt.enabled?(),
-         kind when not is_nil(kind) <- ContentTypes.type_name_for(record) do
+  defp announce({:ok, record} = result, kind) do
+    if Crdt.enabled?() and not is_nil(kind) do
       KilnCMSWeb.Endpoint.broadcast(Crdt.doc_key(kind, record.id), "published", %{})
     end
 
@@ -77,12 +88,12 @@ defmodule KilnCMS.CMS.Changes.CheckpointCollabRoom do
       result
   end
 
-  defp announce(_changeset, result), do: result
+  defp announce(result, _kind), do: result
 
-  defp merge_converged_prose(changeset) do
+  defp merge_converged_prose(changeset, kind) do
     with true <- Crdt.enabled?(),
+         false <- is_nil(kind),
          %{id: id} = record when not is_nil(id) <- changeset.data,
-         kind when not is_nil(kind) <- ContentTypes.type_name_for(record),
          {:ok, blocks} <- Crdt.converged_blocks(Crdt.doc_key(kind, id), record) do
       Ash.Changeset.force_change_attribute(changeset, :blocks, blocks)
     else
