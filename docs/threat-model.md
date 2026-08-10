@@ -670,6 +670,38 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    in DNS and TLS certificates. Terminate unknown hosts at the proxy if your
    tenant list is confidential.
 
+   **That caching fix applies uniformly to all five callers** that resolve a
+   tenant (`SetTenant`, the LiveView on_mount hook, and the three sockets —
+   all route through `Tenant.fetch_org/1` or `fetch_org_from_connect_info/1`),
+   so a *repeated* refusal is cheap everywhere, not just at the plug. What
+   remained until #678 was visibility: a flood of *distinct* invented hosts
+   still costs a lookup each, on every one of the five, and none of it reached
+   an operator. `KilnCMSWeb.TenantRefusalAlert` now fires one aggregated,
+   cooldown-limited `Logger.warning` + Sentry alert per surface — tagged
+   `:plug`/`:live`/`:gql`/`:bridge`/`:collab` so an alert says *which* surface
+   is being flooded — the first time each is refused in a 15-minute window.
+   It is deliberately **not** wired into `Tenant.fetch_org/1` itself (that
+   would also fire for host-agnostic traffic on its way to being served, and
+   for the LiveView on_mount's foreign-claim check, which is driven by the
+   client's *claimed* host rather than one that failed to resolve) — each
+   caller alerts from its own refusal decision instead.
+
+   The issue also floated rate-limiting `/live/longpoll` specifically at the
+   router, alongside the plug's pipeline limiters. That turned out not to be
+   available: `use Phoenix.Endpoint` installs `socket_dispatch` as the first
+   plug in the endpoint unconditionally, ahead of `SetTenant`, the session
+   plug and the router itself, regardless of where a `socket "/path", …`
+   declaration sits in the module — so every one of `/live`, `/ws/gql`,
+   `/ws/collab` and `/ws/bridge` is dispatched and its connection accepted or
+   refused before any router pipeline would run, on every transport including
+   longpoll. There is no router-reachable place to put a limiter in front of
+   them. Accepted rather than closed: the per-request cost a longpoll flood
+   adds beyond the alerting above is one cached-miss lookup and one LiveView
+   process spun up and torn down per request, the same bound #677 already
+   put on every other caller — real but small, and an operator who sees the
+   new alert firing can add a proxy-level limiter on `/live` and `/ws/gql` the
+   same way one is already recommended for unknown hosts generally, above.
+
    The quieter half is closed unconditionally: `Tenant.current_org_id/1` now
    **raises** when the `:current_org` assign is missing rather than reading the
    default org, so a forgotten `SetTenant` plug or `:assign_current_org`
@@ -864,7 +896,11 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
     issue at will, not a quota burn. The join itself is still free, and the
     Sentry logger handler's own `:rate_limiting` option — which would bound any
     crash shape rather than one named function — is available and unset.
-    Tracked in #678.
+    **Narrower than it sounds:** #678 closed the *tenant-refusal* half of
+    "`/live` is unthrottled" — a flood of unresolvable hosts now alerts (see
+    item 3 above) — but a flood of *valid*, successfully-resolving joins is
+    still free and still uncounted. That's this item's actual gap, and it
+    remains open; tracked in #1183.
 11. **Periodic CSP re-review** as the editor adds third-party assets. The
     runtime `img-src` is widened by `CSP_IMG_SRC` and by the Unsplash
     integration — the only externally-influenced part of the policy.

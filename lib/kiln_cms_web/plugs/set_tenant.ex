@@ -47,6 +47,12 @@ defmodule KilnCMSWeb.Plugs.SetTenant do
   a bounded amount of indexed-lookup load for the ability to 404 real tenants is
   the wrong trade; terminate unknown hosts at the proxy if the load matters.
 
+  What was missing until #678 was not a bound on that cost but any way for an
+  operator to *see* it happening: see `KilnCMSWeb.TenantRefusalAlert`, called
+  from the branch below that actually refuses (never from the exemption branch
+  above it, and never from `Tenant.fetch_org/1` itself, which health probes and
+  the billing webhook also call on their way to being served).
+
   ## What the refusal still reveals
 
   An unknown host gets this plain-text 404; a **known** host with an unmatched
@@ -117,6 +123,7 @@ defmodule KilnCMSWeb.Plugs.SetTenant do
       # tenant that won't resolve drops the level and sees exactly which host
       # missed.
       Logger.debug(fn -> "SetTenant: rejected unknown host #{inspect(conn.host)}" end)
+      KilnCMSWeb.TenantRefusalAlert.notify(:plug, conn.host)
 
       conn
       |> put_resp_content_type("text/plain")

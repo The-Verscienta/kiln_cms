@@ -300,10 +300,20 @@ defmodule KilnCMSWeb.LiveUserAuth do
     end
   end
 
+  # Both `request_org!/1`'s disconnected path and `connected_org!/1` funnel
+  # their unresolvable-host refusal through here, so this is the one place to
+  # alert (#678) — never `Tenant.fetch_org/1` itself (shared with every
+  # caller that resolves leniently) and never `refuse_foreign_claim!/3` below
+  # (that refusal is driven by the client's own claim, not by a host that
+  # failed to resolve, so counting it would answer a different question).
   defp fetch_org!(host) do
     case KilnCMSWeb.Tenant.fetch_org(host) do
-      {:ok, org} -> org
-      :error -> raise KilnCMSWeb.Tenant.UnknownHostError, host: host
+      {:ok, org} ->
+        org
+
+      :error ->
+        KilnCMSWeb.TenantRefusalAlert.notify(:live, host)
+        raise KilnCMSWeb.Tenant.UnknownHostError, host: host
     end
   end
 

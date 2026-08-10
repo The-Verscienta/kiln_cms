@@ -34,6 +34,13 @@ defmodule KilnCMSWeb.GraphqlSocket do
         {:ok, socket}
 
       :error ->
+        # The decision point, not `Tenant.fetch_org_from_connect_info/1` itself
+        # (#678) — this is where the connection is actually refused.
+        KilnCMSWeb.TenantRefusalAlert.notify(
+          :gql,
+          KilnCMSWeb.Tenant.connect_info_host(connect_info)
+        )
+
         :error
     end
   end

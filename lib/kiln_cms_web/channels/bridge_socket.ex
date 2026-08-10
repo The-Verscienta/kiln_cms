@@ -186,10 +186,25 @@ defmodule KilnCMSWeb.BridgeSocket do
   # Raw transports bypass the plug pipeline, so resolve the tenant from the
   # connect URI's host (the same source `SetTenant` uses). A missing host —
   # `connect_info` absent in tests — resolves to the default org, or refuses the
-  # connection under `TENANT_STRICT_HOST` (#563).
+  # connection under `TENANT_STRICT_HOST` (#563). The refusal alerts (#678) —
+  # from here, the decision point, not from `Tenant.fetch_org_from_connect_info/1`
+  # itself.
   defp fetch_org(info) do
     # A raw transport nests connect_info one level deeper than a Phoenix.Socket.
-    KilnCMSWeb.Tenant.fetch_org_from_connect_info(info[:connect_info] || %{})
+    connect_info = info[:connect_info] || %{}
+
+    case KilnCMSWeb.Tenant.fetch_org_from_connect_info(connect_info) do
+      {:ok, org} ->
+        {:ok, org}
+
+      :error ->
+        KilnCMSWeb.TenantRefusalAlert.notify(
+          :bridge,
+          KilnCMSWeb.Tenant.connect_info_host(connect_info)
+        )
+
+        :error
+    end
   end
 
   defp excerpt(value) when is_binary(value), do: value
