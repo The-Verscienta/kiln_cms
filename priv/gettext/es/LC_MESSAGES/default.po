@@ -3307,6 +3307,12 @@ msgstr "Vista previa del borrador — no es la página publicada"
 msgid "Draft translation created (%{locale})."
 msgstr "Traducción en borrador creada (%{locale})."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/translations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Draft translation created (%{locale}). Not copied, because your role cannot set them: %{fields}."
+msgstr "Borrador de traducción creado (%{locale}). No se copiaron, porque tu rol no puede establecerlos: %{fields}."
+
 #: lib/kiln_cms_web/controllers/manifest_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Drafts"
@@ -9991,6 +9997,12 @@ msgstr "Tu plan"
 #, elixir-autogen, elixir-format
 msgid "Your recovery codes — save them now, they won't be shown again."
 msgstr "Sus códigos de recuperación: guárdelos ahora, no se volverán a mostrar."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/translations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Your role cannot copy this content's blocks, so it cannot be translated."
+msgstr "Tu rol no puede copiar los bloques de este contenido, así que no se puede traducir."
 
 #: lib/kiln_cms_web/controllers/form_controller.ex
 #, elixir-autogen, elixir-format

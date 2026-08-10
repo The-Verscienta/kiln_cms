@@ -56,6 +56,38 @@ migration, a rewritten column, a dropped config key).
   cannot publish, and it would be refusing on rules nobody could confirm.
 ### Fixed
 
+- **A one-click translation honours the acting editor's field grants** (#1157).
+  Duplication and translation are the two creates that carry *another record's*
+  values, and only duplication asked what the editor was allowed to write.
+  `Changes.EnforceFieldGrants` deliberately skips creates — sound for a document
+  written from scratch, not for one arriving pre-filled — so an editor granted
+  only `title` on a type minted a translation carrying its `seo_title`,
+  `excerpt`, `audience` and custom fields, every one of which is refused when
+  they try to save it on the source.
+
+  `slug` is exempt for a reason of its own: the `[slug, locale]` identity is
+  what pairs a translation to its source, so dropping it would not narrow the
+  copy but sever it. Both surfaces now report what didn't travel, the way
+  Duplicate has since #929.
+
+- **The block envelope is no longer mistaken for a restricted field**, which was
+  silently costing every non-admin translation its block ids. `_type`,
+  `_version` and `id` share the stored map with a block's authored fields but
+  are the union's own bookkeeping. Asking a *field* policy about them answered
+  "no" for every non-admin, so those keys were overwritten with `nil`.
+
+  Nulling `id` defeated `keep_ids?: true`: an admin's translation preserved the
+  source's block ids and **everyone else's did not**. Those ids are persisted,
+  and they are what the XLIFF vendor round-trip matches trans-units on (#502) —
+  without them it falls back to matching on position, which is wrong the moment
+  either side is reordered. Nulling `_version` rewrote a block's stored schema
+  version to the current head, so a block still awaiting its upcast would never
+  receive it; inert today, since the only migration in the tree is idempotent
+  with the field's own default.
+
+  The visible symptom was the flash: a plain editor duplicating a plain page was
+  told their role could not set `heading._type`.
+
 - **Taking a backup now needs a platform admin, and is re-checked when the
   button is pressed** (#1160). `BackupLive` did no tier check of its own, and
   `Backups.enqueue/1` takes no actor and authorizes nothing — so the route's

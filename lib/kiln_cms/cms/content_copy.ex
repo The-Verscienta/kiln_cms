@@ -30,6 +30,8 @@ defmodule KilnCMS.CMS.ContentCopy do
   `KilnCMS.CMS.Duplication` clones the `ContentLink` rows themselves.
   """
 
+  alias KilnCMS.Accounts.Scoping
+  alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.Tag
 
   # The authored content attributes shared by every clone. Deliberately absent:
@@ -56,6 +58,52 @@ defmodule KilnCMS.CMS.ContentCopy do
   """
   @spec content_attrs() :: [atom()]
   def content_attrs, do: @content_attrs
+
+  @doc """
+  The acting editor's per-field write grant for `source`'s type — `nil` when no
+  restriction applies, otherwise the attribute names they may write.
+
+  Cloning is the one kind of create that carries **another record's** values,
+  which is why it has to ask. `Changes.EnforceFieldGrants` deliberately skips
+  creates (authoring a *new* document is gated by `editable_types` instead),
+  and that reasoning holds for a document written from scratch — not for one
+  arriving pre-filled from a record the actor may only partly write.
+
+  `nil` for an effective admin and for an actor-less internal caller, mirroring
+  the policy bypass the change itself respects. Note the shape: `nil` means
+  "everything", an empty list means "nothing" — reading one as the other
+  inverts the grant, which is how #927 happened.
+  """
+  @spec field_grant(struct(), keyword()) :: [String.t()] | nil
+  def field_grant(source, opts) do
+    actor = Keyword.get(opts, :actor)
+    subject = Keyword.get(opts, :tenant)
+
+    with %{} <- actor,
+         :editor <- Scoping.effective_tier(actor, subject) do
+      Scoping.field_grant(actor, subject, ContentTypes.type_name_for(source))
+    else
+      _ -> nil
+    end
+  end
+
+  @doc """
+  `attrs` filtered to what `grant` permits, plus the names it dropped.
+
+  `exempt` attributes survive a grant that does not name them, and each caller
+  has its own reasons — see `KilnCMS.CMS.Duplication` and
+  `KilnCMS.CMS.Translations`, which both state theirs. They are not reported as
+  withheld, because they were not withheld.
+  """
+  @spec permitted([atom()], [String.t()] | nil, [atom()]) :: {[atom()], [String.t()]}
+  def permitted(attrs, nil, _exempt), do: {attrs, []}
+
+  def permitted(attrs, grant, exempt) do
+    {kept, dropped} =
+      Enum.split_with(attrs, &(&1 in exempt or to_string(&1) in grant))
+
+    {kept, Enum.map(dropped, &to_string/1)}
+  end
 
   @doc """
   The load a caller must request so `tag_ids/1` sees a real list rather than
@@ -153,11 +201,26 @@ defmodule KilnCMS.CMS.ContentCopy do
   defp reset_block(block, _module, _role, reset), do: {block, reset}
 
   defp reset_fields(value, module, role, reset) do
+    declared = MapSet.new(Kiln.Block.Info.fields(module), & &1.name)
+
     Enum.reduce(value, {value, reset}, fn {key, _current}, {acc, reset} ->
       name = field_atom(key)
 
       cond do
         is_nil(name) ->
+          {acc, reset}
+
+        # `_type`, `_version` and `id` live in the same stored map as the
+        # authored fields but are the union's own envelope, not fields anyone
+        # declares or edits. Asking a *field* policy about them answered "no"
+        # for every non-admin — so a plain editor duplicating a plain page had
+        # them overwritten with `nil` and was told, in a flash, that their role
+        # could not set `heading._type` (#1157).
+        #
+        # Declared-fields-only is the rule, not a denylist of the three names:
+        # the envelope is the union's business and can gain a key without this
+        # having to hear about it.
+        not MapSet.member?(declared, name) ->
           {acc, reset}
 
         Kiln.Block.Policy.can_edit_field?(module, name, role) ->

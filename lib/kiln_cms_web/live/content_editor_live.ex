@@ -2706,20 +2706,31 @@ defmodule KilnCMSWeb.ContentEditorLive do
     %{kind: kind, record: record, actor: actor} = socket.assigns
 
     if socket.assigns.may_write? do
-      translation =
-        KilnCMS.CMS.Translations.create_translation!(kind, record, locale,
+      {translation, withheld} =
+        KilnCMS.CMS.Translations.create_translation_with_notes!(kind, record, locale,
           actor: actor,
           tenant: record.org_id
         )
 
       {:noreply,
        socket
-       |> put_flash(:info, gettext("Draft translation created (%{locale}).", locale: locale))
+       |> put_flash(:info, translation_flash(locale, withheld))
        |> push_navigate(to: ~p"/editor/content/#{kind}/#{translation.id}")}
     else
       {:noreply, socket}
     end
   rescue
+    # Distinguished from a generic failure because it is not one: the refusal is
+    # a permission boundary the editor can act on (ask for the grant), and
+    # "couldn't create that translation" would read as a broken feature (#1157).
+    _error in KilnCMS.CMS.Translations.BlocksWithheldError ->
+      {:noreply,
+       put_flash(
+         socket,
+         :error,
+         gettext("Your role cannot copy this content's blocks, so it cannot be translated.")
+       )}
+
     _error ->
       {:noreply, put_flash(socket, :error, gettext("Couldn't create that translation."))}
   end
@@ -9196,4 +9207,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
     do: gettext("Unsaved changes won't be copied. Duplicate the last saved version?")
 
   defp duplicate_confirm(_save_state, _conflict), do: false
+
+  # A field grant can leave a translation narrower than its source, and so can
+  # the block-field policy (#1157/#890). Saying so is the difference between
+  # "translation is broken" and "your role cannot copy those fields" — the same
+  # distinction the Duplicate handler draws (#929).
+  defp translation_flash(locale, []),
+    do: gettext("Draft translation created (%{locale}).", locale: locale)
+
+  defp translation_flash(locale, withheld) do
+    gettext(
+      "Draft translation created (%{locale}). Not copied, because your role cannot set them: %{fields}.",
+      locale: locale,
+      fields: Enum.join(withheld, ", ")
+    )
+  end
 end
