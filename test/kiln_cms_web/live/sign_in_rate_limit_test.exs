@@ -32,6 +32,7 @@ defmodule KilnCMSWeb.SignInRateLimitTest do
   """
   use KilnCMSWeb.ConnCase, async: false
 
+  import ExUnit.CaptureLog
   import KilnCMS.RateLimitHelpers
   import Phoenix.LiveViewTest
   import Swoosh.TestAssertions
@@ -245,22 +246,56 @@ defmodule KilnCMSWeb.SignInRateLimitTest do
       |> Plug.Conn.put_req_header("x-forwarded-for", forwarded)
     end
 
-    test "behind a trusted proxy the form context holds the forwarded client", %{conn: conn} do
+    # Addresses of their own, like every other test in this file: `/sign-in` is
+    # behind `AuthRateLimit`, so each disconnected GET spends a real `:auth`
+    # bucket, and a fixed one would 429 under `--repeat-until-failure` and fail
+    # the `live/2` match with a message naming nothing. The proxy address stays
+    # inside `10.0.0.0/8` because the trusted case needs it to.
+    defp proxy_address, do: {10, 0, rem(System.unique_integer([:positive]), 250), 1}
+
+    defp forwarded_address do
+      {203, 0, 113, rem(System.unique_integer([:positive]), 250) + 1}
+    end
+
+    defp dotted({a, b, c, d}), do: "#{a}.#{b}.#{c}.#{d}"
+
+    # `ClientIp`'s warning latch is global and a forwarded request trips it.
+    # Reset on the way out so this file cannot silence a warning another file
+    # is asserting on, and captured so it stays out of the suite's output.
+    defp with_proxies(proxies, fun) do
       previous = Application.get_env(:kiln_cms, :trusted_proxies)
-      Application.put_env(:kiln_cms, :trusted_proxies, ["10.0.0.0/8"])
+
+      if proxies,
+        do: Application.put_env(:kiln_cms, :trusted_proxies, proxies),
+        else: Application.delete_env(:kiln_cms, :trusted_proxies)
+
+      KilnCMSWeb.Plugs.ClientIp.reset_forwarding_warning()
 
       on_exit(fn ->
+        KilnCMSWeb.Plugs.ClientIp.reset_forwarding_warning()
+
         if previous,
           do: Application.put_env(:kiln_cms, :trusted_proxies, previous),
           else: Application.delete_env(:kiln_cms, :trusted_proxies)
       end)
 
-      conn = proxied_conn(conn, {10, 0, 0, 1}, "203.0.113.7")
-      {:ok, view, _html} = live(conn, ~p"/sign-in")
+      {result, _log} = with_log(fun)
+      result
+    end
+
+    test "behind a trusted proxy the form context holds the forwarded client", %{conn: conn} do
+      client = forwarded_address()
+
+      view =
+        with_proxies(["10.0.0.0/8"], fn ->
+          conn = proxied_conn(conn, proxy_address(), dotted(client))
+          {:ok, view, _html} = live(conn, ~p"/sign-in")
+          view
+        end)
 
       form_context = :sys.get_state(view.pid).socket.assigns.context
 
-      assert ThrottleSignIn.client_ip_context(RateLimit.client_key({203, 0, 113, 7})) ==
+      assert ThrottleSignIn.client_ip_context(RateLimit.client_key(client)) ==
                Map.take(form_context, [:kiln_client_ip])
     end
 
@@ -269,19 +304,18 @@ defmodule KilnCMSWeb.SignInRateLimitTest do
     # Rotating `X-Forwarded-For` otherwise rotates the bucket, and `/sign-in`
     # has no limit at all.
     test "with no trusted proxies the form context ignores the header", %{conn: conn} do
-      previous = Application.get_env(:kiln_cms, :trusted_proxies)
-      Application.delete_env(:kiln_cms, :trusted_proxies)
+      peer = proxy_address()
 
-      on_exit(fn ->
-        if previous, do: Application.put_env(:kiln_cms, :trusted_proxies, previous)
-      end)
-
-      conn = proxied_conn(conn, {10, 0, 0, 1}, "203.0.113.7")
-      {:ok, view, _html} = live(conn, ~p"/sign-in")
+      view =
+        with_proxies(nil, fn ->
+          conn = proxied_conn(conn, peer, dotted(forwarded_address()))
+          {:ok, view, _html} = live(conn, ~p"/sign-in")
+          view
+        end)
 
       form_context = :sys.get_state(view.pid).socket.assigns.context
 
-      assert ThrottleSignIn.client_ip_context(RateLimit.client_key({10, 0, 0, 1})) ==
+      assert ThrottleSignIn.client_ip_context(RateLimit.client_key(peer)) ==
                Map.take(form_context, [:kiln_client_ip])
     end
 

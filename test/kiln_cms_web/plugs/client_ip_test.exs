@@ -182,8 +182,11 @@ defmodule KilnCMSWeb.Plugs.ClientIpTest do
     @x_headers [{"x-forwarded-for", "203.0.113.7"}]
 
     test "with no trusted proxies the header is ignored and the peer stands" do
-      # The default, and the one that protects production.
-      assert ClientIp.resolve(@x_headers, @proxy) == @proxy
+      # The default, and the one that protects production. Captured only to keep
+      # the forwarding warning out of the suite's output, as every sibling does.
+      {answer, _log} = with_log(fn -> ClientIp.resolve(@x_headers, @proxy) end)
+
+      assert answer == @proxy
     end
 
     test "with the peer inside a trusted proxy the forwarded client is used" do
@@ -205,6 +208,26 @@ defmodule KilnCMSWeb.Plugs.ClientIpTest do
       assert ClientIp.resolve(@x_headers, @proxy) == @client
     end
 
+    # The configured CIDRs have to actually be *used*, not merely be non-empty.
+    # Every private range is in `RemoteIp`'s hardcoded reserved set and is
+    # skipped whatever `:proxies` says, so a single-hop chain behind a private
+    # peer answers the same for any valid list — a regression that passed the
+    # wrong list through would not show. A public-IP load balancer is where the
+    # list does the work: two hops, and only the configured CIDR distinguishes
+    # the client from the proxy that forwarded it.
+    test "the configured CIDRs decide which hop is the client" do
+      chain = [{"x-forwarded-for", "203.0.113.7, 198.51.100.4"}]
+
+      trust(["198.51.100.0/24"])
+      assert ClientIp.resolve(chain, @proxy) == @client
+
+      # The same chain with an unrelated list: the LB is no longer a known hop,
+      # so it is taken for the client — one bucket for the whole internet, which
+      # is #564's trap arriving through a *configured* deployment.
+      trust(["10.0.0.0/8"])
+      assert ClientIp.resolve(chain, @proxy) == {198, 51, 100, 4}
+    end
+
     # A malformed CIDR degrades to "trust nothing", the same direction `call/2`
     # fails — a spoofable header is never honoured on the way down.
     test "a malformed proxy list falls back to the peer" do
@@ -219,6 +242,23 @@ defmodule KilnCMSWeb.Plugs.ClientIpTest do
       assert ClientIp.resolve([], nil) == nil
     end
 
+    # The docstring promises RFC 7239 `Forwarded:` cannot reach here, because
+    # LiveView's `:x_headers` is exactly the `x-`-prefixed headers. That is an
+    # upstream property, and `resolve/2` *would* honour the header if handed one
+    # — so the guarantee lives in the transport, and this is what pins it.
+    test "the transport hands over only x- headers, so Forwarded cannot arrive" do
+      x_headers =
+        :get
+        |> conn("/")
+        |> put_req_header("forwarded", "for=203.0.113.7")
+        |> put_req_header("x-forwarded-for", "203.0.113.7")
+        |> Phoenix.Socket.Transport.connect_info(KilnCMSWeb.Endpoint, [:x_headers], [])
+        |> Map.fetch!(:x_headers)
+
+      assert Enum.all?(x_headers, fn {name, _value} -> String.starts_with?(name, "x-") end)
+      refute Enum.any?(x_headers, fn {name, _value} -> name == "forwarded" end)
+    end
+
     # The invariant the docstring states out loud: two copies of "when do we
     # believe X-Forwarded-For" that drift would give the socket a different
     # client identity than the HTTP request that preceded it. Asserted as
@@ -228,14 +268,10 @@ defmodule KilnCMSWeb.Plugs.ClientIpTest do
         trust(proxies)
         ClientIp.reset_forwarding_warning()
 
-        plug_answer =
-          capture_log(fn ->
-            send(
-              self(),
-              {:ip, "203.0.113.7" |> forwarded() |> ClientIp.call([]) |> Map.fetch!(:remote_ip)}
-            )
+        {plug_answer, _log} =
+          with_log(fn ->
+            "203.0.113.7" |> forwarded() |> ClientIp.call([]) |> Map.fetch!(:remote_ip)
           end)
-          |> then(fn _log -> receive do: ({:ip, ip} -> ip) end)
 
         assert ClientIp.resolve(@x_headers, @proxy) == plug_answer,
                "socket and plug disagreed with trusted_proxies=#{inspect(proxies)}"
