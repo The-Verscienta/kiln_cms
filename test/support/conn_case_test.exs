@@ -9,10 +9,13 @@ defmodule KilnCMSWeb.ConnCaseTest do
   status 200, got: 429` inside an assertion about a Content-Security-Policy.
   It broke `main` twice before anyone read it as a rate-limit bucket collision
   rather than a CSP problem.
+
+  ConnCase's `setup` now applies the same scheme by default (#936), so a test
+  that forgets to call `unique_ip/1` is no longer on the shared loopback bucket.
   """
   use ExUnit.Case, async: true
 
-  import KilnCMSWeb.ConnCase, only: [unique_ip: 1]
+  import KilnCMSWeb.ConnCase, only: [unique_ip: 1, loopback_conn: 0]
 
   defp ip(conn), do: conn.remote_ip
 
@@ -35,22 +38,29 @@ defmodule KilnCMSWeb.ConnCaseTest do
       assert length(Enum.uniq(addresses)) == 20
     end
 
-    test "stays inside loopback, and off the network and broadcast addresses" do
+    test "stays inside the RateLimitHelpers range, clear of exhaustion tests" do
+      # `10.128.0.0/9` — see `KilnCMS.RateLimitHelpers.client_address/0`. Not
+      # loopback: ConnCase's default is already off loopback, and this helper
+      # must agree with it rather than invent a second scheme.
       for _ <- 1..1_000 do
-        assert {127, b, c, d} = fresh() |> unique_ip() |> ip()
-        assert b in 1..254
-        assert c in 0..249
-        # `.0` is the network address and `.255` the broadcast; neither is a
-        # host, and a limiter keyed on a "host" that is not one is a trap.
-        assert d in 1..250
+        assert {10, b, _c, _d} = fresh() |> unique_ip() |> ip()
+        assert b in 128..255
       end
     end
 
-    test "replaces the address rather than adding a key to the struct" do
+    test "sets peer_data and remote_ip to the same address" do
       conn = fresh() |> unique_ip()
 
       assert %Plug.Conn{} = conn
       assert is_tuple(conn.remote_ip)
+      assert Plug.Conn.get_peer_data(conn).address == conn.remote_ip
+    end
+  end
+
+  describe "loopback_conn/0" do
+    test "is the shared bucket a test has to opt into" do
+      conn = loopback_conn()
+      assert conn.remote_ip == {127, 0, 0, 1}
     end
   end
 end
