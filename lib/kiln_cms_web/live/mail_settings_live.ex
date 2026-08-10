@@ -132,8 +132,13 @@ defmodule KilnCMSWeb.MailSettingsLive do
   # the actor — `rotate`, `save_key_source`, `save_server_ip`, `unsuppress` —
   # so a mount-guard mistake is caught by a policy. These three call
   # `DnsCheck.run/1`, `DnsCheck.check_port25/0` and `Mail.deliver_now/1`, none
-  # of which take an actor or check anything, and a mount guard is evaluated
-  # once.
+  # of which take an actor or check anything.
+  #
+  # What this buys is a refusal for a forged or replayed event on a socket that
+  # never passed `mount/3` — not a live check on the acting role.
+  # `platform_admin?/1` reads `current_user`, which is assigned once, so a
+  # global admin demoted mid-session still passes here. Saying otherwise would
+  # be claiming a guarantee this cannot give.
   def handle_event("verify", _params, socket) do
     settings = socket.assigns.settings
 

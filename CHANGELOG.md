@@ -59,8 +59,12 @@ migration, a rewritten column, a dropped config key).
 - **Six console actions that authorize nothing now re-check who is asking**
   (#1166). Every other privileged handler funnels into an Ash action carrying
   the actor, so a mistake in a mount guard is still caught by a policy. These
-  six do not — and a mount guard is evaluated once, so an access change
-  mid-session held until the tab was closed.
+  six do not. What the re-checks buy is a refusal for a forged or replayed event
+  on a socket that never passed the mount guard, plus — on the per-org axis,
+  where the tier is re-read from the actor's membership — a revoked grant taking
+  effect immediately rather than when the tab is closed. A demoted *global*
+  admin is not caught either way: that role is read from a struct assigned once
+  at mount.
 
   Worst was **sending a newsletter**: `send_as_newsletter/2` accepts an actor
   but uses it only to stamp `sent_by_id`, writes the campaign with

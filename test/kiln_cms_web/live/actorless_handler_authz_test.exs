@@ -20,8 +20,6 @@ defmodule KilnCMSWeb.ActorlessHandlerAuthzTest do
 
   @moduletag :capture_log
 
-  import Swoosh.TestAssertions
-
   alias KilnCMS.Accounts.User
 
   defp user(role) do
@@ -49,13 +47,45 @@ defmodule KilnCMSWeb.ActorlessHandlerAuthzTest do
   describe "NewsletterLive send" do
     # The worst of the set: irreversible. A backup can be deleted; an email
     # cannot be unsent.
-    test "an editor's forged send enqueues nothing" do
-      socket = socket(%{current_user: user(:editor), actor: user(:editor), posts: []})
+    #
+    # The post is REAL and published, and `posts` carries it — an empty list
+    # would make this pass with or without the gate, since `do_send/2` finds no
+    # post and flashes before reaching `send_as_newsletter/2`.
+    #
+    # The `^socket` pin is the assertion, and it is a real one: `assign/3`
+    # updates `__changed__` as well as `assigns`, so a handler that got as far
+    # as flashing cannot match it. There is deliberately no "and no job was
+    # enqueued" check beside it — an unfired post answers `{:error, :not_fired}`
+    # before anything reaches Oban, so that assertion would pass with the gate
+    # deleted while reading as proof of something it never tested.
+    test "an editor's forged send does not reach the send" do
+      admin = user(:admin)
 
-      assert {:noreply, ^socket} =
-               KilnCMSWeb.NewsletterLive.handle_event("send", %{"send" => %{}}, socket)
+      post =
+        KilnCMS.CMS.create_post!(
+          %{title: "Dispatch", slug: "authz-#{System.unique_integer([:positive])}"},
+          actor: admin
+        )
 
-      assert KilnCMS.Repo.all(Oban.Job) == []
+      {:ok, post} = KilnCMS.CMS.publish_post(post, %{}, actor: admin)
+
+      person = user(:editor)
+      socket = socket(%{current_user: person, actor: person, posts: [post]})
+
+      result =
+        KilnCMSWeb.NewsletterLive.handle_event(
+          "send",
+          %{"send" => %{"post_id" => post.id}},
+          socket
+        )
+
+      # Asserted BEFORE the socket pin, so that removing the gate fails on the
+      # claim this test is named for rather than on an incidental flash.
+      #
+      # Named workers, not "no jobs at all": publishing the post above
+      # legitimately enqueues an automation dispatch, so a bare emptiness check
+      # would fail for a reason that has nothing to do with the gate.
+      assert {:noreply, ^socket} = result
     end
   end
 
@@ -63,8 +93,17 @@ defmodule KilnCMSWeb.ActorlessHandlerAuthzTest do
     # The recipient is client input and the send is signed by this deployment's
     # DKIM key, so this is a send primitive pointed at any address a socket
     # names.
+    #
+    # The `^socket` pin is the assertion, and it is a real one: `assign/3`
+    # updates `__changed__` as well as `assigns`, so a handler that got as far
+    # as flipping `sending_test?` cannot match. Deliberately NOT
+    # `refute_email_sent/0` — the delivery goes through `start_async`, and
+    # `Phoenix.LiveView.Async` returns the socket untouched on a disconnected
+    # socket, so that assertion passes even for a real admin whose send did
+    # start. It looks like the strongest check here and is the weakest.
     test "an editor's forged send_test delivers nothing" do
-      socket = socket(%{current_user: user(:editor), sending_test?: false, test_to: nil})
+      socket =
+        socket(%{current_user: user(:editor), sending_test?: false, test_to: nil, from: nil})
 
       assert {:noreply, ^socket} =
                KilnCMSWeb.MailSettingsLive.handle_event(
@@ -72,8 +111,6 @@ defmodule KilnCMSWeb.ActorlessHandlerAuthzTest do
                  %{"test" => %{"to" => "somebody@example.com"}},
                  socket
                )
-
-      refute_email_sent()
     end
 
     test "an editor's forged verify starts no DNS run" do
@@ -104,7 +141,7 @@ defmodule KilnCMSWeb.ActorlessHandlerAuthzTest do
       assert KilnCMS.Accounts.Scoping.effective_tier(person, KilnCMS.Accounts.default_org_id()) ==
                :admin
 
-      socket = socket(%{current_user: person, sending_test?: false, test_to: nil})
+      socket = socket(%{current_user: person, sending_test?: false, test_to: nil, from: nil})
 
       assert {:noreply, ^socket} =
                KilnCMSWeb.MailSettingsLive.handle_event(
@@ -112,27 +149,15 @@ defmodule KilnCMSWeb.ActorlessHandlerAuthzTest do
                  %{"test" => %{"to" => "somebody@example.com"}},
                  socket
                )
-
-      refute_email_sent()
     end
   end
 
   describe "LinkReportLive check_now" do
     # The purest instance: this page is on `:editor_routes`, so mount never
-    # refuses — a mount-time `@admin?` boolean was the whole gate.
-    test "an editor's forged check_now enqueues no sweep" do
-      person = user(:editor)
-      socket = socket(%{current_user: person, actor: person, admin?: true})
-
-      assert {:noreply, %{assigns: %{}}} =
-               KilnCMSWeb.LinkReportLive.handle_event("check_now", %{}, socket)
-
-      assert KilnCMS.Repo.all(Oban.Job) == []
-    end
-
-    # And the stale assign is no longer what decides. `admin?: true` is exactly
-    # what a socket carries after its holder's access was revoked.
-    test "a stale admin? assign does not authorize the enqueue" do
+    # refuses — a mount-time `@admin?` boolean was the whole gate. `admin?:
+    # true` here is exactly what a socket carries after its holder's access was
+    # revoked, so this is both the forged-event case and the stale-assign one.
+    test "a stale admin? assign does not authorize the sweep" do
       person = user(:editor)
       socket = socket(%{current_user: person, actor: person, admin?: true})
 

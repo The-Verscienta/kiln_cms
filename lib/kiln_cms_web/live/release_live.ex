@@ -293,18 +293,21 @@ defmodule KilnCMSWeb.ReleaseLive do
   # "content anyone holding this URL can read", for an hour.
   #
   # So the tier stays, and the read is re-verified instead. `@release` is a
-  # struct fetched at mount; `ReleasePreview.sign/1` takes no actor and checks
-  # nothing, so without this an editor whose access was revoked mid-session
-  # would keep minting hour-long public links for the life of the socket. This
-  # asks the policy the same question again, now.
+  # struct fetched at mount and `ReleasePreview.sign/1` takes no actor, so this
+  # asks the read policy the same question again, now — which catches a forged
+  # event and an org grant revoked since mount (`effective_tier/2` re-reads the
+  # membership). It does not catch a demoted global admin, whose role is read
+  # off the mount-time `current_user`.
   def handle_event("share_preview", _params, socket) do
     case CMS.get_release(socket.assigns.release.id, act(socket)) do
       {:ok, release} ->
         token = ReleasePreview.sign(release)
         {:noreply, assign(socket, :preview_url, url(~p"/preview/release/#{token}"))}
 
+      # Flashed rather than silent, matching `delete`, `remove_item` and
+      # `apply_action` above: a button that visibly does nothing reads as a bug.
       _error ->
-        {:noreply, socket}
+        {:noreply, put_flash(socket, :error, gettext("That release no longer exists."))}
     end
   end
 

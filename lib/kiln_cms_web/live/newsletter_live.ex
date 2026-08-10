@@ -142,11 +142,20 @@ defmodule KilnCMSWeb.NewsletterLive do
   # writes the campaign with `authorize?: false`, then hands the fan-out to
   # Oban. There is nothing behind the guard.
   #
-  # And a mount guard is evaluated once. This one is a per-org tier — the right
-  # question, since the post and the segment both resolve off `document.org_id`
-  # — but an admin whose access is revoked mid-session would otherwise keep
-  # sending for the life of the socket. The consequence is worse than the
-  # backup panel's (#1160): a backup can be deleted, an email cannot be unsent.
+  # The tier is the per-org one — the right question, since the post and the
+  # segment both resolve off `document.org_id`, and escalating to a platform
+  # admin would lock a site's own admin out of their own newsletter.
+  #
+  # Two things this buys, and one it does not. It refuses a forged or replayed
+  # event on a socket that never passed `mount/3`, which is the whole point when
+  # nothing downstream will check. And because `effective_tier/2` re-reads the
+  # actor's `OrgMembership` rather than trusting the mount-time struct, a grant
+  # revoked mid-session is caught here. What it does *not* catch is a demoted
+  # **global** admin: `%{role: :admin}` short-circuits off `current_user`, which
+  # is assigned once. Don't read this as a live authorization check on that axis.
+  #
+  # The consequence is worse than the backup panel's (#1160): a backup can be
+  # deleted, an email cannot be unsent.
   def handle_event("send", %{"send" => params}, socket) when is_map(params) do
     if KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin do
       do_send(params, socket)
