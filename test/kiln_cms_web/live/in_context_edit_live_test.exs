@@ -111,7 +111,7 @@ defmodule KilnCMSWeb.InContextEditLiveTest do
 
       # The premise: they really can read it. Without this the tests below would
       # pass for the wrong reason — a reader who cannot even fetch the record.
-      assert %{} = KilnCMS.CMS.get_page!(page.id, actor: reader)
+      assert KilnCMS.CMS.get_page!(page.id, actor: reader).id == page.id
 
       %{conn: log_in(conn, reader), page: page, reader: reader}
     end
@@ -122,6 +122,38 @@ defmodule KilnCMSWeb.InContextEditLiveTest do
 
       assert to == "/editor/preview/page/#{page.id}"
       assert flash["info"] =~ "view this content but not edit it"
+    end
+  end
+
+  # The second gate had zero coverage: deleting it left every test green,
+  # because the mount refusal makes it unreachable through a browser. Now that
+  # the decision is an assign, the state it defends can be built directly —
+  # which is the state an ordinary refactor of the mount refusal would produce.
+  describe "the write funnel when the mount decision says no" do
+    test "a save is refused and says so, rather than sticking on Saving…", %{conn: conn} do
+      editor = authed_user(:editor)
+      {page, ids} = page_with_blocks(editor)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/site/page/#{page.slug}")
+
+      render_hook(lv, "update_block", %{"id" => ids.heading, "value" => "Rewritten"})
+
+      # Exactly what a mount refusal that rendered a panel instead of navigating
+      # away would leave behind.
+      :sys.replace_state(lv.pid, fn state ->
+        put_in(state.socket.assigns.may_write?, false)
+      end)
+
+      html = render_click(lv, "save", %{})
+
+      assert html =~ "Couldn&#39;t save."
+
+      # And the write did not land.
+      assert KilnCMS.CMS.get_page!(page.id, actor: editor).blocks
+             |> Enum.find_value(fn
+               %Ash.Union{type: :heading, value: v} -> v.text
+               _ -> nil
+             end) != "Rewritten"
     end
   end
 

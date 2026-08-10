@@ -207,7 +207,7 @@ defmodule KilnCMSWeb.PresentationLiveTest do
 
     # The premise: they really can read it, so the redirect below is about
     # WRITE access and not about a record they could never fetch.
-    assert %{} = CMS.get_page!(page.id, actor: reader)
+    assert CMS.get_page!(page.id, actor: reader).id == page.id
 
     assert {:error, {:live_redirect, %{to: to, flash: flash}}} =
              conn |> log_in(reader) |> live(~p"/editor/presentation/page/#{page.slug}")

@@ -50,7 +50,7 @@ defmodule KilnCMSWeb.InContextEditLive do
            fetch_by_slug(ct.type, slug, actor, socket.assigns.current_org),
          {true, _ct, _record} <-
            {may_write?(record, actor, socket.assigns.current_org), ct, record} do
-      {:ok, mount_editor(socket, ct, record, actor, params)}
+      {:ok, socket |> assign(:may_write?, true) |> mount_editor(ct, record, actor, params)}
     else
       # Read-only visitors get the read-only surface, not an editor that accepts
       # a page of typing and refuses all of it on Save (#1159).
@@ -268,23 +268,31 @@ defmodule KilnCMSWeb.InContextEditLive do
   # `:autosave` (debounced draft) share this — the `:autosave` action tags and
   # coalesces its PaperTrail versions so an edit-per-pause doesn't flood history.
   # Returns `{:ok | :conflict | :error, socket}` with the save state applied.
-  # Asked again here, not just at mount, because `mount/3` refuses with
-  # `push_navigate` — which ends the LiveView, and so carries the guarantee only
-  # by accident of how the refusal is spelled. Render a "read-only" panel
-  # instead, an ordinary refactor, and every write below becomes reachable. This
-  # is the one funnel they all pass through (#1159).
+  # The mount decision, re-asserted at the write. `mount/3` refuses with
+  # `push_navigate`, which ends the LiveView — so the guarantee holds only by
+  # accident of how the refusal is spelled. Render a "read-only" panel instead,
+  # an ordinary refactor, and every write below becomes reachable. This is the
+  # one funnel they all pass through (#1159).
   #
-  # Be exact about what it does NOT do: `Ash.can?` is asked about
-  # `socket.assigns.actor`, a struct assigned once at mount, so a scope narrowed
-  # mid-session is invisible here. Measured — the save still lands. Catching
-  # that would need the actor re-read per write, which `ContentEditorLive` does
-  # not do either, and diverging from it would be the worse outcome. So this
-  # guards the refactor, not the revocation.
+  # The ASSIGN, not a fresh `Ash.can?`. Recomputing it here would rebuild the
+  # whole `:autosave` changeset — a `field_definitions` read plus the policy
+  # chain — on every debounce, which is the editor's hottest path, and would
+  # answer from the same mount-time actor regardless. `ContentEditorLive`
+  # computes it once per record load for the same reason.
+  #
+  # Be exact about what it therefore does NOT do: a scope narrowed mid-session
+  # is invisible. Measured — the save still lands. Catching that needs the actor
+  # re-read per write, which no console does; diverging from them would be worse
+  # than the gap. This guards the refactor, not the revocation.
   defp persist(socket, action) do
-    if may_write?(socket.assigns.record, socket.assigns.actor, socket.assigns.current_org) do
+    if socket.assigns.may_write? do
       do_persist(socket, action)
     else
-      {:error, socket}
+      # Same shape as `do_persist/2`'s own error branch, so a refusal cannot
+      # leave the toolbar stuck on "Saving…" with nothing said — which is what
+      # `perform_autosave/1` would do with a bare `{:error, socket}`, since it
+      # discards the tag.
+      {:error, assign(socket, :save_state, :error)}
     end
   end
 

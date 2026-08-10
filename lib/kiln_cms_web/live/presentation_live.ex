@@ -45,6 +45,8 @@ defmodule KilnCMSWeb.PresentationLive do
            {may_write?(record, actor, socket.assigns.current_org), ct, record} do
       {:ok,
        socket
+       # Decided once, re-asserted at the write — see `save` below.
+       |> assign(:may_write?, true)
        |> assign(:kind, ct.type)
        |> assign(:ct, ct)
        |> assign(:actor, actor)
@@ -223,15 +225,22 @@ defmodule KilnCMSWeb.PresentationLive do
     end
   end
 
-  # Asked again here for the reason `InContextEditLive.persist/2` states: the
-  # mount refusal ends the LiveView, so it holds only by accident of how it is
-  # spelled. Same caveat too — the actor is a mount-time struct, so this guards
-  # a future refactor of that refusal, not a scope narrowed mid-session.
+  # The mount decision, re-asserted at the write, for the reason
+  # `InContextEditLive.persist/2` states: the mount refusal ends the LiveView,
+  # so it holds only by accident of how it is spelled. Same caveat too — the
+  # decision was taken from a mount-time actor, so this guards a future
+  # refactor of that refusal, not a scope narrowed mid-session.
+  #
+  # It says so rather than returning silently: a Save button that does nothing
+  # at all is indistinguishable from a broken one.
   def handle_event("save", _params, socket) do
-    if may_write?(socket.assigns.record, socket.assigns.actor, socket.assigns.current_org) do
+    if socket.assigns.may_write? do
       do_save(socket)
     else
-      {:noreply, socket}
+      {:noreply,
+       socket
+       |> assign(:save_state, :error)
+       |> put_flash(:error, gettext("You can view this content but not edit it."))}
     end
   end
 
