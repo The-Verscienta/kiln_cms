@@ -178,6 +178,13 @@ msgid_plural "%{count} posts"
 msgstr[0] "%{count} article"
 msgstr[1] "%{count} articles"
 
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} published document scanned"
+msgid_plural "%{count} published documents scanned"
+msgstr[0] "%{count} document publié analysé"
+msgstr[1] "%{count} documents publiés analysés"
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} published untouched for %{days}+ days"
@@ -1905,6 +1912,7 @@ msgstr "Source"
 
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/compliance_live.ex
+#: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Claim checking"
 msgstr "Vérification des allégations"
@@ -1913,6 +1921,11 @@ msgstr "Vérification des allégations"
 #, elixir-autogen, elixir-format
 msgid "Claim checking is off for this site"
 msgstr "La vérification des allégations est désactivée pour ce site"
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Claim checking is off for this site, so nothing has been scanned. Turn it on at Claim checking to see what is published in your name."
+msgstr "La vérification des allégations est désactivée pour ce site, rien n'a donc été analysé. Activez-la dans Vérification des allégations pour voir ce qui est publié en votre nom."
 
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
@@ -4831,6 +4844,11 @@ msgstr "Pointe vers"
 msgid "Listed with pg_restore after writing, so it is a real backup"
 msgstr "Vérifié avec pg_restore après écriture — c'est donc une vraie sauvegarde"
 
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Live claims"
+msgstr "Allégations publiées"
+
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
 msgid "Live mode"
@@ -5439,6 +5457,11 @@ msgstr "Aucun témoin externe n'est configuré. Les points de contrôle sont ém
 msgid "No fields yet — add one from the palette."
 msgstr "Aucun champ pour le moment — ajoutez-en un depuis la palette."
 
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "No flagged claims in anything currently published."
+msgstr "Aucune allégation signalée dans le contenu actuellement publié."
+
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
 msgid "No focus keyphrase set — the first SEO keyword becomes the focus keyphrase."
@@ -5928,6 +5951,11 @@ msgstr "Seuls les articles publiés peuvent être envoyés."
 #, elixir-autogen, elixir-format
 msgid "Only sends when the form has an email field and the visitor filled it in."
 msgstr "Envoyé uniquement si le formulaire comporte un champ e-mail que le visiteur a renseigné."
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Only the %{count} most recently updated published documents were scanned; there may be more."
+msgstr "Seuls les %{count} documents publiés les plus récemment mis à jour ont été analysés ; il peut y en avoir d'autres."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -10699,6 +10727,11 @@ msgstr "par rapport à l'étape précédente"
 #, elixir-autogen, elixir-format
 msgid "went live"
 msgstr "a été mis en ligne"
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "would refuse a publish"
+msgstr "empêcherait la publication"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format

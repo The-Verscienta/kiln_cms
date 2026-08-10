@@ -178,6 +178,13 @@ msgid_plural "%{count} posts"
 msgstr[0] ""
 msgstr[1] ""
 
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} published document scanned"
+msgid_plural "%{count} published documents scanned"
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} published untouched for %{days}+ days"
@@ -1905,6 +1912,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/compliance_live.ex
+#: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Claim checking"
 msgstr ""
@@ -1912,6 +1920,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Claim checking is off for this site"
+msgstr ""
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Claim checking is off for this site, so nothing has been scanned. Turn it on at Claim checking to see what is published in your name."
 msgstr ""
 
 #: lib/kiln_cms_web/live/compliance_live.ex
@@ -4831,6 +4844,11 @@ msgstr ""
 msgid "Listed with pg_restore after writing, so it is a real backup"
 msgstr ""
 
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Live claims"
+msgstr ""
+
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
 msgid "Live mode"
@@ -5439,6 +5457,11 @@ msgstr ""
 msgid "No fields yet — add one from the palette."
 msgstr ""
 
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "No flagged claims in anything currently published."
+msgstr ""
+
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
 msgid "No focus keyphrase set — the first SEO keyword becomes the focus keyphrase."
@@ -5927,6 +5950,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Only sends when the form has an email field and the visitor filled it in."
+msgstr ""
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Only the %{count} most recently updated published documents were scanned; there may be more."
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -10698,6 +10726,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "went live"
+msgstr ""
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "would refuse a publish"
 msgstr ""
 
 #: lib/kiln_cms_web/live/media_live.ex

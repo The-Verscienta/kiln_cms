@@ -55,6 +55,30 @@ migration, a rewritten column, a dropped config key).
   axis where guessing wrong turns a transient read error into a site that
   cannot publish, and it would be refusing on rules nobody could confirm.
 
+- **The governance dashboard answers "what are we claiming right now"** (#858).
+  #377 tied claim checking to #352's dashboard and `docs/p3-plan.md` said the
+  checks would feed it; what shipped fed nothing. Findings lived in the content
+  editor's panel and in the publish gate's refusal — both about the document in
+  front of you, neither a record of what the site is actually saying.
+
+  `/editor/governance` now carries a **Live claims** panel: every published
+  document scanned against the site's own vocabulary (#857), naming the phrase
+  that matched and flagging the ones the publish gate would refuse, errors
+  first. Off is rendered as off rather than as an empty list, because "nobody
+  scanned" and "nothing found" are the same picture and opposite facts.
+
+  **Recomputed on read, not stored.** No findings table, and nothing written on
+  publish. Three consequences, all deliberate: it answers what is live now and
+  not what a page claimed in March (point-in-time history is on the same
+  dashboard for that); a finding is always judged by the rules in force now, so
+  narrowing a vocabulary retires it rather than leaving a record judged by a
+  retired rule; and it never has to write on publish, where
+  `AutoCompleteTasks` force-completes every open task and would close the very
+  task a compliance finding might have opened — the hazard #858 flags.
+
+  Bounded at `KilnCMS.Compliance.Report.document_cap/0` documents, with the
+  panel saying so rather than describing a subset as the whole.
+
 ### Fixed
 
 - **The in-context and Presentation editors no longer accept edits they cannot
