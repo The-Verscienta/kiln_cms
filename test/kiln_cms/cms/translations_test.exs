@@ -19,6 +19,16 @@ defmodule KilnCMS.CMS.TranslationsTest do
     })
   end
 
+  defp granted_editor(grants) do
+    Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+      email: "tr-#{System.unique_integer([:positive])}@example.com",
+      hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+      confirmed_at: DateTime.utc_now(),
+      role: :editor,
+      field_grants: grants
+    })
+  end
+
   defp slug, do: "tr-#{System.unique_integer([:positive])}"
 
   test "coverage reports every configured locale with status and staleness" do
@@ -156,5 +166,111 @@ defmodule KilnCMS.CMS.TranslationsTest do
     :page
     |> Translations.coverage(record, actor: actor)
     |> Enum.find(&(&1.locale == locale))
+  end
+
+  # #1157. A translation and a duplicate are the project's two creates that
+  # carry ANOTHER record's values, so both have to honour the acting editor's
+  # per-field write grant. `Changes.EnforceFieldGrants` deliberately skips
+  # creates, so nothing downstream catches this — the values simply land.
+  describe "per-field write grants" do
+    setup do
+      admin = admin()
+
+      source =
+        CMS.create_post!(
+          %{
+            title: "Original",
+            slug: slug(),
+            locale: "en",
+            excerpt: "Not theirs to steward",
+            seo_title: "SEO",
+            audience: :member,
+            blocks: [%{"_type" => "heading", "text" => "Body"}]
+          },
+          actor: admin
+        )
+
+      %{source: source}
+    end
+
+    test "a granted editor's translation carries only the granted attributes", %{source: source} do
+      editor = granted_editor(%{"post" => ["title", "blocks"]})
+
+      {fr, withheld} =
+        Translations.create_translation_with_notes!(:post, source, "fr", actor: editor)
+
+      assert fr.title == "Original"
+      assert [%Ash.Union{value: %{text: "Body"}}] = fr.blocks
+
+      # Not granted: dropped rather than cloned past the grant.
+      assert is_nil(fr.excerpt)
+      assert is_nil(fr.seo_title)
+
+      assert "excerpt" in withheld
+      assert "seo_title" in withheld
+    end
+
+    # The slug is what makes it a translation rather than an unrelated document
+    # in another locale — the `[slug, locale]` identity is the pairing. Dropping
+    # it would not narrow the copy, it would sever it.
+    test "the slug survives a grant that does not name it", %{source: source} do
+      editor = granted_editor(%{"post" => ["title"]})
+
+      fr = Translations.create_translation!(:post, source, "fr", actor: editor)
+
+      assert fr.slug == source.slug
+      assert fr.locale == "fr"
+    end
+
+    # Dropping `audience` falls back to the attribute default (`:public`),
+    # strictly LESS restrictive than the source — a grant would have quietly
+    # moved a members-only body to the public tier.
+    test "audience survives a grant that does not name it", %{source: source} do
+      editor = granted_editor(%{"post" => ["title"]})
+
+      assert Translations.create_translation!(:post, source, "fr", actor: editor).audience ==
+               :member
+    end
+
+    test "blocks follow the grant, and their absence is reported", %{source: source} do
+      editor = granted_editor(%{"post" => ["title"]})
+
+      {fr, withheld} =
+        Translations.create_translation_with_notes!(:post, source, "fr", actor: editor)
+
+      assert fr.blocks == []
+      assert "blocks" in withheld
+    end
+
+    test "an editor with no grant gets a complete translation", %{source: source} do
+      editor = granted_editor(%{})
+
+      {fr, withheld} =
+        Translations.create_translation_with_notes!(:post, source, "fr", actor: editor)
+
+      assert fr.excerpt == "Not theirs to steward"
+      assert fr.seo_title == "SEO"
+      assert withheld == []
+    end
+
+    # Grants bind an effective EDITOR; admins are exempt, mirroring the policy
+    # bypass the change respects. Getting this backwards would strip fields from
+    # an admin who happens to carry a grants entry.
+    test "an admin carrying a grants entry is exempt", %{source: source} do
+      admin =
+        Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+          email: "tr-#{System.unique_integer([:positive])}@example.com",
+          hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+          confirmed_at: DateTime.utc_now(),
+          role: :admin,
+          field_grants: %{"post" => ["title"]}
+        })
+
+      {fr, withheld} =
+        Translations.create_translation_with_notes!(:post, source, "fr", actor: admin)
+
+      assert fr.seo_title == "SEO"
+      assert withheld == []
+    end
   end
 end

@@ -2706,15 +2706,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
     %{kind: kind, record: record, actor: actor} = socket.assigns
 
     if socket.assigns.may_write? do
-      translation =
-        KilnCMS.CMS.Translations.create_translation!(kind, record, locale,
+      {translation, withheld} =
+        KilnCMS.CMS.Translations.create_translation_with_notes!(kind, record, locale,
           actor: actor,
           tenant: record.org_id
         )
 
       {:noreply,
        socket
-       |> put_flash(:info, gettext("Draft translation created (%{locale}).", locale: locale))
+       |> put_flash(:info, translation_flash(locale, withheld))
        |> push_navigate(to: ~p"/editor/content/#{kind}/#{translation.id}")}
     else
       {:noreply, socket}
@@ -9186,6 +9186,21 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Two reasons the saved row differs from what is on screen, and they need
   # different words: unsaved work is yours to lose, a conflict is someone else's
   # save you have not read.
+  # A field grant can leave a translation narrower than its source, and so can
+  # the block-field policy (#1157/#890). Saying so is the difference between
+  # "translation is broken" and "your role cannot copy those fields" — the same
+  # distinction the Duplicate handler draws (#929).
+  defp translation_flash(locale, []),
+    do: gettext("Draft translation created (%{locale}).", locale: locale)
+
+  defp translation_flash(locale, withheld) do
+    gettext(
+      "Draft translation created (%{locale}). Not copied, because your role cannot set them: %{fields}.",
+      locale: locale,
+      fields: Enum.join(withheld, ", ")
+    )
+  end
+
   defp duplicate_confirm(_save_state, true),
     do:
       gettext(

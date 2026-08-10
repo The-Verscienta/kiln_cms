@@ -169,7 +169,7 @@ defmodule KilnCMS.CMS.Duplication do
   defp id(id) when is_binary(id), do: id
 
   defp attrs(source, opts) do
-    allowed = allowed_fields(source, opts)
+    allowed = ContentCopy.field_grant(source, opts)
     {blocks, reset_fields} = blocks(source, allowed, opts)
 
     attrs =
@@ -224,22 +224,6 @@ defmodule KilnCMS.CMS.Duplication do
   # internal caller, matching the policy bypass.
   defp tier_or_nil(:admin), do: nil
   defp tier_or_nil(tier), do: tier
-
-  # `nil` means "copy everything" — no grant restriction applies. A list is the
-  # attribute names the acting editor may write for this type. Effective admins
-  # (and actor-less internal callers) are exempt, mirroring the policy bypass
-  # `Changes.EnforceFieldGrants` respects.
-  defp allowed_fields(source, opts) do
-    actor = Keyword.get(opts, :actor)
-    subject = Keyword.get(opts, :tenant)
-
-    with %{} <- actor,
-         :editor <- Scoping.effective_tier(actor, subject) do
-      Scoping.field_grant(actor, subject, ContentTypes.type_name_for(source))
-    else
-      _ -> nil
-    end
-  end
 
   # Re-point each of the source's outgoing links at the copy, payload intact.
   # `content_links` is the raw `ContentLink` row set (`kind`, `position`,

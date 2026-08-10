@@ -56,6 +56,27 @@ migration, a rewritten column, a dropped config key).
   cannot publish, and it would be refusing on rules nobody could confirm.
 ### Fixed
 
+- **A one-click translation honours the acting editor's field grants** (#1157).
+  Duplication and translation are the two creates that carry *another record's*
+  values, and only duplication asked what the editor was allowed to write.
+  `Changes.EnforceFieldGrants` deliberately skips creates — sound for a document
+  written from scratch, not for one arriving pre-filled — so an editor granted
+  only `title` on a type minted a translation carrying its `seo_title`,
+  `excerpt`, `audience` and custom fields, every one of which is refused when
+  they try to save it on the source.
+
+  `slug` is exempt for a reason of its own: the `[slug, locale]` identity is
+  what pairs a translation to its source, so dropping it would not narrow the
+  copy but sever it. Both surfaces now report what didn't travel, the way
+  Duplicate has since #929.
+
+- **The block envelope is no longer mistaken for a restricted field.** `_type`,
+  `_version` and `id` share the stored map with a block's authored fields but
+  are the union's own bookkeeping. Asking a *field* policy about them answered
+  "no" for every non-admin, so a plain editor duplicating a plain page had them
+  overwritten with `nil` and was told, in a flash, that their role could not set
+  `heading._type`.
+
 - **Taking a backup now needs a platform admin, and is re-checked when the
   button is pressed** (#1160). `BackupLive` did no tier check of its own, and
   `Backups.enqueue/1` takes no actor and authorizes nothing — so the route's

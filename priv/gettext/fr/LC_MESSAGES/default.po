@@ -3307,6 +3307,12 @@ msgstr "Aperçu du brouillon — pas la page publiée"
 msgid "Draft translation created (%{locale})."
 msgstr "Traduction à l'état de brouillon créée (%{locale})."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/translations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Draft translation created (%{locale}). Not copied, because your role cannot set them: %{fields}."
+msgstr "Brouillon de traduction créé (%{locale}). Non copiés, car votre rôle ne peut pas les définir : %{fields}."
+
 #: lib/kiln_cms_web/controllers/manifest_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Drafts"

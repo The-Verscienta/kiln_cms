@@ -31,6 +31,23 @@ defmodule KilnCMS.CMS.Translations do
   # by nature, so it isn't carried over.
   @copied_attrs [:slug | ContentCopy.content_attrs()]
 
+  # Carried whatever the acting editor's field grant says (#1157), each for its
+  # own reason:
+  #
+  #   * `slug` — the `[slug, locale]` identity is what pairs a translation to
+  #     its source. Dropping it doesn't narrow the copy, it stops the copy being
+  #     a translation at all: the create would derive a fresh slug and mint an
+  #     unrelated document in another locale.
+  #   * `title` — the record needs one to exist, and the editor could type any
+  #     title into a new document anyway.
+  #   * `audience` — dropping it falls back to the attribute default
+  #     (`:public`), which is strictly *less* restrictive than the source. A
+  #     grant would silently move a members-only body to the public tier.
+  #
+  # `Duplication` exempts the same two it can (it rewrites `title` rather than
+  # copying it), and states the same reasons.
+  @grant_exempt_attrs [:slug, :title, :audience]
+
   @doc """
   Every locale variant sharing `record`'s slug (including `record` itself),
   any workflow state, sorted by locale. Editor-facing: pass the acting user.
@@ -88,6 +105,27 @@ defmodule KilnCMS.CMS.Translations do
   @spec create_translation!(atom() | String.t() | map(), struct(), String.t(), keyword()) ::
           struct()
   def create_translation!(kind, record, target_locale, opts \\ []) do
+    {translation, _withheld} = create_translation_with_notes!(kind, record, target_locale, opts)
+    translation
+  end
+
+  @doc """
+  `create_translation!/4`, plus the list of things the translation did **not**
+  carry.
+
+  A translation can be silently narrower than its source in two ways — a
+  per-field write grant drops attributes (#1157), and a block-field policy
+  resets values the actor could not have set (#890) — and an editor told only
+  "draft translation created" has no way to tell either from a bug. Same
+  contract as `Duplication.duplicate_with_notes!/3`, for the same reason (#929).
+  """
+  @spec create_translation_with_notes!(
+          atom() | String.t() | map(),
+          struct(),
+          String.t(),
+          keyword()
+        ) :: {struct(), [String.t()]}
+  def create_translation_with_notes!(kind, record, target_locale, opts \\ []) do
     # Re-fetch with tags so the copy carries them regardless of what the
     # caller had loaded.
     record =
@@ -105,16 +143,34 @@ defmodule KilnCMS.CMS.Translations do
     # trans-units on block identity, and without shared ids it would have to
     # fall back to matching on position, which is wrong the moment either side
     # is reordered. See `ContentCopy.dump_blocks/2` for why sharing them is safe.
-    {blocks, _withheld} = ContentCopy.dump_blocks(record, role: role(opts), keep_ids?: true)
+    grant = ContentCopy.field_grant(record, opts)
+    {copied, dropped} = ContentCopy.permitted(@copied_attrs, grant, @grant_exempt_attrs)
+
+    # Blocks follow the grant the way the `block_tree` argument does in
+    # `Changes.EnforceFieldGrants`: a grant that does not name them does not
+    # carry them. A translation of nothing is a poor answer, but it is the
+    # honest one — the alternative hands an editor a document full of prose
+    # they are refused, field by field, the moment they save it.
+    {blocks, reset} = translated_blocks(record, grant, opts)
 
     attrs =
       record
-      |> ContentCopy.take(@copied_attrs)
+      |> ContentCopy.take(copied)
       |> Map.put(:locale, target_locale)
       |> Map.put(:blocks, blocks)
       |> Map.put(:tag_ids, ContentCopy.tag_ids(record))
 
-    ContentTypes.create!(kind, attrs, opts)
+    {ContentTypes.create!(kind, attrs, opts), dropped ++ reset}
+  end
+
+  defp translated_blocks(record, grant, opts) do
+    if is_nil(grant) or "blocks" in grant do
+      # `keep_ids?`: see the comment above — a locale variant is the same
+      # document, and the XLIFF round-trip matches trans-units on block id.
+      ContentCopy.dump_blocks(record, role: role(opts), keep_ids?: true)
+    else
+      {[], ["blocks"]}
+    end
   end
 
   defp role(opts) do

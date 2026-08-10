@@ -57,6 +57,21 @@ defmodule KilnCMSWeb.TranslationsLive do
 
   # The first locale that is not the default — the common case is one extra
   # locale, and then this dashboard needs no configuring at all.
+  # A field grant can leave a translation narrower than its source, and so can
+  # the block-field policy (#1157/#890) — the editor is told which, rather than
+  # being left to wonder why half the document is missing. Same wording as the
+  # content editor's own translation flash.
+  defp translation_flash(locale, []),
+    do: gettext("Draft translation created (%{locale}).", locale: locale)
+
+  defp translation_flash(locale, withheld) do
+    gettext(
+      "Draft translation created (%{locale}). Not copied, because your role cannot set them: %{fields}.",
+      locale: locale,
+      fields: Enum.join(withheld, ", ")
+    )
+  end
+
   defp default_vendor_locale do
     Enum.find(I18n.locales(), &(&1 != I18n.default_locale()))
   end
@@ -74,12 +89,12 @@ defmodule KilnCMSWeb.TranslationsLive do
     org = socket.assigns.current_org
     source = ContentTypes.get_record!(kind, id, actor: actor, tenant: org)
 
-    translation =
-      Translations.create_translation!(kind, source, locale, actor: actor, tenant: org)
+    {translation, withheld} =
+      Translations.create_translation_with_notes!(kind, source, locale, actor: actor, tenant: org)
 
     {:noreply,
      socket
-     |> put_flash(:info, gettext("Draft translation created (%{locale}).", locale: locale))
+     |> put_flash(:info, translation_flash(locale, withheld))
      |> push_navigate(to: ~p"/editor/content/#{kind}/#{translation.id}")}
   rescue
     _error ->

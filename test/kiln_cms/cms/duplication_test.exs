@@ -451,6 +451,35 @@ defmodule KilnCMS.CMS.DuplicationTest do
       assert quote_block(translated).featured == false
     end
 
+    # #1157. `_type`, `_version` and `id` share the stored map with the authored
+    # fields but are the union's envelope, not fields anyone declares. Asking a
+    # FIELD policy about them answered "no" for every non-admin, so a plain
+    # editor duplicating a plain page had them overwritten with `nil` and was
+    # told their role could not set `heading._type`.
+    test "the block envelope is not mistaken for a restricted field" do
+      admin = user(:admin)
+      editor = user(:editor)
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Plain",
+            slug: slug(),
+            blocks: [%{"_type" => "heading", "text" => "Top"}]
+          },
+          actor: admin
+        )
+
+      assert {:ok, copy, withheld} = Duplication.duplicate(:page, page, actor: editor)
+
+      # Nothing to report: this page has no restricted field on it at all.
+      assert withheld == []
+
+      # And the envelope survived rather than being nulled and re-derived.
+      assert [%Ash.Union{type: :heading, value: heading}] = copy.blocks
+      assert heading.text == "Top"
+    end
+
     test "an unrestricted block field is untouched" do
       admin = user(:admin)
       editor = user(:editor)
