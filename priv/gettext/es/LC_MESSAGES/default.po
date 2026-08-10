@@ -10115,6 +10115,11 @@ msgstr "no se puede procesar: la eliminación de metadatos PDF no está disponib
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
+msgid "can't be stored right now — the server is out of temporary disk space. Try again shortly."
+msgstr "no se puede almacenar ahora mismo: el servidor no tiene espacio temporal en disco. Vuelve a intentarlo en unos momentos."
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
 msgid "can't be stored — video and audio metadata stripping isn't available on this server"
 msgstr "no se puede almacenar: la eliminación de metadatos de vídeo y audio no está disponible en este servidor"
 

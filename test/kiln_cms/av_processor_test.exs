@@ -259,4 +259,117 @@ defmodule KilnCMS.AVProcessorTest do
                AVProcessor.strip_metadata("/tmp/x", "/../../etc/passwd")
     end
   end
+
+  # #1100 moved probe/poster off `System.cmd/3` and onto the port runner that
+  # can enforce a wall-clock deadline. Nothing pinned either of them SUCCEEDING
+  # before — the only coverage was that a garbage file errors, which a runner
+  # returning nothing at all would also satisfy. So the output ffprobe actually
+  # produces, and the fact that it still parses as JSON once stderr is folded
+  # into it, are pinned here.
+  describe "probe/poster with ffmpeg" do
+    @describetag :ffmpeg
+
+    test "probe/1 reads duration and dimensions back", %{tmp_dir: dir} do
+      assert {:ok, probed} = AVProcessor.probe(source_with_metadata(dir))
+
+      assert probed.width == 64
+      assert probed.height == 64
+      assert probed.video?
+      assert_in_delta probed.duration, 1.0, 0.3
+    end
+
+    test "poster/2 writes a real JPEG", %{tmp_dir: dir} do
+      assert {:ok, out} = AVProcessor.poster(source_with_metadata(dir), 1.0)
+      on_exit(fn -> File.rm(out) end)
+
+      # SOI marker — that it is a JPEG, not merely a non-empty file.
+      assert <<0xFF, 0xD8, _rest::binary>> = File.read!(out)
+    end
+  end
+
+  # #1100. The strip writes a second full copy of the upload to the temp
+  # filesystem, so a 500 MB video needs a gigabyte there. When that runs out,
+  # ffmpeg fails ENOSPC and the caller's default configuration used to store the
+  # file UNSTRIPPED — the privacy guarantee lapsing exactly under disk pressure,
+  # which is when nobody is watching. These pin the precheck that refuses first.
+  describe "temp-space precheck (#1100)" do
+    # A file whose `stat` size is larger than any disk this will ever run on,
+    # without writing the bytes: the header goes at offset 0 and a single byte
+    # goes at the far end, leaving a hole in between. 8 TB is comfortably above
+    # any CI runner's free space and comfortably below ext4's 16 TiB file cap.
+    @sparse_size 8_000_000_000_000
+
+    defp huge_sparse_mp4(dir) do
+      path = Path.join(dir, "huge.mp4")
+
+      {:ok, fd} = :file.open(path, [:write, :binary])
+      :ok = :file.write(fd, <<0, 0, 0, 24>> <> "ftyp" <> "isom" <> String.duplicate("\0", 64))
+      :ok = :file.pwrite(fd, @sparse_size, <<0>>)
+      :ok = :file.close(fd)
+
+      # If the filesystem did not give us a sparse file of the size we asked
+      # for, every assertion below would be measuring the wrong thing.
+      assert File.stat!(path).size == @sparse_size + 1
+
+      path
+    end
+
+    test "a file that cannot fit its own copy is refused", %{tmp_dir: dir} do
+      refute AVProcessor.enough_temp_space?(huge_sparse_mp4(dir))
+    end
+
+    test "an ordinary upload is not", %{tmp_dir: dir} do
+      path = Path.join(dir, "small.mp4")
+      File.write!(path, String.duplicate("x", 1_000))
+
+      assert AVProcessor.enough_temp_space?(path)
+    end
+
+    test "an unmeasurable path proceeds rather than refusing" do
+      # Fail direction, on purpose: refusing when free space cannot be read
+      # would break A/V upload on every host whose `df` we cannot parse. The
+      # ENOSPC classification is the backstop for what this lets through.
+      assert AVProcessor.enough_temp_space?("/nonexistent/#{System.unique_integer()}")
+    end
+
+    test "the requirement is the file again, with headroom" do
+      # More than the input, because the copy is the same order of magnitude
+      # and a remux can grow — a fragmented MP4 comes back with a full `moov`.
+      assert AVProcessor.required_bytes(500_000_000) > 500_000_000
+
+      # And a floor, so a small file on a nearly-full disk is still refused
+      # rather than squeaking through on a percentage of almost nothing.
+      assert AVProcessor.required_bytes(0) >= 16_000_000
+    end
+
+    test "parses GNU df" do
+      output = """
+      Filesystem     1K-blocks      Used Available Use% Mounted on
+      /dev/root       74244772  12285036  61943352  17% /
+      """
+
+      assert AVProcessor.parse_available(output) == {:ok, 61_943_352 * 1024}
+    end
+
+    test "parses BSD/macOS df" do
+      output = """
+      Filesystem   1024-blocks      Used Available Capacity  Mounted on
+      /dev/disk3s5   971298980 367330784 561974572    40%    /System/Volumes/Data
+      """
+
+      assert AVProcessor.parse_available(output) == {:ok, 561_974_572 * 1024}
+    end
+
+    test "refuses to guess at output it does not understand" do
+      assert :error = AVProcessor.parse_available("")
+      assert :error = AVProcessor.parse_available("df: /nope: No such file or directory\n")
+      assert :error = AVProcessor.parse_available("Filesystem Size\n/dev/root 74244772\n")
+    end
+
+    @tag :ffmpeg
+    test "strip_metadata/2 reports it, without starting ffmpeg", %{tmp_dir: dir} do
+      assert {:error, :insufficient_space} =
+               AVProcessor.strip_metadata(huge_sparse_mp4(dir), ".mp4")
+    end
+  end
 end
