@@ -2218,6 +2218,24 @@ defmodule KilnCMS.CMS.Content do
         change KilnCMS.CMS.Changes.AnchorVersion, on: [:create, :update, :destroy]
       end
 
+      validations do
+        # A content slug is a URL component by definition (#1062). Same charset
+        # as taxonomy (#1044): lowercase letters, digits, and single hyphens
+        # between them. `DeriveSlug` already produces conforming values for the
+        # generated path; this catches explicit slugs from the editor, JSON:API,
+        # and importers that would otherwise persist `a/b` as a live path.
+        validate match(:slug, ~r/\A[a-z0-9]+(-[a-z0-9]+)*\z/) do
+          # Only when the slug is being written. Without this, `Match` reads the
+          # attribute's *current* value on every update, so a row stored before
+          # this rule existed could no longer be edited at all — renaming a
+          # title, or changing blocks, would fail on a slug field nobody touched,
+          # and the only way out would be to change a live public URL. Declining
+          # to migrate legacy rows and then freezing them is the worst of both.
+          where changing(:slug)
+          message "must be lowercase letters, digits and single hyphens between them"
+        end
+      end
+
       policies do
         # The AshOban scheduler publishes scheduled content as a trusted job.
         bypass AshOban.Checks.AshObanInteraction do
