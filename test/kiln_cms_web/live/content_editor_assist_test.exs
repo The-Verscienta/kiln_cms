@@ -188,6 +188,47 @@ defmodule KilnCMSWeb.ContentEditorAssistTest do
 
       assert KilnCMS.StubAssistGenerator.Counting.count() == 0
     end
+
+    # #868. A per-field grant is enforced by a *change*, and `Ash.can?` builds
+    # its changeset with empty input — so `may_write?` passes for an editor who
+    # may not write `blocks`, and assist billed a run whose prose the save then
+    # refused. #868 asks for both AI paths; this is the block half.
+    test "an editor with no blocks grant cannot spend LLM budget on assist (#868)", %{
+      conn: conn
+    } do
+      put_assist(generator: KilnCMS.StubAssistGenerator.Counting, model: "stub:stub")
+      {:ok, _} = KilnCMS.StubAssistGenerator.Counting.start_link()
+      KilnCMS.StubAssistGenerator.Counting.reset()
+
+      # May write the record, may NOT write `blocks`.
+      granted = authed_user(:editor, %{field_grants: %{"page" => ["title"]}})
+      target = page(authed_user(:admin))
+      {lv, html} = open_editor(conn, granted, target)
+
+      refute html =~ "AI assist"
+
+      render_click(lv, "assist_run", %{"bid" => block_id(target)})
+      render_async(lv, 2_000)
+
+      assert KilnCMS.StubAssistGenerator.Counting.count() == 0
+    end
+
+    # The control is not withheld from an editor who may write blocks.
+    test "an editor granted blocks still gets assist", %{conn: conn} do
+      put_assist(generator: KilnCMS.StubAssistGenerator.Counting, model: "stub:stub")
+      {:ok, _} = KilnCMS.StubAssistGenerator.Counting.start_link()
+      KilnCMS.StubAssistGenerator.Counting.reset()
+
+      granted = authed_user(:editor, %{field_grants: %{"page" => ["blocks"]}})
+      target = page(authed_user(:admin))
+      {lv, _html} = open_editor(conn, granted, target)
+
+      render_click(lv, "assist_open", %{"bid" => block_id(target)})
+      render_click(lv, "assist_run", %{"bid" => block_id(target)})
+      render_async(lv, 2_000)
+
+      assert KilnCMS.StubAssistGenerator.Counting.count() == 1
+    end
   end
 
   describe "the egress notice" do

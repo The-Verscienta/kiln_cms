@@ -453,6 +453,30 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **A field-granted editor is no longer offered a billed AI run the save will
+  refuse** (#868). The editor gated "Suggest with AI" on `Ash.can?({record,
+  :autosave})`. Per-field grants are enforced by
+  `KilnCMS.CMS.Changes.EnforceFieldGrants`, which is a **change**, and
+  `Ash.can?` builds its changeset with *empty input* — while the change only
+  raises a violation for an attribute that was actually supplied. So no field
+  was ever supplied during the check, no error was ever added, and every
+  field-granted editor passed a gate the save would then reject field by field.
+
+  An editor holding `field_grants: %{"page" => ["title"]}` saw the button, spent
+  the organization's LLM budget, and got `seo_title` / `seo_description` /
+  `seo_keywords` refused one at a time on the next save. The control and its
+  handler now ask the question the change asks — may this actor change *these
+  fields* on *this type* — mirroring the change's tier condition, so an admin
+  carrying a grants entry is exempt exactly as the policy bypass makes them.
+
+  **Block assist** carried the identical hole and is closed with it: it bills
+  its own budget and writes prose into a block, so a grant without `blocks`
+  meant a billed run the save then refused. The gate is *any* of the fields the
+  feature writes, not all of them, because each SEO card is accepted on its own
+  — an editor granted one field can take that card and save cleanly — and the
+  per-card accept re-checks, so a queued or replayed one after a grant narrows
+  mid-session is refused rather than written into the form.
+
 - **The editor's tag picker no longer detaches tags it never showed you**
   (#638). Tags were written with the complete-set `tag_ids` argument, so a
   checkbox that was not rendered was not submitted and `append_and_remove` read

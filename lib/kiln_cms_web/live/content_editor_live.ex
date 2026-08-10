@@ -31,8 +31,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias Kiln.Advisory.Registry
   alias Kiln.Advisory.Report
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.Scoping
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
+
+  # The fields the SEO suggestion writes if the author accepts it.
+  # `maybe_sync_slug/3` can also move `slug` off a `seo_keywords` accept, but
+  # only while the slug is still auto-derived — a grant that withholds `slug`
+  # from an editor who may edit the keywords is not a reason to withhold the
+  # suggestion, so it is deliberately not required here.
+  @seo_suggestion_fields ~w(seo_title seo_description seo_keywords)
   alias KilnCMS.CMS.VersionDiff
   alias KilnCMS.CMS.VersionSnapshot
   alias KilnCMS.Search.Related
@@ -610,6 +618,21 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:page_title, record.title)
     |> assign(:slug_customized?, slug_customized?(socket))
     |> assign(:may_write?, may_write?(record, socket.assigns.actor, socket.assigns.current_org))
+    # Recomputed alongside `may_write?` and for the same reason: a reload that
+    # lands a change (a publish, a re-scoped grant) must re-evaluate both.
+    |> assign(
+      :may_suggest_seo?,
+      may_write_fields?(
+        record,
+        socket.assigns.actor,
+        socket.assigns.current_org,
+        @seo_suggestion_fields
+      )
+    )
+    |> assign(
+      :may_assist_blocks?,
+      may_write_fields?(record, socket.assigns.actor, socket.assigns.current_org, ["blocks"])
+    )
     |> assign(:form, build_form(record, socket.assigns.actor))
     |> refresh_tag_index()
     |> seed_block_children(record)
@@ -629,6 +652,41 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # editors with (`KilnCMSWeb.CollabChannel`). Recomputed here (not once at
   # mount) so a reload that lands a state change — e.g. a publish — re-evaluates.
   defp may_write?(record, actor, org), do: Ash.can?({record, :autosave}, actor, tenant: org)
+
+  @doc false
+  # Whether the actor may change ALL of `fields` on this record's type (#868).
+  #
+  # `may_write?/3` cannot answer this. It is `Ash.can?`, and `Ash.can?` builds
+  # the changeset with **empty input** — while `Changes.EnforceFieldGrants`
+  # only raises a violation for an attribute that was `supplied?`. So no field
+  # is ever supplied during the check, no error is ever added, and every
+  # field-granted editor passes a gate the save will then refuse field by
+  # field. A *change* is structurally invisible to `Ash.can?`; asking the same
+  # question the change asks is the only way to get the same answer.
+  #
+  # Mirrors the change exactly, including the tier condition: grants bind an
+  # effective **editor**, and effective admins are exempt (the policy bypass).
+  # Getting that wrong in the other direction would hide the control from an
+  # admin who happens to carry a `field_grants` entry.
+  defp may_write_fields?(record, actor, org, fields) do
+    Enum.any?(fields, &field_granted?(record, actor, org, &1))
+  end
+
+  # One field. `may_write_fields?/4` is `any?` over these rather than `all?`
+  # because each suggestion is accepted on its own (`seo_accept` writes exactly
+  # one attribute) — an editor granted `seo_title` alone can take that card and
+  # save cleanly, so hiding the whole panel from them would be a second bug in
+  # the opposite direction. The per-card accept re-checks with this.
+  defp field_granted?(record, actor, org, field) do
+    if Scoping.effective_tier(actor, org) == :editor do
+      case Scoping.field_grant(actor, org, ContentTypes.type_name_for(record)) do
+        nil -> true
+        allowed -> field in allowed
+      end
+    else
+      true
+    end
+  end
 
   # Whether the slug is the author's own (pinned) or still auto-derived — while
   # not customized, editing a slug-source field re-derives the slug live
@@ -1577,8 +1635,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # REACH this handler (a reviewer can open the record), but billing an org LLM
     # run needs write access. The hidden button is not the control — a
     # replayed/forged event reaches here regardless — so refuse server-side.
+    # `may_suggest_seo?` as well as `may_write?` (#868): a field-granted editor
+    # passes `may_write?`, because that is `Ash.can?` and the grant lives in a
+    # *change*, which `Ash.can?` cannot see. Billing an LLM run for fields the
+    # save will refuse one by one is the outcome that gate was missing.
     if socket.assigns.seo_drafting? or not socket.assigns.seo_enabled? or
-         not socket.assigns.may_write? do
+         not socket.assigns.may_write? or not socket.assigns.may_suggest_seo? do
       {:noreply, socket}
     else
       document = seo_document(socket)
@@ -3435,6 +3497,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:record, record)
     |> assign(:page_title, record.title)
     |> assign(:may_write?, may_write?(record, socket.assigns.actor, socket.assigns.current_org))
+    |> assign(
+      :may_suggest_seo?,
+      may_write_fields?(
+        record,
+        socket.assigns.actor,
+        socket.assigns.current_org,
+        @seo_suggestion_fields
+      )
+    )
+    |> assign(
+      :may_assist_blocks?,
+      may_write_fields?(record, socket.assigns.actor, socket.assigns.current_org, ["blocks"])
+    )
     |> assign(:slug_customized?, slug_customized?(socket))
   end
 
@@ -4057,10 +4132,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp suggested_fields(nil), do: []
 
   defp suggested_fields(draft) do
-    Enum.filter(
-      ~w(seo_title seo_description seo_keywords),
-      &(suggested_value(draft, &1) not in [nil, ""])
-    )
+    Enum.filter(@seo_suggestion_fields, &(suggested_value(draft, &1) not in [nil, ""]))
   end
 
   defp suggested_value(nil, _field), do: nil
@@ -4101,6 +4173,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
       field_locked?(locked_fields(socket), field) ->
         {socket, :locked}
+
+      # Re-checked per card, not just at generation time (#868): the panel is
+      # hidden when the grant narrows mid-session, but a queued or replayed
+      # `seo_accept` still arrives — and writing the value would schedule an
+      # autosave the change then refuses on that exact field.
+      not field_granted?(
+        socket.assigns.record,
+        socket.assigns.actor,
+        socket.assigns.current_org,
+        field
+      ) ->
+        {socket, :not_permitted}
 
       true ->
         params = socket.assigns.form |> AshPhoenix.Form.params() |> Map.put(field, value)
@@ -4248,8 +4332,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # Same write-authorization boundary as `seo_suggest` (#550): block assist
     # also bills an org LLM run, so read access to the record must not be
     # enough to spend it. Refused server-side, not just hidden.
+    # …and the grant, for the same reason `seo_suggest` needs it (#868):
+    # assist bills its own budget and writes prose into a block, so a
+    # `blocks`-less grant means a billed run whose result the save refuses.
     socket.assigns.assist_enabled? and
       socket.assigns.may_write? and
+      socket.assigns.may_assist_blocks? and
       not socket.assigns.assist_running? and
       socket.assigns.assist_block == block_id and
       not is_nil(assist_block_form(socket.assigns.form, block_id))
@@ -7716,7 +7804,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
                             matches on `data-block-id`, so a block without one
                             has nothing to deliver to. --%>
                       <.assist_panel
-                        :if={@assist_enabled? and @may_write? and bf[:id].value}
+                        :if={
+                          @assist_enabled? and @may_write? and @may_assist_blocks? and bf[:id].value
+                        }
                         block_id={bf[:id].value}
                         open?={@assist_block == bf[:id].value}
                         action={@assist_action}
@@ -8074,11 +8164,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   slug_customized?={@slug_customized?}
                   class="rounded border border-base-content/10 bg-base-200/40 p-2"
                 />
-                <div :if={@seo_enabled? and @may_write?}>
+                <div :if={@seo_enabled? and @may_write? and @may_suggest_seo?}>
                   <%!-- Gated on write access, not just the feature flag (#550):
                         a read-only viewer must not see a control that would bill
                         the org for a record they cannot edit. The server handler
-                        re-checks; this only keeps the affordance honest. --%>
+                        re-checks; this only keeps the affordance honest.
+                        `@may_suggest_seo?` adds the per-field grant (#868) —
+                        `@may_write?` is `Ash.can?`, which cannot see a change,
+                        so a field-granted editor was offered a billed run whose
+                        result the save would then reject field by field. --%>
                   <%!-- `type="button"` is mandatory: this sits inside the main
                         <.form>, so the default type would submit it. --%>
                   <button
