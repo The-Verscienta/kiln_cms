@@ -94,11 +94,23 @@ defmodule KilnCMS.Analytics.Export do
   is emitted — **including ones with no hits**, which is what makes a
   complementary partner available at all.
 
-  That brings the export up to the dashboard's behaviour. It does **not** close
-  #777: the algorithm itself does not prevent arithmetic recovery while the
-  exact view total is published beside the breakdown — see the warning on
-  `Analytics.suppress_referrer_group/1`, and #1073. What changes here is that there is now
-  one decision to fix rather than two implementations to fix separately.
+  That brought the export up to the dashboard's behaviour, and at the time it
+  did **not** close #777 — the algorithm then in place did not prevent
+  arithmetic recovery while the exact view total is published beside the
+  breakdown. What it bought was one decision to fix rather than two
+  implementations to fix separately, and #1073 then fixed it: the partner is now
+  the largest of the others rather than the smallest, and a breakdown that
+  cannot be made ambiguous is hidden whole, zeros included. See the warning on
+  `Analytics.suppress_referrer_group/1` for what that replaced.
+
+  So #777 is closed, and closed **here** rather than only in the algorithm:
+  `test/kiln_cms/analytics/export_recovery_test.exs` brute-forces an actual
+  exported file — the exact `views` off the view row, every referrer cell off
+  the referrer rows — and asserts no suppressed count is uniquely determined.
+  It reproduces the four breakdowns #1073 found exactly recoverable, and all
+  four go red against the pre-#1073 algorithm. That the *function* is sound is a
+  separate claim, tested separately; this one is about the file, which is what
+  #777 was filed about and what a recipient actually holds.
 
   ## Why this is still a stream
 

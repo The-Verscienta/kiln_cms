@@ -178,6 +178,30 @@ migration, a rewritten column, a dropped config key).
 
 ### Security
 
+- **The analytics export is now shown, not asserted, to resist arithmetic
+  recovery of a suppressed referrer count** (#777). #620 suppressed a low count
+  per row; #1054 moved the export onto the dashboard's shared decision; #1073
+  fixed that decision (the complementary partner became the *largest* of the
+  others rather than the smallest, and a breakdown that cannot be made ambiguous
+  is hidden whole, zeros included). What was never checked is the property #777
+  was actually filed about — the **file**.
+
+  The algorithm and the export can disagree in ways only an end-to-end read
+  catches: the export builds its totals by grouping a stream, so a breakdown
+  split across batches would be decided twice on two partial pictures; and the
+  view total the reader subtracts is printed on a *different row*, sourced from
+  `ContentViewDay` rather than from the `ReferrerDay` rows the decision was made
+  over. Its grain is also per day, so residuals are small and the regime where
+  #1073 demonstrated recovery is the common case rather than a corner.
+
+  `test/kiln_cms/analytics/export_recovery_test.exs` brute-forces a real
+  exported CSV from the recipient's side and asserts no suppressed value is
+  uniquely determined. It reproduces the four breakdowns #1073 found exactly
+  recoverable, and all four go red against the pre-#1073 algorithm. No
+  production behaviour changes — this closes #777's outstanding acceptance
+  criterion and corrects `KilnCMS.Analytics.Export`'s moduledoc, which still
+  said the export did not close it.
+
 - **An abandoned two-factor sign-in no longer leaves a usable token behind**
   (#742). `KilnCMS.Accounts.User` sets `store_all_tokens?`, so the first-factor
   JWT is minted **and inserted into `tokens`** by the sign-in strategy — before
