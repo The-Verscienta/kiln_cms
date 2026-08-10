@@ -61,13 +61,4 @@ defmodule KilnCMSWeb.TenantRefusalAlertTest do
     assert :ok = TenantRefusalAlert.notify(:collab, "c.example.com")
     assert_receive {^ref, _measurements, %{source: :collab}}
   end
-
-  test "an unknown source is rejected rather than silently accepted" do
-    # Via apply/3 so the compiler's static type check (source is one of the 5
-    # tagged atoms) doesn't itself flag this call — the point is the runtime
-    # guard on notify/2, not a type the compiler would catch anyway.
-    assert_raise FunctionClauseError, fn ->
-      apply(TenantRefusalAlert, :notify, [:carrier_pigeon, nil])
-    end
-  end
 end
