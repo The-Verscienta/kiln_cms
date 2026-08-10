@@ -81,6 +81,14 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **The content editor no longer loads every tag in the org on mount** (#1149).
+  Since #638 the picker submits add/remove diffs, so an unrendered tag is no
+  longer detached by omission — and the unpaginated mount load was the last
+  reason to keep the whole vocabulary in the socket. The window is now capped
+  (500, same as the media picker); the filter box is a server round-trip so
+  tags past the window stay reachable by name; every tag already on the
+  record is still unioned in so detach stays possible.
+
 - **Publishing no longer discards prose a collab room was still holding**
   (#1061). The server checkpoint writes a room's converged text back through
   `:autosave`, which carries a draft-only row filter — so a publish landing

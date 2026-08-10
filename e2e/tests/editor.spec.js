@@ -283,12 +283,12 @@ test.describe("editor journey", () => {
 
   // #523. Whether a tag-picker section is expanded is client state with three
   // would-be owners: the editor's own click, the server's rendered `open`, and
-  // the TagFilter hook's force-open while narrowing. The bug was the last two
-  // fighting — the server re-derived `open` from the live tick count, so
-  // unticking folded the section shut under the cursor, and the hook kept its
-  // own shadow copy of the server's choice on a data attribute. Every symptom
-  // is a DOM-state race across a LiveView patch, so none of it is visible to
-  // the Elixir round-trip tests: it has to be driven in a real browser.
+  // the filter's force-open while narrowing (#1149 moved that force-open to the
+  // server). The bug was the last two fighting — the server re-derived `open`
+  // from the live tick count, so unticking folded the section shut under the
+  // cursor. Every symptom is a DOM-state race across a LiveView patch, so none
+  // of it is visible to the Elixir round-trip tests: it has to be driven in a
+  // real browser.
   test("the tag picker's sections stay where the editor put them", async ({ page }) => {
     const stamp = Date.now();
     const group = `E2E Group ${stamp}`;
@@ -339,7 +339,8 @@ test.describe("editor journey", () => {
     await expect(section).toHaveJSProperty("open", false);
 
     // Narrowing force-opens the section holding the hit, and clearing the box
-    // undoes exactly that — the hook closes only what the hook opened.
+    // undoes exactly that — unless the editor ticked something while it was
+    // open (#523 / #1149: filter is a server round-trip now).
     await filter.fill("alpha");
     await expect(section).toHaveJSProperty("open", true);
     await filter.fill("");
@@ -349,6 +350,7 @@ test.describe("editor journey", () => {
     // clearing the box must not fold it away under them: the box they just
     // ticked and the sibling they were reaching for both have to stay put.
     await filter.fill("alpha");
+    await expect(section).toHaveJSProperty("open", true);
     await section.getByRole("checkbox", { name: alpha }).check();
     await page.waitForTimeout(700);
     await filter.fill("");

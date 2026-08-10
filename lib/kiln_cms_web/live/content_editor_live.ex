@@ -83,6 +83,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # library can't grow each open editor's heap without limit.
   @max_media 500
 
+  # Bound the tag picker the same way (#1149). The filter is a server round-trip
+  # (the client-side TagFilter only stops form propagation and pushes the
+  # query), so a vocabulary larger than this is still reachable by name — and
+  # every tag already on the record is unioned in regardless of the window.
+  # Runtime (not compile_env) so a test can lower the window without a recompile.
+  defp max_tags,
+    do: :kiln_cms |> Application.get_env(:editor, []) |> Keyword.get(:max_tags, 500)
+
   # Idle delay before a draft is autosaved after the last edit. Configurable so
   # tests can shorten it.
   @autosave_debounce_ms Application.compile_env(
@@ -324,22 +332,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
            :categories,
            CMS.list_categories!(actor: actor, tenant: org, query: [sort: [name: :asc]])
          )
-         # Three columns, not every column (#528). This was the last mount load
-         # without a `select:`, and the picker reads exactly `id`, `name` and
-         # `tag_group_id` — the rest were `%Ash.NotLoaded{}` placeholders held
-         # for the socket's lifetime. Deliberately still UNPAGINATED: an
-         # unrendered tag can no longer be detached by omission (#638 moved the
-         # picker to the merge verbs), so paginating is now *safe* — it is
-         # simply not done yet, because the filter box is client-side and would
-         # only search the page it has.
-         |> assign(
-           :tags,
-           CMS.list_tags!(
-             actor: actor,
-             tenant: org,
-             query: [select: [:id, :name, :tag_group_id], sort: [name: :asc]]
-           )
-         )
+         # Three columns, not every column (#528). Cap at `@max_tags` (#1149) —
+         # since #638 an unrendered tag is no longer detached by omission, so a
+         # bounded window is safe. The filter box queries the full vocabulary;
+         # `all_pickable_tags/2` still unions every attached tag so detach stays
+         # reachable. See `load_org_tags/3` and `handle_event("filter_tags", …)`.
+         |> assign(:tag_query, "")
+         |> assign(:tags, load_org_tags(actor, org, ""))
+         |> assign(:max_tags, max_tags())
          # `TagGroup`'s primary read is already ordered by position then name.
          #
          # #528 also proposed skipping this read when no tag carries a group —
@@ -2111,6 +2111,43 @@ defmodule KilnCMSWeb.ContentEditorLive do
         else: search_media(q, socket.assigns.actor, socket.assigns.current_org)
 
     {:noreply, socket |> assign(:media_query, q) |> assign(:picker_media, results)}
+  end
+
+  # Server-side tag vocabulary filter (#1149). The box lives inside the content
+  # form, so the TagFilter hook stops propagation and pushes this event rather
+  # than letting `phx-change` mark the document dirty on every keystroke.
+  def handle_event("filter_tags", %{"q" => q}, socket) when is_binary(q) do
+    prev = socket.assigns.tag_query
+    q = String.trim(q)
+
+    socket =
+      socket
+      |> assign(:tag_query, q)
+      |> assign(
+        :tags,
+        load_org_tags(socket.assigns.actor, socket.assigns.current_org, q)
+      )
+      |> refresh_tag_index()
+
+    # Clearing a filter undoes the force-open the template applied while
+    # narrowing — except for sections that now hold a live tick. Folding those
+    # away would hide the box the editor just checked (#523, e2e).
+    socket =
+      if prev != "" and q == "" do
+        selected = selected_tag_ids(socket.assigns.form, socket.assigns.record)
+
+        keep =
+          for section <- with_counts(socket.assigns.tag_index.sections, selected),
+              section.selected_count > 0,
+              into: MapSet.new(),
+              do: section.key
+
+        update(socket, :tag_sections_open, &MapSet.union(&1, keep))
+      else
+        socket
+      end
+
+    {:noreply, socket}
   end
 
   # Set the social card image from the library (#476).
@@ -4617,6 +4654,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
   attr :tag_index, :any, required: true
   attr :record, :any, required: true
   attr :open_sections, :any, required: true
+  attr :tag_query, :string, default: ""
+  attr :tags_capped?, :boolean, default: false
+  attr :tag_limit, :integer, default: 500
 
   defp tag_picker(assigns) do
     # A **MapSet**, not a list (#528). Membership is tested three times per tag
@@ -4629,11 +4669,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # render. Only the per-section tick counts depend on `selected`, so only
     # they are recomputed here.
     sections = with_counts(assigns.tag_index.sections, selected)
+    filtering? = assigns.tag_query != ""
 
     assigns =
       assigns
       |> assign(:selected, selected)
       |> assign(:sections, sections)
+      |> assign(:filtering?, filtering?)
       # The checkboxes still post under `tag_ids[]`; `merge_tag_params/2`
       # rewrites that into `add_tag_ids`/`remove_tag_ids` at submit time, so the
       # wire name the browser posts and the argument the changeset takes are
@@ -4649,7 +4691,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> assign(
         :empty_reason,
         cond do
-          assigns.tag_index.pickable? == false -> :no_tags
+          assigns.tag_index.pickable? == false and not filtering? -> :no_tags
+          sections == [] and filtering? -> :no_match
           sections == [] -> :none_apply
           true -> nil
         end
@@ -4674,11 +4717,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
         >{gettext("taxonomy")}</.link>.
       </p>
 
-      <div :if={@sections != []} class="space-y-2">
+      <div :if={@sections != [] or @filtering?} class="space-y-2">
         <%!-- Unnamed so it never serializes into the changeset, and wrapped in
               phx-update="ignore" so a re-render can't clobber what's typed.
-              Unnamed does NOT stop the enclosing form's phx-change from firing,
-              though — the TagFilter hook stops propagation for that. --%>
+              The TagFilter hook stops form propagation and pushes `filter_tags`
+              (#1149) — the vocabulary is capped at mount, so the box has to
+              round-trip to search beyond the window. --%>
         <div phx-update="ignore" id="tag-picker-filter">
           <input
             type="search"
@@ -4690,12 +4734,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
           />
         </div>
 
+        <p :if={@tags_capped? and not @filtering?} class="text-xs text-base-content/60">
+          {gettext(
+            "Showing the first %{limit} tags. Filter to find others.",
+            limit: @tag_limit
+          )}
+        </p>
+
         <%!-- `open` comes from a set judged once per section, never from the
-              live tick count — see `refresh_tag_index/1`. A server value
-              that moves mid-session overrides the app-wide <details>
-              preservation in `app.js`, and folded a section shut under the
-              cursor (#523). Toggling one after that is the editor's business,
-              and the filter hook's for the sections it force-opened. --%>
+              live tick count — see `refresh_tag_index/1`. While filtering, every
+              section that still has tags is force-opened so hits are visible;
+              clearing the query restores `@open_sections` (plus any section
+              that gained a tick while open — see `filter_tags`). --%>
         <%!-- The id is load-bearing, not a handle: without one morphdom pairs
               these positionally, so a section appearing mid-list (a group that
               was empty at mount gaining an attached tag) shifts every section
@@ -4706,7 +4756,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
           :for={section <- @sections}
           id={tag_section_id(section.key)}
           data-tag-section
-          open={MapSet.member?(@open_sections, section.key)}
+          open={@filtering? or MapSet.member?(@open_sections, section.key)}
           class="rounded border border-base-content/15"
         >
           <summary class="cursor-pointer px-2 py-1.5 text-sm font-medium">
@@ -4737,7 +4787,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
           </div>
         </details>
 
-        <p data-tag-filter-empty hidden class="text-xs text-base-content/70">
+        <p :if={@empty_reason == :no_match} class="text-xs text-base-content/70">
           {gettext("No tags match that filter.")}
         </p>
       </div>
@@ -6003,6 +6053,30 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # `kind` filters to the same image/document split the mounted `@media`/
   # `@file_media` lists use (#481) — the image picker must never surface a
   # document it can't render as an `<img>`, and vice versa.
+  # The org tag vocabulary for the picker (#1149): three columns, alphabetical,
+  # capped. A non-blank `filter` is an `ilike` on the name so tags past the
+  # mount window stay reachable; attached tags outside the window are still
+  # unioned in by `all_pickable_tags/2`.
+  defp load_org_tags(actor, org, filter) do
+    query =
+      KilnCMS.CMS.Tag
+      |> Ash.Query.select([:id, :name, :tag_group_id])
+      |> Ash.Query.sort(name: :asc)
+      |> Ash.Query.limit(max_tags())
+
+    query =
+      case String.trim(to_string(filter || "")) do
+        "" ->
+          query
+
+        text ->
+          pattern = "%" <> String.replace(text, ~r/([\\%_])/, "\\\\\\1") <> "%"
+          Ash.Query.filter(query, expr(ilike(name, ^pattern)))
+      end
+
+    CMS.list_tags!(actor: actor, tenant: org, query: query)
+  end
+
   defp search_media(q, actor, org, kind \\ :image) do
     pattern = "%" <> String.replace(q, ~r/([\\%_])/, "\\\\\\1") <> "%"
 
@@ -8161,6 +8235,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   tag_index={@tag_index}
                   record={@record}
                   open_sections={@tag_sections_open}
+                  tag_query={@tag_query}
+                  tags_capped?={length(@tags) >= @max_tags}
+                  tag_limit={@max_tags}
                 />
 
                 <.featured_image_field form={@form} media={@media} />

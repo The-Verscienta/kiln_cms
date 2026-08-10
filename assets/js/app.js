@@ -31,11 +31,6 @@ import {PushToggle} from "./push"
 
 const clamp01 = (n) => Math.min(Math.max(n, 0), 1)
 
-// How many boxes are ticked inside an element — see TagFilter, which uses it to
-// tell "the editor selected something while I had this open" from "it already
-// held selections before the search".
-const checkedCount = (el) => el.querySelectorAll("input:checked").length
-
 const Hooks = {
   FocusTrap,
   // Passkey enrolment on /editor/settings (#331) — see assets/js/passkeys.js.
@@ -356,24 +351,17 @@ const Hooks = {
   // hook re-resolves its handles on every patch rather than once at mount.
   TagFilter: {
     mounted() {
-      // The sections *this hook* forced open to surface a match (mapped to
-      // their tick count at that moment), so clearing the query closes only
-      // those (#523). `open` is otherwise owned by the editor and by the
-      // app-wide <details> preservation in the LiveSocket `dom` option below —
-      // a second writer here fought it for the attribute, and which one won
-      // depended on whether `updated()` ran before or after the patch. A
-      // WeakMap so a section morphdom replaces is simply forgotten.
-      this.forced = new WeakMap()
+      this.timer = null
       this.bind()
     },
 
     updated() {
       this.bind()
-      this.filter()
     },
 
     destroyed() {
       this.unbind()
+      if (this.timer) clearTimeout(this.timer)
     },
 
     // Wire the filter box, if there is one. Idempotent: the input lives inside
@@ -383,7 +371,6 @@ const Hooks = {
     // (it filters nothing, and its keystrokes reach the form's phx-change).
     bind() {
       const input = this.el.querySelector("[data-tag-filter-input]")
-      this.empty = this.el.querySelector("[data-tag-filter-empty]")
       if (input === this.input) return
 
       this.unbind()
@@ -395,9 +382,15 @@ const Hooks = {
       // never on `name`. Without this the filter box pushes `validate` on every
       // keystroke, which marks the document dirty and schedules a real draft
       // autosave — a DB write and a paper-trail version for a search box.
+      //
+      // The query itself is a server round-trip (#1149): the mount window is
+      // capped, so filtering in the DOM would only ever search the page it has.
       this.onInput = e => {
         e.stopPropagation()
-        this.filter()
+        if (this.timer) clearTimeout(this.timer)
+        this.timer = setTimeout(() => {
+          this.pushEvent("filter_tags", {q: e.target.value})
+        }, 300)
       }
       input.addEventListener("input", this.onInput)
       // Same reason, for the blur-time `change` event.
@@ -416,54 +409,6 @@ const Hooks = {
       this.input.removeEventListener("change", this.onChange)
       this.input.removeEventListener("keydown", this.onKey)
       this.input = null
-    },
-
-    filter() {
-      if (!this.input) return
-      const q = this.input.value.trim().toLowerCase()
-      const sections = this.el.querySelectorAll("[data-tag-section]")
-      // Nothing to narrow. Bailing here rather than falling through keeps the
-      // hook from asserting the picker's markup shape: the loop below never
-      // runs, so `anyVisible` would stay false and "No tags match that filter."
-      // would appear under an untouched filter box (#524).
-      if (sections.length === 0) {
-        if (this.empty) this.empty.hidden = true
-        return
-      }
-
-      let anyVisible = false
-
-      sections.forEach(section => {
-        let matches = 0
-        section.querySelectorAll("[data-tag-item]").forEach(item => {
-          const hit = q === "" || (item.dataset.tagItem || "").includes(q)
-          item.hidden = !hit
-          if (hit) matches++
-        })
-        section.hidden = matches === 0
-        if (q !== "") {
-          // A search should surface hits wherever they live, so expand while
-          // filtering — but remember only the sections that were actually
-          // closed, so an editor's own toggle survives the query being cleared.
-          // Alongside each, how many boxes were ticked at that moment.
-          if (!section.open) {
-            section.open = true
-            this.forced.set(section, checkedCount(section))
-          }
-        } else if (this.forced.has(section)) {
-          const before = this.forced.get(section)
-          this.forced.delete(section)
-          // ...unless the editor ticked something while it was open. Folding it
-          // away then is the same harm as #523's server flip: it hides the box
-          // they just ticked and the sibling they were reaching for. A section
-          // that merely *held* ticks before the search still closes — that is
-          // the state they left it in.
-          if (checkedCount(section) === before) section.open = false
-        }
-        anyVisible = anyVisible || matches > 0
-      })
-
-      if (this.empty) this.empty.hidden = anyVisible
     },
   },
   // Notion-style slash-command block inserter (#29). The server renders the
