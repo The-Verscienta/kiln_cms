@@ -239,6 +239,41 @@ migration, a rewritten column, a dropped config key).
 
 ### Security
 
+- **A reusable fragment's content is no longer invisible to search, word
+  count, and the editor's own preview** (#910). `KilnCMS.CMS.Fragments.expand/3`
+  (#479) inlines a fragment's body for the four fired delivery surfaces and
+  live HTML — but a `%Fragment{}` block's own `search_text/1` is always `""`,
+  so everything derived from the block tree at *write* time or in the editor
+  still saw the raw, unexpanded tree: `search_text` (Postgres FTS,
+  Meilisearch, document embeddings) had no fragment words, and the Preview
+  tab / SEO-readability panel showed an embedded fragment as empty, giving an
+  author no feedback that the picker worked.
+
+  `KilnCMS.Firing.Engine.fire/2` now recomputes `search_text` against the
+  fragment-expanded tree it already builds for the rendered surfaces, via a
+  narrow internal action (`:reindex_search_text`, modeled on
+  `:set_oembed_metadata` — no webhook, no re-fired version, no lock bump) —
+  written only when the recomputed text actually differs, which is the
+  common (fragment-free) case. Since the re-fire wave also calls `fire/2`, a
+  referrer's `search_text` catches up when the fragment it embeds changes,
+  not just when the referrer is next edited itself — the write-depends-on-read
+  coupling the issue explicitly declined for the *editorial* save path stays
+  declined; only the already-async fire path recomputes it.
+
+  `KilnCMSWeb.ContentEditorLive`'s preview now expands fragments the same
+  way, with the record's own audience (mirroring `Engine.host_audiences/1`,
+  now public for this reason) — so a `:member` document's preview never shows
+  a wider-audience fragment than delivery would ever grant it.
+
+  **Left open, per the issue's own framing** (not decided here): `word_count`
+  and `reading_time_minutes` are Ash *calculations* over the raw `.blocks`
+  attribute, not stored columns the re-fire wave could refresh — fixing them
+  needs a different shape (the calculation itself reading a tenant to expand
+  against, which no calculation in this codebase does today). Block
+  embeddings/Meilisearch reindexing is not wired into the re-fire wave at
+  all yet, independent of fragments. `links/extract.ex`'s nightly sweep
+  still reads raw blocks too. Filed as #1190, #1191, #1192.
+
 - **The governance checkpoint chain's link digest now covers `covered_at` and
   `key_id`, closing a gap `link_failures/1` could not see** (#892). Reviewing
   #732's own PR found `Checkpoint.digest/1` hashed `id`, `sequence`, `root`,
