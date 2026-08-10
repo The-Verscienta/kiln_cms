@@ -2697,19 +2697,28 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # One-click translation: duplicate this record's content into a new draft in
   # the target locale and jump to its editor.
+  #
+  # Gated on `may_write?` for the reason the Duplicate handler below is (#922):
+  # this is the same shape — forking the record's payload into a new draft —
+  # and it was the other affordance in this file offered to an actor who may
+  # only read this record.
   def handle_event("create_translation", %{"locale" => locale}, socket) when is_binary(locale) do
     %{kind: kind, record: record, actor: actor} = socket.assigns
 
-    translation =
-      KilnCMS.CMS.Translations.create_translation!(kind, record, locale,
-        actor: actor,
-        tenant: record.org_id
-      )
+    if socket.assigns.may_write? do
+      translation =
+        KilnCMS.CMS.Translations.create_translation!(kind, record, locale,
+          actor: actor,
+          tenant: record.org_id
+        )
 
-    {:noreply,
-     socket
-     |> put_flash(:info, gettext("Draft translation created (%{locale}).", locale: locale))
-     |> push_navigate(to: ~p"/editor/content/#{kind}/#{translation.id}")}
+      {:noreply,
+       socket
+       |> put_flash(:info, gettext("Draft translation created (%{locale}).", locale: locale))
+       |> push_navigate(to: ~p"/editor/content/#{kind}/#{translation.id}")}
+    else
+      {:noreply, socket}
+    end
   rescue
     _error ->
       {:noreply, put_flash(socket, :error, gettext("Couldn't create that translation."))}
@@ -2718,34 +2727,55 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # One-click duplicate (#471): clone this record's saved payload into a new
   # draft of the same locale and jump to it. Unsaved edits don't travel — the
   # copy is made from the row, so the autosave that just ran is the boundary.
+  #
+  # Refused server-side too (#922), for the reason `seo_suggest` states: the
+  # hidden button is not the boundary, a replayed or forged event arrives here
+  # regardless. It closes no hole today — `Checks.EditableContentType` gates
+  # authoring and updating alike, so `may_write?` and "may create one of these"
+  # are the same question and the create refuses this actor anyway. What shipped
+  # was a button whose only possible outcome was an error flash.
+  #
+  # Be precise about what this gate can see, because the obvious claim for it is
+  # wrong: `may_write?` is `Ash.can?`, which evaluates the POLICY chain only.
+  # `:autosave` already carries a per-record condition — `change filter(state ==
+  # :draft)` — and `Ash.can?` is blind to it. That blindness is load-bearing
+  # here (a published record stays duplicable, which is right), but it also
+  # means a future per-record rule written as a change or a validation would be
+  # just as invisible; only one written as a policy check would reach this gate.
+  # So the reason to refuse here is not "it catches whatever comes next" — it is
+  # that a forged event now gets the same answer the UI gave.
   def handle_event("duplicate", _params, socket) do
     %{kind: kind, record: record, actor: actor} = socket.assigns
 
-    case KilnCMS.CMS.Duplication.duplicate(kind, record, actor: actor, tenant: record.org_id) do
-      {:ok, copy, []} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, gettext("Duplicated as a new draft."))
-         |> push_navigate(to: ~p"/editor/content/#{kind}/#{copy.id}")}
+    if socket.assigns.may_write? do
+      case KilnCMS.CMS.Duplication.duplicate(kind, record, actor: actor, tenant: record.org_id) do
+        {:ok, copy, []} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, gettext("Duplicated as a new draft."))
+           |> push_navigate(to: ~p"/editor/content/#{kind}/#{copy.id}")}
 
-      # Some of the source did not travel — a field grant dropped attributes, or
-      # the block policy reset values this editor could not have set. Saying so
-      # is the difference between "duplication is broken" and "your role cannot
-      # copy those fields" (#929).
-      {:ok, copy, withheld} ->
-        {:noreply,
-         socket
-         |> put_flash(
-           :info,
-           gettext(
-             "Duplicated as a new draft. Not copied, because your role cannot set them: %{fields}.",
-             fields: Enum.join(withheld, ", ")
+        # Some of the source did not travel — a field grant dropped attributes, or
+        # the block policy reset values this editor could not have set. Saying so
+        # is the difference between "duplication is broken" and "your role cannot
+        # copy those fields" (#929).
+        {:ok, copy, withheld} ->
+          {:noreply,
+           socket
+           |> put_flash(
+             :info,
+             gettext(
+               "Duplicated as a new draft. Not copied, because your role cannot set them: %{fields}.",
+               fields: Enum.join(withheld, ", ")
+             )
            )
-         )
-         |> push_navigate(to: ~p"/editor/content/#{kind}/#{copy.id}")}
+           |> push_navigate(to: ~p"/editor/content/#{kind}/#{copy.id}")}
 
-      {:error, _reason} ->
-        {:noreply, put_flash(socket, :error, gettext("Couldn't duplicate that content."))}
+        {:error, _reason} ->
+          {:noreply, put_flash(socket, :error, gettext("Couldn't duplicate that content."))}
+      end
+    else
+      {:noreply, socket}
     end
   end
 
@@ -7552,8 +7582,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   warning has to cover two different reasons the saved row is not
                   what is on screen. A dirty buffer is your own unsaved work; a
                   conflict means the saved row is somebody ELSE's save, so the
-                  copy would be of content you have never seen (#928). --%>
+                  copy would be of content you have never seen (#928).
+
+                  `:if={@may_write?}` like every other write affordance in this
+                  file (#922): this route deliberately admits an actor who may
+                  OPEN a record without being able to write it (#550), and
+                  forking someone else's draft is a write. --%>
             <button
+              :if={@may_write?}
               type="button"
               phx-click="duplicate"
               data-confirm={duplicate_confirm(@save_state, @conflict)}
@@ -8567,8 +8603,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     >
                       {state_label(cov.status)} — {gettext("edit")}
                     </.link>
+                    <%!-- `@may_write?` for the reason the header's Duplicate
+                          button carries it (#922): this forks the record's
+                          payload into a new draft, and read access to a record
+                          is not enough to fork it. --%>
                     <button
-                      :if={is_nil(cov.record)}
+                      :if={is_nil(cov.record) and @may_write?}
                       type="button"
                       phx-click="create_translation"
                       phx-value-locale={cov.locale}
