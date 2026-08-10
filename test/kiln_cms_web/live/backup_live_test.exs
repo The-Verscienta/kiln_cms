@@ -287,5 +287,28 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
       refute html =~ "overview-backup-warning"
     end
+
+    # #1160. The strip links to `/editor/backups`, which now takes a PLATFORM
+    # admin — so gating the strip on the per-org tier would report on the whole
+    # instance's infrastructure to an admin of one site, and send them to a page
+    # that turns them away.
+    test "nor does an org admin who is not a platform admin", %{conn: conn} do
+      user = authed_user(:editor)
+
+      Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+        user_id: user.id,
+        organization_id: KilnCMS.Accounts.default_org_id(),
+        role: :admin
+      })
+
+      {:ok, _lv, html} = conn |> log_in(user) |> live(~p"/editor/overview")
+
+      # The premise: they are an admin as far as the per-org tier is concerned,
+      # so this is not just the editor case again.
+      assert KilnCMS.Accounts.Scoping.effective_tier(user, KilnCMS.Accounts.default_org_id()) ==
+               :admin
+
+      refute html =~ "overview-backup-warning"
+    end
   end
 end

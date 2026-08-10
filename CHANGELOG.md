@@ -70,6 +70,11 @@ migration, a rewritten column, a dropped config key).
   slug-regeneration console's `apply`, whose worker likewise authorizes nothing,
   gained the same re-check at its own (correctly per-org) tier.
 
+  The overview's stale-backup warning strip moved to the same gate. It links to
+  the backup panel, so leaving it on the per-org tier would have reported on the
+  whole instance's infrastructure to an admin of one site and sent them to a
+  page that turns them away.
+
 - **404 capture no longer evicts real misses before attacker junk** (#920). At
   the per-org cap a new path evicts the least-requested row, and the tie among
   equal counts was broken by `last_seen_at` **ascending** — so the oldest
