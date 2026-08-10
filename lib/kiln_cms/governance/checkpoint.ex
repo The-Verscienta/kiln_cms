@@ -845,7 +845,7 @@ defmodule KilnCMS.Governance.Checkpoint do
   end
 
   defp digest_failure(checkpoint, prev) do
-    if digest(prev) == checkpoint.prev_checkpoint_digest do
+    if digest_matches?(prev, checkpoint.prev_checkpoint_digest) do
       []
     else
       [
@@ -883,40 +883,107 @@ defmodule KilnCMS.Governance.Checkpoint do
   A digest over a checkpoint's identity and contents, recorded by its successor.
 
   Same *reason* as `KilnCMS.Governance.Chain.anchor_digest/1`: the id alone would
-  let a deleted predecessor be replaced by a forged row reusing it.
+  let a deleted predecessor be replaced by a forged row reusing it. `digest/1` is
+  `digest/2` at `newest_digest_version/0` — every writer (`mint/1`) and every
+  existing caller wants "the current shape" and none passes a version.
 
-  Not the same coverage, though, and the difference matters to anything reading
-  this as "the contents". It hashes `id`, `sequence`, `root`, `document_count`,
-  `signature` and the two link columns — but **not** `covered_at`, `key_id` or
-  `org_id`, all three of which `document/2` does carry and two of which
-  `checkpoint_payload/1` signs. So a row whose `covered_at` is moved forward, or
-  whose `key_id` is pointed at a key nobody holds, produces an identical digest
-  and is invisible to `link_failures/1`. `key_id` is the same one-column hole
-  `Chain` catalogues for anchors; nulling `signature`, by contrast, *is* caught.
+  ## Versions (#892)
 
-  Widening this is not a one-line edit: the output is already recorded in every
-  existing `prev_checkpoint_digest`, so changing the input set retro-breaks every
-  run. It needs a versioned digest with fallback shapes, the way `anchor_payload`
-  is versioned. Tracked separately.
+  **v1** hashes `id`, `sequence`, `root`, `document_count`, `signature` and the
+  two link columns — but not `covered_at`, `key_id` or `org_id`, all three of
+  which `document/2` carries and two of which `checkpoint_payload/1` signs. So
+  under v1 a row whose `covered_at` is moved forward, or whose `key_id` is
+  pointed at a key nobody holds, produces an identical digest and is invisible
+  to `link_failures/1`. `key_id` is the same one-column hole `Chain` catalogues
+  for anchors; nulling `signature`, by contrast, *was* already caught.
+
+  **v2** adds `covered_at` and `key_id` to close that. `org_id` deliberately
+  does **not** join the digest: it is already in the *signed* set
+  (`checkpoint_payload/1`), which is the stronger guarantee where a witness is
+  configured, and adding it here would need every caller of `digest/2` to also
+  carry an org id, which the hand-built test fixtures and `link_failure/2`'s
+  walk (keyed on checkpoint structs alone) do not.
+
+  Widening `digest/1`'s coverage could not be a one-line edit: its output is
+  already embedded in every existing `prev_checkpoint_digest`, so changing the
+  input set outright would retro-break every recorded run — `link_failures/1`
+  would report every checkpoint ever minted as tampered the moment the code
+  deployed. `digest_matches?/2` is what actually gets used for comparison; it
+  tries versions newest-first, the same fallback shape
+  `Chain.signature_verdict/3` uses for `anchor_payload`. Unlike the anchor
+  side, no stored version tag is needed: none of v1's or v2's covered columns
+  are ever absent on a real row, so "does the newest shape match" is decidable
+  outright, with nothing to disambiguate by content.
+
+  **Not retroactive.** `prev_checkpoint_digest` is written once, at mint time;
+  there is no migration here that recomputes it. A link minted before this
+  shipped stays exactly as v1-shaped, and as unprotected on `covered_at`/
+  `key_id`, as it always was — v2 protects checkpoints minted from here
+  forward, not history already on disk.
   """
   @spec digest(struct() | nil) :: String.t() | nil
-  def digest(nil), do: nil
+  def digest(checkpoint), do: digest(checkpoint, newest_digest_version())
 
-  def digest(checkpoint) do
-    :sha256
-    |> :crypto.hash(
-      Canonical.encode(%{
-        "id" => checkpoint.id,
-        "sequence" => checkpoint.sequence,
-        "root" => checkpoint.root,
-        "document_count" => checkpoint.document_count,
-        "signature" => checkpoint.signature,
-        "prev_checkpoint_id" => Map.get(checkpoint, :prev_checkpoint_id),
-        "prev_checkpoint_digest" => Map.get(checkpoint, :prev_checkpoint_digest)
-      })
-    )
-    |> Base.encode16(case: :lower)
+  @doc "`digest/1` at an explicit version — see its docs for what each covers."
+  @spec digest(struct() | nil, pos_integer()) :: String.t() | nil
+  def digest(nil, _version), do: nil
+
+  def digest(checkpoint, 1) do
+    hash_digest(%{
+      "id" => checkpoint.id,
+      "sequence" => checkpoint.sequence,
+      "root" => checkpoint.root,
+      "document_count" => checkpoint.document_count,
+      "signature" => checkpoint.signature,
+      "prev_checkpoint_id" => Map.get(checkpoint, :prev_checkpoint_id),
+      "prev_checkpoint_digest" => Map.get(checkpoint, :prev_checkpoint_digest)
+    })
   end
+
+  def digest(checkpoint, 2) do
+    hash_digest(%{
+      "id" => checkpoint.id,
+      "sequence" => checkpoint.sequence,
+      "root" => checkpoint.root,
+      "document_count" => checkpoint.document_count,
+      "covered_at" => digest_timestamp(Map.get(checkpoint, :covered_at)),
+      "key_id" => Map.get(checkpoint, :key_id),
+      "signature" => checkpoint.signature,
+      "prev_checkpoint_id" => Map.get(checkpoint, :prev_checkpoint_id),
+      "prev_checkpoint_digest" => Map.get(checkpoint, :prev_checkpoint_digest)
+    })
+  end
+
+  @doc """
+  Whether `recorded_digest` is `checkpoint`'s digest — under the newest shape
+  `digest/1` would compute today, or any earlier one it could have been
+  written under (#892). This is what `link_failures/1` compares with, so a
+  link minted before the widening keeps verifying afterward rather than the
+  whole prior history reporting as tampered on deploy.
+  """
+  @spec digest_matches?(struct() | nil, String.t() | nil) :: boolean()
+  def digest_matches?(checkpoint, recorded_digest) do
+    Enum.any?(1..newest_digest_version(), &(digest(checkpoint, &1) == recorded_digest))
+  end
+
+  @doc false
+  # The version `digest/1` and `mint/1` write at. Bump when a digest version is
+  # added; `digest_matches?/2` picks up every version up to this one.
+  @spec newest_digest_version() :: pos_integer()
+  def newest_digest_version, do: 2
+
+  defp hash_digest(fields) do
+    :sha256 |> :crypto.hash(Canonical.encode(fields)) |> Base.encode16(case: :lower)
+  end
+
+  # `document/2` and `checkpoint_payload/1` both stringify `covered_at` before
+  # canonicalizing, because `Canonical.encode/1` has no clause for a bare
+  # `DateTime` struct. The hand-built checkpoint fixtures in
+  # `governance_witness_test.exs` predate v2 and carry no `covered_at` key at
+  # all, so `Map.get/2` above already answers `nil` for them — passed through
+  # unchanged rather than crashing on `DateTime.to_iso8601(nil)`.
+  defp digest_timestamp(%DateTime{} = covered_at), do: DateTime.to_iso8601(covered_at)
+  defp digest_timestamp(other), do: other
 
   # `org_id` is inside the payload: a checkpoint is an org-wide statement, and
   # without it a checkpoint from a quiet org could be moved onto a busy one,

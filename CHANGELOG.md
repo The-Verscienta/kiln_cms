@@ -239,6 +239,41 @@ migration, a rewritten column, a dropped config key).
 
 ### Security
 
+- **The governance checkpoint chain's link digest now covers `covered_at` and
+  `key_id`, closing a gap `link_failures/1` could not see** (#892). Reviewing
+  #732's own PR found `Checkpoint.digest/1` hashed `id`, `sequence`, `root`,
+  `document_count`, `signature` and the two link columns — but not
+  `covered_at` or `key_id`, both of which `document/2` carries. An edit to
+  either (moving a checkpoint's recorded coverage time forward, or pointing
+  `key_id` at a key nobody holds) produced an identical digest and was
+  invisible to the predecessor-link walk; only a configured witness's
+  byte-comparison caught it, and the default deployment has none.
+
+  Widening the hash could not be a one-line edit — its output is already
+  embedded in every existing `prev_checkpoint_digest`, so changing the input
+  set outright would have reported every checkpoint ever minted as tampered
+  on deploy. `Checkpoint.digest/2` now takes an explicit version (`digest/1`
+  stays the newest-version shorthand every write path already calls), and
+  `digest_matches?/2` — what `link_failures/1` actually compares with now —
+  tries versions newest-first, the same fallback shape
+  `Chain.signature_verdict/3` already uses for `anchor_payload`. A link
+  minted before this change keeps verifying under the old shape; only an
+  edit to a covered column, old or new, is caught.
+
+  **Not retroactive**: `prev_checkpoint_digest` is written once, at mint
+  time, and this ships no data migration to recompute it. Every link minted
+  before this deploys stays exactly as v1-shaped — and as unprotected on
+  `covered_at`/`key_id` — as it always was; this closes the gap going
+  forward, not for history already on disk.
+
+  `org_id` — the third column `document/2` carries but `digest/1` didn't —
+  deliberately stays out of the digest: it's already in the *signed* set
+  (`checkpoint_payload/1`), the stronger guarantee where a witness is
+  configured. Whether `key_id` should also join that signed set (it's
+  currently in neither) is left as an open question — doing so needs its own
+  versioned-fallback verify in `checkpoint_attestation/2`, which has none
+  today, and is a separable change from closing the digest gap.
+
 - **A flood of unresolvable hosts against the LiveView and socket transports
   now reaches an operator, not just the plug** (#678). #659/#677 bounded the
   *repeat* cost of an unresolvable `Host` under `TENANT_STRICT_HOST`, but only

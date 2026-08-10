@@ -459,19 +459,61 @@ defmodule KilnCMS.Governance.WitnessTest do
       assert Checkpoint.link_failures(cascaded) == []
     end
 
-    test "covered_at and key_id are outside the digest, so edits to them are invisible" do
-      # Both are carried by `document/2` and `covered_at` is signed, but neither
-      # is hashed by `digest/1` — so the witness comparison catches them and this
-      # walk cannot. Pinned so the moduledoc's claim stays honest if `digest/1`
-      # is ever widened.
+    test "covered_at and key_id are now covered by the digest (#892)" do
+      # Pre-#892 (digest v1) neither was hashed, so an edit to either was
+      # invisible to this walk — only the witness comparison caught them. v2
+      # closes that; `signature` was already covered under v1 and stays a
+      # contrast case.
       [two, one] = run(2)
 
       assert Checkpoint.digest(%{one | signature: "forged"}) != Checkpoint.digest(one)
 
-      assert Checkpoint.link_failures([two, Map.put(one, :covered_at, ~U[2030-01-01 00:00:00Z])]) ==
-               []
+      edited_covered_at = Map.put(one, :covered_at, ~U[2030-01-01 00:00:00Z])
+      assert [message] = Checkpoint.link_failures([two, edited_covered_at])
+      assert message =~ "checkpoint 2 does not match the contents of predecessor 1"
 
-      assert Checkpoint.link_failures([two, Map.put(one, :key_id, "bogus")]) == []
+      edited_key_id = Map.put(one, :key_id, "bogus")
+      assert [message] = Checkpoint.link_failures([two, edited_key_id])
+      assert message =~ "checkpoint 2 does not match the contents of predecessor 1"
+    end
+
+    # #892: widening the digest could not be a one-line edit, because its
+    # output is already embedded in every existing `prev_checkpoint_digest` —
+    # so a link minted under the old (v1) shape must keep verifying under the
+    # new code, rather than the whole prior history reporting as tampered.
+    test "a link minted under the old digest shape still verifies after the widening" do
+      one =
+        link(1, %{
+          # Real values, unlike `run/1`'s fixtures — the case worth pinning is
+          # a v1 link whose predecessor genuinely HAS the columns v2 covers,
+          # not one where both versions happen to hash the same nil.
+          covered_at: ~U[2026-01-01 00:00:00.000000Z],
+          key_id: "kiln-key-1"
+        })
+
+      # Simulates a row written before #892 shipped: its successor's recorded
+      # digest is the OLD shape, which never covered covered_at/key_id.
+      two =
+        link(2, %{
+          prev_checkpoint_id: one.id,
+          prev_checkpoint_digest: Checkpoint.digest(one, 1)
+        })
+
+      assert Checkpoint.link_failures([two, one]) == []
+    end
+
+    test "a run mixing an old (v1) link with a freshly-minted (v2) one still walks clean" do
+      one = link(1, %{covered_at: ~U[2026-01-01 00:00:00.000000Z], key_id: "kiln-key-1"})
+
+      two =
+        link(2, %{prev_checkpoint_id: one.id, prev_checkpoint_digest: Checkpoint.digest(one, 1)})
+
+      # `three` is minted "now" — `Checkpoint.digest/1` defaults to the newest
+      # version, exactly as `mint/1` does.
+      three =
+        link(3, %{prev_checkpoint_id: two.id, prev_checkpoint_digest: Checkpoint.digest(two)})
+
+      assert Checkpoint.link_failures([three, two, one]) == []
     end
 
     test "a real minted run walks clean" do
