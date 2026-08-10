@@ -192,9 +192,11 @@ defmodule KilnCMSWeb.MissedPathTracking do
   # every one of them a capped slot spent on a probe.
   #
   # A leading dot is the rule rather than a longer extension list because it is
-  # what the whole family has in common, and no content URL this CMS can mint
-  # has a segment starting with one — slugs are derived through
-  # `KilnCMS.CMS.Slugs`, which cannot produce a leading dot.
+  # what the whole family has in common, and no URL this CMS can mint has a
+  # segment starting with one. Checked both producers: `KilnCMS.Slug.slugify/1`
+  # keeps only `[a-z0-9\s-]`, and an editor-authored `path_alias` (#485) is
+  # validated against `\A(/[a-z0-9-]+)+\z` by `Validations.PathAliasValid`, so
+  # neither can emit a dot at all — let alone a leading one.
   defp dotfile?(path) do
     path |> String.split("/") |> Enum.any?(&String.starts_with?(&1, "."))
   end
