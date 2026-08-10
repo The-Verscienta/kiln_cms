@@ -48,6 +48,11 @@ defmodule KilnCMSWeb.OverviewLive do
      socket
      |> assign(:actor, socket.assigns.current_user)
      |> assign(:admin?, KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin)
+     # A separate, stricter question from `:admin?` — see the backup strip in
+     # `render/1`. Backups are instance-wide, so the panel this strip links to
+     # takes a platform admin (#1160); gating the strip on the per-org tier
+     # would advertise a page the reader cannot open.
+     |> assign(:platform_admin?, KilnCMSWeb.LiveUserAuth.platform_admin?(socket))
      |> assign_backup_warning()
      |> assign_blocked_experiments()
      |> assign(:page_title, gettext("Overview"))
@@ -205,13 +210,18 @@ defmodule KilnCMSWeb.OverviewLive do
               be read before the eight steady-state numbers rather than
               alongside them.
 
-              Admin-only, matching `/editor/backups`: an editor can't act on
-              it and shouldn't be told the deployment is unprotected. Absent
-              entirely when backups are healthy — a permanent green banner is
-              one nobody reads, and its absence is what makes the red one
-              land. --%>
+              Platform-admin only, matching `/editor/backups` — and note that
+              is a STRICTER test than `@admin?`, which is the per-org tier
+              (#1160). A backup covers the whole instance, so an admin of one
+              site can neither take one nor open the panel this strip links to;
+              showing it to them would report on someone else's infrastructure
+              and lead to a page that turns them away. An editor can't act on
+              it either and shouldn't be told the deployment is unprotected.
+              Absent entirely when backups are healthy — a permanent green
+              banner is one nobody reads, and its absence is what makes the red
+              one land. --%>
         <.overview_strip
-          :if={@admin? and @backup_alarming?}
+          :if={@platform_admin? and @backup_alarming?}
           id="overview-backup-warning"
           navigate={~p"/editor/backups"}
           tone_class="border-error/30 bg-error/5 hover:bg-error/10"
