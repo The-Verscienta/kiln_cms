@@ -54,6 +54,13 @@ migration, a rewritten column, a dropped config key).
   the operator config and the **publish gate is forced off**: that is the one
   axis where guessing wrong turns a transient read error into a site that
   cannot publish, and it would be refusing on rules nobody could confirm.
+### Fixed
+
+- The content editor no longer offers **Duplicate** or **Create translation** to
+  an actor who may open a record without being able to write it. Both fork the
+  record's payload into a new draft, and both were the only write affordances in
+  the editor with no `may_write?` gate; both handlers now refuse server-side as
+  well, so a replayed event cannot reach the copy. (#922)
 
 ## [0.5.0] - 2026-08-09
 
