@@ -15,7 +15,9 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
   """
   use KilnCMS.DataCase, async: false
 
+  alias KilnCMS.Accounts
   alias KilnCMS.Accounts.PendingSignIn
+  alias KilnCMS.Accounts.Token
   alias KilnCMS.TwoFactorFixtures
 
   @endpoint KilnCMSWeb.Endpoint
@@ -200,6 +202,266 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
         :error -> String.contains?(part, needle)
       end
     end)
+  end
+
+  describe "the first-factor token is held for the length of the step (#742)" do
+    # `store_all_tokens?` mints AND stores the first-factor JWT before either
+    # controller learns the account owes a code, so the step used to leave a
+    # live, usable row that nobody holds — for the JWT's full lifetime. These
+    # pin the hold on BOTH gates, because the browser flow has the same shape
+    # and #742's own notes say so.
+    for mode <- [:session, :encrypted] do
+      @mode mode
+
+      test "#{mode}: minting moves the stored token off the purpose auth requires" do
+        {user, token} = held_user()
+
+        assert usable?(token), "precondition: a freshly stored token authenticates"
+
+        PendingSignIn.mint(@mode, @endpoint, user)
+
+        refute usable?(token)
+        assert row(token).purpose == Token.second_factor_hold_purpose()
+      end
+
+      test "#{mode}: claiming puts it back, with the expiry the JWT itself carries" do
+        {user, token} = held_user()
+        expiry = row(token).expires_at
+
+        blob = PendingSignIn.mint(@mode, @endpoint, user)
+        assert {:ok, resolved} = PendingSignIn.resolve(@mode, @endpoint, blob)
+
+        assert :ok = PendingSignIn.claim(resolved)
+
+        assert usable?(token)
+        # Not the hold's minutes: a released token has to be worth what the JWT
+        # in it says, or a completed sign-in expires in the middle of the step
+        # that completed it.
+        assert row(token).expires_at == expiry
+      end
+
+      test "#{mode}: an abandoned exchange leaves nothing usable, and nothing long-lived" do
+        {user, token} = held_user()
+        natural = row(token).expires_at
+
+        PendingSignIn.mint(@mode, @endpoint, user)
+
+        refute usable?(token)
+
+        # The whole cost #742 names: without this the row sits live until the
+        # JWT's own expiry, which is weeks away, and the nightly expunge is no
+        # help inside that. Held, it is collectable within a day of this step.
+        held = row(token).expires_at
+        assert DateTime.compare(held, natural) == :lt
+
+        assert DateTime.diff(held, DateTime.utc_now()) <= Token.second_factor_hold_ttl()
+      end
+    end
+
+    test "a release does not resurrect a token that was revoked in between" do
+      # A password change fires `log_out_everywhere` and an erasure fires
+      # `AnonymizeUser`; both move the row to `"revocation"`. A release that
+      # restored unconditionally would undo that for anyone holding a
+      # five-minute-old blob and a live code — so it is filtered on the hold
+      # purpose, in the UPDATE's own WHERE, and finds nothing to put back.
+      {user, token} = held_user()
+
+      blob = PendingSignIn.mint(:encrypted, @endpoint, user)
+      Ash.Seed.update!(row(token), %{purpose: "revocation"})
+
+      assert {:ok, resolved} = PendingSignIn.resolve(:encrypted, @endpoint, blob)
+
+      # `:unavailable`, not `:ok`. The token cannot be made usable, and saying
+      # otherwise hands the caller a 201 carrying a revoked credential whose
+      # only symptom is a 401 on every request after it.
+      assert :unavailable = PendingSignIn.claim(resolved)
+
+      refute usable?(token)
+      assert row(token).purpose == "revocation"
+    end
+
+    test "a claim that loses the race does not release the token" do
+      # The ordering, pinned. Releasing before claiming reads better on a
+      # release failure, and fails in the wrong direction on a claim failure:
+      # the token goes back to `"user"` with its full natural expiry and the
+      # caller is refused, so nobody holds it — #742 verbatim, re-created by the
+      # code that closes it.
+      {user, token} = held_user()
+
+      blob = PendingSignIn.mint(:encrypted, @endpoint, user)
+      assert {:ok, resolved} = PendingSignIn.resolve(:encrypted, @endpoint, blob)
+
+      # Someone else spends this blob's jti first.
+      assert :ok =
+               Accounts.spend_pending_sign_in(
+                 %{jti: resolved.jti, subject: AshAuthentication.user_to_subject(user)},
+                 authorize?: false
+               )
+               |> then(fn {:ok, _} -> :ok end)
+
+      assert :taken = PendingSignIn.claim(resolved)
+
+      # Still parked. A loser must move nothing.
+      refute usable?(token)
+      assert row(token).purpose == Token.second_factor_hold_purpose()
+    end
+
+    test "a hold that has lapsed is reported, not papered over" do
+      # `GetTokenPreparation` filters `expires_at > now()`, so a hold that
+      # outlived its own window is invisible to the release. Answering `:ok`
+      # there hands back a 201 whose credential is still parked and now
+      # unrecoverable — a sign-in that 401s on its very next request, silently.
+      {user, token} = held_user()
+
+      blob = PendingSignIn.mint(:encrypted, @endpoint, user)
+      Ash.Seed.update!(row(token), %{expires_at: DateTime.add(DateTime.utc_now(), -5, :second)})
+
+      assert {:ok, resolved} = PendingSignIn.resolve(:encrypted, @endpoint, blob)
+      assert :unavailable = PendingSignIn.claim(resolved)
+    end
+
+    test "a token the store never held does not refuse the sign-in" do
+      # The other side of fail-soft, and the reason the release keys on whether a
+      # row exists rather than on whether one is held. If the store stops holding
+      # first-factor tokens at all — `store_all_tokens?` turned off, an
+      # AshAuthentication purpose renamed, this resource regenerated — the hold
+      # logs and carries on. A release that refused on the same fault would turn
+      # that deployment into "no account with a second factor can sign in",
+      # which is the outcome the fail-soft half exists to rule out.
+      {user, token} = held_user()
+
+      blob = PendingSignIn.mint(:encrypted, @endpoint, user)
+      KilnCMS.Repo.delete!(row(token))
+
+      assert {:ok, resolved} = PendingSignIn.resolve(:encrypted, @endpoint, blob)
+      assert :ok = PendingSignIn.claim(resolved)
+    end
+
+    test "a re-mint re-takes the hold rather than leaving the first one to lapse" do
+      # The blob's window restarts on every mint; the hold's does not, unless it
+      # is re-taken. A re-mint that no-ops leaves a blob redeemable past the
+      # moment its own hold expires.
+      {user, token} = held_user()
+
+      PendingSignIn.mint(:encrypted, @endpoint, user)
+      first = row(token).expires_at
+
+      Ash.Seed.update!(row(token), %{expires_at: DateTime.add(first, -120, :second)})
+      PendingSignIn.mint(:encrypted, @endpoint, user)
+
+      assert DateTime.compare(row(token).expires_at, first) in [:eq, :gt]
+      assert row(token).purpose == Token.second_factor_hold_purpose()
+    end
+
+    test "a revocation landing between the read and the hold is not overwritten" do
+      # Check-then-act. `hold_first_factor/1` SELECTs the row, then updates it;
+      # in between, a password change can fire `log_out_everywhere` and move it
+      # to `"revocation"`. A guard that compares the in-memory snapshot passes on
+      # a value that is already stale, and the UPDATE — keyed on the primary key
+      # alone — discards the revocation. The guard is therefore a `filter`, in
+      # the UPDATE's own WHERE, and the database decides.
+      #
+      # Staged rather than raced: `Ash.Seed.update!` writes the new purpose while
+      # `stale` goes on claiming the old one, which is exactly the interleaving.
+      {_user, token} = held_user()
+      stale = row(token)
+      Ash.Seed.update!(stale, %{purpose: "revocation"})
+
+      assert {:error, _} = Accounts.hold_first_factor_token(stale, %{}, authorize?: false)
+      assert row(token).purpose == "revocation"
+    end
+
+    test "a revocation landing between the read and the release is not overwritten" do
+      # The same race on the half that grants use, where losing it un-revokes a
+      # credential the user just revoked and restores its full natural expiry.
+      {_user, token} = held_user()
+      held = Ash.Seed.update!(row(token), %{purpose: Token.second_factor_hold_purpose()})
+      Ash.Seed.update!(held, %{purpose: "revocation"})
+
+      assert {:error, _} =
+               Accounts.release_first_factor_token(held, %{token: token}, authorize?: false)
+
+      assert row(token).purpose == "revocation"
+    end
+
+    test "neither action is reachable without the system's own authorize?: false" do
+      # Both are `forbid_if always()`. Every other test here passes
+      # `authorize?: false`, so without this one the policy block could be
+      # deleted and the suite would stay green.
+      {_user, token} = held_user()
+      record = row(token)
+
+      assert {:error, %Ash.Error.Forbidden{}} = Accounts.hold_first_factor_token(record, %{})
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               Accounts.release_first_factor_token(record, %{token: token})
+    end
+
+    test "the hold refuses a row that is not a usable stored token" do
+      # The caller finds the row under the `"user"` purpose, so this is
+      # unreachable through it — which is the point. A hold taken on a
+      # `"revocation"` row is released back to `"user"` one step later, and an
+      # unrevoke is not a thing one call site's filter should be the only thing
+      # standing between us and.
+      {_user, token} = held_user()
+      revoked = Ash.Seed.update!(row(token), %{purpose: "revocation"})
+
+      assert {:error, _} = Accounts.hold_first_factor_token(revoked, %{}, authorize?: false)
+    end
+
+    test "the release refuses a token that does not name the row it was handed" do
+      # `StoreTokenChange` writes `jti` from the token, and `jti` is the primary
+      # key — so a mismatched pair *renames* a row rather than releasing one:
+      # the held token loses the row it was parked in, and the row comes back
+      # under `"user"` naming a JWT that was never released.
+      #
+      # The other token's own row is deleted first, deliberately. Leave it and
+      # the rename collides with it, so Postgres refuses for a reason that has
+      # nothing to do with the pair being mismatched — which is exactly how this
+      # test first passed with the validation removed.
+      {_mine, mine} = held_user()
+      {_theirs, theirs} = held_user()
+      KilnCMS.Repo.delete!(row(theirs))
+
+      held = Ash.Seed.update!(row(mine), %{purpose: Token.second_factor_hold_purpose()})
+
+      assert {:error, _} =
+               Accounts.release_first_factor_token(held, %{token: theirs}, authorize?: false)
+
+      assert {:ok, _} =
+               Accounts.release_first_factor_token(held, %{token: mine}, authorize?: false)
+    end
+
+    test "the hold outlives the blob it is holding for" do
+      # `GetTokenPreparation` filters `expires_at > now()`, so a hold that lapses
+      # while the blob is still redeemable is a token nobody can put back — the
+      # caller gets a 201 and a credential that answers 401. The two constants
+      # live in different modules, so nothing but this stops one moving.
+      assert Token.second_factor_hold_ttl() > PendingSignIn.max_age()
+    end
+
+    test "a blob carrying something that is not a JWT neither raises nor holds" do
+      # `Joken.peek_claims/1` raises on anything that is not a well-formed token,
+      # and `mint/4` is on the sign-in path: an absence has to stay an absence.
+      {user, _secret} = enabled_user()
+
+      assert is_binary(PendingSignIn.mint(:encrypted, @endpoint, user, token: "stub.jwt.token"))
+    end
+  end
+
+  # A 2FA account carrying a first-factor token the store has actually seen.
+  defp held_user do
+    {user, _secret} = enabled_user()
+    TwoFactorFixtures.with_first_factor_token(user)
+  end
+
+  # The exact question `BearerAuth.user_from_token/1` and the session plug both
+  # ask: is there a row for this jti under the `"user"` purpose?
+  defp usable?(token), do: match?({:ok, _user}, KilnCMSWeb.BearerAuth.user_from_token(token))
+
+  defp row(token) do
+    {:ok, %{"jti" => jti}} = AshAuthentication.Jwt.peek(token)
+    Ash.get!(Token, jti, authorize?: false)
   end
 
   # `Plug.Crypto` signs `{data, signed_at, max_age}`; the payload segment of a

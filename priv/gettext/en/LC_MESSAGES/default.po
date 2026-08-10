@@ -7924,6 +7924,11 @@ msgstr ""
 msgid "Sign out"
 msgstr ""
 
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Sign-in could not be completed right now. Try again in a moment."
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/passkey_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Signed in with a passkey."

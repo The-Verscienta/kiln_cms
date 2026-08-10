@@ -190,13 +190,25 @@ themselves**; other readers see the record without `role`.
 interaction bypass, and the nightly expunge trigger to the AshOban one. There are
 no caller-facing token actions.
 
-One action is ours rather than AshAuthentication's: `:spend_jti` (#743), which
-records a redeemed headless two-factor blob. It is `forbid_if always()` — no
-actor may reach it. `KilnCMS.Accounts.PendingSignIn` calls it with
-`authorize?: false`, because the whole point of the step is that the caller has
-not finished signing in. **The headless single-use guarantee depends on that
-flag**, so a change that tightens `authorize?` handling has to keep this call
-working.
+Three actions are ours rather than AshAuthentication's, and all three are
+`forbid_if always()` — no actor may reach any of them:
+
+| Action | What it is for |
+|---|---|
+| `:spend_jti` | Records a redeemed headless two-factor blob (#743) |
+| `:hold_for_second_factor` | Parks a first-factor token while a code is owed (#742) |
+| `:release_second_factor_hold` | Returns it to use once the code lands (#742) |
+
+`KilnCMS.Accounts.PendingSignIn` calls all three with `authorize?: false`,
+because the whole point of both steps is that the caller has **not** finished
+signing in — there is no actor to authorize. **The headless single-use guarantee
+and the #742 hold both depend on that flag**, so a change that tightens
+`authorize?` handling has to keep these calls working.
+
+The domain names them (`spend_pending_sign_in`, `hold_first_factor_token`,
+`release_first_factor_token`) plus `get_stored_token_by_jti`, a by-jti `:read`. A
+name is not an opening here: no policy matches `:read` either, so every one of
+them is refused without the `authorize?: false` only that module passes.
 
 ## Platform accounts — `Organization`, `OrgMembership`, `Role`, `ApiKey`, `Passkey`, `UserIdentity`
 

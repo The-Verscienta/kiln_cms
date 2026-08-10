@@ -7924,6 +7924,11 @@ msgstr "Connectez-vous avec l'empreinte digitale, le visage ou le code PIN de vo
 msgid "Sign out"
 msgstr "Se déconnecter"
 
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Sign-in could not be completed right now. Try again in a moment."
+msgstr "La connexion n’a pas pu être finalisée pour le moment. Réessayez dans un instant."
+
 #: lib/kiln_cms_web/controllers/passkey_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Signed in with a passkey."

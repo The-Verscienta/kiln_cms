@@ -7924,6 +7924,11 @@ msgstr "Inicie sesión con la huella, el rostro o el PIN de su dispositivo en lu
 msgid "Sign out"
 msgstr "Cerrar sesión"
 
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Sign-in could not be completed right now. Try again in a moment."
+msgstr "No se pudo completar el inicio de sesión en este momento. Inténtelo de nuevo en unos instantes."
+
 #: lib/kiln_cms_web/controllers/passkey_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Signed in with a passkey."

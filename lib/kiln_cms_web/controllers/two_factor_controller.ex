@@ -38,6 +38,10 @@ defmodule KilnCMSWeb.TwoFactorController do
       five-minute lifetime, and the four steps that turn it back into a user.
       This gate differs only in passing `:session`, because its blob lives in
       the session rather than in the client's hands.
+
+      It also owns the hold on the first-factor token (#742) — taken at the mint
+      and released by `claim/1` — which is why this gate calls `claim/1` at all,
+      when the single use a `:session` blob needs is the deleted session key.
     * `KilnCMS.Accounts.SecondFactor.check/2` owns charge → verify → forgive,
       so the ordering `AccountThrottle` depends on cannot be got wrong at one
       call site and right at the other.
@@ -60,8 +64,16 @@ defmodule KilnCMSWeb.TwoFactorController do
   end
 
   def create(conn, %{"code" => code}) do
-    with {:ok, %{user: user, remember_me?: remember_me?}} <- pending(conn),
-         {:ok, user} <- SecondFactor.check(user, code) do
+    with {:ok, %{user: user, remember_me?: remember_me?} = resolved} <- pending(conn),
+         {:ok, user} <- SecondFactor.check(user, code),
+         # In the `with`, not beside it, and for the headless gate's reason
+         # (#743) plus one of this door's own (#742): claiming releases the
+         # first-factor token `mint/4` held, and a session established on a token
+         # still parked in the store is a sign-in that answers 401 on its very
+         # next request. The `:session` blob's single use is still the deleted
+         # session key — the claim half of this is a no-op here — but the release
+         # half is the same on both doors, which is the point of sharing it.
+         :ok <- PendingSignIn.claim(resolved) do
       conn
       # Record that THIS session was established with a recovery code (#786), so
       # a later re-enrolment on /editor/settings can promote a fresh TOTP secret
@@ -79,9 +91,31 @@ defmodule KilnCMSWeb.TwoFactorController do
       |> then(&if remember_me?, do: AuthController.put_remember_me(&1, user), else: &1)
       |> AuthController.complete_sign_in(user, gettext("You are now signed in"))
     else
-      :error ->
+      # `:taken` joins it (#742): a `:session` blob never reports it, so reaching
+      # it means the pending state was somehow redeemed elsewhere, and the
+      # exchange is over either way.
+      answer when answer in [:error, :taken] ->
         # Pending token missing/expired — restart from sign-in.
         redirect(conn, to: ~p"/sign-in")
+
+      # The release could not be recorded, so the token this session would be
+      # established on is still parked. Not `/sign-in`: the code was right and
+      # the `:session` blob is still good (its claim half is a no-op), so the
+      # honest answer is to try this again — the same one the headless gate
+      # gives as a 503.
+      #
+      # One thing it costs, and it is worth knowing rather than hiding: a
+      # *recovery* code is already spent by the time we get here, because
+      # `SecondFactor.check/2` burns it on a successful verify. Retrying with
+      # the same one will be refused. That is the price of any failure point
+      # after the check, and moving the burn later would mean a code that
+      # verified twice — which is the thing recovery codes must not do.
+      :unavailable ->
+        render_form(
+          conn,
+          503,
+          gettext("Sign-in could not be completed right now. Try again in a moment.")
+        )
 
       # `SecondFactor.check/2` has already alerted the owner: whoever is here
       # got past a first factor, which is news #478's alert cannot carry (it
