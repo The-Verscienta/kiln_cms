@@ -56,6 +56,31 @@ migration, a rewritten column, a dropped config key).
   cannot publish, and it would be refusing on rules nobody could confirm.
 ### Fixed
 
+- **404 capture no longer evicts real misses before attacker junk** (#920). At
+  the per-org cap a new path evicts the least-requested row, and the tie among
+  equal counts was broken by `last_seen_at` **ascending** — so the oldest
+  one-hit row went first. That is a genuine miss recorded weeks ago, while the
+  rows that caused the cap are the newest and were chosen last: a flood at the
+  `:delivery` bucket's 300/min cleared every real row in under twenty minutes
+  and then held the table, denying the feature the cap exists to keep
+  available. The tie is now broken newest-first, so a flood can only displace
+  itself.
+
+  The eviction read also had no supporting index, so once an org was at the cap
+  every anonymous 404 on a new path seq-scanned and sorted the whole table — up
+  to 5,000 rows, on the public delivery path, against the pool that renders
+  pages. It now has one, and the index's column **directions** match the sort:
+  an all-ascending index leaves Postgres an incremental sort that degenerates
+  into a full sort under exactly the flood this is about.
+
+  The junk filter read only the last dot-separated piece of a path's basename,
+  so `/.env` was dropped while `/.env.local` was recorded — and with it
+  `/.ssh/id_rsa`, `/.aws/credentials`, `/.svn/entries`, `/.DS_Store`,
+  `/.htaccess`, `/wp-admin` and `/actuator/health`, each spending a capped slot
+  on a probe. Any path segment beginning with a dot is now junk, as are the
+  scanner roots; `/wp-content` stays recordable, because after a WordPress
+  migration those misses are real inbound links.
+
 - **The ActivityPub inbox no longer fetches an actor it has no use for** (#966).
   Authenticating an inbound activity needs the sender's key, which lives in the
   sender's actor document, so a ~200-byte unauthenticated POST bought an

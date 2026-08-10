@@ -112,6 +112,49 @@ defmodule KilnCMS.CMS.MissedPathTest do
       assert rows() == []
     end
 
+    # #920. `junk_extension?/1` reads only the last dot-separated piece of the
+    # basename, so `/.env` was dropped while `/.env.local` was recorded —
+    # `"local"` is not a listed extension. One scanner family per line here, and
+    # each one was spending a capped slot.
+    test "drops the dotfile families a last-segment extension check misses" do
+      for path <- [
+            "/.env.local",
+            "/.env.production",
+            "/.ssh/id_rsa",
+            "/.aws/credentials",
+            "/.svn/entries",
+            "/.DS_Store",
+            "/.htaccess",
+            "/nested/.env.local"
+          ] do
+        visit(build_conn(), path)
+      end
+
+      assert rows() == []
+    end
+
+    test "drops the scanner roots that have no content behind them" do
+      for path <- [
+            "/wp-admin",
+            "/wp-admin/setup-config.php",
+            "/wp-includes/x",
+            "/actuator/health"
+          ] do
+        visit(build_conn(), path)
+      end
+
+      assert rows() == []
+    end
+
+    # The counterweight to the rule above: `/wp-content` misses are real inbound
+    # links after a WordPress migration, which is the whole reason this feature
+    # exists. A filter that swallowed them would be worse than no filter.
+    test "keeps /wp-content, which is real inbound traffic after a migration", %{conn: conn} do
+      visit(conn, "/wp-content/uploads/2019/logo-page")
+
+      assert [%{path: "/wp-content/uploads/2019/logo-page"}] = rows()
+    end
+
     test "keeps .html — the legacy paths a static-site migration leaves behind", %{conn: conn} do
       visit(conn, "/about.html")
 
@@ -159,6 +202,72 @@ defmodule KilnCMS.CMS.MissedPathTest do
       assert "/popular" in paths
       assert "/newly-broken" in paths
       refute "/junk" in paths
+    end
+
+    # #920, and the direction is the entire finding. Both rows below have a
+    # count of 1, so the tie-break decides — and it used to be `last_seen_at:
+    # :asc`, which evicts the OLDEST equal-count row. That is the genuine miss
+    # recorded weeks ago, while the rows that caused the cap (an attacker's
+    # fresh junk) are the newest and were chosen last. A flood at the
+    # `:delivery` bucket's 300/min would clear every real row inside twenty
+    # minutes and then hold the table.
+    test "among equal counts it evicts the newest row, not the oldest", %{conn: conn} do
+      visit(build_conn(), "/genuine-old-miss")
+      visit(build_conn(), "/attacker-junk")
+
+      assert length(rows()) == 2
+
+      visit(conn, "/attacker-junk-2")
+
+      paths = Enum.map(rows(), & &1.path)
+      assert "/genuine-old-miss" in paths
+      assert "/attacker-junk-2" in paths
+      refute "/attacker-junk" in paths
+    end
+  end
+
+  # #920. At the cap, every 404 on a new path runs the eviction read — on the
+  # public, unauthenticated delivery path, against the pool that renders pages.
+  # Unindexed that is a seq scan plus a top-N sort of the whole capped table.
+  describe "the eviction index" do
+    # `enable_seqscan = off` because the test table is tiny and Postgres would
+    # rightly scan it; the question here is not what the planner prefers today
+    # but whether the index CAN serve this sort at all, which is a property of
+    # the column directions and nothing else.
+    defp eviction_plan do
+      KilnCMS.Repo.query!("SET enable_seqscan = off")
+
+      %{rows: rows} =
+        KilnCMS.Repo.query!("""
+        EXPLAIN SELECT id FROM missed_paths
+        WHERE org_id = '00000000-0000-0000-0000-000000000000'
+        ORDER BY count ASC, last_seen_at DESC LIMIT 1
+        """)
+
+      Enum.map_join(rows, "\n", &List.first/1)
+    end
+
+    test "serves the eviction sort with no sort node at all" do
+      plan = eviction_plan()
+
+      assert plan =~ "missed_paths_eviction_index"
+
+      # The assertion that would have caught the first version of this index.
+      # It was all-ascending while the sort is `count ASC, last_seen_at DESC`,
+      # and a btree is walked forward or backward as a whole — so the plan was
+      # `Incremental Sort -> Index Scan`. Harmless-looking, and exactly wrong in
+      # the case that matters: under a flood nearly every row has `count = 1`,
+      # so the first group is nearly the whole table.
+      refute plan =~ "Sort"
+    end
+
+    # The SQL above is hand-written, so it can drift from what `evict/1` asks
+    # for and keep passing while the real query goes back to scanning. This
+    # pins the two together.
+    test "and the directions it is built for are the ones evict/1 sorts by" do
+      source = File.read!("lib/kiln_cms_web/missed_path_tracking.ex")
+
+      assert source =~ "sort(count: :asc, last_seen_at: :desc)"
     end
   end
 

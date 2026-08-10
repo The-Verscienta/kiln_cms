@@ -6225,8 +6225,8 @@ msgstr "Modèle d'alias de chemin (facultatif)"
 
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
-msgid "Paths visitors asked for that nothing on the site could serve, most-requested first. Counters only — no IPs, no user agents. Rows are dropped %{days} days after they were last hit, and obvious vulnerability probing is never recorded."
-msgstr "Chemins demandés par les visiteurs que rien sur le site n'a pu servir, les plus demandés en premier. Uniquement des compteurs : ni adresses IP, ni agents utilisateurs. Les lignes sont supprimées %{days} jours après la dernière requête, et les sondages de vulnérabilités évidents ne sont jamais enregistrés."
+msgid "Paths visitors asked for that nothing on the site could serve, most-requested first. Counters only — no IPs, no user agents. Rows are dropped %{days} days after they were last hit, and common vulnerability probing — dotfiles, scanner roots, script and asset extensions — is filtered out before it is recorded."
+msgstr "Chemins demandés par les visiteurs que rien sur le site n'a pu servir, les plus demandés en premier. Uniquement des compteurs : ni adresses IP, ni agents utilisateurs. Les lignes sont supprimées %{days} jours après la dernière requête, et les sondages de vulnérabilités courants — fichiers cachés, racines de scanners, extensions de scripts et de ressources — sont filtrés avant d'être enregistrés."
 
 #: lib/kiln_cms_web/live/account_live.ex
 #, elixir-autogen, elixir-format
