@@ -158,7 +158,11 @@ self.addEventListener("push", (event) => {
     // reviewer would never learn the second thing happened.
     tag: data.tag || "kiln",
     renotify: false,
-    icon: "/images/app-icon-192.png",
+    // Per-org app icon when the payload carries one (#1146 / #629). The worker
+    // is static and has no tenant, so branding arrives on the encrypted JSON
+    // rather than from a request. Badge stays stock: Android renders it
+    // monochrome, and a full-colour ≥512 square is the wrong asset for that.
+    icon: data.icon || "/images/app-icon-192.png",
     badge: "/images/app-icon-192.png",
     data: {url: data.url || "/editor"}
   }
