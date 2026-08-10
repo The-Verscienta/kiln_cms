@@ -447,6 +447,7 @@ defmodule KilnCMS.Experiments.LifecycleTest do
 
       ExperimentFixtures.variant!(earlier, "Control", %{}, ctx.org_id, control: true)
       ExperimentFixtures.variant!(earlier, "B", %{}, ctx.org_id, [])
+
       {:ok, earlier} =
         Experiments.start_experiment(earlier, authorize?: false, tenant: ctx.org_id)
 
