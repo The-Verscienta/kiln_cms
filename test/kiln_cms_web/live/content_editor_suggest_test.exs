@@ -226,6 +226,68 @@ defmodule KilnCMSWeb.ContentEditorSuggestTest do
       assert html =~ "Suggest with AI"
     end
 
+    # `any?`, not `all?`: each card is accepted on its own (`seo_accept` writes
+    # exactly one attribute), so an editor granted one SEO field can take that
+    # card and save cleanly. Hiding the panel from them would be the same bug
+    # in the opposite direction.
+    test "an editor granted one of the SEO fields still gets the control", %{conn: conn} do
+      enable_stub()
+      editor = authed_user(:editor, %{field_grants: %{"page" => ["seo_title"]}})
+
+      {_lv, html} = open_editor(conn, editor, page(authed_user(:admin)))
+
+      assert html =~ "Suggest with AI"
+    end
+
+    # …and the card they may NOT write is refused at accept time, not left to
+    # be rejected by the save. The panel being hidden is not the boundary: a
+    # queued or replayed `seo_accept` arrives regardless.
+    test "accepting a card outside the grant does not touch the form", %{conn: conn} do
+      enable_stub()
+      editor = authed_user(:editor, %{field_grants: %{"page" => ["seo_title"]}})
+
+      {lv, _html} = open_editor(conn, editor, page(authed_user(:admin)))
+
+      render_click(lv, "seo_suggest", %{})
+      render_async(lv, 2_000)
+
+      before = field_value(lv, "seo_description")
+      render_click(lv, "seo_accept", %{"field" => "seo_description"})
+
+      assert field_value(lv, "seo_description") == before
+    end
+
+    # `may_write_fields?/4` calls `ContentTypes.type_name_for/1` with a RECORD,
+    # where the change calls it with a changeset. For a dynamic type those are
+    # different clauses, and resolving to "entry" instead of the type's own name
+    # would read as no restriction and open the gate for every dynamic type.
+    test "a dynamic type resolves its own name, not \"entry\"", %{conn: conn} do
+      enable_stub()
+      admin = authed_user(:admin)
+
+      definition =
+        KilnCMS.CMS.create_type_definition!(
+          %{name: "recipe#{System.unique_integer([:positive])}", label: "Recipe"},
+          actor: admin
+        )
+
+      entry =
+        KilnCMS.CMS.ContentTypes.create!(
+          definition.name,
+          %{title: "Soup", slug: "soup-#{System.unique_integer([:positive])}"},
+          actor: admin
+        )
+
+      # Granted under the DYNAMIC type's name — if the gate resolved "entry"
+      # this would read as "no grant for entry" and wrongly show the control.
+      editor = authed_user(:editor, %{field_grants: %{definition.name => ["title"]}})
+
+      {:ok, _lv, html} =
+        conn |> log_in(editor) |> live(~p"/editor/content/#{definition.name}/#{entry.id}")
+
+      refute html =~ "Suggest with AI"
+    end
+
     # The content-intelligence section is the same shape as Suggest and was
     # missing the same guard (#916): "Analyze content" is an unbounded
     # `list_tags!` plus an embedding per unapplied tag on a cold 6h cache, and

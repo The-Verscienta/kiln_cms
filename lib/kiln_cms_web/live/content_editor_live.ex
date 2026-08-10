@@ -629,6 +629,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
         @seo_suggestion_fields
       )
     )
+    |> assign(
+      :may_assist_blocks?,
+      may_write_fields?(record, socket.assigns.actor, socket.assigns.current_org, ["blocks"])
+    )
     |> assign(:form, build_form(record, socket.assigns.actor))
     |> refresh_tag_index()
     |> seed_block_children(record)
@@ -665,10 +669,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Getting that wrong in the other direction would hide the control from an
   # admin who happens to carry a `field_grants` entry.
   defp may_write_fields?(record, actor, org, fields) do
+    Enum.any?(fields, &field_granted?(record, actor, org, &1))
+  end
+
+  # One field. `may_write_fields?/4` is `any?` over these rather than `all?`
+  # because each suggestion is accepted on its own (`seo_accept` writes exactly
+  # one attribute) — an editor granted `seo_title` alone can take that card and
+  # save cleanly, so hiding the whole panel from them would be a second bug in
+  # the opposite direction. The per-card accept re-checks with this.
+  defp field_granted?(record, actor, org, field) do
     if Scoping.effective_tier(actor, org) == :editor do
       case Scoping.field_grant(actor, org, ContentTypes.type_name_for(record)) do
         nil -> true
-        allowed -> Enum.all?(fields, &(&1 in allowed))
+        allowed -> field in allowed
       end
     else
       true
@@ -3462,6 +3475,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
         @seo_suggestion_fields
       )
     )
+    |> assign(
+      :may_assist_blocks?,
+      may_write_fields?(record, socket.assigns.actor, socket.assigns.current_org, ["blocks"])
+    )
     |> assign(:slug_customized?, slug_customized?(socket))
   end
 
@@ -4055,10 +4072,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp suggested_fields(nil), do: []
 
   defp suggested_fields(draft) do
-    Enum.filter(
-      ~w(seo_title seo_description seo_keywords),
-      &(suggested_value(draft, &1) not in [nil, ""])
-    )
+    Enum.filter(@seo_suggestion_fields, &(suggested_value(draft, &1) not in [nil, ""]))
   end
 
   defp suggested_value(nil, _field), do: nil
@@ -4099,6 +4113,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
       field_locked?(locked_fields(socket), field) ->
         {socket, :locked}
+
+      # Re-checked per card, not just at generation time (#868): the panel is
+      # hidden when the grant narrows mid-session, but a queued or replayed
+      # `seo_accept` still arrives — and writing the value would schedule an
+      # autosave the change then refuses on that exact field.
+      not field_granted?(
+        socket.assigns.record,
+        socket.assigns.actor,
+        socket.assigns.current_org,
+        field
+      ) ->
+        {socket, :not_permitted}
 
       true ->
         params = socket.assigns.form |> AshPhoenix.Form.params() |> Map.put(field, value)
@@ -4246,8 +4272,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # Same write-authorization boundary as `seo_suggest` (#550): block assist
     # also bills an org LLM run, so read access to the record must not be
     # enough to spend it. Refused server-side, not just hidden.
+    # …and the grant, for the same reason `seo_suggest` needs it (#868):
+    # assist bills its own budget and writes prose into a block, so a
+    # `blocks`-less grant means a billed run whose result the save refuses.
     socket.assigns.assist_enabled? and
       socket.assigns.may_write? and
+      socket.assigns.may_assist_blocks? and
       not socket.assigns.assist_running? and
       socket.assigns.assist_block == block_id and
       not is_nil(assist_block_form(socket.assigns.form, block_id))
@@ -7685,7 +7715,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
                             matches on `data-block-id`, so a block without one
                             has nothing to deliver to. --%>
                       <.assist_panel
-                        :if={@assist_enabled? and @may_write? and bf[:id].value}
+                        :if={
+                          @assist_enabled? and @may_write? and @may_assist_blocks? and bf[:id].value
+                        }
                         block_id={bf[:id].value}
                         open?={@assist_block == bf[:id].value}
                         action={@assist_action}

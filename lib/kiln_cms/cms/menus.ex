@@ -137,7 +137,7 @@ defmodule KilnCMS.CMS.Menus do
   # and `MapSet.put/2` below — and OTP 29's dialyzer reads that as an opacity
   # violation. `.tool-versions` records why that matters: CI runs OTP 27, whose
   # opacity checking is weaker, so this class is invisible there and only a
-  # local `mix dialyzer` catches it. A chain here is `max_depth()` long when the
+  # local `mix dialyzer` catches it. A chain here is `MenuItem.max_depth()` long when the
   # data is sound and terminates on the revisit when it is not, so a linear
   # membership test costs nothing worth a MapSet.
   defp rooted?(%{parent_id: nil}, _by_id, _seen), do: true
