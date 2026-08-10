@@ -2691,6 +2691,40 @@ defmodule KilnCMSWeb.ContentEditorLive do
      |> put_flash(:info, gettext("Reloaded the latest version."))}
   end
 
+  # Somebody published this document while a collab room was open (#1061). The
+  # publish carried the room's converged prose into its own write, so nothing
+  # typed up to that point is lost — but from here nothing persists: this
+  # client stops autosaving on a non-draft (`mark_dirty/1`), and the server
+  # checkpoint is refused by `:autosave`'s draft-only filter. So reload onto the
+  # published record and say what happened, rather than leaving the editor
+  # typing into a doc that is going nowhere.
+  #
+  # Idempotent: every rich-text block on the page hears the browser event, so
+  # this arrives once per block.
+  def handle_event("collab_published", _params, socket) do
+    if socket.assigns.record.state == :published do
+      {:noreply, socket}
+    else
+      record =
+        fetch!(
+          socket.assigns.kind,
+          socket.assigns.record.id,
+          socket.assigns.actor,
+          socket.assigns.current_org
+        )
+
+      {:noreply,
+       socket
+       |> assign_record(record)
+       |> reset_editors()
+       |> assign(:save_state, :saved)
+       |> put_flash(
+         :info,
+         gettext("This was published. Your collaborative edits were saved with it.")
+       )}
+    end
+  end
+
   def handle_event("workflow", %{"action" => action}, socket) when is_binary(action) do
     {:noreply, run_workflow(socket, action)}
   end

@@ -8997,6 +8997,11 @@ msgstr "El vocabulario de este sitio"
 msgid "This unsubscribe link is invalid."
 msgstr "Este enlace para darse de baja no es válido."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "This was published. Your collaborative edits were saved with it."
+msgstr "Esto se publicó. Tus ediciones colaborativas se guardaron con ello."
+
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "Thu"

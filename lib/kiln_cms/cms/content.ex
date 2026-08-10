@@ -1897,6 +1897,11 @@ defmodule KilnCMS.CMS.Content do
           # author has been reading.
           validate KilnCMS.CMS.Validations.ComplianceClaims
           change filter(expr(^ref(:state) == :draft or ^ref(:state) == :in_review))
+          # Before the state changes, and therefore before `:autosave`'s
+          # draft-only filter can refuse the room's checkpoint: an open collab
+          # session's prose rides in on this write or is lost with the DocServer
+          # (#1061). No-op when nobody is editing.
+          change KilnCMS.CMS.Changes.CheckpointCollabRoom
           change transition_state(:published)
           change set_attribute(:published_at, &DateTime.utc_now/0)
           change KilnCMS.CMS.Changes.RecordPublishedVersion

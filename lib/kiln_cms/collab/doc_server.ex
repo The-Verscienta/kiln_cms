@@ -53,6 +53,15 @@ defmodule KilnCMS.Collab.Crdt.DocServer do
   def apply_update(server, update) when is_binary(update),
     do: GenServer.call(server, {:apply_update, update})
 
+  @doc """
+  `record`'s blocks with this room's converged prose merged in, without writing.
+
+  Runs inside the server so the `Yex.Doc` is read by the process that owns it.
+  """
+  @spec converged_blocks(GenServer.server(), struct()) :: [map()]
+  def converged_blocks(server, record),
+    do: GenServer.call(server, {:converged_blocks, record})
+
   @doc "The whole doc encoded as a single Yjs update."
   @spec state_update(pid()) :: binary()
   def state_update(server), do: GenServer.call(server, :state_update)
@@ -94,6 +103,13 @@ defmodule KilnCMS.Collab.Crdt.DocServer do
       :ok -> {:reply, :ok, mark_dirty(state), @idle_shutdown}
       {:error, reason} -> {:reply, {:error, reason}, state, @idle_shutdown}
     end
+  end
+
+  def handle_call({:converged_blocks, record}, _from, state) do
+    state = maybe_restore(state)
+
+    {:reply, KilnCMS.Collab.Crdt.Checkpoint.materialize_blocks(record, state.doc), state,
+     @idle_shutdown}
   end
 
   def handle_call(:state_update, _from, state) do

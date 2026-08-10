@@ -25,6 +25,13 @@ defmodule KilnCMS.Collab.Crdt.Checkpoint do
   Nothing here can prevent that (the publish already snapshotted whatever the
   record held), but it must not be reported as a successful no-op. `save/2`
   re-reads the row to tell the two apart and warns loudly for the second.
+
+  Since #1061 the publish path takes the prose with it —
+  `KilnCMS.CMS.Changes.CheckpointCollabRoom` asks this module for the room's
+  converged blocks *before* the state changes and publishes those — so the loud
+  case should no longer be reachable by that route. The warning stays for every
+  other route to it, and because "should no longer be reachable" is a claim
+  worth keeping instrumented rather than assumed.
   """
   require Logger
 
@@ -47,7 +54,7 @@ defmodule KilnCMS.Collab.Crdt.Checkpoint do
          {:ok, %{state: :draft} = record} <-
            ContentTypes.get_record(ct, id, authorize?: false, tenant: tenant) do
       current = Enum.map(record.blocks, &TypedBlocks.input_map/1)
-      materialized = Enum.map(record.blocks, &materialize_block(&1, doc))
+      materialized = materialize_blocks(record, doc)
 
       if materialized == current do
         :ok
@@ -61,6 +68,18 @@ defmodule KilnCMS.Collab.Crdt.Checkpoint do
   end
 
   def write_back(_other_key, _doc, _tenant), do: :ok
+
+  @doc """
+  `record`'s blocks with every collaboratively-edited rich-text body replaced by
+  what `doc` currently holds — as create/update input maps, not stored unions.
+
+  Split out of `write_back/3` so the publish path can ask what a live room holds
+  *without* writing it (#1061). That caller cannot use `write_back/3`: it needs
+  the prose to travel in the publish's own changeset, because a separate write
+  would bump `lock_version` and make the publish that follows it stale.
+  """
+  @spec materialize_blocks(struct(), Yex.Doc.t()) :: [map()]
+  def materialize_blocks(record, doc), do: Enum.map(record.blocks, &materialize_block(&1, doc))
 
   defp materialize_block(%Ash.Union{type: :rich_text} = block, doc) do
     input = TypedBlocks.input_map(block)
