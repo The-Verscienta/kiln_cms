@@ -54,6 +54,7 @@ migration, a rewritten column, a dropped config key).
   the operator config and the **publish gate is forced off**: that is the one
   axis where guessing wrong turns a transient read error into a site that
   cannot publish, and it would be refusing on rules nobody could confirm.
+
 ### Fixed
 
 - **The ActivityPub inbox no longer fetches an actor it has no use for** (#966).
@@ -70,6 +71,44 @@ migration, a rewritten column, a dropped config key).
   record's payload into a new draft, and both were the only write affordances in
   the editor with no `may_write?` gate; both handlers now refuse server-side as
   well, so a replayed event cannot reach the copy. (#922)
+
+### Security
+
+- **An abandoned two-factor sign-in no longer leaves a usable token behind**
+  (#742). `KilnCMS.Accounts.User` sets `store_all_tokens?`, so the first-factor
+  JWT is minted **and inserted into `tokens`** by the sign-in strategy — before
+  either gate has looked at `totp_enabled?`. #726 withheld the caller's *access*
+  to that token; it did not withhold the token. A sign-in that stopped at the
+  code prompt left a live, usable row that nobody held, for the JWT's full
+  lifetime, and a stuffed password for a 2FA account was enough to write one per
+  attempt. #761 bounded the rate; the rows were still real credentials that a
+  later tokens-table read, database backup or `secret_key_base` compromise would
+  have upgraded a password-only position into.
+
+  `KilnCMS.Accounts.PendingSignIn.mint/4` now **holds** that row for the length
+  of the step: it moves to a `pending_second_factor` purpose and its expiry
+  shortens to six minutes. AshAuthentication requires a row under the `user`
+  purpose to authenticate a JWT
+  (`require_token_presence_for_authentication?`), so from that instant the token
+  authenticates nothing, wherever it is — and an exchange that is never finished
+  leaves an inert row the nightly `:expunge_expired` collects, rather than a live
+  one that outlives the attempt by weeks. `claim/1` releases it, with the
+  expiry the JWT itself carries, once a code verifies.
+
+  Both doors, one code path — the browser prompt now calls `claim/1` too, which
+  is the only reason it needs to: a session blob's single use is still the
+  deleted session key. Held rather than revoked, because the exchange may still
+  complete, and both halves carry their expected purpose in the UPDATE's own
+  WHERE — so a revocation landing between the caller's read and the write is not
+  overwritten, and a token revoked mid-window by a password change
+  (`log_out_everywhere`) or an account erasure is not resurrected by a late
+  redemption.
+
+  A hold that cannot be written logs and carries on — the result is exactly the
+  old behaviour, and refusing instead would turn a token-store hiccup into "no
+  account with a second factor can sign in". A *release* that cannot be written
+  does fail the sign-in, as a 503 on both doors, because a token still parked in
+  the store is a credential the client cannot use and nothing to say why.
 
 ## [0.5.0] - 2026-08-09
 

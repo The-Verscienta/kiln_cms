@@ -53,7 +53,11 @@ defmodule KilnCMSWeb.BearerAuth do
            {:ok, [_]} <-
              TokenActions.get_token(
                token_resource,
-               %{"jti" => jti, "purpose" => "user"},
+               # Not a literal (#742). This purpose is what the two-factor hold
+               # moves a first-factor row *off*, so a second copy of the string
+               # here is a second place the hold can silently stop meaning
+               # anything.
+               %{"jti" => jti, "purpose" => KilnCMS.Accounts.Token.user_purpose()},
                opts
              ) do
         {:ok, :valid}

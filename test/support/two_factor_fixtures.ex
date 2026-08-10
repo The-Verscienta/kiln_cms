@@ -97,6 +97,27 @@ defmodule KilnCMS.TwoFactorFixtures do
     do: Totp.code_at(secret, System.system_time(:second))
 
   @doc """
+  A real first-factor JWT for `user`, minted **and stored** exactly as the
+  password strategy leaves it (#742).
+
+  A stub string was fine while the pending blob only carried the token around.
+  It stopped being fine when `KilnCMS.Accounts.PendingSignIn.mint/4` began
+  *holding* the stored row: a stub has no row, so a test that mints one exercises
+  the "nothing to hold" path and would pass with the whole defence deleted. Any
+  test that means to say something about the hold has to start from a token the
+  store has actually seen.
+
+  Returns `{user, token}`, with the token also on `user.__metadata__` — where
+  `mint/4` reads it from when a caller passes no `:token`.
+  """
+  @spec with_first_factor_token(User.t()) :: {User.t(), String.t()}
+  def with_first_factor_token(%User{} = user) do
+    {:ok, token, _claims} = AshAuthentication.Jwt.token_for_user(user)
+
+    {%{user | __metadata__: Map.put(user.__metadata__, :token, token)}, token}
+  end
+
+  @doc """
   Issues recovery codes for `user`, returning `{user, codes}`.
 
   Seeded rather than generated through the action, like the rest of this module:

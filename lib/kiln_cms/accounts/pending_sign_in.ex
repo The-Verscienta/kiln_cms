@@ -98,6 +98,36 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   Spending is deliberately **not** done on a wrong code or a spent budget. The
   caller has not failed authentication there, and destroying their pending state
   would turn "that code isn't valid" into "start over".
+
+  ## The token it carries is withheld from the store too (#742)
+
+  `User` sets `store_all_tokens?`, so the first-factor JWT is minted **and
+  inserted into `tokens`** by `AshAuthentication.Strategy.action/3` — before
+  either controller has looked at `totp_enabled?`. What the second factor used to
+  withhold was the caller's *access* to that token, not its existence: a sign-in
+  abandoned at the code prompt left a live, usable row that nobody held, for the
+  JWT's full lifetime — fourteen days, AshAuthentication's default, since nothing
+  here narrows `tokens.token_lifetime`. #761 bounded how many an attacker could
+  cause by looping the password step; it did not stop them existing.
+
+  So `mint/4` **holds** the token as it wraps it — `hold_for_second_factor` moves
+  the row off the `"user"` purpose that AshAuthentication's own
+  `validate_token/3` requires of anything it authenticates, and shortens its
+  expiry to the length of this step. From that instant the JWT authenticates
+  nothing, wherever it is, and an exchange that is never finished leaves a row
+  that is inert immediately and collected by the nightly `:expunge_expired`
+  rather than one that is live for a fortnight. `claim/1` puts it back.
+
+  Two asymmetries, both deliberate:
+
+    * A hold that cannot be taken does **not** fail the sign-in. It logs and
+      carries on, because the result is exactly the pre-#742 behaviour, and
+      refusing instead would turn a token-store hiccup into "no account with a
+      second factor can sign in".
+    * A release that cannot be *recorded* **does** fail it, as `:unavailable`.
+      Handing back a token whose row is still parked would be a 201 the client
+      cannot use, and every subsequent request answering 401 with nothing to say
+      why is a far worse trade than one honest "try again in a moment".
   """
 
   alias KilnCMS.Accounts
@@ -144,6 +174,12 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   @doc """
   Mint the blob for `user`, who has just passed the first factor.
 
+  Also **holds** the first-factor token in the token store, so it authenticates
+  nothing until `claim/1` releases it — see the moduledoc. That is a side effect
+  on a function named `mint`, and it lives here rather than at the two call sites
+  for the reason the whole module exists: a defence written twice is a defence
+  that is eventually only on one door.
+
   Options:
 
     * `:token` — the first-factor JWT to carry. Defaults to
@@ -156,10 +192,13 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   @spec mint(mode(), context(), Accounts.User.t(), keyword()) :: String.t()
   def mint(mode, context, user, opts \\ []) when is_map_key(@modes, mode) do
     %{jti?: jti?, remember_me?: carries_remember_me?} = Map.fetch!(@modes, mode)
+    token = Keyword.get_lazy(opts, :token, fn -> user.__metadata__.token end)
+
+    hold_first_factor(token)
 
     %{
       "user_id" => user.id,
-      "token" => Keyword.get_lazy(opts, :token, fn -> user.__metadata__.token end)
+      "token" => token
     }
     # Names this attempt so redeeming it can be recorded without keeping the
     # ciphertext, which is long and would key the cache on a secret.
@@ -214,13 +253,15 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   def resolve(mode, _context, _blob) when is_map_key(@modes, mode), do: :error
 
   @doc """
-  Claim this attempt, so the blob cannot be redeemed again.
+  Complete this attempt: release the first-factor token `mint/4` held, and claim
+  the blob so it cannot be redeemed again.
 
-    * `:ok` — this caller got it.
+    * `:ok` — this caller got it, and the token it holds now authenticates.
     * `:taken` — someone else already did. The exchange is over.
-    * `:unavailable` — the claim could not be recorded. **Not** the same answer:
-      the blob may well still be redeemable, and telling the caller to start
-      again would be wrong advice as well as a wasted sign-in attempt.
+    * `:unavailable` — the release or the claim could not be recorded. **Not**
+      the same answer: the blob may well still be redeemable, and telling the
+      caller to start again would be wrong advice as well as a wasted sign-in
+      attempt.
 
   **The return value is the single-use guarantee, and a caller that ignores it
   has none.** The row's primary key is the `jti`, so two concurrent redemptions
@@ -231,16 +272,56 @@ defmodule KilnCMS.Accounts.PendingSignIn do
 
   Called once the code has verified, never on resolve: a wrong code or a spent
   budget is not a failed authentication, and spending the blob there would turn
-  "that code isn't valid" into "start over".
+  "that code isn't valid" into "start over". That ordering is also what makes
+  the release safe — nothing puts a held token back without a code.
+
+  ## Claim first, release second
+
+  This order is chosen for its failure case, and the other order was written
+  first and was wrong. Releasing first is friendlier when the release fails — the
+  blob is unspent, so "try again in a moment" is true advice — but it fails in
+  the wrong direction when the *claim* then fails: the token is already back
+  under `"user"` with its full natural expiry, the caller is refused, and nobody
+  holds it. That is #742 verbatim, re-created by the code that closes it.
+
+  Claiming first cannot do that. A release that fails leaves the token parked,
+  which is the safe state; the caller is told `:unavailable`, and a retry of a
+  spent blob answers `:taken` and sends them back to the password step. One
+  wasted round trip in a rare double failure, against re-opening the hole in a
+  single one.
+
+  A caller that loses the claim race never reaches the release at all, so only
+  the winner ever moves the row.
+
+  The release is filtered on the hold purpose **in the UPDATE's own WHERE**,
+  which is what keeps it from resurrecting a token revoked in between: a password
+  change fires `log_out_everywhere` and an erasure fires `AnonymizeUser`, both of
+  which sweep every row the subject owns — held ones included — to
+  `"revocation"`, and a release then matches nothing. It is a release, not an
+  unconditional restore, and the database is what enforces that rather than the
+  row this module happened to read a moment earlier.
+
+  (Sign-out revokes too — `clear_session/2` runs
+  `AshAuthentication.Plug.Helpers.revoke_session_tokens/3` — but only the token
+  carried in *that* session, and a browser waiting at the code prompt is not
+  signed in and carries none. So it is the two sweeps above that can reach a
+  held row.)
 
   A `nil` `jti` is a `:session` blob, whose single use is the deleted session
-  key — so this is `:ok` rather than an error, and a caller can claim what it
-  resolved without asking which door it came through. The clause matches `nil`
-  specifically: a `:encrypted` blob that somehow reached here *without* a jti is
-  a bug, and answering `:ok` to it would report a claim that never happened.
+  key — so the claim half is `:ok` rather than an error, and a caller can claim
+  what it resolved without asking which door it came through. The clause matches
+  `nil` specifically: a `:encrypted` blob that somehow reached here *without* a
+  jti is a bug, and answering `:ok` to it would report a claim that never
+  happened. The release half is the same for both doors.
   """
   @spec claim(t()) :: :ok | :taken | :unavailable
-  def claim(%__MODULE__{jti: jti, user: %Accounts.User{} = user}) when is_binary(jti) do
+  def claim(%__MODULE__{user: %Accounts.User{__metadata__: metadata}} = pending) do
+    with :ok <- record_spend(pending) do
+      release_first_factor(Map.get(metadata, :token))
+    end
+  end
+
+  defp record_spend(%__MODULE__{jti: jti, user: %Accounts.User{} = user}) when is_binary(jti) do
     # `authorize?: false` because there is no actor to authorize: the whole
     # point of this step is that the caller has *not* finished signing in. The
     # action is `forbid_if always()` so nothing else can reach it.
@@ -265,7 +346,7 @@ defmodule KilnCMS.Accounts.PendingSignIn do
     end
   end
 
-  def claim(%__MODULE__{jti: nil}), do: :ok
+  defp record_spend(%__MODULE__{jti: nil}), do: :ok
 
   # The conflict Postgres raises when the blob has already been claimed. Ash
   # surfaces the primary key's implicit unique constraint as an invalid-changes
@@ -274,6 +355,163 @@ defmodule KilnCMS.Accounts.PendingSignIn do
     do: Enum.any?(errors, &match?(%{field: :jti}, &1))
 
   defp already_claimed?(_other), do: false
+
+  # #742. Park the first-factor token for the length of this step.
+  #
+  # Fail-soft, and that means catching **raises** as well as `{:error, _}`: the
+  # store is reached over a connection pool, and a checkout failure arrives as an
+  # exception rather than a tuple. Left to travel it would 500 a password step
+  # that had already succeeded — which is the outcome the moduledoc's first
+  # asymmetry exists to rule out, arriving by a route the tuple-only version did
+  # not cover.
+  @spec hold_first_factor(term()) :: :ok
+  defp hold_first_factor(token) do
+    case stored_token(token, [
+           Accounts.Token.user_purpose(),
+           Accounts.Token.second_factor_hold_purpose()
+         ]) do
+      {:ok, record} ->
+        case Accounts.hold_first_factor_token(record, %{}, authorize?: false) do
+          {:ok, _held} -> :ok
+          {:error, error} -> log_hold_failure(Exception.message(error))
+        end
+
+      # A token we could read a jti out of was minted by the strategy and
+      # therefore should have a row, so its absence is the defence quietly not
+      # running and has to say so: every way this degrades (an AshAuthentication
+      # purpose change, `store_all_tokens?` turned off, this resource
+      # regenerated by the installer) looks exactly like an ordinary sign-in
+      # otherwise.
+      :none ->
+        log_hold_failure("no stored row for it")
+
+      # Not a JWT at all — a fixture, a fabricated payload. There was never a
+      # row, so this is silent rather than an anomaly.
+      :no_token ->
+        :ok
+
+      :error ->
+        log_hold_failure("the token store could not be read")
+    end
+  rescue
+    error -> log_hold_failure(Exception.message(error))
+  end
+
+  defp log_hold_failure(detail) do
+    Logger.error("could not hold a first-factor token: #{detail}")
+    :ok
+  end
+
+  # The other half, and the one that fails **closed**: everything short of "this
+  # token is now usable" answers `:unavailable`, because the alternative is a 201
+  # (or a session) carrying a credential that is still parked, whose only symptom
+  # is a 401 on every subsequent request with nothing logged.
+  @spec release_first_factor(term()) :: :ok | :unavailable
+  defp release_first_factor(token) do
+    case stored_token(token, [Accounts.Token.second_factor_hold_purpose()]) do
+      {:ok, record} ->
+        case Accounts.release_first_factor_token(record, %{token: token}, authorize?: false) do
+          {:ok, _released} -> :ok
+          {:error, error} -> log_release_failure(Exception.message(error))
+        end
+
+      # Nothing held under that purpose, and what to make of it turns on whether
+      # a row exists at all — absence is not evidence.
+      #
+      # A row that exists and is not usable is evidence: it was revoked in the
+      # window, or the hold outlived its own `expires_at` and is invisible to
+      # `get_token`'s `expires_at > now()` filter. Either way this token cannot
+      # authenticate, and reporting it released hands the caller a 201 whose only
+      # symptom is a 401 on every request after it.
+      #
+      # NO row is not evidence of anything. It is what a deployment looks like
+      # when the assumption underneath all of this stops holding —
+      # `store_all_tokens?` turned off, an AshAuthentication purpose renamed,
+      # this resource regenerated by the installer — and refusing there would
+      # turn that into "no account with a second factor can sign in", which is
+      # precisely the outcome the hold's fail-soft half exists to rule out. The
+      # two halves have to answer the same fault the same way, or the fail-soft
+      # one is decorative.
+      :none ->
+        if stored_row_exists?(token),
+          do: log_release_failure("it is not held and not usable"),
+          else: :ok
+
+      # Not a JWT at all, so nothing was ever held and there is nothing to put
+      # back. Symmetric with the hold, and silent for the same reason.
+      :no_token ->
+        :ok
+
+      :error ->
+        log_release_failure("the token store could not be read")
+    end
+  rescue
+    error -> log_release_failure(Exception.message(error))
+  end
+
+  defp log_release_failure(detail) do
+    Logger.error("could not release a held first-factor token: #{detail}")
+    :unavailable
+  end
+
+  # Is there a row for this token under any purpose, expired or not? `:get_token`
+  # cannot answer it — it filters `expires_at > now()`, and a lapsed hold is
+  # exactly the case this has to see.
+  defp stored_row_exists?(token) do
+    case Accounts.Token.peeked_jti(token) do
+      jti when is_binary(jti) ->
+        match?(
+          {:ok, %Accounts.Token{}},
+          Accounts.stored_token_exists?(jti, authorize?: false, not_found_error?: false)
+        )
+
+      nil ->
+        false
+    end
+  end
+
+  # The stored row for this JWT under any of `purposes`, in order.
+  #
+  # Four states, not two, because the callers need to tell them apart:
+  #
+  #   * `{:ok, record}` — found it.
+  #   * `:none` — this is a token, and it has no row under those purposes.
+  #   * `:no_token` — not a JWT, so there was never a row to find.
+  #   * `:error` — we could not find out.
+  #
+  # The last two used to be folded into the first. Folding `:error` in is what
+  # let a transient read failure report a token as released when it had not
+  # been; folding `:no_token` in makes a fabricated test token look like a
+  # missing row, which is the anomaly the hold now logs.
+  #
+  # The jti is resolved up front rather than left to `:get_token`'s own `token`
+  # argument, which raises when it cannot peek one.
+  #
+  # `TokenResource.Actions.get_token/3` rather than a domain code interface,
+  # because it is what `KilnCMSWeb.BearerAuth` already uses for this exact
+  # lookup: it stamps the query with AshAuthentication's own context, which the
+  # resource's existing bypass authorizes, so this needs neither a new public
+  # name on the domain nor `authorize?: false`.
+  @spec stored_token(term(), [String.t()]) :: {:ok, struct()} | :none | :no_token | :error
+  defp stored_token(token, purposes) do
+    case Accounts.Token.peeked_jti(token) do
+      jti when is_binary(jti) -> first_row(jti, purposes)
+      nil -> :no_token
+    end
+  end
+
+  defp first_row(_jti, []), do: :none
+
+  defp first_row(jti, [purpose | rest]) do
+    case AshAuthentication.TokenResource.Actions.get_token(
+           Accounts.Token,
+           %{"jti" => jti, "purpose" => purpose}
+         ) do
+      {:ok, [record]} -> {:ok, record}
+      {:ok, _empty} -> first_row(jti, rest)
+      {:error, _reason} -> :error
+    end
+  end
 
   defp wrap(:session, context, payload),
     do: Phoenix.Token.sign(context, salt(:session), payload, max_age: @max_age)

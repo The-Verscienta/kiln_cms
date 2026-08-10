@@ -49,6 +49,32 @@ every sign-in, after the first factor.
   sentence at the top of this page — "a valid code is required at every sign-in"
   — is only now true. API keys remain the recommended credential for unattended
   server-to-server use, and carry no second factor by design.
+- **The first-factor token is held for the length of the step**
+  ([#742](https://github.com/The-Verscienta/kiln_cms/issues/742)). `User` sets
+  `store_all_tokens?`, so the first-factor JWT is minted *and inserted into
+  `tokens`* before either gate has looked at `totp_enabled?`. Withholding the
+  caller's access to it is not the same as withholding the token: an exchange
+  abandoned at the prompt used to leave a live, usable row that nobody held, for
+  the JWT's full lifetime.
+
+  `PendingSignIn.mint/4` therefore moves that row to the `pending_second_factor`
+  purpose and shortens its expiry to the length of this step, and
+  `PendingSignIn.claim/1` puts it back once a code verifies. AshAuthentication
+  requires a row under the `user` purpose to authenticate a JWT
+  (`require_token_presence_for_authentication?`), so in between the token
+  authenticates nothing, wherever it is. Both gates, one code path — which is
+  why the browser prompt calls `claim/1` at all, when the single use a session
+  blob needs is the deleted session key.
+
+  Held rather than revoked, because the exchange may still complete — and the
+  release is filtered on the hold purpose **in the UPDATE's own WHERE**, so a
+  token revoked mid-window is not resurrected by a late redemption even if the
+  revocation lands after the release has read the row. The revokers are
+  `log_out_everywhere` (a password change) and account erasure, which sweep
+  every row a subject owns, held ones included. Sign-out revokes too, but only
+  the token in *that* session — a browser sitting at the code prompt is not
+  signed in and carries none, so signing out elsewhere does not reach a held
+  row.
 - **Where the code is checked:** `KilnCMS.Accounts.SecondFactor.check/2`, for
   both gates, so neither can drift on what counts as a valid submission.
   Whitespace normalization sits one level lower still, in

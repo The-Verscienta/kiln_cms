@@ -344,13 +344,34 @@ build if a resource is ever registered without that authorizer.
     The second factor gates whether the caller ever receives it. Say it that way
     round: "no token is issued" would tell an incident responder that a
     password-alone compromise leaves nothing to revoke, and it leaves something.
-    *Residual:* an abandoned exchange still leaves a live token row nobody
-    holds, for the JWT's natural lifetime. The **rate** is now bounded — #742
-    stopped a password that stops at the code prompt from clearing the
-    per-account sign-in counter, so an attacker gets `@budget` of them per
-    window per account rather than as many as their IP pool allows. Not minting
-    the token until the second factor verifies is the deeper fix and fights
-    `require_token_presence_for_authentication?`; #742 stays open for it.
+
+    Since #742 the row's **use** is withheld too, on both doors.
+    `PendingSignIn.mint/4` moves it to the `pending_second_factor` purpose and
+    shortens its expiry to the length of the step, and `claim/1` puts it back
+    once a code verifies. `AshAuthentication` requires a row under the `user`
+    purpose to authenticate a JWT (`require_token_presence_for_authentication?`),
+    so between the two steps the token authenticates nothing, wherever it is —
+    and an exchange that is never finished leaves an inert row that expires with
+    the step rather than a live credential nobody holds for the JWT's full
+    lifetime. The rate was already bounded: #742's first half stopped a password
+    that stops at the code prompt from clearing the per-account sign-in counter,
+    so an attacker gets `@budget` of them per window per account rather than as
+    many as their IP pool allows.
+
+    Held, not revoked: `:revoke_jti` writes a thousand-year `revocation` row,
+    and the exchange may still complete. The filter cuts the other way too — a
+    release only ever moves a row *off* the hold purpose, and that predicate is
+    in the UPDATE's own WHERE rather than checked against the row the caller
+    read, so a revocation landing mid-release is not overwritten rather than
+    merely usually surviving. `log_out_everywhere` (password change) and account
+    erasure sweep every row a subject owns, held ones included; sign-out revokes
+    only the token held in that session, which a browser waiting at the code
+    prompt does not have.
+
+    *Residual:* a hold that cannot be written does not fail the sign-in — it
+    logs and leaves the pre-#742 behaviour, because refusing instead would turn
+    a token-store hiccup into "no account with a second factor can sign in".
+    The token is still minted; what is closed is that it is usable.
   - The pending blob is **encrypted** (`Phoenix.Token.encrypt/4`), not signed.
     The browser's equivalent can be signed because it lives in the encrypted
     session cookie; this one is handed to the client, and signing it would
