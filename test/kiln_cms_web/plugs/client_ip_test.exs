@@ -165,4 +165,81 @@ defmodule KilnCMSWeb.Plugs.ClientIpTest do
       end
     end
   end
+
+  # `resolve/2` is the socket half of the same rule (#715, #934). `call/2` is a
+  # plug and cannot run on a `/live` handshake, so the endpoint hands the
+  # transport's `:x_headers` and `:peer_data` here instead — and the whole point
+  # of the socket sharing a bucket with the HTTP request that preceded it is
+  # that the two answer identically.
+  #
+  # Nothing pinned it until now. Deleting the `proxies() == []` guard makes
+  # `resolve/2` always believe `X-Forwarded-For`, so every socket sign-in bucket
+  # keys on an attacker-supplied header — rotate the header, rotate the bucket,
+  # unlimited `/sign-in` brute force — and the suite stayed fully green.
+  describe "resolve/2 (the socket half)" do
+    @proxy {10, 0, 0, 1}
+    @client {203, 0, 113, 7}
+    @x_headers [{"x-forwarded-for", "203.0.113.7"}]
+
+    test "with no trusted proxies the header is ignored and the peer stands" do
+      # The default, and the one that protects production.
+      assert ClientIp.resolve(@x_headers, @proxy) == @proxy
+    end
+
+    test "with the peer inside a trusted proxy the forwarded client is used" do
+      trust(["10.0.0.0/8"])
+
+      assert ClientIp.resolve(@x_headers, @proxy) == @client
+    end
+
+    # Worth pinning because it is the opposite of what the name suggests, and I
+    # asserted the wrong thing here first. `RemoteIp`'s `:proxies` names *which
+    # hops to skip while walking the forwarded chain*, not *who is allowed to
+    # forward* — no peer is consulted. So once the list is non-empty the header
+    # is honoured whatever the peer's address, and `TRUSTED_PROXIES` must be set
+    # only on a deployment that really is behind a proxy. Both doors do this, so
+    # the socket is no weaker than the plug; the config is the boundary.
+    test "any non-empty list honours the header, whatever the peer's address" do
+      trust(["192.168.0.0/16"])
+
+      assert ClientIp.resolve(@x_headers, @proxy) == @client
+    end
+
+    # A malformed CIDR degrades to "trust nothing", the same direction `call/2`
+    # fails — a spoofable header is never honoured on the way down.
+    test "a malformed proxy list falls back to the peer" do
+      trust(["not-a-cidr"])
+
+      assert ClientIp.resolve(@x_headers, @proxy) == @proxy
+    end
+
+    test "no header and no peer is nil, not a guess" do
+      trust(["10.0.0.0/8"])
+
+      assert ClientIp.resolve([], nil) == nil
+    end
+
+    # The invariant the docstring states out loud: two copies of "when do we
+    # believe X-Forwarded-For" that drift would give the socket a different
+    # client identity than the HTTP request that preceded it. Asserted as
+    # equality between the two doors, so a change to either alone goes red.
+    test "agrees with call/2 on the same request, trusted and not" do
+      for proxies <- [[], ["10.0.0.0/8"], ["192.168.0.0/16"], ["not-a-cidr"]] do
+        trust(proxies)
+        ClientIp.reset_forwarding_warning()
+
+        plug_answer =
+          capture_log(fn ->
+            send(
+              self(),
+              {:ip, "203.0.113.7" |> forwarded() |> ClientIp.call([]) |> Map.fetch!(:remote_ip)}
+            )
+          end)
+          |> then(fn _log -> receive do: ({:ip, ip} -> ip) end)
+
+        assert ClientIp.resolve(@x_headers, @proxy) == plug_answer,
+               "socket and plug disagreed with trusted_proxies=#{inspect(proxies)}"
+      end
+    end
+  end
 end

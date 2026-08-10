@@ -230,6 +230,61 @@ defmodule KilnCMSWeb.SignInRateLimitTest do
       assert ThrottleSignIn.client_ip_context(ip) == Map.take(form_context, [:kiln_client_ip])
     end
 
+    # #934. `client_conn/1` sets peer and `remote_ip` to the SAME address, so it
+    # cannot express a proxied request — and the socket half of the
+    # trusted-proxy rule (`ClientIp.resolve/2`) had no coverage at all. These
+    # two set them apart and drive the whole chain the endpoint actually uses:
+    # transport `:peer_data` + `:x_headers` → `resolve/2` → `client_key/1` →
+    # the form context the preparation reads.
+    defp proxied_conn(conn, peer, forwarded) do
+      %Plug.Conn{} =
+        conn = Plug.Test.put_peer_data(conn, %{address: peer, port: 111, ssl_cert: nil})
+
+      conn
+      |> Map.put(:remote_ip, peer)
+      |> Plug.Conn.put_req_header("x-forwarded-for", forwarded)
+    end
+
+    test "behind a trusted proxy the form context holds the forwarded client", %{conn: conn} do
+      previous = Application.get_env(:kiln_cms, :trusted_proxies)
+      Application.put_env(:kiln_cms, :trusted_proxies, ["10.0.0.0/8"])
+
+      on_exit(fn ->
+        if previous,
+          do: Application.put_env(:kiln_cms, :trusted_proxies, previous),
+          else: Application.delete_env(:kiln_cms, :trusted_proxies)
+      end)
+
+      conn = proxied_conn(conn, {10, 0, 0, 1}, "203.0.113.7")
+      {:ok, view, _html} = live(conn, ~p"/sign-in")
+
+      form_context = :sys.get_state(view.pid).socket.assigns.context
+
+      assert ThrottleSignIn.client_ip_context(RateLimit.client_key({203, 0, 113, 7})) ==
+               Map.take(form_context, [:kiln_client_ip])
+    end
+
+    # The default, and the one that protects production: with no trusted proxy
+    # the header is attacker-supplied, so the bucket must key on the peer.
+    # Rotating `X-Forwarded-For` otherwise rotates the bucket, and `/sign-in`
+    # has no limit at all.
+    test "with no trusted proxies the form context ignores the header", %{conn: conn} do
+      previous = Application.get_env(:kiln_cms, :trusted_proxies)
+      Application.delete_env(:kiln_cms, :trusted_proxies)
+
+      on_exit(fn ->
+        if previous, do: Application.put_env(:kiln_cms, :trusted_proxies, previous)
+      end)
+
+      conn = proxied_conn(conn, {10, 0, 0, 1}, "203.0.113.7")
+      {:ok, view, _html} = live(conn, ~p"/sign-in")
+
+      form_context = :sys.get_state(view.pid).socket.assigns.context
+
+      assert ThrottleSignIn.client_ip_context(RateLimit.client_key({10, 0, 0, 1})) ==
+               Map.take(form_context, [:kiln_client_ip])
+    end
+
     test "a real submit through the page charges the bucket exactly once", %{conn: conn} do
       address = email()
       user!(address)
