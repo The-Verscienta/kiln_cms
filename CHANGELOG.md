@@ -57,6 +57,18 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **The in-context and Presentation editors no longer accept edits they cannot
+  save** (#1159). Both mounted a record through an actor-scoped read and then
+  offered `contenteditable` regions, drag-reorder and a Save button, with no
+  notion of write access anywhere — the concept `ContentEditorLive` has had
+  since #550.
+
+  The editor-tier route is coarser than it looks: an editor restricted to other
+  content types may still *read* this one, as a signed-in consumer does, so they
+  could open a page they may not author, rewrite it, and learn only on Save that
+  none of it could land. They now get the read-only preview and a line saying
+  why.
+
 - **Six console actions that authorize nothing now re-check who is asking**
   (#1166). Every other privileged handler funnels into an Ash action carrying
   the actor, so a mistake in a mount guard is still caught by a policy. These

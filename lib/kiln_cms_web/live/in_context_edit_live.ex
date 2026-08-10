@@ -42,40 +42,70 @@ defmodule KilnCMSWeb.InContextEditLive do
   def mount(%{"type" => type, "slug" => slug} = params, _session, socket) do
     actor = socket.assigns.current_user
 
-    case ContentTypes.get(type) do
+    # Each failure has its own answer, so they are tagged rather than collapsed
+    # into one "no such content": an unwritable record is not a missing one, and
+    # the reader is sent somewhere useful.
+    with ct when not is_nil(ct) <- ContentTypes.get(type),
+         record when not is_nil(record) <-
+           fetch_by_slug(ct.type, slug, actor, socket.assigns.current_org),
+         {true, _ct, _record} <-
+           {may_write?(record, actor, socket.assigns.current_org), ct, record} do
+      {:ok, socket |> assign(:may_write?, true) |> mount_editor(ct, record, actor, params)}
+    else
+      # Read-only visitors get the read-only surface, not an editor that accepts
+      # a page of typing and refuses all of it on Save (#1159).
+      {false, ct, record} ->
+        {:ok,
+         socket
+         |> put_flash(:info, gettext("You can view this content but not edit it."))
+         |> push_navigate(to: ~p"/editor/preview/#{ct.type}/#{record.id}")}
+
       nil ->
-        {:ok, redirect_to_editor(socket, gettext("Unknown content type."))}
-
-      ct ->
-        case fetch_by_slug(ct.type, slug, actor, socket.assigns.current_org) do
-          nil ->
-            {:ok, redirect_to_editor(socket, gettext("No such content to edit."))}
-
-          record ->
-            {:ok,
-             socket
-             |> assign(:kind, ct.type)
-             |> assign(:ct, ct)
-             |> assign(:actor, actor)
-             # Deep-link target from the visual-editing bridge (#355):
-             # `?focus=<block_id>` scrolls to and focuses that block on load.
-             |> assign(:focus_block_id, params["focus"])
-             |> assign(:autosave_timer, nil)
-             |> assign(:save_state, :saved)
-             |> assign(:conflict, false)
-             |> assign(:moved_announcement, nil)
-             # Bumped on server-driven form replacement (save/restore/reload) so the
-             # `phx-update="ignore"` editable regions remount and reload from the
-             # fresh content rather than keeping the stale DOM they own.
-             |> assign(:region_version, 0)
-             |> assign_record(record)}
-        end
+        {:ok, redirect_to_editor(socket, gettext("No such content to edit."))}
     end
   end
 
-  # The editable record for a public slug. Editors may read any state (see the
-  # content read policy), so this returns the live working copy — draft or
+  # Whether the actor may WRITE this record, the concept this console never had
+  # (#1159). `/editor/site/...` sits in the editor-tier live_session, and that
+  # gate is coarser than it looks: `Checks.ReadableContentType` lets an editor
+  # restricted to other types read this one exactly as a signed-in consumer
+  # does, so they can open a published page they may not author. Everything on
+  # this screen then works — the regions are `contenteditable`, drag-reorder
+  # runs, Save is present — until the update is refused and a page of typing is
+  # gone.
+  #
+  # Keyed on `:autosave`, the same action `ContentEditorLive.may_write?/3` asks
+  # about, so the two consoles cannot disagree about who may edit a record.
+  defp may_write?(record, actor, org), do: Ash.can?({record, :autosave}, actor, tenant: org)
+
+  defp mount_editor(socket, ct, record, actor, params) do
+    socket
+    |> assign(:kind, ct.type)
+    |> assign(:ct, ct)
+    |> assign(:actor, actor)
+    # Deep-link target from the visual-editing bridge (#355):
+    # `?focus=<block_id>` scrolls to and focuses that block on load.
+    |> assign(:focus_block_id, params["focus"])
+    |> assign(:autosave_timer, nil)
+    |> assign(:save_state, :saved)
+    |> assign(:conflict, false)
+    |> assign(:moved_announcement, nil)
+    # Bumped on server-driven form replacement (save/restore/reload) so the
+    # `phx-update="ignore"` editable regions remount and reload from the
+    # fresh content rather than keeping the stale DOM they own.
+    |> assign(:region_version, 0)
+    |> assign_record(record)
+  end
+
+  # The editable record for a public slug: the live working copy — draft or
   # published — whose `blocks` the page renders and edits write to.
+  #
+  # NOT "editors may read any state". That was the comment here, and it is false
+  # for a restricted editor (#1159): `Checks.ReadableContentType` grants the
+  # see-everything read only for types in the actor's `readable_types` scope,
+  # and an out-of-scope type falls through to the published/audience filters —
+  # so this can return a *published* record to someone who may not author it,
+  # which is exactly why `mount/3` now asks whether they may write it.
   defp fetch_by_slug(kind, slug, actor, org) do
     # Scope to the current site's org (epic #336) so in-context editing on one
     # site's host only resolves that site's content.
@@ -238,7 +268,35 @@ defmodule KilnCMSWeb.InContextEditLive do
   # `:autosave` (debounced draft) share this — the `:autosave` action tags and
   # coalesces its PaperTrail versions so an edit-per-pause doesn't flood history.
   # Returns `{:ok | :conflict | :error, socket}` with the save state applied.
+  # The mount decision, re-asserted at the write. `mount/3` refuses with
+  # `push_navigate`, which ends the LiveView — so the guarantee holds only by
+  # accident of how the refusal is spelled. Render a "read-only" panel instead,
+  # an ordinary refactor, and every write below becomes reachable. This is the
+  # one funnel they all pass through (#1159).
+  #
+  # The ASSIGN, not a fresh `Ash.can?`. Recomputing it here would rebuild the
+  # whole `:autosave` changeset — a `field_definitions` read plus the policy
+  # chain — on every debounce, which is the editor's hottest path, and would
+  # answer from the same mount-time actor regardless. `ContentEditorLive`
+  # computes it once per record load for the same reason.
+  #
+  # Be exact about what it therefore does NOT do: a scope narrowed mid-session
+  # is invisible. Measured — the save still lands. Catching that needs the actor
+  # re-read per write, which no console does; diverging from them would be worse
+  # than the gap. This guards the refactor, not the revocation.
   defp persist(socket, action) do
+    if socket.assigns.may_write? do
+      do_persist(socket, action)
+    else
+      # Same shape as `do_persist/2`'s own error branch, so a refusal cannot
+      # leave the toolbar stuck on "Saving…" with nothing said — which is what
+      # `perform_autosave/1` would do with a bare `{:error, socket}`, since it
+      # discards the tag.
+      {:error, assign(socket, :save_state, :error)}
+    end
+  end
+
+  defp do_persist(socket, action) do
     # `:update` shares the `:save` telemetry event with the structured editor.
     event = if action == :autosave, do: :autosave, else: :save
 
