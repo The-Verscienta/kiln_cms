@@ -1,13 +1,22 @@
 defmodule KilnCMS.Compliance.Checks.Disclaimer do
   @moduledoc """
-  Reports a body that is missing the configured disclaimer (#377).
+  Reports a body that is missing the required disclaimer (#377).
+
+  Which text that is, and whether any of this runs, is the site's own answer
+  (`/editor/compliance`, #857) over the deployment default:
 
       config :kiln_cms, KilnCMS.Compliance,
         disclaimer: "This information is not medical advice."
 
-  Cheap enough to run in the check itself — one `String.contains?/2` against
-  the already-folded body text, no scan and no walk, so unlike
-  `KilnCMS.Compliance.Checks.Claims` it needs no fact.
+  Both arrive already resolved, as the `:compliance_settings` fact that
+  `KilnCMS.Compliance.Checks.Claims` documents. A caller that resolved none
+  gets `:n_a` — this check is a *requirement*, and reporting a document green
+  against a requirement nobody looked up is the failure mode compliance
+  checking exists to avoid.
+
+  The comparison itself is cheap enough to run in the check — one
+  `String.contains?/2` against the already-folded body text, no scan and no
+  walk, so unlike `KilnCMS.Compliance.Checks.Claims` it needs no *scan* fact.
 
   ## Substring, not equality, and folded on both sides
 
@@ -29,15 +38,15 @@ defmodule KilnCMS.Compliance.Checks.Disclaimer do
 
   alias Kiln.Advisory.Body
   alias Kiln.Advisory.Context
-  alias KilnCMS.Compliance
+  alias KilnCMS.Compliance.Settings
 
   @impl Kiln.Advisory
   def lenses, do: [:compliance]
 
   @impl Kiln.Advisory
-  def check(%Context{body: %Body{} = body} = _context) do
-    with true <- Compliance.enabled?(),
-         text when is_binary(text) <- Compliance.disclaimer(),
+  def check(%Context{body: %Body{} = body} = context) do
+    with %Settings{enabled?: true, disclaimer: text} when is_binary(text) <-
+           Context.fact(context, :compliance_settings),
          false <- blank?(body.folded_text) do
       if String.contains?(body.folded_text, fold(text)) do
         :ok

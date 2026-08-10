@@ -990,12 +990,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   defp refresh_body_stats(socket, typed) do
-    # The claim rules are part of the digest, not just the blocks: the body
-    # scan is memoized here, so switching claim checking on (or editing the
+    # This site's settings, not the deployment's (#857) — resolved here rather
+    # than at mount so an admin turning the panel on, or editing the site's
+    # phrase list, reaches an editor session already open. `Settings.for_org/1`
+    # is cached per org, so this is an ETS read per form change.
+    settings = KilnCMS.Compliance.Settings.for_org(socket.assigns.current_org)
+
+    # The resolved settings are part of the digest, not just the blocks: the
+    # body scan is memoized here, so switching claim checking on (or editing the
     # rules) while an editor session is open would otherwise leave that session
     # showing the previous scan — or no panel at all — until the author
     # happened to touch the body.
-    digest = :erlang.phash2({typed, claim_signature()})
+    digest = :erlang.phash2({typed, settings})
 
     if digest == socket.assigns[:seo_body_digest] do
       socket
@@ -1005,11 +1011,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
       socket
       |> assign(:seo_body_digest, digest)
       |> assign(:seo_body_stats, body)
+      |> assign(:compliance_settings, settings)
       # Scanning the whole document for every configured claim phrase is body
       # work, so it is memoized here with the rest of it (#377). The short
       # scalar fields are scanned per keystroke in `refresh_seo_report/1` and
       # merged in — see `KilnCMS.Compliance.merge/2`.
-      |> assign(:claim_body_matches, scan_claims(body.text))
+      |> assign(:claim_body_matches, scan_claims(settings, body.text))
       |> refresh_link_targets()
     end
   end
@@ -1017,13 +1024,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # `%{}` rather than `nil` when nothing matched, so the check can tell "scanned
   # and clean" from "nobody scanned" — which it reports as `:n_a`, because a
   # document nobody checked is not a document that is clean.
-  defp scan_claims(text) do
-    if KilnCMS.Compliance.enabled?(), do: KilnCMS.Compliance.scan(text), else: nil
-  end
+  defp scan_claims(%KilnCMS.Compliance.Settings{enabled?: true} = settings, text),
+    do: KilnCMS.Compliance.scan(text, settings.rules)
 
-  defp claim_signature do
-    if KilnCMS.Compliance.enabled?(), do: KilnCMS.Compliance.rules(), else: nil
-  end
+  defp scan_claims(_off, _text), do: nil
 
   # Resolving an internal link is a query per distinct path (#474), so it is
   # keyed on the *set of paths* rather than on the body digest: an author typing
@@ -1096,6 +1100,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
       KilnCMS.Seo.Analyzer.run(fields, socket.assigns.seo_body_stats,
         facts: %{
           link_targets: socket.assigns[:link_targets] || %{},
+          # Both compliance facts come from the one resolve in
+          # `refresh_body_stats/2`: matches computed under this site's
+          # vocabulary have to be graded under the same one (#857).
+          compliance_settings: socket.assigns[:compliance_settings],
           claim_matches: claim_matches(socket, fields)
         }
       )
@@ -1134,12 +1142,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
         # invents phrases across the seam — a title ending "…at your own risk"
         # beside an SEO title starting "Free…" would report "risk free", which
         # appears nowhere in the document.
+        rules = socket.assigns.compliance_settings.rules
+
         @claim_scanned_fields
         |> Enum.reduce(body_matches, fn field, acc ->
           fields
           |> Map.get(field)
           |> to_string()
-          |> KilnCMS.Compliance.scan()
+          |> KilnCMS.Compliance.scan(rules)
           |> then(&KilnCMS.Compliance.merge(acc, &1))
         end)
     end
