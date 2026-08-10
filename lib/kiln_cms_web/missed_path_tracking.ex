@@ -24,9 +24,11 @@ defmodule KilnCMSWeb.MissedPathTracking do
       queueing delivery behind them. Failures — including a supervisor that is
       momentarily down — are swallowed: a 404 must render during an outage.
     * **Junk-filtered.** Most anonymous 404 traffic is vulnerability probing
-      (`/wp-login.php`, `/.env`, `/static/app.js`), which is noise in a list
-      whose purpose is "which of *my* URLs broke". Probe-shaped paths are
-      dropped before any DB work.
+      (`/wp-login.php`, `/.env.local`, `/wp-admin`, `/static/app.js`), which is
+      noise in a list whose purpose is "which of *my* URLs broke". Probe-shaped
+      paths are dropped before any DB work — by extension, by prefix, and by a
+      leading dot on any segment, which is what the dotfile families
+      (`.env.*`, `.ssh`, `.aws`, `.svn`) have in common.
     * **Capped, by eviction rather than refusal.** Anyone can ask for a million
       distinct paths. Once an org is at `MissedPath.max_paths/0`, a new path
       evicts the **least-requested** row instead of being turned away. Refusing
@@ -62,7 +64,13 @@ defmodule KilnCMSWeb.MissedPathTracking do
   # path, so each is listed without one — `/.git` and `/.git/config` both hit.
   # `/wp-content` is deliberately absent: after a WordPress migration those are
   # real inbound links worth redirecting.
-  @junk_prefixes ~w(/.well-known /.git /vendor /cgi-bin /phpmyadmin)
+  # `/wp-admin`, `/wp-includes` and `/actuator` are scanner roots with no
+  # content behind them on any site — unlike `/wp-content`, whose misses are
+  # real inbound links worth redirecting after a WordPress migration (#920).
+  @junk_prefixes ~w(
+    /.well-known /.git /actuator /cgi-bin /phpmyadmin /vendor /wp-admin
+    /wp-includes
+  )
 
   # Longer than any real URL an editor would want to redirect; a path this long
   # is a buffer-probe or a fuzzer.
@@ -125,9 +133,8 @@ defmodule KilnCMSWeb.MissedPathTracking do
   end
 
   # True once there is room for a new row. At the cap, evict the least-requested
-  # row (oldest first among equals) — an attacker's one-hit junk is exactly what
-  # that selects, while a URL real visitors keep hitting can only be displaced by
-  # a path with *more* real traffic behind it.
+  # row — a URL real visitors keep hitting can only be displaced by a path with
+  # *more* real traffic behind it.
   defp make_room(opts) do
     if Ash.count!(MissedPath, opts) < MissedPath.max_paths() do
       true
@@ -136,9 +143,23 @@ defmodule KilnCMSWeb.MissedPathTracking do
     end
   end
 
+  # `last_seen_at: :desc` among equal counts, and the direction is the whole
+  # point (#920). Ordering the tie ascending evicts the *oldest* one-hit row,
+  # which is a genuine miss recorded weeks ago — while the rows that caused the
+  # cap, an attacker's freshly-minted junk, are the newest and are chosen last.
+  # A flood at the `:delivery` bucket's 300/min would clear every real row in
+  # about seventeen minutes and then hold the table, permanently denying the
+  # feature the cap exists to keep available.
+  #
+  # Descending inverts that: the newest one-hit row is the previous junk row, so
+  # a flood can only ever displace itself, and it costs an attacker more traffic
+  # than a row has to take that row's place. The price is that a genuine miss
+  # discovered moments ago is the first thing evicted while a flood is running —
+  # the right way round, because that row can be re-recorded by the next real
+  # visitor, and an evicted month-old row is gone for good.
   defp evict(opts) do
     MissedPath
-    |> Ash.Query.sort(count: :asc, last_seen_at: :asc)
+    |> Ash.Query.sort(count: :asc, last_seen_at: :desc)
     |> Ash.Query.limit(1)
     |> Ash.read!(opts)
     |> case do
@@ -159,7 +180,25 @@ defmodule KilnCMSWeb.MissedPathTracking do
       byte_size(path) <= @max_path_length and
       not String.contains?(path, <<0>>) and
       not junk_prefix?(path) and
+      not dotfile?(path) and
       not junk_extension?(path)
+  end
+
+  # Any segment beginning with a dot. `junk_extension?/1` reads only the last
+  # dot-separated piece of the basename, so it blocked `/.env` and let
+  # `/.env.local` through — `"local"` is not a listed extension (#920). Same
+  # hole for `/.env.production`, `/.ssh/id_rsa`, `/.aws/credentials`,
+  # `/.svn/entries`, `/.DS_Store` and `/.htaccess`: one scanner family each,
+  # every one of them a capped slot spent on a probe.
+  #
+  # A leading dot is the rule rather than a longer extension list because it is
+  # what the whole family has in common, and no URL this CMS can mint has a
+  # segment starting with one. Checked both producers: `KilnCMS.Slug.slugify/1`
+  # keeps only `[a-z0-9\s-]`, and an editor-authored `path_alias` (#485) is
+  # validated against `\A(/[a-z0-9-]+)+\z` by `Validations.PathAliasValid`, so
+  # neither can emit a dot at all — let alone a leading one.
+  defp dotfile?(path) do
+    path |> String.split("/") |> Enum.any?(&String.starts_with?(&1, "."))
   end
 
   defp junk_prefix?(path) do

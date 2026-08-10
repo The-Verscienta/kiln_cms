@@ -361,7 +361,7 @@ defmodule KilnCMSWeb.RedirectLive do
       <div :if={@tab == "404s"}>
         <p class="mt-4 text-sm text-base-content/70">
           {gettext(
-            "Paths visitors asked for that nothing on the site could serve, most-requested first. Counters only — no IPs, no user agents. Rows are dropped %{days} days after they were last hit, and obvious vulnerability probing is never recorded.",
+            "Paths visitors asked for that nothing on the site could serve, most-requested first. Counters only — no IPs, no user agents. Rows are dropped %{days} days after they were last hit, and common vulnerability probing — dotfiles, scanner roots, script and asset extensions — is filtered out before it is recorded.",
             days: @missed_retention_days
           )}
         </p>

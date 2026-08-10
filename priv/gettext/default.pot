@@ -6225,7 +6225,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
-msgid "Paths visitors asked for that nothing on the site could serve, most-requested first. Counters only — no IPs, no user agents. Rows are dropped %{days} days after they were last hit, and obvious vulnerability probing is never recorded."
+msgid "Paths visitors asked for that nothing on the site could serve, most-requested first. Counters only — no IPs, no user agents. Rows are dropped %{days} days after they were last hit, and common vulnerability probing — dotfiles, scanner roots, script and asset extensions — is filtered out before it is recorded."
 msgstr ""
 
 #: lib/kiln_cms_web/live/account_live.ex

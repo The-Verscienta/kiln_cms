@@ -6225,8 +6225,8 @@ msgstr "Patrón de alias de ruta (opcional)"
 
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
-msgid "Paths visitors asked for that nothing on the site could serve, most-requested first. Counters only — no IPs, no user agents. Rows are dropped %{days} days after they were last hit, and obvious vulnerability probing is never recorded."
-msgstr "Rutas que pidieron los visitantes y que el sitio no pudo servir, las más pedidas primero. Solo contadores: sin IP ni agentes de usuario. Las filas se eliminan %{days} días después de la última petición, y los sondeos de vulnerabilidades evidentes nunca se registran."
+msgid "Paths visitors asked for that nothing on the site could serve, most-requested first. Counters only — no IPs, no user agents. Rows are dropped %{days} days after they were last hit, and common vulnerability probing — dotfiles, scanner roots, script and asset extensions — is filtered out before it is recorded."
+msgstr "Rutas que pidieron los visitantes y que el sitio no pudo servir, las más pedidas primero. Solo contadores: sin IP ni agentes de usuario. Las filas se eliminan %{days} días después de la última petición, y los sondeos de vulnerabilidades habituales —archivos ocultos, rutas típicas de escáneres y extensiones de script y de recursos— se filtran antes de registrarse."
 
 #: lib/kiln_cms_web/live/account_live.ex
 #, elixir-autogen, elixir-format
