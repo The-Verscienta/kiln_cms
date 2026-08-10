@@ -9264,11 +9264,6 @@ msgstr "Inchangé"
 msgid "Ungrouped"
 msgstr "Sans groupe"
 
-#: lib/kiln_cms_web/live/in_context_edit_live.ex
-#, elixir-autogen, elixir-format
-msgid "Unknown content type."
-msgstr "Type de contenu inconnu."
-
 #: lib/kiln_cms_web/controllers/content_html/lock.html.heex
 #, elixir-autogen, elixir-format
 msgid "Unlock"
@@ -9791,6 +9786,12 @@ msgstr "Vous êtes maintenant connecté"
 #, elixir-autogen, elixir-format
 msgid "You are now signed out"
 msgstr "Vous êtes maintenant déconnecté"
+
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#: lib/kiln_cms_web/live/presentation_live.ex
+#, elixir-autogen, elixir-format
+msgid "You can view this content but not edit it."
+msgstr "Vous pouvez consulter ce contenu, mais pas le modifier."
 
 #: lib/kiln_cms_web/controllers/billing_controller.ex
 #, elixir-autogen, elixir-format

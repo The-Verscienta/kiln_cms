@@ -37,7 +37,12 @@ defmodule KilnCMSWeb.PresentationLive do
 
     with ct when not is_nil(ct) <- ContentTypes.get(type),
          record when not is_nil(record) <-
-           fetch_by_slug(ct.type, slug, actor, socket.assigns.current_org) do
+           fetch_by_slug(ct.type, slug, actor, socket.assigns.current_org),
+         # `{false, ct, record}` rather than a bare `false`: the else-branch
+         # needs the record's ID to send the reader to the read-only surface,
+         # and a `with` clause that fails hands on only what it matched.
+         {true, _ct, _record} <-
+           {may_write?(record, actor, socket.assigns.current_org), ct, record} do
       {:ok,
        socket
        |> assign(:kind, ct.type)
@@ -52,9 +57,29 @@ defmodule KilnCMSWeb.PresentationLive do
        |> assign(:region_version, 0)
        |> assign_record(record)}
     else
-      _ -> {:ok, redirect_to_editor(socket, gettext("No such content to edit."))}
+      # Separated from "no such content" because it is a different answer, and
+      # the reader gets the read-only surface rather than an editor that accepts
+      # a page of typing and refuses all of it on Save (#1159).
+      {false, ct, record} ->
+        {:ok,
+         socket
+         |> put_flash(:info, gettext("You can view this content but not edit it."))
+         |> push_navigate(to: ~p"/editor/preview/#{ct.type}/#{record.id}")}
+
+      _ ->
+        {:ok, redirect_to_editor(socket, gettext("No such content to edit."))}
     end
   end
+
+  # Whether the actor may WRITE this record, the concept this console never had
+  # (#1159). The editor-tier live_session is coarser than it looks:
+  # `Checks.ReadableContentType` lets an editor restricted to other types read
+  # this one as a signed-in consumer does, so they could open a published page
+  # they may not author and find every inline field editable.
+  #
+  # Keyed on `:autosave`, the same action `ContentEditorLive` asks about, so the
+  # consoles cannot disagree about who may edit a record.
+  defp may_write?(record, actor, org), do: Ash.can?({record, :autosave}, actor, tenant: org)
 
   # Scope to the current site's org (epic #336) so the Presentation console on
   # one site's host only resolves that site's content.
@@ -83,6 +108,44 @@ defmodule KilnCMSWeb.PresentationLive do
     end
   rescue
     _ -> nil
+  end
+
+  defp do_save(socket) do
+    changes =
+      socket.assigns.scalar_changes
+      |> Map.new(fn {field, value} -> {String.to_existing_atom(field), value} end)
+      |> Map.put(:blocks, socket.assigns.block_inputs)
+
+    case InlineEditing.write_changes(
+           socket.assigns.record,
+           :update,
+           changes,
+           socket.assigns.actor
+         ) do
+      {:ok, record} ->
+        {:noreply,
+         socket
+         |> assign_record(record)
+         |> update(:region_version, &(&1 + 1))
+         |> assign(:save_state, :saved)
+         |> assign(:conflict, false)
+         |> broadcast_preview()
+         |> push_event("presentation:refresh", %{})
+         |> put_flash(:info, gettext("Saved."))}
+
+      :conflict ->
+        {:noreply,
+         socket
+         |> assign(:conflict, true)
+         |> assign(:save_state, :unsaved)
+         |> put_flash(:error, gettext("This content changed elsewhere. Reload before saving."))}
+
+      {:error, _error} ->
+        {:noreply,
+         socket
+         |> assign(:save_state, :error)
+         |> put_flash(:error, gettext("Could not save. Please try again."))}
+    end
   end
 
   defp assign_record(socket, record) do
@@ -160,41 +223,15 @@ defmodule KilnCMSWeb.PresentationLive do
     end
   end
 
+  # Asked again here for the reason `InContextEditLive.persist/2` states: the
+  # mount refusal ends the LiveView, so it holds only by accident of how it is
+  # spelled. Same caveat too — the actor is a mount-time struct, so this guards
+  # a future refactor of that refusal, not a scope narrowed mid-session.
   def handle_event("save", _params, socket) do
-    changes =
-      socket.assigns.scalar_changes
-      |> Map.new(fn {field, value} -> {String.to_existing_atom(field), value} end)
-      |> Map.put(:blocks, socket.assigns.block_inputs)
-
-    case InlineEditing.write_changes(
-           socket.assigns.record,
-           :update,
-           changes,
-           socket.assigns.actor
-         ) do
-      {:ok, record} ->
-        {:noreply,
-         socket
-         |> assign_record(record)
-         |> update(:region_version, &(&1 + 1))
-         |> assign(:save_state, :saved)
-         |> assign(:conflict, false)
-         |> broadcast_preview()
-         |> push_event("presentation:refresh", %{})
-         |> put_flash(:info, gettext("Saved."))}
-
-      :conflict ->
-        {:noreply,
-         socket
-         |> assign(:conflict, true)
-         |> assign(:save_state, :unsaved)
-         |> put_flash(:error, gettext("This content changed elsewhere. Reload before saving."))}
-
-      {:error, _error} ->
-        {:noreply,
-         socket
-         |> assign(:save_state, :error)
-         |> put_flash(:error, gettext("Could not save. Please try again."))}
+    if may_write?(socket.assigns.record, socket.assigns.actor, socket.assigns.current_org) do
+      do_save(socket)
+    else
+      {:noreply, socket}
     end
   end
 

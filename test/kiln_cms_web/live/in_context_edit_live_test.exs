@@ -94,6 +94,37 @@ defmodule KilnCMSWeb.InContextEditLiveTest do
     CMS.get_page!(page_id, authorize?: false).blocks |> Enum.map(& &1.value.id)
   end
 
+  # #1159. `/editor/site/...` is in the editor-tier live_session, and that gate
+  # is coarser than it looks: `Checks.ReadableContentType` lets an editor
+  # restricted to other types read this one, so they could open the console and
+  # find every region `contenteditable`, drag-reorder working and Save present —
+  # learning only on Save that none of it could land.
+  describe "a reader who may not write" do
+    setup %{conn: conn} do
+      admin = authed_user(:admin)
+      {page, _ids} = page_with_blocks(admin)
+
+      reader = authed_user(:editor)
+
+      {:ok, reader} =
+        KilnCMS.Accounts.manage_user_access(reader, %{editable_types: ["post"]}, actor: admin)
+
+      # The premise: they really can read it. Without this the tests below would
+      # pass for the wrong reason — a reader who cannot even fetch the record.
+      assert %{} = KilnCMS.CMS.get_page!(page.id, actor: reader)
+
+      %{conn: log_in(conn, reader), page: page, reader: reader}
+    end
+
+    test "gets the read-only preview instead of an editor", %{conn: conn, page: page} do
+      assert {:error, {:live_redirect, %{to: to, flash: flash}}} =
+               live(conn, ~p"/editor/site/page/#{page.slug}")
+
+      assert to == "/editor/preview/page/#{page.id}"
+      assert flash["info"] =~ "view this content but not edit it"
+    end
+  end
+
   describe "mount and render" do
     test "renders each block with stable ids and inline-editable regions", %{conn: conn} do
       editor = authed_user(:editor)

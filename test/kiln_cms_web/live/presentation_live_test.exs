@@ -188,6 +188,34 @@ defmodule KilnCMSWeb.PresentationLiveTest do
     assert CMS.get_post!(post.id, actor: admin).excerpt == "New excerpt"
   end
 
+  # #1159. The editor-tier live_session is coarser than it looks:
+  # `Checks.ReadableContentType` lets an editor restricted to other types read
+  # this one, so they could open the Presentation console on a page they may not
+  # author and find every inline field editable — learning only on Save.
+  test "a reader who may not write gets the read-only preview, not an editor", %{conn: conn} do
+    admin = user(:admin)
+
+    page =
+      CMS.create_page!(%{title: "Off limits", slug: "pl-#{System.unique_integer([:positive])}"},
+        actor: admin
+      )
+
+    reader = user(:editor)
+
+    {:ok, reader} =
+      KilnCMS.Accounts.manage_user_access(reader, %{editable_types: ["post"]}, actor: admin)
+
+    # The premise: they really can read it, so the redirect below is about
+    # WRITE access and not about a record they could never fetch.
+    assert %{} = CMS.get_page!(page.id, actor: reader)
+
+    assert {:error, {:live_redirect, %{to: to, flash: flash}}} =
+             conn |> log_in(reader) |> live(~p"/editor/presentation/page/#{page.slug}")
+
+    assert to == "/editor/preview/page/#{page.id}"
+    assert flash["info"] =~ "view this content but not edit it"
+  end
+
   test "excerpt on a type WITHOUT one (Page) offers the full editor, not a broken panel", %{
     conn: conn
   } do
