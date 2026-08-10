@@ -91,6 +91,28 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **Archiving a published document now tells subscribers it left delivery**
+  (#914). #879 made `:archive` tear down a published record's delivery
+  version and artifacts (previously orphaned) — but unlike `:unpublish`,
+  which fires `unpublished`, `:archive` fired no webhook at all, so
+  archiving silently removed a document from delivery with no signal to a
+  CDN or subscriber watching for exactly that.
+
+  `:archive` now fires the same `unpublished` event `:unpublish` does, since
+  from a subscriber's perspective the two have the same effect: the content
+  left delivery. Gated on `only_when: :was_published` (new on
+  `Changes.NotifyWebhooks`, checking the record's state *before* the
+  transition) rather than the existing `:published` mode (which checks the
+  *resulting* state) — `:archive` always lands on `:archived`, so a
+  `:published`-gated check would never fire; a draft or in-review record,
+  which was never delivered, correctly stays silent.
+
+  The issue's second item — `:unarchive` missing the `accept []` +
+  compare-and-swap hardening the other transitions got in #879 — was
+  already closed as an incidental side effect of #1026 (`:autosave`
+  refusing a published row); verified against current code rather than
+  redone here.
+
 - **Publishing no longer discards prose a collab room was still holding**
   (#1061). The server checkpoint writes a room's converged text back through
   `:autosave`, which carries a draft-only row filter — so a publish landing

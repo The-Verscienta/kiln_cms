@@ -146,6 +146,50 @@ defmodule KilnCMS.WebhooksTest do
     assert "page.unpublished" in events
   end
 
+  # #914: archiving a published record removes it from delivery exactly as
+  # unpublishing does, so it must tell a subscriber the same way — but only
+  # when there was anything to remove.
+  test "archiving a published document dispatches an unpublished event" do
+    stub_capture()
+    admin = admin()
+    CMS.create_webhook_endpoint!(%{url: "https://example.test/hook"}, actor: admin)
+
+    page = CMS.create_page!(%{title: "Live", slug: slug()}, actor: admin)
+    page = CMS.publish_page!(page, %{}, actor: admin)
+    CMS.archive_page!(page, %{}, actor: admin)
+    KilnCMS.DataCase.drain_oban()
+
+    events =
+      Stream.repeatedly(fn ->
+        receive do
+          {:delivered, _, _, headers, _} -> headers["x-kilncms-event"]
+        after
+          0 -> nil
+        end
+      end)
+      |> Enum.take_while(&(&1 != nil))
+
+    assert "page.published" in events
+    assert "page.unpublished" in events
+  end
+
+  test "archiving a draft (never published) document dispatches nothing" do
+    stub_capture()
+    admin = admin()
+    CMS.create_webhook_endpoint!(%{url: "https://example.test/hook"}, actor: admin)
+
+    page = CMS.create_page!(%{title: "Never live", slug: slug()}, actor: admin)
+    CMS.archive_page!(page, %{}, actor: admin)
+    KilnCMS.DataCase.drain_oban()
+
+    # A draft was never delivered, so archiving it must stay as silent as
+    # unpublishing would have been — this is what `only_when: :was_published`
+    # (rather than the generic `:published`, which checks the resulting
+    # state — always `:archived` here, so it would never gate anything) is
+    # for.
+    refute_received {:delivered, _, _, _, _}
+  end
+
   test "editing published content dispatches an updated event" do
     stub_capture()
     admin = admin()
