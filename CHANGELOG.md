@@ -27,6 +27,16 @@ migration, a rewritten column, a dropped config key).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A dead app-icon URL no longer keeps `apple-touch-icon` pointed at a 404**
+  (#1147). Save-time verification stored the measured edge once; nothing
+  re-checked it, so a CDN that later 404'd still looked installable to every
+  gate that reads `app_icon_size`. A nightly AshOban sweep on `SiteBranding`
+  re-runs `AppIcon.verify/1` and, after two consecutive failures, clears the
+  **size** (never the URL) so the stock mark returns until the next successful
+  verify. The failure streak resets on every branding save.
+
 ### Added
 
 - **Claim checking is per site, and has a page** (#857). `KilnCMS.Compliance`

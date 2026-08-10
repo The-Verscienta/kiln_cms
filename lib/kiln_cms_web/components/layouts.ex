@@ -180,9 +180,10 @@ defmodule KilnCMSWeb.Layouts do
   otherwise allow. And unlike the manifest — which keeps the stock entries
   alongside a brand icon precisely so an icon that 404s after verification
   cannot make the app uninstallable — `apple-touch-icon` is a single href with
-  no second candidate. Verification happens at save time and is not repeated,
-  so an icon whose URL later dies degrades to iOS's own fallback (a screenshot
-  of the page). Re-verifying on a schedule is filed rather than done.
+  no second candidate. Verification runs at save and again on a nightly
+  AshOban sweep (`SiteBranding` `:reverify_app_icon`, #1147): after a couple of
+  consecutive failures the measured size is cleared (URL kept), so this link
+  falls back to the stock mark instead of a dead brand URL.
   """
   @spec app_icon_href(map()) :: String.t()
   def app_icon_href(assigns) do
