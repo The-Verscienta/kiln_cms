@@ -340,8 +340,17 @@ defmodule KilnCMSWeb.Tenant do
   """
   @spec fetch_org_from_connect_info(map()) :: {:ok, Accounts.Organization.t()} | :error
   def fetch_org_from_connect_info(connect_info) do
-    fetch_org(get_in(connect_info, [:uri, Access.key(:host)]))
+    fetch_org(connect_info_host(connect_info))
   end
+
+  @doc """
+  The host a socket's connect info names, or `nil` — the same value
+  `fetch_org_from_connect_info/1` resolves against, exposed so a caller that
+  needs the host too (a refused-connect alert, #678) doesn't hand-write a
+  fourth copy of this `get_in/2`.
+  """
+  @spec connect_info_host(map()) :: String.t() | nil
+  def connect_info_host(connect_info), do: get_in(connect_info, [:uri, Access.key(:host)])
 
   defp canonical_host?(host) when is_binary(host), do: normalize(host) == base_host()
   defp canonical_host?(_), do: false

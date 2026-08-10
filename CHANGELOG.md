@@ -239,6 +239,33 @@ migration, a rewritten column, a dropped config key).
 
 ### Security
 
+- **A flood of unresolvable hosts against the LiveView and socket transports
+  now reaches an operator, not just the plug** (#678). #659/#677 bounded the
+  *repeat* cost of an unresolvable `Host` under `TENANT_STRICT_HOST`, but only
+  for `KilnCMSWeb.Plugs.SetTenant`; the same resolver backs the LiveView
+  `:assign_current_org` on_mount hook and the three raw sockets
+  (`GraphqlSocket`, `BridgeSocket`, `CollabSocket`), and a flood of *distinct*
+  invented hosts against any of them was metered by nothing at all.
+
+  `KilnCMSWeb.TenantRefusalAlert` now fires one cooldown-limited `Logger.warning`
+  + Sentry alert per surface (`:plug`/`:live`/`:gql`/`:bridge`/`:collab`) the
+  first time each is refused in a 15-minute window — called from each caller's
+  own refusal decision, never from the shared `Tenant.fetch_org/1` (which
+  host-agnostic traffic also passes through on its way to being served) and
+  never from the LiveView on_mount's foreign-claim check (driven by the
+  client's claimed host, not a resolution failure). A prior attempt at this
+  issue was built and withdrawn after review found it alerted from the wrong
+  choke points and relied on a telemetry counter with no consumer in
+  production — see the issue history.
+
+  Rate-limiting `/live/longpoll` at the router, the issue's other proposed
+  option, turned out not to be available: `socket_dispatch` preempts the
+  router for every socket transport unconditionally, so there is no
+  router-reachable place to put a limiter in front of it. Accepted rather than
+  closed — see `docs/threat-model.md` for the full writeup and the residual
+  filed as #1183 (general join-volume metering, distinct from this refusal-flood
+  fix).
+
 - **The analytics export is now shown, not asserted, to resist arithmetic
   recovery of a suppressed referrer count** (#777). #620 suppressed a low count
   per row; #1054 moved the export onto the dashboard's shared decision; #1073

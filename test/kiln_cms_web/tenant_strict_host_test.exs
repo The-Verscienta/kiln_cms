@@ -372,6 +372,142 @@ defmodule KilnCMSWeb.TenantStrictHostTest do
     end
   end
 
+  describe "refusal alerting (#678)" do
+    setup do: strict!(true)
+
+    setup do
+      KilnCMSWeb.TenantRefusalAlert.reset()
+
+      ref = make_ref()
+      handler_id = "tenant-refusal-alert-#{inspect(ref)}"
+      test_pid = self()
+
+      :telemetry.attach(
+        handler_id,
+        [:kiln_cms, :tenant, :refusal_flood],
+        fn _event, measurements, metadata, _cfg ->
+          send(test_pid, {ref, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      %{ref: ref}
+    end
+
+    @tag :capture_log
+    test "the plug alerts (:plug) on a refused Host", %{conn: conn, ref: ref} do
+      conn = %{conn | host: unknown_host()} |> get(~p"/")
+
+      assert conn.status == 404
+      assert_receive {^ref, %{count: 1}, %{source: :plug}}
+    end
+
+    @tag :capture_log
+    test "the plug does not alert for an exempt (host-agnostic) request", %{ref: ref} do
+      _ = plug_call("/up")
+
+      refute_receive {^ref, _measurements, _metadata}
+    end
+
+    @tag :capture_log
+    test "the LiveView mount hook alerts (:live) on a disconnected mount with an unknown host",
+         %{ref: ref} do
+      socket = %Phoenix.LiveView.Socket{host_uri: URI.parse("https://#{unknown_host()}/")}
+
+      assert_raise KilnCMSWeb.Tenant.UnknownHostError, fn ->
+        KilnCMSWeb.LiveUserAuth.on_mount(:assign_current_org, %{}, %{}, socket)
+      end
+
+      assert_receive {^ref, %{count: 1}, %{source: :live}}
+    end
+
+    @tag :capture_log
+    test "the LiveView mount hook alerts (:live) on a CONNECTED mount with an unknown host",
+         %{ref: ref} do
+      host = unknown_host()
+
+      socket = %Phoenix.LiveView.Socket{
+        transport_pid: self(),
+        private: %{connect_info: %{uri: URI.parse("https://#{host}/")}},
+        host_uri: URI.parse("https://#{host}/")
+      }
+
+      assert_raise KilnCMSWeb.Tenant.UnknownHostError, fn ->
+        KilnCMSWeb.LiveUserAuth.on_mount(:assign_current_org, %{}, %{}, socket)
+      end
+
+      assert_receive {^ref, %{count: 1}, %{source: :live}}
+    end
+
+    @tag :capture_log
+    test "a connected mount's foreign-claim refusal does NOT alert — it is client-driven, not an unresolved host",
+         %{ref: ref} do
+      connected = org("liveconnected")
+      claimed = org("liveclaimed")
+
+      socket = %Phoenix.LiveView.Socket{
+        transport_pid: self(),
+        private: %{
+          connect_info: %{
+            uri: URI.parse("https://#{connected.slug}.#{Tenant.base_host()}/")
+          }
+        },
+        host_uri: URI.parse("https://#{claimed.slug}.#{Tenant.base_host()}/")
+      }
+
+      assert_raise KilnCMSWeb.Tenant.HostMismatchError, fn ->
+        KilnCMSWeb.LiveUserAuth.on_mount(:assign_current_org, %{}, %{}, socket)
+      end
+
+      # Both hosts resolve fine — nothing here is a refusal-to-resolve, only a
+      # claim that doesn't match, so it must not feed the same alert an actual
+      # flood of made-up hosts would trip.
+      refute_receive {^ref, _measurements, _metadata}
+    end
+
+    @tag :capture_log
+    test "the GraphQL socket alerts (:gql) on a refused connect", %{ref: ref} do
+      info = %{uri: URI.parse("wss://#{unknown_host()}/ws/gql")}
+
+      assert :error = KilnCMSWeb.GraphqlSocket.connect(%{}, %Phoenix.Socket{}, info)
+      assert_receive {^ref, %{count: 1}, %{source: :gql}}
+    end
+
+    @tag :capture_log
+    test "the bridge socket alerts (:bridge) on a refused connect", %{ref: ref} do
+      assert :error =
+               KilnCMSWeb.BridgeSocket.connect(%{
+                 params: %{"type" => "post", "id" => Ash.UUID.generate()},
+                 connect_info: %{uri: URI.parse("wss://#{unknown_host()}/ws/bridge")}
+               })
+
+      assert_receive {^ref, %{count: 1}, %{source: :bridge}}
+    end
+
+    @tag :capture_log
+    test "the collab socket alerts (:collab) on a refused connect", %{ref: ref} do
+      email = "collab-refusal-#{System.unique_integer([:positive])}@example.com"
+
+      user =
+        Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+          email: email,
+          hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+          confirmed_at: DateTime.utc_now(),
+          role: :editor
+        })
+
+      token = Phoenix.Token.sign(KilnCMSWeb.Endpoint, "collab", user.id)
+      info = %{uri: URI.parse("wss://#{unknown_host()}/ws/collab")}
+
+      assert :error =
+               KilnCMSWeb.CollabSocket.connect(%{"token" => token}, %Phoenix.Socket{}, info)
+
+      assert_receive {^ref, %{count: 1}, %{source: :collab}}
+    end
+  end
+
   describe "UnknownHostError" do
     test "carries a 404 plug status and names the host" do
       err = KilnCMSWeb.Tenant.UnknownHostError.exception(host: "nope.example.com")

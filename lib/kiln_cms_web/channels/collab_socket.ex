@@ -67,7 +67,20 @@ defmodule KilnCMSWeb.CollabSocket do
 
   defp fetch_actor(_other), do: :error
 
+  # The refusal alerts (#678) — from here, the decision point, not from
+  # `Tenant.fetch_org_from_connect_info/1` itself.
   defp fetch_org(connect_info) do
-    KilnCMSWeb.Tenant.fetch_org_from_connect_info(connect_info)
+    case KilnCMSWeb.Tenant.fetch_org_from_connect_info(connect_info) do
+      {:ok, org} ->
+        {:ok, org}
+
+      :error ->
+        KilnCMSWeb.TenantRefusalAlert.notify(
+          :collab,
+          KilnCMSWeb.Tenant.connect_info_host(connect_info)
+        )
+
+        :error
+    end
   end
 end

@@ -35,6 +35,9 @@ defmodule KilnCMS.Application do
       # Cooldown bucket for the aggregated "relay unreachable" mail alert — one
       # fixed key, so the table stays tiny; a periodic clean keeps it honest.
       {KilnCMS.Mail.RelayAlert, clean_period: :timer.minutes(5)},
+      # Cooldown buckets for the aggregated tenant-refusal-flood alert (#678) —
+      # one fixed key per surface (`:plug`/`:live`/`:gql`/`:bridge`/`:collab`).
+      {KilnCMSWeb.TenantRefusalAlert, clean_period: :timer.minutes(5)},
       # Per-account auth budgets (#478). No `key_older_than`: the fixed-window
       # algorithm's cleaner deletes strictly on `expires_at`, and never reads
       # that option — setting it would be inert config that reads like a floor.
