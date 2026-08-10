@@ -1,6 +1,13 @@
 defmodule KilnCMSWeb.GovernanceLiveTest do
-  @moduledoc "Governance dashboard LiveView + export (#352)."
-  use KilnCMSWeb.ConnCase, async: true
+  @moduledoc """
+  Governance dashboard LiveView + export (#352).
+
+  `async: false` since #858: the live-claims panel resolves
+  `KilnCMS.Compliance.Settings`, which reads application env and a shared
+  Cachex. Both are VM-global, so an async sibling would see this file's
+  configuration — the failure that looks like a race and is not one.
+  """
+  use KilnCMSWeb.ConnCase, async: false
 
   @moduletag :capture_log
 
@@ -179,5 +186,80 @@ defmodule KilnCMSWeb.GovernanceLiveTest do
 
     assert html =~ "Before"
     assert html =~ "After"
+  end
+
+  # #858. `docs/p3-plan.md` said claim checks would feed this dashboard and they
+  # never did — the findings lived only in the editor's panel and the publish
+  # gate's refusal, neither of which answers "what is published in our name".
+  describe "live claims panel (#858)" do
+    setup do
+      original = Application.get_env(:kiln_cms, KilnCMS.Compliance)
+      org = KilnCMS.Accounts.default_org_id()
+
+      on_exit(fn ->
+        Application.put_env(:kiln_cms, KilnCMS.Compliance, original || [])
+        KilnCMS.Cache.bust_compliance(org)
+      end)
+
+      # `Settings.for_org/1` is cached per org, so setting application env
+      # without busting leaves the page rendering the previous configuration.
+      configure = fn opts ->
+        Application.put_env(:kiln_cms, KilnCMS.Compliance, opts)
+        KilnCMS.Cache.bust_compliance(org)
+      end
+
+      %{configure: configure}
+    end
+
+    test "a published claim is named on the dashboard", %{conn: conn, configure: configure} do
+      configure.(enabled: true, rules: :default)
+      admin = authed_user(:admin)
+
+      %{title: "Our clinically proven method", slug: slug()}
+      |> CMS.create_page!(actor: admin)
+      |> CMS.publish_page!(%{}, actor: admin)
+
+      {:ok, _view, html} = live(log_in(conn, admin), ~p"/editor/governance")
+
+      assert html =~ "Live claims"
+      assert html =~ "Our clinically proven method"
+      # The phrase itself, not just the document: a report that says a page is
+      # flagged without saying what it said sends the reader back to the editor
+      # to find out, which is the trip this panel exists to save.
+      assert html =~ "clinically proven"
+      assert html =~ "would refuse a publish"
+    end
+
+    test "off is rendered as off, not as a clean bill of health", %{
+      conn: conn,
+      configure: configure
+    } do
+      configure.(enabled: false, rules: :default)
+      admin = authed_user(:admin)
+
+      %{title: "Our clinically proven method", slug: slug()}
+      |> CMS.create_page!(actor: admin)
+      |> CMS.publish_page!(%{}, actor: admin)
+
+      {:ok, _view, html} = live(log_in(conn, admin), ~p"/editor/governance")
+
+      assert html =~ "Claim checking is off for this site"
+      # And it must not quietly report the flagged page as clean.
+      refute html =~ "No flagged claims"
+    end
+
+    test "a site with nothing flagged says so", %{conn: conn, configure: configure} do
+      configure.(enabled: true, rules: :default)
+      admin = authed_user(:admin)
+
+      %{title: "An ordinary page", slug: slug()}
+      |> CMS.create_page!(actor: admin)
+      |> CMS.publish_page!(%{}, actor: admin)
+
+      {:ok, _view, html} = live(log_in(conn, admin), ~p"/editor/governance")
+
+      assert html =~ "No flagged claims"
+      assert html =~ "scanned"
+    end
   end
 end

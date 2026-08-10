@@ -34,9 +34,11 @@ defmodule KilnCMSWeb.ApiAuthController do
   "Returned", not "issued": `Strategy.action/3` mints and — because `User` sets
   `store_all_tokens?` — *stores* the first-factor JWT before this controller
   gets to look at `totp_enabled?`. What the second factor withholds is the
-  caller's access to it, not its existence. An abandoned exchange therefore
-  leaves a live token row nobody holds; see `docs/threat-model.md` on why that
-  is a bounded cost and what still needs doing about it.
+  caller's access to it. Since #742 it also withholds its *use*:
+  `PendingSignIn.mint/4` parks the stored row off the purpose authentication
+  requires, and `claim/1` puts it back once the code lands, so an abandoned
+  exchange leaves an inert row that expires with the step rather than a live
+  credential nobody holds.
 
   The blob itself is `KilnCMS.Accounts.PendingSignIn`'s business — encrypted
   rather than signed because it carries that JWT, and single-use so a captured
@@ -146,6 +148,11 @@ defmodule KilnCMSWeb.ApiAuthController do
          # loses that race and lands here as `:taken` — and must be refused
          # rather than handed a token. Calling this and ignoring the answer
          # would leave exactly the replay the claim exists to stop.
+         #
+         # It is also what releases the first-factor token from the hold `mint/4`
+         # took (#742): until this succeeds, the JWT in the blob authenticates
+         # nothing, so a 201 issued without it would be a token the client cannot
+         # use.
          :ok <- PendingSignIn.claim(resolved) do
       issue_token(conn, user)
     else
@@ -164,10 +171,17 @@ defmodule KilnCMSWeb.ApiAuthController do
           "Sign-in is no longer pending. Start again."
         )
 
-      # Not the same answer (#743). The claim could not be *recorded* — the
-      # blob may well still be redeemable, so "start again" would be wrong
-      # advice as well as a wasted trip through the password step and its
-      # throttle. A 503 says what is true: try this again shortly.
+      # Not the same answer (#743). Something could not be *recorded*, which is
+      # not "this exchange is over" — so "start again" would be wrong advice as
+      # well as a wasted trip through the password step and its throttle. A 503
+      # says what is true: this did not complete, try it again shortly.
+      #
+      # Two things reach here and they leave the blob differently (#742):
+      # a failed *claim* leaves it redeemable and the retry works; a failed
+      # *release* happens after the claim committed, so the retry answers
+      # `pending_expired` and the client restarts. Both are honest terminations,
+      # and the second is the safe direction — a token that could not be
+      # released stays parked rather than live and unheld.
       :unavailable ->
         ApiError.send(
           conn,

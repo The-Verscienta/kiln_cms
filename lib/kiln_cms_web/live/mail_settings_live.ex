@@ -17,7 +17,7 @@ defmodule KilnCMSWeb.MailSettingsLive do
   def mount(_params, _session, socket) do
     actor = socket.assigns.current_user
 
-    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+    if platform_admin?(socket) do
       {:ok,
        socket
        |> assign(:actor, actor)
@@ -125,13 +125,27 @@ defmodule KilnCMSWeb.MailSettingsLive do
     end
   end
 
+  # The three handlers below re-check the tier, and the in-flight flags beneath
+  # them are not a substitute (#1166). `verifying?`/`preflighting?`/
+  # `sending_test?` stop a *second* run; they say nothing about who started the
+  # first. Every other handler on this page funnels into an Ash action carrying
+  # the actor — `rotate`, `save_key_source`, `save_server_ip`, `unsuppress` —
+  # so a mount-guard mistake is caught by a policy. These three call
+  # `DnsCheck.run/1`, `DnsCheck.check_port25/0` and `Mail.deliver_now/1`, none
+  # of which take an actor or check anything.
+  #
+  # What this buys is a refusal for a forged or replayed event on a socket that
+  # never passed `mount/3` — not a live check on the acting role.
+  # `platform_admin?/1` reads `current_user`, which is assigned once, so a
+  # global admin demoted mid-session still passes here. Saying otherwise would
+  # be claiming a guarantee this cannot give.
   def handle_event("verify", _params, socket) do
     settings = socket.assigns.settings
 
     # Ignore a re-click while a run is already in flight: the disabled button
     # attribute is client-side only, so a fast double-click (or a replayed
     # event) would otherwise start a second concurrent run.
-    if socket.assigns.verifying? do
+    if socket.assigns.verifying? or not platform_admin?(socket) do
       {:noreply, socket}
     else
       {:noreply,
@@ -142,7 +156,7 @@ defmodule KilnCMSWeb.MailSettingsLive do
   end
 
   def handle_event("preflight", _params, socket) do
-    if socket.assigns.preflighting? do
+    if socket.assigns.preflighting? or not platform_admin?(socket) do
       {:noreply, socket}
     else
       {:noreply,
@@ -157,6 +171,13 @@ defmodule KilnCMSWeb.MailSettingsLive do
 
     cond do
       socket.assigns.sending_test? ->
+        {:noreply, socket}
+
+      # The recipient is client input, and `Mail.deliver_now/1` is a bare
+      # `Mailer.deliver/1` — so this is a send primitive pointed at any address
+      # a socket names, signed by this deployment's DKIM key and charged to its
+      # domain reputation. Whoever holds the socket must still be an admin.
+      not platform_admin?(socket) ->
         {:noreply, socket}
 
       recipient == "" ->
@@ -736,4 +757,8 @@ defmodule KilnCMSWeb.MailSettingsLive do
   defp badge_text("fail"), do: gettext("fail")
   defp badge_text("skip"), do: gettext("skipped")
   defp badge_text(_unchecked), do: gettext("not checked")
+
+  # One spelling of the question, so the mount guard and the three actor-less
+  # handlers cannot drift apart.
+  defp platform_admin?(socket), do: KilnCMSWeb.LiveUserAuth.platform_admin?(socket)
 end

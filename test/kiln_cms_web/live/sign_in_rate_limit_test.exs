@@ -32,6 +32,7 @@ defmodule KilnCMSWeb.SignInRateLimitTest do
   """
   use KilnCMSWeb.ConnCase, async: false
 
+  import ExUnit.CaptureLog
   import KilnCMS.RateLimitHelpers
   import Phoenix.LiveViewTest
   import Swoosh.TestAssertions
@@ -228,6 +229,94 @@ defmodule KilnCMSWeb.SignInRateLimitTest do
       # not against loopback, so a view that stopped resolving one (or answered
       # a constant) fails rather than passing on `ConnTest`'s default peer.
       assert ThrottleSignIn.client_ip_context(ip) == Map.take(form_context, [:kiln_client_ip])
+    end
+
+    # #934. `client_conn/1` sets peer and `remote_ip` to the SAME address, so it
+    # cannot express a proxied request — and the socket half of the
+    # trusted-proxy rule (`ClientIp.resolve/2`) had no coverage at all. These
+    # two set them apart and drive the whole chain the endpoint actually uses:
+    # transport `:peer_data` + `:x_headers` → `resolve/2` → `client_key/1` →
+    # the form context the preparation reads.
+    defp proxied_conn(conn, peer, forwarded) do
+      %Plug.Conn{} =
+        conn = Plug.Test.put_peer_data(conn, %{address: peer, port: 111, ssl_cert: nil})
+
+      conn
+      |> Map.put(:remote_ip, peer)
+      |> Plug.Conn.put_req_header("x-forwarded-for", forwarded)
+    end
+
+    # Addresses of their own, like every other test in this file: `/sign-in` is
+    # behind `AuthRateLimit`, so each disconnected GET spends a real `:auth`
+    # bucket, and a fixed one would 429 under `--repeat-until-failure` and fail
+    # the `live/2` match with a message naming nothing. The proxy address stays
+    # inside `10.0.0.0/8` because the trusted case needs it to.
+    defp proxy_address, do: {10, 0, rem(System.unique_integer([:positive]), 250), 1}
+
+    defp forwarded_address do
+      {203, 0, 113, rem(System.unique_integer([:positive]), 250) + 1}
+    end
+
+    defp dotted({a, b, c, d}), do: "#{a}.#{b}.#{c}.#{d}"
+
+    # `ClientIp`'s warning latch is global and a forwarded request trips it.
+    # Reset on the way out so this file cannot silence a warning another file
+    # is asserting on, and captured so it stays out of the suite's output.
+    defp with_proxies(proxies, fun) do
+      previous = Application.get_env(:kiln_cms, :trusted_proxies)
+
+      if proxies,
+        do: Application.put_env(:kiln_cms, :trusted_proxies, proxies),
+        else: Application.delete_env(:kiln_cms, :trusted_proxies)
+
+      KilnCMSWeb.Plugs.ClientIp.reset_forwarding_warning()
+
+      on_exit(fn ->
+        KilnCMSWeb.Plugs.ClientIp.reset_forwarding_warning()
+
+        if previous,
+          do: Application.put_env(:kiln_cms, :trusted_proxies, previous),
+          else: Application.delete_env(:kiln_cms, :trusted_proxies)
+      end)
+
+      {result, _log} = with_log(fun)
+      result
+    end
+
+    test "behind a trusted proxy the form context holds the forwarded client", %{conn: conn} do
+      client = forwarded_address()
+
+      view =
+        with_proxies(["10.0.0.0/8"], fn ->
+          conn = proxied_conn(conn, proxy_address(), dotted(client))
+          {:ok, view, _html} = live(conn, ~p"/sign-in")
+          view
+        end)
+
+      form_context = :sys.get_state(view.pid).socket.assigns.context
+
+      assert ThrottleSignIn.client_ip_context(RateLimit.client_key(client)) ==
+               Map.take(form_context, [:kiln_client_ip])
+    end
+
+    # The default, and the one that protects production: with no trusted proxy
+    # the header is attacker-supplied, so the bucket must key on the peer.
+    # Rotating `X-Forwarded-For` otherwise rotates the bucket, and `/sign-in`
+    # has no limit at all.
+    test "with no trusted proxies the form context ignores the header", %{conn: conn} do
+      peer = proxy_address()
+
+      view =
+        with_proxies(nil, fn ->
+          conn = proxied_conn(conn, peer, dotted(forwarded_address()))
+          {:ok, view, _html} = live(conn, ~p"/sign-in")
+          view
+        end)
+
+      form_context = :sys.get_state(view.pid).socket.assigns.context
+
+      assert ThrottleSignIn.client_ip_context(RateLimit.client_key(peer)) ==
+               Map.take(form_context, [:kiln_client_ip])
     end
 
     test "a real submit through the page charges the bucket exactly once", %{conn: conn} do

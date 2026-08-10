@@ -31,8 +31,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias Kiln.Advisory.Registry
   alias Kiln.Advisory.Report
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.Scoping
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
+
+  # The fields the SEO suggestion writes if the author accepts it.
+  # `maybe_sync_slug/3` can also move `slug` off a `seo_keywords` accept, but
+  # only while the slug is still auto-derived — a grant that withholds `slug`
+  # from an editor who may edit the keywords is not a reason to withhold the
+  # suggestion, so it is deliberately not required here.
+  @seo_suggestion_fields ~w(seo_title seo_description seo_keywords)
   alias KilnCMS.CMS.VersionDiff
   alias KilnCMS.CMS.VersionSnapshot
   alias KilnCMS.Search.Related
@@ -320,8 +328,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # without a `select:`, and the picker reads exactly `id`, `name` and
          # `tag_group_id` — the rest were `%Ash.NotLoaded{}` placeholders held
          # for the socket's lifetime. Deliberately still UNPAGINATED: an
-         # unrendered checkbox is a detach (see `tag_picker/1`), so the list has
-         # to stay whole until the picker moves to the merge verbs (#638).
+         # unrendered tag can no longer be detached by omission (#638 moved the
+         # picker to the merge verbs), so paginating is now *safe* — it is
+         # simply not done yet, because the filter box is client-side and would
+         # only search the page it has.
          |> assign(
            :tags,
            CMS.list_tags!(
@@ -337,11 +347,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # suite says so: with no groups loaded, `bucket_for/3` files a tag
          # whose group does not resolve under "Ungrouped", so a tag a
          # collaborator attaches after mount from an out-of-scope group lands
-         # there instead of in "Also attached". That section exists precisely to
-         # make such a tag visible and undoable before the next
-         # `append_and_remove` save silently detaches it (#522) — and it carries
-         # the note explaining where the tag came from, which "Ungrouped" does
-         # not. One small indexed read is the cheaper side of that trade.
+         # there instead of in "Also attached", losing the note explaining where
+         # the tag came from. Since #638 a mis-filed tag is no longer *detached*
+         # by the next save — the merge verbs only remove what was rendered and
+         # unticked — so this is now a labelling question rather than a
+         # data-loss one. Still worth one small indexed read: "Ungrouped" tells
+         # an editor nothing about why a tag they cannot find in any group is on
+         # their post.
          |> assign(:tag_groups, CMS.list_tag_groups!(actor: actor, tenant: org))
          # Which tag-picker sections render expanded, and which have rendered at
          # all (#523). Both start empty and are filled by `assign_record/2`
@@ -606,6 +618,21 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:page_title, record.title)
     |> assign(:slug_customized?, slug_customized?(socket))
     |> assign(:may_write?, may_write?(record, socket.assigns.actor, socket.assigns.current_org))
+    # Recomputed alongside `may_write?` and for the same reason: a reload that
+    # lands a change (a publish, a re-scoped grant) must re-evaluate both.
+    |> assign(
+      :may_suggest_seo?,
+      may_write_fields?(
+        record,
+        socket.assigns.actor,
+        socket.assigns.current_org,
+        @seo_suggestion_fields
+      )
+    )
+    |> assign(
+      :may_assist_blocks?,
+      may_write_fields?(record, socket.assigns.actor, socket.assigns.current_org, ["blocks"])
+    )
     |> assign(:form, build_form(record, socket.assigns.actor))
     |> refresh_tag_index()
     |> seed_block_children(record)
@@ -625,6 +652,41 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # editors with (`KilnCMSWeb.CollabChannel`). Recomputed here (not once at
   # mount) so a reload that lands a state change — e.g. a publish — re-evaluates.
   defp may_write?(record, actor, org), do: Ash.can?({record, :autosave}, actor, tenant: org)
+
+  @doc false
+  # Whether the actor may change ALL of `fields` on this record's type (#868).
+  #
+  # `may_write?/3` cannot answer this. It is `Ash.can?`, and `Ash.can?` builds
+  # the changeset with **empty input** — while `Changes.EnforceFieldGrants`
+  # only raises a violation for an attribute that was `supplied?`. So no field
+  # is ever supplied during the check, no error is ever added, and every
+  # field-granted editor passes a gate the save will then refuse field by
+  # field. A *change* is structurally invisible to `Ash.can?`; asking the same
+  # question the change asks is the only way to get the same answer.
+  #
+  # Mirrors the change exactly, including the tier condition: grants bind an
+  # effective **editor**, and effective admins are exempt (the policy bypass).
+  # Getting that wrong in the other direction would hide the control from an
+  # admin who happens to carry a `field_grants` entry.
+  defp may_write_fields?(record, actor, org, fields) do
+    Enum.any?(fields, &field_granted?(record, actor, org, &1))
+  end
+
+  # One field. `may_write_fields?/4` is `any?` over these rather than `all?`
+  # because each suggestion is accepted on its own (`seo_accept` writes exactly
+  # one attribute) — an editor granted `seo_title` alone can take that card and
+  # save cleanly, so hiding the whole panel from them would be a second bug in
+  # the opposite direction. The per-card accept re-checks with this.
+  defp field_granted?(record, actor, org, field) do
+    if Scoping.effective_tier(actor, org) == :editor do
+      case Scoping.field_grant(actor, org, ContentTypes.type_name_for(record)) do
+        nil -> true
+        allowed -> field in allowed
+      end
+    else
+      true
+    end
+  end
 
   # Whether the slug is the author's own (pinned) or still auto-derived — while
   # not customized, editing a slug-source field re-derives the slug live
@@ -928,12 +990,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   defp refresh_body_stats(socket, typed) do
-    # The claim rules are part of the digest, not just the blocks: the body
-    # scan is memoized here, so switching claim checking on (or editing the
+    # This site's settings, not the deployment's (#857) — resolved here rather
+    # than at mount so an admin turning the panel on, or editing the site's
+    # phrase list, reaches an editor session already open. `Settings.for_org/1`
+    # is cached per org, so this is an ETS read per form change.
+    settings = KilnCMS.Compliance.Settings.for_org(socket.assigns.current_org)
+
+    # The resolved settings are part of the digest, not just the blocks: the
+    # body scan is memoized here, so switching claim checking on (or editing the
     # rules) while an editor session is open would otherwise leave that session
     # showing the previous scan — or no panel at all — until the author
     # happened to touch the body.
-    digest = :erlang.phash2({typed, claim_signature()})
+    digest = :erlang.phash2({typed, settings})
 
     if digest == socket.assigns[:seo_body_digest] do
       socket
@@ -943,11 +1011,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
       socket
       |> assign(:seo_body_digest, digest)
       |> assign(:seo_body_stats, body)
+      |> assign(:compliance_settings, settings)
       # Scanning the whole document for every configured claim phrase is body
       # work, so it is memoized here with the rest of it (#377). The short
       # scalar fields are scanned per keystroke in `refresh_seo_report/1` and
       # merged in — see `KilnCMS.Compliance.merge/2`.
-      |> assign(:claim_body_matches, scan_claims(body.text))
+      |> assign(:claim_body_matches, scan_claims(settings, body.text))
       |> refresh_link_targets()
     end
   end
@@ -955,13 +1024,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # `%{}` rather than `nil` when nothing matched, so the check can tell "scanned
   # and clean" from "nobody scanned" — which it reports as `:n_a`, because a
   # document nobody checked is not a document that is clean.
-  defp scan_claims(text) do
-    if KilnCMS.Compliance.enabled?(), do: KilnCMS.Compliance.scan(text), else: nil
-  end
+  defp scan_claims(%KilnCMS.Compliance.Settings{enabled?: true} = settings, text),
+    do: KilnCMS.Compliance.scan(text, settings.rules)
 
-  defp claim_signature do
-    if KilnCMS.Compliance.enabled?(), do: KilnCMS.Compliance.rules(), else: nil
-  end
+  defp scan_claims(_off, _text), do: nil
 
   # Resolving an internal link is a query per distinct path (#474), so it is
   # keyed on the *set of paths* rather than on the body digest: an author typing
@@ -1034,6 +1100,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
       KilnCMS.Seo.Analyzer.run(fields, socket.assigns.seo_body_stats,
         facts: %{
           link_targets: socket.assigns[:link_targets] || %{},
+          # Both compliance facts come from the one resolve in
+          # `refresh_body_stats/2`: matches computed under this site's
+          # vocabulary have to be graded under the same one (#857).
+          compliance_settings: socket.assigns[:compliance_settings],
           claim_matches: claim_matches(socket, fields)
         }
       )
@@ -1072,12 +1142,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
         # invents phrases across the seam — a title ending "…at your own risk"
         # beside an SEO title starting "Free…" would report "risk free", which
         # appears nowhere in the document.
+        rules = socket.assigns.compliance_settings.rules
+
         @claim_scanned_fields
         |> Enum.reduce(body_matches, fn field, acc ->
           fields
           |> Map.get(field)
           |> to_string()
-          |> KilnCMS.Compliance.scan()
+          |> KilnCMS.Compliance.scan(rules)
           |> then(&KilnCMS.Compliance.merge(acc, &1))
         end)
     end
@@ -1316,6 +1388,35 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  # Which tags the picker should show ticked, as a MapSet of id strings.
+  #
+  # Two shapes reach it, which is why this is not just `selected_ids/3` (#638).
+  # While editing, the form carries `tag_ids` — the raw checkbox state from the
+  # last `validate`. But a **failed submit** leaves the form holding what Save
+  # sent, and Save sends the merge verbs instead. Reading only `tag_ids` there
+  # would fall through to the persisted tags and silently roll every unsaved
+  # tick back, on the one screen where the editor is already being told to fix
+  # something else.
+  defp selected_tag_ids(form, record) do
+    attached = record.tags |> current_ids() |> MapSet.new(&to_string/1)
+
+    case form[:tag_ids].value do
+      nil -> apply_merge_verbs(form, attached)
+      value -> value |> List.wrap() |> MapSet.new(&to_string/1)
+    end
+  end
+
+  defp apply_merge_verbs(form, attached) do
+    added = form |> merge_verb_ids(:add_tag_ids) |> MapSet.new()
+    removed = form |> merge_verb_ids(:remove_tag_ids) |> MapSet.new()
+
+    attached |> MapSet.union(added) |> MapSet.difference(removed)
+  end
+
+  defp merge_verb_ids(form, field) do
+    form[field].value |> List.wrap() |> Enum.map(&to_string/1)
+  end
+
   defp list_versions(kind, opts), do: ContentTypes.list_versions!(kind, opts)
 
   defp restore_version(kind, record, vid, actor),
@@ -1411,7 +1512,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> inject_children(socket.assigns.block_children)
       |> inject_rich_bodies(socket.assigns.rich_bodies)
       |> normalize_item_rows()
-      |> normalize_tag_ids()
+      |> merge_tag_params(socket)
 
     {params, socket} = sync_slug(params, event["_target"], socket)
     socket = assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
@@ -1544,8 +1645,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # REACH this handler (a reviewer can open the record), but billing an org LLM
     # run needs write access. The hidden button is not the control — a
     # replayed/forged event reaches here regardless — so refuse server-side.
+    # `may_suggest_seo?` as well as `may_write?` (#868): a field-granted editor
+    # passes `may_write?`, because that is `Ash.can?` and the grant lives in a
+    # *change*, which `Ash.can?` cannot see. Billing an LLM run for fields the
+    # save will refuse one by one is the outcome that gate was missing.
     if socket.assigns.seo_drafting? or not socket.assigns.seo_enabled? or
-         not socket.assigns.may_write? do
+         not socket.assigns.may_write? or not socket.assigns.may_suggest_seo? do
       {:noreply, socket}
     else
       document = seo_document(socket)
@@ -2448,6 +2553,37 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, apply_children(socket, bc)}
   end
 
+  # The form-serialized shape (#893). A `<select>` inside the editor's form
+  # cannot deliver `phx-value-*` — LiveView routes a form-associated
+  # `phx-change` through `pushInput`, which scrapes those off the form rather
+  # than the element — so the nested-child select carries its identifiers in its
+  # `name` instead, and they arrive here as ordinary nested params.
+  #
+  # One entry at every level, because `pushInput` filters the serialized form to
+  # the changed input's name. Anything else is a payload this event did not
+  # send, and is refused rather than guessed at.
+  def handle_event("col_update_child", %{"col_child" => payload}, socket)
+      when is_map(payload) do
+    with [{id, children}] when is_map(children) <- Map.to_list(payload),
+         [{child_id, fields}] when is_map(fields) <- Map.to_list(children),
+         [{field, value}] when is_binary(value) <- Map.to_list(fields) do
+      bc =
+        update_columns(socket.assigns.block_children, id, fn blocks ->
+          Enum.map(blocks, &maybe_put_field(&1, child_id, field, value))
+        end)
+
+      {:noreply, apply_children(socket, bc)}
+    else
+      # Logged, not swallowed. This head matches before `MalformedEvent`'s
+      # catch-all can, so a payload that fails the shape below would otherwise
+      # die here in total silence — which is the condition #893 was, and the
+      # reason it survived. Same level and same non-prod gate as that fallback.
+      unexpected ->
+        KilnCMSWeb.MalformedEvent.log(__MODULE__, {"col_update_child", unexpected})
+        {:noreply, socket}
+    end
+  end
+
   def handle_event(
         "col_update_child",
         %{"id" => id, "child" => child_id, "field" => field} = p,
@@ -2502,7 +2638,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> inject_children(socket.assigns.block_children)
       |> inject_rich_bodies(socket.assigns.rich_bodies)
       |> normalize_item_rows()
-      |> normalize_tag_ids()
+      |> merge_tag_params(socket)
 
     result =
       EditorTelemetry.span(:save, %{kind: socket.assigns.kind}, fn ->
@@ -2555,26 +2691,80 @@ defmodule KilnCMSWeb.ContentEditorLive do
      |> put_flash(:info, gettext("Reloaded the latest version."))}
   end
 
+  # Somebody published this document while a collab room was open (#1061). The
+  # publish carried the room's converged prose into its own write, so nothing
+  # typed up to that point is lost — but from here nothing persists: this
+  # client stops autosaving on a non-draft (`mark_dirty/1`), and the server
+  # checkpoint is refused by `:autosave`'s draft-only filter. So reload onto the
+  # published record and say what happened, rather than leaving the editor
+  # typing into a doc that is going nowhere.
+  #
+  # Idempotent: every rich-text block on the page hears the browser event, so
+  # this arrives once per block.
+  def handle_event("collab_published", _params, socket) do
+    if socket.assigns.record.state == :published do
+      {:noreply, socket}
+    else
+      record =
+        fetch!(
+          socket.assigns.kind,
+          socket.assigns.record.id,
+          socket.assigns.actor,
+          socket.assigns.current_org
+        )
+
+      {:noreply,
+       socket
+       |> assign_record(record)
+       |> reset_editors()
+       |> assign(:save_state, :saved)
+       |> put_flash(
+         :info,
+         gettext("This was published. Your collaborative edits were saved with it.")
+       )}
+    end
+  end
+
   def handle_event("workflow", %{"action" => action}, socket) when is_binary(action) do
     {:noreply, run_workflow(socket, action)}
   end
 
   # One-click translation: duplicate this record's content into a new draft in
   # the target locale and jump to its editor.
+  #
+  # Gated on `may_write?` for the reason the Duplicate handler below is (#922):
+  # this is the same shape — forking the record's payload into a new draft —
+  # and it was the other affordance in this file offered to an actor who may
+  # only read this record.
   def handle_event("create_translation", %{"locale" => locale}, socket) when is_binary(locale) do
     %{kind: kind, record: record, actor: actor} = socket.assigns
 
-    translation =
-      KilnCMS.CMS.Translations.create_translation!(kind, record, locale,
-        actor: actor,
-        tenant: record.org_id
-      )
+    if socket.assigns.may_write? do
+      {translation, withheld} =
+        KilnCMS.CMS.Translations.create_translation_with_notes!(kind, record, locale,
+          actor: actor,
+          tenant: record.org_id
+        )
 
-    {:noreply,
-     socket
-     |> put_flash(:info, gettext("Draft translation created (%{locale}).", locale: locale))
-     |> push_navigate(to: ~p"/editor/content/#{kind}/#{translation.id}")}
+      {:noreply,
+       socket
+       |> put_flash(:info, translation_flash(locale, withheld))
+       |> push_navigate(to: ~p"/editor/content/#{kind}/#{translation.id}")}
+    else
+      {:noreply, socket}
+    end
   rescue
+    # Distinguished from a generic failure because it is not one: the refusal is
+    # a permission boundary the editor can act on (ask for the grant), and
+    # "couldn't create that translation" would read as a broken feature (#1157).
+    _error in KilnCMS.CMS.Translations.BlocksWithheldError ->
+      {:noreply,
+       put_flash(
+         socket,
+         :error,
+         gettext("Your role cannot copy this content's blocks, so it cannot be translated.")
+       )}
+
     _error ->
       {:noreply, put_flash(socket, :error, gettext("Couldn't create that translation."))}
   end
@@ -2582,34 +2772,55 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # One-click duplicate (#471): clone this record's saved payload into a new
   # draft of the same locale and jump to it. Unsaved edits don't travel — the
   # copy is made from the row, so the autosave that just ran is the boundary.
+  #
+  # Refused server-side too (#922), for the reason `seo_suggest` states: the
+  # hidden button is not the boundary, a replayed or forged event arrives here
+  # regardless. It closes no hole today — `Checks.EditableContentType` gates
+  # authoring and updating alike, so `may_write?` and "may create one of these"
+  # are the same question and the create refuses this actor anyway. What shipped
+  # was a button whose only possible outcome was an error flash.
+  #
+  # Be precise about what this gate can see, because the obvious claim for it is
+  # wrong: `may_write?` is `Ash.can?`, which evaluates the POLICY chain only.
+  # `:autosave` already carries a per-record condition — `change filter(state ==
+  # :draft)` — and `Ash.can?` is blind to it. That blindness is load-bearing
+  # here (a published record stays duplicable, which is right), but it also
+  # means a future per-record rule written as a change or a validation would be
+  # just as invisible; only one written as a policy check would reach this gate.
+  # So the reason to refuse here is not "it catches whatever comes next" — it is
+  # that a forged event now gets the same answer the UI gave.
   def handle_event("duplicate", _params, socket) do
     %{kind: kind, record: record, actor: actor} = socket.assigns
 
-    case KilnCMS.CMS.Duplication.duplicate(kind, record, actor: actor, tenant: record.org_id) do
-      {:ok, copy, []} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, gettext("Duplicated as a new draft."))
-         |> push_navigate(to: ~p"/editor/content/#{kind}/#{copy.id}")}
+    if socket.assigns.may_write? do
+      case KilnCMS.CMS.Duplication.duplicate(kind, record, actor: actor, tenant: record.org_id) do
+        {:ok, copy, []} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, gettext("Duplicated as a new draft."))
+           |> push_navigate(to: ~p"/editor/content/#{kind}/#{copy.id}")}
 
-      # Some of the source did not travel — a field grant dropped attributes, or
-      # the block policy reset values this editor could not have set. Saying so
-      # is the difference between "duplication is broken" and "your role cannot
-      # copy those fields" (#929).
-      {:ok, copy, withheld} ->
-        {:noreply,
-         socket
-         |> put_flash(
-           :info,
-           gettext(
-             "Duplicated as a new draft. Not copied, because your role cannot set them: %{fields}.",
-             fields: Enum.join(withheld, ", ")
+        # Some of the source did not travel — a field grant dropped attributes, or
+        # the block policy reset values this editor could not have set. Saying so
+        # is the difference between "duplication is broken" and "your role cannot
+        # copy those fields" (#929).
+        {:ok, copy, withheld} ->
+          {:noreply,
+           socket
+           |> put_flash(
+             :info,
+             gettext(
+               "Duplicated as a new draft. Not copied, because your role cannot set them: %{fields}.",
+               fields: Enum.join(withheld, ", ")
+             )
            )
-         )
-         |> push_navigate(to: ~p"/editor/content/#{kind}/#{copy.id}")}
+           |> push_navigate(to: ~p"/editor/content/#{kind}/#{copy.id}")}
 
-      {:error, _reason} ->
-        {:noreply, put_flash(socket, :error, gettext("Couldn't duplicate that content."))}
+        {:error, _reason} ->
+          {:noreply, put_flash(socket, :error, gettext("Couldn't duplicate that content."))}
+      end
+    else
+      {:noreply, socket}
     end
   end
 
@@ -3036,6 +3247,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> inject_children(socket.assigns.block_children)
       |> inject_rich_bodies(socket.assigns.rich_bodies)
 
+    # Autosave carried the identical defect and was never named in #638: it
+    # submits the live form's params, so a debounced save detached an
+    # out-of-scope tag just as an explicit one did — and did it without
+    # anyone pressing anything. `:autosave` accepts the same verbs (#636
+    # mirrored them there for this change).
+    #
+    # No rewrite here: these params come from the form, which `validate`
+    # already normalized, not from the browser. `merge_tag_params/2` refuses
+    # to run twice for this reason, but not calling it at all is clearer
+    # about where the one rewrite happens.
+
     result =
       EditorTelemetry.span(:autosave, %{kind: socket.assigns.kind}, fn ->
         AshPhoenix.Form.submit(autosave_form, params: params)
@@ -3360,6 +3582,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:record, record)
     |> assign(:page_title, record.title)
     |> assign(:may_write?, may_write?(record, socket.assigns.actor, socket.assigns.current_org))
+    |> assign(
+      :may_suggest_seo?,
+      may_write_fields?(
+        record,
+        socket.assigns.actor,
+        socket.assigns.current_org,
+        @seo_suggestion_fields
+      )
+    )
+    |> assign(
+      :may_assist_blocks?,
+      may_write_fields?(record, socket.assigns.actor, socket.assigns.current_org, ["blocks"])
+    )
     |> assign(:slug_customized?, slug_customized?(socket))
   end
 
@@ -3576,10 +3811,24 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   # Apply `fun` to every column's child-block list of a block.
+  # `Map.update/4`'s default would *create* an entry for a block id that is not
+  # in the tree. The id comes from a client event, and on a published record —
+  # which never autosaves, so `assign_record/2` never re-seeds this map — a
+  # fabricated one would sit in socket state for the whole session.
+  #
+  # Defensive, and deliberately untested: a phantom entry matches no block, so
+  # `inject_children/2` blanks nothing and there is no observable damage to
+  # assert on today. A test for it could not fail, and one that cannot fail is
+  # worse than none. The guard is here because the *next* reader of this map
+  # should not have to re-derive that argument.
   defp update_columns(block_children, block_id, fun) do
-    Map.update(block_children, block_id, [], fn cols ->
-      Enum.map(cols, &update_col_blocks(&1, fun))
-    end)
+    if Map.has_key?(block_children, block_id) do
+      Map.update!(block_children, block_id, fn cols ->
+        Enum.map(cols, &update_col_blocks(&1, fun))
+      end)
+    else
+      block_children
+    end
   end
 
   defp update_col_blocks(col, fun) do
@@ -3649,20 +3898,104 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
-  # Drop the tag picker's hidden sentinel (see `tag_picker/1`). It exists so an
-  # all-unchecked group still submits `tag_ids`, which is the difference between
-  # "detach every tag" and "the field was never touched" — but `""` is not a
-  # uuid, so it must not reach the changeset.
-  defp normalize_tag_ids(%{"tag_ids" => ids} = params) when is_list(ids),
-    do: Map.put(params, "tag_ids", Enum.reject(ids, &(&1 == "")))
+  # Rewrite the picker's ticks into the merge verbs (#638).
+  #
+  # No create branch, because this LiveView has none: `for_update/3` is its only
+  # form constructor (content is created elsewhere and edited here). That
+  # matters, because `:create` rejects the verbs outright — it has nothing to
+  # merge against — so a create path added later has to come back through here
+  # rather than inherit this by accident.
+  #
+  # `tag_ids` is the COMPLETE set, so submitting it means "these are the only
+  # tags" — and a checkbox that was never rendered was never submitted, so
+  # narrowing a tag group's content types silently stripped tags off existing
+  # content on the next Save. That is what the "Also attached" rescue section,
+  # the hidden `""` sentinel and `normalize_tag_ids/1` all existed to work
+  # around; #636 gave the resource `add_tag_ids`/`remove_tag_ids`, and this is
+  # the caller finally using them.
+  #
+  # The diff is taken against what the server chose to RENDER, not against the
+  # record's current tags:
+  #
+  #   * `remove` is rendered-minus-ticked. A tag with no checkbox cannot appear
+  #     here, which is exactly the property that was missing — it survives
+  #     instead of being detached by omission.
+  #   * `add` is every ticked id, not ticked-minus-attached. `:append` is
+  #     `on_match: :ignore`, so re-adding is free, and diffing against a
+  #     possibly-stale `record.tags` would drop a tick for a tag a collaborator
+  #     detached since this page loaded.
+  #
+  # Deriving `rendered` server-side rather than posting it as a hidden field is
+  # also what bounds the blast radius: a forged payload can only tick ids, and
+  # what may be *removed* stays whatever this server put on the page.
+  #
+  # An all-unchecked group now submits no `tag_ids` key at all and needs none —
+  # `ticked` is empty, so every rendered tag lands in `remove`. That is the
+  # sentinel's whole job, done by the diff instead.
+  # NB this is not idempotent, and must only ever see BROWSER params. It
+  # consumes `tag_ids`, so a second pass over its own output reads as "nothing
+  # ticked" and removes everything the first pass just added — which is exactly
+  # what happened when autosave (which forwards the *form's* params, already
+  # rewritten by `validate`) also called it. Autosave therefore does not, and
+  # "a section already on screen stays closed once its tag is saved" is the test
+  # that catches it coming back.
+  #
+  # An earlier version guarded that with a shape check — "if it already has the
+  # verbs, pass it through". That was worse than useless: it also let a crafted
+  # payload post its own `remove_tag_ids` and skip the rewrite entirely, which
+  # is precisely the bound this function exists to impose.
+  defp merge_tag_params(params, socket) do
+    ticked = ticked_tag_ids(params)
+    ticked_set = MapSet.new(ticked)
 
-  defp normalize_tag_ids(params), do: params
+    # `rendered` is every tag the picker put a checkbox on, precomputed in
+    # `refresh_tag_index/1`. `tag_picker/1` renders the sections and nothing
+    # else (an empty `sections` renders no controls at all), so it is the
+    # rendered set exactly — which has to be true rather than approximately
+    # true, because it is the ceiling on what this save may detach.
+    removed =
+      socket.assigns.tag_index.rendered
+      |> Enum.reject(&MapSet.member?(ticked_set, &1))
+
+    params
+    |> Map.delete("tag_ids")
+    |> Map.put("add_tag_ids", ticked)
+    |> Map.put("remove_tag_ids", removed)
+  end
+
+  # Blanks are dropped, and that is not the old sentinel coming back: nothing
+  # renders a `""` any more, so the only way one arrives is a page that was
+  # loaded before this deployment and submitted after it. Reading it as an id
+  # would fail the uuid cast and turn a routine save into an error the editor
+  # cannot act on; reading it as "nothing ticked" is what that page meant.
+  defp ticked_tag_ids(params) do
+    params
+    |> Map.get("tag_ids", [])
+    |> List.wrap()
+    |> Enum.map(&to_string/1)
+    |> Enum.reject(&(&1 == ""))
+  end
 
   # Coerce an editable child field, keeping `level` an integer (headings clamp on
   # render, so an out-of-range value is harmless, but a non-integer would fail the
   # embedded cast).
   defp put_child_field(child, "level", value), do: Map.put(child, "level", to_int(value))
-  defp put_child_field(child, field, value), do: Map.put(child, field, value)
+
+  # Only the fields this child's own editor renders. `field` arrives from a
+  # client event, and a bare `Map.put/3` let one name a *structural* key:
+  # `_type` rewrites the union discriminator, so the next save fails its typed
+  # cast — and on the autosave path that surfaces as `save_state: :error` with
+  # no field to point at, leaving the document unsaveable until the block is
+  # deleted; `id` collides two children's DOM ids and their drag addressing.
+  # Neither is reachable from the rendered markup, which is exactly why nothing
+  # would have noticed.
+  defp put_child_field(child, field, value) do
+    if field in Enum.map(nested_fields_for(child["_type"]), &elem(&1, 0)) do
+      Map.put(child, field, value)
+    else
+      child
+    end
+  end
 
   defp to_int(value) when is_integer(value), do: value
 
@@ -3804,13 +4137,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
       true ->
         current =
           socket.assigns.form
-          |> selected_ids(:tag_ids, current_ids(socket.assigns.record.tags))
-          |> Enum.map(&to_string/1)
+          |> selected_tag_ids(socket.assigns.record)
+          |> MapSet.to_list()
 
+        # Written back as `tag_ids` and immediately rewritten by
+        # `merge_tag_params/2` — leaving `tag_ids` in the form's params
+        # beside the verbs would make the next save contradictory, and
+        # `MergeArguments` refuses that combination outright rather than
+        # resolving it by declaration order.
         params =
           socket.assigns.form
           |> AshPhoenix.Form.params()
+          |> Map.drop(["add_tag_ids", "remove_tag_ids"])
           |> Map.put("tag_ids", Enum.uniq(current ++ [tag_id]))
+          |> merge_tag_params(socket)
 
         socket
         |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
@@ -3877,10 +4217,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp suggested_fields(nil), do: []
 
   defp suggested_fields(draft) do
-    Enum.filter(
-      ~w(seo_title seo_description seo_keywords),
-      &(suggested_value(draft, &1) not in [nil, ""])
-    )
+    Enum.filter(@seo_suggestion_fields, &(suggested_value(draft, &1) not in [nil, ""]))
   end
 
   defp suggested_value(nil, _field), do: nil
@@ -3921,6 +4258,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
       field_locked?(locked_fields(socket), field) ->
         {socket, :locked}
+
+      # Re-checked per card, not just at generation time (#868): the panel is
+      # hidden when the grant narrows mid-session, but a queued or replayed
+      # `seo_accept` still arrives — and writing the value would schedule an
+      # autosave the change then refuses on that exact field.
+      not field_granted?(
+        socket.assigns.record,
+        socket.assigns.actor,
+        socket.assigns.current_org,
+        field
+      ) ->
+        {socket, :not_permitted}
 
       true ->
         params = socket.assigns.form |> AshPhoenix.Form.params() |> Map.put(field, value)
@@ -4068,8 +4417,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # Same write-authorization boundary as `seo_suggest` (#550): block assist
     # also bills an org LLM run, so read access to the record must not be
     # enough to spend it. Refused server-side, not just hidden.
+    # …and the grant, for the same reason `seo_suggest` needs it (#868):
+    # assist bills its own budget and writes prose into a block, so a
+    # `blocks`-less grant means a billed run whose result the save refuses.
     socket.assigns.assist_enabled? and
       socket.assigns.may_write? and
+      socket.assigns.may_assist_blocks? and
       not socket.assigns.assist_running? and
       socket.assigns.assist_block == block_id and
       not is_nil(assist_block_form(socket.assigns.form, block_id))
@@ -4269,10 +4622,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # A **MapSet**, not a list (#528). Membership is tested three times per tag
     # — the checkbox, the section count, and the filter — and this component
     # re-renders on every `validate`, i.e. per keystroke anywhere in the form.
-    selected =
-      assigns.form
-      |> selected_ids(:tag_ids, current_ids(assigns.record.tags))
-      |> MapSet.new(&to_string/1)
+    selected = selected_tag_ids(assigns.form, assigns.record)
 
     # The skeleton — which tag sits in which section, and its downcased filter
     # key — is computed once per RECORD change (`refresh_tag_index/1`), not per
@@ -4284,6 +4634,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
       assigns
       |> assign(:selected, selected)
       |> assign(:sections, sections)
+      # The checkboxes still post under `tag_ids[]`; `merge_tag_params/2`
+      # rewrites that into `add_tag_ids`/`remove_tag_ids` at submit time, so the
+      # wire name the browser posts and the argument the changeset takes are
+      # deliberately not the same thing (#638).
+      |> assign(:name, assigns.form[:tag_ids].name <> "[]")
       # Why an empty picker is empty, which is not one question but two, and the
       # difference is what the editor should do next (#524). `pickable` and
       # `sections` are narrowed independently — every tag in the org can sit in
@@ -4299,7 +4654,6 @@ defmodule KilnCMSWeb.ContentEditorLive do
           true -> nil
         end
       )
-      |> assign(:name, assigns.form[:tag_ids].name <> "[]")
 
     ~H"""
     <fieldset id="tag-picker" phx-hook="TagFilter" data-tag-filter>
@@ -4319,19 +4673,6 @@ defmodule KilnCMSWeb.ContentEditorLive do
           class="underline"
         >{gettext("taxonomy")}</.link>.
       </p>
-
-      <%!-- Browsers omit an all-unchecked checkbox group from the payload
-            entirely, which `selected_ids/3` can only read as "untouched" — so
-            the last tag could never be removed. This sentinel keeps the key
-            present; `normalize_tag_ids/1` drops it before the changeset.
-
-            Gated on the sections, not on `pickable`: with nothing rendered to
-            tick, submitting the key at all would post an empty `tag_ids` that
-            `append_and_remove` reads as "detach everything". (Unreachable
-            today — every attached tag lands in some section, so no sections
-            means no attached tags — but the sentinel's whole job is to make an
-            empty submission meaningful, and it must not do that here.) --%>
-      <input :if={@sections != []} type="hidden" name={@name} value="" />
 
       <div :if={@sections != []} class="space-y-2">
         <%!-- Unnamed so it never serializes into the changeset, and wrapped in
@@ -4421,11 +4762,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # for tags already on the record, which are collected into a trailing
   # "Also attached" section.
   #
-  # That last part is load-bearing, not a nicety: tags are written with
+  # That section used to be load-bearing: tags were written with
   # `manage_relationship(:tag_ids, :tags, type: :append_and_remove)`, so a
-  # checkbox that isn't rendered isn't submitted, and the link is *removed*.
-  # Narrowing a group's content types after the fact would otherwise silently
-  # strip tags off existing content the next time someone hit Save.
+  # checkbox that was not rendered was not submitted and the link was *removed*
+  # — and without this section, narrowing a group's content types silently
+  # stripped tags off existing content on the next Save.
+  #
+  # Since #638 the picker submits `add_tag_ids`/`remove_tag_ids` diffed against
+  # what it rendered, so an unrendered tag simply survives and the section is no
+  # longer holding anything up. It stays for the two things it was always also
+  # doing, which are worth keeping on their own: telling an editor that a tag
+  # from a group scoped elsewhere is on this item, and giving them a control to
+  # take it off. Note the consequence of keeping the checkboxes — these tags ARE
+  # rendered, so unticking one does now remove it, which is the point.
   defp tag_sections(tags, groups, kind, attached) do
     kind = to_string(kind)
     known_ids = MapSet.new(groups, & &1.id)
@@ -4444,7 +4793,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # Keyed on `attached` (the persisted set) rather than `selected` (the live
     # ticks): keying on the latter meant unchecking a tag here emptied the
     # section, `Enum.reject` deleted it, and there was no control left to undo
-    # with — an irreversible detach one mis-click away.
+    # with. Still true and still the reason — and now doubly so, because the
+    # removal diff is taken against what was rendered: a control that vanishes
+    # mid-edit would take its tag out of `remove_tag_ids` and quietly cancel the
+    # detach the editor just asked for.
     orphaned_tags =
       by_bucket
       |> Map.get(:out_of_scope, [])
@@ -4463,9 +4815,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Which section a tag belongs in. A `tag_group_id` that resolves to no loaded
   # group — a dangling pointer, or one written across tenants (the FK has no
-  # org component) — falls back to "Ungrouped" rather than vanishing: an
-  # unrendered checkbox is a checkbox that isn't submitted, and
-  # `append_and_remove` reads that as "detach me".
+  # org component) — falls back to "Ungrouped" rather than vanishing. That was
+  # originally about data loss (an unsubmitted checkbox was a detach); since
+  # #638 it is about reach: a tag with no control cannot be *removed*, so
+  # vanishing would strand it on the record with no way to take it off.
   defp bucket_for(%{tag_group_id: nil}, _known_ids, _applicable_ids), do: :ungrouped
 
   defp bucket_for(%{tag_group_id: id}, known_ids, applicable_ids) do
@@ -4557,7 +4910,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
           do: section.key
 
     socket
-    |> assign(:tag_index, %{sections: sections, pickable?: pickable != []})
+    # `rendered` is stamped here for the same reason `tag_view/1` downcases
+    # here: the section list is built once per record change, and the thing
+    # that reads this runs on every keystroke (`validate` rewrites the tag
+    # params on each one). Walking every section's tags per keystroke to
+    # rebuild a set that only changes with the record is the exact cost this
+    # module already refuses to pay elsewhere.
+    |> assign(:tag_index, %{
+      sections: sections,
+      pickable?: pickable != [],
+      # `tag_view/1` already stringified the ids, so this is comparable to the
+      # form params without further coercion.
+      rendered: MapSet.new(for section <- sections, tag <- section.tags, do: tag.id)
+    })
     |> update(:tag_sections_open, &MapSet.union(&1, fresh))
     |> assign(:tag_sections_seen, MapSet.union(seen, MapSet.new(sections, & &1.key)))
   end
@@ -7113,18 +7478,47 @@ defmodule KilnCMSWeb.ContentEditorLive do
         phx-value-field={field}
         class="w-full rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
       />
+      <%!-- Named, unlike its nameless siblings above, and the name carries the
+      identifiers (#893). A `<select>` inside a form routes its own `phx-change`
+      through LiveView's `pushInput`, which serializes the form filtered to the
+      changed input's `name` and scrapes `phx-value-*` off the FORM, not the
+      element — so a nameless select sends neither its value nor its ids, and
+      the handler head could not match. The text inputs beside it work because
+      `phx-blur` is not a form binding and goes through `pushEvent`, which does
+      carry `phx-value-*`; that asymmetry is what hid this.
+
+      Named outside the `form[...]` namespace on purpose, so it stays out of the
+      content changeset exactly as the nameless inputs do: `validate` matches
+      `%{"form" => params}` and never sees this key, and the nested tree is
+      re-injected from socket state by `inject_children/2` regardless. --%>
       <select
         :if={@child["_type"] == "heading"}
+        name={"col_child[#{@block_id}][#{@child["id"]}][level]"}
         phx-change="col_update_child"
-        phx-value-id={@block_id}
-        phx-value-child={@child["id"]}
-        phx-value-field="level"
         class="rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
       >
-        <option :for={n <- 1..6} value={n} selected={to_int(@child["level"]) == n}>H{n}</option>
+        <%!-- Matched to what will actually publish. A child with no stored `level`
+        (a legacy one, or an empty string) made `to_int/1` return 0, so no option
+        was `selected` and the browser showed the first — H1 — while delivery
+        renders `h2`, because `Blocks.Heading.clamp/1` falls back to its default.
+        Harmless while the control was inert; a lie now that it works. --%>
+        <option :for={n <- 1..6} value={n} selected={child_heading_level(@child) == n}>H{n}</option>
       </select>
     </div>
     """
+  end
+
+  # The level the select must show: what `KilnCMS.Blocks.Heading` will render,
+  # not what happens to be stored. Anything outside 1..6 — including a missing
+  # or unparseable value — resolves to the same default that block clamps to, so
+  # the control and the published page cannot disagree.
+  @heading_default_level 2
+
+  defp child_heading_level(child) do
+    case to_int(child["level"]) do
+      n when n in 1..6 -> n
+      _out_of_range -> @heading_default_level
+    end
   end
 
   # {field, placeholder} pairs for a nested child type's text inputs.
@@ -7233,8 +7627,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   warning has to cover two different reasons the saved row is not
                   what is on screen. A dirty buffer is your own unsaved work; a
                   conflict means the saved row is somebody ELSE's save, so the
-                  copy would be of content you have never seen (#928). --%>
+                  copy would be of content you have never seen (#928).
+
+                  `:if={@may_write?}` like every other write affordance in this
+                  file (#922): this route deliberately admits an actor who may
+                  OPEN a record without being able to write it (#550), and
+                  forking someone else's draft is a write. --%>
             <button
+              :if={@may_write?}
               type="button"
               phx-click="duplicate"
               data-confirm={duplicate_confirm(@save_state, @conflict)}
@@ -7495,7 +7895,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
                             matches on `data-block-id`, so a block without one
                             has nothing to deliver to. --%>
                       <.assist_panel
-                        :if={@assist_enabled? and @may_write? and bf[:id].value}
+                        :if={
+                          @assist_enabled? and @may_write? and @may_assist_blocks? and bf[:id].value
+                        }
                         block_id={bf[:id].value}
                         open?={@assist_block == bf[:id].value}
                         action={@assist_action}
@@ -7853,11 +8255,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   slug_customized?={@slug_customized?}
                   class="rounded border border-base-content/10 bg-base-200/40 p-2"
                 />
-                <div :if={@seo_enabled? and @may_write?}>
+                <div :if={@seo_enabled? and @may_write? and @may_suggest_seo?}>
                   <%!-- Gated on write access, not just the feature flag (#550):
                         a read-only viewer must not see a control that would bill
                         the org for a record they cannot edit. The server handler
-                        re-checks; this only keeps the affordance honest. --%>
+                        re-checks; this only keeps the affordance honest.
+                        `@may_suggest_seo?` adds the per-field grant (#868) —
+                        `@may_write?` is `Ash.can?`, which cannot see a change,
+                        so a field-granted editor was offered a billed run whose
+                        result the save would then reject field by field. --%>
                   <%!-- `type="button"` is mandatory: this sits inside the main
                         <.form>, so the default type would submit it. --%>
                   <button
@@ -8242,8 +8648,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     >
                       {state_label(cov.status)} — {gettext("edit")}
                     </.link>
+                    <%!-- `@may_write?` for the reason the header's Duplicate
+                          button carries it (#922): this forks the record's
+                          payload into a new draft, and read access to a record
+                          is not enough to fork it. --%>
                     <button
-                      :if={is_nil(cov.record)}
+                      :if={is_nil(cov.record) and @may_write?}
                       type="button"
                       phx-click="create_translation"
                       phx-value-locale={cov.locale}
@@ -8831,4 +9241,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
     do: gettext("Unsaved changes won't be copied. Duplicate the last saved version?")
 
   defp duplicate_confirm(_save_state, _conflict), do: false
+
+  # A field grant can leave a translation narrower than its source, and so can
+  # the block-field policy (#1157/#890). Saying so is the difference between
+  # "translation is broken" and "your role cannot copy those fields" — the same
+  # distinction the Duplicate handler draws (#929).
+  defp translation_flash(locale, []),
+    do: gettext("Draft translation created (%{locale}).", locale: locale)
+
+  defp translation_flash(locale, withheld) do
+    gettext(
+      "Draft translation created (%{locale}). Not copied, because your role cannot set them: %{fields}.",
+      locale: locale,
+      fields: Enum.join(withheld, ", ")
+    )
+  end
 end

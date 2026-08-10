@@ -24,10 +24,64 @@ defmodule KilnCMS.Federation.RemoteActor do
   same gap, since the check could only compare against one of the two URLs.
   `activity["actor"]` is a canonical actor id in practice, so there is nothing
   to follow.
+
+  ## Successful fetches are cached
+
+  The inbox has to fetch before it can authenticate — the key that verifies the
+  signature is *in* the document — so every inbound activity that needs an actor
+  costs an outbound request to a host a stranger named, and repeats were not
+  deduped (#966). A short-lived cache turns a burst from one actor into one
+  fetch.
+
+  Three things it deliberately does not do:
+
+    * **cache a failure.** A 500 or a timeout is transient, and remembering it
+      would keep a legitimate actor unreachable for the whole TTL.
+    * **live long.** An actor rotating its key is invisible to us until the
+      entry expires, and during that window every signature it sends fails to
+      verify. Minutes, not hours — long enough to collapse a burst, short enough
+      that a rotation is a blip rather than an outage.
+    * **grow without bound.** The key is a URL from an unauthenticated request,
+      so the entry count is otherwise attacker-chosen. The instance is capped
+      and evicts least-recently-written, so filling it costs the attacker one
+      fetch per entry and costs this node a fixed table.
+
+  The cache is not per-org. An actor document is a public document about a
+  stranger, identical whichever site was asked to fetch it, and the key is the
+  canonical URL whole — never a URL joined to anything else, which is how a
+  cache key stops being one-to-one.
   """
+  import Cachex.Spec, only: [hook: 1]
 
   @accept "application/activity+json, application/ld+json"
   @max_bytes 128 * 1024
+
+  @cache :kiln_cms_remote_actors
+
+  # A parsed actor document is a handful of strings, so this cap is a few MB. It
+  # is a ceiling on abuse, not a working-set target: a site with real federation
+  # traffic talks to far fewer distinct actors than this.
+  @max_entries 5_000
+
+  # Passed as `expire:`, NOT `ttl:` — Cachex silently ignores unknown options,
+  # so `ttl:` compiles, runs, and leaves the entry immortal. That is the trap
+  # `KilnCMS.Search.VectorCache` and `KilnCMS.Firing.Cache` both document, and
+  # here an immortal entry would pin a rotated key forever.
+  @ttl :timer.minutes(10)
+
+  @doc "The Cachex instance name (started in the application supervision tree)."
+  @spec cache_name() :: atom()
+  def cache_name, do: @cache
+
+  @doc "Supervisor child spec, bounded by an evented least-recently-written policy."
+  def child_spec(_arg) do
+    Supervisor.child_spec(
+      {Cachex,
+       name: @cache,
+       hooks: [hook(module: Cachex.Limit.Evented, args: {@max_entries, [reclaim: 0.1]})]},
+      id: __MODULE__
+    )
+  end
 
   @typedoc "What we need from a remote actor to talk to it."
   @type t :: %{
@@ -48,6 +102,36 @@ defmodule KilnCMS.Federation.RemoteActor do
   def fetch(uri) when is_binary(uri) do
     canonical = strip_fragment(uri)
 
+    case Cachex.fetch(@cache, canonical, fn _key -> commit(canonical) end) do
+      {:ok, cached} -> cached
+      {:commit, cached} -> cached
+      # `:ignore` carries the error the fetch produced, uncached — see `commit/1`.
+      {:ignore, error} -> error
+      # The instance is genuinely not running (a release that starts the inbox
+      # without the cache, a test). A cache that is down must not take
+      # federation down with it.
+      {:error, :no_cache} -> fetch_now(canonical)
+      # Anything else means the fallback ran and raised, and Cachex's Courier
+      # reports it here. Re-fetching would pay a second outbound request for the
+      # same failure.
+      {:error, _ran_and_failed} -> {:error, "actor fetch failed"}
+    end
+  end
+
+  def fetch(_uri), do: {:error, "actor uri must be a string"}
+
+  # `:ignore` rather than committing the error. A committed `{:error, _}` would
+  # occupy one of the capped entries and, unlike a `nil` (which `Cachex.fetch/3`
+  # re-runs the fallback for), it would actually be served — so one bad minute
+  # at the far end would be remembered as a bad ten.
+  defp commit(canonical) do
+    case fetch_now(canonical) do
+      {:ok, _actor} = ok -> {:commit, ok, expire: @ttl}
+      {:error, _reason} = error -> {:ignore, error}
+    end
+  end
+
+  defp fetch_now(canonical) do
     with {:ok, %{status: status, body: body}} when status in 200..299 <-
            KilnCMS.SafeFetch.get(canonical,
              headers: [{"accept", @accept}],
@@ -77,8 +161,6 @@ defmodule KilnCMS.Federation.RemoteActor do
         {:error, reason}
     end
   end
-
-  def fetch(_uri), do: {:error, "actor uri must be a string"}
 
   # The document may only speak for the URL it was served from.
   defp same_url(id, canonical) do

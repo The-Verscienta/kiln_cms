@@ -29,7 +29,12 @@ defmodule KilnCMS.Seo.LinksTest do
     })
   end
 
+  # `:tenant` defaults to the default org. Passing another one is how the
+  # cross-org cases build the page that must never surface.
   defp post(actor, text, opts \\ []) do
+    tenant = Keyword.get(opts, :tenant)
+    write_opts = if tenant, do: [actor: actor, tenant: tenant], else: [actor: actor]
+
     record =
       CMS.create_post!(
         Map.merge(
@@ -40,16 +45,24 @@ defmodule KilnCMS.Seo.LinksTest do
           },
           Keyword.get(opts, :attrs, %{})
         ),
-        actor: actor
+        write_opts
       )
 
     record =
       if Keyword.get(opts, :publish?, true),
-        do: CMS.publish_post!(record, %{}, actor: actor),
+        do: CMS.publish_post!(record, %{}, write_opts),
         else: record
 
     if Keyword.get(opts, :index?, true), do: {:ok, _} = BlockIndexer.reindex(record)
     record
+  end
+
+  defp other_org do
+    Ash.Seed.seed!(KilnCMS.Accounts.Organization, %{
+      name: "Other",
+      slug: "links-org-#{System.unique_integer([:positive])}",
+      status: :active
+    })
   end
 
   describe "the semantic leg" do
@@ -146,6 +159,77 @@ defmodule KilnCMS.Seo.LinksTest do
                Links.suggest(anchor, exclude_paths: [linked.path]),
                &(&1.id == twin.id)
              )
+    end
+
+    # #924. The keyword fallback has its own cross-org case, but it sits under a
+    # `semantic_off()` setup — so `Links.suggest/2` short-circuits at
+    # `Search.semantic?()` and only `Search.global/2`'s scoping is exercised.
+    # The docstring naming the SEMANTIC leg as the reason `:tenant` is
+    # unnecessary was the one leg no test reached.
+    #
+    # ## What this does and does not pin
+    #
+    # `KilnCMS.Search.Related` scopes the semantic path TWICE — `tenant:` on
+    # `nearest_block_embeddings!`, and again on the per-neighbour read in
+    # `resolve/3` — and either alone is sufficient. Verified by mutation:
+    # deleting one and running this file is still green; deleting both turns
+    # these two cases red.
+    #
+    # So this is a guard on the org boundary as a user-visible property, not on
+    # either layer individually. That is the property the docstring claims and
+    # the one an operator cares about; a single-layer regression stays
+    # invisible from out here, which is what defence in depth means and is not
+    # something an end-to-end test can fix.
+    test "never suggests a page from another organization (#869, #924)" do
+      actor = admin()
+      other = other_org()
+
+      # A byte-identical twin in ANOTHER org. Under the stub embedder identical
+      # title + body means cosine distance 0, so with the boundary gone this
+      # ranks FIRST — the strongest version of the leak, not a marginal one.
+      foreign =
+        post(actor, "brewing herbal tea slowly", title: @twin_title, tenant: other)
+
+      # A same-org twin, so the semantic leg has something legitimate to return.
+      # Without it `suggestions` is `[]`, and an empty list satisfies BOTH the
+      # `refute Enum.any?` below and the `Enum.all?` guard under it — the first
+      # draft of this test asserted `source == :semantic` on nothing and passed
+      # with the predicate changed to a source that does not exist.
+      twin = post(actor, "brewing herbal tea slowly", title: @twin_title)
+      anchor = post(actor, "brewing herbal tea slowly", title: @twin_title)
+
+      suggestions = Links.suggest(anchor)
+
+      # Non-emptiness FIRST: every other assertion here is vacuous without it.
+      assert Enum.any?(suggestions, &(&1.id == twin.id)),
+             "the same-org twin should be suggested; with no suggestions at all " <>
+               "the org-boundary assertion below proves nothing"
+
+      # ...and it came from the leg this test is named for, not the keyword
+      # fallback that `candidates/2` drops to when the semantic leg is empty.
+      assert Enum.all?(suggestions, &(&1.source == :semantic))
+
+      refute Enum.any?(suggestions, &(&1.id == foreign.id)),
+             "a semantic suggestion must not cross the org boundary"
+    end
+
+    test "the keyword fall-through does not leak the foreign page either" do
+      # No same-org twin, so the semantic leg returns nothing and `candidates/2`
+      # falls through to the keyword leg. Asserted explicitly, because that is
+      # what distinguishes this case from the one above — the first draft
+      # claimed the difference and did not have it, so the two were identical.
+      actor = admin()
+      other = other_org()
+
+      foreign =
+        post(actor, "brewing herbal tea slowly", title: @twin_title, tenant: other)
+
+      anchor = post(actor, "brewing herbal tea slowly", title: @twin_title)
+
+      suggestions = Links.suggest(anchor)
+
+      refute Enum.any?(suggestions, &(&1.id == foreign.id))
+      refute Enum.any?(suggestions, &(&1.source == :semantic))
     end
 
     test "respects :limit" do

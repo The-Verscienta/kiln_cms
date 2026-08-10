@@ -40,10 +40,6 @@ defmodule KilnCMSWeb.FormEmbedTest do
   end
 
   # Every test gets its own IP so rate buckets never cross tests.
-  defp unique_ip(conn) do
-    Map.put(conn, :remote_ip, {127, 2, rem(System.unique_integer([:positive]), 250), 1})
-  end
-
   defp csp(conn), do: conn |> get_resp_header("content-security-policy") |> List.first()
 
   describe "GET /forms/:slug/embed" do
@@ -164,10 +160,12 @@ defmodule KilnCMSWeb.FormEmbedTest do
              ]
     end
 
+    # `nil` in place of a form is the deployment-wide question, asked on purpose
+    # — there is no arity that asks it by omission (#648).
     test "frame_ancestors reflects the configured origins" do
-      assert Embed.frame_ancestors() == "'self' https://embedder.test"
-      assert Embed.cross_site?()
-      assert Embed.allowed_origins_label() == "https://embedder.test"
+      assert Embed.frame_ancestors_for(nil) == "'self' https://embedder.test"
+      assert Embed.cross_site?(nil)
+      assert Embed.allowed_origins_label(nil) == "https://embedder.test"
     end
 
     test "frame_ancestors renders each setting" do

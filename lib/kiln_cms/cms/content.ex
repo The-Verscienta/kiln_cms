@@ -1878,6 +1878,12 @@ defmodule KilnCMS.CMS.Content do
 
         update :publish do
           require_atomic? false
+          # FIRST, so its `before_action` hook registers before the two
+          # block-reading validations below defer themselves to the same phase:
+          # an open collab session's prose rides in on this write or is lost
+          # with the DocServer (#1061), and the gates must judge what actually
+          # publishes. No-op when nobody is editing.
+          change KilnCMS.CMS.Changes.CheckpointCollabRoom
           # No content input, and a compare-and-swap on state (#879) — see
           # `:return_to_draft`. Without the filter a publish landing after a
           # concurrent transition would stamp `published_at` + artifacts onto a
@@ -1889,16 +1895,22 @@ defmodule KilnCMS.CMS.Content do
           # Accessibility gate (#403), config-gated and off by default: a publish
           # is refused when the document shows an image with neither alt text nor
           # a `decorative` mark.
-          validate KilnCMS.CMS.Validations.MediaAltText
+          validate KilnCMS.CMS.Validations.MediaAltText, before_action?: true
           # Claim gate (#377), config-gated and off by default: a publish is
           # refused when the document carries a phrase an `:error`-severity
           # compliance rule matches. Same rules the editor's compliance panel
           # advises on, so the gate can never disagree with the panel the
           # author has been reading.
-          validate KilnCMS.CMS.Validations.ComplianceClaims
+          validate KilnCMS.CMS.Validations.ComplianceClaims, before_action?: true
           change filter(expr(^ref(:state) == :draft or ^ref(:state) == :in_review))
           change transition_state(:published)
           change set_attribute(:published_at, &DateTime.utc_now/0)
+          # A publish never used to change content, so it carried none of the
+          # derived-column changes. It can now (#1061), and a published document
+          # that cannot be found by its own published words is a poor answer.
+          # After the checkpoint, because hooks run in registration order.
+          change KilnCMS.CMS.Changes.SetSearchText
+          change KilnCMS.CMS.Changes.EnqueueEmbedding
           change KilnCMS.CMS.Changes.RecordPublishedVersion
           change KilnCMS.CMS.Changes.FireArtifacts
           change KilnCMS.CMS.Changes.NotifyWebhooks
@@ -1909,20 +1921,31 @@ defmodule KilnCMS.CMS.Content do
         update :publish_scheduled do
           # Run by the AshOban scheduler once `scheduled_at` has passed.
           require_atomic? false
+          # Same room checkpoint as `:publish`, and for the same reason (#1061).
+          # "A scheduled publish is never under an open room" is false: schedule
+          # for 09:00, keep editing collaboratively, and the cron fires at 09:00
+          # into a live room. FIRST, so the gates below see the merged tree.
+          change KilnCMS.CMS.Changes.CheckpointCollabRoom
           # Same compliance gate as `:publish` (#356) — a scheduled publish must
           # also satisfy any required consent.
           validate KilnCMS.CMS.Validations.RequiredConsent
           # Accessibility gate (#403), config-gated and off by default: a publish
           # is refused when the document shows an image with neither alt text nor
           # a `decorative` mark.
-          validate KilnCMS.CMS.Validations.MediaAltText
+          validate KilnCMS.CMS.Validations.MediaAltText, before_action?: true
           # Same claim gate as `:publish` (#377) — a scheduled publish is still
           # a publish, and a claim that must not go live at 09:00 by hand must
           # not go live at 09:00 by scheduler either.
-          validate KilnCMS.CMS.Validations.ComplianceClaims
+          validate KilnCMS.CMS.Validations.ComplianceClaims, before_action?: true
           change transition_state(:published)
           change set_attribute(:published_at, &DateTime.utc_now/0)
           change set_attribute(:scheduled_at, nil)
+          # A publish never used to change content, so it carried none of the
+          # derived-column changes. It can now (#1061), and a published document
+          # that cannot be found by its own published words is a poor answer.
+          # After the checkpoint, because hooks run in registration order.
+          change KilnCMS.CMS.Changes.SetSearchText
+          change KilnCMS.CMS.Changes.EnqueueEmbedding
           change KilnCMS.CMS.Changes.RecordPublishedVersion
           change KilnCMS.CMS.Changes.FireArtifacts
           change KilnCMS.CMS.Changes.NotifyWebhooks
@@ -2594,6 +2617,32 @@ defmodule KilnCMS.CMS.Content do
           public? true
         end
 
+        # The SEO fields as anything *rendering* them should read them: the
+        # author's own value, else the type's #805 pattern expanded (#1102).
+        # The stored `seo_title`/`seo_description` keep saying exactly what a
+        # human typed — which is what the editor's SEO panel, the analyzer and
+        # the export need them to say — so this is a second field rather than a
+        # change to the first.
+        calculate :effective_seo_title,
+                  :string,
+                  {KilnCMS.CMS.Calculations.EffectiveSeo, field: :seo_title} do
+          public? true
+          # No `expression/2` — the pattern lives in the type registry, not in a
+          # column — so a filter or sort on this would raise out of AshSql as a
+          # 500. Declaring them unusable rejects at the query layer instead,
+          # exactly as `word_count` and `related_links` do.
+          filterable? false
+          sortable? false
+        end
+
+        calculate :effective_seo_description,
+                  :string,
+                  {KilnCMS.CMS.Calculations.EffectiveSeo, field: :seo_description} do
+          public? true
+          filterable? false
+          sortable? false
+        end
+
         # The curated related links, projected to `[%{id, title, slug}]` (#996).
         # A calculation rather than `load [related_*s: [...]]` because `load`
         # cannot project — see `KilnCMS.CMS.Calculations.RelatedLinks`.
@@ -2603,6 +2652,24 @@ defmodule KilnCMS.CMS.Content do
           public? true
           # No expression, so a filter or sort would raise out of AshSql as a
           # 500; declaring them unusable rejects at the query layer instead —
+          # same reason `word_count` does.
+          filterable? false
+          sortable? false
+        end
+
+        # The block tree projected to `_id`/`_type` only, nested children in
+        # the positions they render (#954). This is the READ surface for block
+        # identity: the write path accepts `_id` back, and `EnforceBlockFieldPolicy`
+        # requires a nested admin-set value to return under the child id that
+        # held it — a demand that is only fair because this makes the ids
+        # readable on drafts (the fired artifact covers published content).
+        # Carries no field values, so the non-`public?` `blocks` boundary and
+        # `hide_inputs: [:blocks]` are untouched; drafts stay editor-scoped by
+        # the row read policy.
+        calculate :block_ids, {:array, :map}, KilnCMS.CMS.Calculations.BlockIds do
+          public? true
+          # No `expression/2`, so a filter or sort would raise out of AshSql as
+          # a 500; declaring them unusable rejects at the query layer instead —
           # same reason `word_count` does.
           filterable? false
           sortable? false

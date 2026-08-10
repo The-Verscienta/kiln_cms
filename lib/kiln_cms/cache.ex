@@ -262,6 +262,26 @@ defmodule KilnCMS.Cache do
   end
 
   @doc """
+  Cache key for a site's resolved claim-checking settings (#857) — the
+  `%KilnCMS.Compliance.Settings{}` its editor and publish gate are judged
+  against, config layer already folded in.
+  """
+  def compliance_key(org_id), do: "compliance:#{org_id}"
+
+  @doc """
+  Drop a site's cached claim-checking settings after a settings save.
+
+  Cluster-wide (#739), like branding and code injection: these hold the same
+  shape of thing, and an admin who turns the publish gate off to unblock a
+  release must not have it stay on wherever their next request lands.
+  """
+  @spec bust_compliance(Ash.UUID.t()) :: :ok
+  def bust_compliance(org_id) do
+    if enabled?(), do: ClusterBust.broadcast([compliance_key(org_id)])
+    :ok
+  end
+
+  @doc """
   Cache key for a site's generated sitemap XML (shared with the sitemap
   controller). Per-org (epic #336): each organization serves its own sitemap of
   its own published URLs.
@@ -293,7 +313,12 @@ defmodule KilnCMS.Cache do
   @doc "Drop a site's cached funnel targets. Called from every funnel/step write."
   @spec bust_funnel_targets(Ash.UUID.t()) :: :ok
   def bust_funnel_targets(org_id) do
-    if enabled?(), do: Cachex.del(@cache, funnel_targets_key(org_id))
+    # Cluster-wide for the same reason as `bust_experiments/1` (#1113), and one
+    # more of its own: the whole point of a funnel goal is that editing the
+    # funnel moves the goal (#1010). A node that has not seen the edit keeps
+    # converting on the PREVIOUS last step, so the same visit counts on one node
+    # and not another.
+    if enabled?(), do: ClusterBust.broadcast([funnel_targets_key(org_id)])
     :ok
   end
 
@@ -323,7 +348,13 @@ defmodule KilnCMS.Cache do
   """
   @spec bust_experiments(Ash.UUID.t()) :: :ok
   def bust_experiments(org_id) do
-    if enabled?(), do: Cachex.del(@cache, experiments_key(org_id))
+    # Cluster-wide, like `bust_branding/1` and for the reason stated there
+    # (#1113). A node-local `Cachex.del` left every OTHER node splitting traffic
+    # on a concluded experiment for up to the TTL — and, since #1008, reporting
+    # its health from a stale row: node A says the experiment is over, node B
+    # says it cannot convert. Two nodes disagreeing intermittently is the
+    # hardest shape of this bug to report.
+    if enabled?(), do: ClusterBust.broadcast([experiments_key(org_id)])
     :ok
   end
 
@@ -438,21 +469,34 @@ defmodule KilnCMS.Cache do
   here means a feed keeps serving whatever the previous policy allowed, while
   the admin is told the save succeeded.
 
-  **Node-local**, unlike `bust_feed_policy/1`. `KilnCMS.Cache.ClusterBust`
-  broadcasts a list of *keys*, and this is a prefix scan whose matching keys
-  differ per node — so making it cluster-wide needs an "intent" broadcast rather
-  than a key list. Tracked separately; the policy above is the half that decides
-  disclosure, and it does reach every node.
+  **Cluster-wide** (#1078), like `bust_feed_policy/1`. The two halves of a
+  syndication change have to travel together: turning full content off dropped
+  the *policy* on every node but only the writing node's cached feed **bodies**,
+  so roughly half of a two-node deployment went on serving complete article text
+  — rendered under the old policy — for the whole five-minute TTL.
+
+  It could not ride `ClusterBust.broadcast/1`, which takes a list of keys: the
+  keys matching this prefix differ per node, and a node that never served
+  `/blog/category/news/feed.xml` has no such key for the writer to name. So it
+  goes as an *intent* (`ClusterBust.broadcast_prefix/1`) and each node runs its
+  own scan.
   """
   @spec bust_all_feeds(Ash.UUID.t()) :: :ok
   def bust_all_feeds(org_id) do
-    if enabled?(), do: drop_feed_keys(org_id)
+    if enabled?(), do: ClusterBust.broadcast_prefix(feed_key_prefix(org_id))
     :ok
   end
 
-  defp drop_feed_keys(org_id) do
-    prefix = feed_key_prefix(org_id)
+  @doc """
+  Drop every cached key starting with `prefix`, on **this node**.
 
+  Public only because `KilnCMS.Cache.ClusterBust` runs it on the receiving side
+  of `broadcast_prefix/1`; every writer should go through that, so the bust
+  reaches the rest of the cluster too. The keyspace walk is bounded but real —
+  see `bust_all_feeds/1` for why no caller may do this before COMMIT.
+  """
+  @spec drop_prefix(String.t()) :: :ok
+  def drop_prefix(prefix) when is_binary(prefix) do
     case Cachex.keys(@cache) do
       {:ok, keys} ->
         # `is_binary/1` is load-bearing: not every cached key is a string (the
@@ -462,8 +506,10 @@ defmodule KilnCMS.Cache do
         end
 
       other ->
-        Logger.warning("could not enumerate feed cache keys to bust: #{inspect(other)}")
+        Logger.warning("could not enumerate cache keys under #{prefix}: #{inspect(other)}")
     end
+
+    :ok
   end
 
   @doc """

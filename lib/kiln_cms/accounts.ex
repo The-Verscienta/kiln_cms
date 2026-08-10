@@ -11,9 +11,25 @@ defmodule KilnCMS.Accounts do
 
   resources do
     resource KilnCMS.Accounts.Token do
-      # The one action on this resource that is ours rather than
-      # AshAuthentication's (#743) — see `:spend_jti`.
+      # The actions on this resource that are ours rather than
+      # AshAuthentication's — see `:spend_jti` (#743) and the hold pair (#742).
+      # All three are `forbid_if always()`, so these names buy a caller nothing
+      # without the `authorize?: false` only `KilnCMS.Accounts.PendingSignIn`
+      # passes.
       define :spend_pending_sign_in, action: :spend_jti
+      define :hold_first_factor_token, action: :hold_for_second_factor
+      define :release_first_factor_token, action: :release_second_factor_hold
+
+      # The by-purpose lookup those two need has no name here: `PendingSignIn`
+      # finds the row through `AshAuthentication.TokenResource.Actions.get_token/3`,
+      # which `KilnCMSWeb.BearerAuth` already uses for the same question.
+      #
+      # This one is different and does need a name, because `:get_token` filters
+      # `expires_at > now()` and therefore cannot answer "is there a row for this
+      # jti *at all*" — which is what tells a failed release apart from a
+      # deployment that never stored the token in the first place. No policy
+      # matches `:read` on this resource, so the name buys a caller nothing.
+      define :get_stored_token_by_jti, action: :read, get_by: [:jti]
     end
 
     # External IdP links for OIDC SSO (#331) — managed by AshAuthentication.

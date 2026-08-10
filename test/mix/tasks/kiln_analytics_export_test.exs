@@ -64,6 +64,11 @@ defmodule Mix.Tasks.Kiln.Analytics.ExportTest do
     enable_referrers(5)
     id = Ash.UUID.generate()
     seed_referrer_bucket(%{content_id: id, day: today(), source: :search, hits: 2})
+    # Something for the low count to hide behind: with four genuine zeros the
+    # whole breakdown is suppressed instead, since nothing makes two views
+    # ambiguous (#1073).
+    seed_referrer_bucket(%{content_id: id, day: today(), source: :social, hits: 40})
+    seed_referrer_bucket(%{content_id: id, day: today(), source: :other, hits: 50})
 
     output =
       capture_io(fn ->

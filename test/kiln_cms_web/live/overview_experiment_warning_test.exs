@@ -52,11 +52,12 @@ defmodule KilnCMSWeb.OverviewExperimentWarningTest do
     on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Experiments, original) end)
   end
 
+  # Published: a draft document under test is a blocked reason of its own now,
+  # so an unpublished fixture would render the strip for the wrong reason.
   defp page(actor, label) do
-    CMS.create_page!(
-      %{title: label, slug: "ov-exp-#{System.unique_integer([:positive])}"},
-      actor: actor
-    )
+    %{title: label, slug: "ov-exp-#{System.unique_integer([:positive])}"}
+    |> CMS.create_page!(actor: actor)
+    |> CMS.publish_page!(%{}, actor: actor)
   end
 
   # A later-page goal, because sticky is the premise that goes away underneath a
@@ -120,5 +121,88 @@ defmodule KilnCMSWeb.OverviewExperimentWarningTest do
     {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
 
     refute html =~ "overview-experiment-warning"
+  end
+
+  describe "the deployment switch" do
+    test "is stated once, not repeated under every experiment", %{conn: conn} do
+      # It used to be a per-experiment reason, so a deployment with the default
+      # (off) and three running experiments rendered a permanent strip with the
+      # same sentence three times — and hid every real reason behind it.
+      admin = authed_user(:admin)
+      a = running_content_view_experiment(admin)
+      b = running_content_view_experiment(admin)
+
+      put_experiments(enabled: false)
+
+      {:ok, _lv, html} = conn |> log_in(admin) |> live(~p"/editor/overview")
+
+      assert html =~ "overview-experiment-warning"
+      assert html =~ "Experiments are switched off for this deployment"
+
+      # Once — not once per experiment, and no per-row reason invented for it.
+      refute html =~ a.name
+      refute html =~ b.name
+      refute html =~ "not producing usable results"
+    end
+
+    test "does not hide a real reason underneath it", %{conn: conn} do
+      admin = authed_user(:admin)
+      experiment = running_content_view_experiment(admin)
+
+      put_experiments(enabled: false, sticky: false)
+
+      {:ok, _lv, html} = conn |> log_in(admin) |> live(~p"/editor/overview")
+
+      assert html =~ "Experiments are switched off for this deployment"
+      assert html =~ experiment.name
+      assert html =~ "sticky assignment is off"
+    end
+
+    test "an editor is shown neither half", %{conn: conn} do
+      running_content_view_experiment(authed_user(:admin))
+      put_experiments(enabled: false, sticky: false)
+
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/overview")
+
+      refute html =~ "overview-experiment-warning"
+    end
+  end
+
+  test "the headline does not claim 'cannot convert' for a goal that converts everything", %{
+    conn: conn
+  } do
+    # `:funnel_ends_here` and `:goal_is_self` mean the experiment converts EVERY
+    # impression, not none — the old headline said the opposite of its own
+    # detail line.
+    org_id = KilnCMS.Accounts.default_org_id()
+    admin = authed_user(:admin)
+    document = page(admin, "Doc")
+
+    funnel =
+      ExperimentFixtures.funnel_ending_at(page(admin, "First"), page(admin, "Last"), org_id)
+
+    {_experiment, _c, _t} =
+      ExperimentFixtures.running!(document, "page", %{},
+        org_id: org_id,
+        goal: :funnel_completion,
+        goal_funnel_id: funnel.id
+      )
+
+    # `:start` refuses a funnel that already ends here, so the only way in is to
+    # move the funnel afterwards — which needs no write to the experiment, and
+    # is exactly why the state is reachable at all.
+    KilnCMS.Analytics.create_funnel_step!(
+      %{funnel_id: funnel.id, content_type: "page", content_id: document.id, position: 99},
+      authorize?: false,
+      tenant: org_id
+    )
+
+    KilnCMS.Cache.bust_funnel_targets(org_id)
+
+    {:ok, _lv, html} = conn |> log_in(admin) |> live(~p"/editor/overview")
+
+    assert html =~ "overview-experiment-warning"
+    assert html =~ "not producing usable results"
+    refute html =~ "cannot convert"
   end
 end

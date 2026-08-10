@@ -47,8 +47,17 @@ defmodule KilnCMSWeb.LinkReportLive do
     end
   end
 
+  # `effective_tier(socket)` rather than `socket.assigns.admin?` (#1166). The
+  # assign is computed once, at mount, and this page is on `:editor_routes` —
+  # so mount never refuses at all, and that one stale boolean was the whole
+  # distance between an editor and the enqueue. `SweepWorker.enqueue/1` takes no
+  # actor and authorizes nothing, so unlike `toggle` above there is no resource
+  # policy to delegate to; the sibling's comment says exactly that, and this is
+  # the handler that could not follow its advice.
+  #
+  # `@admin?` still decides what renders. It just no longer decides what runs.
   def handle_event("check_now", _params, socket) do
-    if socket.assigns.admin? do
+    if KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin do
       {:ok, _job} = SweepWorker.enqueue(org_id(socket))
 
       {:noreply,

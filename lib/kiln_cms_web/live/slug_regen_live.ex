@@ -65,7 +65,26 @@ defmodule KilnCMSWeb.SlugRegenLive do
     {:noreply, socket |> assign(:preview, preview) |> assign(:result, nil)}
   end
 
+  # Re-checked here, not only in `mount/3` (#1160). `SlugRegenerationWorker.enqueue/4`
+  # takes the actor but authorizes nothing — it records `actor_id` on the job —
+  # so unlike every other handler on this page there is no Ash policy behind the
+  # mount guard to catch a mistake in it. The guard currently holds only because
+  # `mount/3` refuses with `push_navigate`, which ends the LiveView; rendering a
+  # "no access" panel instead, an ordinary refactor, would leave this reachable
+  # by anyone past the router gate. Same argument `KilnCMSWeb.SystemLive` makes
+  # for its cache flush.
+  #
+  # The per-org tier is the right question here, unlike the backup panel's:
+  # regeneration is scoped to `current_org` and rewrites only that site's slugs.
   def handle_event("apply", _params, socket) do
+    if KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin do
+      apply_regeneration(socket)
+    else
+      {:noreply, socket}
+    end
+  end
+
+  defp apply_regeneration(socket) do
     {:ok, _job} =
       SlugRegenerationWorker.enqueue(
         Accounts.org_id(socket.assigns.current_org),

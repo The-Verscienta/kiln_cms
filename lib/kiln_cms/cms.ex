@@ -76,16 +76,33 @@ defmodule KilnCMS.CMS do
   # an LLM authors drafts and submits them for review; a human approves.
   tools do
     # Discovery / reads.
+    #
+    # `block_ids` rides on every content read (#954): it is the id-only
+    # projection of the block tree (`_id`/`_type`, nested children in render
+    # positions, no field values), and it is what lets a model editing a page
+    # that carries an admin-set nested value send each child back under the id
+    # that held it — which `EnforceBlockFieldPolicy` requires. Unlike the
+    # related links it is small and unconditionally relevant to authoring, so
+    # it is loaded flat rather than through `McpLoads`.
     tool :read_pages, KilnCMS.CMS.Page, :read do
-      description "List/filter pages (drafts included when the key's user is an editor)."
+      description "List/filter pages (drafts included when the key's user is an editor). " <>
+                    "block_ids carries each block's _id — echo _id on block_tree children when updating."
+
+      load [:block_ids]
     end
 
     tool :read_posts, KilnCMS.CMS.Post, :read do
-      description "List/filter blog posts (drafts included when the key's user is an editor)."
+      description "List/filter blog posts (drafts included when the key's user is an editor). " <>
+                    "block_ids carries each block's _id — echo _id on block_tree children when updating."
+
+      load [:block_ids]
     end
 
     tool :read_entries, KilnCMS.CMS.Entry, :read do
-      description "List/filter dynamic-type entries; scope by type_definition_id (see read_type_definitions)."
+      description "List/filter dynamic-type entries; scope by type_definition_id (see read_type_definitions). " <>
+                    "block_ids carries each block's _id — echo _id on block_tree children when updating."
+
+      load [:block_ids]
     end
 
     tool :read_type_definitions, KilnCMS.CMS.TypeDefinition, :read do
@@ -345,6 +362,7 @@ defmodule KilnCMS.CMS do
       define :get_menu_item, action: :read, get_by: [:id]
       define :create_menu_item, action: :create
       define :update_menu_item, action: :update
+      define :reparent_menu_item, action: :reparent
       define :destroy_menu_item, action: :destroy
     end
 
@@ -404,6 +422,16 @@ defmodule KilnCMS.CMS do
     resource KilnCMS.CMS.SiteEditorialSettings do
       define :list_site_editorial_settings, action: :read
       define :save_site_editorial_settings, action: :save
+    end
+
+    # Per-org claim-checking settings (#857): whether the compliance panel runs
+    # for this site, whether it gates publishing, and the site's own claim
+    # vocabulary. The layer above `config :kiln_cms, KilnCMS.Compliance`,
+    # resolved through `KilnCMS.Compliance.Settings`.
+    resource KilnCMS.CMS.SiteCompliance do
+      define :list_site_compliance, action: :read
+      define :save_site_compliance, action: :save
+      define :reset_site_compliance, action: :destroy
     end
 
     # One outbound URL in one document, and its last verdict (#474). Written by

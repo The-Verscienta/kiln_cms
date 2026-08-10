@@ -200,10 +200,11 @@ defmodule KilnCMS.CMS.BlockFieldPolicyTest do
       # non-default nested restricted value was a violation). The multiset rule
       # allows it — the admin value is preserved, only the permitted `text` moved.
       #
-      # No child id, deliberately. This is the headless shape: `blocks` is not
-      # readable, so a `block_tree` client cannot learn one. The #865 binding
-      # must not refuse this, or the write API loses the ability to edit any
-      # page holding a nested admin-set value (see `round_trips_ids?/2`).
+      # No child id anywhere: the STORED children carry none (this page was
+      # authored id-less), so there is no identity to bind and the multiset
+      # governs. Once the stored tree carries ids, an id-less write is refused
+      # instead (#954) — see "a wholly id-less re-target against stamped
+      # children is refused".
       assert {:ok, updated} =
                CMS.update_page(
                  page,
@@ -507,14 +508,49 @@ defmodule KilnCMS.CMS.BlockFieldPolicyTest do
       assert Exception.message(error) =~ "cannot move or clear"
     end
 
-    test "a wholly id-less re-target is still allowed (accepted residual, #865)" do
-      # Pinned so the limit is deliberate rather than discovered. Nested child
-      # ids cannot be READ back — `blocks` is not `public?` and the fired
-      # artifact carries `_id`, not `id` — so a rule that demanded one would
-      # lock out every headless client and every `restore_version` of a version
-      # captured before the editor stamped its children. The binding therefore
-      # applies only where the client round-trips ids, and a caller willing to
-      # drop all of them keeps #774's count-only guarantee.
+    test "a wholly id-less re-target against stamped children is refused (#954)" do
+      # The residual #954 was filed about, inverted. The stored children carry
+      # ids, the submission carries none, and the count is unchanged — so only
+      # the binding sees this, and the binding is now required rather than
+      # gated: ids are readable (`block_ids` on drafts, the artifact's `_id`
+      # once published), so stripping them is a refusal, not a downgrade to the
+      # count-only multiset.
+      admin = user(:admin)
+      {a, b} = {Ash.UUID.generate(), Ash.UUID.generate()}
+
+      before =
+        columns_children([
+          quote_block(%{"id" => a, "featured" => true, "text" => "A"}),
+          quote_block(%{"id" => b, "featured" => false, "text" => "B"})
+        ])
+
+      {:ok, page} = create_page(admin, [before])
+
+      swapped =
+        columns_children([
+          quote_block(%{"featured" => false, "text" => "A"}),
+          quote_block(%{"featured" => true, "text" => "B"})
+        ])
+
+      assert {:error, error} =
+               CMS.update_page(page, %{block_tree: [swapped]}, actor: user(:editor))
+
+      # Bound, not merely counted — and the message names the surface the ids
+      # can be read from, because a client that dropped every id has no other
+      # way to learn one exists.
+      assert Exception.message(error) =~ "cannot move or clear"
+      assert Exception.message(error) =~ "block_ids"
+    end
+
+    test "a re-target on a stored tree whose children carry no ids is still allowed " <>
+           "(narrowed residual, #954)" do
+      # What remains open, pinned so the limit stays deliberate. A restricted
+      # value stored on an id-less child (a page authored by an id-less headless
+      # admin client — the editor always stamps) has no identity to bind, and
+      # the policy's strictness is keyed on ids that are actually STORED: a
+      # demand for ids nothing ever stored would brick the row for every
+      # non-admin, with no surface able to answer it. Such a document becomes
+      # strict the first time an id-stamping client saves it.
       admin = user(:admin)
 
       before =
@@ -533,6 +569,33 @@ defmodule KilnCMS.CMS.BlockFieldPolicyTest do
 
       assert {:ok, _updated} =
                CMS.update_page(page, %{block_tree: [swapped]}, actor: user(:editor))
+    end
+
+    test "echoing some ids while dropping the featured child's is refused (#954)" do
+      # Partial round-tripping is not a loophole: the binding demands the child
+      # that HELD the value back under its id, whatever else the submission
+      # carries.
+      admin = user(:admin)
+      {a, b} = {Ash.UUID.generate(), Ash.UUID.generate()}
+
+      {:ok, page} =
+        create_page(admin, [
+          columns_children([
+            quote_block(%{"id" => a, "featured" => true, "text" => "A"}),
+            quote_block(%{"id" => b, "featured" => false, "text" => "B"})
+          ])
+        ])
+
+      kept_b_dropped_a =
+        columns_children([
+          quote_block(%{"featured" => true, "text" => "A"}),
+          quote_block(%{"id" => b, "featured" => false, "text" => "B"})
+        ])
+
+      assert {:error, error} =
+               CMS.update_page(page, %{block_tree: [kept_b_dropped_a]}, actor: user(:editor))
+
+      assert Exception.message(error) =~ "cannot move or clear"
     end
 
     test "a child may still move between columns, carrying its id and value (#865)" do
@@ -587,15 +650,15 @@ defmodule KilnCMS.CMS.BlockFieldPolicyTest do
                CMS.update_page(page, %{block_tree: [with_sibling]}, actor: user(:editor))
     end
 
-    test "an id-less headless client can still edit the page repeatedly (#865)" do
-      # The lockout this design exists to avoid. An earlier draft required the
-      # child that held an admin value to come back under the same id; a
-      # `block_tree` client cannot learn that id (`blocks` is not `public?`, and
-      # the fired artifact carries `_id`), so it would have been refused on
-      # every edit to this page, forever, told to send something it cannot know.
-      # The page is authored the way the EDITOR authors one — children carrying
-      # ids — because that is what makes the lockout reachable: stored children
-      # have ids, and the id-less client cannot produce them.
+    test "a headless client that reads block_ids can edit the page repeatedly (#954)" do
+      # The remedy the refusal names has to actually work, or the requirement is
+      # a wall (the reason the binding used to be gated at all). The page is
+      # authored the way the editor authors one — children carrying ids — and
+      # the client does what the error says: read each child's `_id` from the
+      # `block_ids` calculation and echo it. Repeatedly, because the earlier
+      # server-side stamping attempt (#953, reverted) churned a fresh id per
+      # save — so the ids are asserted STABLE across the edits, not merely
+      # accepted.
       admin = user(:admin)
       a = Ash.UUID.generate()
 
@@ -604,19 +667,27 @@ defmodule KilnCMS.CMS.BlockFieldPolicyTest do
           columns_children([quote_block(%{"id" => a, "featured" => true, "text" => "A"})])
         ])
 
-      assert [%{"id" => ^a}] = stored_children(page)
-
       editor = user(:editor)
 
       page =
         Enum.reduce(1..3, page, fn n, page ->
+          # As the client would: a policy-scoped read carrying the projection.
+          %{block_ids: [%{"columns" => [%{"blocks" => [%{"_id" => child_id}]}]}]} =
+            Ash.load!(page, :block_ids, actor: editor)
+
+          assert child_id == a, "block_ids handed back a churned id on edit #{n}"
+
           assert {:ok, updated} =
                    CMS.update_page(
                      page,
                      %{
                        block_tree: [
                          columns_children([
-                           quote_block(%{"featured" => true, "text" => "edit #{n}"})
+                           quote_block(%{
+                             "_id" => child_id,
+                             "featured" => true,
+                             "text" => "edit #{n}"
+                           })
                          ])
                        ]
                      },
@@ -628,15 +699,48 @@ defmodule KilnCMS.CMS.BlockFieldPolicyTest do
         end)
 
       assert [child] = stored_children(page)
+      assert child["id"] == a
       assert child["featured"] == true
       assert child["text"] == "edit 3"
+    end
+
+    test "an id-less write against a stamped tree holding an admin value is refused, " <>
+           "naming the surface (#954)" do
+      # The other half of the flow above: the client that did NOT read
+      # `block_ids` is told exactly where the ids it dropped can be read from.
+      # This is the lockout the old gate existed to avoid, converted into a
+      # refusal with a performable remedy.
+      admin = user(:admin)
+      a = Ash.UUID.generate()
+
+      {:ok, page} =
+        create_page(admin, [
+          columns_children([quote_block(%{"id" => a, "featured" => true, "text" => "A"})])
+        ])
+
+      assert {:error, error} =
+               CMS.update_page(
+                 page,
+                 %{
+                   block_tree: [
+                     columns_children([quote_block(%{"featured" => true, "text" => "edited"})])
+                   ]
+                 },
+                 actor: user(:editor)
+               )
+
+      assert Exception.message(error) =~ "cannot move or clear"
+      assert Exception.message(error) =~ "block_ids"
     end
 
     test "a non-admin can restore a version whose children carry no ids (#865)" do
       # `restore_version` accepts nothing but a `version_id`, so it can never
       # supply child ids — and every version captured before children had them
       # restores id-less by construction. A binding that demanded ids back would
-      # make those versions unrestorable by an editor, with no remedy.
+      # make those versions unrestorable by an editor, with no remedy: no
+      # surface can hand back ids history never stored. Now that the binding is
+      # otherwise required (#954), this pins the one deliberate carve-out — the
+      # id-less restore fold, whose tree is our own vetted history.
       #
       # v1's children are id-less; the CURRENT row's carry ids. Restoring v1
       # therefore submits an id-less tree against an identified stored one,

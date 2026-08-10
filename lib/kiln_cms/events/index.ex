@@ -254,7 +254,12 @@ defmodule KilnCMS.Events.Index do
         # (a festival's parallel stages), and an unstable order across pages
         # drops and repeats rows for a reader paging through.
         sort: [next_occurrence_at: :asc, id: :asc],
-        select: select_fields(descriptor)
+        select: select_fields(descriptor),
+        # `KilnCMSWeb.EventIndex`'s `summary` (#1102). The type's #805 pattern
+        # already fills the document's own `<meta name="description">`, and the
+        # listing that links to it showed nothing — the calculation's `load/3`
+        # also folds the tokens' dependencies into the pinned `select:` above.
+        load: KilnCMS.Seo.Patterns.loads()
       ],
       # No `count: true`: only `more?` is read, and a count adds a COUNT(*) over
       # the whole published set to every request on an anonymous route.

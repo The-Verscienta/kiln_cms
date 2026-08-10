@@ -335,6 +335,28 @@ defmodule KilnCMS.Firing.PointInTime do
 
     # `org_id` is a version column (attributes_as_attributes), not in the freeform
     # `changes` map, so stamp it explicitly for the in-memory re-fire.
-    struct(resource, attrs |> Map.put(:id, id) |> Map.put(:org_id, org_id))
+    resource
+    |> struct(attrs |> Map.put(:id, id) |> Map.put(:org_id, org_id))
+    |> as_stored_seo()
+  end
+
+  # The replayed document's own SEO fields, stamped onto the `effective_seo_*`
+  # calculations the fired `:json_ld` reads (#1102).
+  #
+  # Same rule as `custom_fields: :as_stored` and `fragments: as_of` above, and
+  # the same failure without it: `KilnCMS.Seo.Patterns.effective/3` falls back to
+  # resolving the type's #805 pattern from the **live** registry, so a historical
+  # artifact would carry a description assembled from a pattern written this week
+  # — on the one endpoint whose promise is what the document said then. A
+  # calculation that is already loaded is returned verbatim, so pre-setting it to
+  # the stored value is how "as stored" is expressed here.
+  defp as_stored_seo(document) do
+    Enum.reduce([:seo_title, :seo_description], document, fn field, acc ->
+      calculation = KilnCMS.Seo.Patterns.calculation_name(field)
+
+      if Map.has_key?(acc, calculation),
+        do: Map.put(acc, calculation, Map.get(acc, field)),
+        else: acc
+    end)
   end
 end

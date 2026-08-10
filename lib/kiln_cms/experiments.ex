@@ -136,6 +136,21 @@ defmodule KilnCMS.Experiments do
   @spec blocked(Ash.UUID.t()) :: [{Experiment.t(), KilnCMS.Experiments.Health.reason()}]
   defdelegate blocked(org_id), to: KilnCMS.Experiments.Health
 
+  @doc "Whether running experiments exist that the deployment switch is stopping."
+  @spec switched_off?(Ash.UUID.t()) :: boolean()
+  defdelegate switched_off?(org_id), to: KilnCMS.Experiments.Health
+
+  @doc """
+  Whether `experiment`'s goal converts on a page **later** than the assignment.
+
+  The one statement of that list (#1115). It is not arbitrary: a later-page goal
+  is exactly the set that needs sticky assignment to attribute anything, cannot
+  be attributed headlessly at all, and counts impressions per exposed visitor
+  rather than per page view. Adding a goal to it changes all three.
+  """
+  @spec later_page_goal?(Experiment.t() | %{goal: atom()}) :: boolean()
+  def later_page_goal?(%{goal: goal}), do: goal in [:content_view, :funnel_completion]
+
   @doc "Drop a site's cached running set. Called from every experiment write."
   @spec bust(Ash.UUID.t()) :: :ok
   defdelegate bust(org_id), to: KilnCMS.Cache, as: :bust_experiments
@@ -166,9 +181,15 @@ defmodule KilnCMS.Experiments do
   @doc "Every funnel's final step for a site, as `%{funnel_id => {type, id}}`. Cached."
   @spec funnel_targets(Ash.UUID.t()) :: %{optional(Ash.UUID.t()) => {String.t(), Ash.UUID.t()}}
   def funnel_targets(org_id) do
+    # `|| %{}` is load-bearing with the `nil` the loader returns on a failed
+    # read: `Cache.fetch/3` commits every non-nil value for the full TTL, so
+    # returning `%{}` from the rescue used to CACHE the failure — five minutes
+    # of "this funnel is gone" on every surface, and five minutes of real
+    # conversions silently uncounted, from one blip (#1008 review). `nil` is the
+    # one value the cache declines to keep, so the next call retries.
     KilnCMS.Cache.fetch(KilnCMS.Cache.funnel_targets_key(org_id), @cache_ttl, fn ->
       load_funnel_targets(org_id)
-    end)
+    end) || %{}
   end
 
   # One read for the whole site rather than one per experiment: funnels are few
@@ -190,9 +211,12 @@ defmodule KilnCMS.Experiments do
     # Same posture and the same reason as `load_running/1`: delivery survives a
     # database that cannot answer, and it says so — "no funnel targets" and
     # "every funnel experiment stopped converting" look identical from outside.
+    #
+    # `nil`, not `%{}`, so the failure is NOT committed to the cache — see
+    # `funnel_targets/1`.
     error ->
       Logger.warning("Experiments.funnel_targets/1 could not read: #{Exception.message(error)}")
-      %{}
+      nil
   end
 
   defp load_running(org_id) do

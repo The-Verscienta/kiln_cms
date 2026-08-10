@@ -138,6 +138,70 @@ defmodule KilnCMSWeb.DuplicateContentTest do
              "Couldn&#39;t duplicate that content."
   end
 
+  # #922. `/editor/content/:kind/:id` deliberately admits an actor who may OPEN
+  # a record without being able to write it (#550), and the header's Duplicate
+  # button was the one write affordance there with no `:if` — offered to a
+  # reader, with an error flash as its only possible outcome. Its siblings in
+  # the same file (the SEO panel, the intelligence panels) are all hidden.
+  describe "the editor header's Duplicate button, for a reader" do
+    setup %{conn: conn} do
+      admin = authed_user(:admin)
+      source = CMS.create_page!(%{title: "Someone else's draft", slug: slug()}, actor: admin)
+
+      reader = authed_user(:editor)
+
+      {:ok, reader} =
+        KilnCMS.Accounts.manage_user_access(reader, %{editable_types: ["post"]}, actor: admin)
+
+      # The premise the rest of this block rests on: they can open it, and what
+      # they get is the real editor for THIS record. `{:ok, lv, _html}` already
+      # fails on a redirect; the title assertion is what would catch a stub page
+      # rendered for readers, which would make every refute below vacuous.
+      {:ok, lv, html} =
+        conn |> log_in(reader) |> live(~p"/editor/content/page/#{source.id}")
+
+      assert html =~ "Someone else&#39;s draft"
+
+      %{lv: lv, source: source}
+    end
+
+    test "is not offered", %{lv: lv} do
+      refute has_element?(lv, "button[phx-click='duplicate']")
+    end
+
+    # The translations panel renders for this reader — `en` is linked and
+    # `fr`/`es` have no record yet — so its "Create translation" buttons are in
+    # the reader's DOM unless the same gate removes them. Without this the
+    # panel half of the fix was unpinned: reverting `and @may_write?` on that
+    # button left 251 tests green across seven files.
+    test "nor is Create translation", %{lv: lv} do
+      refute has_element?(lv, "button[phx-click='create_translation']")
+    end
+
+    # The hidden button is not the boundary — a replayed or forged event arrives
+    # regardless, which is why `seo_suggest` refuses server-side as well.
+    #
+    # Asserting on the *flash*, not on the absence of a copy: the type's
+    # `:create` policy already refuses this actor (`Checks.EditableContentType`
+    # gates authoring and updating alike), so no copy is written either way and
+    # that assertion could not fail. What the gate changes is that the refusal
+    # happens before any work, rather than as an error the reader is shown for
+    # an action they were never offered.
+    test "a forged duplicate event is refused", %{lv: lv} do
+      render_click(lv, "duplicate", %{})
+
+      refute has_element?(lv, "#flash-error")
+    end
+
+    # Same shape, same file: `create_translation` forks the record's payload
+    # into a new draft too, and was the other affordance offered to a reader.
+    test "a forged create_translation event is refused", %{lv: lv} do
+      render_click(lv, "create_translation", %{"locale" => "fr"})
+
+      refute has_element?(lv, "#flash-error")
+    end
+  end
+
   # `kind` and `id` ride on the clicked row, so they are client input. A crafted
   # pair must flash, not take the LiveView down with it.
   test "a crafted kind or id flashes instead of crashing the list", %{conn: conn} do

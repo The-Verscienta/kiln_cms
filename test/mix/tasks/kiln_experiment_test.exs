@@ -35,11 +35,13 @@ defmodule Mix.Tasks.Kiln.ExperimentTest do
     })
   end
 
+  # Published: a draft document under test is now a blocked reason of its own,
+  # so an unpublished fixture would make every health assertion here fire for
+  # the wrong reason.
   defp page(actor) do
-    KilnCMS.CMS.create_page!(
-      %{title: "Target", slug: "exptask-#{System.unique_integer([:positive])}"},
-      actor: actor
-    )
+    %{title: "Target", slug: "exptask-#{System.unique_integer([:positive])}"}
+    |> KilnCMS.CMS.create_page!(actor: actor)
+    |> KilnCMS.CMS.publish_page!(%{}, actor: actor)
   end
 
   defp name, do: "exp-#{System.unique_integer([:positive])}"
@@ -52,9 +54,11 @@ defmodule Mix.Tasks.Kiln.ExperimentTest do
     on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Experiments, original) end)
   end
 
-  defp sticky_off do
+  defp sticky_off, do: put_experiments(sticky: false)
+
+  defp put_experiments(overrides) do
     original = Application.get_env(:kiln_cms, KilnCMS.Experiments, [])
-    Application.put_env(:kiln_cms, KilnCMS.Experiments, Keyword.put(original, :sticky, false))
+    Application.put_env(:kiln_cms, KilnCMS.Experiments, Keyword.merge(original, overrides))
     on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Experiments, original) end)
   end
 
@@ -392,13 +396,13 @@ defmodule Mix.Tasks.Kiln.ExperimentTest do
           goal_document_id: goal.id
         )
 
-      refute run(["list"]) =~ "cannot convert"
+      refute run(["list"]) =~ "no usable result"
 
       sticky_off()
 
       out = run(["list"])
       assert out =~ experiment.name
-      assert out =~ "cannot convert"
+      assert out =~ "no usable result"
       assert out =~ "sticky"
     end
 
@@ -415,17 +419,37 @@ defmodule Mix.Tasks.Kiln.ExperimentTest do
           goal_document_id: goal.id
         )
 
-      refute run(["show", experiment.name]) =~ "CANNOT CONVERT"
+      refute run(["show", experiment.name]) =~ "NO USABLE RESULT"
 
       sticky_off()
 
       out = run(["show", experiment.name])
-      assert out =~ "CANNOT CONVERT"
+      assert out =~ "NO USABLE RESULT"
 
       # Before the variants: a 0.0% rate under this experiment is not a result,
       # and reading the numbers first is how an operator concludes "no effect".
       [before_variants, _rest] = String.split(out, "Control", parts: 2)
-      assert before_variants =~ "CANNOT CONVERT"
+      assert before_variants =~ "NO USABLE RESULT"
+    end
+
+    test "the deployment switch is stated once, not under every row", ctx do
+      # It used to be a per-experiment reason, so `list` printed it in
+      # `deployment_line()` and then again under every running row — the
+      # "a marker on every row is one nobody reads" outcome list_row/1's own
+      # comment argues against (#1008 review).
+      ExperimentFixtures.enable!()
+      sticky_on()
+
+      {experiment, _control, _treatment} =
+        ExperimentFixtures.running!(page(ctx.actor), "page", %{}, org_id: ctx.org_id)
+
+      put_experiments(enabled: false)
+
+      out = run(["list"])
+
+      assert out =~ "Deployment: DISABLED"
+      assert out =~ experiment.name
+      refute out =~ "no usable result"
     end
 
     test "show raises on an unknown name", _ctx do

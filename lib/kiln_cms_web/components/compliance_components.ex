@@ -86,6 +86,17 @@ defmodule KilnCMSWeb.ComplianceComponents do
         phrases: quoted(a)
       )
 
+  # The rule a site builds from its own phrase list at `/editor/compliance`
+  # (#857). It gets a sentence of its own rather than the generic fallback,
+  # which would say "matches the site claim compliance rule" — naming an
+  # internal code at an author who has no idea what it refers to. Saying *this
+  # site's list* is what points them at someone who can change it.
+  def finding_message(%{code: :site_claim, args: a}, _pinned?),
+    do:
+      gettext("%{phrases} is on this site's list of phrases to review before publishing.",
+        phrases: quoted(a)
+      )
+
   def finding_message(%{code: :disclaimer_missing, args: a}, _pinned?),
     do:
       gettext(

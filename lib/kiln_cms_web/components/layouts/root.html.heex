@@ -81,7 +81,20 @@
       name="apple-mobile-web-app-title"
       content={Layouts.brand_or_unbranded(assigns).site_name}
     />
-    <link :if={assigns[:pwa]} rel="apple-touch-icon" href={~p"/images/apple-touch-icon.png"} />
+    <%!-- The verified brand icon when there is one, the stock mark otherwise
+          (#629). iOS takes the home-screen icon from here and nowhere else, so
+          a white-labelled site that skipped this kept the KilnCMS flame on the
+          reviewer's phone no matter what the manifest said.
+
+          Same precondition as the manifest: only an icon `Branding.AppIcon`
+          has measured. iOS is more forgiving than Chromium here (it scales
+          whatever it gets), but "we have seen this image" is also what stops a
+          404 or an HTML error page being linked as an icon. --%>
+    <link
+      :if={assigns[:pwa]}
+      rel="apple-touch-icon"
+      href={Layouts.app_icon_href(assigns)}
+    />
     <meta :if={assigns[:meta_description]} name="description" content={@meta_description} />
     <meta :if={assigns[:meta_keywords]} name="keywords" content={@meta_keywords} />
     <link :if={assigns[:canonical_url]} rel="canonical" href={@canonical_url} />

@@ -72,4 +72,22 @@ defmodule KilnCMSWeb.SlugRegenLiveTest do
     # The worker's completion broadcast reaches the subscribed view.
     assert render(lv) =~ "Done:"
   end
+
+  # #1160. `SlugRegenerationWorker.enqueue/4` takes the actor but authorizes
+  # nothing, so the mount guard is the only thing in front of it — and a mount
+  # guard runs once. Called directly because a refused mount leaves no socket to
+  # push an event down: the question is what the handler does by itself.
+  test "the apply handler refuses on its own, without the mount guard in front of it" do
+    socket = %Phoenix.LiveView.Socket{
+      assigns: %{
+        __changed__: %{},
+        current_user: %{role: :editor},
+        current_org: KilnCMS.Accounts.default_org()
+      }
+    }
+
+    assert {:noreply, ^socket} = KilnCMSWeb.SlugRegenLive.handle_event("apply", %{}, socket)
+
+    assert KilnCMS.Repo.all(Oban.Job) == []
+  end
 end

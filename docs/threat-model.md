@@ -276,8 +276,11 @@ build if a resource is ever registered without that authorizer.
   and follow no redirects — a followed redirect is a fresh resolution the pin
   never sees. `KilnCMS.SafeFetch` packages that plus a streaming byte cap, since
   an attacker-influenced response has an attacker-influenced *length* too.
-  (`Webhooks.DeliveryWorker` still has its own copy of the pinning; folding it
-  onto `SafeFetch` is tracked in #753.)
+  Since #753 there is exactly one implementation: every caller that fetches a
+  URL the *content* chose — webhook delivery, oEmbed, link checking, federation,
+  social posting, portability import — goes through `SafeFetch`. A new caller
+  reaching for `Req` directly, or copying its `connect_options`, is the bug that
+  invariant exists to catch.
 - **Upload handling** — uploads validated from bytes rather than declared type,
   EXIF stripped, and blobs served with `Content-Disposition: attachment` and
   `X-Content-Type-Options: nosniff`.
@@ -341,13 +344,34 @@ build if a resource is ever registered without that authorizer.
     The second factor gates whether the caller ever receives it. Say it that way
     round: "no token is issued" would tell an incident responder that a
     password-alone compromise leaves nothing to revoke, and it leaves something.
-    *Residual:* an abandoned exchange still leaves a live token row nobody
-    holds, for the JWT's natural lifetime. The **rate** is now bounded — #742
-    stopped a password that stops at the code prompt from clearing the
-    per-account sign-in counter, so an attacker gets `@budget` of them per
-    window per account rather than as many as their IP pool allows. Not minting
-    the token until the second factor verifies is the deeper fix and fights
-    `require_token_presence_for_authentication?`; #742 stays open for it.
+
+    Since #742 the row's **use** is withheld too, on both doors.
+    `PendingSignIn.mint/4` moves it to the `pending_second_factor` purpose and
+    shortens its expiry to the length of the step, and `claim/1` puts it back
+    once a code verifies. `AshAuthentication` requires a row under the `user`
+    purpose to authenticate a JWT (`require_token_presence_for_authentication?`),
+    so between the two steps the token authenticates nothing, wherever it is —
+    and an exchange that is never finished leaves an inert row that expires with
+    the step rather than a live credential nobody holds for the JWT's full
+    lifetime. The rate was already bounded: #742's first half stopped a password
+    that stops at the code prompt from clearing the per-account sign-in counter,
+    so an attacker gets `@budget` of them per window per account rather than as
+    many as their IP pool allows.
+
+    Held, not revoked: `:revoke_jti` writes a thousand-year `revocation` row,
+    and the exchange may still complete. The filter cuts the other way too — a
+    release only ever moves a row *off* the hold purpose, and that predicate is
+    in the UPDATE's own WHERE rather than checked against the row the caller
+    read, so a revocation landing mid-release is not overwritten rather than
+    merely usually surviving. `log_out_everywhere` (password change) and account
+    erasure sweep every row a subject owns, held ones included; sign-out revokes
+    only the token held in that session, which a browser waiting at the code
+    prompt does not have.
+
+    *Residual:* a hold that cannot be written does not fail the sign-in — it
+    logs and leaves the pre-#742 behaviour, because refusing instead would turn
+    a token-store hiccup into "no account with a second factor can sign in".
+    The token is still minted; what is closed is that it is usable.
   - The pending blob is **encrypted** (`Phoenix.Token.encrypt/4`), not signed.
     The browser's equivalent can be signed because it lives in the encrypted
     session cookie; this one is handed to the client, and signing it would
@@ -475,9 +499,13 @@ build if a resource is ever registered without that authorizer.
 - **CSRF** — deliberately absent: forms are meant to be posted from third-party
   pages. Abuse is bounded by the `:form` bucket and a honeypot field, and a
   tripped honeypot returns success so a bot cannot distinguish rejection.
-- **Framing** — the embed route sets its own `frame-ancestors` from
-  `EMBED_ORIGINS`, which defaults to same-origin only (#562), so cross-site
-  embedding is opt-in.
+- **Framing** — the embed route sets its own `frame-ancestors` from the form's
+  `embed_origins` (#648), falling back to the deployment-wide `EMBED_ORIGINS`,
+  which defaults to same-origin only (#562), so cross-site embedding is opt-in.
+  Per form because a deployment-wide allowlist has to be the union of every
+  org's embedders, and that union is what every org's forms become framable by.
+  A form's list is written by an org admin — the party whose submissions an
+  overlay would harvest — and grants nothing across the tenant boundary.
 - **Submission contents** — treat as untrusted PII; retention is covered in
   [`data-flows.md`](data-flows.md).
 
@@ -560,9 +588,20 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    opt-in, and a malformed value closes the policy rather than widening it.
    `EMBED_ORIGINS=*` restores the old any-site behaviour if a deployment
    genuinely wants it. See [forms.md](forms.md#embedding-on-another-site).
-   **Remainder:** the allowlist is deployment-global while forms are org-scoped,
-   so on a multi-org instance an origin added for one org may frame every org's
-   forms. Tracked in #648.
+   **Remainder, narrowed in #648:** the allowlist can now be set **on the
+   form**, and a form's list replaces the deployment's rather than extending it,
+   so an entry made for one org reaches no other org's forms. What is *not*
+   closed is the default: a form that has not been given a list still inherits
+   `EMBED_ORIGINS`, which has no tenant dimension — so on a multi-org instance
+   the shared union governs every untouched form. **A multi-org deployment
+   should set the allowlist per form and leave `EMBED_ORIGINS` unset**; the
+   variable remains the single-org convenience. Two things would close it
+   outright: a per-org default so an operator decides once per org rather than
+   once per form, and an operator ceiling — today an org admin can open framing
+   on their own forms that the operator had left closed. That is deliberate (a
+   form's `frame-ancestors` governs who may overlay *that org's* form and
+   harvest *that org's* submissions, and grants nothing across the tenant
+   boundary), but it is a change of who holds the control and worth stating.
 2. **Passphrase-locked content is weak by construction (#496).** A shared secret
    typed into a public form is not access control in the sense the rest of this
    document uses the phrase: there is no per-reader identity, so no audit trail
@@ -751,26 +790,36 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    wins, and a decoy sharing the real child's id satisfies the binding while the
    rendered content quietly loses the value.
 
-   The binding applies only when the client demonstrably round-trips ids, and
-   that gate is forced rather than chosen: `blocks` is not `public?` and GraphQL
-   carries `hide_inputs: [:blocks]`, so most callers cannot read a child's id,
-   and `restore_version` accepts nothing but a `version_id` — versions captured
-   before the editor stamped children restore id-less by construction. Demanding
-   an id back from those callers would refuse them permanently while naming a
-   remedy neither could perform.
+   The binding is **required, not gated** (#954). It used to apply only when
+   the client demonstrably round-tripped ids, because ids were unreadable —
+   `blocks` is not `public?` and GraphQL carries `hide_inputs: [:blocks]`, so
+   demanding an id back named a remedy most callers could not perform, and a
+   caller willing to drop every id was quietly downgraded to the count-only
+   multiset, where the re-target survived. Every caller can now read them: the
+   public `block_ids` calculation projects the tree to `_id`/`_type` only —
+   nested children in the positions they render, **no field values**, so the
+   non-`public?` `blocks` boundary is untouched — on any policy-scoped read.
+   Drafts are therefore editor-scoped by the row read policy; on published rows
+   the fired `:json` artifact already names each block's id `_id`, nested
+   children included, and the write path accepts that spelling (#990). An
+   id-less submission against an identified stored tree is refused with the
+   surface named in the error.
 
-   **Published content is now round-trippable** (#954). The fired `:json`
-   artifact names each block's id `_id`, nested children included, and the write
-   path accepts that spelling — so a headless client editing published content
-   can read the artifact, send it back, and get the binding. Before, that
-   arrived id-less (fresh ids minted, `_id` stored as a junk key nothing read),
-   so the one available route to round-tripping silently did not work.
+   Two deliberate carve-outs, both keyed on what is stored rather than on who
+   is asking: a `restore_version` fold that carries no ids is exempt (the tree
+   is our own history, vetted by this same policy when written, and versions
+   captured before the editor stamped children fold back id-less by
+   construction — no surface can ever hand those ids back; a restore that does
+   carry ids keeps the binding like any other write). And a stored tree whose
+   children carry no ids binds nothing, so it is governed by the multiset
+   exactly as before rather than bricked by a demand for ids never stored.
 
-   *Residual:* a **draft** has no readable block surface at all, so a headless
-   client editing one still cannot produce ids, and a caller willing to drop
-   every id is governed by the count alone. Closing that needs a draft-readable
-   block-tree surface — a genuine API addition rather than a fix, tracked in
-   #954.
+   *Residual:* that second carve-out — a restricted value stored on an
+   **id-less child** (a page authored by an id-less headless admin client; the
+   editor always stamps) can still be re-targeted until an id-stamping save
+   gives the document identity, and an id-less `restore_version` replays
+   whichever vetted placement history holds. Both are bounded by the multiset:
+   the count can never change.
 
    *Residual, all about **which block an id names** rather than what a field may
    hold:* an editor can still reuse the id of another block **of the same type**
@@ -909,12 +958,16 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
 
     *Residual:* the re-check re-runs the join's rule, so what it catches is
     exactly what a *fresh join* would refuse — no more. A document publish under
-    an open room is the case that makes this concrete: `Ash.can?` on `:autosave`
-    does not consult the row-level `state == :draft` filter that action carries,
-    so publishing does not close the room, and collaborative prose no client
-    autosave captured is still lost at checkpoint. That is a data-loss bug
-    rather than an authorization one, and closing it belongs with the publish
-    path rather than with the authorization check — tracked in #1061.
+    an open room used to make that concrete: `Ash.can?` on `:autosave` does not
+    consult the row-level `state == :draft` filter that action carries, so
+    publishing does not close the room, and collaborative prose no client
+    autosave had captured was lost at checkpoint. That was a data-loss bug
+    rather than an authorization one, and it is closed at the publish path
+    rather than at the authorization check (#1061):
+    `Changes.CheckpointCollabRoom` carries the room's converged prose into the
+    publish's own write, and the room is told afterwards so its editors stop
+    typing into a document nothing will persist. The authorization re-check is
+    unchanged — collaborative editing of published content remains supported.
 14. **Webhook deliveries have no anti-replay.** The signature
     (`x-kilncms-signature`, HMAC-SHA256 over the raw body) proves a delivery's
     origin and integrity, not its freshness — there is no timestamp or nonce

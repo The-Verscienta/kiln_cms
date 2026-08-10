@@ -8,7 +8,9 @@ defmodule KilnCMSWeb.PwaHeadTest do
   exactly "does this page install an app and a service worker" — which is why
   each surface is asserted rather than only the happy path.
   """
-  use KilnCMSWeb.ConnCase, async: true
+  # `async: false` — the app-icon cases below write a branding row for the
+  # default org and bust the shared branding cache.
+  use KilnCMSWeb.ConnCase, async: false
 
   alias KilnCMS.Accounts.User
   alias KilnCMS.CMS
@@ -30,9 +32,10 @@ defmodule KilnCMSWeb.PwaHeadTest do
       # The link is what decides which locale a browser installs under — the
       # controller must never read it from the session, or the installed app is
       # named after whichever locale happened to trigger the first fetch.
-      # No app-env mutation here: `config/test.exs` already configures "fr", and
-      # this module is `async: true` — narrowing `:i18n` globally would drop "es"
-      # out from under every concurrently-running test that asserts on it.
+      # No app-env mutation here: `config/test.exs` already configures "fr", so
+      # none is needed. Narrowing `:i18n` globally would leak to everything that
+      # runs after this module — the flip to `async: false` (for the branding
+      # cases below) bounds the blast radius, it does not remove it.
       html =
         conn
         |> log_in(authed_user(:editor))
@@ -77,6 +80,48 @@ defmodule KilnCMSWeb.PwaHeadTest do
       html = conn |> get(~p"/sign-in") |> html_response(200)
 
       refute html =~ ~s(rel="manifest")
+    end
+  end
+
+  # #629. The iOS home-screen icon is the one PWA asset with no manifest to carry
+  # a declared size, so it follows the same gate for a different reason: iOS
+  # scales whatever it is handed, and a wordmark scaled to a square tile is the
+  # unmistakably-broken look the stock mark avoids.
+  describe "the iOS home-screen icon (#629)" do
+    setup do
+      on_exit(fn -> KilnCMS.Cache.bust_branding(KilnCMS.Accounts.default_org_id()) end)
+      :ok
+    end
+
+    defp head_with_branding(conn, attrs) do
+      Ash.Seed.seed!(
+        KilnCMS.CMS.SiteBranding,
+        Map.merge(%{org_id: KilnCMS.Accounts.default_org_id(), site_name: "Icon Co"}, attrs)
+      )
+
+      KilnCMS.Cache.bust_branding(KilnCMS.Accounts.default_org_id())
+
+      conn |> log_in(authed_user(:editor)) |> get(~p"/editor") |> html_response(200)
+    end
+
+    test "a verified icon replaces the stock apple-touch-icon", %{conn: conn} do
+      html = head_with_branding(conn, %{app_icon_url: "/uploads/icon.png", app_icon_size: 512})
+
+      assert html =~ ~s(rel="apple-touch-icon" href="/uploads/icon.png")
+    end
+
+    test "an unverified URL falls back to the stock mark", %{conn: conn} do
+      html =
+        head_with_branding(conn, %{app_icon_url: "/uploads/wordmark.png", app_icon_size: nil})
+
+      assert html =~ ~s(href="/images/apple-touch-icon.png")
+      refute html =~ "wordmark.png"
+    end
+
+    test "an unbranded site keeps the stock mark", %{conn: conn} do
+      html = conn |> log_in(authed_user(:editor)) |> get(~p"/editor") |> html_response(200)
+
+      assert html =~ ~s(href="/images/apple-touch-icon.png")
     end
   end
 

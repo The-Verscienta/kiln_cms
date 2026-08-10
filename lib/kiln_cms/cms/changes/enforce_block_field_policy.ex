@@ -75,20 +75,33 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
       the same id, still holding it — otherwise the rule above is sidestepped by
       presenting the same content under a fresh id.
 
-  The last two apply only when the client has shown it round-trips nested ids
-  (`round_trips_ids?/2`), and that gate is not politeness. Nested child ids are
-  **not readable**: `blocks` is not `public?`, GraphQL hides it, and the fired
-  artifact exposes `_id` rather than `id`. A headless `block_tree` client cannot
-  learn a child's id, and `restore_version` takes nothing but a `version_id`, so
-  a version captured before the editor stamped its children restores id-less by
-  construction. Requiring an id back from those callers would refuse them
-  permanently while naming a remedy neither can perform.
+  The last two are **required, not opt-in** (#954). They used to apply only
+  when the client demonstrably round-tripped ids, because nested child ids were
+  unreadable — demanding one back named a remedy the caller could not perform.
+  Every caller can now read them: the public `block_ids` calculation projects
+  the tree to `_id`/`_type` on any policy-scoped read (drafts included,
+  editor-scoped by the row read policy), the fired `:json` artifact carries
+  `_id` for published content, and the write path accepts either spelling. So a
+  submission that strips the ids of an identified tree is refused, with the
+  surface named in the error, rather than quietly downgraded to the count-only
+  multiset — which is what #774's re-target needed.
 
-  **So this does not close the residual for a caller that drops every id.** Such
-  a submission is still only counted, and #774's re-target survives there. What
-  it closes is the case where identity exists — editor-authored content, and any
-  client that round-trips what it was given. Closing the rest needs nested child
-  ids a client can *read*; recorded in `docs/threat-model.md`.
+  Two deliberate carve-outs, both keyed on what is actually stored:
+
+    * **`restore_version` folding an id-less tree.** The submission is our own
+      history, vetted by this policy when written, and versions captured before
+      the editor stamped children fold back id-less by construction — no
+      surface can ever hand those ids back. A restore that does carry ids keeps
+      the binding like any other write, so nothing that was checked before is
+      loosened.
+    * **A stored tree whose children carry no ids** binds nothing (its entries
+      are empty), so it is governed by the multiset exactly as before — old
+      rows and headlessly-authored ones are not bricked by a demand for ids
+      that were never stored. The document becomes strict the first time an
+      id-stamping client (the editor, or any client echoing `block_ids`) saves
+      it. The cost is the narrowed residual: a restricted value stored on an
+      id-less child can still be re-targeted until then; recorded in
+      `docs/threat-model.md`.
 
   ## Omitted is not the same as default (#566)
 
@@ -136,8 +149,9 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
   the binding above believes the labels it is handed. It is checked for the one
   case that is decidable without ownership — an id naming two children at once —
   and otherwise holds only as well as the ids do. Nested children additionally
-  keep the wholly-id-less residual described above, because their ids cannot be
-  read back.
+  keep the id-less-STORED residual described above: a restricted value stored on
+  a child that has no id has no identity to bind until an id-stamping save gives
+  it one.
 
   Recorded as residual risk in `docs/threat-model.md`.
   """
@@ -332,7 +346,7 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
     now = Map.new(now_entries)
 
     bound =
-      if round_trips_ids?(stored, now),
+      if binding_applies?(changeset, stored, now),
         do: moved_values(now, stored) ++ dropped_values(stored, now),
         else: []
 
@@ -347,27 +361,46 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
     end)
   end
 
-  # Has this client shown it can name a nested child? At least one submitted
-  # child has come back under an id the stored tree knows.
+  # The binding is REQUIRED, not gated on the client demonstrating it
+  # round-trips ids (#954). It used to be gated, because nested child ids were
+  # unreadable — a rule demanding one back refused headless callers permanently
+  # while naming a remedy they could not perform. That premise is gone: the
+  # `block_ids` calculation projects the tree to `_id`/`_type` on every
+  # policy-scoped read (drafts included, editor-scoped by the row policy), the
+  # fired artifact carries `_id` for published content, and the write path
+  # accepts either spelling. Stripping ids is therefore a refusal rather than a
+  # fallback to the count-only multiset, which is what closes #774's id-less
+  # re-target.
   #
-  # The same shape as the top-level `identified?` test, and load-bearing for a
-  # sharper reason: nested child ids are **not readable**. `blocks` is not
-  # `public?`, every GraphQL action carries `hide_inputs: [:blocks]`, and the
-  # fired artifact exposes `_id`, not `id`. A headless `block_tree` client
-  # therefore has no way to learn a child's id, and `restore_version` accepts
-  # nothing but a `version_id` — versions captured before the editor stamped
-  # children restore id-less by construction. Demanding an id back
-  # unconditionally refuses both of them permanently, naming a remedy neither
-  # can perform.
-  #
-  # So the binding applies to clients that demonstrably round-trip ids — the
-  # content editor stamps one per child and resubmits it — and everyone else is
-  # governed by the multiset, exactly as before. The cost is the residual this
-  # cannot close: a wholly id-less nested submission is only counted, so a
-  # caller willing to drop every id keeps #774's re-target. Closing that needs
-  # child ids a client can *read*; recorded in `docs/threat-model.md`.
+  # The one exemption: a `restore_version` fold that carries no ids. The
+  # submitted tree is our own history — vetted by this same policy when it was
+  # written — and versions captured before the editor stamped children fold
+  # back id-less by construction; there is no surface that can ever hand those
+  # ids back. A restore that DOES round-trip ids keeps the binding exactly as
+  # any other write, so this exemption never loosens a case that was previously
+  # checked.
+  defp binding_applies?(changeset, stored, now),
+    do: round_trips_ids?(stored, now) or not restoring_version?(changeset)
+
   defp round_trips_ids?(stored, now),
     do: Enum.any?(Map.keys(now), &Map.has_key?(stored, &1))
+
+  # Keyed on the ACTION, not on a caller-set flag. `:restore_version` is
+  # `accept []` with a single `version_id` argument (see `KilnCMS.CMS.Content`),
+  # so it takes no content input at all — the tree it writes comes wholly from
+  # our own version history through `Changes.RestoreVersion`, never from the
+  # request. An attacker who reaches this action can choose *which* vetted
+  # arrangement to replay (a documented residual, bounded by the multiset,
+  # which still runs on a restore) but cannot smuggle a fresh tree through it.
+  #
+  # Deliberately not a `changeset.context` flag: that would rest the whole
+  # exemption on no external surface ever threading request data into private
+  # context, which is true today but is a barrier a future plug could quietly
+  # lower. The action name cannot be forged onto a plain `:update`, and a
+  # `:restore_version` write cannot carry a hostile tree, so there is nothing
+  # to leak.
+  defp restoring_version?(%{action: %{name: :restore_version}}), do: true
+  defp restoring_version?(_changeset), do: false
 
   # An id names one child. A tree where it names two collapses in `Map.new/1`
   # above and the LAST one wins, which is a collision that makes the check
@@ -398,10 +431,12 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
   end
 
   # ...and a child that held one must still be there holding it. Without this
-  # the rule above is evaded by simply dropping the ids: the stamp then mints
-  # fresh ones, which match nothing stored, and the multiset only counts. It is
-  # also what refuses the #774 clear-by-omission on an identified child, this
-  # time naming the child rather than the tree.
+  # the rule above is evaded by simply dropping the ids: an id-less child
+  # matches nothing stored, and the multiset only counts. It is also what
+  # refuses the #774 clear-by-omission on an identified child, this time naming
+  # the child rather than the tree — and, now that the binding is required
+  # (#954), what refuses the wholly id-less submission against an identified
+  # stored tree.
   #
   # Only non-default stored values are required back, so an ordinary page —
   # where nothing restricted is set — is untouched, and a child may still be
@@ -577,8 +612,12 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
     )
   end
 
-  # Nested children now DO have an id, so this one can say which value moved and
-  # what the remedy is — resubmit the child that held it, holding it.
+  # Nested children now DO have an id, so this one can say which value moved
+  # and what the remedy is — resubmit the child that held it, holding it. The
+  # ids are readable (#954): `block_ids` on any policy-scoped read, `_id` in
+  # the fired artifact for published content. The message names the surface,
+  # because a client that dropped every id has no other way to learn that one
+  # exists.
   defp add_nested_identity_violation(changeset, module, field_name) do
     type = Kiln.Block.Info.name(module)
 
@@ -587,7 +626,8 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
       message:
         "cannot move or clear `#{field_name}` on a nested #{type} block: it is restricted to " <>
           "other roles, so the child that holds it must come back under the same id still " <>
-          "holding it"
+          "holding it — read each child's `_id` from the `block_ids` calculation (or the " <>
+          "fired artifact) and send it back"
     )
   end
 

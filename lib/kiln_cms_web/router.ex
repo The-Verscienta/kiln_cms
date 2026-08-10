@@ -265,8 +265,8 @@ defmodule KilnCMSWeb.Router do
 
   # The iframe page for an embeddable form. A page load, not a submission, so it
   # gets the generous `:delivery` ceiling rather than the tight `:form` bucket.
-  # The controller replaces the CSP with `KilnCMSWeb.Embed.content_security_policy/0`,
-  # whose `frame-ancestors` permits third-party parents.
+  # The controller replaces the CSP with `KilnCMSWeb.Embed.content_security_policy/1`,
+  # whose `frame-ancestors` permits the parents that form allows (#648).
   pipeline :form_embed do
     plug :accepts, ["html"]
     plug :put_secure_browser_headers, @browser_csp_headers
@@ -384,6 +384,11 @@ defmodule KilnCMSWeb.Router do
       # branding is: full-text syndication is a disclosure decision, and it used
       # to live in a config file no tenant admin could reach.
       live "/editor/feeds", FeedSettingsLive, :index
+      # Per-site claim checking (#857) — whether the editor's Compliance panel
+      # runs here, whether it gates publishing, and this site's own claims
+      # vocabulary. Org-scoped for the reason feeds are: a hard publish refusal
+      # used to live in a config file no tenant admin could reach.
+      live "/editor/compliance", ComplianceLive, :index
       # White-label branding for the current site (#48) — name, logo, colour.
       # Org-scoped: you brand the site you're on (switch org by host).
       live "/editor/branding", BrandingLive, :index
@@ -738,6 +743,17 @@ defmodule KilnCMSWeb.Router do
     # (the browser fetches it as a page subresource) and cheap — a cached
     # branding lookup — so `:probe` is the right ceiling.
     get "/manifest.webmanifest", ManifestController, :show
+
+    # The service worker's offline fallback (#629). Was `priv/static/offline.html`
+    # and is now per-org for the same reason the manifest is: a white-labelled
+    # site should not show the KilnCMS mark the moment the network drops. Same
+    # ceiling, and the same one-segment placement — declared here, ahead of the
+    # `[:browser, :delivery]` content scopes, so a document could not shadow it.
+    #
+    # The `.html` is kept from the static path it replaces: an already-installed
+    # service worker precached that exact URL, and keeping it means those clients
+    # resolve rather than 404 until they update.
+    get "/offline.html", OfflineController, :show
 
     # ActivityPub discovery (#491). Unauthenticated machine fetches of per-org
     # documents — the same shape as the manifest above, so the same ceiling.

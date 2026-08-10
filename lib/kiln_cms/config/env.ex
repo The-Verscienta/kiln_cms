@@ -100,6 +100,12 @@ defmodule KilnCMS.Config.Env do
   @true_values ~w(true 1 yes on)
   @false_values ~w(false 0 no off)
 
+  # Upper bound for `positive_integer/1` (#1091). 2³¹-1: not a claim about what
+  # a sensible retention or word-rate is, but a backstop against a mistyped
+  # digit — Elixir integers are arbitrary-precision, so without it
+  # `BACKUP_KEEP_DAYS=144444444444444` parses and is honoured.
+  @max_integer 2_147_483_647
+
   # Unrecognized reads accumulate here rather than in application env, because a
   # release's config provider computes runtime config in a boot VM and then
   # restarts the system — anything `Application.put_env/3` wrote during that pass
@@ -225,11 +231,30 @@ defmodule KilnCMS.Config.Env do
   window or a retention, and zero is the value that reads as "do it never" or
   "delete everything" rather than as "unset".
 
+  ## Bounded above, too (#1091)
+
+  Elixir integers are arbitrary-precision, so without a ceiling a *digit* slip
+  is accepted where a *letter* slip warns: `BACKUP_KEEP_DAYS=144444444444444` —
+  a fat-fingered `14` — parses cleanly and silently becomes a four-billion-year
+  retention. That is the one class this module still interpreted, against its
+  own thesis that an unusable value must never be guessed at.
+
+  The bound is `#{@max_integer}` (2³¹-1). It is arbitrary in the sense that any
+  bound would be, but it is not a judgement about what a *sensible* value is —
+  every real value for every variable this reads is smaller by orders of
+  magnitude, so what it actually catches is a typo, which is the failure that
+  happens. Anything genuinely needing a larger count wants its own reader with a
+  range it can justify, not a wider blanket here.
+
       iex> System.put_env("KILN_INT_DOCTEST", "230")
       iex> KilnCMS.Config.Env.positive_integer("KILN_INT_DOCTEST")
       {:ok, 230}
 
       iex> System.put_env("KILN_INT_DOCTEST", "0")
+      iex> KilnCMS.Config.Env.positive_integer("KILN_INT_DOCTEST")
+      :unrecognized
+
+      iex> System.put_env("KILN_INT_DOCTEST", "144444444444444")
       iex> KilnCMS.Config.Env.positive_integer("KILN_INT_DOCTEST")
       :unrecognized
 
@@ -242,7 +267,7 @@ defmodule KilnCMS.Config.Env do
     raw = System.get_env(var, "")
 
     case raw |> String.trim() |> Integer.parse() do
-      {parsed, ""} when parsed > 0 ->
+      {parsed, ""} when parsed > 0 and parsed <= @max_integer ->
         {:ok, parsed}
 
       # Blank and unusable land in the same clause because `Integer.parse/1`
@@ -263,8 +288,8 @@ defmodule KilnCMS.Config.Env do
       # `"12"` when the operator wrote `" 12 "` hides the only clue they can
       # act on.
       IO.warn(
-        "#{var} is set to #{inspect(raw)}, which is not a positive integer; " <>
-          "keeping the configured default.",
+        "#{var} is set to #{inspect(raw)}, which is not a positive integer " <>
+          "up to #{@max_integer}; keeping the configured default.",
         []
       )
 
@@ -331,17 +356,27 @@ defmodule KilnCMS.Config.Env do
   The collector without a parser. `expected` completes the sentence "Expected …"
   — a phrase, not a sentence: `"a comma-separated list of PEM file paths"`.
 
-  One caller, and it earns the exception: `KILN_PROVENANCE_RETIRED_KEY_FILES` is
-  a path list whose failure mode is "parsed to no paths at all", which no
-  general reader here would model. Left as a bare `IO.warn/1` it was stderr-only
-  on a value that decides which retired keys still verify — a typo silently
-  deregisters every one of them, which is the failure the variable exists to
-  prevent.
+  Two callers, and they earn the exception by having nothing in common — which
+  is the point: neither shape generalizes, so a reader for either would have
+  exactly one user.
+
+    * `KILN_PROVENANCE_RETIRED_KEY_FILES` is a path list whose failure mode is
+      "parsed to no paths at all". Left as a bare `IO.warn/1` it was stderr-only
+      on a value that decides which retired keys still verify — a typo silently
+      deregisters every one of them, which is the failure the variable exists to
+      prevent.
+    * `BRAND_PRIMARY_COLOR` is a hex grammar validated by
+      `KilnCMS.CMS.Validations.BrandTokens.normalize_color/1`, the same
+      validator the editor-managed row uses. Its rejection used to be a
+      `Logger.warning` inside `KilnCMS.Branding`, which never reaches Sentry
+      (#1089).
 
   Always returns `:unrecognized`, so a `case`/`cond` branch can end on it.
 
   Reach for a real reader first — `fetch/1`, `positive_integer/1`, `one_of/2`.
-  A second caller here means the shape wants one of its own.
+  A **third** caller is the signal that some shape here wants a reader of its
+  own rather than a third hand-written phrase; `expected` is a free string, so
+  nothing stops it drifting from what the caller actually checked.
   """
   @spec record_unusable(String.t(), String.t(), String.t()) :: :unrecognized
   def record_unusable(var, raw, expected)
@@ -495,7 +530,10 @@ defmodule KilnCMS.Config.Env do
   defp advice(:boolean),
     do: "Use one of: #{Enum.join(@true_values, "/")}, #{Enum.join(@false_values, "/")}."
 
-  defp advice(:positive_integer), do: "Use a positive integer."
+  # Names the ceiling as well as the floor (#1091): an operator who typed one
+  # digit too many is told the bound rather than left to infer that a number
+  # they can see is a number was somehow not one.
+  defp advice(:positive_integer), do: "Use a positive integer up to #{@max_integer}."
 
   defp advice({:one_of, allowed}), do: "Use one of: #{Enum.join(allowed, "/")}."
 

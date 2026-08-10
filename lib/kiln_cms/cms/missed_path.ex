@@ -89,6 +89,29 @@ defmodule KilnCMS.CMS.MissedPath do
   postgres do
     table "missed_paths"
     repo KilnCMS.Repo
+
+    custom_indexes do
+      # The eviction read: "the least-requested row for this org", which runs
+      # once per distinct-path 404 while the org is at `max_paths`. Without it
+      # that is a sequential scan plus a top-N sort over the whole capped table
+      # — 5,000 rows by default — on the public, unauthenticated delivery path,
+      # against the same pool that renders pages (#920).
+      #
+      # `last_seen_at DESC` is not decoration. `MissedPathTracking.evict/1`
+      # sorts `count ASC, last_seen_at DESC`, and a btree can only be walked
+      # forward or backward as a whole — an all-ascending index serves the
+      # `count` half and leaves Postgres an Incremental Sort for the rest.
+      # Measured: with the directions matched the plan is a bare `Index Scan`;
+      # with them mismatched it is `Incremental Sort -> Index Scan`. That sounds
+      # cheap and is not, in the case that matters: under a flood almost every
+      # row has `count = 1`, so the first group is nearly the whole table and
+      # the incremental sort degenerates into the full sort this index exists to
+      # remove. Both directions must keep matching `evict/1`'s sort.
+      # `org_id` is not listed: AshPostgres prepends the tenant attribute to a
+      # multitenant resource's custom index itself, and naming it here produces
+      # a duplicated leading column.
+      index ["count", "last_seen_at DESC"], name: "missed_paths_eviction_index"
+    end
   end
 
   oban do

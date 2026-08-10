@@ -4,8 +4,8 @@ defmodule KilnCMS.CMS.Validations.BrandTokens do
 
   ## Image URLs
 
-  `logo_url` / `favicon_url` / `social_image_url` follow the same rule as the
-  SEO URLs — a same-origin relative path or an absolute `https://` URL — via
+  `logo_url` / `favicon_url` / `social_image_url` / `app_icon_url` follow the
+  same rule as the SEO URLs — a same-origin relative path or an absolute `https://` URL — via
   `KilnCMS.CMS.Validations.SeoUrls.valid?/1`, so `javascript:`, `data:`, plain
   `http:` and protocol-relative `//host` are rejected in one place for both
   features.
@@ -44,7 +44,7 @@ defmodule KilnCMS.CMS.Validations.BrandTokens do
   alias Ash.Error.Changes.InvalidAttribute
   alias KilnCMS.CMS.Validations.SeoUrls
 
-  @url_fields [:logo_url, :favicon_url, :social_image_url]
+  @url_fields [:logo_url, :favicon_url, :social_image_url, :app_icon_url]
 
   @hex ~r/\A#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})\z/
 
@@ -92,6 +92,20 @@ defmodule KilnCMS.CMS.Validations.BrandTokens do
   end
 
   defp validate_url(field, value), do: validate_url(field, to_string(value))
+
+  @doc """
+  Whether `url` would pass the image-URL rule above.
+
+  Exposed for `KilnCMS.Branding.AppIcon`\'s caller: the app icon is *fetched by
+  the server* to be measured (#629), and that fetch happens before the changeset
+  runs. Asking here first means a URL this validation is going to reject anyway
+  is never dialled — the validation stays the single definition of the rule, and
+  the probe does not become a way to point the server at a host the image policy
+  forbids.
+  """
+  @spec allowed_image_url?(term()) :: boolean()
+  def allowed_image_url?(url) when is_binary(url), do: SeoUrls.valid?(url) and allowed_host?(url)
+  def allowed_image_url?(_url), do: false
 
   # A relative path is same-origin and always fine. An absolute URL must be on a
   # host the CSP `img-src` already permits, otherwise the browser blocks it.

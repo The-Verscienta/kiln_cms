@@ -2100,6 +2100,133 @@ defmodule KilnCMSWeb.EditorLiveTest do
                ~r/<input[^>]*value="#{orphan.id}"[^>]*checked|checked[^>]*value="#{orphan.id}"/
     end
 
+    # #638. The property the merge verbs buy, and the one `tag_ids` could not
+    # express: **removal is bounded by what the picker rendered**.
+    #
+    # Deliberately constructed so the rescue machinery cannot save it. The tag
+    # is attached out of band and this page never re-fetches before saving, so
+    # the picker has no control for it — which is exactly the state
+    # `append_and_remove` read as "detach me". The sibling test above ("a tag
+    # attached after mount…") covers the case where an autosave DOES re-fetch
+    # and the union puts a checkbox back; this one covers the gap that was left.
+    #
+    # The join row is seeded directly rather than through `add_tag_ids` for the
+    # reason documented there: the action bumps `lock_version` and the save
+    # below would hit a stale-conflict instead of exercising the tag path.
+    test "a tag the picker never rendered survives a save (#638)", %{conn: conn} do
+      editor = authed_user(:editor)
+      keeper = Ash.Seed.seed!(Tag, %{name: "keepertag", slug: "t-#{uniq()}"})
+
+      post =
+        CMS.create_post!(%{title: "T", slug: "p-#{uniq()}", tag_ids: [keeper.id]}, actor: editor)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+
+      latecomer = Ash.Seed.seed!(Tag, %{name: "latecomertag", slug: "t-#{uniq()}"})
+
+      Ash.Seed.seed!(KilnCMS.CMS.Tagging, %{
+        org_id: post.org_id,
+        subject_id: post.id,
+        tag_id: latecomer.id
+      })
+
+      # Straight to Save with no intervening autosave, so nothing re-fetches
+      # `record.tags` and the latecomer never gets a checkbox.
+      lv |> form("#post-editor", form: %{tag_ids: [keeper.id]}) |> render_submit()
+
+      assert tag_names(post.id) == ["keepertag", "latecomertag"]
+    end
+
+    test "an unticked tag that IS rendered is still removed (#638)", %{conn: conn} do
+      # The other half: the diff must not become "never remove anything". A tag
+      # the picker rendered and the editor unticked has to come off, or the fix
+      # for the detach bug is just a different bug.
+      editor = authed_user(:editor)
+      drop = Ash.Seed.seed!(Tag, %{name: "droptag", slug: "t-#{uniq()}"})
+      keeper = Ash.Seed.seed!(Tag, %{name: "keepertag", slug: "t-#{uniq()}"})
+
+      post =
+        CMS.create_post!(%{title: "T", slug: "p-#{uniq()}", tag_ids: [drop.id, keeper.id]},
+          actor: editor
+        )
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+
+      lv |> form("#post-editor", form: %{tag_ids: [keeper.id]}) |> render_submit()
+
+      assert tag_names(post.id) == ["keepertag"]
+    end
+
+    test "the picker renders no empty-string sentinel any more (#638)", %{conn: conn} do
+      post = draft_post()
+      Ash.Seed.seed!(Tag, %{name: "sometag", slug: "t-#{uniq()}"})
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
+
+      assert html =~ "sometag"
+      refute html =~ ~s(name="form[tag_ids][]" value="")
+    end
+
+    test "a page cached across the deploy can still post the old sentinel (#638)",
+         %{conn: conn} do
+      # Nothing renders `""` now, but a browser holding the previous release's
+      # page will submit one. It has to read as "nothing ticked", not as an id —
+      # a uuid cast error on save is not something an editor can act on.
+      editor = authed_user(:editor)
+      tag = Ash.Seed.seed!(Tag, %{name: "staletag", slug: "t-#{uniq()}"})
+
+      post =
+        CMS.create_post!(%{title: "T", slug: "p-#{uniq()}", tag_ids: [tag.id]}, actor: editor)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+
+      # Not through `form/3`: LiveViewTest validates values against the rendered
+      # inputs, and it now REFUSES `""` because no such input exists any more —
+      # which is itself the proof the sentinel is gone. The raw event is what a
+      # stale browser actually sends.
+      render_submit(lv, "save", %{
+        "form" => %{"title" => "T", "slug" => post.slug, "tag_ids" => [""]}
+      })
+
+      assert tag_names(post.id) == []
+    end
+
+    test "a crafted payload cannot smuggle in its own merge verbs (#638)", %{conn: conn} do
+      # The rewrite is what bounds a save to the tags this server put on the
+      # page, so it must not be skippable by posting the verbs directly. An
+      # earlier version passed such params straight through on the theory that
+      # they were "already merged".
+      editor = authed_user(:editor)
+      keeper = Ash.Seed.seed!(Tag, %{name: "keepertag", slug: "t-#{uniq()}"})
+      smuggled = Ash.Seed.seed!(Tag, %{name: "smuggledtag", slug: "t-#{uniq()}"})
+
+      post =
+        CMS.create_post!(%{title: "T", slug: "p-#{uniq()}", tag_ids: [keeper.id]}, actor: editor)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+
+      render_submit(lv, "save", %{
+        "form" => %{
+          "title" => "T",
+          "slug" => post.slug,
+          "tag_ids" => [keeper.id],
+          "add_tag_ids" => [smuggled.id]
+        }
+      })
+
+      # The ticks decide, not the smuggled argument.
+      assert tag_names(post.id) == ["keepertag"]
+    end
+
+    defp tag_names(post_id) do
+      post_id
+      |> CMS.get_post!(load: [:tags], authorize?: false)
+      |> Map.fetch!(:tags)
+      |> Enum.map(& &1.name)
+      |> Enum.sort()
+    end
+
     # `tags.tag_group_id` is a plain FK with no org component, so a tag can be
     # pointed at a group in another tenant. That group never appears in this
     # org's loaded list, and a tag the picker doesn't render is a tag
@@ -2158,7 +2285,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert tag_section(html, "OpenThemes") =~ ~r/\sopen=/
 
       # Untick it: the section's contents must still be on screen.
-      html = lv |> form("#post-editor", form: %{tag_ids: [""]}) |> render_change()
+      html = lv |> form("#post-editor", form: %{tag_ids: []}) |> render_change()
 
       assert tag_section(html, "OpenThemes") =~ ~r/\sopen=/
       assert html =~ "opentag"
@@ -2318,7 +2445,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       # Untick and save: with nothing attached, the out-of-scope group
       # contributes nothing, and there is no other section to fall back to.
-      lv |> form("#post-editor", form: %{tag_ids: [""]}) |> render_submit()
+      lv |> form("#post-editor", form: %{tag_ids: []}) |> render_submit()
       html = render(lv)
 
       assert CMS.get_post!(post.id, authorize?: false, load: [:tags]).tags == []
@@ -2402,10 +2529,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
 
-      # An all-unchecked group submits only the hidden sentinel. Without it the
-      # key would be absent and selected_ids would fall back to record.tags,
-      # re-checking the box and making the tag impossible to remove.
-      lv |> form("#post-editor", form: %{tag_ids: [""]}) |> render_submit()
+      # Unticking every box submits no `tag_ids` key at all. Since #638 that is
+      # read against what the picker RENDERED, so it detaches — where before it
+      # needed a hidden sentinel to be distinguishable from "never touched".
+      lv |> form("#post-editor", form: %{tag_ids: []}) |> render_submit()
 
       assert CMS.get_post!(post.id, authorize?: false, load: [:tags]).tags == []
     end
@@ -2802,6 +2929,163 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert [%{"blocks" => [child]}, %{"blocks" => []}] = block.data["columns"]
       assert child["_type"] == "heading"
       assert child["text"] == "Nested heading"
+    end
+
+    # #893. Changing a nested heading's level did nothing: the `<select>` had no
+    # `name`, and a form-associated `phx-change` routes through LiveView's
+    # `pushInput`, which serializes the form filtered to the changed input's name
+    # and scrapes `phx-value-*` off the form rather than the element. With an
+    # empty name, neither the chosen level nor the three identifiers arrived.
+    #
+    # Asserted on the MARKUP, not only through the handler: `render_hook/3` and a
+    # hand-built `render_change/2` payload both supply params directly, so they
+    # pass just as happily against the nameless select that shipped. The `name`
+    # is the thing that makes the browser send anything at all.
+    test "the nested heading level select carries its identifiers in its name",
+         %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      add_columns_block(lv)
+      id = columns_block_id(lv)
+
+      lv
+      |> element("button[phx-click='col_add_child'][phx-value-col='0'][phx-value-type='heading']")
+      |> render_click()
+
+      [_, child_id] = Regex.run(~r/data-child-id="([^"]+)"/, render(lv))
+
+      assert has_element?(
+               lv,
+               ~s(select[name="col_child[#{id}][#{child_id}][level]"][phx-change="col_update_child"])
+             )
+    end
+
+    test "changing a nested heading's level persists it", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      add_columns_block(lv)
+      id = columns_block_id(lv)
+
+      lv
+      |> element("button[phx-click='col_add_child'][phx-value-col='0'][phx-value-type='heading']")
+      |> render_click()
+
+      [_, child_id] = Regex.run(~r/data-child-id="([^"]+)"/, render(lv))
+
+      # A heading child starts at level 2, so 3 is a real change.
+      lv
+      |> element(~s(select[name="col_child[#{id}][#{child_id}][level]"]))
+      |> render_change(%{"col_child" => %{id => %{child_id => %{"level" => "3"}}}})
+
+      # Reflected in the control, so a reload does not silently revert it.
+      assert has_element?(
+               lv,
+               ~s(select[name="col_child[#{id}][#{child_id}][level]"] option[value="3"][selected])
+             )
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert [%{"blocks" => [child]}, %{"blocks" => []}] = block.data["columns"]
+      assert child["level"] == 3
+    end
+
+    # The select is named outside the `form[...]` namespace so it stays out of
+    # the content changeset, the way the nameless sibling inputs do. If it ever
+    # lands inside it, the level would be cast as a content attribute.
+    test "the level select does not enter the content form's params", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      add_columns_block(lv)
+
+      lv
+      |> element("button[phx-click='col_add_child'][phx-value-col='0'][phx-value-type='heading']")
+      |> render_click()
+
+      refute render(lv) =~ ~s(name="form[col_child)
+    end
+
+    # `field` arrives from a client event and used to reach a bare `Map.put/3`,
+    # so a payload could name a *structural* key. `_type` rewrites the union
+    # discriminator: the next save fails its typed cast, and on the autosave
+    # path that surfaces as an error with no field to point at, leaving the
+    # document unsaveable until the block is deleted.
+    test "a field the child's editor does not render is ignored", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      add_columns_block(lv)
+      id = columns_block_id(lv)
+
+      lv
+      |> element("button[phx-click='col_add_child'][phx-value-col='0'][phx-value-type='heading']")
+      |> render_click()
+
+      [_, child_id] = Regex.run(~r/data-child-id="([^"]+)"/, render(lv))
+
+      for bad <- ["_type", "id"] do
+        render_hook(lv, "col_update_child", %{
+          "id" => id,
+          "child" => child_id,
+          "field" => bad,
+          "value" => "tampered"
+        })
+      end
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert [%{"blocks" => [child]}, %{"blocks" => []}] = block.data["columns"]
+      assert child["_type"] == "heading"
+      assert child["id"] == child_id
+    end
+
+    # A child with no stored level showed H1 in the select while delivery renders
+    # h2 (`Blocks.Heading.clamp/1`'s default). Harmless while the control was
+    # inert; a lie once it works, and an editor "confirming" H1 would get h2.
+    test "a heading with no usable level shows the level it will publish at",
+         %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      add_columns_block(lv)
+      id = columns_block_id(lv)
+
+      lv
+      |> element("button[phx-click='col_add_child'][phx-value-col='0'][phx-value-type='heading']")
+      |> render_click()
+
+      [_, child_id] = Regex.run(~r/data-child-id="([^"]+)"/, render(lv))
+
+      # `to_int("")` is 0 — the same value a legacy child with no `level` key
+      # produces, and the one that used to leave no option selected so the
+      # browser displayed H1 while delivery rendered h2.
+      lv
+      |> element(~s(select[name="col_child[#{id}][#{child_id}][level]"]))
+      |> render_change(%{"col_child" => %{id => %{child_id => %{"level" => ""}}}})
+
+      selector =
+        ~s(select[name="col_child[#{id}][#{child_id}][level]"] option[value="2"][selected])
+
+      assert has_element?(lv, selector)
+
+      refute has_element?(
+               lv,
+               ~s(select[name="col_child[#{id}][#{child_id}][level]"] option[value="1"][selected])
+             )
     end
 
     test "the nested block renders in the live preview", %{conn: conn} do

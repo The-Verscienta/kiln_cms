@@ -35,7 +35,15 @@ defmodule KilnCMSWeb.PreviewController do
   # The token carries the content type; resolve it generically via the registry.
   defp fetch(type, id) do
     if ContentTypes.type?(type),
-      do: ContentTypes.get_record(type, id, authorize?: false),
+      do:
+        ContentTypes.get_record(type, id,
+          authorize?: false,
+          # The payload carries both the stored SEO fields and their effective
+          # values (#1102); loading the calculations here is what lets
+          # `[category]` and `[field:<name>]` resolve to what the delivered page
+          # shows, rather than to what a record read with no loads can see.
+          load: KilnCMS.Seo.Patterns.loads([:seo_title, :seo_description])
+        ),
       else: {:error, :unknown_type}
   end
 end

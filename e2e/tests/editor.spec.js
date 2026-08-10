@@ -371,4 +371,52 @@ test.describe("editor journey", () => {
     await page.waitForTimeout(2500);
     await expect(section).toHaveJSProperty("open", true);
   });
+
+  // #893. The nested heading-level `<select>` had no `name`, so LiveView routed
+  // its form-associated `phx-change` through `pushInput`, which serializes the
+  // form filtered to the changed input's name and reads `phx-value-*` off the
+  // form rather than the element — nothing arrived and the level never changed.
+  //
+  // Only a real browser exercises that path: an ExUnit `render_change` supplies
+  // params directly and passes against the broken markup too. This is the test
+  // that would have caught it.
+  test("changing a nested heading's level in a columns block takes effect", async ({
+    page,
+  }) => {
+    await newDraftPage(page);
+    await page.fill('input[name$="[title]"]', "E2E Nested Heading");
+    await page.fill('input[name$="[slug]"]', `e2e-cols-${Date.now()}`);
+
+    await addBlock(page, "columns");
+
+    // Nest a heading in the first column.
+    await page.click(
+      'button[phx-click="col_add_child"][phx-value-col="0"][phx-value-type="heading"]',
+    );
+
+    // The control under test. A heading child starts at level 2.
+    const level = page.locator('select[phx-change="col_update_child"]').first();
+    await expect(level).toBeVisible();
+    await expect(level).toHaveValue("2");
+
+    await level.selectOption("3");
+
+    // NOT asserted here. `expect(level).toHaveValue("3")` immediately after
+    // `selectOption` cannot fail: with the bug, the handler no-ops and the
+    // server sends no diff at all, so the DOM simply keeps the value Playwright
+    // just set — and even with a diff, `dom.ts`'s `mergeFocusedInput` skips
+    // `HTMLSelectElement`, so a focused select never takes the server's
+    // `selected` back. The only honest check is a server-rendered one.
+    //
+    // So: save, re-mount the editor from the database, and read the control on
+    // a fresh unfocused render. That can only pass if the browser actually sent
+    // the change and the server actually stored it.
+    await page.getByRole("button", { name: /^save$/i }).click();
+    await expect(page.getByText("Saved.")).toBeVisible();
+    await page.reload();
+
+    const reloaded = page.locator('select[phx-change="col_update_child"]').first();
+    await expect(reloaded).toBeVisible();
+    await expect(reloaded).toHaveValue("3");
+  });
 });

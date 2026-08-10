@@ -181,10 +181,22 @@ defmodule KilnCMS.Events.ICS do
   defp until_type(true), do: :date
   defp until_type(false), do: :datetime
 
+  # Authored first, the type's #805 default last (#1102). A pattern renders in
+  # the document's own `<meta name="description">`, and a subscriber whose
+  # calendar entry had no DESCRIPTION at all for the same event had no way to
+  # know why — but it must not outrank what an editor wrote, and a pattern is
+  # essentially never nil, so putting it first made `excerpt` dead on this route
+  # alone. Every sibling surface picks in this order.
   defp description(record) do
-    case Map.get(record, :seo_description) || Map.get(record, :excerpt) do
-      value when is_binary(value) and value != "" -> "DESCRIPTION:#{escape(value)}"
-      _other -> nil
+    [
+      Map.get(record, :seo_description),
+      Map.get(record, :excerpt),
+      KilnCMS.Seo.Patterns.effective(record, :seo_description)
+    ]
+    |> Enum.find(&(is_binary(&1) and &1 != ""))
+    |> case do
+      nil -> nil
+      value -> "DESCRIPTION:#{escape(value)}"
     end
   end
 

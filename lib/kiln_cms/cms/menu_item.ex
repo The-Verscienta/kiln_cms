@@ -101,6 +101,28 @@ defmodule KilnCMS.CMS.MenuItem do
       validate KilnCMS.CMS.Validations.MenuItemPlacement
     end
 
+    # Moving an item back to the top level, and nothing else (#900). The repair
+    # for an item no chain of parents reaches a root from — the builder's
+    # "Detached items" section.
+    #
+    # Separate from `:update` because that re-runs `MenuItemDestination` on
+    # every write, and a detached item is exactly the one likely to fail it: a
+    # `:url` item with a blank url, or a `:content` item whose type has since
+    # been deleted, is what a restore or a direct `UPDATE` leaves behind — the
+    # same causes that strand it in the first place. Gating the escape hatch on
+    # the destination being valid would refuse it to the items that most need
+    # it, with a message about links that has nothing to do with the problem.
+    #
+    # `MenuItemPlacement` is kept: it returns `:ok` immediately for a nil
+    # parent, so it costs nothing here and stays in force if this action ever
+    # learns to accept a real parent.
+    update :reparent do
+      accept [:position]
+      require_atomic? false
+      change set_attribute(:parent_id, nil)
+      validate KilnCMS.CMS.Validations.MenuItemPlacement
+    end
+
     read :read do
       primary? true
       prepare build(sort: [position: :asc, label: :asc])

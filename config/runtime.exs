@@ -793,15 +793,53 @@ if config_env() == :prod do
 
   # White-label branding (#48, see `KilnCMS.Branding`) — the instance-wide layer
   # beneath each site's own editor-managed row. Unset vars fall through to the
-  # stock KilnCMS defaults. BRAND_PRIMARY_COLOR must be a hex colour (`#1d4ed8`);
-  # anything else is ignored with a warning, since the value drives the emitted
-  # theme tokens. Off-origin BRAND_LOGO_URL hosts must also be in CSP_IMG_SRC or
-  # the browser will block the image.
+  # stock KilnCMS defaults. Off-origin BRAND_LOGO_URL hosts must also be in
+  # CSP_IMG_SRC or the browser will block the image.
+  #
+  # BRAND_PRIMARY_COLOR must be a hex colour (`#1d4ed8` or `#1d4`), and is
+  # checked HERE rather than only where it is used (#1089). `KilnCMS.Branding`
+  # still rejects a bad value — it is the same grammar wherever the colour comes
+  # from, and the editor-managed row goes through it too — but its rejection is
+  # a bare `Logger.warning`, which `Sentry.LoggerHandler`'s defaults
+  # (`level: :error`, `capture_log_messages: false`) drop. So on the env path
+  # that was container stdout and nowhere else, for a value that changes what
+  # every page looks like. Reading it through the collector puts it in the same
+  # boot-warning replay as every other misconfiguration in this file (#634).
+  brand_primary_color_raw = System.get_env("BRAND_PRIMARY_COLOR", "")
+
+  brand_primary_color =
+    case KilnCMS.CMS.Validations.BrandTokens.normalize_color(brand_primary_color_raw) do
+      nil ->
+        # Blank — including whitespace-only — is "leave this alone", the same
+        # rule a bare `FOO=` gets everywhere else in this file; warning about it
+        # would be noise on every boot. `normalize_color/1` trims for itself, so
+        # only the emptiness test needs to.
+        #
+        # The RAW value goes to the collector, untrimmed: the trimming is a
+        # candidate explanation for the mismatch, so echoing the normalized form
+        # hands the operator the one spelling that is not in their compose file.
+        unless String.trim(brand_primary_color_raw) == "" do
+          Env.record_unusable(
+            "BRAND_PRIMARY_COLOR",
+            brand_primary_color_raw,
+            "a hex colour such as #1d4ed8 or #1d4"
+          )
+        end
+
+        nil
+
+      # Normalized (downcased, shorthand expanded) rather than raw: `Branding`
+      # would do it on every read anyway, and writing the canonical form means
+      # the value the tokens are built from is the one an operator sees.
+      normalized ->
+        normalized
+    end
+
   config :kiln_cms, :branding,
     site_name: System.get_env("SITE_NAME"),
     logo_url: System.get_env("BRAND_LOGO_URL"),
     favicon_url: System.get_env("BRAND_FAVICON_URL"),
-    primary_color: System.get_env("BRAND_PRIMARY_COLOR")
+    primary_color: brand_primary_color
 
   config :kiln_cms, KilnCMSWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],

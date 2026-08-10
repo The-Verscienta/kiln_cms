@@ -132,6 +132,54 @@ defmodule KilnCMSWeb.JsonApiTest do
     end
   end
 
+  describe "block_ids over the wire (#954)" do
+    test "an editor reads a DRAFT's block ids via fields[post]=block_ids; anonymous cannot" do
+      # The draft-readable id surface the required #865 binding depends on:
+      # `blocks` stays non-`public?`, but its identity projection is a public
+      # calculation, so a headless client can learn the `_id`s it must echo.
+      # Field values must not ride along — the projection is ids and types
+      # only — and delivery must not gain drafts: the anonymous request is
+      # refused at the row, ids and all.
+      admin = user(:admin)
+      child = Ash.UUID.generate()
+
+      draft =
+        make_post(
+          %{
+            title: "Draft with ids",
+            block_tree: [
+              %{
+                "_type" => "columns",
+                "columns" => [
+                  %{
+                    "blocks" => [
+                      %{"_type" => "quote", "id" => child, "text" => "A", "featured" => true}
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          admin
+        )
+
+      assert {200, body} =
+               api_get("/api/json/posts/#{draft.id}?fields[post]=block_ids",
+                 token: token(user(:editor))
+               )
+
+      assert [%{"_type" => "columns", "_id" => _} = columns] =
+               body["data"]["attributes"]["block_ids"]
+
+      # Ids and types only — a field value here would be `blocks` leaking.
+      assert columns["columns"] == [
+               %{"blocks" => [%{"_type" => "quote", "_id" => child}]}
+             ]
+
+      assert {404, _body} = api_get("/api/json/posts/#{draft.id}?fields[post]=block_ids")
+    end
+  end
+
   describe "sorting" do
     test "sorts by title ascending and descending" do
       admin = user(:admin)

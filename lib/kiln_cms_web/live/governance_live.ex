@@ -7,6 +7,7 @@ defmodule KilnCMSWeb.GovernanceLive do
   """
   use KilnCMSWeb, :live_view
 
+  alias KilnCMS.Compliance
   alias KilnCMS.Governance
 
   @impl true
@@ -31,6 +32,10 @@ defmodule KilnCMSWeb.GovernanceLive do
     |> assign(:trail, nil)
     |> assign(:content, Governance.content_index(socket.assigns.current_org.id))
     |> assign(:witness, Governance.witness_status(socket.assigns.current_org.id))
+    # #858. The claim scan is recomputed here rather than stored, so it is
+    # resolved per page load like the witness status beside it — see
+    # `KilnCMS.Compliance.Report` for why there is no findings table.
+    |> assign(:claims, Compliance.Report.for_org(socket.assigns.current_org.id))
   end
 
   defp apply_action(socket, :show, %{"type" => type, "id" => id}) do
@@ -229,9 +234,82 @@ defmodule KilnCMSWeb.GovernanceLive do
       page_title={@page_title}
       active={:governance}
     >
-      <.index :if={is_nil(@trail)} content={@content} witness={@witness} />
+      <.index :if={is_nil(@trail)} content={@content} witness={@witness} claims={@claims} />
       <.detail :if={@trail} trail={@trail} consent_form={@consent_form} />
     </Layouts.console>
+    """
+  end
+
+  attr :claims, :map, required: true
+
+  # What this site is currently claiming (#858).
+  #
+  # #377 put claim checking in the editor's panel and the publish gate's
+  # refusal, both of which are about the document in front of you. Neither can
+  # answer the question a compliance officer actually has — what is published in
+  # our name right now — and `docs/p3-plan.md` said this dashboard was where
+  # that answer would live. It did not, until now.
+  #
+  # "Off" is rendered rather than skipped, for `witness_panel/1`'s reason one
+  # section up: a page that shows nothing when the scan never ran looks exactly
+  # like a page that scanned and found nothing, and those are opposite facts.
+  defp claims_panel(assigns) do
+    ~H"""
+    <section class="card card-pad space-y-3" data-role="claim-findings">
+      <div class="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 class="text-lg font-medium">{gettext("Live claims")}</h2>
+        <span :if={@claims.enabled?} class="text-xs text-base-content/60">
+          {ngettext(
+            "%{count} published document scanned",
+            "%{count} published documents scanned",
+            @claims.scanned,
+            count: @claims.scanned
+          )}
+        </span>
+      </div>
+
+      <p :if={not @claims.enabled?} class="text-sm text-base-content/70">
+        {gettext(
+          "Claim checking is off for this site, so nothing has been scanned. Turn it on at Claim checking to see what is published in your name."
+        )}
+        <.link navigate={~p"/editor/compliance"} class="link">{gettext("Claim checking")}</.link>
+      </p>
+
+      <p
+        :if={@claims.enabled? and @claims.findings == []}
+        class="text-sm text-base-content/60"
+      >
+        {gettext("No flagged claims in anything currently published.")}
+      </p>
+
+      <p :if={@claims.truncated?} class="text-sm text-warning">
+        {gettext(
+          "Only the %{count} most recently updated published documents were scanned; there may be more.",
+          count: @claims.scanned
+        )}
+      </p>
+
+      <ul :if={@claims.findings != []} class="divide-y divide-base-content/10">
+        <li :for={finding <- @claims.findings} class="flex flex-wrap items-baseline gap-2 py-2">
+          <.link
+            navigate={~p"/editor/governance/#{finding.type}/#{finding.id}"}
+            class="text-sm font-medium hover:underline"
+          >
+            {finding.title}
+          </.link>
+          <span class="text-xs text-base-content/50">{finding.type}</span>
+          <span
+            :if={finding.errors?}
+            class="badge badge-sm bg-error/15 text-error-ink"
+          >
+            {gettext("would refuse a publish")}
+          </span>
+          <span class="w-full font-mono text-xs text-base-content/70">
+            {finding.matches |> Enum.flat_map(fn {_code, phrases} -> phrases end) |> Enum.join(", ")}
+          </span>
+        </li>
+      </ul>
+    </section>
     """
   end
 
@@ -363,6 +441,7 @@ defmodule KilnCMSWeb.GovernanceLive do
 
   attr :content, :list, required: true
   attr :witness, :map, required: true
+  attr :claims, :map, required: true
 
   defp index(assigns) do
     ~H"""
@@ -375,6 +454,7 @@ defmodule KilnCMSWeb.GovernanceLive do
       </div>
 
       <.witness_panel witness={@witness} />
+      <.claims_panel claims={@claims} />
 
       <p :if={@content == []} class="text-sm text-base-content/60">{gettext("No content yet.")}</p>
 

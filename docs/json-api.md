@@ -451,6 +451,15 @@ which **sanitizes** rich-text HTML and media URLs. On an update, **omit**
 `block_tree` to leave the body untouched (a metadata-only `PATCH` never wipes
 it); send `[]` to clear it.
 
+**Round-trip block ids when updating.** Read the tree's identity first — the
+`block_ids` calculation (`?fields[post]=block_ids`) projects the stored tree to
+`_id`/`_type` only, nested `columns` children included in the positions they
+render — and echo each block's `_id` on the maps you send back. That is what
+lets the server tell an in-place edit from a replacement; on a page carrying an
+admin-set nested value (a field behind `editable_by`), a non-admin write that
+drops the ids is **refused** (#954), with the error naming this surface. The
+fired `:json` artifact carries the same `_id`s for published content.
+
 ### Re-fire semantics
 
 Firing (immutable per-surface artifact regeneration) is bound to `:publish`, so

@@ -7,17 +7,21 @@ defmodule KilnCMS.CMS.Validations.ComplianceClaims do
   the same rules, so the panel an author has been looking at is the panel that
   decides.
 
-  ## Off by default, twice
-
-      config :kiln_cms, KilnCMS.Compliance,
-        enabled: true,
-        require_at_publish: true
+  ## Off by default, twice, and per site (#857)
 
   `enabled` has to be on for anything to have been scanned, and
   `require_at_publish` has to be on for a match to stop a publish. Neither is
   the default. A CMS that started refusing publishes on a phrase list nobody
   chose would be indefensible, and the rule pack is explicitly a starting
   point (see `KilnCMS.Compliance`).
+
+  Both switches, and the vocabulary they act on, belong to the **site being
+  published to**, resolved from the changeset's tenant through
+  `KilnCMS.Compliance.Settings`. A gate that read a deployment-wide config
+  would refuse one tenant's publish over another tenant's claims vocabulary —
+  the reason #857 exists, and the one failure here that no author could act on,
+  since the phrase quoted back at them would come from rules their site never
+  chose.
 
   ## Only `:error` rules gate
 
@@ -48,27 +52,39 @@ defmodule KilnCMS.CMS.Validations.ComplianceClaims do
 
   alias Kiln.Advisory.Body
   alias KilnCMS.Compliance
+  alias KilnCMS.Compliance.Settings
 
   @scanned_fields [:title, :seo_title, :seo_description]
 
   @impl true
   def validate(changeset, opts, _context) do
-    if Compliance.require_at_publish?() and judgeable?(changeset) do
-      check(changeset, opts[:only_new] == true)
+    settings = Settings.for_org_uncached(org_id(changeset))
+
+    # The same locale test the panel applies (`Settings.judgeable?/2`).
+    #
+    # Without it the gate and the panel diverge in the worst possible
+    # direction: a French page under the shipped English pack renders *no
+    # compliance panel at all* — `Checks.Claims` reports `:n_a` — and is then
+    # refused at publish quoting an English phrase the author was never shown.
+    # Any other rule set is assumed to fit the content it was written for, so
+    # those still run.
+    if settings.require_at_publish? and Settings.judgeable_locale?(settings, locale(changeset)) do
+      check(changeset, settings.rules, opts[:only_new] == true)
     else
       :ok
     end
   end
 
-  # The same locale test the panel applies (`KilnCMS.Compliance.judgeable?/1`).
+  # The site being published to. Uncached deliberately — this runs inside the
+  # write transaction, and `Settings.for_org_uncached/1` says why a cached
+  # resolve there would want a second pool connection while holding the first.
   #
-  # Without it the gate and the panel diverge in the worst possible direction:
-  # a French page under the shipped English pack renders *no compliance panel
-  # at all* — `Checks.Claims` reports `:n_a` — and is then refused at publish
-  # quoting an English phrase the author was never shown. Custom rules are
-  # assumed to fit the content they were written for, so those still run.
-  defp judgeable?(changeset) do
-    not Compliance.default_pack?() or Compliance.english_locale?(locale(changeset))
+  # Read from the record's own `org_id` rather than `changeset.tenant`: with
+  # strict tenancy off the tenant may be absent while the attribute is always
+  # populated, and reading the wrong site's vocabulary is the exact failure this
+  # gate must not have.
+  defp org_id(changeset) do
+    Ash.Changeset.get_attribute(changeset, :org_id) || KilnCMS.Accounts.default_org_id()
   end
 
   # `Kiln.Advisory.Context.new/3`'s fallback, exactly: a blank locale is the
@@ -82,9 +98,7 @@ defmodule KilnCMS.CMS.Validations.ComplianceClaims do
     end
   end
 
-  defp check(changeset, only_new?) do
-    rules = Compliance.rules()
-
+  defp check(changeset, rules, only_new?) do
     new = offenders(changeset, :new, rules)
     existing = if only_new?, do: offenders(changeset, :existing, rules), else: %{}
 
@@ -156,8 +170,11 @@ defmodule KilnCMS.CMS.Validations.ComplianceClaims do
     # Names every offending phrase at once rather than making an author
     # rediscover the next one on each retry — the same reasoning as
     # `KilnCMS.CMS.Validations.MediaAltText`.
+    #
+    # And the rule now lives somewhere an admin on this site can actually reach
+    # (#857), so the sentence says where instead of leaving them to guess.
     "cannot go live: #{quoted} #{verb(offenders)} an unreviewed claim. " <>
-      "Reword it, or have an admin clear the compliance rule."
+      "Reword it, or have an admin change the rule in Compliance settings."
   end
 
   defp verb([_one]), do: "is"

@@ -52,7 +52,14 @@ defmodule KilnCMSWeb.LlmsController do
             |> ContentTypes.list!(
               authorize?: true,
               tenant: org.id,
-              query: [select: [:title, :slug, :locale, :seo_description], limit: remaining]
+              query: [
+                select: [:title, :slug, :locale, :seo_description],
+                # The type's #805 default where the record has no description of
+                # its own (#1102). The calculation's `load/3` folds the tokens'
+                # own dependencies into the pinned `select:` above.
+                load: KilnCMS.Seo.Patterns.loads(),
+                limit: remaining
+              ]
             )
             |> Enum.filter(&(&1.locale == default_locale))
             |> Enum.map(&entry(&1, ct, org))
@@ -75,7 +82,7 @@ defmodule KilnCMSWeb.LlmsController do
       # The fired :llm surface (#357): the clean Markdown form of this document,
       # linked per the llmstxt.org "markdown versions" convention.
       md_url: "#{base_url}/api/content/#{ct.type}/#{record.slug}?surface=llm",
-      description: record.seo_description
+      description: KilnCMS.Seo.Patterns.effective(record, :seo_description, type: ct, org: org)
     }
   end
 

@@ -3,9 +3,23 @@ defmodule KilnCMSWeb.BackupLive do
   The backup panel (`/editor/backups`, #484): when the last backup ran, what
   it produced, whether it verified — and a button to take one now.
 
-  Admin-only (`:live_admin_required`). Backups are infrastructure, and the
-  artifact list names the database dump; an editor has no reason to see it and
-  no action to take on it.
+  **Platform**-admin only, and the distinction is the point (#1160). The route
+  carries `:live_admin_required`, which is an *effective per-org* admin tier
+  (#419) — but a backup is a `pg_dump` of the whole instance plus a media
+  archive, covering every tenant. A per-org admin is the wrong question to ask
+  about an instance-wide action, so `mount/3` asks the global one instead, the
+  same gate `KilnCMSWeb.SystemLive` uses for a cache flush and for the same
+  stated reason.
+
+  `handle_event/3` asks again rather than trusting the mount. Two reasons, both
+  of which the sibling console already documents: `Backups.enqueue/1` takes no
+  actor and authorizes nothing, so a mount-guard mistake has no policy behind it
+  to catch it; and a mount guard is evaluated once, so an admin whose role is
+  revoked mid-session would otherwise keep triggering full-instance backups for
+  as long as the socket lived.
+
+  The artifact list names the database dump; an editor has no reason to see it
+  and no action to take on it.
 
   ## It reports on backups it did not run
 
@@ -32,16 +46,35 @@ defmodule KilnCMSWeb.BackupLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok,
-     socket
-     |> assign(:page_title, gettext("Backups"))
-     |> assign(:running?, false)
-     |> assign(:polls_left, @max_polls)
-     |> load_status()}
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      {:ok,
+       socket
+       |> assign(:page_title, gettext("Backups"))
+       |> assign(:running?, false)
+       |> assign(:polls_left, @max_polls)
+       |> load_status()}
+    else
+      # `push_navigate`, matching the admin siblings: it ends the LiveView
+      # rather than rendering a refusal panel, so nothing below is reachable
+      # from this socket. The handler re-checks anyway — see the moduledoc for
+      # why that is not redundant.
+      {:ok,
+       socket
+       |> put_flash(:error, gettext("You need admin access to view that page."))
+       |> push_navigate(to: ~p"/")}
+    end
   end
 
   @impl true
   def handle_event("backup_now", _params, socket) do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      start_backup(socket)
+    else
+      {:noreply, socket}
+    end
+  end
+
+  defp start_backup(socket) do
     case Backups.enqueue(trigger: :manual) do
       {:ok, _job} ->
         # `running?` is optimistic and local to this session: the job is on a

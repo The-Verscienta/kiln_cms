@@ -79,16 +79,6 @@ defmodule KilnCMSWeb.PreviewCommentPinsTest do
     Enum.map(page.blocks, & &1.value.id)
   end
 
-  defp eventually(view, substring, present? \\ true, tries \\ 40) do
-    html = render(view)
-
-    cond do
-      String.contains?(html, substring) == present? -> html
-      tries == 0 -> flunk("expected #{substring} #{if present?, do: "in", else: "gone from"}")
-      true -> Process.sleep(25) && eventually(view, substring, present?, tries - 1)
-    end
-  end
-
   test "render_block/1 anchors every block with its id" do
     actor = admin()
     page = a_page(actor)

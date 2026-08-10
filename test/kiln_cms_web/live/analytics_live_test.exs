@@ -199,6 +199,11 @@ defmodule KilnCMSWeb.AnalyticsLiveTest do
       enable_referrers(5)
       page = new_page("Quiet Page")
       record_referrers(page, :social, 2)
+      # Something for the low count to hide behind. Without it the breakdown is
+      # two views total against four genuine zeros, which no partner makes
+      # ambiguous — see the whole-breakdown case below (#1073).
+      record_referrers(page, :search, 40)
+      record_referrers(page, :other, 50)
 
       {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/analytics")
 
@@ -211,23 +216,33 @@ defmodule KilnCMSWeb.AnalyticsLiveTest do
     # suppressed one, to the row's own exact view total) makes that one
     # category's true count recoverable by subtraction. Closing it means a
     # second category must also stop reading as an exact "0".
-    test "a lone suppressed category forces a second category into complementary suppression",
+    #
+    # #1073 then found the first fix insufficient: the partner was the SMALLEST
+    # of the others, which bounded it above by every published exact and pinned
+    # the pair anyway. It is the largest now.
+    test "a lone suppressed category forces the LARGEST other into suppression",
          %{conn: conn} do
       enable_referrers(5)
       page = new_page("Complementary")
       record_referrers(page, :social, 2)
+      record_referrers(page, :direct, 40)
+      record_referrers(page, :search, 90)
 
       {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/analytics")
 
-      # social stays "< 5" (it was already below threshold); some other
-      # category — direct, first in source order — no longer reads as an
-      # honest exact "0", which would have given social away by subtraction.
       assert html =~ "<title>Social: &lt; 5</title>"
-      assert html =~ "<title>Direct: hidden</title>"
-      refute html =~ "<title>Direct: 0</title>"
+      assert html =~ "<title>Search: hidden</title>"
+      # The smaller ones stay exact: hiding those was what made the residual
+      # small enough to pin.
+      assert html =~ "<title>Direct: 40</title>"
     end
 
-    test "two or more naturally-suppressed categories need no complementary help", %{conn: conn} do
+    # #620 claimed two naturally-low categories were "already underdetermined by
+    # the total alone". #1073's brute force says otherwise — `direct: 1,
+    # internal: 1` with three zeros has exactly one consistent assignment — so
+    # a breakdown with nowhere to hide loses all of it, zeros included. A
+    # published `0` is not a courtesy there, it is a term in the equation.
+    test "a breakdown with nowhere to hide loses all of it", %{conn: conn} do
       enable_referrers(5)
       page = new_page("Two Low")
       Analytics.record_view_day!("page", page.id, authorize?: false)
@@ -236,14 +251,10 @@ defmodule KilnCMSWeb.AnalyticsLiveTest do
 
       {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/analytics")
 
-      # Two unknowns, one equation: internal/other genuinely have nothing to
-      # hide and read as exact zeros; direct does too (it's not adjacent to
-      # the lone-suppressed case above).
-      assert html =~ "<title>Search: &lt; 5</title>"
-      assert html =~ "<title>Social: &lt; 5</title>"
-      assert html =~ "<title>Direct: 0</title>"
-      assert html =~ "<title>Internal: 0</title>"
-      assert html =~ "<title>Other: 0</title>"
+      for label <- ~w(Direct Internal Search Social Other) do
+        assert html =~ "<title>#{label}: hidden</title>"
+        refute html =~ "<title>#{label}: 0</title>"
+      end
     end
 
     test "suppressed and complementarily-suppressed bars render at the same size, unlike an exact one",

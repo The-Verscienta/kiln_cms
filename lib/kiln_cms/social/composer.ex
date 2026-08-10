@@ -40,7 +40,20 @@ defmodule KilnCMS.Social.Composer do
   @spec compose(struct(), String.t(), pos_integer(), String.t() | nil) :: String.t()
   def compose(record, url, max_length, template \\ nil) do
     title = clean(Map.get(record, :title))
-    excerpt = clean(Map.get(record, :excerpt) || Map.get(record, :seo_description))
+
+    # The *effective* SEO description (#1102): a type that defaults one through a
+    # #805 pattern posts it here too, rather than posting a bare title while its
+    # own page carries the sentence.
+    #
+    # `Enum.find/2` on `is_binary`, not `||`: `%Ash.NotLoaded{}` is truthy, so an
+    # `excerpt` the caller's select happened to omit would win the `||` and then
+    # be dropped by `clean/1` — posting a bare title and never reaching the
+    # pattern at all.
+    excerpt =
+      [Map.get(record, :excerpt), KilnCMS.Seo.Patterns.effective(record, :seo_description)]
+      |> Enum.find(&(is_binary(&1) and &1 != ""))
+      |> clean()
+
     type = record |> KilnCMS.Firing.Engine.public_type() |> to_string()
 
     case template do

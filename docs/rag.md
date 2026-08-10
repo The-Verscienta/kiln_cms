@@ -185,8 +185,8 @@ when semantic search is off:
   org-scoped, cacheable): nearest foreign block embeddings to the document's
   centroid, aggregated per document by minimum cosine distance.
 - **Near-duplicates** — `near_duplicates/2`: documents within a cosine
-  distance threshold (default 0.1), any workflow state — catches a draft
-  duplicating live content.
+  distance threshold (`:near_duplicate_threshold`, default 0.1), any workflow
+  state — catches a draft duplicating live content.
 - **Tag suggestions** — `suggest_tags/2`: existing tags ranked by similarity
   to the document's centroid, minus the ones already applied, and minus
   anything past a cosine-distance ceiling (`:suggest_tags_threshold`, default
@@ -196,6 +196,74 @@ when semantic search is off:
   when nothing is close. Tune it for your embedder — measure with
   `suggest_tags(record, threshold: 2.0)` (the ceiling of cosine distance, so
   nothing is filtered) and read the distances off the result.
+
+### The two thresholds are measured, and one of them is a judgement call
+
+Both defaults above are properties of `BAAI/bge-small-en-v1.5`, and #1086
+measured them rather than deriving them. Change the model and you should
+re-measure; the harness is in
+`test/kiln_cms/search/tag_suggestion_calibration_test.exs`, behind
+`mix test --include calibration`, and the corpus and recorded numbers are
+`KilnCMS.TagSuggestionCorpus`.
+
+**Method.** Eight documents on unrelated subjects, thirty-five tags, and a human
+label on every one of the 280 pairs: would a person tick this tag for this
+document? Each document's vector is the mean of its per-block embeddings, which
+is what `Related.centroid/1` computes from stored `BlockEmbedding` rows; each
+tag's is its name embedded as a document. Every document is scored against the
+**whole** vocabulary, because that is the real regime. The vocabulary includes
+near-misses on purpose — `fermentation` beside a cold-brew article, `sql` beside
+a maths one — since "carburetors for herbal tea" is not the failure an editor
+actually meets.
+
+**Tag suggestions (`:suggest_tags_threshold`).**
+
+| | cosine distance |
+|---|---|
+| tags a human would tick | 0.2119 – 0.4292 |
+| tags they would not | 0.2828 – 0.5626 |
+
+The bands overlap, and that is the finding: no ceiling keeps every wanted tag
+and admits no unwanted one.
+
+| ceiling | wanted kept | unwanted admitted | suggestions per document |
+|---|---|---|---|
+| 0.25 | 3/27 | 0/253 | 0.4 |
+| 0.30 | 12/27 | 1/253 | 1.6 |
+| 0.35 | 21/27 | 10/253 | 3.9 |
+| 0.40 | 25/27 | 40/253 | 8.1 |
+| 0.45 | 27/27 | 92/253 | 14.9 |
+
+**0.35**, because the two errors are not symmetric. A panel with one odd
+suggestion beside three good ones is a picker an editor uses; an empty panel
+reads as a broken feature, and `suggest_tags/2` takes only the five closest, so
+a stray admission is bounded while a missing good one is simply gone. 0.40 and
+up hands the filtering to that `limit: 5` and leaves the ceiling doing nothing.
+
+This also corrects the reasoning behind the number #851 shipped. That one came
+from bge-small's published behaviour on *sentence pairs* — unrelated around
+0.6–0.8 similarity, so 0.2–0.4 in distance — and #1086 predicted the band might
+not transfer to a one-word tag label against a whole-document centroid. It does
+not: measured, an unrelated tag sits at 0.35 and up. Reasoning from the wrong
+band produced 0.25, which keeps **3 of 27** wanted tags — the feature shipped
+inert.
+
+**Near-duplicates (`:near_duplicate_threshold`).** Measured on the axis this one
+actually compares, document centroid against document centroid, which behaves
+nothing like the above:
+
+| | cosine distance |
+|---|---|
+| the same document | 0.0000 |
+| a reworded copy of it | 0.0376 |
+| another document on the same subject | 0.1938 – 0.2097 |
+| an unrelated document | 0.3690 |
+
+**0.1** sits in the gap with room on both sides, which is exactly what this
+feature needs: "the same article rewritten" is a duplicate worth flagging,
+"another article about sourdough" is not. Unchanged in value, but it is a config
+key now rather than a literal — the number is a property of the model, and an
+operator who changes the model had no way to change it.
 - **Content gaps** — `content_gaps/2`: recorded zero-result search queries
   (the search-analytics log), most-searched first — what readers looked for
   and didn't get. The one function here that needs no embeddings, so it works

@@ -285,6 +285,94 @@ defmodule KilnCMSWeb.ApiAuthControllerTest do
     end
   end
 
+  describe "the first-factor token is withheld from the store too (#742)" do
+    test "the JWT the blob carries authenticates nothing until the code lands", %{conn: conn} do
+      # #726 withheld the caller's *access* to this token; #742 is that it was
+      # still live and usable in the store the whole time, for anyone who came by
+      # it another way — a log, a crash report, a backup, a `secret_key_base`.
+      {user, secret} = seed_totp_user()
+
+      pending = begin_two_factor(conn, user)
+      assert {:ok, %{"token" => jwt}} = Phoenix.Token.decrypt(Endpoint, @pending_salt, pending)
+
+      assert :error = BearerAuth.user_from_token(jwt)
+
+      assert %{"token" => issued} =
+               build_conn()
+               |> post_verify(%{pending_token: pending, code: current_code(secret)})
+               |> json_response(201)
+
+      # The very same JWT — the second factor releases the token, it does not
+      # mint a different one — so this is a before/after on one credential.
+      assert issued == jwt
+      assert {:ok, authed} = BearerAuth.user_from_token(jwt)
+      assert authed.id == user.id
+    end
+
+    test "an abandoned exchange leaves an inert row that expires with the step", %{conn: conn} do
+      {user, _secret} = seed_totp_user()
+
+      pending = begin_two_factor(conn, user)
+      assert {:ok, %{"token" => jwt}} = Phoenix.Token.decrypt(Endpoint, @pending_salt, pending)
+      assert {:ok, %{"jti" => jti, "exp" => natural_exp}} = AshAuthentication.Jwt.peek(jwt)
+
+      # The cost #742 names: the loop is bounded per account since #761, but each
+      # row it does write used to sit live until the JWT's own expiry — weeks out
+      # — which the nightly expunge cannot touch from inside.
+      row = Ash.get!(Accounts.Token, jti, authorize?: false)
+
+      refute row.purpose == Accounts.Token.user_purpose()
+      assert DateTime.to_unix(row.expires_at) < natural_exp
+
+      assert DateTime.diff(row.expires_at, DateTime.utc_now()) <=
+               Accounts.Token.second_factor_hold_ttl()
+    end
+
+    test "the held JWT is refused by the real :api pipeline, not just by BearerAuth",
+         %{conn: conn} do
+      # The other tests in this block ask `KilnCMSWeb.BearerAuth`, which is
+      # Kiln's own copy of the presence check and serves the sockets. The hold
+      # has to hold where the HTTP surface actually authenticates —
+      # AshAuthentication's `load_from_bearer`, which runs its own
+      # `validate_token/3`. If that upstream lookup ever widened, every
+      # `BearerAuth`-based assertion here would stay green while the defence did
+      # nothing on the door that matters.
+      {user, secret} = seed_totp_user(:admin)
+      draft = CMS.create_post!(%{title: "Held", slug: "held-#{unique()}"}, actor: user)
+
+      pending = begin_two_factor(conn, user)
+      assert {:ok, %{"token" => jwt}} = Phoenix.Token.decrypt(Endpoint, @pending_salt, pending)
+
+      # The JWT itself, not the pending blob — this is the credential the client
+      # never receives but which existed and worked before #742.
+      refute draft.id in draft_ids(jwt)
+
+      assert %{"token" => ^jwt} =
+               build_conn()
+               |> post_verify(%{pending_token: pending, code: current_code(secret)})
+               |> json_response(201)
+
+      assert draft.id in draft_ids(jwt)
+    end
+
+    test "a wrong code does not release it", %{conn: conn} do
+      # The blob deliberately survives a wrong code. The hold has to survive with
+      # it, or guessing wrong would be a way to unpark the token the second
+      # factor is withholding.
+      {user, _secret} = seed_totp_user()
+
+      pending = begin_two_factor(conn, user)
+      assert {:ok, %{"token" => jwt}} = Phoenix.Token.decrypt(Endpoint, @pending_salt, pending)
+
+      assert %{"errors" => [%{"code" => "invalid_code"}]} =
+               build_conn()
+               |> post_verify(%{pending_token: pending, code: "000000"})
+               |> json_response(401)
+
+      assert :error = BearerAuth.user_from_token(jwt)
+    end
+  end
+
   describe "two-factor accounts: the verify step (#726)" do
     test "a valid TOTP code returns the bearer token", %{conn: conn} do
       {user, secret} = seed_totp_user(:admin)

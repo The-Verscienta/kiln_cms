@@ -41,33 +41,45 @@ The builder's **Embed** tab hands out a one-line snippet
 self-sizing iframe of `GET /forms/<slug>/embed` onto a third-party page.
 
 That route serves its own CSP, because the site-wide `frame-ancestors 'self'`
-would block the iframe. Which parents may frame it comes from **`EMBED_ORIGINS`**
-(see [`KilnCMSWeb.Embed`](../lib/kiln_cms_web/embed.ex)):
+would block the iframe. Which parents may frame it is set **on the form**, in
+the Embed tab's *Who may embed this form* control, with the deployment-wide
+`EMBED_ORIGINS` as the default for forms that leave it alone (see
+[`KilnCMSWeb.Embed`](../lib/kiln_cms_web/embed.ex)):
+
+| Embed tab | `frame-ancestors` | Effect |
+| --- | --- | --- |
+| **Use the deployment default** (unset — the default) | whatever `EMBED_ORIGINS` says | The single-org setup: one variable, every form. |
+| **This site only** | `'self'` | Cross-site embedding off for this form, whatever the deployment allows. |
+| **Only these sites** | `'self' https://acme.com https://blog.acme.com` | This form's own allowlist, **instead of** the deployment's. `'self'` is always kept, so allowlisting a partner never removes same-origin framing. |
+
+And the deployment default itself:
 
 | `EMBED_ORIGINS` | `frame-ancestors` | Effect |
 | --- | --- | --- |
 | unset or blank (**default**) | `'self'` | Cross-site embedding off. The snippet still works on pages served from the form's *own* origin. |
-| `https://acme.com,https://blog.acme.com` | `'self' https://acme.com https://blog.acme.com` | The intended production setting. `'self'` is always kept, so allowlisting a partner never removes same-origin framing. |
+| `https://acme.com,https://blog.acme.com` | `'self' https://acme.com https://blog.acme.com` | The intended production setting for a single-org deployment. |
 | `*` | `*` | Any site may frame the form. |
 
 **The default is closed** (#562). Copying the snippet onto an external site
-before setting `EMBED_ORIGINS` renders a blank iframe and a CSP violation in
-that site's console — the builder's Embed tab says so, and also shows the
-current allowlist so you can check a host before pasting the snippet there.
+before allowing that site renders a blank iframe and a CSP violation in that
+site's console — the builder's Embed tab says so, and also shows the origins
+that will actually be served for *that* form, so you can check a host before
+pasting the snippet there.
 
 **Your own logs will tell you too** (#650). A browser framing the embed page
 sends Fetch Metadata (`Sec-Fetch-Dest: iframe` with a `Sec-Fetch-Site` that is
-not `same-origin`), so when that arrives and `EMBED_ORIGINS` is unset the CMS
-logs a warning naming the variable and the parent origin. At most once an hour
-per node, so a busy embed route cannot flood the log. Note a sibling subdomain
-counts as blocked: `frame-ancestors 'self'` matches the *origin*, so
-`https://blog.acme.com` framing `https://acme.com`'s CMS needs an allowlist
-entry like any unrelated host.
+not `same-origin`), so when that arrives and the form's policy is closed the CMS
+logs a warning naming the parent origin — and naming *which* of the two settings
+closed it, so you edit the one actually in force rather than the one you happen
+to know about. At most once an hour per node, so a busy embed route cannot flood
+the log. Note a sibling subdomain counts as blocked: `frame-ancestors 'self'`
+matches the *origin*, so `https://blog.acme.com` framing `https://acme.com`'s
+CMS needs an allowlist entry like any unrelated host.
 
-The warning fires only while `EMBED_ORIGINS` is **unset**. Setting it to a
-*partial* list — one parent allowed, another forgotten — leaves the forgotten
-parent just as blocked, and silent: the CMS cannot tell an omission from a
-deliberate refusal. Check the value against the list `/editor/forms` shows you.
+The warning fires only while the policy allows **nobody**. A *partial* list —
+one parent allowed, another forgotten — leaves the forgotten parent just as
+blocked, and silent: the CMS cannot tell an omission from a deliberate refusal.
+Check the list the form's Embed tab shows you.
 
 Why not leave it open? The embed page carries no ambient credentials — it is an
 anonymous public form, and a cross-site iframe never receives the `SameSite=Lax`
@@ -76,21 +88,53 @@ attack: any site could overlay the form invisibly and harvest into *your*
 submissions table under *your* org's branding, and submission is deliberately
 CSRF-free (see below), so nothing else stands behind it.
 
-A malformed value **closes** the policy rather than widening it: every entry
-must look like a CSP host source, and one bad entry discards the whole list for
-`'self'` (with a warning on stderr) instead of applying the rest. Two shapes
-this catches — a `*` mixed into a list, which would otherwise render
+A malformed `EMBED_ORIGINS` **closes** the policy rather than widening it: every
+entry must look like a CSP host source, and one bad entry discards the whole
+list for `'self'` (with a warning on stderr) instead of applying the rest. Two
+shapes this catches — a `*` mixed into a list, which would otherwise render
 `frame-ancestors * https://acme.com` and grant every site while looking like an
 allowlist; and an entry containing `;`, which would append further directives to
 the header, since `frame-ancestors` is the last one emitted. Write
 `EMBED_ORIGINS=*` on its own if you mean "any site".
 
-**Origins are per deployment, not per org.** `'self'` is the *form's* origin —
-on a multi-org instance each org resolves to its own `custom_domain` or
+A form's own list is stricter still, because it comes from a settings form
+rather than from the operator's shell: each entry must be a **full origin**
+(`https://acme.com`, optionally `*.`-prefixed on the leftmost label, optionally
+with a port — `http://` only for `localhost`), and a bad entry is **refused at
+save**, naming itself, rather than silently dropped. Same predicate as the
+per-site CSP additions in Code Injection
+(`KilnCMS.CMS.Validations.CspOrigins`).
+
+**Per form, because forms are org-scoped** (#648). `'self'` is the *form's*
+origin — on a multi-org instance each org resolves to its own `custom_domain` or
 `<slug>.<base_host>` (see `KilnCMSWeb.Tenant`), so one org's page framing
-another org's form is cross-site and needs an allowlist entry. The allowlist
-itself is global, so it must be the union of every org's embedders, and that
-union is what every org's forms become framable by. Tracked in #648.
+another org's form is cross-site and needs an allowlist entry. `EMBED_ORIGINS`
+has no tenant dimension, so as a deployment-wide allowlist it has to be the
+*union* of every org's embedders — and that union is what every org's forms
+would become framable by, which is the overlay-and-harvest attack above one
+tenant boundary over. Set the allowlist on the form instead and each org
+authorises only its own embedders; a form's list replaces the deployment's
+rather than extending it, so an org can also narrow below what someone else
+needed added globally.
+
+Who owns the setting follows the risk: `frame-ancestors` on this page governs
+who may overlay *this org's* form and harvest into *this org's* submissions, so
+an org admin sets it. It grants nothing across the tenant boundary — framing
+org B's embed page conveys no access to org A. There is no operator ceiling over
+it for the same reason: an org admin may open framing on their own forms that
+`EMBED_ORIGINS` leaves closed.
+
+**On a multi-org deployment, set the allowlist per form and leave
+`EMBED_ORIGINS` unset.** A form that has not been given one still inherits the
+deployment's, so an untouched form on a multi-org instance is governed by the
+shared union exactly as before — the per-form control is what closes that, and
+it only closes it for forms that use it.
+
+**Revoking an origin takes up to a minute to reach everyone.** The embed page is
+served `Cache-Control: public, max-age=60`, so a shared cache or a browser that
+fetched it in the preceding minute can keep replaying the older, more permissive
+policy after you narrow the list. There is no purge to issue; wait a minute
+before treating a revocation as in force.
 
 ## Abuse protection
 

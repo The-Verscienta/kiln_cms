@@ -29,6 +29,309 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **Claim checking is per site, and has a page** (#857). `KilnCMS.Compliance`
+  was configured entirely in `config.exs`, which is the wrong grain on a
+  multi-org install: a claims vocabulary is a statement about one publication's
+  voice and jurisdiction, and `require_at_publish` is a hard publish refusal.
+  One clinic deciding that "cures" cannot ship refused every other site's
+  publishes on the same instance, and a tenant that wanted the panel off could
+  not turn it off either.
+
+  Each site now has a `KilnCMS.CMS.SiteCompliance` row — the panel switch, the
+  publish gate, the required disclaimer, whether the deployment's rules apply,
+  and its own phrase list with a severity — edited at **Claim checking**
+  (`/editor/compliance`, admin only). `KilnCMS.Compliance.Settings` resolves
+  that row over the existing `config :kiln_cms, KilnCMS.Compliance`, so a site
+  that saves nothing inherits exactly what it inherited before and a
+  single-tenant install needs no change.
+
+  The page is also the answer to the feature being invisible: it shipped off,
+  and the editor renders no Compliance panel while it is off, so nothing in the
+  admin UI said it existed. A site that has not opted in now gets an explainer
+  and one button, the way `/editor/links` does for outbound link checking.
+
+  If the settings row cannot be read at all, the advisory switches fall back to
+  the operator config and the **publish gate is forced off**: that is the one
+  axis where guessing wrong turns a transient read error into a site that
+  cannot publish, and it would be refusing on rules nobody could confirm.
+
+- **The governance dashboard answers "what are we claiming right now"** (#858).
+  #377 tied claim checking to #352's dashboard and `docs/p3-plan.md` said the
+  checks would feed it; what shipped fed nothing. Findings lived in the content
+  editor's panel and in the publish gate's refusal — both about the document in
+  front of you, neither a record of what the site is actually saying.
+
+  `/editor/governance` now carries a **Live claims** panel: every published
+  document scanned against the site's own vocabulary (#857), naming the phrase
+  that matched and flagging the ones the publish gate would refuse, errors
+  first. Off is rendered as off rather than as an empty list, because "nobody
+  scanned" and "nothing found" are the same picture and opposite facts.
+
+  **Recomputed on read, not stored.** No findings table, and nothing written on
+  publish. Three consequences, all deliberate: it answers what is live now and
+  not what a page claimed in March (point-in-time history is on the same
+  dashboard for that); a finding is always judged by the rules in force now, so
+  narrowing a vocabulary retires it rather than leaving a record judged by a
+  retired rule; and it never has to write on publish, where
+  `AutoCompleteTasks` force-completes every open task and would close the very
+  task a compliance finding might have opened — the hazard #858 flags.
+
+  Bounded at `KilnCMS.Compliance.Report.document_cap/0` documents, with the
+  panel saying so rather than describing a subset as the whole.
+
+### Fixed
+
+- **Publishing no longer discards prose a collab room was still holding**
+  (#1061). The server checkpoint writes a room's converged text back through
+  `:autosave`, which carries a draft-only row filter — so a publish landing
+  while editors were typing left that text unreachable, and it went away with
+  the document server. Nothing looked wrong from the editors' side: the client
+  also stops autosaving once a record is not a draft, so after the publish
+  nobody was persisting while the shared document kept accepting edits.
+
+  A publish now takes the open room's converged prose into its own write, so
+  what goes live — and what is versioned, and what delivery serves — is what
+  the editors had actually written. The room is told afterwards, and the editor
+  reloads onto the published record rather than continuing to type into a
+  document nothing will persist. A publish for a document nobody is editing is
+  unchanged, and never starts a room.
+
+  The publish gates judge what actually publishes: `ComplianceClaims` and
+  `MediaAltText` are evaluated after the room's prose is merged, so a claim
+  typed into a shared document and never autosaved is refused rather than
+  published — and a claim the room has already deleted no longer refuses a
+  publish over text the author cannot see. A scheduled publish gets the same
+  treatment, since "keep editing until the cron fires" is the ordinary case.
+  And because a publish can now change content, it recomputes the search text
+  and re-enqueues the embedding, so a document is findable by the words it
+  actually went live with.
+
+- **The in-context and Presentation editors no longer accept edits they cannot
+  save** (#1159). Both mounted a record through an actor-scoped read and then
+  offered `contenteditable` regions, drag-reorder and a Save button, with no
+  notion of write access anywhere — the concept `ContentEditorLive` has had
+  since #550.
+
+  The editor-tier route is coarser than it looks: an editor restricted to other
+  content types may still *read* this one, as a signed-in consumer does, so they
+  could open a page they may not author, rewrite it, and learn only on Save that
+  none of it could land. They now get the read-only preview and a line saying
+  why.
+
+- **Six console actions that authorize nothing now re-check who is asking**
+  (#1166). Every other privileged handler funnels into an Ash action carrying
+  the actor, so a mistake in a mount guard is still caught by a policy. These
+  six do not. What the re-checks buy is a refusal for a forged or replayed event
+  on a socket that never passed the mount guard, plus — on the per-org axis,
+  where the tier is re-read from the actor's membership — a revoked grant taking
+  effect immediately rather than when the tab is closed. A demoted *global*
+  admin is not caught either way: that role is read from a struct assigned once
+  at mount.
+
+  Worst was **sending a newsletter**: `send_as_newsletter/2` accepts an actor
+  but uses it only to stamp `sent_by_id`, writes the campaign with
+  `authorize?: false`, then hands the fan-out to Oban. A backup can be deleted;
+  an email cannot be unsent. Then **the mail test send**, whose recipient comes
+  from the client — a DKIM-signed send primitive pointed at any address a
+  socket names — along with its DNS verify and port-25 preflight, and
+  **billing credential verification**.
+
+  **The broken-link sweep** was the plainest case: its page is on the editor
+  routes, so its mount never refuses at all, and a boolean computed once at
+  mount was the entire distance between an editor and the enqueue.
+
+  The release **preview link** stays an editor action, deliberately — previewing
+  is what the feature is for, and an editor who can open a release can already
+  read every document in it. What the link changes is distribution rather than
+  access, so the read is now re-verified when the link is minted instead of
+  trusted from a struct fetched at mount.
+
+- **A one-click translation honours the acting editor's field grants** (#1157).
+  Duplication and translation are the two creates that carry *another record's*
+  values, and only duplication asked what the editor was allowed to write.
+  `Changes.EnforceFieldGrants` deliberately skips creates — sound for a document
+  written from scratch, not for one arriving pre-filled — so an editor granted
+  only `title` on a type minted a translation carrying its `seo_title`,
+  `excerpt`, `audience` and custom fields, every one of which is refused when
+  they try to save it on the source.
+
+  `slug` is exempt for a reason of its own: the `[slug, locale]` identity is
+  what pairs a translation to its source, so dropping it would not narrow the
+  copy but sever it. Both surfaces now report what didn't travel, the way
+  Duplicate has since #929.
+
+- **The block envelope is no longer mistaken for a restricted field**, which was
+  silently costing every non-admin translation its block ids. `_type`,
+  `_version` and `id` share the stored map with a block's authored fields but
+  are the union's own bookkeeping. Asking a *field* policy about them answered
+  "no" for every non-admin, so those keys were overwritten with `nil`.
+
+  Nulling `id` defeated `keep_ids?: true`: an admin's translation preserved the
+  source's block ids and **everyone else's did not**. Those ids are persisted,
+  and they are what the XLIFF vendor round-trip matches trans-units on (#502) —
+  without them it falls back to matching on position, which is wrong the moment
+  either side is reordered. Nulling `_version` rewrote a block's stored schema
+  version to the current head, so a block still awaiting its upcast would never
+  receive it; inert today, since the only migration in the tree is idempotent
+  with the field's own default.
+
+  The visible symptom was the flash: a plain editor duplicating a plain page was
+  told their role could not set `heading._type`.
+
+- **Taking a backup now needs a platform admin, and is re-checked when the
+  button is pressed** (#1160). `BackupLive` did no tier check of its own, and
+  `Backups.enqueue/1` takes no actor and authorizes nothing — so the route's
+  `:live_admin_required` was the only gate, and it runs once, at mount. An admin
+  whose role was revoked mid-session kept triggering backups for the life of the
+  socket.
+
+  It was also the wrong question. `:live_admin_required` is an *effective
+  per-org* admin, while a backup is a `pg_dump` of the whole instance covering
+  every tenant — so a user granted admin on one site could take one. The panel
+  now asks the global question instead, and asks it again in the handler. The
+  slug-regeneration console's `apply`, whose worker likewise authorizes nothing,
+  gained the same re-check at its own (correctly per-org) tier.
+
+  The overview's stale-backup warning strip moved to the same gate. It links to
+  the backup panel, so leaving it on the per-org tier would have reported on the
+  whole instance's infrastructure to an admin of one site and sent them to a
+  page that turns them away.
+
+- **404 capture no longer evicts real misses before attacker junk** (#920). At
+  the per-org cap a new path evicts the least-requested row, and the tie among
+  equal counts was broken by `last_seen_at` **ascending** — so the oldest
+  one-hit row went first. That is a genuine miss recorded weeks ago, while the
+  rows that caused the cap are the newest and were chosen last: a flood at the
+  `:delivery` bucket's 300/min cleared every real row in under twenty minutes
+  and then held the table, denying the feature the cap exists to keep
+  available. The tie is now broken newest-first, so a flood can only displace
+  itself.
+
+  The eviction read also had no supporting index, so once an org was at the cap
+  every anonymous 404 on a new path seq-scanned and sorted the whole table — up
+  to 5,000 rows, on the public delivery path, against the pool that renders
+  pages. It now has one, and the index's column **directions** match the sort:
+  an all-ascending index leaves Postgres an incremental sort that degenerates
+  into a full sort under exactly the flood this is about.
+
+  The junk filter read only the last dot-separated piece of a path's basename,
+  so `/.env` was dropped while `/.env.local` was recorded — and with it
+  `/.ssh/id_rsa`, `/.aws/credentials`, `/.svn/entries`, `/.DS_Store`,
+  `/.htaccess`, `/wp-admin` and `/actuator/health`, each spending a capped slot
+  on a probe. Any path segment beginning with a dot is now junk, as are the
+  scanner roots; `/wp-content` stays recordable, because after a WordPress
+  migration those misses are real inbound links.
+
+- **The ActivityPub inbox no longer fetches an actor it has no use for** (#966).
+  Authenticating an inbound activity needs the sender's key, which lives in the
+  sender's actor document, so a ~200-byte unauthenticated POST bought an
+  outbound HTTPS GET of up to 128 KB aimed at any host the caller named — even
+  for a `Like` or an `Announce`, which this phase accepts and drops. Only a
+  `Follow` or `Undo{Follow}` addressed to this site's actor is fetched now, and
+  fetched documents are cached for ten minutes in a capped, least-recently-
+  written instance, so repeats from one actor cost one request.
+
+- The content editor no longer offers **Duplicate** or **Create translation** to
+  an actor who may open a record without being able to write it. Both fork the
+  record's payload into a new draft, and both were the only write affordances in
+  the editor with no `may_write?` gate; both handlers now refuse server-side as
+  well, so a replayed event cannot reach the copy. (#922)
+
+### Security
+
+- **The analytics export is now shown, not asserted, to resist arithmetic
+  recovery of a suppressed referrer count** (#777). #620 suppressed a low count
+  per row; #1054 moved the export onto the dashboard's shared decision; #1073
+  fixed that decision (the complementary partner became the *largest* of the
+  others rather than the smallest, and a breakdown that cannot be made ambiguous
+  is hidden whole, zeros included). What was never checked is the property #777
+  was actually filed about — the **file**.
+
+  The algorithm and the export can disagree in ways only an end-to-end read
+  catches: the export builds its totals by grouping a stream, so a breakdown
+  split across batches would be decided twice on two partial pictures; and the
+  view total the reader subtracts is printed on a *different row*, sourced from
+  `ContentViewDay` rather than from the `ReferrerDay` rows the decision was made
+  over. Its grain is also per day, so residuals are small and the regime where
+  #1073 demonstrated recovery is the common case rather than a corner.
+
+  `test/kiln_cms/analytics/export_recovery_test.exs` brute-forces a real
+  exported CSV from the recipient's side and asserts no suppressed value is
+  uniquely determined. It reproduces the four breakdowns #1073 found exactly
+  recoverable, and all four go red against the pre-#1073 algorithm. No
+  production behaviour changes — this closes #777's outstanding acceptance
+  criterion and corrects `KilnCMS.Analytics.Export`'s moduledoc, which still
+  said the export did not close it.
+
+- **An abandoned two-factor sign-in no longer leaves a usable token behind**
+  (#742). `KilnCMS.Accounts.User` sets `store_all_tokens?`, so the first-factor
+  JWT is minted **and inserted into `tokens`** by the sign-in strategy — before
+  either gate has looked at `totp_enabled?`. #726 withheld the caller's *access*
+  to that token; it did not withhold the token. A sign-in that stopped at the
+  code prompt left a live, usable row that nobody held, for the JWT's full
+  lifetime, and a stuffed password for a 2FA account was enough to write one per
+  attempt. #761 bounded the rate; the rows were still real credentials that a
+  later tokens-table read, database backup or `secret_key_base` compromise would
+  have upgraded a password-only position into.
+
+  `KilnCMS.Accounts.PendingSignIn.mint/4` now **holds** that row for the length
+  of the step: it moves to a `pending_second_factor` purpose and its expiry
+  shortens to six minutes. AshAuthentication requires a row under the `user`
+  purpose to authenticate a JWT
+  (`require_token_presence_for_authentication?`), so from that instant the token
+  authenticates nothing, wherever it is — and an exchange that is never finished
+  leaves an inert row the nightly `:expunge_expired` collects, rather than a live
+  one that outlives the attempt by weeks. `claim/1` releases it, with the
+  expiry the JWT itself carries, once a code verifies.
+
+  Both doors, one code path — the browser prompt now calls `claim/1` too, which
+  is the only reason it needs to: a session blob's single use is still the
+  deleted session key. Held rather than revoked, because the exchange may still
+  complete, and both halves carry their expected purpose in the UPDATE's own
+  WHERE — so a revocation landing between the caller's read and the write is not
+  overwritten, and a token revoked mid-window by a password change
+  (`log_out_everywhere`) or an account erasure is not resurrected by a late
+  redemption.
+
+  A hold that cannot be written logs and carries on — the result is exactly the
+  old behaviour, and refusing instead would turn a token-store hiccup into "no
+  account with a second factor can sign in". A *release* that cannot be written
+  does fail the sign-in, as a 503 on both doors, because a token still parked in
+  the store is a credential the client cannot use and nothing to say why.
+
+## [0.5.0] - 2026-08-09
+
+### Added
+
+- **A white-labelled site installs under its own icon, and its offline page
+  carries its own name** (#629). The editor PWA already installed under each
+  org's name and colour; the two assets that stayed stock KilnCMS were the
+  install icons and `priv/static/offline.html`.
+
+  A site now sets an **App icon URL** under `/editor/branding`. The server
+  fetches it on save and measures it (`KilnCMS.Branding.AppIcon`): a square PNG
+  or JPEG of at least 512×512, with the format read from the decoded bytes
+  rather than the URL's extension. Only a measured icon is ever declared,
+  because `icons[].sizes` is a claim Chromium's installability check believes —
+  a manifest that mis-states it does not degrade, it removes the install prompt
+  with nothing said anywhere. An icon that fails verification is still saved
+  (a briefly-down CDN should not discard what an admin typed) but is not
+  declared, and the form says which of the reasons it was.
+
+  The offline fallback moved from `priv/static/offline.html` to
+  `KilnCMSWeb.OfflineController`, so it carries the site's name and brand
+  colour. It stays entirely self-contained — no stylesheet, script, image or
+  font — because it renders from the service worker's cache exactly when
+  nothing can be fetched.
+
+  Two things here are easy to get backwards, and are documented at more length
+  in `docs/mobile-admin-spike.md` §5.1: a verified icon is declared `any` and
+  the stock **maskable** entry is withdrawn while one is in use (a maskable
+  icon is cropped, and Android *prefers* one for the home screen, so leaving
+  the stock entry would put the KilnCMS flame on a white-labelled home screen);
+  and PNG/JPEG is narrower than the media library on purpose, because
+  `apple-touch-icon` has no fallback and iOS ignores a WebP.
+
 - **The governance dashboard says whether history is actually being witnessed**
   (#731). `chain_checkpoints.witness_error` was written on every failed
   publication and surfaced nowhere, so the only way to learn a deployment had
@@ -317,13 +620,6 @@ migration, a rewritten column, a dropped config key).
   an embed block, and other shortcodes are removed rather than left as literal
   `[gallery ids="1,2"]` text in the middle of a sentence.
 
-### Fixed
-
-- **The sitemap escaped three characters where the feeds escaped five** (#502).
-  Its copy of the XML escaper let a C0 control byte through, and one of those
-  makes the whole sitemap unparseable rather than one URL. All three
-  serializers now share `KilnCMS.Xml`.
-
 ### Changed
 
 - **A translation now keeps the source's block ids** (#502). `create_translation!`
@@ -436,6 +732,224 @@ migration, a rewritten column, a dropped config key).
   [Navigation menus](docs/navigation-menus.md).
 
 ### Fixed
+
+- **A field-granted editor is no longer offered a billed AI run the save will
+  refuse** (#868). The editor gated "Suggest with AI" on `Ash.can?({record,
+  :autosave})`. Per-field grants are enforced by
+  `KilnCMS.CMS.Changes.EnforceFieldGrants`, which is a **change**, and
+  `Ash.can?` builds its changeset with *empty input* — while the change only
+  raises a violation for an attribute that was actually supplied. So no field
+  was ever supplied during the check, no error was ever added, and every
+  field-granted editor passed a gate the save would then reject field by field.
+
+  An editor holding `field_grants: %{"page" => ["title"]}` saw the button, spent
+  the organization's LLM budget, and got `seo_title` / `seo_description` /
+  `seo_keywords` refused one at a time on the next save. The control and its
+  handler now ask the question the change asks — may this actor change *these
+  fields* on *this type* — mirroring the change's tier condition, so an admin
+  carrying a grants entry is exempt exactly as the policy bypass makes them.
+
+  **Block assist** carried the identical hole and is closed with it: it bills
+  its own budget and writes prose into a block, so a grant without `blocks`
+  meant a billed run the save then refused. The gate is *any* of the fields the
+  feature writes, not all of them, because each SEO card is accepted on its own
+  — an editor granted one field can take that card and save cleanly — and the
+  per-card accept re-checks, so a queued or replayed one after a grant narrows
+  mid-session is refused rather than written into the form.
+
+- **The editor's tag picker no longer detaches tags it never showed you**
+  (#638). Tags were written with the complete-set `tag_ids` argument, so a
+  checkbox that was not rendered was not submitted and `append_and_remove` read
+  the omission as "detach me". The picker now submits `add_tag_ids` /
+  `remove_tag_ids` (added to the resource in #636) diffed against what it
+  actually rendered, so removal is bounded by what was on the page: a tag
+  attached out of band — by a collaborator, an API call, an automation — after
+  the page loaded now survives the next save instead of being silently dropped.
+
+  Autosave carried the identical defect and was never named in the issue, which
+  made it the worse of the two: it fired on a debounce with nobody pressing
+  anything.
+
+  The workarounds this retires go with it — the hidden empty-string sentinel
+  that made an all-unchecked group distinguishable from an untouched one, and
+  `normalize_tag_ids/1`, which existed only to strip it back out. The "Also
+  attached" section stays, but as information and a control rather than as the
+  thing standing between a scoped-away tag group and data loss.
+
+- **A navigation subtree that goes missing can be got back** (#900). Two editors
+  re-parenting at the same time can commit a parent cycle — the placement
+  validation walks the ancestor chain with plain reads outside any lock, so
+  under READ COMMITTED each validates against pre-commit state and neither sees
+  the other's write. The read path does not loop: it descends from the roots and
+  emits each item under its single parent, so the cycle's members and everything
+  nested under them simply **vanish** from the served menu *and* from the
+  builder's own tree, with no error and no row deleted. The editor's only signal
+  was a section disappearing, with nothing to click — the items aren't rendered,
+  so they can't be selected, edited or outdented back. Adding to them fails too:
+  the depth check bounds its ancestor walk rather than following the cycle
+  round, so every new child under one is refused as *is nested too deeply*.
+
+  The builder now lists them under **Detached items** with a *Move to top level*
+  action that breaks the cycle by making the item a root; its children come back
+  with it, and nothing else moves. Only the top level is offered, because the
+  item is unreachable precisely when no parent of it is trustworthy. This covers
+  any cause of orphaning — a restore, direct SQL, a `parent_id` pointing into
+  another menu — not only the race, which stays open and is documented.
+
+- **Changing a nested heading's level in a Columns block now takes effect**
+  (#893). The per-child level `<select>` had no `name`, and a `phx-change` on a
+  form-associated element routes through LiveView's `pushInput`, which
+  serializes the form filtered to the changed input's name and reads
+  `phx-value-*` off the **form** rather than the element. With an empty name
+  neither the chosen level nor the block/child/field identifiers arrived, so the
+  handler could not match and H1→H3 silently did nothing. The sibling text
+  inputs work because `phx-blur` is not a form binding and goes through
+  `pushEvent`, which does carry `phx-value-*` — that asymmetry is what hid it.
+
+  The select now carries its identifiers in its `name`, outside the `form[...]`
+  namespace so it still stays out of the content changeset the way the nameless
+  inputs do. Covered by an end-to-end test, because that is the only layer where
+  the bug existed: an ExUnit `render_change` supplies params directly and passes
+  against the broken markup too.
+
+- **The collab-editor flake is checked for, not just fixed** (#1067). Filed as a
+  presence race in `CollabPersisterTest` — one failure in three full-suite runs,
+  never in isolation — it turned out to be a VM-global one:
+  `:collab_prototype` is `Application.get_env/2`, re-read on every editor mount,
+  and an `async: true` test flipping it off turned collaboration off for every
+  concurrent test that mounted an editor. PR #1090 fixed the one offender; this
+  makes the next one impossible.
+
+  A static check now fails if any `async: true` module writes that flag, and the
+  two collab live-view files assert it is on before their own assertions run —
+  so the failure says which class of problem it is instead of presenting as a
+  broken election. The three lines the issue suggested hardening are hardened
+  too: they sampled a single render where presence is eventually consistent,
+  and they poll now.
+
+- **Referrer suppression now actually suppresses** (#1073). #620 hid a
+  low referrer count behind `"< n"` and pulled a second category into `hidden`
+  so the low one was not the sole unknown. Brute-forcing every assignment
+  consistent with the published breakdown *plus the view total shown beside it*
+  found that most of them had exactly one solution: the partner was chosen as
+  the **smallest** of the others, which bounds it above by every published exact
+  — and whenever the residual falls under the threshold the partner must be
+  zero, which recovers the hidden count exactly. `direct: 3` with four genuine
+  zeros gave the count away outright.
+
+  The partner is the **largest** of the others now, so it is bounded below by
+  every published exact and unbounded above and the residual splits many ways.
+  Where no partner makes it ambiguous — a handful of views against genuine zeros
+  — the whole breakdown is hidden, zeros included, because a published `0` is a
+  term in the equation rather than a courtesy. Both the dashboard and the export
+  read the same decision, as they have since #777.
+
+  The property is now a test rather than an argument: it brute-forces the
+  assignments a reader who knows the algorithm could construct and asserts there
+  is more than one, across every small breakdown and at three thresholds. It
+  fails on the old algorithm.
+
+  The cost is exactness on the lowest-traffic days, which
+  `docs/environment-variables.md` states next to
+  `KILN_ANALYTICS_LOW_COUNT_THRESHOLD`.
+
+- **Turning off full-content feeds now empties the cached feed bodies on every
+  node** (#1078). #719's `bust_feed_policy/1` already reached the cluster, so the
+  *policy* — the value deciding whether whole article bodies go out to anonymous
+  subscribers — was consistent everywhere. The cached feed **documents** were
+  not: `bust_all_feeds/1` was node-local, so on a two-node deployment roughly
+  half of all `/feed.xml` fetches went on serving complete article text,
+  rendered under the old policy, until the five-minute TTL.
+
+  It could not use the existing broadcast, which names keys: a prefix scan's
+  matching keys differ per node, and a node that never served
+  `/blog/category/news/feed.xml` has no key for the writer to name. So
+  `KilnCMS.Cache.ClusterBust` gained `broadcast_prefix/1`, which carries the
+  rule instead and lets each node run its own scan. Receivers stay as dumb as
+  they were — a string and "forget what starts with this", not a name for the
+  thing being invalidated.
+
+- **The tag-suggestion threshold is measured now, and the old one was inert**
+  (#1086). #851 shipped `suggest_tags/2`'s cosine-distance ceiling with a
+  derived `0.25`, reasoned from bge-small's published behaviour on *sentence
+  pairs*, and said in as many words that it wanted calibrating against a real
+  embedder — which `KilnCMS.StubEmbedder` cannot stand in for, so no test could
+  tell a good suggestion from a bad one.
+
+  Measured against the shipped model over a labelled corpus (eight documents,
+  thirty-five tags, a human label on all 280 pairs), that band does not transfer:
+  a tag label against a whole-document centroid is not a sentence pair. An
+  unrelated tag sits at 0.35 and up; a wanted one can sit at 0.43. `0.25` kept
+  **3 of 27** tags a person would tick, so the panel was empty for most
+  documents — which reads to an editor as a broken feature, not as "nothing is
+  close".
+
+  The default is now **0.35**: 21 of 27 wanted tags kept, 10 of 253 unwanted
+  admitted, about four suggestions per document under the panel's own limit of
+  five. The bands overlap, so it is a judgement about which error to make, and
+  `docs/rag.md` records the measurement and the reasoning.
+
+  `near_duplicates/2`'s `0.1` was measured on the same corpus and holds — a
+  reworded copy sits at 0.04, another document on the same subject at 0.19-0.21
+  — but it is a config key (`:near_duplicate_threshold`) now rather than a
+  literal, because it is a property of the model and an operator who changes the
+  model had no way to change it.
+
+  The corpus and the recorded distances are `KilnCMS.TagSuggestionCorpus`, so
+  the shipped value is pinned by tests that need no model; the harness that
+  produced them re-runs against any configured embedder with
+  `mix test --include calibration`.
+
+- **A content type's default SEO description now reaches every surface that
+  renders one** (#1102). #805 let a type default its `seo_title` /
+  `seo_description` from a `[token]` pattern, resolved at render time — but only
+  for the delivered HTML page. Eight other surfaces kept rendering the record's
+  stored column, so the same document carried a meta description on its own page
+  and an empty `<summary>` in the feed that linked to it: RSS/Atom/JSON Feed, the
+  `.ics` `DESCRIPTION`, the event index's `index.json`, `llms.txt`, auto-posted
+  social text, the ActivityPub `Note`, the fired `:json_ld` artifact and the
+  preview payload.
+
+  Two new public calculations, `effective_seo_title` and
+  `effective_seo_description`, carry the resolved value; the stored columns still
+  say exactly what a human typed, which is what the editor's SEO panel, the
+  analyzer and the export read them as. Headless consumers get both. Each
+  calculation declares the data its own tokens need, so `[category]` and
+  `[field:<name>]` resolve on reads that pin a column set — where they used to
+  expand empty with nothing to explain why.
+
+  The fired artifact was the sharpest case: `KilnCMSWeb.StructuredData` documents
+  itself as mirroring the fired producer's rule, and the two emitted different
+  `description` for one document — permanently, because re-firing re-read the
+  same column. It now re-fires to agreement. Artifacts fired before this change
+  keep their old description until that document is published again or re-fired
+  (`mix kiln.refire_all`).
+
+  A pattern still only ever fills a blank: it never outranks an author's own
+  excerpt, it stays out of a paywall teaser's visible body copy, and on a teaser
+  the two tokens needing columns the paywall-safe select omits go quiet rather
+  than widening that select. See [docs/seo.md](docs/seo.md).
+
+- **The form builder showed `%{value}` instead of the value it was refusing.**
+  Splode interpolates an error's `vars` only inside `Exception.message/1`, and
+  the builder read `.message` off the struct — so a rejected setting reported
+  which field was wrong but never which entry. Affects every validation message
+  in `/editor/forms/:id`.
+
+- **The embed page now sends `Vary: Accept-Language`.** It renders through
+  gettext and is served `Cache-Control: public`, so a shared cache could hand
+  the first visitor's language to everyone for the cache window. Published HTML
+  already did this.
+
+- **Two separators in the form builder rendered as nothing.** `class="divider"`
+  is a DaisyUI class, and this repo has no DaisyUI (`docs/design-language.md`).
+
+
+- **The sitemap escaped three characters where the feeds escaped five** (#502).
+  Its copy of the XML escaper let a C0 control byte through, and one of those
+  makes the whole sitemap unparseable rather than one URL. All three
+  serializers now share `KilnCMS.Xml`.
+
 
 - **A headless two-factor pending token is now single-use exactly, not
   best-effort** (#743). The record of a redeemed blob was a node-local `Cachex`
@@ -1237,7 +1751,459 @@ migration, a rewritten column, a dropped config key).
   nosniff` **cannot** be set as S3 object metadata and remains an operator
   task; `docs/media-pipeline.md` now documents it per CDN.
 
+
+- **The remaining auth pages no longer render another tenant's branding.**
+  `/password-reset/:token`, `/confirm_new_user/:token`, `/magic_link/:token`
+  and `/sign-out` are now routed through thin Kiln wrappers
+  (`KilnCMSWeb.AuthLive`), which puts them under `use KilnCMSWeb, :live_view`
+  and so under the url-less-join guard from #688 (#701).
+
+  They were the last views outside it, because `AshAuthentication.Phoenix`
+  ships them and a library module cannot use Kiln's macro. A `/live` join
+  carrying no URL matches no route, so it skipped their
+  `{LiveUserAuth, :assign_current_org}` hook and left `:current_org` unassigned
+  — and `Layouts.brand_or_unbranded/1`, which fails closed on exactly that,
+  never ran, because the channel takes the layout from the matched route too.
+  `Branding.for_org(nil)` answered with the **default organization**, so a
+  password-reset page joined that way on a tenant host drew another site's name
+  and logo. No authorization was involved (these pages are unauthenticated by
+  design); the leak was identity, which is what #48 exists to prevent.
+
+  Wrapping refuses the join outright rather than trying to render it correctly.
+
+  `/sign-out` is worth knowing about separately: `sign_out_route/3` emits a
+  `DELETE` to the auth controller **and** a `live` route in its own
+  `live_session`, and only the first is visible at the call site. It reads as
+  controller-only and is not, so its live half had a replayable session like
+  every other page here. `KilnCMSWeb.LiveJoinWithoutUrlTest`'s exemption list is
+  now empty, which is what keeps that true as views are added.
+
+- **A client-chosen payload shape no longer crashes an editor LiveView.** A
+  `handle_event/3` payload is arbitrary client JSON and `handle_params/3` has a
+  controller's shape freedom, so `%{"q" => q}` constrains the key and never the
+  value — `String.trim/1` and `Integer.parse/1` have no clause for a list or a
+  map and raise (#764). The authenticated sibling of #751.
+
+  Two mechanisms, which only work together: a `when is_binary(…)` guard on the
+  clause heads that would otherwise raise inside their bodies, and a catch-all
+  `handle_event/3` that `KilnCMSWeb.MalformedEvent` appends to every Kiln
+  LiveView so an unmatched event is a no-op. A guard without the catch-all just
+  moves the crash from the body to the head. It has to be `@before_compile`:
+  a catch-all injected at the top of a module shadows every real handler in it.
+
+  The three cases reachable by a **crafted link** rather than a pushed event —
+  `/editor?q[a]=1`, `/media?q[a]=1`, `/editor/analytics?range[]=7` — now read
+  through `KilnCMSWeb.Params`, so a wrong shape is absent rather than coerced.
+
+  `KilnCMSWeb.CollabChannel` is separate: `handle_in/3` had no catch-all and
+  `Base.decode64/2` was called on an unguarded `"update"` value, so one
+  malformed frame killed that client's channel process and dropped its editor
+  to a rejoin mid-edit. It now guards the payload and ignores unknown frames.
+  The document room itself survives either way — each client gets its own
+  channel process, and `Collab.DocServer` monitors its channels rather than
+  linking them.
+
+- **`KILN_STRICT_TEST=true` ran the test suite without strict tenancy, and said
+  nothing.** The flag was matched as `== "1"` while
+  `docs/environment-variables.md` teaches `true`/`1`/`yes`/`on` for every other
+  boolean, so the documented spelling compiled the suite **fail-open** (#646).
+  It now accepts the same spellings as everything else, through the standalone
+  `config/strict_test_flag.exs` — `config/test.exs` is evaluated before any
+  project module is on the code path, so it cannot call `KilnCMS.Config.Env`,
+  and `test/test_helper.exs` reads the same snippet instead of carrying a second
+  copy of the comparison.
+
+  An unrecognized value now **warns on stderr** rather than passing silently for
+  an unset one. That distinction is what the flag's failure mode demands: a
+  quiet misparse leaves the strict leg selecting `--only strict_tenancy` against
+  a fail-open build, which runs zero tests and exits 0 — indistinguishable from
+  never having invoked it, and impossible for any test to catch, since the
+  strict-tagged file is excluded.
+
+  The whole failure class here is silence. `--only strict_tenancy` kept
+  selecting the tagged tests and they kept passing, against precisely the
+  configuration they exist to catch, so a contributor working on epic #336's
+  multi-tenancy could believe they had exercised the strict build and had not.
+
+- **Every `config/runtime.exs` line anchor in `docs/environment-variables.md`
+  points at the right line again, and a test keeps it that way.** The document
+  cites its source by line number for each variable, so any insertion shifts
+  every anchor below it at once — and nothing checked them, because
+  `mix docs --warnings-as-errors` verifies cross-references between docs and
+  *modules*, not offsets into source. 54 were wrong; `TOKEN_SIGNING_SECRET`
+  pointed at a Bandit documentation URL, and the branding rows at a comment
+  block.
+
+  This has been re-filed three times (#610, #645, #657), which is itself the
+  symptom: it was correct when written every time, and wrong by the commit. The
+  new test resolves every anchor against the current source and carries its own
+  self-check, so the next insertion fails the build instead of the reader.
+
+- **A rate-limited request now answers the same error envelope as everything
+  else it sits in front of.** `{"errors": [{"status", "code", "detail"}]}` was
+  described in a comment as *"the standard error envelope shared across the
+  headless surfaces"* and then written out eight times. The per-IP 429 was the
+  one clients hit most and the one that carried least: `{"errors":
+  [{"detail": "Too many requests"}]}`, with no `status` and no `code`, so a
+  client branching on `errors[].code` fell through to its unknown-error path on
+  the single refusal that has a defined recovery — and `POST
+  /api/auth/sign_in/verify` could answer 429 in two different shapes for the
+  same URL, depending on whether the per-IP bucket or the per-account budget
+  refused it. It now answers `code: "too_many_requests"` with the numeric
+  `status`, next to the `retry-after` it already sent. The HTML denial page for
+  browser navigations is unchanged.
+
+  `GET /api/visual-editing/:type/:slug` likewise answered an envelope-*shaped*
+  body with two of the three fields missing, and now answers the envelope.
+
+  Behind both: `FormController`'s copy interpolated the status it was handed
+  instead of normalizing it through `Plug.Conn.Status.code/1`, so an atom
+  status would have answered `"status": "unprocessable_entity"` where the
+  others answer `"422"`. Nothing passed it an atom, so no client saw that one —
+  it was a divergence waiting for the next error case added to that controller.
+
+  Every headless surface now renders through `KilnCMSWeb.ApiError.send/4`, and
+  a source scan fails the build when a module writes the envelope by hand, so
+  the convention is enforced rather than described. `docs/api.md` now also
+  names the three shapes that deliberately differ (JSON:API's richer entries,
+  form field errors, `/api/resolve`'s verdict) and the two that are known gaps
+  (#750). (#744)
+
+- **`audit_anchor_every_write` no longer reports untouched documents as
+  tampered.** Turning it on made the audit surface it exists to strengthen read
+  permanently red after two autosaves, with no tampering anywhere.
+
+  Two changes, each correct alone, ran against each other in the same
+  `after_transaction`. `AnchorVersion` anchors every write, including each
+  `:autosave`, so a debounced save's version row was folded and signed
+  immediately. `CoalesceAutosaveVersions` then merged the trailing autosave run
+  into one snapshot (#32) — deleting the superseded rows and rewriting the
+  survivor's diff. Both of those are rows an anchor had just committed to, and
+  the chain folds the diff, so the anchored prefix could no longer reproduce and
+  the row count no longer reached `version_count`. Either alone is fatal, and
+  the verdict is permanent: no later publish clears it, and there is no
+  supported way to re-anchor a document. It needed no unusual usage — autosave
+  is on by default in the editor, so the one flag was enough.
+
+  Coalescing now stops at `Chain.anchored_boundary/1` as well as at the last
+  manual version, so it never touches a row inside an anchor's fold. Anything
+  that mutates version rows should ask the same question; coalescing is the only
+  such path in ordinary operation (`RestoreVersion` replays rows and writes a
+  new version, it does not rewrite old ones — the one other path is the
+  `mix kiln.promote_data` task, which moves version rows between tables and is
+  tracked separately).
+
+  Ordering the two hooks instead — coalesce first, anchor second — was the
+  obvious-looking alternative and does not work, which is worth recording because
+  it is the cheapest-looking way to "get coalescing back". Ash can guarantee the
+  order (`after_transaction/3` takes `prepend?`), but the row a save destroys was
+  anchored by the *previous* save, in a previous transaction. No intra-transaction
+  ordering reaches it. The shipped fix is order-independent for the same reason,
+  which is why it does not depend on Ash's hook order staying what it is today.
+
+  Three details, because a wrong answer here destroys history that cannot be
+  reconstructed. The boundary lookup **ignores the `audit_anchors_enabled` master
+  kill switch**, unlike every other read in `Chain`: turning that switch off stops
+  anchoring but does not delete the anchors already minted, and reading "no
+  anchors" because the feature is off would let coalescing eat them and red the
+  document the moment it came back on. It **never raises** — it runs after the
+  editor's save has committed, where a raise reaches the LiveView rather than the
+  changeset, so an unreadable `history_anchors` (migration not yet applied, a
+  transient fault) answers `:unknown`. And **`:unknown` means "assume everything
+  is anchored"**, so nothing is coalesced: skipping costs version rows, guessing
+  costs history. `CoalesceAutosaveVersions` is now wrapped the same way for the
+  same reason — tidying history must not cost an editor their save, which is the
+  rule `Chain.anchor/2` and `extend/2` already followed.
+
+  `history_anchors` gains the sort columns on its lookup index. `latest_anchor/3`
+  is a top-1 by `(inserted_at, id)` descending, which on the filter columns alone
+  makes Postgres fetch every anchor a document has and top-N sort them — and
+  `anchor_every_write` mints one anchor per save, so an hour of debounced typing
+  reaches ~1200 of them and this change asks for the latest twice per save.
+
+  The cost is real and falls only where the flag is on: when every save is
+  anchored, every autosave row is anchored the moment it is written, so there is
+  never an unanchored pair to collapse and an hour of typing leaves one version
+  row per debounce rather than one for the session. That is the honest form of
+  the trade — the alternative is not "both", it is the false tamper verdict —
+  and `docs/editorial-consent.md` now states it as the price of the setting
+  alongside the per-save signature. With the flag off (the default) anchoring
+  happens at publish, a publish is itself a non-autosave version, so the two
+  boundaries coincide and coalescing behaves exactly as before. (#671)
+
+- **The collaborative-editing doc supervisor is bounded.** Its
+  `DynamicSupervisor` had no `max_children`, so nothing limited how many
+  authoritative Yjs documents a deployment could hold open — and each one pins a
+  Yex NIF document in memory and lingers ten minutes past its last client.
+  `config :kiln_cms, :collab_max_documents` (default 500) now caps it, counted
+  in documents open concurrently across the deployment rather than editors,
+  since several editors on one document share one server. Over the ceiling, a
+  join is refused with `unavailable` — a capacity answer, distinct from the
+  uniform "not found" the authorization checks give — and the client falls back
+  to solo editing with autosave, the same fallback it uses when the prototype is
+  switched off. The refusal is logged at error level, because the only other
+  symptom is editors quietly losing collaboration.
+
+  Behind `:collab_prototype`, which is off in production, so this was never live
+  exposure; it becomes load-bearing if collab graduates. #655 had already made
+  the doc key the resolved record, so a client could no longer conjure several
+  servers per document by varying the topic string — this bounds how many
+  documents can be open at once, not how many ways there are to name one. (#676)
+
+- **`entries_versions` had no index on `version_source_id`.** When the version
+  tables' foreign keys were dropped, `pages_versions` and `posts_versions` got a
+  single-column index to replace the lookup the FK had been providing;
+  `entries_versions` — the table every **dynamic** content type shares — got
+  neither. Every per-document version read filters on that column: the
+  governance chain's fold and its keyset resume, the governance trail, autosave
+  coalescing on every debounced save, and the version-history UI. On the dynamic
+  tier those were sequential scans over every version of every entry in the
+  deployment, growing without bound.
+
+  All three tables now carry `(org_id, version_source_id, version_inserted_at,
+  id)`, which covers the sort as well as the filter — that is the exact order
+  the chain folds and pages in — and leads with the tenant column because every
+  one of those reads is tenant-scoped. Declared through the shared
+  `paper_trail` mixin, since AshPaperTrail generates the version resource's
+  `postgres` block itself. The pre-existing single-column indexes on
+  `pages_versions` and `posts_versions` are left in place: they are not a prefix
+  of the new one, so they still serve a tenant-less read.
+
+  Postgres truncates the generated index names to 63 characters and says so at
+  migration time; the three remain distinct. (#672)
+
+- **History anchoring no longer resumes its incremental fold with a SQL
+  `OFFSET`.** `KilnCMS.Governance.Chain` folded "everything since the last
+  anchor" by skipping `version_count` rows, which means "skip the first n rows
+  of the *current* result set" — the anchored prefix only while no row ever
+  becomes visible below the boundary afterwards. Two ordinary things break
+  that: concurrent writes whose version rows commit out of stamp order, and
+  wall-clock skew between app nodes, since `version_inserted_at` is stamped by
+  whichever node performs the write. Either one made the fold skip the row it
+  was meant to cover and fold the boundary row a second time, minting a
+  correctly-signed anchor whose hash covers a sequence that never existed and
+  whose `version_count` is one too high. Anchors now record the full sort key of
+  the last version they covered (`last_version_at` alongside `last_version_id`)
+  and the next fold resumes strictly after it — a position rather than a
+  cardinality, stable under any commit order.
+
+  **This does not clear the verdict, and #598 stays open for that.** A document
+  that took a below-boundary row read `{:tampered, …}` before this change and
+  reads it after: an earlier anchor committed to an ordering the version table
+  no longer holds, so it can never reproduce, and verification recomputes from
+  genesis. What changes is that the chain no longer records fabricated state,
+  that anchoring logs an error the moment an uncovered row appears instead of
+  it surfacing months later at an audit, and that the verdict now says how many
+  rows sort inside the anchored range rather than reporting a bare hash
+  mismatch indistinguishable from doctored content. Actually closing it needs a
+  fold order assigned at write time rather than inferred from a wall clock,
+  which also decides whether such a row counts as tampering or as a latecomer —
+  a compliance-visible call, tracked separately.
+
+  The boundary is inside the **signed** anchor payload (`v: 3`), because it
+  steers which rows the next anchor covers. Without that, a single `UPDATE` to
+  an unsigned column could repoint the resume past every future version: the
+  fold would find nothing new, anchoring would silently stop, and the document
+  would keep reading `:verified` while its history was rewritten freely. Anchors
+  minted before this change carry no boundary and keep verifying under their
+  original payload shape; they resume by the old count until their next anchor.
+  The timestamp is stored rather than looked up from `last_version_id` because
+  version rows are deleted in ordinary operation — autosave coalescing destroys
+  superseded rows on every debounced save — and a boundary that vanished with
+  its row would have made the fix inert on exactly the every-write
+  configuration that needs it. (#598)
+
+- **Artifacts fired before a surface-shape change are now migrated instead of
+  serving the old shape forever.** `@format_version` was bumped 1 → 2 when
+  `:json` gained `custom_fields` and `:json_ld` gained `contentLocation` (#601),
+  but nothing read the field and nothing re-fired — so every document published
+  before that deploy kept serving the v1 shape indefinitely while everything
+  published after served v2, and a consumer could not tell which, because the
+  field that would say so was never consulted. Meanwhile
+  `docs/headless-consumer-guide.md` documented those keys as present on every
+  surface. The bump was decorative, which is worse than not bumping: it looks
+  like a migration happened. `Engine.read/4` and `Firing.Delivery.read_artifact/4`
+  now compare a fetched row's version against the one the build writes; an older
+  row is served **once** more and a re-fire is enqueued behind the request, so
+  the second read has the new shape. That makes the field load-bearing, so the
+  next bump of an **existing** surface needs only the bump — no deploy step for
+  anyone to forget. A bump that *adds* a surface is still a `mix kiln.refire_all`
+  job: there is no row for the new surface, so nothing is stale to detect.
+  Convergence is eventual rather than next-request — the stale body is cached for
+  up to an hour, so reads in between are cache hits on the old shape until the
+  job lands. All three artifact readers migrate (delivery, the engine read, and
+  the provenance manifest), so a document read through only one of them still
+  converges. A row whose document can no longer be fired at all (an orphan left
+  by a failed unpublish purge) re-enqueues a futile job per cache expiry —
+  bounded and logged, tracked in #664.
+  Enqueueing is best-effort and deduplicated by `FireWorker`'s existing unique
+  window, so it can neither fail a read (delivery is expected to survive a
+  database outage) nor turn a cache stampede into a firing stampede.
+  `mix kiln.refire_all` still exists for an operator who would rather migrate a
+  whole corpus at once — the lazy path only reaches documents that are read.
+  (#615)
+
+- **`KilnCMSWeb.Tenant.current_org_id/1` raises on a missing `:current_org`
+  assign** instead of quietly returning the default org (#563). It is the
+  quieter half of the same defect: the assign comes from `Plugs.SetTenant`
+  (endpoint-level, so ahead of every pipeline) or the `:assign_current_org`
+  on_mount hook, and any path that skipped both read the default org's data on a
+  tenant's site with nothing to show for it. It now fails where such a path is
+  cheapest to find — in test. `live_session :token_preview` was the one route
+  group missing the hook and now carries it.
+
+- **`DATABASE_SSL=True` no longer disables Postgres TLS.** The value was matched
+  raw against `~w(true 1)`, so any capitalized or space-padded spelling missed
+  and fell through to `false` — an operator explicitly asking for TLS got a
+  plaintext connection, with credentials and every query crossing the network
+  unencrypted, and no warning or boot failure to show for it. Only deployments
+  that set the variable deliberately were affected; leaving it unset was, and
+  remains, encrypted. **An unrecognized spelling now behaves differently — see
+  Upgrading below.** (#606)
+- Every on/off environment variable now goes through one parser,
+  `KilnCMS.Config.Env` — seven call sites that previously shared no code, in
+  five distinct parser shapes and three different unrecognized-value semantics.
+  All of them are now trimmed and case-insensitive (`TRUE`, `On`, `" true "`),
+  accept `true`/`1`/`yes`/`on` and `false`/`0`/`no`/`off`, treat a blank `FOO=`
+  as unset, and keep the default with a warning on anything else — an
+  unparseable value is never *interpreted*, in either direction. Alongside
+  `DATABASE_SSL` this fixes `VISUAL_EDITING_ENABLED=False`, which used to leave
+  the bridge on, contradicting the documentation. `ECTO_IPV6`,
+  `KILN_UPDATE_CHECK`, `KILN_AUDIT_ANCHOR_EVERY_WRITE`, `SMTP_TLS` and
+  `SMTP_TLS_VERIFY` all gain the wider spellings. One exclusion remains:
+  `config/test.exs`'s `KILN_STRICT_TEST` cannot use the parser at all —
+  compile-time config files are evaluated before any project module is on the
+  code path. (#607)
+- **`PHX_SERVER=false` no longer starts the web server.** Every string is truthy
+  in Elixir, so the Phoenix generator's `if System.get_env("PHX_SERVER")` read an
+  explicit `false`/`0`/`no`/`off` as a request to serve. It now honours those
+  four spellings. Presence still enables — a blank `PHX_SERVER=` and an
+  unrecognized value both start the server as before, because the variable is
+  documented as "any truthy value" and reading a declared-but-empty one as
+  "serve nothing" would be a silent outage. `KilnCMS.Config.Env.truthy?/1` is
+  the one function with those semantics; everything else uses `flag/2` or
+  `fetch/1`.
+- A blank `DATABASE_SSL_CACERTFILE=` configured `verify_peer` against an empty
+  path, so `:ssl` could not read the bundle and **every database connection
+  failed at boot** — the opposite of the "encrypt but skip verification"
+  fallback that branch exists to provide. Blank now reads as unset, like every
+  other variable.
+- `KILN_STAGING_FORCE` accepted only the literal `1`, so
+  `KILN_STAGING_FORCE=true` read as *not* forced. It now uses the shared
+  spelling table. `KILN_STAGING_SCRUB` is unchanged and deliberately still a
+  sentinel word (`confirm`): typing `true` must not confirm a destructive
+  scrub.
+- The media library's responsive-variant list previews each variant inline
+  instead of linking to it. The old per-variant "open" link announced itself as
+  opening in a new tab, but media carries `Content-Disposition: attachment` on
+  both storage adapters, so it downloaded a UUID-named file — misleading for
+  sighted and screen-reader users alike. The copyable media URL now says so too.
+
 ### Security
+
+- **Promoting a dynamic type no longer leaves its documents unwitnessed for a
+  checkpoint interval** (#849). Promotion re-attests a document's history
+  anchors under the compiled type (#704), but `Checkpoint.witnessed_head/3`
+  resolves entries by `{resource_type, source_id}` — so from the moment
+  promotion committed until the next scheduled checkpoint, a promoted document
+  had no witness coverage, and a truncation of its newest anchors inside that
+  window would not have been caught. Silent, because nothing reports an absent
+  entry. Promotion now mints a checkpoint over the re-attested heads.
+
+  Minted **after** the transaction commits, not inside it: minting publishes to
+  an immutable witness sink, and committing to heads a rollback could take away
+  would leave a published object attesting a state that never existed — the
+  exact fingerprint `Checkpoint.publish/2` already treats as an attack. A mint
+  failure is logged and does not fail the promotion, since the data move has
+  already committed and the scheduled checkpoint still covers those heads.
+
+  The old `("entry", …)` checkpoint entries are deliberately left untouched.
+  Their Merkle leaves commit to `resource_type`, so re-keying them — the fix
+  the issue first suggested — would invalidate every stored proof against its
+  published root, and they are a true record of what that chain's head was
+  under the old type. Superseding history is not the same as rewriting it.
+
+- **A form's embed allowlist is now the form's, not the deployment's** (#648).
+  `EMBED_ORIGINS` has no tenant dimension, so on a multi-org instance it had to
+  be the *union* of every org's embedders — and that union was what every org's
+  forms became framable by. An operator allowlisting `https://partner-a.com` for
+  one site also authorised it to frame every other site's forms, which is the
+  overlay-and-harvest attack #562 closed, one tenant boundary over. The builder's
+  Embed tab could not be accurate either: it answered a deployment-wide question,
+  so an admin checking "may my embedders frame this?" before pasting a snippet
+  got an approximation of the answer.
+
+  Forms carry an `embed_origins` allowlist, set in the Embed tab, and the embed
+  page's `frame-ancestors` comes from it. Three states: **use the deployment
+  default** (unset — unchanged behaviour, and the whole single-org story),
+  **this site only** (closed for this form whatever the deployment allows), and
+  **only these sites**. A form's list *replaces* the deployment's rather than
+  extending it, so an org can also narrow below what another org needed added
+  globally. The tab's banner and allowlist line now read the policy that will
+  actually be served for that form, read back out of the rendered directive so
+  they cannot name an origin the header does not grant.
+
+  Entries are validated on save with the same predicate as the per-site CSP
+  additions in Code Injection (`KilnCMS.CMS.Validations.CspOrigins`): a full
+  origin, no keyword sources, no bare `*`, and nothing that could end the
+  directive or the header. A bad entry is **refused, naming itself**, rather
+  than dropped — a shorter allowlist than the admin typed is indistinguishable
+  from a deliberate one. `EMBED_ORIGINS` keeps its own looser grammar and its
+  fail-closed parsing; nothing about a single-org deployment changes.
+
+  **On a multi-org deployment, set the allowlist per form and leave
+  `EMBED_ORIGINS` unset** — a form that has not been given one still inherits
+  the deployment's, so the shared union governs every untouched form exactly as
+  before. `docs/threat-model.md` records what that leaves open.
+
+- **A CSP source may no longer wildcard a public suffix.**
+  `KilnCMS.CMS.Validations.CspOrigins` accepted `https://*.com`, which is
+  syntactically a leftmost-label wildcard and semantically every `.com` site —
+  a bare `*` wearing a hat, in the validation that refuses bare `*`. A wildcard
+  now needs at least two labels after it (`https://*.acme.com`). Affects the
+  per-site Code Injection lists as well as the new embed allowlist; a stored
+  value in the old shape keeps working until the next save of that settings
+  form, which then refuses it.
+
+- **A form's embed allowlist survives duplication.** `duplicate_form` copied a
+  hand-written list of attributes that had already drifted (the autoresponder
+  fields were never copied), so a duplicate lost `embed_origins` and silently
+  fell back to the deployment-wide allowlist. It now copies every attribute the
+  create action accepts.
+
+- **Webhook delivery now goes through `KilnCMS.SafeFetch`** (#753). The address
+  pinning that closes the DNS-rebinding window — resolve once, connect to the
+  literal, keep SNI and certificate hostname verification aimed at the real
+  name, restore the `Host` header, follow no redirects — existed twice: once in
+  `SafeFetch` and once in the `Webhooks.DeliveryWorker` it was extracted from.
+  Fifteen lines of TLS options that fail *open* when mistyped, in two places,
+  with `SafeFetch`'s own moduledoc claiming there should be one. There is now
+  one, and the worker also picks up the streaming byte cap it never had — with
+  truncation, so a receiver that answers 200 with a large body stays a delivered
+  200 rather than becoming a permanent failure the cap invented.
+
+  The ledger's `last_error` vocabulary is unchanged. `SafeFetch` writes for its
+  own callers and prefixes differently, so each of its shapes is *translated*
+  rather than wrapped — wrapping read `delivery failed: request failed:
+  %Req.TransportError{…}`, the documented wording with somebody else's inside
+  it.
+
+  **An IPv6 endpoint could never be delivered to.** The pinned host was
+  bracketed by hand *and* by `URI.to_string/1`, producing
+  `https://[[2606:2800::1]]/x` — so a webhook to any endpoint whose DNS answer
+  is IPv6 failed with a transport error that named nothing. It affected oEmbed,
+  link checking, federation and social posting too, since all of them share this
+  path. Found by writing the pinning test #753 asked for; the round-trip is now
+  asserted. The `Host` header for an IPv6 *literal* URL keeps its brackets as
+  well, so `[2606:2800::1]:8443` is no longer sent as an ambiguous
+  `2606:2800::1:8443`.
+
+  `SafeFetch` gained the test suite the issue names — the refusal of private and
+  link-local addresses, the pinned connection's TLS options asserted as values
+  (a `Req.Test` round trip cannot see them; the plug adapter never opens a
+  socket), the byte cap holding against a lying `content-length`, and
+  `decode_body: false` meaning the caller always gets bytes.
+
 
 - **`mix kiln.audit.verify` can now fail a run it previously passed, and no
   longer calls a chain "intact" when its attestation stops short of the head.**
@@ -2049,355 +3015,6 @@ migration, a rewritten column, a dropped config key).
   framing; it now renders `frame-ancestors 'self' https://acme.com`, so opting a
   partner site in never takes the CMS's own host out. (#562)
 
-### Fixed
-
-- **The remaining auth pages no longer render another tenant's branding.**
-  `/password-reset/:token`, `/confirm_new_user/:token`, `/magic_link/:token`
-  and `/sign-out` are now routed through thin Kiln wrappers
-  (`KilnCMSWeb.AuthLive`), which puts them under `use KilnCMSWeb, :live_view`
-  and so under the url-less-join guard from #688 (#701).
-
-  They were the last views outside it, because `AshAuthentication.Phoenix`
-  ships them and a library module cannot use Kiln's macro. A `/live` join
-  carrying no URL matches no route, so it skipped their
-  `{LiveUserAuth, :assign_current_org}` hook and left `:current_org` unassigned
-  — and `Layouts.brand_or_unbranded/1`, which fails closed on exactly that,
-  never ran, because the channel takes the layout from the matched route too.
-  `Branding.for_org(nil)` answered with the **default organization**, so a
-  password-reset page joined that way on a tenant host drew another site's name
-  and logo. No authorization was involved (these pages are unauthenticated by
-  design); the leak was identity, which is what #48 exists to prevent.
-
-  Wrapping refuses the join outright rather than trying to render it correctly.
-
-  `/sign-out` is worth knowing about separately: `sign_out_route/3` emits a
-  `DELETE` to the auth controller **and** a `live` route in its own
-  `live_session`, and only the first is visible at the call site. It reads as
-  controller-only and is not, so its live half had a replayable session like
-  every other page here. `KilnCMSWeb.LiveJoinWithoutUrlTest`'s exemption list is
-  now empty, which is what keeps that true as views are added.
-
-- **A client-chosen payload shape no longer crashes an editor LiveView.** A
-  `handle_event/3` payload is arbitrary client JSON and `handle_params/3` has a
-  controller's shape freedom, so `%{"q" => q}` constrains the key and never the
-  value — `String.trim/1` and `Integer.parse/1` have no clause for a list or a
-  map and raise (#764). The authenticated sibling of #751.
-
-  Two mechanisms, which only work together: a `when is_binary(…)` guard on the
-  clause heads that would otherwise raise inside their bodies, and a catch-all
-  `handle_event/3` that `KilnCMSWeb.MalformedEvent` appends to every Kiln
-  LiveView so an unmatched event is a no-op. A guard without the catch-all just
-  moves the crash from the body to the head. It has to be `@before_compile`:
-  a catch-all injected at the top of a module shadows every real handler in it.
-
-  The three cases reachable by a **crafted link** rather than a pushed event —
-  `/editor?q[a]=1`, `/media?q[a]=1`, `/editor/analytics?range[]=7` — now read
-  through `KilnCMSWeb.Params`, so a wrong shape is absent rather than coerced.
-
-  `KilnCMSWeb.CollabChannel` is separate: `handle_in/3` had no catch-all and
-  `Base.decode64/2` was called on an unguarded `"update"` value, so one
-  malformed frame killed that client's channel process and dropped its editor
-  to a rejoin mid-edit. It now guards the payload and ignores unknown frames.
-  The document room itself survives either way — each client gets its own
-  channel process, and `Collab.DocServer` monitors its channels rather than
-  linking them.
-
-- **`KILN_STRICT_TEST=true` ran the test suite without strict tenancy, and said
-  nothing.** The flag was matched as `== "1"` while
-  `docs/environment-variables.md` teaches `true`/`1`/`yes`/`on` for every other
-  boolean, so the documented spelling compiled the suite **fail-open** (#646).
-  It now accepts the same spellings as everything else, through the standalone
-  `config/strict_test_flag.exs` — `config/test.exs` is evaluated before any
-  project module is on the code path, so it cannot call `KilnCMS.Config.Env`,
-  and `test/test_helper.exs` reads the same snippet instead of carrying a second
-  copy of the comparison.
-
-  An unrecognized value now **warns on stderr** rather than passing silently for
-  an unset one. That distinction is what the flag's failure mode demands: a
-  quiet misparse leaves the strict leg selecting `--only strict_tenancy` against
-  a fail-open build, which runs zero tests and exits 0 — indistinguishable from
-  never having invoked it, and impossible for any test to catch, since the
-  strict-tagged file is excluded.
-
-  The whole failure class here is silence. `--only strict_tenancy` kept
-  selecting the tagged tests and they kept passing, against precisely the
-  configuration they exist to catch, so a contributor working on epic #336's
-  multi-tenancy could believe they had exercised the strict build and had not.
-
-- **Every `config/runtime.exs` line anchor in `docs/environment-variables.md`
-  points at the right line again, and a test keeps it that way.** The document
-  cites its source by line number for each variable, so any insertion shifts
-  every anchor below it at once — and nothing checked them, because
-  `mix docs --warnings-as-errors` verifies cross-references between docs and
-  *modules*, not offsets into source. 54 were wrong; `TOKEN_SIGNING_SECRET`
-  pointed at a Bandit documentation URL, and the branding rows at a comment
-  block.
-
-  This has been re-filed three times (#610, #645, #657), which is itself the
-  symptom: it was correct when written every time, and wrong by the commit. The
-  new test resolves every anchor against the current source and carries its own
-  self-check, so the next insertion fails the build instead of the reader.
-
-- **A rate-limited request now answers the same error envelope as everything
-  else it sits in front of.** `{"errors": [{"status", "code", "detail"}]}` was
-  described in a comment as *"the standard error envelope shared across the
-  headless surfaces"* and then written out eight times. The per-IP 429 was the
-  one clients hit most and the one that carried least: `{"errors":
-  [{"detail": "Too many requests"}]}`, with no `status` and no `code`, so a
-  client branching on `errors[].code` fell through to its unknown-error path on
-  the single refusal that has a defined recovery — and `POST
-  /api/auth/sign_in/verify` could answer 429 in two different shapes for the
-  same URL, depending on whether the per-IP bucket or the per-account budget
-  refused it. It now answers `code: "too_many_requests"` with the numeric
-  `status`, next to the `retry-after` it already sent. The HTML denial page for
-  browser navigations is unchanged.
-
-  `GET /api/visual-editing/:type/:slug` likewise answered an envelope-*shaped*
-  body with two of the three fields missing, and now answers the envelope.
-
-  Behind both: `FormController`'s copy interpolated the status it was handed
-  instead of normalizing it through `Plug.Conn.Status.code/1`, so an atom
-  status would have answered `"status": "unprocessable_entity"` where the
-  others answer `"422"`. Nothing passed it an atom, so no client saw that one —
-  it was a divergence waiting for the next error case added to that controller.
-
-  Every headless surface now renders through `KilnCMSWeb.ApiError.send/4`, and
-  a source scan fails the build when a module writes the envelope by hand, so
-  the convention is enforced rather than described. `docs/api.md` now also
-  names the three shapes that deliberately differ (JSON:API's richer entries,
-  form field errors, `/api/resolve`'s verdict) and the two that are known gaps
-  (#750). (#744)
-
-- **`audit_anchor_every_write` no longer reports untouched documents as
-  tampered.** Turning it on made the audit surface it exists to strengthen read
-  permanently red after two autosaves, with no tampering anywhere.
-
-  Two changes, each correct alone, ran against each other in the same
-  `after_transaction`. `AnchorVersion` anchors every write, including each
-  `:autosave`, so a debounced save's version row was folded and signed
-  immediately. `CoalesceAutosaveVersions` then merged the trailing autosave run
-  into one snapshot (#32) — deleting the superseded rows and rewriting the
-  survivor's diff. Both of those are rows an anchor had just committed to, and
-  the chain folds the diff, so the anchored prefix could no longer reproduce and
-  the row count no longer reached `version_count`. Either alone is fatal, and
-  the verdict is permanent: no later publish clears it, and there is no
-  supported way to re-anchor a document. It needed no unusual usage — autosave
-  is on by default in the editor, so the one flag was enough.
-
-  Coalescing now stops at `Chain.anchored_boundary/1` as well as at the last
-  manual version, so it never touches a row inside an anchor's fold. Anything
-  that mutates version rows should ask the same question; coalescing is the only
-  such path in ordinary operation (`RestoreVersion` replays rows and writes a
-  new version, it does not rewrite old ones — the one other path is the
-  `mix kiln.promote_data` task, which moves version rows between tables and is
-  tracked separately).
-
-  Ordering the two hooks instead — coalesce first, anchor second — was the
-  obvious-looking alternative and does not work, which is worth recording because
-  it is the cheapest-looking way to "get coalescing back". Ash can guarantee the
-  order (`after_transaction/3` takes `prepend?`), but the row a save destroys was
-  anchored by the *previous* save, in a previous transaction. No intra-transaction
-  ordering reaches it. The shipped fix is order-independent for the same reason,
-  which is why it does not depend on Ash's hook order staying what it is today.
-
-  Three details, because a wrong answer here destroys history that cannot be
-  reconstructed. The boundary lookup **ignores the `audit_anchors_enabled` master
-  kill switch**, unlike every other read in `Chain`: turning that switch off stops
-  anchoring but does not delete the anchors already minted, and reading "no
-  anchors" because the feature is off would let coalescing eat them and red the
-  document the moment it came back on. It **never raises** — it runs after the
-  editor's save has committed, where a raise reaches the LiveView rather than the
-  changeset, so an unreadable `history_anchors` (migration not yet applied, a
-  transient fault) answers `:unknown`. And **`:unknown` means "assume everything
-  is anchored"**, so nothing is coalesced: skipping costs version rows, guessing
-  costs history. `CoalesceAutosaveVersions` is now wrapped the same way for the
-  same reason — tidying history must not cost an editor their save, which is the
-  rule `Chain.anchor/2` and `extend/2` already followed.
-
-  `history_anchors` gains the sort columns on its lookup index. `latest_anchor/3`
-  is a top-1 by `(inserted_at, id)` descending, which on the filter columns alone
-  makes Postgres fetch every anchor a document has and top-N sort them — and
-  `anchor_every_write` mints one anchor per save, so an hour of debounced typing
-  reaches ~1200 of them and this change asks for the latest twice per save.
-
-  The cost is real and falls only where the flag is on: when every save is
-  anchored, every autosave row is anchored the moment it is written, so there is
-  never an unanchored pair to collapse and an hour of typing leaves one version
-  row per debounce rather than one for the session. That is the honest form of
-  the trade — the alternative is not "both", it is the false tamper verdict —
-  and `docs/editorial-consent.md` now states it as the price of the setting
-  alongside the per-save signature. With the flag off (the default) anchoring
-  happens at publish, a publish is itself a non-autosave version, so the two
-  boundaries coincide and coalescing behaves exactly as before. (#671)
-
-- **The collaborative-editing doc supervisor is bounded.** Its
-  `DynamicSupervisor` had no `max_children`, so nothing limited how many
-  authoritative Yjs documents a deployment could hold open — and each one pins a
-  Yex NIF document in memory and lingers ten minutes past its last client.
-  `config :kiln_cms, :collab_max_documents` (default 500) now caps it, counted
-  in documents open concurrently across the deployment rather than editors,
-  since several editors on one document share one server. Over the ceiling, a
-  join is refused with `unavailable` — a capacity answer, distinct from the
-  uniform "not found" the authorization checks give — and the client falls back
-  to solo editing with autosave, the same fallback it uses when the prototype is
-  switched off. The refusal is logged at error level, because the only other
-  symptom is editors quietly losing collaboration.
-
-  Behind `:collab_prototype`, which is off in production, so this was never live
-  exposure; it becomes load-bearing if collab graduates. #655 had already made
-  the doc key the resolved record, so a client could no longer conjure several
-  servers per document by varying the topic string — this bounds how many
-  documents can be open at once, not how many ways there are to name one. (#676)
-
-- **`entries_versions` had no index on `version_source_id`.** When the version
-  tables' foreign keys were dropped, `pages_versions` and `posts_versions` got a
-  single-column index to replace the lookup the FK had been providing;
-  `entries_versions` — the table every **dynamic** content type shares — got
-  neither. Every per-document version read filters on that column: the
-  governance chain's fold and its keyset resume, the governance trail, autosave
-  coalescing on every debounced save, and the version-history UI. On the dynamic
-  tier those were sequential scans over every version of every entry in the
-  deployment, growing without bound.
-
-  All three tables now carry `(org_id, version_source_id, version_inserted_at,
-  id)`, which covers the sort as well as the filter — that is the exact order
-  the chain folds and pages in — and leads with the tenant column because every
-  one of those reads is tenant-scoped. Declared through the shared
-  `paper_trail` mixin, since AshPaperTrail generates the version resource's
-  `postgres` block itself. The pre-existing single-column indexes on
-  `pages_versions` and `posts_versions` are left in place: they are not a prefix
-  of the new one, so they still serve a tenant-less read.
-
-  Postgres truncates the generated index names to 63 characters and says so at
-  migration time; the three remain distinct. (#672)
-
-- **History anchoring no longer resumes its incremental fold with a SQL
-  `OFFSET`.** `KilnCMS.Governance.Chain` folded "everything since the last
-  anchor" by skipping `version_count` rows, which means "skip the first n rows
-  of the *current* result set" — the anchored prefix only while no row ever
-  becomes visible below the boundary afterwards. Two ordinary things break
-  that: concurrent writes whose version rows commit out of stamp order, and
-  wall-clock skew between app nodes, since `version_inserted_at` is stamped by
-  whichever node performs the write. Either one made the fold skip the row it
-  was meant to cover and fold the boundary row a second time, minting a
-  correctly-signed anchor whose hash covers a sequence that never existed and
-  whose `version_count` is one too high. Anchors now record the full sort key of
-  the last version they covered (`last_version_at` alongside `last_version_id`)
-  and the next fold resumes strictly after it — a position rather than a
-  cardinality, stable under any commit order.
-
-  **This does not clear the verdict, and #598 stays open for that.** A document
-  that took a below-boundary row read `{:tampered, …}` before this change and
-  reads it after: an earlier anchor committed to an ordering the version table
-  no longer holds, so it can never reproduce, and verification recomputes from
-  genesis. What changes is that the chain no longer records fabricated state,
-  that anchoring logs an error the moment an uncovered row appears instead of
-  it surfacing months later at an audit, and that the verdict now says how many
-  rows sort inside the anchored range rather than reporting a bare hash
-  mismatch indistinguishable from doctored content. Actually closing it needs a
-  fold order assigned at write time rather than inferred from a wall clock,
-  which also decides whether such a row counts as tampering or as a latecomer —
-  a compliance-visible call, tracked separately.
-
-  The boundary is inside the **signed** anchor payload (`v: 3`), because it
-  steers which rows the next anchor covers. Without that, a single `UPDATE` to
-  an unsigned column could repoint the resume past every future version: the
-  fold would find nothing new, anchoring would silently stop, and the document
-  would keep reading `:verified` while its history was rewritten freely. Anchors
-  minted before this change carry no boundary and keep verifying under their
-  original payload shape; they resume by the old count until their next anchor.
-  The timestamp is stored rather than looked up from `last_version_id` because
-  version rows are deleted in ordinary operation — autosave coalescing destroys
-  superseded rows on every debounced save — and a boundary that vanished with
-  its row would have made the fix inert on exactly the every-write
-  configuration that needs it. (#598)
-
-- **Artifacts fired before a surface-shape change are now migrated instead of
-  serving the old shape forever.** `@format_version` was bumped 1 → 2 when
-  `:json` gained `custom_fields` and `:json_ld` gained `contentLocation` (#601),
-  but nothing read the field and nothing re-fired — so every document published
-  before that deploy kept serving the v1 shape indefinitely while everything
-  published after served v2, and a consumer could not tell which, because the
-  field that would say so was never consulted. Meanwhile
-  `docs/headless-consumer-guide.md` documented those keys as present on every
-  surface. The bump was decorative, which is worse than not bumping: it looks
-  like a migration happened. `Engine.read/4` and `Firing.Delivery.read_artifact/4`
-  now compare a fetched row's version against the one the build writes; an older
-  row is served **once** more and a re-fire is enqueued behind the request, so
-  the second read has the new shape. That makes the field load-bearing, so the
-  next bump of an **existing** surface needs only the bump — no deploy step for
-  anyone to forget. A bump that *adds* a surface is still a `mix kiln.refire_all`
-  job: there is no row for the new surface, so nothing is stale to detect.
-  Convergence is eventual rather than next-request — the stale body is cached for
-  up to an hour, so reads in between are cache hits on the old shape until the
-  job lands. All three artifact readers migrate (delivery, the engine read, and
-  the provenance manifest), so a document read through only one of them still
-  converges. A row whose document can no longer be fired at all (an orphan left
-  by a failed unpublish purge) re-enqueues a futile job per cache expiry —
-  bounded and logged, tracked in #664.
-  Enqueueing is best-effort and deduplicated by `FireWorker`'s existing unique
-  window, so it can neither fail a read (delivery is expected to survive a
-  database outage) nor turn a cache stampede into a firing stampede.
-  `mix kiln.refire_all` still exists for an operator who would rather migrate a
-  whole corpus at once — the lazy path only reaches documents that are read.
-  (#615)
-
-- **`KilnCMSWeb.Tenant.current_org_id/1` raises on a missing `:current_org`
-  assign** instead of quietly returning the default org (#563). It is the
-  quieter half of the same defect: the assign comes from `Plugs.SetTenant`
-  (endpoint-level, so ahead of every pipeline) or the `:assign_current_org`
-  on_mount hook, and any path that skipped both read the default org's data on a
-  tenant's site with nothing to show for it. It now fails where such a path is
-  cheapest to find — in test. `live_session :token_preview` was the one route
-  group missing the hook and now carries it.
-
-- **`DATABASE_SSL=True` no longer disables Postgres TLS.** The value was matched
-  raw against `~w(true 1)`, so any capitalized or space-padded spelling missed
-  and fell through to `false` — an operator explicitly asking for TLS got a
-  plaintext connection, with credentials and every query crossing the network
-  unencrypted, and no warning or boot failure to show for it. Only deployments
-  that set the variable deliberately were affected; leaving it unset was, and
-  remains, encrypted. **An unrecognized spelling now behaves differently — see
-  Upgrading below.** (#606)
-- Every on/off environment variable now goes through one parser,
-  `KilnCMS.Config.Env` — seven call sites that previously shared no code, in
-  five distinct parser shapes and three different unrecognized-value semantics.
-  All of them are now trimmed and case-insensitive (`TRUE`, `On`, `" true "`),
-  accept `true`/`1`/`yes`/`on` and `false`/`0`/`no`/`off`, treat a blank `FOO=`
-  as unset, and keep the default with a warning on anything else — an
-  unparseable value is never *interpreted*, in either direction. Alongside
-  `DATABASE_SSL` this fixes `VISUAL_EDITING_ENABLED=False`, which used to leave
-  the bridge on, contradicting the documentation. `ECTO_IPV6`,
-  `KILN_UPDATE_CHECK`, `KILN_AUDIT_ANCHOR_EVERY_WRITE`, `SMTP_TLS` and
-  `SMTP_TLS_VERIFY` all gain the wider spellings. One exclusion remains:
-  `config/test.exs`'s `KILN_STRICT_TEST` cannot use the parser at all —
-  compile-time config files are evaluated before any project module is on the
-  code path. (#607)
-- **`PHX_SERVER=false` no longer starts the web server.** Every string is truthy
-  in Elixir, so the Phoenix generator's `if System.get_env("PHX_SERVER")` read an
-  explicit `false`/`0`/`no`/`off` as a request to serve. It now honours those
-  four spellings. Presence still enables — a blank `PHX_SERVER=` and an
-  unrecognized value both start the server as before, because the variable is
-  documented as "any truthy value" and reading a declared-but-empty one as
-  "serve nothing" would be a silent outage. `KilnCMS.Config.Env.truthy?/1` is
-  the one function with those semantics; everything else uses `flag/2` or
-  `fetch/1`.
-- A blank `DATABASE_SSL_CACERTFILE=` configured `verify_peer` against an empty
-  path, so `:ssl` could not read the bundle and **every database connection
-  failed at boot** — the opposite of the "encrypt but skip verification"
-  fallback that branch exists to provide. Blank now reads as unset, like every
-  other variable.
-- `KILN_STAGING_FORCE` accepted only the literal `1`, so
-  `KILN_STAGING_FORCE=true` read as *not* forced. It now uses the shared
-  spelling table. `KILN_STAGING_SCRUB` is unchanged and deliberately still a
-  sentinel word (`confirm`): typing `true` must not confirm a destructive
-  scrub.
-- The media library's responsive-variant list previews each variant inline
-  instead of linking to it. The old per-variant "open" link announced itself as
-  opening in a new tab, but media carries `Content-Disposition: attachment` on
-  both storage adapters, so it downloaded a UUID-named file — misleading for
-  sighted and screen-reader users alike. The copyable media URL now says so too.
-
 ### Upgrading
 
 **The occurrence backfill runs itself** (#766) — no step to perform, but worth
@@ -2556,6 +3173,7 @@ deployment keeps its current behaviour. Before turning it on, check that every
 host reaching the app is an org subdomain, an org `custom_domain`, or the
 `PHX_HOST` apex. Health checks need no special handling — `/up` and `/ready`
 are exempt.
+
 **Check `DATABASE_SSL` before deploying, if you set it at all.** Tightening
 #606 means an unrecognized value now keeps TLS *on* where it used to silently
 turn it off. A deployment that reached for a libpq `sslmode` spelling —
@@ -2594,6 +3212,19 @@ previously ignored (`true`, `yes`, `on`) now genuinely skips the
 ephemeral-name check on `mix kiln.staging.scrub`. It still cannot scrub
 anything on its own — `KILN_STAGING_SCRUB=confirm` is required either way.
 
+**Integer-valued variables are now bounded at 2³¹-1** (#1091), which affects
+`BACKUP_KEEP_DAYS`, `BACKUP_STALE_AFTER_HOURS`, `KILN_READING_TIME_WPM`,
+`KILN_EXPERIMENTS_STICKY_DAYS` and `KILN_ANALYTICS_LOW_COUNT_THRESHOLD`. Elixir
+integers are arbitrary-precision, so a mistyped digit —
+`BACKUP_KEEP_DAYS=144444444444444` for `14` — used to parse cleanly and be
+honoured as a four-billion-year retention. Such a value now keeps the **default**
+and warns on stderr naming the bound, in line with every other unrecognized
+read. The bound is not a claim about a sensible retention; every real value for
+every variable this reads is smaller by orders of magnitude. No action needed
+unless you deliberately set one above the bound, in which case the effective
+value changes from what you typed to the default — check `docker logs` after
+the first boot.
+
 ## [0.1.0]
 
 First tagged release. Everything before this point shipped untagged on `main`;
@@ -2617,5 +3248,6 @@ one that can't be described by a changelog diff. Before moving the pin:
 
 After this release, `mix kiln.update --check` does all of the above for you.
 
-[Unreleased]: https://github.com/The-Verscienta/kiln_cms/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/The-Verscienta/kiln_cms/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/The-Verscienta/kiln_cms/releases/tag/v0.5.0
 [0.1.0]: https://github.com/The-Verscienta/kiln_cms/releases/tag/v0.1.0

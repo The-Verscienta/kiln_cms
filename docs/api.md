@@ -654,8 +654,15 @@ Submissions post to the normal `POST /forms/:slug` endpoint and render the
 form's success message inside the iframe. No CORS is involved: the iframe is
 served *from* the CMS origin, so its form post is same-origin.
 
-**Who may embed** is controlled by the `EMBED_ORIGINS` env var, which sets the
-embed page's CSP `frame-ancestors`:
+**Who may embed** is set per form, in the builder's Embed tab, and becomes that
+page's CSP `frame-ancestors`. A form that leaves it alone inherits the
+deployment-wide `EMBED_ORIGINS`:
+
+| Form's *Who may embed*                 | Effect                                             |
+|----------------------------------------|----------------------------------------------------|
+| *(unset — the default)*                | Whatever `EMBED_ORIGINS` says, below.              |
+| **This site only**                     | `'self'` — same-origin only for this form, whatever the deployment allows. |
+| **Only these sites**                   | `'self'` plus this form's own parents, **instead of** the deployment's list. |
 
 | `EMBED_ORIGINS`                        | Effect                                             |
 |----------------------------------------|----------------------------------------------------|
@@ -663,8 +670,12 @@ embed page's CSP `frame-ancestors`:
 | `https://a.example,https://b.example`  | `'self'` plus these parents may frame it.          |
 | `*`                                    | Any site may embed the form.                       |
 
+Per form because forms are org-scoped (#648): a deployment-wide allowlist has to
+be the union of every org's embedders, and that union is what every org's forms
+would become framable by.
+
 **The default is closed** (#562) — paste the snippet on an external site before
-setting `EMBED_ORIGINS` and you get a blank iframe plus a CSP violation in that
+allowing that site and you get a blank iframe plus a CSP violation in that
 site's console. The embed page carries no ambient credentials (an anonymous
 public form; a cross-site iframe never receives the `SameSite=Lax` session
 cookie), but framing is itself the attack: with `*`, any site can overlay the

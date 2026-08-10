@@ -65,10 +65,6 @@ defmodule KilnCMSWeb.FormEmbedDefaultTest do
     form
   end
 
-  defp unique_ip(conn) do
-    Map.put(conn, :remote_ip, {127, 3, rem(System.unique_integer([:positive]), 250), 1})
-  end
-
   defp csp(conn), do: conn |> get_resp_header("content-security-policy") |> List.first()
 
   test "with EMBED_ORIGINS unset the embed page is same-origin only", %{conn: conn} do
@@ -100,9 +96,9 @@ defmodule KilnCMSWeb.FormEmbedDefaultTest do
   end
 
   test "the module reports embedding as closed", %{conn: _conn} do
-    assert Embed.frame_ancestors() == "'self'"
-    refute Embed.cross_site?()
-    assert Embed.allowed_origins_label() == nil
+    assert Embed.frame_ancestors_for(nil) == "'self'"
+    refute Embed.cross_site?(nil)
+    assert Embed.allowed_origins_label(nil) == nil
   end
 
   # #650. The flip to same-origin-only in #562 is silent for anyone who was
@@ -151,6 +147,9 @@ defmodule KilnCMSWeb.FormEmbedDefaultTest do
       # The parent, from the Referer — an origin, not the full URL.
       assert log =~ "https://acme.test"
       refute log =~ "/pricing"
+      # And which form, since #648 made the policy per form: an operator with a
+      # dozen of them needs to know which Embed tab to open.
+      assert log =~ form.slug
 
       # At most hourly per node: a busy embed route must not flood the log.
       second =
@@ -162,6 +161,48 @@ defmodule KilnCMSWeb.FormEmbedDefaultTest do
         end)
 
       refute second =~ "EMBED_ORIGINS"
+    end
+
+    # Per form since #648, because the policy is. A node-wide claim would let
+    # the first blocked form silence every other one for an hour — including
+    # forms closed for a different reason and needing a different fix — and a
+    # `curl` at a slug that matches nothing would silence all of them.
+    test "one form's warning does not mute another form's", %{conn: conn} do
+      first = form!()
+      second = form!()
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        conn |> framed("cross-site") |> get(~p"/forms/#{first.slug}/embed") |> response(200)
+      end)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          build_conn()
+          |> framed("cross-site")
+          |> get(~p"/forms/#{second.slug}/embed")
+          |> response(200)
+        end)
+
+      assert log =~ second.slug
+      refute log =~ first.slug
+    end
+
+    test "a probe at a slug that matches no form mutes only itself", %{conn: conn} do
+      form = form!()
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        conn |> framed("cross-site") |> get(~p"/forms/no-such-form/embed") |> response(404)
+      end)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          build_conn()
+          |> framed("cross-site")
+          |> get(~p"/forms/#{form.slug}/embed")
+          |> response(200)
+        end)
+
+      assert log =~ form.slug
     end
 
     # A scanner can set Fetch Metadata by hand — the headers are unforgeable to a
@@ -182,7 +223,7 @@ defmodule KilnCMSWeb.FormEmbedDefaultTest do
       # persistent_term is the point: it asserts the re-arm is time-based rather
       # than testing a helper that fakes the answer.
       :persistent_term.put(
-        {KilnCMSWeb.Embed, :framing_warned_at},
+        {KilnCMSWeb.Embed, :framing_warned_at, form.id},
         System.monotonic_time() - System.convert_time_unit(3601, :second, :native)
       )
 

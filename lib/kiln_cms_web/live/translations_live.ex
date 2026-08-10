@@ -61,6 +61,21 @@ defmodule KilnCMSWeb.TranslationsLive do
     Enum.find(I18n.locales(), &(&1 != I18n.default_locale()))
   end
 
+  # A field grant can leave a translation narrower than its source, and so can
+  # the block-field policy (#1157/#890) — the editor is told which, rather than
+  # being left to wonder why half the document is missing. Same wording as the
+  # content editor's own translation flash.
+  defp translation_flash(locale, []),
+    do: gettext("Draft translation created (%{locale}).", locale: locale)
+
+  defp translation_flash(locale, withheld) do
+    gettext(
+      "Draft translation created (%{locale}). Not copied, because your role cannot set them: %{fields}.",
+      locale: locale,
+      fields: Enum.join(withheld, ", ")
+    )
+  end
+
   # A missing chip: create the draft translation from the row's source record
   # and jump straight into its editor.
   @impl true
@@ -74,14 +89,25 @@ defmodule KilnCMSWeb.TranslationsLive do
     org = socket.assigns.current_org
     source = ContentTypes.get_record!(kind, id, actor: actor, tenant: org)
 
-    translation =
-      Translations.create_translation!(kind, source, locale, actor: actor, tenant: org)
+    {translation, withheld} =
+      Translations.create_translation_with_notes!(kind, source, locale, actor: actor, tenant: org)
 
     {:noreply,
      socket
-     |> put_flash(:info, gettext("Draft translation created (%{locale}).", locale: locale))
+     |> put_flash(:info, translation_flash(locale, withheld))
      |> push_navigate(to: ~p"/editor/content/#{kind}/#{translation.id}")}
   rescue
+    # Distinguished from a generic failure because it is not one: the refusal is
+    # a permission boundary the editor can act on (ask for the grant), while
+    # "couldn't create that translation" reads as a broken feature (#1157).
+    _error in KilnCMS.CMS.Translations.BlocksWithheldError ->
+      {:noreply,
+       put_flash(
+         socket,
+         :error,
+         gettext("Your role cannot copy this content's blocks, so it cannot be translated.")
+       )}
+
     _error ->
       {:noreply, put_flash(socket, :error, gettext("Couldn't create that translation."))}
   end

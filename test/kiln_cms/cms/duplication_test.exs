@@ -317,6 +317,31 @@ defmodule KilnCMS.CMS.DuplicationTest do
     assert {:error, %Ash.Error.Forbidden{}} = Duplication.duplicate(:page, page, actor: editor)
   end
 
+  # The flash named attributes the copy actually carried: `withheld` was derived
+  # from every copyable attr the grant didn't name, without subtracting the ones
+  # that are exempt from the grant in the first place (#1157 review).
+  test "the withheld list does not name attributes the copy carried" do
+    admin = user(:admin)
+
+    source =
+      CMS.create_post!(
+        %{title: "Gated", slug: slug(), audience: :member, blocks: []},
+        actor: admin
+      )
+
+    # Names NEITHER exempt attribute, which is the whole point: a grant that
+    # already names them could not tell the exemption from the grant.
+    editor = user(:editor, %{field_grants: %{"post" => ["blocks"]}})
+
+    assert {:ok, copy, withheld} = Duplication.duplicate(:post, source, actor: editor)
+
+    # Both are exempt and both travelled, so neither may be reported.
+    assert copy.audience == :member
+    assert copy.title == "Gated (copy)"
+    refute "audience" in withheld
+    refute "title" in withheld
+  end
+
   test "a field-granted editor's copy carries only the granted attributes" do
     admin = user(:admin)
 
@@ -449,6 +474,35 @@ defmodule KilnCMS.CMS.DuplicationTest do
       assert %{} = translated = Translations.create_translation!(:page, page, "fr", actor: editor)
       assert translated.locale == "fr"
       assert quote_block(translated).featured == false
+    end
+
+    # #1157. `_type`, `_version` and `id` share the stored map with the authored
+    # fields but are the union's envelope, not fields anyone declares. Asking a
+    # FIELD policy about them answered "no" for every non-admin, so a plain
+    # editor duplicating a plain page had them overwritten with `nil` and was
+    # told their role could not set `heading._type`.
+    test "the block envelope is not mistaken for a restricted field" do
+      admin = user(:admin)
+      editor = user(:editor)
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Plain",
+            slug: slug(),
+            blocks: [%{"_type" => "heading", "text" => "Top"}]
+          },
+          actor: admin
+        )
+
+      assert {:ok, copy, withheld} = Duplication.duplicate(:page, page, actor: editor)
+
+      # Nothing to report: this page has no restricted field on it at all.
+      assert withheld == []
+
+      # And the envelope survived rather than being nulled and re-derived.
+      assert [%Ash.Union{type: :heading, value: heading}] = copy.blocks
+      assert heading.text == "Top"
     end
 
     test "an unrestricted block field is untouched" do
