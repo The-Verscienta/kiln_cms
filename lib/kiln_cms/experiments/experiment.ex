@@ -92,6 +92,12 @@ defmodule KilnCMS.Experiments.Experiment do
     read :running do
       description "Experiments currently serving variants."
       filter expr(state == :running)
+      # Stable order for every surface that renders this as a list a human
+      # re-reads (`Health.blocked/1`, the overview strip, `mix kiln.experiment
+      # list`). Without it the order is whatever Postgres returns, and a
+      # cache bust that reloads the set can reorder the same rows for no
+      # reason the reader can see (#1118).
+      prepare build(sort: [inserted_at: :asc])
     end
 
     update :start do

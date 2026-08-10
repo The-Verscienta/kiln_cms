@@ -435,4 +435,46 @@ defmodule KilnCMS.Experiments.LifecycleTest do
       assert Exception.message(error) =~ "must be block ids"
     end
   end
+
+  describe "running read order (#1118)" do
+    test "returns experiments in inserted_at ascending order", ctx do
+      # Two documents so both can be :running at once (partial unique index).
+      earlier =
+        experiment!(ctx, %{
+          name: "earlier-#{System.unique_integer([:positive])}",
+          document_id: Ash.UUID.generate()
+        })
+
+      ExperimentFixtures.variant!(earlier, "Control", %{}, ctx.org_id, control: true)
+      ExperimentFixtures.variant!(earlier, "B", %{}, ctx.org_id, [])
+      {:ok, earlier} =
+        Experiments.start_experiment(earlier, authorize?: false, tenant: ctx.org_id)
+
+      # Force a later inserted_at on the second row so the assertion is not
+      # relying on wall-clock coincidence under a fast suite.
+      later =
+        experiment!(ctx, %{
+          name: "later-#{System.unique_integer([:positive])}",
+          document_id: Ash.UUID.generate()
+        })
+
+      ExperimentFixtures.variant!(later, "Control", %{}, ctx.org_id, control: true)
+      ExperimentFixtures.variant!(later, "B", %{}, ctx.org_id, [])
+      {:ok, later} = Experiments.start_experiment(later, authorize?: false, tenant: ctx.org_id)
+
+      # Bump the second row's inserted_at past the first; create timestamps can
+      # land in the same microsecond on a warm CI runner.
+      later
+      |> Ecto.Changeset.change(inserted_at: DateTime.add(earlier.inserted_at, 1, :second))
+      |> KilnCMS.Repo.update!()
+
+      Experiments.bust(ctx.org_id)
+
+      ids = ctx.org_id |> Experiments.running() |> Enum.map(& &1.id)
+      earlier_idx = Enum.find_index(ids, &(&1 == earlier.id))
+      later_idx = Enum.find_index(ids, &(&1 == later.id))
+
+      assert earlier_idx < later_idx
+    end
+  end
 end

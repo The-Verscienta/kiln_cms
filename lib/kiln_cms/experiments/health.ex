@@ -116,8 +116,8 @@ defmodule KilnCMS.Experiments.Health do
   Every running experiment for a site that cannot convert, as
   `[{experiment, reason}]`.
 
-  Ordered as `Experiments.running/1` returns them, so two calls in a row list
-  them the same way.
+  Ordered as `Experiments.running/1` returns them (`inserted_at` ascending),
+  so two calls in a row list them the same way.
   """
   # DO NOT short-circuit this on `Experiments.enabled?()`. It looks like free
   # efficiency — no arm is served, so why compute a goal reason — and #1114
