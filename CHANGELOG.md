@@ -56,6 +56,15 @@ migration, a rewritten column, a dropped config key).
   cannot publish, and it would be refusing on rules nobody could confirm.
 ### Fixed
 
+- **The ActivityPub inbox no longer fetches an actor it has no use for** (#966).
+  Authenticating an inbound activity needs the sender's key, which lives in the
+  sender's actor document, so a ~200-byte unauthenticated POST bought an
+  outbound HTTPS GET of up to 128 KB aimed at any host the caller named — even
+  for a `Like` or an `Announce`, which this phase accepts and drops. Only a
+  `Follow` or `Undo{Follow}` addressed to this site's actor is fetched now, and
+  fetched documents are cached for ten minutes in a capped, least-recently-
+  written instance, so repeats from one actor cost one request.
+
 - The content editor no longer offers **Duplicate** or **Create translation** to
   an actor who may open a record without being able to write it. Both fork the
   record's payload into a new draft, and both were the only write affordances in

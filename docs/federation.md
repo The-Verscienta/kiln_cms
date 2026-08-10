@@ -151,6 +151,28 @@ The `Accept` sent back is rebuilt from four known fields rather than echoing the
 inbound activity, so a caller cannot choose the size of what this server stores
 for 30 days and POSTs back.
 
+### Nothing is fetched for an activity that changes nothing
+
+Verifying a signature needs the sender's key, and that key lives in the sender's
+actor document — so authenticating *anything* costs an outbound HTTPS GET to a
+host the unauthenticated caller named. A ~200-byte POST would otherwise buy a
+fetch of up to 128 KB, aimed wherever the caller likes, holding a web-tier
+process open for the length of the fetch.
+
+So the fetch happens only for an activity whose outcome the document could
+change: a `Follow` or an `Undo{Follow}` **addressed to this site's actor**.
+Every `Like`, every `Announce`, every misdelivered `Follow` is accepted with a
+202 and dropped without a byte leaving the server. The trade is that which
+activity types this software acts on becomes observable before authentication —
+a property of the release, documented here, not of any site.
+
+Actor documents that *are* fetched are cached for ten minutes, capped, and
+evicted least-recently-written, so a burst from one actor costs one fetch and a
+flood of invented actor URLs costs a fixed table. Failures are never cached. The
+cost of the cache is that an actor rotating its signing key is unrecognised
+until the entry expires — its activities 401 and its server retries, which is
+the mild direction for this to fail in.
+
 Outbound requests — actor fetches and inbox deliveries — go through
 `KilnCMS.SafeFetch`, which pins the resolved address and refuses private ranges.
 The URLs come from inbound requests written by strangers, which is exactly the

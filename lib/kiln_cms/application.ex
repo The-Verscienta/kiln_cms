@@ -66,6 +66,11 @@ defmodule KilnCMS.Application do
       Supervisor.child_spec({Cachex, [name: KilnCMS.Accounts.WebAuthn.challenge_cache()]},
         id: KilnCMS.Accounts.WebAuthn.challenge_cache()
       ),
+      # Bounded LRW cache of remote ActivityPub actor documents (#966), so an
+      # inbound activity that needs one does not re-fetch it per request. Its
+      # own instance: the keys are URLs from unauthenticated callers, and a
+      # burst of them must not evict anything that matters.
+      KilnCMS.Federation.RemoteActor,
       # Bounded LRW firing-artifact cache (see `KilnCMS.Firing.Cache.child_spec/1`).
       KilnCMS.Firing.Cache,
       KilnCMS.Repo,
