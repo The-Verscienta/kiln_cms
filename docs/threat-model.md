@@ -948,12 +948,16 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
 
     *Residual:* the re-check re-runs the join's rule, so what it catches is
     exactly what a *fresh join* would refuse — no more. A document publish under
-    an open room is the case that makes this concrete: `Ash.can?` on `:autosave`
-    does not consult the row-level `state == :draft` filter that action carries,
-    so publishing does not close the room, and collaborative prose no client
-    autosave captured is still lost at checkpoint. That is a data-loss bug
-    rather than an authorization one, and closing it belongs with the publish
-    path rather than with the authorization check — tracked in #1061.
+    an open room used to make that concrete: `Ash.can?` on `:autosave` does not
+    consult the row-level `state == :draft` filter that action carries, so
+    publishing does not close the room, and collaborative prose no client
+    autosave had captured was lost at checkpoint. That was a data-loss bug
+    rather than an authorization one, and it is closed at the publish path
+    rather than at the authorization check (#1061):
+    `Changes.CheckpointCollabRoom` carries the room's converged prose into the
+    publish's own write, and the room is told afterwards so its editors stop
+    typing into a document nothing will persist. The authorization re-check is
+    unchanged — collaborative editing of published content remains supported.
 14. **Webhook deliveries have no anti-replay.** The signature
     (`x-kilncms-signature`, HMAC-SHA256 over the raw body) proves a delivery's
     origin and integrity, not its freshness — there is no timestamp or nonce

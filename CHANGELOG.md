@@ -81,6 +81,31 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **Publishing no longer discards prose a collab room was still holding**
+  (#1061). The server checkpoint writes a room's converged text back through
+  `:autosave`, which carries a draft-only row filter — so a publish landing
+  while editors were typing left that text unreachable, and it went away with
+  the document server. Nothing looked wrong from the editors' side: the client
+  also stops autosaving once a record is not a draft, so after the publish
+  nobody was persisting while the shared document kept accepting edits.
+
+  A publish now takes the open room's converged prose into its own write, so
+  what goes live — and what is versioned, and what delivery serves — is what
+  the editors had actually written. The room is told afterwards, and the editor
+  reloads onto the published record rather than continuing to type into a
+  document nothing will persist. A publish for a document nobody is editing is
+  unchanged, and never starts a room.
+
+  The publish gates judge what actually publishes: `ComplianceClaims` and
+  `MediaAltText` are evaluated after the room's prose is merged, so a claim
+  typed into a shared document and never autosaved is refused rather than
+  published — and a claim the room has already deleted no longer refuses a
+  publish over text the author cannot see. A scheduled publish gets the same
+  treatment, since "keep editing until the cron fires" is the ordinary case.
+  And because a publish can now change content, it recomputes the search text
+  and re-enqueues the embedding, so a document is findable by the words it
+  actually went live with.
+
 - **The in-context and Presentation editors no longer accept edits they cannot
   save** (#1159). Both mounted a record through an actor-scoped read and then
   offered `contenteditable` regions, drag-reorder and a Save button, with no

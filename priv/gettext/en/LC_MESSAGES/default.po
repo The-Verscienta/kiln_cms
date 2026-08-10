@@ -9025,6 +9025,11 @@ msgstr ""
 msgid "This unsubscribe link is invalid."
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "This was published. Your collaborative edits were saved with it."
+msgstr ""
+
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "Thu"

@@ -269,9 +269,18 @@ const Hooks = {
       import("./rich_text").then(({mount}) => {
         if (!this._destroyed) mount(this)
       })
+
+      // The document was published while this collab room was open (#1061).
+      // The publish took the room's prose with it, so nothing is lost — but
+      // nothing persists from here either, so the editor has to be told rather
+      // than left typing into a doc that is going nowhere. Every rich-text
+      // block hears it; the LiveView's handler is idempotent.
+      this._collabPublished = () => this.pushEvent("collab_published", {})
+      window.addEventListener("kiln:collab-published", this._collabPublished)
     },
     destroyed() {
       this._destroyed = true
+      window.removeEventListener("kiln:collab-published", this._collabPublished)
       this.slash && this.slash.destroy()
       this.linkPrompt && this.linkPrompt.destroy()
       this.editor && this.editor.destroy()

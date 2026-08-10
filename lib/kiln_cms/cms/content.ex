@@ -1878,6 +1878,12 @@ defmodule KilnCMS.CMS.Content do
 
         update :publish do
           require_atomic? false
+          # FIRST, so its `before_action` hook registers before the two
+          # block-reading validations below defer themselves to the same phase:
+          # an open collab session's prose rides in on this write or is lost
+          # with the DocServer (#1061), and the gates must judge what actually
+          # publishes. No-op when nobody is editing.
+          change KilnCMS.CMS.Changes.CheckpointCollabRoom
           # No content input, and a compare-and-swap on state (#879) — see
           # `:return_to_draft`. Without the filter a publish landing after a
           # concurrent transition would stamp `published_at` + artifacts onto a
@@ -1889,16 +1895,22 @@ defmodule KilnCMS.CMS.Content do
           # Accessibility gate (#403), config-gated and off by default: a publish
           # is refused when the document shows an image with neither alt text nor
           # a `decorative` mark.
-          validate KilnCMS.CMS.Validations.MediaAltText
+          validate KilnCMS.CMS.Validations.MediaAltText, before_action?: true
           # Claim gate (#377), config-gated and off by default: a publish is
           # refused when the document carries a phrase an `:error`-severity
           # compliance rule matches. Same rules the editor's compliance panel
           # advises on, so the gate can never disagree with the panel the
           # author has been reading.
-          validate KilnCMS.CMS.Validations.ComplianceClaims
+          validate KilnCMS.CMS.Validations.ComplianceClaims, before_action?: true
           change filter(expr(^ref(:state) == :draft or ^ref(:state) == :in_review))
           change transition_state(:published)
           change set_attribute(:published_at, &DateTime.utc_now/0)
+          # A publish never used to change content, so it carried none of the
+          # derived-column changes. It can now (#1061), and a published document
+          # that cannot be found by its own published words is a poor answer.
+          # After the checkpoint, because hooks run in registration order.
+          change KilnCMS.CMS.Changes.SetSearchText
+          change KilnCMS.CMS.Changes.EnqueueEmbedding
           change KilnCMS.CMS.Changes.RecordPublishedVersion
           change KilnCMS.CMS.Changes.FireArtifacts
           change KilnCMS.CMS.Changes.NotifyWebhooks
@@ -1909,20 +1921,31 @@ defmodule KilnCMS.CMS.Content do
         update :publish_scheduled do
           # Run by the AshOban scheduler once `scheduled_at` has passed.
           require_atomic? false
+          # Same room checkpoint as `:publish`, and for the same reason (#1061).
+          # "A scheduled publish is never under an open room" is false: schedule
+          # for 09:00, keep editing collaboratively, and the cron fires at 09:00
+          # into a live room. FIRST, so the gates below see the merged tree.
+          change KilnCMS.CMS.Changes.CheckpointCollabRoom
           # Same compliance gate as `:publish` (#356) — a scheduled publish must
           # also satisfy any required consent.
           validate KilnCMS.CMS.Validations.RequiredConsent
           # Accessibility gate (#403), config-gated and off by default: a publish
           # is refused when the document shows an image with neither alt text nor
           # a `decorative` mark.
-          validate KilnCMS.CMS.Validations.MediaAltText
+          validate KilnCMS.CMS.Validations.MediaAltText, before_action?: true
           # Same claim gate as `:publish` (#377) — a scheduled publish is still
           # a publish, and a claim that must not go live at 09:00 by hand must
           # not go live at 09:00 by scheduler either.
-          validate KilnCMS.CMS.Validations.ComplianceClaims
+          validate KilnCMS.CMS.Validations.ComplianceClaims, before_action?: true
           change transition_state(:published)
           change set_attribute(:published_at, &DateTime.utc_now/0)
           change set_attribute(:scheduled_at, nil)
+          # A publish never used to change content, so it carried none of the
+          # derived-column changes. It can now (#1061), and a published document
+          # that cannot be found by its own published words is a poor answer.
+          # After the checkpoint, because hooks run in registration order.
+          change KilnCMS.CMS.Changes.SetSearchText
+          change KilnCMS.CMS.Changes.EnqueueEmbedding
           change KilnCMS.CMS.Changes.RecordPublishedVersion
           change KilnCMS.CMS.Changes.FireArtifacts
           change KilnCMS.CMS.Changes.NotifyWebhooks
