@@ -28,6 +28,29 @@ defmodule KilnCMS.Federation.Inbox do
   nothing. A 4xx would make the sending server retry for days over something
   that is simply not built yet, and filling strangers' retry queues is a way to
   get an instance blocked. Moderated replies are phase 3 (#491).
+
+  ## Nothing is fetched for an activity that changes nothing
+
+  Authentication needs the sender's key, and the key lives in the sender's actor
+  document — so verifying *anything* costs an outbound HTTPS GET to a host the
+  unauthenticated caller named. That is a ~200-byte POST turned into a fetch of
+  up to `RemoteActor`'s byte cap, aimed wherever the caller likes, occupying a
+  web-tier process for as long as the fetch takes (#966).
+
+  So the fetch is not the first thing that happens. `needs_actor?/2` answers,
+  from the activity and this site's own identity alone, whether the actor
+  document could change the outcome: only a `Follow` or an `Undo{Follow}`
+  **addressed to this site's actor** can. Everything else — every `Like`, every
+  `Announce`, every misdelivered `Follow` — is accepted and ignored without a
+  single byte leaving the server.
+
+  The trade is that "which activity types this software acts on" becomes
+  observable before authentication. That is a property of the release, not of
+  the site: it is in this module's docs, and a prober could equally read them.
+
+  What survives is the case that has to: a `Follow` naming us. `RemoteActor`
+  caches what it fetches, so a repeat from the same actor is answered from
+  memory rather than re-fetched.
   """
 
   alias KilnCMS.Federation
@@ -50,12 +73,36 @@ defmodule KilnCMS.Federation.Inbox do
   @spec handle(map(), map(), [{String.t(), String.t()}], binary(), Ash.UUID.t(), keyword()) ::
           :ok | {:error, String.t()}
   def handle(settings, activity, headers, raw_body, org_id, _opts \\ []) do
-    with {:ok, actor_uri} <- actor_uri(activity),
-         {:ok, remote} <- RemoteActor.fetch(actor_uri),
-         :ok <- verify(settings, remote, headers, raw_body) do
-      act(settings, activity, remote, org_id)
+    identity = Actor.identity(settings)
+
+    if needs_actor?(activity, identity) do
+      with {:ok, actor_uri} <- actor_uri(activity),
+           {:ok, remote} <- RemoteActor.fetch(actor_uri),
+           :ok <- verify(settings, remote, headers, raw_body) do
+        act(settings, activity, remote, org_id)
+      end
+    else
+      Logger.debug("Federation inbox ignoring #{inspect(activity["type"])} without a fetch")
+      :ok
     end
   end
+
+  # Whether the sender's actor document could change what this request does —
+  # see the moduledoc. Deliberately the *whole* precondition `act/4` applies,
+  # not just the type: a `Follow` addressed to somebody else is dropped there
+  # whatever the document says, so fetching one buys nothing.
+  #
+  # Every clause must stay in step with `act/4` below in one direction only: it
+  # is safe for this to say `true` where `act/4` ignores (a wasted fetch), and a
+  # bug for it to say `false` where `act/4` acts (an unauthenticated write).
+  # Keep the patterns identical and the pair cannot drift silently.
+  defp needs_actor?(%{"type" => "Follow"} = activity, identity),
+    do: object_uri(activity) == identity.actor_id
+
+  defp needs_actor?(%{"type" => "Undo", "object" => %{"type" => "Follow"} = follow}, identity),
+    do: object_uri(follow) == identity.actor_id
+
+  defp needs_actor?(_activity, _identity), do: false
 
   # ── authentication ──────────────────────────────────────────────────────────
 
@@ -90,6 +137,10 @@ defmodule KilnCMS.Federation.Inbox do
 
   # ── acting ──────────────────────────────────────────────────────────────────
 
+  # `needs_actor?/2` has already established that this Follow names us — but the
+  # check is repeated rather than assumed. It is the rule that keeps a stranger
+  # from signing this site up to somebody else's firehose, and a caller that
+  # reaches `act/4` by another path (a future one, a test) must meet it too.
   defp act(settings, %{"type" => "Follow"} = activity, remote, org_id) do
     identity = Actor.identity(settings)
 

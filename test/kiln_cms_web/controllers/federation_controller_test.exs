@@ -23,6 +23,12 @@ defmodule KilnCMSWeb.FederationControllerTest do
     KilnCMS.FederationFixtures.enable_deployment!()
     org_id = KilnCMS.Accounts.default_org_id()
 
+    # `RemoteActor` caches a fetched document for minutes (#966), and every test
+    # here mints a fresh key at the SAME actor URL — a key rotation per test,
+    # which is precisely what the cache is designed not to notice. Clearing it
+    # keeps each test's stub authoritative. `async: false`, so nothing races it.
+    Cachex.clear(KilnCMS.Federation.RemoteActor.cache_name())
+
     remote_pem = Keys.generate_rsa_pem()
     {:ok, remote_key} = Keys.rsa_private_key(remote_pem)
 
@@ -51,6 +57,11 @@ defmodule KilnCMSWeb.FederationControllerTest do
   end
 
   defp stub_remote_actor(public_pem, overrides \\ %{}) do
+    # Captured here, in the test process. The stub body runs in whichever
+    # process serves the request, so a process-dictionary counter would be
+    # written in one process and read in another — and silently report zero.
+    test_pid = self()
+
     document =
       Map.merge(
         %{
@@ -68,6 +79,8 @@ defmodule KilnCMSWeb.FederationControllerTest do
     Req.Test.stub(KilnCMS.Federation, fn conn ->
       case conn.method do
         "GET" ->
+          send(test_pid, :actor_fetched)
+
           conn
           |> Plug.Conn.put_resp_content_type("application/activity+json")
           |> Plug.Conn.send_resp(200, Jason.encode!(document))
@@ -354,6 +367,96 @@ defmodule KilnCMSWeb.FederationControllerTest do
 
       assert conn |> post_signed(like, remote_pem) |> response(202)
       assert [] = Ash.read!(Follower, authorize?: false, tenant: org_id)
+    end
+
+    # #966. Verifying anything costs an outbound GET to a host the caller named,
+    # because the key that verifies the signature lives in the document being
+    # fetched. So an activity this phase does nothing with must not pay for one.
+    test "an unsigned Like costs no outbound request", %{conn: conn} do
+      like = %{
+        "@context" => "https://www.w3.org/ns/activitystreams",
+        "type" => "Like",
+        "actor" => @remote_actor,
+        "object" => "#{@origin}/ap/object/whatever"
+      }
+
+      assert conn
+             |> put_req_header("content-type", "application/activity+json")
+             |> post("/actor/inbox", Jason.encode!(like))
+             |> response(202)
+
+      refute_received :actor_fetched
+    end
+
+    # A Follow addressed elsewhere is dropped whatever the actor document
+    # says, so reading one buys nothing.
+    test "a Follow addressed to another actor costs no outbound request", %{conn: conn} do
+      misdelivered = %{follow_activity() | "object" => "https://elsewhere.example/actor"}
+
+      assert conn
+             |> put_req_header("content-type", "application/activity+json")
+             |> post("/actor/inbox", Jason.encode!(misdelivered))
+             |> response(202)
+
+      refute_received :actor_fetched
+    end
+
+    # An `Undo{Like}` carries `object` as a bare URI, and is ignored for the
+    # same reason — but it must not be confused with the `Undo{Follow}` that
+    # does need authenticating.
+    test "an Undo of something other than a Follow costs no outbound request", %{conn: conn} do
+      undo = %{
+        "@context" => "https://www.w3.org/ns/activitystreams",
+        "type" => "Undo",
+        "actor" => @remote_actor,
+        "object" => "https://remote.example/likes/1"
+      }
+
+      assert conn
+             |> put_req_header("content-type", "application/activity+json")
+             |> post("/actor/inbox", Jason.encode!(undo))
+             |> response(202)
+
+      refute_received :actor_fetched
+    end
+
+    # The case that has to keep paying: a Follow naming us is acted on, so its
+    # sender must be authenticated, so its document must be read.
+    test "a Follow naming this site is still fetched and verified", %{
+      conn: conn,
+      remote_pem: remote_pem
+    } do
+      assert conn |> post_signed(follow_activity(), remote_pem) |> response(202)
+
+      assert_received :actor_fetched
+    end
+
+    # Repeats from the same actor were re-fetched on every request.
+    test "a second activity from the same actor is served from cache", %{
+      conn: conn,
+      remote_pem: remote_pem
+    } do
+      assert conn |> post_signed(follow_activity(), remote_pem) |> response(202)
+      assert_received :actor_fetched
+
+      assert conn |> post_signed(follow_activity(), remote_pem) |> response(202)
+      refute_received :actor_fetched
+    end
+
+    # A remote server's bad minute must not be remembered as a bad ten.
+    test "a failed fetch is not cached", %{conn: conn, remote_pem: remote_pem} do
+      test_pid = self()
+
+      Req.Test.stub(KilnCMS.Federation, fn c ->
+        send(test_pid, :actor_fetched)
+        Plug.Conn.send_resp(c, 503, "")
+      end)
+
+      assert conn |> post_signed(follow_activity(), remote_pem) |> response(401)
+      assert_received :actor_fetched
+
+      assert conn |> post_signed(follow_activity(), remote_pem) |> response(401)
+      assert_received :actor_fetched
     end
 
     test "a tampered body is refused", %{conn: conn, remote_pem: remote_pem} do
