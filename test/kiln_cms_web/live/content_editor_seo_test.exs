@@ -231,6 +231,80 @@ defmodule KilnCMSWeb.ContentEditorSeoTest do
     end
   end
 
+  describe "reusable fragments are expanded in the preview (#910)" do
+    test "the Preview tab renders an embedded fragment's content, not empty", %{conn: conn} do
+      editor = authed_user(:editor)
+      # Publishing needs an admin actor (the editor's own policy check below
+      # is what's under test, not who may publish).
+      admin = authed_user(:admin)
+
+      shared =
+        CMS.create_page!(
+          %{
+            title: "Shared CTA",
+            slug: "shared-cta-#{System.unique_integer([:positive])}",
+            blocks: [%{"_type" => "heading", "text" => "Book a studio tour today"}]
+          },
+          actor: admin
+        )
+        |> then(&CMS.publish_page!(&1, %{}, actor: admin))
+
+      host =
+        CMS.create_page!(
+          %{
+            title: "Host",
+            slug: "host-fragment-#{System.unique_integer([:positive])}",
+            blocks: [%{"_type" => "fragment", "ref" => %{"type" => "page", "id" => shared.id}}]
+          },
+          actor: editor
+        )
+
+      {_lv, html} = open_editor(conn, editor, host)
+
+      assert html =~ "Book a studio tour today"
+    end
+
+    test "the SEO word count includes an embedded fragment's words", %{conn: conn} do
+      editor = authed_user(:editor)
+      admin = authed_user(:admin)
+
+      shared =
+        CMS.create_page!(
+          %{
+            title: "Shared CTA",
+            slug: "shared-cta-wc-#{System.unique_integer([:positive])}",
+            blocks: prose_blocks()
+          },
+          actor: admin
+        )
+        |> then(&CMS.publish_page!(&1, %{}, actor: admin))
+
+      empty_host =
+        CMS.create_page!(
+          %{title: "Empty host", slug: "empty-host-#{System.unique_integer([:positive])}"},
+          actor: editor
+        )
+
+      fragment_host =
+        CMS.create_page!(
+          %{
+            title: "Fragment host",
+            slug: "fragment-host-#{System.unique_integer([:positive])}",
+            blocks: [%{"_type" => "fragment", "ref" => %{"type" => "page", "id" => shared.id}}]
+          },
+          actor: editor
+        )
+
+      {empty_lv, _html} = open_editor(conn, editor, empty_host)
+      {fragment_lv, _html} = open_editor(conn, editor, fragment_host)
+
+      empty_count = :sys.get_state(empty_lv.pid).socket.assigns.seo_body_stats.word_count
+      fragment_count = :sys.get_state(fragment_lv.pid).socket.assigns.seo_body_stats.word_count
+
+      assert fragment_count > empty_count
+    end
+  end
+
   describe "social image" do
     defp media(attrs \\ %{}) do
       Ash.Seed.seed!(

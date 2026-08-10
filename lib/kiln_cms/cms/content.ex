@@ -1395,7 +1395,8 @@ defmodule KilnCMS.CMS.Content do
           :set_oembed_metadata,
           :set_next_occurrence,
           :backdate_published_at,
-          :reassign_author
+          :reassign_author,
+          :reindex_search_text
         ])
 
         # No FK from version -> source, so a `:purge` can hard-delete a record
@@ -2167,6 +2168,24 @@ defmodule KilnCMS.CMS.Content do
           # just moved anyway. What would have been a real problem is the
           # *version*, the *webhook* and the *lock*, and this action carries
           # none of those.
+        end
+
+        # Internal: recompute `search_text` against the fragment-expanded block
+        # tree, written by `KilnCMS.Firing.Engine.fire/2` (#910).
+        #
+        # A `%Fragment{}` block's own `search_text/1` is always `""` — it
+        # renders nothing itself — so the denormalized `search_text`
+        # `Changes.SetSearchText` sets on the editorial actions never carries a
+        # fragment's words: those actions see only the raw, unexpanded tree.
+        # `fire/2` already builds the expanded one for the rendered surfaces;
+        # this is its own action for the same reasons `:set_oembed_metadata`
+        # is — no webhook, no re-fired version, no lock bump for a derived
+        # column — and accepts no `:blocks`, since this never touches the
+        # document's own stored content, only the search text summarizing it.
+        update :reindex_search_text do
+          require_atomic? false
+          argument :search_text, :string, allow_nil?: false
+          change set_attribute(:search_text, arg(:search_text))
         end
 
         # Internal: advance the materialized "what's on" sort key once an

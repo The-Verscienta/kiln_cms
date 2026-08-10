@@ -95,6 +95,7 @@ defmodule KilnCMS.Firing.Engine do
 
     if mode == :persist do
       persist(document, type, org_id, artifacts)
+      reindex_search_text(document, org_id, expanded)
       # Keep the dependency graph current (decision D13). Invalidation of
       # referrers is enqueued by the caller (publish hook / re-fire worker), not
       # here, to keep fire/2 free of recursion.
@@ -114,12 +115,62 @@ defmodule KilnCMS.Firing.Engine do
 
   # The gated tiers a document's own artifact may carry: its own, when gated.
   # A `:public` document carries public fragments only.
-  defp host_audiences(document) do
+  #
+  # Public (not `defp`) so `KilnCMSWeb.ContentEditorLive` can expand the same
+  # way for its own preview/SEO panel (#910) — a fragment inside a `:member`
+  # document must not be expanded there with a wider audience than delivery
+  # will ever grant it, or the editor's own preview would show text a reader
+  # of the finished page could never see.
+  @doc false
+  @spec host_audiences(struct()) :: [atom()]
+  def host_audiences(document) do
     case Map.get(document, :audience) do
       nil -> []
       :public -> []
       audience -> [audience]
     end
+  end
+
+  # A fragment block's own `search_text` is always `""` — it renders nothing
+  # itself — so `search_text` (denormalized at save time by
+  # `Changes.SetSearchText`, from the RAW tree) never carries a fragment's
+  # words, and stays that way until something recomputes it (#910). Every
+  # fire already builds `expanded` for the rendered surfaces; recomputing here
+  # too keeps FTS/Meilisearch/document-embedding text in sync with what a
+  # reader actually sees, on both an initial fire and a re-fire wave
+  # (`RefireWorker` calls `fire/2` too, so a referrer's `search_text` catches
+  # up when the fragment it embeds changes, not just when the referrer itself
+  # is next edited).
+  #
+  # Its own narrow action, for the reason `:set_oembed_metadata` documents:
+  # no webhook, no re-fired version, no lock bump for a derived column, and no
+  # `:blocks` in `accept` — this never touches the document's own stored
+  # content, only the denormalized text summarizing it. Skipped when nothing
+  # changed, which is the common case (most documents carry no fragment, so
+  # `expanded` equals `typed` and the recomputed text already matches).
+  defp reindex_search_text(document, org_id, expanded) do
+    search_text =
+      KilnCMS.CMS.Changes.SetSearchText.compute(document, body_text(expanded))
+
+    if search_text != Map.get(document, :search_text) do
+      document
+      |> Ash.Changeset.for_update(:reindex_search_text, %{search_text: search_text},
+        authorize?: false,
+        tenant: org_id
+      )
+      |> Ash.update()
+      |> case do
+        {:ok, _updated} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning(
+            "fire: search_text reindex failed for #{document.id}: #{inspect(reason)}"
+          )
+      end
+    end
+
+    :ok
   end
 
   @doc "Read a fired artifact body for a surface: cache, then the artifact table."
