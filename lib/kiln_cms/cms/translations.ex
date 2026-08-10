@@ -23,6 +23,23 @@ defmodule KilnCMS.CMS.Translations do
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.I18n
 
+  defmodule BlocksWithheldError do
+    @moduledoc """
+    Raised when an editor whose field grant excludes `blocks` tries to translate
+    a document that has some (#1157).
+
+    Refusing rather than creating an empty shell, because a translation is not
+    a duplicate. It claims the `[slug, locale]` identity: the empty draft
+    permanently occupies that locale, the one-click path is then dead for
+    *everyone* (the create raises on the identity, and the UI hides the button
+    for a locale that already exists), and the editor cannot fill it in
+    afterwards — the same grant refuses their update. A duplicate gets a fresh
+    slug and can simply be deleted; this cannot be undone by the person who did
+    it.
+    """
+    defexception [:message]
+  end
+
   # Content fields copied into a new translation: the payload every clone
   # carries (`ContentCopy`) plus the slug — a translation is the *same*
   # document in another locale, and the `[slug, locale]` identity is what pairs
@@ -164,12 +181,20 @@ defmodule KilnCMS.CMS.Translations do
   end
 
   defp translated_blocks(record, grant, opts) do
-    if is_nil(grant) or "blocks" in grant do
-      # `keep_ids?`: see the comment above — a locale variant is the same
-      # document, and the XLIFF round-trip matches trans-units on block id.
-      ContentCopy.dump_blocks(record, role: role(opts), keep_ids?: true)
-    else
-      {[], ["blocks"]}
+    cond do
+      is_nil(grant) or "blocks" in grant ->
+        # `keep_ids?`: see the comment above — a locale variant is the same
+        # document, and the XLIFF round-trip matches trans-units on block id.
+        ContentCopy.dump_blocks(record, role: role(opts), keep_ids?: true)
+
+      # Nothing to withhold, so nothing to refuse: a source with no blocks
+      # translates to a draft with no blocks either way.
+      record.blocks in [nil, []] ->
+        {[], []}
+
+      true ->
+        raise BlocksWithheldError,
+          message: "your role cannot set blocks on this content type"
     end
   end
 

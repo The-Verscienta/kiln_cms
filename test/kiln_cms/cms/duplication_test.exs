@@ -317,6 +317,31 @@ defmodule KilnCMS.CMS.DuplicationTest do
     assert {:error, %Ash.Error.Forbidden{}} = Duplication.duplicate(:page, page, actor: editor)
   end
 
+  # The flash named attributes the copy actually carried: `withheld` was derived
+  # from every copyable attr the grant didn't name, without subtracting the ones
+  # that are exempt from the grant in the first place (#1157 review).
+  test "the withheld list does not name attributes the copy carried" do
+    admin = user(:admin)
+
+    source =
+      CMS.create_post!(
+        %{title: "Gated", slug: slug(), audience: :member, blocks: []},
+        actor: admin
+      )
+
+    # Names NEITHER exempt attribute, which is the whole point: a grant that
+    # already names them could not tell the exemption from the grant.
+    editor = user(:editor, %{field_grants: %{"post" => ["blocks"]}})
+
+    assert {:ok, copy, withheld} = Duplication.duplicate(:post, source, actor: editor)
+
+    # Both are exempt and both travelled, so neither may be reported.
+    assert copy.audience == :member
+    assert copy.title == "Gated (copy)"
+    refute "audience" in withheld
+    refute "title" in withheld
+  end
+
   test "a field-granted editor's copy carries only the granted attributes" do
     admin = user(:admin)
 

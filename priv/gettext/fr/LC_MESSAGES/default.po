@@ -9998,6 +9998,12 @@ msgstr "Votre formule"
 msgid "Your recovery codes — save them now, they won't be shown again."
 msgstr "Vos codes de récupération — enregistrez-les maintenant, ils ne seront plus affichés."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/translations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Your role cannot copy this content's blocks, so it cannot be translated."
+msgstr "Votre rôle ne peut pas copier les blocs de ce contenu, il ne peut donc pas être traduit."
+
 #: lib/kiln_cms_web/controllers/form_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Your submission couldn't be saved: %{detail}"

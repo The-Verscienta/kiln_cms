@@ -70,12 +70,23 @@ migration, a rewritten column, a dropped config key).
   copy but sever it. Both surfaces now report what didn't travel, the way
   Duplicate has since #929.
 
-- **The block envelope is no longer mistaken for a restricted field.** `_type`,
+- **The block envelope is no longer mistaken for a restricted field**, which was
+  silently costing every non-admin translation its block ids. `_type`,
   `_version` and `id` share the stored map with a block's authored fields but
   are the union's own bookkeeping. Asking a *field* policy about them answered
-  "no" for every non-admin, so a plain editor duplicating a plain page had them
-  overwritten with `nil` and was told, in a flash, that their role could not set
-  `heading._type`.
+  "no" for every non-admin, so those keys were overwritten with `nil`.
+
+  Nulling `id` defeated `keep_ids?: true`: an admin's translation preserved the
+  source's block ids and **everyone else's did not**. Those ids are persisted,
+  and they are what the XLIFF vendor round-trip matches trans-units on (#502) —
+  without them it falls back to matching on position, which is wrong the moment
+  either side is reordered. Nulling `_version` rewrote a block's stored schema
+  version to the current head, so a block still awaiting its upcast would never
+  receive it; inert today, since the only migration in the tree is idempotent
+  with the field's own default.
+
+  The visible symptom was the flash: a plain editor duplicating a plain page was
+  told their role could not set `heading._type`.
 
 - **Taking a backup now needs a platform admin, and is re-checked when the
   button is pressed** (#1160). `BackupLive` did no tier check of its own, and

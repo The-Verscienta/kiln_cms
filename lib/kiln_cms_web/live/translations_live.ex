@@ -57,6 +57,10 @@ defmodule KilnCMSWeb.TranslationsLive do
 
   # The first locale that is not the default — the common case is one extra
   # locale, and then this dashboard needs no configuring at all.
+  defp default_vendor_locale do
+    Enum.find(I18n.locales(), &(&1 != I18n.default_locale()))
+  end
+
   # A field grant can leave a translation narrower than its source, and so can
   # the block-field policy (#1157/#890) — the editor is told which, rather than
   # being left to wonder why half the document is missing. Same wording as the
@@ -70,10 +74,6 @@ defmodule KilnCMSWeb.TranslationsLive do
       locale: locale,
       fields: Enum.join(withheld, ", ")
     )
-  end
-
-  defp default_vendor_locale do
-    Enum.find(I18n.locales(), &(&1 != I18n.default_locale()))
   end
 
   # A missing chip: create the draft translation from the row's source record
@@ -97,6 +97,17 @@ defmodule KilnCMSWeb.TranslationsLive do
      |> put_flash(:info, translation_flash(locale, withheld))
      |> push_navigate(to: ~p"/editor/content/#{kind}/#{translation.id}")}
   rescue
+    # Distinguished from a generic failure because it is not one: the refusal is
+    # a permission boundary the editor can act on (ask for the grant), while
+    # "couldn't create that translation" reads as a broken feature (#1157).
+    _error in KilnCMS.CMS.Translations.BlocksWithheldError ->
+      {:noreply,
+       put_flash(
+         socket,
+         :error,
+         gettext("Your role cannot copy this content's blocks, so it cannot be translated.")
+       )}
+
     _error ->
       {:noreply, put_flash(socket, :error, gettext("Couldn't create that translation."))}
   end

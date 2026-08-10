@@ -76,8 +76,10 @@ defmodule KilnCMS.CMS.Duplication do
   @copy_suffix " (copy)"
 
   # Carried whatever the acting editor's field grant says — see the module doc.
-  # (`title` is exempt too, but it is rewritten rather than copied.)
-  @grant_exempt_attrs [:audience]
+  # `title` is exempt for a different reason than `audience`: it is rewritten
+  # rather than copied, so it is never withheld and must not be reported as
+  # such.
+  @grant_exempt_attrs [:title, :audience]
 
   @doc """
   Duplicate a record into a new draft of the same type and locale, raising on
@@ -169,39 +171,29 @@ defmodule KilnCMS.CMS.Duplication do
   defp id(id) when is_binary(id), do: id
 
   defp attrs(source, opts) do
-    allowed = ContentCopy.field_grant(source, opts)
-    {blocks, reset_fields} = blocks(source, allowed, opts)
+    grant = ContentCopy.field_grant(source, opts)
+    {copied, dropped} = ContentCopy.permitted(copyable_attrs(), grant, @grant_exempt_attrs)
+    {blocks, reset_fields} = blocks(source, grant, opts)
 
     attrs =
       source
-      |> ContentCopy.take(copied_attrs(allowed))
-      |> Map.merge(ContentCopy.take(source, @grant_exempt_attrs))
+      |> ContentCopy.take(copied)
       |> Map.put(:title, copy_title(source.title))
       |> Map.put(:locale, source.locale)
       |> Map.put(:blocks, blocks)
       |> Map.put(:tag_ids, ContentCopy.tag_ids(source))
 
-    {attrs, withheld_notes(allowed, reset_fields)}
-  end
-
-  # What the editor is told. Attribute names the grant dropped, plus any block
-  # field the block policy reset — both are cases where the copy is narrower
-  # than the source through no fault of the source.
-  defp withheld_notes(nil, reset), do: reset
-
-  defp withheld_notes(allowed, reset) do
-    dropped = Enum.reject(copyable_attrs(), &(to_string(&1) in allowed))
-
-    Enum.map(dropped, &to_string/1) ++ reset
+    # What the editor is told: attribute names the grant dropped, plus any block
+    # field the block policy reset — both cases where the copy is narrower than
+    # the source through no fault of the source. The exempt attrs are absent
+    # because they were not withheld; the previous version derived this list
+    # from `copyable_attrs()` without subtracting them, so an editor was told
+    # `audience` had not been copied while the copy carried it (#1157 review).
+    {attrs, dropped ++ reset_fields}
   end
 
   # The focus keyphrase stays with the source — see the module doc.
   defp copyable_attrs, do: ContentCopy.content_attrs() -- [:seo_keywords]
-
-  defp copied_attrs(nil), do: copyable_attrs()
-
-  defp copied_attrs(allowed),
-    do: Enum.filter(copyable_attrs(), &(to_string(&1) in allowed))
 
   # The acting tier decides which block fields survive: a value this role could
   # not have set is reset to its declared default rather than refused (#890).

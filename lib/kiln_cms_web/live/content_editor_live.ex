@@ -2720,6 +2720,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
       {:noreply, socket}
     end
   rescue
+    # Distinguished from a generic failure because it is not one: the refusal is
+    # a permission boundary the editor can act on (ask for the grant), and
+    # "couldn't create that translation" would read as a broken feature (#1157).
+    _error in KilnCMS.CMS.Translations.BlocksWithheldError ->
+      {:noreply,
+       put_flash(
+         socket,
+         :error,
+         gettext("Your role cannot copy this content's blocks, so it cannot be translated.")
+       )}
+
     _error ->
       {:noreply, put_flash(socket, :error, gettext("Couldn't create that translation."))}
   end
@@ -9186,6 +9197,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Two reasons the saved row differs from what is on screen, and they need
   # different words: unsaved work is yours to lose, a conflict is someone else's
   # save you have not read.
+  defp duplicate_confirm(_save_state, true),
+    do:
+      gettext(
+        "Someone else saved this page. Duplicating copies their version, not what you see. Continue?"
+      )
+
+  defp duplicate_confirm(save_state, _conflict) when save_state != :saved,
+    do: gettext("Unsaved changes won't be copied. Duplicate the last saved version?")
+
+  defp duplicate_confirm(_save_state, _conflict), do: false
+
   # A field grant can leave a translation narrower than its source, and so can
   # the block-field policy (#1157/#890). Saying so is the difference between
   # "translation is broken" and "your role cannot copy those fields" — the same
@@ -9200,15 +9222,4 @@ defmodule KilnCMSWeb.ContentEditorLive do
       fields: Enum.join(withheld, ", ")
     )
   end
-
-  defp duplicate_confirm(_save_state, true),
-    do:
-      gettext(
-        "Someone else saved this page. Duplicating copies their version, not what you see. Continue?"
-      )
-
-  defp duplicate_confirm(save_state, _conflict) when save_state != :saved,
-    do: gettext("Unsaved changes won't be copied. Duplicate the last saved version?")
-
-  defp duplicate_confirm(_save_state, _conflict), do: false
 end
