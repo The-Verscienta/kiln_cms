@@ -11,6 +11,34 @@ Everything here is **off by default**.
 
 ## Turning it on
 
+Go to **Claim checking** in the console (`/editor/compliance`, admin only). A
+site that has not opted in gets an explanation and a button rather than an empty
+form — which is the page's other job, since the editor renders no Compliance
+panel at all while the feature is off, and before this page existed nothing in
+the admin UI said the feature was there.
+
+Everything on that page belongs to **the site you are on** (#857):
+
+| Setting | Effect |
+|---|---|
+| Show the Compliance panel | Whether the checks run and the panel appears. Off, both checks report `:n_a` and the panel never renders. |
+| Refuse to publish… | Whether an `:error`-severity match **refuses the publish**. Off, everything is advice. **Requires the panel to be on** — on its own it is inert. |
+| Also use the rules this deployment ships | Whether the operator's rules (the shipped pack unless they replaced it) apply here. |
+| Phrases to flag | This site's own claim vocabulary, one per line. |
+| What a match on these phrases means | The severity those phrases carry — only *blocking* can refuse a publish. |
+| Text every body must contain | The required disclaimer. Blank inherits the operator's. |
+
+The first two are separate switches on purpose, but they are not independent:
+the gate is read through the panel switch, so setting it alone does nothing.
+Most publications want the panel long before they want a gate, and turning a
+claims vocabulary into a hard publish refusal is a decision someone should make
+deliberately.
+
+### The operator layer underneath
+
+A site with no saved settings inherits the deployment-wide config, which is
+what a single-tenant install can use on its own:
+
 ```elixir
 config :kiln_cms, KilnCMS.Compliance,
   enabled: true,
@@ -19,18 +47,28 @@ config :kiln_cms, KilnCMS.Compliance,
   rules: :default
 ```
 
-| Key | Effect |
-|---|---|
-| `enabled` | Whether the checks run and the panel appears. Off, both checks report `:n_a` and the panel never renders. |
-| `require_at_publish` | Whether an `:error`-severity match **refuses the publish**. Off, everything is advice. **Requires `enabled: true`** — on its own it is inert. |
-| `disclaimer` | Text a body must contain verbatim, or `nil`. |
-| `rules` | `:default` for the shipped pack, or your own list. |
+`KilnCMS.Compliance.Settings` resolves the two layers, most specific first. The
+difference between *inherit* and *this site said so* is whether the site has a
+row at all: **Save** writes one, **Use the operator defaults** drops it. The one
+exception is the disclaimer, where blank means inherit — a text box has no third
+state, and an operator's required disclaimer dropped by an admin tabbing past an
+empty field would be a compliance requirement lost by accident.
 
-The two are separate switches on purpose, but they are not independent:
-`require_at_publish` is read through `enabled`, so setting it alone does
-nothing. Most publications want the panel long before they want a gate, and
-turning a claims vocabulary into a hard publish refusal is a decision an
-operator should make deliberately.
+This layering is why the feature is per-site and not per-deployment. A claims
+vocabulary is a statement about one publication's voice and jurisdiction, and
+`require_at_publish` is a hard refusal: while both lived only in config, one
+clinic deciding that "cures" cannot ship refused every other site's publishes on
+the same instance, and a tenant that wanted the panel *off* could not turn it
+off either.
+
+### When the settings row cannot be read
+
+A rolling deploy before the table exists, a pool timeout: the advisory settings
+fall back to the operator config, and the **publish gate is forced off**
+(`KilnCMS.Compliance.Settings.unavailable/0`). The gate is the one axis where
+guessing wrong turns a transient read error into a site that cannot publish at
+all — and it would be refusing on a vocabulary nobody could confirm, since the
+site's own rules are exactly what could not be read.
 
 ## Why this is an advisory, not an agent
 
@@ -106,6 +144,12 @@ A rule code the web layer has no sentence for still renders: the panel quotes
 the matched phrases and names the rule. Malformed rules — a bad severity, no
 usable phrases — are dropped rather than raising.
 
+A **site's** own phrases (the ones typed into `/editor/compliance`) become one
+rule, `:site_claim`, carrying the severity chosen beside them. One fixed code
+rather than one per phrase because a code is an atom the web layer translates,
+and minting atoms from column values is how a settings table becomes an
+unbounded atom table.
+
 ### Severity is the operator's statement of meaning
 
 `:error` is what the publish gate acts on, and it is the only severity that
@@ -136,10 +180,14 @@ under the shipped pack rather than passing it — a document nobody checked is
 not a document that is clean, and green would be the single most misleading
 thing this could show.
 
-**Custom** rules run in every locale. An operator who configured French phrases
-meant them to fire.
+Any **other** rule set runs in every locale — whether the phrases came from an
+operator's config or from a site's own list. Someone who wrote French phrases
+meant them to fire. The test is on the resolved rules, not on a config key: a
+site that added one phrase of its own is no longer under the shipped pack alone.
 
 ## The disclaimer check
+
+Set on `/editor/compliance`, or deployment-wide:
 
 ```elixir
 config :kiln_cms, KilnCMS.Compliance,
@@ -158,6 +206,8 @@ error before anything has been written.
 
 ## The publish gate
 
+Turned on per site (or, underneath, deployment-wide):
+
 ```elixir
 config :kiln_cms, KilnCMS.Compliance,
   enabled: true,
@@ -171,6 +221,13 @@ the next one on each retry. A scheduled publish is gated identically — a claim
 that must not go live by hand must not go live by scheduler.
 
 Details worth knowing before switching it on:
+
+**It resolves the settings of the site being published to, uncached.** The gate
+runs inside the write transaction, and a cached resolve there would check out a
+second pool connection while holding the first — see
+`KilnCMS.Compliance.Settings.for_org_uncached/1`. One indexed single-row read
+per publish is nothing; it is the editor's per-keystroke path that needs the
+cache, and that one is not in a transaction.
 
 **It scans the SEO fields too, each on its own.** The title, SEO title and SEO
 description are scanned alongside the block text. A claim in the meta
@@ -236,7 +293,15 @@ consuming alternation is leftmost-first, so "always works" swallows "works for
 everyone" and the overlapping rule is never seen. Per rule, the rule that
 matched is the rule that was scanned.
 
-The compiled form is cached and rebuilt only when the configured rules change.
+The compiled form is cached under the rule list that produced it, and several
+rule sets are kept at once: with per-site vocabularies, a single-entry cache
+meant two sites with different phrase lists evicted each other on every scan,
+and `:persistent_term.put/2` is not a cheap write — it scans every process on
+the node.
+
+The **resolved settings** are cached too, per org, for five minutes, and dropped
+precisely by `KilnCMS.CMS.Changes.BustCompliance` on any settings write — so an
+admin who turns the gate off to unblock a release does not wait out a TTL.
 
 None of this applies to the **publish gate**, which is a per-write cost rather
 than a per-keystroke one — see above.
@@ -248,7 +313,10 @@ the point in a compliance context.
 
 | | |
 |---|---|
-| `KilnCMS.Compliance` | config, the rule pack, the scanner |
+| `KilnCMS.Compliance` | the rule pack and the scanner |
+| `KilnCMS.Compliance.Settings` | the resolved per-site settings: row over config |
+| `KilnCMS.CMS.SiteCompliance` | the per-org row |
+| `KilnCMSWeb.ComplianceLive` | `/editor/compliance` — the admin page and the explainer |
 | `KilnCMS.Compliance.Checks.Claims` | phrases → findings, reading the scan as a fact |
 | `KilnCMS.Compliance.Checks.Disclaimer` | required disclaimer present |
 | `KilnCMS.CMS.Validations.ComplianceClaims` | the opt-in publish and edit gate |
@@ -283,8 +351,14 @@ Tracked separately.
 `docs/p3-plan.md` says claim checks feed that dashboard. `/editor/governance`
 has no compliance surface. Also tracked separately.
 
-**Configuration is global, not per-org.** Every comparable operator switch here
-— outbound [link checking](link-checking.md), branding, code injection, form
-spam keywords — is a per-org resource with an admin UI. This is `config.exs`
-only, so on a multi-org install one tenant's vocabulary and gate apply to all
-of them. That is the gap to close before this is used on a shared instance.
+**A site's vocabulary is one flat list at one severity.** `/editor/compliance`
+writes every phrase a site adds into a single `:site_claim` rule. A publication
+wanting *two* house rules at different severities — say a blocking list and an
+advisory one — cannot express that without an operator editing config. The
+shape is there (the resolver merges rule lists), and the UI is what is narrow;
+splitting it is a change to this page, not to the model.
+
+Per-org configuration itself is done: #857 moved the switches, the disclaimer
+and the vocabulary onto `KilnCMS.CMS.SiteCompliance` with an admin page, which
+is the same shape as outbound [link checking](link-checking.md), branding, code
+injection and the form spam keywords.

@@ -262,6 +262,26 @@ defmodule KilnCMS.Cache do
   end
 
   @doc """
+  Cache key for a site's resolved claim-checking settings (#857) — the
+  `%KilnCMS.Compliance.Settings{}` its editor and publish gate are judged
+  against, config layer already folded in.
+  """
+  def compliance_key(org_id), do: "compliance:#{org_id}"
+
+  @doc """
+  Drop a site's cached claim-checking settings after a settings save.
+
+  Cluster-wide (#739), like branding and code injection: these hold the same
+  shape of thing, and an admin who turns the publish gate off to unblock a
+  release must not have it stay on wherever their next request lands.
+  """
+  @spec bust_compliance(Ash.UUID.t()) :: :ok
+  def bust_compliance(org_id) do
+    if enabled?(), do: ClusterBust.broadcast([compliance_key(org_id)])
+    :ok
+  end
+
+  @doc """
   Cache key for a site's generated sitemap XML (shared with the sitemap
   controller). Per-org (epic #336): each organization serves its own sitemap of
   its own published URLs.

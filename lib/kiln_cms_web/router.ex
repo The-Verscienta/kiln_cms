@@ -384,6 +384,11 @@ defmodule KilnCMSWeb.Router do
       # branding is: full-text syndication is a disclosure decision, and it used
       # to live in a config file no tenant admin could reach.
       live "/editor/feeds", FeedSettingsLive, :index
+      # Per-site claim checking (#857) — whether the editor's Compliance panel
+      # runs here, whether it gates publishing, and this site's own claims
+      # vocabulary. Org-scoped for the reason feeds are: a hard publish refusal
+      # used to live in a config file no tenant admin could reach.
+      live "/editor/compliance", ComplianceLive, :index
       # White-label branding for the current site (#48) — name, logo, colour.
       # Org-scoped: you brand the site you're on (switch org by host).
       live "/editor/branding", BrandingLive, :index

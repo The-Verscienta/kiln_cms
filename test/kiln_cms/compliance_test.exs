@@ -7,6 +7,7 @@ defmodule KilnCMS.ComplianceTest do
   alias KilnCMS.Compliance
   alias KilnCMS.Compliance.Checks.Claims
   alias KilnCMS.Compliance.Checks.Disclaimer
+  alias KilnCMS.Compliance.Settings
 
   setup do
     original = Application.get_env(:kiln_cms, KilnCMS.Compliance)
@@ -22,39 +23,52 @@ defmodule KilnCMS.ComplianceTest do
     )
   end
 
+  # The operator layer on its own — no database, which is what keeps this file a
+  # unit test of the scanner and the checks. `KilnCMS.Compliance.SettingsTest`
+  # covers the per-org row on top of it.
+  defp settings, do: Settings.defaults()
+
+  defp rules, do: settings().rules
+
   defp context(opts) do
     text = Keyword.get(opts, :text, "")
     matches = Keyword.get(opts, :matches, :scan)
+    given = Keyword.get(opts, :settings, settings())
+    scan_with = if given == :absent, do: settings(), else: given
 
     body = %Body{text: text, folded_text: Body.fold(text)}
 
     facts =
       case matches do
-        :scan -> %{claim_matches: Compliance.scan(text)}
+        :scan -> %{claim_matches: Compliance.scan(text, scan_with.rules)}
         :absent -> %{}
         other -> %{claim_matches: other}
       end
 
+    # `settings: :absent` is the caller that resolved none at all — a check must
+    # report `:n_a` there rather than inventing the deployment's answer.
+    facts = if given == :absent, do: facts, else: Map.put(facts, :compliance_settings, given)
+
     Context.new(%{}, body, locale: Keyword.get(opts, :locale, "en"), facts: facts)
   end
 
-  describe "scan/1 phrase matching" do
+  describe "scan/2 phrase matching" do
     setup do
       configure([])
     end
 
     test "matches a multi-word phrase and attributes it to its rule" do
       assert %{regulatory_claim: ["fda approved"]} =
-               Compliance.scan("Our formula is FDA approved.")
+               Compliance.scan("Our formula is FDA approved.", rules())
     end
 
     test "is case insensitive and matches hyphenated variants listed separately" do
-      assert %{regulatory_claim: ["fda-approved"]} = Compliance.scan("FDA-APPROVED")
+      assert %{regulatory_claim: ["fda-approved"]} = Compliance.scan("FDA-APPROVED", rules())
     end
 
     test "matches across a line break or doubled spacing" do
       assert %{regulatory_claim: ["clinically proven"]} =
-               Compliance.scan("It is clinically\n  proven to work.")
+               Compliance.scan("It is clinically\n  proven to work.", rules())
     end
 
     # The bug this guards is the whole reason the phrases are word-bounded:
@@ -64,29 +78,29 @@ defmodule KilnCMS.ComplianceTest do
     test "does not match a phrase embedded inside a longer word" do
       configure(rules: [%{code: :curative, severity: :error, phrases: ["cures"]}])
 
-      assert %{} == Compliance.scan("He secures manicures and procures things.")
-      assert %{curative: ["cures"]} = Compliance.scan("It cures nothing.")
+      assert %{} == Compliance.scan("He secures manicures and procures things.", rules())
+      assert %{curative: ["cures"]} = Compliance.scan("It cures nothing.", rules())
     end
 
     test "matches a phrase whose edge is not a word character" do
-      assert %{safety_claim: ["100% safe"]} = Compliance.scan("It is 100% safe.")
+      assert %{safety_claim: ["100% safe"]} = Compliance.scan("It is 100% safe.", rules())
     end
 
     test "collects several rules from one pass, deduped" do
-      matches = Compliance.scan("FDA approved, no side effects, and FDA approved again.")
+      matches = Compliance.scan("FDA approved, no side effects, and FDA approved again.", rules())
 
       assert matches[:regulatory_claim] == ["fda approved"]
       assert matches[:safety_claim] == ["no side effects"]
     end
 
     test "returns an empty map for clean text" do
-      assert %{} == Compliance.scan("A calm article about herbal tea.")
+      assert %{} == Compliance.scan("A calm article about herbal tea.", rules())
     end
 
     test "returns an empty map when no rule carries a usable phrase" do
       configure(rules: [%{code: :junk, severity: :error, phrases: ["", "  "]}])
 
-      assert %{} == Compliance.scan("fda approved")
+      assert %{} == Compliance.scan("fda approved", rules())
     end
 
     test "does not raise on a malformed rule in the list" do
@@ -111,7 +125,7 @@ defmodule KilnCMS.ComplianceTest do
     # ſ (U+017F) and on Greek final sigma, so attributing a match by looking
     # the downcased text back up in a phrase map dropped it entirely.
     test "a match whose case-folding downcase cannot reproduce is still reported" do
-      matches = Compliance.scan("Our formula has no ſide effects and is FDA approved.")
+      matches = Compliance.scan("Our formula has no ſide effects and is FDA approved.", rules())
 
       assert Map.has_key?(matches, :safety_claim)
       assert Map.has_key?(matches, :regulatory_claim)
@@ -152,12 +166,14 @@ defmodule KilnCMS.ComplianceTest do
     end
   end
 
-  describe "configuration" do
+  # The operator layer, which is what a site with no row of its own inherits.
+  # `KilnCMS.Compliance.SettingsTest` covers the row on top of it.
+  describe "the operator configuration layer" do
     test "is off unless enabled" do
       Application.put_env(:kiln_cms, KilnCMS.Compliance, [])
 
-      refute Compliance.enabled?()
-      refute Compliance.require_at_publish?()
+      refute settings().enabled?
+      refute settings().require_at_publish?
     end
 
     test "the publish gate stays off while claim checking itself is off" do
@@ -166,7 +182,7 @@ defmodule KilnCMS.ComplianceTest do
         require_at_publish: true
       )
 
-      refute Compliance.require_at_publish?()
+      refute settings().require_at_publish?
     end
 
     test "drops malformed rules rather than raising" do
@@ -179,23 +195,41 @@ defmodule KilnCMS.ComplianceTest do
         ]
       )
 
-      assert [%{code: :good}] = Compliance.rules()
+      assert [%{code: :good}] = rules()
     end
 
     test "a blank disclaimer reads as none configured" do
       configure(disclaimer: "   ")
-      assert Compliance.disclaimer() == nil
+      assert settings().disclaimer == nil
 
       configure(disclaimer: "Not medical advice.")
-      assert Compliance.disclaimer() == "Not medical advice."
+      assert settings().disclaimer == "Not medical advice."
     end
 
     test "recompiles when the configured rules change" do
       configure(rules: [%{code: :a, severity: :error, phrases: ["alpha"]}])
-      assert %{a: ["alpha"]} = Compliance.scan("alpha beta")
+      assert %{a: ["alpha"]} = Compliance.scan("alpha beta", rules())
 
       configure(rules: [%{code: :b, severity: :error, phrases: ["beta"]}])
-      assert %{b: ["beta"]} = Compliance.scan("alpha beta")
+      assert %{b: ["beta"]} = Compliance.scan("alpha beta", rules())
+    end
+
+    # Two sites with different vocabularies alternating used to evict each
+    # other from a single-entry cache, so every scan recompiled — and
+    # `:persistent_term.put/2` is not a cheap write, it scans every process on
+    # the node. Asserted on the cache itself: both rule sets scan correctly
+    # either way, so only the retained entries show the thrash is gone.
+    test "keeps compiled scanners for several rule sets at once" do
+      alpha = [%{code: :a, severity: :error, phrases: ["alpha"]}]
+      beta = [%{code: :b, severity: :error, phrases: ["beta"]}]
+
+      assert %{a: ["alpha"]} = Compliance.scan("alpha beta", alpha)
+      assert %{b: ["beta"]} = Compliance.scan("alpha beta", beta)
+
+      cached = :persistent_term.get({Compliance, :scanners}, %{})
+
+      assert Map.has_key?(cached, alpha)
+      assert Map.has_key?(cached, beta)
     end
   end
 
@@ -205,23 +239,23 @@ defmodule KilnCMS.ComplianceTest do
     end
 
     test "reads severity from the matching rule" do
-      assert Compliance.severity(:regulatory_claim) == :error
-      assert Compliance.severity(:efficacy_claim) == :warning
+      assert Compliance.severity(:regulatory_claim, rules()) == :error
+      assert Compliance.severity(:efficacy_claim, rules()) == :warning
     end
 
     # A `matches` map computed under one configuration and judged under another
     # must not become an error by accident.
     test "an unknown code falls back to :warning, never :error" do
-      assert Compliance.severity(:a_rule_nobody_configured) == :warning
+      assert Compliance.severity(:a_rule_nobody_configured, rules()) == :warning
     end
 
     test "keeps only error-severity rules" do
-      matches = Compliance.scan("100% safe with guaranteed results")
+      matches = Compliance.scan("100% safe with guaranteed results", rules())
 
       assert Map.has_key?(matches, :safety_claim)
       assert Map.has_key?(matches, :efficacy_claim)
 
-      errors = Compliance.errors_only(matches)
+      errors = Compliance.errors_only(matches, rules())
 
       assert Map.has_key?(errors, :safety_claim)
       refute Map.has_key?(errors, :efficacy_claim)
@@ -268,6 +302,13 @@ defmodule KilnCMS.ComplianceTest do
     test "is :n_a while claim checking is off" do
       configure(enabled: false)
       assert :n_a == Claims.check(context(text: "FDA approved."))
+    end
+
+    # Which rules apply is a property of the site (#857), so a caller that
+    # resolved none has checked nothing — the same answer, for the same reason,
+    # as a caller that computed no scan.
+    test "is :n_a when the caller resolved no settings" do
+      assert :n_a == Claims.check(context(text: "FDA approved.", settings: :absent))
     end
 
     test "is :n_a on a non-English document under the shipped English pack" do
@@ -331,6 +372,15 @@ defmodule KilnCMS.ComplianceTest do
     test "is :n_a while claim checking is off, even with a disclaimer configured" do
       configure(enabled: false, disclaimer: "Not medical advice.")
       assert :n_a == Disclaimer.check(context(text: "An article."))
+    end
+
+    test "is :n_a when the caller resolved no settings" do
+      configure(disclaimer: "Not medical advice.")
+
+      assert :n_a ==
+               Disclaimer.check(
+                 context(text: "An article with no disclaimer.", settings: :absent)
+               )
     end
   end
 

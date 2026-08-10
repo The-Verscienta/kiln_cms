@@ -407,6 +407,16 @@ defmodule KilnCMS.CMS do
       define :save_site_editorial_settings, action: :save
     end
 
+    # Per-org claim-checking settings (#857): whether the compliance panel runs
+    # for this site, whether it gates publishing, and the site's own claim
+    # vocabulary. The layer above `config :kiln_cms, KilnCMS.Compliance`,
+    # resolved through `KilnCMS.Compliance.Settings`.
+    resource KilnCMS.CMS.SiteCompliance do
+      define :list_site_compliance, action: :read
+      define :save_site_compliance, action: :save
+      define :reset_site_compliance, action: :destroy
+    end
+
     # One outbound URL in one document, and its last verdict (#474). Written by
     # the sweep and the check worker, both system-side; read by the report.
     resource KilnCMS.CMS.ExternalLink do

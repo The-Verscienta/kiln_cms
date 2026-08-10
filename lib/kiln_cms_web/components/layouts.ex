@@ -679,6 +679,16 @@ defmodule KilnCMSWeb.Layouts do
             path: ~p"/editor/forms",
             icon: "hero-clipboard-document-list"
           },
+          # Per-site claim checking (#857). Called "Claim checking" rather than
+          # "Compliance", which is already the Governance page's subject and the
+          # name of the editor panel this switches on — an admin looking for one
+          # should not have to guess which of two items owns it.
+          %{
+            key: :compliance,
+            label: gettext("Claim checking"),
+            path: ~p"/editor/compliance",
+            icon: "hero-scale"
+          },
           %{
             key: :funnels,
             label: gettext("Funnels"),

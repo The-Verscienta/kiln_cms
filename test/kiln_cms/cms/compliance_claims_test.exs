@@ -13,6 +13,10 @@ defmodule KilnCMS.CMS.ComplianceClaimsTest do
     :ok
   end
 
+  # No cache bust needed anywhere in this file: the gate resolves its settings
+  # through `Settings.for_org_uncached/1`, because it runs inside the write
+  # transaction. That is a production property, not a test convenience — see
+  # that function.
   defp gate!(opts \\ []) do
     Application.put_env(
       :kiln_cms,

@@ -31,7 +31,11 @@ defmodule KilnCMS.Compliance do
   hard gate at publish** for operators who want a claim to be un-shippable
   rather than merely flagged. Both are off by default.
 
-  ## Configuration
+  ## Configuration is per site, over a deployment default (#857)
+
+  This module owns the **rule pack and the scanner**. What a given site has
+  switched on lives in `KilnCMS.Compliance.Settings`, which resolves the site's
+  `KilnCMS.CMS.SiteCompliance` row over the deployment-wide config:
 
       config :kiln_cms, KilnCMS.Compliance,
         enabled: true,
@@ -47,6 +51,11 @@ defmodule KilnCMS.Compliance do
   * `disclaimer` — text that must appear in the body, or `nil` for no such
     requirement. See `KilnCMS.Compliance.Checks.Disclaimer`.
   * `rules` — `:default` for the shipped pack, or a list of custom rules.
+
+  Nothing here reads that config directly, and nothing outside `Settings`
+  should: on a multi-org install (#336) the answer to "is claim checking on"
+  is a question about *which site*, and a zero-arity reader is a function that
+  cannot ask it. Every entry point takes a resolved `t:Settings.t/0`.
 
   ## Rules
 
@@ -103,10 +112,9 @@ defmodule KilnCMS.Compliance do
   The shipped phrases are English, so `KilnCMS.Compliance.Checks.Claims`
   reports `:n_a` on a non-English document rather than passing it — a document
   nobody checked is not a document that is clean. **Custom** rules run in every
-  locale, since an operator who configured French phrases meant them to fire.
+  locale, since an operator (or an admin typing a site's own phrase list) who
+  wrote French phrases meant them to fire.
   """
-
-  alias Kiln.Advisory.Context
 
   @type rule :: %{
           required(:code) => atom(),
@@ -119,64 +127,23 @@ defmodule KilnCMS.Compliance do
 
   @cache_key {__MODULE__, :scanners}
 
-  @doc """
-  Whether claim checking runs at all. Off unless configured.
-  """
-  @spec enabled?() :: boolean()
-  def enabled?, do: Keyword.get(config(), :enabled, false)
+  # How many distinct rule sets keep their compiled scanners before the cache is
+  # dropped and rebuilt. Sized for "every site on this node, plus a few edits in
+  # flight", not for a global registry of every rule set ever seen.
+  @max_cached_scanners 32
 
   @doc """
-  Whether an `:error`-severity match blocks going live. Off unless configured.
+  Resolve a configured `rules` value — `:default` for the shipped pack, or a
+  list — into a rule list, dropping junk entries.
 
-  Independent of `enabled?/0` in config but not in effect — the gate is a no-op
-  when claim checking is off, because there is nothing to have matched.
+  A malformed rule map is dropped here rather than left to raise from inside a
+  check, where `Kiln.Advisory.Registry` catches it and the only visible effect
+  is an advisory that silently stopped appearing.
   """
-  @spec require_at_publish?() :: boolean()
-  def require_at_publish?, do: enabled?() and Keyword.get(config(), :require_at_publish, false)
-
-  @doc """
-  The disclaimer text a body must contain, or `nil` when none is required.
-  """
-  @spec disclaimer() :: String.t() | nil
-  def disclaimer do
-    case Keyword.get(config(), :disclaimer) do
-      text when is_binary(text) ->
-        case String.trim(text) do
-          "" -> nil
-          trimmed -> trimmed
-        end
-
-      _other ->
-        nil
-    end
-  end
-
-  @doc "The configured rules, with `:default` resolved and junk entries dropped."
-  @spec rules() :: [rule()]
-  def rules do
-    case Keyword.get(config(), :rules, :default) do
-      :default -> default_rules()
-      list when is_list(list) -> Enum.filter(list, &valid_rule?/1)
-      _other -> default_rules()
-    end
-  end
-
-  @doc """
-  Whether the configured rules are the shipped English pack.
-
-  What decides whether a non-English document is skipped — see the moduledoc.
-  """
-  @spec default_pack?() :: boolean()
-  def default_pack?, do: Keyword.get(config(), :rules, :default) == :default
-
-  @doc """
-  Whether `context`'s locale is one the configured rules can judge.
-
-  The default pack is English; custom rules are assumed to match the content
-  they were written for.
-  """
-  @spec judgeable?(Context.t()) :: boolean()
-  def judgeable?(%Context{} = context), do: not default_pack?() or Context.english?(context)
+  @spec rules_from(:default | [rule()] | term()) :: [rule()]
+  def rules_from(:default), do: default_rules()
+  def rules_from(list) when is_list(list), do: Enum.filter(list, &valid_rule?/1)
+  def rules_from(_other), do: default_rules()
 
   @doc """
   Whether `locale` is one the shipped English pack can judge.
@@ -304,11 +271,11 @@ defmodule KilnCMS.Compliance do
   is not called from a check regardless — the caller scans when the body
   changes and hands the result in as a `Kiln.Advisory.Context` fact. See
   `KilnCMS.Compliance.Checks.Claims`.
-  """
-  @spec scan(String.t()) :: matches()
-  def scan(text), do: scan(text, rules())
 
-  @doc "Scan against an explicit rule list — for the publish gate and for tests."
+  The rules are always passed in, never read from config here: on a
+  multi-org install they belong to *a site* (#857), and a scanner that resolved
+  them itself would scan one tenant's document against another's vocabulary.
+  """
   @spec scan(String.t(), [rule()]) :: matches()
   def scan(text, rules) when is_binary(text) and is_list(rules) do
     rules
@@ -349,15 +316,11 @@ defmodule KilnCMS.Compliance do
     do: Map.merge(left, right, fn _code, a, b -> Enum.uniq(a ++ b) end)
 
   @doc """
-  The severity configured for `code`, or `:warning` for a code with no rule.
+  The severity `code` carries in `rules`, or `:warning` for a code with no rule.
 
   The fallback matters for the publish gate: a `matches` map computed under one
-  configuration and judged under another must not silently become an `:error`.
+  site's rules and judged under another's must not silently become an `:error`.
   """
-  @spec severity(atom()) :: Kiln.Advisory.Finding.severity()
-  def severity(code), do: severity(code, rules())
-
-  @doc "As `severity/1`, against an explicit rule list already in hand."
   @spec severity(atom(), [rule()]) :: Kiln.Advisory.Finding.severity()
   def severity(code, rules) when is_list(rules) do
     # `match?` rather than `&1.code == code`: this is public and documented for
@@ -373,10 +336,6 @@ defmodule KilnCMS.Compliance do
   @doc """
   Only the matches whose rule is `:error` severity — what the publish gate acts on.
   """
-  @spec errors_only(matches()) :: matches()
-  def errors_only(matches), do: errors_only(matches, rules())
-
-  @doc "As `errors_only/1`, against an explicit rule list already in hand."
   @spec errors_only(matches(), [rule()]) :: matches()
   def errors_only(matches, rules) when is_list(rules) do
     matches
@@ -384,21 +343,38 @@ defmodule KilnCMS.Compliance do
     |> Map.new()
   end
 
-  # Compiling the alternations is not free, and `rules/0` is read from config
-  # on every call, so the compiled form is cached in `:persistent_term` keyed
-  # on the rules that produced it. Config is settable at runtime and rewritten
-  # freely in tests, so the cache stores the rules alongside the scanners and
-  # recompiles when they differ rather than trusting the key alone.
+  # Compiling the alternations is not free, so the compiled form is cached in
+  # `:persistent_term` under the rules that produced it. Rules are runtime data
+  # — config is settable at runtime, and since #857 a site's own phrases are a
+  # database row — so the cache is keyed on the rule list itself and never on a
+  # generation counter it would have to be told to bump.
+  #
+  # A **map** of rule-set to scanners rather than the single entry this started
+  # as: with per-org rules, two sites with different vocabularies alternating
+  # made every call a miss, and `:persistent_term.put/2` is not a cheap write —
+  # it scans every process for references to the old term. One tenant's
+  # keystrokes would have paid for the other's.
+  #
+  # Bounded by dropping the whole map at `@max_cached_scanners`: entries are
+  # never invalidated (a rule set that no longer exists is simply never looked
+  # up again), so without a ceiling a long-lived node that has seen many edits
+  # of many sites' phrase lists accumulates compiled regexes forever. Resetting
+  # wholesale rather than evicting one costs a recompile for the sites still
+  # active and needs no recency bookkeeping in a term that is expensive to
+  # write.
   #
   # Returns `[{code, regex}]` in rule order.
   defp scanner(rules) do
-    case :persistent_term.get(@cache_key, nil) do
-      {^rules, scanners} ->
+    cache = :persistent_term.get(@cache_key, %{})
+
+    case Map.fetch(cache, rules) do
+      {:ok, scanners} ->
         scanners
 
-      _stale ->
+      :error ->
         scanners = compile(rules)
-        :persistent_term.put(@cache_key, {rules, scanners})
+        base = if map_size(cache) >= @max_cached_scanners, do: %{}, else: cache
+        :persistent_term.put(@cache_key, Map.put(base, rules, scanners))
         scanners
     end
   end
@@ -482,6 +458,4 @@ defmodule KilnCMS.Compliance do
        do: Enum.any?(phrases, &(normalize_phrase(&1) != ""))
 
   defp valid_rule?(_rule), do: false
-
-  defp config, do: Application.get_env(:kiln_cms, __MODULE__, [])
 end

@@ -262,6 +262,11 @@ config :kiln_cms, Kiln.Advisory,
 # The shipped rule pack is deliberately narrow, and is meant to be extended per
 # publication. See `KilnCMS.Compliance` for why bare curative vocabulary
 # ("cures", "heals") is NOT in it.
+#
+# This is the DEPLOYMENT-WIDE layer (#857). Each site's own answer lives on its
+# `KilnCMS.CMS.SiteCompliance` row, edited at `/editor/compliance`, and
+# `KilnCMS.Compliance.Settings` resolves the two — a site with no row inherits
+# exactly what is here, which is what a single-tenant install wants.
 config :kiln_cms, KilnCMS.Compliance,
   enabled: false,
   require_at_publish: false,

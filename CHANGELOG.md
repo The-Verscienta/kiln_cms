@@ -27,6 +27,34 @@ migration, a rewritten column, a dropped config key).
 
 ## [Unreleased]
 
+### Added
+
+- **Claim checking is per site, and has a page** (#857). `KilnCMS.Compliance`
+  was configured entirely in `config.exs`, which is the wrong grain on a
+  multi-org install: a claims vocabulary is a statement about one publication's
+  voice and jurisdiction, and `require_at_publish` is a hard publish refusal.
+  One clinic deciding that "cures" cannot ship refused every other site's
+  publishes on the same instance, and a tenant that wanted the panel off could
+  not turn it off either.
+
+  Each site now has a `KilnCMS.CMS.SiteCompliance` row — the panel switch, the
+  publish gate, the required disclaimer, whether the deployment's rules apply,
+  and its own phrase list with a severity — edited at **Claim checking**
+  (`/editor/compliance`, admin only). `KilnCMS.Compliance.Settings` resolves
+  that row over the existing `config :kiln_cms, KilnCMS.Compliance`, so a site
+  that saves nothing inherits exactly what it inherited before and a
+  single-tenant install needs no change.
+
+  The page is also the answer to the feature being invisible: it shipped off,
+  and the editor renders no Compliance panel while it is off, so nothing in the
+  admin UI said it existed. A site that has not opted in now gets an explainer
+  and one button, the way `/editor/links` does for outbound link checking.
+
+  If the settings row cannot be read at all, the advisory switches fall back to
+  the operator config and the **publish gate is forced off**: that is the one
+  axis where guessing wrong turns a transient read error into a site that
+  cannot publish, and it would be refusing on rules nobody could confirm.
+
 ## [0.5.0] - 2026-08-09
 
 ### Added

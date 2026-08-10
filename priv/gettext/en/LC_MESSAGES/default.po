@@ -361,6 +361,11 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/compliance_components.ex
 #, elixir-autogen, elixir-format
+msgid "%{phrases} is on this site's list of phrases to review before publishing."
+msgstr ""
+
+#: lib/kiln_cms_web/components/compliance_components.ex
+#, elixir-autogen, elixir-format
 msgid "%{phrases} matches the %{rule} compliance rule."
 msgstr ""
 
@@ -1001,6 +1006,11 @@ msgstr ""
 msgid "Adds detail drawn from this block and the rest of the page."
 msgstr ""
 
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Advice only (warning)"
+msgstr ""
+
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
 msgid "After changing slug conventions, every existing slug looks hand-picked — check the box to migrate them all."
@@ -1110,6 +1120,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Also attached"
+msgstr ""
+
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Also use the rules this deployment ships"
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -1506,6 +1521,16 @@ msgstr ""
 msgid "Blocks"
 msgstr ""
 
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Blocks publishing"
+msgstr ""
+
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Blocks publishing (error)"
+msgstr ""
+
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/controllers/content_controller.ex
 #: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex
@@ -1876,6 +1901,32 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Citation"
+msgstr ""
+
+#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Claim checking"
+msgstr ""
+
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Claim checking is off for this site"
+msgstr ""
+
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Claim checking is on. The Compliance panel now appears in the editor."
+msgstr ""
+
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Claim checking settings could not be saved."
+msgstr ""
+
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Claim checking settings saved."
 msgstr ""
 
 #: lib/kiln_cms_web/live/release_live.ex
@@ -4423,6 +4474,16 @@ msgstr ""
 msgid "Indent"
 msgstr ""
 
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Info"
+msgstr ""
+
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Informational (info)"
+msgstr ""
+
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #, elixir-autogen, elixir-format
 msgid "Inline scripts allowed by this site's policy"
@@ -4884,6 +4945,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
 msgid "Mastodon only. Must be https, and reachable from this server."
+msgstr ""
+
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Matched as a substring, ignoring case and line wrapping, so it can sit inside a longer paragraph — but not reworded. Leave blank to inherit whatever the operator configured."
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/content_html.ex
@@ -5515,6 +5581,11 @@ msgstr ""
 msgid "No results for “%{query}”."
 msgstr ""
 
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format
+msgid "No rules apply, so every document reports as unchecked rather than as clean. Add some phrases, or put the deployment's rules back."
+msgstr ""
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "No saved versions yet."
@@ -5685,6 +5756,7 @@ msgstr ""
 msgid "Nothing has asked for a URL this site can't serve."
 msgstr ""
 
+#: lib/kiln_cms_web/live/compliance_live.ex
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Nothing has been set for this site yet, so it follows whatever the operator configured for the whole deployment. Saving below gives this site its own settings."
@@ -5698,6 +5770,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Nothing in this release"
+msgstr ""
+
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nothing is scanned and no panel appears until you switch it on, and what you switch on applies to this site only."
 msgstr ""
 
 #: lib/kiln_cms_web/live/editor_live.ex
@@ -5809,6 +5886,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/analytics_live.ex
 #, elixir-autogen, elixir-format
 msgid "On-site searches that returned nothing. Each is a reader who looked for something this site doesn't cover."
+msgstr ""
+
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format
+msgid "One per line. Matched case-insensitively on whole words, so \"cures\" does not match \"secures\". Whitespace between words is flexible, so a phrase still matches text the editor wrapped across a line."
 msgstr ""
 
 #: lib/kiln_cms_web/components/seo_components.ex
@@ -6201,6 +6283,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Photos from Unsplash — importing adds a copy to your library."
+msgstr ""
+
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Phrases in this site's content that a regulator, a clinic's counsel or a style guide would want a second look at before it goes live — shown to authors in the editor's Compliance panel."
+msgstr ""
+
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Phrases to flag"
 msgstr ""
 
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
@@ -6647,6 +6739,11 @@ msgstr ""
 msgid "Refresh"
 msgstr ""
 
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Refuse to publish a document containing a blocking claim"
+msgstr ""
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Regenerate"
@@ -6864,6 +6961,11 @@ msgstr ""
 msgid "Remove this path from the list? It returns if it's hit again."
 msgstr ""
 
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format, fuzzy
+msgid "Remove this site's claim checking settings and follow the deployment defaults again?"
+msgstr ""
+
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #, elixir-autogen, elixir-format
 msgid "Remove this site's custom code entirely?"
@@ -6981,6 +7083,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Required"
+msgstr ""
+
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format, fuzzy
+msgid "Required disclaimer"
 msgstr ""
 
 #: lib/kiln_cms_web/live/branding_live.ex
@@ -7208,6 +7315,11 @@ msgstr ""
 msgid "Rules"
 msgstr ""
 
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Rules in effect"
+msgstr ""
+
 #: lib/kiln_cms_web/live/automation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Run a reaction when content is published, updated, or unpublished — email, an internal broadcast, cache invalidation, or a re-index. HTTP/Slack notifications are the Webhooks page's job."
@@ -7283,6 +7395,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/code_injection_live.ex
+#: lib/kiln_cms_web/live/compliance_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
@@ -7379,6 +7492,7 @@ msgid "Saved."
 msgstr ""
 
 #: lib/kiln_cms_web/live/code_injection_live.ex
+#: lib/kiln_cms_web/live/compliance_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
@@ -7723,6 +7837,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
 msgid "Show the \"Powered by\" line in the public footer"
+msgstr ""
+
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Show the Compliance panel in the editor"
 msgstr ""
 
 #: lib/kiln_cms_web/live/redirect_live.ex
@@ -8273,6 +8392,11 @@ msgstr ""
 msgid "Test ping queued — see deliveries below."
 msgstr ""
 
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Text every body must contain"
+msgstr ""
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Text formatting"
@@ -8593,9 +8717,19 @@ msgstr ""
 msgid "The preflight check failed unexpectedly."
 msgstr ""
 
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format
+msgid "The publish gate acts only on rules marked as blocking. Authors editing a document that already carried a flagged phrase are not stopped for words they did not add."
+msgstr ""
+
 #: lib/kiln_cms_web/components/compliance_components.ex
 #, elixir-autogen, elixir-format
 msgid "The required disclaimer is missing. Add it verbatim: “%{disclaimer}”"
+msgstr ""
+
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format
+msgid "The shipped pack deliberately leaves out bare curative words — \"cures\", \"heals\", \"treats\" — because they have too many legitimate uses to flag without knowing a publication's subject. That is what the phrase list above is for."
 msgstr ""
 
 #: lib/kiln_cms_web/live/overview_live.ex
@@ -8811,6 +8945,12 @@ msgstr ""
 msgid "This setting applies to this form only — another site's forms are unaffected by what you allow here."
 msgstr ""
 
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site follows the operator defaults again."
+msgstr ""
+
+#: lib/kiln_cms_web/live/compliance_live.ex
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "This site is using the deployment defaults."
@@ -8829,6 +8969,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #, elixir-autogen, elixir-format
 msgid "This site's Content-Security-Policy blocks scripts, connections and images from hosts it doesn't know. List the origins your snippet needs — one per line, e.g. https://plausible.io — or the browser will silently refuse them. Inline <script> blocks are allowed automatically once you save."
+msgstr ""
+
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site's phrases"
+msgstr ""
+
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format, fuzzy
+msgid "This site's vocabulary"
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/newsletter_controller.ex
@@ -8988,6 +9138,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
 msgid "Turn on"
+msgstr ""
+
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Turn on claim checking"
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
@@ -9292,6 +9447,7 @@ msgstr ""
 msgid "Use the deployment default"
 msgstr ""
 
+#: lib/kiln_cms_web/live/compliance_live.ex
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Use the operator defaults"
@@ -9439,6 +9595,11 @@ msgstr ""
 msgid "Visual separator between sections"
 msgstr ""
 
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format, fuzzy
+msgid "Warning"
+msgstr ""
+
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
 msgid "We can't find the internet"
@@ -9484,6 +9645,21 @@ msgstr ""
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "Went live"
+msgstr ""
+
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format
+msgid "What a document on this site is checked against right now — the deployment's rules, unless you turned them off above, plus this site's own phrases."
+msgstr ""
+
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format
+msgid "What a match on these phrases means"
+msgstr ""
+
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format
+msgid "What runs on this site"
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -9559,6 +9735,11 @@ msgstr ""
 msgid "Will be unpublished when the release goes live."
 msgstr ""
 
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format
+msgid "With it on, the editor gains a Compliance panel that quotes back the phrases a document contains from a claims vocabulary — \"FDA approved\", \"no side effects\", \"guaranteed results\". It is advice: a match is a prompt to look, not a verdict, and nothing is blocked unless you separately turn on the publish gate."
+msgstr ""
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Witnessed by checkpoint #%{sequence} at anchor position %{position}"
@@ -9608,6 +9789,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to change this site's branding."
+msgstr ""
+
+#: lib/kiln_cms_web/live/compliance_live.ex
+#, elixir-autogen, elixir-format, fuzzy
+msgid "You don't have permission to change this site's claim checking."
 msgstr ""
 
 #: lib/kiln_cms_web/live/code_injection_live.ex

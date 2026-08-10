@@ -22,7 +22,13 @@ defmodule KilnCMSWeb.ContentEditorComplianceTest do
 
   setup do
     previous = Application.get_env(:kiln_cms, KilnCMS.Compliance, [])
-    on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Compliance, previous) end)
+    bust()
+
+    on_exit(fn ->
+      Application.put_env(:kiln_cms, KilnCMS.Compliance, previous)
+      bust()
+    end)
+
     :ok
   end
 
@@ -32,7 +38,16 @@ defmodule KilnCMSWeb.ContentEditorComplianceTest do
       KilnCMS.Compliance,
       Keyword.merge([enabled: true, rules: :default], opts)
     )
+
+    bust()
   end
+
+  # The editor resolves this site's settings through the per-org cache — it does
+  # so on every form change, which is the one path that needs one. A deployment
+  # sets the config underneath once at boot; only a test rewrites it mid-run, so
+  # only a test has to drop the entry. `KilnCMS.Feeds`' tests bust their policy
+  # key for the same reason.
+  defp bust, do: KilnCMS.Cache.bust_compliance(KilnCMS.Accounts.default_org_id())
 
   defp authed_user(role) do
     email = "compliance-panel-#{System.unique_integer([:positive])}@example.com"
