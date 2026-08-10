@@ -135,7 +135,27 @@ defmodule KilnCMSWeb.NewsletterLive do
 
   # --- send ------------------------------------------------------------------
 
+  # Re-checked here, not only in `mount/3` (#1166). Every other handler on this
+  # page carries the actor into an Ash action, so a mistake in the mount guard
+  # is still caught by a policy. `Newsletter.send_as_newsletter/2` is the one
+  # that isn't: it *accepts* `actor:` but uses it only to stamp `sent_by_id`,
+  # writes the campaign with `authorize?: false`, then hands the fan-out to
+  # Oban. There is nothing behind the guard.
+  #
+  # And a mount guard is evaluated once. This one is a per-org tier — the right
+  # question, since the post and the segment both resolve off `document.org_id`
+  # — but an admin whose access is revoked mid-session would otherwise keep
+  # sending for the life of the socket. The consequence is worse than the
+  # backup panel's (#1160): a backup can be deleted, an email cannot be unsent.
   def handle_event("send", %{"send" => params}, socket) when is_map(params) do
+    if KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin do
+      do_send(params, socket)
+    else
+      {:noreply, socket}
+    end
+  end
+
+  defp do_send(params, socket) do
     post = Enum.find(socket.assigns.posts, &(&1.id == params["post_id"]))
     segment_id = presence(params["segment_id"])
     subject = presence(params["subject"])

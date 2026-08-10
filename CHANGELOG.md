@@ -56,6 +56,30 @@ migration, a rewritten column, a dropped config key).
   cannot publish, and it would be refusing on rules nobody could confirm.
 ### Fixed
 
+- **Six console actions that authorize nothing now re-check who is asking**
+  (#1166). Every other privileged handler funnels into an Ash action carrying
+  the actor, so a mistake in a mount guard is still caught by a policy. These
+  six do not — and a mount guard is evaluated once, so an access change
+  mid-session held until the tab was closed.
+
+  Worst was **sending a newsletter**: `send_as_newsletter/2` accepts an actor
+  but uses it only to stamp `sent_by_id`, writes the campaign with
+  `authorize?: false`, then hands the fan-out to Oban. A backup can be deleted;
+  an email cannot be unsent. Then **the mail test send**, whose recipient comes
+  from the client — a DKIM-signed send primitive pointed at any address a
+  socket names — along with its DNS verify and port-25 preflight, and
+  **billing credential verification**.
+
+  **The broken-link sweep** was the plainest case: its page is on the editor
+  routes, so its mount never refuses at all, and a boolean computed once at
+  mount was the entire distance between an editor and the enqueue.
+
+  The release **preview link** stays an editor action, deliberately — previewing
+  is what the feature is for, and an editor who can open a release can already
+  read every document in it. What the link changes is distribution rather than
+  access, so the read is now re-verified when the link is minted instead of
+  trusted from a struct fetched at mount.
+
 - **A one-click translation honours the acting editor's field grants** (#1157).
   Duplication and translation are the two creates that carry *another record's*
   values, and only duplication asked what the editor was allowed to write.

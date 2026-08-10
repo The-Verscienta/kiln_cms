@@ -285,9 +285,27 @@ defmodule KilnCMSWeb.ReleaseLive do
   # Minted on demand rather than rendered on every page load: the link grants a
   # read of every unpublished document in the release, so it should exist because
   # somebody asked to share it.
+  #
+  # Deliberately an EDITOR action, unlike this page's publish/schedule/delete
+  # controls (#1166). Previewing a release is what the feature is for, and an
+  # editor who can open the release can already read every document in it. What
+  # the link changes is distribution, not access — "content I can read" becomes
+  # "content anyone holding this URL can read", for an hour.
+  #
+  # So the tier stays, and the read is re-verified instead. `@release` is a
+  # struct fetched at mount; `ReleasePreview.sign/1` takes no actor and checks
+  # nothing, so without this an editor whose access was revoked mid-session
+  # would keep minting hour-long public links for the life of the socket. This
+  # asks the policy the same question again, now.
   def handle_event("share_preview", _params, socket) do
-    token = ReleasePreview.sign(socket.assigns.release)
-    {:noreply, assign(socket, :preview_url, url(~p"/preview/release/#{token}"))}
+    case CMS.get_release(socket.assigns.release.id, act(socket)) do
+      {:ok, release} ->
+        token = ReleasePreview.sign(release)
+        {:noreply, assign(socket, :preview_url, url(~p"/preview/release/#{token}"))}
+
+      _error ->
+        {:noreply, socket}
+    end
   end
 
   # --- helpers ---------------------------------------------------------------
