@@ -76,16 +76,33 @@ defmodule KilnCMS.CMS do
   # an LLM authors drafts and submits them for review; a human approves.
   tools do
     # Discovery / reads.
+    #
+    # `block_ids` rides on every content read (#954): it is the id-only
+    # projection of the block tree (`_id`/`_type`, nested children in render
+    # positions, no field values), and it is what lets a model editing a page
+    # that carries an admin-set nested value send each child back under the id
+    # that held it — which `EnforceBlockFieldPolicy` requires. Unlike the
+    # related links it is small and unconditionally relevant to authoring, so
+    # it is loaded flat rather than through `McpLoads`.
     tool :read_pages, KilnCMS.CMS.Page, :read do
-      description "List/filter pages (drafts included when the key's user is an editor)."
+      description "List/filter pages (drafts included when the key's user is an editor). " <>
+                    "block_ids carries each block's _id — echo _id on block_tree children when updating."
+
+      load [:block_ids]
     end
 
     tool :read_posts, KilnCMS.CMS.Post, :read do
-      description "List/filter blog posts (drafts included when the key's user is an editor)."
+      description "List/filter blog posts (drafts included when the key's user is an editor). " <>
+                    "block_ids carries each block's _id — echo _id on block_tree children when updating."
+
+      load [:block_ids]
     end
 
     tool :read_entries, KilnCMS.CMS.Entry, :read do
-      description "List/filter dynamic-type entries; scope by type_definition_id (see read_type_definitions)."
+      description "List/filter dynamic-type entries; scope by type_definition_id (see read_type_definitions). " <>
+                    "block_ids carries each block's _id — echo _id on block_tree children when updating."
+
+      load [:block_ids]
     end
 
     tool :read_type_definitions, KilnCMS.CMS.TypeDefinition, :read do

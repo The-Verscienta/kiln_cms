@@ -522,4 +522,45 @@ defmodule KilnCMSWeb.McpTest do
 
     _ = conn
   end
+
+  # #954 — a model editing a page that carries an admin-set nested value must
+  # send each child back under the id that held it (`EnforceBlockFieldPolicy`
+  # requires the binding), and the read tool result is the only surface an MCP
+  # client has to learn those ids from. `block_ids` rides on every content
+  # read: ids and types in render positions, no field values.
+  test "read_pages carries block_ids so a model can round-trip nested child ids", %{conn: conn} do
+    editor = user(:editor)
+    child = Ecto.UUID.generate()
+
+    page =
+      KilnCMS.CMS.create_page!(
+        %{
+          title: "Ids over MCP",
+          slug: "mcp-ids-#{System.unique_integer([:positive])}",
+          block_tree: [
+            %{
+              "_type" => "columns",
+              "columns" => [
+                %{"blocks" => [%{"_type" => "quote", "id" => child, "text" => "A"}]}
+              ]
+            }
+          ]
+        },
+        actor: editor
+      )
+
+    plaintext = mint(editor, :read)
+
+    conn =
+      rpc(conn, plaintext, "tools/call", %{
+        name: "read_pages",
+        arguments: %{input: %{}, filter: %{slug: %{eq: page.slug}}}
+      })
+
+    assert %{"result" => %{"isError" => false, "content" => [%{"text" => text}]}} =
+             json_response(conn, 200)
+
+    assert text =~ "block_ids"
+    assert text =~ child
+  end
 end
