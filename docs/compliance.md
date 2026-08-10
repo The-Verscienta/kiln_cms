@@ -338,7 +338,7 @@ from an uncited one, and does not link a finding to the block it came from —
 findings are document-level and quote the phrase instead. Those are worthwhile
 and were left out on purpose rather than done badly.
 
-Three gaps are worth naming because the issue's wording implies them:
+Two gaps are worth naming because the issue's wording implies them:
 
 **The approver doesn't see the panel.** #377 says "in the review workflow", and
 in this codebase that means `draft → in_review → published` with an **admin**
@@ -347,16 +347,33 @@ editor; the approver's list has no compliance column. With the gate on, an
 admin clicking approve gets the refusal without ever having seen the finding.
 Tracked separately.
 
-**Nothing feeds the governance dashboard.** The issue ties box 3 to #352, and
-`docs/p3-plan.md` says claim checks feed that dashboard. `/editor/governance`
-has no compliance surface. Also tracked separately.
-
 **A site's vocabulary is one flat list at one severity.** `/editor/compliance`
 writes every phrase a site adds into a single `:site_claim` rule. A publication
 wanting *two* house rules at different severities — say a blocking list and an
 advisory one — cannot express that without an operator editing config. The
 shape is there (the resolver merges rule lists), and the UI is what is narrow;
 splitting it is a change to this page, not to the model.
+
+**The governance dashboard is fed** (#858). `/editor/governance` carries a
+**Live claims** panel: every published document on the site, scanned against the
+site's own vocabulary, showing the phrase that matched and whether it is one the
+publish gate would refuse. That is the question a compliance officer has and the
+one the editor panel and the publish refusal both cannot answer, since both are
+about the document in front of you.
+
+It is **recomputed on read, not stored**. There is no findings table and nothing
+is written on publish, which is worth knowing for two reasons. It answers "what
+is live now" and cannot answer "what did this page claim in March" — point-in-time
+history is next door on the same dashboard if that is the question. And a
+finding is always judged by the rules in force *now*, so narrowing a site's
+vocabulary retires the finding rather than leaving a record judged by a rule
+nobody uses any more. `KilnCMS.Compliance.Report`'s moduledoc carries the full
+reasoning, including why not writing on publish sidesteps
+`AutoCompleteTasks` force-completing the very task a finding might have opened.
+
+The scan is bounded at `KilnCMS.Compliance.Report.document_cap/0` most recently
+updated published documents; past that the panel says so rather than describing
+a subset as the whole.
 
 Per-org configuration itself is done: #857 moved the switches, the disclaimer
 and the vocabulary onto `KilnCMS.CMS.SiteCompliance` with an admin page, which
