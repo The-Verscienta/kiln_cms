@@ -15,6 +15,8 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
   """
   use KilnCMS.DataCase, async: false
 
+  require Ash.Query
+
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.PendingSignIn
   alias KilnCMS.Accounts.Token
@@ -306,18 +308,21 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
       assert row(token).purpose == Token.second_factor_hold_purpose()
     end
 
-    test "a hold that has lapsed is reported, not papered over" do
-      # `GetTokenPreparation` filters `expires_at > now()`, so a hold that
-      # outlived its own window is invisible to the release. Answering `:ok`
-      # there hands back a 201 whose credential is still parked and now
-      # unrecoverable — a sign-in that 401s on its very next request, silently.
+    test "a hold that has lapsed can still be released by jti" do
+      # Before #1173, release went through `get_token`, which filters
+      # `expires_at > now()` — so a lapsed hold was invisible and claim answered
+      # `:unavailable`, leaving a parked credential. The atomic UPDATE filters by
+      # jti + purpose only, so a hold that outlived its window can still be put
+      # back under `"user"` with the JWT's own expiry.
       {user, token} = held_user()
 
       blob = PendingSignIn.mint(:encrypted, @endpoint, user)
       Ash.Seed.update!(row(token), %{expires_at: DateTime.add(DateTime.utc_now(), -5, :second)})
 
       assert {:ok, resolved} = PendingSignIn.resolve(:encrypted, @endpoint, blob)
-      assert :unavailable = PendingSignIn.claim(resolved)
+      assert :ok = PendingSignIn.claim(resolved)
+      assert usable?(token)
+      assert row(token).purpose == Token.user_purpose()
     end
 
     test "a token the store never held does not refuse the sign-in" do
@@ -354,20 +359,24 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
     end
 
     test "a revocation landing between the read and the hold is not overwritten" do
-      # Check-then-act. `hold_first_factor/1` SELECTs the row, then updates it;
-      # in between, a password change can fire `log_out_everywhere` and move it
-      # to `"revocation"`. A guard that compares the in-memory snapshot passes on
-      # a value that is already stale, and the UPDATE — keyed on the primary key
-      # alone — discards the revocation. The guard is therefore a `filter`, in
-      # the UPDATE's own WHERE, and the database decides.
-      #
-      # Staged rather than raced: `Ash.Seed.update!` writes the new purpose while
-      # `stale` goes on claiming the old one, which is exactly the interleaving.
+      # The purpose filter rides in the UPDATE's WHERE. Staged rather than raced:
+      # `Ash.Seed.update!` writes `"revocation"` before the bulk hold runs, which
+      # is exactly the interleaving a password-change `log_out_everywhere` would
+      # produce against `PendingSignIn`'s single-statement hold (#1173).
       {_user, token} = held_user()
-      stale = row(token)
-      Ash.Seed.update!(stale, %{purpose: "revocation"})
+      {:ok, %{"jti" => jti}} = AshAuthentication.Jwt.peek(token)
+      Ash.Seed.update!(row(token), %{purpose: "revocation"})
 
-      assert {:error, _} = Accounts.hold_first_factor_token(stale, %{}, authorize?: false)
+      result =
+        Token
+        |> Ash.Query.filter(jti == ^jti)
+        |> Ash.bulk_update(:hold_for_second_factor, %{},
+          strategy: :atomic,
+          authorize?: false,
+          return_records?: true
+        )
+
+      assert result.records in [[], nil]
       assert row(token).purpose == "revocation"
     end
 
@@ -375,12 +384,21 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
       # The same race on the half that grants use, where losing it un-revokes a
       # credential the user just revoked and restores its full natural expiry.
       {_user, token} = held_user()
-      held = Ash.Seed.update!(row(token), %{purpose: Token.second_factor_hold_purpose()})
-      Ash.Seed.update!(held, %{purpose: "revocation"})
+      {:ok, %{"jti" => jti}} = AshAuthentication.Jwt.peek(token)
+      Ash.Seed.update!(row(token), %{purpose: Token.second_factor_hold_purpose()})
+      Ash.Seed.update!(row(token), %{purpose: "revocation"})
+      expires_at = Token.peeked_expires_at(token)
 
-      assert {:error, _} =
-               Accounts.release_first_factor_token(held, %{token: token}, authorize?: false)
+      result =
+        Token
+        |> Ash.Query.filter(jti == ^jti)
+        |> Ash.bulk_update(:release_second_factor_hold, %{expires_at: expires_at},
+          strategy: :atomic,
+          authorize?: false,
+          return_records?: true
+        )
 
+      assert result.records in [[], nil]
       assert row(token).purpose == "revocation"
     end
 
@@ -390,46 +408,66 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
       # deleted and the suite would stay green.
       {_user, token} = held_user()
       record = row(token)
+      expires_at = Token.peeked_expires_at(token)
 
       assert {:error, %Ash.Error.Forbidden{}} = Accounts.hold_first_factor_token(record, %{})
 
       assert {:error, %Ash.Error.Forbidden{}} =
-               Accounts.release_first_factor_token(record, %{token: token})
+               Accounts.release_first_factor_token(record, %{expires_at: expires_at})
     end
 
     test "the hold refuses a row that is not a usable stored token" do
-      # The caller finds the row under the `"user"` purpose, so this is
-      # unreachable through it — which is the point. A hold taken on a
-      # `"revocation"` row is released back to `"user"` one step later, and an
-      # unrevoke is not a thing one call site's filter should be the only thing
-      # standing between us and.
+      # `"revocation"` is not in the purpose list, and that is the whole point of
+      # listing. Exercised through the same bulk filter `PendingSignIn` uses
+      # (#1173), because a record-shaped code-interface update is not the
+      # production path.
       {_user, token} = held_user()
-      revoked = Ash.Seed.update!(row(token), %{purpose: "revocation"})
+      {:ok, %{"jti" => jti}} = AshAuthentication.Jwt.peek(token)
+      Ash.Seed.update!(row(token), %{purpose: "revocation"})
 
-      assert {:error, _} = Accounts.hold_first_factor_token(revoked, %{}, authorize?: false)
+      result =
+        Token
+        |> Ash.Query.filter(jti == ^jti)
+        |> Ash.bulk_update(:hold_for_second_factor, %{},
+          strategy: :atomic,
+          authorize?: false,
+          return_records?: true
+        )
+
+      assert result.records in [[], nil]
+      assert row(token).purpose == "revocation"
     end
 
-    test "the release refuses a token that does not name the row it was handed" do
-      # `StoreTokenChange` writes `jti` from the token, and `jti` is the primary
-      # key — so a mismatched pair *renames* a row rather than releasing one:
-      # the held token loses the row it was parked in, and the row comes back
-      # under `"user"` naming a JWT that was never released.
-      #
-      # The other token's own row is deleted first, deliberately. Leave it and
-      # the rename collides with it, so Postgres refuses for a reason that has
-      # nothing to do with the pair being mismatched — which is exactly how this
-      # test first passed with the validation removed.
+    test "a release bulk-update for the wrong jti leaves the held row untouched" do
+      # Before #1173, `StoreTokenChange` wrote `jti` from the token argument and
+      # could rename a held row. The atomic form filters by jti instead, so a
+      # UPDATE aimed at a different primary key is a no-op.
       {_mine, mine} = held_user()
       {_theirs, theirs} = held_user()
       KilnCMS.Repo.delete!(row(theirs))
 
-      held = Ash.Seed.update!(row(mine), %{purpose: Token.second_factor_hold_purpose()})
+      _held = Ash.Seed.update!(row(mine), %{purpose: Token.second_factor_hold_purpose()})
+      {:ok, %{"jti" => theirs_jti}} = AshAuthentication.Jwt.peek(theirs)
+      mine_exp = Token.peeked_expires_at(mine)
 
-      assert {:error, _} =
-               Accounts.release_first_factor_token(held, %{token: theirs}, authorize?: false)
+      result =
+        Token
+        |> Ash.Query.filter(jti == ^theirs_jti)
+        |> Ash.bulk_update(:release_second_factor_hold, %{expires_at: mine_exp},
+          strategy: :atomic,
+          authorize?: false,
+          return_records?: true
+        )
+
+      assert result.records == [] or result.records == nil
+      assert row(mine).purpose == Token.second_factor_hold_purpose()
 
       assert {:ok, _} =
-               Accounts.release_first_factor_token(held, %{token: mine}, authorize?: false)
+               Accounts.release_first_factor_token(row(mine), %{expires_at: mine_exp},
+                 authorize?: false
+               )
+
+      assert row(mine).purpose == Token.user_purpose()
     end
 
     test "the hold outlives the blob it is holding for" do
