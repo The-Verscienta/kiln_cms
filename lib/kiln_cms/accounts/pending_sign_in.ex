@@ -462,7 +462,7 @@ defmodule KilnCMS.Accounts.PendingSignIn do
       jti when is_binary(jti) ->
         match?(
           {:ok, %Accounts.Token{}},
-          Accounts.stored_token_exists?(jti, authorize?: false, not_found_error?: false)
+          Accounts.get_stored_token_by_jti(jti, authorize?: false, not_found_error?: false)
         )
 
       nil ->

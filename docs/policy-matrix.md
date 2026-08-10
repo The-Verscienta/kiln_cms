@@ -206,7 +206,7 @@ and the #742 hold both depend on that flag**, so a change that tightens
 `authorize?` handling has to keep these calls working.
 
 The domain names them (`spend_pending_sign_in`, `hold_first_factor_token`,
-`release_first_factor_token`) plus `stored_token_exists?`, a by-jti `:read`. A
+`release_first_factor_token`) plus `get_stored_token_by_jti`, a by-jti `:read`. A
 name is not an opening here: no policy matches `:read` either, so every one of
 them is refused without the `authorize?: false` only that module passes.
 

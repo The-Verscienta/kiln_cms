@@ -29,7 +29,7 @@ defmodule KilnCMS.Accounts do
       # jti *at all*" — which is what tells a failed release apart from a
       # deployment that never stored the token in the first place. No policy
       # matches `:read` on this resource, so the name buys a caller nothing.
-      define :stored_token_exists?, action: :read, get_by: [:jti]
+      define :get_stored_token_by_jti, action: :read, get_by: [:jti]
     end
 
     # External IdP links for OIDC SSO (#331) — managed by AshAuthentication.
