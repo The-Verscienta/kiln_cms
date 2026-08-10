@@ -593,9 +593,10 @@ defmodule KilnCMS.Cache do
   end
 
   @doc """
-  Drop **every** delivery cache: this instance and the fired-artifact cache
-  (`KilnCMS.Firing.Cache`). The operator-facing purge behind `mix
-  kiln.cache.flush` and the admin button (#483).
+  Drop **every** delivery cache on **every** node: this instance and the
+  fired-artifact cache (`KilnCMS.Firing.Cache`), then a cluster-wide clear
+  (#1138 / #483). The operator-facing purge behind `mix kiln.cache.flush` and
+  the admin button.
 
   Both instances feed delivery, so clearing one and not the other leaves the
   site serving half-stale — the published-record lookups repopulate from the
@@ -605,14 +606,25 @@ defmodule KilnCMS.Cache do
 
   It exists for the states precise invalidation cannot reach — a config change,
   a template deploy, an external data source feeding a custom block — where the
-  alternative was an IEx shell on production.
+  alternative was an IEx shell on production. Those are exactly the cases where
+  being node-local defeated the escape hatch (#1138), so this clears locally
+  then notifies every other node via `ClusterBust` (`{:bust_all, origin}`).
+  Prefer `ClusterBust.broadcast_clear/0` when you do not need the drop counts.
+  `bust_published/0` stays node-local on purpose: its callers include a path
+  that fires on every media download.
 
-  Returns the number of entries dropped from each, for the operator to see that
-  something happened. A disabled cache reports `0` rather than failing.
+  Returns the number of entries dropped **on this node** (the one that served
+  the purge), for the operator to see that something happened. Other nodes are
+  cleared too; their counts are not summed here. A disabled cache reports `0`
+  rather than failing.
   """
   @spec flush_delivery() :: %{published: non_neg_integer(), artifacts: non_neg_integer()}
   def flush_delivery do
-    %{published: clear_published(), artifacts: KilnCMS.Firing.Cache.clear()}
+    # Clear and count this node first, then ask every other node to do the same.
+    # Counts are deliberately this node's, not a cluster sum (#1138).
+    dropped = %{published: clear_published(), artifacts: KilnCMS.Firing.Cache.clear()}
+    if enabled?(), do: ClusterBust.notify_clear()
+    dropped
   end
 
   defp clear_published do

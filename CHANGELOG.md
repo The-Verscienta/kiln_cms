@@ -27,6 +27,18 @@ migration, a rewritten column, a dropped config key).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The admin delivery-cache purge reaches every node** (#1138).
+  `KilnCMS.Cache.flush_delivery/0` (the System console button and
+  `mix kiln.cache.flush`) used to clear only the node that served the request,
+  so after a template deploy other nodes kept serving stale markup for the full
+  TTL while the UI reported thousands of entries dropped. It now broadcasts a
+  `ClusterBust` full clear (`bust_published/0` stays node-local on purpose). The
+  printed count remains **this node's** drop. The same issue lifted
+  `PublicPath`'s per-row type-registry scan into a shared
+  `Slugs.descriptors_for_records/1` memo used by effective SEO too.
+
 ### Added
 
 - **Claim checking is per site, and has a page** (#857). `KilnCMS.Compliance`
