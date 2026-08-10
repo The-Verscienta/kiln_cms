@@ -805,11 +805,27 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    arrived id-less (fresh ids minted, `_id` stored as a junk key nothing read),
    so the one available route to round-tripping silently did not work.
 
-   *Residual:* a **draft** has no readable block surface at all, so a headless
-   client editing one still cannot produce ids, and a caller willing to drop
-   every id is governed by the count alone. Closing that needs a draft-readable
-   block-tree surface — a genuine API addition rather than a fix, tracked in
-   #954.
+   **And a caller who drops every id is now bound too** (#954). The id binding
+   could not see such a submission at all — no ids means no entries, so the
+   gate above answers "this client does not round-trip ids" and only the count
+   remains, which a re-target preserves. A second binding keys on what the child
+   *is*: its non-restricted fields, sorted. A child whose content comes back
+   unchanged must come back with the value that content held, whether or not
+   anyone sent an id.
+
+   It asks nothing of the client, so it cannot lock out the callers the id gate
+   exists to protect, and three rules keep it from refusing honest work: it
+   binds only *moved* values and never treats a changed signature as a dropped
+   child (editing a featured child's text would otherwise be refused); it skips
+   a signature that names two children, since the survivor would answer for
+   both; and it is additive, contributing violations and never suppressing one.
+
+   *Residual:* two siblings whose non-restricted content is **identical** are
+   indistinguishable to it, so a flag may still move between them — which
+   changes nothing a reader can see, since the two render the same. A draft
+   still has no readable block surface, so a headless client editing one cannot
+   produce ids; that no longer costs it the binding, but it does mean the id
+   half of the check remains editor-only.
 
    *Residual, all about **which block an id names** rather than what a field may
    hold:* an editor can still reuse the id of another block **of the same type**

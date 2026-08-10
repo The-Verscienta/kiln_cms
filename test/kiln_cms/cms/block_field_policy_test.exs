@@ -507,14 +507,12 @@ defmodule KilnCMS.CMS.BlockFieldPolicyTest do
       assert Exception.message(error) =~ "cannot move or clear"
     end
 
-    test "a wholly id-less re-target is still allowed (accepted residual, #865)" do
-      # Pinned so the limit is deliberate rather than discovered. Nested child
-      # ids cannot be READ back — `blocks` is not `public?` and the fired
-      # artifact carries `_id`, not `id` — so a rule that demanded one would
-      # lock out every headless client and every `restore_version` of a version
-      # captured before the editor stamped its children. The binding therefore
-      # applies only where the client round-trips ids, and a caller willing to
-      # drop all of them keeps #774's count-only guarantee.
+    test "a wholly id-less re-target is refused by the content binding (#954)" do
+      # This was the accepted residual: strip every id and the id binding has
+      # nothing to match, so only #774's count survives — and a re-target
+      # preserves the count. Closed by binding the value to what the child IS
+      # (its non-restricted content) rather than to the id it was handed, which
+      # asks nothing of the client and so cannot lock anyone out.
       admin = user(:admin)
 
       before =
@@ -531,8 +529,71 @@ defmodule KilnCMS.CMS.BlockFieldPolicyTest do
           quote_block(%{"featured" => true, "text" => "B"})
         ])
 
+      assert {:error, error} =
+               CMS.update_page(page, %{block_tree: [swapped]}, actor: user(:editor))
+
+      assert Exception.message(error) =~ "cannot move or clear"
+    end
+
+    # The other half of the same rule, and the reason `dropped_values/2` is not
+    # applied on the content path: a non-admin editing the text of a child that
+    # holds an admin-set value changes its signature, which is indistinguishable
+    # from having dropped the child. Refusing that would break ordinary editing.
+    test "editing the text of a child that holds an admin value is still allowed (#954)" do
+      admin = user(:admin)
+
+      {:ok, page} =
+        create_page(admin, [
+          columns_children([
+            quote_block(%{"featured" => true, "text" => "Original"}),
+            quote_block(%{"featured" => false, "text" => "Other"})
+          ])
+        ])
+
+      edited =
+        columns_children([
+          quote_block(%{"featured" => true, "text" => "Reworded"}),
+          quote_block(%{"featured" => false, "text" => "Other"})
+        ])
+
+      assert {:ok, _updated} =
+               CMS.update_page(page, %{block_tree: [edited]}, actor: user(:editor))
+    end
+
+    # Two siblings whose non-restricted content is identical collapse to one
+    # signature, so the binding cannot say which held the value. Skipped rather
+    # than guessed — and it costs nothing, because moving a flag between two
+    # children that render identically changes nothing a reader can see. The
+    # multiset still counts them.
+    test "identical-content siblings fall back to the multiset (#954)" do
+      admin = user(:admin)
+
+      {:ok, page} =
+        create_page(admin, [
+          columns_children([
+            quote_block(%{"featured" => true, "text" => "Same"}),
+            quote_block(%{"featured" => false, "text" => "Same"})
+          ])
+        ])
+
+      swapped =
+        columns_children([
+          quote_block(%{"featured" => false, "text" => "Same"}),
+          quote_block(%{"featured" => true, "text" => "Same"})
+        ])
+
       assert {:ok, _updated} =
                CMS.update_page(page, %{block_tree: [swapped]}, actor: user(:editor))
+
+      # But the multiset still holds: one of them must still be featured.
+      cleared =
+        columns_children([
+          quote_block(%{"featured" => false, "text" => "Same"}),
+          quote_block(%{"featured" => false, "text" => "Same"})
+        ])
+
+      assert {:error, _} =
+               CMS.update_page(page, %{block_tree: [cleared]}, actor: user(:editor))
     end
 
     test "a child may still move between columns, carrying its id and value (#865)" do

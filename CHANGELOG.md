@@ -57,6 +57,23 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **A nested restricted value can no longer be re-targeted by dropping every
+  block id** (#954). The per-child binding (#865) keys on the child's id, and a
+  submission carrying none produces nothing to bind — so the check fell back to
+  #774's count, and moving an admin-set flag from one sibling to another
+  preserves the count.
+
+  The binding now also keys on what a child *is*: its non-restricted fields.
+  A child whose content comes back unchanged must come back with the value that
+  content held, whether or not anyone sent an id. That asks nothing of the
+  client, so it closes the hole without the lockout that made the id rule
+  conditional in the first place — headless clients and `restore_version` are
+  unaffected, and the existing tests for both prove it.
+
+  Left open deliberately: two siblings whose non-restricted content is
+  identical are indistinguishable, so a flag may still move between them. They
+  render the same, so nothing is hidden from a reader.
+
 - **The in-context and Presentation editors no longer accept edits they cannot
   save** (#1159). Both mounted a record through an actor-scoped read and then
   offered `contenteditable` regions, drag-reorder and a Save button, with no

@@ -84,11 +84,14 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
   construction. Requiring an id back from those callers would refuse them
   permanently while naming a remedy neither can perform.
 
-  **So this does not close the residual for a caller that drops every id.** Such
-  a submission is still only counted, and #774's re-target survives there. What
-  it closes is the case where identity exists — editor-authored content, and any
-  client that round-trips what it was given. Closing the rest needs nested child
-  ids a client can *read*; recorded in `docs/threat-model.md`.
+  **A caller that drops every id is bound by content instead** (#954). Such a
+  submission produces no identified entries at all, so the gate above answers
+  "no" and only the count would remain — which a re-target preserves. See
+  `content_bound/3`: it binds each restricted value to the child's
+  *non-restricted content*, which asks nothing of the client and so cannot lock
+  out the callers the id gate exists to protect. What survives is a pair of
+  siblings whose non-restricted content is identical, which render the same and
+  so hide nothing from a reader; recorded in `docs/threat-model.md`.
 
   ## Omitted is not the same as default (#566)
 
@@ -336,7 +339,7 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
         do: moved_values(now, stored) ++ dropped_values(stored, now),
         else: []
 
-    (duplicate_ids(now_entries) ++ bound)
+    (duplicate_ids(now_entries) ++ bound ++ content_bound(stored_maps, now_maps, role))
     |> Enum.uniq()
     |> Enum.reduce(changeset, fn
       {:duplicate, module, field_name}, acc ->
@@ -345,6 +348,96 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
       {:binding, module, field_name}, acc ->
         add_nested_identity_violation(acc, module, field_name)
     end)
+  end
+
+  # The same binding, keyed on what a child *is* rather than on the id it was
+  # given (#954). This is what closes the residual the id gate leaves: a caller
+  # who strips every id produces no identified entries at all, so
+  # `round_trips_ids?/2` answers false and #774's count-only guarantee is all
+  # that remains — and a re-target preserves the count.
+  #
+  # The key is the child's non-restricted fields, sorted: the term itself, not a
+  # digest, because a term is already comparable and hashable as a map key and
+  # brings no collision to reason about.
+  #
+  # Three rules, each chosen against a specific way this goes wrong:
+  #
+  #   * **`moved_values/2` only.** `dropped_values/2` must NOT be applied here.
+  #     A non-admin editing the *text* of a child that holds an admin-set value
+  #     changes its signature, which is indistinguishable from having dropped
+  #     the child — so applying it would refuse an ordinary edit. Under
+  #     `moved_values/2` alone a changed signature simply matches nothing and is
+  #     governed by the multiset, exactly as before.
+  #   * **ambiguous signatures are skipped.** Two siblings whose non-restricted
+  #     content is identical collapse in `Map.new/1`, and the survivor would
+  #     answer for both. Skipping is not laxity: moving a restricted flag
+  #     between two children that render identically changes nothing a reader
+  #     can see, and the multiset still counts them.
+  #   * **purely additive**, like the id binding above. It can only refuse
+  #     writes that used to pass, never permit one that used to fail (#566's
+  #     constraint), because it contributes violations and never suppresses one.
+  #
+  # Restores are unaffected: a version whose content matches produces identical
+  # signatures and passes, while one that re-sets a value an admin has since
+  # cleared is refused here — which the multiset already refuses today.
+  defp content_bound(stored_maps, now_maps, role) do
+    stored_entries = content_entries(stored_maps, role)
+    now_entries = content_entries(now_maps, role)
+
+    ambiguous =
+      MapSet.union(
+        repeated_keys(stored_entries),
+        repeated_keys(now_entries)
+      )
+
+    moved_values(unambiguous(now_entries, ambiguous), unambiguous(stored_entries, ambiguous))
+  end
+
+  defp unambiguous(entries, ambiguous) do
+    entries
+    |> Enum.reject(fn {key, _value} -> MapSet.member?(ambiguous, key) end)
+    |> Map.new()
+  end
+
+  defp repeated_keys(entries) do
+    entries
+    |> Enum.frequencies_by(fn {key, _value} -> key end)
+    |> Enum.flat_map(fn
+      {key, count} when count > 1 -> [key]
+      _unique -> []
+    end)
+    |> MapSet.new()
+  end
+
+  # `{{signature, module, field_name}, {field, value}}` for every role-restricted
+  # field of every nested child, identified or not — the counterpart of
+  # `identified_entries/2`, which skips a child with no id.
+  defp content_entries(child_maps, role),
+    do: Enum.flat_map(child_maps, &signature_entries(&1, role))
+
+  defp signature_entries(map, role) do
+    with {:ok, type} <- fetch_type(map),
+         {:ok, module} <- KilnCMS.Blocks.fetch(type) do
+      restricted = restricted_fields(module, role)
+      signature = content_signature(map, module, restricted)
+
+      Enum.map(restricted, &{{signature, module, &1.name}, {&1, field_value(map, &1)}})
+    else
+      _ -> []
+    end
+  end
+
+  # Everything about the child that is NOT restricted, in declaration-independent
+  # order. Restricted fields are excluded by definition — they are what is being
+  # bound, so including them would make every signature match only itself.
+  defp content_signature(map, module, restricted) do
+    restricted_names = MapSet.new(restricted, & &1.name)
+
+    module
+    |> Kiln.Block.Info.fields()
+    |> Enum.reject(&MapSet.member?(restricted_names, &1.name))
+    |> Enum.sort_by(& &1.name)
+    |> Enum.map(&{&1.name, field_value(map, &1)})
   end
 
   # Has this client shown it can name a nested child? At least one submitted
