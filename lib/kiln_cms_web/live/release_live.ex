@@ -285,9 +285,30 @@ defmodule KilnCMSWeb.ReleaseLive do
   # Minted on demand rather than rendered on every page load: the link grants a
   # read of every unpublished document in the release, so it should exist because
   # somebody asked to share it.
+  #
+  # Deliberately an EDITOR action, unlike this page's publish/schedule/delete
+  # controls (#1166). Previewing a release is what the feature is for, and an
+  # editor who can open the release can already read every document in it. What
+  # the link changes is distribution, not access — "content I can read" becomes
+  # "content anyone holding this URL can read", for an hour.
+  #
+  # So the tier stays, and the read is re-verified instead. `@release` is a
+  # struct fetched at mount and `ReleasePreview.sign/1` takes no actor, so this
+  # asks the read policy the same question again, now — which catches a forged
+  # event and an org grant revoked since mount (`effective_tier/2` re-reads the
+  # membership). It does not catch a demoted global admin, whose role is read
+  # off the mount-time `current_user`.
   def handle_event("share_preview", _params, socket) do
-    token = ReleasePreview.sign(socket.assigns.release)
-    {:noreply, assign(socket, :preview_url, url(~p"/preview/release/#{token}"))}
+    case CMS.get_release(socket.assigns.release.id, act(socket)) do
+      {:ok, release} ->
+        token = ReleasePreview.sign(release)
+        {:noreply, assign(socket, :preview_url, url(~p"/preview/release/#{token}"))}
+
+      # Flashed rather than silent, matching `delete`, `remove_item` and
+      # `apply_action` above: a button that visibly does nothing reads as a bug.
+      _error ->
+        {:noreply, put_flash(socket, :error, gettext("That release no longer exists."))}
+    end
   end
 
   # --- helpers ---------------------------------------------------------------

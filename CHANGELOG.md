@@ -57,6 +57,34 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **Six console actions that authorize nothing now re-check who is asking**
+  (#1166). Every other privileged handler funnels into an Ash action carrying
+  the actor, so a mistake in a mount guard is still caught by a policy. These
+  six do not. What the re-checks buy is a refusal for a forged or replayed event
+  on a socket that never passed the mount guard, plus — on the per-org axis,
+  where the tier is re-read from the actor's membership — a revoked grant taking
+  effect immediately rather than when the tab is closed. A demoted *global*
+  admin is not caught either way: that role is read from a struct assigned once
+  at mount.
+
+  Worst was **sending a newsletter**: `send_as_newsletter/2` accepts an actor
+  but uses it only to stamp `sent_by_id`, writes the campaign with
+  `authorize?: false`, then hands the fan-out to Oban. A backup can be deleted;
+  an email cannot be unsent. Then **the mail test send**, whose recipient comes
+  from the client — a DKIM-signed send primitive pointed at any address a
+  socket names — along with its DNS verify and port-25 preflight, and
+  **billing credential verification**.
+
+  **The broken-link sweep** was the plainest case: its page is on the editor
+  routes, so its mount never refuses at all, and a boolean computed once at
+  mount was the entire distance between an editor and the enqueue.
+
+  The release **preview link** stays an editor action, deliberately — previewing
+  is what the feature is for, and an editor who can open a release can already
+  read every document in it. What the link changes is distribution rather than
+  access, so the read is now re-verified when the link is minted instead of
+  trusted from a struct fetched at mount.
+
 - **A one-click translation honours the acting editor's field grants** (#1157).
   Duplication and translation are the two creates that carry *another record's*
   values, and only duplication asked what the editor was allowed to write.
