@@ -88,6 +88,10 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
   @impl true
   def change(changeset, _opts, context) do
     version_id = Ash.Changeset.get_argument(changeset, :version_id)
+    # `EnforceBlockFieldPolicy` exempts an id-less fold from its nested id
+    # binding (#954), keyed on the action name `:restore_version` rather than
+    # any flag we set — the action is `accept []` with only a `version_id`, so
+    # the tree it writes is wholly our own vetted history. Nothing to mark here.
     Ash.Changeset.before_action(changeset, &apply_version(&1, version_id, context))
   end
 

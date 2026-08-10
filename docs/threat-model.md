@@ -790,26 +790,36 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    wins, and a decoy sharing the real child's id satisfies the binding while the
    rendered content quietly loses the value.
 
-   The binding applies only when the client demonstrably round-trips ids, and
-   that gate is forced rather than chosen: `blocks` is not `public?` and GraphQL
-   carries `hide_inputs: [:blocks]`, so most callers cannot read a child's id,
-   and `restore_version` accepts nothing but a `version_id` — versions captured
-   before the editor stamped children restore id-less by construction. Demanding
-   an id back from those callers would refuse them permanently while naming a
-   remedy neither could perform.
+   The binding is **required, not gated** (#954). It used to apply only when
+   the client demonstrably round-tripped ids, because ids were unreadable —
+   `blocks` is not `public?` and GraphQL carries `hide_inputs: [:blocks]`, so
+   demanding an id back named a remedy most callers could not perform, and a
+   caller willing to drop every id was quietly downgraded to the count-only
+   multiset, where the re-target survived. Every caller can now read them: the
+   public `block_ids` calculation projects the tree to `_id`/`_type` only —
+   nested children in the positions they render, **no field values**, so the
+   non-`public?` `blocks` boundary is untouched — on any policy-scoped read.
+   Drafts are therefore editor-scoped by the row read policy; on published rows
+   the fired `:json` artifact already names each block's id `_id`, nested
+   children included, and the write path accepts that spelling (#990). An
+   id-less submission against an identified stored tree is refused with the
+   surface named in the error.
 
-   **Published content is now round-trippable** (#954). The fired `:json`
-   artifact names each block's id `_id`, nested children included, and the write
-   path accepts that spelling — so a headless client editing published content
-   can read the artifact, send it back, and get the binding. Before, that
-   arrived id-less (fresh ids minted, `_id` stored as a junk key nothing read),
-   so the one available route to round-tripping silently did not work.
+   Two deliberate carve-outs, both keyed on what is stored rather than on who
+   is asking: a `restore_version` fold that carries no ids is exempt (the tree
+   is our own history, vetted by this same policy when written, and versions
+   captured before the editor stamped children fold back id-less by
+   construction — no surface can ever hand those ids back; a restore that does
+   carry ids keeps the binding like any other write). And a stored tree whose
+   children carry no ids binds nothing, so it is governed by the multiset
+   exactly as before rather than bricked by a demand for ids never stored.
 
-   *Residual:* a **draft** has no readable block surface at all, so a headless
-   client editing one still cannot produce ids, and a caller willing to drop
-   every id is governed by the count alone. Closing that needs a draft-readable
-   block-tree surface — a genuine API addition rather than a fix, tracked in
-   #954.
+   *Residual:* that second carve-out — a restricted value stored on an
+   **id-less child** (a page authored by an id-less headless admin client; the
+   editor always stamps) can still be re-targeted until an id-stamping save
+   gives the document identity, and an id-less `restore_version` replays
+   whichever vetted placement history holds. Both are bounded by the multiset:
+   the count can never change.
 
    *Residual, all about **which block an id names** rather than what a field may
    hold:* an editor can still reuse the id of another block **of the same type**

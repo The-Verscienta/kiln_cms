@@ -2634,6 +2634,24 @@ defmodule KilnCMS.CMS.Content do
           sortable? false
         end
 
+        # The block tree projected to `_id`/`_type` only, nested children in
+        # the positions they render (#954). This is the READ surface for block
+        # identity: the write path accepts `_id` back, and `EnforceBlockFieldPolicy`
+        # requires a nested admin-set value to return under the child id that
+        # held it — a demand that is only fair because this makes the ids
+        # readable on drafts (the fired artifact covers published content).
+        # Carries no field values, so the non-`public?` `blocks` boundary and
+        # `hide_inputs: [:blocks]` are untouched; drafts stay editor-scoped by
+        # the row read policy.
+        calculate :block_ids, {:array, :map}, KilnCMS.CMS.Calculations.BlockIds do
+          public? true
+          # No `expression/2`, so a filter or sort would raise out of AshSql as
+          # a 500; declaring them unusable rejects at the query layer instead —
+          # same reason `word_count` does.
+          filterable? false
+          sortable? false
+        end
+
         # Full-text relevance of a row against a query — higher is more
         # relevant. Used to order the `:search` action; `query`/`locale` are the
         # same values that action filters on, so the weighted `search_vector` is

@@ -196,6 +196,51 @@ defmodule KilnCMS.Blocks.Columns do
     |> Enum.flat_map(&[&1 | nested_child_maps(&1)])
   end
 
+  @doc """
+  The child tree projected to **identity only** — each child as
+  `%{"_id" => id, "_type" => type}` (`"_id"` omitted when the stored child has
+  none), in the same column/position structure the renderer reads, nested
+  columns recursed.
+
+  This is the shape `KilnCMS.CMS.Calculations.BlockIds` emits for a columns
+  block (#954): position is what lets a client tell which id names which child,
+  so the structure is preserved rather than flattened like `child_maps/1`.
+  Field values are deliberately absent — the projection exists so a client can
+  round-trip identity, not to widen the non-`public?` `blocks` boundary.
+
+  Lives here for the #956 reason `child_maps/1` does: the module that renders
+  the children is the one that knows where they live.
+  """
+  @spec child_id_columns(struct()) :: [map()]
+  def child_id_columns(block) do
+    block |> columns() |> Enum.map(&id_column/1)
+  end
+
+  defp id_column(col) do
+    %{"blocks" => col |> raw_blocks() |> Enum.filter(&is_map/1) |> Enum.map(&child_id_map/1)}
+  end
+
+  defp child_id_map(child) do
+    base =
+      case Map.get(child, "_type") || Map.get(child, :_type) do
+        type when is_binary(type) -> %{"_type" => type}
+        type when is_atom(type) and not is_nil(type) -> %{"_type" => to_string(type)}
+        _none -> %{}
+      end
+
+    base
+    |> put_child_id(Map.get(child, "id") || Map.get(child, :id))
+    |> put_nested_id_columns(Map.get(child, "columns") || Map.get(child, :columns))
+  end
+
+  defp put_child_id(map, id) when is_binary(id) and id != "", do: Map.put(map, "_id", id)
+  defp put_child_id(map, _id), do: map
+
+  defp put_nested_id_columns(map, cols) when is_list(cols),
+    do: Map.put(map, "columns", cols |> Enum.filter(&is_map/1) |> Enum.map(&id_column/1))
+
+  defp put_nested_id_columns(map, _cols), do: map
+
   # A child that is itself a columns block carries its own columns, in the same
   # raw shape — recursed here rather than by the caller so the "where do
   # children live" answer stays in one module.
