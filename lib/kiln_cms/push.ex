@@ -58,6 +58,7 @@ defmodule KilnCMS.Push do
   require Logger
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Branding
   alias KilnCMS.Push.Vapid
 
   # Matches the resource's `max_length` — one number, so the constraint can
@@ -154,10 +155,24 @@ defmodule KilnCMS.Push do
   end
 
   defp enqueue(subscription, payload) do
-    %{"subscription_id" => subscription.id, "payload" => payload}
+    %{"subscription_id" => subscription.id, "payload" => with_icon(payload, subscription)}
     |> KilnCMS.Push.Worker.new()
     |> Oban.insert!()
   end
+
+  # The service worker is a static file with no org context (#1146), so branding
+  # has to travel on the payload. `verified_app_icon/1` is the same gate the
+  # manifest / apple-touch-icon / offline page use — an unverified URL never
+  # reaches a lock screen. Callers that already set `"icon"` keep it
+  # (`put_new`), so a test or a future channel can override without fighting.
+  defp with_icon(payload, %{org_id: org_id}) when is_map(payload) do
+    case Branding.for_org(org_id) |> Branding.verified_app_icon() do
+      {url, _size} when is_binary(url) -> Map.put_new(payload, "icon", url)
+      nil -> payload
+    end
+  end
+
+  defp with_icon(payload, _subscription), do: payload
 
   defp org_id(%{id: id}), do: id
   defp org_id(id) when is_binary(id), do: id
