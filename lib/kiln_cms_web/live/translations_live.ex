@@ -18,6 +18,7 @@ defmodule KilnCMSWeb.TranslationsLive do
   """
   use KilnCMSWeb, :live_view
 
+  alias KilnCMS.Accounts.Scoping
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.Translations
   alias KilnCMS.CMS.Xliff
@@ -87,15 +88,31 @@ defmodule KilnCMSWeb.TranslationsLive do
       when is_binary(kind) and is_binary(id) and is_binary(locale) do
     actor = socket.assigns.current_user
     org = socket.assigns.current_org
-    source = ContentTypes.get_record!(kind, id, actor: actor, tenant: org)
 
-    {translation, withheld} =
-      Translations.create_translation_with_notes!(kind, source, locale, actor: actor, tenant: org)
+    # Hidden button is not the boundary — a forged event lands here regardless
+    # (#922 / #1156). Match ContentEditorLive: silent refuse, no error flash.
+    case ContentTypes.get(kind, org) do
+      ct when not is_nil(ct) ->
+        if may_author?(actor, org.id, ct) do
+          source = ContentTypes.get_record!(kind, id, actor: actor, tenant: org)
 
-    {:noreply,
-     socket
-     |> put_flash(:info, translation_flash(locale, withheld))
-     |> push_navigate(to: ~p"/editor/content/#{kind}/#{translation.id}")}
+          {translation, withheld} =
+            Translations.create_translation_with_notes!(kind, source, locale,
+              actor: actor,
+              tenant: org
+            )
+
+          {:noreply,
+           socket
+           |> put_flash(:info, translation_flash(locale, withheld))
+           |> push_navigate(to: ~p"/editor/content/#{kind}/#{translation.id}")}
+        else
+          {:noreply, socket}
+        end
+
+      nil ->
+        {:noreply, socket}
+    end
   rescue
     # Distinguished from a generic failure because it is not one: the refusal is
     # a permission boundary the editor can act on (ask for the grant), while
@@ -244,6 +261,26 @@ defmodule KilnCMSWeb.TranslationsLive do
 
   # --- data -------------------------------------------------------------------
 
+  # The same question the create policy asks (`Checks.EditableContentType`), so
+  # the Missing chip and create_translation cannot disagree (#1156).
+  defp may_author?(actor, org_id, content_type) do
+    case Scoping.effective_tier(actor, org_id) do
+      :admin ->
+        true
+
+      :editor ->
+        Scoping.permitted?(actor, org_id, :editable_types, type_name_of(content_type))
+
+      _ ->
+        false
+    end
+  end
+
+  # `editable_types` groups every dynamic type under `entry` (see
+  # docs/granular-rbac.md) — deliberately, unlike field grants.
+  defp type_name_of(%{source: :dynamic}), do: "entry"
+  defp type_name_of(%{type: type}), do: to_string(type)
+
   defp load_rows(socket) do
     actor = socket.assigns.current_user
     org = socket.assigns.current_org
@@ -264,7 +301,9 @@ defmodule KilnCMSWeb.TranslationsLive do
           ]
         )
         |> Enum.group_by(& &1.slug)
-        |> Enum.map(fn {_slug, records} -> row(ct, records, default) end)
+        |> Enum.map(fn {_slug, records} ->
+          row(ct, records, default, may_author?(actor, org.id, ct))
+        end)
       end)
       |> Enum.sort_by(& &1.updated_at, {:desc, DateTime})
 
@@ -273,7 +312,7 @@ defmodule KilnCMSWeb.TranslationsLive do
 
   # One dashboard row per (type, slug): the default-locale record (or the
   # first variant) represents it; each configured locale gets a cell.
-  defp row(ct, records, default) do
+  defp row(ct, records, default, may_author?) do
     by_locale = Map.new(records, &{&1.locale, &1})
     source = by_locale[default] || hd(records)
 
@@ -297,7 +336,8 @@ defmodule KilnCMSWeb.TranslationsLive do
       source: source,
       title: source.title,
       updated_at: records |> Enum.map(& &1.updated_at) |> Enum.max(DateTime),
-      cells: cells
+      cells: cells,
+      may_author?: may_author?
     }
   end
 
@@ -560,7 +600,7 @@ defmodule KilnCMSWeb.TranslationsLive do
                     </span>
                   </.link>
                   <button
-                    :if={is_nil(cell.record)}
+                    :if={is_nil(cell.record) and row.may_author?}
                     type="button"
                     phx-click="create_translation"
                     phx-value-kind={row.kind}
@@ -573,6 +613,15 @@ defmodule KilnCMSWeb.TranslationsLive do
                   >
                     + {status_label(:missing)}
                   </button>
+                  <span
+                    :if={is_nil(cell.record) and not row.may_author?}
+                    class={[
+                      "inline-flex items-center rounded border px-2 py-0.5 text-xs",
+                      chip_class(:missing)
+                    ]}
+                  >
+                    {status_label(:missing)}
+                  </span>
                 </td>
               </tr>
             </tbody>
