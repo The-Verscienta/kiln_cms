@@ -38,8 +38,23 @@ migration, a rewritten column, a dropped config key).
   printed count remains **this node's** drop. The same issue lifted
   `PublicPath`'s per-row type-registry scan into a shared
   `Slugs.descriptors_for_records/1` memo used by effective SEO too.
+- **A dead app-icon URL no longer keeps `apple-touch-icon` pointed at a 404**
+  (#1147). Save-time verification stored the measured edge once; nothing
+  re-checked it, so a CDN that later 404'd still looked installable to every
+  gate that reads `app_icon_size`. A nightly AshOban sweep on `SiteBranding`
+  re-runs `AppIcon.verify/1` and, after two consecutive failures, clears the
+  **size** (never the URL) so the stock mark returns until the next successful
+  verify. The failure streak resets on every branding save.
 
 ### Added
+
+- **Boot warns when the chain cannot detect splices** (#1056). With
+  `audit_anchor_every_write` on (or any `history_anchors` row already present)
+  and no provenance signing key, splice detection inside an anchored range is
+  soft (`:unverifiable`) rather than a hard failure — documented, but easy to
+  miss because the per-anchor "stored UNSIGNED" log is noise under every-write
+  anchoring. `KilnCMS.Application` now logs that once at boot, same shape as
+  the mailer / egress warnings.
 
 - **Claim checking is per site, and has a page** (#857). `KilnCMS.Compliance`
   was configured entirely in `config.exs`, which is the wrong grain on a
@@ -92,6 +107,28 @@ migration, a rewritten column, a dropped config key).
   panel saying so rather than describing a subset as the whole.
 
 ### Fixed
+
+- **Archiving a published document now tells subscribers it left delivery**
+  (#914). #879 made `:archive` tear down a published record's delivery
+  version and artifacts (previously orphaned) — but unlike `:unpublish`,
+  which fires `unpublished`, `:archive` fired no webhook at all, so
+  archiving silently removed a document from delivery with no signal to a
+  CDN or subscriber watching for exactly that.
+
+  `:archive` now fires the same `unpublished` event `:unpublish` does, since
+  from a subscriber's perspective the two have the same effect: the content
+  left delivery. Gated on `only_when: :was_published` (new on
+  `Changes.NotifyWebhooks`, checking the record's state *before* the
+  transition) rather than the existing `:published` mode (which checks the
+  *resulting* state) — `:archive` always lands on `:archived`, so a
+  `:published`-gated check would never fire; a draft or in-review record,
+  which was never delivered, correctly stays silent.
+
+  The issue's second item — `:unarchive` missing the `accept []` +
+  compare-and-swap hardening the other transitions got in #879 — was
+  already closed as an incidental side effect of #1026 (`:autosave`
+  refusing a published row); verified against current code rather than
+  redone here.
 
 - **Publishing no longer discards prose a collab room was still holding**
   (#1061). The server checkpoint writes a room's converged text back through
@@ -250,6 +287,41 @@ migration, a rewritten column, a dropped config key).
   well, so a replayed event cannot reach the copy. (#922)
 
 ### Security
+
+- **A reusable fragment's content is no longer invisible to search, word
+  count, and the editor's own preview** (#910). `KilnCMS.CMS.Fragments.expand/3`
+  (#479) inlines a fragment's body for the four fired delivery surfaces and
+  live HTML — but a `%Fragment{}` block's own `search_text/1` is always `""`,
+  so everything derived from the block tree at *write* time or in the editor
+  still saw the raw, unexpanded tree: `search_text` (Postgres FTS,
+  Meilisearch, document embeddings) had no fragment words, and the Preview
+  tab / SEO-readability panel showed an embedded fragment as empty, giving an
+  author no feedback that the picker worked.
+
+  `KilnCMS.Firing.Engine.fire/2` now recomputes `search_text` against the
+  fragment-expanded tree it already builds for the rendered surfaces, via a
+  narrow internal action (`:reindex_search_text`, modeled on
+  `:set_oembed_metadata` — no webhook, no re-fired version, no lock bump) —
+  written only when the recomputed text actually differs, which is the
+  common (fragment-free) case. Since the re-fire wave also calls `fire/2`, a
+  referrer's `search_text` catches up when the fragment it embeds changes,
+  not just when the referrer is next edited itself — the write-depends-on-read
+  coupling the issue explicitly declined for the *editorial* save path stays
+  declined; only the already-async fire path recomputes it.
+
+  `KilnCMSWeb.ContentEditorLive`'s preview now expands fragments the same
+  way, with the record's own audience (mirroring `Engine.host_audiences/1`,
+  now public for this reason) — so a `:member` document's preview never shows
+  a wider-audience fragment than delivery would ever grant it.
+
+  **Left open, per the issue's own framing** (not decided here): `word_count`
+  and `reading_time_minutes` are Ash *calculations* over the raw `.blocks`
+  attribute, not stored columns the re-fire wave could refresh — fixing them
+  needs a different shape (the calculation itself reading a tenant to expand
+  against, which no calculation in this codebase does today). Block
+  embeddings/Meilisearch reindexing is not wired into the re-fire wave at
+  all yet, independent of fragments. `links/extract.ex`'s nightly sweep
+  still reads raw blocks too. Filed as #1190, #1191, #1192.
 
 - **The governance checkpoint chain's link digest now covers `covered_at` and
   `key_id`, closing a gap `link_failures/1` could not see** (#892). Reviewing

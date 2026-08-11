@@ -55,7 +55,9 @@ defmodule KilnCMS.PushTest do
       "label" => Keyword.get(opts, :label, "iOS · Safari")
     }
 
-    {:ok, subscription} = Push.subscribe(params, user, nil)
+    org = Keyword.get(opts, :org_id)
+
+    {:ok, subscription} = Push.subscribe(params, user, org)
     subscription
   end
 
@@ -230,6 +232,52 @@ defmodule KilnCMS.PushTest do
       encoded = Jason.encode!(job.args)
       refute encoded =~ subscription.endpoint
       refute encoded =~ subscription.auth
+    end
+
+    test "a verified org app icon rides on the payload (#1146)" do
+      actor = user()
+      org_id = KilnCMS.Accounts.default_org_id()
+      # Subscribe under the org whose branding we are about to set, the way a
+      # real editor session would — `org_id` on the row is what `with_icon/2`
+      # reads.
+      subscription = subscribe(actor, org_id: org_id)
+
+      Ash.Seed.seed!(CMS.SiteBranding, %{
+        org_id: org_id,
+        site_name: "Icon Co",
+        app_icon_url: "/uploads/icon.png",
+        app_icon_size: 512
+      })
+
+      KilnCMS.Cache.bust_branding(org_id)
+
+      Push.notify([actor], %{"title" => "Review requested", "tag" => "kiln-review"})
+
+      [job] = Oban.Job |> KilnCMS.Repo.all() |> Enum.filter(&(&1.worker =~ "Push.Worker"))
+      assert job.args["payload"]["icon"] == "/uploads/icon.png"
+      assert subscription.org_id == org_id
+    end
+
+    test "an unverified app icon is not put on the payload" do
+      actor = user()
+      org_id = KilnCMS.Accounts.default_org_id()
+      _subscription = subscribe(actor, org_id: org_id)
+
+      # Size missing ⇒ `verified_app_icon/1` refuses, same as the other PWA
+      # surfaces. The worker then falls back to the stock icon in `sw.js`.
+      Ash.Seed.seed!(CMS.SiteBranding, %{
+        org_id: org_id,
+        site_name: "Wordmark Co",
+        app_icon_url: "/uploads/wordmark.png",
+        app_icon_size: nil
+      })
+
+      KilnCMS.Cache.bust_branding(org_id)
+
+      Push.notify([actor], %{"title" => "t"})
+
+      [job] = Oban.Job |> KilnCMS.Repo.all() |> Enum.filter(&(&1.worker =~ "Push.Worker"))
+      refute Map.has_key?(job.args["payload"], "icon")
     end
   end
 

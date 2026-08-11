@@ -39,7 +39,9 @@ defmodule KilnCMS.Branding.AppIcon do
   whose CDN is briefly down should not have their icon setting rejected; they
   should keep the stock icon until the next save succeeds. The reason exists so
   the settings page can say which of the four things went wrong, rather than
-  "invalid".
+  "invalid". A nightly AshOban sweep on `SiteBranding` re-runs this probe and
+  clears the stored size after consecutive failures (#1147), so a URL that dies
+  after save does not keep `apple-touch-icon` pointed at a 404.
   """
 
   use Gettext, backend: KilnCMSWeb.Gettext

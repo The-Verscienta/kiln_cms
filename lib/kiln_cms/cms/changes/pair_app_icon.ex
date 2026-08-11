@@ -41,7 +41,11 @@ defmodule KilnCMS.CMS.Changes.PairAppIcon do
     url = Ash.Changeset.get_attribute(changeset, :app_icon_url)
     size = Ash.Changeset.get_argument(changeset, :app_icon_size)
 
-    Ash.Changeset.force_change_attribute(changeset, :app_icon_size, size_for(url, size))
+    changeset
+    |> Ash.Changeset.force_change_attribute(:app_icon_size, size_for(url, size))
+    # A settings save is a fresh measurement attempt — do not let a prior
+    # nightly streak survive underneath a successful (or freshly failed) save.
+    |> Ash.Changeset.force_change_attribute(:app_icon_verify_failures, 0)
   end
 
   # No icon, no measurement to keep. Covers both "cleared it" and "never set

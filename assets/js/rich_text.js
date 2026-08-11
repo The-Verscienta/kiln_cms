@@ -43,10 +43,11 @@ const TABLE_EXTENSIONS = [
 // Mirror of `KilnCMS.HTMLSanitizer.safe_href/1`: returns the trimmed URL when
 // the CMS will store it, `null` when it won't. Allowed are same-origin relative
 // paths, in-page `#fragment`s, `http(s)://` and `mailto:` — everything else
-// (`javascript:`, `data:`, `ftp:`, protocol-relative `//host`, paths
-// containing `..`) is rejected.
+// (`javascript:`, `data:`, `ftp:`, protocol-relative `//host`, its backslash
+// twin `/\host` (browsers treat `\` as `/`), paths containing `..`) is
+// rejected.
 //
-// This has to agree with the server (#823). `PortableText.sanitize_def/1`
+// This has to agree with the server (#823, #921). `PortableText.sanitize_def/1`
 // blanks the href of any link mark it doesn't like, and a blanked href renders
 // as plain text — so an href the editor accepts but the server rejects is a
 // link the author watches vanish on the next reload. Rejecting it here instead
@@ -60,7 +61,12 @@ function safeHref(url) {
   // and `/blog/x` never reach the URL parser.
   if (trimmed.startsWith("#")) return trimmed
 
-  if (trimmed.startsWith("/") && !trimmed.startsWith("//") && !trimmed.includes("..")) {
+  if (
+    trimmed.startsWith("/") &&
+    !trimmed.startsWith("//") &&
+    !trimmed.includes("\\") &&
+    !trimmed.includes("..")
+  ) {
     return trimmed
   }
 
