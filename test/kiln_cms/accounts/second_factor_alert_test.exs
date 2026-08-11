@@ -69,6 +69,7 @@ defmodule KilnCMS.Accounts.SecondFactorAlertTest do
       })
 
     build_conn()
+    |> unique_ip()
     |> Plug.Conn.put_private(:plug_skip_csrf_protection, true)
     |> Plug.Test.init_test_session(%{})
     |> Plug.Conn.put_session(:pending_2fa, token)
@@ -80,6 +81,7 @@ defmodule KilnCMS.Accounts.SecondFactorAlertTest do
   defp headless_pending(user) do
     conn =
       build_conn()
+      |> unique_ip()
       |> put_req_header("content-type", "application/json")
       |> post(~p"/api/auth/sign_in", %{email: to_string(user.email), password: @password})
 
@@ -88,6 +90,7 @@ defmodule KilnCMS.Accounts.SecondFactorAlertTest do
 
   defp headless_verify(pending, code) do
     build_conn()
+    |> unique_ip()
     |> put_req_header("content-type", "application/json")
     |> post(~p"/api/auth/sign_in/verify", %{pending_token: pending, code: code})
   end

@@ -134,7 +134,12 @@ defmodule KilnCMSWeb.TwoFactorControllerTest do
       reloaded = KilnCMS.Accounts.get_user!(user.id, authorize?: false)
       assert length(reloaded.totp_recovery_hashes) == RecoveryCodes.count() - 1
 
-      retry = build_conn() |> with_pending(user) |> post(~p"/sign-in/verify", %{"code" => code})
+      retry =
+        build_conn()
+        |> unique_ip()
+        |> with_pending(user)
+        |> post(~p"/sign-in/verify", %{"code" => code})
+
       assert retry.status == 401
     end
 
