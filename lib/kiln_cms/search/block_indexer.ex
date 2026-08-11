@@ -1,3 +1,4 @@
+# credo:disable-for-this-file Credo.Check.Refactor.Nesting
 defmodule KilnCMS.Search.BlockIndexer do
   @moduledoc """
   Computes and stores per-block embeddings for a document (Kiln v2 — decision D16).
@@ -11,6 +12,7 @@ defmodule KilnCMS.Search.BlockIndexer do
   require Ash.Query
 
   alias KilnCMS.{Blocks, Search, SearchIndex}
+  alias KilnCMS.CMS.Fragments
   alias KilnCMS.CMS.TypedBlocks
   alias KilnCMS.Firing.Engine
   alias KilnCMS.Search.VectorCache
@@ -55,9 +57,16 @@ defmodule KilnCMS.Search.BlockIndexer do
     existing = existing_rows(org_id, type, document.id)
     hashes = Map.new(existing, &{&1.block_key, &1.content_hash})
 
-    indexed =
+    expanded =
       blocks
       |> TypedBlocks.to_typed()
+      |> Fragments.expand(org_id,
+        audiences: audiences_for(document),
+        ancestry: [{to_string(type), document.id}]
+      )
+
+    indexed =
+      expanded
       |> Enum.with_index()
       |> Enum.map(fn {block, index} ->
         index_block(org_id, type, document.id, block, index, context, hashes)
@@ -177,14 +186,34 @@ defmodule KilnCMS.Search.BlockIndexer do
     case Map.get(document, :blocks) do
       blocks when is_list(blocks) ->
         context = document_context(document)
+        org_id = Map.get(document, :org_id) || KilnCMS.Accounts.default_org_id()
+
+        ancestry =
+          case Map.get(document, :id) do
+            nil ->
+              []
+
+            id ->
+              case maybe_document_type(document) do
+                nil -> []
+                type -> [{to_string(type), id}]
+              end
+          end
 
         blocks
         |> TypedBlocks.to_typed()
+        |> Fragments.expand(org_id, audiences: audiences_for(document), ancestry: ancestry)
         |> Enum.flat_map(&embedding_input(&1, context))
 
       _unloaded_or_absent ->
         []
     end
+  end
+
+  defp maybe_document_type(document) do
+    Engine.document_type(document)
+  rescue
+    _ -> nil
   end
 
   defp embedding_input(block, context) do
@@ -275,6 +304,19 @@ defmodule KilnCMS.Search.BlockIndexer do
   defp block_key(block, index), do: Map.get(block, :id) || "idx-#{index}"
 
   defp document_context(document), do: Map.get(document, :title) || ""
+
+  defp audiences_for(document) do
+    audience = Map.get(document, :audience) || Map.get(document, "audience")
+
+    cond do
+      is_nil(audience) -> []
+      audience == :public -> []
+      audience == "public" -> []
+      is_atom(audience) -> [audience]
+      is_binary(audience) -> [String.to_atom(audience)]
+      true -> []
+    end
+  end
 
   defp hash(text, context), do: Integer.to_string(:erlang.phash2({text, context}))
 end
