@@ -368,44 +368,43 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   @spec hold_first_factor(term()) :: :ok
   defp hold_first_factor(token) do
     case Accounts.Token.peeked_jti(token) do
-      jti when is_binary(jti) ->
-        result =
-          Accounts.Token
-          |> Ash.Query.filter(jti == ^jti)
-          |> Ash.bulk_update(:hold_for_second_factor, %{},
-            strategy: :atomic,
-            authorize?: false,
-            return_records?: true,
-            return_errors?: true
-          )
-
-        case result do
-          %Ash.BulkResult{status: status, records: records}
-          when status in [:success, :partial_success] and is_list(records) and records != [] ->
-            :ok
-
-          %Ash.BulkResult{status: status, records: records}
-          when status in [:success, :partial_success] and (records == [] or records == nil) ->
-            # A token we could read a jti out of was minted by the strategy and
-            # therefore should have a row, so its absence is the defence quietly
-            # not running and has to say so.
-            log_hold_failure("no stored row for it")
-
-          %Ash.BulkResult{errors: errors} when is_list(errors) and errors != [] ->
-            log_hold_failure(Exception.message(List.first(errors)))
-
-          other ->
-            log_hold_failure(inspect(other))
-        end
-
+      jti when is_binary(jti) -> hold_by_jti(jti)
       # Not a JWT at all — a fixture, a fabricated payload. There was never a
       # row, so this is silent rather than an anomaly.
-      nil ->
-        :ok
+      nil -> :ok
     end
   rescue
     error -> log_hold_failure(Exception.message(error))
   end
+
+  defp hold_by_jti(jti) do
+    Accounts.Token
+    |> Ash.Query.filter(jti == ^jti)
+    |> Ash.bulk_update(:hold_for_second_factor, %{},
+      strategy: :atomic,
+      authorize?: false,
+      return_records?: true,
+      return_errors?: true
+    )
+    |> interpret_hold_result()
+  end
+
+  defp interpret_hold_result(%Ash.BulkResult{status: status, records: [_ | _]})
+       when status in [:success, :partial_success],
+       do: :ok
+
+  defp interpret_hold_result(%Ash.BulkResult{status: status})
+       when status in [:success, :partial_success] do
+    # A token we could read a jti out of was minted by the strategy and
+    # therefore should have a row, so its absence is the defence quietly
+    # not running and has to say so.
+    log_hold_failure("no stored row for it")
+  end
+
+  defp interpret_hold_result(%Ash.BulkResult{errors: [error | _]}),
+    do: log_hold_failure(Exception.message(error))
+
+  defp interpret_hold_result(other), do: log_hold_failure(inspect(other))
 
   defp log_hold_failure(detail) do
     Logger.error("could not hold a first-factor token: #{detail}")
@@ -424,45 +423,50 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   defp release_first_factor(token) do
     with jti when is_binary(jti) <- Accounts.Token.peeked_jti(token),
          %DateTime{} = expires_at <- Accounts.Token.peeked_expires_at(token) do
-      result =
-        Accounts.Token
-        |> Ash.Query.filter(jti == ^jti)
-        |> Ash.bulk_update(:release_second_factor_hold, %{expires_at: expires_at},
-          strategy: :atomic,
-          authorize?: false,
-          return_records?: true,
-          return_errors?: true
-        )
-
-      case result do
-        %Ash.BulkResult{status: status, records: records}
-        when status in [:success, :partial_success] and is_list(records) and records != [] ->
-          :ok
-
-        %Ash.BulkResult{status: status, records: records}
-        when status in [:success, :partial_success] and (records == [] or records == nil) ->
-          # Nothing held under that purpose, and what to make of it turns on
-          # whether a row exists at all — absence is not evidence. See the
-          # pre-#1173 comments: a row that exists and is not held is evidence
-          # (revoked or lapsed); no row is a deployment that never stored tokens.
-          if stored_row_exists?(token),
-            do: log_release_failure("it is not held and not usable"),
-            else: :ok
-
-        %Ash.BulkResult{errors: errors} when is_list(errors) and errors != [] ->
-          log_release_failure(Exception.message(List.first(errors)))
-
-        other ->
-          log_release_failure(inspect(other))
-      end
+      release_by_jti(jti, expires_at, token)
     else
-      nil ->
-        # Not a JWT at all, so nothing was ever held and there is nothing to put
-        # back. Symmetric with the hold, and silent for the same reason.
-        :ok
+      # Not a JWT at all, so nothing was ever held and there is nothing to put
+      # back. Symmetric with the hold, and silent for the same reason.
+      nil -> :ok
     end
   rescue
     error -> log_release_failure(Exception.message(error))
+  end
+
+  defp release_by_jti(jti, expires_at, token) do
+    Accounts.Token
+    |> Ash.Query.filter(jti == ^jti)
+    |> Ash.bulk_update(:release_second_factor_hold, %{expires_at: expires_at},
+      strategy: :atomic,
+      authorize?: false,
+      return_records?: true,
+      return_errors?: true
+    )
+    |> interpret_release_result(token)
+  end
+
+  defp interpret_release_result(%Ash.BulkResult{status: status, records: [_ | _]}, _token)
+       when status in [:success, :partial_success],
+       do: :ok
+
+  defp interpret_release_result(%Ash.BulkResult{status: status}, token)
+       when status in [:success, :partial_success] do
+    # Nothing held under that purpose, and what to make of it turns on whether a
+    # row exists at all — absence is not evidence. See the pre-#1173 comments: a
+    # row that exists and is not held is evidence (revoked or lapsed); no row is
+    # a deployment that never stored tokens.
+    release_when_unheld(token)
+  end
+
+  defp interpret_release_result(%Ash.BulkResult{errors: [error | _]}, _token),
+    do: log_release_failure(Exception.message(error))
+
+  defp interpret_release_result(other, _token), do: log_release_failure(inspect(other))
+
+  defp release_when_unheld(token) do
+    if stored_row_exists?(token),
+      do: log_release_failure("it is not held and not usable"),
+      else: :ok
   end
 
   defp log_release_failure(detail) do
