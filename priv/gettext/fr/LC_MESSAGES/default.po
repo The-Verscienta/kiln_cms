@@ -7906,7 +7906,7 @@ msgstr "Affichage des %{count} premières occurrences : corrigez-en une partie p
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Showing the first %{limit} tags. Filter to find others."
-msgstr ""
+msgstr "Affichage des %{limit} premières étiquettes. Filtrez pour trouver les autres."
 
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
