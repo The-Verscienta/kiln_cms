@@ -47,6 +47,32 @@ migration, a rewritten column, a dropped config key).
   **size** (never the URL) so the stock mark returns until the next successful
   verify. The failure streak resets on every branding save.
 
+- **Four tests' copies of the experiments config fixture now bust the cache
+  on restore, like the one that already did** (#1120). The same
+  get/put/`on_exit`-restore block for `:kiln_cms, KilnCMS.Experiments` was
+  copied — as a `put_experiments/1` helper — into
+  `test/kiln_cms/experiments/sticky_test.exs`,
+  `test/kiln_cms/experiments/health_test.exs`,
+  `test/kiln_cms_web/live/overview_experiment_warning_test.exs`, and
+  `test/mix/tasks/kiln_experiment_test.exs` (as `sticky_on/0` +
+  `put_experiments/1`). `KilnCMS.ExperimentFixtures.enable!/0` was the same
+  block **plus** `KilnCMS.Cache.bust_experiments/1` on restore; none of the
+  four copies busted.
+
+  Harmless while `Experiments.enabled?/0` and `Sticky.enabled?/0` were plain
+  config reads. Not harmless once a test flips the flag and then reads
+  `Experiments.running/1` (as `health_test.exs` has done since #1110, to
+  catch a `select` regression): the flag restores correctly on `on_exit`, but
+  a cached running set survives into the next `async: false` test in the same
+  partition — an unreproducible cross-test flake that passes isolated, fails
+  under load, and moves with the seed.
+
+  All four now delegate to a new `ExperimentFixtures.put_config/1`, which
+  `enable!/0` is defined in terms of — one place that knows the flag and the
+  cache have to move together. Two more inline (not helper-shaped, so not
+  caught by grepping for `put_experiments`) copies of the same unbust block
+  turned up while fixing this and are filed separately as #1210.
+
 ### Added
 
 - **Boot warns when the chain cannot detect splices** (#1056). With

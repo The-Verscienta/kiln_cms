@@ -48,19 +48,13 @@ defmodule Mix.Tasks.Kiln.ExperimentTest do
 
   defp run(args), do: capture_io(fn -> Experiment.run(args) end)
 
-  defp sticky_on do
-    original = Application.get_env(:kiln_cms, KilnCMS.Experiments, [])
-    Application.put_env(:kiln_cms, KilnCMS.Experiments, Keyword.put(original, :sticky, true))
-    on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Experiments, original) end)
-  end
-
+  defp sticky_on, do: put_experiments(sticky: true)
   defp sticky_off, do: put_experiments(sticky: false)
 
-  defp put_experiments(overrides) do
-    original = Application.get_env(:kiln_cms, KilnCMS.Experiments, [])
-    Application.put_env(:kiln_cms, KilnCMS.Experiments, Keyword.merge(original, overrides))
-    on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Experiments, original) end)
-  end
+  # Delegates to ExperimentFixtures.put_config/1 (#1120) — this used to be its
+  # own copy of the get/put/on_exit-restore block, which didn't bust the
+  # running-experiments cache on restore the way the shared fixture does.
+  defp put_experiments(overrides), do: ExperimentFixtures.put_config(overrides)
 
   defp find(org_id, name) do
     Experiments.list_experiments!(authorize?: false, tenant: org_id, load: [:variants])

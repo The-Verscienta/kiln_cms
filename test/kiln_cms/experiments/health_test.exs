@@ -39,11 +39,10 @@ defmodule KilnCMS.Experiments.HealthTest do
     })
   end
 
-  defp put_experiments(overrides) do
-    original = Application.get_env(:kiln_cms, KilnCMS.Experiments, [])
-    Application.put_env(:kiln_cms, KilnCMS.Experiments, Keyword.merge(original, overrides))
-    on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Experiments, original) end)
-  end
+  # Delegates to ExperimentFixtures.put_config/1 (#1120) — this used to be its
+  # own copy of the get/put/on_exit-restore block, which didn't bust the
+  # running-experiments cache on restore the way the shared fixture does.
+  defp put_experiments(overrides), do: ExperimentFixtures.put_config(overrides)
 
   # PUBLISHED, because a draft page serves nobody and is now a reason in its own
   # right. Every test that wants a healthy experiment therefore has to publish
