@@ -123,6 +123,31 @@ migration, a rewritten column, a dropped config key).
 
   Item 2 from the same review — `:archive` firing no webhook — was already
   filed and fixed separately as #914.
+- **A missing responsive-label image encoder (no AVIF build, a `thumb.avif`
+  past a dimension ceiling) re-decoded the source on every regeneration run,
+  forever** (#1036). #1000 recorded which full-size alternates a source
+  cannot be encoded to, so `Regeneration.current?/1` could tell "not written
+  yet" from "will never be written" — but only for the full-size case.
+  `build_variants/3` (the responsive `thumb`/`medium`/`card` ladder) and
+  `build_crops/5` (the focal-point crop) reported nothing: a failed
+  `thumb.avif` write was swallowed into a bare `Logger.warning` and recorded
+  nowhere, so the `base_labels` sweep kept demanding it forever and
+  `run(only_missing?: true)` re-decoded the source on every pass — the exact
+  standing cost #1000 set out to remove, just one label over.
+
+  `ImageProcessor.process/3`'s per-write failure tracking (previously only
+  inside `build_full/2`'s `alternates/2`) is now threaded through
+  `encodings/3` — the function `thumb/4` and `focal_crop/7` both delegate
+  to — so every builder reports its own failed `"<label>.<format>"` keys the
+  same way it reports its written ones. `variant_failures` (written by
+  `Media.VariantWorker`) is keyed per-`{label, format}` rather than per-format
+  alone, decided in the issue's own favor: an encoder can reject one label's
+  dimensions (a full-size panorama past a WebP ceiling) while accepting a
+  smaller label's, and a bare per-format record would incorrectly excuse — or
+  fail to excuse — a label it was never actually tested against.
+  `Regeneration.current?/1`'s `base_labels` sweep now excuses a label+format
+  recorded as impossible, the same "present OR recorded as impossible" rule
+  it already applied to `full`.
 
 - **Archiving a published document now tells subscribers it left delivery**
   (#914). #879 made `:archive` tear down a published record's delivery
