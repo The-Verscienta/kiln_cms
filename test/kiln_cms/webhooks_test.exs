@@ -173,6 +173,23 @@ defmodule KilnCMS.WebhooksTest do
     assert "page.unpublished" in events
   end
 
+  test "archiving an in-review (never published) document dispatches nothing" do
+    # Distinct from the draft case: `:archive`'s `from: [:draft, :in_review,
+    # :published]` makes `:in_review` a real reachable pre-state, and only
+    # `changeset.data.state == :published` — not, say, `!= :draft` — is the
+    # right predicate. This case is what would catch that looser one.
+    stub_capture()
+    admin = admin()
+    CMS.create_webhook_endpoint!(%{url: "https://example.test/hook"}, actor: admin)
+
+    page = CMS.create_page!(%{title: "Under review", slug: slug()}, actor: admin)
+    page = CMS.submit_page_for_review!(page, actor: admin)
+    CMS.archive_page!(page, %{}, actor: admin)
+    KilnCMS.DataCase.drain_oban()
+
+    refute_received {:delivered, _, _, _, _}
+  end
+
   test "archiving a draft (never published) document dispatches nothing" do
     stub_capture()
     admin = admin()
