@@ -6430,6 +6430,11 @@ msgstr "Presentación: %{title}"
 msgid "Preview"
 msgstr "Vista previa"
 
+#: lib/kiln_cms_web/live/presentation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Preview URL matches this console's origin, so the frame is sandboxed without cookies. Signed-in or member-only pages render as anonymous here. Point PRESENTATION_PREVIEW_URL at a separate front-end origin to keep preview authentication."
+msgstr ""
+
 #: lib/kiln_cms_web/live/token_preview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Preview links are short-lived. Ask the editor who shared it for a fresh one."
