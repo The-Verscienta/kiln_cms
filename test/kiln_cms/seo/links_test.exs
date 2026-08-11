@@ -29,7 +29,12 @@ defmodule KilnCMS.Seo.LinksTest do
     })
   end
 
+  # `:tenant` defaults to the default org. Passing another one is how the
+  # cross-org cases build the page that must never surface.
   defp post(actor, text, opts \\ []) do
+    tenant = Keyword.get(opts, :tenant)
+    write_opts = if tenant, do: [actor: actor, tenant: tenant], else: [actor: actor]
+
     record =
       CMS.create_post!(
         Map.merge(
@@ -40,16 +45,24 @@ defmodule KilnCMS.Seo.LinksTest do
           },
           Keyword.get(opts, :attrs, %{})
         ),
-        actor: actor
+        write_opts
       )
 
     record =
       if Keyword.get(opts, :publish?, true),
-        do: CMS.publish_post!(record, %{}, actor: actor),
+        do: CMS.publish_post!(record, %{}, write_opts),
         else: record
 
     if Keyword.get(opts, :index?, true), do: {:ok, _} = BlockIndexer.reindex(record)
     record
+  end
+
+  defp other_org do
+    Ash.Seed.seed!(KilnCMS.Accounts.Organization, %{
+      name: "Other",
+      slug: "links-org-#{System.unique_integer([:positive])}",
+      status: :active
+    })
   end
 
   describe "the semantic leg" do
@@ -148,6 +161,77 @@ defmodule KilnCMS.Seo.LinksTest do
              )
     end
 
+    # #924. The keyword fallback has its own cross-org case, but it sits under a
+    # `semantic_off()` setup — so `Links.suggest/2` short-circuits at
+    # `Search.semantic?()` and only `Search.global/2`'s scoping is exercised.
+    # The docstring naming the SEMANTIC leg as the reason `:tenant` is
+    # unnecessary was the one leg no test reached.
+    #
+    # ## What this does and does not pin
+    #
+    # `KilnCMS.Search.Related` scopes the semantic path TWICE — `tenant:` on
+    # `nearest_block_embeddings!`, and again on the per-neighbour read in
+    # `resolve/3` — and either alone is sufficient. Verified by mutation:
+    # deleting one and running this file is still green; deleting both turns
+    # these two cases red.
+    #
+    # So this is a guard on the org boundary as a user-visible property, not on
+    # either layer individually. That is the property the docstring claims and
+    # the one an operator cares about; a single-layer regression stays
+    # invisible from out here, which is what defence in depth means and is not
+    # something an end-to-end test can fix.
+    test "never suggests a page from another organization (#869, #924)" do
+      actor = admin()
+      other = other_org()
+
+      # A byte-identical twin in ANOTHER org. Under the stub embedder identical
+      # title + body means cosine distance 0, so with the boundary gone this
+      # ranks FIRST — the strongest version of the leak, not a marginal one.
+      foreign =
+        post(actor, "brewing herbal tea slowly", title: @twin_title, tenant: other)
+
+      # A same-org twin, so the semantic leg has something legitimate to return.
+      # Without it `suggestions` is `[]`, and an empty list satisfies BOTH the
+      # `refute Enum.any?` below and the `Enum.all?` guard under it — the first
+      # draft of this test asserted `source == :semantic` on nothing and passed
+      # with the predicate changed to a source that does not exist.
+      twin = post(actor, "brewing herbal tea slowly", title: @twin_title)
+      anchor = post(actor, "brewing herbal tea slowly", title: @twin_title)
+
+      suggestions = Links.suggest(anchor)
+
+      # Non-emptiness FIRST: every other assertion here is vacuous without it.
+      assert Enum.any?(suggestions, &(&1.id == twin.id)),
+             "the same-org twin should be suggested; with no suggestions at all " <>
+               "the org-boundary assertion below proves nothing"
+
+      # ...and it came from the leg this test is named for, not the keyword
+      # fallback that `candidates/2` drops to when the semantic leg is empty.
+      assert Enum.all?(suggestions, &(&1.source == :semantic))
+
+      refute Enum.any?(suggestions, &(&1.id == foreign.id)),
+             "a semantic suggestion must not cross the org boundary"
+    end
+
+    test "the keyword fall-through does not leak the foreign page either" do
+      # No same-org twin, so the semantic leg returns nothing and `candidates/2`
+      # falls through to the keyword leg. Asserted explicitly, because that is
+      # what distinguishes this case from the one above — the first draft
+      # claimed the difference and did not have it, so the two were identical.
+      actor = admin()
+      other = other_org()
+
+      foreign =
+        post(actor, "brewing herbal tea slowly", title: @twin_title, tenant: other)
+
+      anchor = post(actor, "brewing herbal tea slowly", title: @twin_title)
+
+      suggestions = Links.suggest(anchor)
+
+      refute Enum.any?(suggestions, &(&1.id == foreign.id))
+      refute Enum.any?(suggestions, &(&1.source == :semantic))
+    end
+
     test "respects :limit" do
       actor = admin()
       anchor = post(actor, "brewing herbal tea slowly", title: @twin_title)
@@ -186,12 +270,95 @@ defmodule KilnCMS.Seo.LinksTest do
       refute Enum.any?(suggestions, &(&1.id == anchor.id))
     end
 
+    # #1066. This stays end-to-end — the fallback is only worth anything if the
+    # words it picks reach `Search.global/2` — but it no longer competes for
+    # rank against the rest of the corpus.
+    #
+    # The old version searched for "Kiln firing" and asserted that a target
+    # whose ONLY match was its title came back. `keyword/2` fetches `limit * 2`
+    # hits and `suggest/2` then takes `limit`, so that target had to out-rank
+    # every other post in the tenant on `ts_rank` — including the sibling case
+    # above, whose body says "a thorough guide to kiln firing". Which of them
+    # placed depended on what else the run had inserted, so the test passed
+    # under some seeds and failed under others with nothing naming a cause.
+    #
+    # A nonce in the title gives the case a corpus it owns: no other row can
+    # contain the term, so rank is not a variable and a failure means the
+    # fallback itself broke.
     test "falls back to the title when no focus keyphrase is set" do
       actor = admin()
-      anchor = post(actor, "unrelated body text", title: "Kiln firing", index?: false)
-      target = post(actor, "a thorough guide", title: "Kiln firing guide", index?: false)
+      nonce = "kilnfire#{System.unique_integer([:positive])}"
 
-      assert Enum.any?(Links.suggest(anchor), &(&1.id == target.id))
+      anchor = post(actor, "unrelated body text", title: nonce, index?: false)
+      target = post(actor, "a thorough guide", title: "#{nonce} guide", index?: false)
+
+      suggestions = Links.suggest(anchor)
+
+      assert Enum.any?(suggestions, &(&1.id == target.id))
+      assert Enum.all?(suggestions, &(&1.source == :keyword))
+    end
+
+    test "the focus keyphrase wins over the title when both are set" do
+      # The other half of the same decision, and it needs both terms present in
+      # the corpus to mean anything: if only the keyphrase target existed, a
+      # fallback-to-title regression would still return it by accident.
+      actor = admin()
+      key = "rakuglaze#{System.unique_integer([:positive])}"
+      title = "kilnfire#{System.unique_integer([:positive])}"
+
+      anchor =
+        post(actor, "unrelated body text",
+          title: title,
+          index?: false,
+          attrs: %{seo_keywords: key}
+        )
+
+      keyphrase_target = post(actor, "notes on #{key}", title: "#{key} notes", index?: false)
+      title_target = post(actor, "a thorough guide", title: "#{title} guide", index?: false)
+
+      suggestions = Links.suggest(anchor)
+
+      assert Enum.any?(suggestions, &(&1.id == keyphrase_target.id))
+      refute Enum.any?(suggestions, &(&1.id == title_target.id))
+    end
+
+    test "never suggests a page from another organization (#869)" do
+      actor = admin()
+
+      # A published page in ANOTHER org that matches the keyphrase. Scoping comes
+      # from the anchor's own `org_id`, so this must never surface — if a future
+      # change dropped the tenant thread, it would.
+      other_org =
+        Ash.Seed.seed!(KilnCMS.Accounts.Organization, %{
+          name: "Other",
+          slug: "links-org-#{System.unique_integer([:positive])}",
+          status: :active
+        })
+
+      foreign =
+        CMS.create_post!(
+          %{
+            title: "Foreign kiln firing",
+            slug: "links-foreign-#{System.unique_integer([:positive])}",
+            blocks: [
+              %{type: :rich_text, content: "<p>a thorough guide to kiln firing</p>", order: 0}
+            ]
+          },
+          actor: actor,
+          tenant: other_org
+        )
+
+      {:ok, foreign} = CMS.publish_post(foreign, %{}, actor: actor, tenant: other_org)
+
+      anchor =
+        post(actor, "notes on kiln firing",
+          title: "Anchor",
+          index?: false,
+          attrs: %{seo_keywords: "kiln firing"}
+        )
+
+      refute Enum.any?(Links.suggest(anchor), &(&1.id == foreign.id)),
+             "a suggestion must not cross the org boundary"
     end
 
     test "keyword suggestions carry a path but no distance" do

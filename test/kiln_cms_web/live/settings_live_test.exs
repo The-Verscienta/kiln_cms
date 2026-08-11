@@ -145,10 +145,12 @@ defmodule KilnCMSWeb.SettingsLiveTest do
   describe "two-factor enrolment (#331)" do
     alias KilnCMS.Accounts
     alias KilnCMS.Accounts.RecoveryCodes
-    alias KilnCMS.Accounts.Totp
+    alias KilnCMS.TwoFactorFixtures
 
-    defp current_code(user),
-      do: Totp.code_at(reload(user).totp_secret, System.system_time(:second))
+    # `current_code/1` takes the user and prefers the PENDING secret, which is
+    # what a mid-enrolment test needs — asking for `totp_secret` there produces a
+    # code for the factor being replaced.
+    defp current_code(user), do: TwoFactorFixtures.current_code(reload(user))
 
     test "enrolment shows a QR code; confirming mints show-once recovery codes", %{conn: conn} do
       user = authed_user(:editor)
@@ -174,7 +176,7 @@ defmodule KilnCMSWeb.SettingsLiveTest do
     test "regenerating replaces the set; disabling clears it", %{conn: conn} do
       user = authed_user(:editor)
       {:ok, user} = Accounts.setup_totp(user, %{}, actor: user)
-      code = Totp.code_at(user.totp_secret, System.system_time(:second))
+      code = TwoFactorFixtures.current_code(user.totp_pending_secret)
       {:ok, user} = Accounts.confirm_totp(user, %{code: code}, actor: user)
       original = reload(user).totp_recovery_hashes
 
@@ -188,6 +190,39 @@ defmodule KilnCMSWeb.SettingsLiveTest do
       lv |> form("#disable-totp-form", %{"code" => current_code(user)}) |> render_submit()
       assert reload(user).totp_recovery_hashes == []
       assert is_nil(reload(user).totp_secret)
+    end
+
+    # #727. The budget is only half the fix: a spent budget that reports "that
+    # code isn't valid" sends a user to type five more codes into a bucket with
+    # nothing left, which is the opposite of the advice they need. The wiring
+    # from `SecondFactorThrottled` to the flash is what makes the difference
+    # visible, and it is one pattern match away from silently falling back.
+    test "a spent budget says so, rather than blaming the code", %{conn: conn} do
+      alias KilnCMS.Accounts.AccountThrottle
+
+      user = authed_user(:editor)
+      {:ok, user} = Accounts.setup_totp(user, %{}, actor: user)
+      code = TwoFactorFixtures.current_code(user.totp_pending_secret)
+      {:ok, user} = Accounts.confirm_totp(user, %{code: code}, actor: user)
+
+      {:ok, lv, _html} = live(log_in(conn, user), ~p"/editor/settings")
+
+      # Spend the real budget from outside the LiveView, so this asserts on the
+      # message rather than on the number.
+      Stream.repeatedly(fn -> AccountThrottle.consume_second_factor(user.id) end)
+      |> Enum.find(&match?({:deny, _}, &1))
+
+      # Submitting a *correct* code: the throttle is what refuses it, so a
+      # "check your authenticator" message would be plainly wrong.
+      html =
+        lv |> form("#disable-totp-form", %{"code" => current_code(user)}) |> render_submit()
+
+      assert html =~ "Too many attempts"
+      refute html =~ "isn&#39;t valid"
+      # ...and it really was refused.
+      refute is_nil(reload(user).totp_secret)
+
+      on_exit(fn -> AccountThrottle.forgive_second_factor(user.id) end)
     end
   end
 end

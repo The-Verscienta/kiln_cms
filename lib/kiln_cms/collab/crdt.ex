@@ -25,7 +25,18 @@ defmodule KilnCMS.Collab.Crdt do
 
   alias KilnCMS.Collab.Crdt.DocServer
 
-  @doc "Whether the collaborative-editing CRDT prototype is enabled."
+  @doc """
+  Whether the collaborative-editing CRDT prototype is enabled.
+
+  Read fresh on every editor mount, from **VM-global** application env. A test
+  that flips `:collab_prototype` therefore flips it for every session in the
+  node, not just its own — so any such test must be `async: false`, or it
+  disables collaboration underneath whatever else is mounting an editor at that
+  moment (`KilnCMSWeb.CollabSavedRefreshTest`, `KilnCMSWeb.CollabChannelTest`).
+  Restore the previous value rather than deleting the key: `config/test.exs`
+  sets it at boot, and `Application.delete_env/2` would leave every later module
+  on the `false` default here.
+  """
   @spec enabled?() :: boolean()
   def enabled?, do: Application.get_env(:kiln_cms, :collab_prototype, false)
 
@@ -93,6 +104,44 @@ defmodule KilnCMS.Collab.Crdt do
         {:error, :unavailable}
     end
   end
+
+  @doc """
+  `record`'s blocks with the converged prose of its **already-open** room merged
+  in, or `:none` when no room is open (#1061).
+
+  Looks the server up rather than starting one — `ensure_server/2` would mint an
+  empty doc for a record nobody is editing, and materializing an empty doc
+  against a record replaces nothing but costs a process and a row. A publish
+  with no room open must be exactly as cheap as it was before this existed.
+
+  Failure is `:none`, not a raise. This runs inside a publish, and a collab
+  prototype that is misbehaving must not be able to stop content going live —
+  the pre-existing behaviour (lose the uncaptured prose) is bad, but refusing
+  the publish outright is worse.
+  """
+  @spec converged_blocks(String.t(), struct()) :: {:ok, [map()]} | :none
+  def converged_blocks(doc_key, record) do
+    case Registry.lookup(KilnCMS.Collab.Crdt.Registry, doc_key) do
+      [{pid, _value} | _] -> {:ok, DocServer.converged_blocks(pid, record)}
+      [] -> :none
+    end
+  rescue
+    # `Registry.lookup/2` RAISES on an unknown registry rather than exiting, so
+    # the `catch` below cannot see it. Reachable in a release with the prototype
+    # flag on and the collab subtree not started — where, without this, every
+    # publish would log the deliberately-loud checkpoint warning and drown the
+    # signal it exists for.
+    ArgumentError -> :none
+  catch
+    # An `exit` from a server that stopped between the lookup and the call.
+    :exit, _reason -> :none
+  end
+
+  @doc """
+  The doc key for one content record — the channel topic without its prefix.
+  """
+  @spec doc_key(atom() | String.t(), Ash.UUID.t()) :: String.t()
+  def doc_key(kind, id), do: "collab:#{kind}:#{id}"
 
   defdelegate attach(server), to: DocServer
   defdelegate apply_update(server, update), to: DocServer

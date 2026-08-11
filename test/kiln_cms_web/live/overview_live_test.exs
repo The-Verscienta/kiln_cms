@@ -76,6 +76,21 @@ defmodule KilnCMSWeb.OverviewLiveTest do
     assert html =~ "All quiet."
   end
 
+  test "the centre tile surfaces tasks assigned to the viewer (#501)", %{conn: conn} do
+    editor = authed_user(:editor)
+    page = seed_page(%{})
+
+    CMS.assign_task!(
+      %{content_type: "page", content_id: page.id, assignee_id: editor.id},
+      actor: editor
+    )
+
+    {:ok, _lv, html} = conn |> log_in(editor) |> live(~p"/editor/overview")
+
+    assert html =~ "1 task assigned to you"
+    refute html =~ "All quiet."
+  end
+
   test "the kan tile counts scheduled transitions in the next week", %{conn: conn} do
     seed_page(%{state: :draft, scheduled_at: DateTime.add(DateTime.utc_now(), 2, :day)})
     seed_page(%{state: :published, unpublish_at: DateTime.add(DateTime.utc_now(), 3, :day)})

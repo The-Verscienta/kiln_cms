@@ -84,6 +84,41 @@ defmodule KilnCMSWeb.AutomationLiveTest do
       assert rule.config == %{"topic" => "editorial"}
     end
 
+    test "an admin can scope a rule to task events (#501)", %{conn: conn} do
+      {:ok, view, html} = live(conn, ~p"/editor/automation")
+
+      # The content-type picker offers "Tasks" so a task.assigned/task.overdue
+      # rule can be scoped correctly, rather than left at "Any content type"
+      # (which would also match every content-publish event) or pointed at an
+      # actual content type (which `Rule.matching`'s exact string match would
+      # then never fire for).
+      assert html =~ "Tasks"
+
+      view
+      |> form("#new-rule-form",
+        rule: %{
+          name: "Notify on task assignment",
+          trigger_event: "assigned",
+          content_type: "task",
+          action: "broadcast",
+          config: ~s({"topic": "tasks"})
+        }
+      )
+      |> render_submit()
+
+      assert render(view) =~ "Notify on task assignment"
+      assert render(view) =~ "task.assigned"
+
+      rule =
+        Enum.find(
+          Automation.list_rules!(authorize?: false),
+          &(&1.name == "Notify on task assignment")
+        )
+
+      assert rule.trigger_event == :assigned
+      assert rule.content_type == "task"
+    end
+
     test "invalid JSON in the config is rejected with a flash", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/editor/automation")
 
@@ -102,6 +137,75 @@ defmodule KilnCMSWeb.AutomationLiveTest do
 
       assert html =~ "valid JSON"
       assert Automation.list_rules!(authorize?: false) == []
+    end
+
+    test "config that can never work is refused, beside the field (#944)", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+
+      html =
+        view
+        |> form("#new-rule-form",
+          rule: %{
+            name: "Never sends",
+            trigger_event: "published",
+            content_type: "",
+            action: "send_email",
+            config: ~s({"subject": "Live: {{title}}"})
+          }
+        )
+        |> render_submit()
+
+      # Not a flash and not a log: the message has to be where the JSON was
+      # typed, which is why the hand-rolled textarea now renders its errors.
+      assert html =~ "missing `to`"
+      assert Automation.list_rules!(authorize?: false) == []
+    end
+
+    test "the string \"true\" on allow_egress is named as the mistake it is", %{conn: conn} do
+      # Every other key in that textarea is a string, so this is the natural
+      # thing to type — and the runtime gate fails closed, leaving a rule that
+      # looks enabled and emails nothing forever.
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+
+      html =
+        view
+        |> form("#new-rule-form",
+          rule: %{
+            name: "Drafts metadata",
+            trigger_event: "in_review",
+            content_type: "",
+            action: "suggest_metadata",
+            config: ~s({"to": "team@example.com", "allow_egress": "true"})
+          }
+        )
+        |> render_submit()
+
+      assert html =~ "allow_egress"
+      assert html =~ "not a string"
+      assert Automation.list_rules!(authorize?: false) == []
+    end
+
+    test "the accepted keys beside the field come from the enforcing table", %{conn: conn} do
+      # Rendered from ActionConfig.shapes/0, so it cannot drift from what the
+      # save allows — a hand-maintained list is the failure mode #944 is about.
+      {:ok, view, html} = live(conn, ~p"/editor/automation")
+
+      # The first action kind is what the untouched select displays.
+      assert html =~ "send_email accepts: to (required), subject, body"
+
+      html =
+        view
+        |> form("#new-rule-form", rule: %{action: "suggest_metadata"})
+        |> render_change()
+
+      assert html =~ "suggest_metadata accepts: to (required), allow_egress"
+
+      html =
+        view
+        |> form("#new-rule-form", rule: %{action: "reindex"})
+        |> render_change()
+
+      assert html =~ "reindex accepts: no config"
     end
 
     test "an admin can toggle and delete a rule", %{conn: conn} do

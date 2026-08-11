@@ -52,6 +52,11 @@ defmodule KilnCMS.Accounts.Role do
       primary? true
       # The shape validation inspects the whole grants map — non-atomic.
       require_atomic? false
+
+      # A role carries the scopes on behalf of every member pointing at it, so
+      # narrowing one narrows theirs — and their live sockets were authorized
+      # under the old grant (#675).
+      change {KilnCMS.Accounts.Changes.EvictRoleMembers, reason: :role_changed}
     end
 
     read :for_org do
@@ -88,8 +93,14 @@ defmodule KilnCMS.Accounts.Role do
       public? true
     end
 
-    attribute :name, :string, allow_nil?: false, public?: true
-    attribute :description, :string, public?: true
+    attribute :name, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
+
+    attribute :description, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.paragraph()]
 
     # The three grant axes, same shapes and semantics as their
     # User/OrgMembership counterparts (empty = no restriction on that axis).

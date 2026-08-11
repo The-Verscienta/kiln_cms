@@ -2,7 +2,7 @@
 
 KilnCMS is a CMS that is headless *and* traditional: the same content is served
 through JSON:API, GraphQL, MCP and a RAG endpoint, and rendered directly by the
-app. It runs on the STAPLE stack (Phoenix · Tailwind · LiveView · Elixir) with
+app. It runs on Phoenix · Ash · LiveView · Tailwind · Elixir, with
 the **Ash Framework** at its core — resources, not schemas, are the source of
 truth for storage, actions, authorization and the publishing state machine.
 
@@ -40,7 +40,7 @@ Once it boots, the surfaces worth opening:
 | `/editor` | the authoring UI — this is the product |
 | `/admin` | AshAdmin raw CRUD (dev only) |
 | `/gql` · `/gql/playground` | GraphQL endpoint and playground |
-| `/api/json/swaggerui` | JSON:API browser over the OpenAPI spec |
+| `/api/json/swaggerui` | JSON:API browser over the OpenAPI spec (dev/test; `API_DOCS_ENABLED` in prod) |
 | `/mcp` | the MCP endpoint for LLM authoring |
 
 ## 2. Read the architecture
@@ -65,12 +65,12 @@ declarative, so the module *is* the specification.
 
 | You want to… | Read |
 |--------------|------|
-| Use the editor | [Editor shortcuts](editor-shortcuts.md), [Editorial advisories](advisories.md) |
+| Use the editor | [Editor shortcuts](editor-shortcuts.md), [Editorial advisories](advisories.md), [Claim checking](compliance.md) |
 | Model new content | [Extending the content model](extending-content.md) |
 | Understand who can do what | [Authorization policy matrix](policy-matrix.md), [Granular RBAC](granular-rbac.md) |
 | Consume the content headlessly | [Headless consumer guide](headless-consumer-guide.md) — it routes you to [JSON:API](json-api.md), [GraphQL](headless-graphql-api.md), [MCP](mcp.md) or [RAG](rag.md) |
 | Wire up an external front end | [Visual-editing bridge](visual-editing-bridge.md), [Static export](static-export.md) |
-| Style the admin UI | [Design system](design-system.md) |
+| Style the admin UI | [Design language](design-language.md), [Design system](design-system.md) |
 | Write a plugin | [Runtime extensibility](plugin-extensibility.md) |
 | Configure an install | [Environment variables](environment-variables.md) |
 | Operate it in production | [Backups](backups.md), [Observability](observability.md), [Performance](performance.md), [Resilient delivery](resilient-delivery.md) |

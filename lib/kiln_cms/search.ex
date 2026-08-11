@@ -121,6 +121,108 @@ defmodule KilnCMS.Search do
   def rerank_model, do: cfg(:rerank_model, "BAAI/bge-reranker-base")
 
   @doc """
+  Maximum cosine distance a semantic hit may have and still count as a match,
+  or `nil` (the default) for no floor.
+
+  Nearest-neighbour search always returns neighbours. Without a floor the
+  semantic leg answers *every* query with its full candidate set, however
+  unrelated — a search for gibberish comes back as confident-looking as a real
+  one, and because `hybrid/3` fuses that leg in, "no results" becomes
+  unreachable. The floor is what lets a semantic search legitimately return
+  nothing.
+
+  pgvector's `<=>` yields cosine distance in `[0, 2]`: `0` identical, `1`
+  orthogonal (no relationship), `2` opposed. The useful cutoff is **model
+  specific** — instruction-tuned embedders like bge sit in a narrow, high
+  baseline band, so a value that filters well for one model can silently
+  discard everything under another. That is why this defaults to `nil` rather
+  than a guess: measure your own corpus with `semantic_distances/3`, then set
+  the value just above where the genuinely related results stop.
+
+      config :kiln_cms, KilnCMS.Search, semantic_max_distance: 0.55
+
+  Rows with no embedding are excluded once a floor is set (`NULL <=> v` is
+  `NULL`); unset, they merely sort last.
+  """
+  @spec semantic_max_distance() :: float() | nil
+  def semantic_max_distance, do: cfg(:semantic_max_distance, nil)
+
+  @doc """
+  Cosine-distance ceiling on a tag suggestion — see
+  `KilnCMS.Search.Related.suggest_tags/2`.
+
+  Unlike `semantic_max_distance/0` this ships a real number rather than `nil`,
+  because "no ceiling" is not a neutral choice here: the candidate set is the
+  site's whole tag list, so on a site with five tags every tag is always
+  suggested, however unrelated (#851). A wrong suggestion in a ranked list of
+  search results costs a scroll; a wrong suggestion in a five-item panel that
+  says "consider these" costs the panel its credibility.
+
+  The number is model-specific, which is why it is a knob rather than a
+  literal. `0.35` is **measured** against the default `BAAI/bge-small-en-v1.5`
+  (#1086) over `KilnCMS.TagSuggestionCorpus` — eight documents, thirty-five
+  tags, human labels for which of them a person would actually tick:
+
+  | | cosine distance |
+  |---|---|
+  | tags a human would tick | 0.2119 – 0.4292 |
+  | tags they would not | 0.2828 – 0.5626 |
+
+  The bands **overlap**, and that is the result. No ceiling keeps every wanted
+  tag and admits no unwanted one, so this is a choice about which error to make.
+  0.35 keeps 21 of 27 wanted and admits 10 of 253 unwanted — about four
+  suggestions per document, under `suggest_tags/2`'s `limit: 5`, so the ceiling
+  rather than the limit is what decides what an editor sees.
+
+  > #### What this replaced, and why it was wrong {: .warning}
+  >
+  > The first number came from the model's published behaviour on **sentence
+  > pairs** — unrelated around 0.6-0.8 similarity, i.e. 0.2-0.4 distance — and
+  > #1086 warned that band might not transfer to a one- or two-word tag label
+  > against a whole-document centroid.
+  >
+  > It does not. Measured, an unrelated tag sits at 0.35 and up, and a wanted
+  > one can sit at 0.43. Reasoning from the sentence-pair band produced `0.25`,
+  > which keeps **3 of 27** wanted tags: the panel is empty for most documents,
+  > which reads to an editor exactly like a broken feature.
+
+  Measure your own with
+  `KilnCMS.Search.Related.suggest_tags(record, threshold: 2.0)` — the ceiling of
+  cosine distance, so nothing is filtered — which restores the pre-#851
+  behaviour, and read the distances off the result. For a whole corpus at once,
+  `test/kiln_cms/search/tag_suggestion_calibration_test.exs` carries the harness
+  behind `--include calibration`.
+  """
+  @spec suggest_tags_threshold() :: float()
+  def suggest_tags_threshold, do: cfg(:suggest_tags_threshold, 0.35)
+
+  @doc """
+  Cosine-distance ceiling on a near-duplicate — see
+  `KilnCMS.Search.Related.near_duplicates/2`.
+
+  Measured on the same corpus as `suggest_tags_threshold/0` (#1086), on the axis
+  this one actually compares — document centroid against document centroid,
+  which behaves nothing like a tag label against a centroid:
+
+  | | cosine distance |
+  |---|---|
+  | the same document | 0.0000 |
+  | a reworded copy of it | 0.0376 |
+  | another document on the same subject | 0.1938 – 0.2097 |
+  | an unrelated document | 0.3690 |
+
+  `0.1` sits in the gap with room on both sides, which is what this feature
+  needs it to do: "this is the same article rewritten" is a duplicate an editor
+  wants flagged, "this is another article about sourdough" is not.
+
+  A knob rather than the literal it used to be, for the reason its sibling is
+  one: the number is a property of the model, and an operator who changes the
+  model had no way to change this.
+  """
+  @spec near_duplicate_threshold() :: float()
+  def near_duplicate_threshold, do: cfg(:near_duplicate_threshold, 0.1)
+
+  @doc """
   Nx `defn_options` for the local Bumblebee servings. Uses the EXLA compiler when
   the `:exla` dependency is compiled in (dev/test); otherwise returns `[]` so the
   servings fall back to Nx's default backend instead of crashing on a missing
@@ -256,6 +358,40 @@ defmodule KilnCMS.Search do
     end
   end
 
+  @doc """
+  The nearest rows of `type` to `query` with their raw cosine distances —
+  the measurement behind `semantic_max_distance/0`.
+
+      iex> KilnCMS.Search.semantic_distances(:page, "reishi mushroom")
+      {:ok, [{"Ling Zhi", 0.31}, {"Medicinal Mushrooms", 0.42}, {"Sitemap", 0.83}]}
+
+  Run it for a query that *should* match and one that should not: the cutoff
+  goes between the two, and if they overlap your corpus isn't separable by
+  distance alone and wants reranking instead. Deliberately ignores any
+  configured floor — you cannot tune a threshold that has already been applied.
+
+  Options: `:limit` (default 20), plus `:actor` / `:authorize?` / `:tenant`.
+  """
+  @spec semantic_distances(module() | atom(), String.t(), keyword()) ::
+          {:ok, [{String.t(), float()}]} | {:error, term()}
+  def semantic_distances(type, query, opts \\ []) when is_binary(query) do
+    resource = search_resource(type)
+    read_opts = Keyword.take(opts, [:actor, :authorize?, :tenant])
+
+    with {:ok, vector} <- embed_query(query) do
+      resource
+      |> Ash.Query.new()
+      |> Ash.Query.load(semantic_distance: %{query_vector: vector})
+      |> Ash.Query.sort([{:semantic_distance, {%{query_vector: vector}, :asc}}])
+      |> Ash.Query.limit(Keyword.get(opts, :limit, 20))
+      |> Ash.read(read_opts)
+      |> case do
+        {:ok, rows} -> {:ok, Enum.map(rows, &{&1.title, &1.semantic_distance})}
+        error -> error
+      end
+    end
+  end
+
   # Resolve what to search: a registered content type (compiled → its
   # resource; dynamic → the shared entry tier) or a resource module as-is.
   defp search_resource(resource) when resource in [KilnCMS.CMS.Entry], do: resource
@@ -302,7 +438,8 @@ defmodule KilnCMS.Search do
   @doc """
   Global **hybrid** search across content types, media, and taxonomy,
   returning sectioned results:
-  `%{pages: [...], posts: [...], entries: [...], media: [...], categories: [...], tags: [...]}`.
+  `%{pages: [...], posts: [...], entries: [...], media: [...], categories: [...],
+  tags: [...], tag_groups: [...]}`.
 
   Every content section fuses the keyword and semantic legs (RRF via
   `hybrid/3`), so meaning-based matches surface everywhere search is offered —
@@ -324,14 +461,30 @@ defmodule KilnCMS.Search do
   the content sections (rendered escape-safely via
   `KilnCMS.Search.Highlight.to_safe_html/1`). `:filters` (see `hybrid/3`)
   narrows the content sections — media and taxonomy don't carry facets.
+
+  The taxonomy sections come from `KilnCMS.CMS.Taxonomy.searchable/0` — one per
+  taxonomy resource, so adding one joins global search with no edit here. They
+  were a literal two-element list, which is how `tag_groups` came to be absent
+  from every search surface without anything failing (#530); `searchable/0` is
+  the contract, and callers that enumerate sections should read it rather than
+  restate the keys.
+
+  ## `:sections`
+
+  By default every section runs. Pass `sections: [...]` to run only the ones
+  the caller will actually read — each section is a full `Ash.read!` holding a
+  DB connection, and three callers were paying for `media`, `categories`,
+  `tags` and `tag_groups` on every call and discarding them (#960).
+
+      Search.global(query, sections: Search.content_sections())
+
+  `content_sections/0` is derived, so prefer it to a literal list: it keeps
+  meaning "the content sections" when a type is registered. **Sections not
+  asked for are absent from the result**, not empty — "you did not ask" and
+  "there were no matches" are different answers, and a `KeyError` is the right
+  way to learn you asked for the wrong thing. An unrecognised key raises.
   """
-  @spec global(String.t(), keyword()) :: %{
-          required(:entries) => [struct()],
-          required(:media) => [struct()],
-          required(:categories) => [struct()],
-          required(:tags) => [struct()],
-          optional(atom()) => [struct()]
-        }
+  @spec global(String.t(), keyword()) :: %{optional(atom()) => [struct()]}
   def global(query, opts \\ []) when is_binary(query) do
     # `:tenant` scopes the multitenant content legs to the request's org (#336).
     read_opts = Keyword.take(opts, [:actor, :authorize?, :tenant])
@@ -366,27 +519,77 @@ defmodule KilnCMS.Search do
         {ct.section, fn -> hybrid(ct.resource, query, [load: content_load] ++ hybrid_opts) end}
       end)
 
-    fixed = [
-      # One section across every dynamic type. `type_name` (an expression
-      # calc, so it doesn't run TypeDefinition's editor-only read policy for
-      # anonymous callers) labels each hit with its dynamic type.
-      {:entries,
-       fn ->
-         hybrid(KilnCMS.CMS.Entry, query, [load: [:type_name | content_load]] ++ hybrid_opts)
-       end},
-      # NOTE (#336): MediaItem/Category/Tag are NOT org-scoped yet, so these three
-      # sections stay cross-org (they ignore the `:tenant` in `read_opts`). Content
-      # + entries above ARE scoped. Closes when those resources gain `org_id`.
-      {:media,
-       fn -> section(KilnCMS.CMS.MediaItem, :search, %{query: query}, read_opts, limit, []) end},
-      # Taxonomy (name/description, typo-tolerant) — matched categories and
-      # tags so editors and headless frontends can jump to filtered listings.
-      {:categories,
-       fn -> section(KilnCMS.CMS.Category, :search, %{query: query}, read_opts, limit, []) end},
-      {:tags, fn -> section(KilnCMS.CMS.Tag, :search, %{query: query}, read_opts, limit, []) end}
-    ]
+    fixed =
+      [
+        # One section across every dynamic type. `type_name` (an expression
+        # calc, so it doesn't run TypeDefinition's editor-only read policy for
+        # anonymous callers) labels each hit with its dynamic type.
+        {:entries,
+         fn ->
+           hybrid(KilnCMS.CMS.Entry, query, [load: [:type_name | content_load]] ++ hybrid_opts)
+         end},
+        # Media and taxonomy are org-scoped like content (epic #336), so the
+        # `:tenant` in `read_opts` narrows these sections too.
+        {:media,
+         fn -> section(KilnCMS.CMS.MediaItem, :search, %{query: query}, read_opts, limit, []) end},
+        # Taxonomy (name/description, typo-tolerant) — matched categories, tags and
+        # tag groups, so editors and headless frontends can jump to filtered
+        # listings. Driven off `Taxonomy.searchable/0` rather than a literal list:
+        # this was two entries hard-coded here, which is how `TagGroup` came to be
+        # unfindable in search without anything failing (#530).
+        Enum.map(KilnCMS.CMS.Taxonomy.searchable(), fn {key, resource} ->
+          {key, fn -> section(resource, :search, %{query: query}, read_opts, limit, []) end}
+        end)
+      ]
+      |> List.flatten()
 
-    run_sections(compiled ++ fixed)
+    (compiled ++ fixed)
+    |> select_sections(Keyword.get(opts, :sections))
+    |> run_sections()
+  end
+
+  @doc """
+  The section keys that hold **content** — one per compiled type, plus
+  `:entries` for every dynamic type.
+
+  Derived rather than written out, so a caller asking for "the content
+  sections" keeps meaning that when a type is added or a plugin registers one
+  (D18). The three callers that want this all used to hardcode the equivalent
+  list and then discard the rest of the sweep.
+  """
+  @spec content_sections() :: [atom()]
+  def content_sections, do: Enum.map(KilnCMS.CMS.ContentTypes.all(), & &1.section) ++ [:entries]
+
+  # Every section is a full `Ash.read!` holding a DB connection for its
+  # duration, so a caller that reads three of them should not pay for all of
+  # them (#960). The fan-out already keys by section, so this is a filter on the
+  # thunk list rather than a restructure.
+  #
+  # #530 is why this stopped being a rounding error: the taxonomy leg became
+  # registry-driven, so the discarded cost now grows with each taxonomy resource
+  # added rather than being a fixed two queries.
+  #
+  # An unknown key RAISES rather than being ignored. Ignoring it would answer a
+  # sweep missing a section the caller asked for, with nothing failing — which
+  # is exactly how `TagGroup` came to be unfindable in search (#530). The
+  # message lists what is actually registered, because on an install with
+  # plugin-registered types that set is not something the caller can read off
+  # the source.
+  defp select_sections(sections, nil), do: sections
+
+  defp select_sections(sections, keys) do
+    wanted = MapSet.new(keys)
+    known = MapSet.new(sections, &elem(&1, 0))
+
+    case wanted |> MapSet.difference(known) |> Enum.sort() do
+      [] ->
+        Enum.filter(sections, &MapSet.member?(wanted, elem(&1, 0)))
+
+      unknown ->
+        raise ArgumentError,
+              "unknown search section(s) #{inspect(unknown)}; registered sections are " <>
+                "#{inspect(known |> Enum.sort())}"
+    end
   end
 
   # Sections are independent — no section's results affect another's — so they

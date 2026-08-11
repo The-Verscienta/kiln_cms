@@ -186,8 +186,29 @@ editor/admin only (privacy-first: no per-user data is stored anyway).
 Field policy: the `role` field is visible only to **admins or the user
 themselves**; other readers see the record without `role`.
 
-`Token` — every action is gated to the AshAuthentication interaction bypass; there
-are no caller-facing token actions.
+`Token` — every AshAuthentication action is gated to the AshAuthentication
+interaction bypass, and the nightly expunge trigger to the AshOban one. There are
+no caller-facing token actions.
+
+Three actions are ours rather than AshAuthentication's, and all three are
+`forbid_if always()` — no actor may reach any of them:
+
+| Action | What it is for |
+|---|---|
+| `:spend_jti` | Records a redeemed headless two-factor blob (#743) |
+| `:hold_for_second_factor` | Parks a first-factor token while a code is owed (#742) |
+| `:release_second_factor_hold` | Returns it to use once the code lands (#742) |
+
+`KilnCMS.Accounts.PendingSignIn` calls all three with `authorize?: false`,
+because the whole point of both steps is that the caller has **not** finished
+signing in — there is no actor to authorize. **The headless single-use guarantee
+and the #742 hold both depend on that flag**, so a change that tightens
+`authorize?` handling has to keep these calls working.
+
+The domain names them (`spend_pending_sign_in`, `hold_first_factor_token`,
+`release_first_factor_token`) plus `get_stored_token_by_jti`, a by-jti `:read`. A
+name is not an opening here: no policy matches `:read` either, so every one of
+them is refused without the `authorize?: false` only that module passes.
 
 ## Platform accounts — `Organization`, `OrgMembership`, `Role`, `ApiKey`, `Passkey`, `UserIdentity`
 
@@ -301,6 +322,25 @@ Both are public information by design — delivery serves the same redirect map 
 anyone who hits an old URL, and branding tokens render on every public page.
 Both reads are tenant-scoped, so a request sees only its own site's rows. The
 slug-change hook that writes redirects runs as the **system**.
+
+## Code injection — `SiteCodeInjection` (#490)
+
+| Resource | read | writes |
+|---|---|---|
+| `SiteCodeInjection` (`read`) | ✅ everyone incl. anonymous | admin only (`save`, `update`, `destroy`) |
+| `SiteCodeInjection.Version` (`read`) | admin only | ❌ nobody (system-written, never destroyed) |
+
+The row's contents are served verbatim to anonymous visitors, so the read policy
+says they are public rather than pretending otherwise. The **history** is not:
+"what the site serves now" and "who put it there, and what it said last week"
+are different questions with different audiences, so the version twin is
+org-admin only and has no writable action at all.
+
+Writes are the tightest surface in this table for their size — this is stored
+XSS by design, so an org admin writing it is the whole authorization model. The
+second half of that model is not a policy: `KilnCMSWeb.Plugs.CodeInjection` runs
+only in the `:delivery` pipeline, so the snippet can never render in the editor
+console. See [code-injection.md](code-injection.md).
 
 ## Content types — `TypeDefinition`
 
@@ -431,11 +471,38 @@ mutations are all covered — not just the editor form, which additionally filte
 the fields it renders. An existing block (matched by id) may keep whatever value
 it already had; a new block must carry the field's declared default.
 
+Omitting a restricted field is not the same as setting it to its default, and
+used to be treated as if it were: a **wholly id-less** tree that leaves the
+field out now fails when any stored block of that type holds a non-default
+value, rather than silently clearing it (#566). The remedy the error names is
+to send each block's id — a tree carrying ids is judged block by block as
+before, so inserting a new block beside a restricted one is unaffected.
+
 Nested children of a `columns` block are raw maps rather than union members, so
-they carry no id to diff and are held to the stricter default-value rule. A
-headless client that drops block ids *and* omits a restricted field still gets
-the default, which can clear an admin-set value — residual risk 8 in
-[`threat-model.md`](threat-model.md).
+they get no `uuid_primary_key` of their own. They are covered first by requiring
+the whole tree's multiset of role-restricted non-default nested values to be
+identical before and after a non-admin write (#774): such a value can be neither
+introduced nor dropped, but a column already holding an admin-set value may be
+resubmitted unchanged.
+
+A count alone cannot say *which* child holds a value. The content editor stamps
+each nested child an `"id"`, and where those ids exist the check binds each
+admin-set value to the child holding it (#865): a child returning under a known
+id must return with that id's value, and a child that held a restricted
+non-default value must return under the same id still holding it. Independently,
+an id naming **two** children in one submission is always refused — that
+collision would otherwise let a decoy satisfy the binding while the rendered
+child lost the value.
+
+The binding applies only to clients that round-trip ids, because nested child
+ids **cannot be read back** — `blocks` is not `public?` and the fired artifact
+carries `_id`, not `id`. A headless `block_tree` client cannot learn one, and
+`restore_version` takes only a `version_id`, so requiring ids would lock both
+out with no remedy. Those callers stay on the count-only rule.
+
+See residual risk 8 in [`threat-model.md`](threat-model.md) for what this does
+and does not guarantee — in particular that a caller dropping every nested id
+keeps the re-target, and that reusing another block's id remains open.
 
 ## Coverage
 

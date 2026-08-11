@@ -14,6 +14,7 @@ defmodule KilnCMS.Firing.Engine do
   require Logger
 
   alias KilnCMS.Blocks
+  alias KilnCMS.CMS.Fragments
   alias KilnCMS.CMS.TypedBlocks
   alias KilnCMS.Firing
   alias KilnCMS.Firing.Cache
@@ -41,6 +42,39 @@ defmodule KilnCMS.Firing.Engine do
 
     typed = document |> Map.get(:blocks) |> TypedBlocks.to_typed()
 
+    # Reusable fragments are inlined here, once, before any surface renders
+    # (#479 — decision A3 taken literally). Every surface, plus `body_text/1`
+    # below and everything derived from it, then sees one flat tree and needs no
+    # knowledge of fragments.
+    #
+    # `typed` — the RAW tree — is what `References.rebuild/4` gets at the bottom
+    # of this function, deliberately: expansion removes the fragment block and
+    # with it the `:reference` the edge is extracted from, so rebuilding on the
+    # expanded tree would drop the edge that makes publishing a fragment re-fire
+    # its referrers.
+    #
+    # Expanded with the **host document's own** audience, and nothing wider.
+    # An artifact is keyed to the host, and every artifact consumer —
+    # `ArtifactController`, the feeds, static export, the newsletter — resolves
+    # that host through a `:public`-only filter and then serves the body
+    # verbatim. Firing with every audience would therefore put a `:member`
+    # fragment's text into a `:public` page's artifact and hand it to anonymous
+    # callers, which is exactly the leak this feature must not have. Keeping the
+    # host's own audience makes the artifact no more permissive than the
+    # document carrying it — the rule delivery already enforces.
+    expanded =
+      Fragments.expand(typed, org_id,
+        audiences: host_audiences(document),
+        # `fragments: <DateTime>` makes expansion resolve each target as it was
+        # at that instant rather than as it is now (#917). Only point-in-time
+        # reads pass it; every other fire leaves it nil and reads live.
+        as_of: Keyword.get(opts, :fragments),
+        # Seeded with the document itself, so a page embedding *itself* doesn't
+        # inline its own body once before the cycle guard catches it a level
+        # down.
+        ancestry: [{public_type(document), document.id}]
+      )
+
     # Custom fields are resolved once and shared by every surface: the read is
     # one query, and computed fields (#429) are recomputed exactly once per
     # fire rather than once per surface.
@@ -50,19 +84,22 @@ defmodule KilnCMS.Firing.Engine do
     # from today's formulas and today's field registry would report values that
     # were never live at the requested instant.
     custom =
-      KilnCMS.Firing.CustomFields.resolve(document, body_text(typed),
+      KilnCMS.Firing.CustomFields.resolve(document, body_text(expanded),
         recompute?: Keyword.get(opts, :custom_fields, :recompute) == :recompute
       )
 
     artifacts =
-      Map.new(@surfaces, fn surface -> {surface, compose(document, typed, custom, surface)} end)
+      Map.new(@surfaces, fn surface ->
+        {surface, compose(document, expanded, custom, surface)}
+      end)
 
     if mode == :persist do
       persist(document, type, org_id, artifacts)
+      reindex_search_text(document, org_id, expanded)
       # Keep the dependency graph current (decision D13). Invalidation of
       # referrers is enqueued by the caller (publish hook / re-fire worker), not
       # here, to keep fire/2 free of recursion.
-      KilnCMS.Firing.References.rebuild(org_id, type, document.id, typed)
+      KilnCMS.Firing.References.rebuild(org_id, type, document, typed)
     end
 
     # Firing-duration telemetry (#206): wall-clock of the per-surface render
@@ -74,6 +111,66 @@ defmodule KilnCMS.Firing.Engine do
     )
 
     {:ok, artifacts}
+  end
+
+  # The gated tiers a document's own artifact may carry: its own, when gated.
+  # A `:public` document carries public fragments only.
+  #
+  # Public (not `defp`) so `KilnCMSWeb.ContentEditorLive` can expand the same
+  # way for its own preview/SEO panel (#910) — a fragment inside a `:member`
+  # document must not be expanded there with a wider audience than delivery
+  # will ever grant it, or the editor's own preview would show text a reader
+  # of the finished page could never see.
+  @doc false
+  @spec host_audiences(struct()) :: [atom()]
+  def host_audiences(document) do
+    case Map.get(document, :audience) do
+      nil -> []
+      :public -> []
+      audience -> [audience]
+    end
+  end
+
+  # A fragment block's own `search_text` is always `""` — it renders nothing
+  # itself — so `search_text` (denormalized at save time by
+  # `Changes.SetSearchText`, from the RAW tree) never carries a fragment's
+  # words, and stays that way until something recomputes it (#910). Every
+  # fire already builds `expanded` for the rendered surfaces; recomputing here
+  # too keeps FTS/Meilisearch/document-embedding text in sync with what a
+  # reader actually sees, on both an initial fire and a re-fire wave
+  # (`RefireWorker` calls `fire/2` too, so a referrer's `search_text` catches
+  # up when the fragment it embeds changes, not just when the referrer itself
+  # is next edited).
+  #
+  # Its own narrow action, for the reason `:set_oembed_metadata` documents:
+  # no webhook, no re-fired version, no lock bump for a derived column, and no
+  # `:blocks` in `accept` — this never touches the document's own stored
+  # content, only the denormalized text summarizing it. Skipped when nothing
+  # changed, which is the common case (most documents carry no fragment, so
+  # `expanded` equals `typed` and the recomputed text already matches).
+  defp reindex_search_text(document, org_id, expanded) do
+    search_text =
+      KilnCMS.CMS.Changes.SetSearchText.compute(document, body_text(expanded))
+
+    if search_text != Map.get(document, :search_text) do
+      document
+      |> Ash.Changeset.for_update(:reindex_search_text, %{search_text: search_text},
+        authorize?: false,
+        tenant: org_id
+      )
+      |> Ash.update()
+      |> case do
+        {:ok, _updated} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning(
+            "fire: search_text reindex failed for #{document.id}: #{inspect(reason)}"
+          )
+      end
+    end
+
+    :ok
   end
 
   @doc "Read a fired artifact body for a surface: cache, then the artifact table."
@@ -264,7 +361,13 @@ defmodule KilnCMS.Firing.Engine do
   storage key is an implementation detail headless consumers never see.
   """
   @spec public_type(struct()) :: String.t()
-  def public_type(%{type_definition_id: id, org_id: org_id}) when not is_nil(id) do
+  # `is_binary(id)` and not `not is_nil(id)`: on a partially-selected read the
+  # attribute is `%Ash.NotLoaded{}`, which is not nil — so the old guard passed,
+  # queried with a NotLoaded struct as the id, failed, and quietly answered
+  # "entry". This is public API whose `@doc` invites a bulk caller, and the
+  # symptom was a wrong type on every dynamic document plus one failing query
+  # each, with nothing raised (#1012).
+  def public_type(%{type_definition_id: id, org_id: org_id}) when is_binary(id) do
     # The definition read is tenant-strict (#419): scope to the document's own
     # org, else the read raises and every dynamic doc silently degrades to the
     # "entry" storage key in webhooks/provenance/search.
@@ -321,6 +424,9 @@ defmodule KilnCMS.Firing.Engine do
       "type" => public_type(document),
       "title" => Map.get(document, :title),
       "slug" => Map.get(document, :slug),
+      # Locale rides with the document identity (`[slug, locale]`) so the bridge
+      # can deep-link the correct variant (#1104). Absent on pre-#1104 artifacts.
+      "locale" => Map.get(document, :locale),
       # The admin-defined custom fields (D4). Already public on the delivery
       # APIs; carrying them here means the fired artifact is a complete view of
       # the document, and is what makes computed fields (#429) part of what
@@ -345,6 +451,10 @@ defmodule KilnCMS.Firing.Engine do
       # A geolocation custom field (#428) is the document's contentLocation:
       # a Place carrying GeoCoordinates.
       |> put_content_location(KilnCMS.Firing.CustomFields.content_location(custom))
+      # An Event-typed document's dates come from its `datetime_range` field
+      # (#480). Only for the Event family: `startDate` on an Article is not a
+      # property schema.org defines.
+      |> put_event_schedule(document)
 
     # Structured data falls out of the typed blocks (decision D9): each block that
     # has a schema.org representation contributes a node to the document @graph. A
@@ -357,6 +467,18 @@ defmodule KilnCMS.Firing.Engine do
 
   defp put_content_location(node, nil), do: node
   defp put_content_location(node, location), do: Map.put(node, "contentLocation", location)
+
+  # `startDate`/`endDate` from the schedule field, and the recurrence as an
+  # `eventSchedule` — schema.org's own `Schedule`, which carries an RRULE
+  # verbatim, so a search engine sees the rule rather than a window of expanded
+  # instances that goes stale the moment it is fired.
+  defp put_event_schedule(%{"@type" => type} = node, document) do
+    if KilnCMS.Firing.SchemaOrg.event_type?(type),
+      do: Map.merge(node, KilnCMS.Events.schema_org_schedule(document)),
+      else: node
+  end
+
+  defp put_event_schedule(node, _document), do: node
 
   # The document's plain text, from the already-typed blocks. `:json_ld` wants
   # paragraph separation; the computed-field context (`word_count`,

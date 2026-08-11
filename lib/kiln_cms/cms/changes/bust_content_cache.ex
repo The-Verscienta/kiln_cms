@@ -40,10 +40,18 @@ defmodule KilnCMS.CMS.Changes.BustContentCache do
     |> Enum.uniq()
     |> Enum.each(&Cache.bust(org_id, type, &1))
 
-    # A publish/unpublish changes the set of public URLs, so the cached sitemap
-    # and llms.txt (keyed separately from per-record entries) must be dropped too.
+    # A publish/unpublish changes the set of public URLs, so the cached sitemap,
+    # llms.txt and feeds (all keyed separately from per-record entries) must be
+    # dropped too. A feed is the one of these a human subscribes to, so a stale
+    # one is a missed notification rather than a slow crawl.
     Cache.bust_sitemap(org_id)
     Cache.bust_llms(org_id)
+    # The record's own locale rides along (#720): a French publish has to drop
+    # `/fr/feed.xml` as well as the default-locale ones. `locale` is a plain
+    # attribute already on the struct, so this costs no read — which is exactly
+    # why it does not fall under the "cannot load relationships in an
+    # after_action" rule that keeps the taxonomy segments out.
+    Cache.bust_feeds(org_id, type, Map.get(record, :locale))
   end
 
   # The cache key's type segment. Compiled types use their type atom; entries

@@ -18,7 +18,7 @@ defmodule KilnCMS.Blocks.Faq do
     # Optional section heading rendered above the list.
     field :title, :string
     # Each entry: `%{"question" => q, "answer" => a}` (string keys, as stored).
-    field :items, {:array, :map}, default: []
+    field :items, {:array, :map}, default: [], translatable: [:question, :answer]
   end
 
   # Match a plain variable, not %__MODULE__{} — see the note in divider.ex: the
@@ -68,6 +68,17 @@ defmodule KilnCMS.Blocks.Faq do
             end)
         }
     end
+  end
+
+  # `items/1` normalizes every entry, so the delivered array is never null and
+  # both keys are always present strings.
+  @impl Kiln.Block.Renderer
+  def json_schema do
+    %{
+      "properties" => %{
+        "items" => Kiln.Block.JsonSchema.object_array(~w(question answer))
+      }
+    }
   end
 
   @impl Kiln.Block.Renderer

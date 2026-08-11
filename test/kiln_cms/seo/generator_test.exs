@@ -183,4 +183,111 @@ defmodule KilnCMS.Seo.GeneratorTest do
       for _ <- 1..5, do: assert({:ok, _} = Seo.draft(document()))
     end
   end
+
+  describe "an unattended caller cannot take the units a person needs (#943)" do
+    setup do
+      put_seo(
+        generator: KilnCMS.StubSeoGenerator,
+        model: "stub:stub",
+        per_user_limit: {100, :timer.minutes(1)},
+        per_org_limit: {4, :timer.hours(1)},
+        unattended_share: 0.5
+      )
+
+      :ok
+    end
+
+    defp org, do: "org-#{System.unique_integer([:positive])}"
+    defp caller, do: "caller-#{System.unique_integer([:positive])}"
+
+    defp unattended(org), do: [org_id: org, user_id: caller(), unattended?: true]
+    defp editor(org), do: [org_id: org, user_id: caller()]
+
+    test "automation stops at its share while the editor's button still works" do
+      # The failure this exists to stop: an admin creates
+      # `*.updated -> suggest_metadata`, a busy day exhausts the hourly org
+      # allowance, and every editor clicking "Suggest with AI" gets a
+      # rate-limit error caused by a rule they cannot see.
+      org = org()
+
+      assert {:ok, _} = Seo.draft(document(), unattended(org))
+      assert {:ok, _} = Seo.draft(document(), unattended(org))
+
+      # Half of 4 is 2, and that is where the background rule stops.
+      assert {:error, {:rate_limited, _}} = Seo.draft(document(), unattended(org))
+
+      # The editor still has the reserved half.
+      assert {:ok, _} = Seo.draft(document(), editor(org))
+      assert {:ok, _} = Seo.draft(document(), editor(org))
+    end
+
+    test "automation cannot take the last unit even when it has spent nothing" do
+      # A sub-ceiling counting only unattended calls would allow this one: the
+      # rule's own tally is zero. The reserve reads the shared counter.
+      org = org()
+
+      for _ <- 1..3, do: assert({:ok, _} = Seo.draft(document(), editor(org)))
+
+      assert {:error, {:rate_limited, _}} = Seo.draft(document(), unattended(org))
+      assert {:ok, _} = Seo.draft(document(), editor(org))
+    end
+
+    test "the per-org ceiling is still the operator's total, not a floor plus a share" do
+      org = org()
+
+      assert {:ok, _} = Seo.draft(document(), unattended(org))
+      assert {:ok, _} = Seo.draft(document(), unattended(org))
+      assert {:ok, _} = Seo.draft(document(), editor(org))
+      assert {:ok, _} = Seo.draft(document(), editor(org))
+
+      # Four in the window is the configured ceiling; the fifth is refused
+      # whoever asks.
+      assert {:error, {:rate_limited, _}} = Seo.draft(document(), editor(org))
+    end
+
+    test "a refused unattended call does not spend an org unit on its way to being told no" do
+      org = org()
+
+      for _ <- 1..2, do: assert({:ok, _} = Seo.draft(document(), unattended(org)))
+      for _ <- 1..5, do: assert({:error, _} = Seo.draft(document(), unattended(org)))
+
+      # The two units the reserve held back are still there.
+      assert {:ok, _} = Seo.draft(document(), editor(org))
+      assert {:ok, _} = Seo.draft(document(), editor(org))
+    end
+
+    test "share 0.0 is a switch, and reports itself as one rather than as an overload" do
+      put_seo(unattended_share: 0.0)
+      org = org()
+
+      assert {:error, :unattended_disabled} = Seo.draft(document(), unattended(org))
+      assert {:ok, _} = Seo.draft(document(), editor(org))
+    end
+
+    test "share 1.0 restores the old shared bucket" do
+      put_seo(unattended_share: 1.0)
+      org = org()
+
+      for _ <- 1..4, do: assert({:ok, _} = Seo.draft(document(), unattended(org)))
+      assert {:error, {:rate_limited, _}} = Seo.draft(document(), editor(org))
+    end
+
+    test "an interactive caller is unaffected by the reserve" do
+      org = org()
+
+      # Four interactive calls fill the org bucket and nothing held any back,
+      # so the share is not a second tax on people.
+      for _ <- 1..4, do: assert({:ok, _} = Seo.draft(document(), editor(org)))
+      assert {:error, {:rate_limited, _}} = Seo.draft(document(), editor(org))
+    end
+  end
+
+  describe "the shipped default share" do
+    test "reserves half, read from the config an install actually gets" do
+      # Deliberately outside the describe above, which overrides the key: a
+      # test that asserts the value its own setup wrote would stay green while
+      # someone narrowed the human reserve in config/config.exs.
+      assert Seo.unattended_share() == 0.5
+    end
+  end
 end

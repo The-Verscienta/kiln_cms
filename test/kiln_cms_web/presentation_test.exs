@@ -92,6 +92,32 @@ defmodule KilnCMSWeb.PresentationTest do
     assert Presentation.frontend_origin() == "https://front.example.com"
   end
 
+  describe "same-origin sandbox policy (#1059)" do
+    test "same_origin_preview? compares console URI to the template origin" do
+      Application.put_env(
+        :kiln_cms,
+        :presentation_preview_url,
+        "https://cms.example.com{path}?kilnPreview=1"
+      )
+
+      assert Presentation.same_origin_preview?(URI.parse("https://cms.example.com/editor"))
+      refute Presentation.same_origin_preview?(URI.parse("https://front.example.com/"))
+      refute Presentation.same_origin_preview?(:not_mounted_at_router)
+    end
+
+    test "iframe_sandbox is restrictive only when same-origin" do
+      assert Presentation.iframe_sandbox(true) == "allow-scripts"
+      assert Presentation.iframe_sandbox(false) == "allow-scripts allow-same-origin"
+    end
+
+    test "origin_from_uri omits default ports and keeps non-default ones" do
+      assert Presentation.origin_from_uri(URI.parse("https://a.example/x")) == "https://a.example"
+
+      assert Presentation.origin_from_uri(URI.parse("http://a.example:4002/x")) ==
+               "http://a.example:4002"
+    end
+  end
+
   test "disabled feature flag makes it unconfigured" do
     Application.put_env(:kiln_cms, :presentation_preview_url, "https://f.example.com{path}")
     Application.put_env(:kiln_cms, :visual_editing_enabled, false)

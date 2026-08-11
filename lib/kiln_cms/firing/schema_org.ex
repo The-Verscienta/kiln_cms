@@ -16,9 +16,25 @@ defmodule KilnCMS.Firing.SchemaOrg do
   @article_types ~w(Article BlogPosting NewsArticle TechArticle)
   @page_types ~w(WebPage AboutPage ContactPage FAQPage MedicalWebPage)
 
+  # A third family (#480). An `Event` is not a `CreativeWork`: it has no body in
+  # the schema.org sense, so it carries neither `articleBody` nor `text`, and it
+  # gains `startDate`/`endDate`/`eventSchedule` from a `datetime_range` field
+  # instead. Declaring one on a type with no schedule is allowed and simply
+  # produces an Event with no dates — the type is what an operator says it is.
+  @event_types ~w(Event BusinessEvent CourseInstance EducationEvent ExhibitionEvent
+                  Festival MusicEvent ScreeningEvent SocialEvent SportsEvent TheaterEvent)
+
   @doc "Allowlist of supported page-level schema.org types."
   @spec types() :: [String.t()]
-  def types, do: @article_types ++ @page_types
+  def types, do: @article_types ++ @page_types ++ @event_types
+
+  @doc "Whether `type` is one of the schema.org Event family."
+  @spec event_type?(String.t()) :: boolean()
+  def event_type?(type), do: type in @event_types
+
+  @doc "Whether `type` is one of the schema.org Article (CreativeWork) family."
+  @spec article_type?(String.t()) :: boolean()
+  def article_type?(type), do: type in @article_types
 
   @doc "The default main-node @type."
   @spec default_type() :: String.t()
@@ -29,10 +45,17 @@ defmodule KilnCMS.Firing.SchemaOrg do
   types), else its module's `__kiln_schema_org_type__/0` (compiled types), else
   `Article`. Unknown/stale declarations fall back to the default rather than
   firing an unvetted @type.
+
+  The definition read is tenant-strict (#419), same as `Engine.public_type/1`:
+  scoped to the document's own org, else it raises under strict tenancy and the
+  document silently degrades to the default @type.
   """
   @spec resolve(struct()) :: String.t()
-  def resolve(%{type_definition_id: id}) when not is_nil(id) do
-    case KilnCMS.CMS.get_type_definition(id, authorize?: false) do
+  def resolve(%{type_definition_id: id} = document) when not is_nil(id) do
+    case KilnCMS.CMS.get_type_definition(id,
+           authorize?: false,
+           tenant: Map.get(document, :org_id)
+         ) do
       {:ok, %{schema_org_type: type}} -> normalize(type)
       _ -> default_type()
     end
@@ -53,17 +76,46 @@ defmodule KilnCMS.Firing.SchemaOrg do
   @spec main_node(struct(), String.t()) :: map()
   def main_node(document, body) do
     type = resolve(document)
+
+    # Only `description` and `inLanguage` are shared: both are properties every
+    # Thing carries. Everything else is family-specific.
+    # The *effective* description (#1102). `KilnCMSWeb.StructuredData`'s moduledoc
+    # says it "mirrors `Firing.SchemaOrg.base_node/3`, the fired producer's own
+    # rule" — and once #805 let a type default a description, the delivered page
+    # resolved the pattern while this read the stored column, so the same
+    # document's inline JSON-LD and its fired `:json_ld` artifact carried
+    # different `description`s. That divergence was permanent rather than stale:
+    # re-firing could not close it, because re-firing re-read the same column.
+    type
+    |> base_node(document, body)
+    |> put_if("description", KilnCMS.Seo.Patterns.effective(document, :seo_description))
+    |> put_if("inLanguage", Map.get(document, :locale))
+  end
+
+  # An Event's headline is its `name`, and it has no body — `articleBody` on an
+  # Event is not a property schema.org defines, and emitting it makes the node
+  # invalid rather than merely verbose.
+  #
+  # `keywords`, `datePublished` and `dateModified` go with it, for exactly the
+  # same reason: all three are CreativeWork properties. Half-enforcing the rule
+  # would leave the node just as invalid, and an invalid Event node produces no
+  # rich result at all — which is the entire point of emitting one.
+  defp base_node(type, document, _body) when type in @event_types,
+    do: %{"@type" => type, "name" => Map.get(document, :title)}
+
+  defp base_node(type, document, body) do
     body_key = if type in @article_types, do: "articleBody", else: "text"
 
     %{"@type" => type, "headline" => Map.get(document, :title), body_key => body}
-    |> put_if("description", Map.get(document, :seo_description))
     |> put_if("keywords", Map.get(document, :seo_keywords))
-    |> put_if("inLanguage", Map.get(document, :locale))
     |> put_if("datePublished", iso(Map.get(document, :published_at)))
     |> put_if("dateModified", iso(Map.get(document, :updated_at)))
   end
 
-  defp normalize(type) when type in @article_types or type in @page_types, do: type
+  defp normalize(type)
+       when type in @article_types or type in @page_types or type in @event_types,
+       do: type
+
   defp normalize(_type), do: default_type()
 
   defp iso(%DateTime{} = dt), do: DateTime.to_iso8601(dt)

@@ -9,7 +9,7 @@ import Config
 #
 # ## Boolean environment variables
 #
-# All seven on/off variables below go through `KilnCMS.Config.Env` — one
+# Every on/off variable below goes through `KilnCMS.Config.Env` — one
 # parser, one set of accepted spellings, one rule for a value it cannot read
 # (#607). Do not hand-roll an eighth: matching the raw value is how
 # `DATABASE_SSL=True` came to silently disable Postgres TLS (#606) and
@@ -24,6 +24,24 @@ import Config
 # "explicitly false" for the flags that must only override config when the
 # operator actually set them. See the moduledoc for the per-flag caveats — this
 # fails to the *default*, which is only the safe side when the default is.
+#
+# ## Integer environment variables
+#
+# `Env.positive_integer/1`, on the same terms and for the same reason (#1009).
+# Four variables here had each hand-rolled the parse, the positivity check and
+# the warning, so "unparseable means the default, not a crash" was four
+# opportunities to disagree — and `IO.warn` alone never reached the Sentry
+# replay that #634 added, so a typo warned on container stdout and nowhere else.
+#
+# ## Everything else
+#
+# Same rule, and it is the rule rather than the parser that matters: a rejected
+# value owes the operator a *collected* warning, never a bare `IO.warn` (#912).
+# `Env.one_of/2` covers an enum — `KILN_PROVENANCE_AI_DISCLOSURE` is the only
+# one — and `Env.record_unusable/3` is the escape hatch for a shape with no
+# reader, which today means `KILN_PROVENANCE_RETIRED_KEY_FILES` alone. There
+# should be no `IO.warn` left in this file; a new one is a warning that reaches
+# container stdout and nothing else.
 alias KilnCMS.Config.Env
 
 # ## Using releases
@@ -63,6 +81,33 @@ end
 # library whenever an access key is configured.
 if unsplash_key = System.get_env("UNSPLASH_ACCESS_KEY") do
   config :kiln_cms, :unsplash, access_key: unsplash_key
+end
+
+# Environment indicator (#469) — a strip across the top of the console naming
+# this deployment. Read in EVERY environment, not just prod: a scrubbed staging
+# clone is a byte-for-byte copy of production's content and branding, so the two
+# consoles are visually identical, and a developer running against a copy of
+# prod data wants the same warning.
+#
+# Absent means no strip, so **production stays clean by default** — it is the
+# environment you recognise by the absence of a label, and the one where nothing
+# has to be configured for that to be true. KILN_ENV_COLOR names a design-kit
+# tone (see `KilnCMS.Environment`), never a hex.
+#
+# Guarded on the label being present, like CSP_IMG_SRC above: `Config`
+# deep-merges keyword lists, so an unconditional `label: nil` would overwrite a
+# project overlay's own `config :kiln_cms, :environment` — silently, and only in
+# the deployment that had bothered to set one.
+#
+# Skipped in `:test` for the reason EMBED_ORIGINS is: this one injects markup
+# into every rendered console page, so a developer with KILN_ENV_LABEL exported
+# would get different HTML from CI on identical code.
+if config_env() != :test do
+  if env_label = System.get_env("KILN_ENV_LABEL") do
+    config :kiln_cms, :environment,
+      label: env_label,
+      tone: System.get_env("KILN_ENV_COLOR")
+  end
 end
 
 # ## Error tracking (Sentry)
@@ -132,18 +177,8 @@ end
 # being interpreted — see KilnCMS.CMS.Calculations.ReadingTime. A release only
 # evaluates this file, so without this block the documented config key would be
 # unreachable on a Docker deployment.
-if wpm = System.get_env("KILN_READING_TIME_WPM") do
-  case Integer.parse(String.trim(wpm)) do
-    {parsed, ""} when parsed > 0 ->
-      config :kiln_cms, :reading_time_wpm, parsed
-
-    _ ->
-      IO.warn(
-        "KILN_READING_TIME_WPM must be a positive integer (got #{inspect(wpm)}); " <>
-          "keeping the default.",
-        []
-      )
-  end
+with {:ok, wpm} <- Env.positive_integer("KILN_READING_TIME_WPM") do
+  config :kiln_cms, :reading_time_wpm, wpm
 end
 
 # ## Visual-editing bridge (#355) — the annotated preview read + `/bridge.js`
@@ -160,13 +195,49 @@ with {:ok, enabled?} <- Env.fetch("VISUAL_EDITING_ENABLED") do
   config :kiln_cms, :visual_editing_enabled, enabled?
 end
 
+# ## A/V metadata stripping — fail closed (#820)
+#
+# An MP4 off a phone carries GPS, device model and a local wall-clock date, and
+# Kiln remuxes those away with ffmpeg. ffmpeg is an OPTIONAL dependency, so the
+# default is best-effort: no ffmpeg means the file is stored as it arrived and
+# a warning is logged.
+#
+# Set REQUIRE_AV_METADATA_STRIP=true to refuse such an upload instead, which is
+# the same contract PDFs already have. Do that only WITH ffmpeg installed —
+# on a host without it, every video and audio upload starts failing. Default
+# off precisely because flipping it for existing deployments would be that
+# outage, silently, on upgrade.
+with {:ok, required?} <- Env.fetch("REQUIRE_AV_METADATA_STRIP") do
+  config :kiln_cms, :require_av_metadata_strip, required?
+end
+
+# ## Tamper-evident history — master kill switch (#356, #611)
+#
+# `:audit_anchors_enabled` gates BOTH publish-time anchor minting AND the
+# `:audit_anchor_every_write` extension below — `Chain.extend/2` requires
+# both, so `KILN_AUDIT_ANCHOR_EVERY_WRITE=true` was a complete no-op whenever
+# this stayed off with no runtime override to recover it, contradicting its
+# documented status (docs/deploy-p3.md) as an operator-facing kill switch
+# reversible without a rebuild.
+#
+# Compiled default is `true` (anchoring on unless an operator turns it off),
+# so an unrecognized value keeps history signed — the safe side, opposite of
+# `KILN_AUDIT_ANCHOR_EVERY_WRITE`'s.
+#
+# Skipped under :test for the same reason as KILN_AUDIT_ANCHOR_EVERY_WRITE.
+if config_env() != :test do
+  with {:ok, enabled?} <- Env.fetch("KILN_AUDIT_ANCHORS_ENABLED") do
+    config :kiln_cms, :audit_anchors_enabled, enabled?
+  end
+end
+
 # ## Tamper-evident history — anchor every write (#356)
 #
 # Anchors are always minted at publish. This additionally extends the signed
 # chain after *every* versioned write, closing the window between two publishes
-# — #356's "sign every version, not just published artifacts". It costs one
-# signature and one `history_anchors` row per save, which is why the compiled
-# default is `false`: a regulated deployment wants it, a blog does not.
+# — #356's "sign every version, not just published artifacts". It costs a
+# signature and a `history_anchors` row per save, AND it disables autosave
+# coalescing (#671), so a draft keeps one version row per debounce. Hence false.
 #
 # Runtime rather than compile-time on purpose — an operator must be able to turn
 # this off without rebuilding the image. See KilnCMS.Governance.Chain and
@@ -185,6 +256,148 @@ if config_env() != :test do
   with {:ok, every_write?} <- Env.fetch("KILN_AUDIT_ANCHOR_EVERY_WRITE") do
     config :kiln_cms, :audit_anchor_every_write, every_write?
   end
+end
+
+# ## Governance checkpoint witness (#666)
+#
+# Where the org-wide anchor-chain commitment gets published. Runtime rather than
+# compile time because it is the one knob that decides whether the truncation
+# guarantee holds against an attacker with full database access, and an operator
+# must be able to point it at a bucket without rebuilding the image.
+#
+# An unrecognized value leaves the compiled default (`none`) rather than
+# guessing. That is the *weaker* side, so it is warned about explicitly here
+# rather than left to `Env`'s generic stderr line — see KilnCMS.Config.Env on
+# why "fail to default" is not "fail safe".
+#
+# Skipped under :test so the suite does not depend on the developer's shell; the
+# checkpoint tests set the adapter explicitly.
+if config_env() != :test do
+  witness =
+    case System.get_env("KILN_GOVERNANCE_WITNESS") do
+      nil ->
+        nil
+
+      value ->
+        case value |> String.trim() |> String.downcase() do
+          "" ->
+            nil
+
+          "none" ->
+            KilnCMS.Governance.Witness.None
+
+          "file" ->
+            KilnCMS.Governance.Witness.File
+
+          "s3" ->
+            KilnCMS.Governance.Witness.S3
+
+          "http" ->
+            KilnCMS.Governance.Witness.HTTP
+
+          other ->
+            # ASCII only: config providers write to stderr before Logger exists,
+            # and non-ASCII comes back escaped in exactly the line an operator
+            # needs to read.
+            IO.puts(
+              :standard_error,
+              "KILN_GOVERNANCE_WITNESS=#{inspect(other)} is not one of none|file|s3|http - " <>
+                "governance checkpoints will NOT be published outside the database, " <>
+                "which is the weaker side of the default. See #666."
+            )
+
+            nil
+        end
+    end
+
+  if witness do
+    config :kiln_cms, KilnCMS.Governance.Witness, adapter: witness
+  end
+
+  if dir = System.get_env("KILN_GOVERNANCE_WITNESS_DIR") do
+    config :kiln_cms, KilnCMS.Governance.Witness.File, dir: dir
+  end
+
+  if bucket = System.get_env("KILN_GOVERNANCE_WITNESS_BUCKET") do
+    config :kiln_cms, KilnCMS.Governance.Witness.S3,
+      bucket: bucket,
+      prefix: System.get_env("KILN_GOVERNANCE_WITNESS_PREFIX", "")
+  end
+
+  if witness_url = System.get_env("KILN_GOVERNANCE_WITNESS_URL") do
+    # The token stays a `{:env, …}` provider tuple rather than being read here,
+    # so it resolves through `KilnCMS.Keys` at call time like every other
+    # credential — an operator can point it at a file or a secret manager
+    # instead by configuring the tuple directly.
+    config :kiln_cms, KilnCMS.Governance.Witness.HTTP,
+      url: witness_url,
+      token:
+        if(System.get_env("KILN_GOVERNANCE_WITNESS_TOKEN"),
+          do: {:env, %{"var" => "KILN_GOVERNANCE_WITNESS_TOKEN"}}
+        )
+  end
+
+  # How often the commitment is refreshed. The exposure window for a truncated
+  # chain is one interval wide, so a regulated deployment shortens this
+  # ("0 * * * *" for hourly) rather than leaving the nightly default.
+  #
+  # A plain `:kiln_cms` key rather than a reach into `Oban`'s nested plugin
+  # keyword list: `Config` deep-merges those, and overriding one entry of one
+  # plugin tuple from here is the #608 shape. `KilnCMS.Application.oban_config/0`
+  # assembles the crontab from this.
+  if cron = System.get_env("KILN_GOVERNANCE_CHECKPOINT_CRON") do
+    config :kiln_cms, :governance_checkpoint_cron, cron
+  end
+end
+
+# ## Outbound link checking (#474)
+#
+# When the sweep runs, and who it says it is. Both are safe to leave alone:
+# checking is opt-in per site, so an unconfigured deployment makes no outbound
+# requests at all. The user-agent is worth setting on a public site — it is what
+# an operator on the receiving end reads before deciding whether to block you,
+# and a contact URL of your own beats Kiln's.
+if cron = System.get_env("KILN_LINK_CHECK_CRON") do
+  config :kiln_cms, :link_check_cron, cron
+end
+
+# ## Editorial tasks (#501)
+#
+# When the due-soon/overdue digest email runs. Safe to leave scheduled
+# everywhere: with no tasks assigned in any org, the sweep enqueues nothing.
+if cron = System.get_env("KILN_TASK_DIGEST_CRON") do
+  config :kiln_cms, :task_digest_cron, cron
+end
+
+# ## Events: the "what's on" index (#766)
+#
+# When the occurrence sweep runs. The interval is how stale the listing may be —
+# an event that has finished keeps its place until the next run — so shorten it
+# on a site whose events turn over during the day, and set `false` (or drive
+# `KilnCMS.Events.Sweep.run/0` from your own scheduler) to turn it off.
+if cron = System.get_env("KILN_OCCURRENCE_SWEEP_CRON") do
+  config :kiln_cms, :occurrence_sweep_cron, cron
+end
+
+# And whether booting queues the one-off backfill that gives pre-existing
+# content its first value. On by default because the alternative is an upgrade
+# step someone has to remember, and the index is simply empty until they do.
+# Deduplicated for a day, and a redundant run writes nothing — so the honest
+# reason to turn this off is wanting to run `mix kiln.occurrences.backfill`
+# yourself, at a time you choose.
+#
+# `Env.fetch/1` rather than `Env.flag/2`, and that is load-bearing: this file is
+# evaluated in EVERY environment and AFTER `config/test.exs`, so a `flag(…,
+# true)` default would overwrite the `false` the test config sets — turning the
+# suite's application boot back into a committed `oban_jobs` row. Only a
+# recognized spelling writes anything here; unset leaves whichever default is
+# already configured.
+with {:ok, enabled?} <- Env.fetch("KILN_OCCURRENCE_BACKFILL_ON_BOOT") do
+  config :kiln_cms, :occurrence_backfill_on_boot, enabled?
+end
+
+if user_agent = System.get_env("KILN_LINK_CHECK_USER_AGENT") do
+  config :kiln_cms, KilnCMS.Links.External, user_agent: user_agent
 end
 
 # ## Signed provenance / C2PA-style content manifests (#340)
@@ -214,6 +427,44 @@ if config_env() != :test do
   # must not start signing because of a typo.
   with {:ok, provenance?} <- Env.fetch("KILN_PROVENANCE_ENABLED") do
     config :kiln_cms, KilnCMS.Provenance, enabled: provenance?
+  end
+
+  # ActivityPub federation (#491). The deployment-wide half of a two-part gate:
+  # off here means every federation route 404s regardless of what any tenant
+  # admin has enabled. Federation makes this server sign and POST to hosts
+  # chosen by strangers who followed the site, so an operator whose egress
+  # policy forbids that must be able to say so once, centrally.
+  #
+  # `Env.fetch/1` for the same reason as above (#607): unset and unrecognized
+  # both leave the compiled default (off) alone.
+  with {:ok, federation?} <- Env.fetch("KILN_FEDERATION_ENABLED") do
+    config :kiln_cms, KilnCMS.Federation, enabled: federation?
+  end
+
+  # Content experiments / A/B testing (#499). OFF by default, and the deployment
+  # gets a say because serving an experiment costs its page the SHARED CACHE: a
+  # variant render is `private, no-store`, since a CDN would otherwise cache one
+  # arm and hand it to every visitor — a 100/0 split reported as 50/50. An
+  # operator fronting Kiln with a CDN should decide that once, centrally, rather
+  # than discover it from a cache-hit graph.
+  with {:ok, experiments?} <- Env.fetch("KILN_EXPERIMENTS_ENABLED") do
+    config :kiln_cms, KilnCMS.Experiments, enabled: experiments?
+  end
+
+  # Sticky assignment (#984). A SECOND decision, and separate from the one above
+  # on purpose: enabling experiments changes caching, enabling this puts a
+  # cookie on visitors of experimented pages. `docs/data-flows.md` states that
+  # no visitor cookie is recorded, and this is the one switch that makes that
+  # untrue — so it is not something the experiments switch should turn on as a
+  # side effect. See docs/data-flows.md#sticky-assignment-cookie-984.
+  with {:ok, sticky?} <- Env.fetch("KILN_EXPERIMENTS_STICKY") do
+    config :kiln_cms, KilnCMS.Experiments, sticky: sticky?
+  end
+
+  # Deep-merges with the two `config` calls above (`Config` merges successive
+  # calls for the same key rather than overwriting them) — see #608.
+  with {:ok, sticky_days} <- Env.positive_integer("KILN_EXPERIMENTS_STICKY_DAYS") do
+    config :kiln_cms, KilnCMS.Experiments, sticky_max_age_days: sticky_days
   end
 
   # Mount the signing key as a file instead of exporting it. The key is a
@@ -250,16 +501,23 @@ if config_env() != :test do
   # variable into a bare separator — otherwise clears the list, and silently
   # deregistering every retired key is precisely the failure this feature exists
   # to prevent.
-  retired_key_files =
-    "KILN_PROVENANCE_RETIRED_KEY_FILES" |> System.get_env("") |> String.trim()
+  retired_key_files_raw = System.get_env("KILN_PROVENANCE_RETIRED_KEY_FILES", "")
+  retired_key_files = String.trim(retired_key_files_raw)
 
   case KilnCMS.Provenance.parse_key_files(retired_key_files) do
     [] when retired_key_files != "" ->
-      IO.warn("""
-      KILN_PROVENANCE_RETIRED_KEY_FILES is set to #{inspect(retired_key_files)}, \
-      which contains no paths; keeping the configured default. Expected a \
-      comma-separated list of PEM file paths.\
-      """)
+      # Collected rather than stderr-only, for the same reason as the
+      # disclosure below (#912) — and the RAW value, because with
+      # `KILN_PROVENANCE_RETIRED_KEY_FILES=" , "` the trimmed form is `","`, a
+      # string that appears nowhere in the operator's compose file.
+      #
+      # `record_unusable/3`, not a reader: the failure here is "parsed to no
+      # paths", which is not a shape `Env` models.
+      Env.record_unusable(
+        "KILN_PROVENANCE_RETIRED_KEY_FILES",
+        retired_key_files_raw,
+        "a comma-separated list of PEM file paths"
+      )
 
     [] ->
       :ok
@@ -342,6 +600,40 @@ releases_url = "KILN_UPDATE_RELEASES_URL" |> System.get_env("") |> String.trim()
 
 if releases_url != "" do
   config :kiln_cms, Kiln.Updates, releases_url: releases_url
+end
+
+# ## Referrer attribution (#619, phase 2 of docs/advanced-analytics-plan.md)
+#
+# Off by default. This gate is a plain operator switch (unlike
+# `:view_analytics`'s `retention_days`, which is baked into an AshOban `where`
+# expression and stays `compile_env`), so it must be — and is — readable at
+# runtime: `KilnCMS.Analytics.referrers_enabled?/0` calls
+# `Application.get_env/3`, never `compile_env`. See #608 for the defect class
+# this avoids.
+#
+# Only a recognized spelling writes config, so an unset var keeps the
+# compiled `false` default. See the header for the accepted spellings.
+with {:ok, enabled?} <- Env.fetch("KILN_ANALYTICS_REFERRERS") do
+  config :kiln_cms, :analytics_referrers, enabled: enabled?
+end
+
+# ## Low-count suppression threshold (#620, phase 3 of docs/advanced-analytics-plan.md)
+#
+# A referrer category's hit count below this renders — in the dashboard and
+# the export — as "< n" rather than an exact number, because a single-digit
+# bucket can describe one visitor's arrival (design doc, "Where 'aggregate'
+# gets thin: low counts"). Runtime-readable for the same reason as the gate
+# above: an operator tightening or loosening this must not need a rebuild.
+# `Env.positive_integer/1`, the shared reader (#1009) — an unparseable or
+# non-positive value keeps the default and warns rather than being
+# interpreted (e.g. silently disabling suppression at threshold 0).
+#
+# This `config` call deep-merges with the `enabled:` one above (`Config`
+# merges successive calls for the same key rather than overwriting), so both
+# land in the same `:analytics_referrers` keyword list — see #608 for why
+# that merge behavior matters here and can also bite.
+with {:ok, threshold} <- Env.positive_integer("KILN_ANALYTICS_LOW_COUNT_THRESHOLD") do
+  config :kiln_cms, :analytics_referrers, low_count_threshold: threshold
 end
 
 if config_env() == :prod do
@@ -445,6 +737,11 @@ if config_env() == :prod do
   # would otherwise fail the Origin check. `//*.host` matches any scheme/port. The
   # explicit list (not `true`) is required for the wildcard; `CHECK_ORIGINS` still
   # widens it (e.g. a custom domain mid-migration).
+  #
+  # The wildcard covers every subdomain of the base host, registered as an org or
+  # not, so passing it says nothing about WHICH org a socket may act as. That is
+  # each socket's own tenant resolution (#654) — every one of the four resolves
+  # from the host it connected on, whatever origin admitted it.
   check_origin = ["https://" <> host, "//*." <> host | extra_origins]
 
   config :kiln_cms, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
@@ -486,17 +783,63 @@ if config_env() == :prod do
     config :kiln_cms, :tenant_strict_host, strict_host?
   end
 
+  # API documentation surface — the OpenAPI document and the Swagger explorer
+  # (#567). Off in a production build; an operator publishing a public API
+  # turns it back on here. `fetch/1` rather than `flag/2` for the reason above:
+  # an unset variable must not rewrite a project overlay's own setting.
+  with {:ok, api_docs?} <- Env.fetch("API_DOCS_ENABLED") do
+    config :kiln_cms, :api_docs, api_docs?
+  end
+
   # White-label branding (#48, see `KilnCMS.Branding`) — the instance-wide layer
   # beneath each site's own editor-managed row. Unset vars fall through to the
-  # stock KilnCMS defaults. BRAND_PRIMARY_COLOR must be a hex colour (`#1d4ed8`);
-  # anything else is ignored with a warning, since the value drives the emitted
-  # theme tokens. Off-origin BRAND_LOGO_URL hosts must also be in CSP_IMG_SRC or
-  # the browser will block the image.
+  # stock KilnCMS defaults. Off-origin BRAND_LOGO_URL hosts must also be in
+  # CSP_IMG_SRC or the browser will block the image.
+  #
+  # BRAND_PRIMARY_COLOR must be a hex colour (`#1d4ed8` or `#1d4`), and is
+  # checked HERE rather than only where it is used (#1089). `KilnCMS.Branding`
+  # still rejects a bad value — it is the same grammar wherever the colour comes
+  # from, and the editor-managed row goes through it too — but its rejection is
+  # a bare `Logger.warning`, which `Sentry.LoggerHandler`'s defaults
+  # (`level: :error`, `capture_log_messages: false`) drop. So on the env path
+  # that was container stdout and nowhere else, for a value that changes what
+  # every page looks like. Reading it through the collector puts it in the same
+  # boot-warning replay as every other misconfiguration in this file (#634).
+  brand_primary_color_raw = System.get_env("BRAND_PRIMARY_COLOR", "")
+
+  brand_primary_color =
+    case KilnCMS.CMS.Validations.BrandTokens.normalize_color(brand_primary_color_raw) do
+      nil ->
+        # Blank — including whitespace-only — is "leave this alone", the same
+        # rule a bare `FOO=` gets everywhere else in this file; warning about it
+        # would be noise on every boot. `normalize_color/1` trims for itself, so
+        # only the emptiness test needs to.
+        #
+        # The RAW value goes to the collector, untrimmed: the trimming is a
+        # candidate explanation for the mismatch, so echoing the normalized form
+        # hands the operator the one spelling that is not in their compose file.
+        unless String.trim(brand_primary_color_raw) == "" do
+          Env.record_unusable(
+            "BRAND_PRIMARY_COLOR",
+            brand_primary_color_raw,
+            "a hex colour such as #1d4ed8 or #1d4"
+          )
+        end
+
+        nil
+
+      # Normalized (downcased, shorthand expanded) rather than raw: `Branding`
+      # would do it on every read anyway, and writing the canonical form means
+      # the value the tokens are built from is the one an operator sees.
+      normalized ->
+        normalized
+    end
+
   config :kiln_cms, :branding,
     site_name: System.get_env("SITE_NAME"),
     logo_url: System.get_env("BRAND_LOGO_URL"),
     favicon_url: System.get_env("BRAND_FAVICON_URL"),
-    primary_color: System.get_env("BRAND_PRIMARY_COLOR")
+    primary_color: brand_primary_color
 
   config :kiln_cms, KilnCMSWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],
@@ -529,6 +872,78 @@ if config_env() == :prod do
       redirect_uri: System.get_env("OIDC_REDIRECT_URI")
   end
 
+  # In-app backups (#484). Every one of these mirrors an environment variable
+  # `scripts/backup.sh` already reads, and by the same name — the cron path and
+  # the app path are two front doors to one backup directory, and an operator
+  # who configured the script should not have to configure this separately.
+  #
+  # BACKUP_ENABLED=false turns the in-app path off (the panel then explains
+  # why) without touching the cron one.
+
+  # Blank counts as UNSET, the convention this file already follows for
+  # DATABASE_SSL_CACERTFILE. `MEDIA_DIR=` is a routine `.env`/compose artifact,
+  # and reading it as set gave `media_dir: ""` — `File.dir?("")` is false, so
+  # every in-app backup failed, while `backup.sh`'s `[ -n … ]` correctly
+  # skipped media and succeeded. `BACKUP_DIR=` was worse: `""` is truthy in
+  # Elixir, so backups would land in a relative `db/` under the release's cwd.
+  backup_env = fn var ->
+    case System.get_env(var) do
+      nil -> nil
+      raw -> if String.trim(raw) == "", do: nil, else: raw
+    end
+  end
+
+  # `Env.flag/2` for the boolean and `Env.positive_integer/1` for the counts —
+  # one shared parser each, see this file's header. The counts used to be a
+  # hand-rolled `Integer.parse` here and in three other places (#1009). An
+  # unparseable or non-positive value keeps the default and warns rather than
+  # being interpreted: `BACKUP_KEEP_DAYS=0` read literally would delete every
+  # backup it had just taken.
+  backup_int = fn var, default ->
+    case Env.positive_integer(var) do
+      {:ok, parsed} -> parsed
+      _unset_or_unrecognized -> default
+    end
+  end
+
+  backup_opts =
+    [
+      enabled: Env.flag("BACKUP_ENABLED", true),
+      dir: backup_env.("BACKUP_DIR") || "/var/backups/kiln",
+      keep_days: backup_int.("BACKUP_KEEP_DAYS", 14),
+      stale_after_hours: backup_int.("BACKUP_STALE_AFTER_HOURS", 36)
+    ]
+
+  # Same variable the script uses, so the app path copies off-site too — a
+  # backup that exists only on the machine being backed up is not a backup of
+  # that machine.
+  backup_opts =
+    case backup_env.("BACKUP_RCLONE_REMOTE") do
+      nil -> backup_opts
+      remote -> Keyword.put(backup_opts, :rclone_remote, remote)
+    end
+
+  # Escape hatch for a connection `KilnCMS.Backups.database_url/0` can't
+  # derive — a unix-socket repo, or one whose `DATABASE_URL` reaches the
+  # database through something `pg_dump` can't use. Ordinary deployments never
+  # set it: `DATABASE_URL` is already the first thing consulted.
+  backup_opts =
+    case backup_env.("BACKUP_DATABASE_URL") do
+      nil -> backup_opts
+      url -> Keyword.put(backup_opts, :database_url, url)
+    end
+
+  # Unset on an S3 deployment, deliberately — the bucket is backed up
+  # provider-side, and tarring the wrong directory yields an archive that
+  # looks like a media backup and restores nothing.
+  backup_opts =
+    case backup_env.("MEDIA_DIR") do
+      nil -> backup_opts
+      media_dir -> Keyword.put(backup_opts, :media_dir, media_dir)
+    end
+
+  config :kiln_cms, KilnCMS.Backups, backup_opts
+
   # ## Object storage (S3-compatible)
   #
   # Opt into the S3 adapter by setting S3_BUCKET. Works with AWS S3, Cloudflare
@@ -551,6 +966,17 @@ if config_env() == :prod do
       case System.get_env("S3_ACL") do
         nil -> s3_opts
         acl -> Keyword.put(s3_opts, :acl, String.to_atom(acl))
+      end
+
+    # Optional (#481): a SEPARATE bucket for gated documents — this app's own
+    # AWS credentials read it directly, so it needs no public-read config, no
+    # CDN, and no S3_PUBLIC_BASE_URL equivalent (see KilnCMS.Storage.S3 docs).
+    # Without it, gating a document is refused rather than silently falling
+    # back to the public bucket.
+    s3_opts =
+      case System.get_env("S3_PRIVATE_BUCKET") do
+        nil -> s3_opts
+        private_bucket -> Keyword.put(s3_opts, :private_bucket, private_bucket)
       end
 
     config :kiln_cms, KilnCMS.Storage.S3, s3_opts
@@ -627,6 +1053,64 @@ if config_env() == :prod do
       end
 
     config :kiln_cms, KilnCMS.Assist, model: assist_model, generator: assist_generator
+  end
+
+  # ## Generated answers for /api/ask (optional)
+  #
+  # The third AI switch, and the one to think hardest about: `/api/ask` is a
+  # **public, anonymous** endpoint. Leave ASK_MODEL unset and it stays what it
+  # is by default — retrieval-only, returning cited published passages and
+  # `"answer": null` — with nothing leaving the deployment. Set it and a
+  # stranger's question causes the retrieved passages to be sent to the model.
+  #
+  #     ASK_MODEL=ollama:llama3.1           # on-prem, no egress
+  #     ASK_MODEL=anthropic:claude-sonnet-5 # hosted; also needs ANTHROPIC_API_KEY
+  #
+  # Only *published, world-readable* content is ever retrieved — for EVERY
+  # caller, bearer token or not (#916). Generation carries its own rate-limit
+  # buckets on top of the pipeline's per-IP limiter, keyed on the client address
+  # for anonymous callers; an exhausted bucket degrades to retrieval-only rather
+  # than refusing the request. Provider API keys are read by `req_llm` from its
+  # own environment — Kiln never reads or stores them. ASK_GENERATOR overrides
+  # the adapter module. See docs/rag.md.
+  if ask_model = System.get_env("ASK_MODEL") do
+    ask_generator =
+      case System.get_env("ASK_GENERATOR") do
+        nil -> KilnCMS.Ask.Generator.ReqLLM
+        module -> Module.concat([module])
+      end
+
+    config :kiln_cms, KilnCMS.Ask, model: ask_model, generator: ask_generator
+  end
+
+  # ### Rich embed cards (#489)
+  #
+  # `OEMBED_ENABLED=true` lets Kiln fetch oEmbed metadata — title, author,
+  # thumbnail — for an embed block's URL, so it renders a card instead of a bare
+  # link. **Off by default, and it is egress**: enabling it means the server
+  # makes an outbound HTTPS request when an editor saves a document containing
+  # an embed whose URL a known provider claims.
+  #
+  # Requests only ever go to the curated provider endpoints in
+  # `KilnCMS.OEmbed.Provider` — never to a URL discovered from content — and
+  # through the pinned, size-capped `KilnCMS.SafeFetch`. Provider HTML is
+  # discarded; only scalars are stored.
+  #
+  #     OEMBED_ENABLED=true
+  #     OEMBED_PROVIDERS=YouTube,Vimeo   # optional: narrow the shipped list
+  #
+  # `OEMBED_PROVIDERS` can only *restrict* the built-in list, never extend it —
+  # adding a provider is a code change, because it is a host this server will
+  # dial. Names are the `name` field of each entry in `KilnCMS.OEmbed.Provider`.
+  if KilnCMS.Config.Env.flag("OEMBED_ENABLED", false) do
+    providers =
+      case System.get_env("OEMBED_PROVIDERS") do
+        nil -> nil
+        "" -> nil
+        list -> list |> String.split(",", trim: true) |> Enum.map(&String.trim/1)
+      end
+
+    config :kiln_cms, KilnCMS.OEmbed, enabled: true, providers: providers
   end
 
   # ## SSL Support
@@ -761,3 +1245,101 @@ if config_env() == :prod do
     config :kiln_cms, email_from: {System.get_env("MAIL_FROM_NAME") || "KilnCMS", from_email}
   end
 end
+
+# ## Signed provenance — the claim fields (#644, residual from #608/#641)
+#
+# The remaining `KilnCMS.Provenance` keys #608 couldn't reach at runtime: the
+# `signer` identity and `origin` URL embedded in every manifest a consumer
+# verifies, and the default `ai_disclosure`. They live here, at the end, rather
+# than in the main provenance block above (search `KILN_PROVENANCE_ENABLED`)
+# because that block is dense with the line anchors `docs/environment-variables.md`
+# cites, and inserting there would shift every one below it —
+# `test/kiln_cms/docs/env_var_anchors_test.exs` guards exactly that.
+#
+# Skipped in `:test` like the rest of the provenance config: these values ride
+# into a signed claim, and the suite must not depend on a developer's shell.
+if config_env() != :test do
+  # `signer` and `origin` default to something a released image can already set
+  # (`:site_name` / `:public_base_url`), so they are lower stakes than #608's
+  # three — but there is no reason a prebuilt image should have to rebuild to
+  # override the claim. Written only when set, so the `nil`-means-fall-back
+  # semantics survive an unset or blank var; scalar values merge cleanly.
+  provenance_signer = "KILN_PROVENANCE_SIGNER" |> System.get_env("") |> String.trim()
+
+  if provenance_signer != "" do
+    config :kiln_cms, KilnCMS.Provenance, signer: provenance_signer
+  end
+
+  provenance_origin = "KILN_PROVENANCE_ORIGIN" |> System.get_env("") |> String.trim()
+
+  if provenance_origin != "" do
+    config :kiln_cms, KilnCMS.Provenance, origin: provenance_origin
+  end
+
+  # The default AI-disclosure embedded when a document declares none. Unlike
+  # `signer`/`origin`, a garbage value here is written into a SIGNED claim, so an
+  # unrecognized spelling warns and keeps the configured default rather than
+  # being written — `KilnCMS.Provenance.normalize_disclosure/1` coerces unknown
+  # to "human" for per-document reads, the wrong direction for a value an
+  # operator set on purpose.
+  #
+  # `Env.one_of/2` rather than a hand-rolled `cond` (#912): the block used to
+  # trim, downcase and match itself and then warn with a bare `IO.warn`, which
+  # in a release reaches container stdout and nothing else — no Logger, no
+  # Sentry. That is the gap #634 closed for flags, and it lands harder here
+  # than on a flag, because the operator's only notice that their spelling was
+  # rejected scrolls past once during a deploy while every manifest a consumer
+  # verifies carries the compiled default instead.
+  with {:ok, disclosure} <-
+         Env.one_of("KILN_PROVENANCE_AI_DISCLOSURE", KilnCMS.Provenance.disclosures()) do
+    config :kiln_cms, KilnCMS.Provenance, ai_disclosure: disclosure
+  end
+
+  # ── Web Push (#628) ──────────────────────────────────────────────────────────
+  #
+  # VAPID identifies this deployment to a push service. Runtime rather than
+  # compile time so a prebuilt image can be switched on by an operator, and
+  # absent keys mean push is simply off: `KilnCMS.Push.enabled?/0` is false, the
+  # settings page never offers the toggle, and the sender no-ops.
+  #
+  # `mix kiln.vapid.gen` generates a pair (the same format
+  # `web-push generate-vapid-keys` emits, so an existing pair carries over).
+  # Rotating invalidates every live subscription — the push service answers 403
+  # and the row is pruned — so reviewers have to re-enable notifications.
+  #
+  # Written key by key rather than as one keyword list: `Config` deep-merges, and
+  # an operator who sets only the subject must not blank the keys.
+  # Inside the non-test region: `runtime.exs` loads after `test.exs` and wins,
+  # so a developer or CI runner with `KILN_VAPID_*` exported would otherwise
+  # turn push on for the suite and break the premise `config/test.exs` states —
+  # failing job-count assertions on one machine and nowhere else.
+  for {var, key} <- [
+        {"KILN_VAPID_PUBLIC_KEY", :vapid_public_key},
+        {"KILN_VAPID_PRIVATE_KEY", :vapid_private_key},
+        {"KILN_VAPID_SUBJECT", :vapid_subject}
+      ] do
+    case var |> System.get_env("") |> String.trim() do
+      "" -> :ok
+      value -> config :kiln_cms, KilnCMS.Push, [{key, value}]
+    end
+  end
+end
+
+# ── Boot-time config warnings ────────────────────────────────────────────────
+#
+# MUST STAY LAST. `KilnCMS.Config.Env` warns on stderr for a variable it cannot
+# parse, and in a release that line reaches container stdout and nothing else —
+# no Sentry, no OTel, no log sink — because config providers run before `Logger`
+# exists (#634). `Env.take_collected/0` returns what this evaluation warned
+# about, so `KilnCMS.Application` can replay it once observability is attached.
+# It DRAINS (unlike the plain `collected/0` reader), so a process that evaluates
+# this file twice — the test harness does — reports only that pass's reads.
+#
+# Anything calling `Env` *below* this line is warned about on stderr only, which
+# is the failure mode #634 exists to close. `test/kiln_cms/config/env_test.exs`
+# fails if that happens.
+#
+# Written unconditionally rather than `if warnings != []`: `Config` deep-merges,
+# so skipping the empty case would leave a previous evaluation's list in place
+# on the config-provider path.
+config :kiln_cms, :config_warnings, Env.take_collected()

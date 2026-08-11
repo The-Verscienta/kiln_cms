@@ -46,7 +46,8 @@ defmodule KilnCMSWeb.ApiKeyLive do
         "mint",
         %{"user_id" => user_id, "name" => name, "days" => days} = params,
         socket
-      ) do
+      )
+      when is_binary(user_id) and is_binary(name) and is_binary(days) do
     actor = socket.assigns.actor
     expires_at = DateTime.add(DateTime.utc_now(), duration_days(days), :day)
     access = access_scope(params["access"])
@@ -70,7 +71,7 @@ defmodule KilnCMSWeb.ApiKeyLive do
   def handle_event("dismiss_new_key", _params, socket),
     do: {:noreply, assign(socket, :new_key, nil)}
 
-  def handle_event("revoke", %{"id" => id}, socket) do
+  def handle_event("revoke", %{"id" => id}, socket) when is_binary(id) do
     actor = socket.assigns.actor
 
     socket =

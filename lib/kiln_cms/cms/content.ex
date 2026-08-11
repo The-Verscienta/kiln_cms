@@ -43,6 +43,10 @@ defmodule KilnCMS.CMS.Content do
   Per-type extras (custom attributes, extra actions) are declared in the using
   module as usual — Spark merges them with what this macro injects.
   """
+  # For `semantic_floor/2` below — `Ash.Query.filter/2` is a macro. Scoped to
+  # this module; the injected resource `quote` brings its own imports.
+  require Ash.Query
+
   # Days trashed content is retained before the nightly auto-purge.
   @trash_retention_days Application.compile_env(:kiln_cms, [:trash, :retention_days], 30)
 
@@ -68,10 +72,33 @@ defmodule KilnCMS.CMS.Content do
          {:ok, vector} <- query_vector(query) do
       query
       |> Ash.Query.sort([{:semantic_distance, {%{query_vector: vector}, :asc}}])
+      |> semantic_floor(vector)
       |> cap_unbounded()
     else
       # Disabled, or the query couldn't be embedded — no semantic results.
       _ -> Ash.Query.limit(query, 0)
+    end
+  end
+
+  # Drop neighbours that are merely the *nearest* rather than actually related
+  # (see `KilnCMS.Search.semantic_max_distance/0`). Off unless configured, so
+  # this is inert for anyone who hasn't measured a cutoff for their model.
+  #
+  # `WHERE distance <= t ORDER BY distance LIMIT n` is pgvector's documented
+  # thresholding shape: the ORDER BY still drives the HNSW index scan and the
+  # bound is applied to the rows it walks, so this does not fall back to the
+  # exact-scan behaviour `cap_unbounded/2` exists to prevent. It can return
+  # fewer than `limit` rows — that is the entire point.
+  defp semantic_floor(query, vector) do
+    case KilnCMS.Search.semantic_max_distance() do
+      nil ->
+        query
+
+      max_distance ->
+        Ash.Query.filter(
+          query,
+          semantic_distance(query_vector: ^vector) <= ^max_distance
+        )
     end
   end
 
@@ -117,6 +144,15 @@ defmodule KilnCMS.CMS.Content do
     alias_pattern =
       opts |> Keyword.get(:alias_pattern) |> KilnCMS.Slug.Pattern.validate!(usage: :alias)
 
+    # Optional default SEO patterns (#805), e.g. "[title] | [site-name]" — see
+    # `KilnCMS.Seo.Pattern`. Unknown tokens fail the build here. Resolved at
+    # render time for records whose own field is blank; nil = no default.
+    seo_title_pattern =
+      opts |> Keyword.get(:seo_title_pattern) |> KilnCMS.Seo.Pattern.validate!()
+
+    seo_description_pattern =
+      opts |> Keyword.get(:seo_description_pattern) |> KilnCMS.Seo.Pattern.validate!()
+
     # `published?:` is accepted for backward compatibility but ignored: the
     # `/published` feed (read + route + GraphQL query) is universal since the
     # official client (#300) — every delivery consumer needs a server-side
@@ -127,6 +163,127 @@ defmodule KilnCMS.CMS.Content do
     resource = __CALLER__.module
     related_name = :"related_#{type}s"
     related_arg = :"related_#{type}_ids"
+
+    # The mergeable relationships, as {complete-set argument, relationship}
+    # (#639). One list drives the arguments, the manage_relationship changes,
+    # `NormalizeManagedArguments` and `MergeArguments` on both `:update` and
+    # `:autosave` — eight hand-written blocks before, where a relationship added
+    # to one and missed in another is a silent asymmetry between explicit Save
+    # and autosave rather than a compile error.
+    mergeable = [{:tag_ids, :tags}, {related_arg, related_name}]
+
+    # `tag_ids` → `add_tag_ids` / `remove_tag_ids`. Derived, not spelled, so the
+    # verbs cannot drift from the argument they merge against.
+    merge_verbs = fn complete -> {:"add_#{complete}", :"remove_#{complete}"} end
+
+    # Every argument name the merge machinery owns, in declaration order.
+    merge_arg_names =
+      Enum.flat_map(mergeable, fn {complete, _rel} ->
+        {add, remove} = merge_verbs.(complete)
+        [complete, add, remove]
+      end)
+
+    # The argument trio and the three `manage_relationship` changes for one
+    # relationship. Emitted per action rather than shared, because an action's
+    # changes are its own.
+    #
+    # Non-destructive merge verbs (#521 for tags, #637 for the related array).
+    # The complete-set argument is exactly that — a whole set — so a
+    # partial-update caller (REST/GraphQL/MCP) that only knows the one link it
+    # cares about detaches every other by omission. The verbs merge against the
+    # current links instead: `add_*` relates what is listed and leaves the rest
+    # alone, `remove_*` unrelates what is listed and is a no-op for ids that
+    # aren't attached (so it stays idempotent). Combining a complete-set
+    # argument with its verbs is refused outright by `MergeArguments` rather
+    # than resolved by declaration order.
+    merge_arguments = fn ->
+      for {complete, _rel} <- mergeable do
+        {add, remove} = merge_verbs.(complete)
+
+        quote do
+          argument unquote(complete), {:array, :uuid}
+          argument unquote(add), {:array, :uuid}
+          argument unquote(remove), {:array, :uuid}
+        end
+      end
+    end
+
+    merge_changes = fn ->
+      for {complete, relationship} <- mergeable do
+        {add, remove} = merge_verbs.(complete)
+
+        quote do
+          change manage_relationship(unquote(complete), unquote(relationship),
+                   type: :append_and_remove
+                 )
+
+          change manage_relationship(unquote(add), unquote(relationship), type: :append)
+
+          # Not `type: :remove`, whose `on_no_match: :error` would turn removing
+          # an already-detached link into a failure; the rest are Ash defaults,
+          # spelled out because idempotency is the documented contract here.
+          change manage_relationship(unquote(remove), unquote(relationship),
+                   on_lookup: :ignore,
+                   on_match: :unrelate,
+                   on_no_match: :ignore,
+                   on_missing: :ignore
+                 )
+        end
+      end
+    end
+
+    # `:create`'s half of the same list: the complete-set argument and its
+    # `manage_relationship`, with no verbs — a create has no existing links to
+    # merge against, so the complete set is unambiguously the whole set (#521).
+    #
+    # Driven off `mergeable` all the same (#639). Hand-writing it left a second
+    # source of truth: a relationship added to the list gained the argument on
+    # `:update` and `:autosave` and silently did not on `:create`, so a headless
+    # create passing it failed with `NoSuchInput` while the equivalent update
+    # succeeded — the same drift class, one action over.
+    create_merge_arguments = fn ->
+      for {complete, _rel} <- mergeable do
+        quote do
+          argument unquote(complete), {:array, :uuid}
+        end
+      end
+    end
+
+    create_merge_changes = fn ->
+      for {complete, relationship} <- mergeable do
+        quote do
+          change manage_relationship(unquote(complete), unquote(relationship),
+                   type: :append_and_remove
+                 )
+        end
+      end
+    end
+
+    normalize_create_merge_arguments =
+      quote do
+        change {KilnCMS.CMS.Changes.NormalizeManagedArguments,
+                arguments: unquote(Enum.map(mergeable, &elem(&1, 0)))}
+      end
+
+    merge_validations = fn ->
+      for {complete, _rel} <- mergeable do
+        {add, remove} = merge_verbs.(complete)
+
+        quote do
+          validate {KilnCMS.CMS.Validations.MergeArguments,
+                    complete: unquote(complete), add: unquote(add), remove: unquote(remove)}
+        end
+      end
+    end
+
+    # Must precede every `manage_relationship`: those changes read the argument
+    # at change-time and snapshot it onto the changeset, so a later
+    # `set_argument` would normalize nothing.
+    normalize_merge_arguments =
+      quote do
+        change {KilnCMS.CMS.Changes.NormalizeManagedArguments,
+                arguments: unquote(merge_arg_names)}
+      end
 
     # AshOban worker/scheduler module names (kept identical to hand-written ones).
     pub_worker = Module.concat([resource, Workers, PublishScheduled])
@@ -171,7 +328,9 @@ defmodule KilnCMS.CMS.Content do
     excerpt_attribute =
       if excerpt? do
         quote do
-          attribute :excerpt, :string, public?: true
+          attribute :excerpt, :string,
+            public?: true,
+            constraints: [max_length: KilnCMS.Limits.paragraph()]
         end
       end
 
@@ -180,8 +339,38 @@ defmodule KilnCMS.CMS.Content do
         # Public delivery: published content, newest first. Universal (#300):
         # every type — not just the blog — needs a server-side published-only
         # index a keyed delivery caller can't widen to drafts (#297).
+        #
+        # `state` only, and NOT the fuller "anonymous can read this" rule the
+        # search twins pin (#1013). An index is a discovery surface, and gated
+        # metadata is public here by deliberate design: `blog_index/2` reads
+        # this action with `authorize?: false` and renders an audience-gated
+        # post with a "Members" badge rather than hiding it, so its title and
+        # excerpt are already public to an anonymous visitor. Narrowing this to
+        # `audience == :public` would take the paywall teaser off the blog
+        # index. `blocks` is not a public attribute on any read action, so no
+        # body rides along either way.
         read :published do
-          filter expr(^ref(:state) == :published)
+          # Published, any audience, but never passphrase-locked (#1032).
+          #
+          # The audience axis is deliberately open here: `blog_index/2` reads
+          # this with `authorize?: false` and renders a `:member` post with a
+          # "Members" badge, because gated metadata is a *marketing* surface —
+          # you want a reader to see that members-only content exists.
+          #
+          # A passphrase is not that. It is a shared secret handed to specific
+          # people, and `docs/api.md` says a locked document is "absent from
+          # every discovery surface … the only way to reach it is to know its
+          # URL *and* its passphrase" — which listing its title, excerpt and
+          # link in the index plainly defeats.
+          #
+          # It is a FILTER rather than a policy clause because the policy that
+          # sweeps locked content out of the sitemap, feeds, `llms.txt`, search
+          # and ActivityPub only fires for readers who fail
+          # `ReadableContentType`, i.e. anonymous ones — and this action's own
+          # caller passes `authorize?: false`, so no policy runs at all. #496
+          # already needed four per-path guards for exactly this reason; the
+          # index was a fifth path nobody had counted.
+          filter expr(^ref(:state) == :published and is_nil(^ref(:access_password_hash)))
 
           # Filter/sort by admin-defined custom fields (typed JSONB access —
           # see the preparation). Declared before the default-sort build so a
@@ -248,7 +437,8 @@ defmodule KilnCMS.CMS.Content do
             # compiled types expose, over the shared entry tier. All are
             # policy/state-filtered, so anonymous callers see published rows only.
             queries do
-              # `hide_inputs [:audiences]` is a SECURITY control, not tidiness:
+              # `hide_inputs [:audiences, :unlocks]` is a SECURITY control, not
+              # tidiness:
               # AshGraphql auto-exposes public action arguments, so without it an
               # anonymous client could send
               # `entryBySlug(audiences: [MEMBER]) { blocks }` and walk straight
@@ -259,11 +449,11 @@ defmodule KilnCMS.CMS.Content do
               # a code interface at all.)
               get :entry_by_slug, :public_by_slug do
                 identity false
-                hide_inputs [:audiences]
+                hide_inputs [:audiences, :unlocks]
               end
 
               list :entry_translations, :published_translations do
-                hide_inputs [:audiences]
+                hide_inputs [:audiences, :unlocks]
               end
 
               # The published index (newest first), across all dynamic types —
@@ -292,6 +482,10 @@ defmodule KilnCMS.CMS.Content do
               create :create_entry, :create, hide_inputs: [:blocks]
               update :update_entry, :update, hide_inputs: [:blocks]
               update :submit_entry_for_review, :submit_for_review, hide_inputs: [:blocks]
+              # The return half of the approve/return pair (#626). Admin-only via
+              # `policy action(:return_to_draft)`, exactly like `publish_entry` —
+              # routing it grants nobody anything the web editor didn't already.
+              update :return_entry_to_draft, :return_to_draft, hide_inputs: [:blocks]
               update :publish_entry, :publish, hide_inputs: [:blocks]
               update :unpublish_entry, :unpublish, hide_inputs: [:blocks]
               destroy :delete_entry, :destroy, hide_inputs: [:blocks]
@@ -336,6 +530,10 @@ defmodule KilnCMS.CMS.Content do
               post :create
               patch :update
               patch :submit_for_review, route: "/:id/submit-for-review"
+              # The return half of the approve/return pair (#626): without it a
+              # headless reviewer can approve but has to switch to the web editor
+              # to send anything back. Admin-only, like `publish` below.
+              patch :return_to_draft, route: "/:id/return-to-draft"
               patch :publish, route: "/:id/publish"
               patch :unpublish, route: "/:id/unpublish"
               delete :destroy
@@ -370,16 +568,21 @@ defmodule KilnCMS.CMS.Content do
               # are state-filtered, so anonymous callers only ever see published rows.
               # `identity false` exposes the action's own slug/locale arguments
               # instead of the default `id` lookup.
-              # `hide_inputs [:audiences]` — see the dynamic tier: the delivery
-              # `audiences` argument must never reach the GraphQL schema, or an
-              # anonymous client could request gated content directly.
+              # `hide_inputs [:audiences, :unlocks]` — see the dynamic tier: both
+              # delivery-widening arguments must stay off the GraphQL schema, or
+              # an anonymous client could ask for gated (or passphrase-locked,
+              # #496) content directly. `unlocks` takes fingerprints that are
+              # never rendered anywhere, so this is defence in depth rather than
+              # a live hole — but it is the same class of hole the `audiences`
+              # control was built for, and a new delivery argument that skips it
+              # is exactly how the next one gets missed.
               get unquote(:"#{type}_by_slug"), :public_by_slug do
                 identity false
-                hide_inputs [:audiences]
+                hide_inputs [:audiences, :unlocks]
               end
 
               list unquote(:"#{type}_translations"), :published_translations do
-                hide_inputs [:audiences]
+                hide_inputs [:audiences, :unlocks]
               end
 
               # The published index (newest first).
@@ -415,6 +618,11 @@ defmodule KilnCMS.CMS.Content do
 
               update unquote(:"submit_#{type}_for_review"), :submit_for_review,
                 hide_inputs: [:blocks]
+
+              # The return half of the approve/return pair (#626), so a review
+              # client can reject as well as approve. Admin-only via
+              # `policy action(:return_to_draft)`, like `publish_#{type}`.
+              update unquote(:"return_#{type}_to_draft"), :return_to_draft, hide_inputs: [:blocks]
 
               update unquote(:"publish_#{type}"), :publish, hide_inputs: [:blocks]
               update unquote(:"unpublish_#{type}"), :unpublish, hide_inputs: [:blocks]
@@ -479,6 +687,10 @@ defmodule KilnCMS.CMS.Content do
               post :create
               patch :update
               patch :submit_for_review, route: "/:id/submit-for-review"
+              # The return half of the approve/return pair (#626): without it a
+              # headless reviewer can approve but has to switch to the web editor
+              # to send anything back. Admin-only, like `publish` below.
+              patch :return_to_draft, route: "/:id/return-to-draft"
               patch :publish, route: "/:id/publish"
               patch :unpublish, route: "/:id/unpublish"
               # DELETE is a reversible soft-delete (AshArchival); hard `:purge`
@@ -524,6 +736,12 @@ defmodule KilnCMS.CMS.Content do
         if(excerpt?, do: [:excerpt], else: []) ++
         if(dynamic?, do: [:type_definition_id], else: [])
 
+    # The locked-page projection (#496): everything the teaser carries, plus the
+    # stored hash the unlock endpoint verifies against and the fingerprint it
+    # mints a grant from. Still WITHOUT `:blocks` — a lock page describes a
+    # document it is refusing to serve, so the body must not be fetched for it.
+    locked_fields = teaser_fields ++ [:access_password_hash, :password_fingerprint]
+
     public_reads =
       if dynamic? do
         quote do
@@ -541,9 +759,23 @@ defmodule KilnCMS.CMS.Content do
               default: [],
               constraints: [items: [one_of: KilnCMS.CMS.Audiences.all()]]
 
+            # Unlock grants (#496) this request carries — fingerprints of
+            # passphrases the caller has already proved, never a raw passphrase
+            # and never client-authored: the controller only ever passes values
+            # it read out of a signed cookie or a signed token.
+            #
+            # Matching the fingerprint HERE rather than in the controller is the
+            # point: rotating the passphrase changes the hash, which changes the
+            # fingerprint, so every outstanding grant stops selecting the row at
+            # the moment of rotation. Default `[]` keeps every existing caller
+            # locked out of locked content, which is the safe direction.
+            argument :unlocks, {:array, :string}, default: []
+
             filter expr(
                      ^ref(:state) == :published and
                        (^ref(:audience) == :public or ^ref(:audience) in ^arg(:audiences)) and
+                       (is_nil(^ref(:access_password_hash)) or
+                          ^ref(:password_fingerprint) in ^arg(:unlocks)) and
                        ^ref(:slug) == ^arg(:slug) and ^ref(:locale) == ^arg(:locale) and
                        ^ref(:type_definition_id) == ^arg(:type_definition_id)
                    )
@@ -557,9 +789,23 @@ defmodule KilnCMS.CMS.Content do
               default: [],
               constraints: [items: [one_of: KilnCMS.CMS.Audiences.all()]]
 
+            # Unlock grants (#496) this request carries — fingerprints of
+            # passphrases the caller has already proved, never a raw passphrase
+            # and never client-authored: the controller only ever passes values
+            # it read out of a signed cookie or a signed token.
+            #
+            # Matching the fingerprint HERE rather than in the controller is the
+            # point: rotating the passphrase changes the hash, which changes the
+            # fingerprint, so every outstanding grant stops selecting the row at
+            # the moment of rotation. Default `[]` keeps every existing caller
+            # locked out of locked content, which is the safe direction.
+            argument :unlocks, {:array, :string}, default: []
+
             filter expr(
                      ^ref(:state) == :published and
                        (^ref(:audience) == :public or ^ref(:audience) in ^arg(:audiences)) and
+                       (is_nil(^ref(:access_password_hash)) or
+                          ^ref(:password_fingerprint) in ^arg(:unlocks)) and
                        ^ref(:slug) == ^arg(:slug) and
                        ^ref(:type_definition_id) == ^arg(:type_definition_id)
                    )
@@ -582,6 +828,45 @@ defmodule KilnCMS.CMS.Content do
 
             prepare build(select: unquote(teaser_fields))
           end
+
+          # Locate a LOCKED published document (#496) in order to render its
+          # passphrase form, or to verify a submitted passphrase.
+          #
+          # It takes `:audiences` for a reason that is easy to miss: the lock is
+          # ANDed with the audience axis, so this read must only match a document
+          # the reader would otherwise be entitled to. Without that clause a
+          # locked members-only post would prompt an anonymous visitor for a
+          # passphrase that, once entered, still left them at the paywall — and
+          # the delivery funnel tries the lock page before the paywall, so the
+          # paywall would never render at all. Consumed with
+          # `authorize?: false` like the other delivery reads, so this filter is
+          # the sole boundary — note it *requires* a passphrase to be set, so it
+          # can never stand in for `:public_by_slug` and never returns a row an
+          # unlocked visitor was already entitled to read.
+          #
+          # The projection is the teaser's (no `:blocks`) plus the hash: the
+          # whole point of a lock page is to describe a document without
+          # serving it.
+          read :locked_by_slug do
+            get? true
+            argument :slug, :string, allow_nil?: false
+            argument :locale, :string, allow_nil?: false
+            argument :type_definition_id, :uuid, allow_nil?: false
+
+            argument :audiences, {:array, :atom},
+              default: [],
+              constraints: [items: [one_of: KilnCMS.CMS.Audiences.all()]]
+
+            filter expr(
+                     ^ref(:state) == :published and
+                       (^ref(:audience) == :public or ^ref(:audience) in ^arg(:audiences)) and
+                       not is_nil(^ref(:access_password_hash)) and
+                       ^ref(:slug) == ^arg(:slug) and ^ref(:locale) == ^arg(:locale) and
+                       ^ref(:type_definition_id) == ^arg(:type_definition_id)
+                   )
+
+            prepare build(select: unquote(locked_fields))
+          end
         end
       else
         quote do
@@ -596,9 +881,23 @@ defmodule KilnCMS.CMS.Content do
               default: [],
               constraints: [items: [one_of: KilnCMS.CMS.Audiences.all()]]
 
+            # Unlock grants (#496) this request carries — fingerprints of
+            # passphrases the caller has already proved, never a raw passphrase
+            # and never client-authored: the controller only ever passes values
+            # it read out of a signed cookie or a signed token.
+            #
+            # Matching the fingerprint HERE rather than in the controller is the
+            # point: rotating the passphrase changes the hash, which changes the
+            # fingerprint, so every outstanding grant stops selecting the row at
+            # the moment of rotation. Default `[]` keeps every existing caller
+            # locked out of locked content, which is the safe direction.
+            argument :unlocks, {:array, :string}, default: []
+
             filter expr(
                      ^ref(:state) == :published and
                        (^ref(:audience) == :public or ^ref(:audience) in ^arg(:audiences)) and
+                       (is_nil(^ref(:access_password_hash)) or
+                          ^ref(:password_fingerprint) in ^arg(:unlocks)) and
                        ^ref(:slug) == ^arg(:slug) and ^ref(:locale) == ^arg(:locale)
                    )
           end
@@ -612,9 +911,23 @@ defmodule KilnCMS.CMS.Content do
               default: [],
               constraints: [items: [one_of: KilnCMS.CMS.Audiences.all()]]
 
+            # Unlock grants (#496) this request carries — fingerprints of
+            # passphrases the caller has already proved, never a raw passphrase
+            # and never client-authored: the controller only ever passes values
+            # it read out of a signed cookie or a signed token.
+            #
+            # Matching the fingerprint HERE rather than in the controller is the
+            # point: rotating the passphrase changes the hash, which changes the
+            # fingerprint, so every outstanding grant stops selecting the row at
+            # the moment of rotation. Default `[]` keeps every existing caller
+            # locked out of locked content, which is the safe direction.
+            argument :unlocks, {:array, :string}, default: []
+
             filter expr(
                      ^ref(:state) == :published and
                        (^ref(:audience) == :public or ^ref(:audience) in ^arg(:audiences)) and
+                       (is_nil(^ref(:access_password_hash)) or
+                          ^ref(:password_fingerprint) in ^arg(:unlocks)) and
                        ^ref(:slug) == ^arg(:slug)
                    )
           end
@@ -635,6 +948,28 @@ defmodule KilnCMS.CMS.Content do
 
             prepare build(select: unquote(teaser_fields))
           end
+
+          # Locate a LOCKED published document (#496) — see the dynamic tier
+          # above for why the filter requires a passphrase and the projection
+          # excludes the block tree.
+          read :locked_by_slug do
+            get? true
+            argument :slug, :string, allow_nil?: false
+            argument :locale, :string, allow_nil?: false
+
+            argument :audiences, {:array, :atom},
+              default: [],
+              constraints: [items: [one_of: KilnCMS.CMS.Audiences.all()]]
+
+            filter expr(
+                     ^ref(:state) == :published and
+                       (^ref(:audience) == :public or ^ref(:audience) in ^arg(:audiences)) and
+                       not is_nil(^ref(:access_password_hash)) and
+                       ^ref(:slug) == ^arg(:slug) and ^ref(:locale) == ^arg(:locale)
+                   )
+
+            prepare build(select: unquote(locked_fields))
+          end
         end
       end
 
@@ -644,15 +979,38 @@ defmodule KilnCMS.CMS.Content do
     # search counterpart of the plain index vs `:published`. The read policy
     # alone doesn't protect delivery consumers here: a bearer API key
     # authorizes as the account that minted it, so with an editor/admin key
-    # the base actions silently match drafts. The twins cannot be widened by
-    # any credential, and they drop the `state` facet argument (dead weight
-    # against the pinned filter). Both flavors come from one template so
-    # their query surfaces can't drift.
+    # the base actions silently match drafts — and, until #1013, gated and
+    # locked rows too. The twins cannot be widened by any credential, and they
+    # drop the `state` facet argument (dead weight against the pinned filter).
+    # Both flavors come from one template so their query surfaces can't drift.
     join_and = fn clauses ->
       Enum.reduce(clauses, fn clause, acc -> quote(do: unquote(acc) and unquote(clause)) end)
     end
 
-    pinned_state = quote(do: ^ref(:state) == :published)
+    # The pinned filter is the whole "an anonymous visitor could read this" rule,
+    # not just `state` (#1013). It used to pin state alone, which made the twins
+    # exactly as leaky as the base actions for the caller they exist to protect:
+    # an API key authorizes as the account that minted it, the `OrgAdmin` bypass
+    # above authorizes that account for everything, and the twins then returned
+    # audience-gated and passphrase-locked rows to a front end holding a
+    # delivery key. `docs/api.md` already promised the opposite for locked
+    # documents ("absent from every discovery surface … keyword and semantic
+    # search").
+    #
+    # What leaked here is metadata — title, slug, excerpt, SEO — since `blocks`
+    # is not a public attribute on any read action. `GET /api/search` was the
+    # one that leaked body text, through its `highlight` calc over
+    # `search_text`; that endpoint is now actorless (#1013).
+    #
+    # Deliberately the same three clauses as
+    # `KilnCMS.CMS.Audiences.public_to_anonymous?/1` (#1006) — that function is
+    # the in-memory statement of this rule; these are the SQL one, and the two
+    # cannot share code. If one changes, change the other.
+    pinned_state =
+      quote do
+        ^ref(:state) == :published and ^ref(:audience) == :public and
+          is_nil(^ref(:access_password_hash))
+      end
 
     # The optional facets shared by keyword + semantic search — category,
     # author, tags (content carrying any of them), custom fields, and (base
@@ -904,6 +1262,12 @@ defmodule KilnCMS.CMS.Content do
 
           # Optional pathauto alias pattern (#485); nil = no auto alias.
           def __kiln_content_alias_pattern__, do: unquote(alias_pattern)
+
+          # Optional default SEO patterns (#805); nil = the record's own
+          # fields. Dynamic entries carry theirs on the TypeDefinition row.
+          def __kiln_seo_title_pattern__, do: unquote(seo_title_pattern)
+
+          def __kiln_seo_description_pattern__, do: unquote(seo_description_pattern)
         end
       end
 
@@ -1003,10 +1367,38 @@ defmodule KilnCMS.CMS.Content do
         # `org_id` to satisfy the inherited multitenancy. The version inherits
         # `global?: true` too, so tenant-less writes still work.
         attributes_as_attributes([:org_id])
-        ignore_attributes([:inserted_at, :updated_at, :embedding, :embedded_at, :lock_version])
+        # `access_password_hash`/`password_fingerprint` are ignored (#496) so a
+        # bcrypt hash never lands in version history, where it would outlive
+        # every rotation and be readable by anyone who can read versions.
+        #
+        # `next_occurrence_at` is ignored (#766) for the reason `embedding` is:
+        # it is derived from `custom_fields`, which IS versioned, so a version
+        # carrying it would show a redundant field in every diff of an event —
+        # and one that moves on its own, since the sweep advances it without any
+        # editorial change at all.
+        ignore_attributes([
+          :inserted_at,
+          :updated_at,
+          :embedding,
+          :embedded_at,
+          :next_occurrence_at,
+          :lock_version,
+          :access_password_hash,
+          :password_fingerprint
+        ])
+
         # Background embedding writes aren't editorial changes — keep the
         # `:set_embedding` action out of the version history.
-        ignore_actions([:set_embedding, :set_published_version_id])
+        ignore_actions([
+          :set_embedding,
+          :set_published_version_id,
+          :set_oembed_metadata,
+          :set_next_occurrence,
+          :backdate_published_at,
+          :reassign_author,
+          :reindex_search_text
+        ])
+
         # No FK from version -> source, so a `:purge` can hard-delete a record
         # whose history exists. Versions of purged content are kept as audit rows.
         reference_source?(false)
@@ -1182,6 +1574,25 @@ defmodule KilnCMS.CMS.Content do
           index [:slug, :locale],
             name: unquote("#{table}_slug_locale_lookup_index"),
             all_tenants?: true
+
+          # The "what's on" delivery index (#766): `WHERE org_id = ? AND
+          # next_occurrence_at >= ?` ordered ascending. Codegen prepends the
+          # tenant column on a multitenant resource, so the created index is
+          # `(org_id, next_occurrence_at)` — which is exactly the seek this
+          # needs, leading column equality then a range on the sort key.
+          #
+          # ASCENDING is the point. A btree IS ascending-nulls-last, so this
+          # ordering is servable by a plain index; `DESC NULLS LAST` is servable
+          # by none (see the repo's Postgres notes), and it would have needed an
+          # expression index of its own. "Soonest first" is ascending, and the
+          # window's lower bound drops the NULL rows before ordering ever comes
+          # up, so the sort has no nulls to place.
+          #
+          # Partial, because nearly every row is NULL: a site with one event
+          # type and forty thousand pages indexes the events, not the pages.
+          index [:next_occurrence_at],
+            name: unquote("#{table}_next_occurrence_index"),
+            where: "next_occurrence_at IS NOT NULL"
         end
       end
 
@@ -1236,14 +1647,9 @@ defmodule KilnCMS.CMS.Content do
           # Set the many-to-many links from lists of ids (nil/omitted = no change).
           # No merge verbs here: a create has no existing links to merge against,
           # so `tag_ids` is unambiguously the whole set (#521).
-          argument :tag_ids, {:array, :uuid}
-          argument unquote(related_arg), {:array, :uuid}
-          change KilnCMS.CMS.Changes.NormalizeTagArguments
-          change manage_relationship(:tag_ids, :tags, type: :append_and_remove)
-
-          change manage_relationship(unquote(related_arg), unquote(related_name),
-                   type: :append_and_remove
-                 )
+          unquote_splicing(create_merge_arguments.())
+          unquote(normalize_create_merge_arguments)
+          unquote_splicing(create_merge_changes.())
 
           # Headless block-body writes (#330): the `blocks` union isn't public on
           # the auto API, so accept the body as a public array of block maps and
@@ -1251,8 +1657,21 @@ defmodule KilnCMS.CMS.Content do
           argument :block_tree, {:array, :map}
           change KilnCMS.CMS.Changes.ApplyBlocksInput
           change KilnCMS.CMS.Changes.ApplyCustomFields
+          # AFTER `ApplyCustomFields`: the schedule this reads is the coerced
+          # value that changeset writes, not the editor's raw parts (#766).
+          change KilnCMS.CMS.Changes.SetNextOccurrence
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
+          change KilnCMS.CMS.Changes.EnqueueOEmbed
+
+          # Shared-passphrase lock (#496). Two arguments rather than one because
+          # blank must mean "unchanged", not "clear" — see
+          # `Changes.ApplyAccessPassword`. `access_password` is sensitive so it
+          # never shows up in a logged changeset.
+          argument :access_password, :string, sensitive?: true
+          argument :remove_access_password, :boolean, default: false
+          change KilnCMS.CMS.Changes.ApplyAccessPassword
+
           validate KilnCMS.CMS.Validations.SlugAvailable
           validate KilnCMS.CMS.Validations.PathAliasValid
           validate KilnCMS.CMS.Validations.SeoUrls
@@ -1272,48 +1691,28 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.DeriveAlias
           # Renaming a published slug leaves a 301 behind at the old URL.
           change KilnCMS.CMS.Changes.RecordSlugRedirect
-          argument :tag_ids, {:array, :uuid}
-          argument unquote(related_arg), {:array, :uuid}
-
-          # Non-destructive tag verbs (#521). `tag_ids` is the *complete* set,
-          # so a partial-update caller (REST/GraphQL/MCP) that only knows the
-          # one tag it cares about detaches every other tag by omission. These
-          # two merge against the current links instead: `add_tag_ids` relates
-          # what is listed and leaves the rest alone, `remove_tag_ids` unrelates
-          # what is listed and is a no-op for ids that aren't attached (so it
-          # stays idempotent). Combining them with `tag_ids` is refused outright
-          # by `TagMergeArguments` rather than resolved by declaration order.
-          argument :add_tag_ids, {:array, :uuid}
-          argument :remove_tag_ids, {:array, :uuid}
-
-          # Must precede every `manage_relationship` below: those changes read
-          # the argument at change-time and snapshot it onto the changeset, so
-          # a later `set_argument` would normalize nothing.
-          change KilnCMS.CMS.Changes.NormalizeTagArguments
-          change manage_relationship(:tag_ids, :tags, type: :append_and_remove)
-          change manage_relationship(:add_tag_ids, :tags, type: :append)
-
-          # Not `type: :remove`, whose `on_no_match: :error` would turn removing
-          # an already-detached tag into a failure; the rest are Ash defaults,
-          # spelled out because idempotency is the documented contract here.
-          change manage_relationship(:remove_tag_ids, :tags,
-                   on_lookup: :ignore,
-                   on_match: :unrelate,
-                   on_no_match: :ignore,
-                   on_missing: :ignore
-                 )
-
-          change manage_relationship(unquote(related_arg), unquote(related_name),
-                   type: :append_and_remove
-                 )
+          unquote_splicing(merge_arguments.())
+          unquote(normalize_merge_arguments)
+          unquote_splicing(merge_changes.())
 
           # Headless block-body writes (#330) — see `:create`. Omitted argument
           # leaves the existing body untouched (a metadata-only PATCH is safe).
           argument :block_tree, {:array, :map}
           change KilnCMS.CMS.Changes.ApplyBlocksInput
           change KilnCMS.CMS.Changes.ApplyCustomFields
+          # AFTER `ApplyCustomFields` — see `:create` (#766).
+          change KilnCMS.CMS.Changes.SetNextOccurrence
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
+          change KilnCMS.CMS.Changes.EnqueueOEmbed
+
+          # Shared-passphrase lock (#496). Two arguments rather than one because
+          # blank must mean "unchanged", not "clear" — see
+          # `Changes.ApplyAccessPassword`. `access_password` is sensitive so it
+          # never shows up in a logged changeset.
+          argument :access_password, :string, sensitive?: true
+          argument :remove_access_password, :boolean, default: false
+          change KilnCMS.CMS.Changes.ApplyAccessPassword
 
           # Edits to already-published content fire a `<type>.updated` webhook;
           # `only_when: :published` keeps draft edits and autosaves silent.
@@ -1324,11 +1723,44 @@ defmodule KilnCMS.CMS.Content do
           # write-through, in-context editing) would leave the fired artifact
           # stale. `only_when: :published` keeps draft edits/autosaves silent.
           change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published}
-          validate KilnCMS.CMS.Validations.TagMergeArguments
+
+          unquote_splicing(merge_validations.())
+
           validate KilnCMS.CMS.Validations.SlugAvailable
           validate KilnCMS.CMS.Validations.PathAliasValid
           validate KilnCMS.CMS.Validations.SeoUrls
           validate KilnCMS.CMS.Validations.ScheduleOrder
+
+          # The alt-text gate is on publish (#403), but `:update` re-fires
+          # artifacts for an already-published record — so editing a live page
+          # to show an alt-less image bypassed the gate entirely (#722). Re-run
+          # it here, but only when it can matter: the record is (still)
+          # published, and the body is in the params at all — a metadata-only
+          # PATCH, and every draft edit, stays untouched. `only_new: true` scopes
+          # it to images this edit newly leaves undescribed, so a page that
+          # already carried one (published before the gate) stays editable.
+          # Autosave is deliberately exempt (a draft in progress is not an
+          # assertion the page is done).
+          validate {KilnCMS.CMS.Validations.MediaAltText, only_new: true},
+            where: [changing(:blocks), attribute_equals(:state, :published)]
+
+          # Same reasoning for the claim gate (#377): `:update` re-fires
+          # artifacts for a live record, so editing a published page to add a
+          # flagged claim would ship it without ever passing `:publish`.
+          # `only_new: true` scopes it to claims this edit introduces, so
+          # switching the gate on doesn't make every page that already carried
+          # one un-editable.
+          #
+          # No `changing(...)` guard, unlike the alt-text gate above. That one
+          # can key on `:blocks` because blocks are the only thing it reads;
+          # this also reads the title and SEO fields, since a claim in the meta
+          # description ships to a search results page. `where:` is an AND, so
+          # there is no "any of these four changed" to express — and it would
+          # buy nothing: an update that touched none of them diffs to zero new
+          # offenders and passes anyway. The gate is opt-in, so the scan it
+          # costs is one an operator asked for.
+          validate {KilnCMS.CMS.Validations.ComplianceClaims, only_new: true},
+            where: [attribute_equals(:state, :published)]
         end
 
         # Debounced draft autosave from the editor. Writes the same content as
@@ -1336,10 +1768,31 @@ defmodule KilnCMS.CMS.Content do
         # tagged `version_action_name: :autosave` and can be coalesced — a save
         # per editor pause would otherwise flood history (issue #32).
         # `CoalesceAutosaveVersions` collapses the trailing run of autosave
-        # versions into a single snapshot after each save. Drafts only (enforced
-        # by the editor); no `updated` webhook (draft edits are silent anyway).
+        # versions into a single snapshot after each save — except for rows an
+        # anchor has already committed to, which are immutable, so with
+        # `audit_anchor_every_write` on nothing is collapsed at all (#671).
+        # Drafts only, and enforced HERE rather than only in the editor (#1015).
+        # It used to be a LiveView invariant — `perform_autosave/1` bails unless
+        # `draft?(socket)` — which is not the same as the action refusing. This
+        # action inherits `default_accept`, so it can write `audience`, and it
+        # carries `ApplyAccessPassword` — but it has no `FireArtifacts` and no
+        # `NotifyWebhooks`, because a draft edit is silent by design. That
+        # combination on a *published* row is the bad one: it would gate or lock
+        # a live document while firing nothing, so the artifacts, the feeds and
+        # the Meilisearch index (#1006, #496) would all keep serving the
+        # ungated version, with nothing anywhere recording that the document
+        # had changed.
+        #
+        # `change filter` and not `validate attribute_equals`: the guard has to
+        # be a compare-and-swap on the ROW, the way the workflow transitions
+        # below are. A validation reads the struct the editor loaded, so a
+        # publish landing between load and write would sail past it — which is
+        # exactly the race, not a hypothetical. A miss raises `StaleRecord`,
+        # which `ContentEditorLive` already turns into "this content changed
+        # elsewhere, reload" (#137).
         update :autosave do
           require_atomic? false
+          change filter(expr(^ref(:state) == :draft))
           change optimistic_lock(:lock_version)
           # Clearing the slug regenerates it from the title — see `:create`.
           change KilnCMS.CMS.Changes.DeriveSlug
@@ -1350,29 +1803,26 @@ defmodule KilnCMS.CMS.Content do
           # picker grows a merge input, an action that didn't declare it would
           # fail every debounce with `NoSuchInput` while explicit Save kept
           # working. Declaring them keeps the two actions interchangeable.
-          argument :tag_ids, {:array, :uuid}
-          argument :add_tag_ids, {:array, :uuid}
-          argument :remove_tag_ids, {:array, :uuid}
-          argument unquote(related_arg), {:array, :uuid}
-          change KilnCMS.CMS.Changes.NormalizeTagArguments
-          change manage_relationship(:tag_ids, :tags, type: :append_and_remove)
-          change manage_relationship(:add_tag_ids, :tags, type: :append)
+          unquote_splicing(merge_arguments.())
+          unquote(normalize_merge_arguments)
+          unquote_splicing(merge_changes.())
+          unquote_splicing(merge_validations.())
 
-          change manage_relationship(:remove_tag_ids, :tags,
-                   on_lookup: :ignore,
-                   on_match: :unrelate,
-                   on_no_match: :ignore,
-                   on_missing: :ignore
-                 )
-
-          change manage_relationship(unquote(related_arg), unquote(related_name),
-                   type: :append_and_remove
-                 )
-
-          validate KilnCMS.CMS.Validations.TagMergeArguments
           change KilnCMS.CMS.Changes.ApplyCustomFields
+          # AFTER `ApplyCustomFields` — see `:create` (#766).
+          change KilnCMS.CMS.Changes.SetNextOccurrence
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
+          change KilnCMS.CMS.Changes.EnqueueOEmbed
+
+          # Shared-passphrase lock (#496). Two arguments rather than one because
+          # blank must mean "unchanged", not "clear" — see
+          # `Changes.ApplyAccessPassword`. `access_password` is sensitive so it
+          # never shows up in a logged changeset.
+          argument :access_password, :string, sensitive?: true
+          argument :remove_access_password, :boolean, default: false
+          change KilnCMS.CMS.Changes.ApplyAccessPassword
+
           change KilnCMS.CMS.Changes.CoalesceAutosaveVersions
           validate KilnCMS.CMS.Validations.SlugAvailable
           validate KilnCMS.CMS.Validations.PathAliasValid
@@ -1392,6 +1842,12 @@ defmodule KilnCMS.CMS.Content do
 
         update :submit_for_review do
           require_atomic? false
+          # A workflow transition takes no content input, and its UPDATE is a
+          # compare-and-swap on the current state — see `:return_to_draft` for the
+          # full rationale (#873); this closes the same two gaps on the other three
+          # routed transitions (#879).
+          accept []
+          change filter(expr(^ref(:state) == :draft))
           change transition_state(:in_review)
           change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "in_review"}
           change {KilnCMS.CMS.Changes.NotifyWorkflowEmail, event: :submitted_for_review}
@@ -1399,6 +1855,23 @@ defmodule KilnCMS.CMS.Content do
 
         update :return_to_draft do
           require_atomic? false
+          # A workflow transition takes no content input. Without this the action
+          # inherits `default_accept` (17 attributes), so `PATCH
+          # /:id/return-to-draft` with a populated `attributes` object would write
+          # content while skipping everything `:update` attaches — the optimistic
+          # lock, `SlugAvailable`/`PathAliasValid`/`SeoUrls`, `RecordSlugRedirect`,
+          # `SetSearchText`, `EnqueueEmbedding`. `docs/json-api.md` has always said
+          # these routes "carry no attributes"; now that is true of this one (#626).
+          accept []
+
+          # The state machine checks `changeset.data.state` — the in-memory struct
+          # — and the resulting UPDATE carries no state predicate, so two admins
+          # acting on an `:in_review` record concurrently can both win. A publish
+          # committing first and this landing second would leave `state: :draft`
+          # with `published_at`, a published version and live artifacts, which
+          # `unpublish` can then never clear because it requires `:published`.
+          # Filtering makes the write a real compare-and-swap.
+          change filter(expr(^ref(:state) == :in_review))
           change transition_state(:draft)
           change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "returned_to_draft"}
           change {KilnCMS.CMS.Changes.NotifyWorkflowEmail, event: :returned_to_draft}
@@ -1406,30 +1879,79 @@ defmodule KilnCMS.CMS.Content do
 
         update :publish do
           require_atomic? false
+          # FIRST, so its `before_action` hook registers before the two
+          # block-reading validations below defer themselves to the same phase:
+          # an open collab session's prose rides in on this write or is lost
+          # with the DocServer (#1061), and the gates must judge what actually
+          # publishes. No-op when nobody is editing.
+          change KilnCMS.CMS.Changes.CheckpointCollabRoom
+          # No content input, and a compare-and-swap on state (#879) — see
+          # `:return_to_draft`. Without the filter a publish landing after a
+          # concurrent transition would stamp `published_at` + artifacts onto a
+          # row another writer had already moved out of a publishable state.
+          accept []
           # Compliance gate (#356): block publish when a required editorial consent
           # is missing (config-gated, no-op by default — see the validation).
           validate KilnCMS.CMS.Validations.RequiredConsent
+          # Accessibility gate (#403), config-gated and off by default: a publish
+          # is refused when the document shows an image with neither alt text nor
+          # a `decorative` mark.
+          validate KilnCMS.CMS.Validations.MediaAltText, before_action?: true
+          # Claim gate (#377), config-gated and off by default: a publish is
+          # refused when the document carries a phrase an `:error`-severity
+          # compliance rule matches. Same rules the editor's compliance panel
+          # advises on, so the gate can never disagree with the panel the
+          # author has been reading.
+          validate KilnCMS.CMS.Validations.ComplianceClaims, before_action?: true
+          change filter(expr(^ref(:state) == :draft or ^ref(:state) == :in_review))
           change transition_state(:published)
           change set_attribute(:published_at, &DateTime.utc_now/0)
+          # A publish never used to change content, so it carried none of the
+          # derived-column changes. It can now (#1061), and a published document
+          # that cannot be found by its own published words is a poor answer.
+          # After the checkpoint, because hooks run in registration order.
+          change KilnCMS.CMS.Changes.SetSearchText
+          change KilnCMS.CMS.Changes.EnqueueEmbedding
           change KilnCMS.CMS.Changes.RecordPublishedVersion
           change KilnCMS.CMS.Changes.FireArtifacts
           change KilnCMS.CMS.Changes.NotifyWebhooks
           change {KilnCMS.CMS.Changes.NotifyWorkflowEmail, event: :published}
+          change KilnCMS.CMS.Changes.AutoCompleteTasks
         end
 
         update :publish_scheduled do
           # Run by the AshOban scheduler once `scheduled_at` has passed.
           require_atomic? false
+          # Same room checkpoint as `:publish`, and for the same reason (#1061).
+          # "A scheduled publish is never under an open room" is false: schedule
+          # for 09:00, keep editing collaboratively, and the cron fires at 09:00
+          # into a live room. FIRST, so the gates below see the merged tree.
+          change KilnCMS.CMS.Changes.CheckpointCollabRoom
           # Same compliance gate as `:publish` (#356) — a scheduled publish must
           # also satisfy any required consent.
           validate KilnCMS.CMS.Validations.RequiredConsent
+          # Accessibility gate (#403), config-gated and off by default: a publish
+          # is refused when the document shows an image with neither alt text nor
+          # a `decorative` mark.
+          validate KilnCMS.CMS.Validations.MediaAltText, before_action?: true
+          # Same claim gate as `:publish` (#377) — a scheduled publish is still
+          # a publish, and a claim that must not go live at 09:00 by hand must
+          # not go live at 09:00 by scheduler either.
+          validate KilnCMS.CMS.Validations.ComplianceClaims, before_action?: true
           change transition_state(:published)
           change set_attribute(:published_at, &DateTime.utc_now/0)
           change set_attribute(:scheduled_at, nil)
+          # A publish never used to change content, so it carried none of the
+          # derived-column changes. It can now (#1061), and a published document
+          # that cannot be found by its own published words is a poor answer.
+          # After the checkpoint, because hooks run in registration order.
+          change KilnCMS.CMS.Changes.SetSearchText
+          change KilnCMS.CMS.Changes.EnqueueEmbedding
           change KilnCMS.CMS.Changes.RecordPublishedVersion
           change KilnCMS.CMS.Changes.FireArtifacts
           change KilnCMS.CMS.Changes.NotifyWebhooks
           change {KilnCMS.CMS.Changes.NotifyWorkflowEmail, event: :published}
+          change KilnCMS.CMS.Changes.AutoCompleteTasks
         end
 
         update :restore_version do
@@ -1439,10 +1961,31 @@ defmodule KilnCMS.CMS.Content do
           accept []
           argument :version_id, :uuid, allow_nil?: false
           change KilnCMS.CMS.Changes.RestoreVersion
+
+          # A restore is a content write, so everything derived from content has
+          # to move with it (#691). Declared AFTER `RestoreVersion`, which writes
+          # the restored values from a `before_action` hook — hooks run in
+          # registration order, so `SetSearchText` sees the reverted document and
+          # not the one being replaced.
+          change KilnCMS.CMS.Changes.RecordSlugRedirect
+          # `next_occurrence_at` is derived from `custom_fields`, and a restore
+          # can revert the schedule — so it moves with the rest of the derived
+          # values rather than being left pointing at the replaced document's
+          # dates (#766, and the same argument #691 made for `search_text`).
+          change KilnCMS.CMS.Changes.SetNextOccurrence
+          change KilnCMS.CMS.Changes.SetSearchText
+          change KilnCMS.CMS.Changes.EnqueueEmbedding
+          change KilnCMS.CMS.Changes.EnqueueOEmbed
+          change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "updated", only_when: :published}
+          change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published}
         end
 
         update :unpublish do
           require_atomic? false
+          # No content input, and a compare-and-swap on state (#879) — see
+          # `:return_to_draft`.
+          accept []
+          change filter(expr(^ref(:state) == :published))
           change transition_state(:draft)
           change KilnCMS.CMS.Changes.ClearPublishedVersion
           change KilnCMS.CMS.Changes.DeleteArtifacts
@@ -1463,13 +2006,48 @@ defmodule KilnCMS.CMS.Content do
 
         update :archive do
           require_atomic? false
+          # Same no-input + compare-and-swap treatment as the other transitions
+          # (#879). `from: [:draft, :in_review, :published]`, so the CAS predicate
+          # is "not already archived".
+          accept []
+          change filter(expr(^ref(:state) != :archived))
           change transition_state(:archived)
+          # Archiving a *published* record must tear down its published version and
+          # artifacts exactly as `:unpublish` does — otherwise they orphan (no race
+          # needed, #879 pt 3). Both are harmless when archiving a draft/in_review
+          # record: there are no artifacts to purge, and `ClearPublishedVersion`
+          # writes a nil `published_version_id` that was already nil.
+          change KilnCMS.CMS.Changes.ClearPublishedVersion
+          change KilnCMS.CMS.Changes.DeleteArtifacts
+          # Archiving a published record removes it from delivery exactly as
+          # `:unpublish` does, so it emits the same event (#914) — a
+          # subscriber/CDN watching for content leaving delivery must not care
+          # which editor action caused that. `only_when: :was_published`, not
+          # `:published`: this action always lands on `:archived`, so a plain
+          # `:published` check (the resulting state) would never fire, and
+          # archiving a draft/in_review record — which was never delivered —
+          # correctly stays silent.
+          change {KilnCMS.CMS.Changes.NotifyWebhooks,
+                  event: "unpublished", only_when: :was_published}
         end
 
         # Sends archived content back to draft (the state-machine inverse of
         # :archive).
+        #
+        # `accept []` + `change filter` for the reasons #626 and #879 gave the
+        # other four transitions — this was the fifth and never got them. A
+        # workflow transition takes no content input, and without `accept []`
+        # this one inherited `default_accept`: all 17 attributes, `:audience`
+        # and `:blocks` among them, writable through an action that attaches no
+        # `FireArtifacts`, no `NotifyWebhooks`, no `optimistic_lock` and none of
+        # the `SlugAvailable`/`SeoUrls`/`ScheduleOrder` validations. It is not
+        # routed on JSON:API or GraphQL, but AshAdmin renders every accepted
+        # input as a form field, so unarchiving was a way to rewrite a body and
+        # an audience while recording nothing.
         update :unarchive do
           require_atomic? false
+          accept []
+          change filter(expr(^ref(:state) == :archived))
           change transition_state(:draft)
         end
 
@@ -1494,6 +2072,22 @@ defmodule KilnCMS.CMS.Content do
           accept []
           require_atomic? false
           change set_attribute(:archived_at, nil)
+
+          # Trashing is a soft delete: `:destroy` runs `DeleteArtifacts`, which
+          # purges the fired artifacts AND enqueues a Meilisearch removal — but
+          # it does not change `state`, so a trashed published document is still
+          # `:published` underneath. Restoring it therefore puts it straight back
+          # on the delivery path with no artifacts and no search entry, and
+          # nothing would rebuild them until an unrelated edit re-fired it (#1025).
+          #
+          # `only_when: :published` because restoring a trashed *draft* has
+          # nothing to rebuild — a draft never had artifacts to purge, and firing
+          # one would publish an artifact for unpublished content.
+          #
+          # Deliberately no webhook: trashing emits none either (it is not an
+          # unpublish), and a `published` event for a document subscribers were
+          # never told had gone would read as a second publish.
+          change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published}
         end
 
         # Permanent hard delete (bypasses archival). Used by "Empty trash" and the
@@ -1518,6 +2112,112 @@ defmodule KilnCMS.CMS.Content do
         update :set_published_version_id do
           require_atomic? false
           accept [:published_version_id]
+        end
+
+        # Internal: restore a publication date an importer carried over (#487).
+        #
+        # Its own action for the same reason `:set_published_version_id` is.
+        # `:publish` stamps `published_at` with `utc_now`, so a bulk importer has
+        # to put the source date back afterwards — and doing that through
+        # `:update` dragged the whole edit chain along: `NotifyWebhooks` and
+        # `FireArtifacts` are both `only_when: :published`, and the record IS
+        # published by then, so a 4,000-post import emitted 4,000 spurious
+        # `updated` webhooks and re-fired every artifact a second time.
+        update :backdate_published_at do
+          require_atomic? false
+          accept [:published_at]
+        end
+
+        # Internal: attribute an imported record to its original author (#950).
+        #
+        # `:create` carries `relate_actor(:author)`, which stamps whoever is
+        # running the import — correct for authored content, wrong for migrated
+        # content, where the byline belongs to whoever wrote it on the old site.
+        # Its own action for the same reason the two above are: `:update` would
+        # fire `NotifyWebhooks` and `FireArtifacts` for what is bookkeeping.
+        #
+        # The create still runs under the OPERATOR's actor, so an import can
+        # never mint content a mapped author was not allowed to create; only the
+        # attribution moves afterwards.
+        update :reassign_author do
+          require_atomic? false
+          accept [:author_id]
+        end
+
+        # Internal: write resolved oEmbed metadata back onto the blocks (#489).
+        #
+        # Its own action rather than `:update`, for the reasons `:set_embedding`
+        # is: `:update` carries `optimistic_lock`, `NotifyWebhooks` and
+        # `FireArtifacts`, and is not in `ignore_actions`. Resolving one embed
+        # on a published post through it would emit a spurious `updated` webhook
+        # to every subscriber, re-fire every artifact, cut a history version
+        # attributed to nobody, and bump `updated_at` (reordering
+        # `updated_at`-sorted feeds and sitemaps) plus `lock_version` — which,
+        # since the resolve is enqueued from `:autosave` too, would land while
+        # an editor is typing and make their next autosave a `StaleRecord`.
+        #
+        # Artifacts still need re-firing so the card reaches delivery, but that
+        # is the worker's decision (only when the document is published), not a
+        # side effect of every metadata write.
+        update :set_oembed_metadata do
+          require_atomic? false
+          accept [:blocks]
+
+          # `search_text` is denormalized by a change on the editorial actions,
+          # and a resolved embed's title is the only text an embed block has
+          # ever contributed to it. Without this, a document whose embeds
+          # resolved in the background stays unsearchable by those titles until
+          # some unrelated save happens to recompute it.
+          change KilnCMS.CMS.Changes.SetSearchText
+
+          # `updated_at` still moves: Ash writes it on every update action and a
+          # change cannot override that. It is bounded rather than fixed — a
+          # resolve only ever runs seconds after the save that enqueued it, and
+          # a resolved document never re-enqueues (`EnqueueOEmbed` requires a
+          # blank title), so the bump lands on a document whose `updated_at` had
+          # just moved anyway. What would have been a real problem is the
+          # *version*, the *webhook* and the *lock*, and this action carries
+          # none of those.
+        end
+
+        # Internal: recompute `search_text` against the fragment-expanded block
+        # tree, written by `KilnCMS.Firing.Engine.fire/2` (#910).
+        #
+        # A `%Fragment{}` block's own `search_text/1` is always `""` — it
+        # renders nothing itself — so the denormalized `search_text`
+        # `Changes.SetSearchText` sets on the editorial actions never carries a
+        # fragment's words: those actions see only the raw, unexpanded tree.
+        # `fire/2` already builds the expanded one for the rendered surfaces;
+        # this is its own action for the same reasons `:set_oembed_metadata`
+        # is — no webhook, no re-fired version, no lock bump for a derived
+        # column — and accepts no `:blocks`, since this never touches the
+        # document's own stored content, only the search text summarizing it.
+        update :reindex_search_text do
+          require_atomic? false
+          argument :search_text, :string, allow_nil?: false
+          change set_attribute(:search_text, arg(:search_text))
+        end
+
+        # Internal: advance the materialized "what's on" sort key once an
+        # occurrence has gone by (#766), written by `KilnCMS.Events.Sweep`.
+        #
+        # Its own action for the reasons `:set_embedding` and
+        # `:set_oembed_metadata` are, and more sharply: this one fires on a
+        # SCHEDULE, over rows nobody touched. Through `:update` a nightly sweep
+        # of a venue's back catalogue would cut a history version per event
+        # attributed to nobody, emit an `updated` webhook per event to every
+        # subscriber, re-fire every artifact, and bump `lock_version` — turning
+        # an open editor's next save into a `StaleRecord` because a gig finished.
+        #
+        # Excluded from PaperTrail (see `ignore_actions`), and nothing is busted:
+        # the delivery index is not response-cached, and its `cache-control`
+        # window is shorter than the sweep's period.
+        update :set_next_occurrence do
+          require_atomic? false
+          # Nullable on purpose — an event whose series has ended advances to
+          # "nothing coming up", and that is a write of `nil`, not a skip.
+          argument :next_occurrence_at, :utc_datetime_usec, allow_nil?: true
+          change set_attribute(:next_occurrence_at, arg(:next_occurrence_at))
         end
       end
 
@@ -1545,6 +2245,24 @@ defmodule KilnCMS.CMS.Content do
         # the between-publish window. Off by default and skipped for publishes
         # (RecordPublishedVersion anchors those) — see the change module.
         change KilnCMS.CMS.Changes.AnchorVersion, on: [:create, :update, :destroy]
+      end
+
+      validations do
+        # A content slug is a URL component by definition (#1062). Same charset
+        # as taxonomy (#1044): lowercase letters, digits, and single hyphens
+        # between them. `DeriveSlug` already produces conforming values for the
+        # generated path; this catches explicit slugs from the editor, JSON:API,
+        # and importers that would otherwise persist `a/b` as a live path.
+        validate match(:slug, ~r/\A[a-z0-9]+(-[a-z0-9]+)*\z/) do
+          # Only when the slug is being written. Without this, `Match` reads the
+          # attribute's *current* value on every update, so a row stored before
+          # this rule existed could no longer be edited at all — renaming a
+          # title, or changing blocks, would fail on a slug field nobody touched,
+          # and the only way out would be to change a live public URL. Declining
+          # to migrate legacy rows and then freezing them is the worst of both.
+          where changing(:slug)
+          message "must be lowercase letters, digits and single hyphens between them"
+        end
       end
 
       policies do
@@ -1613,6 +2331,31 @@ defmodule KilnCMS.CMS.Content do
           authorize_if KilnCMS.CMS.Checks.InAudience
         end
 
+        # Passphrase-locked content (#496) is invisible to every authorized
+        # read. A SEPARATE policy block, because Ash ANDs policies and ORs the
+        # checks within one: folding this into the block above would have made
+        # the lock an alternative grant, so an `InAudience` reader would have
+        # read a locked document without the passphrase. The issue asks for the
+        # opposite — a lock applies "regardless of audience".
+        #
+        # This one block is what keeps locked content out of the sitemap, the
+        # feeds, `llms.txt`, the calendar, ActivityPub, keyword/semantic search
+        # and related-content. Every one of those reads actorless with
+        # `authorize?: true`, so none of them needs (or gets) its own filter —
+        # and a surface added later inherits the exclusion instead of having to
+        # remember it.
+        #
+        # Delivery is the deliberate exception: `:public_by_slug` and friends run
+        # `authorize?: false`, so their own filters carry the unlock grant.
+        # Editors still see everything through `ReadableContentType` (and admins
+        # through the bypass above); a *restricted* editor reading an
+        # out-of-scope type reads it as a consumer does, which here means they
+        # need the passphrase too.
+        policy action_type(:read) do
+          authorize_if KilnCMS.CMS.Checks.ReadableContentType
+          authorize_if expr(is_nil(^ref(:access_password_hash)))
+        end
+
         # Authoring and workflow transitions are reserved for editors (and admins
         # via the bypass above). Every state-machine action is an update action.
         # Granular RBAC (#332): an editor may author only the content types in
@@ -1659,8 +2402,15 @@ defmodule KilnCMS.CMS.Content do
           public? false
         end
 
-        attribute :title, :string, allow_nil?: false, public?: true
-        attribute :slug, :string, allow_nil?: false, public?: true
+        attribute :title, :string,
+          allow_nil?: false,
+          public?: true,
+          constraints: [max_length: KilnCMS.Limits.line()]
+
+        attribute :slug, :string,
+          allow_nil?: false,
+          public?: true,
+          constraints: [max_length: KilnCMS.Limits.identifier()]
 
         unquote(excerpt_attribute)
 
@@ -1678,21 +2428,41 @@ defmodule KilnCMS.CMS.Content do
           public? false
         end
 
-        attribute :seo_title, :string, public?: true
-        attribute :seo_description, :string, public?: true
+        attribute :seo_title, :string,
+          public?: true,
+          constraints: [max_length: KilnCMS.Limits.line()]
+
+        attribute :seo_description, :string,
+          public?: true,
+          constraints: [max_length: KilnCMS.Limits.paragraph()]
+
         # Comma-separated keyphrases; the first is the focus keyphrase and
         # drives slug auto-derivation (Yoast-style: slug = focus keyphrase).
-        attribute :seo_keywords, :string, public?: true
+        attribute :seo_keywords, :string,
+          public?: true,
+          constraints: [max_length: KilnCMS.Limits.line()]
 
         # Optional multi-segment path alias (#485): when set, the record's
         # canonical public URL (`/acupuncture/needle/size/14mm`) — the flat
         # `/<prefix>/<slug>` URL 301s to it. The slug stays the single-segment
         # internal handle. Validated by `Validations.PathAliasValid`.
-        attribute :path_alias, :string, public?: true
+        attribute :path_alias, :string,
+          public?: true,
+          constraints: [max_length: KilnCMS.Limits.url()]
+
         # og:image URL and rel=canonical for SEO/social.
-        attribute :seo_image, :string, public?: true
-        attribute :canonical_url, :string, public?: true
-        attribute :locale, :string, default: "en", public?: true
+        attribute :seo_image, :string,
+          public?: true,
+          constraints: [max_length: KilnCMS.Limits.url()]
+
+        attribute :canonical_url, :string,
+          public?: true,
+          constraints: [max_length: KilnCMS.Limits.url()]
+
+        attribute :locale, :string,
+          default: "en",
+          public?: true,
+          constraints: [max_length: KilnCMS.Limits.identifier()]
 
         # Consumer-facing access tier (KilnCMS.CMS.Audiences). `:public` (the
         # default) keeps a published record world-readable; any other audience
@@ -1706,6 +2476,29 @@ defmodule KilnCMS.CMS.Content do
           public? true
         end
 
+        # Shared-passphrase lock for PUBLISHED content (#496). Independent of
+        # `audience` and composed by AND: a locked record inside a gated
+        # audience needs both. `nil` (the default) means unlocked, which is
+        # what every existing row is.
+        #
+        # Never public on any API and never in a delivery projection — the only
+        # reads that select it are the unlock endpoints, which need it to verify
+        # a submitted passphrase. See `KilnCMS.CMS.ContentPassword` for why the
+        # fingerprint exists alongside it.
+        attribute :access_password_hash, :string do
+          public? false
+          sensitive? true
+        end
+
+        # `sha256(access_password_hash)` — what an unlock grant names. Kept as a
+        # stored column rather than computed per request so the delivery read
+        # can match it **in the filter**: that makes passphrase rotation
+        # invalidate every outstanding grant structurally, instead of relying on
+        # a controller check.
+        attribute :password_fingerprint, :string do
+          public? false
+        end
+
         # Admin-UI-defined custom fields (decision D4 — schema stays compile-time,
         # but *fields* are data-driven). Values are keyed by `FieldDefinition.name`
         # and coerced/validated against the registry on write by
@@ -1716,6 +2509,16 @@ defmodule KilnCMS.CMS.Content do
           allow_nil? false
           public? true
         end
+
+        # Denormalized "when is this on next", maintained by
+        # `Changes.SetNextOccurrence` on write and `KilnCMS.Events.Sweep` on a
+        # schedule; `nil` for the overwhelming majority of records, which carry
+        # no schedule at all. `KilnCMS.Events.Index` is the argument for storing
+        # it and for what `nil` means. Internal, like `search_text`: the sort is
+        # applied server-side by the delivery routes, and a public attribute
+        # would put a derived timestamp on every type's API surface — including
+        # every type that will never have an event in it.
+        attribute :next_occurrence_at, :utc_datetime_usec, public?: false
 
         attribute :published_at, :utc_datetime_usec, public?: true
 
@@ -1859,6 +2662,64 @@ defmodule KilnCMS.CMS.Content do
         # headless consumers can link without hard-coding the URL scheme.
         calculate :path, :string, KilnCMS.CMS.Calculations.PublicPath do
           public? true
+        end
+
+        # The SEO fields as anything *rendering* them should read them: the
+        # author's own value, else the type's #805 pattern expanded (#1102).
+        # The stored `seo_title`/`seo_description` keep saying exactly what a
+        # human typed — which is what the editor's SEO panel, the analyzer and
+        # the export need them to say — so this is a second field rather than a
+        # change to the first.
+        calculate :effective_seo_title,
+                  :string,
+                  {KilnCMS.CMS.Calculations.EffectiveSeo, field: :seo_title} do
+          public? true
+          # No `expression/2` — the pattern lives in the type registry, not in a
+          # column — so a filter or sort on this would raise out of AshSql as a
+          # 500. Declaring them unusable rejects at the query layer instead,
+          # exactly as `word_count` and `related_links` do.
+          filterable? false
+          sortable? false
+        end
+
+        calculate :effective_seo_description,
+                  :string,
+                  {KilnCMS.CMS.Calculations.EffectiveSeo, field: :seo_description} do
+          public? true
+          filterable? false
+          sortable? false
+        end
+
+        # The curated related links, projected to `[%{id, title, slug}]` (#996).
+        # A calculation rather than `load [related_*s: [...]]` because `load`
+        # cannot project — see `KilnCMS.CMS.Calculations.RelatedLinks`.
+        calculate :related_links,
+                  {:array, :map},
+                  {KilnCMS.CMS.Calculations.RelatedLinks, relationship: unquote(related_name)} do
+          public? true
+          # No expression, so a filter or sort would raise out of AshSql as a
+          # 500; declaring them unusable rejects at the query layer instead —
+          # same reason `word_count` does.
+          filterable? false
+          sortable? false
+        end
+
+        # The block tree projected to `_id`/`_type` only, nested children in
+        # the positions they render (#954). This is the READ surface for block
+        # identity: the write path accepts `_id` back, and `EnforceBlockFieldPolicy`
+        # requires a nested admin-set value to return under the child id that
+        # held it — a demand that is only fair because this makes the ids
+        # readable on drafts (the fired artifact covers published content).
+        # Carries no field values, so the non-`public?` `blocks` boundary and
+        # `hide_inputs: [:blocks]` are untouched; drafts stay editor-scoped by
+        # the row read policy.
+        calculate :block_ids, {:array, :map}, KilnCMS.CMS.Calculations.BlockIds do
+          public? true
+          # No `expression/2`, so a filter or sort would raise out of AshSql as
+          # a 500; declaring them unusable rejects at the query layer instead —
+          # same reason `word_count` does.
+          filterable? false
+          sortable? false
         end
 
         # Full-text relevance of a row against a query — higher is more

@@ -35,6 +35,7 @@ defmodule KilnCMSWeb.SystemLive do
        socket
        |> assign(:page_title, gettext("System"))
        |> assign(:build, Build.current())
+       |> assign(:strict_host_gap, KilnCMSWeb.Tenant.strict_host_gap?())
        |> assign(:update, :loading)
        |> assign(:flushed, nil)
        |> check_for_updates()}
@@ -136,6 +137,27 @@ defmodule KilnCMSWeb.SystemLive do
             {gettext("The Kiln core this instance is built from, and how to update it.")}
           </p>
         </div>
+
+        <section
+          :if={@strict_host_gap}
+          class="card card-pad max-w-2xl border border-warning/40 bg-warning/10"
+        >
+          <h2 class="text-lg font-semibold text-warning-ink">
+            {gettext("Host matching is off, and this deployment has more than one organization")}
+          </h2>
+
+          <p class="mt-2 text-sm text-warning-ink">
+            {gettext(
+              "A request whose Host header matches no organization is served the default organization's content, branding and analytics — including a bare hostname, an IP address, or a Host a caller made up. With one organization that is the same site either way. With more than one it is another tenant's."
+            )}
+          </p>
+
+          <p class="mt-2 text-sm text-warning-ink">
+            {gettext(
+              "Set TENANT_STRICT_HOST=true to reject unrecognized hosts instead, then restart. Leave it off only if an unmatched host reaching the default organization is what you want."
+            )}
+          </p>
+        </section>
 
         <section class="card card-pad max-w-2xl">
           <h2 class="text-lg font-semibold">{gettext("This instance")}</h2>

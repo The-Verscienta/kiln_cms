@@ -22,6 +22,7 @@ defmodule KilnCMSWeb.NewsletterController do
 
   alias KilnCMS.Forms
   alias KilnCMS.Newsletter
+  alias KilnCMSWeb.Params
   alias KilnCMSWeb.Tenant
 
   @doc """
@@ -42,7 +43,7 @@ defmodule KilnCMSWeb.NewsletterController do
   bounds how fast anyone can make us mail an address they don't own.
   """
   def subscribe(conn, params) do
-    email = params |> Map.get("email", "") |> to_string() |> String.trim()
+    email = params |> Params.string("email", "") |> String.trim()
 
     cond do
       email == "" ->
@@ -53,7 +54,7 @@ defmodule KilnCMSWeb.NewsletterController do
         submitted(conn)
 
       true ->
-        do_subscribe(conn, email, params["name"])
+        do_subscribe(conn, email, Params.string(params, "name"))
     end
   end
 

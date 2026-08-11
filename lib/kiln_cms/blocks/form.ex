@@ -9,7 +9,7 @@ defmodule KilnCMS.Blocks.Form do
   use Kiln.Block
 
   block :form do
-    field :form_slug, :string, required: true
+    field :form_slug, :string, required: true, translatable: false
   end
 
   # Match plain variables, never `%__MODULE__{}` — the struct is built at

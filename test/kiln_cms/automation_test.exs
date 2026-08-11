@@ -68,6 +68,22 @@ defmodule KilnCMS.AutomationTest do
       assert :ok = Automation.dispatch("form.submitted", payload())
       assert :ok = Automation.dispatch("garbage", payload())
     end
+
+    # #501: task.assigned/task.overdue are task-domain events, not
+    # content-type-domain — but `handle_event/2`/`dispatch/2` only ever split
+    # the event string on its first "." and match the verb, so a literal
+    # `content_type: "task"` rule works with no executor changes.
+    test "a rule scoped to content_type \"task\" matches task.assigned" do
+      r = rule(%{trigger_event: :assigned, action: :broadcast, content_type: "task"})
+      Automation.dispatch("task.assigned", payload())
+      assert_enqueued(worker: RuleWorker, args: %{"rule_id" => r.id, "event" => "task.assigned"})
+    end
+
+    test "task.overdue matches an :overdue-triggered rule" do
+      r = rule(%{trigger_event: :overdue, action: :broadcast, content_type: "task"})
+      Automation.dispatch("task.overdue", payload())
+      assert_enqueued(worker: RuleWorker, args: %{"rule_id" => r.id, "event" => "task.overdue"})
+    end
   end
 
   describe "RuleWorker reactions" do
@@ -164,6 +180,41 @@ defmodule KilnCMS.AutomationTest do
       drain_oban()
 
       assert_receive {:automation_event, "page.published", %{"title" => "Auto"}}
+    end
+
+    test "a broadcast carries the access fields through the Oban JSON round trip (#1014)" do
+      # The automation path is the second consumer of `ContentSerializer`, and
+      # it is the one with a JSON round trip in the middle: the payload goes
+      # into Oban's args, where the `:member` ATOM becomes a string, and back
+      # out again. A rule that forwards content outward needs those fields to
+      # survive it, so this asserts the far end rather than the serializer.
+      topic = "e2e-gated-#{System.unique_integer([:positive])}"
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, "automation:#{topic}")
+      rule(%{trigger_event: :published, action: :broadcast, config: %{"topic" => topic}})
+
+      actor =
+        Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+          email: "auto-#{System.unique_integer([:positive])}@example.com",
+          hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+          confirmed_at: DateTime.utc_now(),
+          role: :admin
+        })
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Gated auto",
+            slug: "auto-#{System.unique_integer([:positive])}",
+            audience: :member
+          },
+          actor: actor
+        )
+
+      CMS.publish_page!(page, actor: actor)
+      drain_oban()
+
+      assert_receive {:automation_event, "page.published",
+                      %{"title" => "Gated auto", "audience" => "member", "locked" => false}}
     end
 
     test "the review-workflow transitions fire in_review / returned_to_draft rules (#375)" do

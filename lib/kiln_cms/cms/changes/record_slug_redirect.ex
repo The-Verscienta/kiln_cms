@@ -17,14 +17,17 @@ defmodule KilnCMS.CMS.Changes.RecordSlugRedirect do
 
   @impl true
   def change(changeset, _opts, _context) do
-    if changeset.data.state == :published and path_changing?(changeset) do
-      Ash.Changeset.after_action(changeset, fn _changeset, record ->
+    # The hook is registered unconditionally and the gate lives inside it:
+    # `restore_version` writes `slug`/`path_alias` from a `before_action`, so at
+    # change time the changeset shows no path change at all, and gating here
+    # meant a restore silently vacated a published URL with no 301 (#691).
+    Ash.Changeset.after_action(changeset, fn hooked, record ->
+      if changeset.data.state == :published and path_changing?(hooked) do
         record_redirect(changeset.data, record)
-        {:ok, record}
-      end)
-    else
-      changeset
-    end
+      end
+
+      {:ok, record}
+    end)
   end
 
   defp path_changing?(changeset) do

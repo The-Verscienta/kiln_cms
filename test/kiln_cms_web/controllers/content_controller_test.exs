@@ -49,6 +49,54 @@ defmodule KilnCMSWeb.ContentControllerTest do
       assert html =~ "Hello Heading"
     end
 
+    # #479: HTML delivery renders live from the block tree, not from the fired
+    # artifact, so fragment expansion has to happen on this path too.
+    test "a fragment block inlines its target's body", %{conn: conn} do
+      shared =
+        page(%{
+          title: "Shared CTA",
+          blocks: [%{"_type" => "heading", "text" => "Subscribe now"}]
+        })
+
+      host =
+        page(%{
+          title: "Host",
+          blocks: [
+            %{"_type" => "heading", "text" => "Intro"},
+            %{"_type" => "fragment", "ref" => %{"type" => "page", "id" => shared.id}}
+          ]
+        })
+
+      html = conn |> get(~p"/#{host.slug}") |> html_response(200)
+
+      assert html =~ "Intro"
+      assert html =~ "Subscribe now"
+    end
+
+    # A pointer to something the reader may not see has no safe rendering — a
+    # placeholder would leak its existence.
+    test "a fragment pointing at a draft renders nothing", %{conn: conn} do
+      draft =
+        Ash.Seed.seed!(Page, %{
+          title: "Unannounced",
+          slug: "fr-#{uniq()}",
+          state: :draft,
+          blocks: [%{"_type" => "heading", "text" => "Unannounced launch"}]
+        })
+
+      host =
+        page(%{
+          title: "Host",
+          blocks: [
+            %{"_type" => "fragment", "ref" => %{"type" => "page", "id" => draft.id}}
+          ]
+        })
+
+      html = conn |> get(~p"/#{host.slug}") |> html_response(200)
+
+      refute html =~ "Unannounced launch"
+    end
+
     test "image blocks render a responsive srcset + alt from the media library", %{conn: conn} do
       media =
         Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
@@ -84,6 +132,118 @@ defmodule KilnCMSWeb.ContentControllerTest do
       assert html =~ "/uploads/orig 1600w"
       assert html =~ ~s(alt="A described image")
       assert html =~ ~s(width="1600")
+    end
+
+    # #473: a browser takes the first `<source>` type it supports, so WebP has to
+    # be offered ahead of the `<img>` fallback — and the fallback's `srcset` must
+    # stay single-encoding or a WebP-less client can be handed one by width.
+    test "modern-format variants render as <picture> sources, not in the srcset", %{conn: conn} do
+      media =
+        Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+          filename: "pic.jpg",
+          url: "/uploads/p-orig",
+          content_type: "image/jpeg",
+          width: 1600,
+          height: 1067,
+          alt: "Described",
+          variants: %{
+            "thumb" => %{
+              "key" => "t",
+              "url" => "/uploads/p-thumb.jpg",
+              "width" => 400,
+              "height" => 267,
+              "content_type" => "image/jpeg"
+            },
+            "thumb.webp" => %{
+              "key" => "tw",
+              "url" => "/uploads/p-thumb.webp",
+              "width" => 400,
+              "height" => 267,
+              "content_type" => "image/webp"
+            },
+            # A crop — excluded from both, in every encoding.
+            "card.webp" => %{
+              "key" => "cw",
+              "url" => "/uploads/p-card.webp",
+              "width" => 800,
+              "height" => 450,
+              "content_type" => "image/webp"
+            },
+            # The full-size alternate. Every processed item has one since #473,
+            # and without it the whole `<source>` is suppressed (#919) — a
+            # matching `<source>` replaces the `<img>` srcset, so a webp ladder
+            # that stopped at 400w would cap this 1600px image at 400px for
+            # every webp-capable browser.
+            "full.webp" => %{
+              "key" => "fw",
+              "url" => "/uploads/p-full.webp",
+              "width" => 1600,
+              "height" => 1067,
+              "content_type" => "image/webp"
+            }
+          }
+        })
+
+      page =
+        page(%{
+          title: "Picture Page",
+          blocks: [
+            %{type: :image, content: "/uploads/p-orig", data: %{"media_id" => media.id}, order: 0}
+          ]
+        })
+
+      html = conn |> get(~p"/#{page.slug}") |> html_response(200)
+
+      assert html =~ "<picture>"
+      assert html =~ ~s(type="image/webp")
+      assert html =~ "/uploads/p-thumb.webp 400w"
+      assert html =~ "/uploads/p-full.webp 1600w"
+
+      # The `<img>` fallback carries the source format only — scoped to the
+      # `<picture>`, since the console layout has an `<img>` of its own.
+      [_, picture] = String.split(html, "<picture>", parts: 2)
+      [picture, _] = String.split(picture, "</picture>", parts: 2)
+      [_, img] = String.split(picture, "<img", parts: 2)
+
+      assert img =~ "/uploads/p-thumb.jpg 400w"
+      refute img =~ "p-thumb.webp"
+
+      # The crop is in neither.
+      refute html =~ "p-card.webp"
+    end
+
+    # An upload processed before #473 has no alternates; the markup must be
+    # exactly what it was, not an empty `<picture>` wrapper with no sources.
+    test "an item with no alternates renders no <source> elements", %{conn: conn} do
+      media =
+        Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+          filename: "old.jpg",
+          url: "/uploads/o-orig",
+          content_type: "image/jpeg",
+          width: 1600,
+          height: 1067,
+          variants: %{
+            "thumb" => %{
+              "key" => "t",
+              "url" => "/uploads/o-thumb",
+              "width" => 400,
+              "height" => 267
+            }
+          }
+        })
+
+      page =
+        page(%{
+          title: "Legacy Img",
+          blocks: [
+            %{type: :image, content: "/uploads/o-orig", data: %{"media_id" => media.id}, order: 0}
+          ]
+        })
+
+      html = conn |> get(~p"/#{page.slug}") |> html_response(200)
+
+      assert html =~ "/uploads/o-thumb 400w"
+      refute html =~ "<source"
     end
 
     test "focal point flows to object-position; cropped variants stay out of srcset", %{
@@ -172,6 +332,94 @@ defmodule KilnCMSWeb.ContentControllerTest do
       assert html =~ "Col heading"
       assert html =~ "/uploads/c-thumb 400w"
       assert html =~ ~s(alt="Nested image")
+    end
+
+    test "gallery images get their srcset, and never a cropped variant (#482)", %{conn: conn} do
+      media =
+        Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+          filename: "g.jpg",
+          url: "/uploads/g-orig",
+          content_type: "image/jpeg",
+          width: 1600,
+          height: 1067,
+          alt: "Library default",
+          focal_x: 0.25,
+          focal_y: 0.75,
+          variants: %{
+            "thumb" => %{
+              "key" => "t",
+              "url" => "/uploads/g-thumb",
+              "width" => 400,
+              "height" => 267
+            },
+            # A focal-aware crop. It has a different aspect ratio, so it must
+            # never appear in a srcset — the browser would swap in a
+            # differently-shaped picture at some viewport widths.
+            "card" => %{"key" => "c", "url" => "/uploads/g-card", "width" => 800, "height" => 450}
+          }
+        })
+
+      page =
+        page(%{
+          title: "Gallery Page",
+          blocks: [
+            %{
+              "_type" => "gallery",
+              "title" => "Shots",
+              "layout" => "masonry",
+              "images" => [
+                %{
+                  "url" => "/uploads/g-orig",
+                  "media_id" => media.id,
+                  "alt" => "Placement alt",
+                  "caption" => "At work"
+                }
+              ]
+            }
+          ]
+        })
+
+      html = conn |> get(~p"/#{page.slug}") |> html_response(200)
+
+      assert html =~ "kiln-gallery"
+      assert html =~ "column-count:3"
+      assert html =~ "/uploads/g-thumb 400w"
+      assert html =~ "/uploads/g-orig 1600w"
+      refute html =~ "g-card"
+
+      # The block's own alt wins over the library default — it is the one
+      # written for this placement (#403).
+      assert html =~ ~s(alt="Placement alt")
+      refute html =~ "Library default"
+      assert html =~ "At work"
+      assert html =~ "object-position: 25% 75%"
+    end
+
+    test "an accordion renders its panels on-site (#482)", %{conn: conn} do
+      page =
+        page(%{
+          title: "Accordion Page",
+          blocks: [
+            %{
+              "_type" => "accordion",
+              "title" => "Specifications",
+              "first_open" => true,
+              "panels" => [
+                %{"title" => "Size", "content" => "Large"},
+                %{"title" => "Weight", "content" => "Heavy"}
+              ]
+            }
+          ]
+        })
+
+      html = conn |> get(~p"/#{page.slug}") |> html_response(200)
+
+      assert html =~ "kiln-accordion"
+      assert html =~ "Size"
+      assert html =~ "Heavy"
+      # Only the first panel opens.
+      assert html |> String.split("<details") |> Enum.count(&String.starts_with?(&1, " open")) ==
+               1
     end
 
     test "GEO blocks render their items and citations on-site (#357)", %{conn: conn} do

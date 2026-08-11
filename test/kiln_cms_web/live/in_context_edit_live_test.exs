@@ -94,6 +94,69 @@ defmodule KilnCMSWeb.InContextEditLiveTest do
     CMS.get_page!(page_id, authorize?: false).blocks |> Enum.map(& &1.value.id)
   end
 
+  # #1159. `/editor/site/...` is in the editor-tier live_session, and that gate
+  # is coarser than it looks: `Checks.ReadableContentType` lets an editor
+  # restricted to other types read this one, so they could open the console and
+  # find every region `contenteditable`, drag-reorder working and Save present —
+  # learning only on Save that none of it could land.
+  describe "a reader who may not write" do
+    setup %{conn: conn} do
+      admin = authed_user(:admin)
+      {page, _ids} = page_with_blocks(admin)
+
+      reader = authed_user(:editor)
+
+      {:ok, reader} =
+        KilnCMS.Accounts.manage_user_access(reader, %{editable_types: ["post"]}, actor: admin)
+
+      # The premise: they really can read it. Without this the tests below would
+      # pass for the wrong reason — a reader who cannot even fetch the record.
+      assert KilnCMS.CMS.get_page!(page.id, actor: reader).id == page.id
+
+      %{conn: log_in(conn, reader), page: page, reader: reader}
+    end
+
+    test "gets the read-only preview instead of an editor", %{conn: conn, page: page} do
+      assert {:error, {:live_redirect, %{to: to, flash: flash}}} =
+               live(conn, ~p"/editor/site/page/#{page.slug}")
+
+      assert to == "/editor/preview/page/#{page.id}"
+      assert flash["info"] =~ "view this content but not edit it"
+    end
+  end
+
+  # The second gate had zero coverage: deleting it left every test green,
+  # because the mount refusal makes it unreachable through a browser. Now that
+  # the decision is an assign, the state it defends can be built directly —
+  # which is the state an ordinary refactor of the mount refusal would produce.
+  describe "the write funnel when the mount decision says no" do
+    test "a save is refused and says so, rather than sticking on Saving…", %{conn: conn} do
+      editor = authed_user(:editor)
+      {page, ids} = page_with_blocks(editor)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/site/page/#{page.slug}")
+
+      render_hook(lv, "update_block", %{"id" => ids.heading, "value" => "Rewritten"})
+
+      # Exactly what a mount refusal that rendered a panel instead of navigating
+      # away would leave behind.
+      :sys.replace_state(lv.pid, fn state ->
+        put_in(state.socket.assigns.may_write?, false)
+      end)
+
+      html = render_click(lv, "save", %{})
+
+      assert html =~ "Couldn&#39;t save."
+
+      # And the write did not land.
+      assert KilnCMS.CMS.get_page!(page.id, actor: editor).blocks
+             |> Enum.find_value(fn
+               %Ash.Union{type: :heading, value: v} -> v.text
+               _ -> nil
+             end) != "Rewritten"
+    end
+  end
+
   describe "mount and render" do
     test "renders each block with stable ids and inline-editable regions", %{conn: conn} do
       editor = authed_user(:editor)
@@ -335,6 +398,42 @@ defmodule KilnCMSWeb.InContextEditLiveTest do
 
       reloaded = lv |> element("#in-context-conflict button", "Reload latest") |> render_click()
       refute reloaded =~ "Someone else saved changes"
+    end
+  end
+
+  describe "locale round-trip (#1104)" do
+    test "opens the requested locale variant and writes only that record", %{conn: conn} do
+      admin = authed_user(:admin)
+      shared = "incontext-loc-#{System.unique_integer([:positive])}"
+      heading_id = Ash.UUID.generate()
+
+      en =
+        CMS.create_page!(
+          %{
+            title: "English in-context",
+            slug: shared,
+            locale: "en",
+            blocks: [
+              %{"_type" => "heading", "text" => "EN heading", "id" => heading_id}
+            ]
+          },
+          actor: admin
+        )
+
+      fr = KilnCMS.CMS.Translations.create_translation!(:page, en, "fr", actor: admin)
+      fr = CMS.update_page!(fr, %{title: "French in-context"}, actor: admin)
+
+      {:ok, lv, html} =
+        conn |> log_in(admin) |> live(~p"/editor/site/page/#{shared}?locale=fr")
+
+      assert html =~ "French in-context"
+      refute html =~ "English in-context"
+
+      render_hook(lv, "update_block", %{"id" => heading_id, "value" => "FR heading edited"})
+      lv |> element("#in-context-edit-bar button", "Save") |> render_click()
+
+      assert block_value(fr.id, heading_id, :text) == "FR heading edited"
+      assert block_value(en.id, heading_id, :text) == "EN heading"
     end
   end
 end

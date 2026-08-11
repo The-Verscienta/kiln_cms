@@ -110,12 +110,82 @@ defmodule Kiln.FieldType do
   """
   @callback input_parts(definition :: struct()) :: [input_part()]
 
-  # `input_parts/1` was added after this contract shipped. `use Kiln.FieldType`
-  # defaults it, but a plugin that hand-rolls `@behaviour Kiln.FieldType` is
-  # explicitly sanctioned (`mix kiln.plugins.doctor` requires only `cast/2` and
-  # `name/0`), and such a module would otherwise fail to compile under
-  # `--warnings-as-errors` on upgrade. Optional here, defaulted there.
-  @optional_callbacks input_parts: 1
+  @doc ~S"""
+  Extra `Kiln.Tokens` (#468) definitions this type can offer beyond the
+  generic `[field:<name>]` substitution the slug/alias pattern engine
+  (`KilnCMS.Slug.Pattern`) already gives every custom field for free — that
+  generic path slugifies a scalar value and expands a map/list one empty,
+  which is the honest answer for most types but not a **composite** one (a
+  coordinate pair, a price-and-currency): those want to expose their own
+  named parts (`[field:location.lat]`) or a custom string form instead of
+  going blank.
+
+  Defaults to `[]`. **Live since #804**: `KilnCMS.CMS.Slugs.type_token_definitions/1`
+  collects these from the field definitions attached to a content type, and both
+  the slug/alias derivation and the save-time pattern validation expand against
+  them alongside the built-in vocabulary.
+
+  Three rules, and the first two are traps rather than niceties:
+
+    * **Scope the match to the field's own name, anchored.** `definition.name`
+      is in scope, so `~r/\Afield:#{definition.name}\.lat\z/` rather than a
+      bare `"field:lat"` or an unanchored `~r/field:lat/`. Nothing enforces
+      this: `Kiln.Tokens.expand/3` takes the *first* matching definition, so a
+      loose matcher on a type used by two fields of one content type
+      deterministically resolves both to whichever field is collected first,
+      with no error anywhere.
+    * **Your name must contain a `.`, or the built-in swallows it.** The
+      built-in `[field:<name>]` family matches `~r/\Afield:[a-z0-9_]+\z/` and
+      is tried first, so a definition matching `"field:price_amount"` never
+      runs — the generic path resolves it to the (absent) custom-field value
+      and expands empty, and validation still answers `:ok`, so the operator
+      sees no error. Dotted names like `field:price.amount` are outside the
+      built-in's character class and reach you.
+    * **Built-ins cannot be shadowed the other way either.** A type redefining
+      `[title]` is ignored rather than surprising a pattern author.
+
+  The field must exist before a pattern may name its token — until then nothing
+  claims it and save-time validation truthfully rejects it as unknown.
+
+  Building the list cannot fail a save: `KilnCMS.CMS.Slugs.type_token_definitions/1`
+  rescues, and the type contributes nothing. **The `resolve` closures you return
+  are also rescued per token** (`Kiln.Tokens.expand/3`), so one that raises on an
+  unexpected context expands empty rather than taking down the write — but write
+  them total anyway, since an expansion that silently vanishes becomes a slug
+  that silently changes shape.
+  """
+  @callback tokens(definition :: struct()) :: [Kiln.Tokens.definition()]
+
+  @doc """
+  The JSON Schema for this type's **delivered** value (#430).
+
+  `KilnCMS.SchemaExport` otherwise infers a shape from the editor widget —
+  `c:input_parts/1` for a composite, `c:input_type/0` for a scalar. That
+  inference is a guess about the *form*, and `c:cast/2` is free to disagree
+  with it: `KilnCMS.CMS.FieldTypes.Recurrence` renders its exclusion dates as
+  one text input but stores a **list**, and
+  `KilnCMS.CMS.FieldTypes.Computed` renders a formula but stores whatever the
+  expression evaluated to — a number, a boolean, a string.
+
+  Implement this when `cast/2`'s return value is not what the widget suggests.
+  Anything you return is used verbatim, so it should describe the JSON that
+  reaches `custom_fields` on the fired artifact, `null` included.
+
+  Optional: a type whose stored value matches its widget needs nothing here.
+  """
+  @callback json_schema(definition :: struct()) :: map()
+
+  # `input_parts/1` and `tokens/1` were added after this contract shipped.
+  # `use Kiln.FieldType` defaults them, but a plugin that hand-rolls
+  # `@behaviour Kiln.FieldType` is explicitly sanctioned (`mix
+  # kiln.plugins.doctor` requires only `cast/2` and `name/0`), and such a
+  # module would otherwise fail to compile under `--warnings-as-errors` on
+  # upgrade. Optional here, defaulted there.
+  # `json_schema/1` is deliberately *not* defaulted by `use Kiln.FieldType`:
+  # `KilnCMS.SchemaExport` probes for it with `function_exported?` and falls
+  # back to widget inference, so defining a default would mean every type
+  # silently claiming to describe itself.
+  @optional_callbacks input_parts: 1, tokens: 1, json_schema: 1
 
   defmacro __using__(_opts) do
     quote do
@@ -148,7 +218,15 @@ defmodule Kiln.FieldType do
       @impl Kiln.FieldType
       def input_parts(_definition), do: []
 
-      defoverridable name: 0, label: 0, input_type: 0, input_attrs: 1, input_parts: 1
+      @impl Kiln.FieldType
+      def tokens(_definition), do: []
+
+      defoverridable name: 0,
+                     label: 0,
+                     input_type: 0,
+                     input_attrs: 1,
+                     input_parts: 1,
+                     tokens: 1
     end
   end
 end

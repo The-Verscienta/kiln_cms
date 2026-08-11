@@ -28,6 +28,12 @@ defmodule Kiln.Plugins do
   """
   def advisories, do: Enum.flat_map(all(), & &1.advisories())
 
+  @doc """
+  Spam checks contributed by plugins (`Kiln.Forms.SpamCheck`, #477), appended
+  after the core scorer's checks the same way `advisories/0` is.
+  """
+  def spam_checks, do: Enum.flat_map(all(), & &1.spam_checks())
+
   @doc "Every plugin-declared admin nav item."
   @spec nav_items() :: [Kiln.Plugin.nav_item()]
   def nav_items, do: Enum.flat_map(all(), & &1.nav_items())

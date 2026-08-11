@@ -44,10 +44,21 @@ module.exports = defineConfig({
     screenshot: "only-on-failure",
   },
   // Use Playwright's bundled Chromium (no system Chrome required).
+  //
+  // WebKit runs one spec, not the suite: `focus_trap.spec.js` is about where
+  // `document.activeElement` lands, and Safari not focusing a `<button>` on
+  // click is the case that motivated #1046 — a Chromium-only run would leave
+  // the reported symptom untested. The rest of the journeys are engine-agnostic
+  // and doubling their runtime buys nothing.
   projects: [
     {
       name: "chromium",
       use: { browserName: "chromium", viewport: { width: 1280, height: 900 } },
+    },
+    {
+      name: "webkit-focus",
+      testMatch: /focus_trap\.spec\.js/,
+      use: { browserName: "webkit", viewport: { width: 1280, height: 900 } },
     },
   ],
   webServer,

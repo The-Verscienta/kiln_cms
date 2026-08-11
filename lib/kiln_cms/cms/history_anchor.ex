@@ -25,8 +25,46 @@ defmodule KilnCMS.CMS.HistoryAnchor do
     repo KilnCMS.Repo
 
     custom_indexes do
-      # The `for_content` lookup: anchors for one document within its site.
-      index [:org_id, :resource_type, :source_id]
+      # The `for_content` lookup: anchors for one document within its site,
+      # in timestamp order. Kept for the governance trail and exports, which
+      # display anchors chronologically; verification does not use it.
+      index [:org_id, :resource_type, :source_id, :inserted_at, :id]
+
+      # The chain's own order (#666), and what `latest_anchor/3` actually reads
+      # in. It carries the sort, not just the filter: on the filter columns alone
+      # Postgres fetches every anchor the document has and top-N sorts them,
+      # which is O(anchors per document) on a path that runs per write —
+      # `anchor_every_write` mints one anchor per save, so an hour of debounced
+      # typing leaves ~1200, and both `mint/3` and `CoalesceAutosaveVersions`
+      # ask for the latest on every one of those saves. `sequence` is `NOT NULL`,
+      # so a backward scan of this plain btree serves `ORDER BY sequence DESC` as
+      # a top-1 with no sort node. (A `NULLS LAST` ordering would have been
+      # servable by no btree at all — a second reason the column is not
+      # nullable.)
+      #
+      # UNIQUE because `next_sequence/1` is a read-then-write in
+      # `after_transaction`, outside the document's own transaction: two
+      # concurrent mints read the same predecessor and pick the same number.
+      # Without this both land, the run reads `[2, 2, 1]`, and the document is
+      # permanently and falsely tampered — unrepairable, since anchors have no
+      # destroy action. With it the loser's insert fails into `Chain.anchor/2`
+      # and `extend/2`'s existing rescue: a logged skip, which is what an
+      # anchoring problem is supposed to cost.
+      index [:org_id, :resource_type, :source_id, :sequence], unique: true
+    end
+
+    references do
+      # `ON DELETE RESTRICT` on the predecessor link (#597): an anchor cannot be
+      # removed while a SURVIVING anchor names it.
+      #
+      # It does not stop a wipe, and the difference matters. Postgres checks the
+      # constraint after the statement's rows are gone, so `DELETE FROM
+      # history_anchors WHERE source_id = …` removes referrer and referent
+      # together and succeeds. What this buys is that a *middle* anchor cannot be
+      # excised on its own — the attacker has to take its successor too, which is
+      # precisely the shape `Chain.chain_intact/1`'s sequence check catches. Both
+      # behaviours are pinned by tests so neither is assumed.
+      reference :prev_anchor, on_delete: :restrict, on_update: :restrict
     end
   end
 
@@ -41,6 +79,7 @@ defmodule KilnCMS.CMS.HistoryAnchor do
         :source_id,
         :chain_hash,
         :version_count,
+        :attribution_hash,
         :last_version_id,
         :last_version_at,
         :published_version_id,
@@ -48,18 +87,30 @@ defmodule KilnCMS.CMS.HistoryAnchor do
         :key_id,
         :actor_id,
         :prev_anchor_id,
-        :prev_anchor_digest
+        :prev_anchor_digest,
+        :sequence,
+        :folded_version_ids,
+        :payload_version
       ]
     end
 
     # Anchors for one document, newest first — the verification baseline is the
     # latest one.
+    #
+    # Ordered by the SIGNED `sequence`, not by `inserted_at` (#666). The
+    # timestamp is neither signed nor digested, so ordering by it meant
+    # `UPDATE history_anchors SET inserted_at = now() WHERE id = <older>` made
+    # the shorter anchor the baseline — the doctored versions then fell outside
+    # the anchored prefix and were never hashed, with nothing deleted at all.
+    # `sequence` is inside the signed payload, so repointing it breaks the
+    # signature. It is `NOT NULL` and unique per document, so this is a total
+    # order with no null case to reason about — see the attribute.
     read :for_content do
       argument :resource_type, :string, allow_nil?: false
       argument :source_id, :uuid, allow_nil?: false
 
       filter expr(resource_type == ^arg(:resource_type) and source_id == ^arg(:source_id))
-      prepare build(sort: [inserted_at: :desc])
+      prepare build(sort: [sequence: :desc])
     end
   end
 
@@ -100,6 +151,17 @@ defmodule KilnCMS.CMS.HistoryAnchor do
     attribute :chain_hash, :string, allow_nil?: false, public?: true
     attribute :version_count, :integer, allow_nil?: false, public?: true
 
+    # A second fold over the covered versions' attribution — author and action
+    # type — kept separate from `chain_hash` so it can be added without
+    # invalidating every anchor already minted (#713). `chain_hash`'s
+    # `item_digest` never covered `user_id`, so rewriting a version row's author
+    # left the chain reading `:verified` next to attribution that had been
+    # changed. Inside the SIGNED payload from `v: 5` on, so on a keyed deployment
+    # it can't be repointed without breaking the signature. Null on anchors
+    # minted before #713 — their attribution is simply not attested, the honest
+    # pre-fix state, and they keep verifying.
+    attribute :attribution_hash, :string, public?: true
+
     # Where the next incremental fold resumes (#598): the full sort key of the
     # last version this anchor covered, in the `(version_inserted_at, id)` order
     # the chain folds in. The timestamp is stored rather than looked up from the
@@ -136,6 +198,81 @@ defmodule KilnCMS.CMS.HistoryAnchor do
     attribute :prev_anchor_id, :uuid, public?: true
     attribute :prev_anchor_digest, :string, public?: true
 
+    # This anchor's position in the document's chain, 1-based and assigned at
+    # write time (#666). Two things depend on it, and neither could be built on
+    # `inserted_at`, which is written by the database and attested by nothing:
+    #
+    #   * it is the **order** `for_content` reads in, so the verification
+    #     baseline cannot be changed by rewriting a timestamp;
+    #   * a **gap** in it is visible. The predecessor links already catch a
+    #     middle anchor removed while its successor survives; a position catches
+    #     the same removal when the successor is removed too.
+    #
+    # `allow_nil? false` is load-bearing, not tidiness. A nullable position is a
+    # one-statement way to redo the very attack this closes: null the newest
+    # anchors' positions, an older and shorter anchor becomes the baseline, the
+    # doctored versions fall outside the anchored prefix, and the verdict is
+    # `:verified` with nothing deleted. **Nothing attests an absent value**, so
+    # the column refuses to be absent. Existing anchors were backfilled in
+    # `(inserted_at, id)` order by the migration that added it.
+    #
+    # It is inside the signed payload from v4 on, so a v4 anchor cannot be
+    # renumbered without the signing key. Backfilled anchors were signed before
+    # it existed and so are renumberable — which is why `Chain.chain_intact/1`
+    # also requires `version_count` to be non-decreasing along the run — on
+    # columns the signature sweep has established are attested, which is why an
+    # anchor it cannot judge floors the chain rather than being skipped. A short
+    # anchor cannot be promoted to the head without violating that.
+    #
+    # It does **not** catch a clean truncation of the newest anchors — nothing
+    # inside the document's own anchor set can, since a shorter chain is
+    # indistinguishable from a younger one. That needs a witness outside the
+    # database; see `KilnCMS.Governance.Chain` and #666.
+    attribute :sequence, :integer, allow_nil?: false, public?: true
+
+    # The version rows this anchor folded, IN THE ORDER IT FOLDED THEM
+    # (#598/#670). The fold order used to be implicit — re-derived at
+    # verification time by sorting on `(version_inserted_at, id)` — and that
+    # timestamp is stamped by whichever node performed the write, so it is not
+    # monotonic with commit order. A row that became visible late sorted INTO a
+    # range this anchor had already committed to, the recomputed prefix no
+    # longer matched, and the document read `{:tampered, …}` permanently with
+    # nothing having been tampered with.
+    #
+    # Recording it makes the order a fact rather than a re-derivation. A row
+    # that arrives late is in no anchor's list, so it is appended by the next
+    # anchor instead of displacing anything, and every earlier anchor keeps
+    # reproducing.
+    #
+    # It is inside the SIGNED payload (`anchor_payload_v6/9`), which is the
+    # reason it lives here rather than in a side table: rewriting the recorded
+    # order breaks the signature, so the order is exactly as tamper-evident as
+    # the hash it explains.
+    #
+    # Empty on every anchor written before this shipped, and on those the fold
+    # falls back to the old timestamp order — see `Chain.fold_order/3`.
+    attribute :folded_version_ids, {:array, :uuid} do
+      allow_nil? false
+      default []
+      public? true
+    end
+
+    # Which signed payload shape this anchor was minted with. `nil` for every
+    # anchor written before #598; `6` for those signed over `folded_version_ids`.
+    #
+    # It exists because the id list alone cannot discriminate. A v6 anchor that
+    # folded nothing has an empty list, and so does a pre-#598 anchor — and the
+    # BACKFILL gives old anchors a populated list too, so neither emptiness nor
+    # presence identifies the shape. Offering the wrong candidate is not a
+    # cosmetic error: handing a v6 anchor the v5 payload would let someone clear
+    # its recorded order and still verify, which is precisely the laundering the
+    # order was recorded to prevent.
+    #
+    # Clearing this column does not help an attacker: the shape is also inside
+    # the signed bytes (`"v" => 6`), so dropping to the v5 candidate produces a
+    # payload that never matches the signature. It fails closed.
+    attribute :payload_version, :integer, public?: true
+
     attribute :actor_id, :uuid, public?: true
 
     timestamps()
@@ -145,6 +282,16 @@ defmodule KilnCMS.CMS.HistoryAnchor do
     # The owning organization — the tenant axis is the `org_id` attribute above.
     belongs_to :organization, KilnCMS.Accounts.Organization do
       source_attribute :org_id
+      define_attribute? false
+      attribute_writable? false
+      public? false
+    end
+
+    # Declared only so the `references` block above can put `ON DELETE RESTRICT`
+    # on `prev_anchor_id` (#597). The chain is walked in memory from one query
+    # rather than through this relationship — see `Chain.chain_intact/1`.
+    belongs_to :prev_anchor, __MODULE__ do
+      source_attribute :prev_anchor_id
       define_attribute? false
       attribute_writable? false
       public? false

@@ -14,6 +14,27 @@ defmodule KilnCMSWeb.Layouts do
   alias KilnCMS.Branding
 
   @doc """
+  The masked CSRF token for the `<meta>` tag in `root.html.heex`, or `nil` if
+  one can't be produced (#681).
+
+  The root layout now also wraps error pages (`render_errors: [root_layout:
+  …]`), which can render from a conn that never reached the normal pipeline — a
+  raise from an endpoint-level plug ahead of `Plug.Session` hands the error
+  renderer the endpoint's *entry* conn. `get_csrf_token/0` happens not to raise
+  there today (it mints a token from the process dictionary), but the error
+  handler is the one place a second failure is least acceptable, so token
+  resolution fails safe rather than trusting that. An error page carries no
+  form to protect, so `nil` is a fine answer; on every normal path a session is
+  present and this returns the real token, unchanged.
+  """
+  @spec csrf_token() :: String.t() | nil
+  def csrf_token do
+    get_csrf_token()
+  rescue
+    _ -> nil
+  end
+
+  @doc """
   Emits the request org's brand colour tokens as an **unlayered** `<style>`
   block, or nothing at all when the site is unbranded (#48).
 
@@ -25,10 +46,12 @@ defmodule KilnCMSWeb.Layouts do
   Permitted with no nonce: `style-src` is `'self' 'unsafe-inline'` and carries
   no nonce source (`KilnCMSWeb.Router`).
   """
-  attr :org, :any, default: nil, doc: "the request's organization, or nil for the default org"
+  attr :brand, KilnCMS.Branding,
+    required: true,
+    doc: "the resolved brand — see `brand_or_unbranded/1`, which fails closed (#701)"
 
   def brand_tokens(assigns) do
-    assigns = assign(assigns, :css, Branding.for_org(assigns.org).css)
+    assigns = assign(assigns, :css, assigns.brand.css)
 
     # `{...}` does NOT interpolate inside <style> (a HEEx raw-text element), so
     # this must use <%= %>. `raw/1` is likewise required: escaping would turn the
@@ -53,13 +76,27 @@ defmodule KilnCMSWeb.Layouts do
   `:assign_current_org` added to their `on_mount` (it resolves from the socket
   host and needs no signed-in user).
   """
-  attr :current_org, :any, default: nil
+  # Deliberately NO `attr :current_org` with a default. `attr` compiles a
+  # `Map.put_new/3` into the function, so a declared default puts the key on the
+  # assigns *before* the body sees them — which would make the absent case below
+  # unreachable, and this layout would go on rendering the default org's
+  # identity for a join that resolved no org at all (#701).
+  # Always present when this runs as a live layout; the default only guards a
+  # direct render in a test. Safe to default (unlike `:current_org` above),
+  # since there is no absent-vs-nil distinction to preserve here.
+  attr :flash, :map, default: %{}
   slot :inner_content
 
   def auth(assigns) do
-    assigns = assign(assigns, :brand, Branding.for_org(assigns[:current_org]))
+    assigns = assign(assigns, :brand, brand_or_unbranded(assigns))
 
     ~H"""
+    <%!-- Sign-in is where an operator forms their belief about which deployment
+          they are on, and a scrubbed clone shows production's logo and site name
+          here (#469). Telling them after they authenticate is one page too late. --%>
+    <div :if={KilnCMS.Environment.label()} class="-mt-4 mb-4 flex justify-center">
+      <.environment_banner />
+    </div>
     <div class="mb-6 flex w-full justify-center">
       <a href="/" class="flex items-center">
         <img src={@brand.logo_url} class="h-10 w-auto" alt="" referrerpolicy="no-referrer" />
@@ -68,8 +105,136 @@ defmodule KilnCMSWeb.Layouts do
         </span>
       </a>
     </div>
+    <%!-- The library's own live layout renders `Components.Flash`; replacing it
+          with this layout (for the white-label banner above) dropped it, so a
+          flash set on an auth page was held in the socket and never drawn (#884).
+          `Password.ResetForm` / `MagicLink` report success *only* by flashing —
+          without this the /reset and magic-link forms gave no feedback at all.
+          Kiln's own `flash_group` (as `Layouts.app/1` uses) rather than the
+          library's `Components.Flash`, so auth toasts match the rest of the
+          console; that is why the `Components.Flash` override is now gone. --%>
+    <.flash_group flash={@flash} />
     {@inner_content}
     """
+  end
+
+  @doc """
+  The brand to render when the caller may not have resolved an organization at
+  all (#701).
+
+  `Branding.for_org(nil)` resolves the **default** organization, which is right
+  when a caller deliberately asks for the instance-wide identity and wrong when
+  it simply never found out. On a tenant host the second case renders another
+  site's name and logo — the leak #48 exists to prevent, and the one #680 and
+  #558 closed for the token preview and the error pages.
+
+  The two are distinguishable, and the distinction is exactly the bug: a hook
+  that ran always *assigns* `:current_org` (`LiveUserAuth.request_org!/1` returns
+  an org or raises), so a **missing key** means no hook ran. So an absent key
+  renders unbranded, and a present one keeps resolving as before, including the
+  legitimate `nil`.
+
+  ## What this does and does not close
+
+  Defence in depth, and never the whole answer for #701. A url-less join matches
+  no route, and the LiveView channel takes the layout from the matched route's
+  `live_session` too — so such a join falls back to `view.__live__()[:layout]`.
+  For the AshAuthentication views that was *their* layout, not this one, so this
+  function never ran on that path and could not have saved it.
+
+  What closed #701 was putting those views behind `KilnCMSWeb.LiveRouteGuard`
+  instead (`KilnCMSWeb.AuthLive`), so the join is refused before any layout is
+  chosen.
+
+  What this holds for is every path that *does* reach these layouts with no
+  resolved org — which is none today (`Plugs.SetTenant` always assigns, and every
+  `live_session` carries `:assign_current_org`), and that is the point: the next
+  one should render stock rather than another tenant.
+
+  Failing closed here rather than in `Branding.for_org/1` is deliberate. That
+  function has callers for which `nil` genuinely means "the instance", the mail
+  senders and `SignInAlert` among them; making *it* fail closed would turn a
+  branded single-org deployment's reset emails and page titles into stock
+  "KilnCMS" to fix a leak that only exists where a hook was skipped.
+  """
+  @spec brand_or_unbranded(map()) :: Branding.t()
+  def brand_or_unbranded(assigns) do
+    if Map.has_key?(assigns, :current_org) do
+      Branding.for_org(assigns[:current_org])
+    else
+      Branding.defaults()
+    end
+  end
+
+  @doc """
+  The home-screen icon for iOS (`apple-touch-icon`): the site's verified app
+  icon, else the stock mark (#629).
+
+  Through `Branding.verified_app_icon/1`, which is also what the manifest's
+  icons and shortcuts gate on — so this link and the manifest can never
+  disagree about whether the site has a usable icon.
+
+  Two caveats worth knowing, because this surface is less forgiving than the
+  manifest. iOS accepts only PNG and JPEG here, which is why
+  `KilnCMS.Branding.AppIcon` refuses a WebP or GIF that the media library would
+  otherwise allow. And unlike the manifest — which keeps the stock entries
+  alongside a brand icon precisely so an icon that 404s after verification
+  cannot make the app uninstallable — `apple-touch-icon` is a single href with
+  no second candidate. Verification runs at save and again on a nightly
+  AshOban sweep (`SiteBranding` `:reverify_app_icon`, #1147): after a couple of
+  consecutive failures the measured size is cleared (URL kept), so this link
+  falls back to the stock mark instead of a dead brand URL.
+  """
+  @spec app_icon_href(map()) :: String.t()
+  def app_icon_href(assigns) do
+    case assigns |> brand_or_unbranded() |> Branding.verified_app_icon() do
+      {url, _size} -> url
+      nil -> ~p"/images/apple-touch-icon.png"
+    end
+  end
+
+  @doc """
+  The `og:image` for this page: the page's own, else the site's branding image
+  (#560).
+
+  Three properties, each of which the issue asks for explicitly:
+
+  **The page-level chain does not move.** Delivery reads `seo_image` alone and
+  assigns it as `:og_image`; this only supplies a fallback *beneath* that, so a
+  page that sets one is byte-identical to before.
+
+  **The URL is made absolute against the REQUEST'S OWN host**
+  (`KilnCMSWeb.Tenant.base_url/1`, #557). That is why this was blocked: the only
+  base URL used to be the deployment-global `:public_base_url`, so on a tenant
+  subdomain or custom domain the tag would have advertised an image on the wrong
+  host — and a wrong absolute URL in a link preview is worse than no tag.
+
+  **It fails closed**, like `brand_or_unbranded/1` and for the same reason: a
+  missing `:current_org` key means no hook ran, and answering that with the
+  default org's branding would put another tenant's image on this page.
+  """
+  @spec social_image(map()) :: String.t() | nil
+  def social_image(assigns) do
+    assigns[:og_image] || brand_social_image(assigns)
+  end
+
+  defp brand_social_image(assigns) do
+    with true <- Map.has_key?(assigns, :current_org),
+         org when not is_nil(org) <- assigns[:current_org],
+         image when is_binary(image) and image != "" <- Branding.for_org(org).social_image_url do
+      absolute(image, org)
+    else
+      _ -> nil
+    end
+  end
+
+  # An operator may paste either a full URL or a site-relative path, and both
+  # are reasonable things to type into that field. Only the second needs a base.
+  defp absolute("http://" <> _ = url, _org), do: url
+  defp absolute("https://" <> _ = url, _org), do: url
+
+  defp absolute(path, org) do
+    KilnCMSWeb.Tenant.base_url(org) <> "/" <> String.trim_leading(path, "/")
   end
 
   @doc "The site name for an org, resolved through the branding fallback chain."
@@ -124,6 +289,10 @@ defmodule KilnCMSWeb.Layouts do
     >
       {gettext("Search")}
     </.link>
+    <%!-- `/editor/api-keys` and `/account` render here rather than in `console`,
+          and minting an API key against the wrong deployment is one of the more
+          expensive mistakes on the whole surface (#469). --%>
+    <.environment_banner />
     <header class="border-b border-base-content/10 px-4 py-4 sm:px-6 lg:px-8">
       <div class="mx-auto flex max-w-6xl items-center justify-between gap-4">
         <a href="/" class="flex items-center gap-3">
@@ -276,34 +445,41 @@ defmodule KilnCMSWeb.Layouts do
       </aside>
 
       <div class="flex min-h-screen flex-col">
-        <header class="sticky top-0 z-20 flex min-h-14 flex-wrap items-center gap-x-3 gap-y-2 border-b border-base-content/10 bg-base-100/90 px-4 py-2 backdrop-blur sm:px-6">
-          <label
-            for="kiln-nav-toggle"
-            class="-ml-1 cursor-pointer rounded-md p-2 text-base-content/70 hover:bg-base-200 lg:hidden"
-          >
-            <.icon name="hero-bars-3" class="size-5" />
-            <span class="sr-only">{gettext("Menu")}</span>
-          </label>
-          <%!-- Chrome label, not a heading: each page body owns the single <h1>
+        <%!-- The strip rides inside the sticky container rather than above it:
+              an environment indicator that scrolls away is visible only when
+              nothing is at stake. One border, at the bottom of the header, so
+              the shell keeps its single hairline. --%>
+        <div class="sticky top-0 z-20">
+          <.environment_banner />
+          <header class="flex min-h-14 flex-wrap items-center gap-x-3 gap-y-2 border-b border-base-content/10 bg-base-100/90 px-4 py-2 backdrop-blur sm:px-6">
+            <label
+              for="kiln-nav-toggle"
+              class="-ml-1 cursor-pointer rounded-md p-2 text-base-content/70 hover:bg-base-200 lg:hidden"
+            >
+              <.icon name="hero-bars-3" class="size-5" />
+              <span class="sr-only">{gettext("Menu")}</span>
+            </label>
+            <%!-- Chrome label, not a heading: each page body owns the single <h1>
                 (its main heading), so this stays a plain element to preserve
                 one-h1-per-page (regression #174). --%>
-          <div :if={@page_title} class="truncate text-sm font-semibold tracking-tight">
-            {@page_title}
-          </div>
-          <div class="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
-            <.link
-              navigate={~p"/editor/search"}
-              class="hidden items-center gap-2 rounded-md border border-base-content/15 px-2.5 py-1.5 text-sm text-base-content/60 hover:bg-base-200 sm:flex"
-            >
-              <.icon name="hero-magnifying-glass" class="size-4" />
-              <span>{gettext("Search")}</span>
-              <span class="kbd ml-1">⌘K</span>
-            </.link>
-            {render_slot(@actions)}
-            <.locale_switcher />
-            <.theme_toggle />
-          </div>
-        </header>
+            <div :if={@page_title} class="truncate text-sm font-semibold tracking-tight">
+              {@page_title}
+            </div>
+            <div class="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
+              <.link
+                navigate={~p"/editor/search"}
+                class="hidden items-center gap-2 rounded-md border border-base-content/15 px-2.5 py-1.5 text-sm text-base-content/60 hover:bg-base-200 sm:flex"
+              >
+                <.icon name="hero-magnifying-glass" class="size-4" />
+                <span>{gettext("Search")}</span>
+                <span class="kbd ml-1">⌘K</span>
+              </.link>
+              {render_slot(@actions)}
+              <.locale_switcher />
+              <.theme_toggle />
+            </div>
+          </header>
+        </div>
 
         <main id="main" class="flex-1 px-4 py-6 sm:px-6 lg:px-8">
           <div class={@container_class}>
@@ -316,6 +492,67 @@ defmodule KilnCMSWeb.Layouts do
     </div>
     """
   end
+
+  @doc """
+  Names the deployment when `KILN_ENV_LABEL` is set, and renders nothing at all
+  otherwise (#469).
+
+  A full-width strip rather than a badge in the header row, deliberately: the
+  incident it prevents is an editor working in the wrong environment on a
+  scrubbed staging clone whose console is byte-for-byte identical to
+  production's, and a pill among six other header controls is exactly the kind
+  of thing you stop seeing after a day. In the console it sits *inside* the
+  sticky header container for the same reason — a strip that scrolls away is
+  visible only at the top of an unscrolled page, which is the moment nothing is
+  at stake.
+
+  The label is real text, not colour alone — the colour is the glance, the word
+  is what survives a screen reader, a monochrome display and the ~8% of readers
+  with a colour-vision deficiency. It carries an `aria-label`, because a bare
+  `<div>` in the chrome belongs to no landmark and would otherwise be reachable
+  only by reading the page linearly. `role="status"` is deliberately absent:
+  this is standing chrome, not an update, and announcing it on every navigation
+  would make it noise.
+
+  `KilnCMS.Environment.tone/0` is asked only when there is a label to draw. It
+  logs on an unrecognized value and this renders once per page, so asking on a
+  deployment that shows no strip would warn forever about a value nothing uses.
+  """
+  def environment_banner(assigns) do
+    assigns = assign(assigns, :label, KilnCMS.Environment.label())
+
+    ~H"""
+    <div
+      :if={@label}
+      aria-label={gettext("Deployment environment")}
+      class={
+        [
+          "flex items-center justify-center gap-2 px-4 py-1 text-xs font-semibold uppercase",
+          # The console's own uppercase micro-label tracking (`.side-section` in
+          # app.css): loose tracking is load-bearing for legibility in caps, and
+          # the shell already picked the value.
+          "tracking-[0.06em]",
+          environment_tone_class(KilnCMS.Environment.tone())
+        ]
+      }
+    >
+      <.icon name="hero-exclamation-triangle" class="size-3.5 shrink-0" />
+      <span class="min-w-0 truncate">{gettext("Environment: %{label}", label: @label)}</span>
+    </div>
+    """
+  end
+
+  # `bg-<tone>/N` with `text-<tone>-ink` — an accent used as text on its own pale
+  # tint only reaches ~2-4:1 (the ink-token note in assets/css/app.css). Spelled
+  # out per tone rather than interpolated: Tailwind scans source for literal
+  # class names, so a built string compiles to no CSS at all.
+  #
+  # No neutral clause: `bg-base-200` is ~1.06:1 against the page it would be
+  # drawn on, and a strip nobody can see is worse than no strip.
+  defp environment_tone_class("error"), do: "bg-error/20 text-error-ink"
+  defp environment_tone_class("info"), do: "bg-info/20 text-info-ink"
+  defp environment_tone_class("success"), do: "bg-success/20 text-success-ink"
+  defp environment_tone_class(_warning), do: "bg-warning/20 text-warning-ink"
 
   # First letter of the signed-in user's email, for the account avatar.
   defp user_initial(%{email: email}) when is_binary(email),
@@ -361,11 +598,21 @@ defmodule KilnCMSWeb.Layouts do
       %{key: :content, label: gettext("Content"), path: ~p"/editor", icon: "hero-document-text"},
       %{key: :media, label: gettext("Media"), path: ~p"/media", icon: "hero-photo"},
       %{key: :taxonomy, label: gettext("Taxonomy"), path: ~p"/editor/taxonomy", icon: "hero-tag"},
+      %{key: :menus, label: gettext("Menus"), path: ~p"/editor/menus", icon: "hero-bars-3"},
       %{
         key: :calendar,
         label: gettext("Calendar"),
         path: ~p"/editor/calendar",
         icon: "hero-calendar-days"
+      },
+      # Content releases (#500) — editorial planning, so it sits with the author
+      # group next to the calendar it plots onto, not with the admin tools. The
+      # admin-only half (schedule/publish/roll back) is gated on the page.
+      %{
+        key: :releases,
+        label: gettext("Releases"),
+        path: ~p"/editor/releases",
+        icon: "hero-rocket-launch"
       },
       multi_locale? &&
         %{
@@ -379,6 +626,15 @@ defmodule KilnCMSWeb.Layouts do
         label: gettext("Analytics"),
         path: ~p"/editor/analytics",
         icon: "hero-chart-bar"
+      },
+      # Outbound broken links (#474). In the author group, not the admin one:
+      # fixing a dead citation is editorial work. The opt-in switch on the page
+      # is what admins own.
+      %{
+        key: :links,
+        label: gettext("Links"),
+        path: ~p"/editor/links",
+        icon: "hero-link-slash"
       }
     ]
 
@@ -392,6 +648,12 @@ defmodule KilnCMSWeb.Layouts do
             icon: "hero-swatch"
           },
           %{
+            key: :code_injection,
+            label: gettext("Code injection"),
+            path: ~p"/editor/code-injection",
+            icon: "hero-code-bracket"
+          },
+          %{
             key: :types,
             label: gettext("Content types"),
             path: ~p"/editor/types",
@@ -403,11 +665,36 @@ defmodule KilnCMSWeb.Layouts do
             path: ~p"/editor/fields",
             icon: "hero-adjustments-horizontal"
           },
+          # Next to Content types, not down with Mail: what a feed carries is a
+          # statement about content types, and the "has a public index" switch
+          # this page defers to lives one item up (#719).
+          %{
+            key: :feeds,
+            label: gettext("Feeds"),
+            path: ~p"/editor/feeds",
+            icon: "hero-rss"
+          },
           %{
             key: :forms,
             label: gettext("Forms"),
             path: ~p"/editor/forms",
             icon: "hero-clipboard-document-list"
+          },
+          # Per-site claim checking (#857). Called "Claim checking" rather than
+          # "Compliance", which is already the Governance page's subject and the
+          # name of the editor panel this switches on — an admin looking for one
+          # should not have to guess which of two items owns it.
+          %{
+            key: :compliance,
+            label: gettext("Claim checking"),
+            path: ~p"/editor/compliance",
+            icon: "hero-scale"
+          },
+          %{
+            key: :funnels,
+            label: gettext("Funnels"),
+            path: ~p"/editor/funnels",
+            icon: "hero-funnel"
           },
           %{
             key: :webhooks,
@@ -432,6 +719,18 @@ defmodule KilnCMSWeb.Layouts do
             label: gettext("Automation"),
             path: ~p"/editor/automation",
             icon: "hero-cpu-chip"
+          },
+          %{
+            key: :social,
+            label: gettext("Social"),
+            path: ~p"/editor/social",
+            icon: "hero-megaphone"
+          },
+          %{
+            key: :backups,
+            label: gettext("Backups"),
+            path: ~p"/editor/backups",
+            icon: "hero-archive-box"
           },
           %{key: :mail, label: gettext("Mail"), path: ~p"/editor/mail", icon: "hero-envelope"},
           %{

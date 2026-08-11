@@ -1,0 +1,55 @@
+<%!--
+  The lock page (#496). Rendered for a PUBLISHED document that carries a shared
+  passphrase, to a reader who hasn't entered it yet.
+
+  Like the paywall it is handed a `KilnCMSWeb.Teaser` struct and never a content
+  record — that struct has no `blocks` field, so this template *cannot* render
+  document body content even if the underlying read were widened. The point of
+  the page is to describe a document in order not to serve it.
+--%>
+<Layouts.public current_org={@current_org} locale={@locale} locale_links={[]}>
+  <article class="kiln-locked space-y-6">
+    <header class="space-y-3">
+      <.badge variant="neutral">{gettext("Protected")}</.badge>
+      <h1 class="text-3xl font-semibold text-balance">{@teaser.title}</h1>
+      <p :if={@teaser.summary} class="text-lg text-base-content/70">{@teaser.summary}</p>
+    </header>
+
+    <section class="card card-pad mx-auto w-full max-w-md space-y-4">
+      <div class="space-y-1 text-center">
+        <h2 class="text-lg font-medium">{gettext("This page needs a passphrase")}</h2>
+        <p class="text-sm text-base-content/70">
+          {gettext("Whoever shared this page with you can give you the passphrase.")}
+        </p>
+      </div>
+
+      <p :if={@error} class="alert alert-error text-sm" role="alert">
+        {gettext("That passphrase didn't work. Try again.")}
+      </p>
+
+      <form action={~p"/_unlock"} method="post" class="space-y-3">
+        <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+        <input type="hidden" name="path" value={@unlock_path} />
+        <input type="hidden" name="type" value={@unlock_type} />
+        <input type="hidden" name="locale" value={@unlock_locale} />
+
+        <div class="space-y-1">
+          <label for="kiln-passphrase" class="block text-sm font-medium">
+            {gettext("Passphrase")}
+          </label>
+          <input
+            type="password"
+            id="kiln-passphrase"
+            name="passphrase"
+            autocomplete="off"
+            autofocus
+            required
+            class="field-input"
+          />
+        </div>
+
+        <button type="submit" class="btn btn-primary w-full">{gettext("Unlock")}</button>
+      </form>
+    </section>
+  </article>
+</Layouts.public>

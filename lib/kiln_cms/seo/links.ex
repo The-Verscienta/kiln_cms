@@ -50,9 +50,18 @@ defmodule KilnCMS.Seo.Links do
   @doc """
   Pages worth linking to from `record`.
 
-  Options: `:limit` (default #{@default_limit}), `:actor`, `:tenant`, and
-  `:exclude_paths` — paths the body already links to, so the panel doesn't
-  suggest a link that is already there.
+  Scoped to `record`'s own organization — every read underneath threads
+  `record.org_id` as the tenant, on both the semantic pgvector leg
+  (`Search.Related`) and the keyword leg (`Search.global`) — and to published,
+  `:public` content, mirroring the delivery boundary in
+  `Slugs.find_published_by_alias/3`. That published/public filter, NOT actor
+  authorization, is the boundary: the panel surfaces nothing an anonymous
+  visitor couldn't already reach, so suggestions are identical for every actor.
+  Hence no `:actor` or `:tenant` option — the tenant is the record's own org,
+  and there is no per-actor scoping to apply (#869).
+
+  Options: `:limit` (default #{@default_limit}) and `:exclude_paths` — paths the
+  body already links to, so the panel doesn't suggest one that is already there.
   """
   @spec suggest(struct(), keyword()) :: [suggestion()]
   def suggest(record, opts \\ []) do
@@ -103,7 +112,10 @@ defmodule KilnCMS.Seo.Links do
           tenant: record.org_id,
           authorize?: false,
           limit: limit * 2,
-          locale: record.locale
+          locale: record.locale,
+          # Only what `content_hits/1` reads. This used to sweep media and
+          # every taxonomy resource too and throw them away (#960).
+          sections: Search.content_sections()
         )
         |> content_hits()
         |> Enum.flat_map(&entry(&1, record.org_id))
@@ -121,11 +133,12 @@ defmodule KilnCMS.Seo.Links do
 
   # Content sections only. `global/2` also returns media, categories and tags,
   # none of which are pages you would link a paragraph to.
+  # `Map.take/2` is still here rather than a bare flat_map: the caller above
+  # asks for exactly these sections, but this stays correct if someone widens
+  # that request later, and it costs one map traversal.
   defp content_hits(sections) do
-    keys = Enum.map(ContentTypes.all(), & &1.section) ++ [:entries]
-
     sections
-    |> Map.take(keys)
+    |> Map.take(Search.content_sections())
     |> Enum.flat_map(fn {_section, hits} -> hits end)
   end
 

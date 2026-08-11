@@ -118,6 +118,32 @@ defmodule KilnCMS.Analytics.ContentViewDay do
       prepare build(sort: [day: :asc], select: [:day, :content_type, :content_id, :views])
     end
 
+    # The export's source read (#618). `:in_window` has no upper bound and no
+    # `pagination` block, so it materializes the whole window into one list —
+    # fine for the dashboard's 7d/30d chart, but chunking a response built from
+    # an already-materialized list bounds nothing. This is the same shape with
+    # a `to` bound and keyset pagination added, so `Ash.stream!` can page
+    # through it instead. The caller (the export controller and the
+    # `mix kiln.analytics.export` task) is responsible for capping the span at
+    # `retention_days/0` — exporting a wider window than what's retained would
+    # just return fewer rows than requested, but an unbounded `to` on a
+    # long-lived site is an unbounded scan.
+    #
+    # `id` breaks ties within a day for a stable keyset cursor — `day` alone
+    # is not unique.
+    read :in_range do
+      description "Daily view buckets between two days inclusive, oldest first, keyset-paginated."
+      argument :from, :date, allow_nil?: false
+      argument :to, :date, allow_nil?: false
+      pagination keyset?: true, required?: false
+      filter expr(day >= ^arg(:from) and day <= ^arg(:to))
+
+      prepare build(
+                sort: [day: :asc, id: :asc],
+                select: [:id, :day, :content_type, :content_id, :views]
+              )
+    end
+
     # Buckets first written before the retention window. Keyset pagination feeds
     # the AshOban `:purge_expired` trigger.
     #

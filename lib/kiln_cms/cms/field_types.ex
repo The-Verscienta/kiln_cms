@@ -51,7 +51,12 @@ defmodule KilnCMS.CMS.FieldTypes do
   # discovered, so the registry stays a literal (same stance as `@core`).
   @builtin_modules [
     KilnCMS.CMS.FieldTypes.Geolocation,
-    KilnCMS.CMS.FieldTypes.Computed
+    KilnCMS.CMS.FieldTypes.Computed,
+    # Event support (#480). Neither is an "event type" on its own — a dynamic
+    # content type carrying a `datetime_range` *is* the event, which is what
+    # keeps Event a thing an operator composes rather than one Kiln hardcodes.
+    KilnCMS.CMS.FieldTypes.DatetimeRange,
+    KilnCMS.CMS.FieldTypes.Recurrence
   ]
 
   # name → module, baked at compile time (plugins are compile-time code, D4).

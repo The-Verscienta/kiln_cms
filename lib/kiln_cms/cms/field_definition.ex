@@ -53,7 +53,15 @@ defmodule KilnCMS.CMS.FieldDefinition do
   end
 
   actions do
-    defaults [:read, :destroy]
+    defaults [:read]
+
+    # `require_atomic? false` because `BustTypeRegistry` runs `after_action`, and
+    # an atomic destroy has no record to hand it. A field-definition destroy is
+    # a rare admin action, so losing the atomic path costs nothing.
+    destroy :destroy do
+      primary? true
+      require_atomic? false
+    end
 
     default_accept [
       :content_type,
@@ -117,6 +125,11 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # A formula belongs to a `:computed` field only — drop it on any other type
     # so switching an existing computed field away isn't a dead end (#429).
     change KilnCMS.CMS.Changes.ClearCompute
+
+    # Whether a type is event-shaped (#480) is decided by whether it carries a
+    # `datetime_range` field, so the cached answer has to drop on a field write,
+    # not only on a type write.
+    change KilnCMS.CMS.Changes.BustTypeRegistry, on: [:create, :update, :destroy]
   end
 
   validations do
@@ -176,10 +189,16 @@ defmodule KilnCMS.CMS.FieldDefinition do
     attribute :content_type, :atom, public?: true
 
     # Machine key inside the `custom_fields` map.
-    attribute :name, :string, allow_nil?: false, public?: true
+    attribute :name, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
 
     # Human label shown in the editor and (optionally) on delivery.
-    attribute :label, :string, allow_nil?: false, public?: true
+    attribute :label, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
 
     # No `one_of` constraint: the allowed set includes plugin-registered types
     # (`KilnCMS.CMS.FieldTypes.names/0`), enforced by `Validations.KnownFieldType`
@@ -201,20 +220,24 @@ defmodule KilnCMS.CMS.FieldDefinition do
     attribute :target_type, :string, public?: true
 
     # Optional helper text rendered under the input.
-    attribute :help_text, :string, public?: true
+    attribute :help_text, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.paragraph()]
 
     # Display order within a content type's custom-field section.
     attribute :position, :integer, allow_nil?: false, default: 0, public?: true
 
     # Optional default value (stored as a string, coerced to the field type when
     # an editor leaves the input blank).
-    attribute :default, :string, public?: true
+    attribute :default, :string, public?: true, constraints: [max_length: KilnCMS.Limits.line()]
 
     # The formula behind a `:computed` field (#429) — a `KilnCMS.CMS.Computed`
     # template like `"{{ reading_time(body) }} min read"`, parsed and validated
     # on save by `Validations.ComputeExpression` and interpreted on every write
     # and every fire. Nil for every other field type.
-    attribute :compute, :string, public?: true
+    attribute :compute, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.paragraph()]
 
     timestamps()
   end

@@ -246,7 +246,7 @@ defmodule KilnCMS.CMS.RelationshipsTest do
                  actor: ctx.editor
                )
 
-      assert Exception.message(error) =~ "same tag"
+      assert Exception.message(error) =~ "cannot list the same id as add_tag_ids"
       assert current_tags(ctx.post, ctx.editor) == MapSet.new([ctx.a.id, ctx.b.id])
     end
 
@@ -318,6 +318,129 @@ defmodule KilnCMS.CMS.RelationshipsTest do
 
       assert [%{id: rel_id}] = a.related_pages
       assert rel_id == b.id
+    end
+  end
+
+  # The same non-destructive merge verbs the tags got in #521, generalized to
+  # the related-content arrays (#637). Before this, a partial writer sending
+  # `related_post_ids: ["<one>"]` detached every other related link by omission,
+  # with no verb to add or remove one link in isolation.
+  describe "add_related_*_ids / remove_related_*_ids (merge semantics, #637)" do
+    setup do
+      editor = user(:editor)
+      post = CMS.create_post!(%{title: "Src", slug: slug()}, actor: editor)
+      a = CMS.create_post!(%{title: "A", slug: slug()}, actor: editor)
+      b = CMS.create_post!(%{title: "B", slug: slug()}, actor: editor)
+      c = CMS.create_post!(%{title: "C", slug: slug()}, actor: editor)
+
+      post =
+        CMS.update_post!(post, %{related_post_ids: [a.id, b.id]},
+          actor: editor,
+          load: [:related_posts]
+        )
+
+      %{editor: editor, post: post, a: a, b: b, c: c}
+    end
+
+    defp related_ids(record), do: MapSet.new(record.related_posts, & &1.id)
+
+    defp current_related(post, actor),
+      do: post.id |> CMS.get_post!(actor: actor, load: [:related_posts]) |> related_ids()
+
+    test "add relates the listed link and leaves the rest attached", ctx do
+      updated =
+        CMS.update_post!(ctx.post, %{add_related_post_ids: [ctx.c.id]},
+          actor: ctx.editor,
+          load: [:related_posts]
+        )
+
+      assert related_ids(updated) == MapSet.new([ctx.a.id, ctx.b.id, ctx.c.id])
+    end
+
+    test "remove unrelates the listed link and is idempotent", ctx do
+      once =
+        CMS.update_post!(ctx.post, %{remove_related_post_ids: [ctx.a.id]},
+          actor: ctx.editor,
+          load: [:related_posts]
+        )
+
+      assert related_ids(once) == MapSet.new([ctx.b.id])
+
+      # Removing an already-detached link is a no-op, not an error.
+      twice =
+        CMS.update_post!(once, %{remove_related_post_ids: [ctx.a.id]},
+          actor: ctx.editor,
+          load: [:related_posts]
+        )
+
+      assert related_ids(twice) == MapSet.new([ctx.b.id])
+    end
+
+    test "a metadata-only update leaves the related links untouched", ctx do
+      updated =
+        CMS.update_post!(ctx.post, %{title: "Retitled"},
+          actor: ctx.editor,
+          load: [:related_posts]
+        )
+
+      assert related_ids(updated) == MapSet.new([ctx.a.id, ctx.b.id])
+    end
+
+    test "combining related_post_ids with a merge verb is refused", ctx do
+      for params <- [
+            %{related_post_ids: [ctx.a.id], add_related_post_ids: [ctx.c.id]},
+            %{related_post_ids: [ctx.a.id], remove_related_post_ids: [ctx.b.id]},
+            # An explicit null still counts as replacing — the #521 SDK shape.
+            %{related_post_ids: nil, add_related_post_ids: [ctx.c.id]}
+          ] do
+        assert {:error, error} = CMS.update_post(ctx.post, params, actor: ctx.editor)
+        assert Exception.message(error) =~ "cannot be combined", inspect(params)
+      end
+
+      assert current_related(ctx.post, ctx.editor) == MapSet.new([ctx.a.id, ctx.b.id])
+    end
+
+    test "listing the same id in both verbs is refused", ctx do
+      assert {:error, error} =
+               CMS.update_post(
+                 ctx.post,
+                 %{add_related_post_ids: [ctx.c.id], remove_related_post_ids: [ctx.c.id]},
+                 actor: ctx.editor
+               )
+
+      assert Exception.message(error) =~ "cannot list the same id as add_related_post_ids"
+      assert current_related(ctx.post, ctx.editor) == MapSet.new([ctx.a.id, ctx.b.id])
+    end
+
+    test "a repeated id within one verb is de-duplicated, not rejected", ctx do
+      updated =
+        CMS.update_post!(ctx.post, %{add_related_post_ids: [ctx.c.id, ctx.c.id]},
+          actor: ctx.editor,
+          load: [:related_posts]
+        )
+
+      assert related_ids(updated) == MapSet.new([ctx.a.id, ctx.b.id, ctx.c.id])
+    end
+
+    test "the verbs are on pages too, keyed to the page relationship", ctx do
+      p1 = CMS.create_page!(%{title: "P1", slug: slug()}, actor: ctx.editor)
+      p2 = CMS.create_page!(%{title: "P2", slug: slug()}, actor: ctx.editor)
+
+      p1 =
+        CMS.update_page!(p1, %{related_page_ids: [p2.id]},
+          actor: ctx.editor,
+          load: [:related_pages]
+        )
+
+      p3 = CMS.create_page!(%{title: "P3", slug: slug()}, actor: ctx.editor)
+
+      updated =
+        CMS.update_page!(p1, %{add_related_page_ids: [p3.id]},
+          actor: ctx.editor,
+          load: [:related_pages]
+        )
+
+      assert MapSet.new(updated.related_pages, & &1.id) == MapSet.new([p2.id, p3.id])
     end
   end
 
@@ -432,6 +555,148 @@ defmodule KilnCMS.CMS.RelationshipsTest do
                  %{source_id: page.id, target_id: post.id},
                  actor: viewer
                )
+    end
+  end
+
+  # #639: the merge machinery is emitted from one `mergeable` list in
+  # `KilnCMS.CMS.Content`, rather than hand-written per relationship per action.
+  # These assert the properties that hand-writing could break — and did come
+  # close to: `:update` and `:autosave` previously declared the same six
+  # arguments in two different orders, which is the same drift one step short of
+  # a missing one.
+  describe "the merge machinery is generated, not hand-written (#639)" do
+    # `Entry` too, and it is the one that matters most: it backs every
+    # admin-defined content type, so a shape that drifts there drifts for types
+    # nobody wrote a test for.
+    @content_resources [KilnCMS.CMS.Page, KilnCMS.CMS.Post, KilnCMS.CMS.Entry]
+
+    defp merge_arguments(resource, action) do
+      resource
+      |> Ash.Resource.Info.action(action)
+      |> Map.fetch!(:arguments)
+      |> Enum.map(& &1.name)
+      |> Enum.filter(&(to_string(&1) =~ ~r/_ids$/))
+    end
+
+    defp merge_entities(resource, action) do
+      resource
+      |> Ash.Resource.Info.action(action)
+      |> Map.fetch!(:changes)
+      |> Enum.flat_map(fn
+        %Ash.Resource.Change{change: {Ash.Resource.Change.ManageRelationship, opts}} ->
+          [{:manage, opts[:argument], opts[:relationship], opts[:opts]}]
+
+        %Ash.Resource.Change{change: {KilnCMS.CMS.Changes.NormalizeManagedArguments, opts}} ->
+          [{:normalize, opts[:arguments]}]
+
+        %Ash.Resource.Validation{validation: {KilnCMS.CMS.Validations.MergeArguments, opts}} ->
+          [{:merge_validation, opts[:complete], opts[:add], opts[:remove]}]
+
+        _other ->
+          []
+      end)
+    end
+
+    # The asymmetry that mattered: `ContentEditorLive` feeds `:autosave` the
+    # params it collected for the `:update` form, so a merge argument on one and
+    # not the other fails every debounce with `NoSuchInput` while explicit Save
+    # keeps working.
+    test ":update and :autosave accept the same merge arguments" do
+      for resource <- @content_resources do
+        assert merge_arguments(resource, :update) == merge_arguments(resource, :autosave),
+               "#{inspect(resource)}: :update and :autosave disagree on merge arguments"
+      end
+    end
+
+    # `:create` takes the complete-set arguments but none of the verbs — there
+    # are no existing links to merge against. What it must NOT do is miss a
+    # relationship the other two accept: a headless create passing `author_ids`
+    # would fail with `NoSuchInput` while the equivalent update succeeded.
+    test ":create accepts every complete-set argument, and no verbs" do
+      for resource <- @content_resources do
+        completes =
+          resource
+          |> merge_arguments(:update)
+          |> Enum.reject(&(to_string(&1) =~ ~r/^(add|remove)_/))
+
+        assert merge_arguments(resource, :create) == completes,
+               "#{inspect(resource)}: :create's merge arguments are not the complete-set " <>
+                 "half of :update's"
+      end
+    end
+
+    test ":update and :autosave manage those relationships identically" do
+      for resource <- @content_resources do
+        assert merge_entities(resource, :update) == merge_entities(resource, :autosave),
+               "#{inspect(resource)}: :update and :autosave disagree on merge changes"
+      end
+    end
+
+    # Every complete-set argument gets all three changes and a validation, and
+    # every verb is derived from its own complete argument — the property that
+    # makes adding a relationship one list entry rather than eight edits.
+    test "each mergeable relationship gets the full quartet, with derived verbs" do
+      for resource <- @content_resources, action <- [:update, :autosave] do
+        entities = merge_entities(resource, action)
+
+        completes =
+          for {:merge_validation, complete, _add, _remove} <- entities, do: complete
+
+        assert length(completes) >= 2, "#{inspect(resource)}.#{action}: no merge validations"
+
+        for complete <- completes do
+          add = :"add_#{complete}"
+          remove = :"remove_#{complete}"
+
+          assert {:merge_validation, complete, add, remove} in entities,
+                 "#{inspect(resource)}.#{action}: #{complete}'s verbs are not derived from it"
+
+          relationship =
+            Enum.find_value(entities, fn
+              {:manage, ^complete, rel, _opts} -> rel
+              _ -> nil
+            end)
+
+          assert relationship, "#{inspect(resource)}.#{action}: #{complete} manages nothing"
+
+          assert {:manage, complete, relationship, [type: :append_and_remove]} in entities
+          assert {:manage, add, relationship, [type: :append]} in entities
+
+          # Not `type: :remove` — its `on_no_match: :error` would make removing
+          # an already-detached link a failure rather than a no-op.
+          assert {:manage, remove, relationship,
+                  [
+                    on_lookup: :ignore,
+                    on_match: :unrelate,
+                    on_no_match: :ignore,
+                    on_missing: :ignore
+                  ]} in entities
+        end
+      end
+    end
+
+    # `NormalizeManagedArguments` snapshots the argument onto the changeset, so
+    # a `manage_relationship` declared before it would read the raw value.
+    test "normalization covers every merge argument, and precedes every manage" do
+      for resource <- @content_resources, action <- [:update, :autosave] do
+        entities = merge_entities(resource, action)
+
+        normalize_at = Enum.find_index(entities, &match?({:normalize, _}, &1))
+        assert normalize_at, "#{inspect(resource)}.#{action}: nothing normalizes the arguments"
+
+        {:normalize, normalized} = Enum.at(entities, normalize_at)
+
+        for {entity, index} <- Enum.with_index(entities),
+            match?({:manage, _, _, _}, entity) do
+          {:manage, argument, _rel, _opts} = entity
+
+          assert index > normalize_at,
+                 "#{inspect(resource)}.#{action}: #{argument} is managed before normalization"
+
+          assert argument in normalized,
+                 "#{inspect(resource)}.#{action}: #{argument} is managed but never normalized"
+        end
+      end
     end
   end
 end

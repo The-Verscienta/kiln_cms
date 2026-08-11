@@ -41,48 +41,88 @@ defmodule KilnCMSWeb.InContextEditLive do
   @impl true
   def mount(%{"type" => type, "slug" => slug} = params, _session, socket) do
     actor = socket.assigns.current_user
+    locale = locale_param(params)
 
-    case ContentTypes.get(type) do
+    # Each failure has its own answer, so they are tagged rather than collapsed
+    # into one "no such content": an unwritable record is not a missing one, and
+    # the reader is sent somewhere useful.
+    with ct when not is_nil(ct) <- ContentTypes.get(type),
+         record when not is_nil(record) <-
+           fetch_by_slug(ct.type, slug, locale, actor, socket.assigns.current_org),
+         {true, _ct, _record} <-
+           {may_write?(record, actor, socket.assigns.current_org), ct, record} do
+      {:ok, socket |> assign(:may_write?, true) |> mount_editor(ct, record, actor, params)}
+    else
+      # Read-only visitors get the read-only surface, not an editor that accepts
+      # a page of typing and refuses all of it on Save (#1159).
+      {false, ct, record} ->
+        {:ok,
+         socket
+         |> put_flash(:info, gettext("You can view this content but not edit it."))
+         |> push_navigate(to: ~p"/editor/preview/#{ct.type}/#{record.id}")}
+
       nil ->
-        {:ok, redirect_to_editor(socket, gettext("Unknown content type."))}
-
-      ct ->
-        case fetch_by_slug(ct.type, slug, actor, socket.assigns.current_org) do
-          nil ->
-            {:ok, redirect_to_editor(socket, gettext("No such content to edit."))}
-
-          record ->
-            {:ok,
-             socket
-             |> assign(:kind, ct.type)
-             |> assign(:ct, ct)
-             |> assign(:actor, actor)
-             # Deep-link target from the visual-editing bridge (#355):
-             # `?focus=<block_id>` scrolls to and focuses that block on load.
-             |> assign(:focus_block_id, params["focus"])
-             |> assign(:autosave_timer, nil)
-             |> assign(:save_state, :saved)
-             |> assign(:conflict, false)
-             |> assign(:moved_announcement, nil)
-             # Bumped on server-driven form replacement (save/restore/reload) so the
-             # `phx-update="ignore"` editable regions remount and reload from the
-             # fresh content rather than keeping the stale DOM they own.
-             |> assign(:region_version, 0)
-             |> assign_record(record)}
-        end
+        {:ok, redirect_to_editor(socket, gettext("No such content to edit."))}
     end
   end
 
-  # The editable record for a public slug. Editors may read any state (see the
-  # content read policy), so this returns the live working copy — draft or
+  # Whether the actor may WRITE this record, the concept this console never had
+  # (#1159). `/editor/site/...` sits in the editor-tier live_session, and that
+  # gate is coarser than it looks: `Checks.ReadableContentType` lets an editor
+  # restricted to other types read this one exactly as a signed-in consumer
+  # does, so they can open a published page they may not author. Everything on
+  # this screen then works — the regions are `contenteditable`, drag-reorder
+  # runs, Save is present — until the update is refused and a page of typing is
+  # gone.
+  #
+  # Keyed on `:autosave`, the same action `ContentEditorLive.may_write?/3` asks
+  # about, so the two consoles cannot disagree about who may edit a record.
+  defp may_write?(record, actor, org), do: Ash.can?({record, :autosave}, actor, tenant: org)
+
+  defp mount_editor(socket, ct, record, actor, params) do
+    socket
+    |> assign(:kind, ct.type)
+    |> assign(:ct, ct)
+    |> assign(:actor, actor)
+    # Deep-link target from the visual-editing bridge (#355):
+    # `?focus=<block_id>` scrolls to and focuses that block on load.
+    |> assign(:focus_block_id, params["focus"])
+    |> assign(:autosave_timer, nil)
+    |> assign(:save_state, :saved)
+    |> assign(:conflict, false)
+    |> assign(:moved_announcement, nil)
+    # Bumped on server-driven form replacement (save/restore/reload) so the
+    # `phx-update="ignore"` editable regions remount and reload from the
+    # fresh content rather than keeping the stale DOM they own.
+    |> assign(:region_version, 0)
+    |> assign_record(record)
+  end
+
+  # The editable record for a public slug: the live working copy — draft or
   # published — whose `blocks` the page renders and edits write to.
-  defp fetch_by_slug(kind, slug, actor, org) do
+  #
+  # NOT "editors may read any state". That was the comment here, and it is false
+  # for a restricted editor (#1159): `Checks.ReadableContentType` grants the
+  # see-everything read only for types in the actor's `readable_types` scope,
+  # and an out-of-scope type falls through to the published/audience filters —
+  # so this can return a *published* record to someone who may not author it,
+  # which is exactly why `mount/3` now asks whether they may write it.
+  defp fetch_by_slug(kind, slug, locale, actor, org) do
     # Scope to the current site's org (epic #336) so in-context editing on one
     # site's host only resolves that site's content.
+    #
+    # Locale is part of the identity (`[slug, locale]`). Absent `?locale=` falls
+    # back to the default — an older bridge or a hand-typed URL (#1104). Shared
+    # block ids across locale variants (#502) make loading the wrong variant a
+    # silent cross-locale write.
     case ContentTypes.list!(kind,
            actor: actor,
            tenant: org,
-           query: [filter: [slug: slug], select: [:id], limit: 1]
+           query: [
+             filter: [slug: slug, locale: locale],
+             select: [:id],
+             limit: 1
+           ]
          ) do
       [%{id: id} | _] ->
         ContentTypes.get_record!(kind, id,
@@ -96,6 +136,10 @@ defmodule KilnCMSWeb.InContextEditLive do
     end
   rescue
     _ -> nil
+  end
+
+  defp locale_param(params) do
+    KilnCMSWeb.Params.string(params, "locale", KilnCMS.I18n.default_locale())
   end
 
   defp assign_record(socket, record) do
@@ -119,7 +163,14 @@ defmodule KilnCMSWeb.InContextEditLive do
   # An inline region reports its edited text/HTML. Update just that block's field
   # in the working set (every other block and its stable id untouched) and persist
   # as a draft autosave, or mark it for an explicit Save on non-draft content.
-  def handle_event("update_block", %{"id" => id, "value" => value}, socket) do
+  #
+  # `value` is a binary for a plain-text region and a TipTap document (a map)
+  # for a rich one, so both shapes are the contract. A LIST is not, and is the
+  # shape worth excluding: `PortableText.from_tiptap/1` returns a list
+  # unchanged, so `"value" => [%{"_type" => "block", ...}]` would have written
+  # a client-authored body straight into the block without normalisation.
+  def handle_event("update_block", %{"id" => id, "value" => value}, socket)
+      when is_binary(id) and (is_binary(value) or is_map(value)) do
     case block_target(socket, id) do
       {index, field} ->
         inputs = InlineEditing.put_block_field(socket.assigns.block_inputs, index, field, value)
@@ -133,7 +184,7 @@ defmodule KilnCMSWeb.InContextEditLive do
   # Drag-and-drop reorder (the `Sortable` hook pushes the new order of block ids).
   # Reordering is a structural edit, but a single-block move is cheap and stays on
   # the inline surface; add/remove of blocks remains in the full editor (#335).
-  def handle_event("reorder", %{"order" => order}, socket) do
+  def handle_event("reorder", %{"order" => order}, socket) when is_list(order) do
     case reordered(socket, order) do
       {:ok, socket} -> {:noreply, mark_dirty(socket)}
       :noop -> {:noreply, socket}
@@ -142,7 +193,8 @@ defmodule KilnCMSWeb.InContextEditLive do
 
   # Keyboard-accessible reorder (the up/down buttons), so reordering isn't
   # drag-only (mirrors the block editor's #171 controls). Announces the move.
-  def handle_event("move_block", %{"id" => id, "dir" => dir}, socket) do
+  def handle_event("move_block", %{"id" => id, "dir" => dir}, socket)
+      when is_binary(id) and is_binary(dir) do
     ids = Enum.map(socket.assigns.blocks, &to_string(&1.id))
 
     with {order, pos} <- neighbor_swap(ids, id, dir),
@@ -218,7 +270,35 @@ defmodule KilnCMSWeb.InContextEditLive do
   # `:autosave` (debounced draft) share this — the `:autosave` action tags and
   # coalesces its PaperTrail versions so an edit-per-pause doesn't flood history.
   # Returns `{:ok | :conflict | :error, socket}` with the save state applied.
+  # The mount decision, re-asserted at the write. `mount/3` refuses with
+  # `push_navigate`, which ends the LiveView — so the guarantee holds only by
+  # accident of how the refusal is spelled. Render a "read-only" panel instead,
+  # an ordinary refactor, and every write below becomes reachable. This is the
+  # one funnel they all pass through (#1159).
+  #
+  # The ASSIGN, not a fresh `Ash.can?`. Recomputing it here would rebuild the
+  # whole `:autosave` changeset — a `field_definitions` read plus the policy
+  # chain — on every debounce, which is the editor's hottest path, and would
+  # answer from the same mount-time actor regardless. `ContentEditorLive`
+  # computes it once per record load for the same reason.
+  #
+  # Be exact about what it therefore does NOT do: a scope narrowed mid-session
+  # is invisible. Measured — the save still lands. Catching that needs the actor
+  # re-read per write, which no console does; diverging from them would be worse
+  # than the gap. This guards the refactor, not the revocation.
   defp persist(socket, action) do
+    if socket.assigns.may_write? do
+      do_persist(socket, action)
+    else
+      # Same shape as `do_persist/2`'s own error branch, so a refusal cannot
+      # leave the toolbar stuck on "Saving…" with nothing said — which is what
+      # `perform_autosave/1` would do with a bare `{:error, socket}`, since it
+      # discards the tag.
+      {:error, assign(socket, :save_state, :error)}
+    end
+  end
+
+  defp do_persist(socket, action) do
     # `:update` shares the `:save` telemetry event with the structured editor.
     event = if action == :autosave, do: :autosave, else: :save
 
@@ -332,6 +412,11 @@ defmodule KilnCMSWeb.InContextEditLive do
   def render(assigns) do
     ~H"""
     <Layouts.public locale_links={[]} locale={@record.locale} current_org={@current_org}>
+      <%!-- This page renders in the *public* layout so the editor sees the real
+            page, which means it inherits none of the console chrome — including
+            the environment strip. Typing straight into live content is the last
+            place you want to be unsure which deployment you are on (#469). --%>
+      <Layouts.environment_banner />
       <Layouts.flash_group flash={@flash} />
       <.edit_bar
         record={@record}
@@ -560,31 +645,19 @@ defmodule KilnCMSWeb.InContextEditLive do
   # (srcset/focal) is a delivery concern; the edit surface renders the plain
   # source, which is enough to keep the page's shape recognizable.
   #
-  # A `columns` container (#335) is rendered through the shared thin-map builder
-  # so its nested children show in place (read-only here — structural nested
-  # edits live in the full editor, like the other non-text blocks on this surface).
-  # The GEO blocks (#357) also carry data-side fields (items/steps/citation),
-  # which the thin-map builder surfaces for the shared renderer.
-  defp read_only_block(%mod{} = struct)
-       when mod in [
-              KilnCMS.Blocks.Columns,
-              KilnCMS.Blocks.Faq,
-              KilnCMS.Blocks.HowTo,
-              KilnCMS.Blocks.Claim
-            ] do
+  # Everything goes through the shared thin-map builder, so a block that carries
+  # data-side fields — a `columns` container's children (#335), the GEO blocks'
+  # items/steps/citation (#357), a gallery's images or an accordion's panels
+  # (#482) — shows them here without this module knowing which blocks those are.
+  #
+  # This used to be a hardcoded `when mod in [...]` list beside a hand-written
+  # fallback, which meant every new data-carrying block rendered blank on this
+  # surface until someone remembered to add it. The builder already has a total
+  # fallback of its own, so there is nothing for the list to protect.
+  defp read_only_block(struct) do
     [legacy] = TypedBlocks.to_legacy([struct])
     [thin] = BlockComponents.thin_blocks([legacy])
     thin
-  end
-
-  defp read_only_block(struct) do
-    [legacy] = TypedBlocks.to_legacy([struct])
-    base = %{type: to_string(legacy.type), content: legacy.content}
-
-    case to_string(legacy.type) do
-      "image" -> Map.put(base, :alt, Map.get(legacy.data, "alt") || "")
-      _ -> base
-    end
   end
 
   # Stable-id region element id, keyed by `region_version` so a save/restore

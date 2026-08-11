@@ -36,6 +36,78 @@ defmodule KilnCMS.Slug.PatternTest do
     end
   end
 
+  # #804. `[field:<name>]` gives every custom field a slugified scalar for free
+  # and expands a map or list to "". A type that wants more — a composite's named
+  # parts, or a derived form like the word below — says so through
+  # `c:Kiln.FieldType.tokens/1`, and these are the definitions that reach the
+  # engine.
+  describe "extra definitions from a field type" do
+    defp word_token do
+      [
+        %{
+          match: ~r/\Afield:rating\.word\z/,
+          resolve: fn _token, ctx -> Map.get(ctx[:custom_fields] || %{}, "rating_word", "") end
+        }
+      ]
+    end
+
+    test "a type-declared token expands" do
+      context = %{title: "Kiln", custom_fields: %{"rating_word" => "three"}}
+
+      assert Pattern.expand("[title]-[field:rating.word]", context, word_token()) ==
+               "kiln-three"
+    end
+
+    test "without them the same token expands empty, and the pattern is invalid" do
+      context = %{title: "Kiln", custom_fields: %{"rating_word" => "three"}}
+
+      assert Pattern.expand("[title]-[field:rating.word]", context) == "kiln"
+      assert {:error, message} = Pattern.validate("[field:rating.word]")
+      assert message =~ "unknown token"
+    end
+
+    test "validate accepts them when they are supplied" do
+      assert Pattern.validate("[field:rating.word]", extra_definitions: word_token()) == :ok
+    end
+
+    # `Kiln.Tokens.expand/3` takes the FIRST matching definition, so a plugin
+    # cannot redefine `[title]` out from under a pattern that already relies on
+    # it — for every content type that happens to use that field type.
+    test "a built-in name cannot be shadowed" do
+      shadow = [%{match: "title", resolve: fn _token, _ctx -> "hijacked" end}]
+
+      assert Pattern.expand("[title]", %{title: "Real Title"}, shadow) == "real-title"
+    end
+
+    test "they reach alias expansion too" do
+      context = %{title: "Kiln", custom_fields: %{"rating_word" => "three"}}
+
+      assert Pattern.expand_path("/rated/[field:rating.word]", context, word_token()) ==
+               "/rated/three"
+    end
+  end
+
+  # The cheap pre-check that keeps a field-definition lookup off the write path
+  # for the overwhelming majority of patterns, which use built-ins only.
+  describe "unknown_tokens/2" do
+    test "is empty for a built-in-only pattern, and for nil" do
+      assert Pattern.unknown_tokens(nil, :slug) == []
+      assert Pattern.unknown_tokens("[yyyy]-[title]-[field:size]", :slug) == []
+    end
+
+    test "names what the built-ins do not cover" do
+      assert Pattern.unknown_tokens("[title]-[field:rating.word]", :slug) == ["field:rating.word"]
+    end
+
+    # `[slug]` is circular in a slug pattern and legal in an alias — so "unknown"
+    # is relative to the usage, and asking with the wrong one would send the
+    # write path looking for a field type that owns `[slug]`.
+    test "is usage-aware" do
+      assert Pattern.unknown_tokens("[slug]", :slug) == ["slug"]
+      assert Pattern.unknown_tokens("[slug]", :alias) == []
+    end
+  end
+
   describe "validate/1" do
     test "accepts known tokens and nil" do
       assert Pattern.validate(nil) == :ok
@@ -64,6 +136,18 @@ defmodule KilnCMS.Slug.PatternTest do
     end
   end
 
+  describe "field_names/1 (#616)" do
+    test "extracts the field names a pattern references, de-duplicated" do
+      assert Pattern.field_names("/library/[field:url_key]/[title]") == ["url_key"]
+      assert Pattern.field_names("[field:a]-[field:b]-[field:a]") == ["a", "b"]
+    end
+
+    test "is empty for a nil or token-free pattern" do
+      assert Pattern.field_names(nil) == []
+      assert Pattern.field_names("[yyyy]-[title]") == []
+    end
+  end
+
   describe "expand_path/2 (alias patterns, #485 follow-up)" do
     test "literal segments plus field tokens" do
       assert Pattern.expand_path("/acupuncture/needle/size/[field:size]", %{
@@ -83,6 +167,52 @@ defmodule KilnCMS.Slug.PatternTest do
     test "non-scalar field values expand empty" do
       assert Pattern.expand_path("/x/[field:tags]", %{custom_fields: %{"tags" => ["a", "b"]}}) ==
                "/x"
+    end
+  end
+
+  # Review findings from #804 — each of these was a real defect the first pass
+  # shipped, so each gets the case that would have caught it.
+  describe "the extras boundary (#804 review)" do
+    test "an extra definition cannot re-admit [slug] in a slug pattern" do
+      # `allowed_definitions(:slug)` drops the built-in `slug` token because it
+      # is circular. A plugin's token list is third-party data; appending it
+      # after that filter let a loose matcher put the token back.
+      loose = [%{match: ~r/slug/, resolve: fn _token, _ctx -> "x" end}]
+
+      assert {:error, message} =
+               Pattern.validate("[slug]-x", usage: :slug, extra_definitions: loose)
+
+      assert message =~ "unknown token"
+
+      # An alias pattern may still name it, with or without extras.
+      assert Pattern.validate("/a/[slug]", usage: :alias, extra_definitions: loose) == :ok
+    end
+
+    test "an extra definition is still admitted for every other token" do
+      word = [%{match: ~r/\Afield:rating\.word\z/, resolve: fn _t, _c -> "three" end}]
+
+      assert Pattern.validate("[title]-[field:rating.word]",
+               usage: :slug,
+               extra_definitions: word
+             ) == :ok
+    end
+
+    test "field_names/1 sees a dotted token" do
+      # Blind to it, `Slugs.changeset_custom_fields/2` took its "no field
+      # tokens" branch and skipped key stringification, so the same record
+      # slugged differently through MCP (atom keys) than through the JSON API.
+      assert Pattern.field_names("[title]-[field:rating.word]") == ["rating.word"]
+      assert Pattern.field_names("[field:size]-[field:location.lat]") == ["size", "location.lat"]
+    end
+
+    test "a resolver that raises expands empty instead of failing the write" do
+      exploding = [
+        # Reads a context key the caller never set — the shape of a plugin
+        # resolver that assumes its custom field is present.
+        %{match: ~r/\Afield:boom\z/, resolve: fn _token, ctx -> String.upcase(ctx[:nope]) end}
+      ]
+
+      assert Pattern.expand("[title]-[field:boom]", %{title: "Guide"}, exploding) == "guide"
     end
   end
 

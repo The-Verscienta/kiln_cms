@@ -8,13 +8,22 @@ defmodule KilnCMSWeb.MediaLive do
   import Ash.Expr, only: [expr: 1]
 
   alias KilnCMS.CMS
-  alias KilnCMS.ImageProcessor
+  alias KilnCMS.Media.Ingest
+  alias KilnCMS.MediaKind
   alias KilnCMS.Storage
   alias KilnCMS.Unsplash
+  alias KilnCMSWeb.Params
 
-  @accept ~w(.jpg .jpeg .png .webp .gif)
+  @accept ~w(.jpg .jpeg .png .webp .gif .pdf .mp4 .m4a .webm .mp3 .vtt)
   @max_entries 10
-  @max_file_size 10_000_000
+  # Phoenix's `allow_upload` takes one ceiling for every entry (there's no
+  # per-accept-type cap in the API), so this is the LARGEST of the per-type
+  # caps — `KilnCMS.Media.Ingest` enforces the tighter one for whichever type
+  # an upload turns out to be, after byte-sniffing it. Video is the outlier and
+  # the reason the ceiling is what it is (#494), which makes this also the
+  # practical statement of "how big a file will Kiln accept" — see
+  # docs/media-pipeline.md.
+  @max_file_size Ingest.max_upload_size()
   # Server-side page size: the grid loads pages of newest-first items and any
   # older item is reachable via Load more or the (server-side) filter.
   @page_size 60
@@ -39,6 +48,8 @@ defmodule KilnCMSWeb.MediaLive do
      |> assign(:is_admin, KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin)
      |> assign(:query, nil)
      |> assign(:selected, nil)
+     |> assign(:usages, empty_usages())
+     |> assign(:usage_counts, %{})
      |> assign(:view, :library)
      |> assign(:trashed, [])
      |> assign(:refresh_timer, nil)
@@ -65,20 +76,27 @@ defmodule KilnCMSWeb.MediaLive do
   # database (audit U-M2), so it finds items beyond the loaded pages.
   @impl true
   def handle_params(params, _uri, socket) do
-    q = params["q"] || ""
+    # `?q[a]=1` decodes to a MAP, which flowed into `search_filter/1`'s
+    # `String.replace/3` and raised (#764). Bookmarkable URL, so absent is the
+    # right answer — same as the omitted parameter.
+    q = Params.string(params, "q", "")
 
     socket =
       if q == socket.assigns.query,
         do: socket,
         else: socket |> assign(:query, q) |> load_media()
 
-    {:noreply, assign_selected(socket, params["id"])}
+    # `?id[]=1` is the same bookmarkable shape, and `assign_selected/2`'s only
+    # other clause is `nil` — so the list reached `CMS.get_media_item/2` as a
+    # primary key. Absent reads as "nothing selected", which is what the
+    # omitted parameter does.
+    {:noreply, assign_selected(socket, Params.string(params, "id"))}
   end
 
   @impl true
   def handle_event("validate", _params, socket), do: {:noreply, socket}
 
-  def handle_event("search", %{"q" => q}, socket) do
+  def handle_event("search", %{"q" => q}, socket) when is_binary(q) do
     {:noreply, push_patch(socket, to: media_path(q, nil), replace: true)}
   end
 
@@ -97,7 +115,7 @@ defmodule KilnCMSWeb.MediaLive do
     end
   end
 
-  def handle_event("cancel", %{"ref" => ref}, socket) do
+  def handle_event("cancel", %{"ref" => ref}, socket) when is_binary(ref) do
     {:noreply, cancel_upload(socket, :media, ref)}
   end
 
@@ -121,7 +139,7 @@ defmodule KilnCMSWeb.MediaLive do
     {:noreply, socket}
   end
 
-  def handle_event("delete", %{"id" => id}, socket) do
+  def handle_event("delete", %{"id" => id}, socket) when is_binary(id) do
     actor = socket.assigns.actor
 
     socket =
@@ -134,6 +152,38 @@ defmodule KilnCMSWeb.MediaLive do
   end
 
   # --- trash -----------------------------------------------------------------
+
+  # Bulk variant regeneration (#473) — admin-only.
+  #
+  # The scan runs in a supervised task, not here. Oban's unique inserts are one
+  # transaction per row, so enqueuing a ten-thousand-image library is tens of
+  # thousands of serialized round trips — long enough to block this LiveView
+  # past the heartbeat and drop the socket. The work itself then runs on the
+  # throttled `:media` queue at the lowest priority.
+  #
+  # The tier is re-read rather than trusted from the mount assign: `Regeneration`
+  # reads with `authorize?: false`, so this check is the only one, and an
+  # assign captured at mount outlives a revoked role for the life of the socket.
+  def handle_event("regenerate_variants", _params, socket) do
+    if KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin do
+      org_id = socket.assigns.current_org.id
+
+      Task.Supervisor.start_child(KilnCMS.TaskSupervisor, fn ->
+        KilnCMS.Media.Regeneration.run(org_id, only_missing?: false)
+      end)
+
+      {:noreply,
+       put_flash(
+         socket,
+         :info,
+         gettext(
+           "Reprocessing the library in the background. Originals are untouched; new variants appear as jobs finish."
+         )
+       )}
+    else
+      {:noreply, put_flash(socket, :error, gettext("You need admin access to do that."))}
+    end
+  end
 
   def handle_event("show_trash", _params, socket) do
     actor = socket.assigns.actor
@@ -161,53 +211,65 @@ defmodule KilnCMSWeb.MediaLive do
     end
   end
 
-  def handle_event("unsplash_search", %{"q" => q}, socket) do
-    case String.trim(q) do
-      "" ->
-        {:noreply,
-         socket
-         |> assign(:unsplash_query, "")
-         |> assign(:unsplash_photos, [])
-         |> assign(:unsplash_more?, false)
-         |> assign(:unsplash_searching?, false)}
+  def handle_event("unsplash_search", %{"q" => q}, socket) when is_binary(q) do
+    if socket.assigns.unsplash_enabled? do
+      case String.trim(q) do
+        "" ->
+          {:noreply,
+           socket
+           |> assign(:unsplash_query, "")
+           |> assign(:unsplash_photos, [])
+           |> assign(:unsplash_more?, false)
+           |> assign(:unsplash_searching?, false)}
 
-      query ->
-        {:noreply,
-         socket
-         |> assign(:unsplash_query, query)
-         |> assign(:unsplash_page, 1)
-         |> assign(:unsplash_searching?, true)
-         |> start_async(:unsplash_search, fn -> {query, 1, Unsplash.search(query, 1)} end)}
+        query ->
+          {:noreply,
+           socket
+           |> assign(:unsplash_query, query)
+           |> assign(:unsplash_page, 1)
+           |> assign(:unsplash_searching?, true)
+           |> start_async(:unsplash_search, fn -> {query, 1, Unsplash.search(query, 1)} end)}
+      end
+    else
+      {:noreply, socket}
     end
   end
 
   def handle_event("unsplash_load_more", _params, socket) do
-    %{unsplash_query: query, unsplash_page: page} = socket.assigns
-    next = page + 1
-
-    {:noreply,
-     socket
-     |> assign(:unsplash_searching?, true)
-     |> start_async(:unsplash_search, fn -> {query, next, Unsplash.search(query, next)} end)}
-  end
-
-  def handle_event("unsplash_import", %{"id" => id}, socket) do
-    photo = Enum.find(socket.assigns.unsplash_photos, &(&1.id == id))
-
-    if is_nil(photo) or MapSet.member?(socket.assigns.unsplash_importing, id) do
-      {:noreply, socket}
-    else
-      actor = socket.assigns.actor
-      org = socket.assigns.current_org
+    if socket.assigns.unsplash_enabled? do
+      %{unsplash_query: query, unsplash_page: page} = socket.assigns
+      next = page + 1
 
       {:noreply,
        socket
-       |> assign(:unsplash_importing, MapSet.put(socket.assigns.unsplash_importing, id))
-       |> start_async({:unsplash_import, id}, fn -> import_unsplash(photo, actor, org) end)}
+       |> assign(:unsplash_searching?, true)
+       |> start_async(:unsplash_search, fn -> {query, next, Unsplash.search(query, next)} end)}
+    else
+      {:noreply, socket}
     end
   end
 
-  def handle_event("restore", %{"id" => id}, socket) do
+  def handle_event("unsplash_import", %{"id" => id}, socket) when is_binary(id) do
+    if socket.assigns.unsplash_enabled? do
+      photo = Enum.find(socket.assigns.unsplash_photos, &(&1.id == id))
+
+      if is_nil(photo) or MapSet.member?(socket.assigns.unsplash_importing, id) do
+        {:noreply, socket}
+      else
+        actor = socket.assigns.actor
+        org = socket.assigns.current_org
+
+        {:noreply,
+         socket
+         |> assign(:unsplash_importing, MapSet.put(socket.assigns.unsplash_importing, id))
+         |> start_async({:unsplash_import, id}, fn -> import_unsplash(photo, actor, org) end)}
+      end
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("restore", %{"id" => id}, socket) when is_binary(id) do
     actor = socket.assigns.actor
 
     socket =
@@ -231,7 +293,7 @@ defmodule KilnCMSWeb.MediaLive do
      |> reload_media()}
   end
 
-  def handle_event("purge", %{"id" => id}, socket) do
+  def handle_event("purge", %{"id" => id}, socket) when is_binary(id) do
     actor = socket.assigns.actor
 
     socket =
@@ -245,7 +307,7 @@ defmodule KilnCMSWeb.MediaLive do
 
   # Selection lives in the URL, so an open drawer survives refresh and can be
   # deep-linked (e.g. from the search palette).
-  def handle_event("select", %{"id" => id}, socket),
+  def handle_event("select", %{"id" => id}, socket) when is_binary(id),
     do: {:noreply, push_patch(socket, to: media_path(socket.assigns.query, id))}
 
   def handle_event("close", _params, socket),
@@ -283,25 +345,22 @@ defmodule KilnCMSWeb.MediaLive do
     end
   end
 
-  def handle_event("save_meta", %{"alt" => alt, "caption" => caption}, socket) do
-    actor = socket.assigns.actor
+  def handle_event("save_meta", %{"alt" => alt, "caption" => caption} = params, socket)
+      when is_binary(alt) and is_binary(caption) do
+    save_meta(socket, %{
+      alt: alt,
+      caption: caption,
+      decorative: params["decorative"] in [true, "true"]
+    })
+  end
 
-    socket =
-      case CMS.update_media_item(socket.assigns.selected, %{alt: alt, caption: caption},
-             actor: actor,
-             tenant: socket.assigns.current_org
-           ) do
-        {:ok, item} ->
-          socket
-          |> assign(:selected, item)
-          |> reload_media()
-          |> put_flash(:info, gettext("Saved details."))
-
-        _ ->
-          put_flash(socket, :error, gettext("Couldn't save those details."))
-      end
-
-    {:noreply, socket}
+  # #822 renders the alt field only where it can mean something, so a plain
+  # non-image row submits caption alone. Absent has to mean *unchanged* here,
+  # not empty: passing `alt: nil` would clear a stored value, and reading the
+  # missing `decorative` hidden input as `false` would silently un-mark a
+  # decorative row. Caption is the only thing this form can still edit.
+  def handle_event("save_meta", %{"caption" => caption}, socket) when is_binary(caption) do
+    save_meta(socket, %{caption: caption})
   end
 
   def handle_event("copied", _params, socket),
@@ -370,127 +429,47 @@ defmodule KilnCMSWeb.MediaLive do
 
   # --- helpers ---------------------------------------------------------------
 
-  # `source`, when removed, is the server-built stripped temp file (UUID path),
-  # never user input — the File.rm traversal warning is a false positive.
-  # sobelow_skip ["Traversal.FileModule"]
-  # Returns :ok or {:error, reason} — the reason reaches the failure flash so
-  # editors learn WHICH file failed and why, not just a count (audit U-M5).
+  # --- ingest ----------------------------------------------------------------
+
+  # The upload pipeline (sniff -> cap -> strip -> store -> item -> derive) is
+  # `KilnCMS.Media.Ingest`, shared with the Unsplash import here and the bulk
+  # importers (#487). This module keeps only the LiveView-shaped edges: what a
+  # temp file is called, and what the editor is told when one fails.
+  #
+  # The returned reason reaches the failure flash so editors learn WHICH file
+  # failed and why, not just a count (audit U-M5).
   defp store_entry(path, entry, actor, org) do
-    case ImageProcessor.validate_upload(path) do
-      {:ok, %{ext: ext, content_type: content_type}} ->
-        key = Storage.generate_key_with_ext(ext)
-        # Strip EXIF/GPS + the client filename before persisting (#215). On any
-        # strip failure we fall back to the original so a valid upload still saves.
-        {source, stripped?} = stripped_source(path, ext)
-
-        try do
-          case Storage.store(key, source) do
-            {:ok, ^key} -> create_from_upload(key, content_type, entry, actor, org)
-            _ -> {:error, :storage_failed}
-          end
-        after
-          if stripped?, do: File.rm(source)
-        end
-
-      {:error, reason} ->
-        {:error, reason}
+    case Ingest.store_file(path, entry.client_name, actor: actor, tenant: org) do
+      {:ok, _item} -> :ok
+      {:error, reason} -> {:error, reason}
     end
   end
 
   # Import an Unsplash photo: download (which also reports the download to
-  # Unsplash, per their guidelines), then run the same validate → strip →
-  # store → create pipeline as a direct upload. Runs inside start_async.
-  # sobelow_skip ["Traversal.FileModule"] — path is a server-generated temp file.
+  # Unsplash, per their guidelines), then the same pipeline as a direct upload.
+  # Runs inside start_async.
+  #
+  # `Unsplash.download/1` returns a server-generated temp path — the File.rm
+  # traversal warning is a false positive.
+  # sobelow_skip ["Traversal.FileModule"]
   defp import_unsplash(photo, actor, org) do
     with {:ok, path} <- Unsplash.download(photo) do
       try do
-        store_unsplash(path, photo, actor, org)
+        # No extension: `Ingest` appends the one it sniffs from the bytes.
+        # No per-kind cap: this is a full-resolution original the editor cannot
+        # resize, and the pre-extraction Unsplash path applied no cap at all.
+        # `Unsplash.download/1` is the only source, so the bytes are ours.
+        Ingest.store_file(path, "unsplash-#{photo.id}",
+          actor: actor,
+          tenant: org,
+          max_bytes: Ingest.max_upload_size(),
+          alt: photo.alt,
+          caption: Unsplash.attribution(photo)
+        )
       after
         File.rm(path)
       end
     end
-  end
-
-  # sobelow_skip ["Traversal.FileModule"]
-  defp store_unsplash(path, photo, actor, org) do
-    case ImageProcessor.validate_upload(path) do
-      {:ok, %{ext: ext, content_type: content_type}} ->
-        key = Storage.generate_key_with_ext(ext)
-        {source, stripped?} = stripped_source(path, ext)
-
-        try do
-          case Storage.store(key, source) do
-            {:ok, ^key} ->
-              attrs = %{
-                filename: "unsplash-#{photo.id}#{ext}",
-                content_type: content_type,
-                byte_size: File.stat!(source).size,
-                storage_key: key,
-                url: Storage.url(key),
-                alt: photo.alt,
-                caption: Unsplash.attribution(photo)
-              }
-
-              case CMS.create_media_item(attrs, actor: actor, tenant: org) do
-                {:ok, item} ->
-                  enqueue_processing(item)
-                  {:ok, item}
-
-                _ ->
-                  Storage.delete(key)
-                  {:error, :create_failed}
-              end
-
-            _ ->
-              {:error, :storage_failed}
-          end
-        after
-          if stripped?, do: File.rm(source)
-        end
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  # {temp_path, true} when a metadata-stripped copy was produced (caller cleans
-  # it up); {original_path, false} when stripping wasn't possible.
-  defp stripped_source(path, ext) do
-    case ImageProcessor.strip_metadata(path, ext) do
-      {:ok, tmp} -> {tmp, true}
-      {:error, _} -> {path, false}
-    end
-  end
-
-  defp create_from_upload(key, content_type, entry, actor, org) do
-    attrs = %{
-      filename: entry.client_name,
-      content_type: content_type,
-      byte_size: entry.client_size,
-      storage_key: key,
-      url: Storage.url(key)
-    }
-
-    case CMS.create_media_item(attrs, actor: actor, tenant: org) do
-      {:ok, item} ->
-        enqueue_processing(item)
-        :ok
-
-      _ ->
-        Storage.delete(key)
-        {:error, :create_failed}
-    end
-  end
-
-  # Queue background dimension/variant processing (keeps libvips off the upload
-  # request). The worker re-fetches the original from storage, so there's no
-  # node-local temp hand-off.
-  defp enqueue_processing(item) do
-    # Carry the item's org so the worker re-fetches/updates under its tenant
-    # (epic #336) — future-proof for the strict `global?: false` flip.
-    %{media_item_id: item.id, org_id: item.org_id}
-    |> KilnCMS.Media.VariantWorker.new()
-    |> Oban.insert!()
   end
 
   defp delete_variant_blobs(variants) do
@@ -529,10 +508,88 @@ defmodule KilnCMSWeb.MediaLive do
     )
   end
 
-  # The thumbnail to show in the grid — the small variant when available, else
-  # the original.
-  defp thumb_src(%{variants: %{"thumb" => %{"url" => url}}}), do: url
-  defp thumb_src(item), do: item.url
+  # The thumbnail to show in the grid — the small variant when available,
+  # else the original — or `nil` for a document (no `width`, so nothing was
+  # ever generated to preview) or a gated item (no public `url` — #481), so
+  # the caller falls back to a file badge instead of a broken/blank `<img>`.
+  #
+  # Dispatching on kind FIRST matters for A/V (#494): a video ffprobe measured
+  # has a `width` exactly like an image does, so the image rules below would
+  # otherwise put an `.mp4` in an `<img src>`. Its generated poster frame,
+  # when it has one, is the only image a video has.
+  defp thumb_src(item) do
+    case MediaKind.of(item.content_type) do
+      :image -> image_thumb_url(item)
+      :video -> poster_url(item)
+      _kind -> nil
+    end
+  end
+
+  defp poster_url(%{variants: %{"poster" => %{"url" => url}}}), do: url
+  defp poster_url(_item), do: nil
+
+  defp image_thumb_url(%{variants: %{"thumb" => %{"url" => url}}}), do: url
+  defp image_thumb_url(%{width: nil}), do: nil
+  defp image_thumb_url(item), do: item.url
+
+  defp save_meta(socket, params) do
+    actor = socket.assigns.actor
+
+    socket =
+      case CMS.update_media_item(
+             socket.assigns.selected,
+             params,
+             actor: actor,
+             tenant: socket.assigns.current_org
+           ) do
+        {:ok, item} ->
+          socket
+          |> assign(:selected, item)
+          |> reload_media()
+          |> put_flash(:info, gettext("Saved details."))
+
+        _ ->
+          put_flash(socket, :error, gettext("Couldn't save those details."))
+      end
+
+    {:noreply, socket}
+  end
+
+  defp image?(item), do: MediaKind.of(item.content_type) == :image
+
+  # #822 narrowed the alt field to images, but a non-image row can already
+  # carry an `alt` — it was unconditional before, `Ingest` takes it as an
+  # option, and it is `public?` and in `default_accept`, so the JSON API and
+  # MCP can set it. Hiding the input on those rows would leave the value
+  # indexed (the search tsvector coalesces filename || alt || caption) and
+  # served, with nowhere left to see or clear it. So: images always, plus any
+  # row that already has something to show.
+  defp alt_editable?(item),
+    do: image?(item) or (is_binary(item.alt) and item.alt != "") or item.decorative == true
+
+  # `nil` (rather than "—") when there's nothing measured, so the caller can
+  # drop the whole row: an unprobed video with no ffmpeg installed shouldn't
+  # advertise a Duration field it will never fill in.
+  defp duration_label(item), do: MediaKind.humanize_duration(item.duration_seconds)
+
+  # The placeholder icon when there is no thumbnail to show — a document, an
+  # unprobed video, a gated item. Naming the kind is the difference between
+  # "this file is broken" and "this is a video with no poster yet".
+  defp kind_icon(item) do
+    case MediaKind.of(item.content_type) do
+      :video -> "hero-film"
+      :audio -> "hero-musical-note"
+      :captions -> "hero-language"
+      _kind -> "hero-document"
+    end
+  end
+
+  defp file_ext(filename) do
+    case filename && Path.extname(filename) do
+      "." <> ext -> String.upcase(ext)
+      _ -> "FILE"
+    end
+  end
 
   # First page under the current filter.
   defp load_media(socket) do
@@ -541,7 +598,17 @@ defmodule KilnCMSWeb.MediaLive do
     socket
     |> assign(:media, items)
     |> assign(:more?, more?)
+    |> assign(:usage_counts, usage_counts(items, socket.assigns.current_org))
     |> assign(:total, count_media(socket))
+  end
+
+  # One query for the whole grid, so the delete confirmation can say what a
+  # delete affects. Best-effort: the count is context, and an unreadable
+  # reference graph must not stop the library from rendering.
+  defp usage_counts(items, org_id) do
+    KilnCMS.Firing.References.usage_counts(tenant_id(org_id), Enum.map(items, & &1.id))
+  rescue
+    _error -> %{}
   end
 
   # Refresh the loaded items in place (after uploads, deletes, metadata edits,
@@ -610,19 +677,56 @@ defmodule KilnCMSWeb.MediaLive do
     ~p"/media?#{params}"
   end
 
-  defp assign_selected(socket, nil), do: assign(socket, :selected, nil)
+  defp assign_selected(socket, nil),
+    do: socket |> assign(:selected, nil) |> assign(:usages, empty_usages())
 
   defp assign_selected(socket, id) do
     case CMS.get_media_item(id, actor: socket.assigns.actor, tenant: socket.assigns.current_org) do
       {:ok, item} ->
-        assign(socket, :selected, item)
+        socket
+        |> assign(:selected, item)
+        |> assign(:usages, usages(item, socket.assigns.current_org))
 
       _ ->
         socket
         |> assign(:selected, nil)
+        |> assign(:usages, empty_usages())
         |> put_flash(:error, gettext("That item no longer exists."))
     end
   end
+
+  # Best-effort: the "used by" list is context, and an editor must still be able
+  # to open a media item when the reference graph can't be read.
+  defp usages(item, org_id) do
+    KilnCMS.Firing.References.usages(tenant_id(org_id) || item.org_id, item.id)
+  rescue
+    _error -> empty_usages()
+  end
+
+  # Deleting a hero image without being told what it appears on is how a page
+  # loses its hero (#403). The count comes from one query over the whole grid,
+  # so it is available at the point of decision rather than only inside a drawer
+  # the editor may never open.
+  defp delete_confirm(item, counts) do
+    case Map.get(counts, item.id) do
+      nil ->
+        gettext("Delete %{name}?", name: item.filename)
+
+      count ->
+        gettext("Delete %{name}? It is used by %{count} published document(s).",
+          name: item.filename,
+          count: count
+        )
+    end
+  end
+
+  defp empty_usages, do: %{total: 0, items: []}
+
+  # `current_org` is the org STRUCT on this LiveView; the reference read wants
+  # its id.
+  defp tenant_id(%{id: id}), do: id
+  defp tenant_id(id) when is_binary(id), do: id
+  defp tenant_id(_other), do: nil
 
   defp flash_for_upload(socket, ok, []) when ok > 0,
     do:
@@ -651,10 +755,48 @@ defmodule KilnCMSWeb.MediaLive do
   end
 
   defp upload_failure_reason(:too_many_pixels), do: gettext("image dimensions are too large")
-  defp upload_failure_reason(:unsupported_format), do: gettext("unsupported image format")
+  defp upload_failure_reason(:unsupported_format), do: gettext("unsupported file format")
+  defp upload_failure_reason(:too_large), do: gettext("file is too large for its type")
   defp upload_failure_reason(:storage_failed), do: gettext("couldn't be stored")
   defp upload_failure_reason(:create_failed), do: gettext("couldn't be saved")
-  defp upload_failure_reason(_invalid), do: gettext("not a valid image")
+
+  # #807. Both of these mean "we could not remove this PDF's metadata", and the
+  # upload is refused rather than stored unstripped — so the message has to name
+  # the server as the problem, not the file. An editor told "unsupported format"
+  # about a PDF that opens fine everywhere would keep retrying it.
+  defp upload_failure_reason(:unavailable),
+    do: gettext("can't be processed — PDF metadata stripping isn't available on this server")
+
+  defp upload_failure_reason(:strip_failed),
+    do: gettext("couldn't have its metadata removed, so it wasn't stored")
+
+  # #820. Same shape as `:unavailable` above, but for A/V — and it has to be
+  # its own message, because the PDF wording names the wrong subsystem and an
+  # editor reading "PDF" about their MP4 learns nothing.
+  defp upload_failure_reason(:av_strip_unavailable),
+    do:
+      gettext(
+        "can't be stored — video and audio metadata stripping isn't available on this server"
+      )
+
+  # #1100. The one A/V refusal that is worth retrying: the strip needs a second
+  # full copy of the upload on temp disk and there was not room for it. So the
+  # message says "try again" — the others above never resolve by retrying, and
+  # this one usually does.
+  defp upload_failure_reason(:av_strip_no_space),
+    do:
+      gettext(
+        "can't be stored right now — the server is out of temporary disk space. Try again shortly."
+      )
+
+  # #918. Unlike the two above, this one IS about the file, and it is the only
+  # refusal here the uploader can actually resolve — so it says what to do
+  # instead of blaming the server.
+  defp upload_failure_reason(:encrypted),
+    do:
+      gettext("is password-protected, so its metadata can't be removed — upload an unlocked copy")
+
+  defp upload_failure_reason(_invalid), do: gettext("not a supported file")
 
   defp humanize_bytes(nil), do: "—"
   defp humanize_bytes(b) when b < 1_024, do: gettext("%{size} B", size: b)
@@ -685,7 +827,9 @@ defmodule KilnCMSWeb.MediaLive do
         <div class="flex items-end justify-between gap-4">
           <div>
             <h1 class="text-2xl font-semibold">{gettext("Media library")}</h1>
-            <p class="text-sm text-base-content/70">{gettext("Upload and manage images.")}</p>
+            <p class="text-sm text-base-content/70">
+              {gettext("Upload and manage images, documents, video and audio.")}
+            </p>
           </div>
           <div :if={@is_admin or @unsplash_enabled?} class="tabs" role="tablist">
             <button
@@ -720,6 +864,26 @@ defmodule KilnCMSWeb.MediaLive do
           </div>
         </div>
 
+        <div :if={@is_admin} class="flex flex-wrap items-center gap-3 text-sm">
+          <button
+            type="button"
+            phx-click="regenerate_variants"
+            data-confirm={
+              gettext(
+                "Reprocess every image in the library? Originals are untouched — this rebuilds the responsive and modern-format variants in the background."
+              )
+            }
+            class="btn btn-sm btn-default"
+          >
+            <.icon name="hero-arrow-path" class="mr-1 size-4" />{gettext("Regenerate variants")}
+          </button>
+          <span class="text-xs text-base-content/60">
+            {gettext("Variant formats: %{formats}. Run this after changing them.",
+              formats: variant_format_summary()
+            )}
+          </span>
+        </div>
+
         <.trash_panel :if={@view == :trash} items={@trashed} />
 
         <.unsplash_panel
@@ -745,12 +909,28 @@ defmodule KilnCMSWeb.MediaLive do
             <.icon name="hero-arrow-up-tray" class="mx-auto size-8 text-base-content/70" />
             <p class="mt-2 text-sm">
               <label for={@uploads.media.ref} class="cursor-pointer font-medium underline">
-                {gettext("Choose images")}
+                {gettext("Choose files")}
               </label>
               {gettext("or drag and drop")}
             </p>
+            <%!-- The accepted set is worth spelling out per kind rather than
+                  as one list: the caps differ by an order of magnitude, and
+                  A/V is the one where "why was this rejected" is otherwise
+                  unanswerable — there is no transcoding, so the container
+                  matters (#494). --%>
             <p class="mt-1 text-xs text-base-content/70">
-              {gettext("PNG, JPG, WEBP or GIF up to 10 MB")}
+              {gettext("Images: PNG, JPG, WEBP, GIF up to 10 MB")}
+            </p>
+            <p class="text-xs text-base-content/70">
+              {gettext("Documents: PDF up to 25 MB")}
+            </p>
+            <p class="text-xs text-base-content/70">
+              {gettext(
+                "Video: MP4, WebM up to 500 MB · Audio: MP3, M4A up to 100 MB · Captions: WebVTT"
+              )}
+            </p>
+            <p class="text-xs text-base-content/50">
+              {gettext("Video and audio are served as uploaded — export web-ready H.264/AAC.")}
             </p>
             <.live_file_input upload={@uploads.media} class="sr-only" />
           </div>
@@ -843,7 +1023,7 @@ defmodule KilnCMSWeb.MediaLive do
             icon="hero-photo"
             title={gettext("No media yet")}
           >
-            {gettext("Upload an image above to start building your library.")}
+            {gettext("Upload a file above to start building your library.")}
           </.empty_state>
           <p :if={@media == [] and @filtering?} class="text-sm text-base-content/60">
             {gettext("No media matches “%{query}”.", query: @query)}
@@ -867,18 +1047,53 @@ defmodule KilnCMSWeb.MediaLive do
                 class="block w-full focus-visible:ring-2 focus-visible:ring-primary"
               >
                 <img
+                  :if={thumb_src(item)}
                   src={thumb_src(item)}
                   alt={item.alt || item.filename}
                   loading="lazy"
                   class="aspect-square w-full object-cover"
                 />
+                <%!-- A document (no width, so no thumbnail variant), a gated
+                      item (no public `url` to preview — #481) or an A/V item
+                      with no poster frame (#494) gets a kind badge instead of
+                      a broken/blank <img>. --%>
+                <div
+                  :if={!thumb_src(item)}
+                  class="flex aspect-square w-full flex-col items-center justify-center gap-1 bg-base-200 text-base-content/60"
+                >
+                  <.icon name={kind_icon(item)} class="size-8" />
+                  <span class="text-[10px] font-medium uppercase">{file_ext(item.filename)}</span>
+                </div>
               </button>
               <div class="p-2">
                 <p class="truncate text-xs font-medium">{item.filename}</p>
                 <p class="flex items-center gap-1 text-[10px] text-base-content/70">
                   <span :if={item.width}>{item.width}×{item.height}</span>
                   <span>{humanize_bytes(item.byte_size)}</span>
-                  <span :if={!item.alt} class="text-warning" title={gettext("Missing alt text")}>
+                  <span
+                    :if={item.audience != :public}
+                    class="rounded bg-warning/15 px-1 py-px text-[9px] font-semibold uppercase text-warning-ink"
+                    title={gettext("Gated to the %{audience} audience", audience: item.audience)}
+                  >
+                    {gettext("Gated")}
+                  </span>
+                  <%!-- `decorative` clears the warning (#403): an editor who has
+                        correctly marked a divider must not watch the badge stay
+                        lit, or they learn to ignore it on the images that
+                        really are missing alt. --%>
+                  <%!-- Images only (#822). A document is reached through a
+                        download link whose accessible name is the `file`
+                        block's title; a video/audio item has no `alt` in its
+                        rendered markup at all; a WebVTT track IS an
+                        accessibility artifact. Flagging those permanently is
+                        the failure #403 warned about — a badge that is
+                        sometimes noise is one editors learn to ignore on the
+                        images that really are missing alt. --%>
+                  <span
+                    :if={(image?(item) and !item.alt) && !item.decorative}
+                    class="text-warning"
+                    title={gettext("Missing alt text")}
+                  >
                     {gettext("· no alt")}
                   </span>
                 </p>
@@ -886,7 +1101,7 @@ defmodule KilnCMSWeb.MediaLive do
               <button
                 phx-click="delete"
                 phx-value-id={item.id}
-                data-confirm={gettext("Delete %{name}?", name: item.filename)}
+                data-confirm={delete_confirm(item, @usage_counts)}
                 aria-label={gettext("Delete")}
                 class="absolute right-1 top-1 rounded bg-base-100/80 p-1 transition hover:text-error opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100"
               >
@@ -908,7 +1123,7 @@ defmodule KilnCMSWeb.MediaLive do
         </div>
       </div>
 
-      <.media_detail :if={@selected} item={@selected} />
+      <.media_detail :if={@selected} item={@selected} usages={@usages} />
     </Layouts.console>
     """
   end
@@ -1033,11 +1248,21 @@ defmodule KilnCMSWeb.MediaLive do
       >
         <li :for={item <- @items} id={"trash-#{item.id}"} class="flex items-center gap-4 p-3">
           <img
+            :if={thumb_src(item)}
             src={thumb_src(item)}
             alt={item.alt || item.filename}
             loading="lazy"
             class="size-12 shrink-0 rounded object-cover"
           />
+          <%!-- Same kind badge the grid uses: a trashed document or A/V item
+               has no thumbnail, and an <img> with a nil src renders as a
+               broken image. --%>
+          <div
+            :if={!thumb_src(item)}
+            class="flex size-12 shrink-0 items-center justify-center rounded bg-base-200 text-base-content/60"
+          >
+            <.icon name={kind_icon(item)} class="size-5" />
+          </div>
           <div class="min-w-0 flex-1">
             <p class="truncate text-sm font-medium">{item.filename}</p>
             <p class="text-xs text-base-content/70">
@@ -1075,38 +1300,25 @@ defmodule KilnCMSWeb.MediaLive do
   end
 
   attr :item, :map, required: true
+  attr :usages, :map, required: true
 
   # Detail drawer for a single media item: preview, metadata, copyable URL, and
   # an alt-text / caption editor (accessibility + SEO).
   defp media_detail(assigns) do
     ~H"""
-    <div class="fixed inset-0 z-40" phx-window-keydown="close" phx-key="Escape">
-      <div class="absolute inset-0 bg-black/40" phx-click="close" aria-hidden="true"></div>
-      <div
-        id="media-detail-dialog"
-        phx-hook="FocusTrap"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="media-detail-title"
-        tabindex="-1"
-        class="absolute right-0 top-0 h-full w-full max-w-md overflow-y-auto bg-base-100 p-6 shadow-xl"
-      >
-        <div class="flex items-start justify-between gap-4">
-          <h2 id="media-detail-title" class="truncate text-lg font-medium">{@item.filename}</h2>
-          <button
-            type="button"
-            phx-click="close"
-            aria-label={gettext("Close")}
-            class="text-base-content/70 hover:text-base-content"
-          >
-            <.icon name="hero-x-mark" class="size-5" />
-          </button>
-        </div>
+    <.modal id="media-detail-dialog" on_close="close" variant={:drawer}>
+      <:title>{@item.filename}</:title>
 
+      <div class="flex-1 overflow-y-auto p-6">
         <%!-- Raster images get the focal-point editor: click (or focus and use
              arrow keys) to move the point crops center on. Non-images keep a
-             plain preview. --%>
-        <div :if={@item.width} class="mt-4 flex justify-center">
+             plain preview.
+
+             Gated on `image?/1` as well as `width`, not `width` alone (#494):
+             ffprobe writes `width`/`height` for a video too, and neither a
+             focal point nor the rotate/flip controls below mean anything for
+             one — `Media.Transform` runs libvips, which can't open an MP4. --%>
+        <div :if={image?(@item) and @item.width} class="mt-4 flex justify-center">
           <div
             id={"focal-editor-#{@item.id}"}
             phx-hook="FocalPoint"
@@ -1124,14 +1336,39 @@ defmodule KilnCMSWeb.MediaLive do
             />
           </div>
         </div>
+        <%!-- A/V (#494) previews in a real player rather than an <img>, and
+             plays through the authorized stream route so a gated item
+             previews here exactly as it would on a page. `preload="metadata"`
+             keeps opening the drawer from pulling down a whole video. --%>
+        <video
+          :if={MediaKind.of(@item.content_type) == :video}
+          id={"media-preview-#{@item.id}"}
+          src={~p"/media/#{@item.id}/stream"}
+          poster={poster_url(@item)}
+          controls
+          playsinline
+          preload="metadata"
+          class="mt-4 max-h-64 w-full rounded bg-black"
+        />
+        <audio
+          :if={MediaKind.of(@item.content_type) == :audio}
+          id={"media-preview-#{@item.id}"}
+          src={~p"/media/#{@item.id}/stream"}
+          controls
+          preload="metadata"
+          class="mt-4 w-full"
+        />
         <img
-          :if={!@item.width}
+          :if={image?(@item) and !@item.width}
           src={@item.url}
           alt={@item.alt || @item.filename}
           class="mt-4 max-h-64 w-full rounded object-contain"
         />
 
-        <div :if={@item.width} class="mt-2 flex flex-wrap items-center justify-center gap-1">
+        <div
+          :if={image?(@item) and @item.width}
+          class="mt-2 flex flex-wrap items-center justify-center gap-1"
+        >
           <button
             :for={
               {op, label, icon} <- [
@@ -1162,6 +1399,8 @@ defmodule KilnCMSWeb.MediaLive do
           <dd>{humanize_bytes(@item.byte_size)}</dd>
           <dt :if={@item.width} class="text-base-content/70">{gettext("Dimensions")}</dt>
           <dd :if={@item.width}>{@item.width} × {@item.height} px</dd>
+          <dt :if={duration_label(@item)} class="text-base-content/70">{gettext("Duration")}</dt>
+          <dd :if={duration_label(@item)}>{duration_label(@item)}</dd>
           <dt class="text-base-content/70">{gettext("Uploaded")}</dt>
           <dd>
             <time
@@ -1223,7 +1462,10 @@ defmodule KilnCMSWeb.MediaLive do
         </div>
 
         <form phx-submit="save_meta" class="mt-5 space-y-3">
-          <div>
+          <%!-- Images only (#822): `MediaItem.alt` reaches rendered markup for
+                nothing else. Offering the field on a PDF or an MP4 invites an
+                editor to write a description that is never read out. --%>
+          <div :if={alt_editable?(@item)}>
             <label for="media-alt" class="text-sm font-medium">{gettext("Alt text")}</label>
             <input
               id="media-alt"
@@ -1232,7 +1474,32 @@ defmodule KilnCMSWeb.MediaLive do
               placeholder={gettext("Describe the image for screen readers")}
               class="field-input mt-1"
             />
+            <p :if={!image?(@item)} class="mt-1 text-[11px] text-base-content/50">
+              {gettext(
+                "This isn't an image, so nothing reads this out. It's shown because a value was set — clear it if it doesn't belong."
+              )}
+            </p>
           </div>
+          <%!-- Decorative is a recorded decision, not an inference from a blank
+                field (#403): a divider or a texture correctly has no alt text,
+                and without somewhere to say so it is indistinguishable from an
+                oversight. The publish check reads this. --%>
+          <label :if={alt_editable?(@item)} class="flex items-start gap-2 text-sm">
+            <input type="hidden" name="decorative" value="false" />
+            <input
+              type="checkbox"
+              name="decorative"
+              value="true"
+              checked={@item.decorative}
+              class="mt-0.5"
+            />
+            <span>
+              {gettext("Decorative — no alt text needed")}
+              <span class="block text-[11px] text-base-content/50">
+                {gettext("For dividers, textures, and images that only repeat nearby text.")}
+              </span>
+            </span>
+          </label>
           <div>
             <label for="media-caption" class="text-sm font-medium">{gettext("Caption")}</label>
             <textarea
@@ -1244,8 +1511,52 @@ defmodule KilnCMSWeb.MediaLive do
           </div>
           <.button type="submit" variant="primary">{gettext("Save details")}</.button>
         </form>
+
+        <%!-- "Where is this used" (#403). Read from the reference graph the fire
+              path already maintains, so it is an exact answer rather than a
+              scan — and it is here because deleting or replacing an image
+              without knowing what it appears on is how a page loses its hero. --%>
+        <div class="mt-6 border-t border-base-content/10 pt-4">
+          <h3 class="text-xs font-semibold uppercase tracking-wide text-base-content/60">
+            {gettext("Used by")}
+          </h3>
+          <p :if={@usages.total == 0} class="mt-2 text-sm text-base-content/60">
+            {gettext("Not used by any published document.")}
+          </p>
+          <ul :if={@usages.items != []} class="mt-2 space-y-1">
+            <li :for={usage <- @usages.items} class="flex items-center gap-2 text-sm">
+              <.link
+                :if={usage.kind}
+                navigate={~p"/editor/content/#{usage.kind}/#{usage.id}"}
+                class="link truncate"
+              >
+                {usage.title}
+              </.link>
+              <span :if={!usage.kind} class="truncate">{usage.title}</span>
+              <span class="shrink-0 text-[11px] text-base-content/50">{usage.state}</span>
+            </li>
+          </ul>
+          <p
+            :if={@usages.total > length(@usages.items)}
+            class="mt-2 text-[11px] text-base-content/50"
+          >
+            {gettext("and %{count} more", count: @usages.total - length(@usages.items))}
+          </p>
+          <p :if={@usages.total > 0} class="mt-2 text-[11px] text-base-content/50">
+            {gettext("Drafts that have never been published are not listed.")}
+          </p>
+        </div>
       </div>
-    </div>
+    </.modal>
     """
+  end
+
+  # Shown next to the regenerate button so an admin can see what a run would
+  # produce before starting one.
+  defp variant_format_summary do
+    case KilnCMS.ImageProcessor.variant_formats() do
+      [] -> gettext("source format only")
+      formats -> Enum.map_join(formats, ", ", &String.upcase(to_string(&1)))
+    end
   end
 end

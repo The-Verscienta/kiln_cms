@@ -97,6 +97,36 @@ defmodule KilnCMSWeb.TaxonomyLiveTest do
       assert Enum.any?(CMS.list_tags!(authorize?: false), &(&1.slug == "ex-lang"))
     end
 
+    test "a slug carrying a path separator is refused, and the editor says why", %{conn: conn} do
+      # #1044's second acceptance criterion. The validation is worth little if
+      # the editor drops it on the floor — an editor who typed a slug with a `/`
+      # would see the row simply not appear.
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/taxonomy")
+
+      html =
+        lv
+        |> form("#new-category-form", category: %{name: "News", slug: "news/locale/fr"})
+        |> render_submit()
+
+      assert html =~ "lowercase"
+      refute Enum.any?(CMS.list_categories!(authorize?: false), &(&1.slug == "news/locale/fr"))
+    end
+
+    test "a name in a non-Latin script still gets a usable slug", %{conn: conn} do
+      # `slugify/1` filters to ASCII, so this name yields "" — which since
+      # #1044 is a rejected write rather than a silently empty slug. Without a
+      # fallback a Chinese- or Russian-language site could not add a category
+      # at all without inventing a Latin slug by hand.
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/taxonomy")
+
+      lv |> form("#new-category-form", category: %{name: "北京", slug: ""}) |> render_submit()
+
+      created = Enum.find(CMS.list_categories!(authorize?: false), &(&1.name == "北京"))
+
+      assert created, "the category was not created"
+      assert created.slug =~ ~r/\A[a-z0-9]+(-[a-z0-9]+)*\z/
+    end
+
     test "a duplicate slug surfaces a validation error instead of crashing", %{conn: conn} do
       seed_category(%{name: "Existing", slug: "dupe-slug"})
 
@@ -168,6 +198,66 @@ defmodule KilnCMSWeb.TaxonomyLiveTest do
 
       assert html =~ "become ungrouped"
     end
+
+    test "a scope entry naming no live type renders as (unknown) (#526)", %{conn: conn} do
+      # Seeded to bypass the KnownContentTypes validation — models a pre-existing
+      # bad row or a TypeDefinition renamed out from under the group.
+      seed_tag_group(%{name: "Stale scope", content_types: ["ghosttype", "post"]})
+
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/taxonomy")
+
+      # The unresolvable entry is flagged; the real one shows its label, not "(unknown)".
+      assert html =~ "ghosttype (unknown)"
+      refute html =~ "post (unknown)"
+    end
+
+    # A tag pointing at a group the page didn't load (a cross-tenant `tag_group_id`
+    # — the FK carries no org component — or one raced in after load) must fall
+    # into "Ungrouped", not vanish: dropping it hid its Edit/Delete controls and
+    # skewed the "Tags (N)" count (#525). This can't be reproduced through the DB
+    # here — the fail-open suite loads every group `global?` and the `nilify` FK
+    # forbids a dangling id — so exercise the pure bucketing directly.
+    test "a tag in an unloaded group buckets as ungrouped rather than disappearing" do
+      # Two loaded groups so we can also assert picker order is preserved and the
+      # Ungrouped bucket lands last.
+      first = %TagGroup{id: Ecto.UUID.generate(), name: "First"}
+      second = %TagGroup{id: Ecto.UUID.generate(), name: "Second"}
+      absent_id = Ecto.UUID.generate()
+
+      in_first = %Tag{id: Ecto.UUID.generate(), name: "Filed", tag_group_id: first.id}
+      orphan = %Tag{id: Ecto.UUID.generate(), name: "Orphan", tag_group_id: absent_id}
+      loose = %Tag{id: Ecto.UUID.generate(), name: "Loose", tag_group_id: nil}
+
+      buckets =
+        KilnCMSWeb.TaxonomyLive.group_tags([in_first, orphan, loose], [first, second])
+
+      # Every tag survives — none is silently dropped.
+      bucketed = for {_id, _name, tags} <- buckets, t <- tags, do: t.name
+      assert Enum.sort(bucketed) == ["Filed", "Loose", "Orphan"]
+
+      # Loaded groups keep picker order; the empty one still shows; Ungrouped last.
+      assert [
+               {first_id, "First", [in_first]},
+               {second_id, "Second", []},
+               {nil, ungrouped_label, ungrouped}
+             ] =
+               buckets
+
+      assert first_id == first.id
+      assert second_id == second.id
+      assert ungrouped_label =~ "Ungrouped"
+      # Both the null-group tag and the unknown-group tag land under "Ungrouped".
+      assert Enum.map(ungrouped, & &1.name) |> Enum.sort() == ["Loose", "Orphan"]
+    end
+
+    test "no ungrouped bucket appears when every tag is filed under a loaded group" do
+      loaded = %TagGroup{id: Ecto.UUID.generate(), name: "Loaded"}
+      filed = %Tag{id: Ecto.UUID.generate(), name: "Filed", tag_group_id: loaded.id}
+
+      buckets = KilnCMSWeb.TaxonomyLive.group_tags([filed], [loaded])
+
+      assert buckets == [{loaded.id, "Loaded", [filed]}]
+    end
   end
 
   describe "editing taxonomy" do
@@ -211,6 +301,134 @@ defmodule KilnCMSWeb.TaxonomyLiveTest do
       |> render_click()
 
       refute Enum.any?(CMS.list_tags!(authorize?: false), &(&1.id == tag.id))
+    end
+
+    # `edit` used a bang fetch with no not-found clause, so clicking Edit on a
+    # row another admin had just deleted crashed the LiveView — taking whatever
+    # was half-typed into all three create forms down with it (#531).
+    test "editing a row that has since been deleted says so instead of crashing",
+         %{conn: conn} do
+      tag = seed_tag(%{name: "Vanishing"})
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/taxonomy")
+
+      # Someone else removes it while this page is open.
+      CMS.destroy_tag!(tag, authorize?: false)
+
+      html =
+        lv
+        |> element(~s(button[phx-click="edit"][phx-value-id="#{tag.id}"]))
+        |> render_click()
+
+      assert html =~ "no longer available"
+      refute html =~ "Vanishing"
+    end
+
+    # The delete handler cleared `@edit` unconditionally and record-agnostically,
+    # so deleting anything threw away an in-progress inline rename of an
+    # unrelated record — and did so even when the delete itself failed (#531).
+    test "deleting one record leaves an in-progress edit of another alone", %{conn: conn} do
+      keeper = seed_category(%{name: "Keeper"})
+      doomed = seed_tag(%{name: "Doomed"})
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/taxonomy")
+
+      # Start renaming the category...
+      lv
+      |> element(~s(button[phx-click="edit"][phx-value-id="#{keeper.id}"]))
+      |> render_click()
+
+      lv
+      |> form("#edit-category-#{keeper.id}", taxonomy: %{name: "Half typed"})
+      |> render_change()
+
+      # ...then delete an unrelated tag.
+      lv
+      |> element(
+        ~s(button[phx-click="delete"][phx-value-type="tag"][phx-value-id="#{doomed.id}"])
+      )
+      |> render_click()
+
+      # The rename is still open, with what was typed into it.
+      html = render(lv)
+      assert html =~ "edit-category-#{keeper.id}"
+      assert html =~ "Half typed"
+    end
+
+    # A row someone else already deleted, a row this actor may not delete, and
+    # anything else are three different problems. Reporting them all as "you may
+    # not have permission" hid the first two — and the obvious way to say more,
+    # interpolating Ash's own error rendering, puts a class header and the raw
+    # primary key in the flash, in English, whatever the locale (#531).
+    test "a delete of a since-deleted row says so, and clears the phantom row",
+         %{conn: conn} do
+      tag = seed_tag(%{name: "Phantom"})
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/taxonomy")
+      CMS.destroy_tag!(tag, authorize?: false)
+
+      html =
+        lv
+        |> element(~s(button[phx-click="delete"][phx-value-id="#{tag.id}"]))
+        |> render_click()
+
+      assert html =~ "no longer available"
+      # Not Ash's internals, and not the record's id.
+      refute html =~ "Input Invalid"
+      refute html =~ tag.id
+
+      # The row is gone from the page, so the only affordance isn't to click
+      # Delete again and get the same message.
+      refute html =~ "Phantom"
+    end
+
+    # Taxonomy is world-readable, so an editor's fetch succeeds and only the
+    # admin-only destroy policy refuses — a genuinely different message.
+    test "a delete an editor isn't allowed says so, and keeps the row", %{conn: conn} do
+      tag = seed_tag(%{name: "Protected"})
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/taxonomy")
+
+      # The editor's page renders no delete button, so push the event directly —
+      # the server must refuse on the policy, not on the missing control.
+      html = render_click(lv, "delete", %{"type" => "tag", "id" => tag.id})
+
+      assert html =~ "permission"
+      assert html =~ "Protected"
+      assert Enum.any?(CMS.list_tags!(authorize?: false), &(&1.id == tag.id))
+    end
+
+    # Every kind's flash comes out of one `labels/1` table now, so a copy/paste
+    # swap between rows would go unnoticed.
+    test "each kind's create flash names that kind", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/taxonomy")
+
+      assert lv
+             |> form("#new-category-form", category: %{name: "Flash Cat"})
+             |> render_submit() =~ "Category added."
+
+      assert lv
+             |> form("#new-tag_group-form", tag_group: %{name: "Flash Group"})
+             |> render_submit() =~ "Tag group added."
+
+      assert lv
+             |> form("#new-tag-form", tag: %{name: "Flash Tag"})
+             |> render_submit() =~ "Tag added."
+    end
+
+    # `kind_params/1` finds the kind by which form key the payload carries. A
+    # payload naming none used to be a `MatchError` that took the LiveView down
+    # — discarding all three half-typed create forms, the very failure the edit
+    # handler was fixed to avoid.
+    test "a validate payload naming no known kind is ignored, not fatal", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/taxonomy")
+
+      lv |> form("#new-category-form", category: %{name: "Still here"}) |> render_change()
+
+      render_change(lv, "validate", %{"not_a_kind" => %{"name" => "x"}})
+      render_change(lv, "create", %{"not_a_kind" => %{"name" => "x"}})
+
+      assert render(lv) =~ "Still here"
     end
   end
 

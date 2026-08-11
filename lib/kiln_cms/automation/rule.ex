@@ -20,15 +20,45 @@ defmodule KilnCMS.Automation.Rule do
   # webhook system emits (`KilnCMS.CMS.WebhookEndpoint.verbs/0`), which is where
   # automation is evaluated from. `:in_review` / `:returned_to_draft` are the
   # review-workflow transitions (#375), so "on `in_review` → notify" rules work.
-  @triggers [:published, :unpublished, :updated, :in_review, :returned_to_draft]
+  #
+  # `:assigned` / `:overdue` (#501) are task-domain, not content-type-domain —
+  # `KilnCMS.Notifications.Tasks` dispatches them as `"task.assigned"` /
+  # `"task.overdue"` through the same `KilnCMS.Webhooks.dispatch/3` funnel.
+  # `Automation.handle_event/3` only ever splits the event string on its first
+  # "." and matches the verb against this list, so a literal `"task"` type
+  # works with no executor changes — a rule scoped to `content_type: "task"`
+  # matches exactly like one scoped to `content_type: "page"`.
+  @triggers [
+    :published,
+    :unpublished,
+    :updated,
+    :in_review,
+    :returned_to_draft,
+    :assigned,
+    :overdue
+  ]
 
   # Reactions. HTTP/Slack notifications are the (signed, SSRF-safe) webhook
   # feature's job; automation adds the reactions webhooks can't do.
   # `:newsletter` (#376) fans a published document out to subscribers via the
   # existing newsletter machinery — "on publish → send the newsletter".
-  # `:flag_duplicates` / `:suggest_tags` (#377) are the embedding-driven
-  # editorial-intelligence reactions — e.g. "on in_review → email the editors
-  # any near-duplicates" as a lightweight review gate.
+  # `:flag_duplicates` / `:suggest_tags` / `:suggest_links` / `:suggest_metadata`
+  # (#377) are the editorial-intelligence reactions — e.g. "on in_review → email
+  # the editors any near-duplicates" as a lightweight review gate.
+  #
+  # Every one of them **suggests and never writes**, which is the design answer
+  # to the reason this issue's automation form was held back: drafted metadata
+  # lands in `<meta>` tags on the public site, so a successful prompt injection
+  # buys SEO cloaking on the operator's own domain, and human-in-the-loop is the
+  # primary control against that. Automation makes the *computation* unattended;
+  # accepting a value stays a click in the editor. A reaction that wrote
+  # `seo_description` on a state transition would remove the primary control
+  # entirely — see `KilnCMS.Seo.Generator`.
+  # `:social_post` (#497) announces a publish to the site's configured Bluesky /
+  # Mastodon accounts (`KilnCMS.Social`). Config: `"provider"` (required) and an
+  # optional `"template"`. It is the one reaction that writes somewhere the
+  # operator cannot quietly undo, which is why the machinery behind it is
+  # at-most-once rather than at-least-once.
   @action_kinds [
     :send_email,
     :broadcast,
@@ -36,7 +66,10 @@ defmodule KilnCMS.Automation.Rule do
     :reindex,
     :newsletter,
     :flag_duplicates,
-    :suggest_tags
+    :suggest_tags,
+    :suggest_links,
+    :suggest_metadata,
+    :social_post
   ]
 
   @doc "Lifecycle events a rule can trigger on."
@@ -96,6 +129,15 @@ defmodule KilnCMS.Automation.Rule do
     end
   end
 
+  validations do
+    # `config` is a free map read defensively by every reaction, so a rule with
+    # a missing or misspelled key saved fine, listed as enabled, and did
+    # nothing — forever, with the only evidence in a server log (#944). On
+    # create and update both: an action can be changed on an existing rule, and
+    # the config that suited the old one usually does not suit the new one.
+    validate KilnCMS.Automation.Validations.ActionConfig, on: [:create, :update]
+  end
+
   # Multi-tenancy (epic #336): a rule belongs to one site, so a lifecycle event
   # only fires its own org's rules. `global?: true` keeps the tenant optional;
   # the executor's `:matching` scan (`authorize?: false`) is scoped to the
@@ -118,8 +160,14 @@ defmodule KilnCMS.Automation.Rule do
       public? false
     end
 
-    attribute :name, :string, allow_nil?: false, public?: true
-    attribute :description, :string, public?: true
+    attribute :name, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
+
+    attribute :description, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.paragraph()]
 
     attribute :trigger_event, :atom do
       allow_nil? false

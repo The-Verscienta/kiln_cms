@@ -16,6 +16,10 @@ defmodule KilnCMS.Seo.Checks.Keyphrase do
 
   alias Kiln.Advisory.Body
   alias Kiln.Advisory.Context
+
+  # Search-only — keyphrase density is not an accessibility property.
+  @impl Kiln.Advisory
+  def lenses, do: [:seo]
   alias KilnCMS.Slug
 
   @density_min 0.5
@@ -36,6 +40,7 @@ defmodule KilnCMS.Seo.Checks.Keyphrase do
       slug_length(Context.field(context, :slug), lints),
       in_description(Context.field(context, :seo_description), words),
       in_first_paragraph(context.body.first_paragraph, words),
+      in_headings(context.body.headings, words),
       density(context.body, keyphrase)
     ]
   end
@@ -87,6 +92,23 @@ defmodule KilnCMS.Seo.Checks.Keyphrase do
     if Slug.subset?(words, Slug.content_words(paragraph)),
       do: :ok,
       else: finding(:warning, :keyphrase_not_in_first_paragraph)
+  end
+
+  # #551: the cheapest of the parity gaps, because `Kiln.Advisory.Body` already
+  # collects headings with their text — no extra traversal, just a subset test
+  # against the same folded-word machinery every other clause here uses.
+  #
+  # `:n_a` (not a pass) when there are no headings, matching how
+  # `Kiln.Advisory.Checks.Headings` treats a document under 300 words: a short
+  # page with no subheadings has nothing to be told off about, and a warning
+  # there would push editors to add headings a page does not need.
+  defp in_headings(_headings, []), do: :n_a
+  defp in_headings([], _words), do: :n_a
+
+  defp in_headings(headings, words) do
+    if Enum.any?(headings, &Slug.subset?(words, Slug.content_words(&1.text))),
+      do: :ok,
+      else: finding(:warning, :keyphrase_not_in_headings, :body)
   end
 
   defp density(_body, ""), do: :n_a

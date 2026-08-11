@@ -18,7 +18,7 @@ defmodule KilnCMS.Blocks.HowTo do
     field :name, :string
     field :description, :string
     # Each entry: `%{"name" => label, "text" => instruction}` (string keys).
-    field :steps, {:array, :map}, default: []
+    field :steps, {:array, :map}, default: [], translatable: [:name, :text]
   end
 
   # Match a plain variable, not %__MODULE__{} — see the note in divider.ex: the
@@ -75,6 +75,17 @@ defmodule KilnCMS.Blocks.HowTo do
         |> put_if("name", block.name)
         |> put_if("description", block.description)
     end
+  end
+
+  # `steps/1` normalizes every entry, so the delivered array is never null and
+  # both keys are always present strings.
+  @impl Kiln.Block.Renderer
+  def json_schema do
+    %{
+      "properties" => %{
+        "steps" => Kiln.Block.JsonSchema.object_array(~w(name text))
+      }
+    }
   end
 
   @impl Kiln.Block.Renderer

@@ -106,11 +106,10 @@ jobs:
         # via setup-beam. The two places that *cannot* read it — mix.exs's
         # `elixir:` requirement and the Dockerfile's ARGs — are guarded here.
         #
-        # This is the cheap half of #600. The expensive half is that CI does not
-        # build the release image at all, so a Dockerfile broken any *other* way
-        # stays invisible until a deploy. #573 raised the elixir requirement and
-        # left the Dockerfile on 1.18.4, which cannot compile this project; every
-        # job stayed green because none of them builds that image.
+        # This is the cheap half of #600 — a declaration check, not a build.
+        # The `image` job below is the other half: it builds the release image,
+        # so a Dockerfile broken in a way no declaration can express fails on
+        # the PR rather than at a deploy.
         run: mix kiln.toolchain.check
 
       # NOTE (#419): the migration/snapshot drift check moved to the
@@ -154,6 +153,41 @@ jobs:
 
       - name: Sobelow (security scan)
         run: mix sobelow --config
+
+      # PDF metadata stripping (#807) shells out to qpdf, and the tests that
+      # prove an uploaded PDF really loses its /Info and XMP need a real one.
+      #
+      # The options arrived in qpdf 11.10. Ubuntu 24.04 packages 11.9.0 — one
+      # minor short — and 26.04 packages 12.3.2, so whether these tests run
+      # depends on where `ubuntu-latest` currently points. `test_helper.exs`
+      # excludes the `:qpdf` tag when the installed qpdf can't strip and says
+      # so on stderr, so this degrades visibly rather than silently passing.
+      # The line below reports it in the job log too, where someone will
+      # actually see it. The RELEASE image is Debian trixie (qpdf 12.2.0) and
+      # is not affected either way.
+      - name: Install qpdf (PDF metadata stripping tests)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends qpdf
+          qpdf --version | head -1
+          if qpdf --help=all 2>&1 | grep -q -- '--remove-info'; then
+            echo "qpdf supports --remove-info; :qpdf tests will run"
+          else
+            echo "::warning::qpdf $(qpdf --version | head -1) predates 11.10 —" \
+                 ":qpdf tests (#807 PDF metadata stripping) will be EXCLUDED"
+          fi
+
+      # Same reasoning as qpdf above, for A/V (#820). Without ffmpeg here, the
+      # :ffmpeg tests are excluded everywhere that matters and the strip — a
+      # privacy control — would be pinned by nothing: a change to the argv that
+      # silently stopped removing GPS would merge green. The `:no_ffmpeg` pair
+      # is excluded once this is installed, which is the intent; between the
+      # two tags, one always runs.
+      - name: Install ffmpeg (A/V metadata stripping tests)
+        run: |
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -version | head -1
+          ffprobe -version | head -1
 
       - name: Run tests
         run: mix test
@@ -378,16 +412,26 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('e2e/package.json') }}
+          # The browser list is part of the key, not just the lockfile: adding
+          # webkit (#1046) while `e2e/package.json` happened to change was luck.
+          # Had only the workflow changed, a cache HIT would have restored a
+          # chromium-only store, `playwright install` would re-download webkit
+          # every run, and the save step would never fire.
+          key: ${{ runner.os }}-playwright-chromium-webkit-${{ hashFiles('e2e/package.json') }}
 
       - name: Install Elixir dependencies
         run: mix deps.get
 
-      - name: Install E2E dependencies + browser
+      - name: Install E2E dependencies + browsers
         working-directory: e2e
         run: |
           npm ci
-          npx playwright install --with-deps chromium
+          # WebKit as well as Chromium: `focus_trap.spec.js` runs on both,
+          # because Safari not focusing a `<button>` on click is the case that
+          # motivated #1046 and a Chromium-only run leaves it untested. Only
+          # that one spec uses it (see the `webkit-focus` project), so this buys
+          # a download rather than a doubled suite.
+          npx playwright install --with-deps chromium webkit
 
       # Compile the app in MIX_ENV=e2e up front, as a normal (uncapped) step, so
       # the potentially-cold dep build lands in the cached _build BEFORE
@@ -562,3 +606,109 @@ jobs:
 
       - name: Check for migration/snapshot drift (overlay build)
         run: mix ash.codegen --check
+
+  image:
+    name: Release image (build only, ${{ matrix.name }})
+    runs-on: ubuntu-latest
+
+    # Two legs: the core image, and one with a project overlay activated (#988).
+    #
+    # The overlay leg exists because `ARG PROJECT` guards a `RUN if [ -n
+    # "$PROJECT" ]` block that the core build never enters — so half the
+    # Dockerfile shipped unexercised, in exactly the state #600 exists to close.
+    # Its failure mode is the one the Dockerfile's own comment names: the
+    # release builds green and boots, then 500s on the first request that
+    # touches a project domain.
+    #
+    # The `overlay_drift` job mirrors the same three steps in Elixir (`cp
+    # project.exs`, `cp -R priv/.`) to check schema drift. That proves the
+    # activation is *coherent*, not that the Dockerfile's copy of it runs — and
+    # the two are the same fact stated twice, so they can drift. This leg is the
+    # only thing that executes the Docker one. It also covers `priv/` merging,
+    # which nothing on the Elixir side does.
+    #
+    # Roughly doubles the job's wall time in the worst case and much less in
+    # practice: everything up to `COPY projects projects` is byte-identical
+    # between the legs, so the second build reads those layers from the shared
+    # `type=gha` cache rather than recompiling the dep tree.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: core
+            project: ""
+          - name: overlay
+            project: acupuncture
+
+    # The release image is the one artifact nothing else in CI exercises, and
+    # the failures it hides are total: #573 raised mix.exs's `elixir:`
+    # requirement past the version the Dockerfile pinned, so the builder could
+    # not compile the project at all — and every job stayed green for weeks,
+    # because none of them builds this image. An earlier revision fetched a
+    # signing key with `curl` three lines before installing `curl`. Both were
+    # found by reading, which is not a gate (#600).
+    #
+    # Build only, never push: this proves the image *builds*, which is the
+    # failure mode that reaches a deploy. Publishing stays a deliberate act
+    # outside CI (prod is a manual Coolify redeploy).
+    #
+    # NOT a required check, deliberately. The "Require CI on main" ruleset lists
+    # only `Compile, lint, scan & test`, so a red build here is visible on the
+    # PR but does not block it. That is the right starting position: this job
+    # depends on a precompiled NIF downloaded from GitHub at build time (see the
+    # flake note below), and a required check that can fail for reasons
+    # unrelated to the change blocks every merge until it passes. Promote it by
+    # adding the context `Release image (build only)` to that ruleset once its
+    # real pass rate and runtime are known.
+    #
+    # Generous timeout: a cold build compiles the whole dep set, and the
+    # Dockerfile deliberately caps the BEAM to 2 schedulers through it to stay
+    # inside a small host's RAM. `exla` is dev/test-only, so the XLA build — the
+    # one thing that would certainly blow this budget — is not in here.
+    #
+    # A cold compile is more common than "only when mix.lock changes" would
+    # suggest: `COPY mix.exs mix.lock` and `COPY config/config.exs` both precede
+    # `mix deps.compile`, so a version bump (every release) or a config edit
+    # (often) invalidates the whole dep layer.
+    #
+    # Known flake vector, worth naming before this is ever made a required
+    # check: `tokenizers` pulls a precompiled NIF from GitHub at compile time
+    # via `rustler_precompiled`, and the builder has no Rust toolchain to fall
+    # back on — so a transient 403 or rate-limit fails the job for reasons that
+    # have nothing to do with the change under test.
+    timeout-minutes: 60
+
+    env:
+      # v6 uploads a build record artifact and writes a job summary on every
+      # run. Neither is worth the storage for a build-only check.
+      DOCKER_BUILD_SUMMARY: false
+      DOCKER_BUILD_RECORD_UPLOAD: false
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the release image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          # Empty on the core leg, which is exactly the default — so that leg
+          # builds the same image it always did, and the overlay leg is the
+          # only behaviour change.
+          build-args: |
+            PROJECT=${{ matrix.project }}
+          # Read the cache everywhere, WRITE it only on a push to main.
+          #
+          # GHA caches are ref-scoped: a PR branch reads main's scope but writes
+          # into its own, which nothing but a later push to that same PR will
+          # ever read. `mode=max` exports every layer of both stages — the dep
+          # tree alone is most of a gigabyte — into a scope that is then dead
+          # weight against the repository's shared cache budget, evicting the
+          # entries other jobs live on. `priv/plts` is the one that hurts: lose
+          # it and `mix dialyzer` rebuilds the PLT from scratch in the `build`
+          # job, which reads as an unexplained slow run on an unrelated PR.
+          cache-from: type=gha
+          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max' || '' }}

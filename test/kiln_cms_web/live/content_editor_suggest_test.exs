@@ -20,15 +20,21 @@ defmodule KilnCMSWeb.ContentEditorSuggestTest do
 
   @password "password123456"
 
-  defp authed_user(role) do
+  defp authed_user(role, grants \\ %{}) do
     email = "seo-suggest-#{System.unique_integer([:positive])}@example.com"
 
-    Ash.Seed.seed!(User, %{
-      email: email,
-      hashed_password: Bcrypt.hash_pwd_salt(@password),
-      confirmed_at: DateTime.utc_now(),
-      role: role
-    })
+    Ash.Seed.seed!(
+      User,
+      Map.merge(
+        %{
+          email: email,
+          hashed_password: Bcrypt.hash_pwd_salt(@password),
+          confirmed_at: DateTime.utc_now(),
+          role: role
+        },
+        grants
+      )
+    )
 
     strategy = AshAuthentication.Info.strategy!(User, :password)
 
@@ -110,6 +116,252 @@ defmodule KilnCMSWeb.ContentEditorSuggestTest do
       [value] -> value
       # Textareas carry their value as content, not an attribute.
       nil -> html |> String.replace(~r/<[^>]*>/, "") |> String.trim()
+    end
+  end
+
+  describe "authorization (#550)" do
+    # An editor scoped to author only "post" can READ pages (empty readable
+    # scope = unrestricted) but cannot autosave one — the "read-only on this
+    # type" role the issue is about.
+    defp read_only_editor,
+      do: authed_user(:editor, %{editable_types: ["post"], readable_types: []})
+
+    test "the Suggest control is hidden from an editor who cannot write the record", %{conn: conn} do
+      enable_stub()
+      page = page(authed_user(:admin))
+
+      {_lv, html} = open_editor(conn, read_only_editor(), page)
+
+      refute html =~ "Suggest with AI"
+    end
+
+    test "a forged seo_suggest event is refused server-side and starts no billed run",
+         %{conn: conn} do
+      # The counting stub proves the guard independently of rendering: the button
+      # is hidden, but that alone wouldn't prove the *handler* refused — only that
+      # the card didn't render. Asserting the generator was never called does.
+      put_seo(generator: KilnCMS.StubSeoGenerator.Counting, model: "stub:stub")
+      {:ok, _} = KilnCMS.StubSeoGenerator.Counting.start_link()
+      KilnCMS.StubSeoGenerator.Counting.reset()
+
+      page = page(authed_user(:admin))
+      {lv, _html} = open_editor(conn, read_only_editor(), page)
+
+      # The disabled/hidden button is not the control — push the event directly,
+      # as a replay or a hand-rolled client would.
+      render_click(lv, "seo_suggest", %{})
+      render_async(lv, 2_000)
+
+      assert KilnCMS.StubSeoGenerator.Counting.count() == 0
+    end
+
+    test "an editor who may write the record still gets the control", %{conn: conn} do
+      enable_stub()
+      editor = authed_user(:editor)
+
+      {lv, html} = open_editor(conn, editor, page(editor))
+      assert html =~ "Suggest with AI"
+
+      render_click(lv, "seo_suggest", %{})
+      assert render_async(lv, 2_000) =~ "Suggestions"
+    end
+
+    # #868. A per-field grant is enforced by `Changes.EnforceFieldGrants`, which
+    # is a *change* — and `Ash.can?` builds its changeset with empty input, so
+    # no attribute is ever `supplied?`, no violation is added, and the record
+    # -level `may_write?` gate passes. This editor could therefore spend the
+    # org's LLM budget on three fields the save would then refuse one by one.
+    defp title_only_editor,
+      do: authed_user(:editor, %{field_grants: %{"page" => ["title"]}})
+
+    test "the Suggest control is hidden from an editor granted only other fields",
+         %{conn: conn} do
+      enable_stub()
+      page = page(authed_user(:admin))
+
+      {_lv, html} = open_editor(conn, title_only_editor(), page)
+
+      refute html =~ "Suggest with AI"
+    end
+
+    test "a forged seo_suggest from a field-granted editor bills nothing", %{conn: conn} do
+      put_seo(generator: KilnCMS.StubSeoGenerator.Counting, model: "stub:stub")
+      {:ok, _} = KilnCMS.StubSeoGenerator.Counting.start_link()
+      KilnCMS.StubSeoGenerator.Counting.reset()
+
+      page = page(authed_user(:admin))
+      {lv, _html} = open_editor(conn, title_only_editor(), page)
+
+      render_click(lv, "seo_suggest", %{})
+      render_async(lv, 2_000)
+
+      assert KilnCMS.StubSeoGenerator.Counting.count() == 0
+    end
+
+    # The grant covers exactly what the suggestion writes, so nothing is
+    # withheld — without this the fix could be "hide it from every granted
+    # editor", which is a different bug.
+    test "an editor granted the SEO fields still gets the control", %{conn: conn} do
+      enable_stub()
+
+      editor =
+        authed_user(:editor, %{
+          field_grants: %{"page" => ["seo_title", "seo_description", "seo_keywords"]}
+        })
+
+      {_lv, html} = open_editor(conn, editor, page(authed_user(:admin)))
+
+      assert html =~ "Suggest with AI"
+    end
+
+    # Grants bind an effective editor; admins are exempt (the policy bypass),
+    # and `EnforceFieldGrants` skips them. Hiding the control from an admin who
+    # happens to carry a grants entry would be the mirror-image mistake.
+    test "an admin carrying a field grant is unaffected", %{conn: conn} do
+      enable_stub()
+      admin = authed_user(:admin, %{field_grants: %{"page" => ["title"]}})
+
+      {_lv, html} = open_editor(conn, admin, page(admin))
+
+      assert html =~ "Suggest with AI"
+    end
+
+    # `any?`, not `all?`: each card is accepted on its own (`seo_accept` writes
+    # exactly one attribute), so an editor granted one SEO field can take that
+    # card and save cleanly. Hiding the panel from them would be the same bug
+    # in the opposite direction.
+    test "an editor granted one of the SEO fields still gets the control", %{conn: conn} do
+      enable_stub()
+      editor = authed_user(:editor, %{field_grants: %{"page" => ["seo_title"]}})
+
+      {_lv, html} = open_editor(conn, editor, page(authed_user(:admin)))
+
+      assert html =~ "Suggest with AI"
+    end
+
+    # …and the card they may NOT write is refused at accept time, not left to
+    # be rejected by the save. The panel being hidden is not the boundary: a
+    # queued or replayed `seo_accept` arrives regardless.
+    test "accepting a card outside the grant does not touch the form", %{conn: conn} do
+      enable_stub()
+      editor = authed_user(:editor, %{field_grants: %{"page" => ["seo_title"]}})
+
+      {lv, _html} = open_editor(conn, editor, page(authed_user(:admin)))
+
+      render_click(lv, "seo_suggest", %{})
+      render_async(lv, 2_000)
+
+      before = field_value(lv, "seo_description")
+      render_click(lv, "seo_accept", %{"field" => "seo_description"})
+
+      assert field_value(lv, "seo_description") == before
+    end
+
+    # `may_write_fields?/4` calls `ContentTypes.type_name_for/1` with a RECORD,
+    # where the change calls it with a changeset. For a dynamic type those are
+    # different clauses, and resolving to "entry" instead of the type's own name
+    # would read as no restriction and open the gate for every dynamic type.
+    test "a dynamic type resolves its own name, not \"entry\"", %{conn: conn} do
+      enable_stub()
+      admin = authed_user(:admin)
+
+      definition =
+        KilnCMS.CMS.create_type_definition!(
+          %{name: "recipe#{System.unique_integer([:positive])}", label: "Recipe"},
+          actor: admin
+        )
+
+      entry =
+        KilnCMS.CMS.ContentTypes.create!(
+          definition.name,
+          %{title: "Soup", slug: "soup-#{System.unique_integer([:positive])}"},
+          actor: admin
+        )
+
+      # Granted under the DYNAMIC type's name — if the gate resolved "entry"
+      # this would read as "no grant for entry" and wrongly show the control.
+      editor = authed_user(:editor, %{field_grants: %{definition.name => ["title"]}})
+
+      {:ok, _lv, html} =
+        conn |> log_in(editor) |> live(~p"/editor/content/#{definition.name}/#{entry.id}")
+
+      refute html =~ "Suggest with AI"
+    end
+
+    # The content-intelligence section is the same shape as Suggest and was
+    # missing the same guard (#916): "Analyze content" is an unbounded
+    # `list_tags!` plus an embedding per unapplied tag on a cold 6h cache, and
+    # unlike the SEO path it has no budget bucket in front of it.
+    test "the Similar content section is hidden from a read-only editor", %{conn: conn} do
+      page = page(authed_user(:admin))
+
+      {_lv, html} = open_editor(conn, read_only_editor(), page)
+
+      refute html =~ "Similar content"
+    end
+
+    test "a forged content_intel_refresh is refused server-side", %{conn: conn} do
+      page = page(authed_user(:admin))
+      {lv, _html} = open_editor(conn, read_only_editor(), page)
+
+      # Asserted on the socket assigns, not the render: the section is hidden by
+      # `:if={@may_write?}` either way, so a DOM assertion here passes with the
+      # handler's guard deleted. `intel_duplicates` starts `nil` and only ever
+      # becomes a list once the async load has run, so it says plainly whether
+      # the handler did anything.
+      render_click(lv, "content_intel_refresh", %{})
+      render_async(lv, 2_000)
+
+      assert intel(lv, :intel_duplicates) == nil
+      assert intel(lv, :intel_tags) == nil
+    end
+
+    test "the same event from a writable editor DOES load", %{conn: conn} do
+      # The positive control. Without it, `intel_duplicates` staying nil proves
+      # nothing — it would stay nil if the event name were simply wrong.
+      editor = authed_user(:editor)
+      {lv, _html} = open_editor(conn, editor, page(editor))
+
+      render_click(lv, "content_intel_refresh", %{})
+      render_async(lv, 2_000)
+
+      assert is_list(intel(lv, :intel_duplicates))
+      assert is_list(intel(lv, :intel_tags))
+    end
+
+    test "a forged intel_add_tag ticks nothing", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      tag =
+        CMS.create_tag!(
+          %{name: "gated tag", slug: "gated-#{System.unique_integer([:positive])}"},
+          actor: admin
+        )
+
+      {lv, _html} = open_editor(conn, read_only_editor(), page(admin))
+
+      # `intel_tags` is empty for this editor by construction — the only thing
+      # that fills it is the refresh gated above — so `add_suggested_tag/2`
+      # would no-op even without the guard. So this asserts the guard's effect
+      # (the form is untouched) rather than pretending to prove the guard; the
+      # guard itself is defence in depth, for the day something else fills that
+      # list.
+      before_params = intel(lv, :form).params
+      render_click(lv, "intel_add_tag", %{"id" => tag.id})
+
+      assert intel(lv, :form).params == before_params
+    end
+
+    # Socket assigns, for the assertions that must not depend on markup a
+    # `:if={@may_write?}` has already removed.
+    defp intel(lv, key), do: :sys.get_state(lv.pid).socket.assigns[key]
+
+    test "an editor who may write the record still gets Similar content", %{conn: conn} do
+      editor = authed_user(:editor)
+
+      {_lv, html} = open_editor(conn, editor, page(editor))
+
+      assert html =~ "Similar content"
     end
   end
 

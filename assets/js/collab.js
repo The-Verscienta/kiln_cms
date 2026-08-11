@@ -80,6 +80,18 @@ export function acquireDoc(topic, token) {
       applyAwarenessUpdate(awareness, fromBase64(update), REMOTE_ORIGIN)
     )
 
+    // The document was published while this room was open (#1061). The server
+    // took the converged prose into that write, so nothing typed so far is
+    // lost — but from here on nobody persists this doc: client autosave stops
+    // on a non-draft, and the server checkpoint is refused by `:autosave`'s
+    // draft-only filter. Continuing to type would silently diverge, so say so
+    // rather than let the editor keep writing into a doc that is going nowhere.
+    chan.on("published", () => {
+      window.dispatchEvent(
+        new CustomEvent("kiln:collab-published", {detail: {topic}})
+      )
+    })
+
     // A newcomer asks the room for current awareness states (otherwise
     // existing carets only appear on their next periodic refresh).
     chan.on("awareness_request", () => {

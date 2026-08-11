@@ -63,6 +63,12 @@ defmodule KilnCMS.Webhooks do
     # (a rule problem must not break the publish).
     KilnCMS.Automation.handle_event(event, payload, org)
 
+    # ActivityPub federation (#491) is the third consumer of this funnel, for
+    # the same reasons: it needs the same editorial events, scoped to the same
+    # org, and it must never break a publish. Enqueue-only and non-raising,
+    # like the automation call above.
+    KilnCMS.Federation.handle_event(event, payload, org)
+
     :ok
   end
 

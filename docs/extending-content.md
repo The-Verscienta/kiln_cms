@@ -19,7 +19,8 @@ UI" workflow, scoped to fields.
   (`content_type`, `name`, `label`, `field_type`, `required`, `options`,
   `help_text`, `position`, `default`, `compute`). Field types: `:string`,
   `:text`, `:integer`, `:float`, `:boolean`, `:date`, `:datetime`, `:url`,
-  `:select`, `:media`, `:reference`, `:geolocation`, `:computed` — plus
+  `:select`, `:media`, `:reference`, `:geolocation`, `:datetime_range`,
+  `:recurrence`, `:computed` — plus
   anything a plugin registers (see
   [plugin-extensibility.md](plugin-extensibility.md)).
 - **Store**: values live in the `custom_fields` map on each content record.
@@ -71,6 +72,25 @@ transposed pair is usually caught rather than silently relocated.
 On the fired `:json_ld` surface each populated geolocation field becomes the
 document's `contentLocation` — a schema.org `Place` carrying `GeoCoordinates`
 — so structured data falls out of the type with no per-type wiring.
+
+### Date-range and recurrence fields
+
+A `:datetime_range` field is what makes a content type an **event**: when
+something starts and ends, in a named timezone, optionally all-day. A
+`:recurrence` field alongside it makes that event repeat.
+
+```elixir
+CMS.create_field_definition!(%{
+  type_definition_id: td.id, name: "when", label: "When",
+  field_type: :datetime_range
+}, actor: admin)
+```
+
+Values are stored as **local wall time plus an IANA zone**, not as a UTC
+instant, and expansion is wall-clock so a weekly event holds its local time
+across a DST change. A type carrying one gets `.ics` calendar routes
+automatically; set the type's `schema_org_type` to `Event` (or a subtype) to
+also fire a `schema.org/Event` node. See [events.md](events.md).
 
 ### Computed fields
 
@@ -206,7 +226,10 @@ config :kiln_cms, :plugins, [Ratings.Plugin]
 
 A `Kiln.Plugin` module contributes, per callback (all optional): **block
 types** (`Kiln.Block` modules — they join the storage union, editor palette,
-firing and search automatically), **custom field types** (`Kiln.FieldType`
+firing, search and the XLIFF translation export automatically; see
+[localization workflows](localization-workflows.md#translation-vendors--xliff-20-exportimport)
+for the `translatable:` field option that decides what a translator sees),
+**custom field types** (`Kiln.FieldType`
 modules — admins pick them in the fields admin like any built-in; the
 plugin's `cast/2` coerces + validates every content write to a JSON-native
 value, and the editor renders `<input type={input_type()}
@@ -277,3 +300,143 @@ AshPhoenix sub-form) and are re-injected into the form params on every
 validate/save, so the live preview and the write stay in sync. The in-context
 on-page editor renders columns with their nested children in place (read-only
 there — structural nested edits belong to the full editor).
+
+## 7. Reusable content fragments (#479)
+
+*Define once, embed everywhere* — the Regular Labs / WP reusable-block /
+Contentful-reference idea. A shared banner, CTA or notice is authored as one
+document and embedded on many pages; edit the fragment, every page carrying it
+updates.
+
+```elixir
+%{
+  "_type" => "fragment",
+  "ref"   => %{"type" => "page", "id" => "<uuid>"},   # the reference
+  "label" => "Newsletter CTA"                          # editor-only, never rendered
+}
+```
+
+### It is inlined, not rendered
+
+[`KilnCMS.CMS.Fragments.expand/3`](../lib/kiln_cms/cms/fragments.ex) replaces the
+block with the target's own block tree **before any surface renderer runs** —
+decision A3 ("resolve/embed at fire time") taken literally. That is why one
+small module buys the whole feature: all four fired surfaces (`:web`, `:json`,
+`:llm`, `:json_ld`) see one flat tree and need no knowledge of fragments at all.
+
+Two callers: `Firing.Engine.fire/2` (so artifacts carry the resolved body) and
+`KilnCMSWeb.ContentController` (HTML delivery renders live from the block tree,
+not from an artifact).
+
+**Not** reached yet: write-time derivations (the `search_text` column, block
+embeddings, `word_count`, `reading_time_minutes`) and the editor's own preview
+/ SEO / a11y panels all run over the raw tree, so fragment text is invisible to
+search and doesn't count towards reading time. Tracked in #910 — expanding
+there means making a write depend on a read.
+
+### The re-fire wave already existed
+
+`ref` is a DSL `:reference` field, which
+[`KilnCMS.Firing.References`](../lib/kiln_cms/firing/references.ex) already
+extracts into a `ReferenceEdge` — so publishing a fragment re-fires every
+document embedding it, with **no new machinery**. That is also the one ordering
+constraint in the feature: expansion must run *after* the edge rebuild, which
+reads the raw tree. Expand first and the fragment block is gone, the edge with
+it, and the feature silently degrades to a one-shot copy.
+
+### Failing closed
+
+A target that is missing, unpublished, archived, trashed, in another org, or
+gated to an audience the reader doesn't hold expands to **nothing**. A fragment
+is a pointer; a pointer to something the caller may not see has no safe
+rendering, and a placeholder would leak its existence.
+
+`:audiences` **widens** on top of `:public`, the same way `public_by_slug`
+treats it — an anonymous reader arrives with `[]`, which means "public content
+only", not "nothing at all".
+
+A fired artifact is expanded with its **host document's own** audience and
+nothing wider. Every artifact consumer — the headless artifact endpoint, the
+feeds, static export, the newsletter — resolves the host through a
+`:public`-only filter and then serves the body verbatim, so an artifact
+carrying content stricter than its host would hand a gated body to anonymous
+callers on all four. The rule is: an artifact is never more permissive than the
+document carrying it.
+
+Because an HTML payload can now embed another document's body, the re-fire wave
+also busts each referrer's **delivery** cache, not just its artifact — that
+cache is keyed on the referrer's own slug, which nothing else touches when the
+target changes.
+
+### Cycles and depth
+
+Fragments nest, so expansion recurses — and a cycle would not terminate. Two
+bounds, both needed:
+
+* an **ancestry set**, so `A → B → A` inlines each body once and stops.
+  Ancestry rather than a global seen-set, because the same fragment legitimately
+  appearing twice on a page must render twice;
+* a **depth cap** (`Fragments.max_depth/0`), so a long non-cyclic chain can't
+  fan a page out without limit.
+
+Both live at expansion time rather than at write time: a cycle needs two
+documents pointing at each other, and either write is individually fine. The
+ancestry is seeded with the *host* document, so a page embedding itself doesn't
+inline its own body once before the guard catches the loop a level down.
+
+Depth bounds depth, not breadth — a host with B fragments whose targets each
+have B more would cost `B + B² + B³` reads. So targets are **memoized per
+expansion** (the same fragment twice is one query) and each expansion has a
+**fetch budget** (`Fragments.max_fetches/0`), past which further fragments
+expand to nothing. An anonymous page render is not where you discover how many
+documents an editor chained together.
+
+Fetches are not the cost that matters, though, and on their own those two
+bounds do not hold (#917). The memo returns a cached target *without* spending
+a fetch, and inlining re-runs the expansion over that target's whole tree at
+every occurrence — so the **emitted** tree still grows as `B^(depth+1)` while
+the fetch budget counts only distinct targets. Three chained pages holding 200
+fragment blocks each spend 3 of 64 fetches and emit eight million blocks, from
+an anonymous `GET`. So the load-bearing bound is `Fragments.max_nodes/0`,
+charged against blocks produced by inlining, checked on the way in and charged
+as each inline returns. Only inlined blocks count — a legitimately long page is
+not what this bounds.
+
+### Withdrawing a fragment
+
+Unpublishing, archiving or deleting a fragment **re-fires everything that
+embeds it**. That has to be explicit, because a referrer inlines its target at
+fire time: the fragment's body is sitting inside every referrer's `:web`,
+`:json`, `:llm` and `:json_ld` artifact, and purging the fragment's own
+artifacts does nothing about those. The re-fire wave was originally wired to
+the publish path only, so a withdrawn fragment kept being served by every page
+embedding it — to anonymous callers, through feeds, static export and the
+newsletter (#917). `Changes.DeleteArtifacts` now enqueues the same wave the
+publish path does.
+
+### Point-in-time reads
+
+A historical read (`as_of`) resolves each fragment to the body its target
+carried **at that instant**, via `PointInTime.snapshot_state/4`, not to its
+current published body. Otherwise the one endpoint whose promise is "what did
+this say on…" answered with today's fragment — or with an empty body where the
+content was, if the target had since been withdrawn. A target that was not
+published then expands to nothing, exactly as an unpublished one does live.
+
+A historical read is **no more permissive** than a live one: it re-applies the
+audience filter and the dynamic-type scope against the values that were live at
+`as_of`. That is not optional — `?as_of=` reaches this path from the
+unauthenticated `:api` route, and the response is served
+`cache-control: public, max-age=300`, so skipping the audience check would let
+anyone append `?as_of=` to a public URL and have a CDN cache the body of a
+`:member` fragment embedded in it. A replayed state with no `audience` at all
+fails closed. Hard-purged targets are excluded by the same `still_exists?/3`
+check `index/4` uses, so erased content is not re-exposed through a referrer.
+
+### Authoring
+
+The editor's fragment block is a single `<select>` of published documents —
+published-only, because a fragment pointing at a draft renders nothing, and a
+picker whose choices silently don't appear is worse than no picker. Any content
+type can be a fragment; a non-routable "Fragment" type is a natural home for
+shared banners but is not required.

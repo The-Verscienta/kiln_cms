@@ -69,11 +69,50 @@ defmodule Kiln.Advisory do
   """
   @callback check(Context.t()) :: outcome() | [outcome()]
 
+  @typedoc """
+  A panel a check's findings belong in.
+
+  `:seo` is #476's search-and-readability panel; `:accessibility` is #495's;
+  `:compliance` is #377's claim-checking panel.
+
+  `:compliance` is deliberately **not** in the default returned by
+  `c:lenses/0`. The other two overlap almost entirely — a skipped heading is
+  both a search and an accessibility problem — which is why defaulting to both
+  is right for them. A claim check is a different question with a different
+  audience and, where the publish gate is switched on, different consequences;
+  a generic plugin check landing in it by default would dilute exactly the
+  panel that must not cry wolf. Compliance checks opt in explicitly.
+  """
+  @type lens :: :seo | :accessibility | :compliance
+
+  @doc """
+  Which panels this check's findings belong in. Defaults to **both**.
+
+  Two features share one registry (see above), and most checks genuinely
+  belong to both: a skipped heading level breaks the outline a screen-reader
+  user navigates by *and* the one a search engine reads. Splitting the panels
+  without splitting the checks is the whole point — an author fixing a heading
+  should not have to find it twice.
+
+  So the default is "show it in both", and a check narrows only when it has a
+  reason to: `KilnCMS.Seo.Checks.Keyphrase` has nothing to say about
+  accessibility, and `Kiln.Advisory.Checks.AllCaps` has nothing to say about
+  search. Defaulting the other way — each check picking exactly one home —
+  would mean a plugin author who never thought about the distinction silently
+  gets no panel at all.
+  """
+  @callback lenses() :: [lens()]
+
   defmacro __using__(_opts) do
     quote do
       @behaviour Kiln.Advisory
 
-      import Kiln.Advisory, only: [finding: 2, finding: 3, finding: 4]
+      import Kiln.Advisory, only: [finding: 2, finding: 3, finding: 4, lensed: 2]
+
+      @impl Kiln.Advisory
+      def lenses, do: [:seo, :accessibility]
+
+      defoverridable lenses: 0
     end
   end
 
@@ -87,4 +126,18 @@ defmodule Kiln.Advisory do
   def finding(severity, code, field \\ :body, args \\ %{}) do
     %Finding{severity: severity, code: code, field: field, args: args}
   end
+
+  @doc """
+  Narrow one finding to specific panels, overriding its check's `lenses/0`.
+
+  For a check whose findings don't all belong in the same place — see
+  `Kiln.Advisory.Finding`. Reach for it only when that is genuinely true: a
+  check that needs this for every finding should change its `lenses/0`
+  instead.
+
+      finding(:warning, :thin_content, :body, %{}) |> lensed([:seo])
+  """
+  @spec lensed(Finding.t(), [lens()]) :: Finding.t()
+  def lensed(%Finding{} = finding, lenses) when is_list(lenses),
+    do: %{finding | lenses: lenses}
 end

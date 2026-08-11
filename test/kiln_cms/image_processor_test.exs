@@ -16,13 +16,37 @@ defmodule KilnCMS.ImageProcessorTest do
     assert {:ok, %{width: 1200, height: 800}} = ImageProcessor.process(path, ".png")
   end
 
+  # #1036: every builder (full-size, responsive, crop) now threads its own
+  # write failures back to `process/3`, keyed identically to `variants` —
+  # asserted here on the happy path (an empty list, not the OLD `failed_full`
+  # key) since forcing a genuine encoder failure needs an out-of-range
+  # quality, and `quality/1` clamps to a valid 1..100 (or the default) before
+  # it ever reaches `Image.write`, same as the "misconfigured quality" test
+  # above already establishes.
+  test "a fully successful run reports no failures, under the new key", %{path: path} do
+    assert {:ok, %{failed: [], variants: variants}} = ImageProcessor.process(path, ".png")
+    Enum.each(variants, &File.rm(&1.path))
+  end
+
   test "generates downscaled variants and never upscales", %{path: path} do
     {:ok, %{variants: variants}} = ImageProcessor.process(path, ".png")
 
     # Source is 1200px wide: both targets (400, 1024) are smaller, so both
-    # run — plus the focal-aware 16:9 card crop (source covers 800×450).
+    # run — plus the focal-aware 16:9 card crop (source covers 800×450). Each
+    # is written in the source format (bare label) and in every configured
+    # alternate (`<label>.<format>`, WebP by default).
     by_label = Map.new(variants, &{&1.label, &1})
-    assert Map.keys(by_label) |> Enum.sort() == ["card", "medium", "thumb"]
+
+    assert Map.keys(by_label) |> Enum.sort() ==
+             [
+               "card",
+               "card.webp",
+               "full.webp",
+               "medium",
+               "medium.webp",
+               "thumb",
+               "thumb.webp"
+             ]
 
     assert by_label["thumb"].width == 400
     assert by_label["medium"].width == 1024
@@ -31,6 +55,118 @@ defmodule KilnCMS.ImageProcessorTest do
     assert File.exists?(by_label["thumb"].path)
 
     Enum.each(variants, &File.rm(&1.path))
+  end
+
+  describe "modern formats (#473)" do
+    test "each variant is written in the source format and every alternate", %{path: path} do
+      {:ok, %{variants: variants}} = ImageProcessor.process(path, ".png")
+      by_label = Map.new(variants, &{&1.label, &1})
+
+      # The bare label is the `<img src>` fallback, in the source's own format.
+      assert by_label["thumb"].content_type == "image/png"
+      assert by_label["thumb"].ext == ".png"
+
+      # …and the alternate carries the type a `<picture>` `<source>` needs.
+      assert by_label["thumb.webp"].content_type == "image/webp"
+      assert by_label["thumb.webp"].ext == ".webp"
+      assert File.exists?(by_label["thumb.webp"].path)
+
+      # Same pixels, different encoding.
+      assert by_label["thumb.webp"].width == by_label["thumb"].width
+      assert by_label["thumb.webp"].height == by_label["thumb"].height
+
+      Enum.each(variants, &File.rm(&1.path))
+    end
+
+    test "a WebP source is written once, not twice under two keys" do
+      path = Path.join(System.tmp_dir!(), "ip-#{System.unique_integer([:positive])}.webp")
+      {:ok, image} = Image.new(1200, 800, color: :blue)
+      {:ok, _} = Image.write(image, path)
+      on_exit(fn -> File.rm(path) end)
+
+      {:ok, %{variants: variants}} = ImageProcessor.process(path, ".webp")
+      labels = variants |> Enum.map(& &1.label) |> Enum.sort()
+
+      assert labels == ["card", "medium", "thumb"]
+      assert Enum.all?(variants, &(&1.content_type == "image/webp"))
+
+      Enum.each(variants, &File.rm(&1.path))
+    end
+
+    test "an unconfigured format list writes the source format only", %{path: path} do
+      Application.put_env(:kiln_cms, :image_variants, formats: [])
+      on_exit(fn -> Application.delete_env(:kiln_cms, :image_variants) end)
+
+      {:ok, %{variants: variants}} = ImageProcessor.process(path, ".png")
+
+      assert variants |> Enum.map(& &1.label) |> Enum.sort() == ["card", "medium", "thumb"]
+
+      Enum.each(variants, &File.rm(&1.path))
+    end
+
+    test "an unknown configured format is dropped rather than raising" do
+      Application.put_env(:kiln_cms, :image_variants, formats: [:webp, :jxl])
+      on_exit(fn -> Application.delete_env(:kiln_cms, :image_variants) end)
+
+      assert ImageProcessor.variant_formats() == [:webp]
+    end
+
+    # A matching `<source>` REPLACES the `<img>`'s srcset, so without a
+    # full-size alternate a WebP-capable browser could never reach a candidate
+    # wider than the largest downscale — every image would quietly render
+    # smaller than it did before.
+    test "a full-size alternate is written so <picture> can reach the original width", %{
+      path: path
+    } do
+      {:ok, %{width: width, variants: variants}} = ImageProcessor.process(path, ".png")
+      by_label = Map.new(variants, &{&1.label, &1})
+
+      assert by_label["full.webp"].width == width
+      assert by_label["full.webp"].content_type == "image/webp"
+
+      # …and no source-format `full`: that is the original, which
+      # `Presentation.srcset/1` already appends.
+      refute Map.has_key?(by_label, "full")
+
+      Enum.each(variants, &File.rm(&1.path))
+    end
+
+    # `Image.write` rejects a quality outside 1..100, and a rejected write
+    # produces no variant at all — so an unclamped `System.get_env/1` string
+    # would empty the library rather than degrade one format.
+    test "a misconfigured quality falls back instead of failing every write", %{path: path} do
+      Application.put_env(:kiln_cms, :image_variants, webp_quality: "82")
+      on_exit(fn -> Application.delete_env(:kiln_cms, :image_variants) end)
+
+      assert ImageProcessor.quality(:webp) == 82
+
+      {:ok, %{variants: variants}} = ImageProcessor.process(path, ".png")
+      assert Enum.any?(variants, &(&1.label == "thumb.webp"))
+
+      Enum.each(variants, &File.rm(&1.path))
+    end
+
+    test "quality is configurable per format, with a default" do
+      assert ImageProcessor.quality(:webp) == 82
+
+      Application.put_env(:kiln_cms, :image_variants, webp_quality: 60)
+      on_exit(fn -> Application.delete_env(:kiln_cms, :image_variants) end)
+
+      assert ImageProcessor.quality(:webp) == 60
+    end
+
+    test "base_label/1 sees through the format suffix" do
+      assert ImageProcessor.base_label("card") == "card"
+      assert ImageProcessor.base_label("card.webp") == "card"
+      assert ImageProcessor.base_label("card.avif") == "card"
+    end
+
+    test "variant_content_type/1 reads the suffix, and is nil for a bare label" do
+      assert ImageProcessor.variant_content_type("thumb.webp") == "image/webp"
+      assert ImageProcessor.variant_content_type("thumb.avif") == "image/avif"
+      assert ImageProcessor.variant_content_type("thumb") == nil
+      assert ImageProcessor.variant_content_type("thumb.jxl") == nil
+    end
   end
 
   describe "focal-aware card crop" do
@@ -161,8 +297,15 @@ defmodule KilnCMS.ImageProcessorTest do
     {:ok, image} = Image.new(150, 100, color: :red)
     {:ok, _} = Image.write(image, small)
 
-    assert {:ok, %{width: 150, variants: []}} = ImageProcessor.process(small, ".png")
+    {:ok, %{width: 150, variants: variants}} = ImageProcessor.process(small, ".png")
 
+    # No downscale and no crop — the source is smaller than every target. The
+    # full-size alternate is still written: it is what a `<picture>` `<source>`
+    # needs in order to offer this image at its own width in WebP (#473).
+    assert Enum.map(variants, & &1.label) == ["full.webp"]
+    assert hd(variants).width == 150
+
+    Enum.each(variants, &File.rm(&1.path))
     File.rm(small)
   end
 
@@ -216,6 +359,34 @@ defmodule KilnCMS.ImageProcessorTest do
       refute stripped |> File.read!() |> String.contains?("Secret Person")
       # The pixels survive: same dimensions, still a readable image.
       assert {:ok, %{width: 600, height: 400}} = ImageProcessor.process(stripped, ".jpg")
+    end
+
+    # #919. `build_full/2` is the one write path that encodes straight from the
+    # OPENED SOURCE rather than from a `thumbnail/2` result, so it is the most
+    # likely of the three to be handed an un-stripped original — a pre-#215
+    # upload, or one where `MediaLive.stripped_source/2` fell back. It was also
+    # the only one not calling `strip/1`, so a regeneration run published a
+    # full-resolution alternate carrying the original's EXIF.
+    test "a full-size alternate carries no EXIF even from an un-stripped source" do
+      src = jpeg_with_exif()
+      on_exit(fn -> File.rm(src) end)
+      assert field?(src, @artist_field)
+
+      # Processed directly, WITHOUT strip_metadata/2 first — standing in for the
+      # un-stripped original the sibling paths' comments say to defend against.
+      assert {:ok, %{variants: variants}} = ImageProcessor.process(src, ".jpg")
+      on_exit(fn -> Enum.each(variants, &File.rm(&1.path)) end)
+
+      full = Enum.filter(variants, &String.starts_with?(&1.label, "full."))
+
+      # If the ladder ever stops producing one, this test must be re-pointed
+      # rather than silently passing over an empty list.
+      assert full != [], "expected a full.<format> variant to assert on"
+
+      for %{label: label, path: path} <- full do
+        refute field?(path, @artist_field), "#{label} still carries the EXIF Artist tag"
+        refute path |> File.read!() |> String.contains?("Secret Person")
+      end
     end
 
     test "returns an error for non-image input (caller falls back to original)" do

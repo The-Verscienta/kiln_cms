@@ -15,13 +15,8 @@ defmodule Kiln.Block.Transformer do
   def transform(dsl_state) do
     case Transformer.get_entities(dsl_state, [:kiln_block]) do
       [%Kiln.Block.Definition{name: name, version: version, fields: fields}] ->
-        dsl_state =
-          dsl_state
-          |> add_discriminator(name)
-          |> add_version(version)
-          |> then(&Enum.reduce(fields, &1, fn field, acc -> add_field(field, acc) end))
-
-        {:ok, dsl_state}
+        with :ok <- validate_translatable(fields),
+             do: {:ok, build(dsl_state, name, version, fields)}
 
       [] ->
         {:error, "Kiln.Block: define exactly one `block` per module (found none)."}
@@ -29,6 +24,44 @@ defmodule Kiln.Block.Transformer do
       many ->
         {:error, "Kiln.Block: define exactly one `block` per module (found #{length(many)})."}
     end
+  end
+
+  defp build(dsl_state, name, version, fields) do
+    dsl_state
+    |> add_discriminator(name)
+    |> add_version(version)
+    |> then(&Enum.reduce(fields, &1, fn field, acc -> add_field(field, acc) end))
+  end
+
+  # `translatable:` has to agree with the field's type, checked here because the
+  # failure it prevents is silent: `Kiln.Block.Info.translatable/1` matches on
+  # shape, so a key list on a `:string` (or `true` on an `{:array, :map}`) falls
+  # through the walker's catch-all and the field is absent from every export
+  # *and* from the warnings — the exact outcome `:unsupported` exists to make
+  # impossible. Spark's `{:or, …}` type-checks the value, not the pairing.
+  defp validate_translatable(fields) do
+    Enum.reduce_while(fields, :ok, fn field, :ok ->
+      case {field.translatable, field.type} do
+        {[_ | _], {:array, :map}} ->
+          {:cont, :ok}
+
+        {[_ | _], type} ->
+          {:halt,
+           {:error,
+            "Kiln.Block: field #{inspect(field.name)} declares translatable keys, which only " <>
+              "an {:array, :map} field has (got #{inspect(type)})."}}
+
+        {true, type} when type not in [:string, :rich_text] ->
+          {:halt,
+           {:error,
+            "Kiln.Block: field #{inspect(field.name)} is marked translatable, but " <>
+              "#{inspect(type)} carries no prose. Name the keys to translate if it is an " <>
+              "{:array, :map}, or drop the option."}}
+
+        _ok ->
+          {:cont, :ok}
+      end
+    end)
   end
 
   # The `_type` discriminator the Phase C `Ash.Type.Union` tags on (decision D11).

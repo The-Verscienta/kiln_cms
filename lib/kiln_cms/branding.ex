@@ -40,6 +40,8 @@ defmodule KilnCMS.Branding do
   defstruct site_name: nil,
             logo_url: nil,
             favicon_url: nil,
+            app_icon_url: nil,
+            app_icon_size: nil,
             social_image_url: nil,
             brand_color: nil,
             show_attribution: true,
@@ -49,6 +51,8 @@ defmodule KilnCMS.Branding do
           site_name: String.t(),
           logo_url: String.t(),
           favicon_url: String.t(),
+          app_icon_url: String.t() | nil,
+          app_icon_size: pos_integer() | nil,
           social_image_url: String.t() | nil,
           brand_color: String.t() | nil,
           show_attribution: boolean(),
@@ -85,6 +89,26 @@ defmodule KilnCMS.Branding do
 
   def for_org(_), do: defaults()
 
+  @doc """
+  The site's app icon as `{url, edge}`, or `nil` when there isn't a usable one
+  (#629).
+
+  **The single definition of "this icon may be used."** Three surfaces gate on
+  it — the manifest's `icons`, the manifest's `shortcuts[].icons`, and the iOS
+  `apple-touch-icon` — and they have to agree: a manifest advertising a brand
+  icon while the `apple-touch-icon` points at the stock mark is the split-brand
+  look this issue is about, and no test of either surface alone would catch it.
+
+  A size is present only when `KilnCMS.Branding.AppIcon` measured the image, so
+  `nil` here means "serve the stock icons" for every caller at once.
+  """
+  @spec verified_app_icon(t()) :: {String.t(), pos_integer()} | nil
+  def verified_app_icon(%__MODULE__{app_icon_url: url, app_icon_size: size})
+      when is_binary(url) and is_integer(size) and size > 0,
+      do: {url, size}
+
+  def verified_app_icon(_unverified), do: nil
+
   @doc "The instance-wide (config + stock) tokens, ignoring any per-site row."
   @spec defaults() :: t()
   def defaults, do: build(nil)
@@ -111,6 +135,16 @@ defmodule KilnCMS.Branding do
       logo_url: pick(row && row.logo_url, config(:logo_url), @default_logo_url),
       favicon_url: pick(row && row.favicon_url, config(:favicon_url), @default_favicon_url),
       social_image_url: pick(row && row.social_image_url, config(:social_image_url), nil),
+      # No config fallback and no default: an app icon is only ever one this
+      # deployment has measured (#629). `app_icon_size` is what the manifest
+      # gates on, so an unverified URL is the same as no icon at all.
+      #
+      # Through `present/1` like every other URL: a blank-but-not-null column
+      # is `is_binary/1`, so without it a `""` paired with a size would emit
+      # `<link rel="apple-touch-icon" href="">` — which resolves to the current
+      # document, i.e. the phone tries to use the HTML page as the icon.
+      app_icon_url: present(row && row.app_icon_url),
+      app_icon_size: row && row.app_icon_size,
       show_attribution: if(row, do: row.show_attribution, else: true),
       brand_color: color,
       css: css_variables(color)
@@ -187,11 +221,29 @@ defmodule KilnCMS.Branding do
   # The brand colour is held to the same grammar wherever it comes from, so an
   # environment variable can't become the injection vector the database column
   # isn't.
+  #
+  # Since #1089 the BRAND_PRIMARY_COLOR path is checked at boot in
+  # `config/runtime.exs`, through `KilnCMS.Config.Env`, so on a prod release a
+  # bad value is dropped before it reaches this key AND reaches Sentry rather
+  # than only container stdout.
+  #
+  # This stays a real guard for everything that is not that path: a compiled
+  # `config :kiln_cms, :branding` from a project overlay, an
+  # `Application.put_env/3` at runtime, and dev/test — where the runtime.exs
+  # block is inside `if config_env() == :prod` and BRAND_PRIMARY_COLOR is never
+  # read at all. So the message must NOT tell the reader the value came from an
+  # overlay; in the environments where this can fire, that is the one thing it
+  # probably did not.
   defp config(:primary_color) do
     case BrandTokens.normalize_color(configured(:primary_color)) do
       nil ->
         if present(configured(:primary_color)) do
-          Logger.warning("BRAND_PRIMARY_COLOR is not a hex colour; ignoring it")
+          Logger.warning(
+            "configured :branding primary_color is not a hex colour; ignoring it. " <>
+              "Source is a `config :kiln_cms, :branding` value — an overlay, a " <>
+              "runtime put_env, or dev/test config. On a prod release " <>
+              "BRAND_PRIMARY_COLOR itself is validated at boot (#1089)."
+          )
         end
 
         nil

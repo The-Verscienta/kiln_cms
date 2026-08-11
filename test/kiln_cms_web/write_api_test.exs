@@ -12,6 +12,8 @@ defmodule KilnCMSWeb.WriteApiTest do
   use KilnCMSWeb.ConnCase, async: true
   use Oban.Testing, repo: KilnCMS.Repo
 
+  import Ecto.Query
+
   alias KilnCMS.Accounts
   alias KilnCMS.CMS
 
@@ -211,6 +213,100 @@ defmodule KilnCMSWeb.WriteApiTest do
       )
     end
 
+    # #626: only half the approve/return pair was routed, so a headless reviewer
+    # could approve content but had to switch to the web editor to send anything
+    # back. The action, its state-machine transition and its `OrgAdmin` policy
+    # all already existed — it was simply never routed.
+    test "return-to-draft sends in-review content back to its author", %{post: post} do
+      admin = user(:admin)
+      in_review = CMS.submit_post_for_review!(post, %{}, actor: admin)
+      assert in_review.state == :in_review
+
+      assert {200, _} =
+               patch_json("/api/json/posts/#{post.id}/return-to-draft", post.id, %{},
+                 type: "post",
+                 bearer: mint(admin, :read_write)
+               )
+
+      assert CMS.get_post!(post.id, actor: admin).state == :draft
+    end
+
+    test "return-to-draft is forbidden to an editor key", %{post: post} do
+      # The gate is `policy action(:return_to_draft)` → `Checks.OrgAdmin`, the
+      # same one `publish` has. Routing the action must not re-derive it: an
+      # editor may submit for review, not decide the outcome.
+      admin = user(:admin)
+      _in_review = CMS.submit_post_for_review!(post, %{}, actor: admin)
+
+      assert {403, _} =
+               patch_json("/api/json/posts/#{post.id}/return-to-draft", post.id, %{},
+                 type: "post",
+                 bearer: mint(user(:editor), :read_write)
+               )
+
+      assert CMS.get_post!(post.id, actor: admin).state == :in_review
+    end
+
+    test "return-to-draft is forbidden to a read-only key, admin or not", %{post: post} do
+      # A `:read` key can never mutate content, whatever its owner's role —
+      # `Checks.ApiKeyWithoutWriteAccess` runs before the admin bypass.
+      admin = user(:admin)
+      _in_review = CMS.submit_post_for_review!(post, %{}, actor: admin)
+
+      assert {403, _} =
+               patch_json("/api/json/posts/#{post.id}/return-to-draft", post.id, %{},
+                 type: "post",
+                 bearer: mint(admin, :read)
+               )
+
+      assert CMS.get_post!(post.id, actor: admin).state == :in_review
+    end
+
+    test "return-to-draft writes no content attributes", %{post: post} do
+      # `docs/json-api.md` has always said the workflow routes "carry no
+      # attributes". Without `accept []` the action inherits `default_accept`, so
+      # a populated `attributes` object would write content here while skipping
+      # everything `:update` attaches — the optimistic lock, the slug/alias/SEO
+      # validations, the redirect record, search text and embeddings.
+      admin = user(:admin)
+      _in_review = CMS.submit_post_for_review!(post, %{}, actor: admin)
+
+      {status, _body} =
+        patch_json(
+          "/api/json/posts/#{post.id}/return-to-draft",
+          post.id,
+          %{
+            title: "Rewritten by the transition",
+            slug: "smuggled-#{System.unique_integer([:positive])}"
+          },
+          type: "post",
+          bearer: mint(admin, :read_write)
+        )
+
+      reloaded = CMS.get_post!(post.id, actor: admin)
+
+      # Either the write is refused outright or the transition happens and the
+      # attributes are ignored — never "200 and the title changed".
+      assert status in [200, 400]
+      assert reloaded.title == "WF"
+      refute reloaded.slug =~ "smuggled"
+    end
+
+    test "return-to-draft from the wrong state is a clean 4xx, not a 500", %{post: post} do
+      # The case a review client hits constantly: double-tap Return, or return
+      # something already returned. The record is still `:draft` here.
+      admin = user(:admin)
+
+      {status, _body} =
+        patch_json("/api/json/posts/#{post.id}/return-to-draft", post.id, %{},
+          type: "post",
+          bearer: mint(admin, :read_write)
+        )
+
+      assert status in 400..499
+      assert CMS.get_post!(post.id, actor: admin).state == :draft
+    end
+
     test "unpublish takes published content back down", %{post: post} do
       admin = user(:admin)
       published = CMS.publish_post!(post, %{}, actor: admin)
@@ -223,6 +319,191 @@ defmodule KilnCMSWeb.WriteApiTest do
                )
 
       assert CMS.get_post!(published.id, actor: admin).state == :draft
+    end
+
+    # #879: the other three routed transitions inherited `default_accept` (17
+    # content attributes) just as `:return_to_draft` did before #873 — a
+    # populated `attributes` object would write content while skipping the
+    # optimistic lock, slug/SEO validations, redirect record, search text and
+    # embeddings. Each now carries `accept []`. Same shape as the return-to-draft
+    # case above: refused outright, or transitions with the attributes ignored —
+    # never "200 and the title changed".
+    test "submit-for-review writes no content attributes (#879)", %{key: key, post: post} do
+      {status, _} =
+        patch_json(
+          "/api/json/posts/#{post.id}/submit-for-review",
+          post.id,
+          %{title: "Smuggled", slug: "smuggled-#{System.unique_integer([:positive])}"},
+          type: "post",
+          bearer: key
+        )
+
+      reloaded = CMS.get_post!(post.id, actor: user(:admin))
+      assert status in [200, 400]
+      assert reloaded.title == "WF"
+      refute reloaded.slug =~ "smuggled"
+    end
+
+    test "publish writes no content attributes (#879)", %{post: post} do
+      {status, _} =
+        patch_json(
+          "/api/json/posts/#{post.id}/publish",
+          post.id,
+          %{title: "Smuggled", slug: "smuggled-#{System.unique_integer([:positive])}"},
+          type: "post",
+          bearer: mint(user(:admin), :read_write)
+        )
+
+      reloaded = CMS.get_post!(post.id, actor: user(:admin))
+      assert status in [200, 400]
+      assert reloaded.title == "WF"
+      refute reloaded.slug =~ "smuggled"
+    end
+
+    test "unpublish writes no content attributes (#879)", %{post: post} do
+      admin = user(:admin)
+      published = CMS.publish_post!(post, %{}, actor: admin)
+
+      {status, _} =
+        patch_json(
+          "/api/json/posts/#{published.id}/unpublish",
+          published.id,
+          %{title: "Smuggled", slug: "smuggled-#{System.unique_integer([:positive])}"},
+          type: "post",
+          bearer: mint(admin, :read_write)
+        )
+
+      reloaded = CMS.get_post!(published.id, actor: admin)
+      assert status in [200, 400]
+      assert reloaded.title == "WF"
+      refute reloaded.slug =~ "smuggled"
+    end
+  end
+
+  # #880: a workflow transition on a record in the wrong state (double-tapping
+  # "Return", approving what a colleague just approved) raises
+  # `AshStateMachine.Errors.NoMatchingTransition`. Without a `ToJsonApiError`
+  # impl it fell through to an opaque `something_went_wrong` 400 plus a
+  # per-request stacktrace in the logs. It is now a clean 409 the client can act
+  # on, and the log line is silenced (the warning fired *because* the protocol
+  # was unimplemented).
+  describe "JSON:API — wrong-state workflow transitions (#880)" do
+    setup do
+      admin = user(:admin)
+      %{admin: admin, admin_key: mint(admin, :read_write)}
+    end
+
+    test "publishing already-published content is a 409, not an opaque fault", ctx do
+      published =
+        CMS.create_post!(%{title: "WS", slug: slug()}, actor: ctx.admin)
+        |> then(&CMS.publish_post!(&1, %{}, actor: ctx.admin))
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {409, body} =
+                   patch_json("/api/json/posts/#{published.id}/publish", published.id, %{},
+                     type: "post",
+                     bearer: ctx.admin_key
+                   )
+
+          # Default config (compliance/consent/alt-text gates off), so the only
+          # error is the transition one. The 409 and the log line below are the
+          # two halves of the SAME branch in AshJsonApi — impl present → this
+          # structured error; impl absent → warn + something_went_wrong/400 — so
+          # asserting the 409+code already proves the fallback wasn't taken.
+          assert [error] = body["errors"]
+          assert error["code"] == "invalid_state_transition"
+          refute error["code"] == "something_went_wrong"
+          # The client can tell "already published" from a server fault, and can
+          # reconcile off the machine-readable state without parsing the prose.
+          assert error["meta"]["current_state"] == "published"
+          assert error["detail"] =~ "published"
+        end)
+
+      # The per-request stacktrace warning is gone. Scoped to this error type
+      # rather than the generic "not implemented" text so a concurrent async
+      # test hitting some *other* unimplemented error can't bleed into the refute
+      # — with the fix in place nothing logs a NoMatchingTransition at all.
+      refute log =~ "NoMatchingTransition"
+    end
+
+    test "submit-for-review from in_review is a 409", ctx do
+      in_review =
+        CMS.create_post!(%{title: "WS2", slug: slug()}, actor: ctx.admin)
+        |> then(&CMS.submit_post_for_review!(&1, %{}, actor: ctx.admin))
+
+      assert {409, body} =
+               patch_json("/api/json/posts/#{in_review.id}/submit-for-review", in_review.id, %{},
+                 type: "post",
+                 bearer: ctx.admin_key
+               )
+
+      assert [
+               %{
+                 "code" => "invalid_state_transition",
+                 "meta" => %{"current_state" => "in_review"}
+               }
+             ] =
+               body["errors"]
+    end
+
+    test "unpublishing a draft is a 409", ctx do
+      draft = CMS.create_post!(%{title: "WS3", slug: slug()}, actor: ctx.admin)
+
+      assert {409, body} =
+               patch_json("/api/json/posts/#{draft.id}/unpublish", draft.id, %{},
+                 type: "post",
+                 bearer: ctx.admin_key
+               )
+
+      assert [%{"code" => "invalid_state_transition", "meta" => %{"current_state" => "draft"}}] =
+               body["errors"]
+    end
+  end
+
+  # #923: every transition above also carries a CAS filter (#879) — two actors
+  # racing the same transition leaves the loser's UPDATE matching no rows,
+  # raising `Ash.Error.Changes.StaleRecord` rather than `NoMatchingTransition`
+  # (that one fires when the state was already wrong before the request; this
+  # one fires when it becomes wrong DURING it). Reproduced deterministically,
+  # without real concurrency: mutate the DB row directly out from under an
+  # in-memory struct that still shows the old state, then transition from
+  # that stale struct — its CAS filter's WHERE clause matches nothing, same
+  # as a genuinely concurrent loser's would.
+  describe "StaleRecord from a racing transition (#923)" do
+    test "raises Ash.Error.Changes.StaleRecord, and the protocol impls translate it to a 409" do
+      admin = user(:admin)
+      stale = CMS.create_post!(%{title: "Race", slug: slug()}, actor: admin)
+
+      KilnCMS.Repo.update_all(
+        from(p in "posts", where: p.id == type(^stale.id, Ecto.UUID)),
+        set: [state: "in_review"]
+      )
+
+      # `Ash.update!/1` always wraps into `Ash.Error.Invalid` (Splode classes
+      # every `class: :invalid` error the same way `StaleRecord` declares
+      # itself) — confirmed against `deps/ash`, and it's also exactly the
+      # shape AshJsonApi/AshGraphql unwrap before calling the protocol
+      # functions below, so asserting on it here matches production's own
+      # dispatch, not a narrower shape.
+      error =
+        try do
+          stale
+          |> Ash.Changeset.for_update(:submit_for_review, %{}, actor: admin)
+          |> Ash.update!()
+
+          flunk("expected the stale CAS filter to raise")
+        rescue
+          e in Ash.Error.Invalid ->
+            assert [%Ash.Error.Changes.StaleRecord{} = stale_record] = e.errors
+            stale_record
+        end
+
+      assert %AshJsonApi.Error{status_code: 409, code: "invalid_state_transition"} =
+               AshJsonApi.ToJsonApiError.to_json_api_error(error)
+
+      assert %{code: "invalid_state_transition", short_message: "invalid state transition"} =
+               AshGraphql.Error.to_error(error)
     end
   end
 
@@ -515,6 +796,38 @@ defmodule KilnCMSWeb.WriteApiTest do
       assert [] = CMS.list_posts!(actor: user(:admin), query: [filter: [slug: s]])
     end
 
+    test "returnPostToDraft is routed and admin-gated (#626)" do
+      admin = user(:admin)
+      post = CMS.create_post!(%{title: "GQL return", slug: slug()}, actor: admin)
+      _in_review = CMS.submit_post_for_review!(post, %{}, actor: admin)
+
+      query = """
+      mutation ($id: ID!) {
+        returnPostToDraft(id: $id) { result { id state } errors { message } }
+      }
+      """
+
+      # An editor key cannot: the `OrgAdmin` gate is the whole point of the
+      # action, and it must survive being exposed here.
+      #
+      # Asserted on the error, not on `result` being nil: a mutation that did not
+      # exist would return `%{"errors" => …}` with no `"data"` key at all, so
+      # `get_in(…, ["data", …])` is nil either way and proves nothing.
+      refused = gql(query, %{id: post.id}, bearer: mint(user(:editor), :read_write))
+
+      assert %{"returnPostToDraft" => %{"result" => nil, "errors" => [_ | _] = errors}} =
+               refused["data"]
+
+      assert Enum.any?(errors, &(&1["message"] =~ "forbidden" or &1["message"] =~ "authorized")),
+             "expected an authorization error, got #{inspect(errors)}"
+
+      assert CMS.get_post!(post.id, actor: admin).state == :in_review
+
+      body = gql(query, %{id: post.id}, bearer: mint(admin, :read_write))
+      assert body["data"]["returnPostToDraft"]["result"]["state"] == "draft"
+      assert CMS.get_post!(post.id, actor: admin).state == :draft
+    end
+
     test "publishPost is admin-gated and re-fires on success" do
       admin = user(:admin)
       admin_key = mint(admin, :read_write)
@@ -534,6 +847,28 @@ defmodule KilnCMSWeb.WriteApiTest do
         worker: KilnCMS.Firing.FireWorker,
         args: %{"type" => "post", "id" => post.id}
       )
+    end
+
+    test "a wrong-state mutation surfaces invalid_state_transition, not a masked error (#880)" do
+      admin = user(:admin)
+      admin_key = mint(admin, :read_write)
+
+      published =
+        CMS.create_post!(%{title: "GQL WS", slug: slug()}, actor: admin)
+        |> then(&CMS.publish_post!(&1, %{}, actor: admin))
+
+      query = """
+      mutation ($id: ID!) {
+        publishPost(id: $id) { result { id } errors { message code } }
+      }
+      """
+
+      body = gql(query, %{id: published.id}, bearer: admin_key)
+
+      assert is_nil(get_in(body, ["data", "publishPost", "result"]))
+      assert [error] = body["data"]["publishPost"]["errors"]
+      assert error["code"] == "invalid_state_transition"
+      assert error["message"] =~ "published"
     end
   end
 end

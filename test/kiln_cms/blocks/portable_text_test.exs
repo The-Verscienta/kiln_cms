@@ -94,8 +94,11 @@ defmodule KilnCMS.Blocks.PortableTextTest do
       end
     end
 
-    test "allows mailto: and relative link hrefs" do
-      for href <- ["mailto:hi@x.test", "/editor/foo"] do
+    # `#section` used to be blanked here while the legacy-HTML scrubber kept it —
+    # one of the four hrefs the two link policies disagreed about before they
+    # were unified on `HTMLSanitizer.safe_href/1`.
+    test "allows mailto:, relative and in-page-fragment link hrefs" do
+      for href <- ["mailto:hi@x.test", "/editor/foo", "#section", "/editor/foo#section"] do
         doc =
           tiptap([
             %{

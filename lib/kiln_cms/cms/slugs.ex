@@ -60,16 +60,40 @@ defmodule KilnCMS.CMS.Slugs do
   `audiences` defaults to `[]`, so a caller that passes none sees `:public` rows
   only, exactly as before.
   """
-  @spec find_published_by_alias(String.t(), String.t(), Ash.UUID.t(), [atom()]) ::
+  @spec find_published_by_alias(String.t(), String.t(), Ash.UUID.t(), [atom()], [String.t()]) ::
           {ContentTypes.t(), struct()} | nil
-  def find_published_by_alias(alias_path, locale, org_id, audiences \\ []) do
+  def find_published_by_alias(alias_path, locale, org_id, audiences \\ [], unlocks \\ []) do
     Enum.find_value(alias_resources(), fn resource ->
       resource
       |> Ash.Query.filter(
         path_alias == ^alias_path and locale == ^locale and state == :published and
-          (audience == :public or audience in ^audiences)
+          (audience == :public or audience in ^audiences) and
+          (is_nil(access_password_hash) or password_fingerprint in ^unlocks)
       )
       |> Ash.Query.load([:author, :category])
+      |> first_with_descriptor(org_id)
+    end)
+  end
+
+  @doc """
+  The LOCKED published record at `alias_path`, for a passphrase form (#496).
+
+  Sibling of `find_teaser_by_alias/3` and shaped the same way: it *requires* a
+  passphrase to be set, so it can never stand in for the entitled lookup, and it
+  selects only lock-page-safe columns — never the block tree. Takes `audiences`
+  because the lock is ANDed with the audience axis (see the delivery funnel).
+  """
+  @spec find_locked_by_alias(String.t(), String.t(), Ash.UUID.t(), [atom()]) ::
+          {ContentTypes.t(), struct()} | nil
+  def find_locked_by_alias(alias_path, locale, org_id, audiences \\ []) do
+    Enum.find_value(alias_resources(), fn resource ->
+      resource
+      |> Ash.Query.filter(
+        path_alias == ^alias_path and locale == ^locale and state == :published and
+          (audience == :public or audience in ^audiences) and
+          not is_nil(access_password_hash)
+      )
+      |> Ash.Query.select(lock_columns(resource))
       |> first_with_descriptor(org_id)
     end)
   end
@@ -95,6 +119,12 @@ defmodule KilnCMS.CMS.Slugs do
       |> first_with_descriptor(org_id)
     end)
   end
+
+  # The lock-page column set: the teaser's, plus the stored hash the unlock
+  # endpoint verifies against and the fingerprint it mints a grant from. Mirrors
+  # the `:locked_by_slug` action's select — still without the block tree.
+  defp lock_columns(resource),
+    do: teaser_columns(resource) ++ [:access_password_hash, :password_fingerprint]
 
   # The paywall-safe column set for a resource — `:excerpt` only where the type
   # opted into it. Mirrors the `:teaser_by_slug` action's select.
@@ -156,8 +186,11 @@ defmodule KilnCMS.CMS.Slugs do
       uncategorized entry) falls back to the default chain instead of failing
       the write.
   """
-  @spec derive_base(String.t() | nil, KilnCMS.Slug.Pattern.context()) :: String.t()
-  def derive_base(pattern, context) do
+  @spec derive_base(String.t() | nil, KilnCMS.Slug.Pattern.context(), [Kiln.Tokens.definition()]) ::
+          String.t()
+  def derive_base(pattern, context, extra \\ []) do
+    # The default chain is built-ins only by construction — it is this module's
+    # own literal — so it never needs a type's extra tokens.
     default = KilnCMS.Slug.Pattern.expand(@default_pattern, context)
 
     cond do
@@ -168,7 +201,7 @@ defmodule KilnCMS.CMS.Slugs do
         default
 
       true ->
-        case KilnCMS.Slug.Pattern.expand(pattern, context) do
+        case KilnCMS.Slug.Pattern.expand(pattern, context, extra) do
           "" -> default
           base -> base
         end
@@ -237,7 +270,7 @@ defmodule KilnCMS.CMS.Slugs do
       seo_keywords: changeset_attribute(changeset, :seo_keywords),
       category_slug: changeset_category_slug(changeset, pattern),
       slug: Ash.Changeset.get_attribute(changeset, :slug),
-      custom_fields: changeset_attribute(changeset, :custom_fields),
+      custom_fields: changeset_custom_fields(changeset, pattern),
       # Stable date anchor: publish date when set, else the scheduled date,
       # else the record's creation date (nil on create → today, which then IS
       # the creation date). Never re-read from the wall clock afterwards.
@@ -306,9 +339,204 @@ defmodule KilnCMS.CMS.Slugs do
     end
   end
 
+  # The custom-field values a `[field:<name>]` token resolves against.
+  #
+  # For an editable field the raw payload carries the value, so it is read
+  # straight off the changeset. A `:computed` field (#601) has none — the write
+  # pass derives it in `Changes.ApplyCustomFields`, which runs AFTER slug/alias
+  # derivation, so the token would otherwise read an empty value on create and a
+  # one-save-stale value on update (#616). Derive any computed field the pattern
+  # references here, fresh, through the same evaluator the write pass uses.
+  #
+  # Value parity with the write pass holds for a formula over the document (the
+  # common `{{ slugify(title) }}` case); a formula referencing a *sibling*
+  # editable field sees that field pre-coercion here (raw payload) versus
+  # post-coercion at write time, so a number posted as a string can slugify
+  # differently. That is the known tradeoff of resolving on demand rather than
+  # reordering the whole write pass.
+  #
+  # Bounded: the definitions read and evaluation happen only when the pattern
+  # actually carries a `[field:…]` token — a plain `[title]` slug pays nothing.
+  # (An editable-only `[field:…]` pattern still pays one definitions read to
+  # learn it has no computed fields; the value it reads is unchanged.)
+  defp changeset_custom_fields(changeset, pattern) do
+    raw = changeset_attribute(changeset, :custom_fields)
+
+    case KilnCMS.Slug.Pattern.field_names(pattern) do
+      [] -> raw
+      referenced -> merge_computed_fields(changeset, referenced, raw)
+    end
+  end
+
+  defp merge_computed_fields(changeset, referenced, raw) do
+    # String keys, matching what the write pass evaluates against and what the
+    # `[field:<name>]` token itself looks up — an atom-keyed payload from an
+    # Elixir/MCP caller would otherwise miss its own sibling fields.
+    base = stringify_keys(raw)
+
+    computed =
+      changeset
+      |> field_definitions()
+      |> Enum.filter(&(&1.field_type == :computed and &1.name in referenced))
+
+    case computed do
+      [] ->
+        base
+
+      defs ->
+        # Drop the computed keys before deriving, so a formula that now
+        # evaluates blank reads as ABSENT (the token expands to "") rather than
+        # as the stale stored value `raw` still carries on an update — the write
+        # pass builds its map from scratch and so never leaks a stale value.
+        cleared = Map.drop(base, Enum.map(defs, & &1.name))
+        context = KilnCMS.CMS.Computed.Context.from_changeset(changeset, cleared)
+        derive_into(defs, context, cleared)
+    end
+  end
+
+  defp derive_into(defs, context, fields) do
+    Enum.reduce(defs, fields, fn definition, acc ->
+      case KilnCMS.CMS.Computed.evaluate(definition.compute || "", context) do
+        blank when blank in [nil, ""] -> acc
+        value -> Map.put(acc, definition.name, value)
+      end
+    end)
+  end
+
+  defp stringify_keys(map) when is_map(map),
+    do: Map.new(map, fn {key, value} -> {to_string(key), value} end)
+
+  defp stringify_keys(_not_a_map), do: %{}
+
+  # The FieldDefinition rows for the changeset's content type — compiled types by
+  # their content-type marker, dynamic entries by their TypeDefinition id. Mirror
+  # of `ApplyCustomFields`'s own lookup; kept private since only the computed-slug
+  # path here needs it.
+  @doc """
+  The extra `Kiln.Tokens` definitions the custom field types attached to
+  `field_definitions` contribute (#804).
+
+  `[field:<name>]` already slugifies any scalar custom-field value for free, and
+  expands a map or list one to `""`. That is the honest answer for most types
+  and the wrong one for a **composite**: a coordinate pair or a
+  price-and-currency wants to expose its own named parts
+  (`[field:location.lat]`) rather than go blank. `c:Kiln.FieldType.tokens/1` is
+  where a type says so; this is what asks it.
+
+  Core field types have no module (the host coerces them) and contribute
+  nothing. A plugin type that hand-rolls `@behaviour Kiln.FieldType` without
+  the callback contributes nothing either — `tokens/1` is an optional callback,
+  so it is probed rather than assumed.
+  """
+  @spec type_token_definitions([struct()]) :: [Kiln.Tokens.definition()]
+  def type_token_definitions(field_definitions) do
+    Enum.flat_map(field_definitions, fn definition ->
+      case KilnCMS.CMS.FieldTypes.get(definition.field_type) do
+        nil -> []
+        module -> type_tokens(module, definition)
+      end
+    end)
+  end
+
+  # `Code.ensure_loaded?/1` is load-bearing, not decoration. `FieldTypes.get/1`
+  # returns a module atom out of a compile-baked map and never loads it, so
+  # under interactive code loading (dev, test, any release not in `:embedded`
+  # mode) `function_exported?/3` answers **false** for a plugin type nobody has
+  # touched yet — and `DeriveSlug` runs before `ApplyCustomFields`, which is
+  # what would otherwise have loaded it. The result was a silently wrong slug
+  # PERSISTED on the first write after boot, and the right one on the second.
+  # `KilnCMS.SchemaExport` guards the identical probe for the identical reason.
+  defp type_tokens(module, definition) do
+    if Code.ensure_loaded?(module) and function_exported?(module, :tokens, 1) do
+      module.tokens(definition)
+    else
+      []
+    end
+  rescue
+    # A plugin's token list must not be able to fail a save. A slug derivation
+    # that raised here would take down the write it was decorating, and the
+    # token simply expanding empty is the same outcome the generic
+    # `[field:<name>]` path already gives a value it cannot render.
+    _error -> []
+  end
+
+  @doc """
+  Extra token definitions for a pattern being expanded on `changeset`, or `[]`.
+
+  Gated on the pattern actually mentioning a token the built-in vocabulary does
+  not cover, which is almost never — so the field-definition read this needs is
+  not paid for by the overwhelming majority of slug derivations.
+  """
+  @spec changeset_token_definitions(Ash.Changeset.t(), String.t() | nil, atom()) ::
+          [Kiln.Tokens.definition()]
+  def changeset_token_definitions(changeset, pattern, usage) do
+    case KilnCMS.Slug.Pattern.unknown_tokens(pattern, usage) do
+      [] -> []
+      _unknown -> changeset |> field_definitions() |> type_token_definitions()
+    end
+  end
+
+  @doc """
+  Extra token definitions for a **type descriptor**'s pattern, or `[]`.
+
+  The `changeset_token_definitions/3` twin for the two callers that hold a
+  descriptor rather than a changeset — the content editor's live slug preview
+  and the bulk regenerator. Both must derive exactly what the write path
+  derives: the editor because `slug_customized?/1` decides "did the author pin
+  this?" by comparing the stored slug against a fresh derivation, and the
+  regenerator because it decides the same thing and then rewrites live URLs.
+
+  Without it, a type using a `c:Kiln.FieldType.tokens/1` token derived
+  `guide-kiln` in the editor while the save wrote `guide-kiln-three`, so every
+  draft of that type read as author-pinned and stopped tracking its title —
+  and `mix kiln.slugs.regenerate --include-pinned`, the workflow recommended
+  after a pattern change, rewrote each of those URLs to the token-less form.
+
+  Gated on the pattern naming something the built-ins don't cover, so an
+  ordinary pattern pays no field-definition read.
+  """
+  @spec descriptor_token_definitions(map(), String.t() | nil, atom(), term()) ::
+          [Kiln.Tokens.definition()]
+  def descriptor_token_definitions(ct, pattern, usage, tenant) do
+    case KilnCMS.Slug.Pattern.unknown_tokens(pattern, usage) do
+      [] -> []
+      _unknown -> ct |> descriptor_field_definitions(tenant) |> type_token_definitions()
+    end
+  rescue
+    # An unreadable definition set must not crash the editor's mount or abort a
+    # regeneration run; degrade to the built-ins, as the save-time validation
+    # does. The cost is that the preview can disagree with the save again — but
+    # only while the read is failing, which is an outage, not a steady state.
+    _error -> []
+  end
+
+  defp descriptor_field_definitions(%{source: :dynamic, definition: %{id: id}}, tenant),
+    do: KilnCMS.CMS.field_definitions_for_definition!(id, authorize?: false, tenant: tenant)
+
+  defp descriptor_field_definitions(%{type: type}, tenant) when not is_nil(type),
+    do: KilnCMS.CMS.field_definitions_for!(type, authorize?: false, tenant: tenant)
+
+  defp descriptor_field_definitions(_ct, _tenant), do: []
+
+  defp field_definitions(%{resource: resource} = changeset) do
+    tenant = changeset.to_tenant
+
+    if function_exported?(resource, :__kiln_dynamic_entry__, 0) do
+      case changeset_attribute(changeset, :type_definition_id) do
+        nil -> []
+        id -> KilnCMS.CMS.field_definitions_for_definition!(id, authorize?: false, tenant: tenant)
+      end
+    else
+      KilnCMS.CMS.field_definitions_for!(resource.__kiln_content_type__(),
+        authorize?: false,
+        tenant: tenant
+      )
+    end
+  end
+
   @doc """
   Whether `slug` is still auto-derived relative to `derived` (the current
-  `derive_base/2` output): the `untitled-<n>` scaffold, an exact match, or a
+  `derive_base/2` output): an `untitled-…` scaffold, an exact match, or a
   dedupe variant. `ensure_unique/2` never mints `-1`, so a `-1` suffix (or any
   non-matching base) means the author chose the slug; `base-N` with N >= 2
   stays ambiguous by construction and we side with "still derived".
@@ -317,9 +545,19 @@ defmodule KilnCMS.CMS.Slugs do
   def underived?(slug, derived) do
     slug = slug || ""
 
-    Regex.match?(~r/\Auntitled-\d+\z/, slug) or (derived != "" and slug == derived) or
+    scaffold?(slug) or (derived != "" and slug == derived) or
       dedupe_variant?(slug, derived)
   end
+
+  # Both scaffold shapes, because both exist in the wild. `untitled-<digits>` is
+  # what every draft created before #834 carries and those rows do not migrate;
+  # `untitled-<random_suffix>` is what new ones get. Recognising only the new
+  # one would strand every existing draft with a slug a title edit can no longer
+  # replace — the same bug as recognising only the old one, aimed backwards.
+  defp scaffold?("untitled-" <> rest),
+    do: Regex.match?(~r/\A\d+\z/, rest) or KilnCMS.Slug.random_suffix?(rest)
+
+  defp scaffold?(_slug), do: false
 
   defp dedupe_variant?(_slug, ""), do: false
 
@@ -384,7 +622,12 @@ defmodule KilnCMS.CMS.Slugs do
     [base]
     |> Stream.concat(Stream.map(2..1_000, &"#{base}-#{&1}"))
     |> Enum.find(&(not MapSet.member?(taken, &1)))
-    |> Kernel.||("#{base}-#{System.unique_integer([:positive])}")
+    # Past a thousand variants, give up on a tidy number and take a random one.
+    # `System.unique_integer/1` was wrong here for the reason #834 documents —
+    # it resets on VM restart while the rows do not — and wrong in the worst
+    # place: this branch is reached only when the low numbers are already taken,
+    # which is exactly the range a restarted counter hands back out.
+    |> Kernel.||("#{base}-#{KilnCMS.Slug.random_suffix()}")
   end
 
   # Every existing slug that could collide with `base` or its numbered

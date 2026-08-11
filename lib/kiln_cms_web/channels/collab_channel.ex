@@ -44,6 +44,59 @@ defmodule KilnCMSWeb.CollabChannel do
   each invisible to the other's editors and each overwriting the other at
   checkpoint, plus an unbounded supply of `DocServer`s for anyone who cared to
   cycle the casing.
+
+  ## The join check runs again, periodically (#775)
+
+  `KilnCMS.Accounts.SessionEviction` (#675) drops a user's sockets from the
+  actions that narrow a grant, which covers deliberate offboarding promptly.
+  It cannot cover two things, and both of them fail silently:
+
+    * **the change nobody wired an eviction into** — a new action that narrows a
+      grant, a role-resource edit, a direct `Ash.update` in a migration or a mix
+      task. The socket simply stays connected doing what it was allowed to do
+      before, and nothing anywhere reports it;
+    * **a change to the document rather than to the user** — the join that
+      authorized this room is long past, so a document that was archived,
+      locked, moved out of the actor's audience or unpublished under an open
+      room keeps accepting updates.
+
+  So the room re-runs `authorize/3` — the *same* function `join/3` uses, never a
+  second spelling of it — on a timer, and additionally every N inbound updates.
+  Both bounds live in `KilnCMSWeb.SocketReauth`, with the measurement behind the
+  interval; `docs/threat-model.md` states the window an operator can rely on.
+  Both are needed, and they bound different things:
+
+    * the **timer** bounds the exposure window in wall-clock terms, which is
+      what an operator reasons about ("within a minute of offboarding") and the
+      only thing that covers a room that is connected but idle;
+    * the **update count** is a floor under that: at typing speed a room emits
+      several updates a second, so a timer alone would admit thousands of writes
+      to a revoked editor before it fired. The count bounds damage done, which
+      is what matters on a channel that writes.
+
+  Only `"update"` is counted. `"awareness"` fires per caret movement and is
+  relayed rather than stored, so counting it would multiply the DB work for a
+  message that changes no document; the timer covers it.
+
+  **The actor is reloaded first, and that is the whole mechanism.**
+  `socket.assigns.actor` is the `User` struct resolved at *connect*, so
+  re-running the policies against it would re-derive the same answer from the
+  same stale role, scopes and audiences for as long as the tab stayed open —
+  an inert check that looks like a working one. Everything else here is
+  plumbing around that reload.
+
+  What this catches is exactly what a *fresh join* would refuse — no more, by
+  design, so the room's rule cannot drift from the join's. In particular a
+  publish under an open room does not close it: `Ash.can?` on `:autosave` does
+  not consult the row-level `state == :draft` filter that action carries. That
+  loses collaborative prose at checkpoint and is worth fixing, on the publish
+  path rather than here (#1061).
+
+  A refusal **closes the channel** rather than pushing an error, which is what
+  eviction does and what the client already handles: Phoenix sends `phx_error`
+  on the channel process exiting, and `phoenix.js` retries the join on a
+  backoff. Those rejoins run the full `join/3` and are refused in turn, so no
+  update flows — and if the grant comes back, the room resumes on its own.
   """
   use Phoenix.Channel
 
@@ -51,6 +104,7 @@ defmodule KilnCMSWeb.CollabChannel do
 
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Collab.Crdt
+  alias KilnCMSWeb.SocketReauth
 
   # Must match SCHEMA_VSN in assets/js/collab.js. A peer whose bundle predates
   # the current ProseMirror node set is refused: y-prosemirror deletes nodes
@@ -77,7 +131,7 @@ defmodule KilnCMSWeb.CollabChannel do
     %{actor: actor, org: org} = socket.assigns
 
     case authorize(key, actor, org) do
-      {:ok, doc_key, org_id} -> attach(doc_key, org_id, socket)
+      {:ok, doc_key, org_id} -> attach(key, doc_key, org_id, socket)
       # One reason for "no such document", "not your organization", "not yours
       # to edit" and "not a content type at all": the refusal must not answer
       # questions the caller could not already answer over HTTP.
@@ -124,7 +178,7 @@ defmodule KilnCMSWeb.CollabChannel do
   # `ensure_server/2` can hand back a server that hits its idle shutdown before
   # `attach/1` reaches it, and a supervisor can refuse to start one at all.
   # Neither is the caller's fault and neither should crash the join.
-  defp attach(doc_key, org_id, socket) do
+  defp attach(key, doc_key, org_id, socket) do
     # `:unavailable` is the deployment's open-document ceiling (#676), already
     # logged where it is decided. It is a capacity answer, not an authorization
     # one, so it says so rather than joining the uniform "not found".
@@ -132,8 +186,18 @@ defmodule KilnCMSWeb.CollabChannel do
       {:ok, server} ->
         {state, peers} = Crdt.attach(server)
 
-        {:ok, %{"state" => Base.encode64(state), "peers" => peers},
-         assign(socket, :doc_server, server)}
+        # `key` is the client's topic string, kept so the periodic check can run
+        # the same `authorize/3` this join just ran; `doc_key` is the canonical
+        # one derived from the resolved record, kept so that check can assert it
+        # still resolves to the document this room is attached to.
+        socket =
+          socket
+          |> assign(:doc_server, server)
+          |> assign(:topic_key, key)
+          |> assign(:doc_key, doc_key)
+          |> schedule_reauth()
+
+        {:ok, %{"state" => Base.encode64(state), "peers" => peers}, socket}
 
       {:error, :unavailable} ->
         {:error, %{reason: "unavailable"}}
@@ -149,13 +213,36 @@ defmodule KilnCMSWeb.CollabChannel do
   end
 
   @impl true
-  def handle_in("update", %{"update" => encoded}, socket) do
-    with {:ok, update} <- Base.decode64(encoded),
-         :ok <- Crdt.apply_update(socket.assigns.doc_server, update) do
-      broadcast_from!(socket, "update", %{"update" => encoded})
-      {:reply, :ok, socket}
-    else
-      _invalid -> {:reply, {:error, %{reason: "bad update"}}, socket}
+  # `is_binary(encoded)` is load-bearing, not decoration (#764). The payload is
+  # client-chosen JSON, so `%{"update" => encoded}` constrains the key and never
+  # the value — and `Base.decode64/2` has no clause for a list or a map.
+  #
+  # The blast radius is the offending client only, not the room: Phoenix gives
+  # each client its own channel process per topic, and `Collab.DocServer` only
+  # MONITORS its attached channels rather than linking them, so a crash just
+  # drops that pid from `clients`. What the sender gets is its editor dropping
+  # to a rejoin mid-edit, which is bad enough for a frame it could have ignored.
+  #
+  # A non-binary falls through to the catch-all below, NOT to the `else` here —
+  # so an undecodable *binary* gets an error reply and a wrong-shaped payload
+  # gets no reply at all. That asymmetry is deliberate but harmless either way:
+  # `assets/js/collab.js` pushes updates without a `.receive`, so nothing is
+  # waiting on a reply.
+  def handle_in("update", %{"update" => encoded}, socket) when is_binary(encoded) do
+    # The count floor (#775) runs BEFORE the update is applied, so the update
+    # that trips it is refused rather than being the last one through.
+    case count_update(socket) do
+      {:ok, socket} ->
+        with {:ok, update} <- Base.decode64(encoded),
+             :ok <- Crdt.apply_update(socket.assigns.doc_server, update) do
+          broadcast_from!(socket, "update", %{"update" => encoded})
+          {:reply, :ok, socket}
+        else
+          _invalid -> {:reply, {:error, %{reason: "bad update"}}, socket}
+        end
+
+      :error ->
+        {:stop, {:shutdown, :unauthorized}, socket}
     end
   end
 
@@ -171,5 +258,109 @@ defmodule KilnCMSWeb.CollabChannel do
   def handle_in("awareness_request", _payload, socket) do
     broadcast_from!(socket, "awareness_request", %{})
     {:noreply, socket}
+  end
+
+  # Anything else is ignored rather than crashing the room (#764).
+  #
+  # `handle_in/3` had no catch-all, so an unknown event name — or a known one
+  # whose payload arrived in a shape its clause head does not match — was a
+  # `FunctionClauseError`, which terminates that client's channel process and
+  # drops it to a rejoin mid-edit. (Only that client's: see the `"update"`
+  # clause above on why the room survives.)
+  #
+  # Logged at debug rather than warn, and not replied to. A real client never
+  # gets here, so the only traffic is a stale build or someone poking the
+  # socket; neither is worth an error-tracker event, and an error reply would
+  # tell a prober which event names exist.
+  def handle_in(event, _payload, socket) do
+    Logger.debug("CollabChannel ignoring unhandled event #{inspect(event)}")
+    {:noreply, socket}
+  end
+
+  # --- periodic re-authorization (#775) ---------------------------------------
+
+  @impl true
+  def handle_info(:reauthorize, socket) do
+    case reauthorize(socket) do
+      {:ok, socket} -> {:noreply, schedule_reauth(socket)}
+      :error -> {:stop, {:shutdown, :unauthorized}, socket}
+    end
+  end
+
+  # `use Phoenix.Channel` supplies no default `handle_info/2` — the channel
+  # server only calls one if the module exports it — so defining the clause
+  # above makes every other message a `FunctionClauseError` that drops this
+  # client mid-edit. Same reason as the `handle_in/3` catch-all (#764).
+  #
+  # Nothing sends here: `Collab.DocServer` monitors its channels rather than
+  # talking to them. Logged at debug because exporting `handle_info/2` at all
+  # silences the "unexpected message" warning Phoenix emits for a channel that
+  # exports none, and losing that signal entirely is worse than a debug line.
+  def handle_info(message, socket) do
+    Logger.debug("CollabChannel ignoring unexpected message #{inspect(message)}")
+    {:noreply, socket}
+  end
+
+  # The timer. Cancelling first keeps a check triggered by the update floor from
+  # leaving the old timer to fire moments later; a message that raced the cancel
+  # and is already in the mailbox only costs one extra check.
+  defp schedule_reauth(socket) do
+    case socket.assigns[:reauth_timer] do
+      nil -> :ok
+      timer -> Process.cancel_timer(timer)
+    end
+
+    socket
+    |> assign(
+      :reauth_timer,
+      Process.send_after(self(), :reauthorize, SocketReauth.interval_ms())
+    )
+    |> assign(:updates_since_reauth, 0)
+  end
+
+  # The floor. Returns the socket with the counter advanced, or runs the check
+  # when the count is reached — which also resets the timer, so a busy room does
+  # not then check again a moment later for having also run out the clock.
+  defp count_update(socket) do
+    count = socket.assigns.updates_since_reauth + 1
+
+    if count < SocketReauth.update_floor() do
+      {:ok, assign(socket, :updates_since_reauth, count)}
+    else
+      case reauthorize(socket) do
+        {:ok, socket} -> {:ok, schedule_reauth(socket)}
+        :error -> :error
+      end
+    end
+  end
+
+  # Re-run the join's authorization against a RELOADED actor — see
+  # `SocketReauth.reload_actor/1` for why the reload is the mechanism and not a
+  # detail of it.
+  #
+  # `authorize/3` then re-reads the *document* under that actor, which is what
+  # catches a change to the document rather than to the user: archived, locked,
+  # unpublished or moved out of the reader's audience all come back as a refused
+  # read. It is the same function `join/3` calls, so the room's rule at minute
+  # ten cannot drift from its rule at minute zero — and it already fails closed,
+  # logging the difference between a refusal and an outage.
+  #
+  # `^doc_key` pins the answer to the document this room is attached to: a topic
+  # that now resolves elsewhere is refused rather than silently re-pointed,
+  # since the `DocServer` it holds is keyed on the old one.
+  defp reauthorize(socket) do
+    %{actor: actor, org: org, topic_key: key, doc_key: doc_key} = socket.assigns
+
+    with {:ok, %{} = actor} <- SocketReauth.reload_actor(actor),
+         {:ok, ^doc_key, _org_id} <- authorize(key, actor, org) do
+      {:ok, assign(socket, :actor, actor)}
+    else
+      _refused ->
+        # One line per closed room, not per rejoin: the client's refused rejoins
+        # go through `join/3`, which stays silent.
+        Logger.info("Collab re-authorization refused for #{doc_key}, closing the channel (#775)")
+
+        :error
+    end
   end
 end

@@ -68,7 +68,7 @@ are pure *clients* over actions that ship today.
 | Tier gating (editors submit, admins approve/return) | `KilnCMS.CMS.Checks.OrgAdmin` on the `:publish` and `:return_to_draft` policies |
 | The list + buttons UI, on the web | `KilnCMSWeb.EditorLive` |
 | Per-type dispatch (`Page`, `Post`, dynamic types) | `KilnCMS.CMS.ContentTypes` — `transition/4`, `list!/2`, `get_record!/3` |
-| Headless bearer sign-in (JWT) | `KilnCMSWeb.ApiAuthController`, `POST /api/auth/sign_in` (#37) |
+| Headless bearer sign-in (JWT) | `KilnCMSWeb.ApiAuthController`, `POST /api/auth/sign_in` (#37); a 2FA account finishes at `POST /api/auth/sign_in/verify` (#726) |
 | Bearer verification without a `conn` | `KilnCMSWeb.BearerAuth` — `token_from_params/1`, `user_from_token/1` |
 | Tenant-from-host on a raw socket | `lib/kiln_cms_web/graphql_socket.ex` |
 
@@ -189,13 +189,13 @@ meantime for GraphQL.
    error. `GraphqlSocket` and `BridgeSocket` both already carry `:uri` for
    exactly this reason and are the pattern to copy.
 
-3. **A `return_to_draft` endpoint.** The JSON:API surface routes
-   `submit_for_review`, `publish` and `unpublish` as PATCH endpoints, and
-   GraphQL exposes `submit_entry_for_review` / `publish_entry` /
-   `unpublish_entry`. **`return_to_draft` is exposed on neither.** Half of the
-   approve/return pair is LiveView-only, so a native or headless review client
-   cannot send anything back to its author. Filed as
-   [#626](https://github.com/The-Verscienta/kiln_cms/issues/626).
+3. ~~**A `return_to_draft` endpoint.**~~ **Done** —
+   [#626](https://github.com/The-Verscienta/kiln_cms/issues/626). Half of the
+   approve/return pair used to be LiveView-only, so a native or headless review
+   client could approve but could not send anything back to its author.
+   `PATCH /:id/return-to-draft` now exists on both the compiled types and
+   `/api/json/entries`, and GraphQL exposes `returnPostToDraft` /
+   `returnPageToDraft` / `returnEntryToDraft`. It is admin-gated, like `publish`.
 
 Item 3 also matters for the non-LVN route: if a native app is ever genuinely
 wanted, the cheaper path is a plain SwiftUI/Compose app over the existing
@@ -208,19 +208,28 @@ it is the more likely shape of any future native work.
 
 Delivered with this document, because it reaches the goal the issue names:
 
-- **`KilnCMSWeb.ManifestController`** serves `/manifest.webmanifest` **per org**
+- **`KilnCMSWeb.ManifestController`** serves `/manifest.webmanifest?locale=…`
+  **per org and per locale** (#630)
   — `name`, `short_name` and `theme_color` come from `KilnCMS.Branding.for_org/1`,
   so a white-labelled site installs under its own name and colour (#48). A
   static file could not do this.
 - **`start_url` is `/editor?status=in_review`** — the review queue, not a
   generic dashboard. `scope` stays `/` so a sign-in redirect stays inside the
   installed window. A stable `id` (`/editor`) keeps existing installs valid if
-  the landing filter ever changes.
+  the landing filter ever changes — and it stays stable across locales too, since
+  a mismatched id makes a browser discard the whole manifest update rather than
+  rename the app.
 - **App icons** at 192/512 plus a separate maskable 512 and an iOS
-  `apple-touch-icon`, all derived from the ember mark.
+  `apple-touch-icon`, derived from the ember mark — or the site's own icon where
+  one has been verified (#629, below).
+- **`KilnCMSWeb.OfflineController`** serves `/offline.html` per org (#629). It is
+  rendered from the service worker's cache with no network at all, so it carries
+  the site name and brand colour *inline* and references nothing it would have to
+  fetch — no stylesheet, no script, no image. That constraint is why the branding
+  here is a name and a colour rather than the logo.
 - **`priv/static/sw.js`** — a deliberately minimal service worker. It exists
   because Chromium will not offer "Install" without a `fetch` handler, and it
-  serves `offline.html` when a *GET navigation* fails. It caches **no**
+  serves `/offline.html` when a *GET navigation* fails. It caches **no**
   application HTML and no API responses: every editor page is per-user and
   per-org and mostly unpublished drafts, so a cache there would be a
   cross-account leak on a shared device and a stale-content bug on every deploy.
@@ -234,20 +243,58 @@ Delivered with this document, because it reaches the goal the issue names:
 
 Honest limits. Each is filed, so closing #65 doesn't bury them:
 
-- **No push notifications for the review queue.** Web Push works on Android and
-  on iOS 16.4+ *for installed* PWAs, but it needs VAPID keys, a subscription
-  store and a server-side sender. None of that exists here —
-  [#628](https://github.com/The-Verscienta/kiln_cms/issues/628).
+- ~~**No push notifications for the review queue.**~~ **Done** —
+  [#628](https://github.com/The-Verscienta/kiln_cms/issues/628). A reviewer can
+  turn notifications on per device in `/editor/settings`, and a submission for
+  review reaches their home screen. Off unless the deployment sets a VAPID pair
+  (`mix kiln.vapid.gen`, then `KILN_VAPID_*`), and the payload never carries
+  draft content — see `KilnCMS.Push`. iOS still needs 16.4+ *and* the app added
+  to the home screen; the toggle hides itself where the browser cannot honour it.
 - **No offline reading or queued approvals.** By design — see the caching note
   above. Offline authoring is a substantially larger design problem than a cache
   entry, and is not filed as a follow-up because it is not obviously wanted.
-- **Install icons and the offline page are stock KilnCMS on every org**, even a
-  white-labelled one: the manifest cannot honestly declare `sizes` for a logo of
-  unknown dimensions, and the offline page is a static file with no org context
-  — [#629](https://github.com/The-Verscienta/kiln_cms/issues/629).
-- **The manifest is not localized** — deliberately, since a manifest is fetched
-  once from a locale-less URL and the label then sticks on the home screen —
-  [#630](https://github.com/The-Verscienta/kiln_cms/issues/630).
+- ~~**Install icons and the offline page are stock KilnCMS on every org**~~
+  **Done** — [#629](https://github.com/The-Verscienta/kiln_cms/issues/629). A
+  site sets an **App icon URL** in `/editor/branding`; the server fetches it on
+  save and measures it (`KilnCMS.Branding.AppIcon`), and only a **square PNG or
+  JPEG of at least 512×512** is used. The measured edge is stored alongside the
+  URL and is what the manifest declares.
+
+  PNG or JPEG is narrower than the media library accepts, and iOS is the reason:
+  `apple-touch-icon` has no format negotiation and no second candidate, and iOS
+  answers a WebP or GIF there by ignoring it and showing a screenshot of the
+  page. The format is read from the decoded bytes, never from the URL's
+  extension — an image CDN will serve WebP from a `.png` path.
+
+  A verified icon is declared `purpose: "any"`, and the stock **maskable** entry
+  is withdrawn while one is in use. That pairing is deliberate and easy to get
+  backwards: a maskable icon is *cropped* to the platform shape (Android keeps
+  roughly the inner 80%), and an operator's square logo has no safe zone, so
+  declaring it maskable would clip it. But leaving the stock maskable declared
+  is worse — Android *prefers* a maskable icon for the home screen, so the
+  white-labelled site would get the KilnCMS flame there, which is the whole
+  complaint. With no maskable declared, Android letterboxes the `any` icon into
+  the adaptive shape instead.
+
+  The verification is the feature, not a nicety around it: `icons[].sizes` is a
+  claim Chromium's installability check believes, so a manifest declaring
+  `512x512` about a 1200×300 wordmark does not degrade — the install prompt
+  disappears with nothing said anywhere. An icon that fails is still *saved*
+  (a briefly-down CDN must not discard what the admin typed) but is not
+  declared, and the settings form says which of the reasons it was. The stock
+  trio stays alongside a verified icon so a launcher picking by size still finds
+  a 192, and so an icon that 404s after verification cannot make the app
+  uninstallable.
+
+  The offline page moved from `priv/static/offline.html` to a controller for the
+  same reason the manifest is one, and `sw.js` precaches it by the same URL it is
+  served from.
+- ~~**The manifest is not localized**~~ **Done** —
+  [#630](https://github.com/The-Verscienta/kiln_cms/issues/630). The link now
+  carries `?locale=`, so `name`, `description` and the shortcut labels are
+  translated. `short_name` is not (a brand name is a proper noun), and Android
+  labels the home-screen icon from `short_name` — so what this reaches is the
+  install dialog, app list, splash screen and shortcut menu, not the icon label.
 - **iOS gives no install prompt.** Safari requires the user to pick "Add to Home
   Screen" manually; there is no `beforeinstallprompt` equivalent.
 - **The iOS status bar stays opaque.** `apple-mobile-web-app-status-bar-style:
@@ -268,8 +315,9 @@ Honest limits. Each is filed, so closing #65 doesn't bury them:
    `phoenix_live_view ~> 1.2`, plus a released Jetpack client. Until both exist,
    this stays closed.
 4. **If a native app becomes a hard requirement before then**, build it over the
-   JSON:API with the #37 bearer token rather than LVN — and land the
-   `return_to_draft` endpoint first ([§4](#4-what-a-native-client-would-actually-need), item 3).
+   JSON:API with the #37 bearer token rather than LVN. The `return_to_draft`
+   endpoint that used to block this has landed
+   ([§4](#4-what-a-native-client-would-actually-need), item 3).
 
 ## Sources
 

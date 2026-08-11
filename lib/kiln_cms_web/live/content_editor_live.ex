@@ -16,21 +16,52 @@ defmodule KilnCMSWeb.ContentEditorLive do
   """
   use KilnCMSWeb, :live_view
 
+  require Ash.Query
   require Logger
 
   import Ash.Expr, only: [expr: 1]
-  import KilnCMSWeb.SeoComponents, only: [seo_findings: 1, seo_grade_badge: 1]
+  import KilnCMSWeb.AccessibilityComponents, only: [a11y_findings: 1, a11y_grade_badge: 1]
 
+  import KilnCMSWeb.ComplianceComponents,
+    only: [compliance_findings: 1, compliance_grade_badge: 1]
+
+  import KilnCMSWeb.SeoComponents, only: [seo_findings: 1, seo_grade_badge: 1]
+  import KilnCMSWeb.VersionDiffComponents, only: [version_compare: 1]
+
+  alias Kiln.Advisory.Registry
+  alias Kiln.Advisory.Report
+  alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.Scoping
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
+
+  # The fields the SEO suggestion writes if the author accepts it.
+  # `maybe_sync_slug/3` can also move `slug` off a `seo_keywords` accept, but
+  # only while the slug is still auto-derived — a grant that withholds `slug`
+  # from an editor who may edit the keywords is not a reason to withhold the
+  # suggestion, so it is deliberately not required here.
+  @seo_suggestion_fields ~w(seo_title seo_description seo_keywords)
+  alias KilnCMS.CMS.VersionDiff
+  alias KilnCMS.CMS.VersionSnapshot
+  alias KilnCMS.Search.Related
   alias KilnCMS.Slug
   alias KilnCMSWeb.EditorTelemetry
   alias KilnCMSWeb.Presence
+  alias KilnCMSWeb.VersionDiffComponents
 
   # Preferred display order for the block palette; any block type registered
   # beyond these is appended automatically (the palette is registry-driven, so
   # adding a `Kiln.Block` module needs no editor change).
-  @type_order ~w(rich_text heading quote image embed divider columns faq how_to claim custom)
+  @type_order ~w(rich_text heading quote image gallery file embed divider columns accordion faq how_to claim custom)
+
+  # Block types edited by `item_rows_editor/1` — a repeating label + body row —
+  # and the `{:array, :map}` param names those rows bind into. Both lists are
+  # load-bearing beyond the component: `normalize_item_rows/1` needs the field
+  # names to turn indexed maps back into lists, and the add/remove handlers
+  # guard on them. A block added to one and not the other silently loses its
+  # rows on save, which is why they sit together here rather than inline.
+  @row_editor_types ~w(faq how_to accordion)
+  @row_fields ~w(items steps panels)
 
   # Child block types offerable inside a `columns` container (#335). A curated
   # subset with simple field editors — nested blocks get functional inputs, not
@@ -43,6 +74,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # can't create a pathological tree. The storage cast has its own depth guard.
   @max_columns 4
   @max_children_per_column 20
+
+  # Stands in for the working draft on the version-compare picker (#467). A
+  # version id is a UUID, so this can never collide with one.
+  @current_pick "current"
 
   # Bound the media picker window loaded on mount (newest first) so a large
   # library can't grow each open editor's heap without limit.
@@ -64,6 +99,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   @impl true
   def mount(%{"id" => id} = params, _session, socket) do
+    # Deep-linked from the content list's "Assign" button (#501): open
+    # straight to the Settings tab with the assignment form expanded.
+    assign_deep_link? = params["assign"] in ["1", "true"]
+
     case content_kind(params, socket) do
       nil ->
         {:ok, push_navigate(socket, to: ~p"/editor")}
@@ -73,7 +112,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         org = socket.assigns.current_org
         record = fetch!(kind, id, actor, org)
         field_definitions = field_definitions(kind, actor, org)
-        content_type = ContentTypes.get!(kind, org_id(org))
+        content_type = ContentTypes.get!(kind, org)
 
         if connected?(socket) do
           topic = Presence.track_editor(self(), kind, id, actor)
@@ -88,6 +127,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:kind, kind)
          |> assign(:content_type, content_type)
          |> assign(:slug_targets, slug_targets(content_type))
+         # The type's own field-type tokens (#804), off the definitions this
+         # mount already loaded — so the live preview derives through exactly
+         # the vocabulary `Changes.DeriveSlug` uses, at no extra query.
+         |> assign(
+           :slug_token_definitions,
+           KilnCMS.CMS.Slugs.type_token_definitions(field_definitions)
+         )
          |> assign(:has_excerpt, content_type.excerpt?)
          |> assign(:actor, actor)
          |> assign(:tier, KilnCMSWeb.LiveUserAuth.effective_tier(socket))
@@ -110,9 +156,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # restore) so rich-text blocks remount and reload TipTap from the new
          # content — `phx-update="ignore"` otherwise keeps the stale editor (#135).
          |> assign(:editor_version, 0)
+         # Version compare (#467): the (at most two) history entries picked in the
+         # version panel, and the computed diff while the modal is open. Restoring
+         # blind is the thing this replaces, so the modal offers Restore itself.
+         |> assign(:current_pick, @current_pick)
+         |> assign(:compare_pick, [])
+         |> assign(:compare, nil)
          # Right inspector rail (Theme A): which panel is showing. All panels stay
          # mounted (form fields must survive submit) — the tab only toggles CSS
-         # visibility, never `:if`.
+         # visibility, never `:if`. Always mounts as `:preview` here (even for
+         # the `?assign=1` deep link, switched to `:settings` further below,
+         # AFTER `assign_record/2`) — `refresh_preview_html/2` only computes
+         # `@preview_html` when `inspector_tab` is `nil`/`:preview` at mount, so
+         # defaulting straight to `:settings` left it unassigned and crashed
+         # the Preview panel, which stays rendered (CSS-hidden) either way.
          |> assign(:inspector_tab, :preview)
          # Preview render is only refreshed while the Preview tab is showing;
          # this tracks whether an off-tab edit left it needing a re-render.
@@ -141,15 +198,34 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:assist_instruction, nil)
          |> assign(:assist_running?, false)
          |> assign(:assist_result, nil)
+         # Block-level editorial comments (#404): loaded once at mount (a
+         # document's comment volume is small) and refreshed after
+         # add/resolve/unresolve. `comment_block` is the id of the block whose
+         # thread panel is open (nil = closed, one at a time — same pattern as
+         # `assist_block`); `comment_draft` is that panel's textarea value.
+         |> assign(:comments, load_comments(kind, record.id, actor, org))
+         # `?comment=<block_id>` opens that block's thread on arrival — the
+         # landing side of the shared preview's comment pins (#802).
+         |> assign(:comment_block, params["comment"])
+         |> assign(:comment_draft, nil)
          # Internal-link suggestions (#377). `nil` = never opened; loading is
          # deferred to first open because it costs a pgvector query plus a
          # record read per neighbour, which no page-load should pay.
          |> assign(:seo_links, nil)
          |> assign(:seo_links_loading?, false)
+         # Content intelligence (#339): near-duplicates + tag suggestions, both
+         # from the block embeddings this document already has. Same deferral
+         # and the same reason as the link suggestions above, doubled — this
+         # runs the vector query *and* embeds every unapplied tag name.
+         # `nil` = never run; `[]` = ran and found nothing.
+         |> assign(:intel_duplicates, nil)
+         |> assign(:intel_tags, nil)
+         |> assign(:intel_loading?, false)
          # Media picker (image blocks) + relationship pickers (taxonomy, siblings).
          # `picking` is nil (closed), a block index (fill that image block), or
          # `:new` (insert a new image block — opened from the editor chrome).
          |> assign(:picking, nil)
+         |> assign(:picked, [])
          |> assign(:media_query, "")
          # nil = not searching (browse the mounted window); a list = DB search
          # results, so the picker also finds items beyond that window.
@@ -157,17 +233,90 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(
            :media,
            # The picker grid needs only these fields; a select keeps 500
-           # variants/EXIF-bearing rows out of the editor's heap.
+           # variants/EXIF-bearing rows out of the editor's heap. Images
+           # only (#481 added non-image documents to the library, which the
+           # image/gallery/featured/social-image pickers below have no way
+           # to render or insert as an `<img>`) — filtered on `content_type`,
+           # NOT `width`: a just-uploaded image has `width: nil` until
+           # `Media.VariantWorker` runs (see `media_live.ex`), and that
+           # window is common enough that a handful of pre-existing tests
+           # seed images without ever setting it. `width` is still the right
+           # signal for "does this item have a thumbnail to show" (the
+           # library grid, `thumb_src/1`) — just not for "is this an image".
+           #
+           # A NULL `content_type` counts as an image, not excluded: every
+           # row was implicitly an image before #481 (documents didn't
+           # exist), and plenty of seed data/tests still create rows without
+           # setting it. Only a row with a *known, non-image* content_type
+           # is confidently a document, below.
            CMS.list_media_items!(
              actor: actor,
              tenant: org,
              query: [
+               filter: expr(is_nil(content_type) or ilike(content_type, "image/%")),
                select: [:id, :url, :alt, :caption, :filename],
                sort: [inserted_at: :desc],
                limit: @max_media
              ]
            )
          )
+         |> assign(
+           :file_media,
+           # The document counterpart of `:media` above (#481) — for the
+           # file-block picker. `content_type`/`byte_size` are denormalized
+           # onto the block at pick time (see `pick_file/2`), same as `alt`
+           # is for an image block. Requires an EXPLICIT non-image
+           # content_type (see the image filter's comment above) — a row
+           # with no content_type at all defaults to the image bucket, not
+           # this one. Documents only: video/audio/caption tracks (#494)
+           # have their own list below.
+           CMS.list_media_items!(
+             actor: actor,
+             tenant: org,
+             query: [
+               filter: document_filter(),
+               select: [:id, :filename, :content_type, :byte_size, :audience],
+               sort: [inserted_at: :desc],
+               limit: @max_media
+             ]
+           )
+         )
+         |> assign(
+           :av_media,
+           # Playable media (#494) — video and audio, for the video/audio
+           # block pickers. `duration_seconds` and `variants` come along
+           # because the picker shows the length and the poster thumbnail,
+           # and `duration_seconds` is denormalized onto the block at pick
+           # time for the JSON-LD `duration`.
+           CMS.list_media_items!(
+             actor: actor,
+             tenant: org,
+             query: [
+               filter: av_filter(),
+               select: [
+                 :id,
+                 :filename,
+                 :content_type,
+                 :byte_size,
+                 :audience,
+                 :duration_seconds,
+                 :variants
+               ],
+               sort: [inserted_at: :desc],
+               limit: @max_media
+             ]
+           )
+         )
+         |> assign(:file_picking, nil)
+         |> assign(:picker_files, nil)
+         |> assign(:file_query, "")
+         # The A/V picker fills one of three different field pairs on a video
+         # block (the media itself, its poster, its caption track), so it
+         # carries a `{block_id, field}` target rather than a bare block id
+         # like `@file_picking` does — see `open_av_picker`.
+         |> assign(:av_picking, nil)
+         |> assign(:picker_av, nil)
+         |> assign(:av_query, "")
          # Taxonomy pick-lists are scanned by eye, so they load in alphabetical
          # order rather than whatever Postgres hands back. Tags additionally
          # carry their group, which sections the picker (see `tag_picker/1`).
@@ -175,12 +324,42 @@ defmodule KilnCMSWeb.ContentEditorLive do
            :categories,
            CMS.list_categories!(actor: actor, tenant: org, query: [sort: [name: :asc]])
          )
+         # Three columns, not every column (#528). This was the last mount load
+         # without a `select:`, and the picker reads exactly `id`, `name` and
+         # `tag_group_id` — the rest were `%Ash.NotLoaded{}` placeholders held
+         # for the socket's lifetime. Deliberately still UNPAGINATED: an
+         # unrendered tag can no longer be detached by omission (#638 moved the
+         # picker to the merge verbs), so paginating is now *safe* — it is
+         # simply not done yet, because the filter box is client-side and would
+         # only search the page it has.
          |> assign(
            :tags,
-           CMS.list_tags!(actor: actor, tenant: org, query: [sort: [name: :asc]])
+           CMS.list_tags!(
+             actor: actor,
+             tenant: org,
+             query: [select: [:id, :name, :tag_group_id], sort: [name: :asc]]
+           )
          )
          # `TagGroup`'s primary read is already ordered by position then name.
+         #
+         # #528 also proposed skipping this read when no tag carries a group —
+         # the zero-group case, which is most installs. It is NOT safe, and the
+         # suite says so: with no groups loaded, `bucket_for/3` files a tag
+         # whose group does not resolve under "Ungrouped", so a tag a
+         # collaborator attaches after mount from an out-of-scope group lands
+         # there instead of in "Also attached", losing the note explaining where
+         # the tag came from. Since #638 a mis-filed tag is no longer *detached*
+         # by the next save — the merge verbs only remove what was rendered and
+         # unticked — so this is now a labelling question rather than a
+         # data-loss one. Still worth one small indexed read: "Ungrouped" tells
+         # an editor nothing about why a tag they cannot find in any group is on
+         # their post.
          |> assign(:tag_groups, CMS.list_tag_groups!(actor: actor, tenant: org))
+         # Which tag-picker sections render expanded, and which have rendered at
+         # all (#523). Both start empty and are filled by `assign_record/2`
+         # below — see `refresh_tag_index/1`.
+         |> assign(:tag_sections_open, MapSet.new())
+         |> assign(:tag_sections_seen, MapSet.new())
          |> assign(:audiences, audience_options())
          |> assign(:field_definitions, field_definitions)
          |> assign(:reference_options, reference_options(field_definitions, actor, org))
@@ -193,9 +372,30 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # (#655).
          |> assign(:collab_topic, "collab:#{kind}:#{record.id}")
          |> assign(:siblings, siblings(kind, id, actor, org))
-         |> assign_record(record)}
+         # Editorial tasks (#501): open tasks on this record (usually zero or
+         # one), plus the org members eligible to be assigned one. Reloaded
+         # after assign/complete; the assignee list is loaded once (an org's
+         # editor roster doesn't change mid-session).
+         |> assign(:tasks, load_tasks(kind, record.id, actor, org))
+         |> assign(:assignable_users, assignable_users())
+         |> assign(:task_assign_open?, assign_deep_link?)
+         |> assign(:task_draft, %{})
+         # What the site does with an open task on publish (#818) — the assign
+         # form's blank option names it, so the author sees what "site default"
+         # means rather than having to go and look.
+         |> assign(:auto_complete_default, KilnCMS.CMS.TaskSettings.site_default(org))
+         # Content releases (#500 / #836): the record's pending release, if any,
+         # plus the releases it could be added to.
+         |> assign_release_state(kind, record.id, actor, org)
+         |> assign_record(record)
+         |> open_settings_if_deep_linked(assign_deep_link?)}
     end
   end
+
+  # See the `:inspector_tab` mount comment above for why this runs AFTER
+  # `assign_record/2` rather than being folded into the initial assign.
+  defp open_settings_if_deep_linked(socket, true), do: assign(socket, :inspector_tab, :settings)
+  defp open_settings_if_deep_linked(socket, false), do: socket
 
   # The content type being edited: from the `:type` param on the generic
   # `/editor/content/:type/:id` route, or the `live_action` on the legacy
@@ -203,7 +403,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp content_kind(%{"type" => type}, socket) do
     # Resolve the type within the current site (epic #336) — a dynamic type name
     # only names a type on the org that defined it.
-    case ContentTypes.get(type, org_id(socket.assigns.current_org)) do
+    case ContentTypes.get(type, socket.assigns.current_org) do
       nil -> nil
       ct -> ct.type
     end
@@ -254,6 +454,38 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, assign(socket, :cursors, cursors)}
   end
 
+  # Another editor of this item persisted a write (#694).
+  #
+  # In a collaborative session only the elected persister autosaves — everyone
+  # else stands down, so their `assign_record/2` never runs again and their
+  # `@record` and `@versions` stay at whatever they were on mount. The version
+  # list silently stopped growing, and #467 turned that into a confidently wrong
+  # statement: pick the creation version against **Current draft** and the modal
+  # says "These two versions are identical" while the live document says
+  # otherwise. That is exactly the wrong-document diff the compare path refuses
+  # to show everywhere else.
+  #
+  # Only the read-only views derived from the SAVED record are refreshed —
+  # `@record`, the title, and the version list (which drags an open comparison
+  # along with it through `refresh_compare/2`). Not the form, the block children
+  # or the rich-text bodies: those are this session's own in-flight edits, and in
+  # a collab session the text among them lives in the shared Y.Doc rather than in
+  # the record that was just written. Rebuilding the form here would throw away
+  # whatever the person was typing, which is a worse bug than the one being
+  # fixed.
+  def handle_info({:record_saved, from}, socket) do
+    if from == self() do
+      # Our own echo; `assign_record/2` already ran. Keyed on the PID, not the
+      # actor id: one person with the document open in two tabs is two sessions
+      # with two stale views, and an actor-id guard silently excluded exactly
+      # that case — the reported symptom reproduces for one person in two
+      # windows.
+      {:noreply, socket}
+    else
+      {:noreply, refresh_saved_record(socket)}
+    end
+  end
+
   # Debounced draft autosave fired by the timer scheduled in `validate`.
   def handle_info(:autosave, socket), do: {:noreply, perform_autosave(socket)}
 
@@ -293,6 +525,46 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # An empty list rather than nil: nil means "not loaded yet" and would make
     # the panel try again on every open.
     {:noreply, socket |> assign(:seo_links_loading?, false) |> assign(:seo_links, [])}
+  end
+
+  # Content intelligence (#339). Stamped with the editor version like the other
+  # async results: a run started before a conflict reload describes content the
+  # author no longer has, and its tag suggestions would be applied to a form
+  # that was replaced underneath them.
+  def handle_async(:content_intel, {:ok, {version, %{} = intel}}, socket) do
+    if version == socket.assigns.editor_version do
+      {:noreply,
+       socket
+       |> assign(:intel_loading?, false)
+       |> assign(:intel_duplicates, intel.duplicates)
+       |> assign(:intel_tags, intel.tags)}
+    else
+      {:noreply, assign(socket, :intel_loading?, false)}
+    end
+  end
+
+  def handle_async(:content_intel, {:exit, reason}, socket) do
+    Logger.warning("Content intelligence task exited: #{inspect(reason)}")
+
+    # `[]`, not nil, so the button stops offering a first run it already made.
+    # But `[]` alone renders the panel's ordinary empty state — "Nothing similar
+    # found." — which is a *result*, and this is the absence of one. The flash
+    # is what carries that difference; without it a crashed analysis is
+    # indistinguishable from a clean bill of health, and an author would
+    # reasonably publish the duplicate we failed to look for.
+    #
+    # Only a *task-level* failure lands here (a lost DB connection, say). An
+    # embedder that raises does not: `KilnCMS.Cache.fetch/3` wraps it in
+    # `Cachex.fetch`, which catches fallback exceptions, so a broken model
+    # degrades to an empty suggestion list through the `{:ok, _}` clause above
+    # and still reads as "nothing found". Widening that is #851's neighbourhood,
+    # not this clause's.
+    {:noreply,
+     socket
+     |> assign(:intel_loading?, false)
+     |> assign(:intel_duplicates, [])
+     |> assign(:intel_tags, [])
+     |> put_flash(:error, gettext("Couldn't analyze this content. Please try again."))}
   end
 
   def handle_async(:seo_draft, {:exit, reason}, socket) do
@@ -345,11 +617,75 @@ defmodule KilnCMSWeb.ContentEditorLive do
     socket
     |> assign(:page_title, record.title)
     |> assign(:slug_customized?, slug_customized?(socket))
+    |> assign(:may_write?, may_write?(record, socket.assigns.actor, socket.assigns.current_org))
+    # Recomputed alongside `may_write?` and for the same reason: a reload that
+    # lands a change (a publish, a re-scoped grant) must re-evaluate both.
+    |> assign(
+      :may_suggest_seo?,
+      may_write_fields?(
+        record,
+        socket.assigns.actor,
+        socket.assigns.current_org,
+        @seo_suggestion_fields
+      )
+    )
+    |> assign(
+      :may_assist_blocks?,
+      may_write_fields?(record, socket.assigns.actor, socket.assigns.current_org, ["blocks"])
+    )
     |> assign(:form, build_form(record, socket.assigns.actor))
+    |> refresh_tag_index()
     |> seed_block_children(record)
     |> refresh_preview()
     |> load_versions()
     |> load_translations()
+    |> load_fragment_options()
+  end
+
+  # Whether the actor may WRITE this record — the authorization both AI-assist
+  # affordances need and a read-only viewer lacks (#550). The route's editor-tier
+  # gate and the mount read-check are coarser: they admit a reviewer or a
+  # read-only-on-one-type role who can OPEN someone else's draft, and both
+  # `seo_suggest` and `assist_run` bill an org LLM run, so read access must not
+  # be enough to spend that budget. Keyed on `:autosave` — the action the editor
+  # actually persists through, and the same gate the collab channel admits
+  # editors with (`KilnCMSWeb.CollabChannel`). Recomputed here (not once at
+  # mount) so a reload that lands a state change — e.g. a publish — re-evaluates.
+  defp may_write?(record, actor, org), do: Ash.can?({record, :autosave}, actor, tenant: org)
+
+  @doc false
+  # Whether the actor may change ALL of `fields` on this record's type (#868).
+  #
+  # `may_write?/3` cannot answer this. It is `Ash.can?`, and `Ash.can?` builds
+  # the changeset with **empty input** — while `Changes.EnforceFieldGrants`
+  # only raises a violation for an attribute that was `supplied?`. So no field
+  # is ever supplied during the check, no error is ever added, and every
+  # field-granted editor passes a gate the save will then refuse field by
+  # field. A *change* is structurally invisible to `Ash.can?`; asking the same
+  # question the change asks is the only way to get the same answer.
+  #
+  # Mirrors the change exactly, including the tier condition: grants bind an
+  # effective **editor**, and effective admins are exempt (the policy bypass).
+  # Getting that wrong in the other direction would hide the control from an
+  # admin who happens to carry a `field_grants` entry.
+  defp may_write_fields?(record, actor, org, fields) do
+    Enum.any?(fields, &field_granted?(record, actor, org, &1))
+  end
+
+  # One field. `may_write_fields?/4` is `any?` over these rather than `all?`
+  # because each suggestion is accepted on its own (`seo_accept` writes exactly
+  # one attribute) — an editor granted `seo_title` alone can take that card and
+  # save cleanly, so hiding the whole panel from them would be a second bug in
+  # the opposite direction. The per-card accept re-checks with this.
+  defp field_granted?(record, actor, org, field) do
+    if Scoping.effective_tier(actor, org) == :editor do
+      case Scoping.field_grant(actor, org, ContentTypes.type_name_for(record)) do
+        nil -> true
+        allowed -> field in allowed
+      end
+    else
+      true
+    end
   end
 
   # Whether the slug is the author's own (pinned) or still auto-derived — while
@@ -366,7 +702,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
       derived =
         KilnCMS.CMS.Slugs.derive_base(
           socket.assigns.content_type.slug_pattern,
-          slug_context(socket)
+          slug_context(socket),
+          slug_token_definitions(socket)
         )
 
       not KilnCMS.CMS.Slugs.underived?(record.slug, derived)
@@ -392,6 +729,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  # The type's extra token definitions (#804), resolved at mount and kept in
+  # assigns: `Slugs.descriptor_token_definitions/4` can read FieldDefinition
+  # rows, and this is consulted on every keystroke that touches a slug source.
+  defp slug_token_definitions(socket), do: socket.assigns[:slug_token_definitions] || []
+
   defp slug_targets(ct) do
     [["form", "title"], ["form", "seo_keywords"]] ++
       if(Slug.Pattern.uses?(ct.slug_pattern, "category"),
@@ -403,12 +745,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Derivation + pathauto-style dedupe, so the slug shown live is the one that
   # will actually save ("guide-kiln-2" when "guide-kiln" is taken). Shares
-  # `Slugs.derive_base/2` with the resource-level `DeriveSlug` change.
+  # `Slugs.derive_base/3` with the resource-level `DeriveSlug` change —
+  # including the type's own field-type tokens (#804), without which the
+  # preview and the save disagreed and every draft read as author-pinned.
   defp derive_unique_slug(socket, params) do
     base =
       KilnCMS.CMS.Slugs.derive_base(
         socket.assigns.content_type.slug_pattern,
-        slug_context(socket, params)
+        slug_context(socket, params),
+        slug_token_definitions(socket)
       )
 
     if base == "",
@@ -428,9 +773,25 @@ defmodule KilnCMSWeb.ContentEditorLive do
       title: param_or(params, "title", record.title),
       seo_keywords: param_or(params, "seo_keywords", Map.get(record, :seo_keywords)),
       category_slug: category_slug(socket, param_or(params, "category_id", record.category_id)),
+      # String keys, matching `Slugs.changeset_custom_fields/2` and what a
+      # `[field:<name>]` resolver looks up. Omitted entirely before #804, so a
+      # field-token pattern never previewed the same slug it saved.
+      custom_fields: slug_custom_fields(record, params),
       date: slug_date(record, params)
     }
   end
+
+  defp slug_custom_fields(record, params) do
+    case params && params["custom_fields"] do
+      %{} = posted -> Map.new(posted, fn {key, value} -> {to_string(key), value} end)
+      _absent -> stringify_custom_fields(Map.get(record, :custom_fields))
+    end
+  end
+
+  defp stringify_custom_fields(%{} = fields),
+    do: Map.new(fields, fn {key, value} -> {to_string(key), value} end)
+
+  defp stringify_custom_fields(_other), do: %{}
 
   defp param_or(nil, _key, fallback), do: fallback
   defp param_or(params, key, fallback), do: params[key] || fallback
@@ -518,6 +879,62 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Per-locale coverage for the Translations panel (only rendered when the
   # install has more than one locale).
+  # Candidates for the fragment picker (#479): published documents of every
+  # content type, most recent first, bounded.
+  #
+  # Published-only because a fragment pointing at a draft expands to nothing —
+  # offering one would be a picker whose choices silently do not render. Loaded
+  # once per editor mount rather than per keystroke: it feeds a `<select>`, and
+  # the cap is what keeps that select usable as much as what keeps the query
+  # cheap.
+  @fragment_option_limit 200
+
+  defp load_fragment_options(socket) do
+    org = socket.assigns.current_org
+
+    options =
+      for ct <- ContentTypes.all() ++ ContentTypes.dynamic_all(org),
+          record <-
+            ContentTypes.list!(ct,
+              actor: socket.assigns.actor,
+              tenant: org,
+              query: [
+                filter: [state: :published],
+                select: [:id, :title, :updated_at],
+                sort: [updated_at: :desc],
+                limit: @fragment_option_limit
+              ]
+            ) do
+        {"#{record.title} (#{ct.label})", "#{ct.type}:#{record.id}"}
+      end
+
+    assign(socket, :fragment_options, options)
+  end
+
+  # The option list, with the block's own current reference guaranteed present.
+  #
+  # `@fragment_options` is published-only and capped, so a target that was
+  # unpublished (or has simply aged out of the cap) would match no option — the
+  # browser would fall back to the prompt, and the next `phx-change` would post
+  # a blank, clearing a reference on a block nobody touched. The stored value is
+  # prepended instead, labelled so the editor can see what happened.
+  defp fragment_options_for(options, bf) do
+    bf[:ref].value |> fragment_ref_value() |> ensure_option(options)
+  end
+
+  defp ensure_option("", options), do: options
+
+  defp ensure_option(current, options) do
+    if Enum.any?(options, fn {_label, value} -> value == current end),
+      do: options,
+      else: [{gettext("Current target (unpublished or not listed)"), current} | options]
+  end
+
+  # The stored `%{"type" =>, "id" =>}` as the picker's `"type:id"` option value.
+  defp fragment_ref_value(%{"type" => type, "id" => id}) when is_binary(id), do: "#{type}:#{id}"
+  defp fragment_ref_value(%{type: type, id: id}) when is_binary(id), do: "#{type}:#{id}"
+  defp fragment_ref_value(_ref), do: ""
+
   defp load_translations(socket) do
     assign(
       socket,
@@ -548,11 +965,34 @@ defmodule KilnCMSWeb.ContentEditorLive do
       socket.assigns.form
       |> preview_block_maps()
       |> KilnCMS.CMS.TypedBlocks.to_typed()
+      |> expand_fragments(socket)
 
     socket
     |> refresh_preview_html(typed)
     |> refresh_body_stats(typed)
     |> refresh_seo_report()
+  end
+
+  # A `%Fragment{}` block renders nothing on its own — until inlined, the
+  # Preview tab shows it as empty and the SEO/readability panel (word count,
+  # reading time, heading outline, alt-text, internal links) scores the
+  # document as if it were missing (#910). `Fragments.expand/3` no-ops when
+  # the tree carries no fragment, so this costs a tree walk on the common
+  # document and a bounded, cached target read only when one is actually
+  # embedded — the same cost every publish already pays in
+  # `KilnCMS.Firing.Engine.fire/2`.
+  #
+  # Expanded with the record's OWN audience, mirroring `Engine.host_audiences/1`
+  # exactly: a `:member` document's preview must not show a wider-audience
+  # fragment than delivery will ever grant it, or the author sees text a
+  # reader of the finished page could never see.
+  defp expand_fragments(typed, socket) do
+    record = socket.assigns.record
+
+    KilnCMS.CMS.Fragments.expand(typed, record.org_id,
+      audiences: KilnCMS.Firing.Engine.host_audiences(record),
+      ancestry: [{KilnCMS.Firing.Engine.public_type(record), record.id}]
+    )
   end
 
   # The in-editor preview is a full block render of every block. Only pay for
@@ -573,19 +1013,92 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   defp refresh_body_stats(socket, typed) do
-    digest = :erlang.phash2(typed)
+    # This site's settings, not the deployment's (#857) — resolved here rather
+    # than at mount so an admin turning the panel on, or editing the site's
+    # phrase list, reaches an editor session already open. `Settings.for_org/1`
+    # is cached per org, so this is an ETS read per form change.
+    settings = KilnCMS.Compliance.Settings.for_org(socket.assigns.current_org)
+
+    # The resolved settings are part of the digest, not just the blocks: the
+    # body scan is memoized here, so switching claim checking on (or editing the
+    # rules) while an editor session is open would otherwise leave that session
+    # showing the previous scan — or no panel at all — until the author
+    # happened to touch the body.
+    digest = :erlang.phash2({typed, settings})
 
     if digest == socket.assigns[:seo_body_digest] do
       socket
     else
+      body = Kiln.Advisory.Body.from_typed(typed)
+
       socket
       |> assign(:seo_body_digest, digest)
-      |> assign(:seo_body_stats, Kiln.Advisory.Body.from_typed(typed))
+      |> assign(:seo_body_stats, body)
+      |> assign(:compliance_settings, settings)
+      # Scanning the whole document for every configured claim phrase is body
+      # work, so it is memoized here with the rest of it (#377). The short
+      # scalar fields are scanned per keystroke in `refresh_seo_report/1` and
+      # merged in — see `KilnCMS.Compliance.merge/2`.
+      |> assign(:claim_body_matches, scan_claims(settings, body.text))
+      |> refresh_link_targets()
     end
   end
 
-  # Cheap by comparison — string checks over a handful of short fields — so this
-  # runs on every keystroke while the body walk above only runs on a form change.
+  # `%{}` rather than `nil` when nothing matched, so the check can tell "scanned
+  # and clean" from "nobody scanned" — which it reports as `:n_a`, because a
+  # document nobody checked is not a document that is clean.
+  defp scan_claims(%KilnCMS.Compliance.Settings{enabled?: true} = settings, text),
+    do: KilnCMS.Compliance.scan(text, settings.rules)
+
+  defp scan_claims(_off, _text), do: nil
+
+  # Resolving an internal link is a query per distinct path (#474), so it is
+  # keyed on the *set of paths* rather than on the body digest: an author typing
+  # a paragraph changes the body constantly and its links almost never. Nothing
+  # here runs on a keystroke — `refresh_body_stats/2` has already short-circuited
+  # on an unchanged body — and this narrows it further to a changed link set.
+  defp refresh_link_targets(socket) do
+    paths = socket.assigns.seo_body_stats.internal_link_paths
+    locale = link_locale(socket)
+
+    # Keyed on the locale as well as the paths: a link is judged in the locale
+    # of the document that holds it, so changing the document's locale changes
+    # every answer. Keying on paths alone would leave the panel reporting the
+    # old locale's verdicts for the rest of the session.
+    if {paths, locale} == socket.assigns[:link_paths] do
+      socket
+    else
+      socket
+      |> assign(:link_paths, {paths, locale})
+      |> assign(
+        :link_targets,
+        KilnCMS.Links.Internal.resolve_all(
+          paths,
+          link_locale(socket),
+          Accounts.org_id(socket.assigns.current_org)
+        )
+      )
+    end
+  end
+
+  # The locale a link is judged in: the *form's* value, because that is what
+  # `refresh_seo_report/1` hands the analyzer. Reading the saved record's locale
+  # instead would resolve links in one locale and report them in another.
+  defp link_locale(socket) do
+    case socket.assigns.form && AshPhoenix.Form.value(socket.assigns.form, :locale) do
+      locale when is_binary(locale) and locale != "" -> locale
+      _other -> socket.assigns.record.locale || KilnCMS.I18n.default_locale()
+    end
+  end
+
+  # Cheap by comparison — the checks compare precomputed facts and a handful of
+  # short fields — so this runs on every keystroke while the body walk above
+  # only runs on a form change.
+  #
+  # "Precomputed" is the load-bearing word, and the reason a check must never
+  # scan `body.text` itself: that puts full-document string work into every
+  # validate, including the ones that only touched the title. `AllCaps` reads
+  # `Body.capitalised_runs` for exactly this reason (#495).
   defp refresh_seo_report(socket) do
     form = socket.assigns.form
 
@@ -600,11 +1113,69 @@ defmodule KilnCMSWeb.ContentEditorLive do
       locale: form[:locale].value
     }
 
-    assign(
-      socket,
-      :seo_report,
-      KilnCMS.Seo.Analyzer.analyze(fields, socket.assigns.seo_body_stats)
+    # One registry run, three views (#495, #377). SEO and accessibility overlap
+    # heavily — headings, alt text and readability report into both — so
+    # running the checks once and splitting the outcomes by lens is the
+    # difference between paying for the shared ones once per keystroke and
+    # paying twice. Compliance shares no checks with either, but rides the same
+    # run rather than opening a second one.
+    outcomes =
+      KilnCMS.Seo.Analyzer.run(fields, socket.assigns.seo_body_stats,
+        facts: %{
+          link_targets: socket.assigns[:link_targets] || %{},
+          # Both compliance facts come from the one resolve in
+          # `refresh_body_stats/2`: matches computed under this site's
+          # vocabulary have to be graded under the same one (#857).
+          compliance_settings: socket.assigns[:compliance_settings],
+          claim_matches: claim_matches(socket, fields)
+        }
+      )
+
+    body = socket.assigns.seo_body_stats
+
+    socket
+    |> assign(:seo_report, outcomes |> Registry.by_lens(:seo) |> Report.from_outcomes(body))
+    |> assign(
+      :a11y_report,
+      outcomes |> Registry.by_lens(:accessibility) |> Report.from_outcomes(body)
     )
+    |> assign(
+      :compliance_report,
+      outcomes |> Registry.by_lens(:compliance) |> Report.from_outcomes(body)
+    )
+  end
+
+  # The scalar fields that get published as text (#377). Scanned here rather
+  # than with the body because they change on every keystroke — but they are a
+  # title and two meta fields, so one regex pass over a few hundred bytes, not
+  # over the document.
+  #
+  # Gating them out would leave the panel and the publish gate disagreeing: the
+  # gate scans the SEO description, and a claim there is the one that ships to
+  # a search results page.
+  @claim_scanned_fields [:title, :seo_title, :seo_description]
+
+  defp claim_matches(socket, fields) do
+    case socket.assigns[:claim_body_matches] do
+      nil ->
+        nil
+
+      body_matches ->
+        # Each field scanned separately, never joined. Concatenating them
+        # invents phrases across the seam — a title ending "…at your own risk"
+        # beside an SEO title starting "Free…" would report "risk free", which
+        # appears nowhere in the document.
+        rules = socket.assigns.compliance_settings.rules
+
+        @claim_scanned_fields
+        |> Enum.reduce(body_matches, fn field, acc ->
+          fields
+          |> Map.get(field)
+          |> to_string()
+          |> KilnCMS.Compliance.scan(rules)
+          |> then(&KilnCMS.Compliance.merge(acc, &1))
+        end)
+    end
   end
 
   defp load_versions(socket) do
@@ -619,7 +1190,47 @@ defmodule KilnCMSWeb.ContentEditorLive do
       ]
     ]
 
-    assign(socket, :versions, list_versions(socket.assigns.kind, opts))
+    versions = list_versions(socket.assigns.kind, opts)
+
+    socket
+    |> assign(:versions, versions)
+    |> refresh_compare(versions)
+  end
+
+  # The record was re-read, so anything derived from it is stale. Two ways that
+  # bites an open comparison:
+  #
+  #   * A picked version can be *gone* — autosave coalescing prunes superseded
+  #     snapshots (#32) on every debounced save. Drop the pick, close the
+  #     comparison, and say why; silently emptying the panel reads as a bug.
+  #   * The "Current draft" side can have *moved* — a pending autosave firing
+  #     while the modal is open leaves it describing a document that no longer
+  #     exists, which is exactly what `build_compare/2` refuses to do elsewhere.
+  #     Recompute rather than close: the editor is mid-read.
+  defp refresh_compare(socket, versions) do
+    picks = socket.assigns.compare_pick
+    live = MapSet.new(versions, & &1.id)
+    kept = Enum.filter(picks, &(&1 == @current_pick or MapSet.member?(live, &1)))
+
+    cond do
+      kept != picks and socket.assigns.compare ->
+        socket
+        |> assign(:compare_pick, kept)
+        |> assign(:compare, nil)
+        |> put_flash(:info, gettext("A version you were comparing was superseded."))
+
+      kept != picks ->
+        assign(socket, :compare_pick, kept)
+
+      socket.assigns.compare ->
+        case build_compare(socket, picks) do
+          {:ok, compare} -> assign(socket, :compare, compare)
+          :error -> assign(socket, :compare, nil)
+        end
+
+      true ->
+        socket
+    end
   end
 
   defp build_form(record, actor) do
@@ -689,6 +1300,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # `<select>` options for the consumer-facing audience (KilnCMS.CMS.Audiences):
   # `{humanized label, atom value}`. The select is only rendered when more than
   # one audience is configured (see the template).
+  # Whether this record currently carries a passphrase (#496). Derived from the
+  # record rather than kept as an assign, so it cannot go stale against a save —
+  # the rail only ever needs to know *that* one is set, never what it is.
+  defp content_locked?(record), do: not is_nil(Map.get(record || %{}, :access_password_hash))
+
   defp audience_options do
     Enum.map(KilnCMS.CMS.Audiences.all(), &{Phoenix.Naming.humanize(&1), &1})
   end
@@ -736,7 +1352,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # kind's by its type atom (see FieldDefinition's two scopes). Resolved and read
   # under the current org (epic #336).
   defp field_definitions(kind, actor, org) do
-    case ContentTypes.get!(kind, org_id(org)) do
+    case ContentTypes.get!(kind, org) do
       %{source: :dynamic, definition: definition} ->
         CMS.field_definitions_for_definition!(definition.id, actor: actor, tenant: org)
 
@@ -744,10 +1360,6 @@ defmodule KilnCMSWeb.ContentEditorLive do
         CMS.field_definitions_for!(ct.type, actor: actor, tenant: org)
     end
   end
-
-  # `ContentTypes.get!/2` keys the dynamic-type registry by a raw org_id.
-  defp org_id(%{id: id}), do: id
-  defp org_id(id) when is_binary(id), do: id
 
   # Pick-lists for `:reference` custom fields: per definition, the target
   # type's records as `{title, id}` options — narrow select and the same window
@@ -757,7 +1369,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> Enum.filter(&(&1.field_type == :reference))
     |> Map.new(fn definition ->
       options =
-        case ContentTypes.get(definition.target_type, org_id(org)) do
+        case ContentTypes.get(definition.target_type, org) do
           nil ->
             []
 
@@ -799,16 +1411,121 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  # Which tags the picker should show ticked, as a MapSet of id strings.
+  #
+  # Two shapes reach it, which is why this is not just `selected_ids/3` (#638).
+  # While editing, the form carries `tag_ids` — the raw checkbox state from the
+  # last `validate`. But a **failed submit** leaves the form holding what Save
+  # sent, and Save sends the merge verbs instead. Reading only `tag_ids` there
+  # would fall through to the persisted tags and silently roll every unsaved
+  # tick back, on the one screen where the editor is already being told to fix
+  # something else.
+  defp selected_tag_ids(form, record) do
+    attached = record.tags |> current_ids() |> MapSet.new(&to_string/1)
+
+    case form[:tag_ids].value do
+      nil -> apply_merge_verbs(form, attached)
+      value -> value |> List.wrap() |> MapSet.new(&to_string/1)
+    end
+  end
+
+  defp apply_merge_verbs(form, attached) do
+    added = form |> merge_verb_ids(:add_tag_ids) |> MapSet.new()
+    removed = form |> merge_verb_ids(:remove_tag_ids) |> MapSet.new()
+
+    attached |> MapSet.union(added) |> MapSet.difference(removed)
+  end
+
+  defp merge_verb_ids(form, field) do
+    form[field].value |> List.wrap() |> Enum.map(&to_string/1)
+  end
+
   defp list_versions(kind, opts), do: ContentTypes.list_versions!(kind, opts)
 
   defp restore_version(kind, record, vid, actor),
     do: ContentTypes.restore_version(kind, record, vid, actor: actor, tenant: record.org_id)
 
+  # ── Version compare (#467) ─────────────────────────────────────────────────
+
+  # Resolves the two picked history entries into snapshots and diffs them.
+  #
+  # Reads carry the actor, not `authorize?: false`: the diff exposes a version's
+  # whole `changes` payload, so it must be gated by the same version read policy
+  # as the history list itself (`KilnCMS.CMS.VersionPolicies`). A forbidden read
+  # raises rather than quietly diffing a partial history, which would render a
+  # confident-looking diff of the wrong document.
+  defp build_compare(socket, picks) do
+    record = socket.assigns.record
+    resource = record.__struct__
+    opts = [actor: socket.assigns.actor, tenant: socket.assigns.current_org]
+
+    with [_, _] = resolved <- Enum.map(picks, &resolve_pick(socket, &1)),
+         false <- Enum.any?(resolved, &is_nil/1),
+         [left, right] <- Enum.sort(resolved, &pick_before?/2),
+         {:ok, old, new} <- snapshots(Module.concat(resource, Version), record, left, right, opts) do
+      {:ok,
+       %{
+         diff: VersionDiff.between(old, new, resource),
+         left: side(left),
+         right: side(right)
+       }}
+    else
+      _unusable -> :error
+    end
+  rescue
+    error ->
+      # `:error` level with the stacktrace, not `:warning`: Sentry's logger
+      # handler is registered at the default `:error` threshold, so a warning
+      # here would make every compare failure — a forbidden read, a broken
+      # snapshot, a dead connection — invisible outside the raw prod log.
+      Logger.error("version compare failed: #{Exception.format(:error, error, __STACKTRACE__)}")
+
+      :error
+  end
+
+  defp resolve_pick(_socket, @current_pick), do: {:current, nil}
+
+  defp resolve_pick(socket, version_id) do
+    case Enum.find(socket.assigns.versions, &(&1.id == version_id)) do
+      nil -> nil
+      version -> {:version, version}
+    end
+  end
+
+  defp snapshots(version_module, record, {:version, old}, {:version, new}, opts),
+    do: VersionSnapshot.pair(version_module, record.id, old, new, opts)
+
+  # The working draft is whatever the record holds now. The editor autosaves on a
+  # debounce, so that is the saved state, not the keystroke in flight.
+  defp snapshots(version_module, record, {:version, old}, {:current, _}, opts) do
+    with {:ok, snapshot} <- VersionSnapshot.at(version_module, record.id, old, opts) do
+      {:ok, snapshot, VersionSnapshot.current(record)}
+    end
+  end
+
+  defp snapshots(_version_module, _record, _left, _right, _opts), do: :error
+
+  # The draft is always the newer side, so a comparison reads before → after.
+  # Two saved versions defer to `VersionSnapshot.before?/2` rather than
+  # re-deriving the rule — it is the ordering authority for version history, and
+  # a second copy here could drift out of agreement with the fold itself.
+  defp pick_before?({:current, _}, _right), do: false
+  defp pick_before?(_left, {:current, _}), do: true
+  defp pick_before?({:version, left}, {:version, right}), do: VersionSnapshot.before?(left, right)
+
+  defp side({:current, _}), do: %{label: gettext("Current draft"), version_id: nil}
+  defp side({:version, version}), do: %{label: version_label(version), version_id: version.id}
+
+  defp version_label(version) do
+    "#{version.version_action_name} · " <>
+      Calendar.strftime(version.version_inserted_at, "%Y-%m-%d %H:%M")
+  end
+
   defp do_workflow(kind, verb, record, actor),
     do: ContentTypes.transition(kind, verb, record, actor: actor, tenant: record.org_id)
 
   @impl true
-  def handle_event("validate", %{"form" => params} = event, socket) do
+  def handle_event("validate", %{"form" => params} = event, socket) when is_map(params) do
     # The columns children live in socket state (they aren't bound form inputs);
     # re-inject them so a keystroke's partial params can't wipe the nested tree.
     # GEO item rows (faq/how_to, #357) ARE bound inputs, but arrive as indexed
@@ -817,8 +1534,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
       params
       |> inject_children(socket.assigns.block_children)
       |> inject_rich_bodies(socket.assigns.rich_bodies)
-      |> normalize_geo_items()
-      |> normalize_tag_ids()
+      |> normalize_item_rows()
+      |> merge_tag_params(socket)
 
     {params, socket} = sync_slug(params, event["_target"], socket)
     socket = assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
@@ -831,7 +1548,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # knows (_touched), so a hook-injected input is silently dropped. Convert to
   # Portable Text here and re-validate with the body injected — the same
   # server-held-state pattern as columns children (apply_children/2).
-  def handle_event("rich_text_body", %{"doc" => doc} = event, socket) do
+  def handle_event("rich_text_body", %{"doc" => doc} = event, socket) when is_map(doc) do
     key =
       case event["id"] do
         id when is_binary(id) and id != "" -> id
@@ -886,7 +1603,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Unknown/garbled tab value — ignore it rather than crash the editor.
   def handle_event("switch_inspector_tab", _params, socket), do: {:noreply, socket}
 
-  def handle_event("field_focus", %{"field" => field}, socket) do
+  def handle_event("field_focus", %{"field" => field}, socket) when is_binary(field) do
     broadcast_cursor(socket, field)
     {:noreply, assign(socket, :self_field, field)}
   end
@@ -946,14 +1663,24 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # Ignore a re-click while a run is in flight: the disabled attribute is
     # client-side only, so a fast double-click (or a replayed event) would
     # otherwise start a second generation and bill for it.
-    if socket.assigns.seo_drafting? or not socket.assigns.seo_enabled? do
+    #
+    # `may_write?` is the authorization boundary (#550): read access is enough to
+    # REACH this handler (a reviewer can open the record), but billing an org LLM
+    # run needs write access. The hidden button is not the control — a
+    # replayed/forged event reaches here regardless — so refuse server-side.
+    # `may_suggest_seo?` as well as `may_write?` (#868): a field-granted editor
+    # passes `may_write?`, because that is `Ash.can?` and the grant lives in a
+    # *change*, which `Ash.can?` cannot see. Billing an LLM run for fields the
+    # save will refuse one by one is the outcome that gate was missing.
+    if socket.assigns.seo_drafting? or not socket.assigns.seo_enabled? or
+         not socket.assigns.may_write? or not socket.assigns.may_suggest_seo? do
       {:noreply, socket}
     else
       document = seo_document(socket)
       # The rate-limit bucket keys interpolate this, so it must be the id —
       # `current_org` is the Organization struct (Ash takes it as a tenant, but
       # a struct in a bucket key would blow up on String.Chars).
-      org_id = org_id(socket.assigns.current_org)
+      org_id = Accounts.org_id(socket.assigns.current_org)
       actor_id = socket.assigns.actor.id
       # Stamped so a result that lands after a conflict reload or a version
       # restore (both bump `editor_version`) can be recognized as stale.
@@ -977,11 +1704,45 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Load internal-link suggestions the first time the panel is opened. Repeat
   # opens reuse what's already there — the author can refresh explicitly.
+  #
+  # `may_write?` for the same reason the two intelligence handlers below carry
+  # it (#550/#916): a pgvector query plus a record read per neighbour, on an
+  # explicit click, re-triggerable indefinitely and with no budget bucket. It is
+  # cheaper than the intelligence refresh — no embedding is generated — but it
+  # is the same shape, and gating one of the two would have been arbitrary.
   def handle_event("seo_links_refresh", _params, socket) do
-    if socket.assigns.seo_links_loading?,
+    if socket.assigns.seo_links_loading? or not socket.assigns.may_write?,
       do: {:noreply, socket},
       else: {:noreply, load_link_suggestions(socket)}
   end
+
+  # ── Content intelligence (#339) ───────────────────────────────────────────
+
+  # Near-duplicates + tag suggestions, on an explicit click. Same "never on
+  # mount" rule as the link suggestions: this is a pgvector query, a record read
+  # per neighbour, and one embedding per unapplied tag name.
+  #
+  # `may_write?` gates it for the reason `seo_suggest` above states (#550): read
+  # access is enough to REACH this handler, but this one is unbounded work on a
+  # cold cache — a `list_tags!` plus an embedding per unapplied tag — and it is
+  # re-triggerable on every click, with no budget bucket in front of it. The
+  # hidden control is not the boundary; a replayed event arrives regardless.
+  def handle_event("content_intel_refresh", _params, socket) do
+    if socket.assigns.intel_loading? or not socket.assigns.may_write?,
+      do: {:noreply, socket},
+      else: {:noreply, load_content_intel(socket)}
+  end
+
+  # Attach a suggested tag. Writes through the form rather than the record, so
+  # it lands in the same save as everything else the author is editing and is
+  # undoable by unticking the checkbox the picker already renders for it.
+  def handle_event("intel_add_tag", %{"id" => id}, socket) when is_binary(id) do
+    if socket.assigns.may_write?,
+      do: {:noreply, add_suggested_tag(socket, id)},
+      else: {:noreply, socket}
+  end
+
+  def handle_event("intel_add_tag", _params, socket), do: {:noreply, socket}
 
   # The `Clipboard` JS hook pushes this after a successful copy. Without a
   # clause here the push would crash the LiveView — the hook predates this
@@ -989,14 +1750,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def handle_event("copied", _params, socket),
     do: {:noreply, put_flash(socket, :info, gettext("Copied to clipboard."))}
 
-  def handle_event("seo_dismiss", %{"field" => field}, socket),
+  def handle_event("seo_dismiss", %{"field" => field}, socket) when is_binary(field),
     do:
       {:noreply, assign(socket, :seo_dismissed, MapSet.put(socket.assigns.seo_dismissed, field))}
 
   def handle_event("seo_dismiss_all", _params, socket),
     do: {:noreply, socket |> assign(:seo_drafts, nil) |> assign(:seo_dismissed, MapSet.new())}
 
-  def handle_event("seo_accept", %{"field" => field}, socket) do
+  def handle_event("seo_accept", %{"field" => field}, socket) when is_binary(field) do
     {socket, outcome} = apply_suggestion(socket, field)
     {:noreply, flash_outcomes(socket, [{field, outcome}])}
   end
@@ -1049,7 +1810,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   def handle_event("assist_close", _params, socket), do: {:noreply, close_assist(socket)}
 
-  def handle_event("assist_action", %{"action" => action}, socket) do
+  def handle_event("assist_action", %{"action" => action}, socket) when is_binary(action) do
     case KilnCMS.Assist.Action.fetch(action) do
       {:ok, %{id: id}} -> {:noreply, assign(socket, :assist_action, id)}
       # Never mints an atom from the pushed string; an unknown id is simply
@@ -1090,7 +1851,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # without this check a crafted push buys a billed generation for nothing.
     if assist_runnable?(socket, block_id) do
       request = assist_request(socket, block_id)
-      org_id = org_id(socket.assigns.current_org)
+      org_id = Accounts.org_id(socket.assigns.current_org)
       actor_id = socket.assigns.actor.id
       version = socket.assigns.editor_version
 
@@ -1135,11 +1896,238 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # A mode outside insert/replace is ignored, not left to fall through.
   def handle_event("assist_apply", _params, socket), do: {:noreply, socket}
 
+  # ── Block-level editorial comments (#404) ───────────────────────────────────
+  #
+  # One thread per block; `RouteToBlockThread` on the resource is what makes
+  # that true regardless of caller, so nothing here has to track which comment
+  # is a reply to which — only ever "add a comment to this block" and "resolve
+  # this block's thread". `comment_draft` is synced the same way
+  # `assist_instruction` is: this panel sits inside the main content `<.form>`,
+  # which can't nest another `<form>`, so the textarea keeps its own
+  # unprefixed `phx-change` and the Send button reads the synced assign rather
+  # than anything in the click event.
+
+  def handle_event("comment_open", %{"bid" => block_id}, socket)
+      when is_binary(block_id) and block_id != "" do
+    {:noreply, socket |> close_comment_panel() |> assign(:comment_block, block_id)}
+  end
+
+  def handle_event("comment_open", _params, socket), do: {:noreply, socket}
+
+  def handle_event("comment_close", _params, socket), do: {:noreply, close_comment_panel(socket)}
+
+  def handle_event("comment_draft", params, socket) do
+    {:noreply, assign(socket, :comment_draft, params["comment_body"])}
+  end
+
+  def handle_event("comment_add", %{"bid" => block_id}, socket)
+      when is_binary(block_id) and block_id != "" do
+    body = socket.assigns.comment_draft
+
+    if is_binary(body) and String.trim(body) != "" do
+      case CMS.add_comment(
+             %{
+               content_type: to_string(socket.assigns.kind),
+               content_id: socket.assigns.record.id,
+               block_id: block_id,
+               body: body
+             },
+             actor: socket.assigns.actor,
+             tenant: socket.assigns.current_org
+           ) do
+        {:ok, _comment} ->
+          {:noreply, socket |> reload_comments() |> assign(:comment_draft, nil)}
+
+        {:error, _error} ->
+          {:noreply, put_flash(socket, :error, gettext("Couldn't add comment."))}
+      end
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("comment_add", _params, socket), do: {:noreply, socket}
+
+  def handle_event("comment_resolve", %{"id" => id}, socket) when is_binary(id),
+    do: resolve_comment_thread(socket, id, :resolve_comment)
+
+  def handle_event("comment_unresolve", %{"id" => id}, socket) when is_binary(id),
+    do: resolve_comment_thread(socket, id, :unresolve_comment)
+
+  # ── Editorial tasks (#501) ───────────────────────────────────────────────
+  def handle_event("task_assign_open", _params, socket),
+    do: {:noreply, socket |> assign(:task_assign_open?, true) |> assign(:task_draft, %{})}
+
+  def handle_event("task_assign_close", _params, socket),
+    do: {:noreply, socket |> assign(:task_assign_open?, false) |> assign(:task_draft, %{})}
+
+  def handle_event("task_draft_change", %{"task_assignee_id" => v}, socket) when is_binary(v),
+    do: {:noreply, put_task_draft(socket, "assignee_id", v)}
+
+  def handle_event("task_draft_change", %{"task_due_on" => v}, socket) when is_binary(v),
+    do: {:noreply, put_task_draft(socket, "due_on", v)}
+
+  def handle_event("task_draft_change", %{"task_note" => v}, socket) when is_binary(v),
+    do: {:noreply, put_task_draft(socket, "note", v)}
+
+  def handle_event("task_draft_change", %{"task_auto_complete" => v}, socket) when is_binary(v),
+    do: {:noreply, put_task_draft(socket, "auto_complete", v)}
+
+  def handle_event("task_draft_change", _params, socket), do: {:noreply, socket}
+
+  def handle_event("task_assign_submit", _params, socket) do
+    draft = socket.assigns.task_draft
+
+    attrs = %{
+      content_type: to_string(socket.assigns.kind),
+      content_id: socket.assigns.record.id,
+      assignee_id: draft["assignee_id"],
+      due_on: blank_to_nil(draft["due_on"]),
+      note: blank_to_nil(draft["note"]),
+      # `nil` means "inherit the site default" (#818) — a real third value, not
+      # an omission, so the blank option has to survive as nil rather than
+      # being dropped from the map.
+      auto_complete_on_publish: tri_state(draft["auto_complete"])
+    }
+
+    case CMS.assign_task(attrs, actor: socket.assigns.actor, tenant: socket.assigns.current_org) do
+      {:ok, _task} ->
+        {:noreply,
+         socket
+         |> reload_tasks()
+         |> assign(:task_assign_open?, false)
+         |> assign(:task_draft, %{})}
+
+      {:error, _error} ->
+        {:noreply, put_flash(socket, :error, gettext("Couldn't assign that task."))}
+    end
+  end
+
+  # No `<form>` for any of this — see `release_panel/1`. Each control carries its
+  # own `phx-change` into `@release_draft`; the button is a plain `phx-click`.
+  def handle_event("release_draft_change", %{"release_target" => v}, socket) when is_binary(v),
+    do: {:noreply, put_release_draft(socket, "release_id", v)}
+
+  def handle_event("release_draft_change", %{"release_action" => v}, socket) when is_binary(v),
+    do: {:noreply, put_release_draft(socket, "action", v)}
+
+  def handle_event("release_draft_change", _params, socket), do: {:noreply, socket}
+
+  def handle_event("release_add", _params, socket) do
+    draft = socket.assigns.release_draft
+    release_id = draft["release_id"] || default_release_id(socket)
+
+    attrs = %{
+      release_id: release_id,
+      content_type: to_string(socket.assigns.kind),
+      content_id: socket.assigns.record.id,
+      action: release_action(draft["action"])
+    }
+
+    case CMS.add_release_item(attrs,
+           actor: socket.assigns.actor,
+           tenant: socket.assigns.current_org
+         ) do
+      {:ok, _item} ->
+        {:noreply,
+         socket
+         |> reload_release_state()
+         |> put_flash(:info, gettext("Added to the release."))}
+
+      # The reason matters here in a way it doesn't for most adds — "already in
+      # another open release", "outside your content-type scope" and "release is
+      # full" are all things the editor can act on.
+      {:error, error} ->
+        {:noreply, put_flash(socket, :error, release_error_message(error))}
+    end
+  end
+
+  def handle_event("release_remove", _params, socket) do
+    case socket.assigns.release_item do
+      nil ->
+        {:noreply, socket}
+
+      item ->
+        case CMS.cancel_release_item(item, %{},
+               actor: socket.assigns.actor,
+               tenant: socket.assigns.current_org
+             ) do
+          {:ok, _} ->
+            {:noreply,
+             socket
+             |> reload_release_state()
+             |> put_flash(:info, gettext("Removed from the release."))}
+
+          {:error, _} ->
+            {:noreply,
+             put_flash(socket, :error, gettext("Couldn't remove it from that release."))}
+        end
+    end
+  end
+
+  def handle_event("task_complete", %{"id" => id}, socket) when is_binary(id) do
+    case Enum.find(socket.assigns.tasks, &(&1.id == id)) do
+      nil ->
+        {:noreply, socket}
+
+      task ->
+        case CMS.complete_task(task, %{}, actor: socket.assigns.actor) do
+          {:ok, _task} ->
+            {:noreply, reload_tasks(socket)}
+
+          {:error, _error} ->
+            {:noreply, put_flash(socket, :error, gettext("Couldn't update that task."))}
+        end
+    end
+  end
+
+  # The gallery's picker is multi-select (#482): a gallery is built from several
+  # images at once, and re-opening a drawer per image turns "add these eight" into
+  # eight round trips through a modal.
+  def handle_event("open_gallery_picker", %{"bid" => bid}, socket)
+      when is_binary(bid) and bid != "",
+      do: {:noreply, socket |> assign(:picking, {:gallery, bid}) |> assign(:picked, [])}
+
+  def handle_event("open_gallery_picker", _params, socket), do: {:noreply, socket}
+
+  # Selection is an ordered list, not a set: the order images are clicked is the
+  # order they land in the gallery, which is the least surprising thing a
+  # multi-select can do and saves a reorder afterwards.
+  def handle_event("toggle_pick", %{"id" => id, "url" => url}, socket)
+      when is_binary(id) and is_binary(url) do
+    picked = socket.assigns.picked
+
+    picked =
+      if Enum.any?(picked, &(&1.id == id)),
+        do: Enum.reject(picked, &(&1.id == id)),
+        else: picked ++ [%{id: id, url: url}]
+
+    {:noreply, assign(socket, :picked, picked)}
+  end
+
+  def handle_event("add_picked_images", %{"bid" => bid}, socket) when is_binary(bid) do
+    case socket.assigns.picked do
+      [] ->
+        {:noreply, reset_picker(socket)}
+
+      picked ->
+        # Alt is left blank deliberately rather than seeded from the library
+        # item: `MediaItem.alt` is the library-wide description, and what ships
+        # is the block's own. Pre-filling it would make a per-placement
+        # description look already written, and the publish gate (#403) is what
+        # asks for it — better it asks than that a stale default sails past.
+        rows = for image <- picked, do: %{"url" => image.url, "media_id" => image.id, "alt" => ""}
+
+        {:noreply, socket} = update_gallery_images(socket, bid, &(&1 ++ rows))
+        {:noreply, reset_picker(socket)}
+    end
+  end
+
   def handle_event("close_picker", _params, socket),
     do: {:noreply, reset_picker(socket)}
 
   # Live-filter the browser grid as the user types.
-  def handle_event("search_media", %{"q" => q}, socket) do
+  def handle_event("search_media", %{"q" => q}, socket) when is_binary(q) do
     results =
       if q == "",
         do: nil,
@@ -1149,11 +2137,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   # Set the social card image from the library (#476).
-  def handle_event("pick_image", %{"index" => "seo_image", "url" => url}, socket),
-    do: {:noreply, socket |> put_seo_image(url) |> reset_picker()}
+  def handle_event("pick_image", %{"index" => "seo_image", "url" => url}, socket)
+      when is_binary(url),
+      do: {:noreply, socket |> put_seo_image(url) |> reset_picker()}
 
   # Set the featured image from the library (#154).
-  def handle_event("pick_image", %{"index" => "featured", "id" => media_id}, socket) do
+  def handle_event("pick_image", %{"index" => "featured", "id" => media_id}, socket)
+      when is_binary(media_id) do
     params = AshPhoenix.Form.params(socket.assigns.form) |> Map.put("featured_image_id", media_id)
 
     {:noreply,
@@ -1166,7 +2156,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Insert a library image as a brand-new image block (browser opened from the
   # editor chrome): the URL becomes the block content and its id is stashed in
   # `data` so delivery can build srcset.
-  def handle_event("pick_image", %{"index" => "new", "id" => media_id, "url" => url}, socket) do
+  def handle_event("pick_image", %{"index" => "new", "id" => media_id, "url" => url}, socket)
+      when is_binary(media_id) and is_binary(url) do
     form =
       AshPhoenix.Form.add_form(socket.assigns.form, socket.assigns.form.name <> "[blocks]",
         params: %{
@@ -1185,7 +2176,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Fill the existing image block identified by `bid`. Its current position is
   # resolved from the live form now, not captured when the picker opened, so a
   # concurrent reorder/removal can't misdirect the image (audit T5.1).
-  def handle_event("pick_image", %{"index" => "block", "bid" => bid} = p, socket) do
+  def handle_event("pick_image", %{"index" => "block", "bid" => bid} = p, socket)
+      when is_binary(bid) do
     %{"id" => media_id, "url" => url} = p
 
     case block_index_by_id(socket.assigns.form, bid) do
@@ -1215,6 +2207,132 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  # Open the file-library drawer to fill a specific `:file` block (#481).
+  # Mirrors `open_picker`/"pick_image" for images, but a distinct assign
+  # (`@file_picking`) rather than reusing `@picking` — the two libraries
+  # (`@media` images-only, `@file_media` documents-only, see mount) are
+  # filtered opposites of each other, so one picker component can't serve
+  # both without threading a mode flag through every existing `@picking`
+  # match in this module.
+  def handle_event("open_file_picker", %{"bid" => bid}, socket) when is_binary(bid) and bid != "",
+    do: {:noreply, assign(socket, :file_picking, bid)}
+
+  def handle_event("open_file_picker", _params, socket), do: {:noreply, socket}
+
+  def handle_event("close_file_picker", _params, socket), do: {:noreply, reset_picker(socket)}
+
+  # Live-filter the file-picker grid as the user types.
+  def handle_event("search_file_media", %{"q" => q}, socket) when is_binary(q) do
+    results =
+      if q == "",
+        do: nil,
+        else: search_media(q, socket.assigns.actor, socket.assigns.current_org, :file)
+
+    {:noreply, socket |> assign(:file_query, q) |> assign(:picker_files, results)}
+  end
+
+  # Fill the file block identified by `@file_picking` from the library.
+  # `content_type`/`byte_size`/`filename` are looked up server-side from the
+  # actor-authorized `MediaItem` rather than trusted from the click payload —
+  # denormalizing a client-supplied size/type onto the block would let it
+  # display something that doesn't match what `MediaDownloadController`
+  # actually serves. A direct `get_media_item` here, not a lookup in
+  # `@file_media`/`@picker_files`: a search result outside the mounted
+  # window lives ONLY in `@picker_files`, and an id present in neither list
+  # (a stale click, or a co-editor's concurrent delete) must still resolve
+  # correctly rather than silently no-op.
+  def handle_event("pick_file", %{"id" => media_id}, socket) when is_binary(media_id) do
+    bid = socket.assigns.file_picking
+    actor = socket.assigns.actor
+    org = socket.assigns.current_org
+
+    with {:ok, item} <- CMS.get_media_item(media_id, actor: actor, tenant: org),
+         index when not is_nil(index) <- block_index_by_id(socket.assigns.form, bid) do
+      blocks =
+        socket.assigns.form
+        |> full_blocks_input()
+        |> List.update_at(
+          index,
+          &Map.merge(&1, %{
+            "media_id" => item.id,
+            "filename" => item.filename,
+            "content_type" => item.content_type,
+            "byte_size" => item.byte_size
+          })
+        )
+
+      params = socket.assigns.form |> AshPhoenix.Form.params() |> Map.put("blocks", blocks)
+
+      socket = socket |> revalidate(params) |> reset_picker()
+      broadcast_preview(socket)
+      {:noreply, mark_dirty(socket)}
+    else
+      _ -> {:noreply, reset_picker(socket)}
+    end
+  end
+
+  # Open the A/V drawer to fill one field pair of a video/audio block (#494).
+  #
+  # `field` distinguishes the three things a video block picks from a library:
+  # the video itself, its poster image, and its WebVTT caption track. They
+  # need three different libraries (`:av`, `:image`, `:captions`) and write
+  # three different field pairs, so the target is `{block_id, field}` — one
+  # drawer parameterized, rather than three near-identical copies of the
+  # `@file_picking` machinery.
+  def handle_event("open_av_picker", %{"bid" => bid, "field" => field}, socket)
+      when is_binary(bid) and bid != "" and field in ~w(media poster captions) do
+    {:noreply, assign(socket, :av_picking, {bid, field})}
+  end
+
+  def handle_event("open_av_picker", _params, socket), do: {:noreply, socket}
+
+  def handle_event("close_av_picker", _params, socket), do: {:noreply, reset_picker(socket)}
+
+  # Live-filter the A/V picker grid as the user types, against whichever
+  # library the open target wants.
+  def handle_event("search_av_media", %{"q" => q}, socket) when is_binary(q) do
+    results =
+      if q == "",
+        do: nil,
+        else:
+          search_media(
+            q,
+            socket.assigns.actor,
+            socket.assigns.current_org,
+            av_picker_kind(socket.assigns.av_picking)
+          )
+
+    {:noreply, socket |> assign(:av_query, q) |> assign(:picker_av, results)}
+  end
+
+  # Fill the field pair identified by `@av_picking`. Everything denormalized
+  # onto the block is read server-side from the actor-authorized `MediaItem`,
+  # never trusted from the click payload — same reasoning as `pick_file`, and
+  # the same direct `get_media_item` rather than a lookup in the mounted list
+  # (a search result outside the mounted window lives only in `@picker_av`).
+  def handle_event("pick_av", %{"id" => media_id}, socket) when is_binary(media_id) do
+    with {bid, field} <- socket.assigns.av_picking,
+         {:ok, item} <-
+           CMS.get_media_item(media_id,
+             actor: socket.assigns.actor,
+             tenant: socket.assigns.current_org
+           ),
+         index when not is_nil(index) <- block_index_by_id(socket.assigns.form, bid) do
+      blocks =
+        socket.assigns.form
+        |> full_blocks_input()
+        |> List.update_at(index, &Map.merge(&1, av_block_patch(field, item)))
+
+      params = socket.assigns.form |> AshPhoenix.Form.params() |> Map.put("blocks", blocks)
+
+      socket = socket |> revalidate(params) |> reset_picker()
+      broadcast_preview(socket)
+      {:noreply, mark_dirty(socket)}
+    else
+      _ -> {:noreply, reset_picker(socket)}
+    end
+  end
+
   # A columns block carries a socket-managed child tree, so it's inserted with a
   # stable id (seeded into `block_children`) and a default two-column layout.
   # `after` (a block id, "start", or absent) positions the new block (B2).
@@ -1238,7 +2356,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, socket |> refresh_preview() |> mark_dirty()}
   end
 
-  def handle_event("add_block", %{"type" => type} = p, socket) do
+  def handle_event("add_block", %{"type" => type} = p, socket) when is_binary(type) do
     # Every block carries a stable id from the moment it's added, so the picker,
     # delete, and keyboard-move can address it by identity rather than by a
     # position that a concurrent reorder can invalidate (audit T5.1/T5.2). The
@@ -1258,7 +2376,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Duplicate the block with stable id `bid`: copy its full field set, give the
   # copy (and, for a columns block, its nested children) fresh ids, and drop it in
   # right after the original.
-  def handle_event("duplicate_block", %{"bid" => bid}, socket) do
+  def handle_event("duplicate_block", %{"bid" => bid}, socket) when is_binary(bid) do
     case Enum.find(
            full_blocks_input(socket.assigns.form),
            &(to_string(&1["id"]) == to_string(bid))
@@ -1303,24 +2421,78 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # same targeted-update pattern as `pick_image` at an index), so there's no
   # parallel socket state to keep in sync.
 
-  def handle_event("geo_item_add", %{"index" => index, "field" => field}, socket)
-      when field in ["items", "steps"] do
-    update_geo_items(socket, index, field, &(&1 ++ [%{}]))
+  def handle_event("item_row_add", %{"index" => index, "field" => field}, socket)
+      when field in @row_fields and is_binary(index) do
+    update_item_rows(socket, index, field, &(&1 ++ [%{}]))
   end
 
   def handle_event(
-        "geo_item_remove",
+        "item_row_remove",
         %{"index" => index, "field" => field, "item" => item},
         socket
       )
-      when field in ["items", "steps"] do
-    update_geo_items(socket, index, field, &List.delete_at(&1, to_int(item)))
+      when field in @row_fields and is_binary(index) and is_binary(item) do
+    update_item_rows(socket, index, field, &List.delete_at(&1, to_int(item)))
   end
+
+  # ── gallery image rows (#482) ───────────────────────────────────────────────
+
+  def handle_event("gallery_remove", %{"bid" => bid, "item" => item}, socket)
+      when is_binary(bid) and is_binary(item) do
+    update_gallery_images(socket, bid, &List.delete_at(&1, to_int(item)))
+  end
+
+  def handle_event("gallery_move", %{"bid" => bid, "item" => item, "dir" => dir}, socket)
+      when is_binary(bid) and is_binary(item) and is_binary(dir) do
+    from = to_int(item)
+    to = if dir == "up", do: from - 1, else: from + 1
+
+    update_gallery_images(socket, bid, fn images ->
+      # BOTH ends checked. `to_int/1` accepts a negative, and `Enum.at(images,
+      # -1)` is the last row rather than an error — so an unchecked `from` moves
+      # the wrong image, and one past the end inserts a `nil` into an
+      # `{:array, :map}` the resource refuses to save.
+      bounds = 0..(length(images) - 1)//1
+
+      if from in bounds and to in bounds do
+        moved = Enum.at(images, from)
+        images |> List.delete_at(from) |> List.insert_at(to, moved)
+      else
+        images
+      end
+    end)
+  end
+
+  # The client reports the new order as a list of the *previous* row indices,
+  # and the server rebuilds from those — never from row content, which the
+  # client could have edited between the drag and the event.
+  def handle_event("gallery_reorder", %{"bid" => bid, "order" => order}, socket)
+      when is_binary(bid) and is_list(order) do
+    update_gallery_images(socket, bid, fn images ->
+      # Deduped and rejected by INDEX, never by value. Two rows pointing at the
+      # same media item are identical maps, so matching on the map itself
+      # collapses them into one and then drops both from the tail — a drag on a
+      # gallery holding one image twice would silently delete a copy.
+      indices =
+        order
+        |> Enum.map(&to_int/1)
+        |> Enum.filter(&(&1 in 0..(length(images) - 1)//1))
+        |> Enum.uniq()
+
+      # Any row the client failed to mention keeps its place at the end rather
+      # than being dropped: a stale or partial order must not delete images.
+      unmentioned = Enum.reject(0..(length(images) - 1)//1, &(&1 in indices))
+
+      for index <- indices ++ Enum.to_list(unmentioned), do: Enum.at(images, index)
+    end)
+  end
+
+  def handle_event("gallery_reorder", _params, socket), do: {:noreply, socket}
 
   # Remove the block with stable id `bid`. Resolving the id to a path now (rather
   # than trusting a path captured at render) means an in-flight reorder can't turn
   # a delete click into a delete of the wrong block (audit T5.2).
-  def handle_event("remove_block", %{"bid" => bid}, socket) do
+  def handle_event("remove_block", %{"bid" => bid}, socket) when is_binary(bid) do
     case block_index_by_id(socket.assigns.form, bid) do
       nil ->
         {:noreply, socket}
@@ -1338,7 +2510,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   def handle_event("remove_block", _params, socket), do: {:noreply, socket}
 
-  def handle_event("reorder", %{"order" => order}, socket) do
+  def handle_event("reorder", %{"order" => order}, socket) when is_list(order) do
     form = AshPhoenix.Form.sort_forms(socket.assigns.form, [:blocks], order)
     {:noreply, socket |> assign(:form, form) |> mark_dirty()}
   end
@@ -1347,7 +2519,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # block with its neighbour and announce the new position to screen readers.
   # The moved block is identified by its stable id and resolved to a live index
   # here, so the swap can't act on the wrong block after a reorder (T4.3/T5.2).
-  def handle_event("move_block", %{"bid" => bid, "dir" => dir}, socket) do
+  def handle_event("move_block", %{"bid" => bid, "dir" => dir}, socket)
+      when is_binary(bid) and is_binary(dir) do
     count = blocks_count(socket.assigns.form)
 
     # Bounds-check BOTH ends: an unknown id no-ops, and a source at either edge
@@ -1380,7 +2553,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # surviving a concurrent reorder.
 
   def handle_event("col_add_child", %{"id" => id, "col" => col, "type" => type}, socket)
-      when type in @nested_child_types do
+      when type in @nested_child_types and is_binary(id) and is_binary(col) do
     # Address the target column by a real index; a garbled `col` no-ops rather
     # than silently landing the child in column 0 (the old `to_int` fallback).
     case parse_index(col) do
@@ -1393,7 +2566,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
-  def handle_event("col_remove_child", %{"id" => id, "child" => child_id}, socket) do
+  def handle_event("col_remove_child", %{"id" => id, "child" => child_id}, socket)
+      when is_binary(id) and is_binary(child_id) do
     bc =
       update_columns(socket.assigns.block_children, id, fn blocks ->
         Enum.reject(blocks, &(&1["id"] == child_id))
@@ -1402,11 +2576,43 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, apply_children(socket, bc)}
   end
 
+  # The form-serialized shape (#893). A `<select>` inside the editor's form
+  # cannot deliver `phx-value-*` — LiveView routes a form-associated
+  # `phx-change` through `pushInput`, which scrapes those off the form rather
+  # than the element — so the nested-child select carries its identifiers in its
+  # `name` instead, and they arrive here as ordinary nested params.
+  #
+  # One entry at every level, because `pushInput` filters the serialized form to
+  # the changed input's name. Anything else is a payload this event did not
+  # send, and is refused rather than guessed at.
+  def handle_event("col_update_child", %{"col_child" => payload}, socket)
+      when is_map(payload) do
+    with [{id, children}] when is_map(children) <- Map.to_list(payload),
+         [{child_id, fields}] when is_map(fields) <- Map.to_list(children),
+         [{field, value}] when is_binary(value) <- Map.to_list(fields) do
+      bc =
+        update_columns(socket.assigns.block_children, id, fn blocks ->
+          Enum.map(blocks, &maybe_put_field(&1, child_id, field, value))
+        end)
+
+      {:noreply, apply_children(socket, bc)}
+    else
+      # Logged, not swallowed. This head matches before `MalformedEvent`'s
+      # catch-all can, so a payload that fails the shape below would otherwise
+      # die here in total silence — which is the condition #893 was, and the
+      # reason it survived. Same level and same non-prod gate as that fallback.
+      unexpected ->
+        KilnCMSWeb.MalformedEvent.log(__MODULE__, {"col_update_child", unexpected})
+        {:noreply, socket}
+    end
+  end
+
   def handle_event(
         "col_update_child",
         %{"id" => id, "child" => child_id, "field" => field} = p,
         socket
-      ) do
+      )
+      when is_binary(id) and is_binary(child_id) and is_binary(field) do
     value = Map.get(p, "value", "")
 
     bc =
@@ -1420,12 +2626,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Nested SortableJS drop: `cols` is the new child-id order of every column of
   # this block. Rebuild each column from the flat id→child map so a child can
   # move within or across the block's columns without losing its edits.
-  def handle_event("col_reorder", %{"id" => id, "cols" => cols}, socket) when is_list(cols) do
+  def handle_event("col_reorder", %{"id" => id, "cols" => cols}, socket)
+      when is_binary(id) and is_list(cols) do
     bc = Map.update(socket.assigns.block_children, id, [], &rebuild_columns(&1, cols))
     {:noreply, apply_children(socket, bc)}
   end
 
-  def handle_event("col_add_column", %{"id" => id}, socket) do
+  def handle_event("col_add_column", %{"id" => id}, socket) when is_binary(id) do
     bc =
       Map.update(socket.assigns.block_children, id, [%{"blocks" => []}], fn cols ->
         if length(cols) >= @max_columns, do: cols, else: cols ++ [%{"blocks" => []}]
@@ -1434,7 +2641,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, apply_children(socket, bc)}
   end
 
-  def handle_event("col_remove_column", %{"id" => id, "col" => col}, socket) do
+  def handle_event("col_remove_column", %{"id" => id, "col" => col}, socket)
+      when is_binary(id) and is_binary(col) do
     case parse_index(col) do
       {:ok, ci} ->
         bc = Map.update(socket.assigns.block_children, id, [], &drop_column(&1, ci))
@@ -1445,15 +2653,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
-  def handle_event("save", %{"form" => params}, socket) do
+  def handle_event("save", %{"form" => params}, socket) when is_map(params) do
     socket = cancel_autosave_timer(socket)
 
     params =
       params
       |> inject_children(socket.assigns.block_children)
       |> inject_rich_bodies(socket.assigns.rich_bodies)
-      |> normalize_geo_items()
-      |> normalize_tag_ids()
+      |> normalize_item_rows()
+      |> merge_tag_params(socket)
 
     result =
       EditorTelemetry.span(:save, %{kind: socket.assigns.kind}, fn ->
@@ -1470,6 +2678,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         {:noreply,
          socket
          |> assign_record(reloaded)
+         |> broadcast_saved()
          |> assign(:save_state, :saved)
          |> put_flash(:info, gettext("Saved."))}
 
@@ -1505,31 +2714,175 @@ defmodule KilnCMSWeb.ContentEditorLive do
      |> put_flash(:info, gettext("Reloaded the latest version."))}
   end
 
-  def handle_event("workflow", %{"action" => action}, socket) do
+  # Somebody published this document while a collab room was open (#1061). The
+  # publish carried the room's converged prose into its own write, so nothing
+  # typed up to that point is lost — but from here nothing persists: this
+  # client stops autosaving on a non-draft (`mark_dirty/1`), and the server
+  # checkpoint is refused by `:autosave`'s draft-only filter. So reload onto the
+  # published record and say what happened, rather than leaving the editor
+  # typing into a doc that is going nowhere.
+  #
+  # Idempotent: every rich-text block on the page hears the browser event, so
+  # this arrives once per block.
+  def handle_event("collab_published", _params, socket) do
+    if socket.assigns.record.state == :published do
+      {:noreply, socket}
+    else
+      record =
+        fetch!(
+          socket.assigns.kind,
+          socket.assigns.record.id,
+          socket.assigns.actor,
+          socket.assigns.current_org
+        )
+
+      {:noreply,
+       socket
+       |> assign_record(record)
+       |> reset_editors()
+       |> assign(:save_state, :saved)
+       |> put_flash(
+         :info,
+         gettext("This was published. Your collaborative edits were saved with it.")
+       )}
+    end
+  end
+
+  def handle_event("workflow", %{"action" => action}, socket) when is_binary(action) do
     {:noreply, run_workflow(socket, action)}
   end
 
   # One-click translation: duplicate this record's content into a new draft in
   # the target locale and jump to its editor.
-  def handle_event("create_translation", %{"locale" => locale}, socket) do
+  #
+  # Gated on `may_write?` for the reason the Duplicate handler below is (#922):
+  # this is the same shape — forking the record's payload into a new draft —
+  # and it was the other affordance in this file offered to an actor who may
+  # only read this record.
+  def handle_event("create_translation", %{"locale" => locale}, socket) when is_binary(locale) do
     %{kind: kind, record: record, actor: actor} = socket.assigns
 
-    translation =
-      KilnCMS.CMS.Translations.create_translation!(kind, record, locale,
-        actor: actor,
-        tenant: record.org_id
-      )
+    if socket.assigns.may_write? do
+      {translation, withheld} =
+        KilnCMS.CMS.Translations.create_translation_with_notes!(kind, record, locale,
+          actor: actor,
+          tenant: record.org_id
+        )
 
-    {:noreply,
-     socket
-     |> put_flash(:info, gettext("Draft translation created (%{locale}).", locale: locale))
-     |> push_navigate(to: ~p"/editor/content/#{kind}/#{translation.id}")}
+      {:noreply,
+       socket
+       |> put_flash(:info, translation_flash(locale, withheld))
+       |> push_navigate(to: ~p"/editor/content/#{kind}/#{translation.id}")}
+    else
+      {:noreply, socket}
+    end
   rescue
+    # Distinguished from a generic failure because it is not one: the refusal is
+    # a permission boundary the editor can act on (ask for the grant), and
+    # "couldn't create that translation" would read as a broken feature (#1157).
+    _error in KilnCMS.CMS.Translations.BlocksWithheldError ->
+      {:noreply,
+       put_flash(
+         socket,
+         :error,
+         gettext("Your role cannot copy this content's blocks, so it cannot be translated.")
+       )}
+
     _error ->
       {:noreply, put_flash(socket, :error, gettext("Couldn't create that translation."))}
   end
 
-  def handle_event("restore", %{"version_id" => version_id}, socket) do
+  # One-click duplicate (#471): clone this record's saved payload into a new
+  # draft of the same locale and jump to it. Unsaved edits don't travel — the
+  # copy is made from the row, so the autosave that just ran is the boundary.
+  #
+  # Refused server-side too (#922), for the reason `seo_suggest` states: the
+  # hidden button is not the boundary, a replayed or forged event arrives here
+  # regardless. It closes no hole today — `Checks.EditableContentType` gates
+  # authoring and updating alike, so `may_write?` and "may create one of these"
+  # are the same question and the create refuses this actor anyway. What shipped
+  # was a button whose only possible outcome was an error flash.
+  #
+  # Be precise about what this gate can see, because the obvious claim for it is
+  # wrong: `may_write?` is `Ash.can?`, which evaluates the POLICY chain only.
+  # `:autosave` already carries a per-record condition — `change filter(state ==
+  # :draft)` — and `Ash.can?` is blind to it. That blindness is load-bearing
+  # here (a published record stays duplicable, which is right), but it also
+  # means a future per-record rule written as a change or a validation would be
+  # just as invisible; only one written as a policy check would reach this gate.
+  # So the reason to refuse here is not "it catches whatever comes next" — it is
+  # that a forged event now gets the same answer the UI gave.
+  def handle_event("duplicate", _params, socket) do
+    %{kind: kind, record: record, actor: actor} = socket.assigns
+
+    if socket.assigns.may_write? do
+      case KilnCMS.CMS.Duplication.duplicate(kind, record, actor: actor, tenant: record.org_id) do
+        {:ok, copy, []} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, gettext("Duplicated as a new draft."))
+           |> push_navigate(to: ~p"/editor/content/#{kind}/#{copy.id}")}
+
+        # Some of the source did not travel — a field grant dropped attributes, or
+        # the block policy reset values this editor could not have set. Saying so
+        # is the difference between "duplication is broken" and "your role cannot
+        # copy those fields" (#929).
+        {:ok, copy, withheld} ->
+          {:noreply,
+           socket
+           |> put_flash(
+             :info,
+             gettext(
+               "Duplicated as a new draft. Not copied, because your role cannot set them: %{fields}.",
+               fields: Enum.join(withheld, ", ")
+             )
+           )
+           |> push_navigate(to: ~p"/editor/content/#{kind}/#{copy.id}")}
+
+        {:error, _reason} ->
+          {:noreply, put_flash(socket, :error, gettext("Couldn't duplicate that content."))}
+      end
+    else
+      {:noreply, socket}
+    end
+  end
+
+  # ── Version compare (#467) ─────────────────────────────────────────────────
+
+  def handle_event("toggle_compare", %{"version_id" => version_id}, socket)
+      when is_binary(version_id) do
+    picks = socket.assigns.compare_pick
+
+    picks =
+      cond do
+        version_id in picks -> List.delete(picks, version_id)
+        length(picks) < 2 -> picks ++ [version_id]
+        # Two is the comparison. Picking a third retires the older choice rather
+        # than making the editor clear the selection first.
+        true -> tl(picks) ++ [version_id]
+      end
+
+    {:noreply, assign(socket, :compare_pick, picks)}
+  end
+
+  def handle_event("open_compare", _params, socket) do
+    case build_compare(socket, socket.assigns.compare_pick) do
+      {:ok, compare} ->
+        {:noreply, assign(socket, :compare, compare)}
+
+      :error ->
+        {:noreply,
+         socket
+         |> assign(:compare, nil)
+         |> put_flash(:error, gettext("Couldn't compare those versions."))}
+    end
+  end
+
+  def handle_event("close_compare", _params, socket) do
+    {:noreply, assign(socket, :compare, nil)}
+  end
+
+  def handle_event("restore", %{"version_id" => version_id}, socket) when is_binary(version_id) do
     result =
       restore_version(
         socket.assigns.kind,
@@ -1543,12 +2896,35 @@ defmodule KilnCMSWeb.ContentEditorLive do
         {:noreply,
          socket
          |> assign_record(record)
+         |> broadcast_saved()
          |> reset_editors()
          |> assign(:save_state, :saved)
+         # Restore can be fired from inside the compare modal; the diff it was
+         # showing describes a document that no longer exists.
+         |> assign(:compare, nil)
+         |> assign(:compare_pick, [])
          |> put_flash(:info, gettext("Restored that version."))}
+
+      {:error, error} ->
+        {:noreply, put_flash(socket, :error, restore_error_message(error))}
 
       _ ->
         {:noreply, put_flash(socket, :error, gettext("Couldn't restore that version."))}
+    end
+  end
+
+  # A restore can fail for a reason the editor can act on — a category deleted or
+  # a media item trashed since the version was written (#691) — and collapsing
+  # every failure into one flash left them with a dead end instead of a fix.
+  defp restore_error_message(error) do
+    error
+    |> Ash.Error.to_error_class()
+    |> Map.get(:errors, [])
+    |> Enum.filter(&match?(%{field: field} when not is_nil(field), &1))
+    |> Enum.map_join(" ", &"#{VersionDiffComponents.field_label(&1.field)} #{&1.message}.")
+    |> case do
+      "" -> gettext("Couldn't restore that version.")
+      message -> message
     end
   end
 
@@ -1568,6 +2944,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> clear_seo_suggestions()
     |> close_assist()
     |> assign(:seo_links, nil)
+    # Same rule for the intelligence panel: its tag suggestions are computed
+    # against the content being discarded, and "Add" writes into the form that
+    # is about to be replaced.
+    |> assign(:intel_duplicates, nil)
+    |> assign(:intel_tags, nil)
   end
 
   defp clear_seo_suggestions(socket) do
@@ -1598,6 +2979,173 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp cancel_assist(socket), do: socket
 
+  # ── Block-level editorial comments (#404): handle_event helpers ────────────
+
+  defp resolve_comment_thread(socket, id, action) do
+    case Enum.find(socket.assigns.comments, &(&1.id == id)) do
+      nil ->
+        {:noreply, socket}
+
+      comment ->
+        case apply(CMS, action, [comment, %{}, [actor: socket.assigns.actor]]) do
+          {:ok, _} ->
+            {:noreply, reload_comments(socket)}
+
+          {:error, _} ->
+            {:noreply, put_flash(socket, :error, gettext("Couldn't update that comment thread."))}
+        end
+    end
+  end
+
+  defp reload_comments(socket) do
+    comments =
+      load_comments(
+        socket.assigns.kind,
+        socket.assigns.record.id,
+        socket.assigns.actor,
+        socket.assigns.current_org
+      )
+
+    assign(socket, :comments, comments)
+  end
+
+  # Batch-loads `:author` on the whole list in one query rather than once per
+  # comment at render time (`comment_author_label/1` reads it back off the
+  # struct — no per-row load in the template). `authorize?: false` on the load
+  # only: `User`'s read policy is self-only (`id == actor(:id)`), so showing
+  # who wrote a comment — ordinary display data, not sensitive — would
+  # otherwise fail to load for every author but the viewer themselves. The
+  # comment list itself is still policy-checked normally.
+  defp load_comments(kind, record_id, actor, org) do
+    to_string(kind)
+    |> CMS.list_comments_for!(record_id, actor: actor, tenant: org)
+    |> Ash.load!(:author, authorize?: false, tenant: org)
+  end
+
+  # ── Editorial tasks (#501): handle_event helpers ────────────────────────────
+
+  defp load_tasks(kind, record_id, actor, org) do
+    to_string(kind)
+    |> CMS.list_tasks_for!(record_id, actor: actor, tenant: org)
+    |> Enum.filter(&(&1.status == :open))
+    |> Ash.load!(:assignee, authorize?: false, tenant: org)
+  end
+
+  defp reload_tasks(socket) do
+    tasks =
+      load_tasks(
+        socket.assigns.kind,
+        socket.assigns.record.id,
+        socket.assigns.actor,
+        socket.assigns.current_org
+      )
+
+    assign(socket, :tasks, tasks)
+  end
+
+  defp put_task_draft(socket, key, value),
+    do: assign(socket, :task_draft, Map.put(socket.assigns.task_draft, key, value))
+
+  # ── Content releases (#500 / #836) ──────────────────────────────────────────
+
+  # A record sits in at most one unshipped release (the partial unique index on
+  # `release_items`), so this is a single row or nothing. The pickable list is
+  # the editable releases; adding is refused server-side for a type outside the
+  # editor's scope, which is what actually enforces it — the picker just doesn't
+  # need to know.
+  defp assign_release_state(socket, kind, record_id, actor, org) do
+    item =
+      to_string(kind)
+      |> CMS.list_pending_release_items_for_content!(record_id, actor: actor, tenant: org)
+      |> List.first()
+
+    socket
+    |> assign(:release_item, item)
+    |> assign(:release_of_item, release_of(item, actor, org))
+    |> assign(:releases, CMS.list_editable_releases!(actor: actor, tenant: org))
+    |> assign(:release_draft, %{})
+  end
+
+  defp reload_release_state(socket) do
+    assign_release_state(
+      socket,
+      socket.assigns.kind,
+      socket.assigns.record.id,
+      socket.assigns.actor,
+      socket.assigns.current_org
+    )
+  end
+
+  defp release_of(nil, _actor, _org), do: nil
+
+  defp release_of(item, actor, org) do
+    case CMS.get_release(item.release_id, actor: actor, tenant: org) do
+      {:ok, release} -> release
+      _ -> nil
+    end
+  end
+
+  defp put_release_draft(socket, key, value),
+    do: assign(socket, :release_draft, Map.put(socket.assigns.release_draft, key, value))
+
+  # The select renders the first release preselected, but a browser that never
+  # fires `change` (the editor accepts the default) leaves the draft empty — so
+  # the button falls back to what the select is actually showing.
+  defp default_release_id(socket) do
+    case socket.assigns.releases do
+      [%{id: id} | _] -> id
+      _ -> nil
+    end
+  end
+
+  defp release_action("unpublish"), do: :unpublish
+  defp release_action(_publish), do: :publish
+
+  # The reason is worth surfacing here — "already in another open release",
+  # "outside your content-type scope" and "release is full" are all things the
+  # editor can act on, and a generic failure would send them hunting.
+  #
+  # Read off the error STRUCTS rather than `Exception.message/1`: Ash renders a
+  # multi-line breakdown with breadcrumbs and a stacktrace, so splitting that on
+  # newlines puts `:gen_server.handle_msg/3` in the flash.
+  defp release_error_message(%{errors: errors}) when is_list(errors) do
+    errors
+    |> Enum.map(&leaf_message/1)
+    |> Enum.find(&(is_binary(&1) and &1 != ""))
+    |> case do
+      nil -> generic_release_error()
+      reason -> gettext("Couldn't add it to that release: %{reason}", reason: reason)
+    end
+  end
+
+  defp release_error_message(_error), do: generic_release_error()
+
+  defp leaf_message(%{message: message}) when is_binary(message), do: message
+  defp leaf_message(_error), do: nil
+
+  defp generic_release_error, do: gettext("Couldn't add it to that release.")
+
+  # Org editors/admins — the roster a task can be assigned to (viewers can't
+  # act on content, so they're excluded). `authorize?: false`: OrgMembership's
+  # read policy is self-only (same reasoning as `load_comments/4`'s author
+  # load), so listing the roster for a dropdown needs a system read.
+  defp assignable_users do
+    Accounts.User
+    |> Ash.Query.filter(role in [:editor, :admin])
+    |> Ash.read!(authorize?: false)
+    |> Enum.sort_by(&user_label/1)
+    |> Enum.map(&{user_label(&1), &1.id})
+  end
+
+  defp user_label(%{name: name}) when is_binary(name) and name != "", do: name
+  defp user_label(%{email: email}), do: to_string(email)
+
+  defp close_comment_panel(socket) do
+    socket
+    |> assign(:comment_block, nil)
+    |> assign(:comment_draft, nil)
+  end
+
   defp run_workflow(socket, action)
        when action in ~w(submit return publish unpublish archive unarchive) do
     # `publish` gets its own event; the rest share `:workflow` (tagged by action)
@@ -1617,6 +3165,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         socket
         |> cancel_autosave_timer()
         |> assign_record(record)
+        |> broadcast_saved()
         |> assign(:save_state, :saved)
         |> put_flash(:info, gettext("Updated to %{state}.", state: state_label(record.state)))
 
@@ -1721,6 +3270,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> inject_children(socket.assigns.block_children)
       |> inject_rich_bodies(socket.assigns.rich_bodies)
 
+    # Autosave carried the identical defect and was never named in #638: it
+    # submits the live form's params, so a debounced save detached an
+    # out-of-scope tag just as an explicit one did — and did it without
+    # anyone pressing anything. `:autosave` accepts the same verbs (#636
+    # mirrored them there for this change).
+    #
+    # No rewrite here: these params come from the form, which `validate`
+    # already normalized, not from the browser. `merge_tag_params/2` refuses
+    # to run twice for this reason, but not calling it at all is clearer
+    # about where the one rewrite happens.
+
     result =
       EditorTelemetry.span(:autosave, %{kind: socket.assigns.kind}, fn ->
         AshPhoenix.Form.submit(autosave_form, params: params)
@@ -1731,7 +3291,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         reloaded =
           fetch!(socket.assigns.kind, record.id, socket.assigns.actor, socket.assigns.current_org)
 
-        socket |> assign_record(reloaded) |> assign(:save_state, :saved)
+        socket |> assign_record(reloaded) |> broadcast_saved() |> assign(:save_state, :saved)
 
       {:error, form} ->
         handle_autosave_error(socket, form)
@@ -1900,7 +3460,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # item rows normalized — the shared path for events that rebuild block params
   # (e.g. an image pick) so a partial update can't drop the nested tree.
   defp revalidate(socket, params) do
-    params = params |> inject_children(socket.assigns.block_children) |> normalize_geo_items()
+    params = params |> inject_children(socket.assigns.block_children) |> normalize_item_rows()
     assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
   end
 
@@ -1966,42 +3526,156 @@ defmodule KilnCMSWeb.ContentEditorLive do
     )
   end
 
-  defp put_color(%{} = cursor), do: Map.put(cursor, :color, color_for(cursor.id))
+  # Tell the other editors of this item that the record on disk moved (#694).
+  # Reuses the Presence editing topic every session already subscribes to, so
+  # this costs no new subscription and no new fan-out.
+  #
+  # Carries the writing session's PID and nothing else. The payload is
+  # deliberately not the record: a broadcast body would have to be authorized per
+  # recipient, and each session re-reads through `fetch!/4` with its OWN actor
+  # and tenant anyway — so a session that may no longer read the record simply
+  # keeps what it has.
+  defp broadcast_saved(socket) do
+    Phoenix.PubSub.broadcast(
+      KilnCMS.PubSub,
+      Presence.topic(socket.assigns.kind, socket.assigns.record.id),
+      {:record_saved, self()}
+    )
 
-  # Merge `fields` into the block at `index`, tolerating params where blocks are
-  # an indexed map (the usual LiveView shape) or a list.
-  defp put_block(params, index, fields) do
-    Map.update(params, "blocks", %{to_string(index) => fields}, fn
-      blocks when is_map(blocks) ->
-        Map.update(blocks, to_string(index), fields, &Map.merge(&1, fields))
-
-      blocks when is_list(blocks) ->
-        List.update_at(blocks, String.to_integer(index), &Map.merge(&1 || %{}, fields))
-    end)
+    socket
   end
+
+  # Re-read the persisted record and everything derived from it. See the
+  # `{:record_saved, _}` handler for what is deliberately left alone.
+  #
+  # ## `@record` is the optimistic lock's basis, so it only moves when it is free
+  #
+  # `:autosave` carries `change optimistic_lock(:lock_version)`, and
+  # `do_autosave/1` builds its changeset from `socket.assigns.record`. Advancing
+  # that assign while `@form` still holds this session's older data hands the
+  # lock a version it will accept and then writes the stale form over the peer's
+  # save — silently, with no conflict flash. That is worse than the staleness
+  # this function exists to fix, and it bites hardest with the collaboration
+  # prototype OFF (the default), where two editors really are two independent
+  # writers.
+  #
+  # So the version list — which is read-only, and drags an open comparison with
+  # it — refreshes unconditionally, and `@record` moves only for a session that
+  # has nothing of its own in flight. A session that does keeps its old record,
+  # so its next save still hits `StaleRecord` and still surfaces the conflict.
+  defp refresh_saved_record(socket) do
+    reloaded =
+      fetch!(
+        socket.assigns.kind,
+        socket.assigns.record.id,
+        socket.assigns.actor,
+        socket.assigns.current_org
+      )
+
+    # `@record` first, `load_versions/1` second — the latter recomputes an open
+    # comparison, and the "Current draft" side of that comparison is built from
+    # `@record`. Reversed, the modal recomputes against the record it is about to
+    # replace and goes on reporting the state it just stopped holding.
+    socket
+    |> adopt_saved(reloaded)
+    |> load_versions()
+  rescue
+    # The record went away, or this session may no longer read it. Keeping the
+    # last known state is the same thing every other read failure here does, and
+    # far better than crashing an editor over someone else's save.
+    _error -> socket
+  catch
+    # A pool or GenServer timeout inside Ash arrives as an exit, which `rescue`
+    # does not catch — and a bystander's editor must not die because of the
+    # timing of someone else's save.
+    :exit, _reason -> socket
+  end
+
+  # Adopt the persisted record, unless this session has something of its own that
+  # adopting it would put at risk: a pending autosave (`:saving`), an edit that
+  # failed validation (`:error`), an un-persisted change (`:unsaved`), or edits
+  # suppressed because another editor is the elected persister (`:synced`).
+  #
+  # A session holding any of those keeps its old record deliberately, so its next
+  # save still fails the optimistic lock and still surfaces the conflict. Its
+  # version panel refreshes either way — that is read-only and cannot lose
+  # anything.
+  defp adopt_saved(%{assigns: %{save_state: :saved}} = socket, record) do
+    socket
+    |> assign(:record, record)
+    |> assign(:page_title, record.title)
+    |> assign(:may_write?, may_write?(record, socket.assigns.actor, socket.assigns.current_org))
+    |> assign(
+      :may_suggest_seo?,
+      may_write_fields?(
+        record,
+        socket.assigns.actor,
+        socket.assigns.current_org,
+        @seo_suggestion_fields
+      )
+    )
+    |> assign(
+      :may_assist_blocks?,
+      may_write_fields?(record, socket.assigns.actor, socket.assigns.current_org, ["blocks"])
+    )
+    |> assign(:slug_customized?, slug_customized?(socket))
+  end
+
+  defp adopt_saved(socket, _record), do: socket
+
+  defp put_color(%{} = cursor), do: Map.put(cursor, :color, color_for(cursor.id))
 
   # ── GEO item rows: params helpers (#357) ────────────────────────────────────
 
   # Apply `fun` to the item list of one block (by index) and re-validate.
-  defp update_geo_items(socket, index, field, fun) do
-    params =
-      socket.assigns.form
-      |> AshPhoenix.Form.params()
-      |> normalize_geo_items()
+  defp update_item_rows(socket, index, field, fun) do
+    # The FULL block set, not a partial params write. `AshPhoenix.Form.params/1`
+    # is `only_touched?`, so a form freshly loaded from a saved record carries no
+    # `blocks` key at all — and `validate/2` rebuilds the sub-forms from the keys
+    # it is given, so writing `%{"blocks" => %{"0" => …}}` deletes every other
+    # block in the document. `pick_image` already carries the full set through
+    # for exactly this reason; these buttons need it just as much, and more
+    # often, since the gallery's only route to its first image is one of them.
+    #
+    # Rebuilding also resolves the "params or stored value?" question: each
+    # block's input map already carries its rows, whether they came from the
+    # record or from something the editor typed.
+    blocks = full_blocks_input(socket.assigns.form)
+    index = to_int(index)
 
-    current = params |> block_param_at(index) |> Map.get(field) |> List.wrap()
-    params = put_block(params, to_string(index), %{field => fun.(current)})
+    case Enum.at(blocks, index) do
+      nil ->
+        {:noreply, socket}
 
-    socket = assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
-    broadcast_preview(socket)
-    {:noreply, mark_dirty(socket)}
+      block ->
+        current = block |> Map.get(field) |> stringify_rows()
+        blocks = List.replace_at(blocks, index, Map.put(block, field, fun.(current)))
+
+        params =
+          socket.assigns.form
+          |> AshPhoenix.Form.params()
+          |> Map.put("blocks", blocks)
+
+        socket = revalidate(socket, params)
+        broadcast_preview(socket)
+        {:noreply, mark_dirty(socket)}
+    end
   end
 
-  defp block_param_at(params, index) do
-    case params["blocks"] do
-      blocks when is_map(blocks) -> Map.get(blocks, to_string(index)) || %{}
-      blocks when is_list(blocks) -> Enum.at(blocks, to_int(index)) || %{}
-      _ -> %{}
+  defp stringify_rows(value) do
+    value
+    |> List.wrap()
+    |> Enum.filter(&is_map/1)
+    |> Enum.map(&Map.new(&1, fn {k, v} -> {to_string(k), v} end))
+  end
+
+  # Resolve the block id to an index *now* rather than trusting one captured at
+  # render, for the reason `remove_block` gives: an in-flight reorder must not
+  # turn a click on one block into an edit of another.
+  defp update_gallery_images(socket, bid, fun) do
+    case block_index_by_id(socket.assigns.form, bid) do
+      nil -> {:noreply, socket}
+      index -> update_item_rows(socket, index, "images", fun)
     end
   end
 
@@ -2009,7 +3683,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # (`"items" => %{"0" => %{…}}`) — convert to the ordered lists the blocks'
   # `{:array, :map}` fields cast. Non-numeric keys (the always-present sentinel
   # that keeps the param submitted when every row is removed) are dropped.
-  defp normalize_geo_items(params) do
+  defp normalize_item_rows(params) do
     # `Map.update/4` would *insert* a nil `blocks` key on block-less params
     # (title-only edits), which AshPhoenix's nested-form validate chokes on.
     case params do
@@ -2025,15 +3699,39 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   defp normalize_block_items(%{} = block) do
-    Enum.reduce(["items", "steps"], block, fn key, block ->
+    # `images` is the gallery's row field. It is not in `@row_fields` because it
+    # is not edited by `item_rows_editor/1` — but it is still an indexed map on
+    # the wire, so it needs the same flattening or a gallery loses every image
+    # on save.
+    @row_fields
+    |> Kernel.++(["images"])
+    |> Enum.reduce(block, fn key, block ->
       case block do
         %{^key => %{} = indexed} -> Map.put(block, key, indexed_items_to_list(indexed))
         _ -> block
       end
     end)
+    |> normalize_fragment_ref()
   end
 
   defp normalize_block_items(other), do: other
+
+  # The fragment picker (#479) is a single `<select>`, because a reference is
+  # one choice — so it posts one `"type:id"` string, which becomes the
+  # `%{"type" => …, "id" => …}` map the `:reference` field stores and
+  # `Firing.References` extracts its edge from. An empty selection clears the
+  # reference rather than storing a half-shape the resolver would silently drop.
+  defp normalize_fragment_ref(%{"ref" => ref} = block) when is_binary(ref) do
+    case String.split(ref, ":", parts: 2) do
+      [type, id] when type != "" and id != "" ->
+        Map.put(block, "ref", %{"type" => type, "id" => id})
+
+      _blank ->
+        Map.put(block, "ref", nil)
+    end
+  end
+
+  defp normalize_fragment_ref(block), do: block
 
   defp indexed_items_to_list(indexed) do
     indexed
@@ -2136,10 +3834,24 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   # Apply `fun` to every column's child-block list of a block.
+  # `Map.update/4`'s default would *create* an entry for a block id that is not
+  # in the tree. The id comes from a client event, and on a published record —
+  # which never autosaves, so `assign_record/2` never re-seeds this map — a
+  # fabricated one would sit in socket state for the whole session.
+  #
+  # Defensive, and deliberately untested: a phantom entry matches no block, so
+  # `inject_children/2` blanks nothing and there is no observable damage to
+  # assert on today. A test for it could not fail, and one that cannot fail is
+  # worse than none. The guard is here because the *next* reader of this map
+  # should not have to re-derive that argument.
   defp update_columns(block_children, block_id, fun) do
-    Map.update(block_children, block_id, [], fn cols ->
-      Enum.map(cols, &update_col_blocks(&1, fun))
-    end)
+    if Map.has_key?(block_children, block_id) do
+      Map.update!(block_children, block_id, fn cols ->
+        Enum.map(cols, &update_col_blocks(&1, fun))
+      end)
+    else
+      block_children
+    end
   end
 
   defp update_col_blocks(col, fun) do
@@ -2209,20 +3921,104 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
-  # Drop the tag picker's hidden sentinel (see `tag_picker/1`). It exists so an
-  # all-unchecked group still submits `tag_ids`, which is the difference between
-  # "detach every tag" and "the field was never touched" — but `""` is not a
-  # uuid, so it must not reach the changeset.
-  defp normalize_tag_ids(%{"tag_ids" => ids} = params) when is_list(ids),
-    do: Map.put(params, "tag_ids", Enum.reject(ids, &(&1 == "")))
+  # Rewrite the picker's ticks into the merge verbs (#638).
+  #
+  # No create branch, because this LiveView has none: `for_update/3` is its only
+  # form constructor (content is created elsewhere and edited here). That
+  # matters, because `:create` rejects the verbs outright — it has nothing to
+  # merge against — so a create path added later has to come back through here
+  # rather than inherit this by accident.
+  #
+  # `tag_ids` is the COMPLETE set, so submitting it means "these are the only
+  # tags" — and a checkbox that was never rendered was never submitted, so
+  # narrowing a tag group's content types silently stripped tags off existing
+  # content on the next Save. That is what the "Also attached" rescue section,
+  # the hidden `""` sentinel and `normalize_tag_ids/1` all existed to work
+  # around; #636 gave the resource `add_tag_ids`/`remove_tag_ids`, and this is
+  # the caller finally using them.
+  #
+  # The diff is taken against what the server chose to RENDER, not against the
+  # record's current tags:
+  #
+  #   * `remove` is rendered-minus-ticked. A tag with no checkbox cannot appear
+  #     here, which is exactly the property that was missing — it survives
+  #     instead of being detached by omission.
+  #   * `add` is every ticked id, not ticked-minus-attached. `:append` is
+  #     `on_match: :ignore`, so re-adding is free, and diffing against a
+  #     possibly-stale `record.tags` would drop a tick for a tag a collaborator
+  #     detached since this page loaded.
+  #
+  # Deriving `rendered` server-side rather than posting it as a hidden field is
+  # also what bounds the blast radius: a forged payload can only tick ids, and
+  # what may be *removed* stays whatever this server put on the page.
+  #
+  # An all-unchecked group now submits no `tag_ids` key at all and needs none —
+  # `ticked` is empty, so every rendered tag lands in `remove`. That is the
+  # sentinel's whole job, done by the diff instead.
+  # NB this is not idempotent, and must only ever see BROWSER params. It
+  # consumes `tag_ids`, so a second pass over its own output reads as "nothing
+  # ticked" and removes everything the first pass just added — which is exactly
+  # what happened when autosave (which forwards the *form's* params, already
+  # rewritten by `validate`) also called it. Autosave therefore does not, and
+  # "a section already on screen stays closed once its tag is saved" is the test
+  # that catches it coming back.
+  #
+  # An earlier version guarded that with a shape check — "if it already has the
+  # verbs, pass it through". That was worse than useless: it also let a crafted
+  # payload post its own `remove_tag_ids` and skip the rewrite entirely, which
+  # is precisely the bound this function exists to impose.
+  defp merge_tag_params(params, socket) do
+    ticked = ticked_tag_ids(params)
+    ticked_set = MapSet.new(ticked)
 
-  defp normalize_tag_ids(params), do: params
+    # `rendered` is every tag the picker put a checkbox on, precomputed in
+    # `refresh_tag_index/1`. `tag_picker/1` renders the sections and nothing
+    # else (an empty `sections` renders no controls at all), so it is the
+    # rendered set exactly — which has to be true rather than approximately
+    # true, because it is the ceiling on what this save may detach.
+    removed =
+      socket.assigns.tag_index.rendered
+      |> Enum.reject(&MapSet.member?(ticked_set, &1))
+
+    params
+    |> Map.delete("tag_ids")
+    |> Map.put("add_tag_ids", ticked)
+    |> Map.put("remove_tag_ids", removed)
+  end
+
+  # Blanks are dropped, and that is not the old sentinel coming back: nothing
+  # renders a `""` any more, so the only way one arrives is a page that was
+  # loaded before this deployment and submitted after it. Reading it as an id
+  # would fail the uuid cast and turn a routine save into an error the editor
+  # cannot act on; reading it as "nothing ticked" is what that page meant.
+  defp ticked_tag_ids(params) do
+    params
+    |> Map.get("tag_ids", [])
+    |> List.wrap()
+    |> Enum.map(&to_string/1)
+    |> Enum.reject(&(&1 == ""))
+  end
 
   # Coerce an editable child field, keeping `level` an integer (headings clamp on
   # render, so an out-of-range value is harmless, but a non-integer would fail the
   # embedded cast).
   defp put_child_field(child, "level", value), do: Map.put(child, "level", to_int(value))
-  defp put_child_field(child, field, value), do: Map.put(child, field, value)
+
+  # Only the fields this child's own editor renders. `field` arrives from a
+  # client event, and a bare `Map.put/3` let one name a *structural* key:
+  # `_type` rewrites the union discriminator, so the next save fails its typed
+  # cast — and on the autosave path that surfaces as `save_state: :error` with
+  # no field to point at, leaving the document unsaveable until the block is
+  # deleted; `id` collides two children's DOM ids and their drag addressing.
+  # Neither is reachable from the rendered markup, which is exactly why nothing
+  # would have noticed.
+  defp put_child_field(child, field, value) do
+    if field in Enum.map(nested_fields_for(child["_type"]), &elem(&1, 0)) do
+      Map.put(child, field, value)
+    else
+      child
+    end
+  end
 
   defp to_int(value) when is_integer(value), do: value
 
@@ -2238,16 +4034,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Parse a non-negative integer index from a client value, or :error — so a
   # stale/garbled index no-ops instead of silently acting on position 0 (which
   # `to_int/1` would do).
-  defp parse_index(value) when is_integer(value) and value >= 0, do: {:ok, value}
-
+  #
+  # Binary-only: both callers (`col_add_child`, `col_remove_column`) now guard
+  # `is_binary(col)` on the head (#764), so the integer and catch-all clauses
+  # this used to carry were dead code. `:error` still covers the live case —
+  # an unparseable *string*, which a stale client can genuinely send.
   defp parse_index(value) when is_binary(value) do
     case Integer.parse(value) do
       {int, ""} when int >= 0 -> {:ok, int}
       _ -> :error
     end
   end
-
-  defp parse_index(_value), do: :error
 
   defp append_child(blocks, _type) when length(blocks) >= @max_children_per_column, do: blocks
   defp append_child(blocks, type), do: blocks ++ [new_child(type)]
@@ -2264,8 +4061,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # nil (image hidden) for rejected schemes like `javascript:`/`data:`.
   defp safe_preview_src(url), do: KilnCMS.HTMLSanitizer.safe_image_src(url)
 
-  defp reset_picker(socket),
-    do: socket |> assign(:picking, nil) |> assign(:media_query, "") |> assign(:picker_media, nil)
+  defp reset_picker(socket) do
+    socket
+    |> assign(:picking, nil)
+    |> assign(:picked, [])
+    |> assign(:media_query, "")
+    |> assign(:picker_media, nil)
+    |> assign(:file_picking, nil)
+    |> assign(:file_query, "")
+    |> assign(:picker_files, nil)
+    |> assign(:av_picking, nil)
+    |> assign(:av_query, "")
+    |> assign(:picker_av, nil)
+  end
 
   # ── AI-assisted SEO drafting (#60) ────────────────────────────────────────
 
@@ -2291,27 +4099,137 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp load_link_suggestions(socket) do
     record = socket.assigns.record
-    actor = socket.assigns.actor
     # Paths the body already links to, so we don't suggest a link that's there.
     linked = socket.assigns.seo_body_stats.internal_link_paths
 
     socket
     |> assign(:seo_links_loading?, true)
     |> start_async(:seo_links, fn ->
-      KilnCMS.Seo.Links.suggest(record, actor: actor, exclude_paths: linked)
+      # No actor/tenant: `suggest/2` scopes to `record`'s own org and the
+      # published/`:public` delivery boundary, so it is identical for every actor
+      # (#869).
+      KilnCMS.Seo.Links.suggest(record, exclude_paths: linked)
     end)
   end
 
+  # ── Content intelligence (#339) ────────────────────────────────────────────
+
+  defp load_content_intel(socket) do
+    # Plain data only into the task, never the socket or the form: both are
+    # stale the moment an autosave rebuilds them. `record` is refreshed on every
+    # autosave, so the neighbour queries run against saved content — a passage
+    # typed since the last save isn't indexed yet either way.
+    record = socket.assigns.record
+    version = socket.assigns.editor_version
+    # The actor is not optional here. Near-duplicates span every workflow state
+    # and audience, and the taxonomy read has to agree with the tag picker's —
+    # a suggestion for a tag this editor's picker doesn't list is an Add button
+    # with no checkbox to tick.
+    actor = socket.assigns.actor
+
+    socket
+    |> assign(:intel_loading?, true)
+    |> start_async(:content_intel, fn ->
+      {version,
+       %{
+         duplicates: Related.near_duplicates(record, actor: actor),
+         tags: Related.suggest_tags(record, actor: actor)
+       }}
+    end)
+  end
+
+  # Tick a suggested tag in the form's `tag_ids`, then drop it from the panel.
+  #
+  # The current selection is read the same way `tag_picker/1` reads it —
+  # form value first, persisted tags as the fallback — because a form that has
+  # never had its tag group submitted carries no `tag_ids` at all, and putting
+  # a one-element list there would submit "these are the only tags", detaching
+  # every tag already on the record (#522's failure, from the other direction).
+  defp add_suggested_tag(socket, tag_id) do
+    suggestions = socket.assigns.intel_tags || []
+
+    cond do
+      not Enum.any?(suggestions, &(to_string(&1.tag.id) == tag_id)) ->
+        # Not a tag we offered — a replayed or forged event. Ignore it rather
+        # than attaching whatever id was pushed.
+        socket
+
+      socket.assigns.conflict ->
+        put_flash(socket, :error, gettext("Reload the page before changing tags."))
+
+      true ->
+        current =
+          socket.assigns.form
+          |> selected_tag_ids(socket.assigns.record)
+          |> MapSet.to_list()
+
+        # Written back as `tag_ids` and immediately rewritten by
+        # `merge_tag_params/2` — leaving `tag_ids` in the form's params
+        # beside the verbs would make the next save contradictory, and
+        # `MergeArguments` refuses that combination outright rather than
+        # resolving it by declaration order.
+        params =
+          socket.assigns.form
+          |> AshPhoenix.Form.params()
+          |> Map.drop(["add_tag_ids", "remove_tag_ids"])
+          |> Map.put("tag_ids", Enum.uniq(current ++ [tag_id]))
+          |> merge_tag_params(socket)
+
+        socket
+        |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
+        |> assign(:intel_tags, Enum.reject(suggestions, &(to_string(&1.tag.id) == tag_id)))
+        |> mark_dirty()
+    end
+  end
+
+  # Why the intelligence panel came back empty.
+  #
+  # "Publish this page to index it" used to be one of the answers, and it is
+  # gone because it stopped being true (#852): an unpublished anchor now has its
+  # centroid computed in memory, so a never-published draft compares like any
+  # other document. What is left is the operator's setting, and genuinely
+  # finding nothing.
+  defp intel_empty_reason(record) do
+    if KilnCMS.Search.semantic?() do
+      empty_document_reason(record)
+    else
+      gettext("Semantic search is off, so there is nothing to compare against.")
+    end
+  end
+
+  # An empty document has no block text to embed, so there is nothing to compare
+  # *from* — distinct from comparing and finding nothing, and fixable by writing
+  # something rather than by waiting.
+  defp empty_document_reason(record) do
+    if blank_document?(record) do
+      gettext("Add some content — suggestions come from what this page says.")
+    else
+      gettext("Nothing similar found.")
+    end
+  end
+
+  # Shares `BlockIndexer`'s projection rather than re-deriving "has any text":
+  # the question the panel is answering is "was there anything to embed", and
+  # the answer has to be the one the embedder would give. It also handles an
+  # unloaded `blocks` without raising.
+  defp blank_document?(record), do: KilnCMS.Search.BlockIndexer.embedding_inputs(record) == []
+
   # Why the suggestion list came back empty — an unexplained empty panel reads
-  # as broken, and the usual cause (a draft that has never been indexed) is
-  # both common and fixable.
+  # as broken. Same #852 change: the anchor no longer has to be published for
+  # its neighbours to be found, so "publish this page" is no longer the reason.
+  # (Only the *neighbours* are still published-only, which is a property of the
+  # reader-facing surface and not something the author can act on here.)
+  # Semantic search is checked FIRST, unlike the duplicates panel. With it off,
+  # `Seo.Links.candidates/2` falls back to a keyword search built from the title
+  # and focus keyphrase, which never reads the blocks — so telling the author to
+  # add content would be advice that changes nothing.
   defp link_empty_reason(record) do
     cond do
-      record.state != :published and is_nil(record.published_at) ->
-        gettext("Publish this page to index it — suggestions come from indexed content.")
-
       not KilnCMS.Search.semantic?() ->
         gettext("No related pages matched. Enabling semantic search improves these results.")
+
+      blank_document?(record) ->
+        gettext("Add some content — suggestions come from what this page says.")
 
       true ->
         gettext("No related pages found yet.")
@@ -2322,10 +4240,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp suggested_fields(nil), do: []
 
   defp suggested_fields(draft) do
-    Enum.filter(
-      ~w(seo_title seo_description seo_keywords),
-      &(suggested_value(draft, &1) not in [nil, ""])
-    )
+    Enum.filter(@seo_suggestion_fields, &(suggested_value(draft, &1) not in [nil, ""]))
   end
 
   defp suggested_value(nil, _field), do: nil
@@ -2366,6 +4281,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
       field_locked?(locked_fields(socket), field) ->
         {socket, :locked}
+
+      # Re-checked per card, not just at generation time (#868): the panel is
+      # hidden when the grant narrows mid-session, but a queued or replayed
+      # `seo_accept` still arrives — and writing the value would schedule an
+      # autosave the change then refuses on that exact field.
+      not field_granted?(
+        socket.assigns.record,
+        socket.assigns.actor,
+        socket.assigns.current_org,
+        field
+      ) ->
+        {socket, :not_permitted}
 
       true ->
         params = socket.assigns.form |> AshPhoenix.Form.params() |> Map.put(field, value)
@@ -2510,7 +4437,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Whether a run may start: the feature on, nothing already in flight, the id
   # matching the open panel, and the id naming a rich-text block on this form.
   defp assist_runnable?(socket, block_id) do
+    # Same write-authorization boundary as `seo_suggest` (#550): block assist
+    # also bills an org LLM run, so read access to the record must not be
+    # enough to spend it. Refused server-side, not just hidden.
+    # …and the grant, for the same reason `seo_suggest` needs it (#868):
+    # assist bills its own budget and writes prose into a block, so a
+    # `blocks`-less grant means a billed run whose result the save refuses.
     socket.assigns.assist_enabled? and
+      socket.assigns.may_write? and
+      socket.assigns.may_assist_blocks? and
       not socket.assigns.assist_running? and
       socket.assigns.assist_block == block_id and
       not is_nil(assist_block_form(socket.assigns.form, block_id))
@@ -2702,43 +4637,67 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # scannable. Groups may be scoped to certain content types; groups that don't
   # apply to `kind` are omitted.
   attr :form, :any, required: true
-  attr :tags, :list, required: true
-  attr :tag_groups, :list, required: true
-  attr :kind, :any, required: true
+  attr :tag_index, :any, required: true
   attr :record, :any, required: true
+  attr :open_sections, :any, required: true
 
   defp tag_picker(assigns) do
-    # What's *persisted* on the record, as distinct from what's currently
-    # ticked. The rescue section below keys on this, so unchecking a tag can't
-    # delete its own checkbox.
-    attached = assigns.record.tags |> current_ids() |> Enum.map(&to_string/1)
+    # A **MapSet**, not a list (#528). Membership is tested three times per tag
+    # — the checkbox, the section count, and the filter — and this component
+    # re-renders on every `validate`, i.e. per keystroke anywhere in the form.
+    selected = selected_tag_ids(assigns.form, assigns.record)
 
-    selected =
-      assigns.form
-      |> selected_ids(:tag_ids, current_ids(assigns.record.tags))
-      |> Enum.map(&to_string/1)
+    # The skeleton — which tag sits in which section, and its downcased filter
+    # key — is computed once per RECORD change (`refresh_tag_index/1`), not per
+    # render. Only the per-section tick counts depend on `selected`, so only
+    # they are recomputed here.
+    sections = with_counts(assigns.tag_index.sections, selected)
 
     assigns =
       assigns
       |> assign(:selected, selected)
-      |> assign(
-        :sections,
-        tag_sections(assigns.tags, assigns.tag_groups, assigns.kind, selected, attached)
-      )
+      |> assign(:sections, sections)
+      # The checkboxes still post under `tag_ids[]`; `merge_tag_params/2`
+      # rewrites that into `add_tag_ids`/`remove_tag_ids` at submit time, so the
+      # wire name the browser posts and the argument the changeset takes are
+      # deliberately not the same thing (#638).
       |> assign(:name, assigns.form[:tag_ids].name <> "[]")
+      # Why an empty picker is empty, which is not one question but two, and the
+      # difference is what the editor should do next (#524). `pickable` and
+      # `sections` are narrowed independently — every tag in the org can sit in
+      # groups scoped to *other* content types, with none of them on this record,
+      # and then there are tags but nothing to show. The old guard keyed the
+      # whole body on `pickable`, so that case rendered a legend, a filter box
+      # and nothing else — no explanation, and no way to tell it from a bug.
+      |> assign(
+        :empty_reason,
+        cond do
+          assigns.tag_index.pickable? == false -> :no_tags
+          sections == [] -> :none_apply
+          true -> nil
+        end
+      )
 
     ~H"""
     <fieldset id="tag-picker" phx-hook="TagFilter" data-tag-filter>
       <legend class="mb-1 block text-sm font-medium text-base-content">{gettext("Tags")}</legend>
-      <p :if={@tags == []} class="text-xs text-base-content/70">{gettext("No tags yet.")}</p>
+      <p :if={@empty_reason == :no_tags} class="text-xs text-base-content/70">
+        {gettext("No tags yet.")}
+      </p>
+      <%!-- Says only what is observable. `tag_sections/5` drops an *applicable*
+            group that happens to be empty exactly as it drops a non-applicable
+            one, so "every group is scoped to other types" would be wrong about
+            as often as it was right — and would send the editor hunting for a
+            scope to widen when the fix is a tag to create. The link goes where
+            both fixes live; same shape as the media picker's empty state. --%>
+      <p :if={@empty_reason == :none_apply} class="text-xs text-base-content/70">
+        {gettext("No tags are available on this content type — set them up under")} <.link
+          navigate={~p"/editor/taxonomy"}
+          class="underline"
+        >{gettext("taxonomy")}</.link>.
+      </p>
 
-      <%!-- Browsers omit an all-unchecked checkbox group from the payload
-            entirely, which `selected_ids/3` can only read as "untouched" — so
-            the last tag could never be removed. This sentinel keeps the key
-            present; `normalize_tag_ids/1` drops it before the changeset. --%>
-      <input :if={@tags != []} type="hidden" name={@name} value="" />
-
-      <div :if={@tags != []} class="space-y-2">
+      <div :if={@sections != []} class="space-y-2">
         <%!-- Unnamed so it never serializes into the changeset, and wrapped in
               phx-update="ignore" so a re-render can't clobber what's typed.
               Unnamed does NOT stop the enclosing form's phx-change from firing,
@@ -2754,15 +4713,23 @@ defmodule KilnCMSWeb.ContentEditorLive do
           />
         </div>
 
-        <%!-- `data-tag-open-default` is the server's own choice, re-rendered on
-              every patch — what the filter hook restores to when the box is
-              cleared (it can't stash that on the element itself; morphdom would
-              drop it). --%>
+        <%!-- `open` comes from a set judged once per section, never from the
+              live tick count — see `refresh_tag_index/1`. A server value
+              that moves mid-session overrides the app-wide <details>
+              preservation in `app.js`, and folded a section shut under the
+              cursor (#523). Toggling one after that is the editor's business,
+              and the filter hook's for the sections it force-opened. --%>
+        <%!-- The id is load-bearing, not a handle: without one morphdom pairs
+              these positionally, so a section appearing mid-list (a group that
+              was empty at mount gaining an attached tag) shifts every section
+              below it onto its neighbour's node — carrying that node's `open`,
+              its `data-server-open` baseline and its filter-hook bookkeeping
+              onto the wrong group. --%>
         <details
           :for={section <- @sections}
+          id={tag_section_id(section.key)}
           data-tag-section
-          data-tag-open-default={to_string(section.open?)}
-          open={section.open?}
+          open={MapSet.member?(@open_sections, section.key)}
           class="rounded border border-base-content/15"
         >
           <summary class="cursor-pointer px-2 py-1.5 text-sm font-medium">
@@ -2778,14 +4745,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
           <div class="flex flex-wrap gap-2 p-2 pt-1">
             <label
               :for={tag <- section.tags}
-              data-tag-item={String.downcase(tag.name)}
+              data-tag-item={tag.filter}
               class="inline-flex cursor-pointer items-center gap-1.5 rounded border border-base-content/20 px-2 py-1 text-sm hover:bg-base-200"
             >
               <input
                 type="checkbox"
                 name={@name}
                 value={tag.id}
-                checked={to_string(tag.id) in @selected}
+                checked={MapSet.member?(@selected, tag.id)}
                 class="size-4 rounded border border-base-content/30 accent-primary"
               />
               {tag.name}
@@ -2801,6 +4768,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
     """
   end
 
+  # The org's tags (loaded at mount) unioned with the ones this record actually
+  # carries (refreshed on every autosave), deduplicated by id and preserving the
+  # org order so the sections still sort as before. A record tag missing from
+  # the org list is one attached since mount — without it the picker can't
+  # render its checkbox, and an unrendered checkbox is a silent detach (#522).
+  defp all_pickable_tags(org_tags, record_tags) do
+    known = MapSet.new(org_tags, & &1.id)
+    org_tags ++ Enum.reject(record_tags, &MapSet.member?(known, &1.id))
+  end
+
   # Bucket the org's tags into the picker's sections.
   #
   # A group applies to this content type when its `content_types` is empty
@@ -2808,12 +4785,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # for tags already on the record, which are collected into a trailing
   # "Also attached" section.
   #
-  # That last part is load-bearing, not a nicety: tags are written with
+  # That section used to be load-bearing: tags were written with
   # `manage_relationship(:tag_ids, :tags, type: :append_and_remove)`, so a
-  # checkbox that isn't rendered isn't submitted, and the link is *removed*.
-  # Narrowing a group's content types after the fact would otherwise silently
-  # strip tags off existing content the next time someone hit Save.
-  defp tag_sections(tags, groups, kind, selected, attached) do
+  # checkbox that was not rendered was not submitted and the link was *removed*
+  # — and without this section, narrowing a group's content types silently
+  # stripped tags off existing content on the next Save.
+  #
+  # Since #638 the picker submits `add_tag_ids`/`remove_tag_ids` diffed against
+  # what it rendered, so an unrendered tag simply survives and the section is no
+  # longer holding anything up. It stays for the two things it was always also
+  # doing, which are worth keeping on their own: telling an editor that a tag
+  # from a group scoped elsewhere is on this item, and giving them a control to
+  # take it off. Note the consequence of keeping the checkboxes — these tags ARE
+  # rendered, so unticking one does now remove it, which is the point.
+  defp tag_sections(tags, groups, kind, attached) do
     kind = to_string(kind)
     known_ids = MapSet.new(groups, & &1.id)
     applicable = Enum.filter(groups, &applies_to?(&1, kind))
@@ -2822,16 +4807,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
     grouped =
       Enum.map(applicable, fn group ->
-        section(group.name, Map.get(by_bucket, {:group, group.id}, []), selected)
+        section({:group, group.id}, group.name, Map.get(by_bucket, {:group, group.id}, []))
       end)
 
-    ungrouped = section(gettext("Ungrouped"), Map.get(by_bucket, :ungrouped, []), selected)
+    ungrouped = section(:ungrouped, gettext("Ungrouped"), Map.get(by_bucket, :ungrouped, []))
 
     # Out-of-scope groups contribute only what the record ALREADY carries.
     # Keyed on `attached` (the persisted set) rather than `selected` (the live
     # ticks): keying on the latter meant unchecking a tag here emptied the
     # section, `Enum.reject` deleted it, and there was no control left to undo
-    # with — an irreversible detach one mis-click away.
+    # with. Still true and still the reason — and now doubly so, because the
+    # removal diff is taken against what was rendered: a control that vanishes
+    # mid-edit would take its tag out of `remove_tag_ids` and quietly cancel the
+    # detach the editor just asked for.
     orphaned_tags =
       by_bucket
       |> Map.get(:out_of_scope, [])
@@ -2839,9 +4827,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
     orphaned =
       section(
+        :out_of_scope,
         gettext("Also attached"),
         orphaned_tags,
-        selected,
         gettext("Already on this item, from a group scoped to other content types.")
       )
 
@@ -2850,9 +4838,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Which section a tag belongs in. A `tag_group_id` that resolves to no loaded
   # group — a dangling pointer, or one written across tenants (the FK has no
-  # org component) — falls back to "Ungrouped" rather than vanishing: an
-  # unrendered checkbox is a checkbox that isn't submitted, and
-  # `append_and_remove` reads that as "detach me".
+  # org component) — falls back to "Ungrouped" rather than vanishing. That was
+  # originally about data loss (an unsubmitted checkbox was a detach); since
+  # #638 it is about reach: a tag with no control cannot be *removed*, so
+  # vanishing would strand it on the record with no way to take it off.
   defp bucket_for(%{tag_group_id: nil}, _known_ids, _applicable_ids), do: :ungrouped
 
   defp bucket_for(%{tag_group_id: id}, known_ids, applicable_ids) do
@@ -2867,12 +4856,98 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp applies_to?(%{content_types: types}, kind) when is_list(types), do: kind in types
   defp applies_to?(_group, _kind), do: true
 
-  # Sections holding a selection start expanded, so what's already on the item
-  # is visible without clicking through every group.
-  defp section(label, tags, selected, note \\ nil) do
-    count = Enum.count(tags, &(to_string(&1.id) in selected))
+  defp tag_section_id({:group, id}), do: "tag-section-group-#{id}"
+  defp tag_section_id(key) when is_atom(key), do: "tag-section-#{key}"
 
-    %{label: label, tags: tags, selected_count: count, open?: count > 0, note: note}
+  # `key` identifies the section across re-renders (the label is translated and
+  # a group's name is editable, so neither is stable) — `@open_sections` is a
+  # set of these, and `tag_section_id/1` turns one into the DOM id.
+  defp section(key, label, tags, note \\ nil) do
+    %{key: key, label: label, tags: Enum.map(tags, &tag_view/1), note: note}
+  end
+
+  # The projection the template renders. `id` is stringified and `filter` is
+  # downcased HERE rather than in the markup, because the section list is built
+  # once per record change while the markup is rebuilt on every keystroke —
+  # `String.downcase/1` per tag per render was the whole reason this exists.
+  defp tag_view(tag), do: %{id: to_string(tag.id), name: tag.name, filter: downcase(tag.name)}
+
+  defp downcase(name) when is_binary(name), do: String.downcase(name)
+  defp downcase(_name), do: ""
+
+  # Stamp each section with how many of its tags are currently ticked. The only
+  # part of the picker that depends on the live form, and therefore the only
+  # part recomputed per render.
+  defp with_counts(sections, selected) do
+    Enum.map(sections, fn section ->
+      Map.put(
+        section,
+        :selected_count,
+        Enum.count(section.tags, &MapSet.member?(selected, &1.id))
+      )
+    end)
+  end
+
+  # Which sections the picker renders expanded — a section carrying a tag the
+  # record already has starts open, so what's on the item is visible without
+  # clicking through every group.
+  #
+  # Deliberately NOT re-derived per render (#523). `open` was `selected_count >
+  # 0` on every patch, and `app.js`'s app-wide <details> preservation only holds
+  # the editor's own toggle while the *server-rendered* value is unchanged — so
+  # unticking a group's last tag flipped that value true→false, the guard was
+  # skipped, and the section folded shut under the cursor, hiding the siblings
+  # they were about to click.
+  #
+  # So a section is judged EXACTLY ONCE: the first time it renders, when there
+  # is no editor toggle to overrule. `@sections` is rebuilt from the reloaded
+  # `record.tags` on every save, so that isn't only at mount — a section can
+  # appear mid-session, most importantly "Also attached", which surfaces a tag a
+  # collaborator hung off an out-of-scope group (#522) precisely so it can be
+  # seen and undone before the next `append_and_remove` save, and which arriving
+  # collapsed would undercut. After that first render the attribute is the
+  # editor's (and the filter hook's), in both directions, for the session.
+  defp refresh_tag_index(socket) do
+    %{tags: tags, tag_groups: groups, kind: kind, record: record} = socket.assigns
+    attached = record.tags |> current_ids() |> MapSet.new(&to_string/1)
+    seen = socket.assigns.tag_sections_seen
+
+    # `@tags` is loaded once at mount and never refreshed, but `record.tags` is
+    # (every autosave's `fetch!`). So a tag created and attached after mount — a
+    # collaborator, another tab — is in `record.tags` but not `@tags`, renders
+    # no checkbox, and the next save submits `tag_ids` without it, which
+    # `append_and_remove` reads as "detach me" (#522). Build from the union of
+    # the two so every attached tag always has a control; the sections and the
+    # empty-state guard both key on it, not on the stale `@tags` alone.
+    pickable = all_pickable_tags(tags, record.tags)
+    sections = tag_sections(pickable, groups, kind, attached)
+
+    # Judged against what is PERSISTED, not what is ticked — see the template.
+    counted = with_counts(sections, attached)
+
+    fresh =
+      for section <- counted,
+          not MapSet.member?(seen, section.key),
+          section.selected_count > 0,
+          into: MapSet.new(),
+          do: section.key
+
+    socket
+    # `rendered` is stamped here for the same reason `tag_view/1` downcases
+    # here: the section list is built once per record change, and the thing
+    # that reads this runs on every keystroke (`validate` rewrites the tag
+    # params on each one). Walking every section's tags per keystroke to
+    # rebuild a set that only changes with the record is the exact cost this
+    # module already refuses to pay elsewhere.
+    |> assign(:tag_index, %{
+      sections: sections,
+      pickable?: pickable != [],
+      # `tag_view/1` already stringified the ids, so this is comparable to the
+      # form params without further coercion.
+      rendered: MapSet.new(for section <- sections, tag <- section.tags, do: tag.id)
+    })
+    |> update(:tag_sections_open, &MapSet.union(&1, fresh))
+    |> assign(:tag_sections_seen, MapSet.union(seen, MapSet.new(sections, & &1.key)))
   end
 
   # Featured-image chooser (#154): a thumbnail of the current selection plus a
@@ -3032,22 +5107,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
       <legend class="mb-1 block text-sm font-medium">{@definition.label}</legend>
       <div class="grid grid-cols-2 gap-2">
         <div :for={part <- @parts}>
-          <label
-            for={cf_part_id(@definition, part)}
-            class="mb-0.5 block text-xs text-base-content/70"
-          >
-            {part.label}
-          </label>
-          <input
-            id={cf_part_id(@definition, part)}
-            type={Map.get(part, :type, "text")}
-            name={"#{@name}[#{part.key}]"}
-            value={composite_part_value(@value, part.key)}
-            required={@definition.required && Map.get(part, :required?, true)}
-            aria-invalid={@errors != [] && "true"}
-            aria-describedby={@errors != [] && cf_errors_id(@definition)}
-            class="field-input"
-            {Map.get(part, :attrs, %{})}
+          <.composite_part
+            definition={@definition}
+            part={part}
+            name={@name}
+            value={@value}
+            errors={@errors}
           />
         </div>
       </div>
@@ -3057,6 +5122,68 @@ defmodule KilnCMSWeb.ContentEditorLive do
       <.custom_field_errors_list definition={@definition} errors={@errors} />
     </fieldset>
     """
+  end
+
+  # A boolean part (`type: "checkbox"`) is not a text input with a different
+  # `type=`. On a checkbox `value=` is what gets *submitted*, not what is
+  # *checked* — binding the stored value there means a saved `all_day: true`
+  # reopens unchecked, and a stored `false` renders `value="false"`, so ticking
+  # the box submits the string "false" and the flag can never be turned on.
+  #
+  # So: a fixed `value="true"` and `checked` from the stored value.
+  #
+  # And deliberately **no** hidden `false` companion, which is the usual Phoenix
+  # pairing. `ApplyCustomFields.blank_for?/2` calls a composite field empty when
+  # every part is blank, and `"false"` is not blank — so the companion made an
+  # untouched widget look filled-in, and an *optional* `datetime_range` field
+  # made every document of its type unsaveable with "start is required". An
+  # absent key already means false to `cast/2`, so unticking needs nothing.
+  defp composite_part(%{part: %{type: "checkbox"}} = assigns) do
+    ~H"""
+    <label class="mt-5 flex items-center gap-2 text-xs text-base-content/70">
+      <input
+        id={cf_part_id(@definition, @part)}
+        type="checkbox"
+        name={"#{@name}[#{@part.key}]"}
+        value="true"
+        checked={composite_part_checked?(@value, @part.key)}
+        aria-describedby={@errors != [] && cf_errors_id(@definition)}
+        class="size-4 rounded border border-base-content/30 accent-primary"
+        {Map.get(@part, :attrs, %{})}
+      />
+      {@part.label}
+    </label>
+    """
+  end
+
+  defp composite_part(assigns) do
+    ~H"""
+    <label for={cf_part_id(@definition, @part)} class="mb-0.5 block text-xs text-base-content/70">
+      {@part.label}
+    </label>
+    <input
+      id={cf_part_id(@definition, @part)}
+      type={Map.get(@part, :type, "text")}
+      name={"#{@name}[#{@part.key}]"}
+      value={composite_part_value(@value, @part.key)}
+      required={@definition.required && Map.get(@part, :required?, true)}
+      aria-invalid={@errors != [] && "true"}
+      aria-describedby={@errors != [] && cf_errors_id(@definition)}
+      class="field-input"
+      {Map.get(@part, :attrs, %{})}
+    />
+    """
+  end
+
+  # The same spellings `Kiln.FieldType` implementations accept, because a value
+  # arrives here either fresh from the form (a string) or round-tripped out of
+  # jsonb (a boolean).
+  defp composite_part_checked?(value, key) do
+    case composite_part_value(value, key) do
+      true -> true
+      binary when is_binary(binary) -> String.downcase(binary) in ~w(true 1 on yes)
+      _other -> false
+    end
   end
 
   # A plain `<input>`. Plugin and built-in field types (`Kiln.FieldType`) pick
@@ -3420,6 +5547,343 @@ defmodule KilnCMSWeb.ContentEditorLive do
     """
   end
 
+  attr :tasks, :list, required: true
+  attr :open?, :boolean, required: true
+  attr :draft, :map, required: true
+  attr :assignable_users, :list, required: true
+  attr :auto_complete_default, :boolean, required: true
+
+  # Editorial tasks (#501): the whole record's open tasks (usually zero or
+  # one — v1 doesn't cap it), plus an inline "+ Assign" form. Document-level,
+  # not block-level (unlike `comment_panel/1` below) — a task is "who owns
+  # getting this whole piece of content done," not feedback on one block.
+  #
+  # No `<form>` here, same reason `comment_panel/1` avoids one (see its own
+  # moduledoc note): this whole section lives inside the page's own
+  # `id="page-editor"` form, and HTML doesn't allow nested forms — a nested
+  # `<form phx-submit=…>` silently gets dropped by the parser (its child
+  # inputs survive, the tag itself vanishes), so `phx-submit` never fires.
+  # Each field tracks its own `phx-change` into `@draft`; the submit button
+  # is a plain `phx-click` reading that assign server-side.
+  defp task_list(assigns) do
+    ~H"""
+    <div class="space-y-2">
+      <p :if={@tasks == []} class="text-xs text-base-content/60">
+        {gettext("No open tasks.")}
+      </p>
+
+      <ul :if={@tasks != []} class="space-y-2">
+        <li :for={task <- @tasks} class="rounded border border-base-content/15 p-2 text-xs">
+          <div class="flex items-center justify-between gap-2">
+            <span class="font-medium">{user_label(task.assignee)}</span>
+            <button
+              type="button"
+              phx-click="task_complete"
+              phx-value-id={task.id}
+              class="text-primary hover:underline"
+            >
+              {gettext("Mark done")}
+            </button>
+          </div>
+          <p :if={task.due_on} class="text-base-content/60">
+            {gettext("Due %{date}", date: Date.to_iso8601(task.due_on))}
+          </p>
+          <%!-- Shown only when this task DISAGREES with the site default
+                (#818). An earlier version keyed on the raw field, which was
+                silent in the case that most needs saying — a site set to
+                "leave open" and a task inheriting it — while labelling a
+                `false` task that merely agreed with the site. Asked through
+                `TaskSettings` so the precedence rule lives in one module. --%>
+          <p
+            :if={task_overrides_site?(task, @auto_complete_default)}
+            class="text-base-content/60"
+          >
+            {if task.auto_complete_on_publish,
+              do: gettext("Completes when this publishes"),
+              else: gettext("Stays open when this publishes")}
+          </p>
+          <p :if={task.note} class="mt-1 text-base-content/70">{task.note}</p>
+        </li>
+      </ul>
+
+      <button
+        :if={!@open?}
+        type="button"
+        phx-click="task_assign_open"
+        class="btn btn-sm btn-default"
+      >
+        {gettext("+ Assign")}
+      </button>
+
+      <div :if={@open?} class="space-y-2 rounded border border-base-content/15 p-2">
+        <select name="task_assignee_id" phx-change="task_draft_change" class="select select-sm w-full">
+          <option value="">{gettext("Assign to…")}</option>
+          <option
+            :for={{label, id} <- @assignable_users}
+            value={id}
+            selected={@draft["assignee_id"] == id}
+          >
+            {label}
+          </option>
+        </select>
+        <input
+          type="date"
+          name="task_due_on"
+          phx-change="task_draft_change"
+          value={@draft["due_on"]}
+          class="input input-sm w-full"
+        />
+        <textarea
+          name="task_note"
+          phx-change="task_draft_change"
+          phx-debounce="blur"
+          placeholder={gettext("Note (optional)")}
+          class="textarea textarea-sm w-full"
+        >{@draft["note"]}</textarea>
+        <%!-- Three values, not a checkbox (#818): the blank option means "use
+              whatever the site is set to", which is different from an explicit
+              yes and from an explicit no. A checkbox could only say two of
+              those, and would have to pick one to mean "inherit". --%>
+        <select
+          name="task_auto_complete"
+          phx-change="task_draft_change"
+          class="select select-sm w-full"
+        >
+          <option value="" selected={@draft["auto_complete"] in [nil, ""]}>
+            {if @auto_complete_default,
+              do: gettext("On publish: complete it (site default)"),
+              else: gettext("On publish: leave it open (site default)")}
+          </option>
+          <option value="true" selected={@draft["auto_complete"] == "true"}>
+            {gettext("On publish: always complete it")}
+          </option>
+          <option value="false" selected={@draft["auto_complete"] == "false"}>
+            {gettext("On publish: always leave it open")}
+          </option>
+        </select>
+        <div class="flex justify-end gap-2">
+          <button type="button" phx-click="task_assign_close" class="btn btn-sm btn-default">
+            {gettext("Cancel")}
+          </button>
+          <button type="button" phx-click="task_assign_submit" class="btn btn-sm btn-primary">
+            {gettext("Assign")}
+          </button>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  attr :item, :map, default: nil
+  attr :release, :map, default: nil
+  attr :releases, :list, required: true
+  attr :draft, :map, required: true
+
+  # Content releases (#500 / #836): which release this record is queued in, or a
+  # picker to put it in one — the editor-side half of "add to release", which
+  # until now existed only as a bulk action on the content list.
+  #
+  # No `<form>`, for the reason `task_list/1` and `comment_panel/1` spell out:
+  # this renders inside the page's own `id="page-editor"` form, HTML forbids
+  # nested forms, and the parser silently drops the tag (keeping its inputs), so
+  # `phx-submit` would never fire and the button would appear to do nothing.
+  defp release_panel(assigns) do
+    ~H"""
+    <div class="space-y-2">
+      <%= if @item do %>
+        <div class="rounded border border-base-content/15 p-2 text-xs">
+          <p class="font-medium">
+            <.link :if={@release} navigate={~p"/editor/releases/#{@release.id}"} class="link">
+              {@release.name}
+            </.link>
+            <span :if={!@release}>{gettext("In a release")}</span>
+          </p>
+          <p class="mt-1 text-base-content/70">
+            {if @item.action == :unpublish,
+              do: gettext("Will be unpublished when the release goes live."),
+              else: gettext("Will be published when the release goes live.")}
+          </p>
+          <button
+            type="button"
+            phx-click="release_remove"
+            class="mt-2 text-primary hover:underline"
+          >
+            {gettext("Remove from release")}
+          </button>
+        </div>
+      <% else %>
+        <p :if={@releases == []} class="text-xs text-base-content/60">
+          {gettext("No open releases.")}
+          <.link navigate={~p"/editor/releases"} class="link">{gettext("Create one")}</.link>
+        </p>
+
+        <div :if={@releases != []} class="space-y-2">
+          <select
+            name="release_target"
+            phx-change="release_draft_change"
+            aria-label={gettext("Release")}
+            class="select select-sm w-full"
+          >
+            <option
+              :for={release <- @releases}
+              value={release.id}
+              selected={@draft["release_id"] == release.id}
+            >
+              {release.name}
+            </option>
+          </select>
+          <select
+            name="release_action"
+            phx-change="release_draft_change"
+            aria-label={gettext("On go-live")}
+            class="select select-sm w-full"
+          >
+            <option value="publish" selected={@draft["action"] != "unpublish"}>
+              {gettext("Publish on go-live")}
+            </option>
+            <option value="unpublish" selected={@draft["action"] == "unpublish"}>
+              {gettext("Unpublish on go-live")}
+            </option>
+          </select>
+          <button type="button" phx-click="release_add" class="btn btn-sm btn-default w-full">
+            {gettext("Add to release")}
+          </button>
+        </div>
+      <% end %>
+    </div>
+    """
+  end
+
+  attr :block_id, :string, required: true
+  attr :comments, :list, required: true
+  attr :open?, :boolean, required: true
+  attr :draft, :string, default: nil
+
+  # Block-level editorial comment thread (#404) — same toggle-button-into-
+  # inline-panel shape as `assist_panel/1` above, and the same reason the
+  # textarea keeps its own unprefixed `phx-change`/`phx-debounce="blur"`
+  # rather than living inside a `<form>`: this sits inside the main content
+  # form, which can't nest one.
+  #
+  # Unlike `assist_panel/1`, rendered for every block type (outside all the
+  # per-type conditionals) — a comment can land on any block, not just rich
+  # text.
+  defp comment_panel(assigns) do
+    thread = thread_for_block(assigns.comments, assigns.block_id)
+    assigns = assign(assigns, :thread, thread)
+
+    ~H"""
+    <div class="mt-2">
+      <button
+        type="button"
+        phx-click={if @open?, do: "comment_close", else: "comment_open"}
+        phx-value-bid={@block_id}
+        aria-expanded={to_string(@open?)}
+        class={[
+          "inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs hover:bg-base-200",
+          if(thread_resolved?(@thread),
+            do: "border-base-content/20 text-base-content/50",
+            else: "border-base-content/20"
+          )
+        ]}
+      >
+        <.icon name="hero-chat-bubble-left-right" class="size-3.5" />
+        {if @thread == [],
+          do: gettext("Comment"),
+          else:
+            ngettext("%{count} comment", "%{count} comments", length(@thread), count: length(@thread))}
+        <span :if={thread_resolved?(@thread)} class="text-success">
+          · {gettext("Resolved")}
+        </span>
+      </button>
+
+      <div
+        :if={@open?}
+        class="mt-2 space-y-2 rounded border border-base-content/15 bg-base-200/40 p-2"
+      >
+        <div :if={@thread == []} class="text-xs text-base-content/60">
+          {gettext("No comments on this block yet.")}
+        </div>
+
+        <div :for={comment <- @thread} class="rounded bg-base-100 p-2 text-xs">
+          <div class="flex items-center justify-between gap-2 text-base-content/60">
+            <span>{comment_author_label(comment)}</span>
+            <time datetime={DateTime.to_iso8601(comment.inserted_at)}>
+              {Calendar.strftime(comment.inserted_at, "%b %-d, %H:%M")}
+            </time>
+          </div>
+          <%!-- Rendered as a text node, never raw markup: a comment is
+                editor-typed prose, not HTML. --%>
+          <p class="mt-1 break-words">{comment.body}</p>
+          <button
+            :if={is_nil(comment.thread_id)}
+            type="button"
+            phx-click={if comment.resolved_at, do: "comment_unresolve", else: "comment_resolve"}
+            phx-value-id={comment.id}
+            class="mt-1 text-base-content/60 underline hover:text-base-content"
+          >
+            {if comment.resolved_at, do: gettext("Reopen thread"), else: gettext("Resolve thread")}
+          </button>
+        </div>
+
+        <%!-- See `assist_panel/1`'s textarea for why this is unprefixed with
+              its own phx-change/phx-debounce="blur" rather than a nested
+              <form>: the Send button reads @comment_draft (synced on blur),
+              never anything from its own click event. --%>
+        <textarea
+          name="comment_body"
+          rows="2"
+          phx-change="comment_draft"
+          phx-debounce="blur"
+          aria-label={gettext("Write a comment")}
+          placeholder={gettext("Write a comment…")}
+          class="field-input text-xs"
+        >{@draft}</textarea>
+
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            phx-click="comment_add"
+            phx-value-bid={@block_id}
+            class="btn btn-sm btn-default"
+          >
+            {gettext("Send")}
+          </button>
+          <button
+            type="button"
+            phx-click="comment_close"
+            class="text-xs text-base-content/60 underline hover:text-base-content"
+          >
+            {gettext("Close")}
+          </button>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  # This block's thread, oldest first — the root (if any) followed by its
+  # replies. `RouteToBlockThread` guarantees every comment sharing a block id
+  # already belongs to the same one thread, so no grouping-by-thread-id is
+  # needed here; `comments` is already sorted by `inserted_at` from
+  # `list_comments_for!`.
+  defp thread_for_block(comments, block_id),
+    do: Enum.filter(comments, &(&1.block_id == block_id))
+
+  # A thread with no comments yet is not "resolved" — there's nothing to
+  # reopen. Otherwise resolved iff its root (thread_id: nil) carries a
+  # resolved_at.
+  defp thread_resolved?([]), do: false
+  defp thread_resolved?(thread), do: Enum.any?(thread, &(is_nil(&1.thread_id) and &1.resolved_at))
+
+  defp comment_author_label(%{author: %{name: name}}) when is_binary(name) and name != "",
+    do: name
+
+  defp comment_author_label(%{author: %{email: email}}) when not is_nil(email),
+    do: to_string(email)
+
+  defp comment_author_label(_comment), do: gettext("Someone")
+
   attr :form, :any, required: true
   attr :media, :list, required: true
   attr :current_org, :any, required: true
@@ -3476,6 +5940,22 @@ defmodule KilnCMSWeb.ContentEditorLive do
     </div>
     """
   end
+
+  defp task_overrides_site?(task, site_default) do
+    case KilnCMS.CMS.TaskSettings.describe(task, site_default) do
+      {^site_default, _source} -> false
+      {_effective, :task} -> true
+      {_effective, :site} -> false
+    end
+  end
+
+  # A three-valued select: "" is `nil` ("use the site default"), and it is a
+  # value in its own right rather than a missing one (#818). Anything else
+  # unrecognised also reads as `nil`, so a hand-pushed payload lands on the
+  # inheriting default rather than silently pinning the task.
+  defp tri_state("true"), do: true
+  defp tri_state("false"), do: false
+  defp tri_state(_other), do: nil
 
   defp blank_to_nil(value) do
     case String.trim(to_string(value || "")) do
@@ -3542,25 +6022,101 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # items beyond the mounted picker window, and matches partial input as the
   # user types (the library's `:search` action is whole-word tsquery, less
   # forgiving for a live picker). %, _ and \ in the input match literally.
-  defp search_media(q, actor, org) do
+  #
+  # `kind` filters to the same image/document split the mounted `@media`/
+  # `@file_media` lists use (#481) — the image picker must never surface a
+  # document it can't render as an `<img>`, and vice versa.
+  defp search_media(q, actor, org, kind \\ :image) do
     pattern = "%" <> String.replace(q, ~r/([\\%_])/, "\\\\\\1") <> "%"
+
+    text_filter =
+      expr(ilike(filename, ^pattern) or ilike(alt, ^pattern) or ilike(caption, ^pattern))
 
     CMS.list_media_items!(
       actor: actor,
       tenant: org,
       query: [
-        filter:
-          expr(ilike(filename, ^pattern) or ilike(alt, ^pattern) or ilike(caption, ^pattern)),
-        select: [:id, :url, :alt, :caption, :filename],
+        filter: search_kind_filter(kind, text_filter),
+        select: search_select(kind),
         sort: [inserted_at: :desc],
         limit: @max_media
       ]
     )
   end
 
+  # Same kind split as the mounted `@media`/`@file_media`/`@av_media` lists
+  # above, by `content_type` rather than `width` — see that comment. Every
+  # clause here has a twin in the mount filters; `KilnCMS.MediaKind` is the
+  # prose version of the same rule, but a filter has to run in Postgres.
+  # Which library an open A/V drawer is browsing. `nil` (drawer closed) still
+  # has to answer something, and `:av` is the harmless default — the search
+  # result is discarded when the drawer isn't open.
+  defp av_picker_kind({_bid, "poster"}), do: :image
+  defp av_picker_kind({_bid, "captions"}), do: :captions
+  defp av_picker_kind(_target), do: :av
+
+  # The block fields each pick writes. `duration_seconds` rides along with the
+  # media itself (it feeds the JSON-LD `duration` and the editor's summary
+  # line) but is NOT written for the poster or the track — the poster's own
+  # length is meaningless and a `.vtt` has none.
+  defp av_block_patch("media", item) do
+    %{
+      "media_id" => item.id,
+      "duration_seconds" => item.duration_seconds,
+      # A pasted external URL and a library item are alternatives, not layers
+      # (see `KilnCMS.Blocks.Video`'s `src/1`): leaving a stale `url` behind
+      # would be invisible until the item was later cleared.
+      "url" => nil
+    }
+  end
+
+  defp av_block_patch("poster", item),
+    do: %{"poster_media_id" => item.id, "poster_url" => nil}
+
+  defp av_block_patch("captions", item),
+    do: %{"captions_media_id" => item.id, "captions_label" => item.alt || item.filename}
+
+  defp search_kind_filter(:image, text_filter),
+    do: expr((is_nil(content_type) or ilike(content_type, "image/%")) and ^text_filter)
+
+  # `:file` is "a document", NOT "not an image" — video, audio and caption
+  # tracks (#494) are all non-image and none of them belongs in a picker whose
+  # block renders a download link.
+  defp search_kind_filter(:file, text_filter),
+    do: expr(^document_filter() and ^text_filter)
+
+  defp search_kind_filter(:av, text_filter),
+    do: expr(^av_filter() and ^text_filter)
+
+  defp search_kind_filter(:captions, text_filter),
+    do: expr(content_type == "text/vtt" and ^text_filter)
+
+  defp search_select(:image), do: [:id, :url, :alt, :caption, :filename]
+  defp search_select(:file), do: [:id, :filename, :content_type, :byte_size, :audience]
+
+  defp search_select(kind) when kind in [:av, :captions],
+    do: [:id, :filename, :content_type, :byte_size, :audience, :duration_seconds, :variants]
+
+  @doc false
+  # Shared by the mount lists and the live search, so the two can't drift.
+  # Both are plain `content_type` predicates: a NULL content_type is an image
+  # (see the mount comment) and so is excluded from each.
+  def document_filter do
+    expr(
+      not is_nil(content_type) and not ilike(content_type, "image/%") and
+        not ilike(content_type, "video/%") and not ilike(content_type, "audio/%") and
+        content_type != "text/vtt"
+    )
+  end
+
+  @doc false
+  def av_filter,
+    do: expr(ilike(content_type, "video/%") or ilike(content_type, "audio/%"))
+
   # The `phx-value-index` for a pick button: "new" inserts a fresh image block
   # (browser opened from the chrome), an integer fills that existing block.
   defp pick_index(:new), do: "new"
+  defp pick_index({:gallery, _id}), do: "gallery"
   defp pick_index(:featured), do: "featured"
   defp pick_index(:seo_image), do: "seo_image"
   defp pick_index({:block, _id}), do: "block"
@@ -3569,6 +6125,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # The target block's stable id for a per-block pick; nil for featured/new picks
   # (so no `phx-value-bid` attribute is emitted for those).
   defp pick_block_id({:block, id}), do: id
+  defp pick_block_id({:gallery, id}), do: id
   defp pick_block_id(_), do: nil
 
   attr :block_types, :list, required: true
@@ -3689,6 +6246,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   attr :media, :list, required: true
   attr :results, :list, default: nil
   attr :query, :string, required: true
+  attr :picked, :list, default: []
 
   # Media-library browser as a right-side drawer (Theme D). It slides in beside the
   # editor rather than a full-screen modal that blanks the whole surface, so you
@@ -3697,86 +6255,299 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # image block (`{:block, id}`). Browse + search + insert; while a query is active
   # `results` (a DB search) replaces the browse window.
   defp image_picker(assigns) do
-    assigns = assign(assigns, :visible, assigns.results || assigns.media)
+    assigns =
+      assigns
+      |> assign(:visible, assigns.results || assigns.media)
+      |> assign(:multi?, match?({:gallery, _id}, assigns.index))
 
     ~H"""
-    <div class="fixed inset-0 z-50" phx-window-keydown="close_picker" phx-key="Escape">
-      <%!-- A light scrim dims the editor without hiding it — the drawer is to the
-            side, not over everything — and clicking it closes the drawer. --%>
-      <div class="absolute inset-0 bg-black/20" phx-click="close_picker" aria-hidden="true"></div>
-      <div
-        id="image-picker-dialog"
-        phx-hook="FocusTrap"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="image-picker-title"
-        tabindex="-1"
-        class="drawer-in absolute inset-y-0 right-0 flex w-full max-w-md flex-col border-l border-base-content/10 bg-base-100 shadow-xl"
-      >
-        <div class="flex items-center justify-between gap-4 border-b border-base-content/10 p-4">
-          <h2 id="image-picker-title" class="text-lg font-medium">{picker_title(@index)}</h2>
+    <.modal id="image-picker-dialog" on_close="close_picker" variant={:drawer}>
+      <:title>{picker_title(@index)}</:title>
+
+      <div class="flex-1 overflow-y-auto p-4">
+        <form :if={@media != []} id="media-browser-filter" phx-change="search_media" class="mb-3">
+          <input
+            type="text"
+            name="q"
+            value={@query}
+            placeholder={gettext("Search by filename, alt or caption")}
+            aria-label={gettext("Search by filename, alt text or caption")}
+            phx-debounce="150"
+            autocomplete="off"
+            class="w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
+          />
+        </form>
+
+        <p :if={@media == []} class="text-sm text-base-content/60">
+          {gettext("No media yet — upload some in the")} <.link
+            navigate={~p"/media"}
+            class="underline"
+          >{gettext("media library")}</.link>.
+        </p>
+        <p :if={@media != [] and @visible == []} class="text-sm text-base-content/60">
+          {gettext("No media matches “%{query}”.", query: @query)}
+        </p>
+
+        <div :if={@visible != []} class="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <button
+            :for={item <- @visible}
             type="button"
-            phx-click="close_picker"
-            aria-label={gettext("Close")}
-            class="rounded p-1 text-base-content/70 hover:bg-base-200 hover:text-base-content"
+            phx-click={if @multi?, do: "toggle_pick", else: "pick_image"}
+            phx-value-index={pick_index(@index)}
+            phx-value-bid={pick_block_id(@index)}
+            phx-value-id={item.id}
+            phx-value-url={item.url}
+            title={item.filename}
+            aria-pressed={@multi? && to_string(picked_position(@picked, item.id) != nil)}
+            class={[
+              "group relative overflow-hidden rounded border hover:ring-2 hover:ring-primary",
+              if(picked_position(@picked, item.id),
+                do: "border-primary ring-2 ring-primary",
+                else: "border-base-content/10"
+              )
+            ]}
           >
-            <.icon name="hero-x-mark" class="size-5" />
+            <img
+              src={item.url}
+              alt={item.alt || item.filename}
+              loading="lazy"
+              class="aspect-square w-full object-cover"
+            />
+            <%!-- The number, not a tick: in a multi-select whose order becomes
+                    the gallery order, "which one did I click third" is the thing
+                    an editor actually needs to see. --%>
+            <span
+              :if={position = picked_position(@picked, item.id)}
+              class="absolute right-1 top-1 flex size-6 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-content"
+            >
+              {position}
+            </span>
           </button>
         </div>
-
-        <div class="flex-1 overflow-y-auto p-4">
-          <form :if={@media != []} id="media-browser-filter" phx-change="search_media" class="mb-3">
-            <input
-              type="text"
-              name="q"
-              value={@query}
-              placeholder={gettext("Search by filename, alt or caption")}
-              aria-label={gettext("Search by filename, alt text or caption")}
-              phx-debounce="150"
-              autocomplete="off"
-              class="w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
-            />
-          </form>
-
-          <p :if={@media == []} class="text-sm text-base-content/60">
-            {gettext("No media yet — upload some in the")} <.link
-              navigate={~p"/media"}
-              class="underline"
-            >{gettext("media library")}</.link>.
-          </p>
-          <p :if={@media != [] and @visible == []} class="text-sm text-base-content/60">
-            {gettext("No media matches “%{query}”.", query: @query)}
-          </p>
-
-          <div :if={@visible != []} class="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <button
-              :for={item <- @visible}
-              type="button"
-              phx-click="pick_image"
-              phx-value-index={pick_index(@index)}
-              phx-value-bid={pick_block_id(@index)}
-              phx-value-id={item.id}
-              phx-value-url={item.url}
-              title={item.filename}
-              class="group overflow-hidden rounded border border-base-content/10 hover:ring-2 hover:ring-primary"
-            >
-              <img
-                src={item.url}
-                alt={item.alt || item.filename}
-                loading="lazy"
-                class="aspect-square w-full object-cover"
-              />
-            </button>
-          </div>
-        </div>
       </div>
-    </div>
+
+      <div
+        :if={@multi?}
+        class="flex items-center justify-between gap-3 border-t border-base-content/10 p-4"
+      >
+        <p class="text-sm text-base-content/70">
+          {ngettext("%{count} image selected", "%{count} images selected", length(@picked))}
+        </p>
+        <button
+          type="button"
+          phx-click="add_picked_images"
+          phx-value-bid={pick_block_id(@index)}
+          disabled={@picked == []}
+          class="rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-content disabled:opacity-40"
+        >
+          {gettext("Add to gallery")}
+        </button>
+      </div>
+    </.modal>
     """
+  end
+
+  # The document counterpart of `image_picker/1` (#481) — a single-select
+  # drawer over the (documents-only) file library, filling the `:file` block
+  # identified by `@file_picking`. No multi-select, no "insert new from
+  # chrome" shortcut, and no thumbnail grid (a badge per file instead) —
+  # deliberately smaller than the image picker, since a document doesn't
+  # preview the way an image does and v1 scopes to "pick from the palette,
+  # then fill it in", not every entry point images have.
+  attr :files, :list, required: true
+  attr :results, :any, required: true
+  attr :query, :string, required: true
+
+  defp file_picker(assigns) do
+    assigns = assign(assigns, :visible, assigns.results || assigns.files)
+
+    ~H"""
+    <.modal id="file-picker-dialog" on_close="close_file_picker" variant={:drawer}>
+      <:title>{gettext("Choose a file")}</:title>
+
+      <div class="flex-1 overflow-y-auto p-4">
+        <form
+          :if={@files != []}
+          id="file-browser-filter"
+          phx-change="search_file_media"
+          class="mb-3"
+        >
+          <input
+            type="text"
+            name="q"
+            value={@query}
+            placeholder={gettext("Search by filename")}
+            aria-label={gettext("Search by filename")}
+            phx-debounce="150"
+            autocomplete="off"
+            class="w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
+          />
+        </form>
+
+        <p :if={@files == []} class="text-sm text-base-content/60">
+          {gettext("No documents yet — upload a PDF in the")} <.link
+            navigate={~p"/media"}
+            class="underline"
+          >{gettext("media library")}</.link>.
+        </p>
+        <p :if={@files != [] and @visible == []} class="text-sm text-base-content/60">
+          {gettext("No documents match “%{query}”.", query: @query)}
+        </p>
+
+        <ul :if={@visible != []} class="space-y-1">
+          <li :for={item <- @visible}>
+            <button
+              type="button"
+              phx-click="pick_file"
+              phx-value-id={item.id}
+              title={item.filename}
+              class="flex w-full items-center gap-2 rounded border border-base-content/10 px-3 py-2 text-left text-sm hover:border-primary hover:bg-base-200"
+            >
+              <.icon name="hero-document" class="size-5 shrink-0 text-base-content/60" />
+              <span class="min-w-0 flex-1 truncate">{item.filename}</span>
+              <span
+                :if={item.audience != :public}
+                class="shrink-0 rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-warning-ink"
+              >
+                {gettext("Gated")}
+              </span>
+            </button>
+          </li>
+        </ul>
+      </div>
+    </.modal>
+    """
+  end
+
+  # The A/V counterpart of `file_picker/1` (#494), and deliberately the same
+  # shape — single-select, no multi-pick, no "insert new" shortcut.
+  #
+  # One component covers three targets, because a video block picks from
+  # three different libraries: the video/audio itself (`@av_media`), a poster
+  # image (`@images`) and a WebVTT caption track (searched, since a `.vtt` is
+  # rare enough not to warrant its own mounted list). `@target` is the
+  # `{block_id, field}` from `@av_picking`, and it decides both the list shown
+  # and the copy — a drawer titled "Choose a video" that is actually offering
+  # poster images is worse than no drawer.
+  attr :target, :any, required: true
+  attr :items, :list, required: true
+  attr :images, :list, required: true
+  attr :results, :any, required: true
+  attr :query, :string, required: true
+
+  defp av_picker(assigns) do
+    {_bid, field} = assigns.target
+
+    mounted =
+      case field do
+        "poster" -> assigns.images
+        # No mounted list for caption tracks: `@results` (the search) is the
+        # only way to reach one, and an empty state below says so.
+        "captions" -> []
+        _media -> assigns.items
+      end
+
+    assigns =
+      assigns
+      |> assign(:field, field)
+      |> assign(:mounted, mounted)
+      |> assign(:visible, assigns.results || mounted)
+
+    ~H"""
+    <.modal id="av-picker-dialog" on_close="close_av_picker" variant={:drawer}>
+      <:title>{av_picker_title(@field)}</:title>
+
+      <div class="flex-1 overflow-y-auto p-4">
+        <form id="av-browser-filter" phx-change="search_av_media" class="mb-3">
+          <input
+            type="text"
+            name="q"
+            value={@query}
+            placeholder={gettext("Search by filename")}
+            aria-label={gettext("Search by filename")}
+            phx-debounce="150"
+            autocomplete="off"
+            class="w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
+          />
+        </form>
+
+        <p :if={@visible == [] and @query != ""} class="text-sm text-base-content/60">
+          {gettext("Nothing matches “%{query}”.", query: @query)}
+        </p>
+        <p :if={@visible == [] and @query == ""} class="text-sm text-base-content/60">
+          {av_picker_empty(@field)} <.link navigate={~p"/media"} class="underline">{gettext(
+                "media library"
+              )}</.link>.
+        </p>
+
+        <ul :if={@visible != []} class="space-y-1">
+          <li :for={item <- @visible}>
+            <button
+              type="button"
+              phx-click="pick_av"
+              phx-value-id={item.id}
+              title={item.filename}
+              class="flex w-full items-center gap-2 rounded border border-base-content/10 px-3 py-2 text-left text-sm hover:border-primary hover:bg-base-200"
+            >
+              <.icon
+                name={av_item_icon(item)}
+                class="size-5 shrink-0 text-base-content/60"
+              />
+              <span class="min-w-0 flex-1 truncate">{item.filename}</span>
+              <span :if={av_item_duration(item)} class="shrink-0 text-xs text-base-content/60">
+                {av_item_duration(item)}
+              </span>
+              <span
+                :if={Map.get(item, :audience, :public) != :public}
+                class="shrink-0 rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-warning-ink"
+              >
+                {gettext("Gated")}
+              </span>
+            </button>
+          </li>
+        </ul>
+      </div>
+    </.modal>
+    """
+  end
+
+  defp av_picker_title("poster"), do: gettext("Choose a poster image")
+  defp av_picker_title("captions"), do: gettext("Choose a caption track")
+  defp av_picker_title(_field), do: gettext("Choose a video or audio file")
+
+  defp av_picker_empty("poster"), do: gettext("No images yet — upload one in the")
+
+  defp av_picker_empty("captions"),
+    do: gettext("Search for a WebVTT (.vtt) track you've uploaded to the")
+
+  defp av_picker_empty(_field),
+    do: gettext("No video or audio yet — upload an MP4, WebM, MP3 or M4A in the")
+
+  # The picker lists items from three different `select:`s, so nothing here may
+  # assume a field is loaded — `Map.get/3` throughout.
+  defp av_item_icon(item) do
+    case KilnCMS.MediaKind.of(Map.get(item, :content_type)) do
+      :video -> "hero-film"
+      :audio -> "hero-musical-note"
+      :captions -> "hero-language"
+      _kind -> "hero-photo"
+    end
+  end
+
+  defp av_item_duration(item),
+    do: KilnCMS.MediaKind.humanize_duration(Map.get(item, :duration_seconds))
+
+  # 1-based position of a media id in the current selection, or nil.
+  defp picked_position(picked, id) do
+    case Enum.find_index(picked, &(&1.id == id)) do
+      nil -> nil
+      index -> index + 1
+    end
   end
 
   # Drawer heading, per open mode.
   defp picker_title(:new), do: gettext("Insert an image")
+  defp picker_title({:gallery, _id}), do: gettext("Add images to the gallery")
   defp picker_title(:featured), do: gettext("Featured image")
   defp picker_title(:seo_image), do: gettext("Choose a social image")
   defp picker_title(_), do: gettext("Choose an image")
@@ -3933,10 +6704,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp block_icon("heading"), do: "hero-hashtag"
   defp block_icon("quote"), do: "hero-chat-bubble-bottom-center-text"
   defp block_icon("image"), do: "hero-photo"
+  defp block_icon("file"), do: "hero-document-arrow-down"
+  defp block_icon("video"), do: "hero-film"
+  defp block_icon("audio"), do: "hero-musical-note"
   defp block_icon("embed"), do: "hero-code-bracket"
   defp block_icon("divider"), do: "hero-minus"
   defp block_icon("columns"), do: "hero-view-columns"
   defp block_icon("portable_text"), do: "hero-bars-3"
+  defp block_icon("gallery"), do: "hero-photo"
+  defp block_icon("accordion"), do: "hero-bars-3-bottom-left"
   defp block_icon("faq"), do: "hero-question-mark-circle"
   defp block_icon("how_to"), do: "hero-list-bullet"
   defp block_icon("claim"), do: "hero-check-badge"
@@ -3948,10 +6724,29 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp block_description("heading"), do: gettext("Section title")
   defp block_description("quote"), do: gettext("Highlighted quotation")
   defp block_description("image"), do: gettext("Picture with alt text and caption")
+  defp block_description("file"), do: gettext("Downloadable document, e.g. a PDF")
+
+  # Says what it is NOT, for the same reason `accordion` does: `embed` also
+  # produces a video player, and the difference an editor cares about is where
+  # the file lives, not what the block looks like.
+  defp block_description("video"),
+    do: gettext("Video from your media library — use Embed for YouTube or Vimeo")
+
+  defp block_description("audio"), do: gettext("Audio from your media library, e.g. a podcast")
   defp block_description("embed"), do: gettext("Embedded HTML or external content")
   defp block_description("divider"), do: gettext("Visual separator between sections")
   defp block_description("columns"), do: gettext("Side-by-side columns holding nested blocks")
   defp block_description("portable_text"), do: gettext("Portable Text rich content")
+
+  defp block_description("gallery"),
+    do: gettext("Several images with captions, fired as ImageGallery structured data")
+
+  # Says what it is NOT, because that is the only difference an editor can see:
+  # this and the FAQ block draw the same collapsing panels, and picking the wrong
+  # one publishes a claim that the page is a list of questions and answers.
+  defp block_description("accordion"),
+    do: gettext("Collapsible panels with no structured data — use FAQ for questions and answers")
+
   defp block_description("faq"), do: gettext("Q&A list, fired as FAQPage structured data")
 
   defp block_description("how_to"),
@@ -4003,10 +6798,30 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # The scalar DSL fields a role may edit (field-level policy, Phase J), excluding
   # types with bespoke UIs (rich_text/map/reference/array).
+  # Fields resolved by the server, not typed by a person. They are ordinary
+  # block scalars — so without this the generic editor offers each of them as a
+  # free-text box, which is how `thumbnail_url` (an `<img src>` on the public
+  # page) and `resolved_at` (a machine timestamp) became editable in the first
+  # draft of #489. The write path filters them anyway; this stops the editor
+  # inviting the attempt.
+  @server_resolved_fields [
+    :title,
+    :author_name,
+    :provider_name,
+    :thumbnail_url,
+    :resolved_url,
+    :resolved_at
+  ]
+
   defp editable_scalar_fields(module, role) do
+    server_resolved = if module == KilnCMS.Blocks.Embed, do: @server_resolved_fields, else: []
+
     module
     |> Kiln.Block.Info.fields()
-    |> Enum.reject(&(&1.type in [:rich_text, :map, :reference] or match?({:array, _}, &1.type)))
+    |> Enum.reject(fn field ->
+      field.type in [:rich_text, :map, :reference] or match?({:array, _}, field.type) or
+        field.name in server_resolved
+    end)
     |> Enum.filter(&Kiln.Block.Policy.can_edit_field?(module, &1.name, role))
   end
 
@@ -4065,16 +6880,22 @@ defmodule KilnCMSWeb.ContentEditorLive do
     """
   end
 
-  # ── GEO item-list editor (faq items / how_to steps, #357) ───────────────────
+  # ── Repeating two-field row editor (faq / how_to / accordion) ───────────────
 
   # Repeatable two-field rows bound straight into the union member's
-  # `{:array, :map}` param (`…[items][0][question]`); `normalize_geo_items`
+  # `{:array, :map}` param (`…[items][0][question]`); `normalize_block_items`
   # turns the indexed maps back into lists on validate/save. The hidden
   # sentinel keeps the param present when every row is removed, so deleting
   # the last row actually clears the stored list.
+  #
+  # Written for the GEO blocks (#357) and generalized when the accordion arrived
+  # (#482) — three blocks, one shape: a label and a body per row. The `case`
+  # below has no fallback on purpose: a block wired into `@row_editor_types`
+  # without a spec here should fail loudly at render rather than draw an empty
+  # box the editor cannot use.
   attr :bf, :any, required: true
 
-  defp geo_items_editor(assigns) do
+  defp item_rows_editor(assigns) do
     {field, key_a, key_b, label_a, label_b, add_label} =
       case block_type_string(assigns.bf) do
         "faq" ->
@@ -4084,13 +6905,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
         "how_to" ->
           {:steps, "name", "text", gettext("Step label (optional)"), gettext("Instruction"),
            gettext("Add step")}
+
+        "accordion" ->
+          {:panels, "title", "content", gettext("Panel title"), gettext("Panel content"),
+           gettext("Add panel")}
       end
 
     assigns =
       assigns
       |> assign(:field, field)
       |> assign(:name, assigns.bf[field].name)
-      |> assign(:items, geo_item_maps(assigns.bf[field].value))
+      |> assign(:items, item_row_maps(assigns.bf[field].value))
       |> assign(:key_a, key_a)
       |> assign(:key_b, key_b)
       |> assign(:label_a, label_a)
@@ -4126,7 +6951,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         </div>
         <button
           type="button"
-          phx-click="geo_item_remove"
+          phx-click="item_row_remove"
           phx-value-index={@bf.index}
           phx-value-field={@field}
           phx-value-item={i}
@@ -4139,7 +6964,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
       <button
         type="button"
-        phx-click="geo_item_add"
+        phx-click="item_row_add"
         phx-value-index={@bf.index}
         phx-value-field={@field}
         class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
@@ -4152,7 +6977,368 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # The current item rows of an `{:array, :map}` field value, tolerating nil
   # (fresh block) and non-map junk.
-  defp geo_item_maps(value), do: value |> List.wrap() |> Enum.filter(&is_map/1)
+  defp item_row_maps(value), do: value |> List.wrap() |> Enum.filter(&is_map/1)
+
+  # A function rather than `@row_editor_types` inline in the template: inside a
+  # `~H` sigil `@name` means `assigns.name`, so referencing the module attribute
+  # there reads a socket assign that does not exist and raises at render.
+  defp row_editor_type?(type), do: type in @row_editor_types
+
+  # ── gallery editor (#482) ───────────────────────────────────────────────────
+
+  # One row per image: thumbnail, alt, caption, reorder, remove. Rows bind into
+  # the `images` `{:array, :map}` param exactly as the row editor above binds
+  # `items`/`steps`/`panels`, so `normalize_item_rows/1` flattens them the same
+  # way and there is no parallel socket state to keep in sync.
+  #
+  # Reordering is offered twice on purpose. Dragging is the fast path; the
+  # up/down buttons are the one that works from a keyboard, on a touch screen,
+  # and with a screen reader — the same pairing `move_block/2` gives the
+  # top-level list, and the reason it is not a "nice to have" is that a gallery
+  # is *only* an ordering: an editor who cannot reorder it cannot use it.
+  # The video block's editor (#494). Three library picks (the media, a poster,
+  # a caption track), each writing a hidden `media_id`-shaped field, plus the
+  # display metadata and the two playback flags.
+  #
+  # Every picked id is carried in a hidden input rather than re-derived on
+  # save: the block's params round-trip through `AshPhoenix.Form`, and a field
+  # with no input in the DOM is a field the next `validate` drops.
+  attr :bf, :any, required: true
+
+  defp video_editor(assigns) do
+    ~H"""
+    <div class="space-y-2">
+      <input type="hidden" name={@bf[:media_id].name} value={@bf[:media_id].value} />
+      <input type="hidden" name={@bf[:poster_media_id].name} value={@bf[:poster_media_id].value} />
+      <input
+        type="hidden"
+        name={@bf[:captions_media_id].name}
+        value={@bf[:captions_media_id].value}
+      />
+      <input
+        type="hidden"
+        name={@bf[:duration_seconds].name}
+        value={@bf[:duration_seconds].value}
+      />
+      <%!-- `poster_url` (an externally-hosted poster, the counterpart of the
+            `url` field below) has no visible input: the picker is the only way
+            to set a poster from this screen, and a second URL box next to it
+            would be one more thing to explain than it is worth. It still needs
+            a hidden input, because a field with no input in the DOM is a field
+            the next `validate` DROPS — without this, opening any page whose
+            video block was written through the headless API would silently
+            erase its poster. The two captions text fields below are visible
+            only when a track is picked, and carry hidden twins for exactly the
+            same reason when they aren't. --%>
+      <input type="hidden" name={@bf[:poster_url].name} value={@bf[:poster_url].value} />
+      <input
+        :if={@bf[:captions_media_id].value in [nil, ""]}
+        type="hidden"
+        name={@bf[:captions_label].name}
+        value={@bf[:captions_label].value}
+      />
+      <input
+        :if={@bf[:captions_media_id].value in [nil, ""]}
+        type="hidden"
+        name={@bf[:captions_lang].name}
+        value={@bf[:captions_lang].value}
+      />
+
+      <%!-- The real player, not a still: the point of picking a video in the
+            editor is confirming you picked the right one, and a filename does
+            not tell you that. Streams through the authorized route, so a gated
+            item previews here exactly as it will on the page. --%>
+      <video
+        :if={@bf[:media_id].value not in [nil, ""]}
+        id={"video-preview-#{@bf[:id].value}"}
+        src={~p"/media/#{@bf[:media_id].value}/stream"}
+        controls
+        playsinline
+        preload="metadata"
+        class="max-h-48 w-full rounded bg-black"
+      />
+
+      <div class="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          phx-click="open_av_picker"
+          phx-value-bid={@bf[:id].value}
+          phx-value-field="media"
+          class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+        >
+          <.icon name="hero-film" class="mr-1 size-4" />{gettext("Choose video")}
+        </button>
+        <button
+          type="button"
+          phx-click="open_av_picker"
+          phx-value-bid={@bf[:id].value}
+          phx-value-field="poster"
+          class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+        >
+          <.icon name="hero-photo" class="mr-1 size-4" />{if @bf[:poster_media_id].value in [
+                                                               nil,
+                                                               ""
+                                                             ],
+                                                             do: gettext("Add poster"),
+                                                             else: gettext("Change poster")}
+        </button>
+        <button
+          type="button"
+          phx-click="open_av_picker"
+          phx-value-bid={@bf[:id].value}
+          phx-value-field="captions"
+          class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+        >
+          <.icon name="hero-language" class="mr-1 size-4" />{if @bf[:captions_media_id].value in [
+                                                                  nil,
+                                                                  ""
+                                                                ],
+                                                                do: gettext("Add captions"),
+                                                                else: gettext("Change captions")}
+        </button>
+      </div>
+
+      <%!-- Not a validation error — a video with no captions still publishes.
+            It is the one accessibility fact about this block an editor cannot
+            see by looking at it, so it is stated where the decision is made
+            rather than in a report nobody opens. --%>
+      <p
+        :if={@bf[:media_id].value not in [nil, ""] and @bf[:captions_media_id].value in [nil, ""]}
+        class="flex items-start gap-1 text-xs text-warning"
+      >
+        <.icon name="hero-exclamation-triangle" class="mt-px size-3.5 shrink-0" />
+        <span>
+          {gettext("No captions — this video isn't available to deaf and hard-of-hearing readers.")}
+        </span>
+      </p>
+
+      <.input
+        field={@bf[:url]}
+        label={gettext("Video URL")}
+        placeholder={gettext("…or paste a URL to a video hosted elsewhere")}
+      />
+      <.input field={@bf[:title]} label={gettext("Title")} />
+      <.input field={@bf[:caption]} label={gettext("Caption")} />
+      <div :if={@bf[:captions_media_id].value not in [nil, ""]} class="grid grid-cols-2 gap-2">
+        <.input field={@bf[:captions_label]} label={gettext("Captions label")} />
+        <.input
+          field={@bf[:captions_lang]}
+          label={gettext("Captions language")}
+          placeholder="en"
+        />
+      </div>
+      <div class="flex flex-wrap gap-4">
+        <%!-- The label says "muted" because the rendered element always is:
+              browsers refuse to autoplay a video with sound, so offering the
+              two as separate choices would offer one that does nothing. --%>
+        <.input
+          field={@bf[:autoplay]}
+          type="checkbox"
+          label={gettext("Autoplay (muted)")}
+        />
+        <.input field={@bf[:loop]} type="checkbox" label={gettext("Loop")} />
+      </div>
+    </div>
+    """
+  end
+
+  attr :bf, :any, required: true
+
+  defp audio_editor(assigns) do
+    ~H"""
+    <div class="space-y-2">
+      <input type="hidden" name={@bf[:media_id].name} value={@bf[:media_id].value} />
+      <input
+        type="hidden"
+        name={@bf[:duration_seconds].name}
+        value={@bf[:duration_seconds].value}
+      />
+
+      <audio
+        :if={@bf[:media_id].value not in [nil, ""]}
+        id={"audio-preview-#{@bf[:id].value}"}
+        src={~p"/media/#{@bf[:media_id].value}/stream"}
+        controls
+        preload="metadata"
+        class="w-full"
+      />
+
+      <div class="flex items-center gap-2">
+        <button
+          type="button"
+          phx-click="open_av_picker"
+          phx-value-bid={@bf[:id].value}
+          phx-value-field="media"
+          class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+        >
+          <.icon name="hero-musical-note" class="mr-1 size-4" />{gettext("Choose audio")}
+        </button>
+      </div>
+
+      <.input
+        field={@bf[:url]}
+        label={gettext("Audio URL")}
+        placeholder={gettext("…or paste a URL to audio hosted elsewhere")}
+      />
+      <.input field={@bf[:title]} label={gettext("Title")} />
+      <.input field={@bf[:caption]} label={gettext("Caption")} />
+      <.input field={@bf[:loop]} type="checkbox" label={gettext("Loop")} />
+    </div>
+    """
+  end
+
+  attr :bf, :any, required: true
+
+  defp gallery_editor(assigns) do
+    assigns =
+      assigns
+      |> assign(:name, assigns.bf[:images].name)
+      |> assign(:images, item_row_maps(assigns.bf[:images].value))
+      |> assign(:bid, assigns.bf[:id].value)
+
+    ~H"""
+    <div class="mt-2 space-y-2">
+      <%!-- Keeps the param present when the last image is removed, so clearing a
+            gallery actually clears the stored list rather than leaving the old
+            one untouched. Same trick as the row editor. --%>
+      <input type="hidden" name={"#{@name}[_sentinel]"} value="" />
+
+      <%!-- The gallery draws its own fields, so it is excluded from
+            `dsl_block_fields/1` — which means anything not rendered here is
+            unreachable from the editor entirely. `title` is one of them. --%>
+      <.input field={@bf[:title]} label={gettext("Heading (optional)")} />
+
+      <.input
+        field={@bf[:layout]}
+        type="select"
+        label={gettext("Layout")}
+        options={gallery_layout_options()}
+      />
+
+      <div
+        :if={@images != []}
+        id={"gallery-#{@bid}"}
+        phx-hook="GallerySortable"
+        data-block-id={@bid}
+        class="space-y-2"
+      >
+        <div
+          :for={{image, i} <- Enum.with_index(@images)}
+          data-image-row={i}
+          class="flex items-start gap-2 rounded border border-base-content/10 p-2"
+        >
+          <button
+            type="button"
+            data-image-handle
+            aria-hidden="true"
+            tabindex="-1"
+            class="mt-1 cursor-grab text-base-content/40"
+          >
+            <.icon name="hero-bars-2" class="size-4" />
+          </button>
+
+          <img
+            :if={safe_preview_src(image["url"])}
+            src={safe_preview_src(image["url"])}
+            alt=""
+            class="size-16 shrink-0 rounded border border-base-content/10 object-cover"
+          />
+
+          <div class="grow space-y-1">
+            <input type="hidden" name={"#{@name}[#{i}][url]"} value={image["url"]} />
+            <input type="hidden" name={"#{@name}[#{i}][media_id]"} value={image["media_id"]} />
+            <input
+              type="text"
+              name={"#{@name}[#{i}][alt]"}
+              value={image["alt"]}
+              placeholder={gettext("Alt text — leave blank only if decorative")}
+              aria-label={gettext("Alt text")}
+              phx-debounce="300"
+              class="w-full rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
+            />
+            <input
+              type="text"
+              name={"#{@name}[#{i}][caption]"}
+              value={image["caption"]}
+              placeholder={gettext("Caption (optional)")}
+              aria-label={gettext("Caption")}
+              phx-debounce="300"
+              class="w-full rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
+            />
+          </div>
+
+          <div class="flex flex-col">
+            <button
+              type="button"
+              phx-click="gallery_move"
+              phx-value-bid={@bid}
+              phx-value-item={i}
+              phx-value-dir="up"
+              disabled={i == 0}
+              aria-label={gettext("Move image up")}
+              class="text-base-content/60 hover:text-base-content disabled:opacity-30"
+            >
+              <.icon name="hero-chevron-up" class="size-4" />
+            </button>
+            <button
+              type="button"
+              phx-click="gallery_move"
+              phx-value-bid={@bid}
+              phx-value-item={i}
+              phx-value-dir="down"
+              disabled={i == length(@images) - 1}
+              aria-label={gettext("Move image down")}
+              class="text-base-content/60 hover:text-base-content disabled:opacity-30"
+            >
+              <.icon name="hero-chevron-down" class="size-4" />
+            </button>
+            <button
+              type="button"
+              phx-click="gallery_remove"
+              phx-value-bid={@bid}
+              phx-value-item={i}
+              aria-label={gettext("Remove image")}
+              class="mt-1 text-base-content/60 hover:text-error"
+            >
+              <.icon name="hero-x-mark" class="size-4" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <p :if={@images == []} class="text-sm text-base-content/60">
+        {gettext("No images yet.")}
+      </p>
+
+      <button
+        type="button"
+        phx-click="open_gallery_picker"
+        phx-value-bid={@bid}
+        class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+      >
+        <.icon name="hero-photo" class="mr-1 size-4" />{gettext("Add images")}
+      </button>
+    </div>
+    """
+  end
+
+  # A blank first option, because a fresh gallery has `layout: nil` and a select
+  # with no empty entry silently selects whichever option sorts first — the
+  # editor would read "Carousel" while the preview rendered the default grid,
+  # and the first save would post a layout nobody chose. (The columns editor
+  # below prepends "Equal width" for the same reason.) It is also the only way
+  # back to the default once a layout has been picked.
+  defp gallery_layout_options do
+    [{gettext("Grid (default)"), ""}] ++
+      for layout <- KilnCMS.Blocks.Gallery.layouts(),
+          layout != "grid",
+          do: {gallery_layout_label(layout), layout}
+  end
+
+  defp gallery_layout_label("grid"), do: gettext("Grid")
+  defp gallery_layout_label("masonry"), do: gettext("Masonry")
+  defp gallery_layout_label("carousel"), do: gettext("Carousel")
+  defp gallery_layout_label(other), do: other
 
   # ── columns (nested-layout) editor (#335) ───────────────────────────────────
 
@@ -4315,18 +7501,47 @@ defmodule KilnCMSWeb.ContentEditorLive do
         phx-value-field={field}
         class="w-full rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
       />
+      <%!-- Named, unlike its nameless siblings above, and the name carries the
+      identifiers (#893). A `<select>` inside a form routes its own `phx-change`
+      through LiveView's `pushInput`, which serializes the form filtered to the
+      changed input's `name` and scrapes `phx-value-*` off the FORM, not the
+      element — so a nameless select sends neither its value nor its ids, and
+      the handler head could not match. The text inputs beside it work because
+      `phx-blur` is not a form binding and goes through `pushEvent`, which does
+      carry `phx-value-*`; that asymmetry is what hid this.
+
+      Named outside the `form[...]` namespace on purpose, so it stays out of the
+      content changeset exactly as the nameless inputs do: `validate` matches
+      `%{"form" => params}` and never sees this key, and the nested tree is
+      re-injected from socket state by `inject_children/2` regardless. --%>
       <select
         :if={@child["_type"] == "heading"}
+        name={"col_child[#{@block_id}][#{@child["id"]}][level]"}
         phx-change="col_update_child"
-        phx-value-id={@block_id}
-        phx-value-child={@child["id"]}
-        phx-value-field="level"
         class="rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
       >
-        <option :for={n <- 1..6} value={n} selected={to_int(@child["level"]) == n}>H{n}</option>
+        <%!-- Matched to what will actually publish. A child with no stored `level`
+        (a legacy one, or an empty string) made `to_int/1` return 0, so no option
+        was `selected` and the browser showed the first — H1 — while delivery
+        renders `h2`, because `Blocks.Heading.clamp/1` falls back to its default.
+        Harmless while the control was inert; a lie now that it works. --%>
+        <option :for={n <- 1..6} value={n} selected={child_heading_level(@child) == n}>H{n}</option>
       </select>
     </div>
     """
+  end
+
+  # The level the select must show: what `KilnCMS.Blocks.Heading` will render,
+  # not what happens to be stored. Anything outside 1..6 — including a missing
+  # or unparseable value — resolves to the same default that block clamps to, so
+  # the control and the published page cannot disagree.
+  @heading_default_level 2
+
+  defp child_heading_level(child) do
+    case to_int(child["level"]) do
+      n when n in 1..6 -> n
+      _out_of_range -> @heading_default_level
+    end
   end
 
   # {field, placeholder} pairs for a nested child type's text inputs.
@@ -4430,6 +7645,26 @@ defmodule KilnCMSWeb.ContentEditorLive do
             >
               <.icon name="hero-pencil-square" class="mr-1 size-4" />{gettext("Edit on page")}
             </.link>
+            <%!-- Duplicate into a new draft (#471). The copy is made from the
+                  SAVED row, which is the part worth warning about — and the
+                  warning has to cover two different reasons the saved row is not
+                  what is on screen. A dirty buffer is your own unsaved work; a
+                  conflict means the saved row is somebody ELSE's save, so the
+                  copy would be of content you have never seen (#928).
+
+                  `:if={@may_write?}` like every other write affordance in this
+                  file (#922): this route deliberately admits an actor who may
+                  OPEN a record without being able to write it (#550), and
+                  forking someone else's draft is a write. --%>
+            <button
+              :if={@may_write?}
+              type="button"
+              phx-click="duplicate"
+              data-confirm={duplicate_confirm(@save_state, @conflict)}
+              class="btn btn-sm btn-default"
+            >
+              <.icon name="hero-document-duplicate" class="mr-1 size-4" />{gettext("Duplicate")}
+            </button>
           </div>
         </div>
 
@@ -4442,6 +7677,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
           editors={@editors}
           actor={@actor}
           word_count={@seo_body_stats.word_count}
+          a11y_report={@a11y_report}
         />
 
         <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
@@ -4682,7 +7918,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
                             matches on `data-block-id`, so a block without one
                             has nothing to deliver to. --%>
                       <.assist_panel
-                        :if={@assist_enabled? and bf[:id].value}
+                        :if={
+                          @assist_enabled? and @may_write? and @may_assist_blocks? and bf[:id].value
+                        }
                         block_id={bf[:id].value}
                         open?={@assist_block == bf[:id].value}
                         action={@assist_action}
@@ -4721,21 +7959,100 @@ defmodule KilnCMSWeb.ContentEditorLive do
                       <.input field={bf[:alt]} label={gettext("Alt text")} />
                       <.input field={bf[:caption]} label={gettext("Caption")} />
                     </div>
+                    <div :if={block_type_string(bf) == "file"} class="space-y-2">
+                      <input type="hidden" name={bf[:media_id].name} value={media_id_of(bf)} />
+                      <input type="hidden" name={bf[:filename].name} value={bf[:filename].value} />
+                      <input
+                        type="hidden"
+                        name={bf[:content_type].name}
+                        value={bf[:content_type].value}
+                      />
+                      <input
+                        type="hidden"
+                        name={bf[:byte_size].name}
+                        value={bf[:byte_size].value}
+                      />
+                      <p :if={bf[:filename].value} class="flex items-center gap-2 text-sm">
+                        <.icon name="hero-document" class="size-4 shrink-0" />
+                        <span class="truncate">{bf[:filename].value}</span>
+                      </p>
+                      <div class="flex items-center gap-2">
+                        <button
+                          type="button"
+                          phx-click="open_file_picker"
+                          phx-value-bid={bf[:id].value}
+                          class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+                        >
+                          <.icon name="hero-document-arrow-down" class="mr-1 size-4" />{gettext(
+                            "Choose from library"
+                          )}
+                        </button>
+                      </div>
+                      <.input
+                        field={bf[:title]}
+                        label={gettext("Title")}
+                        placeholder={bf[:filename].value}
+                      />
+                      <.input field={bf[:description]} label={gettext("Description")} />
+                    </div>
+                    <div :if={block_type_string(bf) == "fragment"} class="space-y-2">
+                      <%!-- One `<select>`, because a reference is one choice.
+                            It posts `"type:id"`, which `normalize_fragment_ref/1`
+                            turns into the stored reference map (#479). --%>
+                      <.input
+                        type="select"
+                        name={bf[:ref].name}
+                        value={fragment_ref_value(bf[:ref].value)}
+                        label={gettext("Fragment")}
+                        prompt={gettext("Choose published content…")}
+                        options={fragment_options_for(@fragment_options, bf)}
+                      />
+                      <.input field={bf[:label]} label={gettext("Label (editor only)")} />
+                      <p class="text-xs text-base-content/60">
+                        {gettext(
+                          "The target's blocks are inlined where this block sits. Editing the target updates every page that embeds it; an unpublished or restricted target renders nothing."
+                        )}
+                      </p>
+                    </div>
+                    <.video_editor :if={block_type_string(bf) == "video"} bf={bf} />
+                    <.audio_editor :if={block_type_string(bf) == "audio"} bf={bf} />
+                    <.gallery_editor :if={block_type_string(bf) == "gallery"} bf={bf} />
                     <.columns_editor
                       :if={block_type_string(bf) == "columns"}
                       bf={bf}
                       columns={col_state(@block_children, bf)}
                       child_types={@nested_child_types}
                     />
-                    <div :if={block_type_string(bf) not in ["rich_text", "image", "columns"]}>
+                    <div :if={
+                      block_type_string(bf) not in [
+                        "rich_text",
+                        "image",
+                        "file",
+                        "video",
+                        "audio",
+                        "columns",
+                        "gallery",
+                        "fragment"
+                      ]
+                    }>
                       <.dsl_block_fields
                         bf={bf}
                         role={@tier}
                         locked_fields={@locked_fields}
                         cursors={@cursors}
                       />
-                      <.geo_items_editor :if={block_type_string(bf) in ["faq", "how_to"]} bf={bf} />
+                      <.item_rows_editor :if={row_editor_type?(block_type_string(bf))} bf={bf} />
                     </div>
+                    <%!-- Comments (#404) are rendered here, outside every
+                          per-type branch above, so they apply to any block
+                          type — unlike AI assist, which is rich_text-only. --%>
+                    <.comment_panel
+                      :if={bf[:id].value}
+                      block_id={bf[:id].value}
+                      comments={@comments}
+                      open?={@comment_block == bf[:id].value}
+                      draft={if @comment_block == bf[:id].value, do: @comment_draft}
+                    />
                     <%!-- Inline "+" to insert a block right after this one (B2). --%>
                     <.block_inserter
                       id={"insert-after-#{bf[:id].value}"}
@@ -4790,6 +8107,25 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
             <%!-- ── Settings ────────────────────────────────────────────── --%>
             <div class={["space-y-4", @inspector_tab != :settings && "hidden"]}>
+              <.inspector_section title={gettext("Assignment")}>
+                <.task_list
+                  tasks={@tasks}
+                  open?={@task_assign_open?}
+                  draft={@task_draft}
+                  assignable_users={@assignable_users}
+                  auto_complete_default={@auto_complete_default}
+                />
+              </.inspector_section>
+
+              <.inspector_section title={gettext("Release")}>
+                <.release_panel
+                  item={@release_item}
+                  release={@release_of_item}
+                  releases={@releases}
+                  draft={@release_draft}
+                />
+              </.inspector_section>
+
               <.inspector_section title={gettext("Organization & relationships")}>
                 <.input
                   field={@form[:category_id]}
@@ -4807,12 +8143,47 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   options={@audiences}
                 />
 
+                <%!-- Shared-passphrase lock (#496). Plain inputs on the enclosing
+                      form, never a nested <form> — the settings rail's parser
+                      drops one silently.
+
+                      The current passphrase is never echoed back: only whether
+                      one is set. So a blank field means "leave it alone" and
+                      clearing needs the explicit checkbox, which is what
+                      `Changes.ApplyAccessPassword` reads. --%>
+                <div class="space-y-2">
+                  <.input
+                    field={@form[:access_password]}
+                    type="password"
+                    value=""
+                    autocomplete="off"
+                    label={
+                      if content_locked?(@record),
+                        do: gettext("Replace passphrase"),
+                        else: gettext("Passphrase")
+                    }
+                    hint={
+                      gettext(
+                        "Anyone with this passphrase can read the published page. Weak protection, meant for convenience — use Audience for real access control."
+                      )
+                    }
+                  />
+                  <p :if={content_locked?(@record)} class="text-xs text-base-content/60">
+                    {gettext("A passphrase is set. Leave blank to keep it.")}
+                  </p>
+                  <.input
+                    :if={content_locked?(@record)}
+                    field={@form[:remove_access_password]}
+                    type="checkbox"
+                    label={gettext("Remove the passphrase")}
+                  />
+                </div>
+
                 <.tag_picker
                   form={@form}
-                  tags={@tags}
-                  tag_groups={@tag_groups}
-                  kind={@kind}
+                  tag_index={@tag_index}
                   record={@record}
+                  open_sections={@tag_sections_open}
                 />
 
                 <.featured_image_field form={@form} media={@media} />
@@ -4838,6 +8209,64 @@ defmodule KilnCMSWeb.ContentEditorLive do
                 />
               </.inspector_section>
 
+              <%!-- Accessibility (#495) sits in its own section rather than
+                    under SEO, because it is a different question with a
+                    different audience — and because a finding buried three
+                    sections into "SEO & scheduling" is one an author fixing
+                    accessibility will never look for. Same checks underneath;
+                    see `Kiln.Advisory`. --%>
+              <.inspector_section id="inspector-accessibility" title={gettext("Accessibility")}>
+                <:aside>
+                  <.a11y_grade_badge report={@a11y_report} />
+                </:aside>
+                <%!-- Advisory only — nothing here ever blocks a save. The
+                      hard gate on alt text is `Validations.MediaAltText`
+                      (#403), which is a separate, opt-in policy. --%>
+                <.a11y_findings
+                  :if={@a11y_report.findings != []}
+                  report={@a11y_report}
+                  class="rounded border border-base-content/10 bg-base-200/40 p-2"
+                />
+                <p :if={@a11y_report.findings == []} class="text-xs text-base-content/60">
+                  {ngettext(
+                    "No accessibility issues found in %{count} applicable check.",
+                    "No accessibility issues found in %{count} applicable checks.",
+                    @a11y_report.total,
+                    count: @a11y_report.total
+                  )}
+                </p>
+              </.inspector_section>
+
+              <%!-- Compliance (#377). Rendered only when there is something to
+                    say: with claim checking off both checks report `:n_a`, so
+                    `total` is 0 and the section never appears — an install
+                    that never asked for a claims panel doesn't grow one. --%>
+              <.inspector_section
+                :if={@compliance_report.total > 0}
+                id="inspector-compliance"
+                title={gettext("Compliance")}
+              >
+                <:aside>
+                  <.compliance_grade_badge report={@compliance_report} />
+                </:aside>
+                <%!-- Advisory only. The hard gate is
+                      `Validations.ComplianceClaims`, which is separate and
+                      opt-in on top of this — see `KilnCMS.Compliance`. --%>
+                <.compliance_findings
+                  :if={@compliance_report.findings != []}
+                  report={@compliance_report}
+                  class="rounded border border-base-content/10 bg-base-200/40 p-2"
+                />
+                <p :if={@compliance_report.findings == []} class="text-xs text-base-content/60">
+                  {ngettext(
+                    "No claim issues found in %{count} applicable check.",
+                    "No claim issues found in %{count} applicable checks.",
+                    @compliance_report.total,
+                    count: @compliance_report.total
+                  )}
+                </p>
+              </.inspector_section>
+
               <.inspector_section title={gettext("SEO & scheduling")}>
                 <:aside>
                   <.seo_grade_badge report={@seo_report} />
@@ -4849,7 +8278,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   slug_customized?={@slug_customized?}
                   class="rounded border border-base-content/10 bg-base-200/40 p-2"
                 />
-                <div :if={@seo_enabled?}>
+                <div :if={@seo_enabled? and @may_write? and @may_suggest_seo?}>
+                  <%!-- Gated on write access, not just the feature flag (#550):
+                        a read-only viewer must not see a control that would bill
+                        the org for a record they cannot edit. The server handler
+                        re-checks; this only keeps the affordance honest.
+                        `@may_suggest_seo?` adds the per-field grant (#868) —
+                        `@may_write?` is `Ash.can?`, which cannot see a change,
+                        so a field-granted editor was offered a billed run whose
+                        result the save would then reject field by field. --%>
                   <%!-- `type="button"` is mandatory: this sits inside the main
                         <.form>, so the default type would submit it. --%>
                   <button
@@ -5042,8 +8479,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
               <%!-- Internal links (#377). Loaded on an explicit click, never on
                     mount: it costs a vector query plus a read per neighbour, and
                     inspector sections are always expanded, so there is no "first
-                    open" to hang lazy loading off. --%>
-              <.inspector_section title={gettext("Internal links")}>
+                    open" to hang lazy loading off.
+
+                    `:if={@may_write?}` matches the SEO panel above and the
+                    Similar content section below — every control in the rail
+                    that spends work on a click is offered only to someone who
+                    could act on the result. --%>
+              <.inspector_section :if={@may_write?} title={gettext("Internal links")}>
                 <p class="text-xs text-base-content/60">
                   {gettext("Related pages worth linking to from this one.")}
                 </p>
@@ -5094,6 +8536,102 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   />
                 </button>
               </.inspector_section>
+
+              <%!-- Content intelligence (#339). Same click-to-load contract as
+                    Internal links above, and deliberately the section below it:
+                    all three read the same embeddings, and an author who has
+                    just paid for one query is the one most likely to want the
+                    others. No `<form>` here — the Settings rail is already
+                    inside `id="page-editor"`'s form, and a nested one is
+                    dropped by the HTML parser.
+
+                    `:if={@may_write?}` for the reason the SEO panel above
+                    carries it (#550): everything in here either bills an
+                    embedding or ticks a tag, and neither is something a
+                    read-only reviewer should be offered. The handlers refuse
+                    server-side too — this only stops showing a control that
+                    would be declined. --%>
+              <.inspector_section :if={@may_write?} title={gettext("Similar content")}>
+                <p class="text-xs text-base-content/60">
+                  {gettext("Near-duplicates of this page, and tags its content suggests.")}
+                </p>
+
+                <p
+                  :if={@intel_duplicates == [] and @intel_tags == []}
+                  class="text-xs text-base-content/60"
+                >
+                  {intel_empty_reason(@record)}
+                </p>
+
+                <div :if={@intel_duplicates not in [nil, []]} class="space-y-1.5">
+                  <%!-- `-ink`, not `text-warning` — the accents are tuned to
+                        carry white on a solid fill and only reach ~2-4:1 as
+                        text on a light surface (the standing rule from #543). --%>
+                  <h4 class="text-xs font-medium text-warning-ink">
+                    {ngettext(
+                      "%{count} possible duplicate",
+                      "%{count} possible duplicates",
+                      length(@intel_duplicates)
+                    )}
+                  </h4>
+
+                  <ul class="space-y-1.5">
+                    <li
+                      :for={dup <- @intel_duplicates}
+                      class="rounded border border-warning/40 bg-warning/10 p-2"
+                    >
+                      <p class="text-xs font-medium text-warning-ink">{dup.title || dup.slug}</p>
+                      <%!-- Opens in a new tab: this is a *different* document,
+                            and navigating away would abandon unsaved edits. --%>
+                      <a
+                        href={~p"/editor/content/#{dup.type}/#{dup.id}"}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="text-xs text-warning-ink underline"
+                      >
+                        {gettext("Open %{type}", type: dup.type)} &nearr;
+                        <span class="sr-only">{gettext("(opens in a new tab)")}</span>
+                      </a>
+                    </li>
+                  </ul>
+                </div>
+
+                <div :if={@intel_tags not in [nil, []]} class="space-y-1.5">
+                  <h4 class="text-xs font-medium">{gettext("Suggested tags")}</h4>
+
+                  <div class="flex flex-wrap gap-1.5">
+                    <%!-- Ticks the tag in the picker above rather than writing
+                          to the record: it saves with everything else, and
+                          unticking the checkbox undoes it. --%>
+                    <button
+                      :for={suggestion <- @intel_tags}
+                      type="button"
+                      phx-click="intel_add_tag"
+                      phx-value-id={suggestion.tag.id}
+                      class="inline-flex items-center gap-1 rounded border border-base-content/20 px-2 py-1 text-xs hover:bg-base-200"
+                    >
+                      <.icon name="hero-plus" class="size-3" />
+                      {suggestion.tag.name}
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  phx-click="content_intel_refresh"
+                  disabled={@intel_loading?}
+                  class="btn btn-sm btn-default"
+                >
+                  {if @intel_duplicates == nil,
+                    do: gettext("Analyze content"),
+                    else: gettext("Refresh")}
+                  <.icon
+                    :if={@intel_loading?}
+                    name="hero-arrow-path"
+                    class="ml-1 size-3 motion-safe:animate-spin"
+                  />
+                </button>
+              </.inspector_section>
             </div>
 
             <%!-- ── History ─────────────────────────────────────────────── --%>
@@ -5133,8 +8671,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     >
                       {state_label(cov.status)} — {gettext("edit")}
                     </.link>
+                    <%!-- `@may_write?` for the reason the header's Duplicate
+                          button carries it (#922): this forks the record's
+                          payload into a new draft, and read access to a record
+                          is not enough to fork it. --%>
                     <button
-                      :if={is_nil(cov.record)}
+                      :if={is_nil(cov.record) and @may_write?}
                       type="button"
                       phx-click="create_translation"
                       phx-value-locale={cov.locale}
@@ -5152,34 +8694,59 @@ defmodule KilnCMSWeb.ContentEditorLive do
                 <p :if={@versions == []} class="text-sm text-base-content/60">
                   {gettext("No saved versions yet.")}
                 </p>
-                <ul :if={@versions != []} class="space-y-2">
-                  <li
-                    :for={version <- @versions}
-                    class="flex items-center justify-between gap-3 text-sm"
-                  >
-                    <span class="text-base-content/70">
-                      {version.version_action_name} · {Calendar.strftime(
-                        version.version_inserted_at,
-                        "%Y-%m-%d %H:%M"
-                      )}
-                      <span
-                        :if={version.id == @record.published_version_id}
-                        class="ml-1 rounded bg-success/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-success"
-                      >
-                        {gettext("Live published")}
-                      </span>
-                    </span>
-                    <button
-                      type="button"
-                      phx-click="restore"
-                      phx-value-version_id={version.id}
-                      data-confirm={gettext("Restore content to this version?")}
-                      class="btn btn-sm btn-default"
+                <div :if={@versions != []}>
+                  <p class="mb-2 text-xs text-base-content/60">
+                    {gettext("Select two to see what changed between them.")}
+                  </p>
+                  <ul class="space-y-2">
+                    <li class="flex items-center gap-2 text-sm">
+                      <.compare_toggle
+                        pick={@current_pick}
+                        picked={@current_pick in @compare_pick}
+                        label={gettext("Current draft")}
+                      />
+                      <span class="text-base-content/70">{gettext("Current draft")}</span>
+                    </li>
+                    <li
+                      :for={version <- @versions}
+                      class="flex items-center justify-between gap-3 text-sm"
                     >
-                      {gettext("Restore")}
-                    </button>
-                  </li>
-                </ul>
+                      <span class="flex min-w-0 items-center gap-2">
+                        <.compare_toggle
+                          pick={version.id}
+                          picked={version.id in @compare_pick}
+                          label={version_label(version)}
+                        />
+                        <span class="text-base-content/70">
+                          {version_label(version)}
+                          <span
+                            :if={version.id == @record.published_version_id}
+                            class="ml-1 rounded bg-success/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-success"
+                          >
+                            {gettext("Live published")}
+                          </span>
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        phx-click="restore"
+                        phx-value-version_id={version.id}
+                        data-confirm={gettext("Restore content to this version?")}
+                        class="btn btn-sm btn-default"
+                      >
+                        {gettext("Restore")}
+                      </button>
+                    </li>
+                  </ul>
+                  <button
+                    type="button"
+                    phx-click="open_compare"
+                    disabled={length(@compare_pick) != 2}
+                    class="btn btn-sm btn-default mt-3 disabled:opacity-50"
+                  >
+                    {gettext("Compare selected")}
+                  </button>
+                </div>
               </.inspector_section>
             </div>
           </div>
@@ -5192,8 +8759,62 @@ defmodule KilnCMSWeb.ContentEditorLive do
         media={@media}
         results={@picker_media}
         query={@media_query}
+        picked={@picked}
+      />
+
+      <.file_picker
+        :if={@file_picking != nil}
+        files={@file_media}
+        results={@picker_files}
+        query={@file_query}
+      />
+
+      <.av_picker
+        :if={@av_picking != nil}
+        target={@av_picking}
+        items={@av_media}
+        images={@media}
+        results={@picker_av}
+        query={@av_query}
+      />
+
+      <.version_compare
+        :if={@compare}
+        diff={@compare.diff}
+        left={@compare.left}
+        right={@compare.right}
       />
     </Layouts.console>
+    """
+  end
+
+  # Pick-for-comparison toggle on a version-history row.
+  #
+  # A `<button>` with checkbox semantics rather than an `<input type="checkbox">`:
+  # this sits inside the main `<.form>`, where even an unnamed input's change
+  # event bubbles up and fires the form's `phx-change` (see the tag filter's note
+  # above), which would run validation and mark the draft dirty on every pick.
+  attr :pick, :string, required: true
+  attr :picked, :boolean, required: true
+  attr :label, :string, required: true
+
+  defp compare_toggle(assigns) do
+    ~H"""
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={to_string(@picked)}
+      aria-label={gettext("Compare %{version}", version: @label)}
+      phx-click="toggle_compare"
+      phx-value-version_id={@pick}
+      class={[
+        "flex size-4 shrink-0 items-center justify-center rounded border",
+        (@picked && "border-primary bg-primary text-primary-content") ||
+          "border-base-content/30 hover:border-base-content/60"
+      ]}
+    >
+      <.icon :if={@picked} name="hero-check" class="size-3" />
+    </button>
     """
   end
 
@@ -5208,6 +8829,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   attr :editors, :list, required: true
   attr :actor, :any, required: true
   attr :word_count, :integer, required: true
+  attr :a11y_report, :map, required: true
 
   defp editor_action_bar(assigns) do
     # Resolved once per render rather than per interpolation: `words_per_minute/0`
@@ -5275,6 +8897,40 @@ defmodule KilnCMSWeb.ContentEditorLive do
               count: @reading_minutes
             )}
           </span>
+
+          <%!-- Accessibility summary (#495). Up here rather than only in the
+                inspector rail because a panel three sections down is one an
+                author has to already care about to find — and the people this
+                helps are the ones who don't yet know there's a problem.
+                Free to render: the report is computed for the panel anyway.
+
+                A button, not a badge: it opens the Settings tab, where the
+                Accessibility section lives — the "expandable to the panel"
+                half of the ask. It reuses the tab strip's own event rather
+                than introducing a scroll hook, so there is one code path that
+                changes which panel is showing.
+
+                Hidden on a brand-new page: greeting an author with a verdict
+                on an empty draft is noise. NOT gated on `total`, which is a
+                trap — a check that passes counts as *applicable*, so an empty
+                document reports one passing check and the chip would render
+                "Accessible" on a page with nothing in it. Content, or a
+                finding to show, is the honest signal. --%>
+          <button
+            :if={@a11y_report.findings != [] or @word_count > 0}
+            id="a11y-chip"
+            type="button"
+            phx-click="switch_inspector_tab"
+            phx-value-tab="settings"
+            class={[
+              "inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium",
+              a11y_chip_class(@a11y_report.grade)
+            ]}
+            title={a11y_chip_title(@a11y_report)}
+          >
+            <.icon name={a11y_chip_icon(@a11y_report.grade)} class="size-3.5" />
+            {a11y_chip_label(@a11y_report)}
+          </button>
         </div>
 
         <div class="ml-auto flex flex-wrap items-center gap-2">
@@ -5301,6 +8957,32 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Same arithmetic as `KilnCMS.CMS.Calculations.ReadingTime`, applied to the
   # in-progress draft rather than the saved record — so the editor's number and
   # the one consumers read off the API agree once the draft is saved.
+  # Traffic-light vocabulary, shared with the grade pill in the panel
+  # (`KilnCMSWeb.AdvisoryComponents`) so the chip and the section it scrolls to
+  # can never disagree about what colour this document is.
+  defp a11y_chip_class(:good), do: "bg-success/15 text-success hover:bg-success/25"
+  defp a11y_chip_class(:ok), do: "bg-warning/20 text-warning-content hover:bg-warning/30"
+  defp a11y_chip_class(:poor), do: "bg-error/12 text-error hover:bg-error/20"
+
+  defp a11y_chip_icon(:good), do: "hero-check-circle"
+  defp a11y_chip_icon(_grade), do: "hero-exclamation-circle"
+
+  # The count, not the grade word: "2 issues" is the actionable number, and
+  # the colour already carries the severity.
+  defp a11y_chip_label(%{findings: []}), do: gettext("Accessible")
+
+  defp a11y_chip_label(%{findings: findings}) do
+    ngettext("%{count} a11y issue", "%{count} a11y issues", length(findings),
+      count: length(findings)
+    )
+  end
+
+  defp a11y_chip_title(%{findings: []}),
+    do: gettext("No accessibility issues found. Opens the Accessibility panel.")
+
+  defp a11y_chip_title(_report),
+    do: gettext("Opens the Accessibility panel.")
+
   defp reading_minutes(0, _wpm), do: 0
   defp reading_minutes(words, wpm), do: ceil(words / wpm)
 
@@ -5353,6 +9035,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # `<details>` accordions with an always-expanded, clearly-labelled section —
   # the panel's tab already gates visibility, so no per-section collapsing.
   attr :title, :string, required: true
+  attr :id, :string, default: nil
   # Optional trailing content on the heading row — a status pill or counter that
   # belongs with the title rather than in the body.
   slot :aside
@@ -5360,7 +9043,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp inspector_section(assigns) do
     ~H"""
-    <section class="rounded-lg border border-base-content/10 p-4">
+    <section id={@id} class="rounded-lg border border-base-content/10 p-4">
       <div class="mb-3 flex items-center justify-between gap-2">
         <h3 class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
           {@title}
@@ -5566,5 +9249,34 @@ defmodule KilnCMSWeb.ContentEditorLive do
       {gettext("Unarchive")}
     </button>
     """
+  end
+
+  # Two reasons the saved row differs from what is on screen, and they need
+  # different words: unsaved work is yours to lose, a conflict is someone else's
+  # save you have not read.
+  defp duplicate_confirm(_save_state, true),
+    do:
+      gettext(
+        "Someone else saved this page. Duplicating copies their version, not what you see. Continue?"
+      )
+
+  defp duplicate_confirm(save_state, _conflict) when save_state != :saved,
+    do: gettext("Unsaved changes won't be copied. Duplicate the last saved version?")
+
+  defp duplicate_confirm(_save_state, _conflict), do: false
+
+  # A field grant can leave a translation narrower than its source, and so can
+  # the block-field policy (#1157/#890). Saying so is the difference between
+  # "translation is broken" and "your role cannot copy those fields" — the same
+  # distinction the Duplicate handler draws (#929).
+  defp translation_flash(locale, []),
+    do: gettext("Draft translation created (%{locale}).", locale: locale)
+
+  defp translation_flash(locale, withheld) do
+    gettext(
+      "Draft translation created (%{locale}). Not copied, because your role cannot set them: %{fields}.",
+      locale: locale,
+      fields: Enum.join(withheld, ", ")
+    )
   end
 end

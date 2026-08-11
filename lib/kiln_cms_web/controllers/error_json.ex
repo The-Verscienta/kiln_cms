@@ -1,21 +1,18 @@
 defmodule KilnCMSWeb.ErrorJSON do
   @moduledoc """
-  This module is invoked by your endpoint in case of errors on JSON requests.
+  Invoked by the endpoint (`render_errors:` in `config/config.exs`) for a
+  *raised* error on a JSON-negotiated request — an unrouted `/api/...` path,
+  or an unhandled exception anywhere the format negotiates to JSON, not only
+  under `/api`.
 
-  See config/config.exs.
+  Answers the same envelope every headless surface does
+  (`KilnCMSWeb.ApiError`, #744/#750): this used to render the `errors` key as
+  a bare object holding one `detail` string, rather than the documented
+  array-of-entries shape — so `errors[0]` was `undefined` for a client written
+  to `docs/api.md`'s contract, and precisely on the two paths a client has the
+  least context for reporting.
   """
 
-  # If you want to customize a particular status code,
-  # you may add your own clauses, such as:
-  #
-  # def render("500.json", _assigns) do
-  #   %{errors: %{detail: "Internal Server Error"}}
-  # end
-
-  # By default, Phoenix returns the status message from
-  # the template name. For example, "404.json" becomes
-  # "Not Found".
-  def render(template, _assigns) do
-    %{errors: %{detail: Phoenix.Controller.status_message_from_template(template)}}
-  end
+  @doc false
+  def render(template, _assigns), do: KilnCMSWeb.ApiError.body_from_template(template)
 end

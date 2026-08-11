@@ -15,10 +15,18 @@ defmodule KilnCMS.CMS.Changes.BustBranding do
 
   @impl true
   def change(changeset, _opts, _context) do
-    Ash.Changeset.after_action(changeset, fn _changeset, record ->
-      KilnCMS.Cache.bust_branding(record.org_id)
-      KilnCMS.Cache.bust_llms(record.org_id)
-      {:ok, record}
+    # `after_transaction` for the reason `BustCodeInjection` gives: the branding
+    # bust is a cluster-wide broadcast now, and one sent before the commit lets
+    # a remote node re-cache the pre-write value under a fresh TTL.
+    Ash.Changeset.after_transaction(changeset, fn _changeset, result ->
+      with {:ok, record} <- result do
+        KilnCMS.Cache.bust_branding(record.org_id)
+        KilnCMS.Cache.bust_llms(record.org_id)
+        # Delivery ETag folds head generation (#1079): branding lands in `<head>`.
+        KilnCMS.Cache.bump_head_generation(record.org_id)
+      end
+
+      result
     end)
   end
 end

@@ -54,18 +54,45 @@ defmodule KilnCMS.HTMLSanitizer do
   end
 
   defp safe_relative_path?(url) do
+    # A backslash is a slash for special schemes under the WHATWG URL spec, so
+    # `/\evil.com` reads as a same-origin path here and resolves to
+    # `https://evil.com/` in every browser — the `//host` escape wearing a
+    # different hat. Nothing legitimate puts a raw `\` in a URL path (it
+    # encodes as `%5C`), so reject it outright rather than trying to spot the
+    # positions that matter.
     String.starts_with?(url, "/") and
       not String.starts_with?(url, "//") and
+      not String.contains?(url, "\\") and
       not String.contains?(url, "..")
   end
 
   @doc """
-  Returns a safe link `href` for block rendering, or `nil` when the URL uses a
-  disallowed scheme (`javascript:`, `data:`, `vbscript:`, …).
+  Returns a safe link `href`, trimmed, or `nil` when Kiln won't carry it.
 
-  Allowed: same-origin relative paths, `http(s)://`, and `mailto:`. Mirrors the
-  URL policy applied on the public HEEx delivery path so fired `:web` artifacts
-  consumed via `innerHTML` cannot carry scriptable links.
+  Allowed: same-origin relative paths, in-page `#fragment`s, `http(s)://` and
+  `mailto:`. Rejected: any other scheme (`javascript:`, `data:`, `vbscript:`,
+  `ftp:`, …), protocol-relative `//host` — which reads as same-origin and
+  isn't — its backslash twin `/\\host` (browsers treat `\\` as `/`), and paths
+  containing `..`.
+
+  **This is the one definition of a link href Kiln will store and serve.**
+  Everything that handles one defers here: `PortableText.sanitize_def/1` at
+  cast time, `PortableText.to_html/1` at render time,
+  `KilnCMS.HTMLSanitizer.RichText` for legacy stored HTML, and the editor's
+  `safeHref` in `assets/js/rich_text.js`, which mirrors these rules so an
+  author is told *why* a URL was refused instead of watching the link vanish
+  on the next reload.
+
+  Keeping them in step matters more than the individual verdicts: the two
+  policies drifted apart for a year and disagreed about four kinds of href,
+  each of which meant a link that survived one surface and died on another.
+
+  > #### `#fragment` targets {: .info}
+  >
+  > A fragment href is *carried*, not resolved: `to_html/1` emits headings
+  > without `id`s, so a bare `#section` has nothing to land on in Kiln-rendered
+  > prose. It stays allowed because in-page anchors are legitimate against page
+  > chrome, and stripping them would break stored content that works today.
   """
   def safe_href(nil), do: nil
   def safe_href(""), do: nil
@@ -74,6 +101,7 @@ defmodule KilnCMS.HTMLSanitizer do
     trimmed = String.trim(url)
 
     cond do
+      fragment?(trimmed) -> trimmed
       safe_relative_path?(trimmed) -> trimmed
       safe_absolute_url?(trimmed) -> trimmed
       mailto?(trimmed) -> trimmed
@@ -83,6 +111,10 @@ defmodule KilnCMS.HTMLSanitizer do
 
   def safe_href(_), do: nil
 
+  # An in-page fragment. Nothing after the `#` can carry a scheme or leave the
+  # page, so the whole rest of the string is taken as-is.
+  defp fragment?(url), do: String.starts_with?(url, "#")
+
   defp mailto?(url) do
     case URI.parse(url) do
       %URI{scheme: "mailto"} -> not String.contains?(String.downcase(url), "javascript:")
@@ -91,8 +123,36 @@ defmodule KilnCMS.HTMLSanitizer do
   end
 
   @doc """
-  Returns a safe embed iframe `src` for supported providers (YouTube, Vimeo),
-  or `nil` when the URL is rejected.
+  Returns an absolute `http(s)` URL, or `nil`.
+
+  Stricter than `safe_href/1`, which also allows relative paths and `mailto:`.
+  For a value that names an *external resource* rather than a link an author
+  typed — an embed's target, a webhook endpoint — neither of those is
+  meaningful, and accepting them means storing something no consumer can use.
+  """
+  @spec safe_external_url(term()) :: String.t() | nil
+  def safe_external_url(url) when is_binary(url) do
+    trimmed = String.trim(url)
+    if safe_absolute_url?(trimmed), do: trimmed, else: nil
+  end
+
+  def safe_external_url(_url), do: nil
+
+  @doc """
+  Returns a safe embed iframe `src` for the two framed providers (YouTube,
+  Vimeo), or `nil` when the URL is not one of them.
+
+  ## This is a render-time question, not a storage filter
+
+  It answers "may this URL be put in an `<iframe>`?", and the answer is no for
+  every host but two. It used to be applied on the *write* path as well, which
+  meant a stored embed URL was either a canonical player URL or the empty
+  string — every other URL an author pasted was silently destroyed on save.
+
+  That made oEmbed cards (#489) impossible: by the time anything looked at a
+  stored embed URL there was nothing left to resolve. Storage now keeps what
+  the author typed (`safe_external_url/1`), and this decides — at render, on
+  both surfaces — whether it gets a frame or a card.
   """
   def safe_embed_url(nil), do: nil
   def safe_embed_url(""), do: nil
@@ -115,30 +175,29 @@ defmodule KilnCMS.HTMLSanitizer do
   defp to_embed_src(%URI{query: query} = uri, host)
        when host in ["www.youtube.com", "youtube.com"] do
     case URI.decode_query(query || "") do
-      %{"v" => id} when is_binary(id) and id != "" ->
-        "https://www.youtube.com/embed/" <> id
+      %{"v" => id} ->
+        youtube(id)
 
       _ ->
         case uri.path do
-          "/embed/" <> id when id != "" -> "https://www.youtube.com/embed/" <> id
+          "/embed/" <> id -> youtube(id)
           _ -> nil
         end
     end
   end
 
-  defp to_embed_src(%URI{path: "/" <> id}, "youtu.be") when id != "" do
-    "https://www.youtube.com/embed/" <> id
-  end
-
-  defp to_embed_src(%URI{path: "/video/" <> id}, "player.vimeo.com") when id != "" do
-    "https://player.vimeo.com/video/" <> id
-  end
-
-  defp to_embed_src(%URI{path: "/" <> id}, "vimeo.com") when id != "" do
-    "https://player.vimeo.com/video/" <> id
-  end
-
+  defp to_embed_src(%URI{path: "/" <> id}, "youtu.be"), do: youtube(id)
+  defp to_embed_src(%URI{path: "/video/" <> id}, "player.vimeo.com"), do: vimeo(id)
+  defp to_embed_src(%URI{path: "/" <> id}, "vimeo.com"), do: vimeo(id)
   defp to_embed_src(_, _), do: nil
+
+  # The id is concatenated into a URL these functions promise is safe, so it is
+  # checked against the provider's own id shape rather than passed through.
+  # Every render path escapes the result, so this is not the last line of
+  # defence — but "the id is whatever was in the path" makes that escaping the
+  # *only* line, and a video id is a well-known character set.
+  defp youtube(id), do: if(id =~ ~r/\A[\w-]{1,64}\z/, do: "https://www.youtube.com/embed/" <> id)
+  defp vimeo(id), do: if(id =~ ~r/\A\d{1,20}\z/, do: "https://player.vimeo.com/video/" <> id)
 
   defp safe_absolute_url?(url) do
     case URI.parse(url) do

@@ -5,11 +5,11 @@ defmodule KilnCMS.Blocks.Image do
   block :image do
     # Not required — the editor inserts a placeholder image block, then fills the
     # url from the media picker or a pasted URL.
-    field :url, :string
+    field :url, :string, translatable: false
     field :alt, :string
     field :caption, :string
     # Optional link to a MediaItem, so delivery can render responsive variants.
-    field :media_id, :string
+    field :media_id, :string, translatable: false
   end
 
   # Match a plain variable, not %__MODULE__{} — see the note in divider.ex: the
@@ -36,6 +36,11 @@ defmodule KilnCMS.Blocks.Image do
     |> put_if("caption", block.caption)
     |> put_if("name", block.alt)
   end
+
+  # `media_id` is an authoring-side pointer at the library item; the `:json`
+  # render resolves it (or the pasted url) into `url` and never projects it.
+  @impl Kiln.Block.Renderer
+  def json_schema, do: %{"x-kiln-drop" => ["media_id"]}
 
   @impl Kiln.Block.Renderer
   def search_text(block),

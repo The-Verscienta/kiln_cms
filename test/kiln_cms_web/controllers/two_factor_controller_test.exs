@@ -4,34 +4,39 @@ defmodule KilnCMSWeb.TwoFactorControllerTest do
 
   import Plug.Conn
 
-  alias KilnCMS.Accounts.Totp
+  alias KilnCMS.Accounts.PendingSignIn
+  alias KilnCMS.TwoFactorFixtures
+  alias KilnCMSWeb.BearerAuth
 
   # A fixed secret so the test can compute the matching code.
   @secret :crypto.strong_rand_bytes(20)
 
   defp enabled_user do
-    Ash.Seed.seed!(KilnCMS.Accounts.User, %{
-      email: "gate-#{System.unique_integer([:positive])}@example.com",
-      hashed_password: Bcrypt.hash_pwd_salt("password123456"),
-      confirmed_at: DateTime.utc_now(),
-      role: :admin,
-      totp_secret: @secret,
-      totp_confirmed_at: DateTime.utc_now()
-    })
+    {user, _secret} = TwoFactorFixtures.enabled_user(secret: @secret)
+    user
   end
 
   # Simulate the post-first-factor state AuthController.success/4 sets: a signed
   # pending token in the session (and skip CSRF for the direct POST).
   defp with_pending(conn, user) do
-    # Mirrors AuthController.sign_pending/3: the payload carries the user id + the
-    # first-factor token (a stand-in here — store_in_session doesn't validate it).
-    payload = %{"user_id" => user.id, "token" => "stub.jwt.token"}
-    token = Phoenix.Token.sign(KilnCMSWeb.Endpoint, "two-factor pending", payload)
+    {user, token} = TwoFactorFixtures.with_first_factor_token(user)
+    with_pending(conn, user, token)
+  end
+
+  # A real, stored first-factor JWT rather than a stub, because `mint/4` holds
+  # the stored row (#742) and a stub has none — every test here would exercise
+  # the "nothing to hold" path and pass with the hold deleted.
+  defp with_pending(conn, user, token) do
+    blob =
+      PendingSignIn.mint(:session, KilnCMSWeb.Endpoint, %{
+        user
+        | __metadata__: Map.put(user.__metadata__, :token, token)
+      })
 
     conn
     |> put_private(:plug_skip_csrf_protection, true)
     |> init_test_session(%{})
-    |> put_session(:pending_2fa, token)
+    |> put_session(:pending_2fa, blob)
   end
 
   test "GET /sign-in/verify without a pending token redirects to sign-in", %{conn: conn} do
@@ -40,7 +45,7 @@ defmodule KilnCMSWeb.TwoFactorControllerTest do
 
   test "a valid code completes sign-in and clears the pending state", %{conn: conn} do
     user = enabled_user()
-    code = Totp.code_at(@secret, System.system_time(:second))
+    code = TwoFactorFixtures.current_code(@secret)
 
     conn = conn |> with_pending(user) |> post(~p"/sign-in/verify", %{"code" => code})
 
@@ -56,6 +61,55 @@ defmodule KilnCMSWeb.TwoFactorControllerTest do
     assert conn.status == 401
     assert conn.resp_body =~ "isn&#39;t valid" or conn.resp_body =~ "isn't valid"
     refute is_nil(get_session(conn, :pending_2fa))
+  end
+
+  test "the first-factor token is held across the prompt and released by a code (#742)", %{
+    conn: conn
+  } do
+    # This door has the same shape as the headless one and #742 says so: the JWT
+    # is minted AND stored by the time `success/4` learns the account owes a
+    # code, so abandoning this prompt used to leave a live token row for weeks.
+    #
+    # `BearerAuth.user_from_token/1` is the assertion because it asks exactly
+    # what the session plug asks — both run
+    # `AshAuthentication.TokenResource.Actions.get_token/3` for this jti under
+    # the `"user"` purpose, so a session established on a still-held token would
+    # be signed out on its very next request.
+    user = enabled_user()
+    {user, token} = TwoFactorFixtures.with_first_factor_token(user)
+
+    assert {:ok, _} = BearerAuth.user_from_token(token)
+
+    conn = with_pending(conn, user, token)
+    assert :error = BearerAuth.user_from_token(token)
+
+    conn = post(conn, ~p"/sign-in/verify", %{"code" => TwoFactorFixtures.current_code(@secret)})
+    assert redirected_to(conn) == ~p"/editor/overview"
+
+    assert {:ok, authed} = BearerAuth.user_from_token(token)
+    assert authed.id == user.id
+  end
+
+  test "an abandoned prompt leaves the first-factor token unusable (#742)", %{conn: conn} do
+    user = enabled_user()
+    {user, token} = TwoFactorFixtures.with_first_factor_token(user)
+
+    _abandoned = with_pending(conn, user, token)
+
+    refute match?({:ok, _}, BearerAuth.user_from_token(token))
+  end
+
+  test "a wrong code does not release the held token (#742)", %{conn: conn} do
+    # The blob survives a wrong code deliberately — "that code isn't valid" must
+    # not become "start over" — and the hold has to survive with it, or a wrong
+    # guess would be a way to unpark the very token the prompt is guarding.
+    user = enabled_user()
+    {user, token} = TwoFactorFixtures.with_first_factor_token(user)
+
+    conn = conn |> with_pending(user, token) |> post(~p"/sign-in/verify", %{"code" => "000000"})
+
+    assert conn.status == 401
+    assert :error = BearerAuth.user_from_token(token)
   end
 
   describe "recovery codes (#331 phase 2)" do
@@ -80,7 +134,12 @@ defmodule KilnCMSWeb.TwoFactorControllerTest do
       reloaded = KilnCMS.Accounts.get_user!(user.id, authorize?: false)
       assert length(reloaded.totp_recovery_hashes) == RecoveryCodes.count() - 1
 
-      retry = build_conn() |> with_pending(user) |> post(~p"/sign-in/verify", %{"code" => code})
+      retry =
+        build_conn()
+        |> unique_ip()
+        |> with_pending(user)
+        |> post(~p"/sign-in/verify", %{"code" => code})
+
       assert retry.status == 401
     end
 

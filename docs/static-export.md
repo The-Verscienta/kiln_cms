@@ -23,13 +23,23 @@ delivery): the same immutable artifacts underpin both.
 
 ```
 mix kiln.export.static <out_dir> [--surface web,json,json_ld] [--base-url URL]
+                                 [--org-id UUID | --all-orgs]
 ```
 
 ```
 mix kiln.export.static ./_static
 mix kiln.export.static /var/www/edge --surface web
 mix kiln.export.static ./_static --base-url https://cdn.example.com
+mix kiln.export.static ./_static --org-id 0f0e…
+mix kiln.export.static ./_static --all-orgs
 ```
+
+Export is per-site (#419). With neither org flag you get the default org;
+`--all-orgs` writes each site into its own `<out_dir>/<org_id>/` subtree.
+
+Both flags are hyphenated. An underscored `--all_orgs` / `--org_id` is not a
+synonym — `OptionParser` treats it as an unknown switch, and the task now raises
+on it rather than quietly exporting the default org (#931).
 
 ### Background / admin / cron trigger
 

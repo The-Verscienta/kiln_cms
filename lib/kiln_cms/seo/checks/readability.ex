@@ -34,8 +34,15 @@ defmodule KilnCMS.Seo.Checks.Readability do
 
   defp content_length(%{word_count: 0}), do: :n_a
 
+  # The one finding here that is purely a search concern: a short page is
+  # perfectly accessible. The other three — long sentences, long paragraphs,
+  # hard-to-read prose — are WCAG 3.1.5 territory as much as SEO advice, so
+  # they take the check's default and show in both panels (#495).
   defp content_length(%{word_count: count}) when count < @thin_content,
-    do: finding(:warning, :thin_content, :body, %{count: count, min: @thin_content})
+    do:
+      :warning
+      |> finding(:thin_content, :body, %{count: count, min: @thin_content})
+      |> lensed([:seo])
 
   defp content_length(_body), do: :ok
 

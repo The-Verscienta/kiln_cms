@@ -15,6 +15,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
 
   alias KilnCMS.CMS
   alias KilnCMS.CMS.FormField
+  alias KilnCMS.Forms.Autoresponder
 
   import KilnCMSWeb.BlockComponents, only: [public_form_field: 1, field_width_class: 1]
 
@@ -42,6 +43,15 @@ defmodule KilnCMSWeb.FormBuilderLive do
        |> assign(:tab, :fields)
        |> assign(:selected_id, nil)
        |> assign(:submissions, [])
+       # Entries moderation (#477): nil = every status; a submission id set
+       # for the bulk mark actions, cleared on every filter change or reload
+       # so a stale selection can't act on rows no longer in view.
+       |> assign(:status_filter, nil)
+       |> assign(:selected_submissions, MapSet.new())
+       # The Embed tab's origins box as last typed, kept only while a save is
+       # being refused (#648); nil means "render what is stored".
+       |> assign(:embed_origins_draft, nil)
+       |> assign_embed_policy(form)
        |> reload_fields()}
     else
       {:error, _error} ->
@@ -75,7 +85,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
   # --- tabs --------------------------------------------------------------------
 
   @impl true
-  def handle_event("set_tab", %{"tab" => tab}, socket) do
+  def handle_event("set_tab", %{"tab" => tab}, socket) when is_binary(tab) do
     tab = Map.get(@tabs, tab, :fields)
     socket = assign(socket, :tab, tab)
     socket = if tab == :entries, do: reload_submissions(socket), else: socket
@@ -84,7 +94,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
 
   # --- fields ------------------------------------------------------------------
 
-  def handle_event("add_field", %{"type" => type}, socket) do
+  def handle_event("add_field", %{"type" => type}, socket) when is_binary(type) do
     fields = socket.assigns.fields
     entry = Enum.find(palette(), &(Atom.to_string(&1.type) == type))
 
@@ -111,7 +121,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
     end
   end
 
-  def handle_event("select_field", %{"id" => id}, socket) do
+  def handle_event("select_field", %{"id" => id}, socket) when is_binary(id) do
     if Enum.any?(socket.assigns.fields, &(&1.id == id)) do
       {:noreply, assign(socket, :selected_id, id)}
     else
@@ -123,7 +133,8 @@ defmodule KilnCMSWeb.FormBuilderLive do
     {:noreply, assign(socket, :selected_id, nil)}
   end
 
-  def handle_event("update_field", %{"field" => %{"id" => id} = params}, socket) do
+  def handle_event("update_field", %{"field" => %{"id" => id} = params}, socket)
+      when is_binary(id) do
     field = Enum.find(socket.assigns.fields, &(&1.id == id))
 
     case field && CMS.update_form_field(field, field_params(params, field), actor_opts(socket)) do
@@ -133,7 +144,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
     end
   end
 
-  def handle_event("duplicate_field", %{"id" => id}, socket) do
+  def handle_event("duplicate_field", %{"id" => id}, socket) when is_binary(id) do
     fields = socket.assigns.fields
 
     case Enum.find(fields, &(&1.id == id)) do
@@ -142,7 +153,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
     end
   end
 
-  def handle_event("delete_field", %{"id" => id}, socket) do
+  def handle_event("delete_field", %{"id" => id}, socket) when is_binary(id) do
     with %FormField{} = field <- Enum.find(socket.assigns.fields, &(&1.id == id)) do
       CMS.destroy_form_field(field, actor_opts(socket))
     end
@@ -158,30 +169,92 @@ defmodule KilnCMSWeb.FormBuilderLive do
 
   # --- form settings -----------------------------------------------------------
 
-  def handle_event("save_form", %{"form" => params}, socket) do
-    case CMS.update_form(socket.assigns.form, params, actor_opts(socket)) do
-      {:ok, form} ->
-        {:noreply,
-         socket
-         |> assign(:form, form)
-         |> assign(:page_title, form.name)
-         |> put_flash(:info, gettext("Saved."))}
+  def handle_event("save_form", %{"form" => params}, socket) when is_map(params) do
+    with {:ok, attrs} <- form_params(params),
+         {:ok, form} <- CMS.update_form(socket.assigns.form, attrs, actor_opts(socket)) do
+      {:noreply,
+       socket
+       |> assign(:form, form)
+       |> assign(:embed_origins_draft, nil)
+       |> assign_embed_policy(form)
+       |> assign(:page_title, form.name)
+       |> put_flash(:info, gettext("Saved."))}
+    else
+      {:error, message} when is_binary(message) ->
+        {:noreply, socket |> keep_embed_draft(params) |> put_flash(:error, message)}
 
       {:error, error} ->
-        {:noreply, put_flash(socket, :error, error_message(error))}
+        {:noreply, socket |> keep_embed_draft(params) |> put_flash(:error, error_message(error))}
     end
   end
 
-  # --- submissions -------------------------------------------------------------
+  # --- submissions (moderation, #477) ------------------------------------------
 
-  def handle_event("delete_submission", %{"id" => id}, socket) do
+  def handle_event("delete_submission", %{"id" => id}, socket) when is_binary(id) do
     opts = actor_opts(socket)
 
     with {:ok, submission} <- CMS.get_form_submission(id, opts) do
       CMS.destroy_form_submission(submission, opts)
     end
 
-    {:noreply, reload_submissions(socket)}
+    # A row deleted by its own trash icon (not bulk-delete, which doesn't
+    # exist yet) can be one a checkbox had selected — drop it so the "N
+    # selected" bar doesn't count a row that's gone, and a later bulk action
+    # doesn't silently no-op trying to find it.
+    selected = MapSet.delete(socket.assigns.selected_submissions, id)
+
+    {:noreply, socket |> assign(:selected_submissions, selected) |> reload_submissions()}
+  end
+
+  def handle_event("filter_status", %{"status" => status}, socket) when is_binary(status) do
+    {:noreply,
+     socket
+     |> assign(:status_filter, parse_status(status))
+     |> assign(:selected_submissions, MapSet.new())
+     |> reload_submissions()}
+  end
+
+  def handle_event("toggle_select", %{"id" => id}, socket) when is_binary(id) do
+    selected = socket.assigns.selected_submissions
+
+    updated =
+      if MapSet.member?(selected, id),
+        do: MapSet.delete(selected, id),
+        else: MapSet.put(selected, id)
+
+    {:noreply, assign(socket, :selected_submissions, updated)}
+  end
+
+  def handle_event("select_all_visible", _params, socket) do
+    ids = socket.assigns.submissions |> Enum.map(& &1.id) |> MapSet.new()
+    {:noreply, assign(socket, :selected_submissions, ids)}
+  end
+
+  def handle_event("clear_selection", _params, socket),
+    do: {:noreply, assign(socket, :selected_submissions, MapSet.new())}
+
+  def handle_event("mark_submission_spam", %{"id" => id}, socket) when is_binary(id),
+    do: {:noreply, mark(socket, [id], :mark_form_submission_spam)}
+
+  def handle_event("mark_submission_reviewed", %{"id" => id}, socket) when is_binary(id),
+    do: {:noreply, mark(socket, [id], :mark_form_submission_reviewed)}
+
+  def handle_event("bulk_mark_spam", _params, socket),
+    do:
+      {:noreply,
+       mark(
+         socket,
+         MapSet.to_list(socket.assigns.selected_submissions),
+         :mark_form_submission_spam
+       )}
+
+  def handle_event("bulk_mark_reviewed", _params, socket) do
+    {:noreply,
+     mark(
+       socket,
+       MapSet.to_list(socket.assigns.selected_submissions),
+       :mark_form_submission_reviewed
+     )}
   end
 
   # --- embed -------------------------------------------------------------------
@@ -198,12 +271,126 @@ defmodule KilnCMSWeb.FormBuilderLive do
   end
 
   # Since #562 the shipped default is same-origin only, so a copied snippet on a
-  # third-party page renders blank until EMBED_ORIGINS names it. Say so here —
+  # third-party page renders blank until an origin is allowed. Say so here —
   # otherwise the only signal is a console CSP violation on someone else's site.
-  # Both of these are deployment-wide, not per-org (#648), so the panel names
-  # the allowlist rather than claiming this org's site is on it.
-  defp cross_site_embedding?, do: KilnCMSWeb.Embed.cross_site?()
-  defp allowed_embed_origins, do: KilnCMSWeb.Embed.allowed_origins_label()
+  #
+  # One value, not a boolean and a label: it is the policy that will actually be
+  # served for *this* form (#648), and `nil` is how "nobody but this site" is
+  # spelled. Computed once when `:form` is assigned rather than per render,
+  # since building it scans the allowlist.
+  defp assign_embed_policy(socket, form),
+    do: assign(socket, :embed_origins_label, KilnCMSWeb.Embed.allowed_origins_label(form))
+
+  # The Embed tab edits `embed_origins` as one line of origins, with a radio for
+  # which of its three states is meant — `nil` (inherit the deployment's
+  # `EMBED_ORIGINS`) and `[]` (same-origin only, whatever the deployment allows)
+  # render identically as an empty box, so the box alone cannot say which was
+  # intended. Classified by `KilnCMSWeb.Embed`, the one place that reads the
+  # attribute's shape, rather than by a fourth copy of the tri-state here.
+  defp embed_mode(form) do
+    case KilnCMSWeb.Embed.own_origins(form) do
+      :deployment -> "inherit"
+      [] -> "closed"
+      _list -> "list"
+    end
+  end
+
+  defp embed_origins_value(%{embed_origins: origins}) when is_list(origins),
+    do: Enum.join(origins, ", ")
+
+  defp embed_origins_value(_form), do: ""
+
+  # A refused save must not empty the box. The origins are one field holding a
+  # whole list, so re-rendering the stored value would make the admin retype
+  # every entry to fix the one the error names.
+  defp keep_embed_draft(socket, %{"embed_origins" => raw}) when is_binary(raw),
+    do: assign(socket, :embed_origins_draft, raw)
+
+  defp keep_embed_draft(socket, _params), do: socket
+
+  # Only the Embed tab submits `embed_mode`, and only then is `embed_origins`
+  # translated — every other tab posts its own subset and must leave the framing
+  # policy exactly as it found it, so the key is dropped rather than trusted.
+  #
+  # Returns `{:ok, params}` or `{:error, message}`: the radio and the box can
+  # contradict each other, and every way of resolving that silently gets the
+  # admin's intent wrong. Typing a list under "use the deployment default" would
+  # throw the list away; picking "only these sites" with an empty box would save
+  # `[]`, which is *closed* — the opposite of the radio, and shown as the other
+  # radio on the next render. Both are a refusal instead.
+  defp form_params(%{"embed_mode" => mode} = params) do
+    origins = KilnCMS.Config.OriginList.parse_list(params["embed_origins"])
+
+    case {mode, origins} do
+      {"inherit", []} ->
+        {:ok, params |> Map.delete("embed_mode") |> Map.put("embed_origins", nil)}
+
+      {"closed", []} ->
+        {:ok, params |> Map.delete("embed_mode") |> Map.put("embed_origins", [])}
+
+      {"list", [_ | _]} ->
+        {:ok, params |> Map.delete("embed_mode") |> Map.put("embed_origins", origins)}
+
+      {"list", []} ->
+        {:error, gettext("Add at least one site to embed on, or choose “This site only”.")}
+
+      {mode, [_ | _]} when mode in ["inherit", "closed"] ->
+        {:error,
+         gettext("Choose “Only these sites” to use the list you typed, or clear the box.")}
+
+      _unknown_mode ->
+        {:error, gettext("Something went wrong.")}
+    end
+  end
+
+  defp form_params(params), do: {:ok, Map.delete(params, "embed_origins")}
+
+  # --- submissions: moderation helpers (#477) -----------------------------------
+
+  defp mark(socket, ids, action) do
+    opts = actor_opts(socket)
+
+    Enum.each(ids, fn id ->
+      with {:ok, submission} <- CMS.get_form_submission(id, opts) do
+        apply(CMS, action, [submission, %{}, opts])
+      end
+    end)
+
+    socket |> assign(:selected_submissions, MapSet.new()) |> reload_submissions()
+  end
+
+  defp parse_status("all"), do: nil
+
+  defp parse_status(status) when status in ~w(new reviewed spam),
+    do: String.to_existing_atom(status)
+
+  defp parse_status(_status), do: nil
+
+  # A function (not an attribute) so gettext resolves per-request locale,
+  # same reasoning as `palette/0`.
+  defp status_filters do
+    [
+      {"all", gettext("All")},
+      {"new", gettext("New")},
+      {"reviewed", gettext("Reviewed")},
+      {"spam", gettext("Spam")}
+    ]
+  end
+
+  defp export_query(nil), do: []
+  defp export_query(status), do: [status: status]
+
+  # Same `bg-<tone>/15 text-<tone>-ink` convention as
+  # `content_editor_live.ex`'s `state_badge_class/1` — the hand-authored kit
+  # has no `.badge-*` classes, so a DaisyUI-named one here would render with
+  # no styling at all.
+  defp status_badge_class(:new), do: "bg-info/15 text-info-ink"
+  defp status_badge_class(:reviewed), do: "bg-success/15 text-success-ink"
+  defp status_badge_class(:spam), do: "bg-error/15 text-error-ink"
+
+  defp status_label(:new), do: gettext("New")
+  defp status_label(:reviewed), do: gettext("Reviewed")
+  defp status_label(:spam), do: gettext("Spam")
 
   # --- data --------------------------------------------------------------------
 
@@ -250,11 +437,14 @@ defmodule KilnCMSWeb.FormBuilderLive do
   end
 
   defp reload_submissions(socket) do
-    assign(
-      socket,
-      :submissions,
-      CMS.recent_form_submissions!(socket.assigns.form.id, actor_opts(socket))
-    )
+    submissions =
+      CMS.recent_form_submissions!(
+        socket.assigns.form.id,
+        %{status: socket.assigns.status_filter},
+        actor_opts(socket)
+      )
+
+    assign(socket, :submissions, submissions)
   end
 
   # Persist a full id ordering as 0-based positions, skipping no-op updates.
@@ -314,6 +504,13 @@ defmodule KilnCMSWeb.FormBuilderLive do
   defp error_message(%{errors: errors}) when is_list(errors) and errors != [] do
     errors
     |> Enum.map_join("; ", fn
+      # Splode interpolates an error's `vars` into its `%{…}` placeholders only
+      # inside `Exception.message/1` — reading `.message` off the struct hands
+      # the admin the raw template. That is how a refused CSP origin arrived as
+      # a literal "%{value} is not an allowed CSP source", telling them a list
+      # was wrong without telling them which entry (#648). `Exception.message/1`
+      # names the field itself, so the prefix below is not repeated here.
+      %{__exception__: true} = error -> Exception.message(error)
       %{field: field, message: message} when not is_nil(field) -> "#{field} #{message}"
       %{message: message} when is_binary(message) -> message
       other -> inspect(other)
@@ -321,6 +518,12 @@ defmodule KilnCMSWeb.FormBuilderLive do
   end
 
   defp error_message(_error), do: gettext("Something went wrong.")
+
+  defp autoresponder_token_hint(form, fields) do
+    Autoresponder.definitions(fields, form.name || "", false)
+    |> Kiln.Tokens.names()
+    |> Enum.map_join(", ", &"[#{&1}]")
+  end
 
   defp tab_label(:fields), do: gettext("Fields")
   defp tab_label(:general), do: gettext("General")
@@ -721,6 +924,49 @@ defmodule KilnCMSWeb.FormBuilderLive do
                 {gettext("Shown on the thank-you page after a successful submission.")}
               </p>
             </div>
+
+            <hr class="border-t border-base-content/10" />
+
+            <label class="flex items-center gap-2 text-sm">
+              <input type="hidden" name="form[autoresponder_enabled]" value="false" />
+              <input
+                type="checkbox"
+                name="form[autoresponder_enabled]"
+                value="true"
+                checked={@form.autoresponder_enabled}
+                class="size-4 rounded border border-base-content/30 accent-primary"
+              />
+              {gettext("Email the submitter a confirmation")}
+            </label>
+            <p class="text-xs text-base-content/60">
+              {gettext("Only sends when the form has an email field and the visitor filled it in.")}
+            </p>
+
+            <div>
+              <label for="cf-ar-subject" class="text-sm font-medium">{gettext("Subject")}</label>
+              <input
+                id="cf-ar-subject"
+                name="form[autoresponder_subject]"
+                value={@form.autoresponder_subject}
+                placeholder={gettext("Thanks for reaching out, [field:name]!")}
+                class="field-input mt-1"
+              />
+            </div>
+            <div>
+              <label for="cf-ar-body" class="text-sm font-medium">{gettext("Body")}</label>
+              <textarea
+                id="cf-ar-body"
+                name="form[autoresponder_body]"
+                rows="4"
+                class="field-input mt-1"
+              >{@form.autoresponder_body}</textarea>
+            </div>
+            <p class="text-xs text-base-content/60">
+              {gettext("Available tokens: %{tokens}",
+                tokens: autoresponder_token_hint(@form, @fields)
+              )}
+            </p>
+
             <.button type="submit" variant="primary">{gettext("Save")}</.button>
           </form>
         </section>
@@ -734,14 +980,16 @@ defmodule KilnCMSWeb.FormBuilderLive do
             )}
           </p>
 
-          <p :if={!cross_site_embedding?()} class="text-xs text-warning">
+          <p :if={is_nil(@embed_origins_label)} class="text-xs text-warning">
             {gettext(
-              "Cross-site embedding is off: this form may only be framed by pages on its own site. Set the EMBED_ORIGINS environment variable to the sites that should be allowed to embed it."
+              "Cross-site embedding is off: this form may only be framed by pages on its own site. List the sites that should be allowed to embed it below."
             )}
           </p>
 
-          <p :if={cross_site_embedding?()} class="text-xs text-base-content/60">
-            {gettext("Sites allowed to embed: %{origins}", origins: allowed_embed_origins())}
+          <p :if={@embed_origins_label} class="text-xs text-base-content/60">
+            {gettext("Sites allowed to embed this form: %{origins}",
+              origins: @embed_origins_label
+            )}
           </p>
 
           <div class="flex items-center gap-2">
@@ -764,22 +1012,171 @@ defmodule KilnCMSWeb.FormBuilderLive do
           </div>
 
           <p class="text-xs text-base-content/60">
-            {gettext(
-              "The iframe sizes itself to the form. Which sites may embed it is set by the EMBED_ORIGINS environment variable."
-            )}
+            {gettext("The iframe sizes itself to the form.")}
           </p>
+
+          <hr class="border-t border-base-content/10" />
+
+          <form phx-submit="save_form" class="space-y-3">
+            <fieldset class="space-y-1">
+              <legend class="text-sm font-medium">{gettext("Who may embed this form")}</legend>
+              <p class="text-xs text-base-content/60">
+                {gettext(
+                  "This setting applies to this form only — another site's forms are unaffected by what you allow here."
+                )}
+              </p>
+
+              <label class="flex items-center gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="form[embed_mode]"
+                  value="inherit"
+                  checked={embed_mode(@form) == "inherit"}
+                  class="size-4 accent-primary"
+                />
+                {gettext("Use the deployment default")}
+              </label>
+
+              <label class="flex items-center gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="form[embed_mode]"
+                  value="closed"
+                  checked={embed_mode(@form) == "closed"}
+                  class="size-4 accent-primary"
+                />
+                {gettext("This site only")}
+              </label>
+
+              <label class="flex items-center gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="form[embed_mode]"
+                  value="list"
+                  checked={embed_mode(@form) == "list"}
+                  class="size-4 accent-primary"
+                />
+                {gettext("Only these sites:")}
+              </label>
+            </fieldset>
+
+            <input
+              id="cf-embed-origins"
+              name="form[embed_origins]"
+              value={@embed_origins_draft || embed_origins_value(@form)}
+              aria-label={gettext("Sites allowed to embed this form")}
+              placeholder="https://acme.com, https://blog.acme.com"
+              class="field-input font-mono text-xs"
+            />
+            <p class="text-xs text-base-content/60">
+              {gettext(
+                "Comma-separated origins (scheme and host, optionally a port). Pages on this form's own site may always frame it."
+              )}
+            </p>
+
+            <.button type="submit" variant="primary">{gettext("Save")}</.button>
+          </form>
         </section>
 
-        <section :if={@tab == :entries} class="max-w-3xl">
+        <section :if={@tab == :entries} class="max-w-3xl space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div role="group" aria-label={gettext("Filter by status")} class="flex gap-1">
+              <button
+                :for={{value, label} <- status_filters()}
+                type="button"
+                phx-click="filter_status"
+                phx-value-status={value}
+                aria-pressed={to_string(@status_filter == parse_status(value))}
+                class={[
+                  "rounded border px-2 py-1 text-xs",
+                  if(@status_filter == parse_status(value),
+                    do: "border-primary bg-primary text-primary-content",
+                    else: "border-base-content/20 hover:bg-base-200"
+                  )
+                ]}
+              >
+                {label}
+              </button>
+            </div>
+
+            <a
+              href={~p"/editor/forms/#{@form.id}/entries/export.csv?#{export_query(@status_filter)}"}
+              class="rounded border border-base-content/20 px-2 py-1 text-xs hover:bg-base-200"
+            >
+              <.icon name="hero-arrow-down-tray" class="mr-1 size-3.5" />{gettext("Export CSV")}
+            </a>
+          </div>
+
+          <div
+            :if={MapSet.size(@selected_submissions) > 0}
+            class="flex items-center gap-2 rounded border border-base-content/15 bg-base-200/50 p-2 text-xs"
+          >
+            <span>
+              {ngettext("%{count} selected", "%{count} selected", MapSet.size(@selected_submissions),
+                count: MapSet.size(@selected_submissions)
+              )}
+            </span>
+            <button
+              type="button"
+              phx-click="bulk_mark_spam"
+              class="rounded border border-base-content/20 px-2 py-0.5 hover:bg-base-200"
+            >
+              {gettext("Mark as spam")}
+            </button>
+            <button
+              type="button"
+              phx-click="bulk_mark_reviewed"
+              class="rounded border border-base-content/20 px-2 py-0.5 hover:bg-base-200"
+            >
+              {gettext("Mark as reviewed")}
+            </button>
+            <button
+              type="button"
+              phx-click="clear_selection"
+              class="text-base-content/60 underline hover:text-base-content"
+            >
+              {gettext("Clear")}
+            </button>
+          </div>
+
           <p :if={@submissions == []} class="text-sm text-base-content/60">
             {gettext("None yet.")}
           </p>
+
+          <button
+            :if={@submissions != []}
+            type="button"
+            phx-click="select_all_visible"
+            class="text-xs text-base-content/60 underline hover:text-base-content"
+          >
+            {gettext("Select all visible")}
+          </button>
+
           <ul :if={@submissions != []} class="space-y-2">
             <li
               :for={submission <- @submissions}
               class="card rounded border border-base-content/10 p-3 text-sm"
             >
               <div class="flex items-center justify-between gap-2">
+                <div class="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    phx-click="toggle_select"
+                    phx-value-id={submission.id}
+                    checked={MapSet.member?(@selected_submissions, submission.id)}
+                    aria-label={gettext("Select this submission")}
+                    class="size-4 rounded border-base-content/30 accent-primary"
+                  />
+                  <span class={[
+                    "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
+                    status_badge_class(submission.status)
+                  ]}>
+                    {status_label(submission.status)}
+                  </span>
+                  <span :if={submission.spam_score > 0} class="text-xs text-base-content/50">
+                    {gettext("score %{score}", score: submission.spam_score)}
+                  </span>
+                </div>
                 <time
                   id={"submission-#{submission.id}"}
                   phx-hook="LocalTime"
@@ -788,16 +1185,6 @@ defmodule KilnCMSWeb.FormBuilderLive do
                 >
                   {Calendar.strftime(submission.inserted_at, "%Y-%m-%d %H:%M")} UTC
                 </time>
-                <button
-                  type="button"
-                  phx-click="delete_submission"
-                  phx-value-id={submission.id}
-                  data-confirm={gettext("Delete this submission?")}
-                  aria-label={gettext("Delete submission")}
-                  class="btn btn-sm btn-ghost hover:text-error"
-                >
-                  <.icon name="hero-trash" class="size-3.5" />
-                </button>
               </div>
               <dl class="mt-1 grid gap-x-4 gap-y-0.5 sm:grid-cols-2">
                 <div :for={{key, value} <- submission.data} class="flex gap-2">
@@ -805,6 +1192,36 @@ defmodule KilnCMSWeb.FormBuilderLive do
                   <dd class="min-w-0 break-words text-base-content/80">{to_string(value)}</dd>
                 </div>
               </dl>
+              <div class="mt-2 flex items-center gap-2 text-xs">
+                <button
+                  :if={submission.status != :spam}
+                  type="button"
+                  phx-click="mark_submission_spam"
+                  phx-value-id={submission.id}
+                  class="rounded border border-base-content/20 px-2 py-0.5 hover:bg-base-200"
+                >
+                  {gettext("Mark as spam")}
+                </button>
+                <button
+                  :if={submission.status != :reviewed}
+                  type="button"
+                  phx-click="mark_submission_reviewed"
+                  phx-value-id={submission.id}
+                  class="rounded border border-base-content/20 px-2 py-0.5 hover:bg-base-200"
+                >
+                  {gettext("Mark as reviewed")}
+                </button>
+                <button
+                  type="button"
+                  phx-click="delete_submission"
+                  phx-value-id={submission.id}
+                  data-confirm={gettext("Delete this submission?")}
+                  aria-label={gettext("Delete submission")}
+                  class="ml-auto rounded p-1 hover:bg-base-200 hover:text-error"
+                >
+                  <.icon name="hero-trash" class="size-3.5" />
+                </button>
+              </div>
             </li>
           </ul>
         </section>

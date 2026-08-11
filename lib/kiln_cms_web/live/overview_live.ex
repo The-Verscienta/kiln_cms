@@ -31,6 +31,8 @@ defmodule KilnCMSWeb.OverviewLive do
 
   alias KilnCMS.I18n
 
+  require Logger
+
   # Published this long ago with no edit since → the centre tile's "stale"
   # nudge (same heuristic family as translation staleness: updated_at only).
   @stale_days 90
@@ -46,6 +48,13 @@ defmodule KilnCMSWeb.OverviewLive do
      socket
      |> assign(:actor, socket.assigns.current_user)
      |> assign(:admin?, KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin)
+     # A separate, stricter question from `:admin?` — see the backup strip in
+     # `render/1`. Backups are instance-wide, so the panel this strip links to
+     # takes a platform admin (#1160); gating the strip on the per-org tier
+     # would advertise a page the reader cannot open.
+     |> assign(:platform_admin?, KilnCMSWeb.LiveUserAuth.platform_admin?(socket))
+     |> assign_backup_warning()
+     |> assign_blocked_experiments()
      |> assign(:page_title, gettext("Overview"))
      |> load_metrics()}
   end
@@ -61,7 +70,7 @@ defmodule KilnCMSWeb.OverviewLive do
     # The dynamic half of the registry is per-org (epic #336), so it has to be
     # asked for THIS site's types — the arity-0 default resolves the default
     # org, which on a multi-site install is the wrong site's custom types.
-    types = ContentTypes.all() ++ ContentTypes.dynamic_all(org.id)
+    types = ContentTypes.all_for_org(org.id)
 
     rows = content_rows(types, actor, org)
     by_state = Enum.frequencies_by(rows, fn {_kind, r} -> r.state end)
@@ -81,6 +90,10 @@ defmodule KilnCMSWeb.OverviewLive do
     |> assign(:webhooks, if(admin?, do: webhook_health(actor, org)))
     |> assign(:forms, if(admin?, do: form_activity(actor, org)))
     |> assign(:keys_count, if(admin?, do: count(ApiKey, actor, org)))
+    |> assign(
+      :my_open_tasks,
+      length(CMS.list_tasks_for_assignee!(actor.id, actor: actor, tenant: org))
+    )
   end
 
   # One narrow-select fetch per content type; every content-shaped metric
@@ -191,6 +204,77 @@ defmodule KilnCMSWeb.OverviewLive do
           </p>
         </div>
 
+        <%!-- Stale-backup warning (#484). A strip above the grid rather than a
+              ninth tile: the bagua is a fixed 3×3 with the centre taken, so
+              there is no ninth position — and this is an alert, which wants to
+              be read before the eight steady-state numbers rather than
+              alongside them.
+
+              Platform-admin only, matching `/editor/backups` — and note that
+              is a STRICTER test than `@admin?`, which is the per-org tier
+              (#1160). A backup covers the whole instance, so an admin of one
+              site can neither take one nor open the panel this strip links to;
+              showing it to them would report on someone else's infrastructure
+              and lead to a page that turns them away. An editor can't act on
+              it either and shouldn't be told the deployment is unprotected.
+              Absent entirely when backups are healthy — a permanent green
+              banner is one nobody reads, and its absence is what makes the red
+              one land. --%>
+        <.overview_strip
+          :if={@platform_admin? and @backup_alarming?}
+          id="overview-backup-warning"
+          navigate={~p"/editor/backups"}
+          tone_class="border-error/30 bg-error/5 hover:bg-error/10"
+          icon="hero-exclamation-triangle"
+          icon_class="text-error"
+        >
+          <span class="block text-sm font-medium">{@backup_headline}</span>
+          <span class="block text-xs text-base-content/70">
+            {gettext("Open Backups to check the schedule or take one now.")}
+          </span>
+        </.overview_strip>
+
+        <%!-- An experiment that cannot convert (#1008). Distinct from the
+              backup strip above and deliberately a *warning*, not an error: the
+              site is fine, the measurement is not. Admin-only for the same
+              reason — the fixes are a config flag or a deleted goal document,
+              neither of which an editor can act on. That gate lives in
+              `assign_blocked_experiments/1`, where it also saves an editor the
+              queries; the list is empty for them, so there is nothing to
+              re-check here.
+
+              Absent when every running experiment is healthy, and absent
+              entirely on a site with none. --%>
+        <.overview_strip
+          :if={@experiments_off? or @blocked_experiments != []}
+          id="overview-experiment-warning"
+          tone_class="border-warning/30 bg-warning/5"
+          icon="hero-beaker"
+          icon_class="text-warning-ink"
+        >
+          <%!-- The deployment switch is site-wide, so it is said once, here,
+                rather than repeated under every experiment (#1008 review). --%>
+          <span :if={@experiments_off?} class="block text-sm font-medium">
+            {gettext("Experiments are switched off for this deployment, so no arm is served.")}
+          </span>
+          <%!-- NOT "cannot convert": the reasons below do not share an outcome
+                — some mean nothing converts, and `:goal_is_self` means a goal
+                that would convert its own impression if delivery let it. What
+                they share is that the numbers are not a result. --%>
+          <span :if={@blocked_experiments != []} class="block text-sm font-medium">
+            {ngettext(
+              "%{count} running experiment is not producing usable results.",
+              "%{count} running experiments are not producing usable results.",
+              length(@blocked_experiments)
+            )}
+          </span>
+          <ul class="mt-1 space-y-0.5 text-xs text-base-content/70">
+            <li :for={{name, reason} <- @blocked_experiments}>
+              <span class="font-medium">{name}</span> — {blocked_headline(reason)}
+            </li>
+          </ul>
+        </.overview_strip>
+
         <div class="grid gap-4 lg:grid-cols-3">
           <div
             id="bagua-center"
@@ -215,6 +299,16 @@ defmodule KilnCMSWeb.OverviewLive do
               )}
             </p>
             <ul class="mt-1 space-y-1 text-xs">
+              <li :if={@my_open_tasks > 0}>
+                <.link navigate={~p"/editor/tasks"} class="text-primary hover:underline">
+                  {ngettext(
+                    "%{count} task assigned to you",
+                    "%{count} tasks assigned to you",
+                    @my_open_tasks,
+                    count: @my_open_tasks
+                  )}
+                </.link>
+              </li>
               <li :if={Map.get(@by_state, :in_review, 0) > 0}>
                 <.link navigate={~p"/editor?status=in_review"} class="text-primary hover:underline">
                   {gettext("%{count} waiting for review", count: Map.get(@by_state, :in_review, 0))}
@@ -240,7 +334,8 @@ defmodule KilnCMSWeb.OverviewLive do
               </li>
               <li
                 :if={
-                  Map.get(@by_state, :in_review, 0) == 0 and @stale == 0 and @upcoming == 0 and
+                  @my_open_tasks == 0 and Map.get(@by_state, :in_review, 0) == 0 and
+                    @stale == 0 and @upcoming == 0 and
                     (is_nil(@webhooks) or @webhooks.failed_24h == 0)
                 }
                 class="text-base-content/50"
@@ -292,6 +387,205 @@ defmodule KilnCMSWeb.OverviewLive do
   # come from the metrics. `value: nil` renders as “—” (admin-only numbers
   # seen by an editor, or coverage on a single-locale site).
   @tile_order [:xun, :li, :kun, :zhen, :dui, :gen, :kan, :qian]
+
+  # Only the name and the reason atom reach the socket — never the experiment
+  # structs, which carry every variant's patch. The English sentence
+  # `Health.blocked_reason/1` also returns is for the terminal; this surface
+  # phrases its own so the strip translates (#1008).
+  #
+  # `experiments_off?` is the site-wide half, kept separate from the per-row
+  # reasons: `Health` deliberately no longer folds the deployment switch into a
+  # per-experiment verdict, because doing so said the same thing on every row
+  # and hid the real reasons behind it.
+  defp assign_blocked_experiments(socket) do
+    if socket.assigns.admin? do
+      org_id = socket.assigns.current_org.id
+
+      # Back through `Experiments.blocked/1` rather than re-deriving it here
+      # (#1114): it is the single entry point, and it short-circuits when the
+      # deployment switch is off so a disabled site pays neither the
+      # running-set load nor a lookup per experiment. `switched_off?/1` is the
+      # site-wide half, and reads the same cache.
+      socket
+      |> assign(
+        :blocked_experiments,
+        Enum.map(KilnCMS.Experiments.blocked(org_id), &blocked_row/1)
+      )
+      |> assign(:experiments_off?, KilnCMS.Experiments.switched_off?(org_id))
+    else
+      socket
+      |> assign(:blocked_experiments, [])
+      |> assign(:experiments_off?, false)
+    end
+  rescue
+    # The overview must render even when the experiments layer cannot answer.
+    # Same posture as `Experiments.running/1`, and logged for the same reason.
+    error ->
+      Logger.warning("Overview could not check experiment health: #{Exception.message(error)}")
+
+      socket
+      |> assign(:blocked_experiments, [])
+      |> assign(:experiments_off?, false)
+  end
+
+  # Restored to the function it documents — a later insertion split it from
+  # `assign_backup_warning/1` and left this reading as though the experiment
+  # check were the cheap one (#1008 review).
+  #
+  # Reads the backup manifest — one small file, no query. Computed at mount
+  # rather than per render, and only the two values the strip needs, so the
+  # whole `Backups.status/0` map isn't held in the socket for a banner that is
+  # usually absent.
+
+  attr :id, :string, required: true
+  attr :icon, :string, required: true
+
+  attr :tone_class, :string,
+    required: true,
+    doc: """
+    Border/background utilities, passed as a LITERAL from the call site. Not
+    built from a tone name: Tailwind's JIT only emits a class it can see spelled
+    out in source, so an interpolated `border-<tone>/30` would compile to markup with no CSS
+    behind it (#1116).
+    """
+
+  attr :icon_class, :string, required: true
+  attr :navigate, :string, default: nil
+  slot :inner_block, required: true
+
+  # An alert strip above the bagua grid.
+  #
+  # A strip rather than a ninth tile: the grid is a fixed 3×3 with the centre
+  # taken, and an alert wants to be read before the eight steady-state numbers
+  # rather than alongside them.
+  #
+  # Rendered as a link when `navigate` is given and a plain `div` otherwise —
+  # which is the one place the two strips legitimately differ, so the hover
+  # state belongs to the navigable variant only rather than being an
+  # inconsistency to reconcile.
+  defp overview_strip(assigns) do
+    ~H"""
+    <.link
+      :if={@navigate}
+      id={@id}
+      navigate={@navigate}
+      class={["flex items-start gap-3 rounded-lg border p-4", @tone_class]}
+    >
+      <.icon name={@icon} class={["mt-0.5 size-5 shrink-0", @icon_class]} />
+      <span class="min-w-0">{render_slot(@inner_block)}</span>
+    </.link>
+    <div
+      :if={is_nil(@navigate)}
+      id={@id}
+      class={["flex items-start gap-3 rounded-lg border p-4", @tone_class]}
+    >
+      <.icon name={@icon} class={["mt-0.5 size-5 shrink-0", @icon_class]} />
+      <div class="min-w-0">{render_slot(@inner_block)}</div>
+    </div>
+    """
+  end
+
+  # Only the name and the reason atom reach the socket — never the experiment
+  # struct, which carries every variant's patch. The English sentence
+  # `blocked_reason/1` also returns is for the terminal; this surface phrases
+  # its own so the strip translates.
+  defp blocked_row({experiment, {reason, _sentence}}), do: {experiment.name, reason}
+
+  defp blocked_headline(:sticky_off),
+    do: gettext("its goal converts on a later page, and sticky assignment is off")
+
+  defp blocked_headline(:no_goal_form), do: gettext("no goal form is set")
+  defp blocked_headline(:goal_form_missing), do: gettext("its goal form has been deleted")
+  defp blocked_headline(:no_target), do: gettext("no goal document is set")
+  defp blocked_headline(:no_goal_funnel), do: gettext("no goal funnel is set")
+
+  defp blocked_headline(:goal_is_self),
+    do: gettext("its goal document is the experimented document itself")
+
+  defp blocked_headline(:goal_type_unknown),
+    do: gettext("its goal content type is not a type on this site")
+
+  defp blocked_headline(:goal_document_missing),
+    do: gettext("its goal document has been deleted")
+
+  defp blocked_headline(:funnel_ends_here),
+    do: gettext("its funnel now ends on the experimented document itself")
+
+  defp blocked_headline(:funnel_target_missing),
+    do: gettext("its funnel no longer resolves to a document")
+
+  defp blocked_headline(:document_missing),
+    do: gettext("the document under test has been deleted")
+
+  defp blocked_headline(:document_unpublished),
+    do: gettext("the document under test is not published, so no arm is served")
+
+  defp blocked_headline(:goal_document_unpublished),
+    do: gettext("its goal document is not published")
+
+  defp blocked_headline(:goal_form_inactive),
+    do: gettext("its goal form is no longer accepting submissions")
+
+  # "could not be read" is deliberately NOT "has been deleted": a pool timeout
+  # and a deletion are the same tuple at the call site, and telling an admin a
+  # form was removed sends them to restore something nobody touched.
+  defp blocked_headline(:goal_unreadable),
+    do: gettext("its goal could not be read — this may be temporary")
+
+  defp blocked_headline(:unknown_goal),
+    do: gettext("its goal is one this version cannot check")
+
+  # Deliberately total: a reason added to `Health` and not here would otherwise
+  # crash the overview, which is a worse outcome than a vaguer sentence.
+  defp blocked_headline(_other), do: gettext("its goal can no longer be reached")
+
+  defp assign_backup_warning(socket) do
+    status = KilnCMS.Backups.status()
+
+    socket
+    # NOT `status.stale?` alone. A backup that failed five minutes ago is not
+    # stale — it is recent and worthless — and gating on age let the overview
+    # stay clean while `/editor/backups` said "The last backup failed". Same
+    # trap as `BackupLive.alarming?/1`; it needed fixing in both places.
+    |> assign(:backup_alarming?, status.stale? or failed?(status))
+    |> assign(:backup_headline, backup_headline(status))
+  end
+
+  defp failed?(%{manifest: %{ok: false}}), do: true
+  defp failed?(_status), do: false
+
+  defp backup_headline(%{manifest: nil}),
+    do: gettext("No backup has ever been recorded for this deployment.")
+
+  defp backup_headline(%{manifest: %{ok: false}}),
+    do: gettext("The last backup failed.")
+
+  defp backup_headline(%{manifest: %{finished_at: %DateTime{} = at}}) do
+    # Hours below a day: `DateTime.diff(:day)` truncates, so a deployment with
+    # `BACKUP_STALE_AFTER_HOURS` under 24 rendered "The last backup was 0 days
+    # ago" — a sentence that reads as a bug rather than a warning.
+    hours = DateTime.diff(DateTime.utc_now(), at, :hour)
+
+    if hours < 24 do
+      ngettext(
+        "The last backup was %{count} hour ago.",
+        "The last backup was %{count} hours ago.",
+        hours,
+        count: hours
+      )
+    else
+      days = div(hours, 24)
+
+      ngettext(
+        "The last backup was %{count} day ago.",
+        "The last backup was %{count} days ago.",
+        days,
+        count: days
+      )
+    end
+  end
+
+  defp backup_headline(_status), do: gettext("The backup status can't be determined.")
 
   defp tiles(assigns), do: Enum.map(@tile_order, &tile_spec(&1, assigns))
 

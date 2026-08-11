@@ -30,7 +30,7 @@ defmodule KilnCMSWeb.FormLive do
   end
 
   @impl true
-  def handle_event("create_form", %{"form" => params}, socket) do
+  def handle_event("create_form", %{"form" => params}, socket) when is_map(params) do
     case CMS.create_form(params, actor_opts(socket)) do
       {:ok, form} ->
         {:noreply,
@@ -45,21 +45,17 @@ defmodule KilnCMSWeb.FormLive do
 
   # A full copy — settings and fields — created inactive so the duplicate
   # doesn't instantly render publicly under its new slug.
-  def handle_event("duplicate_form", %{"id" => id}, socket) do
+  def handle_event("duplicate_form", %{"id" => id}, socket) when is_binary(id) do
     opts = actor_opts(socket)
 
     with {:ok, form} <- CMS.get_form(id, opts),
          {:ok, copy} <-
            CMS.create_form(
-             %{
+             Map.merge(copied_settings(form), %{
                name: gettext("%{name} (copy)", name: form.name),
                slug: unique_slug(form.slug, socket.assigns.forms),
-               description: form.description,
-               active: false,
-               success_message: form.success_message,
-               notify_email: form.notify_email,
-               submit_label: form.submit_label
-             },
+               active: false
+             }),
              opts
            ) do
       for field <- CMS.form_fields_for!(form.id, opts) do
@@ -91,7 +87,7 @@ defmodule KilnCMSWeb.FormLive do
     end
   end
 
-  def handle_event("delete_form", %{"id" => id}, socket) do
+  def handle_event("delete_form", %{"id" => id}, socket) when is_binary(id) do
     opts = actor_opts(socket)
 
     with {:ok, form} <- CMS.get_form(id, opts),
@@ -124,6 +120,19 @@ defmodule KilnCMSWeb.FormLive do
   end
 
   # A slug not yet taken by any listed form: `contact-copy`, `contact-copy-2`, …
+  # Every attribute the create action accepts, read off the resource rather than
+  # listed here. The hand-written list this replaces had already drifted — the
+  # three autoresponder fields were never copied — and since #648 a missed
+  # attribute is a security default rather than a cosmetic one: a copy that
+  # lost `embed_origins` silently falls back to the deployment-wide allowlist,
+  # which on a multi-org instance is every other org's embedders.
+  defp copied_settings(form) do
+    KilnCMS.CMS.Form
+    |> Ash.Resource.Info.action(:create)
+    |> Map.fetch!(:accept)
+    |> Map.new(&{&1, Map.get(form, &1)})
+  end
+
   defp unique_slug(slug, forms) do
     taken = MapSet.new(forms, & &1.slug)
     base = "#{slug}-copy"

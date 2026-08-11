@@ -2,52 +2,13 @@
 // `test` here carries the LiveView navigation guard (see fixtures.js): every
 // page.goto/reload waits for the LiveView to finish joining its channel, so a
 // phx-click or phx-submit issued right after a page load can't be swallowed.
-const { test, expect } = require("./fixtures");
-
-// Demo admin seeded by priv/repo/seeds.exs (mix e2e.setup).
-const ADMIN = { email: "admin@kiln.test", password: "kilnadmin123" };
-
-async function signInAsAdmin(page) {
-  await page.goto("/sign-in");
-  await page.fill('input[name="user[email]"]', ADMIN.email);
-  await page.fill('input[name="user[password]"]', ADMIN.password);
-  await page.getByRole("button", { name: /sign in/i }).click();
-  // Editors/admins land on the console overview by default after sign-in
-  // (#157); this seeded user has the :admin role (see priv/repo/seeds.exs).
-  await expect(page).toHaveURL("/editor/overview");
-}
-
-// Start a fresh draft page from the editor index and return its slug (the
-// `new` handler creates an "Untitled …" draft and navigates into the editor).
-// Past @max_inline_new_buttons content types the per-type "New …" buttons
-// collapse into the #content-new-menu <details> dropdown, so open it first.
-async function newDraftPage(page) {
-  await page.goto("/editor");
-  const newMenu = page.locator("#content-new-menu summary");
-  if (await newMenu.count()) await newMenu.click();
-  await page.click('button[phx-click="new"][phx-value-kind="page"]');
-  await page.waitForURL(/\/editor\/(content\/page|pages)\//);
-  await expect(page.locator('form[id$="-editor"]')).toBeVisible();
-}
-
-// The block inserter (#29) is a closed dropdown: its options only become
-// visible/clickable after the "Add block" trigger opens the menu (the
-// BlockInserter JS hook toggles `data-inserter-menu`'s `hidden` attribute).
-// Selecting an option closes the menu again, so each insert needs its own
-// trigger click.
-//
-// Once a block exists there are several inserters (the inline "+" between-block
-// inserters from themes B2/C/D), each rendering a hidden add_block option per
-// type — so a bare phx-value-type match resolves to multiple elements and can
-// click a hidden one. Open the unique main "Add block" menu and click the
-// *visible* option instead.
-async function addBlock(page, type) {
-  await page.getByRole("button", { name: /add block/i }).click();
-  await page
-    .locator(`button[data-inserter-item][phx-value-type="${type}"]:visible`)
-    .first()
-    .click();
-}
+const {
+  test,
+  expect,
+  signInAsAdmin,
+  newDraftPage,
+  addBlock,
+} = require("./fixtures");
 
 test.describe("editor journey", () => {
   test.beforeEach(async ({ page }) => {
@@ -109,6 +70,74 @@ test.describe("editor journey", () => {
     await page.keyboard.press("Enter");
     await page.keyboard.type("Pearl of wisdom");
     await expect(editor.locator("blockquote")).toContainText("Pearl of wisdom");
+  });
+
+  // #823. A rich-text link only exists if it survives being *parsed back* into
+  // TipTap: the stored Portable Text is rendered to HTML to seed the editor, and
+  // an extension list without a Link mark drops the anchor there and then
+  // autosaves prose that no longer has it. That is invisible to the Elixir
+  // round-trip tests — `to_html/1` and `from_tiptap/1` were both correct
+  // throughout the bug — so the regression has to be caught in a real browser.
+  test("a link authored in a rich-text block survives the editor round-trip", async ({ page }) => {
+    const slug = `e2e-link-${Date.now()}`;
+    const linkText = "the refund policy";
+    await newDraftPage(page);
+    await page.fill('input[name$="[title]"]', "E2E Link");
+    await page.fill('input[name$="[slug]"]', slug);
+
+    await addBlock(page, "rich_text");
+    const editor = page.locator('[phx-hook="RichText"] [data-editor] .ProseMirror').first();
+    await expect(editor).toBeVisible();
+    await editor.click();
+    await page.keyboard.type(linkText);
+
+    // Select the prose, then link it. `Mod-a` is ProseMirror's own selectAll
+    // keybinding, so it lands as an editor command rather than depending on the
+    // browser's native caret movement — which arrow keys in an automated
+    // contenteditable can't be relied on for.
+    await page.keyboard.press("ControlOrMeta+a");
+    // ⌘K / Ctrl-K is bound on the editor itself and pre-empts the global
+    // search palette (which skips contenteditable targets anyway).
+    await page.keyboard.press("ControlOrMeta+k");
+    const url = page.locator(".rt-link-prompt input");
+    await expect(url).toBeFocused();
+
+    // An href the server would blank is refused here, with a reason, and the
+    // document is left alone — the popover stays open to be corrected.
+    //
+    // `http:///path` is the one that drifted (#833): WHATWG parsing invents an
+    // authority out of the path, so `new URL(...).host` is truthy and a naive
+    // client check accepts what `URI.parse/1` refuses. The whole point of the
+    // mirror is that the two agree, so it earns a case of its own.
+    for (const bad of ["javascript:alert(1)", "http:///path", "//evil.example.com"]) {
+      await url.fill(bad);
+      await page.keyboard.press("Enter");
+      await expect(page.locator(".rt-link-error")).toBeVisible();
+      await expect(editor.locator("a")).toHaveCount(0);
+    }
+
+    await url.fill("/refunds");
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".rt-link-prompt")).toBeHidden();
+    await expect(editor.locator('a[href="/refunds"]')).toHaveText(linkText);
+
+    // Let the 300ms rich_text_body push flush, then save.
+    await page.waitForTimeout(700);
+    await page.getByRole("button", { name: /^save$/i }).click();
+
+    // The regression: reloading re-seeds the editor from the *stored* Portable
+    // Text, so the anchor here proves markDefs survived both directions.
+    await page.reload();
+    const reloaded = page.locator('[phx-hook="RichText"] [data-editor] .ProseMirror').first();
+    await expect(reloaded.locator('a[href="/refunds"]')).toHaveText(linkText);
+
+    // And it reaches readers: publish, then check the delivered page.
+    await page.click('button[phx-click="workflow"][phx-value-action="publish"]');
+    await expect(
+      page.locator('button[phx-click="workflow"][phx-value-action="unpublish"]'),
+    ).toBeVisible();
+    await page.goto(`/${slug}`);
+    await expect(page.locator('article a[href="/refunds"]')).toHaveText(linkText);
   });
 
   test("reorder blocks via drag-and-drop (SortableJS)", async ({ page }) => {
@@ -250,5 +279,144 @@ test.describe("editor journey", () => {
     await page.waitForTimeout(700);
     await expect(settingsTab).toHaveAttribute("aria-selected", "true");
     await expect(seoTitle).toHaveValue("E2E SEO title more");
+  });
+
+  // #523. Whether a tag-picker section is expanded is client state with three
+  // would-be owners: the editor's own click, the server's rendered `open`, and
+  // the TagFilter hook's force-open while narrowing. The bug was the last two
+  // fighting — the server re-derived `open` from the live tick count, so
+  // unticking folded the section shut under the cursor, and the hook kept its
+  // own shadow copy of the server's choice on a data attribute. Every symptom
+  // is a DOM-state race across a LiveView patch, so none of it is visible to
+  // the Elixir round-trip tests: it has to be driven in a real browser.
+  test("the tag picker's sections stay where the editor put them", async ({ page }) => {
+    const stamp = Date.now();
+    const group = `E2E Group ${stamp}`;
+    const [alpha, beta] = [`e2e-alpha-${stamp}`, `e2e-beta-${stamp}`];
+
+    // A group with two tags, so there is a section to collapse and a sibling
+    // inside it that a fold-away would hide.
+    await page.goto("/editor/taxonomy");
+    await page.fill('#new-tag_group-form input[name$="[name]"]', group);
+    await page.locator("#new-tag_group-form button[type=submit]").click();
+    await expect(page.locator("#new-tag-form select").getByText(group)).toBeAttached();
+
+    for (const name of [alpha, beta]) {
+      await page.fill('#new-tag-form input[name$="[name]"]', name);
+      await page.selectOption('#new-tag-form select[name$="[tag_group_id]"]', { label: group });
+      await page.locator("#new-tag-form button[type=submit]").click();
+      // The row renders the name and the auto-derived slug, which are the same
+      // string here — assert on the first match rather than fighting that.
+      await expect(page.getByText(name, { exact: true }).first()).toBeVisible();
+    }
+
+    await newDraftPage(page);
+    await page.getByRole("tab", { name: /settings/i }).click();
+
+    const picker = page.locator("#tag-picker");
+    const section = picker.locator("details[data-tag-section]").filter({ hasText: group });
+    const filter = picker.locator("[data-tag-filter-input]");
+    const title = page.locator('input[name$="[title]"]');
+
+    // Nothing is tagged on a fresh draft, so the section mounts collapsed.
+    await expect(section).toHaveJSProperty("open", false);
+
+    // Opened by hand, it survives the per-keystroke validate patch — the
+    // app-wide <details> preservation in app.js's `onBeforeElUpdated`.
+    await section.locator("summary").click();
+    await expect(section).toHaveJSProperty("open", true);
+    await title.fill("E2E Tag Picker");
+    await page.waitForTimeout(700);
+    await expect(section).toHaveJSProperty("open", true);
+
+    // Closed by hand, it stays closed across the next patch too. This is the
+    // direction the old code broke: the server re-rendered `open` from the tick
+    // count, and any change to that value overrode the editor's toggle.
+    await section.locator("summary").click();
+    await expect(section).toHaveJSProperty("open", false);
+    await title.fill("E2E Tag Picker 2");
+    await page.waitForTimeout(700);
+    await expect(section).toHaveJSProperty("open", false);
+
+    // Narrowing force-opens the section holding the hit, and clearing the box
+    // undoes exactly that — the hook closes only what the hook opened.
+    await filter.fill("alpha");
+    await expect(section).toHaveJSProperty("open", true);
+    await filter.fill("");
+    await expect(section).toHaveJSProperty("open", false);
+
+    // But once the editor has ticked something in a force-opened section,
+    // clearing the box must not fold it away under them: the box they just
+    // ticked and the sibling they were reaching for both have to stay put.
+    await filter.fill("alpha");
+    await section.getByRole("checkbox", { name: alpha }).check();
+    await page.waitForTimeout(700);
+    await filter.fill("");
+    await expect(section).toHaveJSProperty("open", true);
+    await expect(section.getByRole("checkbox", { name: alpha })).toBeChecked();
+    await expect(section.getByRole("checkbox", { name: beta })).toBeVisible();
+
+    // And the original report: unticking the section's last tag must not fold
+    // it shut. This is the crossing that the old server-rendered `open` got
+    // wrong — the value moved true→false, which is precisely the patch on which
+    // `onBeforeElUpdated` stops preserving the editor's own toggle, so the
+    // section vanished under the cursor with `beta` still unticked inside it.
+    await section.getByRole("checkbox", { name: alpha }).uncheck();
+    await page.waitForTimeout(700);
+    await expect(section).toHaveJSProperty("open", true);
+    await expect(section.getByRole("checkbox", { name: beta })).toBeVisible();
+
+    // Let the debounced autosave land: persisting the (now empty) tag set
+    // reloads the record, and that reload must not re-judge the section either.
+    await page.waitForTimeout(2500);
+    await expect(section).toHaveJSProperty("open", true);
+  });
+
+  // #893. The nested heading-level `<select>` had no `name`, so LiveView routed
+  // its form-associated `phx-change` through `pushInput`, which serializes the
+  // form filtered to the changed input's name and reads `phx-value-*` off the
+  // form rather than the element — nothing arrived and the level never changed.
+  //
+  // Only a real browser exercises that path: an ExUnit `render_change` supplies
+  // params directly and passes against the broken markup too. This is the test
+  // that would have caught it.
+  test("changing a nested heading's level in a columns block takes effect", async ({
+    page,
+  }) => {
+    await newDraftPage(page);
+    await page.fill('input[name$="[title]"]', "E2E Nested Heading");
+    await page.fill('input[name$="[slug]"]', `e2e-cols-${Date.now()}`);
+
+    await addBlock(page, "columns");
+
+    // Nest a heading in the first column.
+    await page.click(
+      'button[phx-click="col_add_child"][phx-value-col="0"][phx-value-type="heading"]',
+    );
+
+    // The control under test. A heading child starts at level 2.
+    const level = page.locator('select[phx-change="col_update_child"]').first();
+    await expect(level).toBeVisible();
+    await expect(level).toHaveValue("2");
+
+    await level.selectOption("3");
+
+    // NOT asserted here. `expect(level).toHaveValue("3")` immediately after
+    // `selectOption` cannot fail: with the bug, the handler no-ops and the
+    // server sends no diff at all, so the DOM simply keeps the value Playwright
+    // just set — and even with a diff, `dom.ts`'s `mergeFocusedInput` skips
+    // `HTMLSelectElement`, so a focused select never takes the server's
+    // `selected` back. The only honest check is a server-rendered one.
+    //
+    // So: save, re-mount the editor from the database, and read the control on
+    // a fresh unfocused render. That can only pass if the browser actually sent
+    // the change and the server actually stored it.
+    await page.getByRole("button", { name: /^save$/i }).click();
+    await expect(page.getByText("Saved.")).toBeVisible();
+    await page.reload();
+
+    const reloaded = page.locator('select[phx-change="col_update_child"]').first();
+    await expect(reloaded).toBeVisible();
+    await expect(reloaded).toHaveValue("3");
   });
 });

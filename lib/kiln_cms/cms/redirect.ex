@@ -83,8 +83,16 @@ defmodule KilnCMS.CMS.Redirect do
 
     # The retired public path, with the type prefix but no locale prefix
     # (`/blog/old-slug`, `/old-page`).
-    attribute :path, :string, allow_nil?: false, public?: true
-    attribute :locale, :string, allow_nil?: false, default: "en", public?: true
+    attribute :path, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.url()]
+
+    attribute :locale, :string,
+      allow_nil?: false,
+      default: "en",
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.identifier()]
 
     # The record that vacated the path: public type name + id, resolved to its
     # current URL at request time.

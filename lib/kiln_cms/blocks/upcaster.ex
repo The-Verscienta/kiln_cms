@@ -57,15 +57,27 @@ defmodule KilnCMS.Blocks.Upcaster do
 
   defp stored_version(map), do: Map.get(map, "_version") || Map.get(map, :_version) || 1
 
-  @types %{
-    "heading" => :heading,
-    "image" => :image,
-    "rich_text" => :rich_text,
-    "quote" => :quote,
-    "embed" => :embed,
-    "columns" => :columns,
-    "custom" => :custom
-  }
   defp safe_atom(type) when is_atom(type), do: type
-  defp safe_atom(type) when is_binary(type), do: Map.get(@types, type, :custom)
+
+  # This used to be a hand-written string→atom map, and it had silently fallen
+  # five types behind: `faq`, `how_to`, `claim`, `form` and `divider` all
+  # resolved to `:custom`, so `upcast_block_map/1` looked up the wrong module's
+  # migration chain for them. Harmless only because no block has ever declared
+  # `version > 1` — the first `migrate` step on any of those types would simply
+  # not have run, on read, with nothing failing.
+  #
+  # `to_existing_atom` needs no list to keep current: every block type name
+  # exists as an atom because a block module declared it, plugin blocks
+  # included. A `_type` that names no block resolves to an atom `Blocks.fetch/1`
+  # rejects (or raises here and is caught), and the caller returns the map
+  # untouched — which is the right answer for a type this build knows nothing
+  # about, and a better one than the old fallback of upcasting it as `:custom`.
+  #
+  # The atom table cannot be grown from a stored document: `to_existing_atom`
+  # only ever returns atoms that already exist.
+  defp safe_atom(type) when is_binary(type) do
+    String.to_existing_atom(type)
+  rescue
+    ArgumentError -> :__unknown_block_type__
+  end
 end

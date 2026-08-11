@@ -4,9 +4,11 @@ defmodule KilnCMSWeb.PasskeyControllerTest do
 
   import KilnCMS.PasskeyFixtures
 
-  # The :auth bucket keeps its REAL (tight) limit in tests; a unique client IP
-  # per test keeps this suite out of the shared 127.0.0.1 window (the
-  # documented rate-limit test flake).
+  # A unique client IP per test keeps this suite out of the shared 127.0.0.1
+  # `:auth` window (the documented rate-limit test flake). Still worth doing
+  # even though `config/test.exs` now raises the `:auth` limit (#715): the
+  # headroom is what stops the suite tripping the limit, not a licence for one
+  # file to spend it.
   setup %{conn: conn} do
     octet = rem(System.unique_integer([:positive]), 254) + 1
     %{conn: %{conn | remote_ip: {127, 0, octet, 1}}}

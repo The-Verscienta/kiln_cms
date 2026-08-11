@@ -68,9 +68,10 @@ app.css to use them … never reference an external vendor'd script `src` or lin
 
 [`assets/js/app.js`](../assets/js/app.js) wires them into LiveView hooks:
 
-- **TipTap** (`Editor` + `StarterKit`) powers the `RichText` hook for rich-text
-  blocks; the editor's HTML is mirrored into a hidden input so it saves through
-  the normal form submit.
+- **TipTap** (`Editor` + `StarterKit`, plus `@tiptap/extension-link` and the
+  `@tiptap/extension-table*` set — StarterKit v2 carries neither) powers the
+  `RichText` hook for rich-text blocks; the editor's HTML is mirrored into a
+  hidden input so it saves through the normal form submit.
 - **SortableJS** powers the `Sortable` hook for drag-and-drop block reordering,
   pushing a `reorder` event with the new `data-sort-id` order.
 - **topbar** shows the live-navigation progress bar.

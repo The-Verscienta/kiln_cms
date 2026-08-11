@@ -187,6 +187,7 @@ scrubbed database — no new build, no new service definition:
    - `DATABASE_URL` → the staging clone,
    - a **fresh** `SECRET_KEY_BASE`,
    - a staging hostname,
+   - **`KILN_ENV_LABEL=staging`** (and optionally `KILN_ENV_COLOR`) — see below,
    - outbound integrations left **off** (default): no `MAIL_MODE`, `KilnCMS.Search.Meilisearch`
      `enabled: false`, `KilnCMS.Storage.Local`.
    - optionally set the crawler to noindex via your reverse proxy.
@@ -194,6 +195,31 @@ scrubbed database — no new build, no new service definition:
 
 Because it's the same image, "upgrade staging" is just redeploying it — the exact
 rehearsal for the production Redeploy.
+
+## Label the clone
+
+A scrub removes the personal data; it does not change how the console **looks**.
+The clone keeps production's content, its branding and its logo, so the two
+consoles are byte-for-byte identical — which is exactly the setup for someone
+publishing to the wrong one.
+
+Set `KILN_ENV_LABEL` on the staging application (#469) and every console page
+gets a strip across the top naming it:
+
+```bash
+KILN_ENV_LABEL=staging
+KILN_ENV_COLOR=warning   # or error, info, success — a tone name, never a hex
+```
+
+**Leave both unset in production.** No label means no strip: production is the
+environment you recognise by the *absence* of a warning, and nothing has to be
+configured for that to hold. See
+[`environment-variables.md`](environment-variables.md#optional--environment-indicator).
+
+`scripts/staging.sh up` and the scrub both print this as a closing reminder.
+Neither can *set* the variable: the scrub runs as a throwaway process against a
+remote `DATABASE_URL`, not inside the application that will serve the clone, so
+it has no way to read or write that application's environment.
 
 ## What's already safe by default
 

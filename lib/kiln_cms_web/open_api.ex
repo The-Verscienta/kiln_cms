@@ -18,7 +18,7 @@ defmodule KilnCMSWeb.OpenApi do
       published content is world-readable, a bearer token only *widens* access
       to drafts.
 
-  The result is published at `/api/json/open_api` in every environment and is
+  The result is published at `/api/json/open_api` wherever `:api_docs` is on (#567) and is
   the spec backing the Swagger UI at `/api/json/swaggerui`.
   """
 
@@ -115,7 +115,12 @@ defmodule KilnCMSWeb.OpenApi do
           description:
             "Sign in with an editor/admin email + password and receive an " <>
               "AshAuthentication JWT for `Authorization: Bearer <token>`. " <>
-              "Public; no authentication required.",
+              "Public; no authentication required.\n\n" <>
+              "If the account has two-factor authentication enabled this " <>
+              "answers **200** with `two_factor_required` and a short-lived " <>
+              "`pending_token` instead of **201** with a JWT — redeem it at " <>
+              "`POST /api/auth/sign_in/verify`. Branch on the status code, not " <>
+              "on the presence of `token`.",
           # No bearer requirement — this is how you *get* the bearer token.
           security: [],
           requestBody: %OpenApiSpex.RequestBody{
@@ -134,36 +139,119 @@ defmodule KilnCMSWeb.OpenApi do
             }
           },
           responses: %{
+            200 => %OpenApiSpex.Response{
+              description:
+                "Two-factor required — no token issued. Redeem `pending_token` " <>
+                  "at `POST /api/auth/sign_in/verify`.",
+              content: %{
+                "application/json" => %OpenApiSpex.MediaType{
+                  schema: pending_schema()
+                }
+              }
+            },
             201 => %OpenApiSpex.Response{
               description: "Signed in — bearer token issued",
               content: %{
-                "application/json" => %OpenApiSpex.MediaType{
-                  schema: %OpenApiSpex.Schema{
-                    type: :object,
-                    properties: %{
-                      token: %OpenApiSpex.Schema{
-                        type: :string,
-                        description: "JWT bearer token"
-                      },
-                      user: %OpenApiSpex.Schema{
-                        type: :object,
-                        properties: %{
-                          id: %OpenApiSpex.Schema{type: :string, format: :uuid},
-                          email: %OpenApiSpex.Schema{type: :string},
-                          role: %OpenApiSpex.Schema{
-                            type: :string,
-                            enum: ["admin", "editor", "viewer"]
-                          }
-                        }
-                      }
+                "application/json" => %OpenApiSpex.MediaType{schema: token_schema()}
+              }
+            },
+            401 => %OpenApiSpex.Response{description: "Invalid email or password"},
+            422 => %OpenApiSpex.Response{description: "Missing email or password"},
+            429 => %OpenApiSpex.Response{
+              description:
+                "Rate limited — per-IP `auth` bucket, or the per-account " <>
+                  "sign-in budget. See `Retry-After`."
+            }
+          }
+        }
+      },
+      "/api/auth/sign_in/verify" => %OpenApiSpex.PathItem{
+        post: %OpenApiSpex.Operation{
+          tags: ["Authentication"],
+          operationId: "signInVerify",
+          summary: "Complete a two-factor sign-in",
+          description:
+            "Exchange the `pending_token` from `POST /api/auth/sign_in` plus a " <>
+              "TOTP code (or a one-time recovery code) for the bearer token. " <>
+              "The pending token is valid for 300 seconds; codes are budgeted " <>
+              "per account across this endpoint and the browser prompt, so a " <>
+              "429 here is not reset by signing in again.",
+          security: [],
+          requestBody: %OpenApiSpex.RequestBody{
+            required: true,
+            content: %{
+              "application/json" => %OpenApiSpex.MediaType{
+                schema: %OpenApiSpex.Schema{
+                  type: :object,
+                  required: [:pending_token, :code],
+                  properties: %{
+                    pending_token: %OpenApiSpex.Schema{
+                      type: :string,
+                      description: "The `pending_token` from the sign-in response"
+                    },
+                    code: %OpenApiSpex.Schema{
+                      type: :string,
+                      description: "6-digit TOTP code, or a recovery code"
                     }
                   }
                 }
               }
+            }
+          },
+          responses: %{
+            201 => %OpenApiSpex.Response{
+              description: "Signed in — bearer token issued",
+              content: %{
+                "application/json" => %OpenApiSpex.MediaType{schema: token_schema()}
+              }
             },
-            401 => %OpenApiSpex.Response{description: "Invalid email or password"},
-            422 => %OpenApiSpex.Response{description: "Missing email or password"}
+            401 => %OpenApiSpex.Response{
+              description:
+                "Invalid code (`invalid_code`), or the pending token has " <>
+                  "expired or is no longer usable (`pending_expired`)"
+            },
+            422 => %OpenApiSpex.Response{description: "Missing pending_token or code"},
+            429 => %OpenApiSpex.Response{
+              description: "Per-account second-factor budget spent — see `Retry-After`"
+            }
           }
+        }
+      }
+    }
+  end
+
+  defp token_schema do
+    %OpenApiSpex.Schema{
+      type: :object,
+      properties: %{
+        token: %OpenApiSpex.Schema{type: :string, description: "JWT bearer token"},
+        user: %OpenApiSpex.Schema{
+          type: :object,
+          properties: %{
+            id: %OpenApiSpex.Schema{type: :string, format: :uuid},
+            email: %OpenApiSpex.Schema{type: :string},
+            role: %OpenApiSpex.Schema{type: :string, enum: ["admin", "editor", "viewer"]}
+          }
+        }
+      }
+    }
+  end
+
+  defp pending_schema do
+    %OpenApiSpex.Schema{
+      type: :object,
+      properties: %{
+        two_factor_required: %OpenApiSpex.Schema{type: :boolean, enum: [true]},
+        pending_token: %OpenApiSpex.Schema{
+          type: :string,
+          description:
+            "Opaque and encrypted. Treat it as a credential: it names the " <>
+              "account and carries the sign-in this exchange will complete. " <>
+              "Redeemed at most once, and only for `expires_in` seconds."
+        },
+        expires_in: %OpenApiSpex.Schema{
+          type: :integer,
+          description: "Seconds the pending token remains valid"
         }
       }
     }

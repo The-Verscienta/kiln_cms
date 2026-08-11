@@ -45,13 +45,29 @@ defmodule KilnCMS.Accounts.OrgMembership do
   end
 
   actions do
-    defaults [:read, :create, :destroy]
+    defaults [:read, :create]
+
+    # Explicit, so removing someone from an org drops the sockets that were
+    # already authorized under it (#675). A membership is the per-org tier, so
+    # deleting one narrows what its holder may do exactly as a demotion does.
+    destroy :destroy do
+      primary? true
+      require_atomic? false
+
+      change {KilnCMS.Accounts.Changes.EvictSessions,
+              reason: :membership_removed, user_id: :user_id}
+    end
 
     # Explicit (not a default) so the grant-shape validation — which inspects
     # the whole map and has no atomic expression — can run.
     update :update do
       primary? true
       require_atomic? false
+
+      # The per-org role, audiences and type scopes all live here, so an edit
+      # narrows a live socket's grant the same way `manage_access` does (#675).
+      change {KilnCMS.Accounts.Changes.EvictSessions,
+              reason: :membership_changed, user_id: :user_id}
     end
 
     default_accept [

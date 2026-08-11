@@ -2,7 +2,7 @@ defmodule KilnCMS.CMS.SlugRegeneration do
   @moduledoc """
   Bulk slug regeneration (#455) — pathauto's "update all aliases".
 
-  Re-derives every record's slug through the same `Slugs.derive_base/2` chain
+  Re-derives every record's slug through the same `Slugs.derive_base/3` chain
   the editor and `DeriveSlug` use (per-type pattern, else focus keyphrase →
   title), with the same dedupe. `preview/3` is the dry run: it reports every
   record whose slug would change, plus how many were skipped as author-pinned
@@ -130,7 +130,11 @@ defmodule KilnCMS.CMS.SlugRegeneration do
   end
 
   defp candidate(ct, record, tenant, include_pinned?) do
-    base = Slugs.derive_base(ct.slug_pattern, Slugs.record_context(record))
+    # The type's own tokens (#804) must be in scope here, or `underived?/2`
+    # below compares the stored slug against a derivation that never had them
+    # and calls every record author-pinned.
+    extra = Slugs.descriptor_token_definitions(ct, ct.slug_pattern, :slug, tenant)
+    base = Slugs.derive_base(ct.slug_pattern, Slugs.record_context(record), extra)
     pinned? = not Slugs.underived?(record.slug, base)
 
     cond do
@@ -160,10 +164,8 @@ defmodule KilnCMS.CMS.SlugRegeneration do
     end
   end
 
-  defp types(:all, tenant),
-    do: ContentTypes.all() ++ ContentTypes.dynamic_all(org_id(tenant))
-
-  defp types(kind, tenant), do: kind |> ContentTypes.get(org_id(tenant)) |> List.wrap()
+  defp types(:all, tenant), do: ContentTypes.all_for_org(tenant)
+  defp types(kind, tenant), do: kind |> ContentTypes.get(tenant) |> List.wrap()
 
   defp records(ct, tenant) do
     query =
@@ -182,8 +184,4 @@ defmodule KilnCMS.CMS.SlugRegeneration do
 
     Ash.stream!(query, authorize?: false, tenant: tenant, batch_size: 100)
   end
-
-  defp org_id(%{id: id}), do: id
-  defp org_id(tenant) when is_binary(tenant), do: tenant
-  defp org_id(_tenant), do: KilnCMS.Accounts.default_org_id()
 end

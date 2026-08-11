@@ -118,7 +118,10 @@ The read policy authorizes **any editor/admin identity for every workflow
 state** — and that includes a service API key attached as a bearer token. A
 public frontend that sets its key "for rate limits" or "as a service identity"
 is *not* an anonymous caller: its plain-index reads (`GET /api/json/<plural>`)
-and **all search routes** silently include drafts.
+and **all search routes** silently include drafts. With an **admin** key it is
+worse than drafts — the admin policy bypass skips the audience and passphrase
+checks too, so the base routes also return audience-gated and passphrase-locked
+bodies (#1013).
 
 Two independent defenses; use both:
 
@@ -131,11 +134,47 @@ Two independent defenses; use both:
   table) rather than the plain index. Search has the same twins (#297):
   `/search/published`, `/semantic-search/published` and
   `/autocomplete/published` (GraphQL: `searchPublished*`,
-  `semanticSearchPublished*`, `autocompletePublished*`) pin
-  `state == :published` server-side — same query surface, minus the `state`
+  `semanticSearchPublished*`, `autocompletePublished*`) pin, server-side,
+  exactly what an anonymous visitor could read — published, `audience: :public`,
+  and no passphrase (#1013) — with the same query surface minus the `state`
   facet, so the filter cannot be widened by any credential. Prefer these over
   remembering to pass `state=published` on every call to the base routes.
 
-Treat "which states can this credential see" as part of the credential's blast
-radius: a leaked editor-keyed delivery config exposes drafts, not just
-rate-limit headroom.
+Treat "what can this credential see" as part of its blast radius: a leaked
+editor-keyed delivery config exposes drafts, and an admin-keyed one exposes
+every paying member's content as well — not just rate-limit headroom.
+
+## Analytics: your fetches are what get counted
+
+A successful `GET /api/content/:type/:slug` records a view against that
+document, so a headless site's traffic appears at `/editor/analytics` instead of
+reading as zero. There is nothing to install: no beacon, no cookie, no client
+JS. Counting happens server-side on the request you already make, and stores
+only the same aggregate counters the rendered site uses — no visitor data. (For
+the same reason there is no ingest endpoint to POST your own numbers to; see
+[advanced-analytics-plan.md](advanced-analytics-plan.md) → "Privacy constraints".)
+
+What that number means depends on how you cache, so read it as a **floor rather
+than a census**:
+
+* **Your cache absorbs readers.** With ISR, a CDN in front of your frontend, or
+  a static build, you fetch once and serve that document to everyone until it
+  expires. Those readers are invisible to Kiln.
+* **A build-time fetch counts a deploy**, not a reader. A CI pipeline that
+  prerenders every page inflates counts by one per page per build.
+* **Each surface counts separately.** Rendering a page from `?surface=json` plus
+  `?surface=json_ld` is two views of one document.
+* **Revalidation counts.** A conditional request that gets a `304` still counts
+  — the client is actively serving that document. Excluding it would make a
+  CDN-fronted site report near-zero.
+* **Point-in-time reads do not count.** `?as_of=` is a history query, not a
+  delivery.
+
+The stored counters have no surface dimension, so headless and rendered views
+sum together in the dashboard. If you export metrics, the
+`kiln_cms.analytics.view.count` telemetry counter is tagged with `surface`
+(`"html"` for the rendered site, otherwise the fired surface name), which is
+where the two can be told apart.
+
+If you need true reader counts, that has to come from your own frontend's
+analytics — Kiln deliberately cannot see the browser.

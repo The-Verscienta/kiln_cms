@@ -13,6 +13,7 @@ defmodule KilnCMSWeb.SlugRegenLive do
   """
   use KilnCMSWeb, :live_view
 
+  alias KilnCMS.Accounts
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.SlugRegeneration
   alias KilnCMS.CMS.Workers.SlugRegenerationWorker
@@ -26,7 +27,10 @@ defmodule KilnCMSWeb.SlugRegenLive do
       org = socket.assigns.current_org
 
       if connected?(socket) do
-        Phoenix.PubSub.subscribe(KilnCMS.PubSub, SlugRegenerationWorker.topic(org_id(org)))
+        Phoenix.PubSub.subscribe(
+          KilnCMS.PubSub,
+          SlugRegenerationWorker.topic(Accounts.org_id(org))
+        )
       end
 
       {:ok,
@@ -61,10 +65,29 @@ defmodule KilnCMSWeb.SlugRegenLive do
     {:noreply, socket |> assign(:preview, preview) |> assign(:result, nil)}
   end
 
+  # Re-checked here, not only in `mount/3` (#1160). `SlugRegenerationWorker.enqueue/4`
+  # takes the actor but authorizes nothing — it records `actor_id` on the job —
+  # so unlike every other handler on this page there is no Ash policy behind the
+  # mount guard to catch a mistake in it. The guard currently holds only because
+  # `mount/3` refuses with `push_navigate`, which ends the LiveView; rendering a
+  # "no access" panel instead, an ordinary refactor, would leave this reachable
+  # by anyone past the router gate. Same argument `KilnCMSWeb.SystemLive` makes
+  # for its cache flush.
+  #
+  # The per-org tier is the right question here, unlike the backup panel's:
+  # regeneration is scoped to `current_org` and rewrites only that site's slugs.
   def handle_event("apply", _params, socket) do
+    if KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin do
+      apply_regeneration(socket)
+    else
+      {:noreply, socket}
+    end
+  end
+
+  defp apply_regeneration(socket) do
     {:ok, _job} =
       SlugRegenerationWorker.enqueue(
-        org_id(socket.assigns.current_org),
+        Accounts.org_id(socket.assigns.current_org),
         socket.assigns.kind,
         socket.assigns.include_pinned,
         socket.assigns.actor
@@ -106,15 +129,8 @@ defmodule KilnCMSWeb.SlugRegenLive do
 
   defp preview_cap, do: @preview_cap
 
-  defp org_id(nil), do: KilnCMS.Accounts.default_org_id()
-  defp org_id(org), do: org.id
-
-  defp type_options(org) do
-    [{gettext("All content types"), "all"}] ++
-      Enum.map(ContentTypes.all() ++ ContentTypes.dynamic_all(org_id(org)), fn ct ->
-        {ct.label, to_string(ct.type)}
-      end)
-  end
+  defp type_options(org),
+    do: ContentTypes.options(org, prompt: {gettext("All content types"), "all"})
 
   @impl true
   def render(assigns) do

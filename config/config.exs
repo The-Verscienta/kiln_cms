@@ -39,10 +39,34 @@ config :kiln_cms, Oban,
     media: 3,
     webhooks: 3,
     scheduling: 5,
+    # Outbound link checking (#474). Deliberately the narrowest queue: every job
+    # is a request to somebody else's server, paced per domain by
+    # KilnCMS.Links.Throttle, and a wide queue would just produce more jobs
+    # snoozing on the same buckets.
+    link_check: 3,
+    # Like `link_check`, deliberately narrow: every job is a signed request to
+    # somebody else's server, and a fediverse fan-out is many of them at once.
+    federation: 3,
+    # Web Push (#628). Its own queue rather than `:mail`: a push is a
+    # third-party HTTP call with connect + receive timeouts and five attempts,
+    # and a reviewer with several devices multiplies it — none of which may
+    # queue in front of a password-reset email.
+    push: 3,
+    # In-app backups (#484). Concurrency ONE: two simultaneous `pg_dump`s of
+    # the same database is never what anyone wanted, and the panel's whole
+    # premise is that there is a most-recent backup. Its own queue so a dump
+    # that runs for minutes can't leave a publish or a password-reset email
+    # queued behind it.
+    backups: 1,
     default: 10
   ],
   repo: KilnCMS.Repo,
   plugins: [
+    # The crontab is assembled in KilnCMS.Application.oban_config/0 rather than
+    # written here, so a runtime override (KILN_GOVERNANCE_CHECKPOINT_CRON) sets
+    # a plain `:kiln_cms` key instead of reaching into this nested keyword list.
+    # `Config` DEEP-MERGES keyword lists, so overriding one entry of a plugin
+    # tuple from runtime.exs is a footgun with a history here (#608).
     {Oban.Plugins.Cron, []},
     # Delete finished jobs after 7 days. Without this, `oban_jobs` grows
     # without bound AND retains job args indefinitely — and mail jobs carry
@@ -64,7 +88,10 @@ config :kiln_cms,
     KilnCMS.Mail,
     KilnCMS.Newsletter,
     KilnCMS.Automation,
-    KilnCMS.Billing
+    KilnCMS.Billing,
+    KilnCMS.Federation,
+    KilnCMS.Experiments,
+    KilnCMS.Social
     # The core stays project-agnostic. A downstream project registers its own
     # content domain (e.g. `Verscienta.Catalog`) by appending to this list in its
     # OWN config — it must NOT be listed here, since it isn't compiled into the
@@ -108,6 +135,19 @@ config :kiln_cms,
   # Override per environment in runtime.exs for production.
   email_from: {"KilnCMS", "noreply@kilncms.dev"}
 
+# In-app backups (#484). Defaults mirror `scripts/backup.sh`'s, so the cron
+# path and the app path land in the same directory with the same retention
+# without an operator stating either twice. `media_dir` stays nil on an S3
+# deployment: the bucket is backed up provider-side, and tarring the wrong
+# directory produces something that looks like a media backup and restores
+# nothing. Overridden from the environment in runtime.exs.
+config :kiln_cms, KilnCMS.Backups,
+  enabled: true,
+  dir: "/var/backups/kiln",
+  media_dir: nil,
+  keep_days: 14,
+  stale_after_hours: 36
+
 # Media blob storage. Swap the adapter for S3/MinIO in production (configure
 # the bucket/endpoint/credentials in runtime.exs).
 config :kiln_cms, KilnCMS.Storage, adapter: KilnCMS.Storage.Local
@@ -136,7 +176,37 @@ config :kiln_cms, KilnCMS.Search,
   # `hybrid(..., rerank: true)` calls use it.
   rerank: false,
   reranker: KilnCMS.Search.Reranker.Bumblebee,
-  rerank_model: "BAAI/bge-reranker-base"
+  rerank_model: "BAAI/bge-reranker-base",
+  # Cosine-distance ceiling for a semantic hit, or nil for none. Nearest
+  # neighbours always exist, so without a ceiling the semantic leg answers
+  # every query — gibberish included — and "no results" never happens. The
+  # right value is model- and corpus-specific, so there is no safe default to
+  # ship: measure with `KilnCMS.Search.semantic_distances/3` and set it just
+  # above where real matches stop. See `KilnCMS.Search.semantic_max_distance/0`.
+  semantic_max_distance: nil,
+  # Cosine-distance ceiling on a tag suggestion (#851). Unlike the ceiling
+  # above this ships a number, because the candidate set is the site's whole
+  # tag list: with no ceiling, a site with five tags suggests all five for
+  # every document, however unrelated. Model-specific, and NOT `nil`-able the
+  # way its neighbour is — see `KilnCMS.Search.suggest_tags_threshold/0` for
+  # why, and for how to measure your own.
+  #
+  # MEASURED against the model above, not derived (#1086): over a labelled
+  # corpus, tags a human would tick land at 0.21-0.43 and tags they would not
+  # at 0.35-0.56. The bands overlap, so this is a choice about which error to
+  # make — 0.35 keeps 21 of 27 wanted tags and admits 10 of 253 unwanted,
+  # roughly four suggestions per document against a `limit: 5` ceiling. The
+  # corpus and the numbers are `KilnCMS.TagSuggestionCorpus`; the reasoning is
+  # in docs/rag.md.
+  suggest_tags_threshold: 0.35,
+  # Cosine-distance ceiling on a near-duplicate (#1086). Measured on the same
+  # corpus: a reworded copy of a document sits at 0.04, another document on the
+  # same subject at 0.19-0.21, an unrelated one at 0.37. 0.1 separates "this is
+  # the same article" from "this is about the same thing" with room on both
+  # sides. A config key rather than a literal for the reason its sibling is one:
+  # the number is a property of the model, and an operator who changes the model
+  # has no way to change this.
+  near_duplicate_threshold: 0.1
 
 # AI-assisted SEO drafting (#60). The deterministic analysis and score in the
 # editor are ALWAYS on and need none of this — the block below gates the
@@ -146,20 +216,75 @@ config :kiln_cms, KilnCMS.Search,
 # (`model: "ollama:llama3.1"`); a hosted provider works too, and is announced at
 # boot and in the editor. API keys are resolved by `req_llm` from its own
 # environment, never read or stored by Kiln. See docs/seo.md.
-# Editorial advisory checks (#476, #495) — the non-blocking advice panel in the
-# content editor. Order here is display order. Plugins append their own via the
-# `advisories/0` callback on `Kiln.Plugin`; a check that raises is dropped and
-# logged rather than taking the editor down. See `Kiln.Advisory`.
+# Timezone database (#480). Elixir ships none, so `DateTime.shift_zone/2` and
+# anything wall-clock returns `{:error, :utc_only_time_zone_database}` without
+# it. Set globally rather than per-call: a caller that forgets does not get a
+# subtly-UTC answer, it gets an error.
+config :elixir, :time_zone_database, Tz.TimeZoneDatabase
+
+# Editorial advisory checks (#476, #495, #377) — the non-blocking advice panels
+# in the content editor. Order here is display order. Plugins append their own
+# via the `advisories/0` callback on `Kiln.Plugin`; a check that raises is
+# dropped and logged rather than taking the editor down. See `Kiln.Advisory`.
 #
-# `Kiln.Advisory.Checks.*` are feature-neutral (an accessibility panel wants
-# them verbatim); `KilnCMS.Seo.Checks.*` are search-specific.
+# Three namespaces: `Kiln.Advisory.Checks.*` are feature-neutral (an
+# accessibility panel wants them verbatim), `KilnCMS.Seo.Checks.*` are
+# search-specific, `KilnCMS.Compliance.Checks.*` are claim checks. Which panel
+# each one appears in is the check's own `lenses/0`, not this list — see
+# `Kiln.Advisory`.
 config :kiln_cms, Kiln.Advisory,
   checks: [
     KilnCMS.Seo.Checks.Meta,
     KilnCMS.Seo.Checks.Keyphrase,
     KilnCMS.Seo.Checks.Readability,
+    # #551 parity gaps. Both are `:info`-only and English-gated: a pixel width
+    # is a model of a font Google can change, and a regex-grade passive
+    # detector has error bars that a warning would misrepresent.
+    KilnCMS.Seo.Checks.PixelWidth,
+    KilnCMS.Seo.Checks.PassiveVoice,
     Kiln.Advisory.Checks.Headings,
-    Kiln.Advisory.Checks.ImageAlt
+    Kiln.Advisory.Checks.ImageAlt,
+    Kiln.Advisory.Checks.InternalLinks,
+    Kiln.Advisory.Checks.LinkText,
+    Kiln.Advisory.Checks.AllCaps,
+    KilnCMS.Compliance.Checks.Claims,
+    KilnCMS.Compliance.Checks.Disclaimer
+  ]
+
+# Editorial claim checking (#377) — the compliance panel. Registered above but
+# inert until `enabled: true`: both checks return `:n_a` while it is off, so an
+# install that never asked for this pays a map lookup and shows no panel.
+#
+# `require_at_publish` is the separate, harder switch — it turns an
+# `:error`-severity match into a refused publish
+# (`KilnCMS.CMS.Validations.ComplianceClaims`) rather than advice.
+#
+# The shipped rule pack is deliberately narrow, and is meant to be extended per
+# publication. See `KilnCMS.Compliance` for why bare curative vocabulary
+# ("cures", "heals") is NOT in it.
+#
+# This is the DEPLOYMENT-WIDE layer (#857). Each site's own answer lives on its
+# `KilnCMS.CMS.SiteCompliance` row, edited at `/editor/compliance`, and
+# `KilnCMS.Compliance.Settings` resolves the two — a site with no row inherits
+# exactly what is here, which is what a single-tenant install wants.
+config :kiln_cms, KilnCMS.Compliance,
+  enabled: false,
+  require_at_publish: false,
+  disclaimer: nil,
+  rules: :default
+
+# Form submission spam scoring (#477) — post-storage triage on top of the
+# honeypot/rate-limit pre-storage defenses in `KilnCMS.Forms`. Order here is
+# irrelevant (weights just sum); a check that raises is dropped and logged
+# rather than failing a visitor's submission. Plugins append their own via
+# the `spam_checks/0` callback on `Kiln.Plugin`. See `Kiln.Forms.SpamCheck`.
+config :kiln_cms, Kiln.Forms.SpamCheck,
+  threshold: 50,
+  checks: [
+    Kiln.Forms.SpamCheck.Checks.LinkDensity,
+    Kiln.Forms.SpamCheck.Checks.DisallowedKeywords,
+    Kiln.Forms.SpamCheck.Checks.FillTime,
+    Kiln.Forms.SpamCheck.Checks.LocaleMismatch
   ]
 
 # `req_llm` (and its `llm_db` catalog) source a `.env` from the working
@@ -185,7 +310,14 @@ config :kiln_cms, KilnCMS.Seo,
   # Both buckets must pass: per-user stops a stuck button, per-org is the
   # actual spend ceiling.
   per_user_limit: {20, :timer.minutes(1)},
-  per_org_limit: {200, :timer.hours(1)}
+  per_org_limit: {200, :timer.hours(1)},
+  # The share of `per_org_limit` that UNATTENDED callers — the #942 automation
+  # reactions, which nobody is waiting on — may spend. The remainder is
+  # reserved for an editor clicking "Suggest with AI", so a background rule
+  # cannot leave them staring at a rate-limit error caused by something they
+  # can neither see nor inspect (#943). 0.0 stops automation drafting against
+  # this budget entirely; 1.0 restores the old shared-bucket behaviour.
+  unattended_share: 0.5
 
 # Block-level AI assist in the content editor (#60) — draft, continue,
 # summarize, rewrite, shorten or expand one rich-text block.
@@ -262,6 +394,14 @@ config :kiln_cms, :branding, []
 # expose a full schema map for reconnaissance.
 config :kiln_cms, :graphql_introspection, true
 
+# The API documentation surface: the OpenAPI 3 document at
+# `/api/json/open_api` and the Swagger UI explorer over it. Enabled by default
+# for local/dev tooling; disabled in production (config/prod.exs) for the same
+# reason introspection is, since #330 made the described surface include the
+# write routes. `API_DOCS_ENABLED` overrides at runtime for operators
+# publishing a public API. See `KilnCMSWeb.Plugs.ApiDocs`.
+config :kiln_cms, :api_docs, true
+
 # Open self-registration. `true` (default) lets anyone create a `:viewer`
 # account via `/register`; set to `false` for an invite-only / internal CMS,
 # which hides the registration route and rejects the registration action.
@@ -320,6 +460,66 @@ config :kiln_cms, :audit_anchors_enabled, true
 # (runtime.exs) — no rebuild needed to turn it back off.
 config :kiln_cms, :audit_anchor_every_write, false
 
+# Org-wide anchor-chain checkpoints (#666). Anchors make history tamper-evident
+# against everything except TRUNCATION: delete a document's newest anchors and
+# the surviving prefix still verifies, because nothing inside the document says
+# how many there were. A checkpoint is the statement from outside — a signed
+# Merkle commitment to every document's head anchor, minted on the cron below.
+# Cheap: one signature per org per run plus a row per document whose head moved.
+config :kiln_cms, :governance_checkpoints_enabled, true
+
+# Where checkpoints are PUBLISHED. The default keeps them in the database, which
+# still catches an attacker who deletes anchors and forgets `chain_checkpoints`
+# — and does not survive one who remembers. A deployment that needs the property
+# to actually hold points this at a sink its database credentials cannot rewrite:
+# KILN_GOVERNANCE_WITNESS=file|s3 in runtime.exs. See KilnCMS.Governance.Witness.
+config :kiln_cms, KilnCMS.Governance.Witness, adapter: KilnCMS.Governance.Witness.None
+
+# How often a checkpoint is minted. Nightly by default because the cost is one
+# signature per org, but the cadence is a SECURITY parameter, not a performance
+# one: anchors minted since the last checkpoint are not yet witnessed, so the
+# window in which a chain can be truncated undetected is exactly one interval.
+# A regulated deployment shortens it (KILN_GOVERNANCE_CHECKPOINT_CRON="0 * * * *").
+# `false` disables the scheduled run without disabling checkpoints, for a
+# deployment that drives `mix kiln.audit.checkpoint` from its own scheduler.
+config :kiln_cms, :governance_checkpoint_cron, "40 3 * * *"
+
+# When the external link sweep runs (#474). Safe to leave scheduled everywhere:
+# outbound checking is opt-in per site, so with nobody opted in this reads one
+# settings row per org and stops. Nightly, and offset from the checkpoint run so
+# two per-org sweeps don't start in the same minute. `false` disables the
+# schedule for a deployment that drives `KilnCMS.Links.Sweep.run/0` itself.
+config :kiln_cms, :link_check_cron, "20 4 * * *"
+
+# When the task due-soon/overdue digest runs (#501): groups each org's open
+# tasks due today-or-earlier or within the next few days by assignee and
+# sends one email per assignee. Mornings, so the digest is waiting when an
+# editor starts their day rather than landing overnight. `false` disables the
+# schedule for a deployment that drives its own equivalent.
+config :kiln_cms, :task_digest_cron, "0 8 * * *"
+
+# When the occurrence sweep advances `next_occurrence_at` (#766). HOURLY, and
+# that period IS the feature's staleness window: the "what's on" index sorts on
+# a stored value, so an event that finished stays at the top of the listing
+# until the next run. Offset to :50 so it doesn't share a minute with anything
+# above. Cheap to leave scheduled everywhere — a site with no event-shaped
+# content does one indexed probe per content type and matches nothing. `false`
+# disables the schedule for a deployment that drives `KilnCMS.Events.Sweep.run/0`
+# itself.
+config :kiln_cms, :occurrence_sweep_cron, "50 * * * *"
+
+# Whether booting enqueues the one-off occurrence backfill (#766). On, because
+# the alternative is an upgrade step a human has to remember, and the feature
+# silently does nothing until they do — the migration cannot fill
+# `next_occurrence_at` and the sweep above will not, since it visits rows whose
+# occurrence has PASSED and a NULL has passed nothing.
+#
+# Deduplicated for a day at the database level, so replicas queue one job
+# between them, and cheap when there is nothing to do: the pass writes only rows
+# whose value actually changes. Turn it off for a deployment that would rather
+# run `mix kiln.occurrences.backfill` on its own terms.
+config :kiln_cms, :occurrence_backfill_on_boot, true
+
 # Enterprise SSO via OpenID Connect (#331). Compile-time gate (like
 # :registration_enabled's route conditional): `enabled: false` (default) means
 # no SSO strategy is compiled — no sign-in button, no OAuth routes, zero
@@ -359,15 +559,39 @@ config :kiln_cms, :search_analytics, retention_days: 90
 # year-plus keeps year-over-year comparisons resolvable (#45).
 config :kiln_cms, :view_analytics, retention_days: 400
 
+# Referrer attribution (KilnCMS.Analytics.ReferrerDay, #619) — off by default.
+# Runtime-readable (`Application.get_env/3`, not `compile_env`): set
+# KILN_ANALYTICS_REFERRERS=true to enable without a rebuild. See
+# config/runtime.exs and docs/environment-variables.md.
+config :kiln_cms, :analytics_referrers, enabled: false
+
 config :ash_graphql, authorize_update_destroy_with_error?: true
 
 # GraphQL subscriptions (real-time headless): the DSL is opt-in while beta.
 # Fields are declared per content resource (see KilnCMS.CMS.Content).
 config :ash_graphql, :subscriptions, true
 
+# `audio/mp4` and `text/vtt` are absent from the `mime` package's table (#494),
+# and two things break without them: `allow_upload`'s `accept: ~w(.m4a .vtt)`
+# refuses to compile an extension it can't resolve to a type, and
+# `KilnCMS.Storage.S3` sets each object's stored `Content-Type` from
+# `MIME.from_path/1` — an `.m4a` would go up as `application/octet-stream` and
+# come back down as a file no browser will play.
+#
+# Note for anyone changing this: the `mime` package reads its config at COMPILE
+# time, so an edit here needs `mix deps.clean mime --build` to take effect.
 config :mime,
   extensions: %{"json" => "application/vnd.api+json"},
-  types: %{"application/vnd.api+json" => ["json"]}
+  types: %{
+    "application/vnd.api+json" => ["json"],
+    "audio/mp4" => ["m4a"],
+    "text/vtt" => ["vtt"],
+    # XLIFF 2.0, the translation-vendor interchange format (#502). Registered
+    # because `allow_upload(accept: ~w(.xlf .xliff))` refuses an extension MIME
+    # cannot resolve — and because the export's `content-type` should name what
+    # the file is rather than fall back to octet-stream.
+    "application/xliff+xml" => ["xlf", "xliff"]
+  }
 
 config :ash_json_api,
   show_public_calculations_when_loaded?: false,
@@ -438,9 +662,21 @@ config :kiln_cms,
 config :kiln_cms, KilnCMSWeb.Endpoint,
   url: [host: "localhost"],
   adapter: Bandit.PhoenixAdapter,
+  # `root_layout` so error pages carry the same `<html>`/`<head>` shell —
+  # app.css, brand tokens, favicon, title — as an ordinary page (#681). Without
+  # it, a `NoRouteError` 404 or a 500 rendered by the endpoint's error renderer
+  # shipped the branded markup as raw unstyled HTML, while a `/:slug` 404 (an
+  # ordinary controller render through the `:browser` pipeline) came back fully
+  # styled — two 404s on one site that looked nothing alike. `layout: false`
+  # stays: the error templates supply their own inner `Layouts.public` chrome,
+  # so only the root shell is missing. The root layout's CSRF `<meta>` is now
+  # resolved through `Layouts.csrf_token/0`, which fails safe, so an error
+  # rendered from a conn outside the normal pipeline still renders the shell
+  # instead of risking a second failure inside the handler.
   render_errors: [
     formats: [html: KilnCMSWeb.ErrorHTML, json: KilnCMSWeb.ErrorJSON],
-    layout: false
+    layout: false,
+    root_layout: {KilnCMSWeb.Layouts, :root}
   ],
   pubsub_server: KilnCMS.PubSub,
   live_view: [signing_salt: "LPPY3qp7"]

@@ -45,10 +45,6 @@ defmodule KilnCMSWeb.FormControllerTest do
   end
 
   # Every test gets its own IP so the tight :form bucket never crosses tests.
-  defp unique_ip(conn) do
-    Map.put(conn, :remote_ip, {127, 1, rem(System.unique_integer([:positive]), 250), 1})
-  end
-
   test "GET /api/forms/:slug returns the schema", %{conn: conn} do
     form = form!()
 
@@ -142,17 +138,32 @@ defmodule KilnCMSWeb.FormControllerTest do
     form = form!()
     ip = {127, 2, rem(System.unique_integer([:positive]), 250), 1}
 
-    for _ <- 1..20 do
-      build_conn()
-      |> Map.put(:remote_ip, ip)
-      |> post("/forms/#{form.slug}", %{"email" => "a@b.co"})
-    end
+    # Not "send exactly the limit, then assert the next one is denied" (#697):
+    # `KilnCMSWeb.RateLimit` buckets are FIXED windows, so a rollover anywhere
+    # across those requests resets the counter and the following one is
+    # legitimately allowed — a 200 that reads as the limiter having failed.
+    # Wall-clock dependent, so it was pure luck of when in the minute CI
+    # happened to run this.
+    #
+    # Keep posting until one is denied instead, bounded at 3x the limit so a
+    # single rollover cannot exhaust the attempts and a genuinely broken
+    # limiter still fails rather than looping.
+    {limit, _scale} = Map.fetch!(KilnCMSWeb.RateLimit.limits(), :form)
 
     denied =
-      build_conn()
-      |> Map.put(:remote_ip, ip)
-      |> post("/forms/#{form.slug}", %{"email" => "a@b.co"})
+      Enum.reduce_while(1..(limit * 3), nil, fn _, _acc ->
+        conn =
+          build_conn()
+          |> Map.put(:remote_ip, ip)
+          |> post("/forms/#{form.slug}", %{"email" => "a@b.co"})
 
+        if conn.status == 429, do: {:halt, conn}, else: {:cont, nil}
+      end)
+
+    # Named rather than left to `denied.status` raising on `nil`: "submissions
+    # were never rate limited" is the abuse regression this test exists to
+    # catch, and it must not read as the test itself being broken.
+    assert denied, "the :form bucket allowed #{limit * 3} submissions without denying one"
     assert denied.status == 429
     assert get_resp_header(denied, "retry-after") != []
   end

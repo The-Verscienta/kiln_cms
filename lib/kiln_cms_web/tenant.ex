@@ -41,6 +41,15 @@ defmodule KilnCMSWeb.Tenant do
   topic and not tenancy was what scoped it. It now resolves its tenant like the
   other two, and every join authorizes the document under it.
 
+  A **connected** LiveView mount was a third until #654 — not because it
+  resolved no host, but because it resolved the *client's*: `socket.host_uri` is
+  rebuilt from the join payload rather than from a `Host` header, so strict or
+  not, the client named its own org. `/live` now carries `connect_info: [:uri]`
+  like the other three, and `:assign_current_org` resolves from the socket's own
+  request URI, refusing a claim that names a different org
+  (`HostMismatchError`). All four socket families now agree: the tenant is the
+  one the transport connected on, never the one the payload asks for.
+
   ## The `:current_org` assign
 
   `current_org_id/1` reads the resolved org back off a conn/socket's
@@ -75,6 +84,54 @@ defmodule KilnCMSWeb.Tenant do
       opts
       |> Keyword.put_new(:message, "no organization is configured for host #{inspect(host)}")
       |> then(&struct!(__MODULE__, &1))
+    end
+
+    def exception(message) when is_binary(message), do: %__MODULE__{message: message}
+  end
+
+  defmodule HostMismatchError do
+    @moduledoc """
+    Raised when a **connected** LiveView mount claims a host belonging to a
+    different organization than the one the socket actually connected on (#654).
+
+    `socket.host_uri` on a connected mount is rebuilt from the client's join
+    payload, not from a validated `Host` header, and `check_origin` admits every
+    subdomain of the base host — so left alone the client picks its own
+    `:current_org`. `KilnCMSWeb.LiveUserAuth.on_mount(:assign_current_org, ...)`
+    resolves from `connect_info[:uri]`, the socket's own request URI, and raises
+    this when the claim names someone else.
+
+    The comparison is by resolved **org**, not by host string. Two spellings of
+    one org's host are not a mismatch, and treating them as one would 404 the
+    LiveView surface of any deployment behind a `Host`-rewriting proxy, on an
+    IPv6 literal, or on a custom domain reached by its subdomain.
+
+    `plug_status: 404` for the same reason `UnknownHostError` carries it: it puts
+    the raise in the range LiveView's channel turns into a client reload
+    rather than a process crash, so a probe costs no crash report. It is a 404
+    and not a 403 deliberately — the answer to "does this socket belong here" is
+    the answer to "is there anything here for you", and the two must not be
+    distinguishable.
+    """
+    defexception [:claimed, :connected, :message, plug_status: 404]
+
+    @impl true
+    def exception(opts) when is_list(opts) do
+      # Built field by field rather than through `struct!/2` over the opts: an
+      # unrecognised key there would raise `KeyError` inside the channel's
+      # rescue, and a `KeyError` is a 500 — turning the deliberately quiet 404
+      # into a crash report per probe, which is the one thing the status buys.
+      claimed = opts[:claimed]
+      connected = opts[:connected]
+
+      %__MODULE__{
+        claimed: claimed,
+        connected: connected,
+        message:
+          opts[:message] ||
+            "LiveView mount claimed host #{inspect(claimed)}, " <>
+              "which is not the organization it connected on (#{inspect(connected)})"
+      }
     end
 
     def exception(message) when is_binary(message), do: %__MODULE__{message: message}
@@ -186,6 +243,63 @@ defmodule KilnCMSWeb.Tenant do
   def strict_host?, do: Application.get_env(:kiln_cms, :tenant_strict_host, false)
 
   @doc """
+  Whether this deployment is serving the default org to unrecognized hosts while
+  more than one organization exists (#660).
+
+  `TENANT_STRICT_HOST` is off by default, and that is right for the single-host
+  install the fallback exists for: with one org, "an unknown Host is served the
+  default org" describes the only org there is. The moment a second one exists it
+  becomes a live misconfiguration — an unrecognized Host, an IP, or an
+  attacker-supplied header is served *another tenant's* content, branding and
+  analytics.
+
+  Nothing about that moment is loud. `KilnCMS.Application` checks it at boot, but
+  boot happened before the second org existed and may not happen again for
+  months; #563 shipped a CHANGELOG note, which helps only an operator reading it
+  at the right time. So the same predicate also runs where the decision is made
+  (creating the org) and where an operator goes to look (`/editor/system`).
+
+  Deliberately **not** gated on `:multitenancy_enabled`. That flag is a create
+  kill switch and nothing in the routing path reads it — an operator with three
+  orgs who sets it to `false` to refuse a fourth still has every unrecognized
+  Host landing on the default org, and gating on it would silence all three
+  warnings for exactly the deployment that needs them.
+  """
+  @spec strict_host_gap?() :: boolean()
+  def strict_host_gap?, do: gap?(org_count())
+
+  @doc """
+  The pure half of `strict_host_gap?/0`: the verdict for an already-known count.
+
+  Split out to be testable. `Organization` has no destroy action, so a test
+  cannot get the table below the seeded default org and the `0`/`1` cases are
+  unreachable through the database — which is how a threshold of `> 0` would
+  otherwise sit here unnoticed, passing every test that exists.
+  """
+  @spec gap?(non_neg_integer() | :unknown) :: boolean()
+  def gap?(count) do
+    strict_host?() != true and is_integer(count) and count > 1
+  end
+
+  @doc """
+  How many organizations exist, or `:unknown` if the question cannot be answered.
+
+  Total by construction. One caller renders a page, one runs after an
+  organization's create, and one runs during boot — a count that raised in any of
+  them would turn an advisory into a worse failure than the one it describes. A
+  database that is not up yet is not evidence of a misconfiguration.
+  """
+  @spec org_count() :: non_neg_integer() | :unknown
+  def org_count do
+    case Ash.count(KilnCMS.Accounts.Organization, authorize?: false) do
+      {:ok, n} -> n
+      _error -> :unknown
+    end
+  rescue
+    _error -> :unknown
+  end
+
+  @doc """
   Resolve the organization for a request host.
 
   `{:ok, org}` for a host that matches an org (subdomain, custom domain, or the
@@ -226,8 +340,17 @@ defmodule KilnCMSWeb.Tenant do
   """
   @spec fetch_org_from_connect_info(map()) :: {:ok, Accounts.Organization.t()} | :error
   def fetch_org_from_connect_info(connect_info) do
-    fetch_org(get_in(connect_info, [:uri, Access.key(:host)]))
+    fetch_org(connect_info_host(connect_info))
   end
+
+  @doc """
+  The host a socket's connect info names, or `nil` — the same value
+  `fetch_org_from_connect_info/1` resolves against, exposed so a caller that
+  needs the host too (a refused-connect alert, #678) doesn't hand-write a
+  fourth copy of this `get_in/2`.
+  """
+  @spec connect_info_host(map()) :: String.t() | nil
+  def connect_info_host(connect_info), do: get_in(connect_info, [:uri, Access.key(:host)])
 
   defp canonical_host?(host) when is_binary(host), do: normalize(host) == base_host()
   defp canonical_host?(_), do: false
@@ -248,11 +371,14 @@ defmodule KilnCMSWeb.Tenant do
 
   # The org this host names, or `nil` if it names none.
   #
-  # Only KNOWN hosts (the base host + real org subdomains/custom domains) are
-  # cached; an unknown/unresolved host returns `nil` here (uncached). This keeps
-  # a flood of distinct attacker Host headers under `*.<base>` from inserting
-  # per-host entries into the shared, size-capped content cache and evicting hot
-  # published pages (#336 review, resolution-cache DoS).
+  # Both outcomes are cached, in `KilnCMS.Cache.Hosts` — a cache of its own, not
+  # the content one. That separation is what makes caching a miss safe: a flood
+  # of distinct attacker Host headers under `*.<base>` evicts only other host
+  # entries, never hot published pages (#659). Before it, `nil` was deliberately
+  # never committed, so every unknown host cost a database round trip for ever,
+  # unmetered — tenant refusal halts in the endpoint above every rate limiter
+  # (#336 review, resolution-cache DoS). See that module for the TTLs and for
+  # what a negative entry does and does not cost.
   defp known_org(host) when is_binary(host) do
     case normalize(host) do
       "" -> nil
@@ -279,8 +405,20 @@ defmodule KilnCMSWeb.Tenant do
   end
 
   # A real org (by subdomain slug or custom domain), or the default org when the
-  # host IS the canonical base host. `nil` for anything else — a `nil` is not
-  # cached (see `KilnCMS.Cache.commit/2`), so unknown hosts never pollute the cache.
+  # host IS the canonical base host. `nil` for anything else — which `Cache.Hosts`
+  # stores as its own `:unresolved` sentinel, because Cachex uses `nil` for "not
+  # present" and a cached miss has to be distinguishable from never having asked.
+  #
+  # This function is the only thing that writes a negative entry.
+  #
+  # NOTE it cannot tell "no such org" from "the read failed": `lookup/2` below
+  # and `Accounts.default_org/0` both collapse `{:error, _}` to `nil`. So one
+  # Postgres blip while resolving a REAL tenant's host caches `:unresolved` and
+  # 404s them for up to the negative TTL after the database is healthy again
+  # (#1124). Pre-#659 that was harmless, because a `nil` was never committed —
+  # caching the miss is what turned an error into a sticky one. Do not read
+  # `Cache.Hosts`' "only ever written from a real lookup that really found
+  # nothing" as true of this path until that is fixed.
   defp resolve_known(host) do
     cond do
       host == base_host() -> Accounts.default_org()

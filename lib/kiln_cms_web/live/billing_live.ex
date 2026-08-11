@@ -64,7 +64,7 @@ defmodule KilnCMSWeb.BillingLive do
   end
 
   def handle_event("store_secret", %{"secret" => %{"key" => key, "value" => value}}, socket)
-      when key in ~w(secret_key webhook_secret) do
+      when key in ~w(secret_key webhook_secret) and is_binary(value) do
     key = String.to_existing_atom(key)
 
     case Billing.store_billing_secret(socket.assigns.settings, key, value,
@@ -114,8 +114,12 @@ defmodule KilnCMSWeb.BillingLive do
   def handle_event("verify", _params, socket) do
     # Ignore a re-click while a run is already in flight: the disabled button
     # attribute is client-side only, so a fast double-click (or a replayed
-    # event) would otherwise start a second concurrent provider call.
-    if socket.assigns.verifying? do
+    # event) would otherwise start a second concurrent provider call. That flag
+    # is a concurrency guard, not an authorization one — hence the tier, which
+    # `Billing.verify_credentials/0` cannot check for itself: it takes no actor,
+    # reads the stored provider credentials, calls the provider and writes a
+    # verification record back (#1166).
+    if socket.assigns.verifying? or not KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
       {:noreply, socket}
     else
       {:noreply,
@@ -140,12 +144,12 @@ defmodule KilnCMSWeb.BillingLive do
 
   # --- tiers ------------------------------------------------------------------
 
-  def handle_event("validate_tier", %{"tier" => params}, socket) do
+  def handle_event("validate_tier", %{"tier" => params}, socket) when is_map(params) do
     {:noreply,
      assign(socket, :tier_form, AshPhoenix.Form.validate(socket.assigns.tier_form, params))}
   end
 
-  def handle_event("save_tier", %{"tier" => params}, socket) do
+  def handle_event("save_tier", %{"tier" => params}, socket) when is_map(params) do
     case AshPhoenix.Form.submit(socket.assigns.tier_form, params: params) do
       {:ok, _tier} ->
         {:noreply,
@@ -160,7 +164,7 @@ defmodule KilnCMSWeb.BillingLive do
     end
   end
 
-  def handle_event("edit_tier", %{"id" => id}, socket) do
+  def handle_event("edit_tier", %{"id" => id}, socket) when is_binary(id) do
     case Enum.find(socket.assigns.tiers, &(&1.id == id)) do
       nil ->
         {:noreply, put_flash(socket, :error, gettext("That tier no longer exists."))}
@@ -174,7 +178,7 @@ defmodule KilnCMSWeb.BillingLive do
     {:noreply, socket |> assign(:editing_tier, nil) |> assign_tier_form()}
   end
 
-  def handle_event("delete_tier", %{"id" => id}, socket) do
+  def handle_event("delete_tier", %{"id" => id}, socket) when is_binary(id) do
     socket =
       case Enum.find(socket.assigns.tiers, &(&1.id == id)) do
         nil ->

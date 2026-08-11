@@ -183,6 +183,272 @@ defmodule KilnCMSWeb.McpTest do
     assert MapSet.new(reloaded.tags, & &1.id) == MapSet.new([a.id, b.id])
   end
 
+  # #640. `remove_tag_ids` is `on_no_match: :ignore` so removal stays
+  # idempotent, which means it is silent about an id matching no tag at all — a
+  # hallucinated uuid returns the same 200 as a real detach. The tool result is
+  # the record's public attributes, and `tags` is a relationship, so a model had
+  # nothing in the response to check its work against and would report a
+  # removal that never happened.
+  test "an update_* result carries the tags, so a no-op removal is visible", %{conn: conn} do
+    editor = user(:editor)
+    plaintext = mint(editor, :read_write)
+    admin = user(:admin)
+
+    keeper =
+      KilnCMS.CMS.create_tag!(
+        %{name: "keeper", slug: "mcp-k-#{System.unique_integer([:positive])}"},
+        actor: admin
+      )
+
+    post =
+      KilnCMS.CMS.create_post!(
+        %{
+          title: "Verifiable",
+          slug: "mcp-v-#{System.unique_integer([:positive])}",
+          tag_ids: [keeper.id]
+        },
+        actor: editor
+      )
+
+    # An id that matches no tag at all — what a model sends when it guesses.
+    conn =
+      rpc(conn, plaintext, "tools/call", %{
+        name: "update_post",
+        arguments: %{id: post.id, input: %{remove_tag_ids: [Ecto.UUID.generate()]}}
+      })
+
+    assert %{"result" => %{"isError" => false, "content" => [%{"text" => text}]}} =
+             json_response(conn, 200)
+
+    # The removal was a no-op, and the response says so by still listing the
+    # tag. Before this the payload was indistinguishable from a real detach.
+    assert text =~ "keeper"
+    assert text =~ keeper.id
+
+    # And a real detach is distinguishable from that.
+    conn =
+      build_conn()
+      |> rpc(plaintext, "tools/call", %{
+        name: "update_post",
+        arguments: %{id: post.id, input: %{remove_tag_ids: [keeper.id]}}
+      })
+
+    assert %{"result" => %{"isError" => false, "content" => [%{"text" => after_text}]}} =
+             json_response(conn, 200)
+
+    refute after_text =~ keeper.id
+  end
+
+  # #996 — the same defect one relationship over. `remove_related_post_ids`
+  # shares `merge_changes`'s `on_no_match: :ignore`, so a hallucinated uuid
+  # returned the same 200 as a real detach, and the payload carried no related
+  # links at all to check against.
+  test "an update_* result carries the related links when the call touched them", %{conn: conn} do
+    editor = user(:editor)
+    plaintext = mint(editor, :read_write)
+
+    sibling =
+      KilnCMS.CMS.create_post!(
+        %{title: "Sibling", slug: "mcp-sib-#{System.unique_integer([:positive])}"},
+        actor: editor
+      )
+
+    post =
+      KilnCMS.CMS.create_post!(
+        %{
+          title: "Anchor",
+          slug: "mcp-anch-#{System.unique_integer([:positive])}",
+          related_post_ids: [sibling.id]
+        },
+        actor: editor
+      )
+
+    # A uuid matching no post — what a model sends when it guesses.
+    conn =
+      rpc(conn, plaintext, "tools/call", %{
+        name: "update_post",
+        arguments: %{id: post.id, input: %{remove_related_post_ids: [Ecto.UUID.generate()]}}
+      })
+
+    assert %{"result" => %{"isError" => false, "content" => [%{"text" => text}]}} =
+             json_response(conn, 200)
+
+    # The no-op says so by still listing the link.
+    assert text =~ "related_links"
+    assert text =~ sibling.id
+    assert text =~ "Sibling"
+
+    # …and a real detach is distinguishable from it.
+    conn =
+      build_conn()
+      |> rpc(plaintext, "tools/call", %{
+        name: "update_post",
+        arguments: %{id: post.id, input: %{remove_related_post_ids: [sibling.id]}}
+      })
+
+    assert %{"result" => %{"isError" => false, "content" => [%{"text" => after_text}]}} =
+             json_response(conn, 200)
+
+    refute after_text =~ sibling.id
+  end
+
+  # The other half of #996's acceptance: a write that never mentioned related
+  # links must not pay for them. `load` on an `AshAi.Tool` takes a function of
+  # the client input, which is what makes that expressible — see
+  # `KilnCMS.CMS.McpLoads`.
+  test "a write that does not touch related links does not carry them", %{conn: conn} do
+    editor = user(:editor)
+    plaintext = mint(editor, :read_write)
+
+    sibling =
+      KilnCMS.CMS.create_post!(
+        %{title: "Unmentioned", slug: "mcp-unm-#{System.unique_integer([:positive])}"},
+        actor: editor
+      )
+
+    post =
+      KilnCMS.CMS.create_post!(
+        %{
+          title: "Anchor",
+          slug: "mcp-anch2-#{System.unique_integer([:positive])}",
+          related_post_ids: [sibling.id]
+        },
+        actor: editor
+      )
+
+    conn =
+      rpc(conn, plaintext, "tools/call", %{
+        name: "update_post",
+        arguments: %{id: post.id, input: %{title: "Retitled"}}
+      })
+
+    assert %{"result" => %{"isError" => false, "content" => [%{"text" => text}]}} =
+             json_response(conn, 200)
+
+    assert text =~ "Retitled"
+    refute text =~ "related_links"
+    refute text =~ sibling.id
+
+    # Tags and category still come unconditionally — they are small and always
+    # relevant to a content write (#640).
+    assert text =~ "tags"
+  end
+
+  # The projection. Loading the relationship instead would have put whole
+  # related posts — bodies and all — into every write response, because `load`
+  # cannot project (see below). A calculation serializes as its own value, so
+  # this stays three fields and cannot widen when a content attribute is added.
+  test "the related links are projected, not whole records", %{conn: conn} do
+    editor = user(:editor)
+    plaintext = mint(editor, :read_write)
+
+    sibling =
+      KilnCMS.CMS.create_post!(
+        %{
+          title: "Bulky",
+          slug: "mcp-bulk-#{System.unique_integer([:positive])}",
+          excerpt: "SENTINEL_EXCERPT_TEXT"
+        },
+        actor: editor
+      )
+
+    post =
+      KilnCMS.CMS.create_post!(
+        %{title: "Anchor", slug: "mcp-anch3-#{System.unique_integer([:positive])}"},
+        actor: editor
+      )
+
+    conn =
+      rpc(conn, plaintext, "tools/call", %{
+        name: "update_post",
+        arguments: %{id: post.id, input: %{add_related_post_ids: [sibling.id]}}
+      })
+
+    assert %{"result" => %{"isError" => false, "content" => [%{"text" => text}]}} =
+             json_response(conn, 200)
+
+    # Enough to identify and name it…
+    assert text =~ sibling.id
+    assert text =~ "Bulky"
+    # …and nothing else off the related record.
+    refute text =~ "SENTINEL_EXCERPT_TEXT"
+  end
+
+  # `load` cannot project: `AshAi.Serializer` emits
+  # `default_attributes(resource) ++ load_fields`, an APPEND, and Ash's load of
+  # an attribute is an ensure-selected no-op. So a nested `[:id, :name, :slug]`
+  # would read like a contract while the payload carried every public attribute
+  # of Tag and Category regardless — and a later attribute on
+  # `KilnCMS.CMS.Taxonomy` would widen every write response with no test
+  # failing. `@link_load` is written as it behaves; this pins that, so the
+  # discovery is not re-lost.
+  test "the loaded links carry the whole related record, not a chosen few fields", %{conn: conn} do
+    editor = user(:editor)
+    plaintext = mint(editor, :read_write)
+    admin = user(:admin)
+
+    category =
+      KilnCMS.CMS.create_category!(
+        %{
+          name: "Described",
+          slug: "mcp-c-#{System.unique_integer([:positive])}",
+          description: "a field no load list mentions"
+        },
+        actor: admin
+      )
+
+    post =
+      KilnCMS.CMS.create_post!(
+        %{title: "Wide", slug: "mcp-w-#{System.unique_integer([:positive])}"},
+        actor: editor
+      )
+
+    conn =
+      rpc(conn, plaintext, "tools/call", %{
+        name: "update_post",
+        arguments: %{id: post.id, input: %{category_id: category.id}}
+      })
+
+    assert %{"result" => %{"isError" => false, "content" => [%{"text" => text}]}} =
+             json_response(conn, 200)
+
+    assert text =~ "a field no load list mentions"
+  end
+
+  # The three `create_*` tools deliberately do NOT load the links: `tag_ids` on
+  # a create hard-errors on an unknown id and `category_id` is echoed back as an
+  # attribute, so a create's links are fully determined by the request that made
+  # it — and an unconditional load costs every write response the full tag set
+  # (measured at 530 B -> 5.3 kB on a 60-tag post) to tell a model something it
+  # already knows.
+  test "a create_* result does not carry the tag records", %{conn: conn} do
+    editor = user(:editor)
+    plaintext = mint(editor, :read_write)
+
+    tag =
+      KilnCMS.CMS.create_tag!(
+        %{name: "uncarried", slug: "mcp-u-#{System.unique_integer([:positive])}"},
+        actor: user(:admin)
+      )
+
+    conn =
+      rpc(conn, plaintext, "tools/call", %{
+        name: "create_post",
+        arguments: %{
+          input: %{
+            title: "Created",
+            slug: "mcp-cr-#{System.unique_integer([:positive])}",
+            tag_ids: [tag.id]
+          }
+        }
+      })
+
+    assert %{"result" => %{"isError" => false, "content" => [%{"text" => text}]}} =
+             json_response(conn, 200)
+
+    refute text =~ "uncarried"
+  end
+
   test "a :read_write key on an editor account can create a draft page", %{conn: conn} do
     plaintext = mint(user(:editor), :read_write)
     slug = "mcp-#{System.unique_integer([:positive])}"
@@ -255,5 +521,46 @@ defmodule KilnCMSWeb.McpTest do
     end
 
     _ = conn
+  end
+
+  # #954 — a model editing a page that carries an admin-set nested value must
+  # send each child back under the id that held it (`EnforceBlockFieldPolicy`
+  # requires the binding), and the read tool result is the only surface an MCP
+  # client has to learn those ids from. `block_ids` rides on every content
+  # read: ids and types in render positions, no field values.
+  test "read_pages carries block_ids so a model can round-trip nested child ids", %{conn: conn} do
+    editor = user(:editor)
+    child = Ecto.UUID.generate()
+
+    page =
+      KilnCMS.CMS.create_page!(
+        %{
+          title: "Ids over MCP",
+          slug: "mcp-ids-#{System.unique_integer([:positive])}",
+          block_tree: [
+            %{
+              "_type" => "columns",
+              "columns" => [
+                %{"blocks" => [%{"_type" => "quote", "id" => child, "text" => "A"}]}
+              ]
+            }
+          ]
+        },
+        actor: editor
+      )
+
+    plaintext = mint(editor, :read)
+
+    conn =
+      rpc(conn, plaintext, "tools/call", %{
+        name: "read_pages",
+        arguments: %{input: %{}, filter: %{slug: %{eq: page.slug}}}
+      })
+
+    assert %{"result" => %{"isError" => false, "content" => [%{"text" => text}]}} =
+             json_response(conn, 200)
+
+    assert text =~ "block_ids"
+    assert text =~ child
   end
 end

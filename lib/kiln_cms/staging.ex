@@ -41,7 +41,7 @@ defmodule KilnCMS.Staging do
   @spec scrub!(keyword()) :: Scrub.summary()
   def scrub!(opts \\ []) do
     shell = Keyword.get(opts, :shell, &IO.puts/1)
-    {host, database} = target()
+    {host, database} = Repo.target()
 
     # KILN_STAGING_SCRUB is a sentinel word, not a boolean — typing `true` must
     # not confirm a destructive scrub. KILN_STAGING_FORCE *is* a boolean, so it
@@ -81,7 +81,30 @@ defmodule KilnCMS.Staging do
     shell.("Scrubbing #{database}@#{host} …")
     summary = Scrub.run(admin_email: admin_email, admin_password: admin_password)
     report(shell, summary)
+    warn_unlabelled(shell)
     summary
+  end
+
+  # A scrub is the moment a database is *proven* to be a clone, and a clone keeps
+  # production's content and branding — so the console serving it is byte-for-byte
+  # identical to the real one until someone labels it (#469).
+  #
+  # Printed unconditionally, and phrased about the *served deployment* rather
+  # than about this process, because the two are usually not the same one: the
+  # documented flow (`scripts/staging.sh`, the Coolify recipe) runs the scrub as
+  # a throwaway `bin/kiln_cms eval` against a remote DATABASE_URL, so a laptop's
+  # own KILN_ENV_LABEL would suppress the reminder while the served application
+  # stayed unlabelled — and an unlabelled laptop would nag an operator who had
+  # already set it. Neither reading is worth having; a short unconditional line
+  # is.
+  defp warn_unlabelled(shell) do
+    shell.("""
+
+    Before serving this clone: set KILN_ENV_LABEL on the application that will
+    serve it (e.g. "staging"), and optionally KILN_ENV_COLOR — one of
+    #{Enum.join(KilnCMS.Environment.tones(), ", ")}. Without it the console is
+    indistinguishable from production's. Leave both unset in production.\
+    """)
   end
 
   defp report(shell, summary) do
@@ -103,22 +126,6 @@ defmodule KilnCMS.Staging do
 
       email ->
         shell.("  staging admin:           #{email} (role :admin, pre-confirmed)")
-    end
-  end
-
-  # The database name + host the repo is connected to, for the guards and the
-  # printed target. Handles both `url:`-style config (prod/staging via
-  # DATABASE_URL) and discrete `database:`/`hostname:` config (dev/test).
-  defp target do
-    config = Repo.config()
-
-    case config[:url] do
-      url when is_binary(url) ->
-        uri = URI.parse(url)
-        {uri.host || "?", String.trim_leading(uri.path || "", "/")}
-
-      _ ->
-        {config[:hostname] || "?", to_string(config[:database] || "?")}
     end
   end
 

@@ -1,11 +1,33 @@
 defmodule KilnCMS.MixProject do
   use Mix.Project
 
-  @version "0.1.0"
+  @version "0.5.0"
   @source_url "https://github.com/The-Verscienta/kiln_cms"
 
   def project do
     [
+      # Gettext catalogs are generated files that nearly every PR touches, so
+      # their *format* decides how often two PRs collide. Two settings do the
+      # work, and both were measured rather than guessed — a five-line shift in
+      # `content_editor_live.ex` churned 3,296 catalog lines before this, and 0
+      # after; two PRs adding unrelated strings conflicted before, and merge
+      # cleanly after.
+      #
+      #   * `write_reference_line_numbers: false` — a `#: lib/foo.ex:8777`
+      #     comment changes whenever any line above it moves, so an edit
+      #     rewrites entries it has nothing to do with. That is what made every
+      #     open PR conflict on every merge, and what made even a conflict-free
+      #     merge fail the drift gate. The file name is kept: it is the part
+      #     anyone reads, and it changes only when a string really moves file.
+      #
+      #   * `sort_by_msgid: :case_sensitive` — without it new messages are
+      #     appended in source-walk order, so where a string lands depends on
+      #     which file it came from. Sorted, two PRs adding unrelated strings
+      #     touch different regions of the file.
+      #
+      # Read from `Mix.Project.config()[:gettext]` — a `config :gettext, …` in
+      # `config/config.exs` is silently ignored, which costs an hour to notice.
+      gettext: [write_reference_line_numbers: false, sort_by_msgid: :case_sensitive],
       app: :kiln_cms,
       version: @version,
       elixir: "~> 1.19",
@@ -86,7 +108,12 @@ defmodule KilnCMS.MixProject do
         "Oban.Worker.timeout/1",
         # Named by `projects/README.md` as the worked overlay example, and
         # excluded from the reference by `filter_modules` above.
-        "Acupuncture.Catalog"
+        "Acupuncture.Catalog",
+        # A dependency's module, marked `@moduledoc false` upstream. Naming it
+        # is correct and useful — `KilnCMS.CMS.Calculations.RelatedLinks`
+        # explains a real behaviour of it — but ExDoc has nothing to link a
+        # hidden module to, and the docs gate runs `--warnings-as-errors`.
+        "AshAi.Serializer"
       ],
       extras: extras(),
       groups_for_extras: groups_for_extras(),
@@ -111,6 +138,10 @@ defmodule KilnCMS.MixProject do
       # Authoring & editorial
       "docs/editor-shortcuts.md": [],
       "docs/advisories.md": [],
+      "docs/compliance.md": [],
+      "docs/link-checking.md": [],
+      "docs/comments.md": [],
+      "docs/content-releases.md": [],
       "docs/forms.md": [],
       "docs/seo.md": [],
       "docs/ai-assist.md": [],
@@ -119,13 +150,19 @@ defmodule KilnCMS.MixProject do
       "docs/editorial-consent.md": [],
       "docs/governance-dashboard.md": [],
       "docs/localization-workflows.md": [],
+      "docs/navigation-menus.md": [],
       "docs/automation.md": [],
       "docs/newsletter.md": [title: "Newsletter"],
       "docs/memberships.md": [title: "Paid memberships"],
       "docs/provenance.md": [],
+      "docs/federation.md": [],
+      "docs/chain-fold-order.md": [],
+      "docs/social-posting.md": [],
       "docs/point-in-time.md": [],
       # Modeling & extending
       "docs/extending-content.md": [],
+      "docs/events.md": [title: "Events"],
+      "docs/design-language.md": [],
       "docs/design-system.md": [],
       "docs/plugin-extensibility.md": [],
       "docs/frontend-assets.md": [],
@@ -139,6 +176,7 @@ defmodule KilnCMS.MixProject do
       "docs/visual-editing-bridge.md": [],
       "docs/static-export.md": [],
       "docs/resilient-delivery.md": [],
+      "docs/webhooks.md": [],
       # Search
       "docs/meilisearch.md": [title: "Meilisearch backend"],
       # Operations & deployment
@@ -147,12 +185,15 @@ defmodule KilnCMS.MixProject do
       "docs/observability.md": [],
       "docs/performance.md": [],
       "docs/releasing.md": [],
+      "docs/beta-testing.md": [],
       "docs/staging-environments.md": [],
       "docs/media-pipeline.md": [],
+      "docs/content-portability.md": [],
       "docs/direct-email-delivery.md": [],
       "docs/data-flows.md": [],
       # Security & access
       "docs/policy-matrix.md": [],
+      "docs/code-injection.md": [],
       "docs/granular-rbac.md": [],
       "docs/passkeys.md": [],
       "docs/two-factor-auth.md": [],
@@ -162,9 +203,9 @@ defmodule KilnCMS.MixProject do
       "docs/advanced-analytics-plan.md": [],
       "docs/collaborative-editing-spike.md": [],
       "docs/content-editor-modernization.md": [],
-      "docs/design-language.md": [],
       "docs/dynamic-content-types-plan.md": [],
       "docs/form-builder-plan.md": [],
+      "docs/content-experiments-plan.md": [],
       "docs/mobile-admin-spike.md": [],
       "docs/plugin-system-plan.md": [],
       "docs/search-roadmap.md": [],
@@ -206,6 +247,10 @@ defmodule KilnCMS.MixProject do
       "Authoring & editorial": [
         "docs/editor-shortcuts.md",
         "docs/advisories.md",
+        "docs/compliance.md",
+        "docs/link-checking.md",
+        "docs/comments.md",
+        "docs/content-releases.md",
         "docs/forms.md",
         "docs/seo.md",
         "docs/ai-assist.md",
@@ -213,15 +258,22 @@ defmodule KilnCMS.MixProject do
         "docs/multiplayer-preview.md",
         "docs/editorial-consent.md",
         "docs/governance-dashboard.md",
+        "docs/code-injection.md",
         "docs/localization-workflows.md",
+        "docs/navigation-menus.md",
         "docs/automation.md",
         "docs/newsletter.md",
         "docs/memberships.md",
         "docs/provenance.md",
-        "docs/point-in-time.md"
+        "docs/federation.md",
+        "docs/social-posting.md",
+        "docs/point-in-time.md",
+        "docs/chain-fold-order.md"
       ],
       "Modeling & extending": [
         "docs/extending-content.md",
+        "docs/events.md",
+        "docs/design-language.md",
         "docs/design-system.md",
         "docs/plugin-extensibility.md",
         "docs/frontend-assets.md"
@@ -235,7 +287,8 @@ defmodule KilnCMS.MixProject do
         "docs/rag.md",
         "docs/visual-editing-bridge.md",
         "docs/static-export.md",
-        "docs/resilient-delivery.md"
+        "docs/resilient-delivery.md",
+        "docs/webhooks.md"
       ],
       Search: ["docs/meilisearch.md"],
       "Operations & deployment": [
@@ -244,8 +297,10 @@ defmodule KilnCMS.MixProject do
         "docs/observability.md",
         "docs/performance.md",
         "docs/releasing.md",
+        "docs/beta-testing.md",
         "docs/staging-environments.md",
         "docs/media-pipeline.md",
+        "docs/content-portability.md",
         "docs/direct-email-delivery.md",
         "docs/data-flows.md"
       ],
@@ -261,9 +316,9 @@ defmodule KilnCMS.MixProject do
         "docs/advanced-analytics-plan.md",
         "docs/collaborative-editing-spike.md",
         "docs/content-editor-modernization.md",
-        "docs/design-language.md",
         "docs/dynamic-content-types-plan.md",
         "docs/form-builder-plan.md",
+        "docs/content-experiments-plan.md",
         "docs/mobile-admin-spike.md",
         "docs/plugin-system-plan.md",
         "docs/search-roadmap.md",
@@ -308,7 +363,7 @@ defmodule KilnCMS.MixProject do
       "Email & notifications":
         ~r/^(Elixir\.)?KilnCMS\.(Mail|Mailer|Newsletter|Notifications)(\.|$)/,
       "Editorial operations":
-        ~r/^(Elixir\.)?KilnCMS\.(Governance|History|Provenance|Automation|Webhooks|Staging|Collab)(\.|$)/,
+        ~r/^(Elixir\.)?KilnCMS\.(Governance|History|Provenance|Automation|Webhooks|Staging|Collab|Beta)(\.|$)/,
       "Rendering & delivery":
         ~r/^(Elixir\.)?KilnCMS\.(Firing|HTMLSanitizer|Highlight|VisualEditing|Seo|Assist|LLM|Branding|I18n)(\.|$)/,
       Analytics: ~r/^(Elixir\.)?KilnCMS\.Analytics(\.|$)/,
@@ -401,6 +456,11 @@ defmodule KilnCMS.MixProject do
       {:phoenix_html, "~> 4.1"},
       {:corsica, "~> 2.1"},
       {:html_sanitize_ex, "~> 1.4"},
+      # Reads legacy HTML back into structured prose for the importers (#487):
+      # a WordPress body is a blob of HTML, and Portable Text is the only shape
+      # this CMS stores. Backed by mochiweb (already here through
+      # html_sanitize_ex) rather than a NIF, so it adds no build weight.
+      {:floki, "~> 0.38"},
       # Fire-time syntax highlighting for rich-text code blocks (#503). Each
       # lexer is its own OTP app that registers language names with
       # Makeup.Registry on boot — see KilnCMS.Highlight.
@@ -459,6 +519,20 @@ defmodule KilnCMS.MixProject do
       {:wax_, "~> 0.7"},
       # QR code SVG for TOTP enrolment (#331) — pure Elixir, no NIF.
       {:eqrcode, "~> 0.2"},
+      # Timezone database for event recurrence and ICS (#480). Elixir ships no
+      # zone data, so `DateTime.shift_zone/2` errors with `:utc_only_time_zone_database`
+      # until one is configured — and recurrence is *wall-clock* by definition:
+      # "every Tuesday at 19:00" must stay 19:00 across a DST boundary, which is
+      # arithmetic no amount of UTC storage can do.
+      #
+      # `tz` rather than `tzdata`: tzdata ships a runtime updater that fetches
+      # IANA releases over HTTP from a supervised process. In a codebase where
+      # every other outbound call is behind an explicit flag and an SSRF-safe
+      # path, a dependency that dials out on its own by default is the wrong
+      # shape. `tz` compiles the data in; updating it is a dependency bump,
+      # which is a decision an operator makes rather than one a background
+      # process makes for them.
+      {:tz, "~> 0.28"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
       # Error tracking. No-op unless SENTRY_DSN is set (config/runtime.exs), so
@@ -526,9 +600,9 @@ defmodule KilnCMS.MixProject do
         "sobelow --config",
         "deps.audit",
         "kiln.plugins.doctor",
-        # Cheap, and catches a class nothing else can: CI never builds the
-        # release image, so a Dockerfile pin that can't satisfy this file's
-        # `elixir:` requirement is green everywhere until a deploy fails (#600).
+        # Cheap, and says in a second what CI's `image` job takes a full
+        # dependency compile to discover: a Dockerfile pin that can't satisfy
+        # this file's `elixir:` requirement (#600).
         "kiln.toolchain.check",
         # Catches untranslated/fuzzy msgstrs locally. Read-only, so `precommit`
         # keeps its non-destructive contract — the *drift* half of the gate

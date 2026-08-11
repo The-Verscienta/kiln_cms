@@ -43,7 +43,21 @@ defmodule KilnCMSWeb.TrashLive do
   # Display fields plus what restore/purge's after-action hooks read (slug,
   # locale, state for cache busting / artifact cleanup) — never the heavy
   # blocks/search_text/embedding columns the trash list doesn't show.
-  @list_fields [:id, :title, :slug, :locale, :state, :archived_at, :updated_at]
+  # `:org_id` is not decoration: every hook on `:restore` needs it. It reached
+  # `Cache.key/5` as `%Ash.NotLoaded{}` and raised inside `BustContentCache`'s
+  # `after_action`, so the transaction rolled back and Restore in this very
+  # LiveView simply failed — before #1025 gave the action a second consumer of
+  # the same attribute (`FireArtifacts` puts it in the Oban args).
+  @list_fields [
+    :id,
+    :org_id,
+    :title,
+    :slug,
+    :locale,
+    :state,
+    :archived_at,
+    :updated_at
+  ]
 
   # (Re)load the first page of soft-deleted records.
   defp load_items(socket) do
@@ -89,10 +103,11 @@ defmodule KilnCMSWeb.TrashLive do
       [select: @list_fields, sort: [archived_at: :desc], limit: @page_size]
   end
 
-  defp editable_types(org_id), do: ContentTypes.all() ++ ContentTypes.dynamic_all(org_id)
+  defp editable_types(org_id), do: ContentTypes.all_for_org(org_id)
 
   @impl true
-  def handle_event("restore", %{"kind" => kind, "id" => id}, socket) do
+  def handle_event("restore", %{"kind" => kind, "id" => id}, socket)
+      when is_binary(kind) and is_binary(id) do
     actor = socket.assigns.actor
 
     case find_item(socket.assigns.items, kind, id) do
@@ -112,7 +127,8 @@ defmodule KilnCMSWeb.TrashLive do
 
   # Permanently delete a single trashed item (#167). Guarded by a data-confirm on
   # the button; the destroy itself is admin-only at the resource policy.
-  def handle_event("purge", %{"kind" => kind, "id" => id}, socket) do
+  def handle_event("purge", %{"kind" => kind, "id" => id}, socket)
+      when is_binary(kind) and is_binary(id) do
     actor = socket.assigns.actor
 
     case find_item(socket.assigns.items, kind, id) do

@@ -9,8 +9,12 @@ defmodule KilnCMSWeb.EditorLive do
 
   import Ash.Expr, only: [expr: 1]
 
+  alias KilnCMS.Accounts.Scoping
+  alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.I18n
+  alias KilnCMS.Slug
+  alias KilnCMSWeb.Params
 
   @statuses ~w(all draft in_review published archived)
 
@@ -107,7 +111,36 @@ defmodule KilnCMSWeb.EditorLive do
   # Scoped to the current site's org (epic #336), like every sibling page
   # (`trash_live`, `calendar_live`, …): the dynamic registry is per-org, so the
   # type filter and the "New …" buttons must offer *this* site's types.
-  defp editable_types(org_id), do: ContentTypes.all() ++ ContentTypes.dynamic_all(org_id)
+  # Only the types this actor may actually author. `all_for_org/1` returned every
+  # type regardless of the actor, so the "New …" buttons, the type filter and the
+  # row actions all offered work the create policy would refuse — an editor
+  # scoped to `editable_types: ["post"]` saw a Duplicate button on every page row
+  # whose only possible outcome was an error flash (#926).
+  defp editable_types(org_id, actor) do
+    org_id
+    |> ContentTypes.all_for_org()
+    |> Enum.filter(&may_author?(actor, org_id, &1))
+  end
+
+  # The same question the create policy asks (`Checks.EditableContentType`), so
+  # the button and the action cannot disagree.
+  defp may_author?(actor, org_id, content_type) do
+    case Scoping.effective_tier(actor, org_id) do
+      :admin ->
+        true
+
+      :editor ->
+        Scoping.permitted?(actor, org_id, :editable_types, type_name_of(content_type))
+
+      _ ->
+        false
+    end
+  end
+
+  # `editable_types` groups every dynamic type under `entry` (see
+  # docs/granular-rbac.md) — deliberately, unlike field grants.
+  defp type_name_of(%{source: :dynamic}), do: "entry"
+  defp type_name_of(%{type: type}), do: to_string(type)
 
   # The types this page pulls rows from: every editable type, or just the one
   # the `type` filter names. Filtering here rather than after the merge keeps
@@ -123,10 +156,15 @@ defmodule KilnCMSWeb.EditorLive do
   defp type_value(%{type: type}), do: to_string(type)
 
   @impl true
-  def handle_event("new", %{"kind" => kind}, socket) do
+  def handle_event("new", %{"kind" => kind}, socket) when is_binary(kind) do
     attrs = %{
       title: "Untitled #{kind}",
-      slug: "untitled-#{System.unique_integer([:positive])}"
+      # NOT `System.unique_integer/1` (#834): that counter resets on every VM
+      # start, while the `untitled-N` rows it must miss live in Postgres and
+      # outlive any restart — so a fresh node re-issues low numbers and the
+      # create fails with "slug has already been taken", leaving the button
+      # doing nothing.
+      slug: "untitled-#{Slug.random_suffix()}"
     }
 
     record = create!(kind, attrs, socket.assigns.actor, socket.assigns.current_org)
@@ -139,17 +177,20 @@ defmodule KilnCMSWeb.EditorLive do
   # One form drives both selects, so a change to either arrives with the full
   # filter state. The `type` select isn't rendered on a single-type site, hence
   # the fallback to the active assign rather than a bare fetch.
-  def handle_event("filter", %{"status" => status} = params, socket) do
+  def handle_event("filter", %{"status" => status} = params, socket) when is_binary(status) do
     type = Map.get(params, "type", socket.assigns.type)
     {:noreply, push_patch(socket, to: list_path(status, socket.assigns.query, type))}
   end
 
-  def handle_event("search", %{"q" => q}, socket) do
+  # `is_binary(q)` guards the body's `String.replace/3` — a pushed `%{"q" => []}`
+  # matched this head and raised inside `search_filter/1` (#764). A wrong shape
+  # now falls through to the catch-all `KilnCMSWeb.MalformedEvent` appends.
+  def handle_event("search", %{"q" => q}, socket) when is_binary(q) do
     path = list_path(socket.assigns.status, q, socket.assigns.type)
     {:noreply, push_patch(socket, to: path, replace: true)}
   end
 
-  def handle_event("toggle_select", %{"key" => key}, socket) do
+  def handle_event("toggle_select", %{"key" => key}, socket) when is_binary(key) do
     selected = socket.assigns.selected
 
     selected =
@@ -183,6 +224,54 @@ defmodule KilnCMSWeb.EditorLive do
 
   def handle_event("cancel_bulk", _params, socket),
     do: {:noreply, assign(socket, :confirming_bulk, nil)}
+
+  # "Add to release" (#500) is a bulk verb with an argument — which release, and
+  # whether the release publishes or unpublishes the selection — so it opens its
+  # own panel instead of reusing the yes/no confirm bar.
+  def handle_event("open_release_panel", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:adding_to_release?, MapSet.size(socket.assigns.selected) > 0)
+     |> assign(:confirming_bulk, nil)}
+  end
+
+  def handle_event("cancel_release_panel", _params, socket),
+    do: {:noreply, assign(socket, :adding_to_release?, false)}
+
+  def handle_event(
+        "add_to_release",
+        %{"release_id" => release_id, "release_action" => action},
+        socket
+      )
+      when action in ~w(publish unpublish) and is_binary(release_id) do
+    opts = [actor: socket.assigns.actor, tenant: socket.assigns.current_org]
+
+    {added, skipped} =
+      Enum.reduce(socket.assigns.selected, {0, 0}, fn key, {added, skipped} ->
+        [kind, id] = String.split(key, ":", parts: 2)
+
+        attrs = %{
+          release_id: release_id,
+          content_type: kind,
+          content_id: id,
+          action: String.to_existing_atom(action)
+        }
+
+        case CMS.add_release_item(attrs, opts) do
+          {:ok, _item} -> {added + 1, skipped}
+          {:error, _error} -> {added, skipped + 1}
+        end
+      end)
+
+    {:noreply,
+     socket
+     |> assign(:selected, MapSet.new())
+     |> assign(:adding_to_release?, false)
+     |> put_flash(:info, release_flash(added, skipped))}
+  end
+
+  def handle_event("add_to_release", _params, socket),
+    do: {:noreply, put_flash(socket, :error, gettext("Pick a release first."))}
 
   def handle_event("confirm_bulk", _params, socket) do
     verb = socket.assigns.confirming_bulk
@@ -227,6 +316,44 @@ defmodule KilnCMSWeb.EditorLive do
 
   def handle_event("unarchive", params, socket),
     do: {:noreply, transition(socket, params, "unarchive")}
+
+  # Clone a row into a new draft and land the editor in it (#471) — the same
+  # verb the content editor's own Duplicate button runs.
+  def handle_event("duplicate", %{"kind" => kind, "id" => id}, socket)
+      when is_binary(kind) and is_binary(id) do
+    %{actor: actor, current_org: org} = socket.assigns
+
+    # `kind`/`id` come off the clicked row, so they are client input: pass them
+    # straight through rather than pre-fetching, so an unknown type or an
+    # unreachable id lands in the error branch instead of crashing the LiveView
+    # (`duplicate/3` re-reads the record either way).
+    case KilnCMS.CMS.Duplication.duplicate(kind, id, actor: actor, tenant: org) do
+      {:ok, copy, []} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, gettext("Duplicated as a new draft."))
+         |> push_navigate(to: edit_path(kind, copy.id))}
+
+      # Some of the source did not travel — a field grant dropped attributes, or
+      # the block policy reset values this editor could not have set. Saying so
+      # is the difference between "duplication is broken" and "your role cannot
+      # copy those fields" (#929).
+      {:ok, copy, withheld} ->
+        {:noreply,
+         socket
+         |> put_flash(
+           :info,
+           gettext(
+             "Duplicated as a new draft. Not copied, because your role cannot set them: %{fields}.",
+             fields: Enum.join(withheld, ", ")
+           )
+         )
+         |> push_navigate(to: edit_path(kind, copy.id))}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, gettext("Couldn't duplicate that content."))}
+    end
+  end
 
   def handle_event("load_more", _params, socket) do
     case List.last(socket.assigns.items) do
@@ -295,7 +422,7 @@ defmodule KilnCMSWeb.EditorLive do
   @impl true
   def handle_params(params, _uri, socket) do
     status = if params["status"] in @statuses, do: params["status"], else: "all"
-    types = editable_types(socket.assigns.current_org.id)
+    types = editable_types(socket.assigns.current_org.id, socket.assigns.actor)
 
     # An unknown `type` (hand-edited URL, or a type deleted/archived since the
     # link was shared) falls back to "all" rather than listing nothing.
@@ -306,8 +433,25 @@ defmodule KilnCMSWeb.EditorLive do
      |> assign(:content_types, types)
      |> assign(:status, status)
      |> assign(:type, type)
-     |> assign(:query, params["q"] || "")
+     # `?q[a]=1` decodes to a MAP, which reached `search_filter/1`'s
+     # `String.replace/3` and raised (#764).
+     |> assign(:query, Params.string(params, "q", ""))
+     |> load_releases()
      |> load_items()}
+  end
+
+  # Releases still open for new content (#500), for the "Add to release" bulk
+  # action. Reloaded per navigation like the type registry, so a release created
+  # in another tab shows up on the next filter change rather than needing a
+  # reload of this page.
+  defp load_releases(socket) do
+    releases =
+      CMS.list_editable_releases!(
+        actor: socket.assigns.actor,
+        tenant: socket.assigns.current_org
+      )
+
+    socket |> assign(:releases, releases) |> assign(:adding_to_release?, false)
   end
 
   defp list_path(status, q, type) do
@@ -431,6 +575,19 @@ defmodule KilnCMSWeb.EditorLive do
           skipped: skipped
         ),
       else: gettext("%{action}: %{count} updated", action: bulk_verb_label(verb), count: ok)
+  end
+
+  # "Skipped" here has one dominant cause worth naming: a record already sitting
+  # in another open release, which the database refuses (#500's conflict rule).
+  defp release_flash(added, 0),
+    do: gettext("Added %{count} item(s) to the release", count: added)
+
+  defp release_flash(added, skipped) do
+    gettext(
+      "Added %{count} item(s); %{skipped} skipped — already in another open release, or not addable",
+      count: added,
+      skipped: skipped
+    )
   end
 
   @impl true
@@ -605,6 +762,18 @@ defmodule KilnCMSWeb.EditorLive do
             >
               {label}
             </button>
+            <%!-- Content releases (#500). Only offered once a release exists to
+                  add to — the button would otherwise be a dead end, and the
+                  release list is one click away in the sidebar. --%>
+            <button
+              :if={@releases != []}
+              type="button"
+              phx-click="open_release_panel"
+              disabled={@selected_count == 0}
+              class="btn btn-sm btn-default"
+            >
+              {gettext("Add to release")}
+            </button>
             <button
               :if={@tier == :admin}
               type="button"
@@ -617,6 +786,35 @@ defmodule KilnCMSWeb.EditorLive do
             </button>
           </div>
         </div>
+
+        <form
+          :if={@adding_to_release?}
+          id="add-to-release"
+          phx-submit="add_to_release"
+          class="flex flex-wrap items-end gap-3 rounded border border-primary/40 bg-primary/5 px-3 py-2 text-sm"
+        >
+          <div>
+            <label for="add-to-release-target" class="field-label">{gettext("Release")}</label>
+            <select id="add-to-release-target" name="release_id" class="field-select w-auto">
+              <option :for={release <- @releases} value={release.id}>{release.name}</option>
+            </select>
+          </div>
+          <div>
+            <label for="add-to-release-action" class="field-label">{gettext("On go-live")}</label>
+            <select id="add-to-release-action" name="release_action" class="field-select w-auto">
+              <option value="publish">{gettext("Publish")}</option>
+              <option value="unpublish">{gettext("Unpublish")}</option>
+            </select>
+          </div>
+          <div class="ml-auto flex gap-2">
+            <button type="submit" class="btn btn-sm btn-primary">
+              {gettext("Add %{count} item(s)", count: @selected_count)}
+            </button>
+            <button type="button" phx-click="cancel_release_panel" class="btn btn-sm btn-default">
+              {gettext("Cancel")}
+            </button>
+          </div>
+        </form>
 
         <div
           :if={@confirming_bulk}
@@ -762,6 +960,22 @@ defmodule KilnCMSWeb.EditorLive do
               >
                 {gettext("Unarchive")}
               </button>
+              <button
+                type="button"
+                phx-click="duplicate"
+                phx-value-kind={kind}
+                phx-value-id={record.id}
+                title={gettext("Copy into a new draft")}
+                class="btn btn-sm btn-default"
+              >
+                {gettext("Duplicate")}
+              </button>
+              <.link
+                navigate={edit_path(kind, record.id) <> "?assign=1"}
+                class="btn btn-sm btn-default"
+              >
+                {gettext("Assign")}
+              </.link>
               <.link
                 navigate={edit_path(kind, record.id)}
                 class="btn btn-sm btn-default"

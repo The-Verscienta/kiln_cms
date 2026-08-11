@@ -9,11 +9,22 @@ defmodule KilnCMS.Cache do
 
   In keeping with the project's minimal-ops goal this is in-process only (no
   Redis/Dragonfly); a shared multi-node cache is deferred until measured (D2).
+  A few keys are the exception to what that costs on a cluster —
+  `bust_code_injection/1`, `bust_branding/1`, `bust_feed_policy/1` and
+  `bump_head_generation/1` reach every node via `KilnCMS.Cache.ClusterBust`,
+  because an operator deleting an executing script, an admin turning off
+  full-text syndication (#719), or a `<head>` settings save that must move the
+  delivery ETag (#1079) should not have to wait out a TTL on the nodes they did
+  not happen to hit (#739).
 
   Set `config :kiln_cms, KilnCMS.Cache, enabled: false` to bypass the cache
   (every read hits the source) without removing the supervised process.
   """
   import Cachex.Spec, only: [hook: 1]
+
+  alias KilnCMS.Cache.ClusterBust
+
+  require Logger
 
   @cache :kiln_cms_content_cache
 
@@ -172,9 +183,41 @@ defmodule KilnCMS.Cache do
   """
   @spec bust_type_registry(Ash.UUID.t()) :: :ok
   def bust_type_registry(org_id) do
-    if enabled?(), do: Cachex.del(@cache, type_registry_key(org_id))
+    if enabled?() do
+      Cachex.del(@cache, type_registry_key(org_id))
+      Cachex.del(@cache, calendar_types_key(org_id))
+      Cachex.del(@cache, delivery_schema_key(org_id))
+      # `has_published_feed` is half of `KilnCMS.Feeds.syndicated?/2`, so a type
+      # write changes which types syndicate as surely as a settings save does.
+      Cachex.del(@cache, syndicated_types_key(org_id))
+    end
+
     :ok
   end
+
+  @doc """
+  Cache key for a site's exported delivery JSON Schema (#430).
+
+  Busted from `bust_type_registry/1` rather than on its own, because the schema
+  is derived from exactly what that function already invalidates: the dynamic
+  type registry and the custom-field definitions. `Changes.BustTypeRegistry`
+  fires on every `TypeDefinition` **and** `FieldDefinition` write, so the
+  invalidation is exact and costs nothing extra.
+  """
+  @spec delivery_schema_key(Ash.UUID.t()) :: String.t()
+  def delivery_schema_key(org_id), do: "delivery_schema:#{org_id}"
+
+  @doc """
+  Cache key for which of a site's content types are event-shaped (#480).
+
+  Its own key rather than a slice of the type registry, because the answer
+  depends on `FieldDefinition` rows and not on `TypeDefinition` ones — a
+  `datetime_range` field being added is what changes it. Both writes bust it
+  (`Changes.BustTypeRegistry` runs on each), so the TTL is a backstop rather
+  than the mechanism.
+  """
+  @spec calendar_types_key(Ash.UUID.t()) :: String.t()
+  def calendar_types_key(org_id), do: "content_types:calendar:#{org_id}"
 
   @doc """
   Cache key for a site's resolved white-label branding tokens (#48). Per-org:
@@ -186,10 +229,105 @@ defmodule KilnCMS.Cache do
   Drop a site's cached branding so a settings save is visible on the next
   request instead of waiting out the TTL. Per-record `bust/3` doesn't touch this
   aggregate key, so `Changes.BustBranding` calls it explicitly.
+
+  Cluster-wide (#739), for the reason `bust_code_injection/1` gives: these two
+  keys hold the same shape of thing, and there is no reason for one of them to
+  reach every node and the other not to.
   """
   @spec bust_branding(Ash.UUID.t()) :: :ok
   def bust_branding(org_id) do
-    if enabled?(), do: Cachex.del(@cache, branding_key(org_id))
+    if enabled?(), do: ClusterBust.broadcast([branding_key(org_id)])
+    :ok
+  end
+
+  @doc """
+  Cache key for a site's delivery-`<head>` generation token (#1079).
+
+  Folded into the public HTML ETag so a settings write that changes feed
+  autodiscovery, branding, code injection, or type-driven calendar links moves
+  the validator even when no content row changed. Without it a browser holding
+  `If-None-Match` keeps a 304 body whose `<link rel="alternate">` still points
+  at a feed that now 404s.
+  """
+  @spec head_generation_key(Ash.UUID.t()) :: String.t()
+  def head_generation_key(org_id), do: "head_generation:#{org_id}"
+
+  @doc """
+  The current head-generation token for `org_id`, or `"0"` when nothing has
+  bumped it yet. Stable across requests until `bump_head_generation/1`.
+  """
+  @spec head_generation(Ash.UUID.t()) :: String.t()
+  def head_generation(org_id) do
+    if enabled?() do
+      case Cachex.get(@cache, head_generation_key(org_id)) do
+        {:ok, value} when is_binary(value) and value != "" -> value
+        _ -> "0"
+      end
+    else
+      "0"
+    end
+  end
+
+  @doc """
+  Mint a new head-generation token for `org_id` and put it on every node.
+
+  Called from the same settings writes that already bust layout-facing caches
+  (`BustBranding`, `BustCodeInjection`, `BustFeedSettings`, `BustTypeRegistry`).
+  A delete-only bust would be wrong here: every miss would fall back to `"0"`,
+  which is the ETag the page carried *before* the write.
+  """
+  @spec bump_head_generation(Ash.UUID.t()) :: :ok
+  def bump_head_generation(org_id) do
+    if enabled?() do
+      token =
+        :crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower)
+
+      ClusterBust.broadcast_put([{head_generation_key(org_id), token}])
+    end
+
+    :ok
+  end
+
+  @doc """
+  Cache key for a site's resolved code injection (#490) — the snippet **and**
+  the CSP sources that let it run, which is why the two are one cached struct.
+  """
+  def code_injection_key(org_id), do: "code_injection:#{org_id}"
+
+  @doc """
+  Drop a site's cached code injection after a settings save.
+
+  Staler than branding would be: the struct carries the CSP sources as well as
+  the HTML, so a stale entry serves the NEW snippet under the OLD policy — a
+  blocked script and a console error rather than a visibly out-of-date page.
+
+  Cluster-wide (#739). The documented incident response for a bad snippet is
+  "delete the row", and a node-local `Cachex.del` left every *other* node
+  serving that script — under its widened CSP — until the TTL expired.
+  """
+  @spec bust_code_injection(Ash.UUID.t()) :: :ok
+  def bust_code_injection(org_id) do
+    if enabled?(), do: ClusterBust.broadcast([code_injection_key(org_id)])
+    :ok
+  end
+
+  @doc """
+  Cache key for a site's resolved claim-checking settings (#857) — the
+  `%KilnCMS.Compliance.Settings{}` its editor and publish gate are judged
+  against, config layer already folded in.
+  """
+  def compliance_key(org_id), do: "compliance:#{org_id}"
+
+  @doc """
+  Drop a site's cached claim-checking settings after a settings save.
+
+  Cluster-wide (#739), like branding and code injection: these hold the same
+  shape of thing, and an admin who turns the publish gate off to unblock a
+  release must not have it stay on wherever their next request lands.
+  """
+  @spec bust_compliance(Ash.UUID.t()) :: :ok
+  def bust_compliance(org_id) do
+    if enabled?(), do: ClusterBust.broadcast([compliance_key(org_id)])
     :ok
   end
 
@@ -199,6 +337,76 @@ defmodule KilnCMS.Cache do
   its own published URLs.
   """
   def sitemap_key(org_id), do: "sitemap:#{org_id}:xml"
+
+  @doc """
+  Cache key for a site's running content experiments (#499).
+
+  On the delivery hot path for **every** page: a site with no experiments must
+  not pay a query per request to find that out. Held as one entry per site
+  rather than one per document, because the set is small by construction — an
+  experiment costs its page the shared cache, so nobody runs many at once.
+  """
+  @spec experiments_key(Ash.UUID.t()) :: String.t()
+  def experiments_key(org_id), do: "experiments:running:#{org_id}"
+
+  @doc """
+  Cache key for a site's funnel targets — each funnel's final step (#1010).
+
+  Separate from `experiments_key/1` because the two are invalidated by different
+  writes: a funnel edit must move a `:funnel_completion` goal without touching
+  the experiment, which is the whole point of naming a funnel rather than a
+  document.
+  """
+  @spec funnel_targets_key(Ash.UUID.t()) :: String.t()
+  def funnel_targets_key(org_id), do: "experiments:funnel_targets:#{org_id}"
+
+  @doc "Drop a site's cached funnel targets. Called from every funnel/step write."
+  @spec bust_funnel_targets(Ash.UUID.t()) :: :ok
+  def bust_funnel_targets(org_id) do
+    # Cluster-wide for the same reason as `bust_experiments/1` (#1113), and one
+    # more of its own: the whole point of a funnel goal is that editing the
+    # funnel moves the goal (#1010). A node that has not seen the edit keeps
+    # converting on the PREVIOUS last step, so the same visit counts on one node
+    # and not another.
+    if enabled?(), do: ClusterBust.broadcast([funnel_targets_key(org_id)])
+    :ok
+  end
+
+  @doc "Cache key for a site's configured social accounts (#497)."
+  @spec social_accounts_key(Ash.UUID.t()) :: String.t()
+  def social_accounts_key(org_id), do: "social:accounts:#{org_id}"
+
+  @doc """
+  Drop a site's cached social-account set.
+
+  Called from every account write, for the same reason experiments bust on
+  every write: an admin who enables an account expects the next publish to
+  announce, not the one after the TTL expires.
+  """
+  @spec bust_social_accounts(Ash.UUID.t()) :: :ok
+  def bust_social_accounts(org_id) do
+    if enabled?(), do: Cachex.del(@cache, social_accounts_key(org_id))
+    :ok
+  end
+
+  @doc """
+  Drop a site's cached running-experiment set.
+
+  Called from every experiment and variant write. The TTL is a backstop, not the
+  freshness signal — an editor who starts an experiment expects it live on the
+  next request, not within five minutes.
+  """
+  @spec bust_experiments(Ash.UUID.t()) :: :ok
+  def bust_experiments(org_id) do
+    # Cluster-wide, like `bust_branding/1` and for the reason stated there
+    # (#1113). A node-local `Cachex.del` left every OTHER node splitting traffic
+    # on a concluded experiment for up to the TTL — and, since #1008, reporting
+    # its health from a stale row: node A says the experiment is over, node B
+    # says it cannot convert. Two nodes disagreeing intermittently is the
+    # hardest shape of this bug to report.
+    if enabled?(), do: ClusterBust.broadcast([experiments_key(org_id)])
+    :ok
+  end
 
   @doc """
   Drop a site's cached sitemap XML so a new publish/unpublish is reflected on the
@@ -224,6 +432,203 @@ defmodule KilnCMS.Cache do
     if enabled?(), do: Cachex.del(@cache, llms_key(org_id))
     :ok
   end
+
+  @doc """
+  Cache key for a generated feed (#486).
+
+  `type` is the content-type name for a per-type feed (`/blog/feed.xml`) or
+  `nil` for the site-wide one; `format` is `:atom`, `:json` or `:ics`. Per-org,
+  like every other aggregate key here.
+
+  The calendar routes (#480) narrow `type` further — `"gigs/tag/jazz"` for a
+  tag-scoped calendar — and the segment feeds (#720) do the same:
+  `"post/category/news"`, `"post/tag/jazz"`, `"post/locale/fr"`.
+
+  `bust_feeds/3` does not enumerate the **taxonomy** ones, and that is not an
+  omission: computing which of them a record belongs to needs that record's tags
+  and category, and the bust runs in an `after_action` — a relationship load
+  there is a database read inside the publish transaction, which can abort it and
+  lose the publish outright (#660). So it drops the keys anyone is actually
+  subscribed to, immediately, and lets the five-minute TTL reclaim the segments.
+
+  The **locale** is not in that bargain, and treating it as though it were was a
+  bug: `record.locale` is a plain attribute already on the struct the bust
+  receives, so it costs no read, no query and no transaction risk. Without it a
+  French publish never invalidated `/fr/feed.xml` — leaving the one reader the
+  locale feeds exist for as the only one whose feed went stale.
+  """
+  @spec feed_key(Ash.UUID.t(), String.t() | nil, :atom | :json | :ics) :: String.t()
+  def feed_key(org_id, type, format),
+    do: feed_key_prefix(org_id) <> "#{type || "all"}:#{format}"
+
+  # The one place the shape of a feed key's org segment is written. `bust_all_feeds/1`
+  # matches on it, and a hand-copied `"feed:#{org_id}:"` there would go on
+  # compiling — and silently match nothing — the day this gains a version
+  # segment or moves the id. That is the same split-brain the note above warns
+  # about for `feed_names/2` vs `FeedController.cache_scope/2`, and here it
+  # would fail in the direction that keeps serving full article bodies.
+  defp feed_key_prefix(org_id), do: "feed:#{org_id}:"
+
+  @doc """
+  Drop the feeds a write to `type` affects: that type's own, the site-wide ones
+  it appears in, and — when `locale` is given — the same two for that locale.
+
+  Takes the type rather than enumerating every syndicated type, for the reason
+  `bust/3` does: the caller knows which record changed, and a dynamic type's
+  name is not derivable from an org id. A type that was *removed* from
+  syndication leaves its own stale key behind, which the TTL reclaims — the
+  site-wide feeds, which are the ones anyone is actually subscribed to, drop
+  immediately.
+
+  `locale` is the written record's own, and defaults to `nil` for a caller that
+  has no locale axis (the calendars). Passing the default locale is harmless: its
+  feeds are keyed without a locale segment, so the two spellings collapse.
+  """
+  @spec bust_feeds(Ash.UUID.t(), String.t() | atom() | nil, String.t() | nil) :: :ok
+  def bust_feeds(org_id, type, locale \\ nil) do
+    if enabled?() do
+      for name <- feed_names(type, locale),
+          # `:ics` rides along (#480): a published event must appear in a
+          # subscribed calendar on the same hook that refreshes the feeds.
+          format <- [:atom, :json, :ics] do
+        Cachex.del(@cache, feed_key(org_id, name, format))
+      end
+    end
+
+    :ok
+  end
+
+  @doc """
+  Drop **every** cached feed document for one org, across types, scopes and
+  formats (#719).
+
+  The blunt counterpart to `bust_feeds/3`, for a write that names no record and
+  no type: a change to the org's syndication policy decides what is *in* every
+  feed body at once. It walks the keyspace rather than enumerating types,
+  because the set of types a stale key was written for is exactly what the
+  policy change may have altered — and the taxonomy scopes `bust_feeds/3`
+  deliberately leaves to the TTL are in here too.
+
+  That walk is the reason its callers run it **after** the write transaction,
+  never in an `after_action`: this is the only `Cachex.keys/1` in the codebase,
+  it materializes the whole (bounded) keyspace, and none of it should happen
+  with a Postgres transaction open. It also must not run before COMMIT for a
+  correctness reason — see `KilnCMS.CMS.Changes.BustFeedSettings`.
+
+  A failure to enumerate is logged rather than swallowed. Silently not busting
+  here means a feed keeps serving whatever the previous policy allowed, while
+  the admin is told the save succeeded.
+
+  **Cluster-wide** (#1078), like `bust_feed_policy/1`. The two halves of a
+  syndication change have to travel together: turning full content off dropped
+  the *policy* on every node but only the writing node's cached feed **bodies**,
+  so roughly half of a two-node deployment went on serving complete article text
+  — rendered under the old policy — for the whole five-minute TTL.
+
+  It could not ride `ClusterBust.broadcast/1`, which takes a list of keys: the
+  keys matching this prefix differ per node, and a node that never served
+  `/blog/category/news/feed.xml` has no such key for the writer to name. So it
+  goes as an *intent* (`ClusterBust.broadcast_prefix/1`) and each node runs its
+  own scan.
+  """
+  @spec bust_all_feeds(Ash.UUID.t()) :: :ok
+  def bust_all_feeds(org_id) do
+    if enabled?(), do: ClusterBust.broadcast_prefix(feed_key_prefix(org_id))
+    :ok
+  end
+
+  @doc """
+  Drop every cached key starting with `prefix`, on **this node**.
+
+  Public only because `KilnCMS.Cache.ClusterBust` runs it on the receiving side
+  of `broadcast_prefix/1`; every writer should go through that, so the bust
+  reaches the rest of the cluster too. The keyspace walk is bounded but real —
+  see `bust_all_feeds/1` for why no caller may do this before COMMIT.
+  """
+  @spec drop_prefix(String.t()) :: :ok
+  def drop_prefix(prefix) when is_binary(prefix) do
+    case Cachex.keys(@cache) do
+      {:ok, keys} ->
+        # `is_binary/1` is load-bearing: not every cached key is a string (the
+        # point-in-time artifact reads cache under a tuple key).
+        for key <- keys, is_binary(key), String.starts_with?(key, prefix) do
+          Cachex.del(@cache, key)
+        end
+
+      other ->
+        Logger.warning("could not enumerate cache keys under #{prefix}: #{inspect(other)}")
+    end
+
+    :ok
+  end
+
+  @doc """
+  Cache key for a site's resolved feed syndication policy (#719) — which types
+  syndicate and which carry their full body, with the operator-level
+  `config :kiln_cms, :feeds` already folded in. Per-org: the whole point of the
+  key is that two tenants on one deployment resolve it differently.
+  """
+  @spec feed_policy_key(Ash.UUID.t()) :: String.t()
+  def feed_policy_key(org_id), do: "feed_policy:#{org_id}"
+
+  @doc """
+  Cache key for a site's resolved list of syndicating content types (#719).
+
+  Separate from `feed_policy_key/1` because it folds in the content-type
+  registry as well as the policy, so a `TypeDefinition` write invalidates it and
+  a `FeedSettings` write invalidates both. Cached for the reason
+  `calendar_types_key/1` is: `KilnCMSWeb.FeedController` resolves it *before*
+  the response cache is consulted, so an uncached answer costs a registry walk
+  on every feed request including hits and 404s.
+  """
+  @spec syndicated_types_key(Ash.UUID.t()) :: String.t()
+  def syndicated_types_key(org_id), do: "content_types:syndicated:#{org_id}"
+
+  @doc """
+  Drop a site's cached syndication policy after a settings save. Called by
+  `Changes.BustFeedSettings`, alongside `bust_all_feeds/1` — the policy decides
+  the contents of the documents, so leaving those cached would hide the save for
+  the whole TTL.
+  """
+  @spec bust_feed_policy(Ash.UUID.t()) :: :ok
+  def bust_feed_policy(org_id) do
+    # Cluster-wide (#739), for the reason code injection is: the policy decides
+    # whether a site's complete article bodies go out to every anonymous
+    # subscriber, and on a multi-node deployment an admin who turns that off
+    # would otherwise watch roughly half of all fetches keep serving full text
+    # until the TTL — with no way to tell whether the switch worked.
+    #
+    # The derived type list rides along: it is a function of the policy, so it
+    # can never outlive it.
+    if enabled?(),
+      do: ClusterBust.broadcast([feed_policy_key(org_id), syndicated_types_key(org_id)])
+
+    :ok
+  end
+
+  # `nil` (site-wide) and the type, each in the default locale and — when the
+  # record was written in another — that locale too. The segment mirrors
+  # `KilnCMSWeb.FeedController.cache_scope/2` exactly; the two have to agree or
+  # this drops keys nothing reads.
+  defp feed_names(type, locale) do
+    scopes = Enum.uniq([nil, type && to_string(type)])
+
+    scopes ++ Enum.reject(Enum.map(scopes, &localized(&1, locale)), &is_nil/1)
+  end
+
+  # `nil` for the default locale, or for a caller with no locale axis at all —
+  # those feeds are keyed without a locale segment, so the two spellings are one
+  # key and the `Enum.uniq` above collapses them.
+  defp localized(scope, locale) when is_binary(locale) do
+    if locale == KilnCMS.I18n.default_locale() do
+      nil
+    else
+      segment = "locale/" <> URI.encode(locale, &URI.char_unreserved?/1)
+      if scope, do: "#{scope}/#{segment}", else: segment
+    end
+  end
+
+  defp localized(_scope, _locale), do: nil
 
   @doc """
   Drop all cached published content. The blunt fallback for writes whose blast

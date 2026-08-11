@@ -24,9 +24,11 @@ defmodule KilnCMSWeb.VisualEditingController do
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Firing.Engine
   alias KilnCMS.VisualEditing
+  alias KilnCMSWeb.ApiError
+  alias KilnCMSWeb.Params
 
   def show(conn, %{"type" => type, "slug" => slug} = params) do
-    locale = params["locale"] || KilnCMS.I18n.default_locale()
+    locale = Params.string(params, "locale", KilnCMS.I18n.default_locale())
     actor = Ash.PlugHelpers.get_actor(conn)
 
     with true <- VisualEditing.enabled?(),
@@ -61,7 +63,16 @@ defmodule KilnCMSWeb.VisualEditingController do
            query: [filter: [slug: slug, locale: locale], select: [:id], limit: 1]
          ) do
       [%{id: id} | _] ->
-        ContentTypes.get_record!(kind, id, actor: actor, tenant: org_id, load: [:featured_image])
+        ContentTypes.get_record!(kind, id,
+          actor: actor,
+          tenant: org_id,
+          # `:effective_seo_description` (#1102) for the same reason
+          # `KilnCMS.Firing.References.load_published/3` carries it: a preview
+          # fire that resolved the type's pattern against an unloaded category
+          # would show the overlay a `description` the published artifact
+          # disagrees with, which is what this bridge exists to prevent.
+          load: [:featured_image] ++ KilnCMS.Seo.Patterns.loads()
+        )
 
       _ ->
         nil
@@ -71,8 +82,6 @@ defmodule KilnCMSWeb.VisualEditingController do
   end
 
   defp not_found(conn, message) do
-    conn
-    |> put_status(:not_found)
-    |> json(%{"errors" => [%{"detail" => message}]})
+    ApiError.send(conn, :not_found, "not_found", message)
   end
 end

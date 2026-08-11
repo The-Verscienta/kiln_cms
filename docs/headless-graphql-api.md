@@ -55,7 +55,7 @@ from its singular type name. For `post`:
 | `searchPosts` | `:search` | `query: String!`, `locale`, `categoryId`, `authorId`, `state`, `tagIds`, `customFilter` | full-text matches, relevance-ranked |
 | `semanticSearchPosts` | `:search_semantic` | `query: String!`, `locale`, `customFilter` | vector/semantic matches |
 | `autocompletePosts` | `:autocomplete` | `prefix: String!`, `locale` | typo-tolerant title suggestions |
-| `searchPublishedPosts` | `:search_published` | as `searchPosts`, minus `state` | published-only full-text matches — `state == :published` pinned server-side (#297) |
+| `searchPublishedPosts` | `:search_published` | as `searchPosts`, minus `state` | published-only full-text matches — the anonymous rule (published, `audience: :public`, unlocked) pinned server-side (#297, #1013) |
 | `semanticSearchPublishedPosts` | `:search_semantic_published` | as `semanticSearchPosts`, minus `state` | published-only semantic matches |
 | `autocompletePublishedPosts` | `:autocomplete_published` | `prefix: String!`, `locale` | published-only title suggestions |
 
@@ -158,6 +158,7 @@ identical; the dynamic tier shares one generic `*_entry` set):
 | `createPost(input:)` | `:create` | `:read_write` key, editor+ | Creates a **draft**, attributed to the key's owner |
 | `updatePost(id:, input:)` | `:update` | `:read_write` key, editor+ | Edits content; **re-fires** if the record is already published |
 | `submitPostForReview(id:)` | `:submit_for_review` | `:read_write` key, editor+ | draft → in_review |
+| `returnPostToDraft(id:)` | `:return_to_draft` | `:read_write` key, **admin** | in_review → draft — the return half of the approve/return pair |
 | `publishPost(id:)` | `:publish` | `:read_write` key, **admin** | Publishes and fires artifacts |
 | `unpublishPost(id:)` | `:unpublish` | `:read_write` key, **admin** | Takes content down, purges artifacts |
 | `deletePost(id:)` | `:destroy` | `:read_write` key, **admin** | **Reversible** soft-delete (AshArchival) |
@@ -165,8 +166,9 @@ identical; the dynamic tier shares one generic `*_entry` set):
 Authorization mirrors `/mcp` exactly: a **read-only key** can run none of these;
 a **`:read_write` key on a `:viewer`** account can run none (the role has no
 authoring rights); a **`:read_write` key on an `:editor`** account can
-create/update/submit; **publish, unpublish and delete require an `:admin`**
-account. The hard delete (`:purge`) is **never** exposed as a mutation and is
+create/update/submit; **return-to-draft, publish, unpublish and delete require an
+`:admin`** account — an editor submits for review, and deciding the outcome
+(approve or return) is the admin's half. The hard delete (`:purge`) is **never** exposed as a mutation and is
 API-key-banned regardless of scope.
 
 ### Writing tags — replace vs merge
@@ -197,8 +199,11 @@ populate every input field must omit it rather than null it); empty merge lists
 do not count and are simply ignored.
 
 The merge verbs are on `update*` only — `create*` has nothing to merge against
-and takes `tagIds` alone. `relatedPostIds` and the other relationship arrays
-still replace.
+and takes `tagIds` alone. The related-content arrays carry the same verbs
+(#637): alongside `relatedPostIds` there are `addRelatedPostIds` /
+`removeRelatedPostIds`, with the same rules, and the sibling
+`addRelatedPageIds` / `removeRelatedPageIds` (and `…RelatedEntryIds` on the
+dynamic tier).
 
 ### Writing body content — the `blockTree` argument
 

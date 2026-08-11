@@ -27,6 +27,47 @@ defmodule KilnCMS.CMS do
   # and a model sends `add_tag_ids` to a create, which Ash rejects outright.
   @create_tag_hint "Tags: pass tag_ids (the merge verbs are update-only)."
 
+  # Load the links a tag write touches back onto the tool result (#640).
+  #
+  # `remove_tag_ids` is `on_no_match: :ignore` so removal stays idempotent — a
+  # retry, or a tag someone else already detached, must not fail. The cost is
+  # that it is silent about *everything*, including an id matching no tag at
+  # all: a hallucinated uuid, or a slug sent by mistake, returns the same 200
+  # as a real detach. (`add_tag_ids` is asymmetric here — it hard-errors on an
+  # unknown id.)
+  #
+  # Over MCP that is the difference between a model that can check its work and
+  # one that cannot. The tool result is the record's public attributes, and
+  # `tags` is a relationship, so without this a model asking to remove a tag
+  # gets a success payload it has no way to verify against — and reports
+  # "removed the Elixir tag" on a complete no-op. #521 exists precisely because
+  # LLM callers get tag writes wrong.
+  #
+  # `category` comes along for the same reason: `category_id` is echoed back as
+  # an attribute, but a uuid is not something a model can check a name against.
+  #
+  # The sibling links (`related_post_ids` and friends, #637) come from the same
+  # `merge_changes` macro with the same `:ignore` semantics, so their removals
+  # were just as unverifiable — closed in #996, but not by adding them here.
+  # Loading the relationship would put whole related records, bodies included,
+  # into every write response, because `load` cannot project: `AshAi.Serializer`
+  # emits `default_attributes(resource) ++ load_fields`, an append, and Ash's
+  # load of an attribute is an ensure-selected no-op — so a field list reads
+  # like a contract while the payload carries every public attribute regardless.
+  # (That is also why `tags`/`category` are written as a bare relationship list:
+  # as they behave, so a later `KilnCMS.CMS.Taxonomy` attribute cannot widen
+  # them silently under a list that claims otherwise.)
+  #
+  # So related links go through a `related_links` CALCULATION, which serializes
+  # as its own value and therefore projects — and they are loaded only when the
+  # call actually named a related argument. `KilnCMS.CMS.McpLoads` resolves
+  # both, per call.
+  #
+  # `create_*` gains nothing either way. On `:create`, `tag_ids` is
+  # `append_and_remove` and hard-errors on an unknown id, and `category_id` is
+  # echoed already — a create's links are fully determined by the request that
+  # made it.
+
   # LLM-facing tools, served over the `/mcp` endpoint (see docs/mcp.md and
   # `KilnCMSWeb.Router`). Every call runs as the API-key's owning user through
   # the same policies as any other caller: reads are role/state/audience-scoped,
@@ -35,16 +76,33 @@ defmodule KilnCMS.CMS do
   # an LLM authors drafts and submits them for review; a human approves.
   tools do
     # Discovery / reads.
+    #
+    # `block_ids` rides on every content read (#954): it is the id-only
+    # projection of the block tree (`_id`/`_type`, nested children in render
+    # positions, no field values), and it is what lets a model editing a page
+    # that carries an admin-set nested value send each child back under the id
+    # that held it — which `EnforceBlockFieldPolicy` requires. Unlike the
+    # related links it is small and unconditionally relevant to authoring, so
+    # it is loaded flat rather than through `McpLoads`.
     tool :read_pages, KilnCMS.CMS.Page, :read do
-      description "List/filter pages (drafts included when the key's user is an editor)."
+      description "List/filter pages (drafts included when the key's user is an editor). " <>
+                    "block_ids carries each block's _id — echo _id on block_tree children when updating."
+
+      load [:block_ids]
     end
 
     tool :read_posts, KilnCMS.CMS.Post, :read do
-      description "List/filter blog posts (drafts included when the key's user is an editor)."
+      description "List/filter blog posts (drafts included when the key's user is an editor). " <>
+                    "block_ids carries each block's _id — echo _id on block_tree children when updating."
+
+      load [:block_ids]
     end
 
     tool :read_entries, KilnCMS.CMS.Entry, :read do
-      description "List/filter dynamic-type entries; scope by type_definition_id (see read_type_definitions)."
+      description "List/filter dynamic-type entries; scope by type_definition_id (see read_type_definitions). " <>
+                    "block_ids carries each block's _id — echo _id on block_tree children when updating."
+
+      load [:block_ids]
     end
 
     tool :read_type_definitions, KilnCMS.CMS.TypeDefinition, :read do
@@ -74,6 +132,7 @@ defmodule KilnCMS.CMS do
 
     tool :update_page, KilnCMS.CMS.Page, :update do
       description "Update a page's content/metadata (state unchanged). #{@tag_merge_hint}"
+      load &KilnCMS.CMS.McpLoads.update/1
     end
 
     tool :submit_page_for_review, KilnCMS.CMS.Page, :submit_for_review do
@@ -86,6 +145,7 @@ defmodule KilnCMS.CMS do
 
     tool :update_post, KilnCMS.CMS.Post, :update do
       description "Update a blog post's content/metadata (state unchanged). #{@tag_merge_hint}"
+      load &KilnCMS.CMS.McpLoads.update/1
     end
 
     tool :submit_post_for_review, KilnCMS.CMS.Post, :submit_for_review do
@@ -98,6 +158,7 @@ defmodule KilnCMS.CMS do
 
     tool :update_entry, KilnCMS.CMS.Entry, :update do
       description "Update a dynamic-type entry's content/metadata (state unchanged). #{@tag_merge_hint}"
+      load &KilnCMS.CMS.McpLoads.update/1
     end
 
     tool :submit_entry_for_review, KilnCMS.CMS.Entry, :submit_for_review do
@@ -126,6 +187,9 @@ defmodule KilnCMS.CMS do
       define :list_page_translations, action: :published_translations, args: [:slug]
       # Paywall projection (#337 Phase 2) — never carries the block tree.
       define :get_page_teaser_by_slug, action: :teaser_by_slug, args: [:slug, :locale]
+      # Lock projection (#496) — the passphrase form's counterpart; carries the
+      # stored hash to verify against, never the block tree.
+      define :get_locked_page_by_slug, action: :locked_by_slug, args: [:slug, :locale]
       define :list_published_pages, action: :published
       define :search_pages, action: :search, args: [:query]
       define :semantic_search_pages, action: :search_semantic, args: [:query]
@@ -160,6 +224,9 @@ defmodule KilnCMS.CMS do
       define :list_post_translations, action: :published_translations, args: [:slug]
       # Paywall projection (#337 Phase 2) — never carries the block tree.
       define :get_post_teaser_by_slug, action: :teaser_by_slug, args: [:slug, :locale]
+      # Lock projection (#496) — the passphrase form's counterpart; carries the
+      # stored hash to verify against, never the block tree.
+      define :get_locked_post_by_slug, action: :locked_by_slug, args: [:slug, :locale]
       define :list_published_posts, action: :published
       define :search_posts, action: :search, args: [:query]
       define :semantic_search_posts, action: :search_semantic, args: [:query]
@@ -208,6 +275,11 @@ defmodule KilnCMS.CMS do
         action: :teaser_by_slug,
         args: [:slug, :locale, :type_definition_id]
 
+      # Lock projection (#496) — see the compiled tiers.
+      define :get_locked_entry_by_slug,
+        action: :locked_by_slug,
+        args: [:slug, :locale, :type_definition_id]
+
       define :list_published_entries, action: :published
 
       define :search_entries, action: :search, args: [:query]
@@ -250,6 +322,7 @@ defmodule KilnCMS.CMS do
       define :list_trashed_media_items, action: :trashed
       define :restore_media_item, action: :restore
       define :purge_media_item, action: :purge
+      define :increment_media_downloads, action: :increment_downloads
     end
 
     resource KilnCMS.CMS.WebhookEndpoint do
@@ -272,11 +345,42 @@ defmodule KilnCMS.CMS do
 
     # 301 redirects from retired public paths (pathauto companion) — written
     # automatically on published slug renames, resolved by delivery.
+    # Editor-managed navigation (#466). Delivery should go through
+    # `KilnCMS.CMS.Menus`, which resolves each item to a live URL and drops the
+    # ones a caller may not see; these interfaces are the structure itself.
+    resource KilnCMS.CMS.Menu do
+      define :list_menus, action: :read
+      define :get_menu, action: :read, get_by: [:id]
+      define :get_menu_by_key, action: :by_key, args: [:key, :locale]
+      define :create_menu, action: :create
+      define :update_menu, action: :update
+      define :destroy_menu, action: :destroy
+    end
+
+    resource KilnCMS.CMS.MenuItem do
+      define :list_menu_items, action: :read
+      define :get_menu_item, action: :read, get_by: [:id]
+      define :create_menu_item, action: :create
+      define :update_menu_item, action: :update
+      define :reparent_menu_item, action: :reparent
+      define :destroy_menu_item, action: :destroy
+    end
+
     resource KilnCMS.CMS.Redirect do
       define :create_redirect, action: :create
       define :list_redirects, action: :read
       define :get_redirect, action: :read, get_by: [:id]
       define :destroy_redirect, action: :destroy
+    end
+
+    # Aggregated delivery 404s (#472) — the other half of the redirect story.
+    # Written by `KilnCMSWeb.MissedPathTracking` off the request path; read by
+    # `/editor/redirects`' 404s tab.
+    resource KilnCMS.CMS.MissedPath do
+      define :record_missed_path, action: :record
+      define :list_missed_paths, action: :top
+      define :get_missed_path, action: :read, get_by: [:id]
+      define :destroy_missed_path, action: :destroy
     end
 
     # Per-site white-label branding (#48). Reads should go through
@@ -286,6 +390,56 @@ defmodule KilnCMS.CMS do
       define :list_site_branding, action: :read
       define :save_site_branding, action: :save
       define :reset_site_branding, action: :destroy
+      define :reverify_site_branding_app_icon, action: :reverify_app_icon
+    end
+
+    # Per-site custom head/footer HTML for the DELIVERY site (#490). Stored XSS
+    # by design — org-admin write, delivery-only render. Read through
+    # `KilnCMS.CodeInjection`, never directly.
+    resource KilnCMS.CMS.SiteCodeInjection do
+      define :list_site_code_injection, action: :read
+      define :save_site_code_injection, action: :save
+      define :reset_site_code_injection, action: :destroy
+    end
+
+    # The version twin: "who added that script, and when". Registered because
+    # AshPaperTrail generates it into this domain.
+    resource KilnCMS.CMS.SiteCodeInjection.Version do
+      define :list_code_injection_versions, action: :read
+    end
+
+    # Whether this site checks its outbound links (#474). Off unless saved; read
+    # through `KilnCMS.Links.Settings`, which resolves an absent row rather than
+    # creating one.
+    resource KilnCMS.CMS.SiteLinkCheck do
+      define :list_site_link_check, action: :read
+      define :save_site_link_check, action: :save
+    end
+
+    # Per-site editorial workflow settings (#818) — currently just whether
+    # publishing completes a record's open tasks. Same absent-row-is-the-default
+    # shape as `SiteLinkCheck`, read through `KilnCMS.CMS.TaskSettings`, which
+    # also applies each task's own override.
+    resource KilnCMS.CMS.SiteEditorialSettings do
+      define :list_site_editorial_settings, action: :read
+      define :save_site_editorial_settings, action: :save
+    end
+
+    # Per-org claim-checking settings (#857): whether the compliance panel runs
+    # for this site, whether it gates publishing, and the site's own claim
+    # vocabulary. The layer above `config :kiln_cms, KilnCMS.Compliance`,
+    # resolved through `KilnCMS.Compliance.Settings`.
+    resource KilnCMS.CMS.SiteCompliance do
+      define :list_site_compliance, action: :read
+      define :save_site_compliance, action: :save
+      define :reset_site_compliance, action: :destroy
+    end
+
+    # One outbound URL in one document, and its last verdict (#474). Written by
+    # the sweep and the check worker, both system-side; read by the report.
+    resource KilnCMS.CMS.ExternalLink do
+      define :list_external_links, action: :read
+      define :observe_external_link, action: :observe
     end
 
     # Editorial/authorization consent linked to content (#356).
@@ -297,11 +451,112 @@ defmodule KilnCMS.CMS do
       define :destroy_consent, action: :destroy
     end
 
+    # Editorial comments anchored to a block, one thread per block (#404).
+    resource KilnCMS.CMS.Comment do
+      define :add_comment, action: :add
+      define :resolve_comment, action: :resolve
+      define :unresolve_comment, action: :unresolve
+      define :get_comment, action: :read, get_by: [:id]
+      define :list_comments_for, action: :for_content, args: [:content_type, :content_id]
+
+      define :list_comments_for_block,
+        action: :for_block,
+        args: [:content_type, :content_id, :block_id]
+    end
+
+    # Editorial tasks: assignments, due dates, a workload view (#501) — the
+    # ownership half of editorial collaboration (Comment above is discussion).
+    resource KilnCMS.CMS.Task do
+      define :assign_task, action: :assign
+      define :update_task, action: :update
+      define :complete_task, action: :complete
+      define :reopen_task, action: :reopen
+      define :mark_task_overdue_notified, action: :mark_overdue_notified
+      define :get_task, action: :read, get_by: [:id]
+      define :list_tasks, action: :read
+      define :list_tasks_for, action: :for_content, args: [:content_type, :content_id]
+      define :list_tasks_for_assignee, action: :for_assignee, args: [:assignee_id]
+
+      define :list_tasks_open_due_between,
+        action: :open_due_between,
+        args: [:from, :to]
+
+      define :list_tasks_due_within, action: :due_within, args: [:to]
+      define :list_newly_overdue_tasks, action: :newly_overdue
+    end
+
+    # Content releases: bundled, atomically published groups of changes (#500).
+    # The go-live/rollback machinery is `KilnCMS.CMS.Releases`; the `mark_*`
+    # interfaces below are its system writes, reachable only with
+    # `authorize?: false` (no policy authorizes them for any actor).
+    resource KilnCMS.CMS.ContentRelease do
+      define :create_release, action: :create
+      define :update_release, action: :update
+      define :get_release, action: :read, get_by: [:id]
+      define :list_releases, action: :read
+      define :list_editable_releases, action: :editable
+      define :list_releases_by_state, action: :by_state, args: [:state]
+      define :list_releases_in_window, action: :in_window, args: [:from, :to]
+      define :schedule_release, action: :schedule
+      define :unschedule_release, action: :unschedule
+      define :start_release, action: :start
+      define :start_release_rollback, action: :start_rollback
+      define :abandon_release, action: :abandon
+      define :reopen_release, action: :reopen
+      define :archive_release, action: :archive
+      define :destroy_release, action: :destroy
+      define :mark_release_published, action: :mark_published
+      define :mark_release_failed, action: :mark_failed
+      define :mark_release_rolled_back, action: :mark_rolled_back
+      define :mark_release_rollback_failed, action: :mark_rollback_failed
+    end
+
+    resource KilnCMS.CMS.ReleaseItem do
+      define :add_release_item, action: :add
+      define :cancel_release_item, action: :cancel
+      define :get_release_item, action: :read, get_by: [:id]
+      define :list_release_items_for, action: :for_release, args: [:release_id]
+      define :list_release_items_for_releases, action: :for_releases, args: [:release_ids]
+
+      define :list_release_items_with_status,
+        action: :for_release_with_status,
+        args: [:release_id, :status]
+
+      define :list_pending_release_items_for_content,
+        action: :pending_for_content,
+        args: [:content_type, :content_id]
+
+      define :mark_release_item_applied, action: :mark_applied
+      define :mark_release_item_skipped, action: :mark_skipped
+      define :mark_release_item_rolled_back, action: :mark_rolled_back
+      define :mark_release_item_cancelled, action: :mark_cancelled
+    end
+
     # Signed, append-only anchors over a document's version history (#356,
     # tamper-evident half). Minted on publish; see KilnCMS.Governance.Chain.
     resource KilnCMS.CMS.HistoryAnchor do
       define :create_history_anchor, action: :create
       define :list_history_anchors_for, action: :for_content, args: [:resource_type, :source_id]
+    end
+
+    # Org-wide, signed commitments to every document's head anchor (#666) — the
+    # witness that makes truncating a chain's newest anchors detectable. Minted
+    # by KilnCMS.Governance.CheckpointWorker; see KilnCMS.Governance.Checkpoint.
+    resource KilnCMS.CMS.ChainCheckpoint do
+      define :create_chain_checkpoint, action: :create
+      define :list_chain_checkpoints, action: :recent
+      define :list_unwitnessed_checkpoints, action: :unwitnessed
+      define :record_checkpoint_publication, action: :record_publication
+    end
+
+    resource KilnCMS.CMS.ChainCheckpointEntry do
+      define :create_chain_checkpoint_entry, action: :create
+
+      define :list_checkpoint_entries_for,
+        action: :for_content,
+        args: [:resource_type, :source_id]
+
+      define :list_checkpoint_entries_in, action: :for_checkpoint, args: [:checkpoint_id]
     end
 
     # Admin-defined public forms (contact/signup/…) + their submissions.
@@ -325,7 +580,26 @@ defmodule KilnCMS.CMS do
       define :create_form_submission, action: :create
       define :get_form_submission, action: :read, get_by: [:id]
       define :recent_form_submissions, action: :recent_for_form, args: [:form_id]
+      define :export_form_submissions, action: :for_export, args: [:form_id]
+      define :mark_form_submission_spam, action: :mark_spam
+      define :mark_form_submission_reviewed, action: :mark_reviewed
       define :destroy_form_submission, action: :destroy
+    end
+
+    # Per-org disallowed-keyword list for the form spam scorer (#477).
+    resource KilnCMS.CMS.FormSpamSettings do
+      define :list_form_spam_settings, action: :read
+      define :save_form_spam_settings, action: :save
+      define :reset_form_spam_settings, action: :destroy
+    end
+
+    # Per-org syndication policy (#719): which types appear in this site's feeds
+    # and which carry their full body. Resolved through `KilnCMS.Feeds`.
+    resource KilnCMS.CMS.FeedSettings do
+      define :list_feed_settings, action: :read
+      define :save_feed_settings, action: :save
+      define :update_feed_settings, action: :update
+      define :reset_feed_settings, action: :destroy
     end
 
     # Taxonomy: categories (one-to-many to content) and tags (many-to-many).

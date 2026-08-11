@@ -1,6 +1,8 @@
 # SEO analysis and drafting
 
 Kiln's SEO support has two halves, and they are deliberately independent.
+(A third, smaller piece — [per-type default patterns](#per-type-default-patterns)
+— needs neither.)
 
 | | Analysis | Drafting |
 |---|---|---|
@@ -44,6 +46,105 @@ Two honest limitations:
 Implementation: `KilnCMS.Seo.Analyzer` (pure) over `KilnCMS.Seo.BodyStats` (the
 body walk). Findings carry codes and numbers, never prose — messages live in
 `KilnCMSWeb.SeoComponents.finding_message/2`, so they translate.
+
+## Per-type default patterns
+
+Neither half above writes anything. If you want every record of a type to get a
+consistent `<title>` without an author typing one, give the type a **pattern**:
+
+```
+Editor → Content types (/editor/types) → a type → Default SEO title
+```
+
+`[category]: [title]` is a typical one. Compiled types declare the same thing
+in code:
+
+```elixir
+use KilnCMS.CMS.Content,
+  type: :post,
+  seo_title_pattern: "[category]: [title]",
+  seo_description_pattern: "[excerpt]"
+```
+
+**Don't put `[site-name]` in a title pattern.** The layout already appends
+` · <your site name>` to every page title, so `"[title] | [site-name]"` renders
+`Sourdough basics | Acme · Acme`. The token exists for description patterns and
+for the rare title that needs the name somewhere other than the end.
+
+Tokens are the same bracket syntax the slug and path-alias patterns use, and
+validated the same way — a typo like `[titel]` is rejected when you
+save the type, not discovered in a search result:
+
+| Token | Expands to |
+|---|---|
+| `[title]` | The record's title, as written |
+| `[excerpt]` | The excerpt, on types that have one |
+| `[category]` | The category's **name** (not its slug) |
+| `[site-name]` | Your site name, from white-label branding |
+| `[yyyy]` `[mm]` `[dd]` | Publish date, else scheduled date, else created |
+| `[field:<name>]` | A custom field's value, as written |
+
+Unlike a slug, nothing is slugified: this is prose, and the separators are
+whatever you typed between the brackets. A token that expands to nothing takes
+its neighbouring separator with it, so `[title] | [category]` on an
+uncategorized record renders `Kiln guide`, not `Kiln guide | `.
+
+**A pattern is a default, never an overwrite.** Three consequences worth
+knowing:
+
+- An author who types a title keeps it. The pattern only fills a field the
+  record left blank.
+- Nothing is written to the record — the expansion happens when the page is
+  rendered, and the page's ETag covers the resolved values. So changing a
+  type's pattern re-titles every record that never had one, immediately, with
+  no backfill and nothing to re-publish.
+- The editor's SEO panel scores what the record itself holds. A record relying
+  on the pattern shows an empty title there and the length check says so, which
+  is the honest reading: the pattern is the type's, not the record's. Type a
+  title if you want it analysed.
+
+**Patterns reach every surface that renders a description.** The delivered
+HTML page (`<title>`, meta description, Open Graph and Twitter tags, inline
+JSON-LD), and also: RSS/Atom/JSON Feed summaries, the `.ics` `DESCRIPTION`, the
+event index's `index.json`, `llms.txt`, auto-posted social text, the ActivityPub
+`Note` summary, the fired `:json_ld` artifact, and the preview/webhook payload.
+A document does not describe itself one way on its own page and another way in
+the feed that links to it.
+
+Surfaces that report a record's fields as **stored data** still report the
+stored ones, and deliberately: the export (#487) and the version history. A
+patterned title re-imported as an author-typed one would be a silent override.
+
+The headless read APIs report both. `seo_title` / `seo_description` are the
+columns — blank means nobody typed one — and `effective_seo_title` /
+`effective_seo_description` are what a renderer should print. The
+preview/webhook payload carries both for the same reason.
+
+Implementation: `KilnCMS.Seo.Pattern` (the vocabulary), `KilnCMS.Seo.Patterns`
+(resolution) and `KilnCMS.CMS.Calculations.EffectiveSeo` (the two calculations,
+which carry their own tokens' data dependencies into any read that names them).
+
+### On a paywall teaser, some tokens go quiet
+
+A gated document's teaser is read through a pinned set of columns with no
+relationships and no `custom_fields` — the same restriction that keeps the block
+tree away from a teaser, and widening it for these two tokens would widen it for
+every other consumer of that record too. So on a teaser (and on a passphrase
+lock page) `[category]` and `[field:<name>]` expand to nothing, and the
+separator beside them drops out with them. The teaser's title is shorter than
+the full page's, never malformed.
+
+The teaser's *visible* summary is unaffected either way: that stays the
+author's own excerpt or description, never a pattern, because it is body copy
+a locked-out reader reads rather than a meta tag.
+
+### On a fired artifact, from the next publish
+
+The `:json_ld` surface is a stored artifact, fired when a document is published.
+Editing a type's pattern re-titles every *page* at once, but an artifact already
+on disk keeps the description it was fired with until that document is published
+again or re-fired (`mix kiln.refire_all`, or `KilnCMS.Firing.Sweep.run/0` on a
+release). Stale, in other words, where it used to be permanently wrong.
 
 ## Drafting (optional)
 
@@ -110,17 +211,42 @@ config :kiln_cms, KilnCMS.Seo,
   temperature: 0.3,
   max_tokens: 700,
   timeout_ms: 20_000,
-  max_input_chars: 12_000,    # body budget; head + tail are kept
+  max_input_chars: 12_000,    # body budget; head + tail are kept. Enforced
+                              # again after fence-neutralization, which can
+                              # expand a rule-heavy body several-fold.
   min_words: 50,              # below this, drafting is refused as pointless
   title_max: 60,
   description_max: 160,
   keyword_max: 5,
   per_user_limit: {20, :timer.minutes(1)},
-  per_org_limit: {200, :timer.hours(1)}
+  per_org_limit: {200, :timer.hours(1)},
+  unattended_share: 0.5       # of per_org_limit, for callers with nobody
+                              # waiting on them (automation reactions)
 ```
 
 Both rate-limit buckets must pass. The per-user bucket stops a stuck button or
 a replayed event; the per-org bucket is the actual spend ceiling.
+
+**Unattended callers stop early, so people keep a reserve.** The
+`suggest_metadata` automation reaction ([`docs/automation.md`](automation.md))
+draws on the same per-org budget as the editor's button, so a busy rule could
+exhaust the hourly allowance and leave every editor with a rate-limit error
+caused by something they cannot see. A caller marked unattended may only
+proceed while the org has spent **less than `unattended_share` of its window** —
+counting every caller's spend, not just automation's. At the defaults that
+leaves at least 100 of the 200 available to a person at any moment in the hour.
+
+Reading the shared counter is the point. A sub-bucket that counted only
+unattended calls would still let a background rule take the last unit when
+editors sat at 199 of 200 and automation had spent nothing — which is the
+failure this exists to prevent. The consequence is that automation's room
+shrinks as editors work, which is the intended priority.
+
+`unattended_share: 0.0` keeps automation off this budget entirely, and reports
+itself as `{:error, :unattended_disabled}` rather than as a rate limit an
+operator would wait out. `1.0` restores the pre-#943 shared bucket. A value
+that isn't a number between 0 and 1 — `50`, meaning percent, is the natural
+mistake — fails closed to 0 and logs which key was wrong.
 
 There is deliberately **no draft cache**: a draft is per-document,
 per-revision and per-org, and a cache key loose enough to ever hit would be a
@@ -141,9 +267,14 @@ cross-tenant leak.
   beyond its own provider.
 - **Drafts are generated in the record's locale**, not the admin UI's.
 
-The body is also fenced and labelled as untrusted data in the prompt. That
-helps and costs nothing, but it is not a security boundary — the three points
-above are.
+Everything the author controls — the title, the excerpt, the headings, the
+existing SEO values and the body — is fenced and labelled as untrusted data in
+the prompt, and passed through `KilnCMS.LLM.Fence` so that nothing inside a
+region can close it early. The labelled fields and the body get *separate*
+regions, so a body line reading `Current SEO title: …` cannot pass for the real
+field. That helps and costs nothing, but it is not a security boundary — the
+three points above are. `KilnCMS.LLM.Fence` is where that defence lives for all
+three of Kiln's prompt builders; extend it there rather than per feature.
 
 ## Writing your own generator
 

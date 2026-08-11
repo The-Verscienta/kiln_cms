@@ -20,8 +20,23 @@ ARG ELIXIR_VERSION=1.19.5
 ARG OTP_VERSION=27.3.4.15
 ARG DEBIAN_VERSION=bookworm-20260713-slim
 
+# The runner tracks a NEWER Debian than the builder, deliberately (#807).
+#
+# PDF metadata stripping shells out to `qpdf --remove-info --remove-metadata`,
+# and those options landed in qpdf 11.10. Bookworm ships 11.3.0 and qpdf is not
+# in bookworm-backports, so on bookworm the option is "no stripping" — and
+# `KilnCMS.DocumentProcessor` refuses a PDF it cannot strip, which would mean
+# the released image could not accept PDFs at all. Trixie ships 12.2.0.
+#
+# Building on the older suite and running on the newer is the safe direction:
+# glibc is backward compatible, so a bookworm-built release runs on trixie, and
+# the reverse would not. The one thing ERTS needs from the runner is
+# `libtinfo.so.6` (verified with `ldd` on the builder's `beam.smp`), which
+# trixie's `libncurses6` provides.
+ARG RUNNER_DEBIAN_VERSION=trixie-20260713-slim
+
 ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
-ARG RUNNER_IMAGE="debian:${DEBIAN_VERSION}"
+ARG RUNNER_IMAGE="debian:${RUNNER_DEBIAN_VERSION}"
 
 # ---- Build stage ----
 FROM ${BUILDER_IMAGE} AS builder
@@ -140,9 +155,51 @@ RUN elixir -e ' \
 # ---- Runtime stage ----
 FROM ${RUNNER_IMAGE}
 
+# curl is here for the HEALTHCHECK below — it probes the HTTP endpoint, which
+# is the only thing that proves this container is actually serving (#647).
+# postgresql-client ships `pg_dump`/`pg_restore` for in-app backups (#484).
+# Without it the "Backup now" button has nothing to call and
+# `KilnCMS.Backups.availability/0` reports `:no_pg_dump` — the console says so
+# rather than failing at the point of use.
+#
+# The MAJOR VERSION MUST MATCH THE SERVER. `pg_dump` refuses to run against a
+# newer server ("aborting because of server version mismatch"), so this pin
+# tracks the Postgres this deployment targets — bump both together. Debian's
+# own `postgresql-client` metapackage would float to whatever the base image's
+# suite carries, which is precisely how this breaks silently on a base-image
+# bump; `postgresql-client-17` is explicit. See docs/backups.md.
+# Base packages FIRST, including curl/ca-certificates/gnupg — the pgdg step
+# below needs all three, and a `-slim` Debian ships none of them. (An earlier
+# revision fetched the signing key with curl three lines before installing
+# curl. Nothing caught it at the time because CI did not build this image; the
+# `image` job added in #600 now does, so this class fails on the PR.)
+# `qpdf` strips `/Info` and XMP from uploaded PDFs (#807). It is NOT optional
+# the way ffmpeg is: `KilnCMS.DocumentProcessor` refuses a PDF it cannot strip,
+# because a privacy control that silently doesn't apply is worse than none.
+#
+# Three package names differ from bookworm's and every one of them is a build
+# break, not a warning: `libncurses5` does not exist in trixie (ERTS wants
+# `libtinfo.so.6`, which `libncurses6` provides), and the 64-bit `time_t`
+# transition renamed `libvips42` to `libvips42t64`.
 RUN apt-get update -y \
-  && apt-get install -y libstdc++6 openssl libncurses5 locales ca-certificates libvips42 \
+  && apt-get install -y --no-install-recommends \
+     libstdc++6 openssl libncurses6 locales ca-certificates libvips42t64 curl gnupg qpdf \
   && apt-get clean && rm -f /var/lib/apt/lists/*_*
+
+# `set -o pipefail` so a truncated download can't produce an empty keyring
+# that rides through to apt-get update. HTTPS for the repo as well as the key:
+# apt verifies the signature either way, but cleartext leaks which packages
+# this host installs and permits a downgrade to an older signed Release.
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+     | gpg --dearmor -o /usr/share/keyrings/postgresql.gpg \
+  && echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt trixie-pgdg main" \
+     > /etc/apt/sources.list.d/pgdg.list \
+  && apt-get update -y \
+  && apt-get install -y --no-install-recommends postgresql-client-17 \
+  && apt-get purge -y gnupg && apt-get autoremove -y \
+  && apt-get clean && rm -f /var/lib/apt/lists/*_*
+SHELL ["/bin/sh", "-c"]
 
 RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
 ENV LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8
@@ -173,9 +230,34 @@ LABEL org.opencontainers.image.title="KilnCMS" \
 
 USER nobody
 
-# Healthcheck hits the Phoenix endpoint.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD ["/app/bin/kiln_cms", "rpc", "1 + 1"]
+# Healthcheck asserts the container is SERVING HTTP, not merely that the BEAM is
+# alive. `rpc 1 + 1` only proved the node was up, so a container booted with
+# PHX_SERVER unset — running migrations, answering rpc, serving zero HTTP —
+# reported healthy forever, to Docker, to Coolify, and to anything reading the
+# container status (#647; the runtime.exs PHX_SERVER note describes the same
+# hole).
+#
+# It probes `/live` (KilnCMSWeb.HealthController :live), NOT `/up`: this
+# healthcheck TRIGGERS RESTARTS, and `/up` returns 503 when the database is
+# unreachable — restarting the app on a database outage it can't fix only
+# restart-storms the replicas (#816). `/live` returns 200 iff the endpoint is
+# serving, no database check; with the endpoint down the connection is refused.
+# `curl -f` turns both a non-2xx and a refused connection into a non-zero exit —
+# the unhealthy signal. Shell form so ${PORT} (default 4000, matching
+# runtime.exs) is expanded. (`/up` / `/ready` remain the readiness signals a
+# load balancer or monitor reads, where a DB-coupled 503 is what's wanted.)
+#
+# Probing 127.0.0.1 over http depends on config/prod.exs's `force_ssl` EXCLUDING
+# host "127.0.0.1" — without that exclude, `Plug.SSL` answers a 301 to https,
+# and `curl -f` treats a 3xx as success, so the check would pass without ever
+# confirming /live's 200. Keep the two in sync.
+#
+# start-period is generous: migrations run in the boot CMD before HTTP is up,
+# and a cold boot of the Ash + Nx/Axon/Bumblebee stack is not fast. Failures
+# during this window don't count toward --retries, so a longer period only
+# delays the first "healthy", it never causes a premature unhealthy.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+  CMD curl -fsS "http://127.0.0.1:${PORT:-4000}/live" || exit 1
 
 # Run pending migrations (KilnCMS.Release.migrate — see rel/overlays/bin/migrate)
 # before starting the server. Coolify's pre-deployment command hook only runs

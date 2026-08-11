@@ -55,6 +55,53 @@ Phase 1 was a read model over what the cluster already produces. Phase 2
   doesn't turn the corpus `unverifiable` — provided you register the outgoing
   key's public half first, via `KILN_PROVENANCE_RETIRED_KEY_FILES` or
   `retired_keys` (see docs/provenance.md#key-rotation).
+
+  Anchors chain to each other and carry a signed per-document position, so a
+  `TAMPERED` verdict also covers a removed or rewritten middle anchor, a middle
+  anchor removed together with its successor, and a reordering of the chain
+  (#597). Note that on an unsigned deployment the links and the sequence are
+  ordinary columns and the verdict is `unsigned` regardless: configure a signing
+  key before treating any of this as evidence.
+
+  A forged head is held to the newest anchor that still verifies (#708), but
+  only within *that* anchor's prefix. An attacker with DELETE as well as INSERT
+  moves the doctoring past it — delete the verified head, doctor only the
+  versions it covered, re-insert an unsigned anchor refolded over the doctored
+  rows — and the result reads `unsigned`, not `TAMPERED` (#811). Nothing inside
+  `history_anchors` can distinguish that from a deployment whose signing key
+  went away between publishes; the two produce identical tables.
+
+  `mix kiln.audit.verify` therefore reports how far the attestation actually
+  reaches rather than calling such a chain "intact", and fails the run when a
+  signing key **is** configured — a deployment that could have signed and did
+  not is an anomaly to explain. The checkpoint witness below is what settles it.
+- **Checkpoints** (#666) — a clean truncation of the *newest* anchors is the one
+  thing no column inside the document can catch: a shorter chain is
+  indistinguishable from a younger one. So a scheduled job mints a signed,
+  org-wide Merkle commitment to every document's head anchor and publishes it
+  outside the database (`KilnCMS.Governance.Checkpoint` /
+  `KilnCMS.Governance.Witness`). A document witnessed at position 7 that now
+  heads at 5 reads `TAMPERED`, and one whose anchors were wiped entirely reads
+  `TAMPERED` rather than `unanchored`.
+
+  Three things an operator has to know before treating this as evidence:
+
+  - Anchors minted since the last checkpoint are **not yet witnessed**, so the
+    exposure window is one `KILN_GOVERNANCE_CHECKPOINT_CRON` interval wide.
+  - The default witness keeps the commitment **in the database**. That catches
+    the attack in its ordinary form and not an attacker who remembers the second
+    table; set `KILN_GOVERNANCE_WITNESS` to `file`, `s3` or `http` for the real
+    property.
+  - Publishing is half of it. `mix kiln.audit.checkpoint --audit` is what
+    compares the sink to the database, and it wants to run somewhere the
+    application host does not control.
+  - `--audit` also walks the run's **predecessor links** — each row records a
+    digest of the one before it (#732). That half needs no sink, so it runs on
+    the default adapter too, and it catches a checkpoint rewritten in place
+    without any signature to check against. It is not a substitute for the
+    witness: the digest is an unkeyed hash over public columns, so a careful
+    attacker recomputes every link after the row they edited, and the newest
+    checkpoint has no successor to record its digest at all.
 - **Consent recording UI** — record a consent (kind / grantor / reference /
   note) directly from the trail page.
 

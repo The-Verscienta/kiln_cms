@@ -10,7 +10,27 @@ defmodule KilnCMS.Accounts do
     otp_app: :kiln_cms
 
   resources do
-    resource KilnCMS.Accounts.Token
+    resource KilnCMS.Accounts.Token do
+      # The actions on this resource that are ours rather than
+      # AshAuthentication's — see `:spend_jti` (#743) and the hold pair (#742).
+      # All three are `forbid_if always()`, so these names buy a caller nothing
+      # without the `authorize?: false` only `KilnCMS.Accounts.PendingSignIn`
+      # passes.
+      define :spend_pending_sign_in, action: :spend_jti
+      define :hold_first_factor_token, action: :hold_for_second_factor
+      define :release_first_factor_token, action: :release_second_factor_hold
+
+      # The by-purpose lookup those two need has no name here: `PendingSignIn`
+      # finds the row through `AshAuthentication.TokenResource.Actions.get_token/3`,
+      # which `KilnCMSWeb.BearerAuth` already uses for the same question.
+      #
+      # This one is different and does need a name, because `:get_token` filters
+      # `expires_at > now()` and therefore cannot answer "is there a row for this
+      # jti *at all*" — which is what tells a failed release apart from a
+      # deployment that never stored the token in the first place. No policy
+      # matches `:read` on this resource, so the name buys a caller nothing.
+      define :get_stored_token_by_jti, action: :read, get_by: [:jti]
+    end
 
     # External IdP links for OIDC SSO (#331) — managed by AshAuthentication.
     resource KilnCMS.Accounts.UserIdentity
@@ -26,6 +46,18 @@ defmodule KilnCMS.Accounts do
       # after Wax verification).
       define :register_passkey_credential, action: :register
       define :bump_passkey_usage, action: :bump_usage
+    end
+
+    # Web Push subscriptions (#628) — one row per browser per account.
+    # `subscribe`/`for_users` are system calls: the first runs from the
+    # controller after it has the actor, the second is the sender's read.
+    resource KilnCMS.Accounts.PushSubscription do
+      define :list_push_subscriptions, action: :for_user, args: [:user_id]
+      define :get_push_subscription, action: :read, get_by: [:id]
+      define :touch_push_subscription, action: :touch_delivered
+      define :push_subscriptions_for, action: :for_users, args: [:user_ids]
+      define :subscribe_to_push, action: :subscribe
+      define :remove_push_subscription, action: :destroy
     end
 
     # The tenant registry (epic #336) + the user↔org membership join. The org is
@@ -111,6 +143,27 @@ defmodule KilnCMS.Accounts do
   """
   @spec default_org_id() :: Ash.UUID.t()
   def default_org_id, do: KilnCMS.Accounts.Organization.default_id()
+
+  @doc """
+  The org id behind an `Organization` struct, a bare id, or `nil` (#527).
+
+  Ash's `tenant:` accepts all three, so a request's org is passed around as any
+  of them; the functions that take an id and not a tenant need it narrowed. Ten
+  private copies of this had grown across the console and the core, and they
+  disagreed on `nil` — some raised, some fell back to the sole org, one had no
+  `is_binary` guard at all.
+
+  `nil` resolves to `default_org_id/0`, the same fallback every tenant-less write
+  already takes under the non-strict rollout, so a missing org reads as "no
+  tenant" does everywhere else. Anything else raises: matching `%{id: id}`
+  loosely — as several of the copies did — quietly accepts a `User`, a `Page`, or
+  a socket and hands its id downstream as a tenant, where it surfaces not as an
+  error but as an empty registry. Only these three shapes are an org.
+  """
+  @spec org_id(KilnCMS.Accounts.Organization.t() | Ash.UUID.t() | nil) :: Ash.UUID.t()
+  def org_id(%KilnCMS.Accounts.Organization{id: id}) when is_binary(id), do: id
+  def org_id(id) when is_binary(id), do: id
+  def org_id(nil), do: default_org_id()
 
   @doc """
   Every organization id (#419 strict-tenancy prep) — the tenant list for

@@ -11,12 +11,14 @@ defmodule KilnCMSWeb.RelatedController do
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Firing.Delivery
   alias KilnCMS.Search.Related
+  alias KilnCMSWeb.ApiError
+  alias KilnCMSWeb.Params
 
   @max_age_seconds 300
 
   def show(conn, %{"type" => type, "slug" => slug} = params) do
     org_id = KilnCMSWeb.Tenant.current_org_id(conn)
-    locale = params["locale"] || KilnCMS.I18n.default_locale()
+    locale = Params.string(params, "locale", KilnCMS.I18n.default_locale())
 
     with ct when not is_nil(ct) <- ContentTypes.get(type),
          {:ok, record} <- Delivery.published(org_id, ct.type, slug, locale) do
@@ -41,29 +43,17 @@ defmodule KilnCMSWeb.RelatedController do
       # a database outage answers 503-retryable, never a cacheable 404.
       :unavailable ->
         conn
-        |> put_status(:service_unavailable)
         |> put_resp_header("retry-after", "2")
-        |> json(%{
-          errors: [
-            %{
-              status: "503",
-              code: "temporarily_unavailable",
-              detail: "Content is temporarily unavailable; retry shortly."
-            }
-          ]
-        })
+        |> ApiError.send(
+          :service_unavailable,
+          "temporarily_unavailable",
+          "Content is temporarily unavailable; retry shortly."
+        )
 
       _ ->
-        conn
-        |> put_status(:not_found)
-        |> json(%{errors: [%{status: "404", code: "not_found", detail: "Content not found."}]})
+        ApiError.send(conn, :not_found, "not_found", "Content not found.")
     end
   end
 
-  defp limit(params) do
-    case Integer.parse(params["limit"] || "") do
-      {n, ""} when n in 1..20 -> n
-      _ -> 5
-    end
-  end
+  defp limit(params), do: Params.integer(params, "limit", 5, 1..20)
 end

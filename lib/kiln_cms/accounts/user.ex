@@ -11,6 +11,17 @@ defmodule KilnCMS.Accounts.User do
     authorizers: [Ash.Policy.Authorizer],
     extensions: [AshAuthentication]
 
+  # The remember-me cookie's name, which is `__Host-`-prefixed exactly when the
+  # session cookie is (#699). Resolved here rather than written as a literal
+  # because the *read* path keys on this DSL value while the *write* path goes
+  # through `KilnCMSWeb.AuthController`, and the two spelling it differently
+  # would fail open — the browser would send nothing and no one would be
+  # remembered. `KilnCMSWeb.SessionCookie` owns the rule for both cookies; see
+  # its moduledoc for why the prefix cannot be unconditional.
+  @remember_me_cookie KilnCMSWeb.SessionCookie.remember_me_key(
+                        Application.compile_env(:kiln_cms, :secure_session_cookie, false)
+                      )
+
   authentication do
     add_ons do
       log_out_everywhere do
@@ -70,7 +81,14 @@ defmodule KilnCMS.Accounts.User do
         sender KilnCMS.Accounts.User.Senders.SendMagicLink
       end
 
-      remember_me :remember_me
+      # "Remember me" on the sign-in form (#699). The token is a 30-day JWT, so
+      # the cookie carrying it is a stronger credential than the session cookie
+      # and gets the same `__Host-` treatment — see `KilnCMSWeb.SessionCookie`
+      # and the `put_remember_me_cookie/3` override in `KilnCMSWeb.AuthController`.
+      remember_me :remember_me do
+        cookie_name @remember_me_cookie
+        token_lifetime {30, :days}
+      end
 
       # Third-party / headless read access. A key signs in as this user, so it
       # inherits the user's read scope; the relationship below is pre-filtered to
@@ -135,7 +153,8 @@ defmodule KilnCMS.Accounts.User do
       :role,
       :notify_on_review_request,
       :notify_on_publish,
-      :notify_on_return_to_draft
+      :notify_on_return_to_draft,
+      :notify_on_comment
     ] do
       authorize_if actor_attribute_equals(:role, :admin)
       authorize_if expr(id == ^actor(:id))
@@ -175,7 +194,12 @@ defmodule KilnCMS.Accounts.User do
     # Self-service workflow-notification preferences (issue #46). A user can
     # toggle their own; admins can edit anyone's via the policy bypass.
     update :update_notification_prefs do
-      accept [:notify_on_review_request, :notify_on_publish, :notify_on_return_to_draft]
+      accept [
+        :notify_on_review_request,
+        :notify_on_publish,
+        :notify_on_return_to_draft,
+        :notify_on_comment
+      ]
     end
 
     # Admin-only: assign a user's editorial role (authoring privilege) and the
@@ -187,6 +211,11 @@ defmodule KilnCMS.Accounts.User do
       # The shape validation inspects the whole map — no atomic expression.
       require_atomic? false
       validate KilnCMS.Accounts.Validations.FieldGrantsShape
+
+      # Every socket authorizes once, at connect and join, and never again — so
+      # a demotion or a narrowed scope left the live ones holding the grant they
+      # had (#675). Dropping them makes the next message prove it again.
+      change {KilnCMS.Accounts.Changes.EvictSessions, reason: :access_changed}
     end
 
     # Billing-derived read entitlements (#337 Phase 2). Written only by
@@ -199,6 +228,10 @@ defmodule KilnCMS.Accounts.User do
       # The guard change runs in Elixir — no atomic expression.
       require_atomic? false
       change KilnCMS.Accounts.Changes.SyncBillingAudiences
+
+      # Audiences are the read axis, so a lapsed subscription narrows what a
+      # live GraphQL subscription may see (#675).
+      change {KilnCMS.Accounts.Changes.EvictSessions, reason: :audiences_changed}
     end
 
     # GDPR Art. 17 erasure (#212). Admin-only. Scrubs PII from the account and
@@ -210,6 +243,10 @@ defmodule KilnCMS.Accounts.User do
       require_atomic? false
       accept []
       change KilnCMS.Accounts.Changes.AnonymizeUser
+
+      # The erasure revokes tokens, which stops new connections; the live ones
+      # had to be dropped too (#675).
+      change {KilnCMS.Accounts.Changes.EvictSessions, reason: :anonymized}
     end
 
     update :change_password do
@@ -250,12 +287,39 @@ defmodule KilnCMS.Accounts.User do
         sensitive? true
       end
 
+      # Declared here rather than only on `:sign_in_with_token` because this is
+      # the action the sign-in form is built from, and
+      # `Components.Helpers.remember_me_field/1` looks for the preparation on
+      # *this* action to decide whether to render the checkbox at all (#699).
+      argument :remember_me, :boolean do
+        description "Whether to issue a long-lived remember-me token."
+        allow_nil? true
+      end
+
       # validates the provided email and password and generates a token
       prepare AshAuthentication.Strategy.Password.SignInPreparation
+
+      # Per-account budget on top of the per-IP `:auth` bucket (#478) — an
+      # attacker rotating IPs gets a fresh window per address otherwise.
+      # Refuses with the same `AuthenticationFailed` a wrong password produces.
+      prepare KilnCMS.Accounts.Preparations.ThrottleSignIn
+
+      # Mints the remember-me token when the box is ticked. On the LiveView path
+      # it deliberately does nothing here: `sign_in_tokens_enabled?` is on, so
+      # the form sets `skip_remember_me_token_generation` and forwards the flag
+      # to `:sign_in_with_token` instead, which is where the token is actually
+      # minted. Keeping it on both is what makes the direct (non-LiveView) POST
+      # to `/auth/user/password/sign_in` work as well.
+      prepare AshAuthentication.Strategy.RememberMe.MaybeGenerateTokenPreparation
 
       metadata :token, :string do
         description "A JWT that can be used to authenticate the user."
         allow_nil? false
+      end
+
+      metadata :remember_me, :map do
+        description "The remember-me token, cookie name and lifetime, when requested."
+        allow_nil? true
       end
     end
 
@@ -277,12 +341,26 @@ defmodule KilnCMS.Accounts.User do
         sensitive? true
       end
 
+      # The LiveView sign-in form carries the ticked checkbox across this
+      # exchange as a query param rather than minting on the password action,
+      # so this is where the remember-me token is actually issued (#699).
+      argument :remember_me, :boolean do
+        description "Whether to issue a long-lived remember-me token."
+        allow_nil? true
+      end
+
       # validates the provided sign in token and generates a token
       prepare AshAuthentication.Strategy.Password.SignInWithTokenPreparation
+      prepare AshAuthentication.Strategy.RememberMe.MaybeGenerateTokenPreparation
 
       metadata :token, :string do
         description "A JWT that can be used to authenticate the user."
         allow_nil? false
+      end
+
+      metadata :remember_me, :map do
+        description "The remember-me token, cookie name and lifetime, when requested."
+        allow_nil? true
       end
     end
 
@@ -310,6 +388,11 @@ defmodule KilnCMS.Accounts.User do
 
     create :register_with_password do
       description "Register a new user with a email and password."
+
+      # Bounded per client address (#724). The form submits over `/live`, so it
+      # passes no router pipeline and no plug can reach it — one websocket
+      # replaying `submit` was unlimited account creation.
+      change KilnCMS.Accounts.Changes.ThrottleRegistration
 
       # Invite-only mode: reject self-registration when
       # `config :kiln_cms, :registration_enabled` is false.
@@ -350,6 +433,21 @@ defmodule KilnCMS.Accounts.User do
       end
     end
 
+    # Written out rather than generated, so a per-address budget can go in front
+    # of it (#724). `MagicLink.Transformer` builds this action only when the
+    # resource does not already define it, and what it builds is exactly the two
+    # entities below — one argument and its own preparation. Ours runs first.
+    read :request_magic_link do
+      description "Send a magic sign-in link to a user if they exist."
+
+      argument :email, :ci_string do
+        allow_nil? false
+      end
+
+      prepare KilnCMS.Accounts.Preparations.ThrottleMagicLink
+      prepare AshAuthentication.Strategy.MagicLink.RequestPreparation
+    end
+
     action :request_password_reset_token do
       description "Send password reset instructions to a user if they exist."
 
@@ -357,8 +455,11 @@ defmodule KilnCMS.Accounts.User do
         allow_nil? false
       end
 
-      # creates a reset token and invokes the relevant senders
-      run {AshAuthentication.Strategy.Password.RequestPasswordReset, action: :get_by_email}
+      # Creates a reset token and invokes the relevant senders — behind a
+      # per-address budget (#724), because this form submits over `/live` too.
+      # A generic action has no `prepare`/`change` hook, so the charge wraps the
+      # run rather than sitting beside it.
+      run {KilnCMS.Accounts.ThrottledPasswordResetRequest, action: :get_by_email}
     end
 
     read :get_by_email do
@@ -379,6 +480,10 @@ defmodule KilnCMS.Accounts.User do
     end
 
     update :reset_password_with_token do
+      # `ForgiveSignInThrottle` runs an `after_action` hook (it needs the saved
+      # record's email), which an atomic update has no place to put.
+      require_atomic? false
+
       argument :reset_token, :string do
         allow_nil? false
         sensitive? true
@@ -408,23 +513,40 @@ defmodule KilnCMS.Accounts.User do
 
       # Generates an authentication token for the user
       change AshAuthentication.GenerateTokenChange
+
+      # Holding the emailed reset token proves the account is yours, so it
+      # releases the per-account sign-in budget (#478) — otherwise the remedy
+      # the throttle's own alert mail recommends leaves the owner still locked.
+      change KilnCMS.Accounts.Changes.ForgiveSignInThrottle
     end
 
     # --- Two-factor authentication (TOTP) self-service (issue #331) ---
 
-    # Begin enrolment: mint a fresh secret (unconfirmed). The caller (the user
-    # themselves) reads back `totp_secret` to show the authenticator QR/URI.
+    # Begin enrolment: mint a fresh secret into `totp_pending_secret`, entirely
+    # separate from whatever `totp_secret`/`totp_confirmed_at` currently hold.
+    # The caller (the user themselves) reads back `totp_pending_secret` to show
+    # the authenticator QR/URI.
+    #
+    # #754: this used to write straight into `totp_secret` and null
+    # `totp_confirmed_at` in the same call — one unauthenticated, unthrottled
+    # request from any session on the account turned 2FA off. Staging into a
+    # separate attribute means `:setup_totp` cannot weaken an already-confirmed
+    # account by itself: nothing about the live factor changes until
+    # `:confirm_totp` proves the *new* secret and promotes it. That is also
+    # what makes re-enrolment self-service for someone who lost their device —
+    # they hold a session (from a recovery-code sign-in) but no code to prove,
+    # and this asks for none.
     update :setup_totp do
       description "Start 2FA enrolment by generating a new TOTP secret."
       accept []
       require_atomic? false
-      change set_attribute(:totp_secret, &KilnCMS.Accounts.Totp.generate_secret/0)
-      change set_attribute(:totp_confirmed_at, nil)
+      change set_attribute(:totp_pending_secret, &KilnCMS.Accounts.Totp.generate_secret/0)
     end
 
-    # Finish enrolment by proving a code from the new secret; only then is 2FA
-    # actually enforced at sign-in. Also mints the one-time recovery-code set
-    # (#331 phase 2) — plaintext codes ride back once as `:recovery_codes`
+    # Finish enrolment by proving a code from the *pending* secret, then
+    # promote it to `totp_secret` and stamp `totp_confirmed_at` — only then is
+    # 2FA actually enforced at sign-in. Also mints the one-time recovery-code
+    # set (#331 phase 2) — plaintext codes ride back once as `:recovery_codes`
     # metadata; only hashes are stored.
     update :confirm_totp do
       description "Confirm 2FA enrolment with a code from the authenticator app."
@@ -433,13 +555,43 @@ defmodule KilnCMS.Accounts.User do
 
       argument :code, :string, allow_nil?: false, sensitive?: true
 
-      validate KilnCMS.Accounts.Validations.ValidTotpCode
+      # Proof of the OUTGOING factor, required only when promoting *over* an
+      # already-confirmed secret and not from a recovery-code session (#786). A
+      # first enrolment leaves both unset. `recovery_login?` is set by the caller
+      # from server-side session provenance, never client input.
+      argument :current_code, :string, allow_nil?: true, sensitive?: true
+      argument :recovery_login?, :boolean, allow_nil?: false, default: false
+
+      # Budgeted like the other two (#727). Not because a stolen-session
+      # attacker can grind this into a bypass — they would have to have called
+      # `:setup_totp` themselves first, in which case they already know the
+      # code and have nothing to guess — but because a *legitimate* enrolment
+      # in progress is itself something worth budgeting: while the real owner
+      # holds an unconfirmed pending secret waiting to be typed in, a second,
+      # attacker-held session on the same account could otherwise grind the
+      # 6-digit space for that same pending secret and confirm it out from
+      # under them. It also budgets grinding of `current_code` below.
+      change KilnCMS.Accounts.Changes.ThrottleSecondFactor
+      # Re-read the staged secret from the DB before the validation and the
+      # promotion below both read it off `changeset.data` — a second settings
+      # tab may have staged a newer one, leaving this caller's `current_user`
+      # assign holding a superseded secret (#787). Must be declared above
+      # `ValidTotpCode`: changes and validations run in declaration order at
+      # build time.
+      change KilnCMS.Accounts.Changes.ReloadPendingTotpSecret
+      validate {KilnCMS.Accounts.Validations.ValidTotpCode, secret_field: :totp_pending_secret}
+      # Replacing a live factor needs the outgoing code (or a recovery-code
+      # session) — a bare setup_totp+confirm_totp can no longer swap the secret
+      # silently out from under the owner (#786).
+      validate KilnCMS.Accounts.Validations.RequireCurrentFactorForReplacement
+      change KilnCMS.Accounts.Changes.PromotePendingTotpSecret
       change set_attribute(:totp_confirmed_at, &DateTime.utc_now/0)
       change KilnCMS.Accounts.Changes.GenerateRecoveryCodes
     end
 
     # Replace the recovery-code set — requires a current authenticator code, so
-    # a walk-up attacker on an open session can't mint themselves backup codes.
+    # an attacker on a stolen session can't mint themselves backup codes without
+    # guessing it, and gets five guesses per fifteen minutes to try (#727).
     # Unused codes from the previous set stop working immediately.
     update :regenerate_totp_recovery_codes do
       description "Mint a fresh 2FA recovery-code set (invalidates the old one)."
@@ -448,6 +600,10 @@ defmodule KilnCMS.Accounts.User do
 
       argument :code, :string, allow_nil?: false, sensitive?: true
 
+      # Above the validation on purpose — see the change's moduledoc. A wrong
+      # code is the only one worth charging, and by the time the validation has
+      # rejected it there is no hook left to charge from.
+      change KilnCMS.Accounts.Changes.ThrottleSecondFactor
       validate KilnCMS.Accounts.Validations.ValidTotpCode
       change KilnCMS.Accounts.Changes.GenerateRecoveryCodes
     end
@@ -466,8 +622,15 @@ defmodule KilnCMS.Accounts.User do
       change KilnCMS.Accounts.Changes.ConsumeRecoveryCode
     end
 
-    # Turn 2FA off — requires a current code, so a walk-up attacker on an open
-    # session still can't remove the second factor.
+    # Turn 2FA off — requires a current code, and that code is now budgeted, so
+    # an attacker on a stolen session can't remove the second factor by grinding
+    # six digits at socket speed either (#727). Five attempts per account per
+    # fifteen minutes, shared with the sign-in prompt so the two can't be spent
+    # independently. `:setup_totp` above no longer has a door of its own to
+    # turn the factor off (#754) — it cannot touch `totp_confirmed_at` at all.
+    #
+    # Also drops any staged `totp_pending_secret`, so an abandoned re-enrolment
+    # (started, never confirmed) doesn't outlive the factor it was replacing.
     update :disable_totp do
       description "Disable 2FA (requires a current code)."
       accept []
@@ -475,10 +638,12 @@ defmodule KilnCMS.Accounts.User do
 
       argument :code, :string, allow_nil?: false, sensitive?: true
 
+      change KilnCMS.Accounts.Changes.ThrottleSecondFactor
       validate KilnCMS.Accounts.Validations.ValidTotpCode
       change set_attribute(:totp_secret, nil)
       change set_attribute(:totp_confirmed_at, nil)
       change set_attribute(:totp_recovery_hashes, [])
+      change set_attribute(:totp_pending_secret, nil)
     end
   end
 
@@ -571,6 +736,7 @@ defmodule KilnCMS.Accounts.User do
     # Public display name — used as the JSON-LD author on content this user
     # authored. Optional; falls back to no author when blank.
     attribute :name, :string do
+      constraints max_length: KilnCMS.Limits.line()
       public? true
     end
 
@@ -674,6 +840,17 @@ defmodule KilnCMS.Accounts.User do
       public? true
     end
 
+    # Editorial comments (#801). One switch for the whole feature — a reply on
+    # a thread you are in, a thread of yours being resolved, and being
+    # @mentioned. Split per-event and the useful setting ("stop the chatter,
+    # keep the mentions") would still need all three toggled together, which is
+    # the setting nobody finds.
+    attribute :notify_on_comment, :boolean do
+      default true
+      allow_nil? false
+      public? true
+    end
+
     # Two-factor (TOTP) secret and enrolment timestamp (issue #331). The raw
     # secret is stored as bytea; `sensitive?` keeps it out of inspect/logs and
     # `public? false` keeps both off every API surface — they're read only
@@ -685,6 +862,16 @@ defmodule KilnCMS.Accounts.User do
     end
 
     attribute :totp_confirmed_at, :utc_datetime_usec do
+      public? false
+    end
+
+    # A staged secret from `:setup_totp`, not yet proven (#754). Lets
+    # enrolment run without touching `totp_secret`/`totp_confirmed_at` until
+    # `:confirm_totp` proves the caller holds it and promotes it — so
+    # generating one can never by itself weaken or disable an existing,
+    # confirmed factor.
+    attribute :totp_pending_secret, :binary do
+      sensitive? true
       public? false
     end
 

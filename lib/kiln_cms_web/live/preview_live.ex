@@ -18,6 +18,7 @@ defmodule KilnCMSWeb.PreviewLive do
   """
   use KilnCMSWeb, :live_view
 
+  alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMSWeb.BlockComponents
   alias KilnCMSWeb.Presence
@@ -49,6 +50,7 @@ defmodule KilnCMSWeb.PreviewLive do
         |> assign(:cursors, %{})
         |> assign(:viewer_key, nil)
         |> assign(:color, "#64748b")
+        |> assign(:comment_counts, comment_counts(kind, id, user, org))
 
       {:ok, maybe_join(socket, kind, id, user)}
     else
@@ -138,6 +140,22 @@ defmodule KilnCMSWeb.PreviewLive do
   end
 
   # Ignore any unexpected message rather than crashing the preview process.
+  # A comment was added or (un)resolved anywhere — the editor, the API, another
+  # viewer's window. Recount rather than adjusting in place: the broadcast says
+  # *that* a block changed, not what it changed to, so a delta would drift on a
+  # dropped message.
+  def handle_info({:preview_comments_changed, _block_id}, socket) do
+    counts =
+      comment_counts(
+        socket.assigns.kind,
+        socket.assigns.record_id,
+        socket.assigns.current_user,
+        socket.assigns.current_org
+      )
+
+    {:noreply, assign(socket, :comment_counts, counts)}
+  end
+
   def handle_info(_message, socket), do: {:noreply, socket}
 
   @impl true
@@ -168,7 +186,7 @@ defmodule KilnCMSWeb.PreviewLive do
   # Switch every co-viewer (self included) to a locale sibling — broadcast on
   # the preview topic, so the whole group stays on the same variant (#378).
   # Only ids from the resolved sibling list are accepted.
-  def handle_event("switch_variant", %{"id" => id}, socket) do
+  def handle_event("switch_variant", %{"id" => id}, socket) when is_binary(id) do
     if Enum.any?(socket.assigns.variants, &(&1.id == id)) and id != socket.assigns.record_id do
       Phoenix.PubSub.broadcast(
         KilnCMS.PubSub,
@@ -269,12 +287,87 @@ defmodule KilnCMSWeb.PreviewLive do
           </header>
           <h1 :if={!@excerpt?} class="text-3xl font-bold tracking-tight">{@title}</h1>
           <div class="space-y-4" id="preview-blocks">
-            <BlockComponents.render_block :for={block <- @blocks} block={block} />
+            <%!-- `relative` on the wrapper, so the pin can sit in the margin
+                  without `render_block/1` knowing anything about comments —
+                  this surface mirrors public HTML, and the shared renderer has
+                  to keep producing exactly that. --%>
+            <div :for={block <- @blocks} class="relative" data-block-wrap={block[:id]}>
+              <BlockComponents.render_block block={block} />
+              <.comment_pin
+                count={@comment_counts[block[:id]]}
+                kind={@kind}
+                record_id={@record_id}
+                block_id={block[:id]}
+              />
+            </div>
           </div>
         </article>
       </Layouts.public>
     </div>
     """
+  end
+
+  attr :count, :integer, default: nil
+  attr :kind, :string, required: true
+  attr :record_id, :string, required: true
+  attr :block_id, :string, default: nil
+
+  # A marker, not a thread. The preview is meant to read like the published
+  # page, so the discussion itself stays in the editor and this is the jump to
+  # it — the same move as the editor's own "Edit this block on the page" link,
+  # pointed the other way.
+  defp comment_pin(%{count: nil} = assigns), do: ~H""
+
+  defp comment_pin(assigns) do
+    ~H"""
+    <.link
+      navigate={~p"/editor/content/#{@kind}/#{@record_id}?#{[comment: @block_id]}"}
+      class="absolute -left-2 top-0 grid size-6 -translate-x-full place-items-center rounded-full bg-warning/20 text-[11px] font-semibold text-warning-ink ring-1 ring-warning/40 hover:bg-warning/30"
+      title={
+        ngettext(
+          "%{count} open comment — open it in the editor",
+          "%{count} open comments — open them in the editor",
+          @count,
+          count: @count
+        )
+      }
+    >
+      {@count}
+    </.link>
+    """
+  end
+
+  # Open threads per block, as `%{block_id => count}`. Resolved threads carry no
+  # pin: a resolved discussion is finished, and leaving a marker for it would
+  # make the margin unreadable on a document that has been through review.
+  #
+  # `nil` for a comment set that cannot be read (a viewer without comment
+  # permission) rather than an error — the preview's job is to show the
+  # document, and losing the pins is a smaller failure than losing the page.
+  defp comment_counts(kind, record_id, actor, org) do
+    kind
+    |> to_string()
+    |> CMS.list_comments_for!(record_id, actor: actor, tenant: org)
+    |> Enum.filter(&(is_nil(&1.thread_id) and is_nil(&1.resolved_at)))
+    |> Enum.reduce(%{}, fn comment, acc ->
+      Map.update(acc, comment.block_id, 1, &(&1 + 1))
+    end)
+    |> reply_counts(kind, record_id, actor, org)
+  rescue
+    _error -> %{}
+  end
+
+  # A thread's pin shows the whole conversation's size, not just its root.
+  defp reply_counts(roots, kind, record_id, actor, org) do
+    open_blocks = Map.keys(roots)
+
+    kind
+    |> to_string()
+    |> CMS.list_comments_for!(record_id, actor: actor, tenant: org)
+    |> Enum.filter(&(not is_nil(&1.thread_id) and &1.block_id in open_blocks))
+    |> Enum.reduce(roots, fn reply, acc ->
+      Map.update(acc, reply.block_id, 1, &(&1 + 1))
+    end)
   end
 
   attr :viewers, :list, required: true

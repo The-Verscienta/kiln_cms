@@ -14,5 +14,18 @@
 # into the Dockerfile ARGs, and expect dialyzer to have opinions on an OTP major
 # bump (#599). setup-beam matches these strictly, so a version with no published
 # build for ubuntu-24.04 fails every job — check builds.hex.pm first.
+#
+# OTP 27 is a deliberate floor, not a stale pin (#600). CI and the release image
+# run what this file says; a developer's machine may be further ahead, and today
+# typically is. The cost of that gap is specific and worth stating rather than
+# rediscovering: OTP 29's dialyzer performs stricter opacity checking than 27's,
+# so that class of warning is invisible to CI and is caught only by whoever runs
+# `mix dialyzer` locally — which is exactly how #599 got in and stayed green.
+#
+# It is a floor rather than a match because this file also decides what
+# *production* runs: the release image should run the toolchain the test suite
+# and dialyzer actually ran against, so moving it is a deploy-affecting change
+# and belongs in its own PR, with #599's class cleared first so the bump is not
+# noisy.
 elixir 1.19.5-otp-27
 erlang 27.3.4.15

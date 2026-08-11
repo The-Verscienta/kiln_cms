@@ -3,10 +3,14 @@ defmodule KilnCMSWeb.AshJsonApiRouter do
   JSON:API router for the headless content surface (`KilnCMS.CMS`).
 
   Serves the JSON:API content endpoints plus a published, machine-readable
-  **OpenAPI 3** spec at `/api/json/open_api`. The spec is available in **every
-  environment** (issue #37) — it describes a read surface whose published
-  content is already world-readable — and backs the Swagger UI mounted at
-  `/api/json/swaggerui` in `KilnCMSWeb.Router`.
+  **OpenAPI 3** spec at `/api/json/open_api` (issue #37), which backs the
+  Swagger UI mounted at `/api/json/swaggerui` in `KilnCMSWeb.Router`.
+
+  The spec route follows `config :kiln_cms, :api_docs` — on in dev and test,
+  off in a production build (#567), because since #330 it describes the write
+  surface too. `KilnCMSWeb.Plugs.ApiDocs` enforces that from the `:api`
+  pipeline, since the route lives inside this router rather than in the
+  application's own.
 
   `KilnCMSWeb.OpenApi.modify/3` enriches the generated spec with auth/usage
   documentation and concrete servers.

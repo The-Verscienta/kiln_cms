@@ -32,6 +32,16 @@ defmodule Kiln.Advisory.Body do
 
   @type heading :: %{level: pos_integer(), text: String.t()}
 
+  @typedoc """
+  One link, with the text a reader actually sees.
+
+  `href` alone was enough while the only question was "does this resolve"
+  (#474). #495 asks a different one — "does this text say where it goes" —
+  which needs the anchor text, and the top-level block index so the editor can
+  offer a jump link.
+  """
+  @type link :: %{text: String.t(), href: String.t(), index: non_neg_integer()}
+
   @type t :: %__MODULE__{
           text: String.t(),
           folded_text: String.t(),
@@ -45,7 +55,10 @@ defmodule Kiln.Advisory.Body do
           paragraph_word_counts: [non_neg_integer()],
           image_count: non_neg_integer(),
           images_missing_alt: [non_neg_integer()],
-          internal_link_paths: [String.t()]
+          internal_link_paths: [String.t()],
+          links: [link()],
+          empty_headings: [non_neg_integer()],
+          capitalised_runs: [String.t()]
         }
 
   defstruct text: "",
@@ -60,7 +73,10 @@ defmodule Kiln.Advisory.Body do
             paragraph_word_counts: [],
             image_count: 0,
             images_missing_alt: [],
-            internal_link_paths: []
+            internal_link_paths: [],
+            links: [],
+            empty_headings: [],
+            capitalised_runs: []
 
   @doc """
   Derive the body facts the analyzer needs. Safe on `nil` and on an empty list.
@@ -84,6 +100,7 @@ defmodule Kiln.Advisory.Body do
     # Every accumulator is built by prepending, so each is reversed exactly once
     # here to restore document order.
     paragraphs = Enum.reverse(walked.paragraphs)
+    links = Enum.reverse(walked.links)
     words = String.split(text, ~r/\s+/u, trim: true)
     sentences = sentences(text)
     folded = fold(text)
@@ -101,8 +118,92 @@ defmodule Kiln.Advisory.Body do
       paragraph_word_counts: Enum.map(paragraphs, &count_words/1),
       image_count: walked.image_count,
       images_missing_alt: Enum.reverse(walked.images_missing_alt),
-      internal_link_paths: walked.links |> Enum.reverse() |> Enum.uniq()
+      links: links,
+      # Per block, never over the joined `text`: `BlockText.to_text/1` joins
+      # blocks with a single SPACE, and a heading carries no terminal
+      # punctuation — so two short shouted headings ("SHIPPING INFO",
+      # "RETURNS POLICY") become one four-word "sentence" and a false
+      # positive. Sentence splitting inside a block can't see a boundary that
+      # isn't in the string.
+      capitalised_runs: capitalised_runs(paragraphs ++ Enum.map(walked.headings, & &1.text)),
+      # Derived from the same walk rather than accumulated separately, so the
+      # two can't disagree about what counts as a link. Only same-origin paths
+      # are internal; absolute URLs point elsewhere and anchors/mailto aren't
+      # navigation.
+      internal_link_paths:
+        links |> Enum.map(& &1.href) |> Enum.filter(&String.starts_with?(&1, "/")) |> Enum.uniq(),
+      empty_headings: Enum.reverse(walked.empty_headings)
     }
+  end
+
+  # Consecutive capitalised words, per sentence (#495).
+  #
+  # Computed HERE rather than in `Kiln.Advisory.Checks.AllCaps` because this
+  # module is the one that gets memoized: the editor re-runs every check on
+  # each keystroke but only recomputes these facts when the body actually
+  # changes. Scanning the full text inside the check instead put ~90ms of
+  # string work on a 50k-word document into every validate, including the ones
+  # that only touched the title.
+  #
+  # Three word classes, not two, and the third is the point. A word with no
+  # cased letters ("2024", "—") or too few ("A", "I") is NEUTRAL: it neither
+  # starts a run nor breaks one, and doesn't count toward the length.
+  # Treating those as lowercase — the obvious two-way split — breaks
+  # "THIS IS A REALLY IMPORTANT NOTICE" into two runs of two at the word "A",
+  # so the one sentence the check exists for scores below the threshold and
+  # passes silently.
+  # Six, not four. Four is the length of a perfectly ordinary list of
+  # acronyms — "PDF CSV XML JSON", "HTTP HTTPS TLS SSL", "NASA JPL ESA NOAA" —
+  # and a check that flags those on a technical page is one an author turns
+  # off, at which point it stops catching the shouted paragraph too. Six is
+  # long enough that a run is prose rather than a list.
+  @min_run_words 6
+  @min_word_length 2
+
+  @spec capitalised_runs([String.t()]) :: [String.t()]
+  defp capitalised_runs(texts) do
+    Enum.flat_map(texts, fn text ->
+      text
+      |> String.split(~r/[\r\n]+|(?<=[.!?])\s+/u, trim: true)
+      |> Enum.flat_map(&runs_in_sentence/1)
+    end)
+  end
+
+  # Per sentence, so a capitalised heading followed by a capitalised heading
+  # isn't merged into one long false positive.
+  defp runs_in_sentence(sentence) do
+    sentence
+    |> String.split(~r/\s+/u, trim: true)
+    |> Enum.reduce({[], []}, &extend_run/2)
+    |> close_run()
+    |> Enum.filter(&(length(&1) >= @min_run_words))
+    |> Enum.map(&Enum.join(&1, " "))
+  end
+
+  defp extend_run(word, {runs, current}) do
+    case classify_case(word) do
+      :shouted -> {runs, [word | current]}
+      :neutral -> {runs, current}
+      :lower -> {close_current(runs, current), []}
+    end
+  end
+
+  defp close_run({runs, current}), do: runs |> close_current(current) |> Enum.reverse()
+
+  defp close_current(runs, []), do: runs
+  defp close_current(runs, current), do: [Enum.reverse(current) | runs]
+
+  # `String.upcase/1` comparison rather than a regex, so this holds for
+  # non-Latin scripts too.
+  defp classify_case(word) do
+    stripped = String.replace(word, ~r/[^\p{L}]/u, "")
+
+    cond do
+      String.length(stripped) < @min_word_length -> :neutral
+      stripped == String.downcase(stripped) -> :lower
+      stripped == String.upcase(stripped) -> :shouted
+      true -> :lower
+    end
   end
 
   @doc """
@@ -187,7 +288,14 @@ defmodule Kiln.Advisory.Body do
   def count_words(text), do: text |> String.split(~r/\s+/u, trim: true) |> length()
 
   defp empty_walk,
-    do: %{headings: [], paragraphs: [], links: [], image_count: 0, images_missing_alt: []}
+    do: %{
+      headings: [],
+      paragraphs: [],
+      links: [],
+      image_count: 0,
+      images_missing_alt: [],
+      empty_headings: []
+    }
 
   # Every block in a top-level slot — the block itself plus any `columns`
   # descendants — reports against that slot's index.
@@ -203,8 +311,8 @@ defmodule Kiln.Advisory.Body do
 
   defp flatten(block), do: [block]
 
-  defp collect(%KilnCMS.Blocks.Heading{} = block, _index, acc) do
-    add_heading(acc, clamp_level(block.level), to_string(block.text || ""))
+  defp collect(%KilnCMS.Blocks.Heading{} = block, index, acc) do
+    add_heading(acc, clamp_level(block.level), to_string(block.text || ""), index)
   end
 
   defp collect(%KilnCMS.Blocks.Image{} = block, index, acc) do
@@ -215,25 +323,25 @@ defmodule Kiln.Advisory.Body do
       else: acc
   end
 
-  defp collect(%KilnCMS.Blocks.RichText{} = block, _index, acc) do
-    block.body |> List.wrap() |> Enum.reduce(acc, &collect_pt/2)
+  defp collect(%KilnCMS.Blocks.RichText{} = block, index, acc) do
+    block.body |> List.wrap() |> Enum.reduce(acc, &collect_pt(&1, index, &2))
   end
 
   defp collect(_block, _index, acc), do: acc
 
   # A Portable Text node: headings by `style`, paragraphs otherwise, plus any
   # link annotations hanging off `markDefs`.
-  defp collect_pt(%{} = node, acc) do
-    acc = node |> mark_def_hrefs() |> Enum.reduce(acc, &add_link(&2, &1))
+  defp collect_pt(%{} = node, index, acc) do
+    acc = node |> node_links(index) |> Enum.reduce(acc, &add_link(&2, &1))
     text = pt_text(node)
 
     case heading_level(node["style"]) do
       nil -> add_paragraph(acc, text)
-      level -> add_heading(acc, level, text)
+      level -> add_heading(acc, level, text, index)
     end
   end
 
-  defp collect_pt(_node, acc), do: acc
+  defp collect_pt(_node, _index, acc), do: acc
 
   defp heading_level("h" <> digit) do
     case Integer.parse(digit) do
@@ -244,8 +352,23 @@ defmodule Kiln.Advisory.Body do
 
   defp heading_level(_style), do: nil
 
+  @doc """
+  Every link href on one Portable Text node, including the ones inside a table's
+  cells.
+
+  Public because the external link checker (`KilnCMS.Links.Extract`) walks the
+  same annotations from a background job, and two copies of "where a link hides
+  in Portable Text" would drift the first time a new nested node type lands —
+  tables already made that mistake available once.
+
+  Returns hrefs of every kind: same-origin paths, absolute URLs, `mailto:`.
+  Deciding which are interesting is the caller's job.
+  """
+  @spec node_hrefs(term()) :: [String.t()]
+  def node_hrefs(node)
+
   # Tables keep their spans (and markDefs) one level deeper, inside cells.
-  defp mark_def_hrefs(%{"_type" => "table"} = node) do
+  def node_hrefs(%{"_type" => "table"} = node) do
     node
     |> Map.get("rows", [])
     |> List.wrap()
@@ -253,7 +376,66 @@ defmodule Kiln.Advisory.Body do
     |> Enum.flat_map(&hrefs/1)
   end
 
-  defp mark_def_hrefs(node), do: hrefs(node)
+  def node_hrefs(node), do: hrefs(node)
+
+  @doc """
+  Every link on one Portable Text node, paired with the text a reader sees.
+
+  `node_hrefs/1` answers "where does this go", which is all the link *checker*
+  needs. This answers "what does it say", which is what an accessibility check
+  needs — and the two cannot be derived from each other, because the text
+  lives on the child spans while the href lives on the `markDefs` entry they
+  reference by `_key`.
+
+  A link annotation with no matching span (an orphaned markDef, which real
+  editors do produce) yields `""` rather than being dropped: an empty link is
+  exactly the defect worth reporting, so losing it here would hide it.
+  """
+  @spec node_links(term(), non_neg_integer()) :: [link()]
+  def node_links(node, index)
+
+  # Tables keep their spans and markDefs one level deeper, inside cells — the
+  # same shape `node_hrefs/1` has to handle, for the same reason.
+  def node_links(%{"_type" => "table"} = node, index) do
+    node
+    |> Map.get("rows", [])
+    |> List.wrap()
+    |> Enum.flat_map(&(&1 |> maybe_get("cells") |> List.wrap()))
+    |> Enum.flat_map(&links(&1, index))
+  end
+
+  def node_links(node, index), do: links(node, index)
+
+  defp links(%{} = node, index) do
+    children = node |> Map.get("children", []) |> List.wrap()
+
+    node
+    |> Map.get("markDefs", [])
+    |> List.wrap()
+    |> Enum.filter(&match?(%{"_type" => "link"}, &1))
+    |> Enum.map(fn def ->
+      %{
+        text: anchor_text(children, def["_key"]),
+        href: to_string(def["href"] || ""),
+        index: index
+      }
+    end)
+  end
+
+  defp links(_node, _index), do: []
+
+  # The spans carrying this annotation, in document order. `marks` holds a mix
+  # of style names ("strong") and markDef keys, so matching is by key.
+  defp anchor_text(children, key) when is_binary(key) do
+    children
+    |> Enum.filter(fn child ->
+      is_map(child) and key in (child |> Map.get("marks", []) |> List.wrap())
+    end)
+    |> Enum.map_join(&to_string(Map.get(&1, "text", "")))
+    |> String.trim()
+  end
+
+  defp anchor_text(_children, _key), do: ""
 
   defp hrefs(%{} = node) do
     node
@@ -273,9 +455,21 @@ defmodule Kiln.Advisory.Body do
 
   defp pt_text(_node), do: ""
 
-  defp add_heading(acc, level, text) do
+  # A blank heading is recorded, not dropped. It used to vanish here, which
+  # meant the one heading defect an author cannot see — an empty H2 that
+  # renders as a gap and reads to a screen reader as an unlabelled landmark —
+  # was the one nothing could report. It stays out of `headings` so the
+  # level-order check isn't judging a heading with no text.
+  #
+  # In practice this fires for Portable Text headings (a TipTap `h2` the
+  # author never filled in). A typed `KilnCMS.Blocks.Heading` requires `text`
+  # and Ash treats whitespace as blank, so that path can't produce one — the
+  # branch stays because `Body.compute/1` is documented as total over
+  # whatever is stored, including rows a migration or a direct write left
+  # behind.
+  defp add_heading(acc, level, text, index) do
     if blank?(text),
-      do: acc,
+      do: %{acc | empty_headings: [index | acc.empty_headings]},
       else: %{acc | headings: [%{level: level, text: String.trim(text)} | acc.headings]}
   end
 
@@ -285,10 +479,7 @@ defmodule Kiln.Advisory.Body do
       else: %{acc | paragraphs: [String.trim(text) | acc.paragraphs]}
   end
 
-  # Only same-origin paths are internal links; absolute URLs point elsewhere and
-  # anchors/mailto aren't navigation.
-  defp add_link(acc, "/" <> _ = href), do: %{acc | links: [href | acc.links]}
-  defp add_link(acc, _href), do: acc
+  defp add_link(acc, link), do: %{acc | links: [link | acc.links]}
 
   defp clamp_level(level) when level in 1..6, do: level
   defp clamp_level(_level), do: 2

@@ -41,9 +41,9 @@ defmodule KilnCMS.Blocks.Columns do
     # array (not a union member) to avoid a recursive-type compile cycle.
     field :columns, {:array, :map}, default: []
     # Width-ratio preset (see @presets); nil renders equal-width columns.
-    field :layout, :string
+    field :layout, :string, translatable: false
     # Inter-column gap keyword (see @gaps); nil renders the default gap.
-    field :gap, :string
+    field :gap, :string, translatable: false
   end
 
   # Width-ratio presets → CSS `grid-template-columns` fractions. The preset is
@@ -117,6 +117,30 @@ defmodule KilnCMS.Blocks.Columns do
     |> Enum.reject(&is_nil/1)
   end
 
+  # The one place the exported schema can say what the Ash type system cannot
+  # (see the moduledoc): a column's children are the block union itself. JSON
+  # Schema recurses through `$ref` happily, so a typed client gets the tree the
+  # storage union has to keep flat. Depth is bounded at cast time
+  # (`KilnCMS.CMS.TypedBlocks` `@max_nesting`), not expressible here.
+  @impl Kiln.Block.Renderer
+  def json_schema do
+    %{
+      "properties" => %{
+        "columns" => %{
+          "type" => "array",
+          "items" => %{
+            "type" => "object",
+            "properties" => %{
+              "blocks" => %{"type" => "array", "items" => Kiln.Block.JsonSchema.block_ref()}
+            },
+            "required" => ["blocks"],
+            "additionalProperties" => false
+          }
+        }
+      }
+    }
+  end
+
   @impl Kiln.Block.Renderer
   def search_text(block) do
     block
@@ -144,6 +168,90 @@ defmodule KilnCMS.Blocks.Columns do
   @spec child_blocks_flat(struct()) :: [struct()]
   def child_blocks_flat(block) do
     block |> columns() |> Enum.flat_map(&child_blocks/1)
+  end
+
+  @doc """
+  The **raw child maps** of every column, flattened, including nested columns'
+  own children.
+
+  Same positions `child_blocks_flat/1` reads, before `TypedBlocks.to_typed/1`
+  fills in defaults — which is what `KilnCMS.CMS.Changes.EnforceBlockFieldPolicy`
+  needs, since a field the client omitted has to stay omitted for it to tell an
+  omission from a write of the default (#566).
+
+  Exported so that check can mirror the renderer exactly rather than guessing
+  where children live. Guessing was the bug: probing every map in the tree for a
+  `"blocks"` key let a restricted value be parked in a slot nothing renders and
+  still be counted, which offset the removal of a real one (#956).
+  """
+  @spec child_maps(struct()) :: [map()]
+  def child_maps(block) do
+    block |> columns() |> Enum.flat_map(&raw_child_maps/1)
+  end
+
+  defp raw_child_maps(col) do
+    col
+    |> raw_blocks()
+    |> Enum.filter(&is_map/1)
+    |> Enum.flat_map(&[&1 | nested_child_maps(&1)])
+  end
+
+  @doc """
+  The child tree projected to **identity only** — each child as
+  `%{"_id" => id, "_type" => type}` (`"_id"` omitted when the stored child has
+  none), in the same column/position structure the renderer reads, nested
+  columns recursed.
+
+  This is the shape `KilnCMS.CMS.Calculations.BlockIds` emits for a columns
+  block (#954): position is what lets a client tell which id names which child,
+  so the structure is preserved rather than flattened like `child_maps/1`.
+  Field values are deliberately absent — the projection exists so a client can
+  round-trip identity, not to widen the non-`public?` `blocks` boundary.
+
+  Lives here for the #956 reason `child_maps/1` does: the module that renders
+  the children is the one that knows where they live.
+  """
+  @spec child_id_columns(struct()) :: [map()]
+  def child_id_columns(block) do
+    block |> columns() |> Enum.map(&id_column/1)
+  end
+
+  defp id_column(col) do
+    %{"blocks" => col |> raw_blocks() |> Enum.filter(&is_map/1) |> Enum.map(&child_id_map/1)}
+  end
+
+  defp child_id_map(child) do
+    base =
+      case Map.get(child, "_type") || Map.get(child, :_type) do
+        type when is_binary(type) -> %{"_type" => type}
+        type when is_atom(type) and not is_nil(type) -> %{"_type" => to_string(type)}
+        _none -> %{}
+      end
+
+    base
+    |> put_child_id(Map.get(child, "id") || Map.get(child, :id))
+    |> put_nested_id_columns(Map.get(child, "columns") || Map.get(child, :columns))
+  end
+
+  defp put_child_id(map, id) when is_binary(id) and id != "", do: Map.put(map, "_id", id)
+  defp put_child_id(map, _id), do: map
+
+  defp put_nested_id_columns(map, cols) when is_list(cols),
+    do: Map.put(map, "columns", cols |> Enum.filter(&is_map/1) |> Enum.map(&id_column/1))
+
+  defp put_nested_id_columns(map, _cols), do: map
+
+  # A child that is itself a columns block carries its own columns, in the same
+  # raw shape — recursed here rather than by the caller so the "where do
+  # children live" answer stays in one module.
+  defp nested_child_maps(%{} = child) do
+    case Map.get(child, "columns") || Map.get(child, :columns) do
+      cols when is_list(cols) ->
+        cols |> Enum.filter(&is_map/1) |> Enum.flat_map(&raw_child_maps/1)
+
+      _none ->
+        []
+    end
   end
 
   # Typed child blocks of a single column (tolerates string/atom keys from jsonb).

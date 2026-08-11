@@ -1,0 +1,50 @@
+# What `docker build` should not send to the daemon as build context (#600).
+#
+# The context is hashed on every build, so this is not only image size — it is
+# how long the build takes to *start*, and how often the layer cache is missed
+# for a file the image never wanted. `.git` alone is a couple of hundred
+# megabytes here.
+#
+# The Dockerfile COPYs what it needs explicitly (mix.exs, mix.lock, config,
+# priv, lib, projects, assets, rel), so anything not listed there is dead
+# weight. This file is the belt: excluding it keeps a stray local artifact —
+# a dialyzer PLT under priv/, a node_modules, a built release — from riding
+# into the image or busting a cached layer.
+
+.git
+.github
+.gitignore
+.dockerignore
+
+# Build outputs and dependency trees. `mix deps.get` and `mix deps.compile` run
+# inside the builder; a host copy is a different OTP/arch and would be worse
+# than useless.
+_build
+_build_*
+deps
+cover
+doc
+
+# Dialyzer PLTs live under priv/, which the Dockerfile COPYs wholesale. They are
+# large, host-specific, and of no use at runtime.
+priv/plts
+
+# Installed by `npm --prefix assets ci` in the builder.
+assets/node_modules
+e2e/node_modules
+node_modules
+
+# Test and local-development surface the image never runs.
+test
+e2e
+.elixir_ls
+.elixir-tools
+.lexical
+*.log
+
+# Local environment and editor state.
+.env
+.env.*
+.DS_Store
+.claude
+.tool-versions.local

@@ -10,29 +10,30 @@ defmodule KilnCMS.VisualEditing do
 
   Only leaf **string** content is encoded, and only in preview responses — never
   the public fired artifact. Identifiers and structural keys (`slug`, `url`,
-  `_type`, `_id`, `_key`, `layout`, `gap`) are left untouched so the encoding
-  can't corrupt a URL, a routing slug, or the block discriminators. Rich-text
-  bodies (Portable Text arrays) aren't string leaves, so they're carried through
-  unencoded — the bridge addresses them via their block `_id` + `data-kiln-*`
-  instead.
+  `_type`, `_id`, `_key`, `layout`, `gap`, `locale`) are left untouched so the
+  encoding can't corrupt a URL, a routing slug, or the block discriminators.
+  Rich-text bodies (Portable Text arrays) aren't string leaves, so they're
+  carried through unencoded — the bridge addresses them via their block `_id` +
+  `data-kiln-*` instead.
   """
 
   alias KilnCMS.VisualEditing.Stega
 
   # Keys whose string values must NOT be stega-encoded (identifiers, structure).
-  @skip_keys ~w(_type _id _key layout gap url slug)
+  @skip_keys ~w(_type _id _key layout gap url slug locale)
 
-  @doc "Whether the visual-editing surfaces (annotated read + bridge) are enabled."
+  @doc "Whether the visual-editing surfaces (annotated preview + bridge) are enabled."
   @spec enabled?() :: boolean()
   def enabled?, do: Application.get_env(:kiln_cms, :visual_editing_enabled, true)
 
   @doc """
   Stega-annotate a fired `:json` artifact map
-  (`%{"type","id","slug","title","blocks"}`) in place. Each encoded payload
-  carries everything the bridge needs to act on the value:
+  (`%{"type","id","slug","locale","title","blocks"}`) in place. Each encoded
+  payload carries everything the bridge needs to act on the value:
 
-    * `type` / `id` / `slug` — the document (write via `PATCH /api/json/<type>/<id>`,
-      open the editor at `/editor/site/<type>/<slug>`);
+    * `type` / `id` / `slug` / `locale` — the document (write via
+      `PATCH /api/json/<type>/<id>`, open the editor at
+      `/editor/site/<type>/<slug>?locale=<locale>`);
     * `field` — the field name;
     * `block` — the block's stable id for a block field (absent for a document
       scalar like `title`), used as the editor `?focus=` target.
@@ -41,7 +42,9 @@ defmodule KilnCMS.VisualEditing do
   """
   @spec annotate(map()) :: map()
   def annotate(%{"type" => type, "id" => id} = json) when is_binary(type) and not is_nil(id) do
-    base = %{"type" => type, "id" => id, "slug" => Map.get(json, "slug")}
+    base =
+      %{"type" => type, "id" => id, "slug" => Map.get(json, "slug")}
+      |> maybe_put_locale(Map.get(json, "locale"))
 
     json
     |> encode_field("title", Map.put(base, "field", "title"))
@@ -50,6 +53,11 @@ defmodule KilnCMS.VisualEditing do
   end
 
   def annotate(json), do: json
+
+  defp maybe_put_locale(base, locale) when is_binary(locale) and locale != "",
+    do: Map.put(base, "locale", locale)
+
+  defp maybe_put_locale(base, _locale), do: base
 
   # Custom fields (present on the annotated preview, not the public artifact):
   # each plain-string value is stega-encoded with `{type, id, slug, field}` —

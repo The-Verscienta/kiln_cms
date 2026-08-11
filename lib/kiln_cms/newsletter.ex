@@ -188,6 +188,14 @@ defmodule KilnCMS.Newsletter do
   #
   # Clause order preserves the existing `:gated`-before-`:not_published`
   # precedence.
+  # A passphrase-locked document (#496) is never sendable, whatever its audience
+  # or segment. A newsletter carries the document's body into inboxes, which is
+  # the one delivery channel with no unlock step in front of it — sending one
+  # would hand the content to every subscriber and leave the lock protecting an
+  # empty room. Refused as `:gated`, the existing "you may not send this" answer.
+  defp ensure_sendable(%{access_password_hash: hash}, _segment) when not is_nil(hash),
+    do: {:error, :gated}
+
   defp ensure_sendable(%{state: :published, audience: :public}, _segment), do: :ok
 
   defp ensure_sendable(%{state: :published, audience: audience}, %Segment{

@@ -1,15 +1,29 @@
 # KilnCMS API documentation
 
 KilnCMS ships a **published, machine-readable OpenAPI 3 spec** for its headless
-JSON:API surface, plus an interactive **Swagger UI** explorer. Both are reachable
-in **every environment** (dev and prod) — the spec describes a read surface whose
-published content is already world-readable.
+JSON:API surface, plus an interactive **Swagger UI** explorer.
+
+Both are served in development and test, and **off in production by default**
+since #567. Set `API_DOCS_ENABLED=true` to publish them from a production
+deployment. When they are off, both paths answer **404** — not 403, which would
+confirm the route exists and is merely closed.
+
+The reason is the same one that already disables GraphQL introspection in
+production: since #330 the described surface includes the **write** routes, so
+the document is a complete machine-readable map of the mutation API. It grants
+nothing — every route it describes is still enforced by the Ash policies and
+the API key's access scope — but it removes the guesswork, and shipping it
+beside a disabled introspection endpoint was an inconsistency rather than a
+decision.
 
 | Resource              | URL                            | Notes                                   |
 |-----------------------|--------------------------------|-----------------------------------------|
 | **OpenAPI 3 spec**    | `GET /api/json/open_api`       | JSON, machine-readable. Import into any OpenAPI tool. |
 | **Swagger UI**        | `GET /api/json/swaggerui`      | Interactive explorer over the spec.     |
 | **GraphQL playground**| `GET /gql/playground`          | **Dev-only** convenience UI.            |
+
+The first two follow `API_DOCS_ENABLED`; the playground is compile-gated to
+`dev_routes` and is never built into a production release.
 
 Locally: <http://localhost:4000/api/json/swaggerui>.
 
@@ -31,10 +45,12 @@ The JSON:API is one of several headless surfaces. Pick the one that fits:
 | **GraphQL**            | `POST /gql`                       | Curated delivery reads + full-text/semantic search.   | [headless-graphql-api.md](headless-graphql-api.md) |
 | **Fired artifacts**    | `GET /api/content/:type/:slug`    | Pre-rendered block tree (`json`, `json_ld`, `web`).   | [`examples/README.md`](../examples/README.md) |
 | **Locales**            | `GET /api/locales`                | Discover configured content locales + the default.    | [§ Locale discovery](#locale-discovery) |
+| **Schema**             | `GET /api/schema`                 | JSON Schema for the fired `json` payloads — generate types, validate responses. | [§ Schema discovery](#schema-discovery-typed-clients) |
 | **Embeddable form**    | `<script src="…/embed.js">`       | Render a form in an auto-resizing iframe on any site. | [§ Embeddable forms](#embeddable-forms) |
 | **Visual editing**     | `<script src="…/bridge.js">`      | In-context edit overlay for an external front end (annotated preview + deep-link + live push). | [visual-editing-bridge.md](visual-editing-bridge.md) |
 | **Sitemap**            | `GET /sitemap.xml`                | Enumerate published content for crawling/SSG.         | — |
-| **Outbound webhooks**  | (you host the receiver)           | HMAC-signed push on publish/unpublish/update.         | [§ Webhooks](#webhooks) |
+| **Feeds**              | `GET /feed.xml`, `GET /feed.json` | Atom 1.0 / JSON Feed 1.1 of newly published content.  | [§ Feeds](#feeds) |
+| **Outbound webhooks**  | (you host the receiver)           | HMAC-signed push on publish/unpublish/update.         | [webhooks.md](webhooks.md) |
 | **Signed preview**     | `GET /preview/:token`             | One unpublished document via a short-lived token.     | [§ Preview tokens](#preview-tokens) |
 
 ## Authentication
@@ -73,6 +89,12 @@ curl -s -X POST http://localhost:4000/api/auth/sign_in \
 }
 ```
 
+`user.role` is the caller's **effective tier on the organization this request
+resolved to** — the same per-org authorization boundary the server enforces
+(#419), not a single global role. It therefore **changes with the host you dial**
+(`acme.example.com` vs `beta.example.com`), and is `"none"` on an org where the
+account has no tier. Shape UI on it only for the org you signed in against.
+
 > The account must already exist with an `:editor` or `:admin` role — signup
 > always creates a `:viewer`. See [**Creating an admin user**](../README.md#creating-an-admin-user)
 > in the README for seeding the first admin and promoting other users.
@@ -95,6 +117,58 @@ Notes:
   log-out-everywhere) takes effect immediately.
 - The browser `/sign-in` LiveView remains the path for the interactive
   admin/editor UI (it establishes a session, not a bearer token).
+
+### Accounts with two-factor authentication
+
+If the account has TOTP enabled, the password alone is **not** enough: the
+response is a `200` (not a `201`) and carries no bearer token, only a
+short-lived handle for finishing the sign-in.
+
+```jsonc
+// 200 OK
+{
+  "two_factor_required": true,
+  "pending_token": "<opaque>",
+  "expires_in": 300
+}
+```
+
+Redeem it with a code from the authenticator app — or one of the account's
+one-time recovery codes:
+
+```bash
+curl -s -X POST http://localhost:4000/api/auth/sign_in/verify \
+  -H 'content-type: application/json' \
+  -d '{"pending_token": "<opaque>", "code": "123456"}'
+```
+
+That returns the same `201 Created` body the single-step flow gives.
+
+**Branch on the status code, not on the presence of `token`** — `201` means
+signed in, `200` means one step to go. A client that only looks for `token`
+will silently treat "second factor required" as a failure.
+
+Notes:
+
+- **Treat the pending token as a credential.** It is opaque and encrypted, but
+  what it encrypts is the sign-in this exchange will complete — it is safe
+  because of the encryption, not because of what is inside. Do not log it, do
+  not put it in a URL, and do not persist it past the exchange. (It is *not*
+  sufficient on its own: redeeming it also takes a valid code.)
+- It is redeemed **at most once**. A verify request that succeeded cannot be
+  replayed. A wrong code or a `429` leaves it usable, so a client can retry the
+  code without restarting.
+- Codes are budgeted **per account** — 5 per 15 minutes, per node — and the
+  budget is shared with the browser prompt at `/sign-in/verify`. A `429` here is
+  not reset by signing in again; it carries `Retry-After` in whole seconds.
+- Errors from both steps carry a stable `code` alongside `detail`:
+  `invalid_credentials`, `missing_parameters`, `pending_expired`,
+  `invalid_code`, `too_many_attempts`. A parameter you supplied with the wrong
+  JSON type is not reported as missing — send `code` as a **string**, since a
+  leading zero makes the integer form fail only some of the time.
+- For unattended server-to-server use prefer an **API key** over a user
+  password. Keys carry no second factor by design, so they are unaffected by
+  any of the above.
 
 In-process server code can skip the HTTP round-trip and mint a token directly:
 
@@ -131,12 +205,20 @@ curl -s 'http://localhost:4000/api/json/posts' \
   - **Read + write**: may additionally author content over **all three
     key-authenticated surfaces** — JSON:API (`POST`/`PATCH`/`DELETE`), GraphQL
     (mutations), and MCP (`/mcp`) — as its owning user, within that user's role.
-    An **editor** creates/updates/submits drafts; **publish, unpublish and
-    (soft-)delete require an admin**; the hard delete (`:purge`) is never exposed
-    to any key. `/mcp` additionally exposes no publish/delete tools at all (LLM
+    An **editor** creates/updates/submits drafts; **return-to-draft, publish,
+    unpublish and (soft-)delete require an admin** — an editor submits for
+    review, and deciding the outcome is the admin's half; the hard delete
+    (`:purge`) is never exposed to any key. `/mcp` additionally exposes no publish/delete tools at all (LLM
     authoring is draft-only). See [json-api.md](json-api.md) → "Writing",
     [headless-graphql-api.md](headless-graphql-api.md) → "Mutations", and
     [mcp.md](mcp.md).
+- **`tag_ids` replaces, it doesn't merge** (#521): sending it on a content write
+  overwrites the *entire* tag set, so a partial list detaches every tag not
+  named. To attach/detach a subset instead, use `add_tag_ids`/`remove_tag_ids`
+  (JSON:API, GraphQL) — MCP's `update_page`/`update_post`/`update_entry` take
+  the same three arguments. See "Writing tags — replace vs merge" in
+  [json-api.md](json-api.md) or [headless-graphql-api.md](headless-graphql-api.md),
+  and [mcp.md](mcp.md) → "Tools".
 - Keys always **expire** and can be **revoked** immediately from the admin UI; an
   expired/revoked key returns **401**.
 - Works on JSON:API (`/api/json`), GraphQL (`/gql`, incl. the subscription
@@ -152,7 +234,7 @@ but **not every query returns drafts**. Pick the right surface:
 | List / filter drafts | JSON:API `GET /api/json/<type>?filter[state]=draft` | ✅ yes |
 | Search drafts | JSON:API `/search` · GraphQL `searchPosts`/`searchPages` | ✅ yes |
 | Fetch one **by id** | JSON:API `GET /api/json/<type>/:id` | ✅ yes |
-| Fetch one **by slug** | GraphQL `postBySlug`/`pageBySlug`, `categoryBySlug`, `tagBySlug` | ❌ **no — published only** |
+| Fetch one **by slug** | GraphQL `postBySlug`/`pageBySlug`, `categoryBySlug`, `tagBySlug`, `tagGroupBySlug` | ❌ **no — published only** |
 | Share a specific draft | `GET /preview/:token` (signed link) | n/a (no account needed) |
 
 > **GraphQL `*BySlug` never returns drafts.** Those queries run the
@@ -179,9 +261,13 @@ A quick map:
 | MediaItem | `GET /api/json/media-items` | `GET /api/json/media-items/:id` | `/media-items/search`                         |
 | Category  | `GET /api/json/categories`  | `GET /api/json/categories/:id`  | `/categories/by-slug/:slug`                   |
 | Tag       | `GET /api/json/tags`        | `GET /api/json/tags/:id`        | `/tags/by-slug/:slug`                         |
+| TagGroup  | `GET /api/json/tag-groups`  | `GET /api/json/tag-groups/:id`  | `/tag-groups/by-slug/:slug`                   |
 
-Taxonomy (Category/Tag) is world-readable and now mirrors the GraphQL taxonomy
-surface over JSON:API (#185) — list, fetch by id, or fetch by slug.
+Taxonomy (Category/Tag/TagGroup) is world-readable and now mirrors the GraphQL
+taxonomy surface over JSON:API (#185) — list, fetch by id, or fetch by slug. A
+tag group is the bucket a tag is filed under — see [json-api.md](json-api.md)
+→ "Routes" and [headless-graphql-api.md](headless-graphql-api.md) → "Taxonomy"
+for the `tag_group_id`/`tagGroup` relationship and `content_types` scoping.
 
 `*/search` (keyword) and `*/semantic-search` (vector) take their inputs as
 top-level query params — `?query=<text>&locale=<code>` (plus optional
@@ -202,6 +288,72 @@ curl -s 'http://localhost:4000/api/json/posts?filter[state]=draft' \
   -H 'authorization: Bearer <token>'
 ```
 
+## Password-protected content
+
+An editor can put a **shared passphrase** on a published document (#496) — the
+WordPress "password protected post" analogue, for a client proposal or an
+early-access page. It is deliberately **weak** access control: one secret, no
+per-reader identity, no revocation but rotation, no audit trail. Use
+**audiences** ([memberships.md](memberships.md)) when you need real access
+control; this exists for convenience.
+
+A locked document answers **401** instead of 200:
+
+```jsonc
+{"errors": [{"status": "401", "code": "password_required",
+             "detail": "This content is protected. POST the passphrase to …"}]}
+```
+
+Exchange the passphrase for a grant token, then present the token on reads:
+
+```bash
+TOKEN=$(curl -s -X POST http://localhost:4000/api/content/page/proposal/unlock \
+  -H 'content-type: application/json' \
+  -d '{"passphrase": "shared secret"}' | jq -r .token)
+
+curl -s http://localhost:4000/api/content/page/proposal \
+  -H "x-kiln-unlock: $TOKEN"
+```
+
+`?unlock=<token>` works too, for callers that cannot set headers (a static build
+step, for instance).
+
+Notes that matter in practice:
+
+- **The token expires in 12 hours and dies on rotation.** It names a fingerprint
+  of the passphrase, not the document — so the moment an editor changes the
+  passphrase, every outstanding token stops working. `expires_in` comes back
+  with the token.
+- **A token is document-scoped.** Two documents sharing a passphrase still have
+  different fingerprints, so a token for one will not read the other.
+- **Unlocked responses are `private, no-store` and carry no `ETag`.** The body
+  is a function of your grant rather than of the URL, so it must not be
+  shared-cached. Budget for that: a locked document is not a CDN-friendly one.
+- **A wrong passphrase and an unlocked document answer identically** (`401`
+  `invalid_passphrase` from the unlock endpoint), so it cannot be used to
+  enumerate which documents are locked.
+- **Locked documents are absent from every discovery surface** — the sitemap,
+  feeds, `llms.txt`, the blog index, the `/published` collection routes,
+  keyword and semantic search, related content, and any configured Meilisearch
+  index. If a document is locked, the only way to reach it is to know its URL
+  *and* its passphrase.
+
+  The `:published` read carries that as a **filter**, not a policy clause, so
+  it holds for an authorized caller too — a locked document is absent from
+  `/published` and its GraphQL twin whatever credential is presented. Those are
+  delivery feeds; an editor reaches their own locked drafts through the editor
+  reads, which are unaffected.
+
+  Note the asymmetry with an **audience** gate, which the index does show, with
+  a "Members" badge: gated metadata is a marketing surface — you want a reader
+  to know members-only content exists and what they would get. A passphrase is
+  a shared secret handed to specific people, so disclosing the document's title
+  and URL is the one thing it must not do (#1032).
+
+The unlock endpoint has its own tight rate-limit bucket (see
+[Rate limits](#rate-limits)) — it is the guessing surface for a shared secret,
+and there is no account to lock out instead.
+
 ## Locale discovery
 
 `GET /api/locales` returns the site's configured content locales and the
@@ -217,6 +369,202 @@ curl -s http://localhost:4000/api/locales
 
 Pass the returned codes as the `locale` argument/param to the other surfaces
 (`GET /api/content/:type/:slug?locale=fr`, `postBySlug(slug:, locale:)`, etc.).
+
+## Schema discovery (typed clients)
+
+`GET /api/schema` returns a JSON Schema (draft 2020-12) describing exactly what
+`GET /api/content/:type/:slug?surface=json` serves: the `_type`-discriminated
+block union and one document schema per content type. Generate types from it,
+or validate responses against it (#430).
+
+```bash
+curl -s http://localhost:4000/api/schema | jq '.["$defs"] | keys'
+# ["block","block_accordion",…,"content_page","content_post","portable_text_block"]
+```
+
+| Parameter | Effect |
+|-----------|--------|
+| `?type=post,page` | Only these content types. An unknown name is a `400`, not a silent full export. |
+| `?blocks=only` | The block union alone — no content types, no database read. |
+
+It is **per site**: dynamic content types and custom fields are
+organization-scoped, so the document is built for the org the request host
+resolves to, and an admin adding a custom field changes it without a redeploy.
+No auth required; cacheable (`Cache-Control: public, max-age=300`).
+
+Notable properties:
+
+- every block object is closed (`additionalProperties: false`) and pinned by a
+  `_type` `const`, so a `oneOf` match is unambiguous;
+- `_id` is the block's stable id — the same anchor the visual-editing bridge
+  uses. It is absent on a block that has never been persisted;
+- a `columns` block's children `$ref` back to the union, so nesting is typed all
+  the way down (the storage union has to stay flat — see
+  `KilnCMS.Blocks.Columns`);
+- `custom_fields` is **open**, and nothing in it is `required`: a definition
+  added after a document was last saved has no stored value and publishing does
+  not invent one, while a point-in-time read (`?as_of=`) serves the values
+  stored at that instant — which may include fields since removed;
+- a `required: true` block field is listed in `required` (the key is always
+  present) but is still nullable. Container children bypass the embedded
+  resource's `allow_nil?`, so a nested block can carry a nil where its
+  top-level twin cannot, and both share one definition.
+
+It publishes **shape**, not editorial content: field `help_text` and a
+`:select`'s option list are deliberately withheld, as is the organization id.
+Type and field *names* are published, so a site where an unannounced content
+type is itself sensitive should keep this endpoint off the public internet.
+
+This describes the **read** surface. The write API's authoring shape (which
+differs — a `video`'s stored `media_id`/`url` pair is delivered as one resolved
+`src`) is described by the OpenAPI document at `/api/json/open_api`.
+
+### Generating types at build time
+
+```bash
+mix kiln.export.schema --out priv/static/schema.json --pretty
+mix kiln.export.schema --format ts --out assets/js/kiln.d.ts
+```
+
+The `.d.ts` emitter is built in, so no Node toolchain is needed:
+
+```ts
+export interface HeadingBlock {
+  _id?: string;
+  _type: "heading";
+  level?: number;
+  text: string;
+}
+
+export type KilnBlock = AccordionBlock | AudioBlock | … | VideoBlock;
+export type KilnDocument = PageDocument | PostDocument;
+```
+
+`--blocks-only` skips content types entirely (and the database with them), which
+is what a CI job that only wants block types should use. `--all-orgs --out <dir>`
+writes one document per site; `mix help kiln.export.schema` has the rest.
+
+## Feeds
+
+Atom 1.0 and JSON Feed 1.1, for readers and for the RSS-driven automation every
+email-campaign tool is built on (#486):
+
+| URL | Format | Scope |
+|-----|--------|-------|
+| `GET /feed.xml` | Atom 1.0 | Every syndicated content type |
+| `GET /feed.json` | JSON Feed 1.1 | Every syndicated content type |
+| `GET /blog/feed.xml` | Atom 1.0 | Posts only |
+| `GET /pages/feed.xml` | Atom 1.0 | Pages only |
+| `GET /blog/category/<slug>/feed.xml` | Atom 1.0 | Posts in one category |
+| `GET /blog/tags/<slug>/feed.json` | JSON Feed 1.1 | Posts carrying one tag |
+| `GET /fr/feed.xml` | Atom 1.0 | Everything, in French |
+| `GET /fr/blog/category/<slug>/feed.xml` | Atom 1.0 | All three at once |
+
+A type's own feed lives under its public path segment where it has one
+(`/blog/…` for posts) and under its plural otherwise (`/pages/…`) — a type served
+at `<base>/<slug>` has no prefix of its own, and deriving one would put its feed
+at `/feed.xml`, which is already taken. Both spellings resolve, so
+`/posts/feed.xml` works too. A dynamic content type (D17) gets a feed at its own
+segment automatically.
+
+Delivery pages advertise these in `<head>` via `<link rel="alternate">`, so a
+reader or a campaign tool finds them without being handed the URL — in the
+locale of the page being read, so a French article points at the French feed.
+
+**Feeds are published *and* public.** An audience-gated record is published and
+paywalled; it never appears in a feed, which anonymous readers and third-party
+aggregators fetch. The same rule holds for the optional Meilisearch index (#1006)
+— it has no audience facet and its queries are anonymous, so a gated document is
+kept out of it and removed from it when gating is applied. See
+[`meilisearch.md`](meilisearch.md#what-is-in-the-index--and-what-is-not-1006).
+
+**A type syndicates if it already has a public index.** For a dynamic content
+type that is the per-type "Has a public index of published entries" checkbox in
+`/editor/types`, which defaults to **off** — a type nobody chose to publish an
+index for is not one whose records should be enumerable. Compiled types (Page,
+Post) have public indexes by definition.
+
+**The rest of the policy is per-site (#719).** `/editor/feeds` lists every
+content type the site has with two switches each — whether it appears in the
+site's feeds at all, and whether its entries carry the rendered body rather than
+a summary. Both are org admin-only, and both are scoped to the site you are on.
+
+"In feeds" is the same switch ActivityPub reads, so a type taken out of a site's
+feeds also stops being announced to the fediverse and leaves that site's outbox
+— see [federation.md](federation.md). The page says so.
+
+Full content is opt-in because it hands the whole article to everything
+subscribed: with it on, every anonymous reader, aggregator and scraper fetching
+the feed receives the complete rendered body of every published entry of that
+type. That is a publishing decision a site makes for itself, which is why it
+cannot live in a config file only a deployment operator can edit — a compiled
+type like `post` is shared by every organization on a deployment, so one
+tenant's newsletter would otherwise have opted in all of them.
+
+Underneath sits the operator default, used by any site that has not saved its
+own settings:
+
+```elixir
+config :kiln_cms, :feeds,
+  exclude: ["page"],        # types that should not syndicate at all
+  full_content: ["post"],   # types whose entries carry the rendered body
+  entry_limit: 50           # newest N records per feed (capped at 200)
+```
+
+A site that has never saved follows this config; saving replaces both lists for
+that site, and **Use the operator defaults** on the page drops them and goes
+back to following it. An empty saved list means *none*, which is not the same as
+never having said anything — that distinction is what lets a site turn full
+content off while the deployment default has it on.
+
+`entry_limit` stays deployment-wide, and deliberately: it bounds the work a feed
+request costs the server rather than expressing a publishing choice.
+
+If the settings row cannot be read at all — a rolling deploy before the table
+exists, a pool timeout — feeds fall back to **summaries only**, not to the
+config. Falling back to the config there would discard the opt-out this exists
+for, and hand out complete articles for the duration of the fault. Exclusions
+keep following the config in that state, because failing closed on *that* axis
+would mean no feeds at all, and nothing in a feed is private.
+
+### Segments and locales (#720)
+
+Every entry carries its taxonomy — `<category term="slug" label="Name"/>` in
+Atom, a flat `tags` array of labels in JSON Feed — capped at 20 per entry so one
+heavily tagged record cannot bloat a document served to every subscriber.
+
+A category element is only useful if there is a feed narrow enough to act on, so
+a type's feed also comes scoped to **one category** or **one tag**. An unknown
+slug is a 404 rather than an empty document: a reader who subscribes to a typo
+would otherwise get something that never has anything in it, and no way to tell.
+
+An unscoped feed carries the **default locale only**. A record translated into
+three languages is three rows, and a feed carrying all three re-notifies every
+subscriber — and every "new post → campaign" automation — three times per
+publish. That left readers of other languages with no feed at all, so any
+locale prefix gives that language its own: `/fr/feed.xml`, `/fr/blog/feed.xml`,
+`/fr/blog/category/news/feed.xml`. Each language has exactly one feed, and
+nobody is notified twice.
+
+There is no `/<locale>/feed.xml` *route* — the locale prefix is stripped before
+the router for every URL on the delivery site, so feeds get this the same way
+pages do. `/en/feed.xml` therefore resolves, and advertises `/feed.xml` as its
+own id, so the two URLs are one thing to subscribe to rather than two.
+
+**Taxonomy** feeds are cached like any other, but they are **not** dropped on
+publish: computing which of them a record belongs to needs its tags and
+category, and the cache bust runs inside the publish transaction, where a
+relationship load can abort it and lose the publish (#660). They are five
+minutes stale at worst.
+
+**Locale** feeds are dropped on publish, along with the site-wide and per-type
+ones. A record's locale is a plain attribute rather than a relationship, so it
+costs the bust nothing — and a locale feed that only ever refreshed on a TTL
+would leave the one reader these exist for as the only one without timely
+invalidation.
+
+Feeds are cached for five minutes and dropped on any publish/unpublish, so a new
+post is in the feed on the next fetch rather than after the TTL.
 
 ## Webhooks
 
@@ -239,6 +587,9 @@ endpoint is disabled. Delivery history is pruned after 30 days; both knobs are
 configurable (`config :kiln_cms, KilnCMS.Webhooks, auto_disable_after: …` and
 `config :kiln_cms, :webhooks, delivery_retention_days: …`).
 
+See [**Webhooks**](webhooks.md) for event names and payload shapes, signature
+verification, and the SSRF/egress protections applied to endpoint URLs.
+
 ## Preview tokens
 
 `GET /preview/:token` returns a single referenced **draft** Page/Post as JSON
@@ -259,6 +610,26 @@ Allowed origins come from the `CORS_ORIGINS` env var, resolved at runtime:
 | *(unset, production default)*          | Same-origin only — no cross-origin reads.          |
 | `*`                                    | Echo any origin (dev default).                     |
 | `https://a.example,https://b.example`  | Allowlist of exact origins (comma-separated).      |
+
+Entries are matched by **exact equality** against the browser's `Origin` header,
+which is always `scheme://host[:port]` — no trailing slash, no path, downcased,
+punycode for an IDN. An entry in any other shape can never match, so the CMS
+warns on stderr at boot naming it (#651). It **applies the value unchanged**:
+the check is a heuristic about what browsers send, and dropping an entry on a
+heuristic would be the outage the warning is meant to prevent, arrived at
+quietly.
+
+The common mistakes are a trailing slash (`https://acme.com/`), a bare host
+(`acme.com`), `https://*.acme.com` — there is no wildcard matching here, so it
+grants nothing — an uppercase host, and a `*` mixed into a list, which unlike in
+`EMBED_ORIGINS` cannot widen anything for the same reason.
+
+**Any scheme is legitimate.** An `Origin` is a serialized origin, so
+`chrome-extension://…`, `moz-extension://…`, `capacitor://localhost`,
+`tauri://localhost` and `app://…` are all real allowlist entries and none of
+them warns. `null` does warn: browsers send it for sandboxed iframes, `file://`
+and some redirects, so allowlisting it grants all of those at once — it is kept
+if you mean it.
 
 Preflight `OPTIONS` requests are answered ahead of routing and are **not**
 counted against the caller's rate-limit budget. Browser/HTML routes are
@@ -283,8 +654,15 @@ Submissions post to the normal `POST /forms/:slug` endpoint and render the
 form's success message inside the iframe. No CORS is involved: the iframe is
 served *from* the CMS origin, so its form post is same-origin.
 
-**Who may embed** is controlled by the `EMBED_ORIGINS` env var, which sets the
-embed page's CSP `frame-ancestors`:
+**Who may embed** is set per form, in the builder's Embed tab, and becomes that
+page's CSP `frame-ancestors`. A form that leaves it alone inherits the
+deployment-wide `EMBED_ORIGINS`:
+
+| Form's *Who may embed*                 | Effect                                             |
+|----------------------------------------|----------------------------------------------------|
+| *(unset — the default)*                | Whatever `EMBED_ORIGINS` says, below.              |
+| **This site only**                     | `'self'` — same-origin only for this form, whatever the deployment allows. |
+| **Only these sites**                   | `'self'` plus this form's own parents, **instead of** the deployment's list. |
 
 | `EMBED_ORIGINS`                        | Effect                                             |
 |----------------------------------------|----------------------------------------------------|
@@ -292,8 +670,12 @@ embed page's CSP `frame-ancestors`:
 | `https://a.example,https://b.example`  | `'self'` plus these parents may frame it.          |
 | `*`                                    | Any site may embed the form.                       |
 
+Per form because forms are org-scoped (#648): a deployment-wide allowlist has to
+be the union of every org's embedders, and that union is what every org's forms
+would become framable by.
+
 **The default is closed** (#562) — paste the snippet on an external site before
-setting `EMBED_ORIGINS` and you get a blank iframe plus a CSP violation in that
+allowing that site and you get a blank iframe plus a CSP violation in that
 site's console. The embed page carries no ambient credentials (an anonymous
 public form; a cross-site iframe never receives the `SameSite=Lax` session
 cookie), but framing is itself the attack: with `*`, any site can overlay the
@@ -314,21 +696,48 @@ Over the limit returns **429** with a `retry-after` header.
 | `gql`  | `/gql`          | 60 requests / minute  |
 | `auth` | sign-in / auth  | 20 requests / minute  |
 | `docs` | `/api/json/swaggerui` | 60 requests / minute |
+| `unlock` | `POST /api/content/:type/:slug/unlock` (and the built-in site's lock form) | 10 requests / minute |
 
 ## Error responses
 
-All surfaces return errors as a JSON object with an **`errors` array**, each
-entry carrying a string `status` (HTTP code), a machine-readable `code`, and a
-human `detail`:
+The headless surfaces return errors as a JSON object with an **`errors`
+array**, each entry carrying a string `status` (HTTP code), a machine-readable
+`code`, and a human `detail`:
 
 ```jsonc
 { "errors": [ { "status": "404", "code": "not_found", "detail": "Content not found." } ] }
 ```
 
-This is the JSON:API shape; the headless sign-in, fired-artifact
-(`not_found` / `artifact_compiling`), and preview-token (`invalid_preview`)
-endpoints use the same envelope (#190). GraphQL follows the GraphQL spec's
-top-level `errors` array instead.
+This is the JSON:API shape. `status` is always the **numeric** HTTP code as a
+string (`"422"`, never `"unprocessable_entity"`) — safe to `parseInt` — and
+`code` is a stable token you can branch on.
+
+You get it from the headless sign-in, fired-artifact (`not_found` /
+`artifact_compiling`), related-content, provenance, form-schema and
+form-submission, visual-editing and preview-token (`invalid_preview`)
+endpoints — **and from the 429 when you exceed a rate-limit bucket**
+(`too_many_requests`, alongside `retry-after`). All of them render through one
+implementation, `KilnCMSWeb.ApiError.send/4`, and a test fails the build if a
+new endpoint writes its own (#190, #744).
+
+An unrouted `/api` path and an unhandled exception on any JSON-negotiated
+request answer this same envelope (`KilnCMSWeb.ErrorJSON`), so a client that
+only special-cases the routes above still gets a body it can parse.
+
+Three responses on these paths are deliberately **not** this envelope:
+
+- **`/api/json/*`** (JSON:API proper) carries the same three fields plus the
+  spec's `id`, `title` and `source.pointer`.
+- **Field-level validation errors** from `POST /api/forms/:slug` are
+  `{"ok": false, "errors": {"<field>": "…"}}` — a per-field map. The envelope
+  says the request failed; this says which input was wrong.
+- **`GET /api/resolve`**'s 200/301-equivalent and 404 responses are a verdict,
+  not an error: `{"status": "ok" | "moved" | "not_found"}`. That `status` is
+  the verdict and is *not* an HTTP code. A missing/malformed `?path=` **is**
+  an error, though, and answers the envelope like everything else — `code:
+  "missing_path"`.
+
+GraphQL follows the GraphQL spec's top-level `errors` array instead.
 
 ## Versioning & stability
 

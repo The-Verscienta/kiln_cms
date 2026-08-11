@@ -27,24 +27,39 @@ import topbar from "../vendor/topbar"
 import Sortable from "../vendor/sortable"
 import {FocusTrap} from "./focus_trap"
 import {PasskeyEnroll, initPasskeySignIn} from "./passkeys"
+import {PushToggle} from "./push"
 
 const clamp01 = (n) => Math.min(Math.max(n, 0), 1)
+
+// How many boxes are ticked inside an element — see TagFilter, which uses it to
+// tell "the editor selected something while I had this open" from "it already
+// held selections before the search".
+const checkedCount = (el) => el.querySelectorAll("input:checked").length
 
 const Hooks = {
   FocusTrap,
   // Passkey enrolment on /editor/settings (#331) — see assets/js/passkeys.js.
   PasskeyEnroll,
+  // Web Push opt-in on /editor/settings (#628) — see assets/js/push.js.
+  PushToggle,
   // Presentation console (#355): relay the framed external front end's
   // click-to-edit `postMessage` up to the LiveView, and nudge the iframe to
   // refresh after a save. Mirrors embed.js's parent-side security check —
   // trust only messages from THIS iframe's window, and (when known) only from
   // the configured front-end origin.
+  //
+  // Same-origin previews are sandboxed without allow-same-origin (#1059), so
+  // the frame posts with origin "null". contentWindow identity stays the guard;
+  // opaqueOrigin marks that null is expected rather than forged.
   PresentationFrame: {
     mounted() {
       this.origin = this.el.dataset.frontendOrigin || null
+      this.opaque = this.el.dataset.opaqueOrigin === "true"
       this.onMessage = e => {
         if (e.source !== this.el.contentWindow) return
-        if (this.origin && e.origin !== this.origin) return
+        if (this.origin && e.origin !== this.origin) {
+          if (!(this.opaque && e.origin === "null")) return
+        }
         const d = e.data
         if (d && d.source === "kiln-bridge" && d.event === "edit" && d.payload) {
           this.pushEvent("edit_field", d.payload)
@@ -54,7 +69,9 @@ const Hooks = {
       // Server → iframe: tell bridge.js to re-fetch after a Kiln-side save.
       this.handleEvent("presentation:refresh", () => {
         const win = this.el.contentWindow
-        if (win) win.postMessage({source: "kiln-console", event: "refresh"}, this.origin || "*")
+        // Opaque frames cannot be addressed by a concrete origin string.
+        const target = this.opaque ? "*" : (this.origin || "*")
+        if (win) win.postMessage({source: "kiln-console", event: "refresh"}, target)
       })
     },
     destroyed() {
@@ -261,10 +278,20 @@ const Hooks = {
       import("./rich_text").then(({mount}) => {
         if (!this._destroyed) mount(this)
       })
+
+      // The document was published while this collab room was open (#1061).
+      // The publish took the room's prose with it, so nothing is lost — but
+      // nothing persists from here either, so the editor has to be told rather
+      // than left typing into a doc that is going nowhere. Every rich-text
+      // block hears it; the LiveView's handler is idempotent.
+      this._collabPublished = () => this.pushEvent("collab_published", {})
+      window.addEventListener("kiln:collab-published", this._collabPublished)
     },
     destroyed() {
       this._destroyed = true
+      window.removeEventListener("kiln:collab-published", this._collabPublished)
       this.slash && this.slash.destroy()
+      this.linkPrompt && this.linkPrompt.destroy()
       this.editor && this.editor.destroy()
       // Rich-text hosts remount on every conflict reload / version restore, so
       // a handler left registered would accumulate one dead listener per
@@ -319,6 +346,7 @@ const Hooks = {
     destroyed() {
       this._destroyed = true
       this.slash && this.slash.destroy()
+      this.linkPrompt && this.linkPrompt.destroy()
       this.toolbar && this.toolbar.remove()
       this.editor && this.editor.destroy()
     },
@@ -331,16 +359,45 @@ const Hooks = {
   // The filter input is inside the content form, so it is deliberately unnamed
   // and wrapped in phx-update="ignore"; `updated()` re-applies the current query
   // after a LiveView patch re-renders the sections underneath it.
+  //
+  // The whole body — filter box included — is absent while the picker has no
+  // sections to show (#524), and a reload can grow one into existence, so the
+  // hook re-resolves its handles on every patch rather than once at mount.
   TagFilter: {
     mounted() {
-      this.input = this.el.querySelector("[data-tag-filter-input]")
+      // The sections *this hook* forced open to surface a match (mapped to
+      // their tick count at that moment), so clearing the query closes only
+      // those (#523). `open` is otherwise owned by the editor and by the
+      // app-wide <details> preservation in the LiveSocket `dom` option below —
+      // a second writer here fought it for the attribute, and which one won
+      // depended on whether `updated()` ran before or after the patch. A
+      // WeakMap so a section morphdom replaces is simply forgotten.
+      this.forced = new WeakMap()
+      this.bind()
+    },
+
+    updated() {
+      this.bind()
+      this.filter()
+    },
+
+    destroyed() {
+      this.unbind()
+    },
+
+    // Wire the filter box, if there is one. Idempotent: the input lives inside
+    // phx-update="ignore", so on most patches it is the same node and this is a
+    // no-op — but it is a *different* node once the picker goes from an empty
+    // state to having sections, and an unbound box is worse than no box at all
+    // (it filters nothing, and its keystrokes reach the form's phx-change).
+    bind() {
+      const input = this.el.querySelector("[data-tag-filter-input]")
       this.empty = this.el.querySelector("[data-tag-filter-empty]")
-      // Whether the *previous* pass was narrowing. Hook state, not a DOM
-      // attribute: morphdom strips client-set attributes on the next patch, so
-      // anything remembered on the element itself is gone the moment the
-      // editor autosaves.
-      this.filtering = false
-      if (!this.input) return
+      if (input === this.input) return
+
+      this.unbind()
+      this.input = input
+      if (!input) return
 
       // stopPropagation is load-bearing, not tidiness: LiveView binds `change`
       // on the *form* and gates only on "is this a form-associated element",
@@ -351,38 +408,41 @@ const Hooks = {
         e.stopPropagation()
         this.filter()
       }
-      this.input.addEventListener("input", this.onInput)
+      input.addEventListener("input", this.onInput)
       // Same reason, for the blur-time `change` event.
       this.onChange = e => e.stopPropagation()
-      this.input.addEventListener("change", this.onChange)
+      input.addEventListener("change", this.onChange)
       // Enter in a search field would otherwise submit the whole content form.
       this.onKey = e => {
         if (e.key === "Enter") e.preventDefault()
       }
-      this.input.addEventListener("keydown", this.onKey)
+      input.addEventListener("keydown", this.onKey)
     },
 
-    updated() {
-      this.filter()
-    },
-
-    destroyed() {
+    unbind() {
       if (!this.input) return
       this.input.removeEventListener("input", this.onInput)
       this.input.removeEventListener("change", this.onChange)
       this.input.removeEventListener("keydown", this.onKey)
+      this.input = null
     },
 
     filter() {
       if (!this.input) return
       const q = this.input.value.trim().toLowerCase()
-      // Only the filtering→cleared transition restores the server's own
-      // open/closed choice. Re-applying it on every pass would slam shut any
-      // section the editor opened by hand, every time a patch lands.
-      const restoring = this.filtering && q === ""
+      const sections = this.el.querySelectorAll("[data-tag-section]")
+      // Nothing to narrow. Bailing here rather than falling through keeps the
+      // hook from asserting the picker's markup shape: the loop below never
+      // runs, so `anyVisible` would stay false and "No tags match that filter."
+      // would appear under an untouched filter box (#524).
+      if (sections.length === 0) {
+        if (this.empty) this.empty.hidden = true
+        return
+      }
+
       let anyVisible = false
 
-      this.el.querySelectorAll("[data-tag-section]").forEach(section => {
+      sections.forEach(section => {
         let matches = 0
         section.querySelectorAll("[data-tag-item]").forEach(item => {
           const hit = q === "" || (item.dataset.tagItem || "").includes(q)
@@ -390,14 +450,28 @@ const Hooks = {
           if (hit) matches++
         })
         section.hidden = matches === 0
-        // A search should surface hits wherever they live, so expand while
-        // filtering.
-        if (q !== "") section.open = true
-        else if (restoring) section.open = section.dataset.tagOpenDefault === "true"
+        if (q !== "") {
+          // A search should surface hits wherever they live, so expand while
+          // filtering — but remember only the sections that were actually
+          // closed, so an editor's own toggle survives the query being cleared.
+          // Alongside each, how many boxes were ticked at that moment.
+          if (!section.open) {
+            section.open = true
+            this.forced.set(section, checkedCount(section))
+          }
+        } else if (this.forced.has(section)) {
+          const before = this.forced.get(section)
+          this.forced.delete(section)
+          // ...unless the editor ticked something while it was open. Folding it
+          // away then is the same harm as #523's server flip: it hides the box
+          // they just ticked and the sibling they were reaching for. A section
+          // that merely *held* ticks before the search still closes — that is
+          // the state they left it in.
+          if (checkedCount(section) === before) section.open = false
+        }
         anyVisible = anyVisible || matches > 0
       })
 
-      this.filtering = q !== ""
       if (this.empty) this.empty.hidden = anyVisible
     },
   },
@@ -562,6 +636,31 @@ const Hooks = {
     },
   },
 
+  // Drag-to-reorder for one level of the navigation menu tree (#466). Unlike
+  // `Sortable`, each list reports which parent it belongs to — a menu renders
+  // one list per level, so a bare "reorder" would be ambiguous. Depth changes
+  // are the indent/outdent buttons, not the drag: dropping *into* a sibling is
+  // hard to hit and impossible with a keyboard, and this tree is the site's
+  // navigation.
+  MenuSortable: {
+    mounted() {
+      this.sorter = Sortable.create(this.el, {
+        animation: 150,
+        handle: "[data-drag-handle]",
+        ghostClass: "opacity-40",
+        onEnd: () => {
+          const order = Array.from(this.el.children)
+            .map(c => c.dataset.sortId)
+            .filter(id => id !== undefined)
+          this.pushEvent("reorder_items", {parent_id: this.el.dataset.parentId || "", order})
+        },
+      })
+    },
+    destroyed() {
+      this.sorter && this.sorter.destroy()
+    },
+  },
+
   // Nested drag-and-drop for a `columns` block's children (#335): one Sortable
   // per column list, all sharing a group so a child can be dragged within a
   // column or across into a sibling column of the same block. On any drop it
@@ -601,6 +700,35 @@ const Hooks = {
     destroySorters() {
       ;(this.sorters || []).forEach(s => s.destroy())
       this.sorters = []
+    },
+  },
+
+  // Drag-to-reorder for a gallery block's images (#482). A single list, so it
+  // needs neither the shared group of NestedBlockSortable nor its re-init on
+  // update — but it does report the full new order rather than a delta, for the
+  // same reason: the server rebuilds the list authoritatively and LiveView
+  // reconciles the DOM back to the server-rendered order.
+  //
+  // Dragging is an enhancement, not the mechanism: each row also carries move
+  // up/down buttons that push the same reorder through the keyboard, so a
+  // pointer is never the only way to reorder a gallery.
+  GallerySortable: {
+    mounted() {
+      const blockId = this.el.dataset.blockId
+      this.sorter = Sortable.create(this.el, {
+        animation: 150,
+        handle: "[data-image-handle]",
+        ghostClass: "opacity-40",
+        onEnd: () => {
+          const order = Array.from(this.el.querySelectorAll("[data-image-row]")).map(
+            row => row.dataset.imageRow,
+          )
+          this.pushEvent("gallery_reorder", {bid: blockId, order})
+        },
+      })
+    },
+    destroyed() {
+      this.sorter && this.sorter.destroy()
     },
   },
 }

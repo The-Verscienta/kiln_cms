@@ -17,12 +17,13 @@ defmodule Mix.Tasks.Kiln.Toolchain.Check do
 
   ## Why this is a separate gate, not a test
 
-  The failure it catches is invisible to the whole rest of the suite. CI never
-  builds the release image, so a Dockerfile that cannot build is green
-  everywhere; the mismatch surfaces at deploy, and *not* where you would guess
-  — `mix deps.get` and `mix deps.compile` do not check the `:elixir`
-  requirement, so the build runs the entire dependency compile before dying at
-  `mix compile`.
+  It is cheap and it is early. CI's `image` job does build the release image
+  (#600), so a Dockerfile that cannot build is no longer green everywhere — but
+  that job finds the mismatch the slow way, and *not* where you would guess:
+  `mix deps.get` and `mix deps.compile` do not check the `:elixir` requirement,
+  so the build runs the entire dependency compile before dying at `mix compile`.
+  This gate names the same problem in a second, on the developer's machine,
+  before a runner spends half an hour on it.
 
   ## What it deliberately does not check
 
@@ -66,9 +67,9 @@ defmodule Mix.Tasks.Kiln.Toolchain.Check do
       #{length(problems)} toolchain mismatch(es).
 
       #{@tool_versions} is the source of truth. Update mix.exs and the
-      #{@dockerfile} ARGs to agree with it in this same change — CI does not
-      build the release image, so a stale Dockerfile pin is invisible until a
-      deploy fails. See #600.
+      #{@dockerfile} ARGs to agree with it in this same change. CI's `image`
+      job would eventually catch a stale Dockerfile pin by failing to build,
+      but only after compiling every dependency first. See #600.
       """)
     end
   end

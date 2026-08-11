@@ -9,6 +9,7 @@ defmodule KilnCMSWeb.AutomationLive do
 
   alias KilnCMS.Automation
   alias KilnCMS.Automation.Rule
+  alias KilnCMS.Automation.Validations.ActionConfig
   alias KilnCMS.CMS.ContentTypes
 
   @impl true
@@ -34,11 +35,11 @@ defmodule KilnCMSWeb.AutomationLive do
   end
 
   @impl true
-  def handle_event("validate", %{"rule" => params}, socket) do
+  def handle_event("validate", %{"rule" => params}, socket) when is_map(params) do
     {:noreply, assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))}
   end
 
-  def handle_event("create", %{"rule" => params}, socket) do
+  def handle_event("create", %{"rule" => params}, socket) when is_map(params) do
     case submit(socket.assigns.form, params) do
       {:ok, _rule} ->
         {:noreply,
@@ -58,7 +59,7 @@ defmodule KilnCMSWeb.AutomationLive do
     end
   end
 
-  def handle_event("edit", %{"id" => id}, socket) do
+  def handle_event("edit", %{"id" => id}, socket) when is_binary(id) do
     {:noreply,
      assign(socket, :edit, %{
        id: id,
@@ -68,7 +69,7 @@ defmodule KilnCMSWeb.AutomationLive do
 
   def handle_event("cancel_edit", _params, socket), do: {:noreply, assign(socket, :edit, nil)}
 
-  def handle_event("validate_edit", %{"rule" => params}, socket) do
+  def handle_event("validate_edit", %{"rule" => params}, socket) when is_map(params) do
     edit = %{
       socket.assigns.edit
       | form: AshPhoenix.Form.validate(socket.assigns.edit.form, params)
@@ -77,7 +78,7 @@ defmodule KilnCMSWeb.AutomationLive do
     {:noreply, assign(socket, :edit, edit)}
   end
 
-  def handle_event("save_edit", %{"rule" => params}, socket) do
+  def handle_event("save_edit", %{"rule" => params}, socket) when is_map(params) do
     case submit(socket.assigns.edit.form, params) do
       {:ok, _rule} ->
         {:noreply,
@@ -94,7 +95,7 @@ defmodule KilnCMSWeb.AutomationLive do
     end
   end
 
-  def handle_event("toggle_enabled", %{"id" => id}, socket) do
+  def handle_event("toggle_enabled", %{"id" => id}, socket) when is_binary(id) do
     actor = socket.assigns.actor
     org = socket.assigns.current_org
 
@@ -110,7 +111,7 @@ defmodule KilnCMSWeb.AutomationLive do
     {:noreply, socket}
   end
 
-  def handle_event("delete", %{"id" => id}, socket) do
+  def handle_event("delete", %{"id" => id}, socket) when is_binary(id) do
     actor = socket.assigns.actor
 
     org = socket.assigns.current_org
@@ -152,10 +153,6 @@ defmodule KilnCMSWeb.AutomationLive do
     |> to_form()
   end
 
-  # The dynamic-type registry (`ContentTypes.*`) keys by a raw org_id.
-  defp org_id(%{id: id}), do: id
-  defp org_id(id) when is_binary(id), do: id
-
   # `config` is entered as JSON in a textarea; decode it to a map before submit
   # (a :map attribute can't take the raw string). Invalid JSON surfaces its own
   # outcome so the caller can flash a friendly message.
@@ -183,9 +180,17 @@ defmodule KilnCMSWeb.AutomationLive do
 
   defp decode_config(params), do: {:ok, params}
 
+  # Editorial tasks (#501) aren't a content type — `task.assigned` /
+  # `task.overdue` are task-domain events dispatched through the same
+  # `<type>.<verb>` funnel with a literal "task" type (see
+  # `KilnCMS.Automation.Rule`'s `@triggers` moduledoc note). Without the trailing
+  # entry, a rule triggered on `:assigned`/`:overdue` could only be left at "Any
+  # content type" (matches every event, not just task ones) or pointed at an
+  # existing content type — which `Rule.matching`'s exact-match filter then never
+  # fires for: a silently dead rule.
   defp type_options(org) do
-    types = ContentTypes.all() ++ ContentTypes.dynamic_all(org_id(org))
-    [{gettext("Any content type"), ""}] ++ Enum.map(types, &{&1.label, to_string(&1.type)})
+    ContentTypes.options(org, prompt: {gettext("Any content type"), ""}) ++
+      [{gettext("Tasks"), "task"}]
   end
 
   defp trigger_options, do: Enum.map(Rule.triggers(), &{Phoenix.Naming.humanize(&1), &1})
@@ -196,6 +201,47 @@ defmodule KilnCMSWeb.AutomationLive do
       map when is_map(map) and map_size(map) > 0 -> Jason.encode!(map, pretty: true)
       raw when is_binary(raw) -> raw
       _ -> ""
+    end
+  end
+
+  # The config textarea is hand-rolled rather than a `<.input>` — it holds JSON,
+  # not the attribute's own value — so it renders no errors of its own. Without
+  # this the #944 validation would refuse the save and the admin would see a
+  # form that simply did not submit.
+  defp config_errors(form) do
+    Enum.map(form[:config].errors, &KilnCMSWeb.CoreComponents.translate_error/1)
+  end
+
+  # Derived from `ActionConfig.shapes/0`, not restated beside it: that table is
+  # what refuses a save, and a hand-maintained list of the same keys is a doc
+  # that drifts from its own enforcement — which is the failure #944 is about.
+  defp config_keys(form) do
+    case ActionConfig.shape(selected_action(form)) do
+      nil ->
+        gettext("nothing")
+
+      %{required: [], optional: []} ->
+        gettext("no config")
+
+      shape ->
+        [
+          Enum.map(shape.required, fn {key, _type} -> "#{key} (#{gettext("required")})" end),
+          Enum.map(shape.optional, fn {key, _type} -> key end)
+        ]
+        |> List.flatten()
+        |> Enum.join(", ")
+    end
+  end
+
+  # An untouched form has no `action` value yet, while the select already shows
+  # its first option — so fall back to that rather than describing a reaction
+  # the admin isn't looking at.
+  defp selected_action(form) do
+    case form[:action].value do
+      nil -> List.first(Rule.action_kinds())
+      "" -> List.first(Rule.action_kinds())
+      value when is_atom(value) -> value
+      value -> Enum.find(Rule.action_kinds(), &(to_string(&1) == to_string(value)))
     end
   end
 
@@ -344,6 +390,9 @@ defmodule KilnCMSWeb.AutomationLive do
       |> assign(:trigger_options, trigger_options())
       |> assign(:action_options, action_options())
       |> assign(:config_json, config_json(assigns.form))
+      |> assign(:config_errors, config_errors(assigns.form))
+      |> assign(:config_action, to_string(selected_action(assigns.form)))
+      |> assign(:config_keys, config_keys(assigns.form))
 
     ~H"""
     <.input field={@form[:name]} label={gettext("Name")} placeholder="Notify on publish" />
@@ -383,10 +432,22 @@ defmodule KilnCMSWeb.AutomationLive do
         class="mt-1 w-full rounded border border-base-content/20 bg-base-100 p-2 font-mono text-xs"
         placeholder={~s({"to": "team@example.com", "subject": "Live: {{title}}"})}
       >{@config_json}</textarea>
+      <p :for={msg <- @config_errors} class="mt-1.5 flex items-center gap-2 text-sm text-error">
+        <.icon name="hero-exclamation-circle" class="size-5" />
+        {msg}
+      </p>
       <p class="mt-1 text-xs text-base-content/60">
         {gettext(
           "send_email: to, subject, body. broadcast: topic. Templates support {{title}}, {{slug}}, {{type}}, {{event}}."
         )}
+      </p>
+      <p class="mt-1 text-xs text-base-content/60">
+        {gettext(
+          "flag_duplicates, suggest_tags, suggest_links, suggest_metadata: to. They email their findings and never write to the record. suggest_metadata additionally needs allow_egress: true when the configured model provider is off-site."
+        )}
+      </p>
+      <p class="mt-1 text-xs font-medium text-base-content/70">
+        {gettext("%{action} accepts: %{keys}", action: @config_action, keys: @config_keys)}
       </p>
     </div>
     """

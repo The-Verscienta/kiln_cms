@@ -72,7 +72,16 @@ defmodule KilnCMSWeb.FormLiveTest do
 
     form =
       CMS.create_form!(
-        %{name: "Contact", slug: "fl-dup", success_message: "Merci!", submit_label: "Send"},
+        %{
+          name: "Contact",
+          slug: "fl-dup",
+          success_message: "Merci!",
+          submit_label: "Send",
+          embed_origins: ["https://acme.test"],
+          autoresponder_enabled: true,
+          autoresponder_subject: "Thanks!",
+          autoresponder_body: "We got it."
+        },
         actor: admin
       )
 
@@ -94,6 +103,15 @@ defmodule KilnCMSWeb.FormLiveTest do
     refute copy.active
     assert copy.success_message == "Merci!"
     assert copy.submit_label == "Send"
+
+    # Every settable attribute, not a hand-kept subset. The list this replaced
+    # had already lost the autoresponder fields, and since #648 a missed one is
+    # a security default: a copy without `embed_origins` silently falls back to
+    # the deployment-wide allowlist, which on a multi-org instance is every
+    # other org's embedders.
+    assert copy.embed_origins == ["https://acme.test"]
+    assert copy.autoresponder_enabled
+    assert copy.autoresponder_subject == "Thanks!"
 
     assert [field] = CMS.form_fields_for!(copy.id, authorize?: false)
     assert field.name == "email"

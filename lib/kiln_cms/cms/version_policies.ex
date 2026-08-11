@@ -39,6 +39,27 @@ defmodule KilnCMS.CMS.VersionPolicies do
         destroy :destroy
       end
 
+      # The row's own signature (#598/#670). It is what lets `Chain.verify/4`
+      # tell a version that ARRIVED LATE from one SPLICED IN once the fold order
+      # is assigned rather than re-derived: a late row carries a valid one, a row
+      # somebody inserted into the table does not.
+      #
+      # Declared in this mixin rather than per resource because AshPaperTrail
+      # generates the version resource itself, and this is the seam it leaves
+      # open — so `Page.Version`, `Post.Version`, `Entry.Version` and every
+      # overlay tier get it without a per-resource edit.
+      #
+      # `nil` on a deployment with no provenance key, which is the normal state
+      # of a default install and reported as an anomaly rather than a verdict.
+      attributes do
+        attribute :chain_signature, :string, public?: false
+        attribute :chain_key_id, :string, public?: false
+      end
+
+      changes do
+        change KilnCMS.Governance.Changes.SignVersion, on: [:create]
+      end
+
       policies do
         bypass KilnCMS.CMS.Checks.OrgAdmin do
           authorize_if always()

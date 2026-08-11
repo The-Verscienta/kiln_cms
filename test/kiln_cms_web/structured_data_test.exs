@@ -114,6 +114,30 @@ defmodule KilnCMSWeb.StructuredDataTest do
     assert hd(items)["url"] == "http://localhost:4000/blog/p1"
   end
 
+  describe "teaser/3 (#337 Phase 2, #769)" do
+    test "with no record, defaults to WebPage (backward compatible)" do
+      teaser = KilnCMSWeb.Teaser.from_record(page(%{audience: :member}), "http://x/about")
+      [node] = StructuredData.teaser(teaser)
+
+      assert node["@type"] == "WebPage"
+      assert node["name"] == "About"
+      assert node["isAccessibleForFree"] == false
+    end
+
+    test "resolves @type from the gated record, matching the full render's @type" do
+      record = post(%{audience: :member})
+      teaser = KilnCMSWeb.Teaser.from_record(record, "http://x/blog/hello")
+
+      [node] = StructuredData.teaser(teaser, record)
+      full = StructuredData.build(record, ContentTypes.get(:post))
+
+      assert node["@type"] == "BlogPosting"
+      assert node["@type"] == full["@type"]
+      assert node["headline"] == "Hello"
+      assert node["isAccessibleForFree"] == false
+    end
+  end
+
   describe "tenant-hosted org URLs (#557)" do
     test "build/3 and document/3 derive the url/breadcrumbs from the given org's host" do
       org = tenant_org()

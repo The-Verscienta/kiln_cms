@@ -16,8 +16,8 @@ defmodule KilnCMS.CMS.TypedBlocks do
   accessors tolerate both.
   """
 
-  alias KilnCMS.Blocks.{Claim, Columns, Custom, Divider, Embed, Faq, Form, Heading, HowTo}
-  alias KilnCMS.Blocks.{Image, Quote, RichText}
+  alias KilnCMS.Blocks.{Accordion, Claim, Columns, Custom, Divider, Embed, Faq, Form}
+  alias KilnCMS.Blocks.{Gallery, Heading, HowTo, Image, Quote, RichText}
   alias KilnCMS.HTMLSanitizer
 
   # Guards recursion for the nested `columns` block: hostile API input can't force
@@ -41,6 +41,23 @@ defmodule KilnCMS.CMS.TypedBlocks do
   def to_typed(blocks), do: blocks |> List.wrap() |> Enum.map(&one_to_typed/1)
 
   defp one_to_typed(%Ash.Union{value: value}), do: one_to_typed(value)
+
+  # An `Ash.Union` that has been through JSON — `%{"type" => tag, "value" => …}`
+  # — which is how a union lands in a paper-trail version's freeform `changes`
+  # map. Without this clause it misses `typed_map?/1` (the `_type` tag is one
+  # level down), falls through to the legacy branch, and every block in a
+  # replayed document comes back as `Custom` (#917).
+  #
+  # That is why a point-in-time read rendered a bare `<!-- fragment block -->`:
+  # `Fragments.expand/3` never saw a `%Fragment{}` to expand. It was mis-typing
+  # every OTHER block the same way, silently, since replay existed.
+  #
+  # `map_size/1` pins the shape: the serialized union has exactly these two
+  # keys, while a legacy block carries its kind in `"type"` alongside its own
+  # attributes, so a bare size check is what keeps the two apart.
+  defp one_to_typed(%{"type" => _tag, "value" => %{} = value} = map) when map_size(map) == 2,
+    do: one_to_typed(value)
+
   defp one_to_typed(%mod{} = struct) when mod in @block_modules, do: struct
   defp one_to_typed(%{} = map), do: one_from_typed_or_legacy(map)
   defp one_to_typed(_other), do: %Custom{_type: "custom", data: %{}}
@@ -77,8 +94,38 @@ defmodule KilnCMS.CMS.TypedBlocks do
 
   def to_union_input(value) do
     case typed_attrs(value) do
-      {nil, _attrs} -> value
-      {name, attrs} -> attrs |> Map.put("_type", name) |> sanitize_attrs() |> drop_nils()
+      {nil, _attrs} ->
+        value
+
+      {name, attrs} ->
+        attrs |> Map.put("_type", name) |> adopt_artifact_id() |> sanitize_attrs() |> drop_nils()
+    end
+  end
+
+  @doc false
+  # The fired `:json` artifact names a block's id `_id`, not `id`
+  # (`KilnCMS.Blocks.render/2`), because blocks are `_type`-tagged maps that
+  # otherwise drop identity. That is the only surface on which a headless client
+  # can read a block's id at all — `blocks` is not `public?`, and GraphQL and
+  # JSON:API both hide it.
+  #
+  # So the one way such a client can round-trip ids is to read the artifact and
+  # send it back, and that did not work: the write path reads `id`, so every
+  # block arrived id-less (fresh ids minted, judged as new) while `_id` was
+  # carried into storage as a junk key nothing reads (#954).
+  #
+  # Accepting it closes the loop for published content, at both levels — a
+  # nested child's `_id` is emitted the same way, since `Columns` renders its
+  # children through the same function.
+  #
+  # An explicit `id` wins: a client that knows the real name means it.
+  defp adopt_artifact_id(%{} = attrs) do
+    case {Map.get(attrs, "id"), Map.pop(attrs, "_id")} do
+      {nil, {artifact_id, rest}} when is_binary(artifact_id) and artifact_id != "" ->
+        Map.put(rest, "id", artifact_id)
+
+      {_present, {_artifact_id, rest}} ->
+        rest
     end
   end
 
@@ -160,14 +207,67 @@ defmodule KilnCMS.CMS.TypedBlocks do
   defp sanitize_attrs(%{"_type" => "image"} = m),
     do: Map.update(m, "url", nil, &(HTMLSanitizer.safe_image_src(&1) || ""))
 
-  defp sanitize_attrs(%{"_type" => "embed"} = m),
-    do: Map.update(m, "url", nil, &(HTMLSanitizer.safe_embed_url(&1) || ""))
+  # Keeps the author's URL rather than rewriting it to a player URL (#489).
+  #
+  # This used to run `safe_embed_url/1`, which knows two hosts and rewrites
+  # them — so a stored embed URL was a canonical YouTube/Vimeo player URL or the
+  # empty string, and everything else an author pasted was destroyed on save.
+  # Whether a URL may be *framed* is a render-time question both surfaces
+  # already ask; making it the storage filter as well meant nothing downstream
+  # could ever see what was actually embedded.
+  #
+  # The metadata fields are resolved server-side, but they are ordinary block
+  # scalars — the editor's generic field renderer offers them as inputs and a
+  # headless `block_tree` write can set them directly — so they are filtered
+  # here on the same footing as anything else an author can type. In particular
+  # `thumbnail_url` becomes an `<img src>`: without this, "checked against the
+  # provider's CDN when it was resolved" would be true only of values that
+  # actually came from a resolve.
+  defp sanitize_attrs(%{"_type" => "embed"} = m) do
+    m
+    |> Map.update("url", nil, &(HTMLSanitizer.safe_external_url(&1) || ""))
+    |> Map.update("thumbnail_url", nil, &KilnCMS.OEmbed.allowed_thumbnail(&1))
+  end
+
+  # A `gallery`'s urls live one level down, inside an `{:array, :map}` field, so
+  # the `image` clause above never sees them. Without this a gallery item is the
+  # one image url on the write path that reaches storage unfiltered — a
+  # `javascript:` src straight through to delivery (#482).
+  defp sanitize_attrs(%{"_type" => "gallery"} = m) do
+    Map.update(m, "images", [], fn
+      images when is_list(images) -> Enum.map(images, &sanitize_gallery_image/1)
+      _other -> []
+    end)
+  end
 
   # A `columns` container: sanitize each child block through the same typed-input
   # pipeline a top-level block uses, so nested rich_text/image/embed are cleaned.
   defp sanitize_attrs(%{"_type" => "columns"} = m), do: sanitize_columns_block(m, 1)
 
   defp sanitize_attrs(m), do: m
+
+  # String-keyed and url-filtered, whatever shape came in.
+  #
+  # Keys are normalized first because atom-keyed image maps are a real input —
+  # seeds, in-Elixir importers and plugins all produce them, and
+  # `KilnCMS.Blocks.Gallery.images/1` deliberately reads either. Updating only
+  # the `"url"` key would leave an atom-keyed `:url` untouched *and* insert a
+  # nil `"url"` beside it, so the unfiltered value is the one that wins on read
+  # — reaching the fired JSON artifact, which is precisely the consumer the
+  # sanitizer exists for (the HTML paths re-filter on the way out; JSON does
+  # not).
+  defp sanitize_gallery_image(image) when is_map(image) do
+    image
+    |> Map.new(fn {key, value} -> {to_string(key), value} end)
+    |> Map.update("url", "", fn
+      url when is_binary(url) -> HTMLSanitizer.safe_image_src(url) || ""
+      # A number or an object is not a url. Blanking it keeps a malformed API
+      # write a no-op rather than a `FunctionClauseError` 500 out of cast.
+      _other -> ""
+    end)
+  end
+
+  defp sanitize_gallery_image(other), do: other
 
   # The editor's hidden input posts body as a JSON string of the live TipTap
   # document; the API/imports post decoded Portable Text. Normalize all input
@@ -212,12 +312,19 @@ defmodule KilnCMS.CMS.TypedBlocks do
           [
             attrs
             |> Map.put("_type", "columns")
+            |> adopt_artifact_id()
             |> sanitize_columns_block(depth + 1)
             |> drop_nils()
           ]
 
         {name, attrs} ->
-          [attrs |> Map.put("_type", name) |> sanitize_attrs() |> drop_nils()]
+          [
+            attrs
+            |> Map.put("_type", name)
+            |> adopt_artifact_id()
+            |> sanitize_attrs()
+            |> drop_nils()
+          ]
       end
     end)
   end
@@ -309,14 +416,50 @@ defmodule KilnCMS.CMS.TypedBlocks do
   defp typed(:quote, id, content, data, _block),
     do: %Quote{id: id, _type: "quote", text: content, citation: data_str(data, "citation")}
 
-  defp typed(:embed, id, content, _data, _block),
-    do: %Embed{id: id, _type: "embed", url: content}
+  # The oEmbed metadata (#489) rides in `data`, like every other block's
+  # non-primary fields. Dropping it here loses the card on any legacy→typed
+  # path, which is every delivery and preview read.
+  defp typed(:embed, id, content, data, _block) do
+    %Embed{
+      id: id,
+      _type: "embed",
+      url: content,
+      title: data_str(data, "title"),
+      author_name: data_str(data, "author_name"),
+      provider_name: data_str(data, "provider_name"),
+      thumbnail_url: data_str(data, "thumbnail_url"),
+      resolved_url: data_str(data, "resolved_url"),
+      resolved_at: data_str(data, "resolved_at")
+    }
+  end
 
   defp typed(:divider, id, _content, _data, _block),
     do: %Divider{id: id, _type: "divider"}
 
   defp typed(:form, id, content, data, _block),
     do: %Form{id: id, _type: "form", form_slug: data_str(data, "form_slug") || content}
+
+  # Repeating-item blocks: the item list rides in `data` as a raw string-keyed
+  # map list, and the section heading rides in `content`.
+  defp typed(:gallery, id, content, data, _block) do
+    %Gallery{
+      id: id,
+      _type: "gallery",
+      title: content,
+      layout: data_str(data, "layout"),
+      images: data_maps(data, "images")
+    }
+  end
+
+  defp typed(:accordion, id, content, data, _block) do
+    %Accordion{
+      id: id,
+      _type: "accordion",
+      title: content,
+      first_open: data_bool(data, "first_open"),
+      panels: data_maps(data, "panels")
+    }
+  end
 
   # GEO blocks (#357): items/steps ride in `data` as raw string-keyed map lists.
   defp typed(:faq, id, content, data, _block),
@@ -390,12 +533,44 @@ defmodule KilnCMS.CMS.TypedBlocks do
   defp one_to_legacy(%Quote{} = b),
     do: %{type: :quote, content: b.text, data: %{"citation" => b.citation}, id: b.id}
 
-  defp one_to_legacy(%Embed{} = b), do: %{type: :embed, content: b.url, data: %{}, id: b.id}
+  defp one_to_legacy(%Embed{} = b),
+    do: %{
+      type: :embed,
+      content: b.url,
+      data: %{
+        "title" => b.title,
+        "author_name" => b.author_name,
+        "provider_name" => b.provider_name,
+        "thumbnail_url" => b.thumbnail_url,
+        "resolved_url" => b.resolved_url,
+        "resolved_at" => b.resolved_at
+      },
+      id: b.id
+    }
 
   defp one_to_legacy(%Divider{} = b), do: %{type: :divider, content: nil, data: %{}, id: b.id}
 
   defp one_to_legacy(%Form{} = b),
     do: %{type: :form, content: b.form_slug, data: %{"form_slug" => b.form_slug}, id: b.id}
+
+  # Repeating-item blocks (#482): heading in `content`, item list in `data` as a
+  # raw map list, normalized through the block module so delivery never has to
+  # tell a missing key from a blank one.
+  defp one_to_legacy(%Gallery{} = b),
+    do: %{
+      type: :gallery,
+      content: b.title,
+      data: %{"layout" => b.layout, "images" => Gallery.images(b)},
+      id: b.id
+    }
+
+  defp one_to_legacy(%Accordion{} = b),
+    do: %{
+      type: :accordion,
+      content: b.title,
+      data: %{"first_open" => b.first_open == true, "panels" => Accordion.panels(b)},
+      id: b.id
+    }
 
   # GEO blocks (#357): the primary text rides in `content`, the rest in `data`
   # (items/steps stay raw map lists — see the block modules).
@@ -436,6 +611,16 @@ defmodule KilnCMS.CMS.TypedBlocks do
   defp one_to_legacy(%Custom{} = b),
     do: %{type: to_type(b.legacy_type), content: b.content, data: b.data || %{}, id: b.id}
 
+  # Total fallback. Every preview surface (`preview_live`, `token_preview_live`,
+  # `release_preview_live`, the in-context editor, the editor's own pop-out
+  # preview) funnels through here, so a block type with no clause above is a
+  # crash on those pages rather than a missing block — and the set without one
+  # grows every time a block is added (`video`, `audio`, `file` and now
+  # `fragment` all lacked one). A content-free legacy block renders as nothing,
+  # which is what these surfaces should show for a block they can't project.
+  defp one_to_legacy(%_{} = block),
+    do: %{type: :custom, content: nil, data: %{}, id: Map.get(block, :id)}
+
   defp rich_text_content(%RichText{legacy_html: html}) when is_binary(html) and html != "",
     do: KilnCMS.HTMLSanitizer.sanitize_rich_text(html)
 
@@ -466,6 +651,17 @@ defmodule KilnCMS.CMS.TypedBlocks do
     case Map.get(data, key) do
       list when is_list(list) -> Enum.filter(list, &is_map/1)
       _ -> []
+    end
+  end
+
+  # A jsonb boolean. Strings are accepted because form params are always strings
+  # and `one_to_legacy/1` writes a real boolean — the value has to survive a
+  # round trip through both.
+  defp data_bool(data, key) do
+    case Map.get(data, key) do
+      value when is_boolean(value) -> value
+      value when is_binary(value) -> value in ["true", "1", "on"]
+      _ -> false
     end
   end
 

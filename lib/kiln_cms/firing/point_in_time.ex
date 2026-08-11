@@ -217,7 +217,13 @@ defmodule KilnCMS.Firing.PointInTime do
           # today's formulas, and projecting onto today's field definitions
           # would add fields defined since and drop fields since deleted, making
           # the historical artifact assert values that were never live then.
-          |> Engine.fire(mode: :preview, custom_fields: :as_stored)
+          # `fragments: as_of` for the same reason (#917). `Fragments.expand/3`
+          # otherwise reads the target's *current* published blocks, so a
+          # historical read returned the fragment as edited today — or an empty
+          # `blocks` array where the content was, if the target has since been
+          # unpublished or gated. Both are silent wrong answers on the one
+          # endpoint whose entire promise is "what did this say on…".
+          |> Engine.fire(mode: :preview, custom_fields: :as_stored, fragments: as_of)
 
         {:ok, Map.fetch!(artifacts, surface), published_at}
 
@@ -253,14 +259,65 @@ defmodule KilnCMS.Firing.PointInTime do
     end
   end
 
+  @doc """
+  The attribute state `id` carried at `as_of`, if it was published then (#917).
+
+  The fragment-expansion counterpart of `read/5`: a point-in-time artifact has
+  to inline what the target said *then*, and this is the primitive
+  `KilnCMS.CMS.Fragments` calls to get it.
+
+  Returns the whole replayed state, string-keyed, **not just the blocks** — the
+  caller has to re-apply the visibility rules against the values that were live
+  at `as_of` (`"audience"`, and `"type_definition_id"` for a dynamic type), and
+  it can only do that if it can see them. Handing back blocks alone is what made
+  the first cut of this leak a gated fragment into a public artifact.
+
+  `:absent` covers every reason a target has no historical body — never
+  published, withdrawn before `as_of`, hard-purged since, or no version rows at
+  all — which expansion treats exactly as it treats an unpublished target
+  today: it expands to nothing.
+
+  Deliberately reuses `last_transition/4` and `still_exists?/3`, so "published
+  then" and "not erased" mean the same thing here, in `read/5` and in
+  `index/4`. A fragment visible in one and not the others would be the same
+  class of disagreement those two guard against.
+  """
+  @spec snapshot_state(Ash.UUID.t(), module(), Ash.UUID.t(), DateTime.t()) ::
+          {:ok, map()} | :absent
+  def snapshot_state(org_id, resource, id, %DateTime{} = as_of) do
+    version_module = Module.concat(resource, Version)
+
+    with true <- still_exists?(resource, id, org_id),
+         {:ok, published_at} <- last_transition(version_module, id, as_of, org_id) do
+      {:ok, replay(version_module, id, published_at, org_id)}
+    else
+      _absent -> :absent
+    end
+  rescue
+    # A target whose version table can't be read is a miss, not a 500 on a
+    # governance page — the same posture `read_target_live/4` takes.
+    _error -> :absent
+  end
+
   # Reconstruct the full attribute state at `up_to` by merging every version's
   # `changes` in chronological order (`:changes_only` tracking).
+  #
+  # `KilnCMS.CMS.VersionSnapshot` owns that fold, and this used to carry its own
+  # copy — sorted on `version_inserted_at` alone, with no tiebreak (#692). Two
+  # versions written in one transaction share an instant, so their merge order
+  # was whatever Postgres happened to return, and this endpoint could reconstruct
+  # a *different* document than restore and version-compare did for the same
+  # moment. On the one API whose whole promise is "what did this say at T", two
+  # answers is the same as none.
+  #
+  # The file already knew timestamps aren't unique: `last_transition/4` tiebreaks
+  # on `id`, and `title_slug_at/3`'s raw SQL orders `version_inserted_at ASC, id
+  # ASC`. Only the Elixir fold missed it.
   defp replay(version_module, id, up_to, org_id) do
-    version_module
-    |> Ash.Query.filter(version_source_id == ^id and version_inserted_at <= ^up_to)
-    |> Ash.Query.sort(version_inserted_at: :asc)
-    |> Ash.read!(authorize?: false, tenant: org_id)
-    |> Enum.reduce(%{}, fn version, acc -> Map.merge(acc, version.changes) end)
+    KilnCMS.CMS.VersionSnapshot.at_time(version_module, id, up_to,
+      authorize?: false,
+      tenant: org_id
+    )
   end
 
   # A fireable document struct of `resource` from the replayed (string-keyed)
@@ -278,6 +335,28 @@ defmodule KilnCMS.Firing.PointInTime do
 
     # `org_id` is a version column (attributes_as_attributes), not in the freeform
     # `changes` map, so stamp it explicitly for the in-memory re-fire.
-    struct(resource, attrs |> Map.put(:id, id) |> Map.put(:org_id, org_id))
+    resource
+    |> struct(attrs |> Map.put(:id, id) |> Map.put(:org_id, org_id))
+    |> as_stored_seo()
+  end
+
+  # The replayed document's own SEO fields, stamped onto the `effective_seo_*`
+  # calculations the fired `:json_ld` reads (#1102).
+  #
+  # Same rule as `custom_fields: :as_stored` and `fragments: as_of` above, and
+  # the same failure without it: `KilnCMS.Seo.Patterns.effective/3` falls back to
+  # resolving the type's #805 pattern from the **live** registry, so a historical
+  # artifact would carry a description assembled from a pattern written this week
+  # — on the one endpoint whose promise is what the document said then. A
+  # calculation that is already loaded is returned verbatim, so pre-setting it to
+  # the stored value is how "as stored" is expressed here.
+  defp as_stored_seo(document) do
+    Enum.reduce([:seo_title, :seo_description], document, fn field, acc ->
+      calculation = KilnCMS.Seo.Patterns.calculation_name(field)
+
+      if Map.has_key?(acc, calculation),
+        do: Map.put(acc, calculation, Map.get(acc, field)),
+        else: acc
+    end)
   end
 end

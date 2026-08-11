@@ -31,9 +31,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
        |> assign(:actor, actor)
        |> assign(:page_title, gettext("Custom fields"))
        |> assign(:content_types, ContentTypes.all())
-       |> assign(:dynamic_types, ContentTypes.dynamic_all(org_id(org)))
+       |> assign(:dynamic_types, ContentTypes.dynamic_all(org))
        |> assign(:field_types, FieldDefinition.field_types())
-       |> assign(:target_types, target_types(org_id(org)))
+       |> assign(:target_types, ContentTypes.options(org))
        |> assign(:edit, nil)
        |> assign(:form, create_form(actor, org))
        |> load_definitions()}
@@ -50,12 +50,12 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   # --- create ----------------------------------------------------------------
 
   @impl true
-  def handle_event("validate", %{"field_definition" => params}, socket) do
+  def handle_event("validate", %{"field_definition" => params}, socket) when is_map(params) do
     {:noreply,
      assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, normalize(params)))}
   end
 
-  def handle_event("create", %{"field_definition" => params}, socket) do
+  def handle_event("create", %{"field_definition" => params}, socket) when is_map(params) do
     case AshPhoenix.Form.submit(socket.assigns.form, params: normalize(params)) do
       {:ok, _definition} ->
         {:noreply,
@@ -71,7 +71,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   # --- inline edit -----------------------------------------------------------
 
-  def handle_event("edit", %{"id" => id}, socket) do
+  def handle_event("edit", %{"id" => id}, socket) when is_binary(id) do
     {:noreply,
      assign(socket, :edit, %{
        id: id,
@@ -81,7 +81,8 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   def handle_event("cancel_edit", _params, socket), do: {:noreply, assign(socket, :edit, nil)}
 
-  def handle_event("validate_edit", %{"field_definition" => params}, socket) do
+  def handle_event("validate_edit", %{"field_definition" => params}, socket)
+      when is_map(params) do
     edit = %{
       socket.assigns.edit
       | form: AshPhoenix.Form.validate(socket.assigns.edit.form, normalize(params))
@@ -90,7 +91,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     {:noreply, assign(socket, :edit, edit)}
   end
 
-  def handle_event("save_edit", %{"field_definition" => params}, socket) do
+  def handle_event("save_edit", %{"field_definition" => params}, socket) when is_map(params) do
     case AshPhoenix.Form.submit(socket.assigns.edit.form, params: normalize(params)) do
       {:ok, _definition} ->
         {:noreply,
@@ -101,7 +102,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     end
   end
 
-  def handle_event("delete", %{"id" => id}, socket) do
+  def handle_event("delete", %{"id" => id}, socket) when is_binary(id) do
     actor = socket.assigns.actor
     org = socket.assigns.current_org
 
@@ -164,10 +165,6 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     |> to_form()
   end
 
-  # The dynamic-type registry (`ContentTypes.*`) keys by a raw org_id.
-  defp org_id(%{id: id}), do: id
-  defp org_id(id) when is_binary(id), do: id
-
   # Options are entered one-per-line (or comma-separated) in a textarea and
   # stored as a string array. Split, trim and drop blanks before they reach the
   # attribute. Only meaningful for `:select`, harmless otherwise. The scope
@@ -182,15 +179,6 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       |> Enum.reject(&(&1 == ""))
 
     params |> Map.put("options", options) |> unpack_scope()
-  end
-
-  # What a `:reference` field may point at: every type, compiled or dynamic,
-  # as `{label, name string}` select options.
-  defp target_types(org_id) do
-    Enum.map(
-      ContentTypes.all() ++ ContentTypes.dynamic_all(org_id),
-      &{&1.label, to_string(&1.type)}
-    )
   end
 
   # Whether the reference-target select applies to the form's current type.

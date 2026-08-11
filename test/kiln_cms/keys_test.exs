@@ -100,6 +100,53 @@ defmodule KilnCMS.KeysTest do
       refute Providers.Env.writable?()
     end
 
+    test "env provider unescapes the literal-\\n form a .env file forces (#609)" do
+      var = "KILN_TEST_DKIM_#{System.unique_integer([:positive])}"
+      pem = Keys.generate_rsa_pem()
+      # The single-line form an operator reaches for when the parser can't carry
+      # real newlines — which read verbatim never PEM-decodes and silently
+      # disables signing.
+      System.put_env(var, String.replace(pem, "\n", "\\n"))
+      on_exit(fn -> System.delete_env(var) end)
+
+      assert {:ok, restored} = Providers.Env.fetch(%{"var" => var})
+      assert restored == pem
+      # And the restored value actually decodes to a usable key.
+      assert {:ok, _key} = Keys.rsa_private_key(restored)
+    end
+
+    test "env provider unescapes the Windows \\r\\n form too (#609)" do
+      var = "KILN_TEST_DKIM_#{System.unique_integer([:positive])}"
+      pem = Keys.generate_rsa_pem()
+      System.put_env(var, String.replace(pem, "\n", "\\r\\n"))
+      on_exit(fn -> System.delete_env(var) end)
+
+      assert {:ok, restored} = Providers.Env.fetch(%{"var" => var})
+      # No stray carriage returns left behind — a clean, decodable PEM.
+      refute restored =~ "\r"
+      assert restored == pem
+      assert {:ok, _key} = Keys.rsa_private_key(restored)
+    end
+
+    test "env provider strips wrapping double quotes around the escaped PEM (#609)" do
+      var = "KILN_TEST_DKIM_#{System.unique_integer([:positive])}"
+      pem = Keys.generate_rsa_pem()
+      System.put_env(var, ~s(") <> String.replace(pem, "\n", "\\n") <> ~s("))
+      on_exit(fn -> System.delete_env(var) end)
+
+      assert {:ok, ^pem} = Providers.Env.fetch(%{"var" => var})
+    end
+
+    test "env provider leaves a real multi-line PEM untouched (#609)" do
+      var = "KILN_TEST_DKIM_#{System.unique_integer([:positive])}"
+      pem = Keys.generate_rsa_pem()
+      System.put_env(var, pem)
+      on_exit(fn -> System.delete_env(var) end)
+
+      # No literal `\n`, no wrapping quotes → returned byte-for-byte.
+      assert {:ok, ^pem} = Providers.Env.fetch(%{"var" => var})
+    end
+
     @tag :tmp_dir
     test "file provider reads its path and reports unreadable ones", %{tmp_dir: tmp_dir} do
       path = Path.join(tmp_dir, "dkim.pem")

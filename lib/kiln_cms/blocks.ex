@@ -15,17 +15,36 @@ defmodule KilnCMS.Blocks do
   @core_blocks [
     heading: KilnCMS.Blocks.Heading,
     image: KilnCMS.Blocks.Image,
+    # A downloadable document attachment (#481) — deliberately not named
+    # "document" to avoid colliding with the unrelated "document" vocabulary
+    # elsewhere in the CMS (content types, the DB "documents").
+    file: KilnCMS.Blocks.File,
+    # Self-hosted A/V (#494) — distinct from `embed`, which points at
+    # YouTube/Vimeo. Two blocks rather than one with a kind flag: an
+    # `<audio>` has no poster and no captions track, so half a shared block's
+    # fields would be permanently inert on it.
+    video: KilnCMS.Blocks.Video,
+    audio: KilnCMS.Blocks.Audio,
     rich_text: KilnCMS.Blocks.RichText,
     quote: KilnCMS.Blocks.Quote,
     embed: KilnCMS.Blocks.Embed,
     divider: KilnCMS.Blocks.Divider,
     form: KilnCMS.Blocks.Form,
     columns: KilnCMS.Blocks.Columns,
+    gallery: KilnCMS.Blocks.Gallery,
+    # The semantically neutral sibling of `faq` (#482): same `<details>` markup,
+    # deliberately no structured data. See its moduledoc for why that split is by
+    # meaning rather than by looks.
+    accordion: KilnCMS.Blocks.Accordion,
     # GEO blocks (#357): structured Q&A, procedures, and sourced claims whose
     # :json_ld renders expand the fired @graph (FAQPage / HowTo / Claim(Review)).
     faq: KilnCMS.Blocks.Faq,
     how_to: KilnCMS.Blocks.HowTo,
     claim: KilnCMS.Blocks.Claim,
+    # Reusable content fragments (#479): a reference that is *inlined* before
+    # any renderer runs (see `KilnCMS.CMS.Fragments`), so it has no surface
+    # output of its own.
+    fragment: KilnCMS.Blocks.Fragment,
     custom: KilnCMS.Blocks.Custom
   ]
 

@@ -9,6 +9,7 @@ defmodule KilnCMSWeb.Plugs.RateLimit do
 
   use Gettext, backend: KilnCMSWeb.Gettext
 
+  alias KilnCMSWeb.ApiError
   alias KilnCMSWeb.RateLimit
 
   def init(bucket) when is_atom(bucket), do: bucket
@@ -23,7 +24,6 @@ defmodule KilnCMSWeb.Plugs.RateLimit do
 
         conn
         |> put_resp_header("retry-after", Integer.to_string(retry_after_s))
-        |> put_status(429)
         |> render_denial(retry_after_s)
         |> halt()
     end
@@ -32,14 +32,24 @@ defmodule KilnCMSWeb.Plugs.RateLimit do
   # A browser navigation (Accept: text/html) gets a readable page; everything
   # else (API clients, fetch/XHR) keeps the JSON error shape.
   #
+  # That JSON goes through `ApiError` like every other headless refusal (#744).
+  # This plug fronts the `:api`, `:auth`, `:form` and `:preview` pipelines — so
+  # a 429 here is the one error *every* headless surface shares, and it used to
+  # be the one that answered `detail` alone. A client branching on
+  # `errors[].code` got `undefined` on the single refusal that has a defined
+  # recovery, next to a `retry-after` telling it exactly how to take it. Worse
+  # on `/api/auth/sign_in/verify`, which could answer 429 in two shapes for the
+  # same URL depending on whether the per-IP bucket or the per-account budget
+  # refused it.
+  #
   # The XSS.HTML warning is a false positive: `deny_html/1` interpolates only
   # gettext strings and a server-computed integer — no request data.
   # sobelow_skip ["XSS.HTML"]
   defp render_denial(conn, retry_after_s) do
     if html_request?(conn) do
-      Phoenix.Controller.html(conn, deny_html(retry_after_s))
+      conn |> put_status(429) |> Phoenix.Controller.html(deny_html(retry_after_s))
     else
-      Phoenix.Controller.json(conn, %{errors: [%{detail: "Too many requests"}]})
+      ApiError.send(conn, :too_many_requests, "too_many_requests", "Too many requests.")
     end
   end
 
@@ -83,9 +93,8 @@ defmodule KilnCMSWeb.Plugs.RateLimit do
     """
   end
 
-  defp remote_ip(conn) do
-    conn.remote_ip
-    |> :inet.ntoa()
-    |> to_string()
-  end
+  # Through `RateLimit.client_key/1` rather than formatted here, so this and the
+  # socket path (`KilnCMSWeb.SignInLive`) cannot spell one client two ways and
+  # split the `:auth` bucket they are meant to share (#715).
+  defp remote_ip(conn), do: RateLimit.client_key(conn.remote_ip)
 end

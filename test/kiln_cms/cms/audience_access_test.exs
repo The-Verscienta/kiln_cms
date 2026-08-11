@@ -22,6 +22,42 @@ defmodule KilnCMS.CMS.AudienceAccessTest do
     })
   end
 
+  describe "public_to_anonymous?/1 — the shared rule, and its direction" do
+    # The three surfaces that decide "may an anonymous visitor read this?" in
+    # memory rather than in an Ash expr — the Meilisearch index (#1006), an
+    # ActivityPub Announce (#491), related-content suggestions — used to spell
+    # this three different ways and disagree on the case that matters.
+    alias KilnCMS.CMS.Audiences
+
+    test "a published, public, unlocked record is public" do
+      assert Audiences.public_to_anonymous?(%{
+               state: :published,
+               audience: :public,
+               access_password_hash: nil
+             })
+    end
+
+    test "each of the three exclusions alone is enough to say no" do
+      base = %{state: :published, audience: :public, access_password_hash: nil}
+
+      refute Audiences.public_to_anonymous?(%{base | state: :draft})
+      refute Audiences.public_to_anonymous?(%{base | audience: :member})
+      refute Audiences.public_to_anonymous?(%{base | access_password_hash: "$2b$..."})
+    end
+
+    test "a record MISSING a field fails closed, not open" do
+      # The bug this replaced: `Map.get(record, :audience, :public)` reads an
+      # absent audience as public, so a `select` that narrowed the load would
+      # push a gated document to strangers' timelines. Absent must mean "cannot
+      # be shown to be public", which is not the same as "is public".
+      refute Audiences.public_to_anonymous?(%{state: :published, access_password_hash: nil})
+      refute Audiences.public_to_anonymous?(%{state: :published, audience: :public})
+      refute Audiences.public_to_anonymous?(%{audience: :public, access_password_hash: nil})
+      refute Audiences.public_to_anonymous?(%{})
+      refute Audiences.public_to_anonymous?(nil)
+    end
+  end
+
   # Seed a page directly in a given state/audience, bypassing the publish
   # workflow (which isn't under test here).
   defp page(audience, state \\ :published) do

@@ -41,7 +41,7 @@ defmodule KilnCMSWeb.SitemapController do
   # capped, and accumulation stops once the overall ceiling is reached.
   # Dynamic types (D17) are included — their entries carry the same read policy.
   defp build_urls(org) do
-    Enum.reduce_while(ContentTypes.all() ++ ContentTypes.dynamic_all(org.id), [], fn ct, acc ->
+    Enum.reduce_while(ContentTypes.all_for_org(org.id), [], fn ct, acc ->
       remaining = @max_urls - length(acc)
 
       if remaining <= 0 do
@@ -117,11 +117,9 @@ defmodule KilnCMSWeb.SitemapController do
     """
   end
 
-  # Minimal XML-entity escaping for the (already URL-ish) slug values.
-  defp escape(value) do
-    value
-    |> String.replace("&", "&amp;")
-    |> String.replace("<", "&lt;")
-    |> String.replace(">", "&gt;")
-  end
+  # Shared with the feeds and the XLIFF export (`KilnCMS.Xml`). This used to be
+  # a three-character copy that let a control byte through — which is what a
+  # duplicated escaper always drifts into, and one control byte makes the whole
+  # sitemap unparseable rather than one URL.
+  defdelegate escape(value), to: KilnCMS.Xml
 end

@@ -28,6 +28,8 @@ defmodule KilnCMSWeb.Teaser do
   about their own metadata.
   """
 
+  alias KilnCMS.Seo.Patterns
+
   @enforce_keys [:title, :audience, :url]
   defstruct [
     :title,
@@ -52,18 +54,41 @@ defmodule KilnCMSWeb.Teaser do
 
   `url` is the document's own canonical path — a paywall must not canonicalise to
   the join page, or search engines would index the wrong URL.
+
+  `opts` may carry `:type` (the content type descriptor) and `:org`, which the
+  caller has already resolved; they only decide the #805 pattern defaults below,
+  and are looked up from the record when absent.
   """
-  @spec from_record(struct(), String.t()) :: t()
-  def from_record(record, url) do
+  @spec from_record(struct(), String.t(), keyword()) :: t()
+  def from_record(record, url, opts \\ []) do
     %__MODULE__{
       title: record.title,
       # `Map.get/2`: `excerpt` only exists on types that opted into it.
+      #
+      # The STORED description, never the type's #805 default. `summary` is the
+      # paragraph a locked-out reader READS (`teaser.html.heex`,
+      # `lock.html.heex`), not a meta tag, and a type patterned
+      # `"[title] — subscribe to read"` must not show that string as if it were
+      # the article's own lede.
       summary: blank_to_nil(Map.get(record, :excerpt)) || blank_to_nil(record.seo_description),
       audience: record.audience,
       url: url,
       published_at: Map.get(record, :published_at),
-      seo_title: record.seo_title,
-      seo_description: record.seo_description,
+      # The meta tags get the opposite rule — the type's default where the
+      # record has none, exactly as the member render resolves it (#805).
+      #
+      # Resolved from the record here rather than applied to this struct
+      # afterwards (#1102), so that the slug route and the `path_alias` route —
+      # which reach this through two different reads — cannot answer differently
+      # for one document.
+      #
+      # `[category]` and `[field:<name>]` still expand empty on a teaser: both
+      # need columns the paywall-safe select deliberately omits, and loading the
+      # `effective_seo_*` calculations here would widen that select for every
+      # consumer of the record, not just this one. `docs/seo.md` says so, and
+      # the separator elision makes it a shorter tag rather than a broken one.
+      seo_title: Patterns.effective(record, :seo_title, opts),
+      seo_description: Patterns.effective(record, :seo_description, opts),
       seo_image: record.seo_image,
       canonical_url: record.canonical_url,
       path_alias: record.path_alias,

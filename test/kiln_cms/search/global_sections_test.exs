@@ -49,9 +49,13 @@ defmodule KilnCMS.Search.GlobalSectionsTest do
     CMS.create_post!(%{title: "alpha notes", slug: "gs-post"}, actor: admin)
     KilnCMS.DataCase.drain_oban()
 
+    # Taxonomy keys come from the registry rather than a literal list (#530) —
+    # the literal is how `tag_groups` came to be missing from search in the
+    # first place, and restating it here would let it happen again.
     expected_keys =
       (Enum.map(KilnCMS.CMS.ContentTypes.all(), & &1.section) ++
-         [:entries, :media, :categories, :tags])
+         [:entries, :media] ++
+         Enum.map(KilnCMS.CMS.Taxonomy.searchable(), &elem(&1, 0)))
       |> Enum.sort()
 
     ids = fn sections ->
@@ -75,5 +79,73 @@ defmodule KilnCMS.Search.GlobalSectionsTest do
     # Sanity: the query actually matched something, so this isn't comparing
     # two empty maps.
     assert Enum.any?(serial, fn {_k, records} -> records != [] end)
+  end
+
+  describe ":sections (#960)" do
+    test "only the requested sections run, and the rest are absent" do
+      admin = admin()
+      CMS.create_page!(%{title: "alpha guide", slug: "gs-sel-page"}, actor: admin)
+      CMS.create_post!(%{title: "alpha notes", slug: "gs-sel-post"}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      result = Search.global("alpha", actor: admin, sections: [:pages, :posts])
+
+      assert Enum.sort(Map.keys(result)) == [:pages, :posts]
+
+      # Absent, not empty: "you did not ask" and "there were no matches" are
+      # different answers, and conflating them is how a caller ends up
+      # believing a section is empty when it never ran.
+      refute Map.has_key?(result, :media)
+      refute Map.has_key?(result, :tags)
+
+      # …and the sections asked for still actually searched.
+      assert Enum.any?(result.pages, &(&1.slug == "gs-sel-page"))
+    end
+
+    test "the default is still every section" do
+      admin = admin()
+      all = Search.global("alpha", actor: admin)
+
+      assert Map.has_key?(all, :media)
+      assert Map.has_key?(all, :tags)
+      assert Map.has_key?(all, :entries)
+    end
+
+    test "content_sections/0 is derived from the registry, not a literal" do
+      # The point of exporting it: a caller that says "the content sections"
+      # keeps meaning that when a type is registered. A literal list is how
+      # `tag_groups` came to be missing from search entirely (#530).
+      expected = Enum.map(KilnCMS.CMS.ContentTypes.all(), & &1.section) ++ [:entries]
+
+      assert Enum.sort(Search.content_sections()) == Enum.sort(expected)
+      assert :entries in Search.content_sections()
+
+      # It is a valid selection — a section key it named that global/2 did not
+      # know would raise below.
+      result = Search.global("alpha", actor: admin(), sections: Search.content_sections())
+      assert Enum.sort(Map.keys(result)) == Enum.sort(Search.content_sections())
+    end
+
+    test "an unknown section raises rather than silently returning less" do
+      # Ignoring it would answer a sweep missing a section the caller asked
+      # for, with nothing failing — which is exactly how #530 happened.
+      assert_raise ArgumentError, ~r/unknown search section/, fn ->
+        Search.global("alpha", actor: admin(), sections: [:pages, :pagez])
+      end
+    end
+
+    test "the raise names what is registered" do
+      # On an install with plugin-registered types the valid set is not
+      # something the caller can read off the source, so the message has to
+      # carry it.
+      error =
+        assert_raise ArgumentError, fn ->
+          Search.global("alpha", actor: admin(), sections: [:nope])
+        end
+
+      assert error.message =~ ":nope"
+      assert error.message =~ "registered sections are"
+      assert error.message =~ ":media"
+    end
   end
 end

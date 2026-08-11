@@ -115,6 +115,16 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ "Media"
     end
 
+    # #501: each row's "Assign" button deep-links into the editor's
+    # Assignment panel (`?assign=1`), not a duplicate of "Edit".
+    test "each row has an Assign entry point into the editor", %{conn: conn} do
+      page = draft_page(%{title: "Assignable Row"})
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+
+      assert html =~ ~s(href="/editor/content/page/#{page.id}?assign=1")
+      assert html =~ "Assign"
+    end
+
     # #155: workflow state labels are humanized and localized, not raw atoms.
     test "humanizes workflow state labels", %{conn: conn} do
       draft_page(%{title: "ReviewMe", state: :in_review})
@@ -1058,8 +1068,8 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       assert picker =~ ~s(role="dialog")
       assert picker =~ ~s(aria-modal="true")
-      assert picker =~ ~s(aria-labelledby="image-picker-title")
-      assert picker =~ ~s(id="image-picker-title")
+      assert picker =~ ~s(aria-labelledby="image-picker-dialog-title")
+      assert picker =~ ~s(id="image-picker-dialog-title")
       assert picker =~ ~s(phx-hook="FocusTrap")
     end
 
@@ -1838,7 +1848,11 @@ defmodule KilnCMSWeb.EditorLiveTest do
         |> Enum.filter(&(&1.version_source_id == page.id))
         |> Enum.sort_by(& &1.version_inserted_at, DateTime)
 
-      lv |> element("button[phx-value-version_id='#{create_version.id}']") |> render_click()
+      # Scoped to the restore control: each row also carries a compare-picker
+      # toggle bound to the same version id (#467).
+      lv
+      |> element("button[phx-click='restore'][phx-value-version_id='#{create_version.id}']")
+      |> render_click()
 
       assert CMS.get_page!(page.id, authorize?: false).title == "Original"
     end
@@ -1997,6 +2011,52 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert kept == tag.id
     end
 
+    # `@tags` is loaded once at mount; `record.tags` is refreshed on every
+    # autosave. A tag attached AFTER mount (a collaborator, a second tab) is in
+    # the record but not `@tags`, so the picker used to render no checkbox for
+    # it — and the next save submitted `tag_ids` without it, detaching it
+    # (#522). The union of the two must always give an attached tag a control.
+    test "a tag attached after mount is not detached on the next save", %{conn: conn} do
+      editor = authed_user(:editor)
+      post = CMS.create_post!(%{title: "T", slug: "p-#{uniq()}"}, actor: editor)
+
+      # Mount before any tag exists, so the mount-time `@tags` is empty and the
+      # picker renders no `tag_ids` field at all.
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+
+      # A collaborator attaches a newly-created tag after this mount. Seed the
+      # join row directly rather than through `add_tag_ids`: that would bump the
+      # post's optimistic `lock_version`, so the editor's autosave below would
+      # hit a stale-conflict and never re-fetch — masking the very split the bug
+      # needs (fresh `record.tags`, stale `@tags`).
+      latecomer = Ash.Seed.seed!(Tag, %{name: "latecomer", slug: "t-#{uniq()}"})
+
+      Ash.Seed.seed!(KilnCMS.CMS.Tagging, %{
+        org_id: post.org_id,
+        subject_id: post.id,
+        tag_id: latecomer.id
+      })
+
+      # An edit + autosave re-fetches `record.tags` (now the latecomer) while
+      # `@tags` stays the empty mount-time list. The autosave submits no
+      # `tag_ids` (the field wasn't rendered), so it leaves the link alone.
+      lv |> form("#post-editor", form: %{title: "Edited"}) |> render_change()
+      send(lv.pid, :autosave)
+      html = render(lv)
+
+      # The latecomer now renders, checked — before the fix, `@tags == []` hid
+      # the whole picker body and the tag had no control.
+      assert html =~
+               ~r/<input[^>]*value="#{latecomer.id}"[^>]*checked|checked[^>]*value="#{latecomer.id}"/
+
+      # A save that never touches the tag field must keep the link.
+      lv |> form("#post-editor", form: %{title: "Final"}) |> render_submit()
+
+      saved = CMS.get_post!(post.id, authorize?: false, load: [:tags])
+      assert [%{id: kept}] = saved.tags
+      assert kept == latecomer.id
+    end
+
     # The rescue section is keyed on the record's PERSISTED tags, not on the
     # live checkbox state. Keying it on the latter meant unchecking a tag there
     # emptied the section, which the empty-section reject then deleted from the
@@ -2040,6 +2100,133 @@ defmodule KilnCMSWeb.EditorLiveTest do
                ~r/<input[^>]*value="#{orphan.id}"[^>]*checked|checked[^>]*value="#{orphan.id}"/
     end
 
+    # #638. The property the merge verbs buy, and the one `tag_ids` could not
+    # express: **removal is bounded by what the picker rendered**.
+    #
+    # Deliberately constructed so the rescue machinery cannot save it. The tag
+    # is attached out of band and this page never re-fetches before saving, so
+    # the picker has no control for it — which is exactly the state
+    # `append_and_remove` read as "detach me". The sibling test above ("a tag
+    # attached after mount…") covers the case where an autosave DOES re-fetch
+    # and the union puts a checkbox back; this one covers the gap that was left.
+    #
+    # The join row is seeded directly rather than through `add_tag_ids` for the
+    # reason documented there: the action bumps `lock_version` and the save
+    # below would hit a stale-conflict instead of exercising the tag path.
+    test "a tag the picker never rendered survives a save (#638)", %{conn: conn} do
+      editor = authed_user(:editor)
+      keeper = Ash.Seed.seed!(Tag, %{name: "keepertag", slug: "t-#{uniq()}"})
+
+      post =
+        CMS.create_post!(%{title: "T", slug: "p-#{uniq()}", tag_ids: [keeper.id]}, actor: editor)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+
+      latecomer = Ash.Seed.seed!(Tag, %{name: "latecomertag", slug: "t-#{uniq()}"})
+
+      Ash.Seed.seed!(KilnCMS.CMS.Tagging, %{
+        org_id: post.org_id,
+        subject_id: post.id,
+        tag_id: latecomer.id
+      })
+
+      # Straight to Save with no intervening autosave, so nothing re-fetches
+      # `record.tags` and the latecomer never gets a checkbox.
+      lv |> form("#post-editor", form: %{tag_ids: [keeper.id]}) |> render_submit()
+
+      assert tag_names(post.id) == ["keepertag", "latecomertag"]
+    end
+
+    test "an unticked tag that IS rendered is still removed (#638)", %{conn: conn} do
+      # The other half: the diff must not become "never remove anything". A tag
+      # the picker rendered and the editor unticked has to come off, or the fix
+      # for the detach bug is just a different bug.
+      editor = authed_user(:editor)
+      drop = Ash.Seed.seed!(Tag, %{name: "droptag", slug: "t-#{uniq()}"})
+      keeper = Ash.Seed.seed!(Tag, %{name: "keepertag", slug: "t-#{uniq()}"})
+
+      post =
+        CMS.create_post!(%{title: "T", slug: "p-#{uniq()}", tag_ids: [drop.id, keeper.id]},
+          actor: editor
+        )
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+
+      lv |> form("#post-editor", form: %{tag_ids: [keeper.id]}) |> render_submit()
+
+      assert tag_names(post.id) == ["keepertag"]
+    end
+
+    test "the picker renders no empty-string sentinel any more (#638)", %{conn: conn} do
+      post = draft_post()
+      Ash.Seed.seed!(Tag, %{name: "sometag", slug: "t-#{uniq()}"})
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
+
+      assert html =~ "sometag"
+      refute html =~ ~s(name="form[tag_ids][]" value="")
+    end
+
+    test "a page cached across the deploy can still post the old sentinel (#638)",
+         %{conn: conn} do
+      # Nothing renders `""` now, but a browser holding the previous release's
+      # page will submit one. It has to read as "nothing ticked", not as an id —
+      # a uuid cast error on save is not something an editor can act on.
+      editor = authed_user(:editor)
+      tag = Ash.Seed.seed!(Tag, %{name: "staletag", slug: "t-#{uniq()}"})
+
+      post =
+        CMS.create_post!(%{title: "T", slug: "p-#{uniq()}", tag_ids: [tag.id]}, actor: editor)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+
+      # Not through `form/3`: LiveViewTest validates values against the rendered
+      # inputs, and it now REFUSES `""` because no such input exists any more —
+      # which is itself the proof the sentinel is gone. The raw event is what a
+      # stale browser actually sends.
+      render_submit(lv, "save", %{
+        "form" => %{"title" => "T", "slug" => post.slug, "tag_ids" => [""]}
+      })
+
+      assert tag_names(post.id) == []
+    end
+
+    test "a crafted payload cannot smuggle in its own merge verbs (#638)", %{conn: conn} do
+      # The rewrite is what bounds a save to the tags this server put on the
+      # page, so it must not be skippable by posting the verbs directly. An
+      # earlier version passed such params straight through on the theory that
+      # they were "already merged".
+      editor = authed_user(:editor)
+      keeper = Ash.Seed.seed!(Tag, %{name: "keepertag", slug: "t-#{uniq()}"})
+      smuggled = Ash.Seed.seed!(Tag, %{name: "smuggledtag", slug: "t-#{uniq()}"})
+
+      post =
+        CMS.create_post!(%{title: "T", slug: "p-#{uniq()}", tag_ids: [keeper.id]}, actor: editor)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+
+      render_submit(lv, "save", %{
+        "form" => %{
+          "title" => "T",
+          "slug" => post.slug,
+          "tag_ids" => [keeper.id],
+          "add_tag_ids" => [smuggled.id]
+        }
+      })
+
+      # The ticks decide, not the smuggled argument.
+      assert tag_names(post.id) == ["keepertag"]
+    end
+
+    defp tag_names(post_id) do
+      post_id
+      |> CMS.get_post!(load: [:tags], authorize?: false)
+      |> Map.fetch!(:tags)
+      |> Enum.map(& &1.name)
+      |> Enum.sort()
+    end
+
     # `tags.tag_group_id` is a plain FK with no org component, so a tag can be
     # pointed at a group in another tenant. That group never appears in this
     # org's loaded list, and a tag the picker doesn't render is a tag
@@ -2077,6 +2264,262 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ ~s(value="#{stray.id}")
     end
 
+    # A section's `open` used to be re-derived per render as `selected_count >
+    # 0`. `app.js` only preserves the editor's own <details> toggle while the
+    # *server-rendered* value is unchanged, so unticking a group's last tag
+    # moved it true→false and the section folded shut under the cursor, hiding
+    # the siblings they were about to click (#523). The open set is decided once
+    # at mount and must not move for the rest of the session.
+    test "a section stays open after its last tag is unticked", %{conn: conn} do
+      editor = authed_user(:editor)
+
+      group = Ash.Seed.seed!(TagGroup, %{name: "OpenThemes", slug: "g-#{uniq()}"})
+      tag = Ash.Seed.seed!(Tag, %{name: "opentag", slug: "t-#{uniq()}", tag_group_id: group.id})
+
+      post =
+        CMS.create_post!(%{title: "T", slug: "p-#{uniq()}", tag_ids: [tag.id]}, actor: editor)
+
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+
+      # The section holds the selection, so it mounts expanded.
+      assert tag_section(html, "OpenThemes") =~ ~r/\sopen=/
+
+      # Untick it: the section's contents must still be on screen.
+      html = lv |> form("#post-editor", form: %{tag_ids: []}) |> render_change()
+
+      assert tag_section(html, "OpenThemes") =~ ~r/\sopen=/
+      assert html =~ "opentag"
+    end
+
+    # The mirror image: a section that mounted collapsed must not spring open
+    # when a tag inside it is ticked, for the same reason — any server-side flip
+    # of `open` overwrites whatever the editor has toggled by hand.
+    test "a section stays closed after a tag inside it is ticked", %{conn: conn} do
+      editor = authed_user(:editor)
+
+      group = Ash.Seed.seed!(TagGroup, %{name: "ShutThemes", slug: "g-#{uniq()}"})
+      tag = Ash.Seed.seed!(Tag, %{name: "shuttag", slug: "t-#{uniq()}", tag_group_id: group.id})
+
+      post = CMS.create_post!(%{title: "T", slug: "p-#{uniq()}"}, actor: editor)
+
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+
+      refute tag_section(html, "ShutThemes") =~ ~r/\sopen=/
+
+      html = lv |> form("#post-editor", form: %{tag_ids: [tag.id]}) |> render_change()
+
+      refute tag_section(html, "ShutThemes") =~ ~r/\sopen=/
+
+      # ...and the tick itself still registers.
+      assert html =~ ~r/<input[^>]*value="#{tag.id}"[^>]*checked|checked[^>]*value="#{tag.id}"/
+    end
+
+    # The same rule in the opening direction, and the one a save can break: a
+    # section already on screen must not be re-judged when the tick it holds
+    # becomes persisted. `app.js`'s preservation is skipped on exactly the patch
+    # where the server value moves, so a false→true flip would spring open a
+    # section the editor had deliberately collapsed.
+    test "a section already on screen stays closed once its tag is saved", %{conn: conn} do
+      editor = authed_user(:editor)
+
+      group = Ash.Seed.seed!(TagGroup, %{name: "SavedThemes", slug: "g-#{uniq()}"})
+      tag = Ash.Seed.seed!(Tag, %{name: "savedtag", slug: "t-#{uniq()}", tag_group_id: group.id})
+
+      post = CMS.create_post!(%{title: "T", slug: "p-#{uniq()}"}, actor: editor)
+
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+      refute tag_section(html, "SavedThemes") =~ ~r/\sopen=/
+
+      # Tick it and let the autosave persist it — `assign_record/2` reloads the
+      # record, so the section now genuinely holds an attached tag.
+      lv |> form("#post-editor", form: %{tag_ids: [tag.id]}) |> render_change()
+      send(lv.pid, :autosave)
+      html = render(lv)
+
+      # The save really landed — otherwise the assertion below proves nothing.
+      assert [%{id: saved}] = CMS.get_post!(post.id, authorize?: false, load: [:tags]).tags
+      assert saved == tag.id
+
+      refute tag_section(html, "SavedThemes") =~ ~r/\sopen=/
+    end
+
+    # The counterweight to the freeze: `@sections` is rebuilt from the reloaded
+    # record, so a section can appear mid-session that mount never saw. "Also
+    # attached" is the one that matters — it exists so a tag a collaborator hung
+    # off an out-of-scope group is visible and undoable before the next
+    # append_and_remove save (#522), which a collapsed section undercuts. Growing
+    # the open set is safe; only shrinking it is what #523 forbids.
+    test "a section that first appears mid-session arrives expanded", %{conn: conn} do
+      editor = authed_user(:editor)
+
+      group =
+        Ash.Seed.seed!(TagGroup, %{
+          name: "PagesOnly",
+          slug: "g-#{uniq()}",
+          content_types: ["page"]
+        })
+
+      post = CMS.create_post!(%{title: "T", slug: "p-#{uniq()}"}, actor: editor)
+
+      # Mount with nothing attached, so no "Also attached" section exists yet.
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+      refute html =~ "Also attached"
+
+      # A collaborator attaches a tag from that page-only group. Seeded directly
+      # so the post's lock_version doesn't move and the autosave below re-fetches
+      # rather than hitting a stale-record conflict.
+      late = Ash.Seed.seed!(Tag, %{name: "latetag", slug: "t-#{uniq()}", tag_group_id: group.id})
+
+      Ash.Seed.seed!(KilnCMS.CMS.Tagging, %{
+        org_id: post.org_id,
+        subject_id: post.id,
+        tag_id: late.id
+      })
+
+      lv |> form("#post-editor", form: %{title: "Edited"}) |> render_change()
+      send(lv.pid, :autosave)
+      html = render(lv)
+
+      assert tag_section(html, "Also attached") =~ ~r/\sopen=/
+      assert html =~ "latetag"
+    end
+
+    # `pickable` and `@sections` are narrowed independently, so "there are tags"
+    # and "there is something to show" are two different questions. When every
+    # group is scoped to other content types and the record carries none of
+    # their tags, the picker used to render a legend and a filter box over
+    # nothing — no explanation, and the client-side filter then announced "No
+    # tags match that filter." under an untouched box (#524).
+    test "an org whose every tag is out of scope gets an explanation, not a blank box",
+         %{conn: conn} do
+      post = draft_post()
+
+      group =
+        Ash.Seed.seed!(TagGroup, %{
+          name: "PagesOnly",
+          slug: "g-#{uniq()}",
+          content_types: ["page"]
+        })
+
+      Ash.Seed.seed!(Tag, %{name: "pagetag", slug: "t-#{uniq()}", tag_group_id: group.id})
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
+
+      assert html =~ "No tags are available on this content type"
+      refute html =~ "No tags yet."
+
+      # Nothing to filter, so no filter box — and nothing that could then claim
+      # the filter matched nothing.
+      refute html =~ "data-tag-filter-input"
+      refute html =~ "data-tag-filter-empty"
+      refute html =~ "data-tag-section"
+
+      # And no sentinel: an empty `tag_ids` with no boxes to tick would read as
+      # "detach everything" rather than "the editor cleared the field".
+      refute html =~ ~s(name="form[tag_ids][]")
+    end
+
+    # The state is also reachable mid-session, and this is the route most
+    # editors take into it: the record's only tag came from a group later scoped
+    # to other types, so it renders under "Also attached" — and detaching it
+    # empties the last section there is. The picker has to explain itself on that
+    # patch too, not just at mount.
+    test "detaching the last out-of-scope tag leaves the explanation, not a blank box",
+         %{conn: conn} do
+      editor = authed_user(:editor)
+
+      group = Ash.Seed.seed!(TagGroup, %{name: "WasEverywhere", slug: "g-#{uniq()}"})
+      tag = Ash.Seed.seed!(Tag, %{name: "onlytag", slug: "t-#{uniq()}", tag_group_id: group.id})
+
+      post =
+        CMS.create_post!(%{title: "T", slug: "p-#{uniq()}", tag_ids: [tag.id]}, actor: editor)
+
+      # Narrowed after the fact — the tag is now on the record but its group no
+      # longer applies, so it lands in the rescue section.
+      CMS.update_tag_group!(group, %{content_types: ["page"]}, authorize?: false)
+
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+      assert html =~ "Also attached"
+      refute html =~ "No tags are available on this content type"
+
+      # Untick and save: with nothing attached, the out-of-scope group
+      # contributes nothing, and there is no other section to fall back to.
+      lv |> form("#post-editor", form: %{tag_ids: []}) |> render_submit()
+      html = render(lv)
+
+      assert CMS.get_post!(post.id, authorize?: false, load: [:tags]).tags == []
+      assert html =~ "No tags are available on this content type"
+      refute html =~ "Also attached"
+      refute html =~ "data-tag-filter-input"
+    end
+
+    test "an org with no tags at all still says so", %{conn: conn} do
+      post = draft_post()
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
+
+      assert html =~ "No tags yet."
+      refute html =~ "No tags are available on this content type"
+    end
+
+    # The opening `<details …>` tag of the picker section whose *summary* reads
+    # `label` — `open` lives there. Scoped by label rather than by position so
+    # another section appearing in the picker can't silently retarget an
+    # assertion, and matched only against the summary so a tag sharing a name
+    # with a group can't either.
+    defp tag_section(html, label) do
+      html
+      |> String.split("<details")
+      |> Enum.find_value(fn chunk ->
+        [summary | _] = String.split(chunk, "</summary>", parts: 2)
+        [attrs | _] = String.split(summary, ">", parts: 2)
+
+        if attrs =~ "data-tag-section" and String.contains?(summary, label),
+          do: "<details" <> attrs
+      end)
+      |> case do
+        nil -> flunk(~s(no tag-picker section whose summary reads "#{label}"))
+        tag -> tag
+      end
+    end
+
+    # The `<summary>` of the picker section with this label — where the
+    # "N of M" tick count lives.
+    defp tag_section_summary(html, label) do
+      html
+      |> String.split("<details")
+      |> Enum.find_value(fn chunk ->
+        [summary | _] = String.split(chunk, "</summary>", parts: 2)
+        if summary =~ "data-tag-section" and String.contains?(summary, label), do: summary
+      end)
+      |> case do
+        nil -> flunk(~s(no tag-picker section whose summary reads "#{label}"))
+        summary -> summary
+      end
+    end
+
+    # #528 moved the section skeleton off the render path — it is rebuilt only
+    # when the record changes, and only the per-section tick counts follow the
+    # live form. This pins the half that could regress silently: a count that
+    # stopped following the form would still render a plausible number.
+    # (The other half — a tag appearing mid-session still getting a checkbox —
+    # is already pinned by the #522 test above.)
+    test "a section's tick count follows the checkbox, not the saved record", %{conn: conn} do
+      editor = authed_user(:editor)
+      tag = Ash.Seed.seed!(Tag, %{name: "counted", slug: "t-#{uniq()}"})
+      post = CMS.create_post!(%{title: "T", slug: "p-#{uniq()}"}, actor: editor)
+
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+      assert tag_section_summary(html, "Ungrouped") =~ "0 of 1"
+
+      # Ticked but NOT saved: the count comes from the form, so it moves now.
+      html = lv |> form("#post-editor", form: %{tag_ids: [tag.id]}) |> render_change()
+
+      assert tag_section_summary(html, "Ungrouped") =~ "1 of 1"
+    end
+
     test "unchecking the last tag actually detaches it", %{conn: conn} do
       editor = authed_user(:editor)
       tag = Ash.Seed.seed!(Tag, %{name: "onlytag", slug: "t-#{uniq()}"})
@@ -2086,10 +2529,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
 
-      # An all-unchecked group submits only the hidden sentinel. Without it the
-      # key would be absent and selected_ids would fall back to record.tags,
-      # re-checking the box and making the tag impossible to remove.
-      lv |> form("#post-editor", form: %{tag_ids: [""]}) |> render_submit()
+      # Unticking every box submits no `tag_ids` key at all. Since #638 that is
+      # read against what the picker RENDERED, so it detaches — where before it
+      # needed a hidden sentinel to be distinguishable from "never touched".
+      lv |> form("#post-editor", form: %{tag_ids: []}) |> render_submit()
 
       assert CMS.get_post!(post.id, authorize?: false, load: [:tags]).tags == []
     end
@@ -2488,6 +2931,163 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert child["text"] == "Nested heading"
     end
 
+    # #893. Changing a nested heading's level did nothing: the `<select>` had no
+    # `name`, and a form-associated `phx-change` routes through LiveView's
+    # `pushInput`, which serializes the form filtered to the changed input's name
+    # and scrapes `phx-value-*` off the form rather than the element. With an
+    # empty name, neither the chosen level nor the three identifiers arrived.
+    #
+    # Asserted on the MARKUP, not only through the handler: `render_hook/3` and a
+    # hand-built `render_change/2` payload both supply params directly, so they
+    # pass just as happily against the nameless select that shipped. The `name`
+    # is the thing that makes the browser send anything at all.
+    test "the nested heading level select carries its identifiers in its name",
+         %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      add_columns_block(lv)
+      id = columns_block_id(lv)
+
+      lv
+      |> element("button[phx-click='col_add_child'][phx-value-col='0'][phx-value-type='heading']")
+      |> render_click()
+
+      [_, child_id] = Regex.run(~r/data-child-id="([^"]+)"/, render(lv))
+
+      assert has_element?(
+               lv,
+               ~s(select[name="col_child[#{id}][#{child_id}][level]"][phx-change="col_update_child"])
+             )
+    end
+
+    test "changing a nested heading's level persists it", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      add_columns_block(lv)
+      id = columns_block_id(lv)
+
+      lv
+      |> element("button[phx-click='col_add_child'][phx-value-col='0'][phx-value-type='heading']")
+      |> render_click()
+
+      [_, child_id] = Regex.run(~r/data-child-id="([^"]+)"/, render(lv))
+
+      # A heading child starts at level 2, so 3 is a real change.
+      lv
+      |> element(~s(select[name="col_child[#{id}][#{child_id}][level]"]))
+      |> render_change(%{"col_child" => %{id => %{child_id => %{"level" => "3"}}}})
+
+      # Reflected in the control, so a reload does not silently revert it.
+      assert has_element?(
+               lv,
+               ~s(select[name="col_child[#{id}][#{child_id}][level]"] option[value="3"][selected])
+             )
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert [%{"blocks" => [child]}, %{"blocks" => []}] = block.data["columns"]
+      assert child["level"] == 3
+    end
+
+    # The select is named outside the `form[...]` namespace so it stays out of
+    # the content changeset, the way the nameless sibling inputs do. If it ever
+    # lands inside it, the level would be cast as a content attribute.
+    test "the level select does not enter the content form's params", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      add_columns_block(lv)
+
+      lv
+      |> element("button[phx-click='col_add_child'][phx-value-col='0'][phx-value-type='heading']")
+      |> render_click()
+
+      refute render(lv) =~ ~s(name="form[col_child)
+    end
+
+    # `field` arrives from a client event and used to reach a bare `Map.put/3`,
+    # so a payload could name a *structural* key. `_type` rewrites the union
+    # discriminator: the next save fails its typed cast, and on the autosave
+    # path that surfaces as an error with no field to point at, leaving the
+    # document unsaveable until the block is deleted.
+    test "a field the child's editor does not render is ignored", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      add_columns_block(lv)
+      id = columns_block_id(lv)
+
+      lv
+      |> element("button[phx-click='col_add_child'][phx-value-col='0'][phx-value-type='heading']")
+      |> render_click()
+
+      [_, child_id] = Regex.run(~r/data-child-id="([^"]+)"/, render(lv))
+
+      for bad <- ["_type", "id"] do
+        render_hook(lv, "col_update_child", %{
+          "id" => id,
+          "child" => child_id,
+          "field" => bad,
+          "value" => "tampered"
+        })
+      end
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert [%{"blocks" => [child]}, %{"blocks" => []}] = block.data["columns"]
+      assert child["_type"] == "heading"
+      assert child["id"] == child_id
+    end
+
+    # A child with no stored level showed H1 in the select while delivery renders
+    # h2 (`Blocks.Heading.clamp/1`'s default). Harmless while the control was
+    # inert; a lie once it works, and an editor "confirming" H1 would get h2.
+    test "a heading with no usable level shows the level it will publish at",
+         %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      add_columns_block(lv)
+      id = columns_block_id(lv)
+
+      lv
+      |> element("button[phx-click='col_add_child'][phx-value-col='0'][phx-value-type='heading']")
+      |> render_click()
+
+      [_, child_id] = Regex.run(~r/data-child-id="([^"]+)"/, render(lv))
+
+      # `to_int("")` is 0 — the same value a legacy child with no `level` key
+      # produces, and the one that used to leave no option selected so the
+      # browser displayed H1 while delivery rendered h2.
+      lv
+      |> element(~s(select[name="col_child[#{id}][#{child_id}][level]"]))
+      |> render_change(%{"col_child" => %{id => %{child_id => %{"level" => ""}}}})
+
+      selector =
+        ~s(select[name="col_child[#{id}][#{child_id}][level]"] option[value="2"][selected])
+
+      assert has_element?(lv, selector)
+
+      refute has_element?(
+               lv,
+               ~s(select[name="col_child[#{id}][#{child_id}][level]"] option[value="1"][selected])
+             )
+    end
+
     test "the nested block renders in the live preview", %{conn: conn} do
       page = draft_page(%{blocks: []})
 
@@ -2543,7 +3143,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       # Add one Q&A row, then type into its bound inputs.
       lv
-      |> element("button[phx-click='geo_item_add'][phx-value-index='0']")
+      |> element("button[phx-click='item_row_add'][phx-value-index='0']")
       |> render_click()
 
       lv
@@ -2578,11 +3178,11 @@ defmodule KilnCMSWeb.EditorLiveTest do
       |> render_click()
 
       lv
-      |> element("button[phx-click='geo_item_add'][phx-value-index='0']")
+      |> element("button[phx-click='item_row_add'][phx-value-index='0']")
       |> render_click()
 
       lv
-      |> element("button[phx-click='geo_item_remove'][phx-value-index='0'][phx-value-item='0']")
+      |> element("button[phx-click='item_row_remove'][phx-value-index='0'][phx-value-item='0']")
       |> render_click()
 
       lv |> form("#page-editor") |> render_submit()
@@ -2590,6 +3190,261 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
       assert block.type == :faq
       assert block.data["items"] == []
+    end
+
+    # #482: the accordion rides the same row editor as faq/how_to, so what needs
+    # pinning is that it was actually wired into it (`@row_editor_types` and
+    # `@row_fields` are two lists that have to agree) rather than that repeating
+    # rows work at all.
+    test "accordion panels add, edit and persist through save", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      lv
+      |> element("#block-inserter button[data-inserter-item][phx-value-type='accordion']")
+      |> render_click()
+
+      lv
+      |> element("button[phx-click='item_row_add'][phx-value-index='0']")
+      |> render_click()
+
+      lv
+      |> form("#page-editor")
+      |> render_change(%{
+        "form" => %{
+          "blocks" => %{
+            "0" => %{
+              "title" => "Specifications",
+              "panels" => %{"0" => %{"title" => "Size", "content" => "Large"}}
+            }
+          }
+        }
+      })
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert block.type == :accordion
+      assert block.content == "Specifications"
+      assert block.data["panels"] == [%{"title" => "Size", "content" => "Large"}]
+    end
+
+    test "gallery images are picked, reordered and removed", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+      [a, b] = for n <- 1..2, do: gallery_media(n)
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      lv
+      |> element("#block-inserter button[data-inserter-item][phx-value-type='gallery']")
+      |> render_click()
+
+      bid = gallery_block_id(lv)
+
+      # Multi-select: two images chosen in one visit to the drawer, and the
+      # order they were clicked is the order they land in.
+      lv
+      |> element("button[phx-click='open_gallery_picker'][phx-value-bid='#{bid}']")
+      |> render_click()
+
+      for item <- [b, a], do: lv |> element("button[phx-value-id='#{item.id}']") |> render_click()
+      lv |> element("button[phx-click='add_picked_images']") |> render_click()
+
+      lv |> form("#page-editor") |> render_submit()
+      assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert Enum.map(block.data["images"], & &1["media_id"]) == [b.id, a.id]
+    end
+
+    test "moving an image down swaps it with the next one", %{conn: conn} do
+      page =
+        draft_page(%{
+          blocks: [
+            %{
+              "_type" => "gallery",
+              "id" => Ash.UUID.generate(),
+              "images" => [
+                %{"url" => "/one.jpg", "alt" => "One"},
+                %{"url" => "/two.jpg", "alt" => "Two"}
+              ]
+            }
+          ]
+        })
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      bid = gallery_block_id(lv)
+
+      lv
+      |> element(
+        "button[phx-click='gallery_move'][phx-value-bid='#{bid}'][phx-value-item='0'][phx-value-dir='down']"
+      )
+      |> render_click()
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert Enum.map(block.data["images"], & &1["alt"]) == ["Two", "One"]
+    end
+
+    # The drag hook reports the new order as previous row indices. A stale or
+    # partial order must not delete rows — it is a reorder, not a replace.
+    test "a partial drag order appends the rows it did not mention", %{conn: conn} do
+      page =
+        draft_page(%{
+          blocks: [
+            %{
+              "_type" => "gallery",
+              "id" => Ash.UUID.generate(),
+              "images" => [
+                %{"url" => "/one.jpg", "alt" => "One"},
+                %{"url" => "/two.jpg", "alt" => "Two"},
+                %{"url" => "/three.jpg", "alt" => "Three"}
+              ]
+            }
+          ]
+        })
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      render_hook(lv, "gallery_reorder", %{"bid" => gallery_block_id(lv), "order" => ["2", "0"]})
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert Enum.map(block.data["images"], & &1["alt"]) == ["Three", "One", "Two"]
+    end
+
+    defp gallery_media(n) do
+      unique = System.unique_integer([:positive])
+
+      Ash.Seed.seed!(MediaItem, %{
+        filename: "g#{n}-#{unique}.jpg",
+        url: "/uploads/g#{n}-#{unique}"
+      })
+    end
+
+    # The gallery editor keys its controls on the block's stable id, which is
+    # generated on insert — read it back out of the rendered markup rather than
+    # assuming an index.
+    defp gallery_block_id(lv) do
+      [_, bid] =
+        Regex.run(~r/phx-click="open_gallery_picker" phx-value-bid="([^"]+)"/, render(lv))
+
+      bid
+    end
+
+    # The one that mattered most: `AshPhoenix.Form.params/1` is only_touched?, so
+    # on a form loaded from a saved record a partial `blocks` write deletes every
+    # block it does not mention. `pick_image` already guarded against this;
+    # the row/gallery buttons did not, and populating a gallery goes through them.
+    test "editing one block's rows does not delete the document's other blocks", %{conn: conn} do
+      media = gallery_media(1)
+
+      page =
+        draft_page(%{
+          blocks: [
+            %{
+              "_type" => "heading",
+              "id" => Ash.UUID.generate(),
+              "text" => "Keep me",
+              "level" => 2
+            },
+            %{"_type" => "gallery", "id" => Ash.UUID.generate(), "images" => []}
+          ]
+        })
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      bid = gallery_block_id(lv)
+
+      lv
+      |> element("button[phx-click='open_gallery_picker'][phx-value-bid='#{bid}']")
+      |> render_click()
+
+      lv |> element("button[phx-value-id='#{media.id}']") |> render_click()
+      lv |> element("button[phx-click='add_picked_images']") |> render_click()
+      lv |> form("#page-editor") |> render_submit()
+
+      blocks = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+
+      assert Enum.map(blocks, & &1.type) == [:heading, :gallery]
+      assert Enum.find(blocks, &(&1.type == :heading)).content == "Keep me"
+    end
+
+    test "reordering a gallery holding the same image twice keeps both", %{conn: conn} do
+      page =
+        draft_page(%{
+          blocks: [
+            %{
+              "_type" => "gallery",
+              "id" => Ash.UUID.generate(),
+              "images" => [
+                %{"url" => "/same.jpg", "alt" => ""},
+                %{"url" => "/same.jpg", "alt" => ""},
+                %{"url" => "/other.jpg", "alt" => "Other"}
+              ]
+            }
+          ]
+        })
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # Two of these rows are identical maps. Deduping the *rows* rather than the
+      # *indices* collapses them into one and then drops both from the tail, so a
+      # drag — including a drop in place, which Sortable also reports — silently
+      # deletes an image.
+      render_hook(lv, "gallery_reorder", %{
+        "bid" => gallery_block_id(lv),
+        "order" => ["2", "1", "0"]
+      })
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert length(block.data["images"]) == 3
+
+      assert Enum.map(block.data["images"], & &1["url"]) == [
+               "/other.jpg",
+               "/same.jpg",
+               "/same.jpg"
+             ]
+    end
+
+    test "an out-of-range move index is a no-op, not a nil row", %{conn: conn} do
+      page =
+        draft_page(%{
+          blocks: [
+            %{
+              "_type" => "gallery",
+              "id" => Ash.UUID.generate(),
+              "images" => [%{"url" => "/one.jpg", "alt" => "One"}]
+            }
+          ]
+        })
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      bid = gallery_block_id(lv)
+
+      # `to_int/1` accepts a negative, and `Enum.at(list, -1)` is the LAST row
+      # rather than an error — so an unchecked `from` moves the wrong image, and
+      # one past the end writes a `nil` into an `{:array, :map}` the resource
+      # refuses to save, wedging the block.
+      for {item, dir} <- [{"-1", "down"}, {"5", "up"}] do
+        render_click(lv, "gallery_move", %{"bid" => bid, "item" => item, "dir" => dir})
+      end
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert Enum.map(block.data["images"], & &1["alt"]) == ["One"]
     end
 
     test "a claim block persists its citation fields via the DSL editor", %{conn: conn} do
@@ -2637,7 +3492,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       |> render_click()
 
       lv
-      |> element("button[phx-click='geo_item_add'][phx-value-index='0']")
+      |> element("button[phx-click='item_row_add'][phx-value-index='0']")
       |> render_click()
 
       html =

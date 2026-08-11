@@ -13,11 +13,12 @@ defmodule KilnCMSWeb.CollabSocket do
   token naming a since-deleted account is refused at the next connect, instead
   of reaching the channel as an id nothing will look up.
 
-  It is refused *at the next connect*, not immediately: nothing calls
-  `Endpoint.disconnect/1` on the `id/1` value below, and `join/3` runs once, so
-  an already-established session keeps the access it was granted until its
-  socket drops. Deleting an account, demoting it, or narrowing its scopes does
-  not evict a live collab session. Tracked separately.
+  An *already-established* session used to keep whatever it was granted, since
+  `join/3` runs once and nothing dropped the socket. `KilnCMS.Accounts.SessionEviction`
+  now does, from the actions that demote, erase, or narrow a scope — the `id/1`
+  below is the topic it broadcasts on (#675). The change nobody wired an
+  eviction into is caught by `KilnCMSWeb.CollabChannel`'s own periodic re-check
+  (#775), which reloads the actor this module resolved and re-runs the join.
 
   The tenant comes from the connect URI's host, the same source `SetTenant`
   uses for HTTP (epic #336, #563). Sockets bypass the plug pipeline, so
@@ -34,7 +35,7 @@ defmodule KilnCMSWeb.CollabSocket do
   @max_age 60 * 60 * 24
 
   @impl true
-  def connect(%{"token" => token}, socket, connect_info) do
+  def connect(%{"token" => token}, socket, connect_info) when is_binary(token) do
     with {:ok, user_id} <-
            Phoenix.Token.verify(KilnCMSWeb.Endpoint, "collab", token, max_age: @max_age),
          # The struct match matters: a `not_found_error?: false` interface would
@@ -50,7 +51,12 @@ defmodule KilnCMSWeb.CollabSocket do
   def connect(_params, _socket, _connect_info), do: :error
 
   @impl true
-  def id(socket), do: "collab:user:#{socket.assigns.actor.id}"
+  # Phoenix drops every socket whose `id/1` matches a `"disconnect"` broadcast,
+  # which is how `KilnCMS.Accounts.SessionEviction` reaches this one. Built by
+  # that module rather than spelled here, so the two cannot drift onto different
+  # strings — a mismatch would leave the socket connected while the caller
+  # believed it dropped (#675).
+  def id(socket), do: KilnCMS.Accounts.SessionEviction.topic(socket.assigns.actor.id)
 
   # A token outlives the account it names by up to a day. Resolving now means a
   # deleted editor cannot keep collaborating on the strength of a token minted
@@ -61,7 +67,20 @@ defmodule KilnCMSWeb.CollabSocket do
 
   defp fetch_actor(_other), do: :error
 
+  # The refusal alerts (#678) — from here, the decision point, not from
+  # `Tenant.fetch_org_from_connect_info/1` itself.
   defp fetch_org(connect_info) do
-    KilnCMSWeb.Tenant.fetch_org_from_connect_info(connect_info)
+    case KilnCMSWeb.Tenant.fetch_org_from_connect_info(connect_info) do
+      {:ok, org} ->
+        {:ok, org}
+
+      :error ->
+        KilnCMSWeb.TenantRefusalAlert.notify(
+          :collab,
+          KilnCMSWeb.Tenant.connect_info_host(connect_info)
+        )
+
+        :error
+    end
   end
 end

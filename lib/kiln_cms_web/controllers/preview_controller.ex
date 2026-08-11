@@ -9,6 +9,7 @@ defmodule KilnCMSWeb.PreviewController do
   alias KilnCMS.CMS.ContentSerializer
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.PreviewToken
+  alias KilnCMSWeb.ApiError
 
   # A browser opening a shared preview link lands on the human multiplayer
   # view (#379); headless consumers (JSON accept — the default) are unchanged.
@@ -22,21 +23,27 @@ defmodule KilnCMSWeb.PreviewController do
       json(conn, %{data: ContentSerializer.to_map(record)})
     else
       _ ->
-        # Standard error envelope shared across the headless surfaces (#190).
-        conn
-        |> put_status(:not_found)
-        |> json(%{
-          errors: [
-            %{status: "404", code: "invalid_preview", detail: "Invalid or expired preview link."}
-          ]
-        })
+        ApiError.send(
+          conn,
+          :not_found,
+          "invalid_preview",
+          "Invalid or expired preview link."
+        )
     end
   end
 
   # The token carries the content type; resolve it generically via the registry.
   defp fetch(type, id) do
     if ContentTypes.type?(type),
-      do: ContentTypes.get_record(type, id, authorize?: false),
+      do:
+        ContentTypes.get_record(type, id,
+          authorize?: false,
+          # The payload carries both the stored SEO fields and their effective
+          # values (#1102); loading the calculations here is what lets
+          # `[category]` and `[field:<name>]` resolve to what the delivered page
+          # shows, rather than to what a record read with no loads can see.
+          load: KilnCMS.Seo.Patterns.loads([:seo_title, :seo_description])
+        ),
       else: {:error, :unknown_type}
   end
 end

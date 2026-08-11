@@ -1,6 +1,14 @@
 import Config
 config :kiln_cms, Oban, testing: :manual
 
+# No boot-time occurrence backfill (#766). Every test runs inside a rolled-back
+# sandbox, but application boot is OUTSIDE them — so an enqueue there commits a
+# real `oban_jobs` row, which `DataCase.drain_oban/0` then re-executes inside
+# whichever unrelated test drains next. `test_helper.exs` deletes stray rows and
+# warns when it does; leaving this on would make that warning fire on every run
+# and train away a signal that exists to catch real leakage.
+config :kiln_cms, :occurrence_backfill_on_boot, false
+
 # Keep DNS checks and the port-25 preflight off the network in tests; explicit
 # `dns:`/`tcp:` opts in DnsCheck tests still override these.
 config :kiln_cms, KilnCMS.Mail.DnsCheck,
@@ -19,8 +27,40 @@ config :kiln_cms, KilnCMS.CMS.ContentTypes, cache_registry?: false
 # Route outbound webhook HTTP through a Req.Test stub in tests.
 config :kiln_cms, KilnCMS.Webhooks, req_options: [plug: {Req.Test, KilnCMS.Webhooks}]
 
+# oEmbed (#489) is OFF by default everywhere, including here — the tests that
+# need it turn it on themselves, so nothing accidentally makes an outbound
+# request. `req_options` points at a Req.Test stub for when they do; the
+# SafeUrl `resolve_dns: false` below is what lets a stub host resolve at all.
+config :kiln_cms, KilnCMS.OEmbed,
+  enabled: false,
+  req_options: [plug: {Req.Test, KilnCMS.OEmbed}]
+
 # Webhook URL validation: skip DNS resolution for Req.Test stub hosts.
 config :kiln_cms, KilnCMS.Webhooks.SafeUrl, require_https: false, resolve_dns: false
+
+# ActivityPub federation (#491). **Off**, like production — the federation
+# tests turn it on for themselves via `KilnCMS.FederationFixtures`. Leaving it
+# on globally would make every publish in the whole suite enqueue an
+# announcement job, which is a side effect on tests that have nothing to do
+# with federation (and did visibly perturb the hybrid-search suite).
+# Outbound requests (actor fetches, inbox deliveries) go through a Req.Test stub.
+config :kiln_cms, KilnCMS.Federation,
+  enabled: false,
+  req_options: [plug: {Req.Test, KilnCMS.Federation}]
+
+# Content experiments (#499). Off, like production — the experiment tests turn it
+# on for themselves. On globally it would make every delivery request in the
+# suite consult the running-experiment cache, and would flip experimented pages
+# to `no-store` under tests that assert cache headers.
+config :kiln_cms, KilnCMS.Experiments, enabled: false
+
+# Outbound link checking (#474). Every request goes to a Req.Test stub; nothing
+# in the suite may reach the real web. The per-host throttle is widened to
+# effectively off, because pacing is tested directly (`Links.Throttle`) and
+# leaving it at its two-second production window would make any test that
+# checks two URLs on one stub host wait for it.
+config :kiln_cms, KilnCMS.Links.External, req_options: [plug: {Req.Test, KilnCMS.Links.External}]
+config :kiln_cms, KilnCMS.Links.Throttle, per_host: {10_000, 1_000}
 
 # S3 storage adapter: dummy credentials + route ExAws HTTP through a Req.Test
 # stub, so the adapter is exercised end-to-end (signing included) with no live S3.
@@ -40,6 +80,28 @@ config :kiln_cms, :unsplash, req_options: [plug: {Req.Test, KilnCMS.Unsplash}]
 # reaches api.github.com. Left enabled so the enabled/disabled branches can
 # both be exercised by overriding this per-test.
 config :kiln_cms, Kiln.Updates, req_options: [plug: {Req.Test, Kiln.Updates}]
+
+# The HTTP governance witness (#733) reaches an operator-configured transparency
+# log. Never dialled for real in tests; the stub stands in for the log.
+config :kiln_cms, KilnCMS.Governance.Witness.HTTP,
+  req_options: [plug: {Req.Test, KilnCMS.Governance.Witness.HTTP}]
+
+# Route social-provider HTTP (#497) through a Req.Test stub, so no test ever
+# reaches bsky.social or somebody's Mastodon instance. Nothing posts without a
+# configured account, so this is a safety net rather than the gate.
+config :kiln_cms, KilnCMS.Social, req_options: [plug: {Req.Test, KilnCMS.Social}]
+
+# App-icon verification (#629) fetches an operator-supplied URL server-side to
+# measure it. Stubbed here so the suite never dials out; tests that exercise the
+# absolute-URL branch install their own `Req.Test.stub/2`.
+config :kiln_cms, KilnCMS.Branding.AppIcon,
+  req_options: [plug: {Req.Test, KilnCMS.Branding.AppIcon}]
+
+# Web Push (#628). No VAPID keys by default, so `KilnCMS.Push.enabled?/0` is
+# false and the suite's editorial actions enqueue no push jobs — the push tests
+# configure a pair explicitly. `req_options` points the sender at a stub for
+# when they do.
+config :kiln_cms, KilnCMS.Push, req_options: [plug: {Req.Test, KilnCMS.Push}]
 
 # Route payment-provider HTTP through a Req.Test stub, so no test ever reaches
 # api.stripe.com. Billing still stays inert unless a test configures credentials
@@ -64,20 +126,52 @@ config :ash, policies: [show_policy_breakdowns?: true], disable_async?: true
 # call the record functions synchronously instead.
 config :kiln_cms, :analytics_enabled, false
 
-# Raise the rate-limit buckets the broad controller suites hammer, per IP. All
-# test requests come from 127.0.0.1, so a fast full-suite run can pack more than
-# the production `:api` limit (120/min) of `/api/*` calls into one window and
-# 429 unrelated tests (flaky on fast machines, and it started failing CI as the
-# `/api` test volume grew). Only the buckets no test asserts on are raised — the
-# `:auth`/`:preview`/`:form`/`:docs` limits `KilnCMSWeb.Plugs.RateLimitTest`
-# exercises are left at their real values. Production is unaffected (unset).
+# Rate-limit overrides for the suite.
+#
+# `:api` / `:delivery` / `:gql` / `:probe` stay raised: those doors still see
+# enough traffic from a *single* test's own address (or from `build_conn/0`
+# callers that have not moved onto ConnCase's unique default) that the real
+# production ceilings would 429 unrelated assertions.
+#
+# `:auth` and `:register` used to be raised too (#715, #724), because every
+# ConnCase request peered from `127.0.0.1` and shared one bucket. ConnCase's
+# setup now mints a per-test address (#936), so those two can exercise the
+# shipped ceilings. Files that deliberately share an address — proving a
+# per-account budget is not per-IP — opt back in with `loopback_conn/0`.
+#
+# `:unlock` stays raised: the lock suite still posts a dozen passphrases from
+# one address in a window (#496).
 config :kiln_cms, KilnCMSWeb.RateLimit,
   limits: %{
     api: {1_000_000, :timer.minutes(1)},
     delivery: {1_000_000, :timer.minutes(1)},
+    # Same reason (#496): the lock suite posts a dozen passphrases from one
+    # address in one window, and the shipped 10/min would 429 whichever test
+    # happened to run last. `RateLimit.default_limits/0` still pins the real
+    # number, so the threat model stays asserted.
+    unlock: {200, :timer.minutes(1)},
     gql: {1_000_000, :timer.minutes(1)},
     probe: {1_000_000, :timer.minutes(1)}
   }
+
+# Per-account auth budgets (#478). The whole suite signs in as seeded users and
+# sends reset/magic-link mail, and every bucket keys on the email — so the real
+# limits would have unrelated auth tests refusing each other's sign-ins and
+# swallowing each other's mail (the ETS table is node-wide and is not reset
+# between test files). `KilnCMS.Accounts.AccountThrottleTest` tightens all four
+# back down per-test, under `async: false`, to assert the real behaviour.
+config :kiln_cms, KilnCMS.Accounts.AccountThrottle,
+  budget: 1_000_000,
+  window: :timer.minutes(15),
+  mail_budget: 1_000_000,
+  mail_window: :timer.hours(1),
+  # The second-factor budget (#714) keys on a user id rather than an email, so
+  # it cannot collide across test files the way the others can — but the 2FA
+  # controller suite drives several attempts against one seeded user, and the
+  # real budget of 5 is small enough to reach by accident. Raised on the same
+  # principle; `AccountThrottleTest` tightens it back per-test.
+  second_factor_budget: 1_000_000,
+  second_factor_window: :timer.minutes(15)
 
 # Configure your database
 #
@@ -170,6 +264,12 @@ config :kiln_cms, KilnCMS.Accounts.Scoping, memo_ttl_ms: 0
 
 # Strict tenancy (#419) is COMPILE-TIME; the main suite predates it and calls
 # interfaces tenant-less (resolving the default org), so tests compile
-# fail-open. The strict CI leg sets KILN_STRICT_TEST=1 and runs the
-# @moduletag :strict_tenancy smoke suite against a strict-compiled build.
-config :kiln_cms, :strict_tenancy, System.get_env("KILN_STRICT_TEST") == "1"
+# fail-open. The strict CI leg sets KILN_STRICT_TEST=true (or 1/yes/on) and
+# runs the @moduletag :strict_tenancy smoke suite against a strict-compiled
+# build. Parsed by the standalone snippet in strict_test_flag.exs — see its
+# header for why this can't just call KilnCMS.Config.Env (#646).
+Code.require_file("strict_test_flag.exs", __DIR__)
+
+config :kiln_cms,
+       :strict_tenancy,
+       KilnCMS.Config.StrictTestFlag.strict?(System.get_env("KILN_STRICT_TEST"))

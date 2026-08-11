@@ -10,7 +10,11 @@ defmodule KilnCMS.Blocks.RichText do
 
   block :rich_text do
     field :body, :rich_text, default: []
-    field :legacy_html, :string
+    # Transitional stored TipTap HTML. Deliberately **not** translatable
+    # (#502): segmenting HTML into trans-units is a different problem from
+    # segmenting Portable Text, and a vendor editing raw markup writes broken
+    # tags back. The XLIFF exporter reports blocks whose text lives here.
+    field :legacy_html, :string, translatable: :unsupported
   end
 
   @impl Kiln.Block.Renderer
@@ -44,6 +48,16 @@ defmodule KilnCMS.Blocks.RichText do
   end
 
   def render(_block, :json_ld), do: nil
+
+  # Both render branches emit `body` as a real array (the fallback emits `[]`
+  # alongside the sanitized HTML), so it is required and never null.
+  @impl Kiln.Block.Renderer
+  def json_schema do
+    %{
+      "required" => ["_type", "body"],
+      "properties" => %{"body" => Kiln.Block.JsonSchema.type_schema(:rich_text, false)}
+    }
+  end
 
   @impl Kiln.Block.Renderer
   def search_text(block) do

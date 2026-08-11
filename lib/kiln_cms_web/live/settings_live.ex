@@ -8,11 +8,13 @@ defmodule KilnCMSWeb.SettingsLive do
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.Errors.SecondFactorThrottled
   alias KilnCMS.Accounts.Totp
   alias KilnCMS.Accounts.WebAuthn
+  alias KilnCMS.Push
 
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(_params, session, socket) do
     user = socket.assigns.current_user
 
     {:ok,
@@ -22,6 +24,10 @@ defmodule KilnCMSWeb.SettingsLive do
      |> assign(:profile_form, profile_form(user))
      |> assign(:password_form, password_form(user))
      |> assign(:totp_enabled?, Accounts.totp_enabled?(user))
+     # Whether THIS session signed in with a recovery code (#786). Set by the
+     # 2FA gate; read here so re-enrolling over a live secret can waive the
+     # current-code proof for someone who lost their authenticator.
+     |> assign(:recovery_login?, session["totp_recovery_login"] == true)
      # Transient enrolment state (secret + provisioning URI + QR) while confirming.
      |> assign(:enrolling, nil)
      # Freshly minted recovery codes, shown exactly once (#331 phase 2).
@@ -29,8 +35,19 @@ defmodule KilnCMSWeb.SettingsLive do
      # Passkeys (#331): registered credentials + the in-flight enrolment
      # challenge (parked in LV state between the JS create() round-trip).
      |> assign(:passkeys, WebAuthn.list(user))
-     |> assign(:passkey_challenge, nil)}
+     |> assign(:passkey_challenge, nil)
+     # Web Push (#628). `push_available?` is the *server* half — VAPID keys are
+     # configured; `push_supported?` is the browser half, which only the hook
+     # can answer, so it starts optimistic and is corrected on mount.
+     |> assign(:push_available?, Push.enabled?())
+     |> assign(:push_key, Push.public_key())
+     |> assign(:push_supported?, true)
+     |> assign(:push_subscribed?, false)
+     |> assign(:push_note, nil)
+     |> assign(:push_devices, push_devices(user))}
   end
+
+  defp push_devices(user), do: Push.list(user)
 
   # --- passkeys (#331) -------------------------------------------------------
 
@@ -82,7 +99,7 @@ defmodule KilnCMSWeb.SettingsLive do
      )}
   end
 
-  def handle_event("remove_passkey", %{"id" => id}, socket) do
+  def handle_event("remove_passkey", %{"id" => id}, socket) when is_binary(id) do
     user = socket.assigns.current_user
 
     socket =
@@ -106,13 +123,13 @@ defmodule KilnCMSWeb.SettingsLive do
 
     case Accounts.setup_totp(user, %{}, actor: user) do
       {:ok, user} ->
-        uri = Totp.otpauth_uri(user.totp_secret, to_string(user.email))
+        uri = Totp.otpauth_uri(user.totp_pending_secret, to_string(user.email))
 
         {:noreply,
          socket
          |> assign(:current_user, user)
          |> assign(:enrolling, %{
-           secret: Totp.base32_encode(user.totp_secret),
+           secret: Totp.base32_encode(user.totp_pending_secret),
            uri: uri,
            qr_svg: qr_svg(uri)
          })}
@@ -125,10 +142,20 @@ defmodule KilnCMSWeb.SettingsLive do
   def handle_event("cancel_totp", _params, socket),
     do: {:noreply, assign(socket, :enrolling, nil)}
 
-  def handle_event("confirm_totp", %{"code" => code}, socket) do
+  def handle_event("confirm_totp", %{"code" => code} = params, socket) when is_binary(code) do
     user = socket.assigns.current_user
 
-    case Accounts.confirm_totp(user, %{code: code}, actor: user) do
+    args = %{
+      code: code,
+      # Only meaningful when replacing an already-confirmed secret (#786); the
+      # action ignores both on a first enrolment. `recovery_login?` comes from
+      # the session, not this payload — the current-code field is the only thing
+      # the form contributes.
+      current_code: params["current_code"],
+      recovery_login?: socket.assigns.recovery_login?
+    }
+
+    case Accounts.confirm_totp(user, args, actor: user) do
       {:ok, user} ->
         {:noreply,
          socket
@@ -138,12 +165,17 @@ defmodule KilnCMSWeb.SettingsLive do
          |> assign(:recovery_codes, Ash.Resource.get_metadata(user, :recovery_codes))
          |> put_flash(:info, gettext("Two-factor authentication is now on."))}
 
-      {:error, _} ->
-        {:noreply, put_flash(socket, :error, gettext("That code isn't valid — try again."))}
+      {:error, error} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           second_factor_error(error, gettext("That code isn't valid — try again."))
+         )}
     end
   end
 
-  def handle_event("regenerate_recovery_codes", %{"code" => code}, socket) do
+  def handle_event("regenerate_recovery_codes", %{"code" => code}, socket) when is_binary(code) do
     user = socket.assigns.current_user
 
     case Accounts.regenerate_totp_recovery_codes(user, %{code: code}, actor: user) do
@@ -157,15 +189,20 @@ defmodule KilnCMSWeb.SettingsLive do
            gettext("New recovery codes generated — the old ones no longer work.")
          )}
 
-      {:error, _} ->
-        {:noreply, put_flash(socket, :error, gettext("That code isn't valid — try again."))}
+      {:error, error} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           second_factor_error(error, gettext("That code isn't valid — try again."))
+         )}
     end
   end
 
   def handle_event("dismiss_recovery_codes", _params, socket),
     do: {:noreply, assign(socket, :recovery_codes, nil)}
 
-  def handle_event("disable_totp", %{"code" => code}, socket) do
+  def handle_event("disable_totp", %{"code" => code}, socket) when is_binary(code) do
     user = socket.assigns.current_user
 
     case Accounts.disable_totp(user, %{code: code}, actor: user) do
@@ -177,17 +214,22 @@ defmodule KilnCMSWeb.SettingsLive do
          |> assign(:recovery_codes, nil)
          |> put_flash(:info, gettext("Two-factor authentication is now off."))}
 
-      {:error, _} ->
-        {:noreply, put_flash(socket, :error, gettext("That code isn't valid — 2FA is still on."))}
+      {:error, error} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           second_factor_error(error, gettext("That code isn't valid — 2FA is still on."))
+         )}
     end
   end
 
   @impl true
-  def handle_event("validate", %{"user" => params}, socket) do
+  def handle_event("validate", %{"user" => params}, socket) when is_map(params) do
     {:noreply, assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))}
   end
 
-  def handle_event("save", %{"user" => params}, socket) do
+  def handle_event("save", %{"user" => params}, socket) when is_map(params) do
     case AshPhoenix.Form.submit(socket.assigns.form, params: params) do
       {:ok, user} ->
         {:noreply,
@@ -204,12 +246,12 @@ defmodule KilnCMSWeb.SettingsLive do
     end
   end
 
-  def handle_event("validate_profile", %{"user" => params}, socket) do
+  def handle_event("validate_profile", %{"user" => params}, socket) when is_map(params) do
     {:noreply,
      assign(socket, :profile_form, AshPhoenix.Form.validate(socket.assigns.profile_form, params))}
   end
 
-  def handle_event("save_profile", %{"user" => params}, socket) do
+  def handle_event("save_profile", %{"user" => params}, socket) when is_map(params) do
     case AshPhoenix.Form.submit(socket.assigns.profile_form, params: params) do
       {:ok, user} ->
         {:noreply,
@@ -226,7 +268,7 @@ defmodule KilnCMSWeb.SettingsLive do
     end
   end
 
-  def handle_event("validate_password", %{"user" => params}, socket) do
+  def handle_event("validate_password", %{"user" => params}, socket) when is_map(params) do
     {:noreply,
      assign(
        socket,
@@ -235,7 +277,7 @@ defmodule KilnCMSWeb.SettingsLive do
      )}
   end
 
-  def handle_event("save_password", %{"user" => params}, socket) do
+  def handle_event("save_password", %{"user" => params}, socket) when is_map(params) do
     case AshPhoenix.Form.submit(socket.assigns.password_form, params: params) do
       {:ok, user} ->
         # Reset the form so the password fields clear after a successful change.
@@ -257,6 +299,98 @@ defmodule KilnCMSWeb.SettingsLive do
 
   # The otpauth URI as an inline QR SVG (eqrcode, pure Elixir). `nil` if
   # encoding fails for any reason — the setup key remains as the fallback.
+
+  # --- web push (#628) -------------------------------------------------------
+  #
+  # The browser is the source of truth for whether *this* device is subscribed:
+  # a reviewer can revoke permission or clear site data and nothing tells us.
+  # So the hook reports what it finds on mount and after every change, and the
+  # server reconciles rather than assuming its rows are current.
+
+  @impl true
+  def handle_event("push_state", %{"subscribed" => subscribed?}, socket)
+      when is_boolean(subscribed?) do
+    {:noreply, assign(socket, push_subscribed?: subscribed?, push_note: nil)}
+  end
+
+  def handle_event("push_unsupported", _params, socket),
+    do: {:noreply, assign(socket, push_supported?: false)}
+
+  def handle_event("push_denied", _params, socket) do
+    {:noreply,
+     assign(socket,
+       push_subscribed?: false,
+       push_note:
+         gettext(
+           "Your browser is blocking notifications for this site. Allow them in the site settings, then try again."
+         )
+     )}
+  end
+
+  def handle_event("push_failed", _params, socket) do
+    {:noreply,
+     assign(socket,
+       push_subscribed?: false,
+       push_note: gettext("Couldn't register this device for notifications.")
+     )}
+  end
+
+  def handle_event(
+        "push_subscribed",
+        %{"endpoint" => endpoint, "p256dh" => p256dh, "auth" => auth} = params,
+        socket
+      )
+      when is_binary(endpoint) and is_binary(p256dh) and is_binary(auth) do
+    user = socket.assigns.current_user
+
+    case Push.subscribe(params, user, socket.assigns.current_org) do
+      {:ok, _subscription} ->
+        {:noreply,
+         socket
+         |> assign(push_subscribed?: true, push_note: nil)
+         |> assign(:push_devices, push_devices(user))
+         |> put_flash(:info, gettext("Notifications are on for this device."))}
+
+      {:error, _reason} ->
+        {:noreply,
+         assign(socket,
+           push_subscribed?: false,
+           push_note: gettext("Couldn't register this device for notifications.")
+         )}
+    end
+  end
+
+  def handle_event("push_unsubscribed", %{"endpoint" => endpoint}, socket)
+      when is_binary(endpoint) do
+    user = socket.assigns.current_user
+    Push.unsubscribe(endpoint, user)
+
+    {:noreply,
+     socket
+     |> assign(push_subscribed?: false, push_note: nil)
+     |> assign(:push_devices, push_devices(user))
+     |> put_flash(:info, gettext("Notifications are off for this device."))}
+  end
+
+  def handle_event("remove_push_device", %{"id" => id}, socket) when is_binary(id) do
+    user = socket.assigns.current_user
+
+    socket =
+      case Enum.find(push_devices(user), &(&1.id == id)) do
+        nil ->
+          socket
+
+        device ->
+          Push.remove(device, user)
+
+          socket
+          |> assign(:push_devices, push_devices(user))
+          |> put_flash(:info, gettext("Device removed."))
+      end
+
+    {:noreply, socket}
+  end
+
   defp qr_svg(uri) do
     uri |> EQRCode.encode() |> EQRCode.svg(width: 176)
   rescue
@@ -550,11 +684,84 @@ defmodule KilnCMSWeb.SettingsLive do
               type="checkbox"
               label={gettext("Changes requested — content I authored was returned to draft")}
             />
+            <.input
+              field={@form[:notify_on_comment]}
+              type="checkbox"
+              label={gettext("Comments — replies on threads I'm in, and when someone @mentions me")}
+            />
 
             <.button type="submit" variant="primary">
               {gettext("Save preferences")}
             </.button>
           </.form>
+        </section>
+
+        <section :if={@push_available?} id="push-settings" class="card card-pad max-w-xl">
+          <h2 class="mb-1 text-lg font-medium">{gettext("Push notifications")}</h2>
+          <p class="mb-4 text-sm text-base-content/60">
+            {gettext(
+              "Get a notification on this device when something needs your review. Install KilnCMS to your home screen first — on iPhone and iPad, notifications only work for the installed app."
+            )}
+          </p>
+
+          <p class="mb-3 text-xs text-base-content/60">
+            {gettext(
+              "Notifications never contain draft content — only that something is waiting, and what kind."
+            )}
+          </p>
+
+          <button
+            id="push-toggle"
+            type="button"
+            phx-hook="PushToggle"
+            data-vapid-key={@push_key}
+            data-enabled={to_string(@push_subscribed?)}
+            disabled={not @push_supported?}
+            class={[
+              "btn btn-sm",
+              if(@push_subscribed?, do: "btn-default", else: "btn-primary"),
+              not @push_supported? && "opacity-50"
+            ]}
+          >
+            {if @push_subscribed?,
+              do: gettext("Turn off on this device"),
+              else: gettext("Turn on for this device")}
+          </button>
+
+          <p :if={not @push_supported?} class="mt-2 text-sm text-base-content/60">
+            {gettext(
+              "This browser can't receive push notifications. On iPhone and iPad they need iOS 16.4 or later and the app added to your home screen."
+            )}
+          </p>
+
+          <p :if={@push_note} class="mt-2 text-sm text-warning">{@push_note}</p>
+
+          <div :if={@push_devices != []} class="mt-4">
+            <h3 class="mb-2 text-sm font-medium">{gettext("Devices receiving notifications")}</h3>
+            <ul class="space-y-2">
+              <li
+                :for={device <- @push_devices}
+                class="flex items-center justify-between gap-3 rounded border border-base-content/10 px-3 py-2 text-sm"
+              >
+                <span>
+                  {device.label}
+                  <span class="ml-2 text-xs text-base-content/50">
+                    {if device.last_delivered_at,
+                      do: gettext("last used %{ago} ago", ago: ago(device.last_delivered_at)),
+                      else: gettext("not used yet")}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  phx-click="remove_push_device"
+                  phx-value-id={device.id}
+                  class="btn btn-sm btn-ghost"
+                >
+                  {gettext("Remove")}
+                </button>
+              </li>
+            </ul>
+          </div>
         </section>
 
         <section class="card card-pad max-w-xl">
@@ -576,4 +783,20 @@ defmodule KilnCMSWeb.SettingsLive do
     </Layouts.console>
     """
   end
+
+  # A spent second-factor budget (#727) and a wrong code are opposite advice:
+  # "check your authenticator" sends someone to type five more codes into a
+  # budget that has nothing left. Telling them apart discloses nothing — whoever
+  # is here is already signed in as this account.
+  defp second_factor_error(%{errors: errors}, wrong_code_message) do
+    case Enum.find(List.wrap(errors), &match?(%SecondFactorThrottled{}, &1)) do
+      %SecondFactorThrottled{retry_after_seconds: seconds} ->
+        gettext("Too many attempts — try again in %{seconds} seconds.", seconds: seconds)
+
+      nil ->
+        wrong_code_message
+    end
+  end
+
+  defp second_factor_error(_error, wrong_code_message), do: wrong_code_message
 end

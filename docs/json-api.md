@@ -9,7 +9,7 @@ see [Writing](#writing-330). This document covers the read query params
 **Post** and **MediaItem** (tuned in Phase 5, issue #33) — and the write routes.
 
 > The machine-readable OpenAPI spec (`/api/json/open_api`) and its interactive
-> Swagger UI (`/api/json/swaggerui`) are published in **all environments** (dev
+> Swagger UI (`/api/json/swaggerui`) are published in dev and test, and in production only with `API_DOCS_ENABLED` (#567) (dev
 > and prod). See [api.md](api.md) for the full API documentation index
 > (authentication, GraphQL, webhooks, preview tokens, rate limits).
 
@@ -59,9 +59,25 @@ the other way. Frontends rebuilding Kiln's grouped tag UI filter
 
 Every content-type search read also has a **published-only twin** at
 `…/search/published`, `…/semantic-search/published` and
-`…/autocomplete/published` — same query surface, with `state == :published`
-filtered server-side. Delivery sites calling with a bearer key should use
-these; see "Search & autocomplete" below.
+`…/autocomplete/published` — same query surface, restricted server-side to what
+an **anonymous** visitor could read: published, `audience: :public`, and not
+passphrase-locked. Delivery sites calling with a bearer key should use these;
+see "Search & autocomplete" below.
+
+That is a stronger filter than the read policy, and deliberately so. A bearer key
+authorizes as the account that minted it, and an admin account bypasses the
+audience and passphrase checks entirely — so on the **base** routes an
+admin-minted delivery key enumerates member-only and locked documents (title,
+slug, excerpt, SEO fields; `blocks` is not public on any read action). The twins
+cannot be widened by any credential (#297, #1013).
+
+The hybrid `GET /api/search` holds the same line — it is actorless, so it always
+answers as an anonymous visitor.
+
+`GET /api/json/<plural>/published` deliberately does **not**: an index is a
+discovery surface, and the rendered blog index publishes an audience-gated
+post's title and excerpt to anonymous visitors with a "Members" badge, so that
+metadata is already public. It pins `state` only.
 
 ## Filtering
 
@@ -250,10 +266,15 @@ and `tag_ids[]`.
 
 The base search routes go through the read policy: anonymous callers match
 published content only, but a **bearer-keyed** caller matches whatever its
-minting account can see — with an editor/admin key that includes drafts, and
-the optional `state` facet is merely a request the caller must remember to
-make. Each search read therefore has a published-only twin whose
-`state == :published` filter is applied **server-side** (#297):
+minting account can see. With an editor/admin key that includes drafts — and,
+because an admin bypasses the audience and passphrase policies outright, also
+audience-gated and passphrase-locked bodies. The optional `state` facet is
+merely a request the caller must remember to make, and it does not narrow the
+other two axes at all.
+
+Each search read therefore has a published-only twin whose filter is applied
+**server-side** and matches exactly what an anonymous visitor could read —
+`state == :published`, `audience == :public`, and no passphrase (#297, #1013):
 
 ```
 GET /api/json/posts/search/published?query=elixir&locale=en
@@ -263,7 +284,9 @@ GET /api/json/posts/autocomplete/published?prefix=eli
 
 They take the same params minus `state` (the twins have no such argument — the
 filter cannot be widened) and keep the same relevance/distance ordering and
-pagination.
+pagination. **A delivery key minted by an admin is the case that matters**: on
+the base routes it reads gated and locked content; on the twins it reads
+neither.
 Delivery sites should use these — the search counterpart of reading
 `/…/published` instead of the plain index. See
 [headless-consumer-guide.md](headless-consumer-guide.md) → "Delivery sites: an
@@ -343,6 +366,7 @@ Use the JSON:API media type on both `Accept` and `Content-Type`:
 | `POST /api/json/posts` | `:create` | `:read_write` key, editor+ | Creates a **draft**, attributed to the key's owner |
 | `PATCH /api/json/posts/:id` | `:update` | `:read_write` key, editor+ | Edits content; **re-fires** if already published |
 | `PATCH /api/json/posts/:id/submit-for-review` | `:submit_for_review` | `:read_write` key, editor+ | draft → in_review |
+| `PATCH /api/json/posts/:id/return-to-draft` | `:return_to_draft` | `:read_write` key, **admin** | in_review → draft — the return half of the approve/return pair |
 | `PATCH /api/json/posts/:id/publish` | `:publish` | `:read_write` key, **admin** | Publishes and fires artifacts |
 | `PATCH /api/json/posts/:id/unpublish` | `:unpublish` | `:read_write` key, **admin** | Takes content down, purges artifacts |
 | `DELETE /api/json/posts/:id` | `:destroy` | `:read_write` key, **admin** | **Reversible** soft-delete (AshArchival) |
@@ -353,8 +377,9 @@ Pages expose the identical set; the dynamic tier is `/api/json/entries` (a
 
 **Authorization** mirrors `/mcp`: a **read-only key** can run none of these; a
 **`:read_write` key on a `:viewer`** account can run none; a **`:read_write` key
-on an `:editor`** can create/update/submit; **publish, unpublish and delete
-require an `:admin`** account. Hard delete (`:purge`) is **never** routed and is
+on an `:editor`** can create/update/submit; **return-to-draft, publish, unpublish
+and delete require an `:admin`** account. An editor submits for review; deciding
+the outcome — approve or return — is the admin's half. Hard delete (`:purge`) is **never** routed and is
 API-key-banned regardless of scope — `DELETE` is the reversible soft-delete.
 
 ### Creating and editing
@@ -408,8 +433,14 @@ rather than resolved in some arbitrary order. "Alongside" includes
 client that always serializes all three keys still gets the replace path. The same three attributes exist on
 GraphQL's `updatePost` (`addTagIds` / `removeTagIds`) and on the MCP `update_*`
 tools. They are **update-only** — `POST` has no existing links to merge against,
-so a create takes `tag_ids` alone. `related_post_ids` and the other relationship
-arrays still replace on both verbs; they have no merge verbs yet.
+so a create takes `tag_ids` alone.
+
+The related-content arrays carry the **same** verbs (#637): `related_post_ids`
+replaces, and `add_related_post_ids` / `remove_related_post_ids` merge, with
+identical rules (an explicit `null` in the complete-set argument counts as
+replacing; the same id may not appear in both verbs). The sibling arrays follow
+the same naming — `add_related_page_ids` / `remove_related_page_ids`, and
+`add_related_entry_ids` / `remove_related_entry_ids` on the dynamic tier.
 
 ### Writing body content — the `block_tree` attribute
 
@@ -419,6 +450,15 @@ block maps (the same shape the editor and MCP submit), cast into the union —
 which **sanitizes** rich-text HTML and media URLs. On an update, **omit**
 `block_tree` to leave the body untouched (a metadata-only `PATCH` never wipes
 it); send `[]` to clear it.
+
+**Round-trip block ids when updating.** Read the tree's identity first — the
+`block_ids` calculation (`?fields[post]=block_ids`) projects the stored tree to
+`_id`/`_type` only, nested `columns` children included in the positions they
+render — and echo each block's `_id` on the maps you send back. That is what
+lets the server tell an in-place edit from a replacement; on a page carrying an
+admin-set nested value (a field behind `editable_by`), a non-admin write that
+drops the ids is **refused** (#954), with the error naming this surface. The
+fired `:json` artifact carries the same `_id`s for published content.
 
 ### Re-fire semantics
 
@@ -430,8 +470,8 @@ edits do not fire.
 
 ### Workflow routes take an empty resource object
 
-The workflow `PATCH` routes (`/publish`, `/unpublish`, `/submit-for-review`)
-carry no attributes — send the JSON:API resource identifier only:
+The workflow `PATCH` routes (`/publish`, `/unpublish`, `/submit-for-review`,
+`/return-to-draft`) carry no attributes — send the JSON:API resource identifier only:
 
 ```bash
 curl -s -X PATCH http://localhost:4000/api/json/posts/<uuid>/publish \

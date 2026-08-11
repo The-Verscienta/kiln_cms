@@ -30,4 +30,42 @@ defmodule KilnCMS.CMS.Audiences do
   @doc "Whether `audience` is a configured audience."
   @spec valid?(term()) :: boolean()
   def valid?(audience), do: audience in @audiences
+
+  @doc """
+  Whether a **loaded record** is readable by an anonymous visitor — published,
+  `:public`, and not behind a passphrase (#496).
+
+  The one definition of that rule for the surfaces that decide it in memory,
+  rather than in an Ash `expr`. Those surfaces are the ones with no actor to
+  authorize against: the Meilisearch index (#1006), an ActivityPub Announce
+  (#491), related-content suggestions. Each was spelling the same three-part
+  rule its own way, and they did not agree on the case that matters — one
+  defaulted a missing `audience` to `:public`, which announces a gated document
+  to strangers' timelines if a `select` ever narrows the load.
+
+  So this **fails closed**: a record that does not carry the fields cannot be
+  shown to be public, and is therefore treated as not public. The alternative
+  reads better and is wrong in exactly one direction.
+
+  Ash `expr` filters express the same rule in SQL and cannot share this
+  function. Two of them are the delivery twins — `read :published` and the
+  `pinned_state` behind `search_published` / `search_semantic_published` /
+  `autocomplete_published` — and they spell it out rather than leaning on the
+  read policy, because the `OrgAdmin` bypass authorizes an admin identity past
+  both the audience grant and the passphrase check, and an API key authorizes
+  as the account that minted it (#1013). `Slugs.find_published_by_alias/5` and
+  the feed controller carry it too.
+
+  So the rule now lives in one Elixir function and several `expr`s that cannot
+  call it. If you change what "public to an anonymous visitor" means, grep for
+  `access_password_hash` and change all of them.
+  """
+  @spec public_to_anonymous?(map()) :: boolean()
+  def public_to_anonymous?(record) when is_map(record) do
+    Map.get(record, :state) == :published and
+      Map.get(record, :audience) == :public and
+      is_nil(Map.get(record, :access_password_hash, :absent))
+  end
+
+  def public_to_anonymous?(_record), do: false
 end

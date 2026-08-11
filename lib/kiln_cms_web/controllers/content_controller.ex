@@ -12,32 +12,50 @@ defmodule KilnCMSWeb.ContentController do
   """
   use KilnCMSWeb, :controller
 
-  alias KilnCMS.Analytics
   alias KilnCMS.Cache
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.ContentPassword
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.Experiments
+  alias KilnCMS.Feeds
   alias KilnCMS.I18n
+  alias KilnCMS.Seo.Patterns
+  alias KilnCMSWeb.ContentLock
+  alias KilnCMSWeb.EventIndex
+  alias KilnCMSWeb.Params
   alias KilnCMSWeb.StructuredData
+  alias KilnCMSWeb.ViewTracking
 
-  def show_page(conn, %{"slug" => slug}) do
+  def show_page(conn, %{"slug" => slug} = params) do
     locale = locale(conn)
     ct = ContentTypes.get(:page)
     org_id = current_org_id(conn)
     audiences = reader_audiences(conn)
+    unlocks = ContentLock.grants(conn)
 
     fetch =
-      &CMS.get_published_page_by_slug!(slug, &1, %{audiences: audiences},
+      &CMS.get_published_page_by_slug!(slug, &1, %{audiences: audiences, unlocks: unlocks},
         not_found_error?: false,
         authorize?: false,
         tenant: org_id,
-        load: [:author]
+        load: [:author, :category]
       )
 
-    case fetch_payload(org_id, "page", slug, locale, audiences, fn ->
+    case fetch_payload(org_id, "page", slug, locale, audiences, unlocks, fn ->
            payload(fetch, locale, ct, org_id, audiences)
          end) do
       nil ->
-        follow_redirect_or_404(conn, "/" <> slug, ct)
+        # A single segment that names no page may still name an event-shaped
+        # type's index (#766) — `/gigs` for a type served at `/gigs/<slug>`.
+        #
+        # LAST in the funnel, after the page, the alias, the redirect table, the
+        # lock page and the teaser, and only ahead of the 404 itself. That order
+        # is the whole safety argument: this can only turn a 404 into an index,
+        # never take a URL away from something that already answers there — a
+        # `path_alias` of `/gigs` on some record, say, which nothing forbids.
+        # It also leaves an operator a way to replace the generated listing with
+        # a hand-built page at the same address.
+        follow_redirect_or_404(conn, "/" <> slug, ct, fn -> event_index(conn, slug, params) end)
 
       payload ->
         serve(conn, :show_page, "page", payload, ct, audiences)
@@ -49,16 +67,17 @@ defmodule KilnCMSWeb.ContentController do
     ct = ContentTypes.get(:post)
     org_id = current_org_id(conn)
     audiences = reader_audiences(conn)
+    unlocks = ContentLock.grants(conn)
 
     fetch =
-      &CMS.get_published_post_by_slug!(slug, &1, %{audiences: audiences},
+      &CMS.get_published_post_by_slug!(slug, &1, %{audiences: audiences, unlocks: unlocks},
         not_found_error?: false,
         authorize?: false,
         tenant: org_id,
-        load: [:author]
+        load: [:author, :category]
       )
 
-    case fetch_payload(org_id, "post", slug, locale, audiences, fn ->
+    case fetch_payload(org_id, "post", slug, locale, audiences, unlocks, fn ->
            payload(fetch, locale, ct, org_id, audiences)
          end) do
       nil ->
@@ -75,19 +94,21 @@ defmodule KilnCMSWeb.ContentController do
     locale = locale(conn)
     org_id = current_org_id(conn)
     audiences = reader_audiences(conn)
+    unlocks = ContentLock.grants(conn)
     ct = ContentTypes.get_by_path(type, org_id)
 
     with ct when not is_nil(ct) <- ct,
          fetch =
            &ContentTypes.get_published_by_slug(ct.type, slug, &1,
              audiences: audiences,
+             unlocks: unlocks,
              not_found_error?: false,
              authorize?: false,
              tenant: org_id,
-             load: [:author]
+             load: [:author, :category]
            ),
          payload when not is_nil(payload) <-
-           fetch_payload(org_id, to_string(ct.type), slug, locale, audiences, fn ->
+           fetch_payload(org_id, to_string(ct.type), slug, locale, audiences, unlocks, fn ->
              payload(fetch, locale, ct, org_id, audiences)
            end) do
       serve(conn, :show, to_string(ct.type), payload, ct, audiences)
@@ -104,8 +125,26 @@ defmodule KilnCMSWeb.ContentController do
     if is_binary(alias_path) and conn.request_path != alias_path do
       moved_permanently(conn, alias_path)
     else
-      track_view(type_string, payload.record.id, payload.record.org_id)
-      render_content(conn, view, payload, ct, audiences)
+      ViewTracking.track(conn, :html, type_string, payload.record.id, payload.record.org_id)
+
+      # A/B experiments (#499). Stateless by default on this surface: a variant
+      # is drawn per request and nothing is stored about the visitor. `nil` — no
+      # experiment, or the feature is off — is the overwhelmingly common case
+      # and costs one cached lookup.
+      #
+      # With `sticky: true` (#984, opt-in) the visitor keeps their arm across
+      # reloads via a bucket cookie, and the conn comes back carrying it. The
+      # page is `private, no-store` either way — stickiness changes which arm a
+      # visitor sees, not that the body differs between visitors.
+      {variant, conn} = Experiments.Delivery.assign_sticky(type_string, payload.record, conn)
+
+      # And this page may itself be some *other* experiment's `:content_view`
+      # goal — the conversion happens on a later page than the assignment, which
+      # is the whole reason that goal needs the sticky cookie (#984). A no-op
+      # unless the visitor carries an exposure this page converts.
+      conn = Experiments.Delivery.record_content_view(type_string, payload.record, conn)
+
+      render_content(conn, view, payload, ct, audiences, variant)
     end
   end
 
@@ -122,18 +161,183 @@ defmodule KilnCMSWeb.ContentController do
   # chains); anything unresolvable 404s as before.
   # `ct` (when known) lets the flat-slug miss try a paywall teaser for that type.
   #
-  # Order matters: alias, then the redirect table, then the teaser, then 404. The
-  # teaser is LAST so a gated document that also has a legacy redirect still
-  # redirects — a paywall must not shadow an editor's explicit routing decision.
-  defp follow_redirect_or_404(conn, path, ct \\ nil) do
+  # Order matters: alias, then the redirect table, then the lock page, then the
+  # teaser, then 404. Both interstitials come after the redirect table, so a
+  # document that also has a legacy redirect still redirects — neither may shadow
+  # an editor's explicit routing decision.
+  #
+  # Lock before teaser (#496), because the lock read already requires the reader
+  # to satisfy the audience axis. A locked members-only post therefore shows the
+  # paywall to a visitor who isn't a member and the passphrase form to one who
+  # is, which is the AND the two axes are supposed to compose to. The other order
+  # would have shown every member a paywall they had already paid past.
+  #
+  # `fallback` is one last thing to try before the 404 — the event index (#766)
+  # is the only caller that passes one. It sits at the very end deliberately:
+  # a generated listing must never outrank a record that actually resolves at
+  # the same URL, and putting it here means the ordering is stated once, in the
+  # funnel, rather than inferred from which branch called what.
+  defp follow_redirect_or_404(conn, path, ct \\ nil, fallback \\ fn -> nil end) do
     serve_alias(conn, path) ||
       case KilnCMS.CMS.Redirects.resolve(path, locale(conn), current_org_id(conn)) do
         nil ->
-          serve_teaser(conn, path, ct) || not_found(conn)
+          serve_lock(conn, path, ct) || serve_teaser(conn, path, ct) || fallback.() ||
+            not_found(conn, path)
 
         %{to: to} ->
           moved_permanently(conn, to)
       end
+  end
+
+  @doc """
+  Verify a passphrase submitted from a lock page (#496) and, on success, record
+  the grant and send the visitor back to the document.
+
+  A wrong passphrase re-renders the same lock page with an error and a `401`. A
+  path that names nothing locked 404s through the normal funnel.
+
+  Those two answers differ, and that is fine *here*: a plain GET of the same URL
+  already distinguishes the cases (a lock page for a locked document, the
+  document itself for an open one), so this endpoint reveals nothing a visitor
+  could not already see. The headless unlock endpoint is the one that has to
+  answer identically, because there the GET is the thing being protected.
+  """
+  def unlock(conn, params) do
+    path = local_path(Params.string(params, "path", ""))
+    type = Params.string(params, "type", "")
+    locale = Params.string(params, "locale", I18n.default_locale())
+    ct = path && ContentTypes.get(type)
+
+    with ct when not is_nil(ct) <- ct,
+         {ct, record} when not is_nil(record) <- locked_at(conn, path, ct, locale) do
+      verify_passphrase(conn, record, ct, path, params["passphrase"])
+    else
+      # No such type, an off-site path, or nothing locked there. Deliberately a
+      # 404 through the normal funnel rather than a distinct error: an unlock
+      # endpoint that answered differently for "not locked" than for "wrong
+      # passphrase" would enumerate which documents are locked.
+      _ -> not_found(conn, path || "/")
+    end
+  end
+
+  defp verify_passphrase(conn, record, ct, path, passphrase) do
+    if ContentPassword.verify(record.access_password_hash, passphrase) do
+      conn
+      |> ContentLock.grant(record.password_fingerprint)
+      # 303, not 302: this is a POST whose result is a page to GET. It also means
+      # the browser drops the form body, so a refresh on the document doesn't
+      # re-submit the passphrase.
+      |> put_status(:see_other)
+      |> redirect(to: I18n.localized_path(conn.assigns[:path_locale], path))
+    else
+      render_lock(conn, record, ct, path, :invalid)
+    end
+  end
+
+  # A submitted return path is only ever used as a local path. `//host` and
+  # `/\\host` are protocol-relative URLs that a browser resolves off-site, so
+  # "starts with a slash" is not enough of a check on its own.
+  defp local_path("/" <> rest = path) do
+    if String.starts_with?(rest, "/") or String.starts_with?(rest, "\\"), do: nil, else: path
+  end
+
+  defp local_path(_), do: nil
+
+  # Render the passphrase form for a LOCKED published document (#496).
+  #
+  # Same shape as the paywall below, and the same guarantee: the read never
+  # selects the block tree, and the record is projected onto `KilnCMSWeb.Teaser`
+  # — a struct with no `blocks` field — before anything reaches a template. A
+  # lock page describes a document precisely in order not to serve it.
+  defp serve_lock(_conn, _path, nil), do: nil
+
+  defp serve_lock(conn, path, ct) do
+    case locked_record(conn, path, ct, locale(conn)) do
+      nil -> nil
+      record -> render_lock(conn, record, ct, path)
+    end
+  end
+
+  # The locked document a submitted `path` names — by `path_alias` first, then by
+  # slug, which is the order delivery itself resolves in.
+  #
+  # The alias branch is not optional: an aliased document's canonical URL has no
+  # relationship to its slug, so deriving one from the last path segment (which
+  # is all the slug branch can do) resolves the wrong document or none at all.
+  # Without it the lock page for an aliased document would render and then refuse
+  # every passphrase, which reads as "the passphrase is wrong".
+  defp locked_at(conn, path, ct, locale) do
+    audiences = reader_audiences(conn)
+    org_id = current_org_id(conn)
+
+    lookup = fn loc -> KilnCMS.CMS.Slugs.find_locked_by_alias(path, loc, org_id, audiences) end
+
+    case lookup.(locale) || lookup.(I18n.default_locale()) do
+      {_ct, _record} = found -> found
+      nil -> {ct, locked_record(conn, path, ct, locale)}
+    end
+  end
+
+  # The locked document at `path`, or `nil`. Shared by the interstitial and by
+  # `unlock/2`, so the form and the check can never disagree about which document
+  # a request is talking about.
+  defp locked_record(conn, path, ct, locale) do
+    slug = path |> String.split("/") |> List.last()
+
+    fetch = fn loc ->
+      ContentTypes.get_locked_by_slug(ct.type, slug, loc,
+        audiences: reader_audiences(conn),
+        not_found_error?: false,
+        authorize?: false,
+        tenant: current_org_id(conn)
+      )
+    end
+
+    localized(fetch, locale)
+  rescue
+    # A content type compiled against an older macro has no locked read — no
+    # lock page rather than a 500, exactly as the teaser path degrades.
+    _ -> nil
+  end
+
+  defp render_lock(conn, record, ct, path, error \\ nil) do
+    org = KilnCMSWeb.Tenant.current_org(conn)
+    base_url = KilnCMSWeb.Tenant.base_url(org)
+    url = record.canonical_url || locale_url(ct, record.slug, record.locale, base_url)
+    # `KilnCMSWeb.Teaser.from_record/3` owns the split now (#1102): the `summary`
+    # a locked-out reader READS stays the author's own words, while the meta tags
+    # carry the type's #805 default. `ct` and `org` are passed rather than
+    # re-derived — the alias funnel reaches the same renderer with a record whose
+    # pinned select omits nothing needed to look them up, but paying a registry
+    # scan per paywall render on a route that exists to keep queries off it would
+    # be the wrong trade.
+    teaser = KilnCMSWeb.Teaser.from_record(record, url, type: ct, org: org)
+
+    conn
+    # Never shared-cached, and no ETag: the same URL returns the lock page to one
+    # visitor and the document to another, so a cache keyed on URL alone would
+    # eventually serve the document to someone who never typed the passphrase.
+    |> put_private_delivery_headers()
+    # A lock page is an interstitial, not the document. `noindex` keeps it from
+    # being indexed in the document's place — the canonical below still points at
+    # the document's own URL, so nothing about it moves in an index.
+    |> put_resp_header("x-robots-tag", "noindex, nofollow")
+    |> put_status(:unauthorized)
+    |> assign(:locale, teaser.locale)
+    |> assign(:page_title, teaser.seo_title || teaser.title)
+    |> assign(:meta_description, teaser.seo_description)
+    |> assign(:og_image, teaser.seo_image)
+    |> assign(:og_type, "article")
+    |> assign(:canonical_url, teaser.url)
+    |> assign(:json_ld, json_ld_script(StructuredData.teaser(teaser, record, org)))
+    |> put_view(KilnCMSWeb.ContentHTML)
+    |> render(:lock,
+      teaser: teaser,
+      unlock_path: path,
+      unlock_type: to_string(ct.type),
+      unlock_locale: record.locale,
+      error: error
+    )
   end
 
   # Render a paywall for a GATED published document the reader can't read.
@@ -172,7 +376,14 @@ defmodule KilnCMSWeb.ContentController do
     org = KilnCMSWeb.Tenant.current_org(conn)
     base_url = KilnCMSWeb.Tenant.base_url(org)
     url = record.canonical_url || locale_url(ct, record.slug, record.locale, base_url)
-    teaser = KilnCMSWeb.Teaser.from_record(record, url)
+    # `KilnCMSWeb.Teaser.from_record/3` owns the split now (#1102): the `summary`
+    # a locked-out reader READS stays the author's own words, while the meta tags
+    # carry the type's #805 default. `ct` and `org` are passed rather than
+    # re-derived — the alias funnel reaches the same renderer with a record whose
+    # pinned select omits nothing needed to look them up, but paying a registry
+    # scan per paywall render on a route that exists to keep queries off it would
+    # be the wrong trade.
+    teaser = KilnCMSWeb.Teaser.from_record(record, url, type: ct, org: org)
 
     conn
     # Same rule as a member render: this body depends on who asked, and the same
@@ -187,7 +398,7 @@ defmodule KilnCMSWeb.ContentController do
     # Canonical is the DOCUMENT's own URL, never the join page: a paywall that
     # canonicalised elsewhere would have search engines index the wrong URL.
     |> assign(:canonical_url, teaser.url)
-    |> assign(:json_ld, json_ld_script(StructuredData.teaser(teaser, org)))
+    |> assign(:json_ld, json_ld_script(StructuredData.teaser(teaser, record, org)))
     |> put_view(KilnCMSWeb.ContentHTML)
     |> render(:teaser, teaser: teaser)
   end
@@ -212,23 +423,44 @@ defmodule KilnCMSWeb.ContentController do
     org_id = current_org_id(conn)
 
     audiences = reader_audiences(conn)
+    unlocks = ContentLock.grants(conn)
 
     lookup = fn loc ->
-      KilnCMS.CMS.Slugs.find_published_by_alias(path, loc, org_id, audiences)
+      KilnCMS.CMS.Slugs.find_published_by_alias(path, loc, org_id, audiences, unlocks)
     end
 
     case lookup.(locale) || lookup.(I18n.default_locale()) do
       nil ->
-        teaser_alias(conn, path, locale, org_id)
+        lock_alias(conn, path, locale, org_id, audiences) ||
+          teaser_alias(conn, path, locale, org_id)
 
       {ct, record} ->
         payload = %{
           record: record,
-          blocks: blocks(record, org_id),
+          blocks: blocks(record, org_id, audiences),
           translations: translations(ct, record.slug, org_id, audiences)
         }
 
         serve(conn, alias_view(ct), to_string(ct.type), payload, ct, audiences)
+    end
+  end
+
+  # An aliased document behind a passphrase: the lock form at the alias, so its
+  # canonical URL doesn't silently 404 (#496).
+  #
+  # This mirrors the slug funnel deliberately. An aliased document is served
+  # through `serve_alias/2` INSTEAD of `:public_by_slug`, so without this pair —
+  # the lock clause on the lookup above and this interstitial — a locked page
+  # that happened to carry a `path_alias` would have been served in full at its
+  # canonical URL with no passphrase at all.
+  defp lock_alias(conn, path, locale, org_id, audiences) do
+    lookup = fn loc ->
+      KilnCMS.CMS.Slugs.find_locked_by_alias(path, loc, org_id, audiences)
+    end
+
+    case lookup.(locale) || lookup.(I18n.default_locale()) do
+      nil -> nil
+      {ct, record} -> render_lock(conn, record, ct, path)
     end
   end
 
@@ -277,12 +509,81 @@ defmodule KilnCMSWeb.ContentController do
     |> render(:blog_index, posts: posts, page: page, has_prev?: page > 0, has_next?: more?)
   end
 
+  # The occurrence-sorted index for an event-shaped type (#766) — "what's on,
+  # soonest first" at `/<plural>`, the HTML twin of
+  # `KilnCMSWeb.EventIndexController`. `nil` when the segment names no such type,
+  # which is what lets `show_page/2` try this and fall through.
+  #
+  # Not a route of its own: `/:slug` already owns single-segment delivery, and a
+  # second route competing for it would have decided the page-vs-index
+  # precedence in the router, where it is invisible. Here it is one branch, in
+  # order, with the reason next to it.
+  #
+  # No `Cache.fetch`: `from`/`until`/`page` are caller-chosen, so a cache key
+  # built from them is unbounded — see `EventIndexController`'s moduledoc. The
+  # response's own `max-age` is what absorbs repeats.
+  defp event_index(conn, segment, params) do
+    org = KilnCMSWeb.Tenant.current_org(conn)
+
+    case EventIndex.type_for(org.id, segment) do
+      nil -> nil
+      descriptor -> render_event_index(conn, org, descriptor, params)
+    end
+  end
+
+  defp render_event_index(conn, org, descriptor, params) do
+    locale = locale(conn)
+    {from, until} = EventIndex.window(params)
+    page = EventIndex.page(params)
+
+    %{entries: entries, more?: more?} =
+      EventIndex.fetch(descriptor, org, from: from, until: until, locale: locale, page: page)
+
+    base = EventIndex.index_path(descriptor)
+
+    conn
+    |> put_resp_header("cache-control", "public, max-age=60, stale-while-revalidate=300")
+    |> put_resp_header("vary", "Accept-Language")
+    |> assign(:locale, locale)
+    |> assign(:page_title, descriptor.label)
+    |> assign(:meta_description, gettext("What's on, soonest first."))
+    |> assign(:locale_links, index_locale_links(locale, base, KilnCMSWeb.Tenant.base_url(org)))
+    |> render(:event_index,
+      entries: entries,
+      label: descriptor.label,
+      base_path: base,
+      # The window rides into the pagination links, or page 2 of a filtered
+      # listing quietly drops the filter and shows something else entirely.
+      window: window_params(params),
+      page: page,
+      has_prev?: page > 0,
+      has_next?: more?
+    )
+  end
+
+  # Only the bounds the caller actually sent, so an unfiltered index's "next"
+  # link stays the bare `?page=2` it was before.
+  defp window_params(params) do
+    for key <- ["from", "until"],
+        value = Params.string(params, key, ""),
+        String.trim(value) != "",
+        do: {key, value}
+  end
+
+  # Language-switcher links to a type's index in each supported locale.
+  defp index_locale_links(current, base, base_url) do
+    for locale <- I18n.locales() do
+      prefix = if locale == I18n.default_locale(), do: "", else: "/#{locale}"
+      %{locale: locale, href: "#{base_url}#{prefix}#{base}", current: locale == current}
+    end
+  end
+
   # Public on-site search (#149). Anonymous, so the read policy returns published
   # content only; locale-scoped to the active locale. Posts, pages and dynamic
   # entries (media isn't part of the public site).
   def search(conn, params) do
     locale = locale(conn)
-    query = params["q"] |> to_string() |> String.trim()
+    query = params |> Params.string("q", "") |> String.trim()
     # Scope search to the request's org (#336); content sections are per-site.
     org = KilnCMSWeb.Tenant.current_org(conn)
     org_id = org.id
@@ -309,7 +610,11 @@ defmodule KilnCMSWeb.ContentController do
             tenant: org_id,
             locale: locale,
             limit: 20,
-            filters: filters
+            filters: filters,
+            # Exactly the three read below — not `content_sections/0`, which
+            # would also sweep any other registered type this page never shows
+            # (#960).
+            sections: [:posts, :pages, :entries]
           )
 
         %{posts: r.posts, pages: r.pages, entries: entry_results(r.entries)}
@@ -404,8 +709,8 @@ defmodule KilnCMSWeb.ContentController do
 
   # Zero-based page index from `?page=N` (1-based in the URL for humans).
   # Anything missing or invalid is page 0; anything beyond @max_page is clamped.
-  defp page_param(%{"page" => raw}) do
-    case Integer.parse(to_string(raw)) do
+  defp page_param(%{"page" => raw}) when is_binary(raw) do
+    case Integer.parse(raw) do
       {n, _} when n > 1 -> min(n - 1, @max_page)
       _ -> 0
     end
@@ -455,10 +760,17 @@ defmodule KilnCMSWeb.ContentController do
   # that class of bug unreachable: gated payloads are never in the cache at all.
   # The cost is one query per gated page view, for the smallest and least
   # latency-sensitive slice of traffic.
-  defp fetch_payload(org_id, type, slug, locale, [], fun),
+  # Unlock grants (#496) bypass it for the same reason and by the same rule: the
+  # cached shape is what an anonymous visitor may read, and a request carrying a
+  # grant may read more. Bypassing on "carries ANY grant" rather than "this
+  # document is locked" is deliberate — the cache is consulted before the record
+  # is known, so the narrower test isn't available at the decision point, and the
+  # wrong guess would file a locked body under the anonymous key. The cost lands
+  # on the handful of visitors who unlocked something, for the life of the grant.
+  defp fetch_payload(org_id, type, slug, locale, [], [], fun),
     do: Cache.fetch_published_payload(org_id, type, slug, locale, fun)
 
-  defp fetch_payload(_org_id, _type, _slug, _locale, _audiences, fun), do: fun.()
+  defp fetch_payload(_org_id, _type, _slug, _locale, _audiences, _unlocks, fun), do: fun.()
 
   # The cached delivery payload: the published record, its media-enriched blocks,
   # and its published locale variants. All enrichment (the per-image media lookup
@@ -474,7 +786,7 @@ defmodule KilnCMSWeb.ContentController do
       record ->
         %{
           record: record,
-          blocks: blocks(record, org_id),
+          blocks: blocks(record, org_id, audiences),
           translations: translations(ct, record.slug, org_id, audiences)
         }
     end
@@ -498,14 +810,41 @@ defmodule KilnCMSWeb.ContentController do
          template,
          %{record: record, blocks: blocks, translations: translations},
          ct,
-         audiences
+         audiences,
+         variant
        ) do
+    # Resolve the type's SEO patterns (#805) here, ahead of the cache headers,
+    # so `etag/1` below hashes the values a visitor will actually be served.
+    # Applied later, a pattern change was invisible to every client holding a
+    # validator: `updated_at` and `published_version_id` do not move when only
+    # the TYPE is edited, so a revalidating browser or CDN got a 304 and kept
+    # the old `<title>` indefinitely.
+    record = Patterns.apply_to(record, ct, KilnCMSWeb.Tenant.current_org(conn))
+
     # A render that depended on WHO asked must never be shared-cached. The public
     # headers carry `public, max-age=60, stale-while-revalidate=300`, so a CDN in
     # front would happily serve one member's gated render to every anonymous
     # visitor. ETag/304 is skipped for the same reason — a conditional hit would
     # revalidate against a body that isn't the same for everyone.
-    private? = audiences != []
+    # A variant render is private for the same reason a gated one is, and it is
+    # worth spelling out because the failure is silent: with `public, max-age=60`
+    # a CDN caches ONE variant and serves it to every visitor for the next
+    # minute. The experiment then reports a 50/50 split that never happened.
+    # `etag/1` has no variant dimension either, so a conditional request would
+    # 304 a visitor into whichever arm the cache is holding.
+    # A document behind a passphrase (#496) is private for the plainest reason of
+    # the four: with `public, max-age=60` the first unlocked visitor populates a
+    # shared cache, and the next sixty seconds of anonymous visitors read it
+    # without ever seeing the lock page. A shared secret is weak access control;
+    # a shared secret plus a shared cache is none.
+    # And a `:content_view` goal document (#984) is private because the
+    # conversion is counted at the ORIGIN: a CDN holding this page would swallow
+    # every conversion after the first and report a fraction of the truth. See
+    # `KilnCMS.Experiments.Delivery.goal_page?/1`.
+    private? =
+      audiences != [] or variant != nil or
+        not is_nil(Map.get(record, :access_password_hash)) or
+        Experiments.Delivery.goal_page?(conn)
 
     conn =
       if private?,
@@ -518,7 +857,7 @@ defmodule KilnCMSWeb.ContentController do
       if not private? and delivery_fresh?(conn, record) do
         send_resp(conn, :not_modified, "")
       else
-        render_content_body(conn, template, record, blocks, translations, ct)
+        render_content_body(conn, template, record, blocks, translations, ct, variant)
       end
 
     # Delivery-render duration telemetry (#206), tagged by content type and
@@ -532,7 +871,12 @@ defmodule KilnCMSWeb.ContentController do
     result
   end
 
-  defp render_content_body(conn, template, record, blocks, translations, ct) do
+  # `record` and `blocks` stay CANONICAL through every assign below — the page
+  # title, the meta description, the canonical URL and the schema.org graph are
+  # all built from them. Only the final `render/3` sees the variant. That is
+  # invariant 3 (`KilnCMS.Experiments`): a variant changes what a human reads,
+  # never what a machine indexes.
+  defp render_content_body(conn, template, record, blocks, translations, ct, variant) do
     org = KilnCMSWeb.Tenant.current_org(conn)
     base_url = KilnCMSWeb.Tenant.base_url(org)
 
@@ -549,8 +893,113 @@ defmodule KilnCMSWeb.ContentController do
     |> assign(:og_type, "article")
     |> assign(:hreflang, hreflang_alternates(ct, translations, base_url))
     |> assign(:locale_links, locale_links(ct, translations, record.locale, base_url))
+    |> assign(
+      :feeds,
+      feed_alternates(ct, org, base_url, record.locale) ++
+        calendar_alternates(ct, org, base_url)
+    )
     |> assign(:json_ld, json_ld_script(StructuredData.document(record, ct, org)))
-    |> render(template, record: record, blocks: blocks)
+    |> assign(:experiment_variant, variant && variant.id)
+    |> render(template,
+      record: Experiments.Assignment.apply_to_record(record, variant),
+      blocks: variant_blocks(record, blocks, variant, org.id, conn)
+    )
+  end
+
+  # Applying the patch to the STORED blocks and re-running the pipeline, rather
+  # than patching the enriched output: the patch addresses blocks by their `_id`
+  # in typed-union terms, and everything downstream — fragment expansion, the
+  # legacy conversion, the batched media and form preloads — then sees an
+  # ordinary tree with no idea experiments exist.
+  #
+  # That re-run is not cheap (fragment expansion plus the batched media and form
+  # loads), and an experimented page is `no-store`, so nothing absorbs it. So it
+  # is skipped entirely unless the variant actually patches a block — a headline
+  # or excerpt test, which is the common case, reuses the blocks already built
+  # for the canonical payload and costs nothing extra.
+  defp variant_blocks(_record, blocks, nil, _org_id, _conn), do: blocks
+
+  defp variant_blocks(record, blocks, variant, org_id, conn) do
+    if Experiments.Assignment.patches_blocks?(variant) do
+      patched = Experiments.Assignment.apply_to_blocks(record.blocks, variant)
+
+      %{record | blocks: patched}
+      |> blocks(org_id, reader_audiences(conn))
+    else
+      blocks
+    end
+  end
+
+  # Feed autodiscovery (#486): the site-wide feed plus this type's own, so a
+  # reader landing on a post can subscribe to just that type. Built from
+  # `FeedController.feed_path/2` rather than spelled out here, so the advertised
+  # URL and the routed one cannot drift. A type that doesn't syndicate
+  # advertises only the site-wide feed; if nothing syndicates, nothing is
+  # advertised at all.
+  # Advertised in the locale of the page being read (#720). A French reader on a
+  # French article was being pointed at the default-locale feed, which carries no
+  # article they can read — and the locale feeds exist precisely so that reader
+  # has one. Same reason the paths come from `FeedController`: the advertised URL
+  # and the routed one cannot drift.
+  # Whether this type syndicates and whether *anything* does are the same
+  # question about the same site's policy (#719), so both are answered from one
+  # resolved policy rather than two lookups that could disagree. `syndicated?/2`
+  # rather than a membership test against the list: it is the predicate that owns
+  # the answer, and it compares names as strings — a descriptor's `type` is an
+  # atom for a compiled type and a string for a dynamic one.
+  defp feed_alternates(ct, org, base_url, locale) do
+    policy = Feeds.policy(org.id)
+
+    case Feeds.syndicated_types(org.id, policy) do
+      [] ->
+        []
+
+      _any ->
+        site = KilnCMS.Branding.for_org(org.id).site_name
+        scope = %{locale: locale, taxonomy: nil}
+
+        types =
+          if Feeds.syndicated?(ct, policy),
+            do: [{nil, site}, {ct, "#{site} — #{ct.label}"}],
+            else: [{nil, site}]
+
+        for {descriptor, title} <- types,
+            {format, mime} <-
+              [{:atom, "application/atom+xml"}, {:json, "application/feed+json"}] do
+          %{
+            type: mime,
+            title: title,
+            href: base_url <> KilnCMSWeb.FeedController.scoped_path(descriptor, scope, format)
+          }
+        end
+    end
+  end
+
+  # Calendar autodiscovery (#480), riding the same `rel="alternate"` block. Built
+  # from `CalendarController.calendar_path/1` for the reason the feeds are: the
+  # advertised URL and the routed one cannot drift.
+  #
+  # Without this the `.ics` routes exist and nothing links to them, so a visitor
+  # can only reach an event calendar by guessing the URL — the inert-surface
+  # shape a round-one review caught on #489.
+  defp calendar_alternates(ct, org, base_url) do
+    case KilnCMS.Events.calendar_types(org.id) do
+      [] ->
+        []
+
+      types ->
+        site = KilnCMS.Branding.for_org(org.id).site_name
+        scope = Enum.find(types, &(to_string(&1.type) == to_string(ct.type)))
+
+        [{nil, site} | if(scope, do: [{scope, "#{site} — #{scope.label}"}], else: [])]
+        |> Enum.map(fn {descriptor, title} ->
+          %{
+            type: "text/calendar",
+            title: title,
+            href: base_url <> KilnCMSWeb.CalendarController.calendar_path(descriptor)
+          }
+        end)
+    end
   end
 
   # Published locale variants of `slug`, scoped to the request's site (#336) so
@@ -613,18 +1062,35 @@ defmodule KilnCMSWeb.ContentController do
     Phoenix.HTML.raw(~s(<script type="application/ld+json">#{json}</script>))
   end
 
-  defp blocks(record, org_id) do
+  defp blocks(record, org_id, audiences) do
     # Blocks are stored as the typed union (Kiln v2); convert back to legacy block
     # structs so the existing media-enriching renderer (`BlockComponents`) is
     # unchanged. A `columns` block (#335) nests child blocks, so the tree is built
     # recursively and flattened once for the media/form preloads — a nested image
     # or form is loaded in the same batched query as a top-level one.
-    tree = block_tree(record.blocks)
+    #
+    # Reusable fragments (#479) are inlined first, so everything after this line
+    # — the media/form preloads included — sees the real tree. HTML delivery
+    # renders live from the block tree rather than from the fired artifact, so
+    # the expansion has to happen on this path too. `audiences` is the reader's,
+    # and the payload cache is already keyed on it.
+    tree = record |> expand_fragments(org_id, audiences) |> block_tree()
     flat = flatten_block_tree(tree)
 
     media = load_block_media(flat, org_id)
     forms = load_block_forms(flat, org_id)
     Enum.map(tree, &enrich_block(&1, media, forms))
+  end
+
+  defp expand_fragments(record, org_id, audiences) do
+    record.blocks
+    |> KilnCMS.CMS.TypedBlocks.to_typed()
+    |> KilnCMS.CMS.Fragments.expand(org_id,
+      audiences: audiences,
+      # Seeded with the record itself: a page embedding *itself* would otherwise
+      # inline its own body once before the cycle guard caught it a level down.
+      ancestry: [{KilnCMS.Firing.Engine.public_type(record), record.id}]
+    )
   end
 
   # Typed union → legacy `KilnCMS.CMS.Block` structs, recursing into `columns`
@@ -674,16 +1140,15 @@ defmodule KilnCMSWeb.ContentController do
     Map.new(slugs, &{&1, KilnCMS.Forms.get_active(&1, org_id)})
   end
 
-  # Batch-load the media items referenced by image blocks (so we render one
-  # query, not one per image).
+  # Batch-load the media items referenced by image and gallery blocks (so we
+  # render one query, not one per image).
+  #
+  # A gallery's ids live one level down, inside its `images` list, so collecting
+  # only top-level `media_id` would leave every gallery image with no srcset, no
+  # focal point and no intrinsic dimensions on the public site — a silent
+  # degradation, since the stored url still renders (#482).
   defp load_block_media(blocks, org_id) do
-    ids =
-      for b <- blocks,
-          to_string(b.type) == "image",
-          id = b.data["media_id"],
-          is_binary(id),
-          uniq: true,
-          do: id
+    ids = blocks |> Enum.flat_map(&block_media_ids/1) |> Enum.uniq()
 
     case ids do
       [] ->
@@ -701,6 +1166,32 @@ defmodule KilnCMSWeb.ContentController do
     end
   end
 
+  # Filtered to real uuids once, here, rather than in each clause.
+  #
+  # A blank `media_id` is the normal state of an image pasted in by URL — but
+  # `media_id` is a free-text block field, so an importer or an API caller can
+  # put anything in it, and `id` is a uuid column: Ash rejects a non-uuid at
+  # query build, which means `list_media_items!` *raises* and the published page
+  # 500s for every visitor. `KilnCMS.Firing.References` has guarded this since
+  # it was written; delivery never did, and a gallery multiplies the exposure
+  # from one id per block to N.
+  defp block_media_ids(%{type: type, data: data}) do
+    type |> to_string() |> media_ids_for(data) |> Enum.filter(&valid_media_id?/1)
+  end
+
+  defp block_media_ids(_block), do: []
+
+  defp media_ids_for("image", data), do: [data["media_id"]]
+
+  defp media_ids_for("gallery", data) do
+    data["images"] |> List.wrap() |> Enum.filter(&is_map/1) |> Enum.map(& &1["media_id"])
+  end
+
+  defp media_ids_for(_type, _data), do: []
+
+  defp valid_media_id?(id) when is_binary(id), do: match?({:ok, _}, Ecto.UUID.cast(id))
+  defp valid_media_id?(_id), do: false
+
   defp enrich_block(block, media, forms) do
     base = %{type: to_string(block.type), content: block.content}
 
@@ -713,11 +1204,27 @@ defmodule KilnCMSWeb.ContentController do
 
         Map.merge(base, %{
           srcset: srcset(item),
-          alt: item.alt,
+          # Alternate encodings for `<picture>` (#473). Separate from `srcset`
+          # on purpose — see `Media.Presentation`.
+          sources: KilnCMS.Media.Presentation.sources(item),
+          # The block's own alt wins, with the library row as the fallback
+          # behind it. This used to take `item.alt` unconditionally, which put
+          # this surface at odds with every other one: the fired `:web`
+          # artifact, the pop-out preview and the in-context editor all render
+          # the block's alt, and `Validations.MediaAltText` gates publishing on
+          # the block's alt and says in as many words that it "is what ships".
+          # It wasn't. An image block described for its placement, pointing at a
+          # library row nobody had filled in, passed the gate and then shipped
+          # `alt=""` on the live site — the one surface the gate exists to
+          # protect (#403, #482).
+          alt: presence(block.data["alt"]) || item.alt,
           width: item.width,
           height: item.height,
           focal: focal_style(item)
         })
+
+      block.type == :gallery ->
+        enrich_gallery(base, block, media)
 
       block.type == :form ->
         # nil form (inactive/unknown slug) → the component renders nothing.
@@ -728,9 +1235,71 @@ defmodule KilnCMSWeb.ContentController do
     end
   end
 
+  # Per-item media enrichment (#482), mirroring what the `image` branch does for
+  # a single image. An item whose `media_id` resolved to nothing still renders
+  # from its stored url — just without srcset/focal/dimensions — which is what
+  # happens when media is deleted out from under a published document.
+  defp enrich_gallery(base, block, media) do
+    images =
+      for image <- block.data["images"] || [], is_map(image) do
+        gallery_image(image, media[image["media_id"]])
+      end
+
+    Map.merge(base, %{
+      images: images,
+      style: KilnCMS.Blocks.Gallery.layout_style(block.data["layout"])
+    })
+  end
+
+  defp gallery_image(image, item) do
+    %{
+      url: image["url"],
+      # The item's own alt wins: it is the one written *for this placement*,
+      # and `MediaItem.alt` is the library-wide default behind it. Same
+      # precedence #403 established for the single-image block.
+      alt: presence(image["alt"]) || (item && item.alt),
+      caption: image["caption"],
+      srcset: item && KilnCMS.Media.Presentation.srcset(item),
+      sources: (item && KilnCMS.Media.Presentation.sources(item)) || [],
+      width: item && item.width,
+      height: item && item.height,
+      focal: item && KilnCMS.Media.Presentation.focal_style(item)
+    }
+  end
+
+  defp presence(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp presence(_value), do: nil
+
+  # Embed cards (#489). Without these fields an embed reaches `BlockComponents`
+  # as `%{type, content}` and the card branch — which needs a title — renders
+  # nothing at all: the fired artifact and every preview showed a card while the
+  # public page, the one surface that matters, showed an empty div.
+  defp enrich_geo(base, %{type: :embed} = block) do
+    Map.merge(base, %{
+      title: block.data["title"],
+      author_name: block.data["author_name"],
+      provider_name: block.data["provider_name"],
+      thumbnail_url: block.data["thumbnail_url"],
+      resolved_url: block.data["resolved_url"]
+    })
+  end
+
   # GEO blocks (#357): surface the data-side fields the renderer reads.
   defp enrich_geo(base, %{type: :faq} = block),
     do: Map.put(base, :items, block.data["items"] || [])
+
+  defp enrich_geo(base, %{type: :accordion} = block) do
+    Map.merge(base, %{
+      panels: block.data["panels"] || [],
+      first_open: block.data["first_open"] == true
+    })
+  end
 
   defp enrich_geo(base, %{type: :how_to} = block) do
     Map.merge(base, %{description: block.data["description"], steps: block.data["steps"] || []})
@@ -761,101 +1330,36 @@ defmodule KilnCMSWeb.ContentController do
     })
   end
 
-  # `object-position` from the media item's focal point, so any theme (or the
-  # inline styles below) cropping via `object-fit` keeps the subject in frame.
-  # Omitted at the default center — no styling noise for untouched media.
-  defp focal_style(%{focal_x: x, focal_y: y})
-       when is_number(x) and is_number(y) and (x != 0.5 or y != 0.5) do
-    "object-position: #{round(x * 100)}% #{round(y * 100)}%"
-  end
+  # `srcset/1` and `focal_style/1` live in `KilnCMS.Media.Presentation` — the
+  # gallery block (#482) is the second consumer, and `srcset`'s exclusion of
+  # cropped variants is the kind of rule that gets reintroduced by someone
+  # writing a second builder rather than finding the first.
+  defp srcset(item), do: KilnCMS.Media.Presentation.srcset(item)
+  defp focal_style(item), do: KilnCMS.Media.Presentation.focal_style(item)
 
-  defp focal_style(_item), do: nil
+  defp not_found(conn, path) do
+    # Every HTML URL miss funnels through here, so this is where the aggregated
+    # 404 counter is written (#472) — after the alias table, the redirect table
+    # and the teaser have all missed, i.e. only for paths nothing can serve.
+    # Off the request path and best-effort; see `KilnCMSWeb.MissedPathTracking`.
+    #
+    # `path` is the caller's, NOT `conn.request_path`: the two diverge (empty
+    # segments collapse, `%xx` stays encoded in `request_path`), and this is the
+    # exact string `Redirects.resolve/3` was just asked for. Recording anything
+    # else would list a path whose one-click redirect could never fire.
+    KilnCMSWeb.MissedPathTracking.track(path, locale(conn), current_org_id(conn))
 
-  # Builds an `srcset` value from a media item's variants plus the original,
-  # e.g. "/uploads/thumb 400w, /uploads/medium 1024w, /uploads/orig 1600w".
-  # Cropped variants (different aspect ratio) are excluded — they're for
-  # consumers that ask for that framing by label, not for responsive scaling.
-  defp srcset(item) do
-    cropped = KilnCMS.ImageProcessor.cropped_labels()
-
-    variant_parts =
-      for {label, %{"url" => url, "width" => w}} <- item.variants || %{},
-          label not in cropped,
-          safe = KilnCMS.HTMLSanitizer.safe_image_src(url),
-          is_binary(safe),
-          do: "#{safe} #{w}w"
-
-    original =
-      case item.width && KilnCMS.HTMLSanitizer.safe_image_src(item.url) do
-        url when is_binary(url) -> ["#{url} #{item.width}w"]
-        _ -> []
-      end
-
-    case variant_parts ++ original do
-      [] -> nil
-      parts -> Enum.join(parts, ", ")
-    end
-  end
-
-  # Record a privacy-first page view. Best-effort and **off the request path**:
-  # the upsert runs in a supervised, unlinked task so a slow DB pool (or a crawler
-  # spike) can't queue page delivery. The supervisor's `max_children` bounds
-  # concurrent tasks, so a spike drops views (start_child → {:error, :max_children})
-  # rather than exhausting the pool. Failures are swallowed.
-  #
-  # `:async_analytics` is on in prod/dev but off under test, where the detached
-  # task would run outside the ExUnit SQL sandbox connection (leaking a connection
-  # past the owning test and racing assertions). Running it inline keeps the
-  # upsert on the request's sandbox-owned connection.
-  defp track_view(type, id, org_id) do
-    # Emitted synchronously, before the task branch, and independently of
-    # `:async_analytics`: it is an in-process dispatch with no IO, it stays
-    # inside the request's OTel span, and it still fires when the supervisor
-    # sheds the DB write below ({:error, :max_children}) — so the event tracks
-    # real traffic rather than DB capacity, and a divergence from the stored
-    # counters is itself the backpressure signal. Emitting from an Ash hook
-    # instead would give the changeset an after_action and so wrap every public
-    # page view in a transaction (KilnCMS.Repo.prefer_transaction? is false).
-    :telemetry.execute(
-      [:kiln_cms, :analytics, :view],
-      %{count: 1},
-      # `content_id` is metadata only and is deliberately NOT a metric tag — one
-      # Prometheus series per content item would be unbounded. No org_id: this
-      # metadata can reach Sentry/OTLP exporters (see KilnCMS.Mail).
-      %{type: type, content_id: id}
-    )
-
-    if Application.get_env(:kiln_cms, :async_analytics, true) do
-      Task.Supervisor.start_child(KilnCMS.TaskSupervisor, fn -> record_view(type, id, org_id) end)
-    else
-      record_view(type, id, org_id)
-    end
-
-    :ok
-  end
-
-  # Both counters land in the viewed record's own site (epic #336): the all-time
-  # total and today's bucket. Two independent single-row upserts sharing one
-  # supervised task — deliberately not wrapped in a transaction, which would
-  # hold the hot totals row's lock across both statements and halve its
-  # throughput ceiling. Sharing the task also means overload drops both together,
-  # so they under-count consistently instead of drifting apart.
-  defp record_view(type, id, org_id) do
-    opts = [authorize?: false, tenant: org_id]
-    Analytics.record_view(type, id, opts)
-    Analytics.record_view_day(type, id, opts)
-  rescue
-    _ -> :ok
-  end
-
-  defp not_found(conn) do
     conn
     # A 404 may be an unpublished/draft slug — never let a CDN or browser cache
     # it (it would mask the page once published).
     |> put_resp_header("cache-control", "no-store")
     |> put_status(:not_found)
     |> put_view(KilnCMSWeb.ErrorHTML)
-    |> render(:"404")
+    # A title, so the tab reads "Page not found · Acme Docs" rather than the
+    # bare brand name. The endpoint-level `render_errors` twin cannot be given
+    # one — Phoenix builds those assigns itself — and renders the brand alone,
+    # which is correct if less specific (#559).
+    |> render(:"404", page_title: gettext("Page not found"))
   end
 
   # CDN/browser cache headers for published HTML: a short shared max-age with a
@@ -874,17 +1378,30 @@ defmodule KilnCMSWeb.ContentController do
     conn
     |> put_resp_header("cache-control", "public, max-age=60, stale-while-revalidate=300")
     |> put_resp_header("vary", "Accept-Language")
-    |> put_resp_header("etag", etag(record))
+    |> put_resp_header("etag", etag(record, current_org_id(conn)))
   end
 
-  defp etag(record) do
-    raw = "#{record.id}:#{record.updated_at}:#{record.published_version_id}"
+  # The resolved SEO fields are part of the raw string, not just the record's
+  # own timestamps: with a type-level pattern (#805) two responses can differ
+  # while every column on the record is identical. `render_content/6` resolves
+  # before this is called, so what is hashed is what is sent.
+  #
+  # Head generation (#1079) is the same idea for layout-facing settings: feed
+  # autodiscovery, branding, code injection and calendar links live in `<head>`
+  # but are not columns on the content row, so a settings save must move the
+  # ETag or a revalidating client keeps a 304 body whose links are already wrong.
+  defp etag(record, org_id) do
+    raw =
+      "#{record.id}:#{record.updated_at}:#{record.published_version_id}" <>
+        ":#{record.seo_title}:#{record.seo_description}" <>
+        ":#{KilnCMS.Cache.head_generation(org_id)}"
+
     digest = :sha256 |> :crypto.hash(raw) |> Base.encode16(case: :lower) |> binary_part(0, 16)
     ~s("#{digest}")
   end
 
   defp delivery_fresh?(conn, record) do
     match?([_ | _], get_req_header(conn, "if-none-match")) and
-      etag(record) in get_req_header(conn, "if-none-match")
+      etag(record, current_org_id(conn)) in get_req_header(conn, "if-none-match")
   end
 end

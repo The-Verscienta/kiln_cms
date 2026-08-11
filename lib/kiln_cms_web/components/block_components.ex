@@ -13,12 +13,26 @@ defmodule KilnCMSWeb.BlockComponents do
   alias KilnCMS.HTMLSanitizer
 
   attr :block, :map, required: true
+  # The experiment variant this page was rendered with (#499), threaded down so
+  # a form block can carry it back on submission. `nil` on every ordinary page.
+  attr :variant, :string, default: nil
 
   def render_block(%{block: %{type: type}} = assigns) do
     assigns = assign(assigns, :type, type)
 
     ~H"""
-    <div class="kiln-block">
+    <%!-- `data-block-id` is the anchor every surface that wants to point AT a
+          block needs — comment pins in the shared preview (#802) first, and
+          `KilnCMSWeb.InContextEditLive` already does the same thing with its
+          own wrapper. `@block[:id]`, not `@block.id`: a legacy or hand-built
+          block map may carry none, and Phoenix omits a nil attribute rather
+          than emitting an empty one.
+
+          It rides on public delivery too, since this is the shared render
+          path. That is a block's own opaque id and nothing else — no comment,
+          author or state travels with it, and `KilnCMS.CMS.Comment` stays
+          unreachable from the public and headless surfaces. --%>
+    <div class="kiln-block" data-block-id={@block[:id]}>
       <%= cond do %>
         <% @type == "heading" -> %>
           <h2 class="text-xl font-bold">{@block.content}</h2>
@@ -30,18 +44,32 @@ defmodule KilnCMSWeb.BlockComponents do
         <% @type == "quote" -> %>
           <blockquote class="border-l-4 border-base-300 pl-3 italic">{@block.content}</blockquote>
         <% @type == "image" -> %>
-          <img
-            :if={src = HTMLSanitizer.safe_image_src(@block.content)}
-            src={src}
-            srcset={@block[:srcset]}
-            sizes={@block[:srcset] && "(max-width: 768px) 100vw, 768px"}
-            alt={@block[:alt] || ""}
-            width={@block[:width]}
-            height={@block[:height]}
-            style={@block[:focal]}
-            loading="lazy"
-            class="max-w-full rounded"
-          />
+          <%!-- `<picture>` so a browser that supports WebP/AVIF takes the
+                smaller encoding and every other one falls through to the `<img>`
+                (#473). The `<source>`s are ordered most-efficient-first by
+                `Media.Presentation.sources/1`, because the browser takes the
+                first `type` it understands and stops looking. With no
+                alternates the element degrades to exactly the `<img>` that was
+                here before. --%>
+          <picture :if={src = HTMLSanitizer.safe_image_src(@block.content)}>
+            <source
+              :for={source <- @block[:sources] || []}
+              type={source.type}
+              srcset={source.srcset}
+              sizes="(max-width: 768px) 100vw, 768px"
+            />
+            <img
+              src={src}
+              srcset={@block[:srcset]}
+              sizes={@block[:srcset] && "(max-width: 768px) 100vw, 768px"}
+              alt={@block[:alt] || ""}
+              width={@block[:width]}
+              height={@block[:height]}
+              style={@block[:focal]}
+              loading="lazy"
+              class="max-w-full rounded"
+            />
+          </picture>
         <% @type == "columns" -> %>
           <%!-- Nested-layout container (#335): a CSS grid whose cells each hold a
                 recursively-rendered child block list. `style` is built from
@@ -49,9 +77,76 @@ defmodule KilnCMSWeb.BlockComponents do
                 safe as an attribute value. --%>
           <div class="kiln-columns" style={@block[:style]}>
             <div :for={col <- @block[:columns] || []} class="kiln-column space-y-2">
-              <.render_block :for={child <- col.blocks} block={child} />
+              <.render_block :for={child <- col.blocks} block={child} variant={@variant} />
             </div>
           </div>
+        <% @type == "gallery" -> %>
+          <%!-- Image collection (#482): heading in content, items in :images.
+                `style` comes from an allowlisted layout key
+                (KilnCMS.Blocks.Gallery.layout_style/1), so it is safe as an
+                attribute value — same rule the columns grid follows. Each item
+                carries its own srcset/focal/dimensions, resolved by delivery's
+                batch media load. --%>
+          <section class="kiln-gallery space-y-2">
+            <h2 :if={@block.content not in [nil, ""]} class="text-xl font-bold">{@block.content}</h2>
+            <div class="kiln-gallery-items" style={@block[:style]}>
+              <%!-- Filtered, not guarded per-element: the block's own `:web`
+                    serializer drops url-less items entirely, and guarding only
+                    the `<img>` would leave an empty captioned figure here that
+                    the fired artifact does not have. --%>
+              <figure
+                :for={image <- gallery_images(@block)}
+                class="kiln-gallery-item m-0"
+              >
+                <picture :if={src = HTMLSanitizer.safe_image_src(image[:url])}>
+                  <source
+                    :for={source <- image[:sources] || []}
+                    type={source.type}
+                    srcset={source.srcset}
+                    sizes="(max-width: 768px) 50vw, 320px"
+                  />
+                  <img
+                    src={src}
+                    srcset={image[:srcset]}
+                    sizes={image[:srcset] && "(max-width: 768px) 50vw, 320px"}
+                    alt={image[:alt] || ""}
+                    width={image[:width]}
+                    height={image[:height]}
+                    style={image[:focal]}
+                    loading="lazy"
+                    class="w-full rounded"
+                  />
+                </picture>
+                <figcaption
+                  :if={image[:caption] not in [nil, ""]}
+                  class="mt-1 text-sm text-base-content/70"
+                >
+                  {image[:caption]}
+                </figcaption>
+              </figure>
+            </div>
+          </section>
+        <% @type == "accordion" -> %>
+          <%!-- Collapsible panels (#482). Deliberately identical in markup to the
+                faq branch below and deliberately different in meaning: this one
+                contributes nothing to the structured-data graph. See
+                KilnCMS.Blocks.Accordion. --%>
+          <section class="kiln-accordion space-y-2">
+            <h2 :if={@block.content not in [nil, ""]} class="text-xl font-bold">{@block.content}</h2>
+            <%!-- Indexed AFTER filtering, matching the block's own serializer.
+                  Indexing first would open panel zero of the raw list — so a
+                  blank leading row (one click too many on "Add panel") leaves
+                  the on-site page with nothing open while the fired artifact
+                  opens the first real panel. --%>
+            <details
+              :for={{panel, index} <- Enum.with_index(accordion_panels(@block))}
+              open={index == 0 && @block[:first_open] == true}
+              class="kiln-accordion-item rounded border border-base-300 p-2"
+            >
+              <summary class="cursor-pointer font-medium">{panel["title"]}</summary>
+              <p class="mt-1">{panel["content"]}</p>
+            </details>
+          </section>
         <% @type == "faq" -> %>
           <%!-- GEO Q&A block (#357): title in content, item rows in :items. --%>
           <section class="kiln-faq space-y-2">
@@ -97,17 +192,43 @@ defmodule KilnCMSWeb.BlockComponents do
           <hr class="border-base-300" />
         <% @type == "form" -> %>
           <%!-- nil form (inactive/unknown slug) renders nothing on-site. --%>
-          <.public_form :if={@block[:form]} form={@block[:form]} />
+          <.public_form :if={@block[:form]} form={@block[:form]} variant={@variant} />
         <% @type == "embed" -> %>
+          <%!-- Two shapes, and only the allowlisted hosts get an iframe. --%>
           <div :if={embed = HTMLSanitizer.safe_embed_url(@block.content)} class="aspect-video">
             <iframe
               src={embed}
-              title={gettext("Embedded media")}
+              title={@block[:title] || gettext("Embedded media")}
               class="h-full w-full rounded"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
               allowfullscreen
             />
           </div>
+          <%!-- Everything else with resolved oEmbed metadata renders as a card
+                (#489): a link, a thumbnail and a title, all escaped scalars. The
+                provider's own `html` is never used — see KilnCMS.OEmbed. An
+                embed with no metadata falls through to nothing, which is what it
+                rendered before the feature existed. --%>
+          <a
+            :if={embed_card?(@block)}
+            href={HTMLSanitizer.safe_href(@block.content)}
+            rel="noopener"
+            class="kiln-embed-card flex gap-3 rounded border border-base-300 p-3 no-underline hover:bg-base-200"
+          >
+            <img
+              :if={thumb = HTMLSanitizer.safe_image_src(@block[:thumbnail_url])}
+              src={thumb}
+              alt=""
+              loading="lazy"
+              class="size-20 shrink-0 rounded object-cover"
+            />
+            <span class="min-w-0">
+              <span class="block font-medium">{@block[:title]}</span>
+              <span :if={byline = embed_byline(@block)} class="block text-sm text-base-content/70">
+                {byline}
+              </span>
+            </span>
+          </a>
         <% true -> %>
           <p>{@block.content}</p>
       <% end %>
@@ -128,6 +249,8 @@ defmodule KilnCMSWeb.BlockComponents do
   """
   attr :form, :map, required: true
   attr :embed, :boolean, default: false
+  # The experiment variant this page was rendered with (#499), or nil.
+  attr :variant, :string, default: nil
 
   def public_form(assigns) do
     ~H"""
@@ -140,6 +263,26 @@ defmodule KilnCMSWeb.BlockComponents do
 
       <%!-- Underscore-prefixed so it can't collide with an admin-defined field name. --%>
       <input :if={@embed} type="hidden" name="_kiln_embed" value="1" />
+
+      <%!-- The fill-time spam signal (#477): a signed "now", so the submit
+            handler can tell how long the visitor actually had the form open.
+            Also underscore-prefixed. --%>
+      <input
+        type="hidden"
+        name={KilnCMS.Forms.rendered_at_field()}
+        value={KilnCMS.Forms.rendered_at_token()}
+      />
+
+      <%!-- The A/B variant this page was rendered with (#499), so a conversion
+            is attributed to the arm the visitor actually saw. This is what lets
+            a form-submission goal work with no visitor cookie at all: the
+            assignment travels with the page rather than with the person. --%>
+      <input
+        :if={@variant}
+        type="hidden"
+        name={KilnCMS.Forms.variant_field()}
+        value={@variant}
+      />
 
       <%!-- Honeypot: hidden from humans, irresistible to bots. --%>
       <div style="position:absolute;left:-9999px" aria-hidden="true">
@@ -250,7 +393,15 @@ defmodule KilnCMSWeb.BlockComponents do
   Shared by `PreviewLive` and the editor's decoupled preview so both agree.
   """
   @spec thin_blocks([map()]) :: [map()]
-  def thin_blocks(legacy_maps), do: Enum.map(legacy_maps, &thin_block/1)
+  def thin_blocks(legacy_maps), do: Enum.map(legacy_maps, &keep_id/1)
+
+  # Every `thin_block/1` clause builds a fresh map for its own type, so the
+  # block's id was dropped on the way through — which meant the thin surfaces
+  # (the pop-out preview, the in-context overlay) rendered without the
+  # `data-block-id` anchor even after `render_block/1` learned to emit it.
+  # Re-attached once here rather than in each of a dozen clauses, so a new
+  # block type cannot forget it.
+  defp keep_id(legacy), do: legacy |> thin_block() |> Map.put(:id, Map.get(legacy, :id))
 
   defp thin_block(%{type: :columns, data: data}) do
     cols =
@@ -269,6 +420,54 @@ defmodule KilnCMSWeb.BlockComponents do
       content: nil,
       columns: cols,
       style: KilnCMS.Blocks.Columns.grid_style(data["layout"], data["gap"], length(cols))
+    }
+  end
+
+  # An image's alt rides along so surfaces that render from the thin shape — the
+  # pop-out preview, the in-context edit overlay — show the same alt text
+  # delivery will. `srcset`/`focal` deliberately do not: those need a loaded
+  # MediaItem, which is a delivery concern.
+  # Embed metadata (#489) rides the thin shape so the previews and the
+  # in-context editor show the same card delivery does, rather than an empty
+  # figure while the real page shows a title and a thumbnail.
+  defp thin_block(%{type: :embed, content: content, data: data}) do
+    %{
+      type: "embed",
+      content: content,
+      title: data["title"],
+      author_name: data["author_name"],
+      provider_name: data["provider_name"],
+      thumbnail_url: data["thumbnail_url"],
+      resolved_url: data["resolved_url"]
+    }
+  end
+
+  defp thin_block(%{type: :image, content: content, data: data}),
+    do: %{type: "image", content: content, alt: data["alt"] || ""}
+
+  # Repeating-item blocks (#482). The thin shape carries no media enrichment —
+  # `thin_blocks/1` serves the pop-out preview and the editor, which render from
+  # the stored url rather than from a batch-loaded MediaItem — so item keys are
+  # atoms here to match what `render_block/1` reads, and `:srcset`/`:focal` are
+  # simply absent (the `:if` guards handle that).
+  defp thin_block(%{type: :gallery, content: content, data: data}) do
+    %{
+      type: "gallery",
+      content: content,
+      style: KilnCMS.Blocks.Gallery.layout_style(data["layout"]),
+      images:
+        for image <- data["images"] || [], is_map(image) do
+          %{url: image["url"], alt: image["alt"], caption: image["caption"]}
+        end
+    }
+  end
+
+  defp thin_block(%{type: :accordion, content: content, data: data}) do
+    %{
+      type: "accordion",
+      content: content,
+      first_open: data["first_open"] == true,
+      panels: data["panels"] || []
     }
   end
 
@@ -296,4 +495,38 @@ defmodule KilnCMSWeb.BlockComponents do
   end
 
   defp thin_block(block), do: %{type: to_string(block.type), content: block.content}
+
+  # The items each renderable surface actually shows, filtered the same way the
+  # block modules' own `:web` serializers filter. Two renderers over one block
+  # that disagree about which items count is a bug that only shows up as "the
+  # published page looks different from the preview".
+  defp gallery_images(block) do
+    for image <- block[:images] || [], present?(image[:url]), do: image
+  end
+
+  defp accordion_panels(block) do
+    for panel <- block[:panels] || [], present?(panel["title"]), do: panel
+  end
+
+  defp present?(value), do: is_binary(value) and String.trim(value) != ""
+
+  # One predicate, shared with the block module's own `card?/1`, so the fired
+  # artifact and the live site cannot disagree about when a card exists — the
+  # drift the #482 review found between the gallery/accordion renderers.
+  defp embed_card?(block) do
+    is_nil(HTMLSanitizer.safe_embed_url(block.content)) and
+      KilnCMS.Blocks.Embed.card?(%KilnCMS.Blocks.Embed{
+        url: block.content,
+        title: block[:title],
+        resolved_url: block[:resolved_url]
+      })
+  end
+
+  # "Provider · Author", omitting whichever is missing, nil when both are.
+  defp embed_byline(block) do
+    case [block[:provider_name], block[:author_name]] |> Enum.filter(&present?/1) do
+      [] -> nil
+      parts -> Enum.join(parts, " · ")
+    end
+  end
 end

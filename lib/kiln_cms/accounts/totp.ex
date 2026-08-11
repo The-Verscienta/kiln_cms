@@ -28,16 +28,49 @@ defmodule KilnCMS.Accounts.Totp do
   Whether `code` is a valid TOTP for `secret` right now (or at `:time`, a Unix
   timestamp in seconds — used by tests). Accepts a code from the current step or
   either adjacent step, and compares in constant time.
+
+  ## Whitespace is stripped, not trimmed
+
+  Authenticator apps display the code as `123 456`, and Safari's
+  `autocomplete="one-time-code"` fill and a plain paste both carry that inner
+  space through. Normalizing *here* rather than at each call site is what makes
+  the three surfaces that check a code — the browser prompt, the headless
+  exchange, and the enrolment/disable forms in `/editor/settings` — agree: they
+  used not to, and a paste that signed you in was rejected when you tried to
+  turn 2FA off (#726).
+
+  It is not cosmetic either. Attempts are budgeted per account
+  (`KilnCMS.Accounts.AccountThrottle.consume_second_factor/1`), so a space costs
+  one of five rather than one free retry — three pastes and one genuine
+  clock-skew miss would lock a user out for fifteen minutes without their ever
+  having entered a wrong code.
   """
   @spec valid?(binary(), String.t(), keyword()) :: boolean()
   def valid?(secret, code, opts \\ []) when is_binary(secret) and is_binary(code) do
     time = Keyword.get(opts, :time, System.system_time(:second))
-    candidate = String.trim(code)
+    candidate = normalize(code)
     step = div(time, @period)
 
     Enum.any?(-@drift..@drift, fn offset ->
       Plug.Crypto.secure_compare(candidate, code_for_step(secret, step + offset))
     end)
+  end
+
+  @doc """
+  A submitted code with all whitespace removed — see `valid?/3` on why inner
+  whitespace and not just the ends.
+
+  A code that is not valid UTF-8 is returned unchanged rather than normalized.
+  `~r/\\s/u` raises `ArgumentError` on such a subject, and this now runs on an
+  unauthenticated request body: `Plug.Parsers` accepts
+  `application/x-www-form-urlencoded` regardless of the `:accepts` list, so
+  `code=%FF%FE` reaches here. Unchanged is the right answer anyway — a code is
+  six digits, so a non-UTF-8 one cannot match, and a 500 here would burn one of
+  the account's five attempts per malformed request.
+  """
+  @spec normalize(String.t()) :: String.t()
+  def normalize(code) when is_binary(code) do
+    if String.valid?(code), do: String.replace(code, ~r/\s/u, ""), else: code
   end
 
   @doc "The TOTP code for `secret` at Unix time `unix_time` (tests / enrolment display)."

@@ -84,18 +84,86 @@ defmodule KilnCMSWeb.ErrorHTMLTest do
       assert html =~ "Powered by Acme Tenant."
     end
 
-    test "a request with no resolved tenant still renders, on the operator defaults" do
-      # Not every error page has a tenant behind it: an exception raised before
-      # `SetTenant` runs, a template rendered directly. This guards the shape
-      # the issue proposed — `current_org={@conn.assigns[:current_org]}` — which
-      # raises `KeyError` on `@conn` for a render with no conn at all, turning
-      # an error page into a second error.
-      assert render_to_string(KilnCMSWeb.ErrorHTML, "404", "html", []) =~ "Powered by KilnCMS."
+    # The root layout — <!DOCTYPE>, the app.css link, the brand tokens, the
+    # <title> — wraps a /:slug 404 (an ordinary controller render through the
+    # :browser pipeline) but used NOT to wrap a NoRouteError 404 or a 500, which
+    # the endpoint's render_errors renderer produced with `layout: false` and no
+    # root layout. The two 404s on one host looked nothing alike (#681).
+    test "a NoRouteError 404 renders the full page chrome, not raw unstyled markup",
+         %{conn: conn} do
+      html =
+        conn
+        |> post("/definitely-no-route-#{System.unique_integer([:positive])}")
+        |> html_response(404)
 
-      bare = %{Phoenix.ConnTest.build_conn() | assigns: %{}}
+      assert html =~ "<!DOCTYPE html"
+      assert html =~ "/assets/css/app.css"
+      assert html =~ "<title"
+      # The inner chrome is still there too — root wraps Layouts.public, not
+      # replaces it.
+      assert html =~ "Powered by"
+    end
 
-      assert render_to_string(KilnCMSWeb.ErrorHTML, "404", "html", conn: bare) =~
-               "Powered by KilnCMS."
+    test "the two 404 surfaces on one host render with the same chrome", %{conn: conn} do
+      slug_404 =
+        conn
+        |> get("/no-such-page-#{System.unique_integer([:positive])}")
+        |> html_response(404)
+
+      route_404 =
+        conn
+        |> post("/no-route-#{System.unique_integer([:positive])}")
+        |> html_response(404)
+
+      for marker <- ["<!DOCTYPE html", "/assets/css/app.css"] do
+        assert slug_404 =~ marker, "the /:slug 404 is missing #{marker}"
+        assert route_404 =~ marker, "the NoRouteError 404 is missing #{marker}"
+      end
+    end
+
+    # Not every error page has a tenant behind it: an exception raised before
+    # `SetTenant` runs, a template rendered directly. This guards the shape the
+    # issue proposed — `current_org={@conn.assigns[:current_org]}` — which raises
+    # `KeyError` on `@conn` for a render with no conn at all, turning an error
+    # page into a second error.
+    #
+    # Every templated status, not just 404: the 500 page is the one that has to
+    # tolerate a half-built conn, because that is precisely the request that
+    # raised. A 500 renderer that itself raises is the loop (#558).
+    for status <- ["403", "404", "500"] do
+      test "#{status} with no resolved tenant still renders, on the operator defaults" do
+        assert render_to_string(KilnCMSWeb.ErrorHTML, unquote(status), "html", []) =~
+                 "Powered by KilnCMS."
+
+        bare = %{Phoenix.ConnTest.build_conn() | assigns: %{}}
+
+        assert render_to_string(KilnCMSWeb.ErrorHTML, unquote(status), "html", conn: bare) =~
+                 "Powered by KilnCMS."
+      end
+
+      # ...and the same through the ROOT layout, which is where the real risk
+      # lives: #681 put `Layouts.root` on the error path, and it runs the theme
+      # boot script and `Layouts.brand_tokens/1` against whatever assigns the
+      # failed request left behind. `render_to_string/4` above renders the inner
+      # template only, so it cannot see a root layout that raises.
+      #
+      # This reproduces what `Phoenix.Controller.RenderErrors` does on its last
+      # two lines. Going through the endpoint instead would need a route that
+      # raises on demand, which is a bigger fixture than the thing under test.
+      test "#{status} renders inside the root layout with a half-built conn" do
+        html =
+          %{Phoenix.ConnTest.build_conn() | assigns: %{}}
+          |> Plug.Conn.put_private(:phoenix_endpoint, KilnCMSWeb.Endpoint)
+          |> Phoenix.Controller.put_root_layout(html: {KilnCMSWeb.Layouts, :root})
+          |> Phoenix.Controller.put_layout(false)
+          |> Phoenix.Controller.put_view(KilnCMSWeb.ErrorHTML)
+          |> Phoenix.Controller.render(unquote(status) <> ".html", %{})
+          |> Map.fetch!(:resp_body)
+
+        assert html =~ "<!DOCTYPE html"
+        assert html =~ "/assets/css/app.css"
+        assert html =~ "Powered by KilnCMS."
+      end
     end
   end
 end

@@ -62,20 +62,81 @@ defmodule KilnCMSWeb.CORS do
   Parses a `CORS_ORIGINS` env value into the config shape. `"*"` → `:all`;
   otherwise a comma-separated allowlist (blank entries dropped). Returns `[]`
   for a blank/empty value (deny all).
+
+  Shares the split/trim/wildcard half with `EMBED_ORIGINS` via
+  `KilnCMS.Config.OriginList` (#651). What differs, deliberately, is what a
+  malformed entry costs: `EMBED_ORIGINS` discards the whole value, because a bad
+  entry there can widen a CSP. A CORS origin is only ever compared for equality
+  (`allowed_origin?/2`, `check_socket_origin?/1`), so a malformed one can do
+  nothing but fail to match — failing the whole list closed over a stray typo
+  would take a working integration down to fix a nuisance. So the suspect
+  entries are named on stderr and the value is applied **unchanged**: the
+  validator below is a heuristic about what browsers send, and dropping an entry
+  on a heuristic would be the same outage by a quieter route.
+
+  That warning is the point. An entry that can never match is invisible
+  otherwise: the browser reports a CORS failure, the server logs a clean 200,
+  and nothing connects the two to a trailing slash in an env var.
   """
   @spec parse_env(String.t() | nil) :: :all | [String.t()]
-  def parse_env(nil), do: []
+  def parse_env(value) do
+    KilnCMS.Config.OriginList.parse(value,
+      name: "CORS_ORIGINS",
+      validator: &valid_origin?/1,
+      on_invalid: :keep,
+      describe: "origin",
+      example: "https://app.acme.com or http://localhost:3000"
+    )
+  end
 
-  def parse_env(value) when is_binary(value) do
-    case String.trim(value) do
-      "*" ->
-        :all
+  @doc """
+  Whether `origin` has the shape a browser's `Origin` header actually takes:
+  scheme, host, optional port — and nothing else, byte for byte.
 
-      trimmed ->
-        trimmed
-        |> String.split(",", trim: true)
-        |> Enum.map(&String.trim/1)
-        |> Enum.reject(&(&1 == ""))
+  Every entry here is compared for **exact equality** against what the browser
+  sent, so "close enough" is the same as absent. The mistakes this catches are
+  the ones that then produce a silent no-match: the browser reports a CORS
+  failure, the server logs a clean 200, and nothing connects the two to a
+  trailing slash in an env var.
+
+    * a trailing slash, a path, a query or a fragment — `https://acme.com/`
+    * a bare host with no scheme — `acme.com`
+    * a `*` anywhere, including `https://*.acme.com`: there is no wildcard
+      matching here, so that entry matches nothing at all
+    * an uppercase scheme or host — browsers send both downcased
+    * a non-ASCII host — browsers send punycode (`xn--…`)
+
+  **Any scheme, not just http(s).** An `Origin` is a *serialized origin*, and
+  browsers legitimately send `chrome-extension://…`, `moz-extension://…`,
+  `capacitor://localhost`, `tauri://localhost`, `app://…`. Restricting this to
+  http/https would warn about working allowlist entries, which trains an
+  operator to ignore the warning — the one outcome that makes it worthless.
+
+  `null` is called out, though. Browsers do send `Origin: null` — sandboxed
+  iframes, `file://`, some redirects — but allowlisting it grants every one of
+  those at once, so it is worth saying out loud. Nothing is removed
+  (`on_invalid: :keep`), so an operator who means it keeps it.
+  """
+  # RFC 3986 scheme grammar, already downcased by the guard above it.
+  @scheme ~r/\A[a-z][a-z0-9+.\-]*\z/
+  # A registered name as a browser serializes it: downcased, punycode for IDNs.
+  # The bracketed form is an IPv6 literal, which `URI.parse/1` hands back
+  # unbracketed.
+  @host ~r/\A[a-z0-9]([a-z0-9.\-]*[a-z0-9])?\z/
+  @ipv6 ~r/\A[0-9a-f:.]+\z/
+
+  @spec valid_origin?(String.t()) :: boolean()
+  def valid_origin?(origin) when is_binary(origin) do
+    case URI.parse(origin) do
+      %URI{scheme: scheme, host: host, path: path, query: nil, fragment: nil}
+      when is_binary(scheme) and is_binary(host) and host != "" ->
+        path in [nil, ""] and Regex.match?(@scheme, scheme) and
+          (Regex.match?(@host, host) or Regex.match?(@ipv6, host))
+
+      _otherwise ->
+        false
     end
   end
+
+  def valid_origin?(_origin), do: false
 end

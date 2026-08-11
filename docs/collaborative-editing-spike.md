@@ -296,17 +296,26 @@ Findings against the §3 risks:
    sessions prune after 30 days. Persistence is config-gated off in the test
    suite (sandbox ownership), exercised by its own sync durability tests.
 8. **Server-side checkpoint materialization: built** (§6.4's option (b) —
-   the last item). `Crdt.Materializer` renders a fragment's ProseMirror-node
-   XML to sanitized HTML on the BEAM: the StarterKit node/mark set is closed
-   and mirrors the rich-text sanitizer's allowlist, so a ~100-line total
-   mapping (unknown nodes degrade to their children) replaces the feared JS
-   render step. `Crdt.Checkpoint` writes changed `legacy_html` back through
-   the `:autosave` action when the **last client detaches** (and on server
-   shutdown) — never while editors are present, so it can't race the elected
-   client persister; drafts only; no-change checkpoints skip; a stale-record
-   failure means an editor already saved the converged content. This closes
-   the one gap client persistence couldn't cover: every editor crashing
-   before their autosave debounce fired.
+   the last item). `Crdt.Materializer` reassembles a fragment's
+   ProseMirror-node XML into the TipTap JSON document the browser would have
+   pushed and converts it with `PortableText.from_tiptap/1`: the node/mark set
+   is closed and the tag names are already TipTap's, so a total mapping
+   (unknown nodes degrade to their children) replaces the feared JS render
+   step. `Crdt.Checkpoint` writes changed `body` back through the `:autosave`
+   action when the **last client detaches** (and on server shutdown) — never
+   while editors are present, so it can't race the elected client persister;
+   drafts only; no-change checkpoints skip; a stale-record failure means an
+   editor already saved the converged content. This closes the one gap client
+   persistence couldn't cover: every editor crashing before their autosave
+   debounce fired.
+
+   > It materialized to **HTML in `legacy_html`** until #830's follow-up, which
+   > meant it closed nothing: Portable Text is authoritative, so the cast nulls
+   > `legacy_html` whenever a `body` is present, and the checkpoint's write was
+   > discarded for every block the editor had ever saved. Going through the same
+   > converter a client save uses is what actually makes this the net it claims
+   > to be — and it stopped the second mark list from drifting, which had
+   > already dropped every collaboratively-authored link.
 
    **The spike is fully graduated** — every item from §3's recommendation and
    §6's findings is implemented and tested. What remains is product surface

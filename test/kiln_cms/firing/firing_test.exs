@@ -212,6 +212,59 @@ defmodule KilnCMS.Firing.FiringTest do
       assert html =~ "kiln-faq"
       assert html =~ "kiln-claim"
     end
+
+    test "a gallery fires ImageGallery, an accordion fires nothing (#482)" do
+      actor = admin()
+      org = KilnCMS.Accounts.default_org_id()
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Gallery",
+            slug: slug(),
+            blocks: [
+              %{
+                type: :gallery,
+                content: "Shots",
+                data: %{
+                  "layout" => "grid",
+                  "images" => [%{"url" => "/a.jpg", "alt" => "A kiln", "caption" => "At work"}]
+                },
+                order: 0
+              },
+              %{
+                type: :accordion,
+                content: "Specifications",
+                data: %{"panels" => [%{"title" => "Size", "content" => "Large"}]},
+                order: 1
+              }
+            ]
+          },
+          actor: actor
+        )
+
+      page = CMS.publish_page!(page, actor: actor)
+      KilnCMS.DataCase.drain_oban()
+
+      {:ok, ld} = Engine.read(org, :page, page.id, :json_ld)
+      types = Enum.map(ld["@graph"], & &1["@type"])
+
+      assert "ImageGallery" in types
+
+      # The whole point of the accordion existing beside `faq`: it renders the
+      # same collapsing panels and contributes no claim about the page. If this
+      # ever fails, the block has become a duplicate of `faq` under a new name.
+      refute "FAQPage" in types
+
+      # Both still render, and both still project into search + the LLM surface.
+      {:ok, %{"html" => html}} = Engine.read(org, :page, page.id, :web)
+      assert html =~ "kiln-gallery"
+      assert html =~ "kiln-accordion"
+
+      {:ok, %{"markdown" => md}} = Engine.read(org, :page, page.id, :llm)
+      assert md =~ "![A kiln](/a.jpg)"
+      assert md =~ "### Size"
+    end
   end
 
   describe "reads never touch the live tree" do
@@ -241,6 +294,42 @@ defmodule KilnCMS.Firing.FiringTest do
       assert {:ok, []} = Firing.artifacts_for(:page, page.id, authorize?: false)
       assert :miss = Cache.get(org, :page, page.id, :web)
       assert :error = Engine.read(org, :page, page.id, :web)
+    end
+  end
+
+  describe "archive (#879)" do
+    test "archiving a published record clears its version and purges artifacts" do
+      actor = admin()
+      org = KilnCMS.Accounts.default_org_id()
+      page = published_page(actor)
+
+      # A published record has a recorded published version and live artifacts.
+      assert {:ok, _} = Engine.read(org, :page, page.id, :web)
+      refute is_nil(CMS.get_page!(page.id, actor: actor).published_version_id)
+
+      archived = CMS.archive_page!(page, actor: actor)
+      assert archived.state == :archived
+
+      # Same teardown as unpublish — otherwise the artifacts (and the published
+      # version pointer) would orphan.
+      reloaded = CMS.get_page!(page.id, actor: actor)
+      assert is_nil(reloaded.published_version_id)
+      assert {:ok, []} = Firing.artifacts_for(:page, page.id, authorize?: false)
+      assert :error = Engine.read(org, :page, page.id, :web)
+    end
+
+    test "archiving a draft is clean — nothing to clear" do
+      actor = admin()
+
+      draft =
+        CMS.create_page!(
+          %{title: "Draft", slug: slug(), blocks: [%{type: :heading, content: "Hi", order: 0}]},
+          actor: actor
+        )
+
+      archived = CMS.archive_page!(draft, actor: actor)
+      assert archived.state == :archived
+      assert is_nil(archived.published_version_id)
     end
   end
 

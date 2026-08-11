@@ -28,11 +28,11 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
   # --- create ----------------------------------------------------------------
 
   @impl true
-  def handle_event("validate", %{"type_definition" => params}, socket) do
+  def handle_event("validate", %{"type_definition" => params}, socket) when is_map(params) do
     {:noreply, assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))}
   end
 
-  def handle_event("create", %{"type_definition" => params}, socket) do
+  def handle_event("create", %{"type_definition" => params}, socket) when is_map(params) do
     case AshPhoenix.Form.submit(socket.assigns.form, params: params) do
       {:ok, _definition} ->
         {:noreply,
@@ -48,7 +48,7 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
 
   # --- inline edit -------------------------------------------------------------
 
-  def handle_event("edit", %{"id" => id}, socket) do
+  def handle_event("edit", %{"id" => id}, socket) when is_binary(id) do
     {:noreply,
      assign(socket, :edit, %{
        id: id,
@@ -58,7 +58,7 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
 
   def handle_event("cancel_edit", _params, socket), do: {:noreply, assign(socket, :edit, nil)}
 
-  def handle_event("validate_edit", %{"type_definition" => params}, socket) do
+  def handle_event("validate_edit", %{"type_definition" => params}, socket) when is_map(params) do
     edit = %{
       socket.assigns.edit
       | form: AshPhoenix.Form.validate(socket.assigns.edit.form, params)
@@ -67,7 +67,7 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
     {:noreply, assign(socket, :edit, edit)}
   end
 
-  def handle_event("save_edit", %{"type_definition" => params}, socket) do
+  def handle_event("save_edit", %{"type_definition" => params}, socket) when is_map(params) do
     case AshPhoenix.Form.submit(socket.assigns.edit.form, params: params) do
       {:ok, _definition} ->
         {:noreply,
@@ -80,7 +80,7 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
 
   # --- archive / restore -------------------------------------------------------
 
-  def handle_event("archive", %{"id" => id}, socket) do
+  def handle_event("archive", %{"id" => id}, socket) when is_binary(id) do
     actor = socket.assigns.actor
     org = socket.assigns.current_org
 
@@ -95,7 +95,7 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
     {:noreply, assign(socket, :edit, nil)}
   end
 
-  def handle_event("restore", %{"id" => id}, socket) do
+  def handle_event("restore", %{"id" => id}, socket) when is_binary(id) do
     actor = socket.assigns.actor
     org = socket.assigns.current_org
 
@@ -230,6 +230,31 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
                 )}
               </p>
             </div>
+            <div class="sm:col-span-2">
+              <.input
+                field={@form[:seo_title_pattern]}
+                label={gettext("Default SEO title (optional)")}
+                placeholder="[category]: [title]"
+              />
+              <p class="mt-1 text-xs text-base-content/60">
+                {gettext(
+                  "Tokens: %{tokens}, [field:<name>]. Used only where an entry leaves its own SEO title blank — nothing is written to the entry, so editing this re-titles those entries immediately.",
+                  tokens: Enum.map_join(KilnCMS.Seo.Pattern.tokens(), ", ", &"[#{&1}]")
+                )}
+              </p>
+            </div>
+            <div class="sm:col-span-2">
+              <.input
+                field={@form[:seo_description_pattern]}
+                label={gettext("Default SEO description (optional)")}
+                placeholder="[excerpt]"
+              />
+              <p class="mt-1 text-xs text-base-content/60">
+                {gettext(
+                  "Same tokens. Used only where an entry leaves its own meta description blank."
+                )}
+              </p>
+            </div>
             <.input
               field={@form[:schema_org_type]}
               type="select"
@@ -350,6 +375,31 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
                   label={gettext("Path alias pattern (optional)")}
                   placeholder="/kiln/care/[slug]"
                 />
+                <div class="sm:col-span-2">
+                  <.input
+                    field={@edit.form[:seo_title_pattern]}
+                    label={gettext("Default SEO title (optional)")}
+                    placeholder="[category]: [title]"
+                  />
+                  <p class="mt-1 text-xs text-base-content/60">
+                    {gettext(
+                      "Tokens: %{tokens}, [field:<name>]. Used only where an entry leaves its own SEO title blank — nothing is written to the entry, so editing this re-titles those entries immediately.",
+                      tokens: Enum.map_join(KilnCMS.Seo.Pattern.tokens(), ", ", &"[#{&1}]")
+                    )}
+                  </p>
+                </div>
+                <div class="sm:col-span-2">
+                  <.input
+                    field={@edit.form[:seo_description_pattern]}
+                    label={gettext("Default SEO description (optional)")}
+                    placeholder="[excerpt]"
+                  />
+                  <p class="mt-1 text-xs text-base-content/60">
+                    {gettext(
+                      "Same tokens. Used only where an entry leaves its own meta description blank."
+                    )}
+                  </p>
+                </div>
                 <.input
                   field={@edit.form[:schema_org_type]}
                   type="select"

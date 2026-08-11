@@ -40,6 +40,11 @@ config :kiln_cms, dev_routes: false
 # Disable GraphQL schema introspection in production (reconnaissance hardening).
 config :kiln_cms, :graphql_introspection, false
 
+# Same reasoning, same posture: the OpenAPI document and its explorer describe
+# the whole headless API — including the write routes since #330 — so they are
+# off unless an operator turns them on with `API_DOCS_ENABLED` (#567).
+config :kiln_cms, :api_docs, false
+
 # Webhook targets must be HTTPS and must not resolve to private addresses.
 config :kiln_cms, KilnCMS.Webhooks.SafeUrl, require_https: true, resolve_dns: true
 

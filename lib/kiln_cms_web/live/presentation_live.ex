@@ -32,19 +32,33 @@ defmodule KilnCMSWeb.PresentationLive do
   @scalar_fields ~w(title excerpt)
 
   @impl true
-  def mount(%{"type" => type, "slug" => slug}, _session, socket) do
+  def mount(%{"type" => type, "slug" => slug} = params, _session, socket) do
     actor = socket.assigns.current_user
+    locale = locale_param(params)
 
     with ct when not is_nil(ct) <- ContentTypes.get(type),
          record when not is_nil(record) <-
-           fetch_by_slug(ct.type, slug, actor, socket.assigns.current_org) do
+           fetch_by_slug(ct.type, slug, locale, actor, socket.assigns.current_org),
+         # `{false, ct, record}` rather than a bare `false`: the else-branch
+         # needs the record's ID to send the reader to the read-only surface,
+         # and a `with` clause that fails hands on only what it matched.
+         {true, _ct, _record} <-
+           {may_write?(record, actor, socket.assigns.current_org), ct, record} do
+      same_origin? = Presentation.same_origin_preview?(socket.host_uri)
+
       {:ok,
        socket
+       # Decided once, re-asserted at the write — see `save` below.
+       |> assign(:may_write?, true)
        |> assign(:kind, ct.type)
        |> assign(:ct, ct)
        |> assign(:actor, actor)
        |> assign(:preview_url, Presentation.preview_url(ct, record))
        |> assign(:frontend_origin, Presentation.frontend_origin())
+       # #1059: restrictive sandbox when the preview is same-origin as the
+       # console; cross-origin keeps cookies via allow-same-origin.
+       |> assign(:same_origin_preview?, same_origin?)
+       |> assign(:iframe_sandbox, Presentation.iframe_sandbox(same_origin?))
        |> assign(:editing, nil)
        |> assign(:scalar_changes, %{})
        |> assign(:save_state, :saved)
@@ -52,17 +66,44 @@ defmodule KilnCMSWeb.PresentationLive do
        |> assign(:region_version, 0)
        |> assign_record(record)}
     else
-      _ -> {:ok, redirect_to_editor(socket, gettext("No such content to edit."))}
+      # Separated from "no such content" because it is a different answer, and
+      # the reader gets the read-only surface rather than an editor that accepts
+      # a page of typing and refuses all of it on Save (#1159).
+      {false, ct, record} ->
+        {:ok,
+         socket
+         |> put_flash(:info, gettext("You can view this content but not edit it."))
+         |> push_navigate(to: ~p"/editor/preview/#{ct.type}/#{record.id}")}
+
+      _ ->
+        {:ok, redirect_to_editor(socket, gettext("No such content to edit."))}
     end
   end
 
+  # Whether the actor may WRITE this record, the concept this console never had
+  # (#1159). The editor-tier live_session is coarser than it looks:
+  # `Checks.ReadableContentType` lets an editor restricted to other types read
+  # this one as a signed-in consumer does, so they could open a published page
+  # they may not author and find every inline field editable.
+  #
+  # Keyed on `:autosave`, the same action `ContentEditorLive` asks about, so the
+  # consoles cannot disagree about who may edit a record.
+  defp may_write?(record, actor, org), do: Ash.can?({record, :autosave}, actor, tenant: org)
+
   # Scope to the current site's org (epic #336) so the Presentation console on
   # one site's host only resolves that site's content.
-  defp fetch_by_slug(kind, slug, actor, org) do
+  #
+  # Locale is part of the identity (`[slug, locale]`). Absent `?locale=` falls
+  # back to the default — an older bridge or a hand-typed URL (#1104).
+  defp fetch_by_slug(kind, slug, locale, actor, org) do
     case ContentTypes.list!(kind,
            actor: actor,
            tenant: org,
-           query: [filter: [slug: slug], select: [:id], limit: 1]
+           query: [
+             filter: [slug: slug, locale: locale],
+             select: [:id],
+             limit: 1
+           ]
          ) do
       [%{id: id} | _] ->
         ContentTypes.get_record!(kind, id, actor: actor, tenant: org, load: [:featured_image])
@@ -74,78 +115,11 @@ defmodule KilnCMSWeb.PresentationLive do
     _ -> nil
   end
 
-  defp assign_record(socket, record) do
-    typed = TypedBlocks.to_typed(record.blocks)
-
-    socket
-    |> assign(:record, record)
-    |> assign(:page_title, gettext("Presentation: %{title}", title: record.title))
-    |> assign(:scalar_changes, %{})
-    |> assign(:block_inputs, InlineEditing.block_inputs(typed))
-    |> assign(:blocks, InlineEditing.editable_blocks(typed))
+  defp locale_param(params) do
+    KilnCMSWeb.Params.string(params, "locale", KilnCMS.I18n.default_locale())
   end
 
-  # ── events ──────────────────────────────────────────────────────────────────
-
-  @impl true
-  # The bridge posts the stega payload `{type, id, slug, field, block}`. Open the
-  # clicked block in the pane when it's inline-editable; a document scalar (no
-  # block — e.g. `title`) opens a scalar input; anything else offers the full
-  # editor.
-  def handle_event("edit_field", %{"block" => block_id} = payload, socket)
-      when is_binary(block_id) do
-    case Enum.find(socket.assigns.blocks, &(&1.id == block_id and &1.field != nil)) do
-      nil -> {:noreply, assign(socket, :editing, {:unsupported, payload["field"] || "content"})}
-      block -> {:noreply, assign(socket, :editing, block)}
-    end
-  end
-
-  def handle_event("edit_field", %{"field" => field}, socket)
-      when field in @scalar_fields do
-    if scalar_supported?(socket, field) do
-      {:noreply, assign(socket, :editing, {:scalar, field, scalar_value(socket, field)})}
-    else
-      # e.g. clicking `excerpt` on a type without one — the `:update` action
-      # wouldn't accept it, so offer the full editor instead of a panel that
-      # can't save.
-      {:noreply, assign(socket, :editing, {:unsupported, field})}
-    end
-  end
-
-  def handle_event("edit_field", payload, socket) do
-    {:noreply, assign(socket, :editing, {:unsupported, payload["field"] || "content"})}
-  end
-
-  # A document scalar input (title/excerpt) changed.
-  def handle_event("update_scalar", %{"field" => field, "value" => value}, socket)
-      when field in @scalar_fields do
-    {:noreply,
-     socket
-     |> update(:scalar_changes, &Map.put(&1, field, value))
-     |> update(:editing, fn
-       {:scalar, ^field, _old} -> {:scalar, field, value}
-       other -> other
-     end)
-     |> assign(:save_state, :unsaved)}
-  end
-
-  # A contenteditable region (InlineText/InlineRichText hook) pushed a new value.
-  def handle_event("update_block", %{"id" => id, "value" => value}, socket) do
-    case block_index(socket, id) do
-      {:ok, index, field} ->
-        inputs = InlineEditing.put_block_field(socket.assigns.block_inputs, index, field, value)
-
-        {:noreply,
-         socket
-         |> assign(:block_inputs, inputs)
-         |> assign(:save_state, :unsaved)}
-
-      :error ->
-        {:noreply, socket}
-    end
-  end
-
-  def handle_event("save", _params, socket) do
+  defp do_save(socket) do
     changes =
       socket.assigns.scalar_changes
       |> Map.new(fn {field, value} -> {String.to_existing_atom(field), value} end)
@@ -183,6 +157,85 @@ defmodule KilnCMSWeb.PresentationLive do
     end
   end
 
+  defp assign_record(socket, record) do
+    typed = TypedBlocks.to_typed(record.blocks)
+
+    socket
+    |> assign(:record, record)
+    |> assign(:page_title, gettext("Presentation: %{title}", title: record.title))
+    |> assign(:scalar_changes, %{})
+    |> assign(:block_inputs, InlineEditing.block_inputs(typed))
+    |> assign(:blocks, InlineEditing.editable_blocks(typed))
+  end
+
+  # ── events ──────────────────────────────────────────────────────────────────
+
+  @impl true
+  # The bridge posts the stega payload `{type, id, slug, locale, field, block}`.
+  # Open the clicked block in the pane when it's inline-editable; a document
+  # scalar (no block — e.g. `title`) opens a scalar input; anything else offers
+  # the full editor. A payload naming a different document is refused (#1104) —
+  # shared block ids across locale variants must not write into the wrong one.
+  def handle_event("edit_field", payload, socket) when is_map(payload) do
+    if foreign_record_payload?(payload, socket) do
+      {:noreply, assign(socket, :editing, {:unsupported, payload["field"] || "content"})}
+    else
+      open_edit_field(payload, socket)
+    end
+  end
+
+  # A document scalar input (title/excerpt) changed.
+  def handle_event("update_scalar", %{"field" => field, "value" => value}, socket)
+      when field in @scalar_fields and is_binary(value) do
+    {:noreply,
+     socket
+     |> update(:scalar_changes, &Map.put(&1, field, value))
+     |> update(:editing, fn
+       {:scalar, ^field, _old} -> {:scalar, field, value}
+       other -> other
+     end)
+     |> assign(:save_state, :unsaved)}
+  end
+
+  # A contenteditable region (InlineText/InlineRichText hook) pushed a new value.
+  # Binary for a plain region, a TipTap document (a map) for a rich one — both
+  # are the contract, a list is not. See `InContextEditLive.handle_event/3` for
+  # why that one shape matters.
+  def handle_event("update_block", %{"id" => id, "value" => value}, socket)
+      when is_binary(id) and (is_binary(value) or is_map(value)) do
+    case block_index(socket, id) do
+      {:ok, index, field} ->
+        inputs = InlineEditing.put_block_field(socket.assigns.block_inputs, index, field, value)
+
+        {:noreply,
+         socket
+         |> assign(:block_inputs, inputs)
+         |> assign(:save_state, :unsaved)}
+
+      :error ->
+        {:noreply, socket}
+    end
+  end
+
+  # The mount decision, re-asserted at the write, for the reason
+  # `InContextEditLive.persist/2` states: the mount refusal ends the LiveView,
+  # so it holds only by accident of how it is spelled. Same caveat too — the
+  # decision was taken from a mount-time actor, so this guards a future
+  # refactor of that refusal, not a scope narrowed mid-session.
+  #
+  # It says so rather than returning silently: a Save button that does nothing
+  # at all is indistinguishable from a broken one.
+  def handle_event("save", _params, socket) do
+    if socket.assigns.may_write? do
+      do_save(socket)
+    else
+      {:noreply,
+       socket
+       |> assign(:save_state, :error)
+       |> put_flash(:error, gettext("You can view this content but not edit it."))}
+    end
+  end
+
   def handle_event("close_panel", _params, socket), do: {:noreply, assign(socket, :editing, nil)}
 
   def handle_event("reload", _params, socket) do
@@ -199,6 +252,34 @@ defmodule KilnCMSWeb.PresentationLive do
      |> assign(:save_state, :saved)
      |> assign(:editing, nil)}
   end
+
+  defp open_edit_field(%{"block" => block_id} = payload, socket) when is_binary(block_id) do
+    case Enum.find(socket.assigns.blocks, &(&1.id == block_id and &1.field != nil)) do
+      nil -> {:noreply, assign(socket, :editing, {:unsupported, payload["field"] || "content"})}
+      block -> {:noreply, assign(socket, :editing, block)}
+    end
+  end
+
+  defp open_edit_field(%{"field" => field}, socket) when field in @scalar_fields do
+    if scalar_supported?(socket, field) do
+      {:noreply, assign(socket, :editing, {:scalar, field, scalar_value(socket, field)})}
+    else
+      # e.g. clicking `excerpt` on a type without one — the `:update` action
+      # wouldn't accept it, so offer the full editor instead of a panel that
+      # can't save.
+      {:noreply, assign(socket, :editing, {:unsupported, field})}
+    end
+  end
+
+  defp open_edit_field(payload, socket) do
+    {:noreply, assign(socket, :editing, {:unsupported, payload["field"] || "content"})}
+  end
+
+  defp foreign_record_payload?(%{"id" => id}, socket) when is_binary(id) do
+    id != to_string(socket.assigns.record.id)
+  end
+
+  defp foreign_record_payload?(_payload, _socket), do: false
 
   # `title` is universal; `excerpt` exists only on types declared `excerpt?: true`.
   defp scalar_supported?(_socket, "title"), do: true
@@ -248,6 +329,9 @@ defmodule KilnCMSWeb.PresentationLive do
   def render(assigns) do
     ~H"""
     <div class="flex h-[calc(100vh-4rem)] flex-col">
+      <%!-- The presentation console wraps no layout component, so the console's
+            environment strip can never reach it — it has to be drawn here (#469). --%>
+      <KilnCMSWeb.Layouts.environment_banner />
       <div class="flex items-center justify-between border-b border-base-300 bg-base-100 px-4 py-2">
         <div class="flex items-center gap-3">
           <.link navigate={~p"/editor/content/#{@kind}/#{@record.id}"} class="text-sm underline">
@@ -273,15 +357,27 @@ defmodule KilnCMSWeb.PresentationLive do
             </div>
           </div>
 
-          <iframe
-            :if={@preview_url}
-            id="presentation-frame"
-            phx-hook="PresentationFrame"
-            data-frontend-origin={@frontend_origin}
-            src={@preview_url}
-            title={gettext("Front-end preview")}
-            class="h-full w-full border-0"
-          ></iframe>
+          <div :if={@preview_url} class="flex h-full min-h-0 flex-col">
+            <p
+              :if={@same_origin_preview?}
+              class="shrink-0 border-b border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-950 dark:text-amber-100"
+              role="status"
+            >
+              {gettext(
+                "Preview URL matches this console's origin, so the frame is sandboxed without cookies. Signed-in or member-only pages render as anonymous here. Point PRESENTATION_PREVIEW_URL at a separate front-end origin to keep preview authentication."
+              )}
+            </p>
+            <iframe
+              id="presentation-frame"
+              phx-hook="PresentationFrame"
+              data-frontend-origin={@frontend_origin}
+              data-opaque-origin={to_string(@same_origin_preview?)}
+              sandbox={@iframe_sandbox}
+              src={@preview_url}
+              title={gettext("Front-end preview")}
+              class="min-h-0 w-full flex-1 border-0"
+            ></iframe>
+          </div>
         </div>
 
         <%!-- Right: the field edit pane. --%>

@@ -2,12 +2,11 @@ defmodule Mix.Tasks.Kiln.Toolchain.CheckTest do
   @moduledoc """
   The toolchain agreement gate.
 
-  This gate exists because the failure it catches is invisible everywhere else:
-  CI never builds the release image, so a Dockerfile that cannot compile the
-  project is green on every job until a deploy fails (#600). A gate that only
-  ever passes proves nothing, so the drift cases are asserted directly — the
-  parse in particular, since a parse that silently returns `nil` would make the
-  whole check pass on a genuine mismatch.
+  This gate names, in a second, a failure CI's `image` job takes a whole
+  dependency compile to reach: a Dockerfile that cannot compile the project
+  (#600). A gate that only ever passes proves nothing, so the drift cases are
+  asserted directly — the parse in particular, since a parse that silently
+  returns `nil` would make the whole check pass on a genuine mismatch.
   """
   use ExUnit.Case, async: true
 

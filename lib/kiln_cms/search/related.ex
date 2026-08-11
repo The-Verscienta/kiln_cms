@@ -18,6 +18,8 @@ defmodule KilnCMS.Search.Related do
   """
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Search
+  alias KilnCMS.Search.BlockIndexer
+  alias KilnCMS.Search.VectorCache
 
   @typedoc """
   A scored neighbouring document. `path` is the canonical *public page* path
@@ -45,31 +47,90 @@ defmodule KilnCMS.Search.Related do
 
     record
     |> neighbours(limit * 4)
-    |> resolve(record.org_id, published_only?: true)
+    |> resolve(record.org_id, published_only?: true, actor: nil)
     |> Enum.take(limit)
   end
 
   @doc """
   Documents whose closest block sits within `:threshold` cosine distance of
-  this document (default 0.1) — near-duplicates, any workflow state.
+  this document — near-duplicates, any workflow state. Defaults to
+  `KilnCMS.Search.near_duplicate_threshold/0`, which carries the measurement
+  (#1086): a reworded copy of a document sits at 0.04 and another document on
+  the same subject at 0.19-0.21, so 0.1 separates "the same article rewritten"
+  from "another article about sourdough".
+
+  Pass `:actor` and the neighbours are resolved as that user, so a document
+  they may not read never appears. Omit it (the automation path, which has no
+  actor and is already trusted) and the reads run unauthorized. Unlike
+  `related_documents/2` this deliberately spans every workflow state and
+  audience, so on an actor-facing surface — the editor's panel — the actor is
+  the only thing standing between a granular-RBAC-restricted editor (#332) and
+  the title of a draft in a content type they were not given.
   """
   @spec near_duplicates(struct(), keyword()) :: [neighbour()]
   def near_duplicates(record, opts \\ []) do
-    threshold = Keyword.get(opts, :threshold, 0.1)
+    threshold = Keyword.get(opts, :threshold, Search.near_duplicate_threshold())
 
     record
     |> neighbours(Keyword.get(opts, :limit, 20))
     |> Enum.filter(&(&1.distance <= threshold))
-    |> resolve(record.org_id, published_only?: false)
+    |> resolve(record.org_id, published_only?: false, actor: opts[:actor])
   end
 
   @doc """
   Existing tags ranked by similarity to the document's content, excluding the
   ones already applied. Returns `[%{tag, distance}]`, best first. Options:
-  `:limit` (default 5).
+  `:limit` (default 5), `:threshold` and `:actor`.
+
+  With `:actor` the taxonomy is read as that user. Beyond the policy question,
+  that keeps an editor-facing caller honest: a suggestion for a tag the
+  editor's own tag picker doesn't list is a control with nothing to tick.
+
+  ## A weak match is no match
+
+  `:threshold` is a cosine-distance ceiling, like `near_duplicates/2`'s,
+  defaulting to `KilnCMS.Search.suggest_tags_threshold/0`. Ranking alone is not
+  enough here and the reason is structural: the candidate set is the site's
+  entire tag list, so taking the top five of five means every tag is suggested
+  for every document (#851). The panel then offers "carburetors" for a page
+  about herbal tea, in the same type, at the same size, as a good match — and
+  a suggester that always suggests something is one an editor learns to ignore.
+
+  The ceiling is a **measured** number, not a derived one (#1086), and the two
+  bands it sits between overlap — see `KilnCMS.Search.suggest_tags_threshold/0`
+  for the measurement and `KilnCMS.TagSuggestionCorpus` for the corpus. So the
+  default admits a few tags a human would not tick, deliberately: the failure it
+  is tuned away from is the empty panel, which reads as a broken feature rather
+  than as "nothing is close".
+
+  Returning `[]` is a real answer, and the same one `near_duplicates/2` gives.
+  Pass `threshold: 2.0` to rank without filtering — cosine distance is
+  `1 - cos θ`, so it tops out at 2 for exactly-opposed vectors — which is what
+  this did before #851 and is the way to measure a ceiling for a non-default
+  embedder.
+
+  A non-numeric `:threshold`, or a non-numeric `:suggest_tags_threshold` in
+  config, **raises** rather than being ignored. It has to: Erlang orders
+  `number < atom < bitstring`, so `0.9 <= nil` is `true` and a `nil` ceiling
+  would pass every candidate — silently restoring the exact behaviour this
+  option exists to end, with no crash and no warning to say so. `nil` is a
+  tempting thing to write here because `:semantic_max_distance` sits three
+  lines above it in `config/config.exs` and does mean "no ceiling"; this one
+  does not have that spelling.
   """
   @spec suggest_tags(struct(), keyword()) :: [%{tag: struct(), distance: float()}]
   def suggest_tags(record, opts \\ []) do
+    actor = opts[:actor]
+    threshold = Keyword.get(opts, :threshold, Search.suggest_tags_threshold())
+
+    unless is_number(threshold) do
+      raise ArgumentError,
+            "suggest_tags/2 needs a numeric :threshold, got #{inspect(threshold)}. " <>
+              "Cosine distance runs 0..2; pass 2.0 to rank without filtering. " <>
+              "(`nil` does not mean \"no ceiling\" here — it would compare as " <>
+              "greater than every distance and quietly admit everything.)"
+    end
+
     with true <- Search.semantic?(),
          centroid when is_list(centroid) <- centroid(record) do
       applied =
@@ -79,7 +140,11 @@ defmodule KilnCMS.Search.Related do
         |> Enum.reject(&match?(%Ash.NotLoaded{}, &1))
         |> MapSet.new(& &1.id)
 
-      KilnCMS.CMS.list_tags!(authorize?: false, tenant: record.org_id)
+      KilnCMS.CMS.list_tags!(
+        actor: actor,
+        authorize?: not is_nil(actor),
+        tenant: record.org_id
+      )
       |> Enum.reject(&MapSet.member?(applied, &1.id))
       |> Enum.flat_map(fn tag ->
         case tag_vector(tag.name) do
@@ -90,6 +155,7 @@ defmodule KilnCMS.Search.Related do
             []
         end
       end)
+      |> Enum.filter(&(&1.distance <= threshold))
       |> Enum.sort_by(& &1.distance)
       |> Enum.take(Keyword.get(opts, :limit, 5))
     else
@@ -100,12 +166,24 @@ defmodule KilnCMS.Search.Related do
   @doc """
   Recorded search queries that found nothing — what readers looked for and
   the site didn't have (the Analytics `:zero_result` read). Options:
-  `:limit` (default 20, most-searched first).
+  `:limit` (default 20, most-searched first) and `:actor`.
+
+  Unlike its siblings this reads no embeddings, so it is the one function here
+  that still answers on a deployment with semantic search off — a keyword-only
+  site records zero-result queries just the same.
+
+  Pass `:actor` from a request context and the read is authorized as that user
+  (the analytics read policy is editor-or-above); omit it and the read runs
+  unauthorized, for the system callers — an automation job has no actor to
+  offer and is already trusted.
   """
-  @spec content_gaps(Ash.UUID.t(), keyword()) :: [map()]
+  @spec content_gaps(Ash.UUID.t() | struct(), keyword()) :: [map()]
   def content_gaps(org_id, opts \\ []) do
+    actor = Keyword.get(opts, :actor)
+
     KilnCMS.Analytics.zero_result_searches!(
-      authorize?: false,
+      actor: actor,
+      authorize?: not is_nil(actor),
       tenant: org_id,
       query: [limit: Keyword.get(opts, :limit, 20)]
     )
@@ -139,26 +217,76 @@ defmodule KilnCMS.Search.Related do
 
   # The document's embedding centroid: the element-wise mean of its block
   # vectors (hierarchical embeddings already fold in ancestor context).
+  #
+  # Falls back to computing them in memory when the index has none (#852).
+  # Vectors are written by firing and firing runs on publish, so a document that
+  # has never been published had no centroid — which meant `near_duplicates/2`,
+  # a **pre**-publication check, only became available once the thing it exists
+  # to prevent had already happened.
   defp centroid(record) do
-    storage = KilnCMS.Firing.Engine.document_type(record)
-
-    vectors =
-      KilnCMS.SearchIndex.block_embeddings_for!(storage, record.id,
-        authorize?: false,
-        tenant: record.org_id
-      )
-      |> Enum.map(&to_list(&1.embedding))
-      |> Enum.reject(&is_nil/1)
-
-    case vectors do
-      [] -> nil
-      _ -> mean(vectors)
+    case stored_vectors(record) do
+      [] -> unindexed_centroid(record)
+      vectors -> mean(vectors)
     end
   end
 
-  defp resolve(neighbours, org_id, published_only?: published_only?) do
+  # Computing costs one model inference PER BLOCK, so it is confined to the one
+  # case that needs it: a document that has not been published.
+  #
+  # Not merely an optimisation. `/api/related` is public and anonymous, and its
+  # anchor always resolves through `Delivery.published/4` — so a published
+  # anchor is the only kind a stranger can name. Without this guard, an operator
+  # who turns on semantic search without re-firing puts every published page in
+  # the empty-`stored_vectors` state, and a crawler walking the site would then
+  # drive N sequential inferences per request through one `Nx.Serving`. Gating
+  # on state means the reader-facing surface keeps exactly the cheap behaviour
+  # it had, whatever the index looks like.
+  defp unindexed_centroid(%{state: :published}), do: nil
+  defp unindexed_centroid(record), do: computed_centroid(record)
+
+  defp stored_vectors(record) do
+    storage = KilnCMS.Firing.Engine.document_type(record)
+
+    KilnCMS.SearchIndex.block_embeddings_for!(storage, record.id,
+      authorize?: false,
+      tenant: record.org_id
+    )
+    |> Enum.map(&to_list(&1.embedding))
+    |> Enum.reject(&is_nil/1)
+  end
+
+  # The mean is arithmetic over vectors already memoized per block by
+  # `KilnCMS.Search.VectorCache` (#964). Not free — a fully warm 200-block
+  # document costs ~3ms of ETS copying and list arithmetic against ~7µs for a
+  # single cached centroid — but nothing next to the inference it replaces, and
+  # the centroid memo it replaces was the expensive kind of cheap.
+  #
+  # This used to memoize the whole centroid in `KilnCMS.Cache`, keyed on a hash
+  # of the document's embedding inputs. That was wrong twice over: every save
+  # minted a fresh key and left the previous one resident, and the entries it
+  # evicted to make room were the `published:record:*` ones delivery serves from
+  # during a database outage. Caching the *inputs* instead makes an edit cost one
+  # inference rather than N, shares an entry between two documents containing the
+  # same paragraph, and keeps an editing workload out of the delivery cache.
+  #
+  # Nothing is persisted — see `KilnCMS.Search.BlockIndexer.block_vectors/1` for
+  # why a draft's vectors must not enter `block_embeddings`.
+  defp computed_centroid(record) do
+    case BlockIndexer.block_vectors(record) do
+      [] -> nil
+      vectors -> mean(vectors)
+    end
+  end
+
+  # A forbidden read comes back as an error tuple, which drops the neighbour —
+  # the same path a deleted one takes. The vector query above stays
+  # unauthorized either way: `BlockEmbedding` is an internal index, and the
+  # documents it points at are filtered here, one read at a time.
+  defp resolve(neighbours, org_id, published_only?: published_only?, actor: actor) do
+    read_opts = [actor: actor, authorize?: not is_nil(actor), tenant: org_id]
+
     Enum.flat_map(neighbours, fn %{type: storage, id: id, distance: distance} ->
-      case ContentTypes.get_record(to_string(storage), id, authorize?: false, tenant: org_id) do
+      case ContentTypes.get_record(to_string(storage), id, read_opts) do
         {:ok, doc} -> neighbour_entry(doc, distance, published_only?)
         _ -> []
       end
@@ -167,11 +295,20 @@ defmodule KilnCMS.Search.Related do
 
   # `published_only?` serves the reader-facing surfaces — `/api/related` and the
   # editor's internal-link suggestions — so it means "a page a reader can
-  # actually open", i.e. published AND public. Delivery draws the same line in
+  # actually open", i.e. published, public, and unlocked. Delivery draws the same line in
   # `Slugs.find_published_by_alias/3`; without the audience half, both surfaces
   # advertise member-gated pages to anonymous callers.
   defp neighbour_entry(doc, _distance, true) when doc.state != :published, do: []
   defp neighbour_entry(doc, _distance, true) when doc.audience != :public, do: []
+
+  # ...and neither is one behind a passphrase (#496). Third clause rather than a
+  # widened second, because the three exclusions are three different reasons and
+  # a reader hitting this surface has satisfied none of them: the vector query
+  # above runs unauthorized, so this is where the lock is actually enforced for
+  # related content.
+  defp neighbour_entry(doc, _distance, true)
+       when not is_nil(:erlang.map_get(:access_password_hash, doc)),
+       do: []
 
   defp neighbour_entry(doc, distance, _published_only?) do
     type = KilnCMS.Firing.Engine.public_type(doc)
@@ -201,14 +338,13 @@ defmodule KilnCMS.Search.Related do
 
   # Tag-name vectors are pure functions of the (stable) name — memoized so a
   # 500-tag org doesn't re-run 500 model inferences per triggering event.
-  defp tag_vector(name) do
-    KilnCMS.Cache.fetch({:tag_vector, Search.model(), name}, :timer.hours(6), fn ->
-      case Search.embed_document(name) do
-        {:ok, vector} -> vector
-        _ -> nil
-      end
-    end)
-  end
+  #
+  # In `VectorCache`, not `KilnCMS.Cache` (#964): this is embedding data, and it
+  # was competing for the delivery cache's 10,000-entry budget with the
+  # `published:record:*` entries `Firing.Delivery` serves from during a database
+  # outage. An org with 500 tags running suggestions could evict pages that
+  # would then 503.
+  defp tag_vector(name), do: VectorCache.embed_document(name)
 
   defp mean(vectors) do
     count = length(vectors)

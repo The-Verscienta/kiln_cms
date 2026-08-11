@@ -101,6 +101,58 @@ defmodule KilnCMS.Blocks.ColumnsTest do
       assert child["text"] == "Hi"
     end
 
+    test "the artifact's `_id` round-trips back as the block's id (#954)" do
+      # `Blocks.render/2` names a block's id `_id` on the `:json` surface, and
+      # that is the ONLY surface on which a headless client can read a block id
+      # at all — `blocks` is not `public?`, and GraphQL and JSON:API hide it. So
+      # "read the artifact, send it back" is the only way such a client can
+      # round-trip ids, and it used to mint fresh ones while carrying `_id` into
+      # storage as a junk key nothing reads.
+      outer_id = Ash.UUID.generate()
+      child_id = Ash.UUID.generate()
+
+      # The shape `Blocks.render(block, :json)` emits, at both levels.
+      artifact = %{
+        "_type" => "columns",
+        "_id" => outer_id,
+        "columns" => [
+          %{"blocks" => [%{"_type" => "quote", "_id" => child_id, "text" => "hello"}]}
+        ]
+      }
+
+      {:ok, %Ash.Union{value: %Columns{} = block}} = Ash.Type.cast_input(BlockUnion, artifact)
+
+      assert block.id == outer_id
+
+      [%{"blocks" => [child]}] = block.columns
+      assert child["id"] == child_id
+
+      # …and the artifact's own spelling does not survive as a second key.
+      refute Map.has_key?(child, "_id")
+    end
+
+    test "an explicit id beats the artifact's `_id` (#954)" do
+      # A client that knows the real name means it; `_id` is the compatibility
+      # spelling, not an override.
+      real = Ash.UUID.generate()
+
+      input = %{
+        "_type" => "columns",
+        "columns" => [
+          %{
+            "blocks" => [
+              %{"_type" => "quote", "id" => real, "_id" => Ash.UUID.generate(), "text" => "x"}
+            ]
+          }
+        ]
+      }
+
+      {:ok, %Ash.Union{value: %Columns{columns: [%{"blocks" => [child]}]}}} =
+        Ash.Type.cast_input(BlockUnion, input)
+
+      assert child["id"] == real
+    end
+
     test "sanitizes a nested rich_text child's dangerous link href on cast" do
       body = [
         %{

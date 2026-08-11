@@ -40,7 +40,11 @@ defmodule KilnCMS.CMS.Form do
       :active,
       :success_message,
       :notify_email,
-      :submit_label
+      :submit_label,
+      :autoresponder_enabled,
+      :autoresponder_subject,
+      :autoresponder_body,
+      :embed_origins
     ]
 
     create :create, primary?: true
@@ -95,6 +99,14 @@ defmodule KilnCMS.CMS.Form do
       where present(:notify_email)
       message "must be an email address"
     end
+
+    validate KilnCMS.CMS.Validations.FormAutoresponderTokens
+
+    # `embed_origins` is concatenated into this form's `frame-ancestors` (#648),
+    # so it is checked with the same predicate as the per-site CSP lists rather
+    # than a looser one: full origin, no keyword sources, no bare `*`, and no
+    # character that could end the directive or the header.
+    validate {KilnCMS.CMS.Validations.CspOrigins, fields: [:embed_origins]}
   end
 
   # Multi-tenancy (epic #336): a form belongs to one site, so its slug is unique
@@ -120,24 +132,78 @@ defmodule KilnCMS.CMS.Form do
       public? false
     end
 
-    attribute :name, :string, allow_nil?: false, public?: true
+    attribute :name, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
 
     # The public handle: POST /forms/<slug>, GET /api/forms/<slug>.
-    attribute :slug, :string, allow_nil?: false, public?: true
+    attribute :slug, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.identifier()]
 
-    attribute :description, :string, public?: true
+    attribute :description, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.paragraph()]
 
     # Inactive forms 404 publicly and reject submissions.
     attribute :active, :boolean, allow_nil?: false, default: true, public?: true
 
     # Shown (or returned) after a successful submission.
-    attribute :success_message, :string, public?: true
+    attribute :success_message, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.paragraph()]
 
     # When set, each submission is mailed here (via the :mail queue).
-    attribute :notify_email, :string, public?: true
+    attribute :notify_email, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
 
     # Submit-button text; nil falls back to the translated "Submit".
-    attribute :submit_label, :string, public?: true
+    attribute :submit_label, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
+
+    # The autoresponder (#468, docs/form-builder-plan.md phase 6): a
+    # confirmation email sent to the *submitter*, not the admin — separate
+    # from `notify_email` above. Only ever fires when the form actually has
+    # an `:email` field and the submission gave it a non-blank value; see
+    # `KilnCMS.Forms.Autoresponder.eligible?/3`.
+    attribute :autoresponder_enabled, :boolean do
+      allow_nil? false
+      default false
+      public? true
+    end
+
+    # `Kiln.Tokens` patterns (#468) — `[field:<name>]` per the form's own
+    # fields plus `[form-name]`, validated by
+    # `KilnCMS.CMS.Validations.FormAutoresponderTokens`. Required (non-blank)
+    # only while `autoresponder_enabled` is true.
+    attribute :autoresponder_subject, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
+
+    attribute :autoresponder_body, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.paragraph()]
+
+    # Which parent sites may frame *this* form's embed page (#648) — `nil` to
+    # inherit the deployment's `EMBED_ORIGINS`, `[]` for same-origin only
+    # whatever the deployment allows, or this form's own allowlist instead of
+    # the deployment's. `KilnCMSWeb.Embed` holds the argument for why the
+    # allowlist belongs on the form and not on one deployment-wide variable;
+    # `nil` vs `[]` is the distinction to preserve when touching this.
+    #
+    # Bounded because these are concatenated into a response HEADER, and a
+    # reverse proxy answers 502 rather than truncating: nginx's default
+    # `proxy_buffer_size` is 4 KB. 16 origins at the 253-byte DNS name limit is
+    # ~4 KB of sources — already more than any real allowlist and near the
+    # smallest limit in the wild, so the cap is 16 rather than the 32
+    # `SiteCodeInjection` uses across three lists on a different header.
+    attribute :embed_origins, {:array, :string},
+      public?: true,
+      constraints: [max_length: 16, items: [max_length: 253]]
 
     timestamps()
   end

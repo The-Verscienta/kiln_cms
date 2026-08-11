@@ -27,6 +27,11 @@ defmodule KilnCMS.Blocks.Quote do
 
   def render(_block, :json_ld), do: nil
 
+  # `featured` is an editorial flag the `:web` render acts on; it is not part of
+  # the delivery payload.
+  @impl Kiln.Block.Renderer
+  def json_schema, do: %{"x-kiln-drop" => ["featured"]}
+
   @impl Kiln.Block.Renderer
   def search_text(block),
     do: [block.text, block.citation] |> Enum.reject(&(&1 in [nil, ""])) |> Enum.join(" ")

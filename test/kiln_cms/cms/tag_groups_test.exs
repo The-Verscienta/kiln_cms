@@ -108,6 +108,161 @@ defmodule KilnCMS.CMS.TagGroupsTest do
     end
   end
 
+  describe "content-type scope validation (#526)" do
+    test "rejects an entry that names no content type" do
+      actor = admin()
+
+      assert {:error, %Ash.Error.Invalid{} = error} =
+               CMS.create_tag_group(
+                 %{name: "Typo", slug: "typo-#{uniq()}", content_types: ["posts"]},
+                 actor: actor
+               )
+
+      assert Enum.any?(error.errors, &(&1.field == :content_types))
+    end
+
+    test "accepts known compiled type names, and re-checks on update" do
+      actor = admin()
+
+      assert {:ok, g} =
+               CMS.create_tag_group(
+                 %{name: "Good", slug: "good-#{uniq()}", content_types: ["post", "page"]},
+                 actor: actor
+               )
+
+      assert {:error, %Ash.Error.Invalid{}} =
+               CMS.update_tag_group(g, %{content_types: ["post", "ghost"]}, actor: actor)
+
+      assert {:ok, _} = CMS.update_tag_group(g, %{content_types: ["page"]}, actor: actor)
+    end
+
+    test "a write that never touches content_types is not judged on the stored list" do
+      # `get_attribute/2` falls back to `get_data/2`, so validating unconditionally
+      # re-judged the STORED list on every update — and an entry goes stale
+      # without anyone touching the group (archiving a dynamic type drops it from
+      # the registry). That froze the row: renaming it was rejected on a field the
+      # write never mentioned, with no way back except editing the column by hand.
+      actor = admin()
+
+      # Seeded past the write path, standing in for a list that has since gone
+      # stale under a row nobody edited.
+      stale = group(%{content_types: ["recipe"]})
+
+      assert {:ok, renamed} =
+               CMS.update_tag_group(stale, %{name: "Renamed"}, actor: actor)
+
+      assert renamed.name == "Renamed"
+      # Untouched, not silently repaired — the UI renders it as "(unknown)" so an
+      # admin can see and fix it.
+      assert renamed.content_types == ["recipe"]
+    end
+
+    test "but a write that DOES supply content_types is still checked" do
+      actor = admin()
+      stale = group(%{content_types: ["recipe"]})
+
+      assert {:error, %Ash.Error.Invalid{} = error} =
+               CMS.update_tag_group(stale, %{content_types: ["also-not-real"]}, actor: actor)
+
+      assert Enum.any?(error.errors, &(&1.field == :content_types))
+    end
+  end
+
+  describe "cross-tenant tag_group_id (#526)" do
+    defp other_org do
+      Ash.Seed.seed!(KilnCMS.Accounts.Organization, %{
+        name: "Other",
+        slug: "other-#{uniq()}",
+        status: :active
+      })
+    end
+
+    test "rejects a group that belongs to another organization" do
+      actor = admin()
+      # Seeded straight into a second org, bypassing the write path under test.
+      foreign = group(%{org_id: other_org().id})
+
+      assert {:error, %Ash.Error.Invalid{} = error} =
+               CMS.create_tag(
+                 %{name: "X", slug: "x-#{uniq()}", tag_group_id: foreign.id},
+                 actor: actor
+               )
+
+      assert Enum.any?(error.errors, &(&1.field == :tag_group_id))
+    end
+
+    test "accepts a group in the writer's own organization" do
+      actor = admin()
+      home = group()
+
+      assert {:ok, tag} =
+               CMS.create_tag(
+                 %{name: "Y", slug: "y-#{uniq()}", tag_group_id: home.id},
+                 actor: actor
+               )
+
+      assert tag.tag_group_id == home.id
+    end
+
+    test "a write that never touches tag_group_id can still save a legacy cross-org tag" do
+      # #513 deliberately made such a tag survivable and EDITABLE so it can be
+      # repaired. Re-judging the stored FK on every update made that impossible:
+      # renaming was rejected on a field the write never mentioned, and the
+      # editor's <select> only offers same-org groups, so the only write that
+      # could succeed was one that silently ungrouped the tag.
+      actor = admin()
+      foreign = group(%{org_id: other_org().id})
+
+      # Seeded past the write path, standing in for a row that predates the check.
+      legacy = tag(%{name: "Legacy", slug: "legacy-#{uniq()}", tag_group_id: foreign.id})
+
+      assert {:ok, renamed} = CMS.update_tag(legacy, %{name: "Renamed"}, actor: actor)
+
+      assert renamed.name == "Renamed"
+      assert renamed.tag_group_id == foreign.id
+    end
+
+    test "but a write that DOES supply a foreign tag_group_id is still rejected" do
+      actor = admin()
+      foreign = group(%{org_id: other_org().id})
+      home = group()
+      t = tag(%{name: "Z", slug: "z-#{uniq()}", tag_group_id: home.id})
+
+      assert {:error, %Ash.Error.Invalid{} = error} =
+               CMS.update_tag(t, %{tag_group_id: foreign.id}, actor: actor)
+
+      assert Enum.any?(error.errors, &(&1.field == :tag_group_id))
+    end
+
+    test "on create, resolves the group under the WRITE's tenant, not the default org" do
+      actor = admin()
+      org_b = other_org()
+      home_b = group(%{org_id: org_b.id})
+      default_group = group()
+
+      # Same-org group written under org_b: accepted. On the buggy version the
+      # validation read the not-yet-stamped `org_id` attribute (nil on create)
+      # and fell back to the default org, so this legitimate group was REJECTED.
+      assert {:ok, _} =
+               CMS.create_tag(
+                 %{name: "Ok", slug: "ok-#{uniq()}", tag_group_id: home_b.id},
+                 actor: actor,
+                 tenant: org_b
+               )
+
+      # The DEFAULT org's group is cross-tenant for an org_b tag: rejected. On the
+      # buggy version this resolved under the default org, found the group, and
+      # WRONGLY ACCEPTED it — the security control inverted for any non-default
+      # tenant.
+      assert {:error, %Ash.Error.Invalid{}} =
+               CMS.create_tag(
+                 %{name: "Bad", slug: "bad-#{uniq()}", tag_group_id: default_group.id},
+                 actor: actor,
+                 tenant: org_b
+               )
+    end
+  end
+
   describe "listing" do
     test "groups come back ordered by position then name" do
       actor = admin()

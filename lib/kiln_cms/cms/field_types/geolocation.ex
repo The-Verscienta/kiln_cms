@@ -52,6 +52,42 @@ defmodule KilnCMS.CMS.FieldTypes.Geolocation do
     end
   end
 
+  @doc ~S"""
+  The named parts of a coordinate, as slug/alias pattern tokens (#804).
+
+  The generic `[field:<name>]` path expands a map value to `""` — honest for a
+  scalar, useless for a composite — so a pattern that wants the latitude says
+  `[field:location.lat]`, and this is what makes that resolvable.
+
+  Each match is anchored to *this definition's own name*, so two geolocation
+  fields on one content type (`location` and `venue`) never contend for a
+  token. `label` is offered too, since a place name is usually what belongs in
+  a URL; `zoom` deliberately is not — a map viewport is not an address.
+  """
+  @impl Kiln.FieldType
+  def tokens(definition) do
+    name = Regex.escape(definition.name)
+
+    for part <- ~w(lat lng label) do
+      %{
+        match: ~r/\Afield:#{name}\.#{part}\z/,
+        resolve: fn _token, context -> part_value(definition.name, part, context) end
+      }
+    end
+  end
+
+  defp part_value(field, part, context) do
+    case Map.get(context[:custom_fields] || %{}, field) do
+      %{} = value -> value |> Map.get(part) |> to_token()
+      _absent -> ""
+    end
+  end
+
+  defp to_token(nil), do: ""
+  defp to_token(value) when is_binary(value), do: value
+  defp to_token(value) when is_number(value), do: to_string(value)
+  defp to_token(_other), do: ""
+
   # The four inputs the editor renders, in order. `step: "any"` matters: a
   # number input defaults to integer steps, which browsers reject decimals
   # against — i.e. every real coordinate.
