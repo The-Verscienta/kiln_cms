@@ -38,7 +38,6 @@ defmodule KilnCMS.Portability.WXR do
   import SweetXml, only: [sigil_x: 2]
 
   alias KilnCMS.Blocks.Html
-  alias KilnCMS.Xml
 
   @typedoc """
   One importable record, source-neutral. `blocks` is typed-block input, ready
@@ -92,28 +91,24 @@ defmodule KilnCMS.Portability.WXR do
   """
   @spec parse(String.t()) :: {:ok, parsed()} | {:error, term()}
   def parse(xml) when is_binary(xml) do
-    with :ok <- Xml.check_name_budget(xml) do
-      do_parse(xml)
-    end
-  end
+    with :ok <- KilnCMS.Xml.check_distinct_names(xml, KilnCMS.Xml.wxr_limit()) do
+      doc = SweetXml.parse(xml, dtd: :none)
 
-  defp do_parse(xml) do
-    doc = SweetXml.parse(xml, dtd: :none)
+      case SweetXml.xpath(doc, ~x"//channel"o) do
+        nil ->
+          {:error, :not_a_wxr_file}
 
-    case SweetXml.xpath(doc, ~x"//channel"o) do
-      nil ->
-        {:error, :not_a_wxr_file}
+        channel ->
+          attachments = attachments(channel)
 
-      channel ->
-        attachments = attachments(channel)
-
-        {:ok,
-         %{
-           site: site(channel),
-           records: records(channel),
-           attachments: attachments,
-           authors: authors(channel)
-         }}
+          {:ok,
+           %{
+             site: site(channel),
+             records: records(channel),
+             attachments: attachments,
+             authors: authors(channel)
+           }}
+      end
     end
   rescue
     # `xmerl` throws/exits on malformed input rather than returning an error,
