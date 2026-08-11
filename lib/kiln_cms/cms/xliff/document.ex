@@ -85,13 +85,16 @@ defmodule KilnCMS.CMS.Xliff.Document do
 
   # `xmerl` builds the whole tree in memory off a charlist expansion of the
   # input, so the honest failure is an up-front refusal naming the limit rather
-  # than an OOM kill — the same reasoning as `KilnCMS.Portability.WXR`, at a
+  # than an OOM kill — the same reasoning as `KilnCMS.Portability.Wxr`, at a
   # quarter of its ceiling because a translation job is prose, not a site dump.
   #
-  # Distinct names are a sharper cost (#1105): `xmerl_scan` interns every
-  # element and attribute name, and atoms are never reclaimed. The byte cap
-  # alone is not enough — `KilnCMS.Xml.check_name_budget/2` refuses a crafted
-  # vocabulary before SweetXml runs.
+  # The cap is also the only bound on a second, sharper cost: `xmerl_scan`
+  # interns every distinct element and attribute name with `list_to_atom/1`,
+  # and atoms are never reclaimed. A crafted document of unique tag names
+  # therefore leaks the atom table, and exhausting it aborts the whole node
+  # rather than raising anything this module could catch. 4 MB keeps a single
+  # upload well inside the default 1,048,576-atom limit; the general problem
+  # belongs to every xmerl caller, not just this one, and is tracked separately.
   @max_bytes 4 * 1024 * 1024
 
   # Portable Text mark name → the `<pc>` type/subType a vendor tool renders.
@@ -347,24 +350,24 @@ defmodule KilnCMS.CMS.Xliff.Document do
         {:error, :empty_file}
 
       true ->
-        with :ok <- Xml.check_name_budget(xml) do
-          do_parse(xml)
-        end
+        do_parse(xml)
     end
   end
 
   defp do_parse(xml) do
-    root = SweetXml.parse(xml, dtd: :none)
+    with :ok <- KilnCMS.Xml.check_distinct_names(xml, KilnCMS.Xml.xliff_limit()) do
+      root = SweetXml.parse(xml, dtd: :none)
 
-    if local_name(root) == "xliff" do
-      {:ok,
-       %{
-         source_locale: attribute(root, "srcLang"),
-         target_locale: attribute(root, "trgLang"),
-         files: root |> children("file") |> Enum.map(&parse_file/1)
-       }}
-    else
-      {:error, :not_an_xliff_file}
+      if local_name(root) == "xliff" do
+        {:ok,
+         %{
+           source_locale: attribute(root, "srcLang"),
+           target_locale: attribute(root, "trgLang"),
+           files: root |> children("file") |> Enum.map(&parse_file/1)
+         }}
+      else
+        {:error, :not_an_xliff_file}
+      end
     end
   rescue
     # xmerl throws and exits on malformed input rather than returning an error,
