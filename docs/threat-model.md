@@ -986,11 +986,28 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
     This also makes the mechanism **cluster-safe by construction**, which
     eviction is not: each channel re-checks itself against the database from
     whichever node holds it, so it needs no message to cross a node boundary.
-    Eviction's own broadcast is cluster-wide in principle — `Phoenix.PubSub`'s
-    default adapter carries it to every node — but nothing verifies that, so
-    treat prompt multi-node eviction as untested rather than unsupported
-    (tracked in #1060; #743 records the same per-node assumption for the
-    pending-sign-in cache). The 30-second backstop applies either way.
+
+    **Eviction's cross-node reach is reasoned about, not exercised — a
+    deliberate decision (#1060), not an oversight.** The deployment genuinely
+    is multi-node capable (`DNSCluster` is in the supervision tree, and
+    `Phoenix.PubSub` is started with no adapter override, so it defaults to
+    the distributed one), and `SessionEviction.evict/2` is one
+    `Endpoint.broadcast/3` call — no custom fan-out to get wrong. What this
+    codebase does not do, anywhere, is stand up a second BEAM node inside the
+    test suite to prove a `Phoenix.PubSub` broadcast crosses one: `Cache.ClusterBust`
+    (#739), landed for the identical shape of problem — a local action that
+    must reach every node — draws the same line. Its own suite proves the
+    writing node's broadcast and a receiving node's handler independently,
+    against the same topic, and stops there; it does not spin up a real
+    second node either. `SessionEvictionTest` mirrors that scope: every
+    trigger, every socket's droppability, and the broadcaster/listener topic
+    agreement are all proven on one node, which is what our own code is
+    responsible for — `Phoenix.PubSub`'s distributed delivery is upstream,
+    third-party behavior this app depends on rather than implements, the same
+    way a test suite here does not re-verify Postgres's own transaction
+    isolation. `#743` records the identical per-node assumption for the
+    pending-sign-in cache, for the same reason. The 30-second backstop
+    applies either way, and bounds the cost of trusting this.
 
     *Residual:* the re-check re-runs the join's rule, so what it catches is
     exactly what a *fresh join* would refuse — no more. A document publish under
