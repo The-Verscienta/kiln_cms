@@ -99,6 +99,31 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **A losing workflow-transition race now returns a 409, not an opaque 400
+  plus a spammed stacktrace** (#923). #879's compare-and-swap on `publish`,
+  `unpublish`, `submit_for_review`, `return_to_draft` and `archive` raises
+  `Ash.Error.Changes.StaleRecord` when two actors race the same transition
+  and the loser's `UPDATE` matches no rows — the same race
+  `AshStateMachine.Errors.NoMatchingTransition` reports when the state was
+  already wrong *before* the request; `StaleRecord` is what it looks like
+  when the state goes wrong *during* the request instead. Neither
+  `AshJsonApi.ToJsonApiError` nor `AshGraphql.Error` was implemented for it,
+  so it fell through AshJsonApi's fallback branch — an opaque
+  `something_went_wrong` 400 indistinguishable from a real server fault,
+  plus a formatted stacktrace warning logged per request (the exact #880
+  failure mode, now reachable on every CAS-guarded transition instead of
+  just the state-was-already-wrong case).
+
+  `KilnCMSWeb.AshStateMachineErrors` — already the home for
+  `NoMatchingTransition`'s translation — gains the matching `StaleRecord`
+  impls, reporting the same `invalid_state_transition` 409 code. The detail
+  message is necessarily more generic than `NoMatchingTransition`'s:
+  `StaleRecord` carries only the resource, not which record or action raced,
+  since that is genuinely all a zero-rows `UPDATE` can report.
+
+  Item 2 from the same review — `:archive` firing no webhook — was already
+  filed and fixed separately as #914.
+
 - **Archiving a published document now tells subscribers it left delivery**
   (#914). #879 made `:archive` tear down a published record's delivery
   version and artifacts (previously orphaned) — but unlike `:unpublish`,

@@ -12,6 +12,8 @@ defmodule KilnCMSWeb.WriteApiTest do
   use KilnCMSWeb.ConnCase, async: true
   use Oban.Testing, repo: KilnCMS.Repo
 
+  import Ecto.Query
+
   alias KilnCMS.Accounts
   alias KilnCMS.CMS
 
@@ -456,6 +458,49 @@ defmodule KilnCMSWeb.WriteApiTest do
 
       assert [%{"code" => "invalid_state_transition", "meta" => %{"current_state" => "draft"}}] =
                body["errors"]
+    end
+  end
+
+  # #923: every transition above also carries a CAS filter (#879) — two actors
+  # racing the same transition leaves the loser's UPDATE matching no rows,
+  # raising `Ash.Error.Changes.StaleRecord` rather than `NoMatchingTransition`
+  # (that one fires when the state was already wrong before the request; this
+  # one fires when it becomes wrong DURING it). Reproduced deterministically,
+  # without real concurrency: mutate the DB row directly out from under an
+  # in-memory struct that still shows the old state, then transition from
+  # that stale struct — its CAS filter's WHERE clause matches nothing, same
+  # as a genuinely concurrent loser's would.
+  describe "StaleRecord from a racing transition (#923)" do
+    test "raises Ash.Error.Changes.StaleRecord, and the protocol impls translate it to a 409" do
+      admin = user(:admin)
+      stale = CMS.create_post!(%{title: "Race", slug: slug()}, actor: admin)
+
+      KilnCMS.Repo.update_all(
+        from(p in "posts", where: p.id == type(^stale.id, Ecto.UUID)),
+        set: [state: "in_review"]
+      )
+
+      error =
+        try do
+          stale
+          |> Ash.Changeset.for_update(:submit_for_review, %{}, actor: admin)
+          |> Ash.update!()
+
+          flunk("expected the stale CAS filter to raise")
+        rescue
+          e in Ash.Error.Invalid ->
+            assert [%Ash.Error.Changes.StaleRecord{} = stale_record] = e.errors
+            stale_record
+
+          e in Ash.Error.Changes.StaleRecord ->
+            e
+        end
+
+      assert %AshJsonApi.Error{status_code: 409, code: "invalid_state_transition"} =
+               AshJsonApi.ToJsonApiError.to_json_api_error(error)
+
+      assert %{code: "invalid_state_transition", short_message: "invalid state transition"} =
+               AshGraphql.Error.to_error(error)
     end
   end
 
