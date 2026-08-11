@@ -178,34 +178,6 @@ defmodule KilnCMSWeb.PresentationLive do
     end
   end
 
-  defp open_edit_field(%{"block" => block_id} = payload, socket) when is_binary(block_id) do
-    case Enum.find(socket.assigns.blocks, &(&1.id == block_id and &1.field != nil)) do
-      nil -> {:noreply, assign(socket, :editing, {:unsupported, payload["field"] || "content"})}
-      block -> {:noreply, assign(socket, :editing, block)}
-    end
-  end
-
-  defp open_edit_field(%{"field" => field}, socket) when field in @scalar_fields do
-    if scalar_supported?(socket, field) do
-      {:noreply, assign(socket, :editing, {:scalar, field, scalar_value(socket, field)})}
-    else
-      # e.g. clicking `excerpt` on a type without one — the `:update` action
-      # wouldn't accept it, so offer the full editor instead of a panel that
-      # can't save.
-      {:noreply, assign(socket, :editing, {:unsupported, field})}
-    end
-  end
-
-  defp open_edit_field(payload, socket) do
-    {:noreply, assign(socket, :editing, {:unsupported, payload["field"] || "content"})}
-  end
-
-  defp foreign_record_payload?(%{"id" => id}, socket) when is_binary(id) do
-    id != to_string(socket.assigns.record.id)
-  end
-
-  defp foreign_record_payload?(_payload, _socket), do: false
-
   # A document scalar input (title/excerpt) changed.
   def handle_event("update_scalar", %{"field" => field, "value" => value}, socket)
       when field in @scalar_fields and is_binary(value) do
@@ -274,6 +246,34 @@ defmodule KilnCMSWeb.PresentationLive do
      |> assign(:save_state, :saved)
      |> assign(:editing, nil)}
   end
+
+  defp open_edit_field(%{"block" => block_id} = payload, socket) when is_binary(block_id) do
+    case Enum.find(socket.assigns.blocks, &(&1.id == block_id and &1.field != nil)) do
+      nil -> {:noreply, assign(socket, :editing, {:unsupported, payload["field"] || "content"})}
+      block -> {:noreply, assign(socket, :editing, block)}
+    end
+  end
+
+  defp open_edit_field(%{"field" => field}, socket) when field in @scalar_fields do
+    if scalar_supported?(socket, field) do
+      {:noreply, assign(socket, :editing, {:scalar, field, scalar_value(socket, field)})}
+    else
+      # e.g. clicking `excerpt` on a type without one — the `:update` action
+      # wouldn't accept it, so offer the full editor instead of a panel that
+      # can't save.
+      {:noreply, assign(socket, :editing, {:unsupported, field})}
+    end
+  end
+
+  defp open_edit_field(payload, socket) do
+    {:noreply, assign(socket, :editing, {:unsupported, payload["field"] || "content"})}
+  end
+
+  defp foreign_record_payload?(%{"id" => id}, socket) when is_binary(id) do
+    id != to_string(socket.assigns.record.id)
+  end
+
+  defp foreign_record_payload?(_payload, _socket), do: false
 
   # `title` is universal; `excerpt` exists only on types declared `excerpt?: true`.
   defp scalar_supported?(_socket, "title"), do: true
