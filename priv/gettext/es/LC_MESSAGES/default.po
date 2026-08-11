@@ -6433,7 +6433,7 @@ msgstr "Vista previa"
 #: lib/kiln_cms_web/live/presentation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Preview URL matches this console's origin, so the frame is sandboxed without cookies. Signed-in or member-only pages render as anonymous here. Point PRESENTATION_PREVIEW_URL at a separate front-end origin to keep preview authentication."
-msgstr ""
+msgstr "La URL de vista previa coincide con el origen de esta consola, así que el marco queda aislado (sandbox) sin cookies. Las páginas con sesión iniciada o solo para miembros se muestran aquí como anónimas. Configura PRESENTATION_PREVIEW_URL con un origen de front-end independiente para conservar la autenticación en la vista previa."
 
 #: lib/kiln_cms_web/live/token_preview_live.ex
 #, elixir-autogen, elixir-format
