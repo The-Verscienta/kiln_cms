@@ -7903,6 +7903,11 @@ msgstr ""
 msgid "Showing the first %{count} occurrences — fix some and re-check for the rest."
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Showing the first %{limit} tags. Filter to find others."
+msgstr ""
+
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
 msgid "Shown"

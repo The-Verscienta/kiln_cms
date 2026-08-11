@@ -7903,6 +7903,11 @@ msgstr "Affichage des %{cap} premiers renommages sur %{total} — l'application 
 msgid "Showing the first %{count} occurrences — fix some and re-check for the rest."
 msgstr "Affichage des %{count} premières occurrences : corrigez-en une partie puis relancez la vérification pour le reste."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Showing the first %{limit} tags. Filter to find others."
+msgstr ""
+
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
 msgid "Shown"
