@@ -29,6 +29,14 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **XML uploads can no longer exhaust the node's atom table via xmerl** (#1105).
+  `:xmerl_scan` interns every distinct element and attribute name; atoms are
+  never reclaimed, and hitting the limit aborts the whole BEAM. A byte cap only
+  changed how many uploads it took. Both WXR and XLIFF parsers now run
+  `KilnCMS.Xml.check_name_budget/2` first — an offset-advancing binary scan that
+  refuses past 512 distinct names with `{:too_many_names, …}` before SweetXml
+  sees the bytes.
+
 - **A dead app-icon URL no longer keeps `apple-touch-icon` pointed at a 404**
   (#1147). Save-time verification stored the measured edge once; nothing
   re-checked it, so a CDN that later 404'd still looked installable to every
