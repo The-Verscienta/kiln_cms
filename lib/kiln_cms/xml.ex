@@ -91,7 +91,7 @@ defmodule KilnCMS.Xml do
     |> String.replace("'", "&apos;")
   end
 
-  defp scan_names(xml, offset, names, max) when byte_size(xml) <= offset, do: {:ok, names}
+  defp scan_names(xml, offset, names, _max) when byte_size(xml) <= offset, do: {:ok, names}
 
   defp scan_names(xml, offset, names, max) do
     size = byte_size(xml)
@@ -260,7 +260,7 @@ defmodule KilnCMS.Xml do
     end
   end
 
-  defp name_end(xml, i, size) when i >= size, do: size
+  defp name_end(_xml, i, size) when i >= size, do: size
 
   defp name_end(xml, i, size) do
     case :binary.at(xml, i) do
