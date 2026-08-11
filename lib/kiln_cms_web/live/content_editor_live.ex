@@ -965,11 +965,34 @@ defmodule KilnCMSWeb.ContentEditorLive do
       socket.assigns.form
       |> preview_block_maps()
       |> KilnCMS.CMS.TypedBlocks.to_typed()
+      |> expand_fragments(socket)
 
     socket
     |> refresh_preview_html(typed)
     |> refresh_body_stats(typed)
     |> refresh_seo_report()
+  end
+
+  # A `%Fragment{}` block renders nothing on its own — until inlined, the
+  # Preview tab shows it as empty and the SEO/readability panel (word count,
+  # reading time, heading outline, alt-text, internal links) scores the
+  # document as if it were missing (#910). `Fragments.expand/3` no-ops when
+  # the tree carries no fragment, so this costs a tree walk on the common
+  # document and a bounded, cached target read only when one is actually
+  # embedded — the same cost every publish already pays in
+  # `KilnCMS.Firing.Engine.fire/2`.
+  #
+  # Expanded with the record's OWN audience, mirroring `Engine.host_audiences/1`
+  # exactly: a `:member` document's preview must not show a wider-audience
+  # fragment than delivery will ever grant it, or the author sees text a
+  # reader of the finished page could never see.
+  defp expand_fragments(typed, socket) do
+    record = socket.assigns.record
+
+    KilnCMS.CMS.Fragments.expand(typed, record.org_id,
+      audiences: KilnCMS.Firing.Engine.host_audiences(record),
+      ancestry: [{KilnCMS.Firing.Engine.public_type(record), record.id}]
+    )
   end
 
   # The in-editor preview is a full block render of every block. Only pay for

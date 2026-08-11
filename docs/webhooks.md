@@ -32,6 +32,12 @@ can emit, so a new content type has webhook events for free:
 | `in_review` | A document is submitted for review ([#375](https://github.com/The-Verscienta/kiln_cms/issues/375)) | **No — opt in** |
 | `returned_to_draft` | A review is sent back to draft | **No — opt in** |
 
+`unpublished` fires for both an explicit unpublish **and** archiving a
+published document (#914) — both remove it from delivery, and a receiver
+watching for content leaving delivery should not have to subscribe to two
+events to hear about it. The payload's `data.state` reflects which happened:
+`"draft"` for an unpublish, `"archived"` for an archive.
+
 `in_review` and `returned_to_draft` are opt-in only: unlike the other three,
 their payload is the full serialized body of a document that has **never been
 published** — a receiver built for publish-mirroring must not be sent

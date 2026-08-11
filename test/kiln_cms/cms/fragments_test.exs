@@ -470,4 +470,75 @@ defmodule KilnCMS.CMS.FragmentsTest do
              )
     end
   end
+
+  # #910: a `%Fragment{}` block's own `search_text/1` is always `""`, so
+  # `search_text` (denormalized at save time, from the raw tree) never carried
+  # a fragment's words. `Engine.fire/2` now recomputes it against the
+  # fragment-EXPANDED tree, on both an initial fire and a re-fire.
+  describe "search_text includes fragment content once fired (#910)" do
+    test "firing a host recomputes its search_text with the fragment's words" do
+      actor = admin()
+
+      shared =
+        real_page(
+          %{title: "Shared", blocks: [%{"_type" => "heading", "text" => "Fragmentword"}]},
+          actor
+        )
+
+      host = real_page(%{title: "Host", blocks: [fragment_block(shared)]}, actor)
+
+      # `FireArtifacts` enqueues rather than firing inline — drain before
+      # reading anything `Engine.fire/2` derives (same as the withdrawal
+      # tests above: "the edge only exists once the host has fired").
+      drain_oban()
+
+      reloaded = Ash.reload!(host, authorize?: false)
+      assert reloaded.search_text =~ "Fragmentword"
+    end
+
+    test "a document with no fragment is not rewritten on fire" do
+      actor = admin()
+
+      host =
+        real_page(%{title: "Plain", blocks: [%{"_type" => "heading", "text" => "Text"}]}, actor)
+
+      before_fire = Ash.reload!(host, authorize?: false)
+      {:ok, _artifacts} = Engine.fire(before_fire)
+      after_fire = Ash.reload!(host, authorize?: false)
+
+      # search_text was already correct from `Changes.SetSearchText` at save
+      # time (no fragment involved), so `reindex_search_text/3`'s "skip when
+      # unchanged" guard means updated_at does not move a second time.
+      assert after_fire.updated_at == before_fire.updated_at
+    end
+
+    test "a re-fire catches a referrer's search_text up when the fragment changes" do
+      actor = admin()
+
+      shared =
+        real_page(
+          %{title: "Shared", blocks: [%{"_type" => "heading", "text" => "Original"}]},
+          actor
+        )
+
+      host = real_page(%{title: "Host", blocks: [fragment_block(shared)]}, actor)
+      drain_oban()
+
+      assert Ash.reload!(host, authorize?: false).search_text =~ "Original"
+      refute Ash.reload!(host, authorize?: false).search_text =~ "Updated"
+
+      # `shared` is already published — `:update` re-fires it in place
+      # (`FireArtifacts, only_when: :published`), which is what enqueues the
+      # re-fire wave over its referrers, `host` included.
+      CMS.update_page!(shared, %{blocks: [%{"_type" => "heading", "text" => "Updated"}]},
+        actor: actor
+      )
+
+      drain_oban()
+
+      reloaded = Ash.reload!(host, authorize?: false)
+      assert reloaded.search_text =~ "Updated"
+      refute reloaded.search_text =~ "Original"
+    end
+  end
 end

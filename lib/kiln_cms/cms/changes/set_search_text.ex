@@ -26,11 +26,33 @@ defmodule KilnCMS.CMS.Changes.SetSearchText do
 
     blocks_text = BlockText.to_text(Ash.Changeset.get_attribute(changeset, :blocks))
 
-    search_text =
-      (field_text ++ [blocks_text])
-      |> Enum.reject(&(&1 in [nil, ""]))
-      |> Enum.join(" ")
+    Ash.Changeset.force_change_attribute(changeset, :search_text, join(field_text, blocks_text))
+  end
 
-    Ash.Changeset.force_change_attribute(changeset, :search_text, search_text)
+  @doc """
+  The same `search_text` computation as `change/3`, over a loaded **struct**
+  and pre-derived block text rather than a changeset (#910).
+
+  For `KilnCMS.Firing.Engine.fire/2`, whose `blocks_text` comes from the
+  fragment-expanded tree (`body_text/1` there) rather than `record.blocks`
+  raw — a `%Fragment{}` block's own `search_text/1` is always `""`, so
+  `search_text` never carried a fragment's words until something recomputed
+  it against the expanded tree. Kept in this module rather than duplicated so
+  `@text_fields` has one definition either way a caller arrives.
+  """
+  @spec compute(struct(), String.t()) :: String.t()
+  def compute(record, blocks_text) do
+    field_text =
+      @text_fields
+      |> Enum.filter(&Ash.Resource.Info.attribute(record.__struct__, &1))
+      |> Enum.map(&Map.get(record, &1))
+
+    join(field_text, blocks_text)
+  end
+
+  defp join(field_text, blocks_text) do
+    (field_text ++ [blocks_text])
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> Enum.join(" ")
   end
 end
