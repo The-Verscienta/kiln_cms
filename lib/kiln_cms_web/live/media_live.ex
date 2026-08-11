@@ -212,9 +212,7 @@ defmodule KilnCMSWeb.MediaLive do
   end
 
   def handle_event("unsplash_search", %{"q" => q}, socket) when is_binary(q) do
-    if !socket.assigns.unsplash_enabled? do
-      {:noreply, socket}
-    else
+    if socket.assigns.unsplash_enabled? do
       case String.trim(q) do
         "" ->
           {:noreply,
@@ -232,13 +230,13 @@ defmodule KilnCMSWeb.MediaLive do
            |> assign(:unsplash_searching?, true)
            |> start_async(:unsplash_search, fn -> {query, 1, Unsplash.search(query, 1)} end)}
       end
+    else
+      {:noreply, socket}
     end
   end
 
   def handle_event("unsplash_load_more", _params, socket) do
-    if !socket.assigns.unsplash_enabled? do
-      {:noreply, socket}
-    else
+    if socket.assigns.unsplash_enabled? do
       %{unsplash_query: query, unsplash_page: page} = socket.assigns
       next = page + 1
 
@@ -246,13 +244,13 @@ defmodule KilnCMSWeb.MediaLive do
        socket
        |> assign(:unsplash_searching?, true)
        |> start_async(:unsplash_search, fn -> {query, next, Unsplash.search(query, next)} end)}
+    else
+      {:noreply, socket}
     end
   end
 
   def handle_event("unsplash_import", %{"id" => id}, socket) when is_binary(id) do
-    if !socket.assigns.unsplash_enabled? do
-      {:noreply, socket}
-    else
+    if socket.assigns.unsplash_enabled? do
       photo = Enum.find(socket.assigns.unsplash_photos, &(&1.id == id))
 
       if is_nil(photo) or MapSet.member?(socket.assigns.unsplash_importing, id) do
@@ -266,6 +264,8 @@ defmodule KilnCMSWeb.MediaLive do
          |> assign(:unsplash_importing, MapSet.put(socket.assigns.unsplash_importing, id))
          |> start_async({:unsplash_import, id}, fn -> import_unsplash(photo, actor, org) end)}
       end
+    else
+      {:noreply, socket}
     end
   end
 
