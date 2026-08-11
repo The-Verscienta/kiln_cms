@@ -29,6 +29,14 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **Visual editing opens the locale variant you clicked** (#1104). Both
+  Presentation and in-context consoles resolved a record by slug pinned to the
+  default locale, so a click on `/fr/…` opened (and could write) the English
+  document once #502 shared block ids across translations. The stega payload and
+  `bridge.js` now carry `locale`; both consoles take `?locale=` (default when
+  absent); Presentation refuses a payload naming a record it did not load. The
+  fired `:json` artifact includes `locale` so the address is complete.
+
 - **A dead app-icon URL no longer keeps `apple-touch-icon` pointed at a 404**
   (#1147). Save-time verification stored the measured edge once; nothing
   re-checked it, so a CDN that later 404'd still looked installable to every

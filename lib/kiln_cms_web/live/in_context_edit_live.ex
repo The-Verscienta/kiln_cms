@@ -41,13 +41,14 @@ defmodule KilnCMSWeb.InContextEditLive do
   @impl true
   def mount(%{"type" => type, "slug" => slug} = params, _session, socket) do
     actor = socket.assigns.current_user
+    locale = locale_param(params)
 
     # Each failure has its own answer, so they are tagged rather than collapsed
     # into one "no such content": an unwritable record is not a missing one, and
     # the reader is sent somewhere useful.
     with ct when not is_nil(ct) <- ContentTypes.get(type),
          record when not is_nil(record) <-
-           fetch_by_slug(ct.type, slug, actor, socket.assigns.current_org),
+           fetch_by_slug(ct.type, slug, locale, actor, socket.assigns.current_org),
          {true, _ct, _record} <-
            {may_write?(record, actor, socket.assigns.current_org), ct, record} do
       {:ok, socket |> assign(:may_write?, true) |> mount_editor(ct, record, actor, params)}
@@ -106,22 +107,19 @@ defmodule KilnCMSWeb.InContextEditLive do
   # and an out-of-scope type falls through to the published/audience filters —
   # so this can return a *published* record to someone who may not author it,
   # which is exactly why `mount/3` now asks whether they may write it.
-  defp fetch_by_slug(kind, slug, actor, org) do
+  defp fetch_by_slug(kind, slug, locale, actor, org) do
     # Scope to the current site's org (epic #336) so in-context editing on one
     # site's host only resolves that site's content.
     #
-    # Pinned to the default locale. `[slug, locale]` is the identity, so a
-    # slug-only read on a multi-locale site returned whichever variant Postgres
-    # handed back first — and once locale variants share block ids (#502), the
-    # `?focus=` block resolves inside the *wrong* record and an inline save
-    # writes one locale's prose into another's. Deterministic and wrong beats
-    # arbitrary and wrong; editing a non-default locale in place needs the
-    # locale in the route, which is tracked separately.
+    # Locale is part of the identity (`[slug, locale]`). Absent `?locale=` falls
+    # back to the default — an older bridge or a hand-typed URL (#1104). Shared
+    # block ids across locale variants (#502) make loading the wrong variant a
+    # silent cross-locale write.
     case ContentTypes.list!(kind,
            actor: actor,
            tenant: org,
            query: [
-             filter: [slug: slug, locale: KilnCMS.I18n.default_locale()],
+             filter: [slug: slug, locale: locale],
              select: [:id],
              limit: 1
            ]
@@ -138,6 +136,10 @@ defmodule KilnCMSWeb.InContextEditLive do
     end
   rescue
     _ -> nil
+  end
+
+  defp locale_param(params) do
+    KilnCMSWeb.Params.string(params, "locale", KilnCMS.I18n.default_locale())
   end
 
   defp assign_record(socket, record) do
