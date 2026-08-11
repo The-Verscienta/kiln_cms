@@ -99,8 +99,9 @@ defmodule KilnCMS.Media.Regeneration do
 
   def current?(%{variants: variants} = item) when is_map(variants) and map_size(variants) > 0 do
     formats = KilnCMS.ImageProcessor.variant_formats()
+    failures = loaded_map(Map.get(item, :variant_failures))
 
-    # `full` is deliberately excluded: `full_present?/1` below owns it, and the
+    # `full` is deliberately excluded: `full_present?/2` below owns it, and the
     # two rules disagree. This sweep asks "does every label carry every format",
     # but `build_full/2` never writes a SOURCE-format full (the original is the
     # source-format full). So a WebP upload with `formats: [:webp, :avif]` gets
@@ -116,11 +117,18 @@ defmodule KilnCMS.Media.Regeneration do
     Enum.all?(base_labels, fn label ->
       Enum.all?(formats, fn format ->
         # The source format has no suffix, so a label whose source *is* this
-        # format counts as present under its bare key.
-        Map.has_key?(variants, "#{label}.#{format}") or source_format?(variants, label, format)
+        # format counts as present under its bare key. A format recorded as
+        # impossible for THIS label (#1036) counts too, the same "present OR
+        # recorded as impossible" rule `full_present?/2` already applies to
+        # `full` — otherwise a label whose encoder genuinely can't produce a
+        # format (not just `full`'s) re-enqueues for ever.
+        key = "#{label}.#{format}"
+
+        Map.has_key?(variants, key) or Map.has_key?(failures, key) or
+          source_format?(variants, label, format)
       end)
     end)
-    |> Kernel.and(full_present?(item))
+    |> Kernel.and(full_present?(item, failures))
   end
 
   # No variants at all. Before #473 that was a legitimate terminal state: an
@@ -139,7 +147,7 @@ defmodule KilnCMS.Media.Regeneration do
   # matches first.)
   def current?(%{variants: variants, width: width} = item)
       when is_map(variants) and map_size(variants) == 0 and is_integer(width),
-      do: full_present?(item)
+      do: full_present?(item, loaded_map(Map.get(item, :variant_failures)))
 
   # Unprocessed (`width` still nil: mid-flight, or a failed run) is enqueued,
   # which is the case a rollout most wants to catch.
@@ -163,15 +171,15 @@ defmodule KilnCMS.Media.Regeneration do
   # re-decoding it every run is the standing tax the moduledoc warns about. So a
   # format counts as satisfied when it is present OR recorded as impossible —
   # which is what `variant_failures` is for.
-  defp full_present?(item) do
-    failures = loaded_map(Map.get(item, :variant_failures))
+  defp full_present?(item, failures) do
     variants = loaded_map(Map.get(item, :variants))
 
     item
     |> Map.get(:content_type)
     |> KilnCMS.ImageProcessor.full_alternates()
     |> Enum.all?(fn format ->
-      Map.has_key?(variants, "full.#{format}") or Map.has_key?(failures, to_string(format))
+      key = "full.#{format}"
+      Map.has_key?(variants, key) or Map.has_key?(failures, key)
     end)
   end
 
