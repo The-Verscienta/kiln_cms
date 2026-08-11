@@ -47,6 +47,29 @@ migration, a rewritten column, a dropped config key).
   **size** (never the URL) so the stock mark returns until the next successful
   verify. The failure streak resets on every branding save.
 
+- **`CollabPersisterTest`'s negative assertion now anchors on a confirmed
+  prior write instead of an unwritten seed value** (#1095). Filed as a single
+  CI failure, never reproduced — not locally, and not under 60 repeats of the
+  file racing the full suite for the same DB connection pool. That
+  investigation is recorded in the test itself: LiveView processes messages
+  FIFO within one process, so the suspected race (asserting "still Original"
+  before an async autosave had a chance to land) turned out not to be
+  reachable as written — `await/2` already forces the mailbox to drain before
+  the assertion runs.
+
+  Hardened anyway, on the same "eventually consistent, occasionally slower
+  than expected" theory that already explains most flakes in this suite: the
+  test's own `await/2` budgeted 40 tries (1s) against a sibling test in the
+  same presence/autosave problem space (`CollabSavedRefreshTest`) budgeting
+  60 (1.5s) for the identical kind of wait — the one asymmetry between two
+  tests racing the same eventually-consistent state. Now matched. The
+  persister's save also runs and is confirmed *first*, so the co-editor's
+  "didn't write" assertion is checked against a definite prior write it must
+  not clobber, not against the absence of something that merely hasn't
+  happened yet — ruling out both sessions silently failing to save as a
+  vacuous pass, the same class of gap #1067's hardening closed for this
+  file's presence waits.
+
 ### Added
 
 - **Boot warns when the chain cannot detect splices** (#1056). With
