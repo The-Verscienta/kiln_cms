@@ -227,10 +227,24 @@ defmodule KilnCMSWeb.MenuLive do
     with %{parent_id: parent_id} = item when not is_nil(parent_id) <-
            Enum.find(socket.assigns.items, &(&1.id == id)),
          %{} = parent <- Enum.find(socket.assigns.items, &(&1.id == parent_id)) do
-      case outdent(socket, item, parent) do
-        :ok -> {:noreply, load_items(socket)}
-        {:error, error} -> {:noreply, put_flash(socket, :error, error_message(error, nil))}
-      end
+      result = outdent(socket, item, parent)
+
+      # Reload regardless of outcome, same reason `reorder_items` always does
+      # (#921 review): `outdent/2` writes one row at a time, not in a single
+      # transaction, so a failure partway through — an unrelated sibling
+      # failing its own destination validation, the case a direct `UPDATE` or
+      # `Ash.Seed` can leave behind — still leaves the earlier writes
+      # committed. Rendering the pre-outdent tree over that would show a
+      # position clash as a successful drop that silently didn't stick.
+      socket = load_items(socket)
+
+      socket =
+        case result do
+          :ok -> socket
+          {:error, error} -> put_flash(socket, :error, error_message(error, nil))
+        end
+
+      {:noreply, socket}
     else
       _ -> {:noreply, socket}
     end
