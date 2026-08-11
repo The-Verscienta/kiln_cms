@@ -39,6 +39,14 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **Boot warns when the chain cannot detect splices** (#1056). With
+  `audit_anchor_every_write` on (or any `history_anchors` row already present)
+  and no provenance signing key, splice detection inside an anchored range is
+  soft (`:unverifiable`) rather than a hard failure — documented, but easy to
+  miss because the per-anchor "stored UNSIGNED" log is noise under every-write
+  anchoring. `KilnCMS.Application` now logs that once at boot, same shape as
+  the mailer / egress warnings.
+
 - **Claim checking is per site, and has a page** (#857). `KilnCMS.Compliance`
   was configured entirely in `config.exs`, which is the wrong grain on a
   multi-org install: a claims vocabulary is a statement about one publication's
