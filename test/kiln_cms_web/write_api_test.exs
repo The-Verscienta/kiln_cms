@@ -480,6 +480,12 @@ defmodule KilnCMSWeb.WriteApiTest do
         set: [state: "in_review"]
       )
 
+      # `Ash.update!/1` always wraps into `Ash.Error.Invalid` (Splode classes
+      # every `class: :invalid` error the same way `StaleRecord` declares
+      # itself) — confirmed against `deps/ash`, and it's also exactly the
+      # shape AshJsonApi/AshGraphql unwrap before calling the protocol
+      # functions below, so asserting on it here matches production's own
+      # dispatch, not a narrower shape.
       error =
         try do
           stale
@@ -491,9 +497,6 @@ defmodule KilnCMSWeb.WriteApiTest do
           e in Ash.Error.Invalid ->
             assert [%Ash.Error.Changes.StaleRecord{} = stale_record] = e.errors
             stale_record
-
-          e in Ash.Error.Changes.StaleRecord ->
-            e
         end
 
       assert %AshJsonApi.Error{status_code: 409, code: "invalid_state_transition"} =
