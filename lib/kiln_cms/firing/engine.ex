@@ -424,6 +424,9 @@ defmodule KilnCMS.Firing.Engine do
       "type" => public_type(document),
       "title" => Map.get(document, :title),
       "slug" => Map.get(document, :slug),
+      # Locale rides with the document identity (`[slug, locale]`) so the bridge
+      # can deep-link the correct variant (#1104). Absent on pre-#1104 artifacts.
+      "locale" => Map.get(document, :locale),
       # The admin-defined custom fields (D4). Already public on the delivery
       # APIs; carrying them here means the fired artifact is a complete view of
       # the document, and is what makes computed fields (#429) part of what

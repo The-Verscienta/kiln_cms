@@ -29,6 +29,13 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **Visual editing opens the locale variant you clicked** (#1104). Both
+  Presentation and in-context consoles resolved a record by slug pinned to the
+  default locale, so a click on `/fr/…` opened (and could write) the English
+  document once #502 shared block ids across translations. The stega payload and
+  `bridge.js` now carry `locale`; both consoles take `?locale=` (default when
+  absent); Presentation refuses a payload naming a record it did not load. The
+  fired `:json` artifact includes `locale` so the address is complete.
 - **Presentation preview iframe is sandboxed when it shares the console's
   origin** (#1059). A bare iframe meant `PRESENTATION_PREVIEW_URL` pointed at
   Kiln's own delivery host gave framed scripts (code injection, stored XSS)
