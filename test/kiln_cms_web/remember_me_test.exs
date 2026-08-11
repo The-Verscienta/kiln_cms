@@ -64,6 +64,7 @@ defmodule KilnCMSWeb.RememberMeTest do
   # max-age=60` response.
   defp visit_with(cookie_value) do
     build_conn()
+    |> unique_ip()
     |> Plug.Test.put_req_cookie(@cookie, cookie_value)
     |> get(~p"/sign-in")
   end
@@ -134,7 +135,8 @@ defmodule KilnCMSWeb.RememberMeTest do
 
       assert exchange =~ "remember_me=true"
 
-      exchanged = build_conn() |> Phoenix.ConnTest.init_test_session(%{}) |> get(exchange)
+      exchanged =
+        build_conn() |> unique_ip() |> Phoenix.ConnTest.init_test_session(%{}) |> get(exchange)
 
       assert %{value: token} = exchanged.resp_cookies[@cookie]
       assert is_binary(token) and token != ""
@@ -168,6 +170,7 @@ defmodule KilnCMSWeb.RememberMeTest do
 
       out =
         build_conn()
+        |> unique_ip()
         |> Plug.Test.put_req_cookie(@cookie, token)
         |> Phoenix.ConnTest.init_test_session(%{})
         |> delete(~p"/sign-out")
@@ -201,6 +204,7 @@ defmodule KilnCMSWeb.RememberMeTest do
 
     defp verify(pending, code) do
       build_conn()
+      |> unique_ip()
       |> Plug.Conn.put_private(:plug_skip_csrf_protection, true)
       |> Phoenix.ConnTest.init_test_session(%{pending_2fa: pending})
       |> post(~p"/sign-in/verify", %{"code" => code})
@@ -274,6 +278,7 @@ defmodule KilnCMSWeb.RememberMeTest do
 
       signed_in =
         build_conn()
+        |> unique_ip()
         |> Plug.Test.put_req_cookie(@cookie, token)
         |> Phoenix.ConnTest.init_test_session(%{})
         |> AshAuthentication.Plug.Helpers.store_in_session(current)

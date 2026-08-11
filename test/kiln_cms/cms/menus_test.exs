@@ -58,6 +58,40 @@ defmodule KilnCMS.CMS.MenusTest do
       assert node.url == "/#{page.slug}"
     end
 
+    test "a target in a non-default locale resolves with the locale prefix (#921)" do
+      actor = user(:editor)
+      page = published_page(%{locale: "fr"})
+      menu = menu(actor)
+
+      item(actor, menu, %{
+        label: "À propos",
+        link_type: :content,
+        target_type: "page",
+        target_id: page.id
+      })
+
+      assert {:ok, _menu, [node]} = Menus.resolve(menu.key, "en", org_id())
+      # Not "/<slug>" — that resolves as the DEFAULT locale, not the
+      # target's own, and `Plugs.SetLocale` has no other way to tell.
+      assert node.url == "/fr/#{page.slug}"
+    end
+
+    test "a target in the default locale is not prefixed" do
+      actor = user(:editor)
+      page = published_page(%{locale: "en"})
+      menu = menu(actor)
+
+      item(actor, menu, %{
+        label: "About",
+        link_type: :content,
+        target_type: "page",
+        target_id: page.id
+      })
+
+      assert {:ok, _menu, [node]} = Menus.resolve(menu.key, "en", org_id())
+      assert node.url == "/#{page.slug}"
+    end
+
     test "renaming the target's slug moves the menu with it — no stale link" do
       actor = user(:editor)
       page = published_page()

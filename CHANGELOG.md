@@ -49,6 +49,14 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **Boot warns when the chain cannot detect splices** (#1056). With
+  `audit_anchor_every_write` on (or any `history_anchors` row already present)
+  and no provenance signing key, splice detection inside an anchored range is
+  soft (`:unverifiable`) rather than a hard failure — documented, but easy to
+  miss because the per-anchor "stored UNSIGNED" log is noise under every-write
+  anchoring. `KilnCMS.Application` now logs that once at boot, same shape as
+  the mailer / egress warnings.
+
 - **Claim checking is per site, and has a page** (#857). `KilnCMS.Compliance`
   was configured entirely in `config.exs`, which is the wrong grain on a
   multi-org install: a claims vocabulary is a statement about one publication's
@@ -100,6 +108,28 @@ migration, a rewritten column, a dropped config key).
   panel saying so rather than describing a subset as the whole.
 
 ### Fixed
+
+- **Archiving a published document now tells subscribers it left delivery**
+  (#914). #879 made `:archive` tear down a published record's delivery
+  version and artifacts (previously orphaned) — but unlike `:unpublish`,
+  which fires `unpublished`, `:archive` fired no webhook at all, so
+  archiving silently removed a document from delivery with no signal to a
+  CDN or subscriber watching for exactly that.
+
+  `:archive` now fires the same `unpublished` event `:unpublish` does, since
+  from a subscriber's perspective the two have the same effect: the content
+  left delivery. Gated on `only_when: :was_published` (new on
+  `Changes.NotifyWebhooks`, checking the record's state *before* the
+  transition) rather than the existing `:published` mode (which checks the
+  *resulting* state) — `:archive` always lands on `:archived`, so a
+  `:published`-gated check would never fire; a draft or in-review record,
+  which was never delivered, correctly stays silent.
+
+  The issue's second item — `:unarchive` missing the `accept []` +
+  compare-and-swap hardening the other transitions got in #879 — was
+  already closed as an incidental side effect of #1026 (`:autosave`
+  refusing a published row); verified against current code rather than
+  redone here.
 
 - **Publishing no longer discards prose a collab room was still holding**
   (#1061). The server checkpoint writes a room's converged text back through

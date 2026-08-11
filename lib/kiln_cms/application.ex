@@ -144,6 +144,7 @@ defmodule KilnCMS.Application do
       # Needs the Repo, so it runs after the tree is up rather than alongside
       # the config-only warnings at the top of start/2.
       warn_if_multi_tenant_without_strict_host()
+      warn_if_chain_unsigned()
       enqueue_occurrence_backfill()
       {:ok, pid}
     end
@@ -365,6 +366,24 @@ defmodule KilnCMS.Application do
           "attacker-supplied header — is served the DEFAULT org's content, branding " <>
           "and analytics. Set TENANT_STRICT_HOST=true to reject those instead; see " <>
           "docs/environment-variables.md."
+      )
+    end
+  end
+
+  # Splice detection inside an anchored range needs signed version rows
+  # (#1056 / docs/chain-fold-order.md). Without a provenance key the chain
+  # still anchors, but a splice is `:unverifiable` rather than tampering —
+  # and the per-anchor "stored UNSIGNED" log is noise under every-write
+  # anchoring. One shot at boot, gated so unused deployments stay quiet.
+  defp warn_if_chain_unsigned do
+    if KilnCMS.Governance.Chain.unsigned_while_in_use?() do
+      require Logger
+
+      Logger.warning(
+        "History anchoring is in use but no provenance signing key is configured. " <>
+          "Anchors and version rows are stored unsigned, so a version row spliced " <>
+          "into an anchored range is reported as an anomaly rather than as tampering. " <>
+          "Set KILN_PROVENANCE_PRIVATE_KEY (or signing_key:) to get hard detection."
       )
     end
   end

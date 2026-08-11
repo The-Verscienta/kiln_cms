@@ -2019,6 +2019,16 @@ defmodule KilnCMS.CMS.Content do
           # writes a nil `published_version_id` that was already nil.
           change KilnCMS.CMS.Changes.ClearPublishedVersion
           change KilnCMS.CMS.Changes.DeleteArtifacts
+          # Archiving a published record removes it from delivery exactly as
+          # `:unpublish` does, so it emits the same event (#914) — a
+          # subscriber/CDN watching for content leaving delivery must not care
+          # which editor action caused that. `only_when: :was_published`, not
+          # `:published`: this action always lands on `:archived`, so a plain
+          # `:published` check (the resulting state) would never fire, and
+          # archiving a draft/in_review record — which was never delivered —
+          # correctly stays silent.
+          change {KilnCMS.CMS.Changes.NotifyWebhooks,
+                  event: "unpublished", only_when: :was_published}
         end
 
         # Sends archived content back to draft (the state-machine inverse of

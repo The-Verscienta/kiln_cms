@@ -63,7 +63,9 @@ defmodule KilnCMSWeb.TwoFactorBudgetTest do
     |> put_session(:pending_2fa, token)
   end
 
-  defp verify(user, code), do: submit(with_pending(build_conn(), user), code)
+  defp verify(user, code), do: submit(with_pending(unique_ip(build_conn()), user), code)
+
+  defp verify_from(conn, user, code), do: submit(with_pending(conn, user), code)
 
   defp submit(conn, code), do: post(conn, ~p"/sign-in/verify", %{"code" => code})
 
@@ -116,7 +118,7 @@ defmodule KilnCMSWeb.TwoFactorBudgetTest do
     # forgave the sign-in counter, making the refresh entirely free; it now
     # costs a unit of that budget, which is a looser second ceiling on the same
     # attack rather than a replacement for this one.)
-    conn = with_pending(build_conn(), user)
+    conn = with_pending(unique_ip(build_conn()), user)
 
     Enum.reduce(1..@budget, conn, fn _, conn ->
       assert submit(conn, "000000").status == 401
@@ -156,14 +158,23 @@ defmodule KilnCMSWeb.TwoFactorBudgetTest do
     other = enabled_user()
     on_exit(fn -> Enum.each([user, other], &AccountThrottle.forgive_second_factor(&1.id)) end)
 
-    exhaust(user)
+    # Shared loopback on purpose: ConnCase's default conn is unique per test
+    # (#936), so proving "not per-IP" requires opting back into the one address
+    # every bare `build_conn/0` used to share.
+    shared = loopback_conn()
 
-    # This pair is what distinguishes per-account from per-IP: every request in
-    # this file comes from `build_conn/0`, i.e. 127.0.0.1, so a per-address
-    # counter would refuse the first line — and would also refuse the second,
-    # which is the one that rules it out.
-    assert verify(user, "000000").status == 429
-    assert verify(other, "000000").status == 401
+    exhaust_from = fn account ->
+      Enum.each(1..@budget, fn _ -> verify_from(shared, account, "000000") end)
+    end
+
+    exhaust_from.(user)
+
+    # This pair is what distinguishes per-account from per-IP: both requests
+    # come from the same address, so a per-address counter would refuse the
+    # first line — and would also refuse the second, which is the one that
+    # rules it out.
+    assert verify_from(shared, user, "000000").status == 429
+    assert verify_from(shared, other, "000000").status == 401
   end
 
   describe "the headless second factor draws on the same bucket (#726)" do
@@ -177,7 +188,7 @@ defmodule KilnCMSWeb.TwoFactorBudgetTest do
           | __metadata__: %{token: "stub"}
         })
 
-      build_conn()
+      unique_ip(build_conn())
       |> put_req_header("content-type", "application/json")
       |> post("/api/auth/sign_in/verify", %{"pending_token" => pending, "code" => code})
     end
