@@ -191,10 +191,11 @@ defmodule KilnCMS.SchemaExport do
         "type" => %{"const" => to_string(ct.type)},
         "title" => %{"type" => ["string", "null"]},
         "slug" => %{"type" => ["string", "null"]},
+        "locale" => %{"type" => ["string", "null"]},
         "custom_fields" => custom_fields_schema(ct.field_definitions),
         "blocks" => %{"type" => "array", "items" => JsonSchema.block_ref()}
       },
-      "required" => ["blocks", "custom_fields", "id", "slug", "title", "type"],
+      "required" => ["blocks", "custom_fields", "id", "locale", "slug", "title", "type"],
       "additionalProperties" => false
     }
   end

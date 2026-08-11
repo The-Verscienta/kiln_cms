@@ -85,7 +85,31 @@ defmodule KilnCMSWeb.PresentationLiveTest do
     assert html =~ "presentation-frame"
     assert html =~ "https://front.test"
     assert html =~ "data-frontend-origin=\"https://front.test\""
+    # Cross-origin template → cookies allowed in the frame (#1059).
+    assert html =~ ~s(sandbox="allow-scripts allow-same-origin")
+    refute html =~ "sandboxed without cookies"
     assert html =~ "Click a highlighted region"
+  end
+
+  test "same-origin preview URL gets a restrictive sandbox and a banner (#1059)", %{conn: conn} do
+    # LiveViewTest's disconnected mount vouch-rewrites host_uri from the
+    # endpoint's struct_url with the conn host — http://www.example.com:4000
+    # under the shipped test Endpoint config.
+    Application.put_env(
+      :kiln_cms,
+      :presentation_preview_url,
+      "http://www.example.com:4000{path}?kilnPreview=1"
+    )
+
+    admin = user(:admin)
+    post = post_with_heading(admin)
+
+    {:ok, _lv, html} = conn |> log_in(admin) |> live(~p"/editor/presentation/post/#{post.slug}")
+
+    assert html =~ ~s(sandbox="allow-scripts")
+    refute html =~ "allow-same-origin"
+    assert html =~ ~s(data-opaque-origin="true")
+    assert html =~ "sandboxed without cookies"
   end
 
   test "shows a setup hint when no preview URL is configured", %{conn: conn} do
@@ -256,5 +280,82 @@ defmodule KilnCMSWeb.PresentationLiveTest do
 
     assert {:error, {:live_redirect, %{to: "/editor"}}} =
              live(conn, ~p"/editor/presentation/post/#{post.slug}")
+  end
+
+  test "locale query opens that variant; a French payload cannot write English (#1104)", %{
+    conn: conn
+  } do
+    admin = user(:admin)
+    shared = "pl-loc-#{System.unique_integer([:positive])}"
+
+    en =
+      CMS.create_page!(
+        %{
+          title: "English page",
+          slug: shared,
+          locale: "en",
+          block_tree: [%{"type" => "heading", "content" => "EN heading", "order" => 1}]
+        },
+        actor: admin
+      )
+
+    fr = KilnCMS.CMS.Translations.create_translation!(:page, en, "fr", actor: admin)
+    fr = CMS.update_page!(fr, %{title: "French page"}, actor: admin)
+    block_id = en.blocks |> hd() |> Map.get(:value) |> Map.get(:id)
+
+    # Shared block ids across the pair (#502) — the bug #1104 closed.
+    assert block_id == fr.blocks |> hd() |> Map.get(:value) |> Map.get(:id)
+
+    {:ok, lv_fr, html_fr} =
+      conn
+      |> log_in(admin)
+      |> live(~p"/editor/presentation/page/#{shared}?locale=fr")
+
+    assert html_fr =~ "French page"
+    refute html_fr =~ "English page"
+
+    # Editing the French console writes French, not English.
+    render_hook(lv_fr, "edit_field", %{
+      "type" => "page",
+      "id" => fr.id,
+      "slug" => shared,
+      "locale" => "fr",
+      "block" => block_id,
+      "field" => "text"
+    })
+
+    render_hook(lv_fr, "update_block", %{"id" => block_id, "value" => "FR heading edited"})
+    render_hook(lv_fr, "save", %{})
+
+    assert CMS.get_page!(fr.id, actor: admin).blocks
+           |> hd()
+           |> Map.get(:value)
+           |> Map.get(:text) == "FR heading edited"
+
+    assert CMS.get_page!(en.id, actor: admin).blocks
+           |> hd()
+           |> Map.get(:value)
+           |> Map.get(:text) == "EN heading"
+
+    # Default (no locale) still opens English.
+    {:ok, lv_en, html_en} =
+      conn |> log_in(admin) |> live(~p"/editor/presentation/page/#{shared}")
+
+    assert html_en =~ "English page"
+
+    # A payload naming the French record while English is loaded is refused —
+    # shared block ids must not open the English pane for a French click.
+    html =
+      render_hook(lv_en, "edit_field", %{
+        "type" => "page",
+        "id" => fr.id,
+        "slug" => shared,
+        "locale" => "fr",
+        "block" => block_id,
+        "field" => "text"
+      })
+
+    refute html =~ ~s(data-kiln-block-id="#{block_id}")
+    assert html =~ "Open the full editor"
   end
 end

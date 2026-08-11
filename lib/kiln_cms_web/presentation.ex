@@ -16,6 +16,10 @@ defmodule KilnCMSWeb.Presentation do
 
   The `?kilnPreview=1`-style query param (yours to name) is how the front end's
   edit-mode build knows to load `bridge.js` and render the annotated preview.
+
+  When the template origin matches the console host, the preview iframe is
+  sandboxed without `allow-same-origin` so framed scripts cannot reach the
+  console DOM (#1059). See `docs/visual-editing-bridge.md`.
   """
 
   alias KilnCMS.CMS.ContentTypes
@@ -63,20 +67,64 @@ defmodule KilnCMSWeb.Presentation do
   """
   @spec frontend_origin() :: String.t() | nil
   def frontend_origin do
-    with tmpl when is_binary(tmpl) <- template(),
-         # Strip placeholders so the URL parses, then read its origin.
-         cleaned = Regex.replace(@placeholder_re, tmpl, ""),
-         %URI{scheme: scheme, host: host} = uri when not is_nil(scheme) and not is_nil(host) <-
-           URI.parse(cleaned) do
-      port = uri.port
+    case template() do
+      tmpl when is_binary(tmpl) ->
+        tmpl
+        |> then(&Regex.replace(@placeholder_re, &1, ""))
+        |> URI.parse()
+        |> origin_from_uri()
 
-      if port in [nil, 80, 443],
-        do: "#{scheme}://#{host}",
-        else: "#{scheme}://#{host}:#{port}"
-    else
-      _ -> nil
+      _ ->
+        nil
     end
   end
+
+  @doc """
+  Whether the preview template's origin matches the Presentation console's
+  host (#1059).
+
+  Same-origin is the configuration that lets framed delivery scripts reach the
+  console DOM without a sandbox. Cross-origin is already blocked by the browser.
+  """
+  @spec same_origin_preview?(URI.t() | term()) :: boolean()
+  def same_origin_preview?(console_uri) do
+    with front when is_binary(front) <- frontend_origin(),
+         console when is_binary(console) <- origin_from_uri(console_uri) do
+      front == console
+    else
+      _ -> false
+    end
+  end
+
+  @doc """
+  `sandbox` attribute for the preview iframe (#1059).
+
+  Same-origin → `allow-scripts` only (opaque origin; no console DOM access, no
+  cookies in the frame). Cross-origin → also `allow-same-origin` so the front
+  end keeps its cookies; SOP already blocks the console.
+  """
+  @spec iframe_sandbox(boolean()) :: String.t()
+  def iframe_sandbox(true = _same_origin?), do: "allow-scripts"
+  def iframe_sandbox(false = _same_origin?), do: "allow-scripts allow-same-origin"
+
+  @doc """
+  Normalize a URI to `scheme://host[:port]`, omitting default ports.
+  """
+  @spec origin_from_uri(URI.t() | term()) :: String.t() | nil
+  def origin_from_uri(%URI{scheme: scheme, host: host} = uri)
+      when is_binary(scheme) and is_binary(host) and host != "" do
+    port = uri.port
+
+    if default_port?(scheme, port),
+      do: "#{scheme}://#{host}",
+      else: "#{scheme}://#{host}:#{port}"
+  end
+
+  def origin_from_uri(_), do: nil
+
+  defp default_port?("http", port) when port in [nil, 80], do: true
+  defp default_port?("https", port) when port in [nil, 443], do: true
+  defp default_port?(_scheme, _port), do: false
 
   # The locale-prefixed public path Kiln's own delivery uses, mirrored by the
   # external front end (`InContextEditLive.published_path/2` uses the same shape).
