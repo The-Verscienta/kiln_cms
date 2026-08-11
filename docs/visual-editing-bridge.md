@@ -140,7 +140,9 @@ elements, where there's no text to encode), annotate elements yourself from the
   `{event: "update", type, id, title, excerpt}`. Connect refuses if the actor
   can't read the document.
 - **Deep-link:** `/editor/site/:type/:slug?focus=<block_id>` (in-context editor,
-  block-level). The structured editor accepts the field-level twin:
+  block-level). Locale variants share a slug, so the bridge also passes
+  `locale=` from the stega payload (#1104); absent locale falls back to the
+  site default. The structured editor accepts the field-level twin:
   `/editor/content/:type/:id?focus=<field>` scrolls to, opens (if collapsed),
   pulses, and focuses that field's input — `<field>` is a custom field's `name`
   or a core field (`title`, `slug`, `excerpt`, `seo_title`, …). Unknown fields

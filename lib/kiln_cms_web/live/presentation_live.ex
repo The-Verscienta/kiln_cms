@@ -32,12 +32,13 @@ defmodule KilnCMSWeb.PresentationLive do
   @scalar_fields ~w(title excerpt)
 
   @impl true
-  def mount(%{"type" => type, "slug" => slug}, _session, socket) do
+  def mount(%{"type" => type, "slug" => slug} = params, _session, socket) do
     actor = socket.assigns.current_user
+    locale = locale_param(params)
 
     with ct when not is_nil(ct) <- ContentTypes.get(type),
          record when not is_nil(record) <-
-           fetch_by_slug(ct.type, slug, actor, socket.assigns.current_org),
+           fetch_by_slug(ct.type, slug, locale, actor, socket.assigns.current_org),
          # `{false, ct, record}` rather than a bare `false`: the else-branch
          # needs the record's ID to send the reader to the read-only surface,
          # and a `with` clause that fails hands on only what it matched.
@@ -91,19 +92,15 @@ defmodule KilnCMSWeb.PresentationLive do
 
   # Scope to the current site's org (epic #336) so the Presentation console on
   # one site's host only resolves that site's content.
-  defp fetch_by_slug(kind, slug, actor, org) do
-    # Pinned to the default locale. `[slug, locale]` is the identity, so a
-    # slug-only read on a multi-locale site returned whichever variant Postgres
-    # handed back first — and once locale variants share block ids (#502), the
-    # block a stega payload names resolves inside the *wrong* record and an
-    # inline save writes one locale's prose into another's. Deterministic and
-    # wrong beats arbitrary and wrong; editing a non-default locale in place
-    # needs the locale in the route, which is tracked separately.
+  #
+  # Locale is part of the identity (`[slug, locale]`). Absent `?locale=` falls
+  # back to the default — an older bridge or a hand-typed URL (#1104).
+  defp fetch_by_slug(kind, slug, locale, actor, org) do
     case ContentTypes.list!(kind,
            actor: actor,
            tenant: org,
            query: [
-             filter: [slug: slug, locale: KilnCMS.I18n.default_locale()],
+             filter: [slug: slug, locale: locale],
              select: [:id],
              limit: 1
            ]
@@ -116,6 +113,10 @@ defmodule KilnCMSWeb.PresentationLive do
     end
   rescue
     _ -> nil
+  end
+
+  defp locale_param(params) do
+    KilnCMSWeb.Params.string(params, "locale", KilnCMS.I18n.default_locale())
   end
 
   defp do_save(socket) do
@@ -170,32 +171,17 @@ defmodule KilnCMSWeb.PresentationLive do
   # ── events ──────────────────────────────────────────────────────────────────
 
   @impl true
-  # The bridge posts the stega payload `{type, id, slug, field, block}`. Open the
-  # clicked block in the pane when it's inline-editable; a document scalar (no
-  # block — e.g. `title`) opens a scalar input; anything else offers the full
-  # editor.
-  def handle_event("edit_field", %{"block" => block_id} = payload, socket)
-      when is_binary(block_id) do
-    case Enum.find(socket.assigns.blocks, &(&1.id == block_id and &1.field != nil)) do
-      nil -> {:noreply, assign(socket, :editing, {:unsupported, payload["field"] || "content"})}
-      block -> {:noreply, assign(socket, :editing, block)}
-    end
-  end
-
-  def handle_event("edit_field", %{"field" => field}, socket)
-      when field in @scalar_fields do
-    if scalar_supported?(socket, field) do
-      {:noreply, assign(socket, :editing, {:scalar, field, scalar_value(socket, field)})}
+  # The bridge posts the stega payload `{type, id, slug, locale, field, block}`.
+  # Open the clicked block in the pane when it's inline-editable; a document
+  # scalar (no block — e.g. `title`) opens a scalar input; anything else offers
+  # the full editor. A payload naming a different document is refused (#1104) —
+  # shared block ids across locale variants must not write into the wrong one.
+  def handle_event("edit_field", payload, socket) when is_map(payload) do
+    if foreign_record_payload?(payload, socket) do
+      {:noreply, assign(socket, :editing, {:unsupported, payload["field"] || "content"})}
     else
-      # e.g. clicking `excerpt` on a type without one — the `:update` action
-      # wouldn't accept it, so offer the full editor instead of a panel that
-      # can't save.
-      {:noreply, assign(socket, :editing, {:unsupported, field})}
+      open_edit_field(payload, socket)
     end
-  end
-
-  def handle_event("edit_field", payload, socket) do
-    {:noreply, assign(socket, :editing, {:unsupported, payload["field"] || "content"})}
   end
 
   # A document scalar input (title/excerpt) changed.
@@ -266,6 +252,34 @@ defmodule KilnCMSWeb.PresentationLive do
      |> assign(:save_state, :saved)
      |> assign(:editing, nil)}
   end
+
+  defp open_edit_field(%{"block" => block_id} = payload, socket) when is_binary(block_id) do
+    case Enum.find(socket.assigns.blocks, &(&1.id == block_id and &1.field != nil)) do
+      nil -> {:noreply, assign(socket, :editing, {:unsupported, payload["field"] || "content"})}
+      block -> {:noreply, assign(socket, :editing, block)}
+    end
+  end
+
+  defp open_edit_field(%{"field" => field}, socket) when field in @scalar_fields do
+    if scalar_supported?(socket, field) do
+      {:noreply, assign(socket, :editing, {:scalar, field, scalar_value(socket, field)})}
+    else
+      # e.g. clicking `excerpt` on a type without one — the `:update` action
+      # wouldn't accept it, so offer the full editor instead of a panel that
+      # can't save.
+      {:noreply, assign(socket, :editing, {:unsupported, field})}
+    end
+  end
+
+  defp open_edit_field(payload, socket) do
+    {:noreply, assign(socket, :editing, {:unsupported, payload["field"] || "content"})}
+  end
+
+  defp foreign_record_payload?(%{"id" => id}, socket) when is_binary(id) do
+    id != to_string(socket.assigns.record.id)
+  end
+
+  defp foreign_record_payload?(_payload, _socket), do: false
 
   # `title` is universal; `excerpt` exists only on types declared `excerpt?: true`.
   defp scalar_supported?(_socket, "title"), do: true

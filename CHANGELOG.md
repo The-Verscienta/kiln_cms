@@ -29,13 +29,13 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
-- **XML uploads can no longer exhaust the node's atom table via xmerl** (#1105).
-  `:xmerl_scan` interns every distinct element and attribute name; atoms are
-  never reclaimed, and hitting the limit aborts the whole BEAM. A byte cap only
-  changed how many uploads it took. Both WXR and XLIFF parsers now run
-  `KilnCMS.Xml.check_name_budget/2` first — an offset-advancing binary scan that
-  refuses past 512 distinct names with `{:too_many_names, …}` before SweetXml
-  sees the bytes.
+- **Visual editing opens the locale variant you clicked** (#1104). Both
+  Presentation and in-context consoles resolved a record by slug pinned to the
+  default locale, so a click on `/fr/…` opened (and could write) the English
+  document once #502 shared block ids across translations. The stega payload and
+  `bridge.js` now carry `locale`; both consoles take `?locale=` (default when
+  absent); Presentation refuses a payload naming a record it did not load. The
+  fired `:json` artifact includes `locale` so the address is complete.
 - **Presentation preview iframe is sandboxed when it shares the console's
   origin** (#1059). A bare iframe meant `PRESENTATION_PREVIEW_URL` pointed at
   Kiln's own delivery host gave framed scripts (code injection, stored XSS)
@@ -53,6 +53,32 @@ migration, a rewritten column, a dropped config key).
   re-runs `AppIcon.verify/1` and, after two consecutive failures, clears the
   **size** (never the URL) so the stock mark returns until the next successful
   verify. The failure streak resets on every branding save.
+
+- **Four tests' copies of the experiments config fixture now bust the cache
+  on restore, like the one that already did** (#1120). The same
+  get/put/`on_exit`-restore block for `:kiln_cms, KilnCMS.Experiments` was
+  copied — as a `put_experiments/1` helper — into
+  `test/kiln_cms/experiments/sticky_test.exs`,
+  `test/kiln_cms/experiments/health_test.exs`,
+  `test/kiln_cms_web/live/overview_experiment_warning_test.exs`, and
+  `test/mix/tasks/kiln_experiment_test.exs` (as `sticky_on/0` +
+  `put_experiments/1`). `KilnCMS.ExperimentFixtures.enable!/0` was the same
+  block **plus** `KilnCMS.Cache.bust_experiments/1` on restore; none of the
+  four copies busted.
+
+  Harmless while `Experiments.enabled?/0` and `Sticky.enabled?/0` were plain
+  config reads. Not harmless once a test flips the flag and then reads
+  `Experiments.running/1` (as `health_test.exs` has done since #1110, to
+  catch a `select` regression): the flag restores correctly on `on_exit`, but
+  a cached running set survives into the next `async: false` test in the same
+  partition — an unreproducible cross-test flake that passes isolated, fails
+  under load, and moves with the seed.
+
+  All four now delegate to a new `ExperimentFixtures.put_config/1`, which
+  `enable!/0` is defined in terms of — one place that knows the flag and the
+  cache have to move together. Two more inline (not helper-shaped, so not
+  caught by grepping for `put_experiments`) copies of the same unbust block
+  turned up while fixing this and are filed separately as #1210.
 
 ### Added
 
@@ -116,6 +142,30 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **A losing workflow-transition race now returns a 409, not an opaque 400
+  plus a spammed stacktrace** (#923). #879's compare-and-swap on `publish`,
+  `unpublish`, `submit_for_review`, `return_to_draft` and `archive` raises
+  `Ash.Error.Changes.StaleRecord` when two actors race the same transition
+  and the loser's `UPDATE` matches no rows — the same race
+  `AshStateMachine.Errors.NoMatchingTransition` reports when the state was
+  already wrong *before* the request; `StaleRecord` is what it looks like
+  when the state goes wrong *during* the request instead. Neither
+  `AshJsonApi.ToJsonApiError` nor `AshGraphql.Error` was implemented for it,
+  so it fell through AshJsonApi's fallback branch — an opaque
+  `something_went_wrong` 400 indistinguishable from a real server fault,
+  plus a formatted stacktrace warning logged per request (the exact #880
+  failure mode, now reachable on every CAS-guarded transition instead of
+  just the state-was-already-wrong case).
+
+  `KilnCMSWeb.AshStateMachineErrors` — already the home for
+  `NoMatchingTransition`'s translation — gains the matching `StaleRecord`
+  impls, reporting the same `invalid_state_transition` 409 code. The detail
+  message is necessarily more generic than `NoMatchingTransition`'s:
+  `StaleRecord` carries only the resource, not which record or action raced,
+  since that is genuinely all a zero-rows `UPDATE` can report.
+
+  Item 2 from the same review — `:archive` firing no webhook — was already
+  filed and fixed separately as #914.
 - **A missing responsive-label image encoder (no AVIF build, a `thumb.avif`
   past a dimension ceiling) re-decoded the source on every regeneration run,
   forever** (#1036). #1000 recorded which full-size alternates a source
