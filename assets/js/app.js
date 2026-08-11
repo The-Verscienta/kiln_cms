@@ -42,12 +42,19 @@ const Hooks = {
   // refresh after a save. Mirrors embed.js's parent-side security check —
   // trust only messages from THIS iframe's window, and (when known) only from
   // the configured front-end origin.
+  //
+  // Same-origin previews are sandboxed without allow-same-origin (#1059), so
+  // the frame posts with origin "null". contentWindow identity stays the guard;
+  // opaqueOrigin marks that null is expected rather than forged.
   PresentationFrame: {
     mounted() {
       this.origin = this.el.dataset.frontendOrigin || null
+      this.opaque = this.el.dataset.opaqueOrigin === "true"
       this.onMessage = e => {
         if (e.source !== this.el.contentWindow) return
-        if (this.origin && e.origin !== this.origin) return
+        if (this.origin && e.origin !== this.origin) {
+          if (!(this.opaque && e.origin === "null")) return
+        }
         const d = e.data
         if (d && d.source === "kiln-bridge" && d.event === "edit" && d.payload) {
           this.pushEvent("edit_field", d.payload)
@@ -57,7 +64,9 @@ const Hooks = {
       // Server → iframe: tell bridge.js to re-fetch after a Kiln-side save.
       this.handleEvent("presentation:refresh", () => {
         const win = this.el.contentWindow
-        if (win) win.postMessage({source: "kiln-console", event: "refresh"}, this.origin || "*")
+        // Opaque frames cannot be addressed by a concrete origin string.
+        const target = this.opaque ? "*" : (this.origin || "*")
+        if (win) win.postMessage({source: "kiln-console", event: "refresh"}, target)
       })
     },
     destroyed() {

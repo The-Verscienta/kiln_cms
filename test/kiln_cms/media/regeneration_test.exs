@@ -114,7 +114,40 @@ defmodule KilnCMS.Media.RegenerationTest do
             "thumb" => variant("/t.jpg", "image/jpeg"),
             "thumb.webp" => variant("/t.webp", "image/webp")
           },
-          variant_failures: %{"webp" => "encoder refused this source"}
+          variant_failures: %{"full.webp" => "encoder refused this source"}
+        })
+
+      assert Regeneration.current?(item)
+    end
+
+    # The `base_labels` sweep's OWN failures branch, isolated from
+    # `full_present?/2`'s: every non-`full` label's format needs the same
+    # "present OR recorded as impossible" rule `full_present?/2` already had —
+    # an encoder can reject one label's dimensions (a wide crop past a WebP
+    # ceiling) while accepting a narrower thumb's, so a per-label record has
+    # to excuse THAT label specifically, not just `full`. Both `full.*`
+    # formats are present here so `full_present?/2` is satisfied on its own,
+    # leaving the sweep's branch as the only thing that can make this pass.
+    test "an alternate recorded as impossible for a non-full label does not keep re-enqueuing" do
+      previous = Application.get_env(:kiln_cms, :image_variants, [])
+
+      Application.put_env(
+        :kiln_cms,
+        :image_variants,
+        Keyword.put(previous, :formats, [:webp, :avif])
+      )
+
+      on_exit(fn -> Application.put_env(:kiln_cms, :image_variants, previous) end)
+
+      item =
+        media(%{
+          variants: %{
+            "thumb" => variant("/t.jpg", "image/jpeg"),
+            "thumb.webp" => variant("/t.webp", "image/webp"),
+            "full.webp" => variant("/f.webp", "image/webp"),
+            "full.avif" => variant("/f.avif", "image/avif")
+          },
+          variant_failures: %{"thumb.avif" => "encoder refused this source"}
         })
 
       assert Regeneration.current?(item)
@@ -143,7 +176,7 @@ defmodule KilnCMS.Media.RegenerationTest do
             "thumb.webp" => variant("/t.webp", "image/webp"),
             "thumb.avif" => variant("/t.avif", "image/avif")
           },
-          variant_failures: %{"webp" => "encoder refused this source"}
+          variant_failures: %{"full.webp" => "encoder refused this source"}
         })
 
       # WebP is excused by the record; AVIF is neither present nor impossible.
@@ -154,7 +187,7 @@ defmodule KilnCMS.Media.RegenerationTest do
     # SOURCE-format full — the original is the source-format full — so the item
     # gets `full.avif` and no `full.webp`. That made `full` a base label, and the
     # sweep then demanded the `full.webp` that will never exist: a permanent
-    # re-enqueue. `full` is excluded from the sweep now, because `full_present?/1`
+    # re-enqueue. `full` is excluded from the sweep now, because `full_present?/2`
     # owns it and the two rules disagreed.
     test "a source-format upload does not demand a full it will never be given" do
       previous = Application.get_env(:kiln_cms, :image_variants, [])
@@ -190,7 +223,7 @@ defmodule KilnCMS.Media.RegenerationTest do
           variants: %{},
           width: 150,
           height: 100,
-          variant_failures: %{"webp" => "encoder refused this source"}
+          variant_failures: %{"full.webp" => "encoder refused this source"}
         })
 
       assert Regeneration.current?(item)
@@ -281,7 +314,7 @@ defmodule KilnCMS.Media.RegenerationTest do
           "thumb" => variant("/t.jpg", "image/jpeg"),
           "thumb.webp" => variant("/t.webp", "image/webp")
         },
-        variant_failures: %{"webp" => "encoder refused this source"}
+        variant_failures: %{"full.webp" => "encoder refused this source"}
       })
 
       assert %{enqueued: 0, scanned: 1} = Regeneration.run(org_id())
