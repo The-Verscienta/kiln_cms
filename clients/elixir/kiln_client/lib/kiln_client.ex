@@ -163,11 +163,11 @@ defmodule KilnClient do
   returns a plain (unpaginated) list — the action caps its own result size —
   so `:total` is always `nil`.
 
-  Options: `:locale`, `:custom_filter` (facets compose with the search),
-  `:sort` (an explicit sort overrides relevance, which degrades to the
-  tiebreaker — the contract kiln_cms#310 pinned), `:limit` (`page[limit]`;
-  the action caps its own maximum), `:include`, `:fields`, `:published`,
-  `:req`.
+  Options: `:locale`, `:tag_ids` (match content carrying any of these tag
+  ids), `:custom_filter` (facets compose with the search), `:sort` (an
+  explicit sort overrides relevance, which degrades to the tiebreaker — the
+  contract kiln_cms#310 pinned), `:limit` (`page[limit]`; the action caps its
+  own maximum), `:include`, `:fields`, `:published`, `:req`.
   """
   @spec text_search(String.t(), String.t(), keyword()) ::
           {:ok, list_result()} | {:error, term()}
@@ -214,6 +214,7 @@ defmodule KilnClient do
     params =
       base_params
       |> put_param(:locale, opts[:locale])
+      |> array_param("tag_ids", opts[:tag_ids])
       |> filter_params("custom_filter", opts[:custom_filter])
       |> put_param(:sort, join_sort(opts[:sort]))
       |> put_param("page[limit]", opts[:limit])
@@ -374,6 +375,18 @@ defmodule KilnClient do
     do: Enum.flat_map(nested, fn {field, spec} -> filter_param("#{key}[#{field}]", spec) end)
 
   defp filter_param(key, value), do: [{key, to_string(value)}]
+
+  # A bare (non-`filter[...]`) array-typed read-action argument — e.g. the
+  # `tag_ids` facet argument `search_read`/`semantic_read` declare (kiln_cms's
+  # `Content` macro), which JSON:API only resolves as its own top-level
+  # `tag_ids[]=` param, the same way `custom_filter` resolves as `custom_
+  # filter[field]=` rather than nesting under a generic `filter[...]`
+  # namespace: AshJsonApi's `filter[...]` only reaches resource fields
+  # (attributes/relationships), never a custom action's own arguments.
+  defp array_param(params, _key, empty) when empty in [nil, []], do: params
+
+  defp array_param(params, key, values),
+    do: params ++ Enum.map(values, &{"#{key}[]", to_string(&1)})
 
   defp page_params(params, opts) do
     params
