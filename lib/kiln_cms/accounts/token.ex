@@ -97,6 +97,28 @@ defmodule KilnCMS.Accounts.Token do
 
   def peeked_jti(_token), do: nil
 
+  @doc false
+  # The `exp` claim as a DateTime, or `nil`. Used by the atomic release (#1173)
+  # so `PendingSignIn` peeks once rather than once here and again inside
+  # `StoreTokenChange`.
+  @spec peeked_expires_at(term()) :: DateTime.t() | nil
+  def peeked_expires_at(token) when is_binary(token) do
+    case AshAuthentication.Jwt.peek(token) do
+      {:ok, %{"exp" => exp}} when is_integer(exp) ->
+        case DateTime.from_unix(exp) do
+          {:ok, expires_at} -> expires_at
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  rescue
+    _ -> nil
+  end
+
+  def peeked_expires_at(_token), do: nil
+
   # Privacy retention (#224): expired auth tokens (sign-in/reset/magic/confirm
   # JWTs) carry a subject + jti and otherwise accumulate forever. A nightly
   # AshOban trigger runs `:expunge_expired`, so an expired token is purged within
@@ -213,23 +235,15 @@ defmodule KilnCMS.Accounts.Token do
     #
     # Held, not revoked, because the exchange may still complete: a hold is
     # reversible and `:revoke_jti`'s thousand-year `"revocation"` row is not.
+    #
+    # Both actions are atomic (#1173): `PendingSignIn` filters by jti and runs a
+    # single UPDATE, so a completed two-factor sign-in is two statements rather
+    # than four. The purpose predicates below stay in the UPDATE's WHERE — that
+    # is what makes the single-statement form safe against a revocation landing
+    # between a would-be read and write.
     update :hold_for_second_factor do
       description "Park a first-factor token for as long as its account owes a second factor."
       accept []
-
-      # The anonymous `change` below has no `atomic/3`, so this action can only
-      # run as read-then-update. That is why the guard beneath is a `filter` and
-      # not a comparison against `changeset.data`: the record the caller hands in
-      # is a snapshot, and between the read and the UPDATE a password change can
-      # fire `log_out_everywhere`, which moves this very row to `"revocation"`. A
-      # check on the snapshot would pass, the UPDATE would key on the primary key
-      # alone and quietly discard the revocation, and `claim/1` would hand the
-      # token back one step later. An **unrevoke**, from a check-then-act.
-      #
-      # `Ash.Changeset.filter/2` puts the predicate in the UPDATE's own WHERE, so
-      # the database decides. Nothing matching means a `StaleRecord` error, which
-      # is what the caller reads as "there was nothing here to hold".
-      require_atomic? false
 
       # Either purpose, so a re-mint re-takes the hold rather than silently
       # leaving the first one to lapse under a blob whose window has restarted.
@@ -238,61 +252,28 @@ defmodule KilnCMS.Accounts.Token do
 
       change set_attribute(:purpose, @second_factor_hold_purpose)
 
-      # Computed here rather than accepted, for `:spend_jti`'s reason one action
-      # up: `expires_at` is what `GetTokenPreparation` filters reads on and what
-      # `:expunge_expired` deletes by, so a caller choosing it could write a hold
-      # that is invisible to the release — leaving the token permanently parked —
-      # or one that outlives the JWT it is holding.
-      #
-      # `set_attribute/2` does take a fn/0, but not an inline one: Spark has to
-      # escape the DSL value at compile time and an anonymous function is not
-      # escapable. Hence the long form, same as `:spend_jti`'s.
-      change fn changeset, _context ->
-        Ash.Changeset.force_change_attribute(
-          changeset,
-          :expires_at,
-          DateTime.add(DateTime.utc_now(), @second_factor_hold_ttl, :second)
-        )
-      end
+      # Database clock, not the app's: `from_now` evaluates in SQL, so a skewed
+      # BEAM clock cannot write a hold that `GetTokenPreparation`'s `expires_at >
+      # now()` (also SQL) would already consider lapsed.
+      change atomic_update(:expires_at, expr(from_now(^@second_factor_hold_ttl, :second)))
     end
 
     update :release_second_factor_hold do
       description "Return a held first-factor token to use, now that the second factor has landed."
       accept []
-      argument :token, :string, allow_nil?: false, sensitive?: true
+      # The JWT's own `exp`, peeked once by the caller. Replaces
+      # `StoreTokenChange`, which also rewrote `jti`/`subject` to values already
+      # identical to the row and left the primary key in the UPDATE's SET —
+      # and had no `atomic/3`, which forced the read-then-update shape (#1173).
+      argument :expires_at, :utc_datetime, allow_nil?: false
 
-      # The direction that grants use, so it carries the same WHERE-clause guard
-      # as the hold and for the sharper version of the same reason: without it,
-      # a revocation landing between the caller's read and this UPDATE is
-      # overwritten and a revoked credential goes back to `"user"` with its full
-      # natural expiry. A release, not an unconditional restore — and the
-      # database is what enforces that, not the call site.
+      # The direction that grants use: without this in the UPDATE's WHERE, a
+      # revocation landing between calls would be overwritten and a revoked
+      # credential would go back to `"user"` with its full natural expiry.
       change filter(expr(purpose == ^@second_factor_hold_purpose))
 
-      # `StoreTokenChange` writes `jti` from the token it is given, and `jti` is
-      # this table's primary key — so a token that names a *different* row would
-      # rename the one it was handed instead of releasing it. The caller finds
-      # the row by this token's own jti, and this makes that a property of the
-      # action rather than of the one call site that currently holds it true.
-      # (A `filter` cannot do this one: it compares an argument to the record,
-      # not a column to a value.)
-      validate fn changeset, _context ->
-        if peeked_jti(Ash.Changeset.get_argument(changeset, :token)) == changeset.data.jti,
-          do: :ok,
-          else: {:error, field: :token, message: "does not name this held token"}
-      end
-
       change set_attribute(:purpose, @user_purpose)
-
-      # AshAuthentication's own change, so the released row carries exactly the
-      # `expires_at` and `subject` `:store_token` would have written for this
-      # JWT — the hold shortened the first of those and must not be the thing
-      # that decides it on the way back. It also rejects a token that is not one,
-      # which is what stops a release naming a row it cannot prove it holds.
-      change AshAuthentication.TokenResource.StoreTokenChange
-
-      # `StoreTokenChange` and the `validate` above have no `atomic/3`.
-      require_atomic? false
+      change set_attribute(:expires_at, arg(:expires_at))
     end
 
     destroy :expunge_expired do
