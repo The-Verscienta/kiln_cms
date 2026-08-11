@@ -177,16 +177,18 @@ defmodule KilnCMS.Media.VariantWorker do
     Enum.each(files, &rm(&1.path))
   end
 
-  # `%{"webp" => reason}` for the full-size alternates this source cannot be
-  # encoded to (#1000). The reason is not read by anything —
+  # `%{"full.webp" => reason}` for every `"<label>.<format>"` this source
+  # cannot be encoded to, across every builder (#1000, widened by #1036 from
+  # the full-size case alone). The reason is not read by anything —
   # `Regeneration.current?/1` only asks whether a key is present — but an
-  # operator looking at why an image has no WebP wants more than a boolean.
+  # operator looking at why an image has no `thumb.webp` wants more than a
+  # boolean.
   #
-  # One clause: `ImageProcessor.process/3` always reports `failed_full`, so a
+  # One clause: `ImageProcessor.process/3` always reports `failed`, so a
   # defensive fallback here would be unreachable code that dialyzer (rightly)
   # rejects.
-  defp failure_map(%{failed_full: failed}) when is_list(failed),
-    do: Map.new(failed, &{to_string(&1), "encoder refused this source"})
+  defp failure_map(%{failed: failed}) when is_list(failed),
+    do: Map.new(failed, &{&1, "encoder refused this source"})
 
   # sobelow_skip ["Traversal.FileModule"]
   defp rm(path), do: File.rm(path)

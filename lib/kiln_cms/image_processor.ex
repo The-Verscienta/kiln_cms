@@ -277,7 +277,7 @@ defmodule KilnCMS.ImageProcessor do
              width: pos_integer,
              height: pos_integer,
              variants: [variant],
-             failed_full: [atom()]
+             failed: [String.t()]
            }}
           | {:error, term}
   def process(path, ext, focal \\ %{x: 0.5, y: 0.5}) do
@@ -289,19 +289,25 @@ defmodule KilnCMS.ImageProcessor do
       width = Image.width(image)
       height = Image.height(image)
 
-      {full, failed} = build_full(image, ext)
+      {full, failed_full} = build_full(image, ext)
+      {responsive, failed_responsive} = build_variants(image, width, ext)
+      {crops, failed_crops} = build_crops(image, width, height, focal, ext)
 
-      variants =
-        build_variants(image, width, ext) ++
-          build_crops(image, width, height, focal, ext) ++
-          full
+      variants = responsive ++ crops ++ full
 
-      # `failed` is the full-size alternates this source CANNOT be encoded to —
-      # a panorama past libvips' WebP dimension ceiling, or a format whose
-      # encoder is missing from the build. Reported rather than only logged
-      # (#1000) so `Regeneration.current?/1` can tell "not written yet" from
-      # "will never be written", and stop re-enqueuing the second one for ever.
-      {:ok, %{width: width, height: height, variants: variants, failed_full: failed}}
+      # Every entry is a `"<label>.<format>"` key (#1036) — `build_full`'s own
+      # `alternates/2` and `encodings/3` (shared by `thumb/4` and
+      # `focal_crop/7`) both key their failures the same way a written variant
+      # is keyed, so `Regeneration.current?/1` can look either map up by the
+      # identical key. Per-{label, format} rather than a bare format list
+      # (#1000 tracked only `full`'s) because a format's encoder can plausibly
+      # reject one label's dimensions and accept another's — collapsing that
+      # to "format X failed" would excuse a label whose own write actually
+      # succeeds, or would fail to re-attempt one whose failure was really
+      # size-specific to a different label.
+      failed = failed_full ++ failed_responsive ++ failed_crops
+
+      {:ok, %{width: width, height: height, variants: variants, failed: failed}}
     else
       {:error, reason} -> {:error, reason}
     end
@@ -351,10 +357,14 @@ defmodule KilnCMS.ImageProcessor do
   defp apply_op(image, :flip_horizontal), do: Image.flip(image, :horizontal)
   defp apply_op(image, :flip_vertical), do: Image.flip(image, :vertical)
 
+  # Each builder returns `{variants, failed_keys}` (#1036) — `merge_built/1`
+  # concatenates both halves across every target the builder attempted, the
+  # same shape `build_full/2` already reported for the full-size case.
   defp build_variants(image, src_width, ext) do
     @targets
     |> Enum.filter(fn {_label, target} -> target < src_width end)
-    |> Enum.flat_map(fn {label, target} -> thumb(image, label, target, ext) end)
+    |> Enum.map(fn {label, target} -> thumb(image, label, target, ext) end)
+    |> merge_built()
   end
 
   # Focal-aware crops: a window with the target's aspect ratio, as large as the
@@ -363,8 +373,15 @@ defmodule KilnCMS.ImageProcessor do
   defp build_crops(image, w, h, focal, ext) do
     @cropped
     |> Enum.filter(fn {_label, {tw, th}} -> w >= tw and h >= th end)
-    |> Enum.flat_map(fn {label, {tw, th}} ->
+    |> Enum.map(fn {label, {tw, th}} ->
       focal_crop(image, w, h, focal, label, {tw, th}, ext)
+    end)
+    |> merge_built()
+  end
+
+  defp merge_built(results) do
+    Enum.reduce(results, {[], []}, fn {variants, failed}, {acc_variants, acc_failed} ->
+      {acc_variants ++ variants, acc_failed ++ failed}
     end)
   end
 
@@ -384,7 +401,12 @@ defmodule KilnCMS.ImageProcessor do
          {:ok, resized} <- strip(resized) do
       encodings(resized, label, ext)
     else
-      _ -> []
+      # The crop/resize pipeline itself failing is "this run failing", the same
+      # as `build_full/2`'s unreadable-source case — not "will never encode",
+      # which is `encodings/3`'s per-format concern. Reporting nothing here
+      # keeps the item repairable by a later run instead of freezing it on a
+      # transient failure.
+      _ -> {[], []}
     end
   end
 
@@ -426,9 +448,19 @@ defmodule KilnCMS.ImageProcessor do
     |> Enum.reject(&(&1 == source))
     |> Enum.map(fn format ->
       {extension, _type} = Map.fetch!(@format_info, format)
-      {format, write(image, "full.#{format}", format, extension)}
+      key = "full.#{format}"
+      {key, write(image, key, format, extension)}
     end)
-    |> Enum.split_with(fn {_format, written} -> written end)
+    |> split_written()
+  end
+
+  # Shared by `alternates/2` and `encodings/3`: pair each write's own key with
+  # its result, then split into the written variants and the keys that
+  # weren't (#1036) — a `nil` from `write/4` is a real per-format encode
+  # failure, not a hole to silently drop.
+  defp split_written(keyed) do
+    keyed
+    |> Enum.split_with(fn {_key, written} -> written end)
     |> then(fn {ok, failed} ->
       {Enum.map(ok, &elem(&1, 1)), Enum.map(failed, &elem(&1, 0))}
     end)
@@ -443,7 +475,9 @@ defmodule KilnCMS.ImageProcessor do
          {:ok, resized} <- strip(resized) do
       encodings(resized, label, ext)
     else
-      _ -> []
+      # Same reasoning as `focal_crop/7`'s else clause: a resize/strip failure
+      # is this run failing, not a permanent per-format verdict.
+      _ -> {[], []}
     end
   end
 
@@ -471,8 +505,8 @@ defmodule KilnCMS.ImageProcessor do
       if source == :gif, do: [], else: Enum.reject(variant_formats(), &(&1 == source))
 
     [{source, to_string(label), ext} | Enum.map(alternates, &alternate(&1, label))]
-    |> Enum.map(fn {format, key, extension} -> write(image, key, format, extension) end)
-    |> Enum.reject(&is_nil/1)
+    |> Enum.map(fn {format, key, extension} -> {key, write(image, key, format, extension)} end)
+    |> split_written()
   end
 
   defp alternate(format, label) do

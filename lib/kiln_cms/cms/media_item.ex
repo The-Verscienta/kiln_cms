@@ -365,14 +365,18 @@ defmodule KilnCMS.CMS.MediaItem do
     # %{"thumb" => %{"key" => ..., "url" => ..., "width" => ..., "height" => ...}}
     attribute :variants, :map, default: %{}, public?: true
 
-    # Full-size alternates this source cannot be encoded to — `%{"webp" =>
-    # "image too large"}` (#1000). Written by `KilnCMS.Media.VariantWorker` from
-    # what `ImageProcessor.process/3` reports, and read by
-    # `KilnCMS.Media.Regeneration.current?/1` so a missing-only run can tell
-    # "not written yet" (re-enqueue it) from "will never be written" (leave it
-    # alone). Without that distinction one of the two has to be wrong: either an
-    # item that lost its top rung is never repaired, or an un-encodable panorama
-    # is re-decoded on every run for ever.
+    # Variants this source cannot be encoded to, keyed identically to `variants`
+    # above — `%{"full.webp" => "image too large", "thumb.avif" => "..."}`
+    # (#1000, widened from the full-size case alone by #1036). Written by
+    # `KilnCMS.Media.VariantWorker` from what `ImageProcessor.process/3`
+    # reports, and read by `KilnCMS.Media.Regeneration.current?/1` so a
+    # missing-only run can tell "not written yet" (re-enqueue it) from "will
+    # never be written" (leave it alone). Without that distinction one of the
+    # two has to be wrong: either an item that lost a variant is never
+    # repaired, or an un-encodable panorama is re-decoded on every run for
+    # ever. Per-`{label, format}` rather than per-format alone, since an
+    # encoder can reject one label's dimensions (a full-size panorama past a
+    # WebP ceiling) while accepting a smaller label's.
     #
     # `public?: false` — it names an internal encoder limit, and `variants` is
     # public, so a headless consumer iterating one must not find the other's

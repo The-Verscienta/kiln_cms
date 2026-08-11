@@ -16,6 +16,18 @@ defmodule KilnCMS.ImageProcessorTest do
     assert {:ok, %{width: 1200, height: 800}} = ImageProcessor.process(path, ".png")
   end
 
+  # #1036: every builder (full-size, responsive, crop) now threads its own
+  # write failures back to `process/3`, keyed identically to `variants` —
+  # asserted here on the happy path (an empty list, not the OLD `failed_full`
+  # key) since forcing a genuine encoder failure needs an out-of-range
+  # quality, and `quality/1` clamps to a valid 1..100 (or the default) before
+  # it ever reaches `Image.write`, same as the "misconfigured quality" test
+  # above already establishes.
+  test "a fully successful run reports no failures, under the new key", %{path: path} do
+    assert {:ok, %{failed: [], variants: variants}} = ImageProcessor.process(path, ".png")
+    Enum.each(variants, &File.rm(&1.path))
+  end
+
   test "generates downscaled variants and never upscales", %{path: path} do
     {:ok, %{variants: variants}} = ImageProcessor.process(path, ".png")
 
