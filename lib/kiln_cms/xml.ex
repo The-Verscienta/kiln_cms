@@ -97,28 +97,26 @@ defmodule KilnCMS.Xml do
     size = byte_size(xml)
 
     case :binary.match(xml, "<", scope: {offset, size - offset}) do
-      :nomatch ->
-        {:ok, names}
+      :nomatch -> {:ok, names}
+      {lt, 1} -> continue_after_lt(xml, lt + 1, names, max, size)
+    end
+  end
 
-      {lt, 1} ->
-        rest_off = lt + 1
+  defp continue_after_lt(_xml, rest_off, names, _max, size) when rest_off >= size,
+    do: {:ok, names}
 
-        cond do
-          rest_off >= size ->
-            {:ok, names}
+  defp continue_after_lt(xml, rest_off, names, max, _size) do
+    case :binary.at(xml, rest_off) do
+      ?! -> scan_names(xml, skip_declaration(xml, rest_off + 1), names, max)
+      ?? -> scan_names(xml, skip_pi(xml, rest_off + 1), names, max)
+      _ -> after_tag(xml, rest_off, names, max)
+    end
+  end
 
-          :binary.at(xml, rest_off) == ?! ->
-            scan_names(xml, skip_declaration(xml, rest_off + 1), names, max)
-
-          :binary.at(xml, rest_off) == ?? ->
-            scan_names(xml, skip_pi(xml, rest_off + 1), names, max)
-
-          true ->
-            case read_tag(xml, rest_off, names, max) do
-              {:ok, names, next} -> scan_names(xml, next, names, max)
-              {:error, _} = err -> err
-            end
-        end
+  defp after_tag(xml, rest_off, names, max) do
+    case read_tag(xml, rest_off, names, max) do
+      {:ok, names, next} -> scan_names(xml, next, names, max)
+      {:error, _} = err -> err
     end
   end
 
@@ -127,33 +125,28 @@ defmodule KilnCMS.Xml do
     size = byte_size(xml)
 
     cond do
-      offset + 2 <= size and binary_part(xml, offset, 2) == "--" ->
-        case :binary.match(xml, "-->", scope: {offset + 2, size - offset - 2}) do
-          {at, 3} -> at + 3
-          :nomatch -> size
-        end
+      comment_start?(xml, offset, size) -> match_or_eof(xml, "-->", offset + 2, size)
+      cdata_start?(xml, offset, size) -> match_or_eof(xml, "]]>", offset + 7, size)
+      true -> match_or_eof(xml, ">", offset, size)
+    end
+  end
 
-      offset + 7 <= size and binary_part(xml, offset, 7) == "[CDATA[" ->
-        case :binary.match(xml, "]]>", scope: {offset + 7, size - offset - 7}) do
-          {at, 3} -> at + 3
-          :nomatch -> size
-        end
+  defp comment_start?(xml, offset, size),
+    do: offset + 2 <= size and binary_part(xml, offset, 2) == "--"
 
-      true ->
-        case :binary.match(xml, ">", scope: {offset, size - offset}) do
-          {at, 1} -> at + 1
-          :nomatch -> size
-        end
+  defp cdata_start?(xml, offset, size),
+    do: offset + 7 <= size and binary_part(xml, offset, 7) == "[CDATA["
+
+  defp match_or_eof(xml, needle, from, size) do
+    case :binary.match(xml, needle, scope: {from, size - from}) do
+      {at, len} -> at + len
+      :nomatch -> size
     end
   end
 
   defp skip_pi(xml, offset) do
     size = byte_size(xml)
-
-    case :binary.match(xml, "?>", scope: {offset, size - offset}) do
-      {at, 2} -> at + 2
-      :nomatch -> size
-    end
+    match_or_eof(xml, "?>", offset, size)
   end
 
   defp read_tag(xml, offset, names, max) do
@@ -166,9 +159,8 @@ defmodule KilnCMS.Xml do
         {:ok, names, next}
 
       {name, after_name} ->
-        with {:ok, names} <- put_name(names, name, max),
-             {:ok, names, after_attrs} <- read_attributes(xml, after_name, names, max) do
-          {:ok, names, after_attrs}
+        with {:ok, names} <- put_name(names, name, max) do
+          read_attributes(xml, after_name, names, max)
         end
     end
   end
@@ -182,26 +174,27 @@ defmodule KilnCMS.Xml do
         {:ok, names, offset}
 
       :binary.at(xml, offset) in [?>, ?/] ->
-        case :binary.match(xml, ">", scope: {offset, size - offset}) do
-          {at, 1} -> {:ok, names, at + 1}
-          :nomatch -> {:ok, names, size}
-        end
+        {:ok, names, match_or_eof(xml, ">", offset, size)}
 
       true ->
-        case read_name(xml, offset) do
-          {nil, next} when next == offset ->
-            # Not a name and not a tag end — skip one byte so a malformed tag
-            # cannot spin the scanner.
-            read_attributes(xml, offset + 1, names, max)
+        read_next_attribute(xml, offset, names, max)
+    end
+  end
 
-          {nil, next} ->
-            {:ok, names, next}
+  defp read_next_attribute(xml, offset, names, max) do
+    case read_name(xml, offset) do
+      {nil, next} when next == offset ->
+        # Not a name and not a tag end — skip one byte so a malformed tag
+        # cannot spin the scanner.
+        read_attributes(xml, offset + 1, names, max)
 
-          {attr, after_attr} ->
-            with {:ok, names} <- put_name(names, attr, max) do
-              after_value = skip_attribute_value(xml, skip_ws(xml, after_attr))
-              read_attributes(xml, after_value, names, max)
-            end
+      {nil, next} ->
+        {:ok, names, next}
+
+      {attr, after_attr} ->
+        with {:ok, names} <- put_name(names, attr, max) do
+          after_value = skip_attribute_value(xml, skip_ws(xml, after_attr))
+          read_attributes(xml, after_value, names, max)
         end
     end
   end
@@ -210,26 +203,19 @@ defmodule KilnCMS.Xml do
     size = byte_size(xml)
 
     cond do
-      offset >= size ->
-        offset
+      offset >= size -> offset
+      :binary.at(xml, offset) != ?= -> offset
+      true -> skip_value_after_equals(xml, skip_ws(xml, offset + 1), size)
+    end
+  end
 
-      :binary.at(xml, offset) != ?= ->
-        offset
-
-      true ->
-        offset = skip_ws(xml, offset + 1)
-
-        if offset < size and :binary.at(xml, offset) in [?", ?'] do
-          quote = :binary.at(xml, offset)
-
-          case :binary.match(xml, <<quote>>, scope: {offset + 1, size - offset - 1}) do
-            {at, 1} -> at + 1
-            :nomatch -> size
-          end
-        else
-          # Unquoted value — advance to whitespace or tag end.
-          skip_unquoted(xml, offset)
-        end
+  defp skip_value_after_equals(xml, offset, size) do
+    if offset < size and :binary.at(xml, offset) in [?", ?'] do
+      quote = :binary.at(xml, offset)
+      match_or_eof(xml, <<quote>>, offset + 1, size)
+    else
+      # Unquoted value — advance to whitespace or tag end.
+      skip_unquoted(xml, offset)
     end
   end
 
