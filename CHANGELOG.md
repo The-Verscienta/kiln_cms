@@ -91,6 +91,30 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **Three nav-menu defects from a max-effort review of #899** (#921):
+
+  1. **Resolved menu URLs dropped the locale prefix.** `Menus.published_paths/4`
+     built every `:content` item's URL from the target's slug/path-alias but
+     never applied `I18n.localized_path/2` — unlike `ContentController`,
+     `SitemapController` and the headless search/ask endpoints, which all
+     prefix. A menu item pointing at a non-default-locale document resolved to
+     the bare (default-locale-routed) path, which `Plugs.SetLocale` then
+     served as the *default* locale's document at that slug — the wrong
+     document, or a 404 when no default-locale twin shared the slug.
+  2. **The editor's `safe_href` JS mirror didn't reject a backslash**, unlike
+     the server's `safe_relative_path?/1` — re-opening the drift the same
+     policy's moduledoc says cost a year to close. `/\evil.example.com` reads
+     as same-origin to the editor (browsers treat `\` as `/`) but is refused
+     server-side, so the author watched the link vanish on the next reload
+     with no explanation.
+  3. **Outdenting placed an item at the end of its new level, not right after
+     its former parent** — `next_position/2`'s "next" meant "after every
+     sibling in the level," not "after the parent specifically." A three-item
+     root `A, B, C` with `X` under `A` outdented to `A, B, C, X` instead of
+     `A, X, B, C`, the doc comment's own stated promise. Invisible with only
+     two root items, where the two answers coincide — which is exactly the
+     shape the existing test had.
+
 - **Publishing no longer discards prose a collab room was still holding**
   (#1061). The server checkpoint writes a room's converged text back through
   `:autosave`, which carries a draft-only row filter — so a publish landing

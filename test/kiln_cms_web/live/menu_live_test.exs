@@ -141,6 +141,32 @@ defmodule KilnCMSWeb.MenuLiveTest do
     assert Enum.find(items(m), &(&1.id == below.id)).parent_id == nil
   end
 
+  test "outdenting lands right after the former parent, not at the end of the level (#921)",
+       %{conn: conn} do
+    # Root A(0), B(1), C(2); X under A. Outdenting X must yield A, X, B, C —
+    # the doc comment's own promise ("become the next sibling of the current
+    # parent"). Two root items alone can't catch this: append-to-the-end and
+    # insert-after-parent coincide when there's nothing after the parent.
+    m = menu()
+    a = item(m, %{label: "A", link_type: :none, position: 0})
+    _b = item(m, %{label: "B", link_type: :none, position: 1})
+    _c = item(m, %{label: "C", link_type: :none, position: 2})
+    x = item(m, %{label: "X", link_type: :none, parent_id: a.id, position: 0})
+
+    {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/menus/#{m.id}")
+
+    render_click(lv, "outdent_item", %{"id" => x.id})
+
+    ordered =
+      m
+      |> items()
+      |> Enum.filter(&is_nil(&1.parent_id))
+      |> Enum.sort_by(& &1.position)
+      |> Enum.map(& &1.label)
+
+    assert ordered == ["A", "X", "B", "C"]
+  end
+
   test "the first item in a level can't be indented — there is nothing above it", %{conn: conn} do
     m = menu()
     only = item(m, %{label: "Only", link_type: :none, position: 0})
