@@ -29,6 +29,13 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **A delivery page's ETag now moves when `<head>` settings change** (#1079).
+  Feed autodiscovery (and branding / code injection / calendar alternates) are
+  derived per request from org settings, but the HTML ETag only hashed the
+  content row — so an admin who dropped a type from `/editor/feeds` still saw
+  revalidating clients 304 the old `<link rel="alternate">` into a feed that
+  now 404s. A per-org head-generation token is folded into the ETag and bumped
+  from the same Bust* changes that already clear layout-facing caches.
 - **Visual editing opens the locale variant you clicked** (#1104). Both
   Presentation and in-context consoles resolved a record by slug pinned to the
   default locale, so a click on `/fr/…` opened (and could write) the English
