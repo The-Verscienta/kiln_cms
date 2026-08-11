@@ -135,6 +135,15 @@ migration, a rewritten column, a dropped config key).
   recorded as impossible, the same "present OR recorded as impossible" rule
   it already applied to `full`.
 
+  Re-keying costs a one-time reprocess, not a migration: a `variant_failures`
+  row written by #1000 (bare `"webp"`) doesn't match the new `"full.webp"`
+  key, so an item with a pre-existing failure briefly reads as "not current"
+  again. `Media.VariantWorker` rewrites the map wholesale on every run, so
+  the very next regeneration pass — not a fresh failure — flips it to the
+  new shape and the item stops re-enqueuing. Running
+  `mix kiln.media.regenerate_variants` (the default `only_missing?: true`)
+  shortly after this deploys will decode and re-fail those items once.
+
 - **Archiving a published document now tells subscribers it left delivery**
   (#914). #879 made `:archive` tear down a published record's delivery
   version and artifacts (previously orphaned) — but unlike `:unpublish`,
