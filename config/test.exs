@@ -126,32 +126,27 @@ config :ash, policies: [show_policy_breakdowns?: true], disable_async?: true
 # call the record functions synchronously instead.
 config :kiln_cms, :analytics_enabled, false
 
-# Raise the rate-limit buckets the broad controller suites hammer, per IP. All
-# test requests come from 127.0.0.1, so a fast full-suite run can pack more than
-# the production `:api` limit (120/min) of `/api/*` calls into one window and
-# 429 unrelated tests (flaky on fast machines, and it started failing CI as the
-# `/api` test volume grew). `:preview`/`:form`/`:docs` stay at their real values,
-# which `KilnCMSWeb.Plugs.RateLimitTest` asserts on. Production is unaffected
-# (unset).
+# Rate-limit overrides for the suite.
 #
-# `:auth` used to be in that second group and is not any more (#715). The suite
-# had grown to sit right on its real 20/min: the sign-in page, `/api/auth/*` and
-# `/sign-in/verify` all key on 127.0.0.1, and *one* more request tipped several
-# unrelated tests into 429. Raised to a number with headroom rather than to
-# 1_000_000, because `RateLimitTest` still exhausts this bucket and derives the
-# count from here — a million iterations is not a test.
+# `:api` / `:delivery` / `:gql` / `:probe` stay raised: those doors still see
+# enough traffic from a *single* test's own address (or from `build_conn/0`
+# callers that have not moved onto ConnCase's unique default) that the real
+# production ceilings would 429 unrelated assertions.
+#
+# `:auth` and `:register` used to be raised too (#715, #724), because every
+# ConnCase request peered from `127.0.0.1` and shared one bucket. ConnCase's
+# setup now mints a per-test address (#936), so those two can exercise the
+# shipped ceilings. Files that deliberately share an address — proving a
+# per-account budget is not per-IP — opt back in with `loopback_conn/0`.
+#
+# `:unlock` stays raised: the lock suite still posts a dozen passphrases from
+# one address in a window (#496).
 config :kiln_cms, KilnCMSWeb.RateLimit,
   limits: %{
     api: {1_000_000, :timer.minutes(1)},
-    auth: {200, :timer.minutes(1)},
-    # Raised for the same reason `:auth` is: every request in the suite comes
-    # from 127.0.0.1, so the shipped 5/min would start refusing the sixth
-    # page-level registration added anywhere — landing as a failure in an
-    # unrelated file (#724).
-    register: {200, :timer.minutes(1)},
     delivery: {1_000_000, :timer.minutes(1)},
-    # Same reason again (#496): the lock suite posts a dozen passphrases from
-    # 127.0.0.1 in one window, and the shipped 10/min would 429 whichever test
+    # Same reason (#496): the lock suite posts a dozen passphrases from one
+    # address in one window, and the shipped 10/min would 429 whichever test
     # happened to run last. `RateLimit.default_limits/0` still pins the real
     # number, so the threat model stays asserted.
     unlock: {200, :timer.minutes(1)},
