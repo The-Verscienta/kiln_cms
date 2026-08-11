@@ -141,6 +141,70 @@ defmodule KilnCMSWeb.MenuLiveTest do
     assert Enum.find(items(m), &(&1.id == below.id)).parent_id == nil
   end
 
+  test "outdenting lands right after the former parent, not at the end of the level (#921)",
+       %{conn: conn} do
+    # Root A(0), B(1), C(2); X under A. Outdenting X must yield A, X, B, C —
+    # the doc comment's own promise ("become the next sibling of the current
+    # parent"). Two root items alone can't catch this: append-to-the-end and
+    # insert-after-parent coincide when there's nothing after the parent.
+    m = menu()
+    a = item(m, %{label: "A", link_type: :none, position: 0})
+    _b = item(m, %{label: "B", link_type: :none, position: 1})
+    _c = item(m, %{label: "C", link_type: :none, position: 2})
+    x = item(m, %{label: "X", link_type: :none, parent_id: a.id, position: 0})
+
+    {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/menus/#{m.id}")
+
+    render_click(lv, "outdent_item", %{"id" => x.id})
+
+    ordered =
+      m
+      |> items()
+      |> Enum.filter(&is_nil(&1.parent_id))
+      |> Enum.sort_by(& &1.position)
+      |> Enum.map(& &1.label)
+
+    assert ordered == ["A", "X", "B", "C"]
+  end
+
+  test "a failure partway through outdent still shows the real DB state, not the stale tree",
+       %{conn: conn} do
+    # #921 review: `outdent/2` writes one row at a time, not inside one
+    # transaction, so a LATER write failing must not leave the screen
+    # rendering the pre-outdent tree while the DB has already moved earlier
+    # rows — that reads as "the drop silently didn't stick" when part of it
+    # did. `broken` is seeded straight past `MenuItemDestination` (the shape a
+    # direct `UPDATE` or a restore leaves behind, per the `reattach_item`
+    # commentary above) specifically so renumbering it fails.
+    m = menu()
+    a = item(m, %{label: "A", link_type: :none, position: 0})
+
+    broken =
+      Ash.Seed.seed!(KilnCMS.CMS.MenuItem, %{
+        menu_id: m.id,
+        label: "Broken",
+        link_type: :url,
+        url: nil,
+        position: 1
+      })
+
+    x = item(m, %{label: "X", link_type: :none, parent_id: a.id, position: 0})
+
+    {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/menus/#{m.id}")
+
+    render_click(lv, "outdent_item", %{"id" => x.id})
+
+    # X's own write is ordered before `broken`'s in the renumbered level, so
+    # it committed even though the outdent as a whole reports an error.
+    assert Enum.find(items(m), &(&1.id == x.id)).parent_id == nil
+
+    # The LiveView's own assigns must agree with that DB state, not still
+    # show X nested under A from before the click.
+    socket_items = :sys.get_state(lv.pid).socket.assigns.items
+    assert Enum.find(socket_items, &(&1.id == x.id)).parent_id == nil
+    assert Enum.find(socket_items, &(&1.id == broken.id))
+  end
+
   test "the first item in a level can't be indented — there is nothing above it", %{conn: conn} do
     m = menu()
     only = item(m, %{label: "Only", link_type: :none, position: 0})

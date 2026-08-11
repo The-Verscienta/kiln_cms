@@ -37,6 +37,7 @@ defmodule KilnCMS.CMS.Menus do
   alias KilnCMS.CMS.Menu
   alias KilnCMS.CMS.MenuItem
   alias KilnCMS.CMS.Slugs
+  alias KilnCMS.I18n
 
   @typedoc """
   A resolved menu node: the item's own fields plus `url` (nil for a `:none`
@@ -239,17 +240,20 @@ defmodule KilnCMS.CMS.Menus do
   end
 
   # The canonical path of each published target: its `path_alias` (#485) when
-  # set, else `/<prefix>/<slug>` — exactly what delivery serves, so nav never
-  # links to a URL that would immediately 301.
+  # set, else `/<prefix>/<slug>`, with the target's own locale prefixed
+  # exactly as `ContentController.moved_permanently/2` and `SitemapController`
+  # prefix it (#921) — otherwise a menu resolving a non-default-locale target
+  # links to the bare (default-locale-routed) path, which `Plugs.SetLocale`
+  # then resolves as the DEFAULT locale rather than the target's own.
   defp published_paths(ct, ids, org_id, opts) do
     audiences = Keyword.get(opts, :audiences, [:public])
 
     Slugs.storage_resource(ct)
     |> Ash.Query.filter(id in ^ids and state == :published and audience in ^audiences)
-    |> Ash.Query.select([:id, :slug, :path_alias])
+    |> Ash.Query.select([:id, :slug, :path_alias, :locale])
     |> scope_dynamic(ct)
     |> Ash.read!(authorize?: false, tenant: org_id)
-    |> Map.new(&{&1.id, Slugs.public_path_for(ct, &1)})
+    |> Map.new(&{&1.id, I18n.localized_path(&1.locale, Slugs.public_path_for(ct, &1))})
   end
 
   # Dynamic types share the `Entry` table, so a bare id read could cross types.
