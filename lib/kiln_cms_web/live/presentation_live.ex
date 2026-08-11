@@ -43,6 +43,8 @@ defmodule KilnCMSWeb.PresentationLive do
          # and a `with` clause that fails hands on only what it matched.
          {true, _ct, _record} <-
            {may_write?(record, actor, socket.assigns.current_org), ct, record} do
+      same_origin? = Presentation.same_origin_preview?(socket.host_uri)
+
       {:ok,
        socket
        # Decided once, re-asserted at the write — see `save` below.
@@ -52,6 +54,10 @@ defmodule KilnCMSWeb.PresentationLive do
        |> assign(:actor, actor)
        |> assign(:preview_url, Presentation.preview_url(ct, record))
        |> assign(:frontend_origin, Presentation.frontend_origin())
+       # #1059: restrictive sandbox when the preview is same-origin as the
+       # console; cross-origin keeps cookies via allow-same-origin.
+       |> assign(:same_origin_preview?, same_origin?)
+       |> assign(:iframe_sandbox, Presentation.iframe_sandbox(same_origin?))
        |> assign(:editing, nil)
        |> assign(:scalar_changes, %{})
        |> assign(:save_state, :saved)
@@ -337,15 +343,27 @@ defmodule KilnCMSWeb.PresentationLive do
             </div>
           </div>
 
-          <iframe
-            :if={@preview_url}
-            id="presentation-frame"
-            phx-hook="PresentationFrame"
-            data-frontend-origin={@frontend_origin}
-            src={@preview_url}
-            title={gettext("Front-end preview")}
-            class="h-full w-full border-0"
-          ></iframe>
+          <div :if={@preview_url} class="flex h-full min-h-0 flex-col">
+            <p
+              :if={@same_origin_preview?}
+              class="shrink-0 border-b border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-950 dark:text-amber-100"
+              role="status"
+            >
+              {gettext(
+                "Preview URL matches this console's origin, so the frame is sandboxed without cookies. Signed-in or member-only pages render as anonymous here. Point PRESENTATION_PREVIEW_URL at a separate front-end origin to keep preview authentication."
+              )}
+            </p>
+            <iframe
+              id="presentation-frame"
+              phx-hook="PresentationFrame"
+              data-frontend-origin={@frontend_origin}
+              data-opaque-origin={to_string(@same_origin_preview?)}
+              sandbox={@iframe_sandbox}
+              src={@preview_url}
+              title={gettext("Front-end preview")}
+              class="min-h-0 w-full flex-1 border-0"
+            ></iframe>
+          </div>
         </div>
 
         <%!-- Right: the field edit pane. --%>

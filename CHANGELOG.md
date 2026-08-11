@@ -36,6 +36,15 @@ migration, a rewritten column, a dropped config key).
   `KilnCMS.Xml.check_name_budget/2` first — an offset-advancing binary scan that
   refuses past 512 distinct names with `{:too_many_names, …}` before SweetXml
   sees the bytes.
+- **Presentation preview iframe is sandboxed when it shares the console's
+  origin** (#1059). A bare iframe meant `PRESENTATION_PREVIEW_URL` pointed at
+  Kiln's own delivery host gave framed scripts (code injection, stored XSS)
+  full DOM access to the signed-in console. Same-origin previews now get
+  `sandbox="allow-scripts"` (opaque; no cookies in the frame); cross-origin
+  previews keep `allow-same-origin` so that site's cookies still work. The
+  click-to-edit bridge accepts opaque `postMessage` origins when the frame is
+  deliberately opaque, guarded by window identity. Docs state the cookie
+  tradeoff; the console banners the same-origin case.
 
 - **A dead app-icon URL no longer keeps `apple-touch-icon` pointed at a 404**
   (#1147). Save-time verification stored the measured edge once; nothing
@@ -106,6 +115,41 @@ migration, a rewritten column, a dropped config key).
   panel saying so rather than describing a subset as the whole.
 
 ### Fixed
+
+- **A missing responsive-label image encoder (no AVIF build, a `thumb.avif`
+  past a dimension ceiling) re-decoded the source on every regeneration run,
+  forever** (#1036). #1000 recorded which full-size alternates a source
+  cannot be encoded to, so `Regeneration.current?/1` could tell "not written
+  yet" from "will never be written" — but only for the full-size case.
+  `build_variants/3` (the responsive `thumb`/`medium`/`card` ladder) and
+  `build_crops/5` (the focal-point crop) reported nothing: a failed
+  `thumb.avif` write was swallowed into a bare `Logger.warning` and recorded
+  nowhere, so the `base_labels` sweep kept demanding it forever and
+  `run(only_missing?: true)` re-decoded the source on every pass — the exact
+  standing cost #1000 set out to remove, just one label over.
+
+  `ImageProcessor.process/3`'s per-write failure tracking (previously only
+  inside `build_full/2`'s `alternates/2`) is now threaded through
+  `encodings/3` — the function `thumb/4` and `focal_crop/7` both delegate
+  to — so every builder reports its own failed `"<label>.<format>"` keys the
+  same way it reports its written ones. `variant_failures` (written by
+  `Media.VariantWorker`) is keyed per-`{label, format}` rather than per-format
+  alone, decided in the issue's own favor: an encoder can reject one label's
+  dimensions (a full-size panorama past a WebP ceiling) while accepting a
+  smaller label's, and a bare per-format record would incorrectly excuse — or
+  fail to excuse — a label it was never actually tested against.
+  `Regeneration.current?/1`'s `base_labels` sweep now excuses a label+format
+  recorded as impossible, the same "present OR recorded as impossible" rule
+  it already applied to `full`.
+
+  Re-keying costs a one-time reprocess, not a migration: a `variant_failures`
+  row written by #1000 (bare `"webp"`) doesn't match the new `"full.webp"`
+  key, so an item with a pre-existing failure briefly reads as "not current"
+  again. `Media.VariantWorker` rewrites the map wholesale on every run, so
+  the very next regeneration pass — not a fresh failure — flips it to the
+  new shape and the item stops re-enqueuing. Running
+  `mix kiln.media.regenerate_variants` (the default `only_missing?: true`)
+  shortly after this deploys will decode and re-fail those items once.
 
 - **Archiving a published document now tells subscribers it left delivery**
   (#914). #879 made `:archive` tear down a published record's delivery
