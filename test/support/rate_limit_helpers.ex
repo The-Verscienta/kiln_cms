@@ -3,17 +3,19 @@ defmodule KilnCMS.RateLimitHelpers do
   Test-only helpers for the files that assert on `KilnCMSWeb.RateLimit`'s
   counters rather than merely on its refusals (#715, #724, #877).
 
-  ## Why a test may not measure the loopback bucket (#877)
+  ## Why a test may not measure the loopback bucket (#877 / #936)
 
   `Phoenix.ConnTest.build_conn/0` peers from `127.0.0.1`, so `auth:127.0.0.1`
-  is the bucket every plain `ConnTest` request in the suite charges. A test
-  that brackets an action with
+  is the bucket every plain `ConnTest` request that has not opted out charges.
+  ConnCase's `setup` now applies `client_conn/1` by default (#936), so a test
+  that uses the injected `conn` is already off that bucket. A test that builds
+  its own conn and then brackets an action with
 
       before = spent("auth", "127.0.0.1")
       # …do the thing…
       assert spent("auth", "127.0.0.1") == before + 1
 
-  is therefore reading a counter the whole run writes to, and it is flaky —
+  is still reading a counter the rest of the run can write to, and it is flaky —
   but *not* for the reason it looks like. The reachable mechanism is not
   another test file racing it: ExUnit runs every `async: true` module to
   completion before the first `async: false` one starts, and sync modules run

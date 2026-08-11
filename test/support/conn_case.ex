@@ -33,7 +33,13 @@ defmodule KilnCMSWeb.ConnCase do
 
   setup tags do
     KilnCMS.DataCase.setup_sandbox(tags)
-    {:ok, conn: Phoenix.ConnTest.build_conn()}
+    # Every ConnCase test gets its own peer + `remote_ip` by default (#936).
+    # Without this, `build_conn/0`'s loopback address makes every file charge
+    # the same rate-limit buckets, and any test that *reads* a counter is
+    # coupled to the rest of the suite. Opt back into the shared bucket with
+    # `loopback_conn/0`.
+    {conn, _ip} = KilnCMS.RateLimitHelpers.client_conn(Phoenix.ConnTest.build_conn())
+    {:ok, conn: conn}
   end
 
   @doc """
@@ -49,35 +55,25 @@ defmodule KilnCMSWeb.ConnCase do
   def org_conn(conn, org), do: %{conn | host: "#{org.slug}.#{KilnCMSWeb.Tenant.base_host()}"}
 
   @doc """
+  A bare `Phoenix.ConnTest.build_conn/0` peering from loopback — the shared
+  rate-limit bucket. Opt in only when a test *needs* every request to share one
+  address (e.g. proving a per-account budget is not per-IP).
+  """
+  @spec loopback_conn() :: Plug.Conn.t()
+  def loopback_conn, do: Phoenix.ConnTest.build_conn()
+
+  @doc """
   Give `conn` a client address no other request in the run will reuse, so a
   per-IP rate limiter cannot couple two unrelated tests.
 
-  Three octets of the unique integer, not one. Three test files each had their
-  own copy spelled `rem(System.unique_integer([:positive]), 250)`, which is 250
-  addresses — and 250 is small enough that a file making twenty requests has a
-  **54% chance** of drawing the same address twice (birthday). When it happens
-  the second request shares a bucket with the first and comes back `429`, which
-  surfaces as `expected response with status 200, got: 429` inside whatever the
-  test was actually asserting. That is not a hypothetical: it broke `main` on
-  2026-08-09 (`KilnCMSWeb.FormEmbedTest`, run 31287147181).
-
-  The files also hand-separated themselves by second octet (127.1/127.2/127.3)
-  to avoid colliding with *each other* — unnecessary once the space is wide
-  enough, and a thing every new file would have had to know to do.
-
-  `127.0.0.0/8` throughout: loopback is inert, and `RateLimit.client_key/1`
-  treats it as any other address.
+  Delegates to `KilnCMS.RateLimitHelpers.client_conn/1` (#936): one scheme for
+  every file, including the ones that used to draw from 250 loopback addresses
+  with `rem(unique_integer, 250)` and collide under load.
   """
   @spec unique_ip(Plug.Conn.t()) :: Plug.Conn.t()
   def unique_ip(conn) do
-    n = System.unique_integer([:positive])
-
-    # 254 × 250 × 250 ≈ 15.9M addresses, and `unique_integer` is monotonic per
-    # VM, so the low octets vary fastest and a run never wraps in practice.
-    %{
-      conn
-      | remote_ip: {127, rem(div(n, 62_500), 254) + 1, rem(div(n, 250), 250), rem(n, 250) + 1}
-    }
+    {conn, _ip} = KilnCMS.RateLimitHelpers.client_conn(conn)
+    conn
   end
 
   @doc """

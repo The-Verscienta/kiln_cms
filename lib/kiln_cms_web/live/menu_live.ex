@@ -227,13 +227,24 @@ defmodule KilnCMSWeb.MenuLive do
     with %{parent_id: parent_id} = item when not is_nil(parent_id) <-
            Enum.find(socket.assigns.items, &(&1.id == id)),
          %{} = parent <- Enum.find(socket.assigns.items, &(&1.id == parent_id)) do
-      case update_item(socket, item, %{
-             parent_id: parent.parent_id,
-             position: next_position(socket, parent.parent_id)
-           }) do
-        {:ok, _} -> {:noreply, load_items(socket)}
-        {:error, error} -> {:noreply, put_flash(socket, :error, error_message(error, nil))}
-      end
+      result = outdent(socket, item, parent)
+
+      # Reload regardless of outcome, same reason `reorder_items` always does
+      # (#921 review): `outdent/2` writes one row at a time, not in a single
+      # transaction, so a failure partway through — an unrelated sibling
+      # failing its own destination validation, the case a direct `UPDATE` or
+      # `Ash.Seed` can leave behind — still leaves the earlier writes
+      # committed. Rendering the pre-outdent tree over that would show a
+      # position clash as a successful drop that silently didn't stick.
+      socket = load_items(socket)
+
+      socket =
+        case result do
+          :ok -> socket
+          {:error, error} -> put_flash(socket, :error, error_message(error, nil))
+        end
+
+      {:noreply, socket}
     else
       _ -> {:noreply, socket}
     end
@@ -342,6 +353,44 @@ defmodule KilnCMSWeb.MenuLive do
     |> Enum.map(& &1.position)
     |> Enum.max(fn -> -1 end)
     |> Kernel.+(1)
+  end
+
+  # Renumbers the WHOLE destination level with `item` inserted directly after
+  # `parent` (#921) — the promise "become the next sibling of the current
+  # parent" makes, which `next_position/2`'s append-to-the-end broke: `parent`
+  # is itself a member of the level being joined, so appending puts the
+  # outdented item after every one of `parent`'s own siblings too, not just
+  # after `parent`. Same "renumber the whole level" choice `reorder_items`
+  # makes, for the same reason: positions stay dense, so the next drop or
+  # outdent has no ties to break.
+  defp outdent(socket, item, parent) do
+    order =
+      socket
+      |> siblings(parent.parent_id)
+      |> Enum.reject(&(&1.id == item.id))
+      |> Enum.sort_by(&{&1.position, &1.label})
+      |> insert_after(parent, item)
+
+    order
+    |> Enum.with_index()
+    |> Enum.reduce_while(:ok, fn {sibling, index}, :ok ->
+      attrs =
+        if sibling.id == item.id,
+          do: %{parent_id: parent.parent_id, position: index},
+          else: %{position: index}
+
+      case update_item(socket, sibling, attrs) do
+        {:ok, _} -> {:cont, :ok}
+        {:error, error} -> {:halt, {:error, error}}
+      end
+    end)
+  end
+
+  defp insert_after(list, %{id: after_id}, item) do
+    Enum.flat_map(list, fn
+      %{id: ^after_id} = matched -> [matched, item]
+      other -> [other]
+    end)
   end
 
   defp sibling_above(socket, item) do

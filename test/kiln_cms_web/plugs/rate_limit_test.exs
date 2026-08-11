@@ -13,11 +13,10 @@ defmodule KilnCMSWeb.Plugs.RateLimitTest do
   end
 
   test "returns 429 when the auth bucket is exceeded", %{conn: conn} do
-    # Deliberately NOT under 127.0.0.x: `rem(n, 200) + 1` can be 1, and
-    # `auth:127.0.0.1` is the bucket every `ConnTest` request in the suite keys
-    # on. Exhausting it here would 429 unrelated tests for the rest of the
-    # window — and, worse, would let this test pass on iteration 1 having
-    # asserted nothing.
+    # Deliberately NOT under ConnCase's default `10.128.0.0/9` range
+    # (`RateLimitHelpers.client_address/0`): this file drives `10.1` / `10.3` /
+    # `10.7` / `10.9` to exhaustion, and sharing an address with a ConnCase
+    # setup conn would 429 an unrelated page test's disconnected render.
     suffix = rem(System.unique_integer([:positive]), 200) + 1
 
     conn
