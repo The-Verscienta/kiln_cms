@@ -383,7 +383,9 @@ defmodule KilnClient do
   # namespace: AshJsonApi's `filter[...]` only reaches resource fields
   # (attributes/relationships), never a custom action's own arguments.
   defp array_param(params, _key, empty) when empty in [nil, []], do: params
-  defp array_param(params, key, values), do: params ++ Enum.map(values, &{"#{key}[]", to_string(&1)})
+
+  defp array_param(params, key, values),
+    do: params ++ Enum.map(values, &{"#{key}[]", to_string(&1)})
 
   defp page_params(params, opts) do
     params
