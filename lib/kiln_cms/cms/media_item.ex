@@ -306,9 +306,22 @@ defmodule KilnCMS.CMS.MediaItem do
 
   # A media write can invalidate any page that embeds this item's enriched media
   # (the delivery cache stores resolved srcset/alt/dimensions), so bust the
-  # published-content cache on every create/update/destroy.
+  # published-content cache when a rendered-media attribute changes — alt text,
+  # dimensions, variants, storage location, focal point, decorative flag,
+  # content type or audience — or when the item appears/disappears (create/
+  # destroy/purge). Attribute-only writes like `download_count` must not keep
+  # the cache cold on every download (#1137).
   changes do
-    change KilnCMS.CMS.Changes.BustMediaCache, on: [:create, :update, :destroy]
+    change KilnCMS.CMS.Changes.BustMediaCache, on: [:create, :destroy, :purge]
+
+    change KilnCMS.CMS.Changes.BustMediaCache,
+      on: [:update],
+      where:
+        changing(:alt) or changing(:width) or changing(:height) or
+          changing(:variants) or changing(:variant_failures) or changing(:storage_key) or
+          changing(:url) or changing(:focal_x) or changing(:focal_y) or
+          changing(:audience) or changing(:decorative) or changing(:content_type)
+
     # Not atomic: relocates the blob between public/private storage — see the
     # module (#481).
     change KilnCMS.CMS.Changes.MigrateMediaStorage, on: [:update]
