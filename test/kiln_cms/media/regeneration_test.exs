@@ -114,7 +114,7 @@ defmodule KilnCMS.Media.RegenerationTest do
             "thumb" => variant("/t.jpg", "image/jpeg"),
             "thumb.webp" => variant("/t.webp", "image/webp")
           },
-          variant_failures: %{"webp" => "encoder refused this source"}
+          variant_failures: %{"full.webp" => "encoder refused this source"}
         })
 
       assert Regeneration.current?(item)
@@ -143,7 +143,7 @@ defmodule KilnCMS.Media.RegenerationTest do
             "thumb.webp" => variant("/t.webp", "image/webp"),
             "thumb.avif" => variant("/t.avif", "image/avif")
           },
-          variant_failures: %{"webp" => "encoder refused this source"}
+          variant_failures: %{"full.webp" => "encoder refused this source"}
         })
 
       # WebP is excused by the record; AVIF is neither present nor impossible.
@@ -190,7 +190,7 @@ defmodule KilnCMS.Media.RegenerationTest do
           variants: %{},
           width: 150,
           height: 100,
-          variant_failures: %{"webp" => "encoder refused this source"}
+          variant_failures: %{"full.webp" => "encoder refused this source"}
         })
 
       assert Regeneration.current?(item)
@@ -281,7 +281,7 @@ defmodule KilnCMS.Media.RegenerationTest do
           "thumb" => variant("/t.jpg", "image/jpeg"),
           "thumb.webp" => variant("/t.webp", "image/webp")
         },
-        variant_failures: %{"webp" => "encoder refused this source"}
+        variant_failures: %{"full.webp" => "encoder refused this source"}
       })
 
       assert %{enqueued: 0, scanned: 1} = Regeneration.run(org_id())
