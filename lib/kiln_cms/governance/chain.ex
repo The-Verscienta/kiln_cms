@@ -241,6 +241,53 @@ defmodule KilnCMS.Governance.Chain do
   def every_write?, do: Application.get_env(:kiln_cms, :audit_anchor_every_write, false)
 
   @doc """
+  Whether history anchoring is in active use without a provenance signing key
+  (#1056).
+
+  Splice detection then reports `:unverifiable` rather than tampering — the
+  documented unsigned behaviour — and an operator who turned on
+  `audit_anchor_every_write` for a hard trail hears nothing at boot today.
+  Gated so a default install that never anchors is not nagged: either
+  every-write anchoring is on, or at least one `history_anchors` row already
+  exists.
+  """
+  @spec unsigned_while_in_use?() :: boolean()
+  def unsigned_while_in_use? do
+    unsigned_while_in_use?(
+      enabled?(),
+      provenance_signing_key?(),
+      every_write?(),
+      any_history_anchors?()
+    )
+  end
+
+  @doc """
+  Pure half of `unsigned_while_in_use?/0` — see `KilnCMSWeb.Tenant.gap?/1`.
+  """
+  @spec unsigned_while_in_use?(boolean(), boolean(), boolean(), boolean()) :: boolean()
+  def unsigned_while_in_use?(enabled?, has_signing_key?, every_write?, any_anchors?) do
+    enabled? and not has_signing_key? and (every_write? or any_anchors?)
+  end
+
+  defp provenance_signing_key? do
+    match?({:ok, _pem}, KilnCMS.Keys.fetch(:provenance))
+  end
+
+  # Cross-tenant presence only — a boot advisory must not depend on which org
+  # the default tenant would pick. Failure (DB not up yet) is not evidence of
+  # a misconfiguration, same shape as `Tenant.org_count/0`.
+  defp any_history_anchors? do
+    import Ecto.Query
+
+    case Repo.one(from(a in "history_anchors", select: 1, limit: 1)) do
+      1 -> true
+      _ -> false
+    end
+  rescue
+    _error -> false
+  end
+
+  @doc """
   Fold the document's versions (ascending) into the chain — all of them, or
   only the first `count` (the prefix an earlier anchor covered). Returns
   `%{chain_hash, attribution_hash, version_count, last_version_id, last_version_at}`.

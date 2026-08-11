@@ -479,9 +479,10 @@ defmodule KilnCMS.Portability.Import do
 
   defp normalize_term(_other), do: nil
 
-  # Mirrors `KilnCMS.CMS.Taxonomy`'s validation. Deliberately duplicated rather
-  # than reached for across the boundary: this decides whether to *rewrite* an
-  # imported value, which is an import policy, not the resource's rule.
+  # Mirrors `KilnCMS.CMS.Taxonomy`'s and `KilnCMS.CMS.Content`'s validation
+  # (#1044 / #1062). Deliberately duplicated rather than reached for across the
+  # boundary: this decides whether to *rewrite* an imported value, which is an
+  # import policy, not the resource's rule.
   defp usable_slug(slug) when is_binary(slug) do
     if Regex.match?(~r/\A[a-z0-9]+(-[a-z0-9]+)*\z/, slug), do: slug
   end
@@ -740,14 +741,35 @@ defmodule KilnCMS.Portability.Import do
 
   # What this record would become, decided from reads alone. Computed up front
   # so the media phase knows which records are actually going to be written.
+  #
+  # An explicit slug is re-slugified when it is not a shape Kiln accepts (#1062),
+  # matching the taxonomy importer's #1044 policy: rewrite rather than drop, and
+  # derive any fallback from the title so `disposition/2` and the eventual
+  # create see the same value on both passes.
   defp disposition(record, opts) do
     locale = locale_for(record, opts)
-    slug = record[:slug] || slugify(record.title)
+    slug = content_slug(record)
 
     cond do
       match = existing(record.kind, slug, locale, opts) -> {:conflict, slug, match.id}
       trashed?(record.kind, slug, locale, opts) -> {:trashed, slug}
       true -> {:create, slug}
+    end
+  end
+
+  defp content_slug(record) do
+    case usable_slug(record[:slug]) || usable_slug(slugify(record.title)) ||
+           generated_content_slug(record.title) do
+      resolved when is_binary(resolved) -> resolved
+      _ -> slugify(record.title)
+    end
+  end
+
+  # Last resort for a title with no ASCII letters or digits — same rationale as
+  # `generated_slug/1` for taxonomy terms. Stable across passes of the importer.
+  defp generated_content_slug(title) do
+    if presence(title) do
+      "content-" <> (title |> :erlang.phash2() |> Integer.to_string(36) |> String.downcase())
     end
   end
 

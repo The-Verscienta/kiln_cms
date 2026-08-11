@@ -390,6 +390,7 @@ defmodule KilnCMS.CMS do
       define :list_site_branding, action: :read
       define :save_site_branding, action: :save
       define :reset_site_branding, action: :destroy
+      define :reverify_site_branding_app_icon, action: :reverify_app_icon
     end
 
     # Per-site custom head/footer HTML for the DELIVERY site (#490). Stored XSS

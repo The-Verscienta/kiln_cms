@@ -25,11 +25,41 @@ defmodule KilnCMS.CMS.SiteBranding do
   use Ash.Resource,
     domain: KilnCMS.CMS,
     data_layer: AshPostgres.DataLayer,
-    authorizers: [Ash.Policy.Authorizer]
+    authorizers: [Ash.Policy.Authorizer],
+    extensions: [AshOban]
+
+  # Consecutive nightly verify failures before `app_icon_size` is cleared
+  # (#1147). Two, not one: a single CDN blip must not yank a working icon.
+  @app_icon_failure_threshold 2
+
+  @doc "How many consecutive re-verify failures clear `app_icon_size` (#1147)."
+  @spec app_icon_failure_threshold() :: pos_integer()
+  def app_icon_failure_threshold, do: @app_icon_failure_threshold
 
   postgres do
     table "site_branding"
     repo KilnCMS.Repo
+  end
+
+  oban do
+    use_tenant_from_record? true
+
+    triggers do
+      # Daily — branding is a settings field, not content. After the other
+      # nightly retention sweeps so this never contends with them.
+      trigger :reverify_app_icon do
+        action :reverify_app_icon
+        read_action :with_app_icon
+        worker_read_action :with_app_icon
+        queue :default
+        scheduler_cron "50 4 * * *"
+        list_tenants KilnCMS.Accounts.ListOrgIds
+        where expr(not is_nil(app_icon_url) and app_icon_url != "")
+
+        worker_module_name KilnCMS.CMS.SiteBranding.Workers.ReverifyAppIcon
+        scheduler_module_name KilnCMS.CMS.SiteBranding.Schedulers.ReverifyAppIcon
+      end
+    end
   end
 
   actions do
@@ -79,6 +109,7 @@ defmodule KilnCMS.CMS.SiteBranding do
         # entries only say the columns are upsertable at all.
         :app_icon_url,
         :app_icon_size,
+        :app_icon_verify_failures,
         :brand_color,
         :show_attribution
       ]
@@ -91,6 +122,22 @@ defmodule KilnCMS.CMS.SiteBranding do
       argument :app_icon_size, :integer
 
       change KilnCMS.CMS.Changes.PairAppIcon
+    end
+
+    # Rows with a configured icon URL — feed for the nightly re-verify (#1147).
+    read :with_app_icon do
+      description "Site branding rows that have an app icon URL to re-check."
+      pagination keyset?: true, required?: false
+      filter expr(not is_nil(app_icon_url) and app_icon_url != "")
+    end
+
+    # Re-fetch `app_icon_url`, refresh or clear `app_icon_size`. Invoked by the
+    # AshOban `:reverify_app_icon` trigger — not by the settings form.
+    update :reverify_app_icon do
+      description "Re-verify the stored app icon URL and refresh its measured size."
+      require_atomic? false
+      accept []
+      change KilnCMS.CMS.Changes.ReverifyAppIcon
     end
   end
 
@@ -108,6 +155,11 @@ defmodule KilnCMS.CMS.SiteBranding do
     # already returns `:admin` for a platform admin on every org.
     policy action_type([:create, :update, :destroy]) do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
+    end
+
+    # The nightly re-verify reads + updates as a trusted system job (no actor).
+    bypass AshOban.Checks.AshObanInteraction do
+      authorize_if always()
     end
   end
 
@@ -172,6 +224,16 @@ defmodule KilnCMS.CMS.SiteBranding do
     # than declaring a size it cannot vouch for. A wrong `sizes` does not
     # degrade the install prompt — it removes it, silently.
     attribute :app_icon_size, :integer, public?: true, writable?: false
+
+    # Consecutive failures of the nightly `AppIcon.verify/1` re-check (#1147).
+    # Reset to 0 on a successful verify (save or sweep). At
+    # `app_icon_failure_threshold/0` the size is cleared; the URL is not.
+    attribute :app_icon_verify_failures, :integer do
+      allow_nil? false
+      default 0
+      public? false
+      writable? false
+    end
 
     # Normalized lowercase `#rrggbb`. Every emitted CSS token is re-derived from
     # the parsed channels by `KilnCMS.Branding.Color`, so no user-supplied byte
