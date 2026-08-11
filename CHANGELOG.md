@@ -29,6 +29,16 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **Presentation preview iframe is sandboxed when it shares the console's
+  origin** (#1059). A bare iframe meant `PRESENTATION_PREVIEW_URL` pointed at
+  Kiln's own delivery host gave framed scripts (code injection, stored XSS)
+  full DOM access to the signed-in console. Same-origin previews now get
+  `sandbox="allow-scripts"` (opaque; no cookies in the frame); cross-origin
+  previews keep `allow-same-origin` so that site's cookies still work. The
+  click-to-edit bridge accepts opaque `postMessage` origins when the frame is
+  deliberately opaque, guarded by window identity. Docs state the cookie
+  tradeoff; the console banners the same-origin case.
+
 - **A dead app-icon URL no longer keeps `apple-touch-icon` pointed at a 404**
   (#1147). Save-time verification stored the measured edge once; nothing
   re-checked it, so a CDN that later 404'd still looked installable to every

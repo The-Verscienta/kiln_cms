@@ -198,6 +198,32 @@ editing) → **Save** writes through Ash (`:update`, policies + PaperTrail nativ
 → the console broadcasts on the preview topic, so `bridge.js` (over `/ws/bridge`)
 re-fetches and the frame updates. No deep-link tab needed.
 
+### Preview iframe sandbox (#1059)
+
+The preview `<iframe>` always carries a `sandbox` attribute. Whether it also
+gets `allow-same-origin` depends on whether `PRESENTATION_PREVIEW_URL` resolves
+to the **same origin as the console**:
+
+| Preview origin | `sandbox` | Cookies in the frame | Can reach console DOM |
+|---|---|---|---|
+| Same as `/editor/...` | `allow-scripts` | No (opaque origin) | No |
+| Separate front-end host | `allow-scripts allow-same-origin` | Yes, for that host | No (SOP) |
+
+Same-origin is the configuration `docs/deploy-write-visual-editing.md` walks
+through when Kiln's own delivery *is* the front end. Without the restrictive
+sandbox, delivery scripts (including code injection or stored XSS) would share
+the console's origin and reach its DOM in the signed-in editor's browser.
+
+**Cookie consequence:** a same-origin preview cannot show gated or member-only
+content as the signed-in user — the frame is anonymous. Point
+`PRESENTATION_PREVIEW_URL` at a separate front-end origin if authenticated
+preview matters. The console shows a banner when it detects the same-origin case.
+
+The click-to-edit bridge still works: opaque frames post with origin `"null"`,
+and the `PresentationFrame` hook accepts that when it deliberately sandboxed
+without `allow-same-origin`, using `event.source === contentWindow` as the
+real guard.
+
 The console edits the inline block fields (heading / quote / rich-text, same as
 #354) **and** the document **title** (click the rendered title). Rich-text is
 fully clickable — every word carries its block's address (see below). Other
