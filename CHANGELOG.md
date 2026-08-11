@@ -29,6 +29,14 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **A delivery page's ETag now moves when `<head>` settings change** (#1079).
+  Feed autodiscovery (and branding / code injection / calendar alternates) are
+  derived per request from org settings, but the HTML ETag only hashed the
+  content row — so an admin who dropped a type from `/editor/feeds` still saw
+  revalidating clients 304 the old `<link rel="alternate">` into a feed that
+  now 404s. A per-org head-generation token is folded into the ETag and bumped
+  from the same Bust* changes that already clear layout-facing caches.
+
 - **A dead app-icon URL no longer keeps `apple-touch-icon` pointed at a 404**
   (#1147). Save-time verification stored the measured edge once; nothing
   re-checked it, so a CDN that later 404'd still looked installable to every
