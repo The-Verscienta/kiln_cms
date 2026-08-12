@@ -216,7 +216,7 @@ defmodule KilnCMSWeb.SystemLive do
 
           <p class="mt-2 text-xs text-base-content/60">
             {gettext(
-              "Every request re-reads the database until the cache warms again, so on a busy site this is a deliberate load spike. This clears the cache for every organization on this deployment, not just the one you are viewing. The cache lives in this node's memory: on a multi-node deployment it clears the node serving you and leaves the others."
+              "Every request re-reads the database until the cache warms again, so on a busy site this is a deliberate load spike. This clears the cache for every organization on this deployment, not just the one you are viewing. On a multi-node deployment it reaches every node; the count shown is from the node that served you."
             )}
           </p>
 
@@ -226,7 +226,7 @@ defmodule KilnCMSWeb.SystemLive do
               phx-click="flush-cache"
               data-confirm={
                 gettext(
-                  "Flush the delivery cache for every organization on this node? Reads will hit the database until it warms again."
+                  "Flush the delivery cache for every organization on every node? Reads will hit the database until it warms again."
                 )
               }
               class="btn btn-sm btn-default"

@@ -3701,8 +3701,8 @@ msgstr "Se registra cada intento de entrega; los fallos se reintentan con espera
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
-msgid "Every request re-reads the database until the cache warms again, so on a busy site this is a deliberate load spike. This clears the cache for every organization on this deployment, not just the one you are viewing. The cache lives in this node's memory: on a multi-node deployment it clears the node serving you and leaves the others."
-msgstr "Cada petición vuelve a leer la base de datos hasta que la caché se calienta de nuevo, así que en un sitio con mucho tráfico esto es un pico de carga deliberado. Esto vacía la caché de todas las organizaciones de este despliegue, no solo la que estás viendo. La caché vive en la memoria de este nodo: en un despliegue de varios nodos vacía el nodo que te atiende y deja los demás."
+msgid "Every request re-reads the database until the cache warms again, so on a busy site this is a deliberate load spike. This clears the cache for every organization on this deployment, not just the one you are viewing. On a multi-node deployment it reaches every node; the count shown is from the node that served you."
+msgstr "Cada petición vuelve a leer la base de datos hasta que la caché se calienta de nuevo, así que en un sitio con mucho tráfico esto es un pico de carga deliberado. Esto vacía la caché de todas las organizaciones de este despliegue, no solo la que estás viendo. En un despliegue de varios nodos, alcanza todos los nodos; el recuento mostrado es el del nodo que te atendió."
 
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
@@ -3966,8 +3966,8 @@ msgstr "Vaciar la caché de entrega"
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
-msgid "Flush the delivery cache for every organization on this node? Reads will hit the database until it warms again."
-msgstr "¿Vaciar la caché de entrega de todas las organizaciones en este nodo? Las lecturas irán a la base de datos hasta que se caliente de nuevo."
+msgid "Flush the delivery cache for every organization on every node? Reads will hit the database until it warms again."
+msgstr "¿Vaciar la caché de entrega de todas las organizaciones en todos los nodos? Las lecturas irán a la base de datos hasta que se caliente de nuevo."
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -9491,11 +9491,6 @@ msgstr "Usar tema claro"
 msgid "Use system theme"
 msgstr "Usar tema del sistema"
 
-#: lib/kiln_cms_web/live/form_builder_live.ex
-#, elixir-autogen, elixir-format
-msgid "Use the deployment default"
-msgstr "Usar el valor predeterminado del despliegue"
-
 #: lib/kiln_cms_web/live/compliance_live.ex
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -9506,6 +9501,11 @@ msgstr "Usar los valores del operador"
 #, elixir-autogen, elixir-format
 msgid "Use this in content. Pasting it into the address bar downloads the file instead of displaying it."
 msgstr "Use esto en el contenido. Pegarlo en la barra de direcciones descarga el archivo en lugar de mostrarlo."
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Use this site's default"
+msgstr "Usar el valor predeterminado de este sitio"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format

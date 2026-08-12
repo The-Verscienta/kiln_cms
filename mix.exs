@@ -92,7 +92,7 @@ defmodule KilnCMS.MixProject do
         name = Atom.to_string(module)
 
         String.starts_with?(name, "Elixir.") and
-          not String.starts_with?(name, "Elixir.Acupuncture.")
+          not String.starts_with?(name, "Elixir.Example.")
       end,
       # Real code that is deliberately not part of the documented surface —
       # `@moduledoc false` internals, generated modules, Phoenix/Oban callbacks.
@@ -108,7 +108,7 @@ defmodule KilnCMS.MixProject do
         "Oban.Worker.timeout/1",
         # Named by `projects/README.md` as the worked overlay example, and
         # excluded from the reference by `filter_modules` above.
-        "Acupuncture.Catalog",
+        "Example.Catalog",
         # A dependency's module, marked `@moduledoc false` upstream. Naming it
         # is correct and useful — `KilnCMS.CMS.Calculations.RelatedLinks`
         # explains a real behaviour of it — but ExDoc has nothing to link a
