@@ -437,30 +437,27 @@ defmodule KilnCMSWeb.Tenant do
   # tenant for the negative TTL (#1124). `Cache.Hosts` only caches `:unresolved`
   # for a true `nil`, never for `:error`.
   defp resolve_known(host) do
-    case host do
-      _ when host == base_host() ->
-        case Accounts.default_org() do
-          %Accounts.Organization{} = org -> org
-          nil -> nil
-          :error -> :error
-          _ -> nil
-        end
+    if host == base_host() do
+      case Accounts.default_org() do
+        %Accounts.Organization{} = org -> org
+        nil -> nil
+        :error -> :error
+      end
+    else
+      case by_subdomain(host) do
+        %Accounts.Organization{} = org ->
+          org
 
-      _ ->
-        case by_subdomain(host) do
-          %Accounts.Organization{} = org ->
-            org
+        :error ->
+          :error
 
-          :error ->
-            :error
-
-          _ ->
-            case by_custom_domain(host) do
-              %Accounts.Organization{} = org -> org
-              :error -> :error
-              _ -> nil
-            end
-        end
+        _ ->
+          case by_custom_domain(host) do
+            %Accounts.Organization{} = org -> org
+            :error -> :error
+            _ -> nil
+          end
+      end
     end
   end
 
@@ -485,8 +482,7 @@ defmodule KilnCMSWeb.Tenant do
       {:ok, %Accounts.Organization{} = org} -> org
       {:ok, nil} -> nil
       {:ok, []} -> nil
-      {:error, %Ash.Error.Query.NotFound{}} -> nil
-      {:error, _} -> :error
+      {:error, error} -> if not_found?(error), do: nil, else: :error
       _ -> :error
     end
   end
@@ -496,11 +492,17 @@ defmodule KilnCMSWeb.Tenant do
       {:ok, %Accounts.Organization{} = org} -> org
       {:ok, nil} -> nil
       {:ok, []} -> nil
-      {:error, %Ash.Error.Query.NotFound{}} -> nil
-      {:error, _} -> :error
+      {:error, error} -> if not_found?(error), do: nil, else: :error
       _ -> :error
     end
   end
+
+  # Ash wraps a get_by miss in an `Invalid`/`Query` envelope whose `errors`
+  # list carries the real class, so this recurses rather than matching the
+  # top-level struct (same pattern as `Firing.References.not_found?/1`).
+  defp not_found?(%Ash.Error.Query.NotFound{}), do: true
+  defp not_found?(%{errors: errors}) when is_list(errors), do: Enum.any?(errors, &not_found?/1)
+  defp not_found?(_other), do: false
 
   @doc """
   The base host subdomains are carved from. Defaults to the endpoint's canonical
