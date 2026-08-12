@@ -258,6 +258,24 @@ defmodule KilnCMSWeb.JsonApiTest do
       assert {:ok, _, _} = DateTime.from_iso8601(first["attributes"]["inserted_at"])
       assert {:ok, _, _} = DateTime.from_iso8601(first["attributes"]["updated_at"])
     end
+
+    # Regression: `word_count`/`reading_time_minutes`/`effective_seo_*`/
+    # `related_links`/`block_ids` have no `expression/2` (computed in Elixir,
+    # not SQL) and are declared `sortable? false` for it — filtering one is
+    # already a clean 400 (`filterable? false`), but sorting bypassed the
+    # flag and crashed with an unhandled `UndefinedFunctionError` deep in
+    # AshSql instead. See `KilnCMS.CMS.Preparations.RejectUnsortableCalculations`.
+    test "sorting by a sortable?-false calculation is a clean 400, not a crash" do
+      admin = user(:admin)
+      cat = category(admin)
+      _post = published_post(%{title: "Sortable check", category_id: cat.id}, admin)
+
+      assert {400, body} = api_get("/api/json/posts?sort=word_count")
+      assert [%{"code" => "invalid_sort"}] = body["errors"]
+
+      assert {400, body} = api_get("/api/json/posts?sort=-effective_seo_title")
+      assert [%{"code" => "invalid_sort"}] = body["errors"]
+    end
   end
 
   describe "pagination" do
