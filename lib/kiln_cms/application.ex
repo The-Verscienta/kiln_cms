@@ -329,9 +329,8 @@ defmodule KilnCMS.Application do
 
     if Application.get_env(:kiln_cms, :compile_env) == :prod and
          adapter in [nil, Swoosh.Adapters.Local] do
-      require Logger
-
-      Logger.warning(
+      KilnCMS.Config.Report.warn(
+        "mailer",
         "No mail delivery is configured (MAIL_MODE / SMTP_HOST unset). Outbound " <>
           "email — confirmations, password resets, notifications — will be queued " <>
           "but never delivered. Set MAIL_MODE=smtp (with SMTP_HOST) or MAIL_MODE=direct."
@@ -352,15 +351,15 @@ defmodule KilnCMS.Application do
   # `/editor/system` ask the same predicate — and it really is the same one,
   # rather than a second copy that drifts.
   #
-  # Logger, not the stderr the config providers use, so it reaches whatever
-  # ships the container's logs (#634). Note that is NOT Sentry: the
-  # `Sentry.LoggerHandler` this app attaches sets no `capture_log_messages`, so
-  # a plain `Logger.warning` never becomes an event.
+  # Reported via `KilnCMS.Config.Report.warn/2` (#1126), not a bare
+  # `Logger.warning` — the stderr the config providers use is not an option
+  # here (this check needs the database), and a plain `Logger.warning` alone
+  # never reaches Sentry: the `Sentry.LoggerHandler` this app attaches sets no
+  # `capture_log_messages`.
   defp warn_if_multi_tenant_without_strict_host do
     if KilnCMSWeb.Tenant.strict_host_gap?() do
-      require Logger
-
-      Logger.warning(
+      KilnCMS.Config.Report.warn(
+        "strict_host",
         "TENANT_STRICT_HOST is off on a deployment with more than one organization. " <>
           "A request whose Host matches no org — a bare hostname, an IP, or an " <>
           "attacker-supplied header — is served the DEFAULT org's content, branding " <>
@@ -377,9 +376,8 @@ defmodule KilnCMS.Application do
   # anchoring. One shot at boot, gated so unused deployments stay quiet.
   defp warn_if_chain_unsigned do
     if KilnCMS.Governance.Chain.unsigned_while_in_use?() do
-      require Logger
-
-      Logger.warning(
+      KilnCMS.Config.Report.warn(
+        "chain_unsigned",
         "History anchoring is in use but no provenance signing key is configured. " <>
           "Anchors and version rows are stored unsigned, so a version row spliced " <>
           "into an anchored range is reported as an anomaly rather than as tampering. " <>
@@ -394,9 +392,8 @@ defmodule KilnCMS.Application do
   # at boot; the editor also carries a standing notice next to the button.
   defp warn_if_seo_drafting_egresses do
     if KilnCMS.Seo.enabled?() and KilnCMS.Seo.egress?() do
-      require Logger
-
-      Logger.warning(
+      KilnCMS.Config.Report.warn(
+        "seo_egress",
         "SEO drafting is enabled against #{KilnCMS.Seo.provider()} (#{KilnCMS.Seo.model()}). " <>
           "Page title, excerpt and body text are sent to that provider when an editor asks " <>
           "for suggestions. Add it to your DPA's subprocessor list, or point SEO_MODEL at a " <>
@@ -411,9 +408,8 @@ defmodule KilnCMS.Application do
   # to put in front of an operator.
   defp warn_if_assist_egresses do
     if KilnCMS.Assist.enabled?() and KilnCMS.Assist.egress?() do
-      require Logger
-
-      Logger.warning(
+      KilnCMS.Config.Report.warn(
+        "assist_egress",
         "Block AI assist is enabled against #{KilnCMS.Assist.provider()} " <>
           "(#{KilnCMS.Assist.model()}). Block text, page context and the editor's typed " <>
           "instruction are sent to that provider on each request. Add it to your DPA's " <>
@@ -429,9 +425,8 @@ defmodule KilnCMS.Application do
   # on the internet can cause published passages to be sent there.
   defp warn_if_ask_egresses do
     if KilnCMS.Ask.enabled?() and KilnCMS.Ask.egress?() do
-      require Logger
-
-      Logger.warning(
+      KilnCMS.Config.Report.warn(
+        "ask_egress",
         "Ask (/api/ask) generation is enabled against #{KilnCMS.Ask.provider()} " <>
           "(#{KilnCMS.Ask.model()}). Published passages retrieved for a question are sent to " <>
           "that provider, on an endpoint any anonymous caller can reach. Add it to your DPA's " <>

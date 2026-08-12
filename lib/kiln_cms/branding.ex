@@ -183,7 +183,22 @@ defmodule KilnCMS.Branding do
       :error ->
         # No fill/ink pair in the search band cleared AA. Ship the stock theme
         # rather than a brand colour with unreadable buttons.
-        Logger.warning("brand colour #{hex} has no accessible token set; using the stock theme")
+        #
+        # This is the identical operator-visible outcome #1089 was filed on —
+        # "a value that changes what every page looks like" — and it cannot be
+        # caught at config-provider time the way #1089's own grammar check
+        # was: whether a hex clears AA depends on the search itself, not on
+        # its shape. Reported via `KilnCMS.Config.Report.warn/2` (#1126) so it
+        # reaches Sentry too, not just whatever ships container stdout.
+        # Called from `for_org/1`'s cache-miss path (5-minute TTL), so this
+        # fires at most once per misconfigured org per TTL window, not once
+        # per request.
+        KilnCMS.Config.Report.warn(
+          "branding_contrast",
+          "brand colour #{hex} has no accessible token set; using the stock theme",
+          %{hex: hex}
+        )
+
         nil
     end
   end
