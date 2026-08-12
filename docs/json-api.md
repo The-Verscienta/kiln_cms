@@ -308,6 +308,38 @@ exposed over JSON:API for *reads* — rendered content is served as fired
 artifacts at `GET /api/content/:type/:slug`. For *writes*, send the body via the
 `block_tree` attribute (see [Writing](#writing-330)).
 
+## Calculated fields
+
+Every content type also exposes these derived, read-only fields — public
+calculations rather than stored columns, so `?fields[post]=title,path` (or any
+other explicit selection) is required to load one; they are not returned by
+default. `GET /api/json/open_api` describes each of them on the resource's
+`attributes` schema.
+
+| Field | Type | Filterable / sortable |
+|-------|------|------------------------|
+| `path` | string | No — full public URL path (`/blog/my-post`); see [URLs, pathauto & redirects](#urls-pathauto--redirects) |
+| `published` | boolean | Yes — convenience flag for `state == :published` (a real SQL expression, unlike the rest of this table) |
+| `word_count` | integer | No — total word count across the block tree |
+| `reading_time_minutes` | integer | No — `word_count` ÷ the configured words-per-minute rate |
+| `effective_seo_title` | string | No — the author's `seo_title`, else the type's pattern expanded (#1102) |
+| `effective_seo_description` | string | No — same as above, for `seo_description` |
+| `related_links` | array | No — curated related links, projected to `[{id, title, slug}]` |
+
+"No" means exactly that — not merely undocumented as a filter: `?filter[path]=…`
+is a clean `400 invalid_filter`, not a match on nothing (`?sort=` on the same
+field is not yet as clean — see the warning below). These fields have no SQL
+expression to filter or sort by (they are computed in Elixir, several from
+data outside the row itself — the type registry, the block tree), so the
+write side of that query would have nothing to push down to Postgres.
+`published` is the one exception: it is a real `state == :published` SQL
+expression, so both filtering and sorting work normally.
+
+> **Known gap:** `?sort=` on any of these fields currently 500s instead of
+> answering `invalid_sort` — `filterable?`/`sortable? false` on a calculation
+> is enforced for filters but not (yet) checked before Ash attempts to build
+> the sort. Avoid sorting by them until this is fixed.
+
 ## URLs, pathauto & redirects
 
 Slugs auto-derive server-side (focus keyphrase → title, stop words stripped,

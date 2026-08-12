@@ -132,6 +132,41 @@ defmodule KilnCMSWeb.JsonApiTest do
     end
   end
 
+  # `path`/`effective_seo_title` have no `expression/2` — filtering them raises
+  # out of AshSql as an unhandled 500, so `filterable? false` rejects it
+  # cleanly at the query layer instead (#1139). `path` was missing that
+  # declaration (unlike its `effective_seo_*`/`word_count` siblings), so a
+  # client filtering on it hit the crash rather than a normal JSON:API error.
+  describe "public calculations without an expression cannot be filtered (#1139)" do
+    test "filter[path] is rejected with a 400, not a 500" do
+      admin = user(:admin)
+      published_post(%{title: "Filterable check"}, admin)
+
+      assert {400, _body} = api_get("/api/json/posts?filter[path]=/blog/x")
+    end
+
+    test "filter[effective_seo_title] is rejected the same way" do
+      admin = user(:admin)
+      published_post(%{title: "SEO filter check"}, admin)
+
+      assert {400, _body} = api_get("/api/json/posts?filter[effective_seo_title]=x")
+    end
+
+    test "the calculated fields are still readable when requested via fields[]" do
+      admin = user(:admin)
+
+      post =
+        published_post(%{title: "Readable check", slug: slug(), seo_title: "Custom SEO"}, admin)
+
+      assert {200, body} =
+               api_get("/api/json/posts/#{post.id}?fields[post]=title,path,effective_seo_title")
+
+      attrs = body["data"]["attributes"]
+      assert attrs["path"] =~ post.slug
+      assert attrs["effective_seo_title"] == "Custom SEO"
+    end
+  end
+
   describe "block_ids over the wire (#954)" do
     test "an editor reads a DRAFT's block ids via fields[post]=block_ids; anonymous cannot" do
       # The draft-readable id surface the required #865 binding depends on:
