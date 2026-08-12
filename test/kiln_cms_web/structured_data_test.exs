@@ -114,8 +114,8 @@ defmodule KilnCMSWeb.StructuredDataTest do
     assert hd(items)["url"] == "http://localhost:4000/blog/p1"
   end
 
-  describe "teaser/3 (#337 Phase 2, #769)" do
-    test "with no record, defaults to WebPage (backward compatible)" do
+  describe "teaser/2 (#337 Phase 2, #769, #1136)" do
+    test "a page teaser resolves @type from its own declared schema_org_type" do
       teaser = KilnCMSWeb.Teaser.from_record(page(%{audience: :member}), "http://x/about")
       [node] = StructuredData.teaser(teaser)
 
@@ -128,7 +128,7 @@ defmodule KilnCMSWeb.StructuredDataTest do
       record = post(%{audience: :member})
       teaser = KilnCMSWeb.Teaser.from_record(record, "http://x/blog/hello")
 
-      [node] = StructuredData.teaser(teaser, record)
+      [node] = StructuredData.teaser(teaser)
       full = StructuredData.build(record, ContentTypes.get(:post))
 
       assert node["@type"] == "BlogPosting"

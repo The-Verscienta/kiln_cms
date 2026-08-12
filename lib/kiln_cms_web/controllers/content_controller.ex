@@ -329,7 +329,7 @@ defmodule KilnCMSWeb.ContentController do
     |> assign(:og_image, teaser.seo_image)
     |> assign(:og_type, "article")
     |> assign(:canonical_url, teaser.url)
-    |> assign(:json_ld, json_ld_script(StructuredData.teaser(teaser, record, org)))
+    |> assign(:json_ld, json_ld_script(StructuredData.teaser(teaser, org)))
     |> put_view(KilnCMSWeb.ContentHTML)
     |> render(:lock,
       teaser: teaser,
@@ -398,7 +398,7 @@ defmodule KilnCMSWeb.ContentController do
     # Canonical is the DOCUMENT's own URL, never the join page: a paywall that
     # canonicalised elsewhere would have search engines index the wrong URL.
     |> assign(:canonical_url, teaser.url)
-    |> assign(:json_ld, json_ld_script(StructuredData.teaser(teaser, record, org)))
+    |> assign(:json_ld, json_ld_script(StructuredData.teaser(teaser, org)))
     |> put_view(KilnCMSWeb.ContentHTML)
     |> render(:teaser, teaser: teaser)
   end

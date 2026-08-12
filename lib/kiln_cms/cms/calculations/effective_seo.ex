@@ -33,11 +33,13 @@ defmodule KilnCMS.CMS.Calculations.EffectiveSeo do
   name these calculations**, and resolve through `KilnCMS.Seo.Patterns.effective/3`
   on the pinned record instead. Their select omits `custom_fields` on purpose,
   and it is not only this module that reads what lands there:
-  `KilnCMSWeb.StructuredData.teaser/3` is handed the raw record and pulls a
-  gated document's schedule out of `custom_fields` for the paywall page's public
-  JSON-LD. Widening the select to fill in two tokens would have disclosed that
-  as a side effect, so on a teaser those two tokens stay quiet — as
-  `docs/seo.md` says, and as they did before #1102.
+  `KilnCMSWeb.Teaser.from_record/3` is handed the raw record and pulls a gated
+  document's Event schedule out of `custom_fields` for the paywall page's
+  public JSON-LD (#1136) — resolved once at projection time, so
+  `KilnCMSWeb.StructuredData.teaser/2` never sees the record itself. Widening
+  the select to fill in two tokens would have disclosed that as a side effect,
+  so on a teaser those two tokens stay quiet — as `docs/seo.md` says, and as
+  they did before #1102.
 
   The loads are unconditional rather than derived from the type's own pattern.
   One resource (`KilnCMS.CMS.Entry`) backs every dynamic type, so "does a
