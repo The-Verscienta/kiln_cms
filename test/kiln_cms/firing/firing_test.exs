@@ -159,6 +159,37 @@ defmodule KilnCMS.Firing.FiringTest do
       assert [%{"@type" => "MedicalWebPage"} | _] = ld["@graph"]
     end
 
+    test "archiving a dynamic type does not change what its published entries fire (#938)" do
+      actor = admin()
+      org = KilnCMS.Accounts.default_org_id()
+
+      definition =
+        CMS.create_type_definition!(
+          %{name: "recipe#{System.unique_integer([:positive])}", label: "Recipe"},
+          actor: actor
+        )
+
+      entry =
+        CMS.ContentTypes.create!(definition.name, %{title: "Ginger", slug: slug()}, actor: actor)
+
+      {:ok, entry} = CMS.ContentTypes.transition(definition.name, "publish", entry, actor: actor)
+      KilnCMS.DataCase.drain_oban()
+
+      {:ok, before} = Engine.read(org, :entry, entry.id, :json)
+      assert before["type"] == definition.name
+
+      # The archived type keeps its entries editable (moduledoc). A re-fire —
+      # e.g. from an edit, or here forced directly — must still resolve the
+      # SAME name, not fall back to the generic "entry" storage key just
+      # because `TypeDefinition`'s default `:read` filters archived rows.
+      CMS.destroy_type_definition!(definition, actor: actor)
+      Engine.fire(entry)
+      KilnCMS.DataCase.drain_oban()
+
+      {:ok, after_archive} = Engine.read(org, :entry, entry.id, :json)
+      assert after_archive["type"] == definition.name
+    end
+
     test "faq, how_to and claim blocks expand the fired @graph (#357)" do
       actor = admin()
       org = KilnCMS.Accounts.default_org_id()

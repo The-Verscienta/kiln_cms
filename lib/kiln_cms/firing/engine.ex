@@ -371,9 +371,18 @@ defmodule KilnCMS.Firing.Engine do
     # The definition read is tenant-strict (#419): scope to the document's own
     # org, else the read raises and every dynamic doc silently degrades to the
     # "entry" storage key in webhooks/provenance/search.
-    case KilnCMS.CMS.get_type_definition(id, authorize?: false, tenant: org_id) do
+    #
+    # Including archived (#938): archiving a type must not change what its
+    # PUBLISHED documents fire — TypeDefinition is soft-deleted (AshArchival),
+    # and the plain `:read` lookup filters archived rows out, which silently
+    # rewrote every "recipe" as generic "entry" the moment an admin archived
+    # the "recipe" type. The "entry" fallback below is now reserved for a
+    # genuinely missing row (deleted mid-request, or a stale cache).
+    case KilnCMS.CMS.get_type_definition_including_archived(id,
+           authorize?: false,
+           tenant: org_id
+         ) do
       {:ok, definition} -> definition.name
-      # Archived/removed definition — fall back to the storage key.
       _ -> "entry"
     end
   end
