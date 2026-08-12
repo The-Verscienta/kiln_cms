@@ -28,6 +28,8 @@ defmodule KilnCMSWeb.Teaser do
   about their own metadata.
   """
 
+  alias KilnCMS.Events
+  alias KilnCMS.Firing.SchemaOrg
   alias KilnCMS.Seo.Patterns
 
   @enforce_keys [:title, :audience, :url]
@@ -46,7 +48,8 @@ defmodule KilnCMSWeb.Teaser do
     :org_id,
     :updated_at,
     :type,
-    :custom_fields
+    :custom_fields,
+    event_schedule: %{}
   ]
 
   @type t :: %__MODULE__{}
@@ -63,6 +66,15 @@ defmodule KilnCMSWeb.Teaser do
   """
   @spec from_record(struct(), String.t(), keyword()) :: t()
   def from_record(record, url, opts \\ []) do
+    # Resolved here rather than by the structured-data renderer (#1136): that
+    # renderer sees only this struct, never `record`, so anything it needs
+    # from the record — the declared @type and, for an Event, its schedule —
+    # has to be computed while `record` is still in scope. Both are public
+    # admin configuration (the type declaration, the event's own dates), not
+    # gated content, so carrying them here does not widen what a paywalled
+    # reader's markup reveals.
+    type = SchemaOrg.resolve(record)
+
     %__MODULE__{
       title: record.title,
       # `Map.get/2`: `excerpt` only exists on types that opted into it.
@@ -97,8 +109,10 @@ defmodule KilnCMSWeb.Teaser do
       locale: record.locale,
       org_id: record.org_id,
       updated_at: record.updated_at,
-      type: Map.get(record, :__kiln_content_type__) || Map.get(record, "__kiln_content_type__"),
-      custom_fields: Map.get(record, :custom_fields) || %{}
+      type: type,
+      custom_fields: Map.get(record, :custom_fields) || %{},
+      event_schedule:
+        if(SchemaOrg.event_type?(type), do: Events.schema_org_schedule(record), else: %{})
     }
   end
 

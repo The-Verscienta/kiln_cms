@@ -122,7 +122,7 @@ defmodule KilnCMSWeb.StructuredDataDynamicTypeTest do
         )
 
       teaser = KilnCMSWeb.Teaser.from_record(entry, "http://x/gigs/a-gig-2")
-      [node] = StructuredData.teaser(teaser, entry)
+      [node] = StructuredData.teaser(teaser)
 
       assert node["@type"] == "MusicEvent"
       assert node["name"] == "A gig"

@@ -104,15 +104,15 @@ defmodule KilnCMSWeb.StructuredData do
   is not itself gated content, so hiding it from the reader who can't yet read
   the body is the same disagreement `paywall_markers/0` exists to avoid.
 
-  `record` is the gated document `teaser` was projected from (#769) — used only
-  to resolve the declared `@type` and Event schedule, never for display, so this
-  does not widen what a paywalled reader's markup reveals: `record` carries no
-  more than `teaser` already summarises, plus the type declaration itself, which
-  is public admin configuration, not gated content.
+  `teaser.type` and `teaser.event_schedule` are resolved from the gated
+  record at projection time (`KilnCMSWeb.Teaser.from_record/3`, #1136) — this
+  renderer never sees the record itself, only what the struct already
+  summarises, plus the type declaration and the event's own dates, both public
+  admin configuration rather than gated content.
   """
   @spec teaser(KilnCMSWeb.Teaser.t(), term()) :: [map()]
   def teaser(teaser, org \\ nil) do
-    type = (teaser.type && to_string(teaser.type)) || "WebPage"
+    type = teaser.type || "WebPage"
 
     node =
       %{
@@ -144,7 +144,7 @@ defmodule KilnCMSWeb.StructuredData do
 
   defp maybe_teaser_event_schedule(node, type, teaser) do
     if SchemaOrg.event_type?(type) do
-      Map.merge(node, KilnCMS.Events.schema_org_schedule(teaser))
+      Map.merge(node, teaser.event_schedule)
     else
       node
     end
