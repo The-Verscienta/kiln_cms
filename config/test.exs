@@ -185,7 +185,7 @@ config :kiln_cms, KilnCMS.Repo,
   # the runner. A job running inside a `container:` (the qpdf CI leg, #907) is
   # on a separate Docker network where the service is only reachable by its
   # service name instead, hence the override.
-  hostname: System.get_env("POSTGRES_HOSTNAME", "localhost"),
+  hostname: System.get_env("POSTGRES_HOST", "localhost"),
   database: "kiln_cms_test#{System.get_env("MIX_TEST_PARTITION")}",
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: System.schedulers_online() * 2

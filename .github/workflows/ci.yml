@@ -737,10 +737,11 @@ jobs:
   # service at all.
   #
   # The hostname differs from `build` above, though: `config/test.exs`
-  # defaults to `POSTGRES_HOSTNAME` env, falling back to `"localhost"`, which
-  # only reaches a service container on a NON-containerized job. This job's
-  # steps run inside `debian:trixie-slim`, where a service is reachable by
-  # its service name instead — set below.
+  # defaults to the `POSTGRES_HOST` env var (already used the same way by
+  # `config/e2e.exs`), falling back to `"localhost"` — which only reaches a
+  # service container on a NON-containerized job. This job's steps run
+  # inside `debian:trixie-slim`, where a service is reachable by its service
+  # name instead — set below.
   qpdf_metadata_stripping:
     name: PDF metadata stripping (qpdf, Debian trixie)
     runs-on: ubuntu-latest
@@ -765,7 +766,7 @@ jobs:
 
     env:
       MIX_ENV: test
-      POSTGRES_HOSTNAME: postgres
+      POSTGRES_HOST: postgres
       # `erlef/setup-beam` picks its precompiled OTP/Elixir build from
       # `ImageOS`, which the runner's own setup scripts normally export — but
       # those scripts never run inside a `container:`, so here it's unset and
