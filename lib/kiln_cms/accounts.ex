@@ -181,11 +181,15 @@ defmodule KilnCMS.Accounts do
   fallback when a request's host doesn't resolve to a specific org. Returns `nil`
   only if the seed row is missing (it's created by the backfill migration).
   """
-  @spec default_org() :: KilnCMS.Accounts.Organization.t() | nil
+  @spec default_org() :: KilnCMS.Accounts.Organization.t() | nil | :error
   def default_org do
     case get_organization(default_org_id(), authorize?: false) do
-      {:ok, org} -> org
-      _ -> nil
+      {:ok, %Accounts.Organization{} = org} -> org
+      {:ok, nil} -> nil
+      {:ok, []} -> nil
+      {:error, %Ash.Error.Query.NotFound{}} -> nil
+      {:error, _} -> :error
+      _ -> :error
     end
   end
 
