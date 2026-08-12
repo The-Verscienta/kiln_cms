@@ -11,9 +11,12 @@ defmodule KilnCMS.CMS.Checks.EditableContentType do
   bypass this entirely (the content policies bypass on `:admin`); viewers and
   anonymous actors never match.
 
-  The name compared is the resource's `__kiln_content_type__/0`. Every dynamic
-  (D17) type shares the `entry` storage key, so `["entry"]` scopes an editor to
-  all admin-defined types as a group — per-dynamic-type scoping is a later phase.
+  The name compared is `ContentTypes.scope_group_name/1`. Every dynamic (D17)
+  type shares the `entry` storage key, so `["entry"]` scopes an editor to all
+  admin-defined types as a group — per-dynamic-type scoping is a later phase
+  (#1175 fixed this actually resolving to `"entry"`; it previously resolved to
+  `nil` via the module-only `type_name/1`, so `["entry"]` matched no dynamic
+  type at all).
   """
   use Ash.Policy.SimpleCheck
 
@@ -32,7 +35,7 @@ defmodule KilnCMS.CMS.Checks.EditableContentType do
         true
 
       :editor ->
-        type = KilnCMS.CMS.ContentTypes.type_name(resource)
+        type = KilnCMS.CMS.ContentTypes.scope_group_name(resource)
         Scoping.permitted?(actor, subject, :editable_types, type)
 
       _ ->
