@@ -195,10 +195,95 @@ defmodule KilnCMS.CMS.ContentCopy do
 
   defp reset_block(%{"value" => value} = block, module, role, reset) when is_map(value) do
     {value, reset} = reset_fields(value, module, role, reset)
+    {value, reset} = reset_nested(value, module, role, reset)
     {%{block | "value" => value}, reset}
   end
 
   defp reset_block(block, _module, _role, reset), do: {block, reset}
+
+  # `columns` nests its children as raw maps rather than union members (a
+  # recursive-type compile cycle), so `dump_blocks/2` never recursed into
+  # them — a `columns` block holding a `quote` with `featured: true` hard-
+  # refused BOTH duplication and translation for a non-admin, because
+  # `Changes.EnforceBlockFieldPolicy.check_nested_tree/3` DOES check them,
+  # and the copy handed back the unreset admin-set value verbatim (#1168).
+  # This is the same reset `reset_fields/4` already gives top-level blocks,
+  # walked to whatever depth `columns` nests (a column may itself hold a
+  # `columns` block) — mirroring `KilnCMS.Blocks.Columns.child_maps/1`'s own
+  # shape rather than guessing where children live, for the reason #956
+  # documents on the enforcement side.
+  defp reset_nested(value, KilnCMS.Blocks.Columns, role, reset) do
+    # `dump_to_embedded` emits ATOM keys for the block's own attributes — so a
+    # TOP-level `columns` block's `value` carries its columns under `:columns`
+    # — while nested children are plain maps that never go through it and keep
+    # the STRING keys they were cast/stored with (a nested `columns` block's
+    # own `columns` field included). Reading/writing back under whichever key
+    # is actually present avoids silently updating a copy nothing reads (the
+    # #1157 "key shapes are mixed on purpose" note applies here too).
+    update_field(value, :columns, "columns", fn columns ->
+      columns
+      |> List.wrap()
+      |> Enum.filter(&is_map/1)
+      |> Enum.map_reduce(reset, &reset_column(&1, role, &2))
+    end)
+  end
+
+  defp reset_nested(value, _module, _role, reset), do: {value, reset}
+
+  defp reset_column(column, role, reset) do
+    update_field(column, :blocks, "blocks", fn blocks ->
+      blocks
+      |> List.wrap()
+      |> Enum.filter(&is_map/1)
+      |> Enum.map_reduce(reset, &reset_nested_child(&1, role, &2))
+    end)
+  end
+
+  # Reads `map[atom_key] || map[string_key]` (defaulting to `[]`), runs
+  # `fun.(value)` — which must itself return `{new_value, reset}` — and writes
+  # the result back under whichever key was actually read, so a value stored
+  # under one key shape is never left beside a spurious empty one under the
+  # other.
+  defp update_field(map, atom_key, string_key, fun) do
+    cond do
+      Map.has_key?(map, atom_key) ->
+        {value, reset} = fun.(Map.get(map, atom_key))
+        {Map.put(map, atom_key, value), reset}
+
+      Map.has_key?(map, string_key) ->
+        {value, reset} = fun.(Map.get(map, string_key))
+        {Map.put(map, string_key, value), reset}
+
+      true ->
+        {_value, reset} = fun.([])
+        {map, reset}
+    end
+  end
+
+  # A nested child carries its fields inline (`"_type"` + attrs, no `"value"`
+  # wrapper) — the same envelope shape `reset_fields/4` already tolerates via
+  # its declared-fields-only rule (#1157) — so it resets exactly like a
+  # top-level block once its own module is resolved.
+  defp reset_nested_child(child, role, reset) do
+    case nested_child_module(child) do
+      nil ->
+        {child, reset}
+
+      module ->
+        {child, reset} = reset_fields(child, module, role, reset)
+        reset_nested(child, module, role, reset)
+    end
+  end
+
+  defp nested_child_module(child) do
+    with type when not is_nil(type) <- Map.get(child, "_type") || Map.get(child, :_type),
+         type_atom when not is_nil(type_atom) <- to_atom(type),
+         {:ok, module} <- KilnCMS.Blocks.fetch(type_atom) do
+      module
+    else
+      _ -> nil
+    end
+  end
 
   defp reset_fields(value, module, role, reset) do
     declared = MapSet.new(Kiln.Block.Info.fields(module), & &1.name)
