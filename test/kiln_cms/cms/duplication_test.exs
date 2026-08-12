@@ -516,6 +516,91 @@ defmodule KilnCMS.CMS.DuplicationTest do
     end
   end
 
+  # `columns` nests children as raw maps rather than union members (a
+  # recursive-type compile cycle), so the #890 fix above — which only walked a
+  # block's own `value` — never reached them. `Changes.EnforceBlockFieldPolicy`
+  # DOES check nested children, so a `columns` block holding a `quote` with
+  # `featured: true` hard-refused both duplication and translation for a
+  # non-admin: the copy carried the unreset admin-set value verbatim, and the
+  # create was refused on content the editor was allowed to read (#1168).
+  describe "nested admin-restricted block fields (#1168)" do
+    defp columns_with_featured_quote_page!(admin) do
+      CMS.create_page!(
+        %{
+          title: "Nested quote",
+          slug: slug(),
+          block_tree: [
+            %{
+              "_type" => "columns",
+              "columns" => [
+                %{
+                  "blocks" => [
+                    %{"_type" => "quote", "text" => "Wisdom", "featured" => true}
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        actor: admin
+      )
+    end
+
+    # `Enum.find_value/2` cannot be used here: the value being looked for is
+    # ITSELF `false` on a reset copy, which `find_value` cannot tell apart
+    # from "not found yet" — it would silently keep searching and return
+    # `nil`. `Enum.find/2` on the child map, then a separate `Map.get/2`,
+    # sidesteps that.
+    defp nested_quote_featured(page) do
+      page.blocks
+      |> Enum.flat_map(fn
+        %Ash.Union{type: :columns, value: %{columns: columns}} -> columns
+        _other -> []
+      end)
+      |> Enum.flat_map(&(Map.get(&1, "blocks") || Map.get(&1, :blocks) || []))
+      |> Enum.find(fn child ->
+        (Map.get(child, "_type") || Map.get(child, :_type)) in ["quote", :quote]
+      end)
+      |> case do
+        nil -> nil
+        child -> Map.get(child, "featured")
+      end
+    end
+
+    test "an editor can duplicate a page whose nested quote is admin-featured" do
+      admin = user(:admin)
+      editor = user(:editor)
+      page = columns_with_featured_quote_page!(admin)
+
+      assert {:ok, copy, withheld} = Duplication.duplicate(:page, page, actor: editor)
+
+      assert copy.id != page.id
+      assert nested_quote_featured(copy) == false
+      assert nested_quote_featured(page) == true
+      assert "quote.featured" in withheld
+    end
+
+    test "an admin's duplicate keeps the nested restricted value" do
+      admin = user(:admin)
+      page = columns_with_featured_quote_page!(admin)
+
+      assert {:ok, copy, withheld} = Duplication.duplicate(:page, page, actor: admin)
+
+      assert nested_quote_featured(copy) == true
+      assert withheld == []
+    end
+
+    test "an editor can translate a page whose nested quote is admin-featured" do
+      admin = user(:admin)
+      editor = user(:editor)
+      page = columns_with_featured_quote_page!(admin)
+
+      assert %{} = translated = Translations.create_translation!(:page, page, "fr", actor: editor)
+      assert translated.locale == "fr"
+      assert nested_quote_featured(translated) == false
+    end
+  end
+
   describe "atomicity (#925)" do
     # The links used to be cloned after the create with nothing tying them
     # together, so a mid-loop failure left a committed copy the caller was told
