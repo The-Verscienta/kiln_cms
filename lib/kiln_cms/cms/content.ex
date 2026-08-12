@@ -2221,6 +2221,18 @@ defmodule KilnCMS.CMS.Content do
         end
       end
 
+      # `word_count`, `path`, `effective_seo_*`, `related_links`, `block_ids`
+      # have no `expression/2` (computed in Elixir, not SQL) and are declared
+      # `sortable? false` for it — but Ash's own sort-field resolution only
+      # honors that flag across a relationship, not for a local sort, so
+      # `sort=word_count` would otherwise crash instead of being rejected
+      # like `filter[word_count]=...` already is. Applies to every read
+      # action (`:read`, `:published`, `:trashed`, ...), not just the
+      # primary one — see the preparation module.
+      preparations do
+        prepare KilnCMS.CMS.Preparations.RejectUnsortableCalculations
+      end
+
       # Invalidate the public delivery cache whenever published content changes
       # (applies to every create/update/destroy action; no-ops for draft-only
       # writes — see the change module).
