@@ -2448,6 +2448,7 @@ msgstr ""
 msgid "Couldn't generate text. Please try again."
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't import that photo from Unsplash."
@@ -4405,6 +4406,7 @@ msgstr ""
 msgid "Images: PNG, JPG, WEBP, GIF up to 10 MB"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Import"
@@ -4435,6 +4437,7 @@ msgstr ""
 msgid "Imported %{name}: %{count} translations applied."
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Importing…"
@@ -4784,6 +4787,7 @@ msgstr ""
 msgid "Leave this field empty"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Library"
@@ -4859,6 +4863,7 @@ msgstr ""
 msgid "Live published"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/trash_live.ex
@@ -4866,6 +4871,7 @@ msgstr ""
 msgid "Load more"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/trash_live.ex
@@ -5549,6 +5555,7 @@ msgstr ""
 msgid "No open tasks."
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "No photos match “%{query}”."
@@ -6317,6 +6324,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/trash_live.ex
 #, elixir-autogen, elixir-format
 msgid "Permanently deleted."
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Photos from Unsplash — importing adds a copy to your library and inserts it here."
 msgstr ""
 
 #: lib/kiln_cms_web/live/media_live.ex
@@ -7608,12 +7620,14 @@ msgstr ""
 #: lib/kiln_cms_web/controllers/content_controller.ex
 #: lib/kiln_cms_web/controllers/content_html/search.html.heex
 #: lib/kiln_cms_web/live/analytics_live.ex
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/search_palette_live.ex
 #, elixir-autogen, elixir-format
 msgid "Search"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Search Unsplash photos"
@@ -7669,6 +7683,7 @@ msgstr ""
 msgid "Searches are logged anonymously — no user ID or IP — to improve content discovery, and purged after %{days} days."
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Searching…"
@@ -9356,16 +9371,19 @@ msgstr ""
 msgid "Unsaved changes won't be copied. Duplicate the last saved version?"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Unsplash"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Unsplash photo"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Unsplash search failed — please try again."

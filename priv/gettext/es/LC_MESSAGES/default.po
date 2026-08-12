@@ -2448,6 +2448,7 @@ msgstr "No se han podido generar sugerencias. Inténtelo de nuevo."
 msgid "Couldn't generate text. Please try again."
 msgstr "No se pudo generar el texto. Inténtalo de nuevo."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't import that photo from Unsplash."
@@ -4405,6 +4406,7 @@ msgstr "Imágenes"
 msgid "Images: PNG, JPG, WEBP, GIF up to 10 MB"
 msgstr "Imágenes: PNG, JPG, WEBP, GIF hasta 10 MB"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Import"
@@ -4435,6 +4437,7 @@ msgstr "Se importó %{name} a la biblioteca."
 msgid "Imported %{name}: %{count} translations applied."
 msgstr "Importado %{name}: %{count} traducciones aplicadas."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Importing…"
@@ -4784,6 +4787,7 @@ msgstr "Déjelo en blanco para conservar el actual."
 msgid "Leave this field empty"
 msgstr "Deje este campo vacío"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Library"
@@ -4859,6 +4863,7 @@ msgstr "Modo producción"
 msgid "Live published"
 msgstr "Publicado en vivo"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/trash_live.ex
@@ -4866,6 +4871,7 @@ msgstr "Publicado en vivo"
 msgid "Load more"
 msgstr "Cargar más"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/trash_live.ex
@@ -5549,6 +5555,7 @@ msgstr "No tienes tareas abiertas asignadas."
 msgid "No open tasks."
 msgstr "No hay tareas abiertas."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "No photos match “%{query}”."
@@ -6318,6 +6325,11 @@ msgstr "%{name} se eliminó permanentemente."
 #, elixir-autogen, elixir-format
 msgid "Permanently deleted."
 msgstr "Eliminado permanentemente."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format, fuzzy
+msgid "Photos from Unsplash — importing adds a copy to your library and inserts it here."
+msgstr "Fotos de Unsplash: al importar se añade una copia a su biblioteca."
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -7608,12 +7620,14 @@ msgstr "Scripts"
 #: lib/kiln_cms_web/controllers/content_controller.ex
 #: lib/kiln_cms_web/controllers/content_html/search.html.heex
 #: lib/kiln_cms_web/live/analytics_live.ex
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/search_palette_live.ex
 #, elixir-autogen, elixir-format
 msgid "Search"
 msgstr "Buscar"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Search Unsplash photos"
@@ -7669,6 +7683,7 @@ msgstr "Buscar contenido publicado…"
 msgid "Searches are logged anonymously — no user ID or IP — to improve content discovery, and purged after %{days} days."
 msgstr "Las búsquedas se registran de forma anónima — sin ID de usuario ni IP — para mejorar el descubrimiento de contenido, y se purgan después de %{days} días."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Searching…"
@@ -9356,16 +9371,19 @@ msgstr "Cambios sin guardar"
 msgid "Unsaved changes won't be copied. Duplicate the last saved version?"
 msgstr "Los cambios sin guardar no se copiarán. ¿Duplicar la última versión guardada?"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Unsplash"
 msgstr "Unsplash"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Unsplash photo"
 msgstr "Foto de Unsplash"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Unsplash search failed — please try again."
