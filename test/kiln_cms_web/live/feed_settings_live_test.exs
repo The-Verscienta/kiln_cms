@@ -21,6 +21,7 @@ defmodule KilnCMSWeb.FeedSettingsLiveTest do
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.User
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Feeds
 
   @password "password1234!"
@@ -77,10 +78,24 @@ defmodule KilnCMSWeb.FeedSettingsLiveTest do
 
       {:ok, _lv, html} = admin_live(conn, org)
 
+      # Syndicate is every registered type minus the excluded one — computed
+      # rather than hardcoded, because a downstream project can register more
+      # content types than this repo ships (e.g. a catalog overlay), and a
+      # fixed list here would fail for reasons that have nothing to do with
+      # this test.
+      expected_syndicate =
+        org
+        |> ContentTypes.all_for_org()
+        |> Enum.map(&to_string(&1.type))
+        |> Enum.reject(&(&1 == "page"))
+
       # Boxes are checked from the RESOLVED policy, so an inherited config shows
       # as the state the site is in rather than as an empty form.
       assert html =~ "Deployment defaults"
-      assert checked_values(html, "feeds[syndicate][]") == ["post"]
+
+      assert Enum.sort(checked_values(html, "feeds[syndicate][]")) ==
+               Enum.sort(expected_syndicate)
+
       assert checked_values(html, "feeds[full_content][]") == ["post"]
     end
 

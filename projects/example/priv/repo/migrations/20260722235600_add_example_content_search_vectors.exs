@@ -1,7 +1,7 @@
-defmodule KilnCMS.Repo.Migrations.AddAcupunctureContentSearchVectors do
+defmodule KilnCMS.Repo.Migrations.AddExampleContentSearchVectors do
   @moduledoc """
   Trigger-maintained `search_vector` columns for the four content types added
-  in `add_acupuncture_content_types` — see `KilnCMS.Migrations` for why
+  in `add_example_content_types` — see `KilnCMS.Migrations` for why
   `mix ash.codegen` cannot generate these.
   """
   use Ecto.Migration

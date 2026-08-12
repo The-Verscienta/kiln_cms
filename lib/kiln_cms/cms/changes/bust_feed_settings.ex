@@ -41,6 +41,9 @@ defmodule KilnCMS.CMS.Changes.BustFeedSettings do
   defp bust(_changeset, {:ok, record} = result) do
     KilnCMS.Cache.bust_feed_policy(record.org_id)
     KilnCMS.Cache.bust_all_feeds(record.org_id)
+    # Delivery ETag folds head generation (#1079): feed autodiscovery `<link>`s
+    # are derived from this policy, not from the content row.
+    KilnCMS.Cache.bump_head_generation(record.org_id)
     result
   end
 

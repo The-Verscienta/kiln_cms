@@ -539,7 +539,7 @@ jobs:
   # Activate the overlay exactly the way the Dockerfile does (project.exs +
   # priv merge), then require codegen to be clean.
   overlay_drift:
-    name: Overlay drift (acupuncture)
+    name: Overlay drift (example)
     runs-on: ubuntu-latest
 
     services:
@@ -595,14 +595,14 @@ jobs:
           mix local.rebar --force
           mix deps.get
 
-      - name: Activate the acupuncture overlay
-        # Mirrors the Dockerfile's PROJECT=acupuncture activation: the
+      - name: Activate the example overlay
+        # Mirrors the Dockerfile's PROJECT=example activation: the
         # subproject's project.exs becomes config/project.exs (compile-time
         # domain registration) and its priv/ (migrations, snapshots) merges
         # into the core priv/ so codegen sees the overlay schema.
         run: |
-          cp projects/acupuncture/project.exs config/project.exs
-          cp -R projects/acupuncture/priv/. priv/
+          cp projects/example/project.exs config/project.exs
+          cp -R projects/example/priv/. priv/
 
       - name: Check for migration/snapshot drift (overlay build)
         run: mix ash.codegen --check
@@ -638,7 +638,7 @@ jobs:
           - name: core
             project: ""
           - name: overlay
-            project: acupuncture
+            project: example
 
     # The release image is the one artifact nothing else in CI exercises, and
     # the failures it hides are total: #573 raised mix.exs's `elixir:`

@@ -593,15 +593,18 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    so an entry made for one org reaches no other org's forms. What is *not*
    closed is the default: a form that has not been given a list still inherits
    `EMBED_ORIGINS`, which has no tenant dimension — so on a multi-org instance
-   the shared union governs every untouched form. **A multi-org deployment
-   should set the allowlist per form and leave `EMBED_ORIGINS` unset**; the
-   variable remains the single-org convenience. Two things would close it
-   outright: a per-org default so an operator decides once per org rather than
-   once per form, and an operator ceiling — today an org admin can open framing
-   on their own forms that the operator had left closed. That is deliberate (a
-   form's `frame-ancestors` governs who may overlay *that org's* form and
-   harvest *that org's* submissions, and grants nothing across the tenant
-   boundary), but it is a change of who holds the control and worth stating.
+   the shared union governs every untouched form. **Narrowed further in
+   #1131:** `KilnCMS.CMS.SiteEmbedSettings`, resolved by
+   `KilnCMS.Forms.EmbedPolicy`, inserts a per-org default between the form and
+   the deployment — `form.embed_origins -> SiteEmbedSettings.embed_origins ->
+   EMBED_ORIGINS` — so an org decides once and every untouched form in that
+   org inherits it, rather than the deployment-wide union. **What is still not
+   closed** is the same operator-ceiling point #648 already named: today an
+   org admin can open framing — on a form, or now on the org default — that
+   the operator had left closed. That remains deliberate (the allowlist
+   governs who may overlay *that org's* forms and harvest *that org's*
+   submissions, and grants nothing across the tenant boundary), but it is a
+   change of who holds the control and worth stating.
 2. **Passphrase-locked content is weak by construction (#496).** A shared secret
    typed into a public form is not access control in the sense the rest of this
    document uses the phrase: there is no per-reader identity, so no audit trail

@@ -1,6 +1,6 @@
 # Import the holistic-acupuncture Sanity export into KilnCMS.
 #
-#     mix run projects/acupuncture/priv/repo/acupuncture_import.exs path/to/kiln-export.json
+#     mix run projects/example/priv/repo/example_import.exs path/to/kiln-export.json
 #
 # The export file is produced by the Astro repo's scripts/export-to-kiln.js:
 # media entries (metadata-only, pointing at Cloudflare Images), categories,
@@ -18,14 +18,14 @@
 # attribute is deliberately not writable through the API, so a one-time
 # migration bypass is the least invasive way to preserve original blog dates.
 #
-# Requires the acupuncture overlay to be active (config/project.exs registers
-# Acupuncture.Catalog — see projects/acupuncture/README.md). Run
-# projects/acupuncture/priv/repo/acupuncture_field_definitions.exs first
+# Requires the example overlay to be active (config/project.exs registers
+# Example.Catalog — see projects/example/README.md). Run
+# projects/example/priv/repo/example_field_definitions.exs first
 # (custom-field values are validated against the definitions on every write).
 
 import Ecto.Query
 
-alias Acupuncture.Catalog
+alias Example.Catalog
 alias KilnCMS.Accounts
 alias KilnCMS.CMS
 alias KilnCMS.Repo
@@ -117,7 +117,7 @@ end
 
 # Per-type code interfaces (bang variants; create/list arity 2, update/publish
 # arity 3: record, params, opts). `post` is a core type on KilnCMS.CMS; the
-# four acupuncture types live on the overlay's Acupuncture.Catalog domain.
+# four acupuncture types live on the overlay's Example.Catalog domain.
 interfaces =
   Map.new(~w(post condition team_member testimonial faq), fn type ->
     plural = if type == "faq", do: "faqs", else: "#{type}s"
