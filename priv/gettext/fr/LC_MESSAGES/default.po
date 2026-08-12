@@ -6023,6 +6023,11 @@ msgstr "Les tâches ouvertes d’un contenu sont marquées comme terminées lors
 msgid "Open tasks stay open when their content publishes. Individual tasks can opt in."
 msgstr "Les tâches ouvertes restent ouvertes lors de la publication de leur contenu. Chaque tâche peut choisir l’inverse."
 
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Open the editor's Compliance panel"
+msgstr "Ouvrir le panneau Conformité de l’éditeur"
+
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #: lib/kiln_cms_web/live/presentation_live.ex
 #, elixir-autogen, elixir-format

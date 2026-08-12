@@ -12,9 +12,13 @@ defmodule KilnCMSWeb.EditorLive do
   alias KilnCMS.Accounts.Scoping
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.Compliance
+  alias KilnCMS.Compliance.Settings
   alias KilnCMS.I18n
   alias KilnCMS.Slug
   alias KilnCMSWeb.Params
+
+  import KilnCMSWeb.ComplianceComponents, only: [compliance_grade_badge: 1]
 
   @statuses ~w(all draft in_review published archived)
 
@@ -48,6 +52,12 @@ defmodule KilnCMSWeb.EditorLive do
   # Workflow/destroy actions re-fetch the full record by id before acting.
   @list_fields [:id, :title, :slug, :state, :updated_at, :scheduled_at, :unpublish_at]
 
+  # Only pulled for `in_review` (see `page_query/3`): the fields the compliance
+  # badge scans (#856). `search_text` is the denormalized plain-text body — a
+  # column read, not a `blocks` union cast — so this stays cheap relative to
+  # what the full advisory panel does per keystroke in the editor.
+  @compliance_fields [:search_text, :seo_title, :seo_description, :locale, :org_id]
+
   # (Re)load the first page under the active status/search filter.
   defp load_items(socket) do
     {items, more?} = fetch_page(socket, nil)
@@ -55,7 +65,68 @@ defmodule KilnCMSWeb.EditorLive do
     socket
     |> assign(:items, items)
     |> assign(:more?, more?)
+    |> assign(:compliance_settings, compliance_settings(socket, items))
     |> assign_translated()
+  end
+
+  # Resolved once per load, not per row — `Settings.for_org/1` is cached, but a
+  # cache read per row on a 50-row page is still 50 reads for one answer. Only
+  # resolved for the status where it is used: the other filters never render
+  # the badge, and `Settings.for_org/1` is a per-org (not per-request) cache,
+  # so this is a real (if small) avoided cost, not just an unread assign.
+  defp compliance_settings(socket, items) do
+    if socket.assigns.status == "in_review" and items != [],
+      do: Settings.for_org(socket.assigns.current_org),
+      else: nil
+  end
+
+  # `nil` (no badge) unless compliance is on for this org AND the document's
+  # locale is one the shipped English pack can judge — the same `:n_a` posture
+  # `KilnCMS.Compliance.Checks.Claims` takes: a document nobody scanned must
+  # not render as clean.
+  #
+  # Scans the SAME fields the publish gate does
+  # (`KilnCMS.CMS.Validations.ComplianceClaims`) — body text (via the
+  # denormalized `search_text` column rather than re-deriving it from `blocks`,
+  # since this is an informational list badge, not the gate itself), title,
+  # SEO title, SEO description — so a phrase this badge shows and one the gate
+  # would refuse are always the same phrase. The gate remains the actual
+  # authority; this is visibility into what it will say.
+  defp compliance_grade(_record, nil), do: nil
+
+  defp compliance_grade(record, %Settings{enabled?: true} = settings) do
+    if Settings.judgeable_locale?(settings, record.locale || I18n.default_locale()) do
+      # Each field scanned on its own, never concatenated — joining them first
+      # invents claims that are not in the document (see docs/compliance.md,
+      # "The publish gate": a body ending "…at your own risk" beside a title
+      # starting "Free…" would report "risk free" across the seam).
+      [record.search_text, record.title, record.seo_title, record.seo_description]
+      |> Enum.map(&(&1 |> to_string() |> Compliance.scan(settings.rules)))
+      |> Enum.reduce(%{}, &Compliance.merge/2)
+      |> grade_from_matches(settings.rules)
+    end
+  end
+
+  defp compliance_grade(_record, _settings), do: nil
+
+  # Same rule `Kiln.Advisory.Report`'s (private) grader uses — kept in sync by
+  # hand since this list badge computes its own lightweight report rather than
+  # running the full advisory pipeline per row.
+  defp grade_from_matches(matches, rules) do
+    severities =
+      for {code, phrases} <- matches, phrases != [], do: Compliance.severity(code, rules)
+
+    errors = Enum.count(severities, &(&1 == :error))
+    warnings = Enum.count(severities, &(&1 == :warning))
+
+    grade =
+      cond do
+        errors > 0 or warnings >= 3 -> :poor
+        warnings > 0 -> :ok
+        true -> :good
+      end
+
+    %{grade: grade, total: 0, passed: 0, findings: []}
   end
 
   # One page of `{kind, record}` tuples merged across every content type,
@@ -90,13 +161,18 @@ defmodule KilnCMSWeb.EditorLive do
   end
 
   defp page_query(status, q, cursor) do
+    # Widened only for `in_review` (#856): the other filters never render the
+    # compliance badge, so they keep the narrower select the comment on
+    # `@list_fields` explains the cost of.
+    select = if status == "in_review", do: @list_fields ++ @compliance_fields, else: @list_fields
+
     [
       status != "all" && {:filter, [state: String.to_existing_atom(status)]},
       q != "" && {:filter, search_filter(q)},
       cursor && {:filter, expr(updated_at < ^cursor)}
     ]
     |> Enum.filter(&is_tuple/1)
-    |> Kernel.++(select: @list_fields, sort: [updated_at: :desc], limit: @page_size)
+    |> Kernel.++(select: select, sort: [updated_at: :desc], limit: @page_size)
   end
 
   # Case-insensitive title/slug match; %, _ and \ in the input match literally.
@@ -885,6 +961,25 @@ defmodule KilnCMSWeb.EditorLive do
               <p class="truncate text-xs text-base-content/70">/{record.slug}</p>
             </div>
             <.state_badge state={record.state} />
+            <%!-- The approving admin sees the publish gate but never the
+                  claim panel — it lives in the editor, and the approver acts
+                  from this list (#856). A click-through to the editor rather
+                  than a flat badge: seeing "poor" here and still having to
+                  open the editor to find out WHAT matched is the same dead
+                  end the flash refusal already is. `nil` (no badge) when
+                  compliance is off for this org or the document's locale
+                  isn't one the shipped pack can judge — see
+                  `compliance_grade/2`. Computed once into `compliance` rather
+                  than called twice (`:if` and the badge attr), since it scans
+                  the document's text on every call. --%>
+            <% compliance = compliance_grade(record, @compliance_settings) %>
+            <.link
+              :if={compliance}
+              navigate={edit_path(kind, record.id)}
+              title={gettext("Open the editor's Compliance panel")}
+            >
+              <.compliance_grade_badge report={compliance} />
+            </.link>
             <span
               :if={record.scheduled_at && record.state in [:draft, :in_review]}
               class="flex items-center gap-1 text-xs text-base-content/60"

@@ -271,6 +271,38 @@ scans, even for a metadata-only PATCH. It diffs to zero new offenders and
 passes, but it is not free. The gate is opt-in, so this is a cost an operator
 asked for; it is the reason not to switch it on speculatively.
 
+## The in-review badge (#856)
+
+The panel is in the editor; approving someone else's submission happens from
+the content list at `/editor?status=in_review`. Before this, an admin with
+`require_at_publish` on got the gate's refusal with no panel, no link, and no
+way to see the finding without opening the editor — the person doing the
+compliance review was exactly the person the feature didn't reach.
+
+`/editor?status=in_review` now shows a grade badge (Good / Needs work / Poor)
+on each row, linking into that document's editor. It is:
+
+- **Scoped to `in_review` only.** The other status filters don't render it —
+  seeing a claim on a *draft* is the author's business in the editor, not the
+  list's.
+- **Off with the feature, and per document locale.** `nil` (no badge) when
+  compliance is off for the org, or when the document's locale isn't one the
+  shipped English pack can judge — the same `:n_a` posture `Checks.Claims`
+  takes. A document nobody scanned must not render as clean.
+- **Scanned the same way the gate is** — body text, title, SEO title, SEO
+  description, each field separately and merged, never concatenated (the same
+  reasoning the publish gate section above gives) — so a phrase this badge
+  shows and one the gate would refuse are always the same phrase.
+- **Read from the denormalized `search_text` column, not `blocks`.** The gate
+  itself re-derives body text from the block tree because it runs inside the
+  write it is judging; the badge is informational and reads the same
+  plain-text projection full-text search already uses, so a 50-row page costs
+  a handful of cheap regex passes over short columns rather than casting the
+  block tree for every row.
+- **Not the gate.** `require_at_publish` still decides whether a claim blocks
+  going live; this is visibility into what that gate will say, so the person
+  who can act on it sees it before clicking Approve instead of after.
+
 ## Performance
 
 Advisory checks re-run on **every keystroke**, so scanning a whole document for
@@ -338,14 +370,7 @@ from an uncited one, and does not link a finding to the block it came from —
 findings are document-level and quote the phrase instead. Those are worthwhile
 and were left out on purpose rather than done badly.
 
-Two gaps are worth naming because the issue's wording implies them:
-
-**The approver doesn't see the panel.** #377 says "in the review workflow", and
-in this codebase that means `draft → in_review → published` with an **admin**
-approving someone else's submission from the content list. The panel is in the
-editor; the approver's list has no compliance column. With the gate on, an
-admin clicking approve gets the refusal without ever having seen the finding.
-Tracked separately.
+One gap is worth naming because the issue's wording implies it:
 
 **A site's vocabulary is one flat list at one severity.** `/editor/compliance`
 writes every phrase a site adds into a single `:site_claim` rule. A publication
