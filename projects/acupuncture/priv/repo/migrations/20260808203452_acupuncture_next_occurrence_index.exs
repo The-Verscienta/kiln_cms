@@ -1,4 +1,4 @@
-defmodule KilnCMS.Repo.Migrations.NextOccurrenceIndex do
+defmodule KilnCMS.Repo.Migrations.AcupunctureNextOccurrenceIndex do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 

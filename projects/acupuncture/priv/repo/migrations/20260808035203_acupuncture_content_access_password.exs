@@ -1,4 +1,4 @@
-defmodule KilnCMS.Repo.Migrations.ContentAccessPassword do
+defmodule KilnCMS.Repo.Migrations.AcupunctureContentAccessPassword do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 
