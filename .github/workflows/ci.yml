@@ -164,7 +164,10 @@ jobs:
       # so on stderr, so this degrades visibly rather than silently passing.
       # The line below reports it in the job log too, where someone will
       # actually see it. The RELEASE image is Debian trixie (qpdf 12.2.0) and
-      # is not affected either way.
+      # is not affected either way. Whatever this job excludes, the
+      # `qpdf_metadata_stripping` job below still runs on a trixie-based
+      # container regardless of where `ubuntu-latest` points, so the `:qpdf`
+      # tests never go fully dark (#907).
       - name: Install qpdf (PDF metadata stripping tests)
         run: |
           sudo apt-get update -qq
@@ -712,3 +715,116 @@ jobs:
           # job, which reads as an unexplained slow run on an unrelated PR.
           cache-from: type=gha
           cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max' || '' }}
+
+  # #907: `:qpdf` tests — the ones that prove an uploaded PDF actually loses
+  # its `/Info` dictionary and XMP packet (#807) — are excluded from the
+  # `build` job above whenever the runner's qpdf predates 11.10 (see the
+  # "Install qpdf" step's comment there). `ubuntu-latest` currently packages
+  # 11.9.0 — one minor short — so this privacy control has had no CI coverage
+  # at all. Rather than move the WHOLE suite onto a newer/untested runner for
+  # one feature, this is a small, separate job that runs only the qpdf tests
+  # inside `debian:trixie-slim`, the exact base the release image's runner
+  # stage already uses successfully (qpdf 12.2.0 there, confirmed in the
+  # Dockerfile's own comments).
+  #
+  # `test/kiln_cms/document_processor_test.exs` is plain `ExUnit.Case,
+  # async: true` — no `KilnCMS.DataCase`, no Ecto sandbox — so it never issues
+  # a query itself. `mix test` still needs a Postgres service regardless:
+  # `test_helper.exs` runs before any test file is even selected, and its
+  # `ash.setup`-equivalent database-create step blocks on actually reaching
+  # one — confirmed the hard way, with this job failing
+  # `The database for KilnCMS.Repo couldn't be created: killed` against no
+  # service at all.
+  #
+  # The hostname differs from `build` above, though: `config/test.exs`
+  # defaults to the `POSTGRES_HOST` env var (already used the same way by
+  # `config/e2e.exs`), falling back to `"localhost"` — which only reaches a
+  # service container on a NON-containerized job. This job's steps run
+  # inside `debian:trixie-slim`, where a service is reachable by its service
+  # name instead — set below.
+  qpdf_metadata_stripping:
+    name: PDF metadata stripping (qpdf, Debian trixie)
+    runs-on: ubuntu-latest
+    container:
+      image: debian:trixie-slim
+
+    services:
+      postgres:
+        # Same image/reasoning as `build`'s service: `pgvector/pgvector:pg16`,
+        # not plain postgres, so `ash.setup`/`mix test` don't fail on a
+        # missing `vector` extension.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      MIX_ENV: test
+      POSTGRES_HOST: postgres
+      # `erlef/setup-beam` picks its precompiled OTP/Elixir build from
+      # `ImageOS`, which the runner's own setup scripts normally export — but
+      # those scripts never run inside a `container:`, so here it's unset and
+      # the action has nothing to match a build against. Debian trixie's
+      # glibc is compatible with Ubuntu 24.04's, so `ubuntu24` is the closest
+      # of the action's supported targets.
+      ImageOS: ubuntu24
+
+    # NOT a required check, same posture and reasoning as `image` above: this
+    # is the first time this project has run `erlef/setup-beam` inside a
+    # non-Ubuntu container, and a required check that can fail for reasons
+    # unrelated to the change under test (a container/action incompatibility,
+    # not a qpdf regression) blocks every merge until it's fixed. Promote it
+    # by adding the context `PDF metadata stripping (qpdf, Debian trixie)` to
+    # the "Require CI on main" ruleset once its real pass rate is known.
+    steps:
+      # `actions/checkout` needs `git`; qpdf is the thing under test.
+      # `ca-certificates` so the later `mix deps.get`/GitHub NIF fetch (for
+      # `tokenizers`, the same flake vector `image` above documents) can
+      # actually verify TLS. `unzip` isn't in `debian:trixie-slim`, but
+      # `erlef/setup-beam` shells out to it to extract the Elixir archive it
+      # downloads. `build-essential` (make + a C compiler) is what a hosted
+      # runner image ships that a bare container doesn't, and `mix compile`
+      # needs it for every NIF dependency in the tree, not just qpdf's own
+      # code path — `bcrypt_elixir` is the one that happens to compile first.
+      - name: Install git, qpdf, unzip, build-essential and CA certificates
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends \
+            git qpdf unzip build-essential ca-certificates
+          qpdf --version | head -1
+          qpdf --help=all 2>&1 | grep -q -- '--remove-info' || {
+            echo "::error::qpdf $(qpdf --version | head -1) still predates 11.10 on" \
+                 "debian:trixie-slim — the base image this job relies on has changed."
+            exit 1
+          }
+
+      - uses: actions/checkout@v5
+
+      - name: Set up Elixir/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          # Reads .tool-versions, same as `build` (#600) — one source of truth.
+          version-file: .tool-versions
+          version-type: strict
+
+      - name: Cache deps and _build
+        uses: actions/cache@v5
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-trixie-mix-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-trixie-mix-${{ hashFiles('.tool-versions') }}-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Run the qpdf-tagged tests
+        run: mix test test/kiln_cms/document_processor_test.exs --only qpdf
