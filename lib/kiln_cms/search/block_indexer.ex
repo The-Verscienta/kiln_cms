@@ -313,7 +313,7 @@ defmodule KilnCMS.Search.BlockIndexer do
       audience == :public -> []
       audience == "public" -> []
       is_atom(audience) -> [audience]
-      is_binary(audience) -> [String.to_atom(audience)]
+      is_binary(audience) -> [String.to_existing_atom(audience)]
       true -> []
     end
   end
