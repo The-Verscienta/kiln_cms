@@ -97,6 +97,73 @@ defmodule KilnCMSWeb.ContentEditorTaskAssignmentTest do
     assert html =~ "phx-click=\"task_assign_submit\""
   end
 
+  # #817 (follow-up to #501): closing the loop between "this needs review" and
+  # "here's who owns reviewing it" — the Assignment panel is one click away
+  # already, but submitting for review didn't surface it as part of that flow.
+  describe "the reviewer-assignment prompt on submit-for-review (#817)" do
+    test "submitting for review opens the Settings tab and the Assignment panel", %{conn: conn} do
+      editor = authed_user(:editor)
+      page = page!(editor)
+
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{page.id}")
+      refute html =~ "Assign to…"
+
+      html = lv |> element("button", "Submit for review") |> render_click()
+
+      assert CMS.get_page!(page.id, authorize?: false).state == :in_review
+      assert html =~ "Assign to…"
+      assert html =~ "phx-click=\"task_assign_submit\""
+    end
+
+    test "the due date is prefilled a few days out, not left blank", %{conn: conn} do
+      editor = authed_user(:editor)
+      page = page!(editor)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{page.id}")
+      html = lv |> element("button", "Submit for review") |> render_click()
+
+      suggested = Date.utc_today() |> Date.add(3) |> Date.to_iso8601()
+      assert html =~ ~s(value="#{suggested}")
+    end
+
+    test "the prompt is dismissable and assigns no one on its own", %{conn: conn} do
+      editor = authed_user(:editor)
+      page = page!(editor)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{page.id}")
+      lv |> element("button", "Submit for review") |> render_click()
+
+      html = lv |> element("button", "Cancel") |> render_click()
+      refute html =~ "phx-click=\"task_assign_submit\""
+      assert CMS.list_tasks_for!("page", page.id, actor: editor) == []
+    end
+
+    test "accepting the prompt assigns a reviewer through the normal path", %{conn: conn} do
+      editor = authed_user(:editor)
+      assignee = authed_user(:editor)
+      page = page!(editor)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{page.id}")
+      lv |> element("button", "Submit for review") |> render_click()
+
+      render_change(lv, "task_draft_change", %{"task_assignee_id" => assignee.id})
+      render_click(lv, "task_assign_submit")
+
+      assert [task] = CMS.list_tasks_for!("page", page.id, actor: editor)
+      assert task.assignee_id == assignee.id
+    end
+
+    test "a different workflow action does not open the prompt", %{conn: conn} do
+      admin = authed_user(:admin)
+      page = page!(admin)
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/content/page/#{page.id}")
+
+      html = lv |> element("button", "Publish") |> render_click()
+      refute html =~ "Assign to…"
+    end
+  end
+
   # The per-task override (#818). Three values, not two: the blank option is
   # "whatever the site is set to", which has to survive as `nil` rather than
   # being dropped from the attrs or coerced to a boolean.
