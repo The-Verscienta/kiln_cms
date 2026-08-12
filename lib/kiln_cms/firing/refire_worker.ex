@@ -57,6 +57,7 @@ defmodule KilnCMS.Firing.RefireWorker do
       {:ok, document} ->
         Engine.fire(document)
         bust_delivery_cache(org_id, document)
+        enqueue_indexing(org_id, type, id, document)
         References.invalidate(org_id, type, id, visited)
 
       # Settled-gone, or a type no compiled resource answers to. A wave reaches
@@ -80,5 +81,25 @@ defmodule KilnCMS.Firing.RefireWorker do
   # name rather than `"entry"`.
   defp bust_delivery_cache(org_id, document) do
     Cache.bust(org_id, Engine.public_type(document), document.slug)
+  end
+
+  defp enqueue_indexing(org_id, type, id, document) do
+    if KilnCMS.Search.semantic?() do
+      %{"org_id" => org_id, "type" => to_string(type), "id" => id}
+      |> KilnCMS.Search.BlockEmbeddingWorker.new()
+      |> Oban.insert()
+    end
+
+    if KilnCMS.Search.Meilisearch.enabled?() do
+      %{"org_id" => org_id, "op" => meili_op(document), "type" => to_string(type), "id" => id}
+      |> KilnCMS.Search.MeilisearchWorker.new()
+      |> Oban.insert()
+    end
+
+    :ok
+  end
+
+  defp meili_op(document) do
+    if KilnCMS.CMS.Audiences.public_to_anonymous?(document), do: "upsert", else: "delete"
   end
 end

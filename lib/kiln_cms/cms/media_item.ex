@@ -306,9 +306,48 @@ defmodule KilnCMS.CMS.MediaItem do
 
   # A media write can invalidate any page that embeds this item's enriched media
   # (the delivery cache stores resolved srcset/alt/dimensions), so bust the
-  # published-content cache on every create/update/destroy.
+  # published-content cache when a rendered-media attribute changes — alt text,
+  # dimensions, variants, storage location, focal point, decorative flag,
+  # content type or audience — or when the item appears/disappears (create/
+  # destroy/purge). Attribute-only writes like `download_count` must not keep
+  # the cache cold on every download (#1137).
   changes do
-    change KilnCMS.CMS.Changes.BustMediaCache, on: [:create, :update, :destroy]
+    # `on:` filters by action TYPE, not name — `:purge` (below) is a `:destroy`
+    # action (`destroy :purge do`), so `:destroy` here already covers it.
+    change KilnCMS.CMS.Changes.BustMediaCache, on: [:create, :destroy]
+
+    # `where:` wraps a list of validations (AND-combined) or a plain 2-arity
+    # function — there is no OR-composable `changing/1` expression, so this is
+    # the function form rather than `where: changing(:a) or changing(:b)`. The
+    # function is a VALIDATION, not a predicate: it must return `:ok` for the
+    # change to apply and `{:error, _}` (any reason) to skip it.
+    change KilnCMS.CMS.Changes.BustMediaCache,
+      on: [:update],
+      where: fn changeset, _context ->
+        rendered_media_field_changed? =
+          Enum.any?(
+            [
+              :alt,
+              :width,
+              :height,
+              :variants,
+              :variant_failures,
+              :storage_key,
+              :url,
+              :focal_x,
+              :focal_y,
+              :audience,
+              :decorative,
+              :content_type
+            ],
+            &Ash.Changeset.changing_attribute?(changeset, &1)
+          )
+
+        if rendered_media_field_changed?,
+          do: :ok,
+          else: {:error, "no rendered-media field changed"}
+      end
+
     # Not atomic: relocates the blob between public/private storage — see the
     # module (#481).
     change KilnCMS.CMS.Changes.MigrateMediaStorage, on: [:update]
