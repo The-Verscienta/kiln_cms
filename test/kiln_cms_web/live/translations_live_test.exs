@@ -224,4 +224,94 @@ defmodule KilnCMSWeb.TranslationsLiveTest do
       assert html =~ "Outdated"
     end
   end
+
+  defp authed_user(role) do
+    email = "trl-#{System.unique_integer([:positive])}@example.com"
+
+    Ash.Seed.seed!(User, %{
+      email: email,
+      hashed_password: Bcrypt.hash_pwd_salt(@password),
+      confirmed_at: DateTime.utc_now(),
+      role: role
+    })
+
+    strategy = AshAuthentication.Info.strategy!(User, :password)
+
+    {:ok, user} =
+      AshAuthentication.Strategy.action(strategy, :sign_in, %{
+        "email" => email,
+        "password" => @password
+      })
+
+    user
+  end
+
+  # #1156. The coverage dashboard used to offer `+ Missing` on every row,
+  # including types the actor may not author — a dead button whose only
+  # outcome was the create-policy flash. Rows stay (read-only coverage);
+  # the create chip and forged events must not.
+  describe "scoped editor (#1156)" do
+    setup %{conn: conn} do
+      admin = authed_admin()
+
+      page =
+        CMS.create_page!(%{title: "Off-limits page", slug: slug(), locale: "en"}, actor: admin)
+
+      post =
+        CMS.create_post!(%{title: "In-scope post", slug: slug(), locale: "en"}, actor: admin)
+
+      scoped = authed_user(:editor)
+
+      {:ok, scoped} =
+        KilnCMS.Accounts.manage_user_access(scoped, %{editable_types: ["post"]}, actor: admin)
+
+      {:ok, lv, _html} = conn |> log_in(scoped) |> live(~p"/editor/translations")
+
+      %{lv: lv, page: page, post: post, scoped: scoped, admin: admin}
+    end
+
+    test "keeps the unauthorable row but offers no create chip", %{lv: lv, page: page} do
+      assert has_element?(lv, ~s(#row-page-#{page.id}))
+
+      refute has_element?(
+               lv,
+               ~s(button[phx-click="create_translation"][phx-value-id="#{page.id}"])
+             )
+    end
+
+    test "still offers create on types the editor may author", %{lv: lv, post: post} do
+      assert has_element?(
+               lv,
+               ~s(button[phx-click="create_translation"][phx-value-id="#{post.id}"][phx-value-locale="fr"])
+             )
+    end
+
+    test "a forged create_translation for an unauthored type is refused", %{
+      lv: lv,
+      page: page,
+      scoped: scoped,
+      admin: admin
+    } do
+      render_click(lv, "create_translation", %{
+        "kind" => "page",
+        "id" => page.id,
+        "locale" => "fr"
+      })
+
+      refute has_element?(lv, "#flash-error")
+
+      assert [] =
+               CMS.list_pages!(
+                 actor: admin,
+                 query: [filter: [slug: page.slug, locale: "fr"]]
+               )
+
+      # Actor still cannot create either — the gate did not widen policy.
+      assert [] =
+               CMS.list_pages!(
+                 actor: scoped,
+                 query: [filter: [slug: page.slug, locale: "fr"]]
+               )
+    end
+  end
 end

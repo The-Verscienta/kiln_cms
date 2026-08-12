@@ -144,6 +144,7 @@ defmodule KilnCMS.SchemaExportArtifactTest do
       "type" => "page",
       "title" => "T",
       "slug" => "s",
+      "locale" => "en",
       "custom_fields" => %{},
       "blocks" => [%{"_type" => "heading", "text" => 7, "level" => "big"}]
     }

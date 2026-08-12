@@ -208,7 +208,12 @@
         encodeURIComponent(p.type) +
         "/" +
         encodeURIComponent(p.slug);
-      if (p.block) url += "?focus=" + encodeURIComponent(p.block);
+      // Locale is part of the document identity (#1104). Absent → console falls
+      // back to the default locale.
+      var qs = [];
+      if (p.locale) qs.push("locale=" + encodeURIComponent(p.locale));
+      if (p.block) qs.push("focus=" + encodeURIComponent(p.block));
+      if (qs.length) url += "?" + qs.join("&");
     }
     // In a Kiln Presentation-style parent frame, hand off via postMessage;
     // otherwise open the editor directly. Target the Kiln host origin (the
@@ -278,13 +283,14 @@
   }
 
   // Fetch the annotated preview JSON for a document (draft-visible with the key).
-  function fetchPreview(type, slug) {
+  function fetchPreview(type, slug, locale) {
     var url =
       config.host.replace(/\/$/, "") +
       "/api/visual-editing/" +
       encodeURIComponent(type) +
       "/" +
       encodeURIComponent(slug);
+    if (locale) url += "?locale=" + encodeURIComponent(locale);
     var headers = {};
     if (config.apiKey) headers["authorization"] = "Bearer " + config.apiKey;
     return fetch(url, { headers: headers, credentials: "omit" }).then(function (r) {

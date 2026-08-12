@@ -69,7 +69,13 @@ defmodule KilnCMSWeb.VisualEditingControllerTest do
     assert id == post.id
     # Title carries the document address and cleans back to the visible text.
     assert Stega.decode(title) ==
-             %{"type" => "post", "id" => post.id, "slug" => post.slug, "field" => "title"}
+             %{
+               "type" => "post",
+               "id" => post.id,
+               "slug" => post.slug,
+               "locale" => post.locale,
+               "field" => "title"
+             }
 
     assert Stega.clean(title) == "Live title"
 
@@ -82,6 +88,7 @@ defmodule KilnCMSWeb.VisualEditingControllerTest do
                "type" => "post",
                "id" => post.id,
                "slug" => post.slug,
+               "locale" => post.locale,
                "field" => "text",
                "block" => block_id
              }
@@ -113,7 +120,13 @@ defmodule KilnCMSWeb.VisualEditingControllerTest do
     assert Stega.clean(byline) == "By A. Author"
 
     assert Stega.decode(byline) ==
-             %{"type" => "post", "id" => post.id, "slug" => post.slug, "field" => "byline"}
+             %{
+               "type" => "post",
+               "id" => post.id,
+               "slug" => post.slug,
+               "locale" => post.locale,
+               "field" => "byline"
+             }
   end
 
   test "an anonymous caller cannot see a draft (404), only published", %{conn: conn} do

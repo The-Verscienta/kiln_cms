@@ -10,10 +10,12 @@ defmodule KilnCMS.Cache do
   In keeping with the project's minimal-ops goal this is in-process only (no
   Redis/Dragonfly); a shared multi-node cache is deferred until measured (D2).
   A few keys are the exception to what that costs on a cluster —
-  `bust_code_injection/1`, `bust_branding/1` and `bust_feed_policy/1` invalidate
-  on every node via `KilnCMS.Cache.ClusterBust`, because an operator deleting an
-  executing script, or an admin turning off full-text syndication (#719), should
-  not have to wait out a TTL on the nodes they did not happen to hit (#739).
+  `bust_code_injection/1`, `bust_branding/1`, `bust_feed_policy/1` and
+  `bump_head_generation/1` reach every node via `KilnCMS.Cache.ClusterBust`,
+  because an operator deleting an executing script, an admin turning off
+  full-text syndication (#719), or a `<head>` settings save that must move the
+  delivery ETag (#1079) should not have to wait out a TTL on the nodes they did
+  not happen to hit (#739).
 
   Set `config :kiln_cms, KilnCMS.Cache, enabled: false` to bypass the cache
   (every read hits the source) without removing the supervised process.
@@ -235,6 +237,54 @@ defmodule KilnCMS.Cache do
   @spec bust_branding(Ash.UUID.t()) :: :ok
   def bust_branding(org_id) do
     if enabled?(), do: ClusterBust.broadcast([branding_key(org_id)])
+    :ok
+  end
+
+  @doc """
+  Cache key for a site's delivery-`<head>` generation token (#1079).
+
+  Folded into the public HTML ETag so a settings write that changes feed
+  autodiscovery, branding, code injection, or type-driven calendar links moves
+  the validator even when no content row changed. Without it a browser holding
+  `If-None-Match` keeps a 304 body whose `<link rel="alternate">` still points
+  at a feed that now 404s.
+  """
+  @spec head_generation_key(Ash.UUID.t()) :: String.t()
+  def head_generation_key(org_id), do: "head_generation:#{org_id}"
+
+  @doc """
+  The current head-generation token for `org_id`, or `"0"` when nothing has
+  bumped it yet. Stable across requests until `bump_head_generation/1`.
+  """
+  @spec head_generation(Ash.UUID.t()) :: String.t()
+  def head_generation(org_id) do
+    if enabled?() do
+      case Cachex.get(@cache, head_generation_key(org_id)) do
+        {:ok, value} when is_binary(value) and value != "" -> value
+        _ -> "0"
+      end
+    else
+      "0"
+    end
+  end
+
+  @doc """
+  Mint a new head-generation token for `org_id` and put it on every node.
+
+  Called from the same settings writes that already bust layout-facing caches
+  (`BustBranding`, `BustCodeInjection`, `BustFeedSettings`, `BustTypeRegistry`).
+  A delete-only bust would be wrong here: every miss would fall back to `"0"`,
+  which is the ETag the page carried *before* the write.
+  """
+  @spec bump_head_generation(Ash.UUID.t()) :: :ok
+  def bump_head_generation(org_id) do
+    if enabled?() do
+      token =
+        :crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower)
+
+      ClusterBust.broadcast_put([{head_generation_key(org_id), token}])
+    end
+
     :ok
   end
 

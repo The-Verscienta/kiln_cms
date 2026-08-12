@@ -44,6 +44,9 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
   # keyspace, which has no business happening with a Postgres transaction open.
   defp bust_feeds(_changeset, {:ok, record} = result) do
     KilnCMS.Cache.bust_all_feeds(record.org_id)
+    # Delivery ETag folds head generation (#1079): `has_published_feed` and
+    # event-shaped fields decide which alternate links the layout emits.
+    KilnCMS.Cache.bump_head_generation(record.org_id)
     result
   end
 

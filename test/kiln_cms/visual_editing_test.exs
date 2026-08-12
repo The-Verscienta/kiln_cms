@@ -92,6 +92,30 @@ defmodule KilnCMS.VisualEditingTest do
       assert heading["level"] == 2
     end
 
+    test "carries locale in the stega address when the artifact has one (#1104)" do
+      json = %{
+        "type" => "page",
+        "id" => "doc-fr",
+        "slug" => "about",
+        "locale" => "fr",
+        "title" => "À propos",
+        "blocks" => [%{"_type" => "heading", "_id" => "b1", "text" => "Titre", "level" => 2}]
+      }
+
+      out = VisualEditing.annotate(json)
+
+      assert Stega.decode(out["title"]) ==
+               %{
+                 "type" => "page",
+                 "id" => "doc-fr",
+                 "slug" => "about",
+                 "locale" => "fr",
+                 "field" => "title"
+               }
+
+      assert Stega.decode(hd(out["blocks"])["text"])["locale"] == "fr"
+    end
+
     test "recurses into nested container (columns) children" do
       json = %{
         "type" => "page",

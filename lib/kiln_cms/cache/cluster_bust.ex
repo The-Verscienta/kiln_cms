@@ -22,12 +22,15 @@ defmodule KilnCMS.Cache.ClusterBust do
   ## How
 
   A `Phoenix.PubSub` broadcast on `#{inspect(__MODULE__)}`'s topic, and a
-  subscriber on every node that deletes the named keys locally. The writing node
-  *also* deletes synchronously before broadcasting — see below.
+  subscriber on every node that deletes (or puts) the named keys locally. The
+  writing node *also* applies the change synchronously before broadcasting —
+  see below.
 
-  Two shapes: `broadcast/1` names the keys, `broadcast_prefix/1` names a rule
-  for finding them. The second exists because a prefix scan's matching keys
-  differ per node, so there is nothing for the writer to enumerate (#1078).
+  Three shapes: `broadcast/1` names keys to delete, `broadcast_put/1` names
+  key/value pairs to write (#1079), and `broadcast_prefix/1` names a rule for
+  finding keys to delete. The prefix shape exists because a prefix scan's
+  matching keys differ per node, so there is nothing for the writer to
+  enumerate (#1078).
 
   This is not a distributed cache and does not pretend to be. It is a best-effort
   "forget this key" signal: PubSub delivery is at-most-once, a node that is
@@ -71,6 +74,29 @@ defmodule KilnCMS.Cache.ClusterBust do
     Enum.each(keys, &Cachex.del(KilnCMS.Cache.cache_name(), &1))
 
     Phoenix.PubSub.broadcast(KilnCMS.PubSub, @topic, {:bust_keys, keys})
+
+    :ok
+  end
+
+  @doc """
+  Write `entries` on this node now, and ask every other node to do the same.
+
+  The sibling of `broadcast/1` for a value that must *move*, not merely vanish
+  (#1079). Delivery ETags fold a per-org head-generation token; a delete-only
+  bust would leave every node on the default `"0"` after a miss, which is the
+  same ETag the page carried *before* the settings write. Putting the new token
+  cluster-wide is what makes a conditional GET stop returning 304.
+
+  Same guarantees as `broadcast/1`: best effort, at-most-once, TTL is the
+  backstop. Receivers stay dumb — they put whatever pairs arrive.
+  """
+  @spec broadcast_put([{String.t(), term()}]) :: :ok
+  def broadcast_put(entries) when is_list(entries) do
+    Enum.each(entries, fn {key, value} ->
+      Cachex.put(KilnCMS.Cache.cache_name(), key, value)
+    end)
+
+    Phoenix.PubSub.broadcast(KilnCMS.PubSub, @topic, {:put_keys, entries})
 
     :ok
   end
@@ -143,6 +169,14 @@ defmodule KilnCMS.Cache.ClusterBust do
   @impl true
   def handle_info({:bust_keys, keys}, state) when is_list(keys) do
     Enum.each(keys, &Cachex.del(KilnCMS.Cache.cache_name(), &1))
+    {:noreply, state}
+  end
+
+  def handle_info({:put_keys, entries}, state) when is_list(entries) do
+    Enum.each(entries, fn {key, value} ->
+      Cachex.put(KilnCMS.Cache.cache_name(), key, value)
+    end)
+
     {:noreply, state}
   end
 
