@@ -230,6 +230,13 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **The content editor no longer loads every tag in the org on mount** (#1149).
+  Since #638 the picker submits add/remove diffs, so an unrendered tag is no
+  longer detached by omission — and the unpaginated mount load was the last
+  reason to keep the whole vocabulary in the socket. The window is now capped
+  (500, same as the media picker); the filter box is a server round-trip so
+  tags past the window stay reachable by name; every tag already on the
+  record is still unioned in so detach stays possible.
 - **A losing workflow-transition race now returns a 409, not an opaque 400
   plus a spammed stacktrace** (#923). #879's compare-and-swap on `publish`,
   `unpublish`, `submit_for_review`, `return_to_draft` and `archive` raises
