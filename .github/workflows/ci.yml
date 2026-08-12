@@ -729,25 +729,43 @@ jobs:
   #
   # `test/kiln_cms/document_processor_test.exs` is plain `ExUnit.Case,
   # async: true` — no `KilnCMS.DataCase`, no Ecto sandbox — so it never issues
-  # a query. No Postgres service here, unlike `build` above: `mix test` still
-  # boots the full OTP application first (`test_helper.exs` unconditionally
-  # calls `Ecto.Adapters.SQL.Sandbox.mode(KilnCMS.Repo, :manual)`), but
-  # `KilnCMS.Repo`'s connection pool starts and retries in the background
-  # rather than blocking boot on a reachable database — standard
-  # Postgrex/DBConnection behaviour, not something specific to this job. A
-  # Postgres service would also need a different hostname here than `build`
-  # uses (`config/test.exs` hardcodes `"localhost"`, which only reaches a
-  # service container on a NON-containerized job; this job's steps run
-  # inside `debian:trixie-slim`, where a service is reachable by its service
-  # name instead) — avoided entirely by not needing one.
+  # a query itself. `mix test` still needs a Postgres service regardless:
+  # `test_helper.exs` runs before any test file is even selected, and its
+  # `ash.setup`-equivalent database-create step blocks on actually reaching
+  # one — confirmed the hard way, with this job failing
+  # `The database for KilnCMS.Repo couldn't be created: killed` against no
+  # service at all.
+  #
+  # The hostname differs from `build` above, though: `config/test.exs`
+  # defaults to `POSTGRES_HOSTNAME` env, falling back to `"localhost"`, which
+  # only reaches a service container on a NON-containerized job. This job's
+  # steps run inside `debian:trixie-slim`, where a service is reachable by
+  # its service name instead — set below.
   qpdf_metadata_stripping:
     name: PDF metadata stripping (qpdf, Debian trixie)
     runs-on: ubuntu-latest
     container:
       image: debian:trixie-slim
 
+    services:
+      postgres:
+        # Same image/reasoning as `build`'s service: `pgvector/pgvector:pg16`,
+        # not plain postgres, so `ash.setup`/`mix test` don't fail on a
+        # missing `vector` extension.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     env:
       MIX_ENV: test
+      POSTGRES_HOSTNAME: postgres
       # `erlef/setup-beam` picks its precompiled OTP/Elixir build from
       # `ImageOS`, which the runner's own setup scripts normally export — but
       # those scripts never run inside a `container:`, so here it's unset and
