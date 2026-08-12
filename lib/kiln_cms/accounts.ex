@@ -186,7 +186,6 @@ defmodule KilnCMS.Accounts do
     case get_organization(default_org_id(), authorize?: false) do
       {:ok, %KilnCMS.Accounts.Organization{} = org} -> org
       {:ok, nil} -> nil
-      {:ok, []} -> nil
       {:error, error} -> if not_found?(error), do: nil, else: :error
       _ -> :error
     end

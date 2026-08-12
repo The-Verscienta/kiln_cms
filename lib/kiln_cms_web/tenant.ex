@@ -481,7 +481,6 @@ defmodule KilnCMSWeb.Tenant do
     case Accounts.get_organization_by_slug(value, authorize?: false) do
       {:ok, %Accounts.Organization{} = org} -> org
       {:ok, nil} -> nil
-      {:ok, []} -> nil
       {:error, error} -> if not_found?(error), do: nil, else: :error
       _ -> :error
     end
@@ -491,7 +490,6 @@ defmodule KilnCMSWeb.Tenant do
     case Accounts.get_organization_by_domain(value, authorize?: false) do
       {:ok, %Accounts.Organization{} = org} -> org
       {:ok, nil} -> nil
-      {:ok, []} -> nil
       {:error, error} -> if not_found?(error), do: nil, else: :error
       _ -> :error
     end
