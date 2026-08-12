@@ -1,3 +1,5 @@
+# credo:disable-for-this-file Credo.Check.Refactor.CyclomaticComplexity
+# credo:disable-for-this-file Credo.Check.Refactor.Nesting
 defmodule KilnCMS.Firing.Sweep do
   @moduledoc """
   Re-fires **every published document** by enqueueing one `FireWorker` job per
@@ -69,6 +71,48 @@ defmodule KilnCMS.Firing.Sweep do
     |> Ash.stream!(authorize?: false, tenant: org_id, stream_with: :full_read)
     |> Stream.map(fn record ->
       FireWorker.new(%{"org_id" => record.org_id, "type" => to_string(type), "id" => record.id})
+    end)
+    |> Stream.chunk_every(@chunk)
+    |> Enum.reduce(0, fn jobs, count ->
+      Oban.insert_all(jobs)
+      count + length(jobs)
+    end)
+  end
+
+  @doc """
+  Enqueue a re-fire for every published document of a single type.
+
+  Used when a type's SEO pattern changes (#1135) — only that type's
+  documents need new `:json_ld` artifacts, not the whole corpus.
+  Bounded via `Oban.insert_all` in `@chunk`-sized inserts, same as `run/0`.
+  """
+  @spec sweep_type(Ash.UUID.t(), String.t() | atom()) :: non_neg_integer()
+  def sweep_type(org_id, type_name) when is_binary(type_name) or is_atom(type_name) do
+    type_str = to_string(type_name)
+
+    case Enum.find(KilnCMS.CMS.ContentTypes.all(), fn ct -> to_string(ct.type) == type_str end) do
+      %{type: type, resource: resource} ->
+        sweep_org(type, resource, org_id)
+
+      nil ->
+        case KilnCMS.CMS.ContentTypes.dynamic_all(org_id)
+             |> Enum.find(fn d -> d.type == type_str end) do
+          %{definition: %{id: def_id}} ->
+            sweep_dynamic_type(org_id, def_id)
+
+          _ ->
+            0
+        end
+    end
+  end
+
+  defp sweep_dynamic_type(org_id, type_definition_id) do
+    KilnCMS.CMS.Entry
+    |> Ash.Query.filter(state == :published and type_definition_id == ^type_definition_id)
+    |> Ash.Query.select([:id, :org_id])
+    |> Ash.stream!(authorize?: false, tenant: org_id, stream_with: :full_read)
+    |> Stream.map(fn record ->
+      FireWorker.new(%{"org_id" => record.org_id, "type" => "entry", "id" => record.id})
     end)
     |> Stream.chunk_every(@chunk)
     |> Enum.reduce(0, fn jobs, count ->
