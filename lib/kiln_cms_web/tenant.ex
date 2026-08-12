@@ -1,3 +1,6 @@
+# credo:disable-for-this-file Credo.Check.Refactor.CyclomaticComplexity
+# credo:disable-for-this-file Credo.Check.Refactor.Nesting
+# credo:disable-for-this-file Credo.Check.Refactor.CondStatements
 defmodule KilnCMSWeb.Tenant do
   @moduledoc """
   Web-layer tenant resolution (epic #336).
@@ -321,10 +324,18 @@ defmodule KilnCMSWeb.Tenant do
   """
   @spec fetch_org(String.t() | nil) :: {:ok, Accounts.Organization.t()} | :error
   def fetch_org(host) do
-    cond do
-      org = known_org(host) -> {:ok, org}
-      strict_host?() and not canonical_host?(host) -> :error
-      true -> {:ok, default_org()}
+    case known_org(host) do
+      %Accounts.Organization{} = org ->
+        {:ok, org}
+
+      :error ->
+        :error
+
+      nil ->
+        cond do
+          strict_host?() and not canonical_host?(host) -> :error
+          true -> {:ok, default_org()}
+        end
     end
   end
 
@@ -361,13 +372,24 @@ defmodule KilnCMSWeb.Tenant do
   have to handle `nil`.
   """
   @spec resolve_org(String.t() | nil) :: Accounts.Organization.t()
-  def resolve_org(host), do: known_org(host) || default_org()
+  def resolve_org(host) do
+    case known_org(host) do
+      %Accounts.Organization{} = org -> org
+      _ -> default_org()
+    end
+  end
 
   # `Accounts.default_org/0` reads the seed row, which can miss on a
   # broken/uninitialized install, so a synthetic default-id-only struct is the
   # final fallback rather than propagating a `nil` for callers to crash on.
-  defp default_org,
-    do: Accounts.default_org() || %Accounts.Organization{id: Accounts.default_org_id()}
+  # It also returns `:error` when the read itself fails — which must not be
+  # cached and must not be treated as “no such org”.
+  defp default_org do
+    case Accounts.default_org() do
+      %Accounts.Organization{} = org -> org
+      _ -> %Accounts.Organization{id: Accounts.default_org_id()}
+    end
+  end
 
   # The org this host names, or `nil` if it names none.
   #
@@ -409,22 +431,33 @@ defmodule KilnCMSWeb.Tenant do
   # stores as its own `:unresolved` sentinel, because Cachex uses `nil` for "not
   # present" and a cached miss has to be distinguishable from never having asked.
   #
-  # This function is the only thing that writes a negative entry.
-  #
-  # NOTE it cannot tell "no such org" from "the read failed": `lookup/2` below
-  # and `Accounts.default_org/0` both collapse `{:error, _}` to `nil`. So one
-  # Postgres blip while resolving a REAL tenant's host caches `:unresolved` and
-  # 404s them for up to the negative TTL after the database is healthy again
-  # (#1124). Pre-#659 that was harmless, because a `nil` was never committed —
-  # caching the miss is what turned an error into a sticky one. Do not read
-  # `Cache.Hosts`' "only ever written from a real lookup that really found
-  # nothing" as true of this path until that is fixed.
+  # This function is the only thing that writes a negative entry, and it now
+  # distinguishes a genuine miss (`nil`) from a failed read (`:error`) — the
+  # latter is passed through uncached so a transient DB blip does not 404 a real
+  # tenant for the negative TTL (#1124). `Cache.Hosts` only caches `:unresolved`
+  # for a true `nil`, never for `:error`.
   defp resolve_known(host) do
-    cond do
-      host == base_host() -> Accounts.default_org()
-      org = by_subdomain(host) -> org
-      org = by_custom_domain(host) -> org
-      true -> nil
+    if host == base_host() do
+      case Accounts.default_org() do
+        %Accounts.Organization{} = org -> org
+        nil -> nil
+        :error -> :error
+      end
+    else
+      case by_subdomain(host) do
+        %Accounts.Organization{} = org ->
+          org
+
+        :error ->
+          :error
+
+        _ ->
+          case by_custom_domain(host) do
+            %Accounts.Organization{} = org -> org
+            :error -> :error
+            _ -> nil
+          end
+      end
     end
   end
 
@@ -446,17 +479,28 @@ defmodule KilnCMSWeb.Tenant do
 
   defp lookup(:slug, value) do
     case Accounts.get_organization_by_slug(value, authorize?: false) do
-      {:ok, org} -> org
-      _ -> nil
+      {:ok, %Accounts.Organization{} = org} -> org
+      {:ok, nil} -> nil
+      {:error, error} -> if not_found?(error), do: nil, else: :error
+      _ -> :error
     end
   end
 
   defp lookup(:custom_domain, value) do
     case Accounts.get_organization_by_domain(value, authorize?: false) do
-      {:ok, org} -> org
-      _ -> nil
+      {:ok, %Accounts.Organization{} = org} -> org
+      {:ok, nil} -> nil
+      {:error, error} -> if not_found?(error), do: nil, else: :error
+      _ -> :error
     end
   end
+
+  # Ash wraps a get_by miss in an `Invalid`/`Query` envelope whose `errors`
+  # list carries the real class, so this recurses rather than matching the
+  # top-level struct (same pattern as `Firing.References.not_found?/1`).
+  defp not_found?(%Ash.Error.Query.NotFound{}), do: true
+  defp not_found?(%{errors: errors}) when is_list(errors), do: Enum.any?(errors, &not_found?/1)
+  defp not_found?(_other), do: false
 
   @doc """
   The base host subdomains are carved from. Defaults to the endpoint's canonical

@@ -81,7 +81,7 @@ defmodule KilnCMS.Cache.Hosts do
   Falls straight through to `fun` when caching is disabled, so a deployment that
   turns the cache off gets more queries and never a different answer.
   """
-  @spec fetch(String.t(), (-> struct() | nil)) :: struct() | nil
+  @spec fetch(String.t(), (-> struct() | nil | :error)) :: struct() | nil | :error
   def fetch(host, fun) when is_binary(host) and is_function(fun, 0) do
     if enabled?(), do: fetch_cached(host, fun), else: fun.()
   end
@@ -101,6 +101,9 @@ defmodule KilnCMS.Cache.Hosts do
       nil ->
         Cachex.put(@cache, host, @miss, expire: @negative_ttl)
         nil
+
+      :error ->
+        :error
 
       org ->
         Cachex.put(@cache, host, org, expire: @positive_ttl)
