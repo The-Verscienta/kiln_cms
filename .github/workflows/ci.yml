@@ -769,12 +769,15 @@ jobs:
       # `tokenizers`, the same flake vector `image` above documents) can
       # actually verify TLS. `unzip` isn't in `debian:trixie-slim`, but
       # `erlef/setup-beam` shells out to it to extract the Elixir archive it
-      # downloads — a hosted runner image ships it preinstalled, so this is
-      # the first job here that has needed to say so explicitly.
-      - name: Install git, qpdf, unzip and CA certificates
+      # downloads. `build-essential` (make + a C compiler) is what a hosted
+      # runner image ships that a bare container doesn't, and `mix compile`
+      # needs it for every NIF dependency in the tree, not just qpdf's own
+      # code path — `bcrypt_elixir` is the one that happens to compile first.
+      - name: Install git, qpdf, unzip, build-essential and CA certificates
         run: |
           apt-get update -qq
-          apt-get install -y --no-install-recommends git qpdf unzip ca-certificates
+          apt-get install -y --no-install-recommends \
+            git qpdf unzip build-essential ca-certificates
           qpdf --version | head -1
           qpdf --help=all 2>&1 | grep -q -- '--remove-info' || {
             echo "::error::qpdf $(qpdf --version | head -1) still predates 11.10 on" \
