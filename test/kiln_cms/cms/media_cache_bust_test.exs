@@ -13,8 +13,8 @@ defmodule KilnCMS.CMS.MediaCacheBustTest do
   """
   use KilnCMS.DataCase, async: false
 
-  alias KilnCMS.CMS.MediaItem
   alias KilnCMS.Cache
+  alias KilnCMS.CMS.MediaItem
 
   defp media! do
     Ash.Seed.seed!(MediaItem, %{
