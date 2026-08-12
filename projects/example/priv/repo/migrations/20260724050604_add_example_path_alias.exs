@@ -1,4 +1,4 @@
-defmodule KilnCMS.Repo.Migrations.AddAcupuncturePathAlias do
+defmodule KilnCMS.Repo.Migrations.AddExamplePathAlias do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 
