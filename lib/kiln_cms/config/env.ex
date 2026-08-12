@@ -95,7 +95,7 @@ defmodule KilnCMS.Config.Env do
   than trusted to stay in sync by hand.
   """
 
-  require Logger
+  alias KilnCMS.Config.Report
 
   @true_values ~w(true 1 yes on)
   @false_values ~w(false 0 no off)
@@ -488,11 +488,10 @@ defmodule KilnCMS.Config.Env do
   `handle_event/3`, and a bare string log with no `:crash_reason` metadata is
   ignored even above that level. Raising the handler's level globally would send
   Sentry every warning the application emits — a much larger change than this
-  issue asked for — so the Sentry event is reported explicitly instead.
-
-  `Sentry.capture_message/2` no-ops when no DSN is configured
-  (Sentry's `send_event` guards on a configured DSN), so this
-  costs a deployment without Sentry nothing.
+  issue asked for — so the Sentry event is reported explicitly instead, via
+  `KilnCMS.Config.Report.warn/3` (#1126) — the same path every OTHER
+  post-boot configuration warning uses now, so this and they cannot drift on
+  *how* a warning reaches an operator, only on what each one says.
 
   Lives here rather than in `KilnCMS.Application` so the boot-time and
   after-boot wordings cannot drift, and so it is directly testable — an
@@ -502,8 +501,7 @@ defmodule KilnCMS.Config.Env do
   def replay_collected do
     for warning <- Application.get_env(:kiln_cms, :config_warnings, []) do
       {var, raw, expected} = normalize(warning)
-      Logger.warning(message_for(var, raw, expected))
-      report_to_sentry(var, raw, expected)
+      Report.warn(var, message_for(var, raw, expected), %{variable: var, value: raw})
     end
 
     :ok
@@ -541,22 +539,6 @@ defmodule KilnCMS.Config.Env do
 
   defp advice(:unknown),
     do: "The collected warning had an unrecognized shape; see KilnCMS.Config.Env."
-
-  # A stable message with the variable in `fingerprint`, so Sentry groups one
-  # issue per variable rather than one per deployment — an operator wants "this
-  # flag is still wrong", not a new issue each restart. The offending value goes
-  # in `extra` for the same reason it is quoted on stderr: it is the only thing
-  # they can act on. Safe to send — this module reads flags and counts only.
-  defp report_to_sentry(var, raw, expected) do
-    _ =
-      Sentry.capture_message(message_for(var, raw, expected),
-        level: :warning,
-        fingerprint: ["kiln-config-warning", var],
-        extra: %{variable: var, value: raw}
-      )
-
-    :ok
-  end
 
   # Prepend + reverse in `collected/0`, so a boot reading dozens of flags does
   # not walk the list once per warning.
