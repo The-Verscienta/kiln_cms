@@ -81,10 +81,10 @@ content types, a two-pass Directus ETL importer) — lives in the
 under `kiln/`, and was extracted from this repo where it originally landed
 (#236).
 
-One subproject is committed in-tree: `acupuncture/` (`Acupuncture.Catalog`,
+One subproject is committed in-tree: `example/` (`Example.Catalog`,
 the holistic-acupuncture site's four content types + Sanity import — see its
 README). It follows the same contract: the domain compiles but stays
 **dormant** — core config never registers it, its migrations and snapshots
-live under `acupuncture/priv/` (not the core `priv/`), and
+live under `example/priv/` (not the core `priv/`), and
 `Kiln.CoreAgnosticTest` enforces that no unregistered project's schema leaks
 into a core build. Activation is still deploy-side via `config/project.exs`.

@@ -11,7 +11,7 @@ defmodule KilnCMS.Repo.Migrations.AddMediaAudienceAndDownloads do
   newsletter_segments, billing_memberships) — a semantic no-op (identical
   constraint, same columns/on_delete) that only existed because the
   generator's snapshot hash for those resources doesn't agree with itself
-  between a core-only run and one with the acupuncture overlay activated.
+  between a core-only run and one with the example overlay activated.
   Regenerating them here pinned this branch to one context's hash and broke
   the other's `ash.codegen --check`. Left untouched (and their accompanying
   snapshot files removed from this branch), this migration is exactly what

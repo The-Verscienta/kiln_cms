@@ -30,7 +30,7 @@ people to pass the flag reflexively.
 ## Cutting a release
 
 1. **Confirm CI is green on `main`.** The `overlay_drift` job is the one that
-   matters most here: it builds the in-tree `acupuncture` overlay against the
+   matters most here: it builds the in-tree `example` overlay against the
    core, so a green run is evidence the overlay contract still holds.
 
 2. **Write the changelog entry.** Move `## [Unreleased]` items into a new

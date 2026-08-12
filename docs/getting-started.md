@@ -53,7 +53,7 @@ Once it boots, the surfaces worth opening:
   and the component kit.
 - **`lib/kiln/`** — the extension points a downstream project or plugin builds
   against: `Kiln.Plugin`, `Kiln.Block`, `Kiln.FieldType`, `Kiln.Advisory`.
-- **`projects/`** — downstream overlays. `projects/acupuncture/` is the worked
+- **`projects/`** — downstream overlays. `projects/example/` is the worked
   example.
 - **`lib/mix/tasks/`** — the operator surface (`mix kiln.*`).
 
