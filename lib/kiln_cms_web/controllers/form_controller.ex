@@ -17,6 +17,7 @@ defmodule KilnCMSWeb.FormController do
   use KilnCMSWeb, :controller
 
   alias KilnCMS.Forms
+  alias KilnCMS.Forms.EmbedPolicy
   alias KilnCMSWeb.ApiError
   alias KilnCMSWeb.Embed
   alias KilnCMSWeb.Params
@@ -65,7 +66,7 @@ defmodule KilnCMSWeb.FormController do
     # is a cross-origin frame and the policy is closed. Say so once, server-side,
     # so an operator whose embeds broke on upgrade finds out from their own logs
     # rather than from someone else's console (#650).
-    Embed.warn_if_framing_blocked(conn, form)
+    Embed.warn_if_framing_blocked(conn, EmbedPolicy.effective(form))
 
     case form do
       nil ->
@@ -86,8 +87,16 @@ defmodule KilnCMSWeb.FormController do
 
   # Replace the site-wide CSP (frame-ancestors 'self') with the embed policy.
   # `put_resp_header/3` overwrites, so this wins over `put_secure_browser_headers`.
+  #
+  # `EmbedPolicy.effective/1` resolves the org rung (#1131) before `Embed` ever
+  # sees the form — a form with no list of its own is handed to `Embed` already
+  # carrying its org's configured default, so `Embed` itself needs no change.
   defp put_embed_csp(conn, form) do
-    put_resp_header(conn, "content-security-policy", Embed.content_security_policy(form))
+    put_resp_header(
+      conn,
+      "content-security-policy",
+      Embed.content_security_policy(EmbedPolicy.effective(form))
+    )
   end
 
   # An embedded form marks its submission so the thank-you page keeps a framing-

@@ -593,6 +593,14 @@ defmodule KilnCMS.CMS do
       define :reset_form_spam_settings, action: :destroy
     end
 
+    # Per-org default for who may frame this org's forms (#1131), resolved
+    # between the form and the deployment by `KilnCMS.Forms.EmbedPolicy`.
+    resource KilnCMS.CMS.SiteEmbedSettings do
+      define :list_site_embed_settings, action: :read
+      define :save_site_embed_settings, action: :save
+      define :reset_site_embed_settings, action: :destroy
+    end
+
     # Per-org syndication policy (#719): which types appear in this site's feeds
     # and which carry their full body. Resolved through `KilnCMS.Feeds`.
     resource KilnCMS.CMS.FeedSettings do

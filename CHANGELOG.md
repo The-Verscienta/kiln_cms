@@ -132,6 +132,22 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **A per-org default for the form embed allowlist** (#1131). Follow-up to
+  #648, which put the `frame-ancestors` allowlist on the **form**: correct
+  per-partner, but every existing form — and every new one — was still
+  governed by the deployment-wide `EMBED_ORIGINS` until an admin opened it
+  and picked a mode, and `EMBED_ORIGINS` has no tenant dimension, so on a
+  multi-org deployment that was necessarily the union of every org's
+  embedders. The ladder gained a rung: `form.embed_origins ->
+  KilnCMS.CMS.SiteEmbedSettings.embed_origins -> EMBED_ORIGINS`, resolved by
+  the new `KilnCMS.Forms.EmbedPolicy` (admin-only settings resource, managed
+  through the generic Ash Admin UI like `FormSpamSettings` rather than a
+  bespoke page). A form's own list, including an explicit `[]` close, still
+  overrides the org default; the org default still overrides the deployment.
+  The Embed tab's "inherit" radio now says "Use this site's default" — it
+  already deliberately avoided naming an actual value (#1130), and now that
+  value is the org's own rather than the deployment's.
+
 - **Boot warns when the chain cannot detect splices** (#1056). With
   `audit_anchor_every_write` on (or any `history_anchors` row already present)
   and no provenance signing key, splice detection inside an anchored range is
