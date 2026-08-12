@@ -164,7 +164,10 @@ jobs:
       # so on stderr, so this degrades visibly rather than silently passing.
       # The line below reports it in the job log too, where someone will
       # actually see it. The RELEASE image is Debian trixie (qpdf 12.2.0) and
-      # is not affected either way.
+      # is not affected either way. Whatever this job excludes, the
+      # `qpdf_metadata_stripping` job below still runs on a trixie-based
+      # container regardless of where `ubuntu-latest` points, so the `:qpdf`
+      # tests never go fully dark (#907).
       - name: Install qpdf (PDF metadata stripping tests)
         run: |
           sudo apt-get update -qq
@@ -712,3 +715,84 @@ jobs:
           # job, which reads as an unexplained slow run on an unrelated PR.
           cache-from: type=gha
           cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max' || '' }}
+
+  # #907: `:qpdf` tests — the ones that prove an uploaded PDF actually loses
+  # its `/Info` dictionary and XMP packet (#807) — are excluded from the
+  # `build` job above whenever the runner's qpdf predates 11.10 (see the
+  # "Install qpdf" step's comment there). `ubuntu-latest` currently packages
+  # 11.9.0 — one minor short — so this privacy control has had no CI coverage
+  # at all. Rather than move the WHOLE suite onto a newer/untested runner for
+  # one feature, this is a small, separate job that runs only the qpdf tests
+  # inside `debian:trixie-slim`, the exact base the release image's runner
+  # stage already uses successfully (qpdf 12.2.0 there, confirmed in the
+  # Dockerfile's own comments).
+  #
+  # `test/kiln_cms/document_processor_test.exs` is plain `ExUnit.Case,
+  # async: true` — no `KilnCMS.DataCase`, no Ecto sandbox — so it never issues
+  # a query. No Postgres service here, unlike `build` above: `mix test` still
+  # boots the full OTP application first (`test_helper.exs` unconditionally
+  # calls `Ecto.Adapters.SQL.Sandbox.mode(KilnCMS.Repo, :manual)`), but
+  # `KilnCMS.Repo`'s connection pool starts and retries in the background
+  # rather than blocking boot on a reachable database — standard
+  # Postgrex/DBConnection behaviour, not something specific to this job. A
+  # Postgres service would also need a different hostname here than `build`
+  # uses (`config/test.exs` hardcodes `"localhost"`, which only reaches a
+  # service container on a NON-containerized job; this job's steps run
+  # inside `debian:trixie-slim`, where a service is reachable by its service
+  # name instead) — avoided entirely by not needing one.
+  qpdf_metadata_stripping:
+    name: PDF metadata stripping (qpdf, Debian trixie)
+    runs-on: ubuntu-latest
+    container:
+      image: debian:trixie-slim
+
+    env:
+      MIX_ENV: test
+
+    # NOT a required check, same posture and reasoning as `image` above: this
+    # is the first time this project has run `erlef/setup-beam` inside a
+    # non-Ubuntu container, and a required check that can fail for reasons
+    # unrelated to the change under test (a container/action incompatibility,
+    # not a qpdf regression) blocks every merge until it's fixed. Promote it
+    # by adding the context `PDF metadata stripping (qpdf, Debian trixie)` to
+    # the "Require CI on main" ruleset once its real pass rate is known.
+    steps:
+      # `actions/checkout` needs `git`; qpdf is the thing under test.
+      # `ca-certificates` so the later `mix deps.get`/GitHub NIF fetch (for
+      # `tokenizers`, the same flake vector `image` above documents) can
+      # actually verify TLS.
+      - name: Install git, qpdf and CA certificates
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends git qpdf ca-certificates
+          qpdf --version | head -1
+          qpdf --help=all 2>&1 | grep -q -- '--remove-info' || {
+            echo "::error::qpdf $(qpdf --version | head -1) still predates 11.10 on" \
+                 "debian:trixie-slim — the base image this job relies on has changed."
+            exit 1
+          }
+
+      - uses: actions/checkout@v5
+
+      - name: Set up Elixir/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          # Reads .tool-versions, same as `build` (#600) — one source of truth.
+          version-file: .tool-versions
+          version-type: strict
+
+      - name: Cache deps and _build
+        uses: actions/cache@v5
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-trixie-mix-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-trixie-mix-${{ hashFiles('.tool-versions') }}-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Run the qpdf-tagged tests
+        run: mix test test/kiln_cms/document_processor_test.exs --only qpdf
