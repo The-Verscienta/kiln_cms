@@ -90,5 +90,33 @@ defmodule KilnCMS.Forms.EmbedPolicyTest do
       form = %{embed_origins: %Ash.NotLoaded{}, org_id: org("epol-eff-notloaded").id}
       assert EmbedPolicy.effective(form) == form
     end
+
+    # The tenancy guarantee, pinned at the function level rather than only
+    # through the HTTP round trip: two orgs' defaults configured side by side,
+    # and each form gets only its own org's.
+    test "two orgs' defaults never cross, at the function level" do
+      a = org("epol-eff-cross-a").id
+      b = org("epol-eff-cross-b").id
+      save!(%{embed_origins: ["https://a-partner.test"]}, a)
+      save!(%{embed_origins: ["https://b-partner.test"]}, b)
+
+      assert EmbedPolicy.effective(%{embed_origins: nil, org_id: a}) == %{
+               embed_origins: ["https://a-partner.test"],
+               org_id: a
+             }
+
+      assert EmbedPolicy.effective(%{embed_origins: nil, org_id: b}) == %{
+               embed_origins: ["https://b-partner.test"],
+               org_id: b
+             }
+    end
+
+    # `Map.get(form, :org_id)` must not raise on a map that carries no
+    # `:org_id` key at all — falls through the same as any other org with no
+    # configured default, rather than crashing the embed route.
+    test "a form-shaped map with no :org_id key at all does not crash" do
+      form = %{embed_origins: nil}
+      assert EmbedPolicy.effective(form) == form
+    end
   end
 end
