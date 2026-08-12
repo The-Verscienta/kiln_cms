@@ -131,6 +131,35 @@ defmodule KilnCMS.Cache.ClusterBust do
     :ok
   end
 
+  @doc """
+  Drop every key in `KilnCMS.Cache` on this node, and ask every other node to
+  do the same (#1138).
+
+  The sibling of `broadcast/1` for a full clear: a key list cannot express
+  "everything", and `bust_published/0` stays node-local on purpose — its
+  callers include a path that fires on every media download (#1137). The
+  operator-facing purge (`flush_delivery/0`) is the one that must reach the
+  whole cluster after a template deploy.
+
+  Also clears `KilnCMS.Firing.Cache` on every node: both instances feed
+  delivery, so emptying one and not the other leaves the site half-stale.
+
+  The sender clears synchronously first (read-your-writes), then broadcasts
+  with its node name so the local subscriber skips a redundant walk. Same
+  best-effort / at-most-once / TTL-as-backstop posture as `broadcast/1`.
+  """
+  @spec broadcast_clear() :: :ok
+  def broadcast_clear do
+    clear_delivery_caches()
+    notify_clear()
+  end
+
+  @doc false
+  def notify_clear do
+    Phoenix.PubSub.broadcast(KilnCMS.PubSub, @topic, {:bust_all, Node.self()})
+    :ok
+  end
+
   @impl true
   def init(_opts) do
     Phoenix.PubSub.subscribe(KilnCMS.PubSub, @topic)
@@ -163,9 +192,22 @@ defmodule KilnCMS.Cache.ClusterBust do
     {:noreply, state}
   end
 
+  # Sender already cleared synchronously in `broadcast_clear/0`. Skipping the
+  # origin keeps a full-cache walk off the critical path twice on one node.
+  def handle_info({:bust_all, origin}, state) do
+    if origin != Node.self(), do: clear_delivery_caches()
+    {:noreply, state}
+  end
+
   # A message this node's code does not understand is dropped, not crashed on:
   # during a rolling deploy the cluster runs two versions, and a subscriber that
   # dies on an unfamiliar payload would stop honouring the busts it *does*
   # understand for as long as it takes to restart.
   def handle_info(_other, state), do: {:noreply, state}
+
+  defp clear_delivery_caches do
+    Cachex.clear(KilnCMS.Cache.cache_name())
+    KilnCMS.Firing.Cache.clear()
+    :ok
+  end
 end

@@ -30,7 +30,7 @@ defmodule KilnCMS.Ask.PromptTest do
 
     assert user =~ "Question: How long is a cone 6 firing?"
     # Opening and closing marker around the passages.
-    assert user |> String.split("-----") |> length() == 3
+    assert user |> String.split(~r/^-----(BEGIN|END) [0-9a-f]+-----$/m) |> length() == 3
   end
 
   test "the system prompt forbids outside knowledge and allows 'I don't know'" do
@@ -85,11 +85,17 @@ defmodule KilnCMS.Ask.PromptTest do
   end
 
   describe "nothing interpolated can close the data fence (#916)" do
-    # The fence line, as `Prompt` writes it. Counting occurrences is the
-    # assertion that matters: the region is delimited by exactly two, so any
-    # third one — from the question or from a body — is a forged region.
+    # A real BEGIN/END marker line, as `Fence.region/3` writes it — matched by
+    # shape (any nonce), not by a literal string a per-call nonce no longer
+    # has. Counting occurrences is the assertion that matters: the region is
+    # delimited by exactly two, so any third one — from the question or from
+    # a body — is a forged region. A bare attacker-supplied "-----" does NOT
+    # match this shape (no BEGIN/END + token), so it can only ever be counted
+    # via the neutralized-shape assertions below, never as a real marker.
     defp fence_lines(text) do
-      text |> String.split("\n") |> Enum.count(&(String.trim(&1) == "-----"))
+      text
+      |> String.split("\n")
+      |> Enum.count(&(String.trim(&1) =~ ~r/^-----(BEGIN|END) [0-9a-f]+-----$/))
     end
 
     test "the real prompt has exactly two fence lines" do

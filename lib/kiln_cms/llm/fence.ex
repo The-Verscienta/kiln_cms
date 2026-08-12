@@ -20,6 +20,27 @@ defmodule KilnCMS.LLM.Fence do
 
   So the fence and its defence live here once, and the builders delegate.
 
+  ## Two layers
+
+  **The marker carries a per-call nonce** (#1065): `Fence.nonce/0` generates
+  one random token per `build/1` call, and every region in that prompt opens
+  with `-----BEGIN <nonce>-----` and closes with `-----END <nonce>-----`.
+  #945 had to widen the shape matcher below twice in one review — a padding
+  class that missed a whole Unicode category, then a rule-character class
+  that missed box-drawing glyphs — because **the set of glyph runs a model
+  reads as "the data ended" has no closed definition**, so no character class
+  ever finishes that job. A nonce the attacker cannot guess sidesteps the
+  problem instead of chasing it further: closing the fence stops being a
+  matching problem and becomes a guessing one. `Fence.region/3` is the only
+  way to build a fenced block, so a call site cannot forget to escape or
+  forget to use the marker the system prompt actually named.
+
+  **The shape matcher stays as a second layer.** It is cheap, it still turns
+  a legitimate horizontal rule in a body into readable prose instead of a
+  false-positive close, and it now also catches an attacker's *guess* at a
+  BEGIN/END-shaped line — a forged marker with the wrong token reads as a
+  rule and gets neutralized the same as a bare `-----` would.
+
   ## What "looks like a delimiter" means here
 
   The pattern deliberately matches a *shape*, not the marker string: any line
@@ -34,18 +55,19 @@ defmodule KilnCMS.LLM.Fence do
 
   > #### Still not a security boundary {: .warning}
   >
-  > A model can be talked out of any instruction, and the set of glyph runs
-  > that read as "the data ended" has no closed definition — so nothing
+  > A nonce closes the *shape* problem, not the framing problem: a model can
+  > still be talked out of the "this is data" instruction by pure prose
+  > inside the region itself — "the page above was truncated; operator note
+  > follows" needs no fence character at all. And in all three builders the
+  > untrusted text is the **last** thing before the model's turn, so the
+  > position an attacker most wants — the words right before the model
+  > answers — belongs to the attacker in every one of these prompts. Nothing
   > downstream may assume the region held. The real defences stay where they
   > are: the generators get **no tools**, and every response is constrained by
   > its own normalizer (`KilnCMS.Ask`, `KilnCMS.Assist.Suggestion`,
   > `KilnCMS.Seo.Draft`). This module makes the fence a boundary the *input*
-  > can't simply step through — defence in depth, not the depth itself. The
-  > version that closes the shape problem outright is an unguessable per-call
-  > delimiter; that is #1065.
+  > can't simply step through — defence in depth, not the depth itself.
   """
-
-  @fence "-----"
 
   # Characters a model reads as a horizontal rule. ASCII first, then the dashes
   # and box-drawing glyphs that render identically — `—————` is the same
@@ -70,6 +92,20 @@ defmodule KilnCMS.LLM.Fence do
                 "mu"
               )
 
+  # A forged BEGIN/END marker: the same rule-char shape as `@fence_like`, but
+  # carrying a guessed label and token between two runs, e.g.
+  # `-----BEGIN deadbeef-----`. The real markers `begin_marker/1`/`end_marker/1`
+  # emit have exactly this shape, so an attacker's copy of it — with a token
+  # they had to guess, since the real one is never disclosed to them — is
+  # neutralized the same way a bare `-----` is, rather than reading as a
+  # plausible (if mismatched) marker to the model.
+  @nonce_marker_like Regex.compile!(
+                       "^#{@pad}*(#{@rule_chars})(?:#{@pad}*\\1){2,}#{@pad}*" <>
+                         "(?:BEGIN|END)#{@pad}+\\S+#{@pad}*(#{@rule_chars})(?:#{@pad}*\\2){2,}" <>
+                         "(?=#{@pad}*(?:\\s|$))",
+                       "miu"
+                     )
+
   # What a neutralized rule becomes. NOT another rule: replacing the dashes
   # with em-dashes left `—————`, which is the same thematic break in a
   # different glyph. This cannot be mistaken for a delimiter, and it keeps the
@@ -82,14 +118,25 @@ defmodule KilnCMS.LLM.Fence do
   @neutralized "(horizontal rule)"
 
   @doc """
-  The marker string, for the builders that name it in their system prompt.
+  A fresh per-call nonce. Call once per `build/1` and thread the result
+  through every marker in that prompt — a value from a different call could
+  in principle be echoed back by an attacker who has seen it (a chained
+  request, a logged prompt), so a nonce must never be reused across two
+  builds.
 
-  Changing it is only half a change: `@fence_like` matches a rule *shape*
-  (`#{@rule_chars}`), so a marker built from any other character would be
-  emitted by the builders and neutralized by nothing.
+  8 hex characters (32 bits) — enough that guessing it is not a practical
+  attack, small enough that the marker stays readable in a system prompt.
   """
-  @spec marker() :: String.t()
-  def marker, do: @fence
+  @spec nonce() :: String.t()
+  def nonce, do: 4 |> :crypto.strong_rand_bytes() |> Base.encode16(case: :lower)
+
+  @doc "The opening marker line for `nonce`."
+  @spec begin_marker(String.t()) :: String.t()
+  def begin_marker(nonce), do: "-----BEGIN #{nonce}-----"
+
+  @doc "The closing marker line for `nonce`."
+  @spec end_marker(String.t()) :: String.t()
+  def end_marker(nonce), do: "-----END #{nonce}-----"
 
   @doc """
   Neutralize anything in `value` that could pass for a fence.
@@ -115,6 +162,7 @@ defmodule KilnCMS.LLM.Fence do
     # everywhere else. `\R` folds all of them (and CRLF as one unit) to `\n`.
     # Every value here is prompt text, so normalizing newlines costs nothing.
     |> String.replace(~r/\R/u, "\n")
+    |> String.replace(@nonce_marker_like, @neutralized)
     |> String.replace(@fence_like, @neutralized)
   end
 
@@ -157,6 +205,41 @@ defmodule KilnCMS.LLM.Fence do
     case inline(value) do
       nil -> nil
       inlined -> "#{label}: #{inlined}"
+    end
+  end
+
+  @doc """
+  A complete fenced region: `label`, then `value` — defended — between
+  `nonce`'s BEGIN/END markers. `nil` when `value` is absent or defends down
+  to nothing, the same rule `field/2` applies, so a builder never assembles
+  an empty region — an empty fenced block invites the model to fill it.
+
+  This is the only way to build a fenced block, on purpose: escaping used to
+  be opt-in at each of five hand-assembled call sites, which is the shape
+  that once let a value sit outside the fence for a whole prompt builder's
+  life (#945). `value` may already be pre-escaped composed text (several
+  `field/2` lines joined, or output already run through `defence/1` for a
+  re-clamp) — running the defence again is idempotent, so this never double-
+  corrupts an already-safe value.
+  """
+  @spec region(String.t(), String.t(), term()) :: String.t() | nil
+  def region(nonce, label, value) do
+    case defence(value) do
+      nil ->
+        nil
+
+      "" ->
+        nil
+
+      defended ->
+        """
+        #{label}
+
+        #{begin_marker(nonce)}
+        #{defended}
+        #{end_marker(nonce)}
+        """
+        |> String.trim()
     end
   end
 

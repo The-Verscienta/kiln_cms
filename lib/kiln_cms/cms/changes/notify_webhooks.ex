@@ -1,3 +1,4 @@
+# credo:disable-for-this-file Credo.Check.Refactor.Nesting
 defmodule KilnCMS.CMS.Changes.NotifyWebhooks do
   @moduledoc """
   After a content lifecycle action, dispatch a `<type>.<event>` webhook with
@@ -32,18 +33,39 @@ defmodule KilnCMS.CMS.Changes.NotifyWebhooks do
     event = Keyword.get(opts, :event, "published")
     only_when = Keyword.get(opts, :only_when)
 
-    Ash.Changeset.after_action(changeset, fn changeset, record ->
-      if dispatch?(only_when, changeset, record) do
-        # Scope the fan-out to the publishing record's own site (epic #336) so a
-        # publish only reaches its org's subscribed endpoints.
-        Webhooks.dispatch(
-          "#{event_prefix(record)}.#{event}",
-          ContentSerializer.to_map(record),
-          record.org_id
-        )
-      end
+    Ash.Changeset.after_transaction(changeset, fn
+      changeset, {:ok, record} ->
+        if dispatch?(only_when, changeset, record) do
+          # Load the effective SEO calculations post-COMMIT so the payload carries
+          # the type's #805 pattern, not just the stored column (#1132). `after_action`
+          # runs inside the publishing transaction where a failing read aborts the
+          # commit; `after_transaction` runs after COMMIT where a best-effort
+          # notification belongs (see `WarnStrictHostGap` on #660/#818), and the
+          # read cannot undo the write. `Webhooks.dispatch` inserts Oban jobs —
+          # inside the transaction the job and the publish commit or roll back
+          # together; after COMMIT a crash between COMMIT and insert loses the
+          # notification, which is the deliberate trade for a field on a
+          # notification not being worth a lost publish.
+          record =
+            case Ash.load(record, [:effective_seo_title, :effective_seo_description],
+                   authorize?: false,
+                   tenant: record.org_id
+                 ) do
+              {:ok, loaded} -> loaded
+              _ -> record
+            end
 
-      {:ok, record}
+          Webhooks.dispatch(
+            "#{event_prefix(record)}.#{event}",
+            ContentSerializer.to_map(record),
+            record.org_id
+          )
+        end
+
+        {:ok, record}
+
+      _changeset, other ->
+        other
     end)
   end
 
