@@ -1,4 +1,4 @@
-defmodule KilnCMS.Repo.Migrations.ChainFoldOrder do
+defmodule KilnCMS.Repo.Migrations.AcupunctureChainFoldOrder do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 

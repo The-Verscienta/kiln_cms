@@ -152,14 +152,20 @@ defmodule KilnCMS.Seo.PromptTest do
   end
 
   describe "build/2 — nothing author-controlled escapes a data region (#945)" do
+    # A real BEGIN/END marker line, as `Fence.region/3` writes it — matched by
+    # shape (any nonce), not by a literal string a per-call nonce no longer
+    # has.
     defp fence_lines(text) do
-      text |> String.split("\n") |> Enum.count(&(String.trim(&1) == "-----"))
+      text
+      |> String.split("\n")
+      |> Enum.count(&(String.trim(&1) =~ ~r/^-----(BEGIN|END) [0-9a-f]+-----$/))
     end
 
-    # Everything NOT inside a fenced region. Split on the fence as a whole
-    # line: the system prompt names the marker inline ("between the -----
-    # markers"), so a plain `String.split(user, "-----")` would cut there and
-    # make every assertion below vacuous.
+    # Everything NOT inside a fenced region. Split on a marker line as a
+    # whole: the system prompt names the marker inline ("between
+    # -----BEGIN <nonce>----- and -----END <nonce>-----"), so a plain
+    # `String.split(user, "-----")` would cut there and make every assertion
+    # below vacuous.
     #
     # Regions come in pairs, so a well-formed message always splits into an odd
     # number of parts and the even-indexed ones are the outside. An unbalanced
@@ -167,7 +173,7 @@ defmodule KilnCMS.Seo.PromptTest do
     # catch — so it fails here rather than quietly returning a shorter string
     # that every `refute ... =~` then passes against.
     defp outside_regions(text) do
-      parts = String.split(text, ~r/^-----$/m)
+      parts = String.split(text, ~r/^-----(BEGIN|END) [0-9a-f]+-----$/m)
 
       assert rem(length(parts), 2) == 1,
              "unbalanced fences: #{length(parts) - 1} markers in #{inspect(text)}"
@@ -209,7 +215,8 @@ defmodule KilnCMS.Seo.PromptTest do
           })
         )
 
-      [_before, context, _between, content, _after] = String.split(user, ~r/^-----$/m)
+      [_before, context, _between, content, _after] =
+        String.split(user, ~r/^-----(BEGIN|END) [0-9a-f]+-----$/m)
 
       refute context =~ "Cheap pills"
       assert content =~ "Cheap pills"
