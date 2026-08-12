@@ -3205,6 +3205,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         |> broadcast_saved()
         |> assign(:save_state, :saved)
         |> put_flash(:info, gettext("Updated to %{state}.", state: state_label(record.state)))
+        |> maybe_prompt_reviewer_assignment(action)
 
       _ ->
         put_flash(socket, :error, gettext("That action isn't allowed right now."))
@@ -3212,6 +3213,35 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   defp run_workflow(socket, _action), do: socket
+
+  # #817 (follow-up to #501): "Submit for review" only ever reaches here for
+  # an editor (workflow_buttons/1 shows that button only when @state == :draft
+  # and @tier == :editor — an admin's own path skips straight to Publish), so
+  # this closes the loop between "this needs review" and "here's who owns
+  # reviewing it" without a role check of its own.
+  #
+  # Reuses the Assignment panel wholesale — same open?/draft assigns,
+  # same CMS.assign_task/2 path `task_assign_submit` already calls — rather
+  # than a new component, mirroring how a `?assign=1` deep link opens it
+  # (`open_settings_if_deep_linked/2`). Optional/dismissable: the panel's own
+  # Cancel button is "no thanks", and the "notify all admins" email
+  # (`Notifications.dispatch(:submitted_for_review, ...)`) already covers the
+  # general case of nobody being named. A blank due date is a real choice
+  # (`assign_task`'s own `nil`), so this only ever SUGGESTS one — the
+  # assignee picker itself stays on its own default ("Assign to…", nothing
+  # selected).
+  @review_due_in_days 3
+
+  defp maybe_prompt_reviewer_assignment(socket, "submit") do
+    socket
+    |> assign(:inspector_tab, :settings)
+    |> assign(:task_assign_open?, true)
+    |> assign(:task_draft, %{
+      "due_on" => Date.utc_today() |> Date.add(@review_due_in_days) |> Date.to_iso8601()
+    })
+  end
+
+  defp maybe_prompt_reviewer_assignment(socket, _action), do: socket
 
   # --- dirty tracking + draft autosave ----------------------------------------
 
