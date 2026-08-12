@@ -2662,6 +2662,13 @@ defmodule KilnCMS.CMS.Content do
         # headless consumers can link without hard-coding the URL scheme.
         calculate :path, :string, KilnCMS.CMS.Calculations.PublicPath do
           public? true
+          # No `expression/2` — the path is assembled from the type registry,
+          # not a column — so a filter or sort raised out of AshSql as an
+          # unhandled 500 (#1139). Declaring it unusable turns that into a
+          # proper `InvalidFilterReference` rejection at the query layer,
+          # exactly as `word_count` and friends already do.
+          filterable? false
+          sortable? false
         end
 
         # The SEO fields as anything *rendering* them should read them: the

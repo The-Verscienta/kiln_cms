@@ -49,6 +49,41 @@ defmodule KilnCMSWeb.ApiDocsTest do
 
       assert html_response(conn, 200) =~ "swagger"
     end
+
+    # A response `?fields[post]=path,effective_seo_title` legitimately produces
+    # was undocumented by its own OpenAPI schema (#1139): AshJsonApi describes
+    # public calculations when generating the spec, but nothing pinned that
+    # the content resources' schemas actually carry them, so a regression here
+    # (a calc losing `public? true`, or a future ash_json_api version reverting
+    # to attributes-only) would silently make the doc lie again.
+    test "public calculations are described on a content resource's schema", %{conn: conn} do
+      conn = conn |> put_req_header("accept", "application/json") |> get(@spec_path)
+      spec = Jason.decode!(response(conn, 200))
+
+      post_attrs =
+        get_in(spec, [
+          "components",
+          "schemas",
+          "post",
+          "properties",
+          "attributes"
+        ])
+
+      calculated_fields = ~w(
+        path effective_seo_title effective_seo_description published
+        word_count reading_time_minutes related_links
+      )
+
+      for field <- calculated_fields do
+        assert Map.has_key?(post_attrs["properties"], field),
+               "expected the \"post\" schema's attributes to describe #{field}"
+      end
+
+      # additionalProperties: false means a client generated from this spec
+      # would REJECT a response carrying an undescribed field — the failure
+      # mode #1139 reported.
+      assert post_attrs["additionalProperties"] == false
+    end
   end
 
   describe "disabled" do
