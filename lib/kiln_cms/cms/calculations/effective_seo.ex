@@ -80,25 +80,20 @@ defmodule KilnCMS.CMS.Calculations.EffectiveSeo do
   @impl true
   def calculate(records, opts, _context) do
     field = opts[:field]
+    descriptors = Slugs.descriptors_for_records(records)
 
-    # One registry lookup per distinct type and one branding read per org, not
-    # one of each per record. A feed page is fifty records of one type and one
-    # site name, and `descriptor_for_record/1` scans the org's dynamic type list
-    # while `Branding.for_org/1` is a cache read (a query on a miss).
+    # One branding read per org, not per record — same memo shape EffectiveSeo
+    # used before #1138 lifted the descriptor half into `Slugs`.
     {values, _seen} =
-      Enum.map_reduce(records, %{}, fn record, seen ->
-        {ct, seen} = memo(seen, type_key(record), fn -> Slugs.descriptor_for_record(record) end)
+      records
+      |> Enum.zip(descriptors)
+      |> Enum.map_reduce(%{}, fn {record, ct}, seen ->
         org_id = Map.get(record, :org_id)
         {branding, seen} = memo(seen, {:branding, org_id}, fn -> Branding.for_org(org_id) end)
-
         {Patterns.resolve(record, ct, field, branding), seen}
       end)
 
     values
-  end
-
-  defp type_key(record) do
-    {record.__struct__, Map.get(record, :org_id), Map.get(record, :type_definition_id)}
   end
 
   defp memo(seen, key, build) do

@@ -402,8 +402,13 @@ defmodule KilnCMS.AssistTest do
       assert user =~ "cut for length"
     end
 
+    # A real BEGIN/END marker line, as `Fence.region/3` writes it — matched by
+    # shape (any nonce), not by a literal string a per-call nonce no longer
+    # has.
     defp fence_lines(text) do
-      text |> String.split("\n") |> Enum.count(&(String.trim(&1) == "-----"))
+      text
+      |> String.split("\n")
+      |> Enum.count(&(String.trim(&1) =~ ~r/^-----(BEGIN|END) [0-9a-f]+-----$/))
     end
 
     # Regions come in pairs, so a well-formed message splits into an odd number
@@ -411,7 +416,7 @@ defmodule KilnCMS.AssistTest do
     # is a stray fence, which must fail loudly rather than return a shorter
     # string that every `refute ... =~` then passes against.
     defp outside_regions(text) do
-      parts = String.split(text, ~r/^-----$/m)
+      parts = String.split(text, ~r/^-----(BEGIN|END) [0-9a-f]+-----$/m)
 
       assert rem(length(parts), 2) == 1,
              "unbalanced fences: #{length(parts) - 1} markers in #{inspect(text)}"

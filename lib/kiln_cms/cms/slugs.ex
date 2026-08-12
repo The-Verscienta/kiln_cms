@@ -238,6 +238,49 @@ defmodule KilnCMS.CMS.Slugs do
   end
 
   @doc """
+  The registry descriptors for a list of stored records, one registry lookup
+  per distinct type rather than per record (#1138).
+
+  `descriptor_for_record/1` fetches the org's dynamic type list and scans it.
+  A headless list loading `path` (or effective SEO) is typically dozens of rows
+  of one or two types, so memoizing on
+  `{struct, org_id, type_definition_id}` is the difference between one scan and
+  one per row. `KilnCMS.CMS.Calculations.EffectiveSeo` and
+  `KilnCMS.CMS.Calculations.PublicPath` both go through here.
+  """
+  @spec descriptors_for_records([struct()]) :: [ContentTypes.t() | nil]
+  def descriptors_for_records(records) when is_list(records) do
+    {descriptors, _seen} =
+      Enum.map_reduce(records, %{}, fn record, seen ->
+        key = {record.__struct__, Map.get(record, :org_id), Map.get(record, :type_definition_id)}
+
+        case seen do
+          %{^key => ct} ->
+            {ct, seen}
+
+          _miss ->
+            ct = descriptor_for_record(record)
+            {ct, Map.put(seen, key, ct)}
+        end
+      end)
+
+    descriptors
+  end
+
+  @doc """
+  Attributes `PublicPath` / effective-SEO calculations need loaded so a pinned
+  `select:` still resolves prefixes and patterns correctly.
+  """
+  @spec path_calculation_loads(Ash.Query.t() | module()) :: [atom()]
+  def path_calculation_loads(%Ash.Query{resource: resource}), do: path_calculation_loads(resource)
+
+  def path_calculation_loads(resource) when is_atom(resource) do
+    if Ash.Resource.Info.attribute(resource, :type_definition_id),
+      do: [:slug, :path_alias, :type_definition_id],
+      else: [:slug, :path_alias]
+  end
+
+  @doc """
   Pattern-expansion context (`Pattern.context/0`) from a **stored** record
   (category loaded or absent). The date anchor is the same chain everywhere:
   publish date, else scheduled date, else the record's creation date.

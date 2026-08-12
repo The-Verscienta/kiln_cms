@@ -1,4 +1,4 @@
-defmodule KilnCMS.Repo.Migrations.AddAcupunctureSeoKeywords do
+defmodule KilnCMS.Repo.Migrations.AddExampleSeoKeywords do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 

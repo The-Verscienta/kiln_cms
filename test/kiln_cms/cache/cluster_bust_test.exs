@@ -219,4 +219,68 @@ defmodule KilnCMS.Cache.ClusterBustTest do
       refute cached?(key)
     end
   end
+
+  # Full clear for the operator purge (#1138). A key list cannot express
+  # "everything", and `bust_published/0` stays node-local on purpose.
+  describe "a full clear" do
+    test "empties both delivery caches on the writing node and tells the others", %{org: org} do
+      key = Cache.branding_key(org)
+      seed(key)
+      doc_id = Ash.UUID.generate()
+      :ok = KilnCMS.Firing.Cache.put(org, :post, doc_id, :html, %{body: "stale"})
+
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, ClusterBust.topic())
+
+      assert :ok = ClusterBust.broadcast_clear()
+
+      assert_receive {:bust_all, origin}
+      assert origin == Node.self()
+      refute cached?(key)
+      assert KilnCMS.Firing.Cache.get(org, :post, doc_id, :html) == :miss
+    end
+
+    test "is applied by a receiving node against both caches", %{org: org} do
+      key = Cache.branding_key(org)
+      seed(key)
+      doc_id = Ash.UUID.generate()
+      :ok = KilnCMS.Firing.Cache.put(org, :post, doc_id, :html, %{body: "stale"})
+
+      # Another node's name — this node must clear, not skip.
+      send(ClusterBust, {:bust_all, :other@host})
+      _ = :sys.get_state(ClusterBust)
+
+      refute cached?(key)
+      assert KilnCMS.Firing.Cache.get(org, :post, doc_id, :html) == :miss
+    end
+
+    test "the origin skips a redundant walk after it already cleared" do
+      key = Cache.branding_key(Ash.UUID.generate())
+      seed(key)
+
+      # Origin is self: the handler must not clear. A buggy double-walk would
+      # empty a key seeded only for this assertion.
+      send(ClusterBust, {:bust_all, Node.self()})
+      _ = :sys.get_state(ClusterBust)
+
+      assert cached?(key)
+    end
+
+    test "flush_delivery/0 clears this node and broadcasts for the rest", %{org: org} do
+      key = Cache.branding_key(org)
+      seed(key)
+      doc_id = Ash.UUID.generate()
+      :ok = KilnCMS.Firing.Cache.put(org, :post, doc_id, :html, %{})
+
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, ClusterBust.topic())
+
+      assert %{published: published, artifacts: artifacts} = Cache.flush_delivery()
+      assert published >= 1
+      assert artifacts >= 1
+
+      assert_receive {:bust_all, origin}
+      assert origin == Node.self()
+      refute cached?(key)
+      assert KilnCMS.Firing.Cache.get(org, :post, doc_id, :html) == :miss
+    end
+  end
 end

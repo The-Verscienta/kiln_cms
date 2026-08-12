@@ -84,6 +84,15 @@ defmodule KilnCMSWeb.Embed do
   no form to speak for — a 404 on `/forms/:slug/embed`, where naming a policy
   for a form that does not exist would answer a question about whether it does.
 
+  A form's `nil` no longer always means the deployment, though: `KilnCMS.Forms.
+  EmbedPolicy` (#1131) resolves a per-org default *before* handing anything to
+  this module, for an org whose forms mostly share one allowlist. Every
+  function here still means exactly what it says above — the form-vs-deployment
+  question — because `EmbedPolicy.effective/1` rewrites a form with no list of
+  its own into one already carrying its org's default, when it has one. This
+  module has no org-awareness added to it on purpose: the ladder gained a rung,
+  not a new data source this half needs to know about.
+
   Scripts on the embed page are external files under `script-src 'self'`
   (`/embed-frame.js`), so no nonce or `unsafe-inline` is needed.
   """

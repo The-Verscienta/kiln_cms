@@ -1,7 +1,7 @@
-defmodule Acupuncture.Catalog do
+defmodule Example.Catalog do
   @moduledoc """
   The holistic-acupuncture site's content catalog — a *project* domain layered
-  on the reusable KilnCMS core (see `projects/acupuncture/README.md`).
+  on the reusable KilnCMS core (see `projects/example/README.md`).
 
   Holds the content types migrated from the site's legacy Sanity backend
   (conditions, team members, testimonials, FAQs). Each is built on
@@ -12,8 +12,8 @@ defmodule Acupuncture.Catalog do
   The reusable core deliberately does **not** register this domain: it's absent
   from `ash_domains`/`content_domains` in `config/config.exs`. So it compiles
   but stays dormant — nothing migrates or serves it. A downstream/production
-  config *activates* the catalog by appending `Acupuncture.Catalog` to both
-  lists (see `projects/acupuncture/project.exs`), which makes
+  config *activates* the catalog by appending `Example.Catalog` to both
+  lists (see `projects/example/project.exs`), which makes
   `KilnCMS.CMS.ContentTypes` discover these types (admin, delivery, search)
   and wires the resources into migrations/AshOban.
   """
@@ -31,7 +31,7 @@ defmodule Acupuncture.Catalog do
   end
 
   resources do
-    resource Acupuncture.Catalog.Condition do
+    resource Example.Catalog.Condition do
       define :list_conditions, action: :read
       define :get_condition, action: :read, get_by: [:id]
       define :get_published_condition_by_slug, action: :public_by_slug, args: [:slug, :locale]
@@ -53,11 +53,11 @@ defmodule Acupuncture.Catalog do
       define :list_published_conditions, action: :published
     end
 
-    resource Acupuncture.Catalog.Condition.Version do
+    resource Example.Catalog.Condition.Version do
       define :list_condition_versions, action: :read
     end
 
-    resource Acupuncture.Catalog.TeamMember do
+    resource Example.Catalog.TeamMember do
       define :list_team_members, action: :read
       define :get_team_member, action: :read, get_by: [:id]
       define :get_published_team_member_by_slug, action: :public_by_slug, args: [:slug, :locale]
@@ -79,11 +79,11 @@ defmodule Acupuncture.Catalog do
       define :list_published_team_members, action: :published
     end
 
-    resource Acupuncture.Catalog.TeamMember.Version do
+    resource Example.Catalog.TeamMember.Version do
       define :list_team_member_versions, action: :read
     end
 
-    resource Acupuncture.Catalog.Testimonial do
+    resource Example.Catalog.Testimonial do
       define :list_testimonials, action: :read
       define :get_testimonial, action: :read, get_by: [:id]
       define :get_published_testimonial_by_slug, action: :public_by_slug, args: [:slug, :locale]
@@ -105,11 +105,11 @@ defmodule Acupuncture.Catalog do
       define :list_published_testimonials, action: :published
     end
 
-    resource Acupuncture.Catalog.Testimonial.Version do
+    resource Example.Catalog.Testimonial.Version do
       define :list_testimonial_versions, action: :read
     end
 
-    resource Acupuncture.Catalog.Faq do
+    resource Example.Catalog.Faq do
       define :list_faqs, action: :read
       define :get_faq, action: :read, get_by: [:id]
       define :get_published_faq_by_slug, action: :public_by_slug, args: [:slug, :locale]
@@ -131,7 +131,7 @@ defmodule Acupuncture.Catalog do
       define :list_published_faqs, action: :published
     end
 
-    resource Acupuncture.Catalog.Faq.Version do
+    resource Example.Catalog.Faq.Version do
       define :list_faq_versions, action: :read
     end
   end
