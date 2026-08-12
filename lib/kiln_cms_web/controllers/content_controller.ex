@@ -1378,17 +1378,23 @@ defmodule KilnCMSWeb.ContentController do
     conn
     |> put_resp_header("cache-control", "public, max-age=60, stale-while-revalidate=300")
     |> put_resp_header("vary", "Accept-Language")
-    |> put_resp_header("etag", etag(record))
+    |> put_resp_header("etag", etag(record, current_org_id(conn)))
   end
 
   # The resolved SEO fields are part of the raw string, not just the record's
   # own timestamps: with a type-level pattern (#805) two responses can differ
   # while every column on the record is identical. `render_content/6` resolves
   # before this is called, so what is hashed is what is sent.
-  defp etag(record) do
+  #
+  # Head generation (#1079) is the same idea for layout-facing settings: feed
+  # autodiscovery, branding, code injection and calendar links live in `<head>`
+  # but are not columns on the content row, so a settings save must move the
+  # ETag or a revalidating client keeps a 304 body whose links are already wrong.
+  defp etag(record, org_id) do
     raw =
       "#{record.id}:#{record.updated_at}:#{record.published_version_id}" <>
-        ":#{record.seo_title}:#{record.seo_description}"
+        ":#{record.seo_title}:#{record.seo_description}" <>
+        ":#{KilnCMS.Cache.head_generation(org_id)}"
 
     digest = :sha256 |> :crypto.hash(raw) |> Base.encode16(case: :lower) |> binary_part(0, 16)
     ~s("#{digest}")
@@ -1396,6 +1402,6 @@ defmodule KilnCMSWeb.ContentController do
 
   defp delivery_fresh?(conn, record) do
     match?([_ | _], get_req_header(conn, "if-none-match")) and
-      etag(record) in get_req_header(conn, "if-none-match")
+      etag(record, current_org_id(conn)) in get_req_header(conn, "if-none-match")
   end
 end
