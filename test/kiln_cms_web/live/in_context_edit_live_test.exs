@@ -400,4 +400,40 @@ defmodule KilnCMSWeb.InContextEditLiveTest do
       refute reloaded =~ "Someone else saved changes"
     end
   end
+
+  describe "locale round-trip (#1104)" do
+    test "opens the requested locale variant and writes only that record", %{conn: conn} do
+      admin = authed_user(:admin)
+      shared = "incontext-loc-#{System.unique_integer([:positive])}"
+      heading_id = Ash.UUID.generate()
+
+      en =
+        CMS.create_page!(
+          %{
+            title: "English in-context",
+            slug: shared,
+            locale: "en",
+            blocks: [
+              %{"_type" => "heading", "text" => "EN heading", "id" => heading_id}
+            ]
+          },
+          actor: admin
+        )
+
+      fr = KilnCMS.CMS.Translations.create_translation!(:page, en, "fr", actor: admin)
+      fr = CMS.update_page!(fr, %{title: "French in-context"}, actor: admin)
+
+      {:ok, lv, html} =
+        conn |> log_in(admin) |> live(~p"/editor/site/page/#{shared}?locale=fr")
+
+      assert html =~ "French in-context"
+      refute html =~ "English in-context"
+
+      render_hook(lv, "update_block", %{"id" => heading_id, "value" => "FR heading edited"})
+      lv |> element("#in-context-edit-bar button", "Save") |> render_click()
+
+      assert block_value(fr.id, heading_id, :text) == "FR heading edited"
+      assert block_value(en.id, heading_id, :text) == "EN heading"
+    end
+  end
 end

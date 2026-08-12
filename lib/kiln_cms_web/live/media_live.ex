@@ -212,48 +212,60 @@ defmodule KilnCMSWeb.MediaLive do
   end
 
   def handle_event("unsplash_search", %{"q" => q}, socket) when is_binary(q) do
-    case String.trim(q) do
-      "" ->
-        {:noreply,
-         socket
-         |> assign(:unsplash_query, "")
-         |> assign(:unsplash_photos, [])
-         |> assign(:unsplash_more?, false)
-         |> assign(:unsplash_searching?, false)}
+    if socket.assigns.unsplash_enabled? do
+      case String.trim(q) do
+        "" ->
+          {:noreply,
+           socket
+           |> assign(:unsplash_query, "")
+           |> assign(:unsplash_photos, [])
+           |> assign(:unsplash_more?, false)
+           |> assign(:unsplash_searching?, false)}
 
-      query ->
-        {:noreply,
-         socket
-         |> assign(:unsplash_query, query)
-         |> assign(:unsplash_page, 1)
-         |> assign(:unsplash_searching?, true)
-         |> start_async(:unsplash_search, fn -> {query, 1, Unsplash.search(query, 1)} end)}
+        query ->
+          {:noreply,
+           socket
+           |> assign(:unsplash_query, query)
+           |> assign(:unsplash_page, 1)
+           |> assign(:unsplash_searching?, true)
+           |> start_async(:unsplash_search, fn -> {query, 1, Unsplash.search(query, 1)} end)}
+      end
+    else
+      {:noreply, socket}
     end
   end
 
   def handle_event("unsplash_load_more", _params, socket) do
-    %{unsplash_query: query, unsplash_page: page} = socket.assigns
-    next = page + 1
-
-    {:noreply,
-     socket
-     |> assign(:unsplash_searching?, true)
-     |> start_async(:unsplash_search, fn -> {query, next, Unsplash.search(query, next)} end)}
-  end
-
-  def handle_event("unsplash_import", %{"id" => id}, socket) when is_binary(id) do
-    photo = Enum.find(socket.assigns.unsplash_photos, &(&1.id == id))
-
-    if is_nil(photo) or MapSet.member?(socket.assigns.unsplash_importing, id) do
-      {:noreply, socket}
-    else
-      actor = socket.assigns.actor
-      org = socket.assigns.current_org
+    if socket.assigns.unsplash_enabled? do
+      %{unsplash_query: query, unsplash_page: page} = socket.assigns
+      next = page + 1
 
       {:noreply,
        socket
-       |> assign(:unsplash_importing, MapSet.put(socket.assigns.unsplash_importing, id))
-       |> start_async({:unsplash_import, id}, fn -> import_unsplash(photo, actor, org) end)}
+       |> assign(:unsplash_searching?, true)
+       |> start_async(:unsplash_search, fn -> {query, next, Unsplash.search(query, next)} end)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("unsplash_import", %{"id" => id}, socket) when is_binary(id) do
+    if socket.assigns.unsplash_enabled? do
+      photo = Enum.find(socket.assigns.unsplash_photos, &(&1.id == id))
+
+      if is_nil(photo) or MapSet.member?(socket.assigns.unsplash_importing, id) do
+        {:noreply, socket}
+      else
+        actor = socket.assigns.actor
+        org = socket.assigns.current_org
+
+        {:noreply,
+         socket
+         |> assign(:unsplash_importing, MapSet.put(socket.assigns.unsplash_importing, id))
+         |> start_async({:unsplash_import, id}, fn -> import_unsplash(photo, actor, org) end)}
+      end
+    else
+      {:noreply, socket}
     end
   end
 

@@ -85,16 +85,13 @@ defmodule KilnCMS.CMS.Xliff.Document do
 
   # `xmerl` builds the whole tree in memory off a charlist expansion of the
   # input, so the honest failure is an up-front refusal naming the limit rather
-  # than an OOM kill — the same reasoning as `KilnCMS.Portability.Wxr`, at a
+  # than an OOM kill — the same reasoning as `KilnCMS.Portability.WXR`, at a
   # quarter of its ceiling because a translation job is prose, not a site dump.
   #
-  # The cap is also the only bound on a second, sharper cost: `xmerl_scan`
-  # interns every distinct element and attribute name with `list_to_atom/1`,
-  # and atoms are never reclaimed. A crafted document of unique tag names
-  # therefore leaks the atom table, and exhausting it aborts the whole node
-  # rather than raising anything this module could catch. 4 MB keeps a single
-  # upload well inside the default 1,048,576-atom limit; the general problem
-  # belongs to every xmerl caller, not just this one, and is tracked separately.
+  # Distinct names are a sharper cost (#1105): `xmerl_scan` interns every
+  # element and attribute name, and atoms are never reclaimed. The byte cap
+  # alone is not enough — `KilnCMS.Xml.check_name_budget/2` refuses a crafted
+  # vocabulary before SweetXml runs.
   @max_bytes 4 * 1024 * 1024
 
   # Portable Text mark name → the `<pc>` type/subType a vendor tool renders.
@@ -350,7 +347,9 @@ defmodule KilnCMS.CMS.Xliff.Document do
         {:error, :empty_file}
 
       true ->
-        do_parse(xml)
+        with :ok <- Xml.check_name_budget(xml) do
+          do_parse(xml)
+        end
     end
   end
 

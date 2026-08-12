@@ -29,6 +29,30 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **A delivery page's ETag now moves when `<head>` settings change** (#1079).
+  Feed autodiscovery (and branding / code injection / calendar alternates) are
+  derived per request from org settings, but the HTML ETag only hashed the
+  content row — so an admin who dropped a type from `/editor/feeds` still saw
+  revalidating clients 304 the old `<link rel="alternate">` into a feed that
+  now 404s. A per-org head-generation token is folded into the ETag and bumped
+  from the same Bust* changes that already clear layout-facing caches.
+- **Visual editing opens the locale variant you clicked** (#1104). Both
+  Presentation and in-context consoles resolved a record by slug pinned to the
+  default locale, so a click on `/fr/…` opened (and could write) the English
+  document once #502 shared block ids across translations. The stega payload and
+  `bridge.js` now carry `locale`; both consoles take `?locale=` (default when
+  absent); Presentation refuses a payload naming a record it did not load. The
+  fired `:json` artifact includes `locale` so the address is complete.
+- **Presentation preview iframe is sandboxed when it shares the console's
+  origin** (#1059). A bare iframe meant `PRESENTATION_PREVIEW_URL` pointed at
+  Kiln's own delivery host gave framed scripts (code injection, stored XSS)
+  full DOM access to the signed-in console. Same-origin previews now get
+  `sandbox="allow-scripts"` (opaque; no cookies in the frame); cross-origin
+  previews keep `allow-same-origin` so that site's cookies still work. The
+  click-to-edit bridge accepts opaque `postMessage` origins when the frame is
+  deliberately opaque, guarded by window identity. Docs state the cookie
+  tradeoff; the console banners the same-origin case.
+
 - **A dead app-icon URL no longer keeps `apple-touch-icon` pointed at a 404**
   (#1147). Save-time verification stored the measured edge once; nothing
   re-checked it, so a CDN that later 404'd still looked installable to every
@@ -36,6 +60,32 @@ migration, a rewritten column, a dropped config key).
   re-runs `AppIcon.verify/1` and, after two consecutive failures, clears the
   **size** (never the URL) so the stock mark returns until the next successful
   verify. The failure streak resets on every branding save.
+
+- **Four tests' copies of the experiments config fixture now bust the cache
+  on restore, like the one that already did** (#1120). The same
+  get/put/`on_exit`-restore block for `:kiln_cms, KilnCMS.Experiments` was
+  copied — as a `put_experiments/1` helper — into
+  `test/kiln_cms/experiments/sticky_test.exs`,
+  `test/kiln_cms/experiments/health_test.exs`,
+  `test/kiln_cms_web/live/overview_experiment_warning_test.exs`, and
+  `test/mix/tasks/kiln_experiment_test.exs` (as `sticky_on/0` +
+  `put_experiments/1`). `KilnCMS.ExperimentFixtures.enable!/0` was the same
+  block **plus** `KilnCMS.Cache.bust_experiments/1` on restore; none of the
+  four copies busted.
+
+  Harmless while `Experiments.enabled?/0` and `Sticky.enabled?/0` were plain
+  config reads. Not harmless once a test flips the flag and then reads
+  `Experiments.running/1` (as `health_test.exs` has done since #1110, to
+  catch a `select` regression): the flag restores correctly on `on_exit`, but
+  a cached running set survives into the next `async: false` test in the same
+  partition — an unreproducible cross-test flake that passes isolated, fails
+  under load, and moves with the seed.
+
+  All four now delegate to a new `ExperimentFixtures.put_config/1`, which
+  `enable!/0` is defined in terms of — one place that knows the flag and the
+  cache have to move together. Two more inline (not helper-shaped, so not
+  caught by grepping for `put_experiments`) copies of the same unbust block
+  turned up while fixing this and are filed separately as #1210.
 
 ### Security
 
@@ -134,6 +184,30 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **A losing workflow-transition race now returns a 409, not an opaque 400
+  plus a spammed stacktrace** (#923). #879's compare-and-swap on `publish`,
+  `unpublish`, `submit_for_review`, `return_to_draft` and `archive` raises
+  `Ash.Error.Changes.StaleRecord` when two actors race the same transition
+  and the loser's `UPDATE` matches no rows — the same race
+  `AshStateMachine.Errors.NoMatchingTransition` reports when the state was
+  already wrong *before* the request; `StaleRecord` is what it looks like
+  when the state goes wrong *during* the request instead. Neither
+  `AshJsonApi.ToJsonApiError` nor `AshGraphql.Error` was implemented for it,
+  so it fell through AshJsonApi's fallback branch — an opaque
+  `something_went_wrong` 400 indistinguishable from a real server fault,
+  plus a formatted stacktrace warning logged per request (the exact #880
+  failure mode, now reachable on every CAS-guarded transition instead of
+  just the state-was-already-wrong case).
+
+  `KilnCMSWeb.AshStateMachineErrors` — already the home for
+  `NoMatchingTransition`'s translation — gains the matching `StaleRecord`
+  impls, reporting the same `invalid_state_transition` 409 code. The detail
+  message is necessarily more generic than `NoMatchingTransition`'s:
+  `StaleRecord` carries only the resource, not which record or action raced,
+  since that is genuinely all a zero-rows `UPDATE` can report.
+
+  Item 2 from the same review — `:archive` firing no webhook — was already
+  filed and fixed separately as #914.
 - **A missing responsive-label image encoder (no AVIF build, a `thumb.avif`
   past a dimension ceiling) re-decoded the source on every regeneration run,
   forever** (#1036). #1000 recorded which full-size alternates a source
@@ -159,6 +233,15 @@ migration, a rewritten column, a dropped config key).
   `Regeneration.current?/1`'s `base_labels` sweep now excuses a label+format
   recorded as impossible, the same "present OR recorded as impossible" rule
   it already applied to `full`.
+
+  Re-keying costs a one-time reprocess, not a migration: a `variant_failures`
+  row written by #1000 (bare `"webp"`) doesn't match the new `"full.webp"`
+  key, so an item with a pre-existing failure briefly reads as "not current"
+  again. `Media.VariantWorker` rewrites the map wholesale on every run, so
+  the very next regeneration pass — not a fresh failure — flips it to the
+  new shape and the item stops re-enqueuing. Running
+  `mix kiln.media.regenerate_variants` (the default `only_missing?: true`)
+  shortly after this deploys will decode and re-fail those items once.
 
 - **Archiving a published document now tells subscribers it left delivery**
   (#914). #879 made `:archive` tear down a published record's delivery

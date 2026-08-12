@@ -364,9 +364,7 @@ defmodule KilnCMS.Experiments.LifecycleTest do
     # all", and a public form POST carrying a stale variant id is the other way
     # in — so it has to gate counting as well as serving.
     test "counts nothing when the deployment switch is off", ctx do
-      original = Application.get_env(:kiln_cms, KilnCMS.Experiments, [])
-      Application.put_env(:kiln_cms, KilnCMS.Experiments, Keyword.put(original, :enabled, false))
-      on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Experiments, original) end)
+      ExperimentFixtures.put_config(enabled: false)
 
       convert(ctx.control.id, ctx)
 

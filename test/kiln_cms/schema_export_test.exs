@@ -56,7 +56,7 @@ defmodule KilnCMS.SchemaExportTest do
 
       # Exactly the keys `KilnCMS.Firing.Engine.compose/4` writes for `:json`.
       assert page["properties"] |> Map.keys() |> Enum.sort() ==
-               ~w(blocks custom_fields id slug title type)
+               ~w(blocks custom_fields id locale slug title type)
 
       assert page["properties"]["type"] == %{"const" => "page"}
       assert page["properties"]["blocks"]["items"] == %{"$ref" => "#/$defs/block"}

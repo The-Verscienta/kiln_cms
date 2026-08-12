@@ -46,11 +46,10 @@ defmodule KilnCMSWeb.OverviewExperimentWarningTest do
     |> AshAuthentication.Plug.Helpers.store_in_session(user)
   end
 
-  defp put_experiments(overrides) do
-    original = Application.get_env(:kiln_cms, KilnCMS.Experiments, [])
-    Application.put_env(:kiln_cms, KilnCMS.Experiments, Keyword.merge(original, overrides))
-    on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Experiments, original) end)
-  end
+  # Delegates to ExperimentFixtures.put_config/1 (#1120) — this used to be its
+  # own copy of the get/put/on_exit-restore block, which didn't bust the
+  # running-experiments cache on restore the way the shared fixture does.
+  defp put_experiments(overrides), do: ExperimentFixtures.put_config(overrides)
 
   # Published: a draft document under test is a blocked reason of its own now,
   # so an unpublished fixture would render the strip for the wrong reason.
