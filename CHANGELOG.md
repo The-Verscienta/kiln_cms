@@ -25,7 +25,94 @@ migration, a rewritten column, a dropped config key).
 
 <!-- Releases are cut from `main`; see docs/releasing.md. -->
 
-## [Unreleased]
+## [0.6.0] - 2026-08-12
+
+### Added
+
+- **A per-org default for the form embed allowlist** (#1131). Follow-up to
+  #648, which put the `frame-ancestors` allowlist on the **form**: correct
+  per-partner, but every existing form — and every new one — was still
+  governed by the deployment-wide `EMBED_ORIGINS` until an admin opened it
+  and picked a mode, and `EMBED_ORIGINS` has no tenant dimension, so on a
+  multi-org deployment that was necessarily the union of every org's
+  embedders. The ladder gained a rung: `form.embed_origins ->
+  KilnCMS.CMS.SiteEmbedSettings.embed_origins -> EMBED_ORIGINS`, resolved by
+  the new `KilnCMS.Forms.EmbedPolicy` (admin-only settings resource, managed
+  through the generic Ash Admin UI like `FormSpamSettings` rather than a
+  bespoke page). A form's own list, including an explicit `[]` close, still
+  overrides the org default; the org default still overrides the deployment.
+  The Embed tab's "inherit" radio now says "Use this site's default" — it
+  already deliberately avoided naming an actual value (#1130), and now that
+  value is the org's own rather than the deployment's.
+
+- **Boot warns when the chain cannot detect splices** (#1056). With
+  `audit_anchor_every_write` on (or any `history_anchors` row already present)
+  and no provenance signing key, splice detection inside an anchored range is
+  soft (`:unverifiable`) rather than a hard failure — documented, but easy to
+  miss because the per-anchor "stored UNSIGNED" log is noise under every-write
+  anchoring. `KilnCMS.Application` now logs that once at boot, same shape as
+  the mailer / egress warnings.
+
+- **Claim checking is per site, and has a page** (#857). `KilnCMS.Compliance`
+  was configured entirely in `config.exs`, which is the wrong grain on a
+  multi-org install: a claims vocabulary is a statement about one publication's
+  voice and jurisdiction, and `require_at_publish` is a hard publish refusal.
+  One clinic deciding that "cures" cannot ship refused every other site's
+  publishes on the same instance, and a tenant that wanted the panel off could
+  not turn it off either.
+
+  Each site now has a `KilnCMS.CMS.SiteCompliance` row — the panel switch, the
+  publish gate, the required disclaimer, whether the deployment's rules apply,
+  and its own phrase list with a severity — edited at **Claim checking**
+  (`/editor/compliance`, admin only). `KilnCMS.Compliance.Settings` resolves
+  that row over the existing `config :kiln_cms, KilnCMS.Compliance`, so a site
+  that saves nothing inherits exactly what it inherited before and a
+  single-tenant install needs no change.
+
+  The page is also the answer to the feature being invisible: it shipped off,
+  and the editor renders no Compliance panel while it is off, so nothing in the
+  admin UI said it existed. A site that has not opted in now gets an explainer
+  and one button, the way `/editor/links` does for outbound link checking.
+
+  If the settings row cannot be read at all, the advisory switches fall back to
+  the operator config and the **publish gate is forced off**: that is the one
+  axis where guessing wrong turns a transient read error into a site that
+  cannot publish, and it would be refusing on rules nobody could confirm.
+
+- **The governance dashboard answers "what are we claiming right now"** (#858).
+  #377 tied claim checking to #352's dashboard and `docs/p3-plan.md` said the
+  checks would feed it; what shipped fed nothing. Findings lived in the content
+  editor's panel and in the publish gate's refusal — both about the document in
+  front of you, neither a record of what the site is actually saying.
+
+  `/editor/governance` now carries a **Live claims** panel: every published
+  document scanned against the site's own vocabulary (#857), naming the phrase
+  that matched and flagging the ones the publish gate would refuse, errors
+  first. Off is rendered as off rather than as an empty list, because "nobody
+  scanned" and "nothing found" are the same picture and opposite facts.
+
+  **Recomputed on read, not stored.** No findings table, and nothing written on
+  publish. Three consequences, all deliberate: it answers what is live now and
+  not what a page claimed in March (point-in-time history is on the same
+  dashboard for that); a finding is always judged by the rules in force now, so
+  narrowing a vocabulary retires it rather than leaving a record judged by a
+  retired rule; and it never has to write on publish, where
+  `AutoCompleteTasks` force-completes every open task and would close the very
+  task a compliance finding might have opened — the hazard #858 flags.
+
+  Bounded at `KilnCMS.Compliance.Report.document_cap/0` documents, with the
+  panel saying so rather than describing a subset as the whole.
+
+- **Unsplash search in the content editor's image picker.** Previously
+  Unsplash search/import lived only on the standalone Media Library page
+  (`KilnCMSWeb.MediaLive`) — putting a stock photo on a post meant importing
+  it via `/media` first, then returning to the post to pick it from the
+  library. The content editor's own image picker (featured image, image
+  blocks, the SEO/social card image, and gallery blocks) now grows a second
+  tab, gated on `KilnCMS.Unsplash.enabled?()`, so search, import, and insert
+  happen in one drawer without leaving the editor. `KilnCMS.Unsplash.import_photo/2`
+  consolidates the download -> store -> cleanup sequence so both LiveViews
+  share one implementation.
 
 ### Fixed
 
@@ -117,118 +204,6 @@ migration, a rewritten column, a dropped config key).
   caught by grepping for `put_experiments`) copies of the same unbust block
   turned up while fixing this and are filed separately as #1210.
 
-### Security
-
-- **The three prompt builders' data fence now carries a per-call nonce
-  instead of a static, publicly-known delimiter** (#1065). #945 twice had to
-  widen `KilnCMS.LLM.Fence`'s shape matcher — a padding class missing a whole
-  Unicode category, then a rule-character class missing box-drawing glyphs —
-  because the set of glyph runs a model reads as "the data ended" has no
-  closed definition, so no character class ever finishes that job.
-
-  `Fence.nonce/0` generates an unguessable token once per `build/1` call;
-  `KilnCMS.Ask.Prompt`, `KilnCMS.Assist.Prompt` and `KilnCMS.Seo.Prompt` each
-  thread it through every region in that prompt as
-  `-----BEGIN <nonce>-----` / `-----END <nonce>-----`. The data cannot
-  contain the closing token because the attacker cannot guess it, so closing
-  the fence stops being a matching problem and becomes a guessing one.
-  `Fence.region/3` is the only way to build a fenced block now — a call site
-  can no longer forget to escape a value or forget to use the marker the
-  system prompt actually named, which is the shape that once let
-  `document.title` sit outside `Seo.Prompt`'s fence for the whole life of
-  that module (#945).
-
-  The shape matcher (`Fence.defence/1`) stays as a second layer — cheap, it
-  still reads a legitimate horizontal rule as prose rather than a
-  false-positive close, and it now also neutralizes an attacker's *guess* at
-  a BEGIN/END-shaped marker line, so a forged token with the wrong nonce
-  reads as a rule rather than a plausible (if mismatched) close.
-
-  Not a complete answer: a nonce closes the shape problem, not the framing
-  one. A model can still be talked out of the "this is data" instruction by
-  prose inside the region itself, and in all three builders the untrusted
-  text is the last thing before the model's turn — the position an attacker
-  most wants. The real defences are unchanged: the generators get no tools,
-  and every response is constrained by its own normalizer (`KilnCMS.Ask`,
-  `KilnCMS.Assist.Suggestion`, `KilnCMS.Seo.Draft`).
-
-### Added
-
-- **A per-org default for the form embed allowlist** (#1131). Follow-up to
-  #648, which put the `frame-ancestors` allowlist on the **form**: correct
-  per-partner, but every existing form — and every new one — was still
-  governed by the deployment-wide `EMBED_ORIGINS` until an admin opened it
-  and picked a mode, and `EMBED_ORIGINS` has no tenant dimension, so on a
-  multi-org deployment that was necessarily the union of every org's
-  embedders. The ladder gained a rung: `form.embed_origins ->
-  KilnCMS.CMS.SiteEmbedSettings.embed_origins -> EMBED_ORIGINS`, resolved by
-  the new `KilnCMS.Forms.EmbedPolicy` (admin-only settings resource, managed
-  through the generic Ash Admin UI like `FormSpamSettings` rather than a
-  bespoke page). A form's own list, including an explicit `[]` close, still
-  overrides the org default; the org default still overrides the deployment.
-  The Embed tab's "inherit" radio now says "Use this site's default" — it
-  already deliberately avoided naming an actual value (#1130), and now that
-  value is the org's own rather than the deployment's.
-
-- **Boot warns when the chain cannot detect splices** (#1056). With
-  `audit_anchor_every_write` on (or any `history_anchors` row already present)
-  and no provenance signing key, splice detection inside an anchored range is
-  soft (`:unverifiable`) rather than a hard failure — documented, but easy to
-  miss because the per-anchor "stored UNSIGNED" log is noise under every-write
-  anchoring. `KilnCMS.Application` now logs that once at boot, same shape as
-  the mailer / egress warnings.
-
-- **Claim checking is per site, and has a page** (#857). `KilnCMS.Compliance`
-  was configured entirely in `config.exs`, which is the wrong grain on a
-  multi-org install: a claims vocabulary is a statement about one publication's
-  voice and jurisdiction, and `require_at_publish` is a hard publish refusal.
-  One clinic deciding that "cures" cannot ship refused every other site's
-  publishes on the same instance, and a tenant that wanted the panel off could
-  not turn it off either.
-
-  Each site now has a `KilnCMS.CMS.SiteCompliance` row — the panel switch, the
-  publish gate, the required disclaimer, whether the deployment's rules apply,
-  and its own phrase list with a severity — edited at **Claim checking**
-  (`/editor/compliance`, admin only). `KilnCMS.Compliance.Settings` resolves
-  that row over the existing `config :kiln_cms, KilnCMS.Compliance`, so a site
-  that saves nothing inherits exactly what it inherited before and a
-  single-tenant install needs no change.
-
-  The page is also the answer to the feature being invisible: it shipped off,
-  and the editor renders no Compliance panel while it is off, so nothing in the
-  admin UI said it existed. A site that has not opted in now gets an explainer
-  and one button, the way `/editor/links` does for outbound link checking.
-
-  If the settings row cannot be read at all, the advisory switches fall back to
-  the operator config and the **publish gate is forced off**: that is the one
-  axis where guessing wrong turns a transient read error into a site that
-  cannot publish, and it would be refusing on rules nobody could confirm.
-
-- **The governance dashboard answers "what are we claiming right now"** (#858).
-  #377 tied claim checking to #352's dashboard and `docs/p3-plan.md` said the
-  checks would feed it; what shipped fed nothing. Findings lived in the content
-  editor's panel and in the publish gate's refusal — both about the document in
-  front of you, neither a record of what the site is actually saying.
-
-  `/editor/governance` now carries a **Live claims** panel: every published
-  document scanned against the site's own vocabulary (#857), naming the phrase
-  that matched and flagging the ones the publish gate would refuse, errors
-  first. Off is rendered as off rather than as an empty list, because "nobody
-  scanned" and "nothing found" are the same picture and opposite facts.
-
-  **Recomputed on read, not stored.** No findings table, and nothing written on
-  publish. Three consequences, all deliberate: it answers what is live now and
-  not what a page claimed in March (point-in-time history is on the same
-  dashboard for that); a finding is always judged by the rules in force now, so
-  narrowing a vocabulary retires it rather than leaving a record judged by a
-  retired rule; and it never has to write on publish, where
-  `AutoCompleteTasks` force-completes every open task and would close the very
-  task a compliance finding might have opened — the hazard #858 flags.
-
-  Bounded at `KilnCMS.Compliance.Report.document_cap/0` documents, with the
-  panel saying so rather than describing a subset as the whole.
-
-### Fixed
 
 - **The content editor no longer loads every tag in the org on mount** (#1149).
   Since #638 the picker submits add/remove diffs, so an unrendered tag is no
@@ -475,6 +450,40 @@ migration, a rewritten column, a dropped config key).
   well, so a replayed event cannot reach the copy. (#922)
 
 ### Security
+
+- **The three prompt builders' data fence now carries a per-call nonce
+  instead of a static, publicly-known delimiter** (#1065). #945 twice had to
+  widen `KilnCMS.LLM.Fence`'s shape matcher — a padding class missing a whole
+  Unicode category, then a rule-character class missing box-drawing glyphs —
+  because the set of glyph runs a model reads as "the data ended" has no
+  closed definition, so no character class ever finishes that job.
+
+  `Fence.nonce/0` generates an unguessable token once per `build/1` call;
+  `KilnCMS.Ask.Prompt`, `KilnCMS.Assist.Prompt` and `KilnCMS.Seo.Prompt` each
+  thread it through every region in that prompt as
+  `-----BEGIN <nonce>-----` / `-----END <nonce>-----`. The data cannot
+  contain the closing token because the attacker cannot guess it, so closing
+  the fence stops being a matching problem and becomes a guessing one.
+  `Fence.region/3` is the only way to build a fenced block now — a call site
+  can no longer forget to escape a value or forget to use the marker the
+  system prompt actually named, which is the shape that once let
+  `document.title` sit outside `Seo.Prompt`'s fence for the whole life of
+  that module (#945).
+
+  The shape matcher (`Fence.defence/1`) stays as a second layer — cheap, it
+  still reads a legitimate horizontal rule as prose rather than a
+  false-positive close, and it now also neutralizes an attacker's *guess* at
+  a BEGIN/END-shaped marker line, so a forged token with the wrong nonce
+  reads as a rule rather than a plausible (if mismatched) close.
+
+  Not a complete answer: a nonce closes the shape problem, not the framing
+  one. A model can still be talked out of the "this is data" instruction by
+  prose inside the region itself, and in all three builders the untrusted
+  text is the last thing before the model's turn — the position an attacker
+  most wants. The real defences are unchanged: the generators get no tools,
+  and every response is constrained by its own normalizer (`KilnCMS.Ask`,
+  `KilnCMS.Assist.Suggestion`, `KilnCMS.Seo.Draft`).
+
 
 - **A reusable fragment's content is no longer invisible to search, word
   count, and the editor's own preview** (#910). `KilnCMS.CMS.Fragments.expand/3`
