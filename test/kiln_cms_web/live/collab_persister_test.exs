@@ -76,7 +76,20 @@ defmodule KilnCMSWeb.CollabPersisterTest do
 
   # Poll a LiveView's render until `fun.(html)` holds (presence diffs arrive
   # asynchronously; never assert on a fixed sleep).
-  defp await(lv, fun, tries \\ 40) do
+  #
+  # 60, not the original 40 (#1095): a full-suite CI run showed one failure of
+  # this file's first test, never reproduced since — not locally, and not
+  # under 60 repeats of this file racing the rest of the suite for the same DB
+  # connection pool. `KilnCMSWeb.CollabSavedRefreshTest`, the sibling test in
+  # the same presence/autosave problem space, already budgets 60 tries here;
+  # this file's tighter 40 (1s vs 1.5s of real wall-clock polling) was the one
+  # asymmetry between two tests waiting on the same kind of eventually-
+  # consistent state, and a saturated CI runner is exactly the condition under
+  # which BEAM scheduling and Postgres round-trips both slow down. Matching
+  # the sibling's budget is the boring, well-precedented fix for "eventually
+  # consistent, occasionally slower than expected" — not a cover for a logic
+  # bug, which the investigation below ruled out as this test's actual race.
+  defp await(lv, fun, tries \\ 60) do
     html = render(lv)
 
     cond do
@@ -111,7 +124,19 @@ defmodule KilnCMSWeb.CollabPersisterTest do
     await(lv_low, &(&1 =~ "2 editing"))
     await(lv_high, &(&1 =~ "2 editing"))
 
-    # The non-persister's edit does NOT autosave — indicator says synced.
+    # The persister's autosave works as always. Done FIRST and confirmed
+    # landed (#1095): a negative assertion that only checks "still Original"
+    # passes for the wrong reason if it merely hasn't happened *yet*, and
+    # can't tell "correctly refused to write" apart from "hasn't tried". A
+    # confirmed prior write it must NOT clobber is a stronger anchor than the
+    # seed value, and rules out both sessions silently failing to save at all.
+    lv_low |> form("#page-editor", form: %{title: "From low"}) |> render_change()
+    send(lv_low.pid, :autosave)
+    await(lv_low, &(&1 =~ "Saved"))
+    assert CMS.get_page!(page.id, actor: low).title == "From low"
+
+    # The non-persister's edit does NOT autosave — indicator says synced, and
+    # the persister's write above survives untouched.
     #
     # `await/2`, not a bare `render/1`. Presence is eventually consistent: the
     # `await` above proves two editors were present at *some* instant, and
@@ -121,12 +146,6 @@ defmodule KilnCMSWeb.CollabPersisterTest do
     lv_high |> form("#page-editor", form: %{title: "From high"}) |> render_change()
     send(lv_high.pid, :autosave)
     await(lv_high, &(&1 =~ "Synced live"))
-    assert CMS.get_page!(page.id, actor: low).title == "Original"
-
-    # The persister's autosave works as always.
-    lv_low |> form("#page-editor", form: %{title: "From low"}) |> render_change()
-    send(lv_low.pid, :autosave)
-    await(lv_low, &(&1 =~ "Saved"))
     assert CMS.get_page!(page.id, actor: low).title == "From low"
   end
 
