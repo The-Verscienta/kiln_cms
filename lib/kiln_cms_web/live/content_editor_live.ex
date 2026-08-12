@@ -6088,7 +6088,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> Ash.Query.limit(max_tags())
 
     query =
-      case String.trim(to_string(filter || "")) do
+      case String.trim(filter) do
         "" ->
           query
 
