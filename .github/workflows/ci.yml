@@ -748,6 +748,13 @@ jobs:
 
     env:
       MIX_ENV: test
+      # `erlef/setup-beam` picks its precompiled OTP/Elixir build from
+      # `ImageOS`, which the runner's own setup scripts normally export — but
+      # those scripts never run inside a `container:`, so here it's unset and
+      # the action has nothing to match a build against. Debian trixie's
+      # glibc is compatible with Ubuntu 24.04's, so `ubuntu24` is the closest
+      # of the action's supported targets.
+      ImageOS: ubuntu24
 
     # NOT a required check, same posture and reasoning as `image` above: this
     # is the first time this project has run `erlef/setup-beam` inside a
