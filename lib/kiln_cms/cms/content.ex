@@ -2240,6 +2240,14 @@ defmodule KilnCMS.CMS.Content do
         # Checks the cast block tree in a before_action hook; admins exempt.
         change KilnCMS.CMS.Changes.EnforceBlockFieldPolicy, on: [:create, :update]
 
+        # A fragment block's `ref` had no write-time check (#911 follow-up to
+        # #479): a dangling target saved cleanly, and the target read ran
+        # `authorize?: false` even though the picker offering it is
+        # actor-scoped. Resolves each fragment's target under the ACTING
+        # actor's own read policy; admins/system writes exempt (see the
+        # change module).
+        change KilnCMS.CMS.Changes.ValidateFragmentReferences, on: [:create, :update]
+
         # Tamper-evident history (#356): with `audit_anchor_every_write` on,
         # extend the signed anchor chain after every versioned write, closing
         # the between-publish window. Off by default and skipped for publishes
