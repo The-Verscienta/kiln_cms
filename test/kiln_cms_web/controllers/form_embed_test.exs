@@ -8,36 +8,7 @@ defmodule KilnCMSWeb.FormEmbedTest do
   alias KilnCMS.CMS
   alias KilnCMSWeb.Embed
 
-  defp admin do
-    Ash.Seed.seed!(KilnCMS.Accounts.User, %{
-      email: "fe-#{System.unique_integer([:positive])}@example.com",
-      hashed_password: Bcrypt.hash_pwd_salt("password123456"),
-      confirmed_at: DateTime.utc_now(),
-      role: :admin
-    })
-  end
-
-  defp form!(opts \\ []) do
-    actor = admin()
-
-    form =
-      CMS.create_form!(
-        %{
-          name: "Contact us",
-          slug: "fe-#{System.unique_integer([:positive])}",
-          success_message: "Merci!",
-          active: Keyword.get(opts, :active, true)
-        },
-        actor: actor
-      )
-
-    CMS.create_form_field!(
-      %{form_id: form.id, name: "email", label: "Email", field_type: :email, required: true},
-      actor: actor
-    )
-
-    form
-  end
+  import KilnCMS.FormFixtures, only: [admin: 0, form!: 1, form!: 2, unique_ip: 1]
 
   # Every test gets its own IP so rate buckets never cross tests.
   defp csp(conn), do: conn |> get_resp_header("content-security-policy") |> List.first()
