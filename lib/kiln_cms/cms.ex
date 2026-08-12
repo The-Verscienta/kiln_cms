@@ -686,6 +686,11 @@ defmodule KilnCMS.CMS do
       define :list_type_definitions, action: :read
       define :list_archived_type_definitions, action: :archived
       define :get_type_definition, action: :read, get_by: [:id]
+
+      define :get_type_definition_including_archived,
+        action: :get_by_id_including_archived,
+        args: [:id]
+
       define :get_type_definition_by_name, action: :by_name, args: [:name]
       define :create_type_definition, action: :create
       define :update_type_definition, action: :update

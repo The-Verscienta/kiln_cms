@@ -34,7 +34,7 @@ defmodule KilnCMS.CMS.TypeDefinition do
   end
 
   archive do
-    exclude_read_actions([:archived])
+    exclude_read_actions([:archived, :get_by_id_including_archived])
   end
 
   actions do
@@ -103,9 +103,23 @@ defmodule KilnCMS.CMS.TypeDefinition do
       change set_attribute(:archived_at, nil)
     end
 
-    # Archived ("trashed") type definitions — the only read that sees them.
+    # Archived ("trashed") type definitions — the only OTHER read that sees them.
     read :archived do
       filter expr(not is_nil(archived_at))
+    end
+
+    # `:read`'s `get_by: [:id]` (the registry's normal lookup) is filtered to
+    # non-archived rows by AshArchival, so `KilnCMS.Firing.Engine.public_type/1`
+    # — which needs the type a document was CREATED under regardless of
+    # whether it has since been archived, so a published document's fired
+    # "type" stays stable rather than degrading to the generic "entry" storage
+    # key the moment an admin archives its type (#938) — cannot use it. Unlike
+    # `:read`, this has no `not is_nil(archived_at)` filter either way: it
+    # answers for a row whether or not it is archived.
+    read :get_by_id_including_archived do
+      get? true
+      argument :id, :uuid, allow_nil?: false
+      filter expr(id == ^arg(:id))
     end
 
     read :by_name do
