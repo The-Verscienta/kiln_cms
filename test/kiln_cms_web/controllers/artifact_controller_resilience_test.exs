@@ -41,6 +41,14 @@ defmodule KilnCMSWeb.ArtifactControllerResilienceTest do
 
   # Dispatch `fun` from a bare, unallowed process (no sandbox `$callers`): any
   # database access raises, exactly as a Postgres outage would.
+  #
+  # The property under test — a cold miss degrades to a retryable 503 without
+  # Postgres — does not depend on *how fast* that happens, so the deadline
+  # below is incidental to what is being asserted rather than part of it. 3s
+  # was a budget for a full Phoenix request dispatch measured against an idle
+  # machine, and flaked under full-suite scheduler contention (#1145, same
+  # shape as the three budget bugs #1125 fixed). The loop returns on the first
+  # message, so a generous deadline costs nothing when it passes.
   defp without_db(fun) do
     parent = self()
     spawn(fn -> send(parent, {:without_db, fun.()}) end)
@@ -48,7 +56,7 @@ defmodule KilnCMSWeb.ArtifactControllerResilienceTest do
     receive do
       {:without_db, result} -> result
     after
-      3000 -> flunk("timed out")
+      30_000 -> flunk("timed out")
     end
   end
 
