@@ -22,6 +22,8 @@ defmodule KilnCMS.CMS.Changes.BustBranding do
       with {:ok, record} <- result do
         KilnCMS.Cache.bust_branding(record.org_id)
         KilnCMS.Cache.bust_llms(record.org_id)
+        # Delivery ETag folds head generation (#1079): branding lands in `<head>`.
+        KilnCMS.Cache.bump_head_generation(record.org_id)
       end
 
       result
