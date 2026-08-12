@@ -20,7 +20,7 @@ defmodule KilnCMSWeb.FormEmbedDefaultTest do
   alias KilnCMS.CMS
   alias KilnCMSWeb.Embed
 
-  import KilnCMS.FormFixtures, only: [admin: 0, form!: 0, form!: 1, form!: 2, unique_ip: 1]
+  import KilnCMS.FormFixtures, only: [admin: 0, form!: 0, form!: 1, form!: 2]
 
   setup do
     previous = Application.get_env(:kiln_cms, :embed_origins)

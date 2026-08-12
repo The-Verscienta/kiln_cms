@@ -8,7 +8,7 @@ defmodule KilnCMSWeb.FormEmbedTest do
   alias KilnCMS.CMS
   alias KilnCMSWeb.Embed
 
-  import KilnCMS.FormFixtures, only: [admin: 0, form!: 1, form!: 2, unique_ip: 1]
+  import KilnCMS.FormFixtures, only: [admin: 0, form!: 0, form!: 1]
 
   # Every test gets its own IP so rate buckets never cross tests.
   defp csp(conn), do: conn |> get_resp_header("content-security-policy") |> List.first()
