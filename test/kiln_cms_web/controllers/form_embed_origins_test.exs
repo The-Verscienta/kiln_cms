@@ -17,40 +17,10 @@ defmodule KilnCMSWeb.FormEmbedOriginsTest do
   use KilnCMSWeb.ConnCase, async: true
 
   import KilnCMS.OrgFixtures
+  import KilnCMS.FormFixtures, only: [admin: 0, form!: 1, form!: 2]
 
   alias KilnCMS.CMS
   alias KilnCMSWeb.Embed
-
-  defp admin do
-    Ash.Seed.seed!(KilnCMS.Accounts.User, %{
-      email: "feo-#{System.unique_integer([:positive])}@example.com",
-      hashed_password: Bcrypt.hash_pwd_salt("password123456"),
-      confirmed_at: DateTime.utc_now(),
-      role: :admin
-    })
-  end
-
-  defp form!(attrs, opts) do
-    form =
-      CMS.create_form!(
-        Map.merge(
-          %{
-            name: "Contact us",
-            slug: "feo-#{System.unique_integer([:positive])}",
-            success_message: "Merci!"
-          },
-          attrs
-        ),
-        Keyword.take(opts, [:actor, :tenant])
-      )
-
-    CMS.create_form_field!(
-      %{form_id: form.id, name: "email", label: "Email", field_type: :email, required: true},
-      Keyword.take(opts, [:actor, :tenant])
-    )
-
-    form
-  end
 
   # `frame-ancestors` is the last directive emitted, so everything after it is
   # the whole source list. Compared with `==`, never `=~`: a substring assertion

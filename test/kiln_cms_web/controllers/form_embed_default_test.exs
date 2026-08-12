@@ -20,6 +20,8 @@ defmodule KilnCMSWeb.FormEmbedDefaultTest do
   alias KilnCMS.CMS
   alias KilnCMSWeb.Embed
 
+  import KilnCMS.FormFixtures, only: [admin: 0, form!: 0, form!: 1, form!: 2]
+
   setup do
     previous = Application.get_env(:kiln_cms, :embed_origins)
     Application.delete_env(:kiln_cms, :embed_origins)
@@ -32,37 +34,6 @@ defmodule KilnCMSWeb.FormEmbedDefaultTest do
     end)
 
     :ok
-  end
-
-  defp admin do
-    Ash.Seed.seed!(KilnCMS.Accounts.User, %{
-      email: "fed-#{System.unique_integer([:positive])}@example.com",
-      hashed_password: Bcrypt.hash_pwd_salt("password123456"),
-      confirmed_at: DateTime.utc_now(),
-      role: :admin
-    })
-  end
-
-  defp form! do
-    actor = admin()
-
-    form =
-      CMS.create_form!(
-        %{
-          name: "Contact us",
-          slug: "fed-#{System.unique_integer([:positive])}",
-          success_message: "Merci!",
-          active: true
-        },
-        actor: actor
-      )
-
-    CMS.create_form_field!(
-      %{form_id: form.id, name: "email", label: "Email", field_type: :email, required: true},
-      actor: actor
-    )
-
-    form
   end
 
   defp csp(conn), do: conn |> get_resp_header("content-security-policy") |> List.first()
