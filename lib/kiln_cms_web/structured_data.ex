@@ -110,9 +110,9 @@ defmodule KilnCMSWeb.StructuredData do
   more than `teaser` already summarises, plus the type declaration itself, which
   is public admin configuration, not gated content.
   """
-  @spec teaser(KilnCMSWeb.Teaser.t(), struct() | nil, term()) :: [map()]
-  def teaser(teaser, record \\ nil, org \\ nil) do
-    type = if record, do: SchemaOrg.resolve(record), else: "WebPage"
+  @spec teaser(KilnCMSWeb.Teaser.t(), term()) :: [map()]
+  def teaser(teaser, org \\ nil) do
+    type = (teaser.type && to_string(teaser.type)) || "WebPage"
 
     node =
       %{
@@ -126,7 +126,7 @@ defmodule KilnCMSWeb.StructuredData do
       |> maybe_put("description", teaser.summary || teaser.seo_description)
       |> maybe_put("image", teaser.seo_image)
       |> maybe_teaser_dates(type, teaser)
-      |> maybe_teaser_event_schedule(type, record)
+      |> maybe_teaser_event_schedule(type, teaser)
       |> Map.merge(paywall_markers())
 
     [node]
@@ -142,9 +142,9 @@ defmodule KilnCMSWeb.StructuredData do
     end
   end
 
-  defp maybe_teaser_event_schedule(node, type, record) do
-    if record && SchemaOrg.event_type?(type) do
-      Map.merge(node, KilnCMS.Events.schema_org_schedule(record))
+  defp maybe_teaser_event_schedule(node, type, teaser) do
+    if SchemaOrg.event_type?(type) do
+      Map.merge(node, KilnCMS.Events.schema_org_schedule(teaser))
     else
       node
     end
