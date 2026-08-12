@@ -166,6 +166,33 @@ defmodule KilnCMS.CMS.GranularRbacPhase2Test do
       # The draft's snapshot must not leak through its history.
       assert version_ids.(restricted) == []
     end
+
+    test "readable_types: [\"entry\"] covers every dynamic type (#1175)" do
+      admin = user(:admin)
+      name = "recipe#{System.unique_integer([:positive])}"
+      definition = CMS.create_type_definition!(%{name: name, label: "Recipe"}, actor: admin)
+
+      draft =
+        KilnCMS.CMS.ContentTypes.create!(
+          definition.name,
+          %{title: "Draft recipe", slug: slug(), blocks: []},
+          actor: admin
+        )
+
+      editor = user(:editor, %{readable_types: ["post"]})
+      unrestricted = user(:editor)
+
+      refute draft.id in (KilnCMS.CMS.ContentTypes.list!(definition.name, actor: editor)
+                          |> Enum.map(& &1.id))
+
+      assert draft.id in (KilnCMS.CMS.ContentTypes.list!(definition.name, actor: unrestricted)
+                          |> Enum.map(& &1.id))
+
+      scoped = user(:editor, %{readable_types: ["entry"]})
+
+      assert draft.id in (KilnCMS.CMS.ContentTypes.list!(definition.name, actor: scoped)
+                          |> Enum.map(& &1.id))
+    end
   end
 
   describe "fail-closed affiliation (#336 interplay)" do

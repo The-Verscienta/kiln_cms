@@ -69,4 +69,55 @@ defmodule KilnCMS.CMS.GranularRbacTest do
     assert {:error, %Ash.Error.Forbidden{}} =
              CMS.create_page(%{title: "Pg", slug: slug()}, actor: editor)
   end
+
+  # editable_types groups every dynamic (D17) type under the shared "entry"
+  # storage key, per docs/granular-rbac.md — unlike field_grants, which is
+  # per-type (#927). Previously `["entry"]` matched no dynamic type at all,
+  # because the check resolved the group key via the module-only `type_name/1`
+  # (`nil` for `KilnCMS.CMS.Entry`, which deliberately doesn't export
+  # `__kiln_content_type__/0`) instead of `scope_group_name/1` (#1175).
+  describe "dynamic content types (#1175)" do
+    setup do
+      admin = user(:admin)
+      name = "recipe#{System.unique_integer([:positive])}"
+      definition = CMS.create_type_definition!(%{name: name, label: "Recipe"}, actor: admin)
+      %{admin: admin, definition: definition}
+    end
+
+    test "an editor scoped to \"entry\" can author any dynamic type", %{
+      admin: admin,
+      definition: d
+    } do
+      editor = user(:editor, %{editable_types: ["entry"]})
+
+      assert %KilnCMS.CMS.Entry{} =
+               KilnCMS.CMS.ContentTypes.create!(
+                 d.name,
+                 %{title: "A recipe", slug: slug(), blocks: []},
+                 actor: editor
+               )
+
+      entry =
+        KilnCMS.CMS.ContentTypes.create!(
+          d.name,
+          %{title: "Another", slug: slug(), blocks: []},
+          actor: admin
+        )
+
+      assert {:ok, _} =
+               KilnCMS.CMS.ContentTypes.update(d.name, entry, %{title: "Renamed"}, actor: editor)
+    end
+
+    test "an editor scoped to a compiled type cannot author a dynamic type", %{definition: d} do
+      editor = user(:editor, %{editable_types: ["post"]})
+
+      assert_raise Ash.Error.Forbidden, fn ->
+        KilnCMS.CMS.ContentTypes.create!(
+          d.name,
+          %{title: "A recipe", slug: slug(), blocks: []},
+          actor: editor
+        )
+      end
+    end
+  end
 end

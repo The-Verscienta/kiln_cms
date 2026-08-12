@@ -32,7 +32,7 @@ defmodule KilnCMS.CMS.Checks.ReadableContentType do
         true
 
       :editor ->
-        type = KilnCMS.CMS.ContentTypes.type_name(resource)
+        type = KilnCMS.CMS.ContentTypes.scope_group_name(resource)
 
         # An EXPLICIT editable_types entry is unioned in: restricting what an
         # editor sees must never revoke drafts of types they were explicitly

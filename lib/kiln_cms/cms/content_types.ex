@@ -278,6 +278,33 @@ defmodule KilnCMS.CMS.ContentTypes do
     end
   end
 
+  @doc """
+  The `editable_types`/`readable_types` **group** key for a resource module
+  (#1175) — `type_name/1`, except the generic entry tier (`KilnCMS.CMS.Entry`,
+  marked `__kiln_dynamic_entry__/0`) resolves to the shared `"entry"` key
+  documented in `docs/granular-rbac.md` instead of `nil`.
+
+  `type_name/1` returns `nil` for the entry tier on purpose — it does not
+  export `__kiln_content_type__/0`, so callers that need a record's *own*
+  dynamic type name (`type_name_for/1`, used by `field_grants` per #927) don't
+  collide with it. The scope-axis policy checks (`EditableContentType`,
+  `ReadableContentType`) only ever see the resource *module*, so they need the
+  group key, not the per-record name — this is that key.
+  """
+  @spec scope_group_name(module()) :: String.t() | nil
+  def scope_group_name(resource) do
+    case type_name(resource) do
+      nil ->
+        if Code.ensure_loaded?(resource) and
+             function_exported?(resource, :__kiln_dynamic_entry__, 0) do
+          "entry"
+        end
+
+      name ->
+        name
+    end
+  end
+
   defp describe(resource) do
     type = resource.__kiln_content_type__()
     plural = resource.__kiln_content_plural__()
