@@ -3700,8 +3700,8 @@ msgid "Every delivery attempt is recorded; failures retry with backoff, and %{co
 msgstr ""
 
 #: lib/kiln_cms_web/live/system_live.ex
-#, elixir-autogen, elixir-format
-msgid "Every request re-reads the database until the cache warms again, so on a busy site this is a deliberate load spike. This clears the cache for every organization on this deployment, not just the one you are viewing. The cache lives in this node's memory: on a multi-node deployment it clears the node serving you and leaves the others."
+#, elixir-autogen, elixir-format, fuzzy
+msgid "Every request re-reads the database until the cache warms again, so on a busy site this is a deliberate load spike. This clears the cache for every organization on this deployment, not just the one you are viewing. On a multi-node deployment it reaches every node; the count shown is from the node that served you."
 msgstr ""
 
 #: lib/kiln_cms_web/live/slug_regen_live.ex
@@ -3965,8 +3965,8 @@ msgid "Flush delivery cache"
 msgstr ""
 
 #: lib/kiln_cms_web/live/system_live.ex
-#, elixir-autogen, elixir-format
-msgid "Flush the delivery cache for every organization on this node? Reads will hit the database until it warms again."
+#, elixir-autogen, elixir-format, fuzzy
+msgid "Flush the delivery cache for every organization on every node? Reads will hit the database until it warms again."
 msgstr ""
 
 #: lib/kiln_cms_web/live/media_live.ex

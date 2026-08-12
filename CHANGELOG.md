@@ -29,6 +29,15 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **The admin delivery-cache purge reaches every node** (#1138).
+  `KilnCMS.Cache.flush_delivery/0` (the System console button and
+  `mix kiln.cache.flush`) used to clear only the node that served the request,
+  so after a template deploy other nodes kept serving stale markup for the full
+  TTL while the UI reported thousands of entries dropped. It now broadcasts a
+  `ClusterBust` full clear (`bust_published/0` stays node-local on purpose). The
+  printed count remains **this node's** drop. The same issue lifted
+  `PublicPath`'s per-row type-registry scan into a shared
+  `Slugs.descriptors_for_records/1` memo used by effective SEO too.
 - **A delivery page's ETag now moves when `<head>` settings change** (#1079).
   Feed autodiscovery (and branding / code injection / calendar alternates) are
   derived per request from org settings, but the HTML ETag only hashed the
@@ -52,7 +61,6 @@ migration, a rewritten column, a dropped config key).
   click-to-edit bridge accepts opaque `postMessage` origins when the frame is
   deliberately opaque, guarded by window identity. Docs state the cookie
   tradeoff; the console banners the same-origin case.
-
 - **A dead app-icon URL no longer keeps `apple-touch-icon` pointed at a 404**
   (#1147). Save-time verification stored the measured edge once; nothing
   re-checked it, so a CDN that later 404'd still looked installable to every
