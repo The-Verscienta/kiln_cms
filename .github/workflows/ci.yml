@@ -767,11 +767,14 @@ jobs:
       # `actions/checkout` needs `git`; qpdf is the thing under test.
       # `ca-certificates` so the later `mix deps.get`/GitHub NIF fetch (for
       # `tokenizers`, the same flake vector `image` above documents) can
-      # actually verify TLS.
-      - name: Install git, qpdf and CA certificates
+      # actually verify TLS. `unzip` isn't in `debian:trixie-slim`, but
+      # `erlef/setup-beam` shells out to it to extract the Elixir archive it
+      # downloads — a hosted runner image ships it preinstalled, so this is
+      # the first job here that has needed to say so explicitly.
+      - name: Install git, qpdf, unzip and CA certificates
         run: |
           apt-get update -qq
-          apt-get install -y --no-install-recommends git qpdf ca-certificates
+          apt-get install -y --no-install-recommends git qpdf unzip ca-certificates
           qpdf --version | head -1
           qpdf --help=all 2>&1 | grep -q -- '--remove-info' || {
             echo "::error::qpdf $(qpdf --version | head -1) still predates 11.10 on" \
