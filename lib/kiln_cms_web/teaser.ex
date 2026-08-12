@@ -44,7 +44,9 @@ defmodule KilnCMSWeb.Teaser do
     :path_alias,
     :locale,
     :org_id,
-    :updated_at
+    :updated_at,
+    :type,
+    :custom_fields
   ]
 
   @type t :: %__MODULE__{}
@@ -94,7 +96,9 @@ defmodule KilnCMSWeb.Teaser do
       path_alias: record.path_alias,
       locale: record.locale,
       org_id: record.org_id,
-      updated_at: record.updated_at
+      updated_at: record.updated_at,
+      type: Map.get(record, :__kiln_content_type__) || Map.get(record, "__kiln_content_type__"),
+      custom_fields: Map.get(record, :custom_fields) || %{}
     }
   end
 
