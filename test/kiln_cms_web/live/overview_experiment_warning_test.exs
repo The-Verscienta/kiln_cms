@@ -46,11 +46,10 @@ defmodule KilnCMSWeb.OverviewExperimentWarningTest do
     |> AshAuthentication.Plug.Helpers.store_in_session(user)
   end
 
-  defp put_experiments(overrides) do
-    original = Application.get_env(:kiln_cms, KilnCMS.Experiments, [])
-    Application.put_env(:kiln_cms, KilnCMS.Experiments, Keyword.merge(original, overrides))
-    on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Experiments, original) end)
-  end
+  # Delegates to ExperimentFixtures.put_config/1 (#1120) — this used to be its
+  # own copy of the get/put/on_exit-restore block, which didn't bust the
+  # running-experiments cache on restore the way the shared fixture does.
+  defp put_experiments(overrides), do: ExperimentFixtures.put_config(overrides)
 
   # Published: a draft document under test is a blocked reason of its own now,
   # so an unpublished fixture would render the strip for the wrong reason.
@@ -88,9 +87,9 @@ defmodule KilnCMSWeb.OverviewExperimentWarningTest do
     admin = authed_user(:admin)
     running_content_view_experiment(admin)
 
-    {:ok, _lv, html} = conn |> log_in(admin) |> live(~p"/editor/overview")
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/overview")
 
-    refute html =~ "overview-experiment-warning"
+    refute has_element?(lv, "#overview-experiment-warning")
   end
 
   test "names the experiment and why, once it cannot", %{conn: conn} do
@@ -99,11 +98,11 @@ defmodule KilnCMSWeb.OverviewExperimentWarningTest do
 
     put_experiments(sticky: false)
 
-    {:ok, _lv, html} = conn |> log_in(admin) |> live(~p"/editor/overview")
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/overview")
 
-    assert html =~ "overview-experiment-warning"
-    assert html =~ experiment.name
-    assert html =~ "sticky assignment is off"
+    assert has_element?(lv, "#overview-experiment-warning")
+    assert has_element?(lv, "#overview-experiment-warning", experiment.name)
+    assert has_element?(lv, "#overview-experiment-warning", "sticky assignment is off")
   end
 
   test "an editor is never shown it", %{conn: conn} do
@@ -112,15 +111,15 @@ defmodule KilnCMSWeb.OverviewExperimentWarningTest do
     running_content_view_experiment(authed_user(:admin))
     put_experiments(sticky: false)
 
-    {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/overview")
+    {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/overview")
 
-    refute html =~ "overview-experiment-warning"
+    refute has_element?(lv, "#overview-experiment-warning")
   end
 
   test "a site with no experiments renders nothing extra", %{conn: conn} do
-    {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+    {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
 
-    refute html =~ "overview-experiment-warning"
+    refute has_element?(lv, "#overview-experiment-warning")
   end
 
   describe "the deployment switch" do
@@ -134,15 +133,20 @@ defmodule KilnCMSWeb.OverviewExperimentWarningTest do
 
       put_experiments(enabled: false)
 
-      {:ok, _lv, html} = conn |> log_in(admin) |> live(~p"/editor/overview")
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/overview")
 
-      assert html =~ "overview-experiment-warning"
-      assert html =~ "Experiments are switched off for this deployment"
+      assert has_element?(lv, "#overview-experiment-warning")
+
+      assert has_element?(
+               lv,
+               "#overview-experiment-warning",
+               "Experiments are switched off for this deployment"
+             )
 
       # Once — not once per experiment, and no per-row reason invented for it.
-      refute html =~ a.name
-      refute html =~ b.name
-      refute html =~ "not producing usable results"
+      refute has_element?(lv, "#overview-experiment-warning", a.name)
+      refute has_element?(lv, "#overview-experiment-warning", b.name)
+      refute has_element?(lv, "#overview-experiment-warning", "not producing usable results")
     end
 
     test "does not hide a real reason underneath it", %{conn: conn} do
@@ -151,20 +155,25 @@ defmodule KilnCMSWeb.OverviewExperimentWarningTest do
 
       put_experiments(enabled: false, sticky: false)
 
-      {:ok, _lv, html} = conn |> log_in(admin) |> live(~p"/editor/overview")
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/overview")
 
-      assert html =~ "Experiments are switched off for this deployment"
-      assert html =~ experiment.name
-      assert html =~ "sticky assignment is off"
+      assert has_element?(
+               lv,
+               "#overview-experiment-warning",
+               "Experiments are switched off for this deployment"
+             )
+
+      assert has_element?(lv, "#overview-experiment-warning", experiment.name)
+      assert has_element?(lv, "#overview-experiment-warning", "sticky assignment is off")
     end
 
     test "an editor is shown neither half", %{conn: conn} do
       running_content_view_experiment(authed_user(:admin))
       put_experiments(enabled: false, sticky: false)
 
-      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/overview")
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/overview")
 
-      refute html =~ "overview-experiment-warning"
+      refute has_element?(lv, "#overview-experiment-warning")
     end
   end
 
@@ -199,10 +208,10 @@ defmodule KilnCMSWeb.OverviewExperimentWarningTest do
 
     KilnCMS.Cache.bust_funnel_targets(org_id)
 
-    {:ok, _lv, html} = conn |> log_in(admin) |> live(~p"/editor/overview")
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/overview")
 
-    assert html =~ "overview-experiment-warning"
-    assert html =~ "not producing usable results"
-    refute html =~ "cannot convert"
+    assert has_element?(lv, "#overview-experiment-warning")
+    assert has_element?(lv, "#overview-experiment-warning", "not producing usable results")
+    refute has_element?(lv, "#overview-experiment-warning", "cannot convert")
   end
 end

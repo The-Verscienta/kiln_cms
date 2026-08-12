@@ -72,9 +72,7 @@ defmodule KilnCMSWeb.ExperimentsDeliveryTest do
     test "serves the canonical document when the deployment switch is off", ctx do
       %{page: page} = experimented_page(ctx)
 
-      original = Application.get_env(:kiln_cms, KilnCMS.Experiments, [])
-      Application.put_env(:kiln_cms, KilnCMS.Experiments, Keyword.put(original, :enabled, false))
-      on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Experiments, original) end)
+      ExperimentFixtures.put_config(enabled: false)
 
       body = ctx.conn |> get("/#{page.slug}") |> html_response(200)
 

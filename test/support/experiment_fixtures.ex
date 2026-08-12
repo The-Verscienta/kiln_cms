@@ -11,11 +11,23 @@ defmodule KilnCMS.ExperimentFixtures do
 
   alias KilnCMS.Experiments
 
-  @doc "Turn the deployment-wide switch on for this test only."
-  @spec enable!() :: :ok
-  def enable! do
+  @doc """
+  Override `:kiln_cms, KilnCMS.Experiments` config for this test only,
+  restoring it — and busting the running-experiments cache — on exit.
+
+  The single place this belongs (#1120): the same get/put/`on_exit`-restore
+  block used to be copied into four test files, none of which busted the
+  cache on restore. Harmless while `Experiments.enabled?/0` and
+  `Sticky.enabled?/0` were plain config reads, but a test that flips the flag
+  and then reads `Experiments.running/1` leaves a cached running set that
+  survives the restore into the next `async: false` test in the same
+  partition — an unreproducible cross-test flake that passes isolated, fails
+  under load, and moves with the seed.
+  """
+  @spec put_config(keyword()) :: :ok
+  def put_config(overrides) do
     original = Application.get_env(:kiln_cms, KilnCMS.Experiments, [])
-    Application.put_env(:kiln_cms, KilnCMS.Experiments, Keyword.put(original, :enabled, true))
+    Application.put_env(:kiln_cms, KilnCMS.Experiments, Keyword.merge(original, overrides))
 
     ExUnit.Callbacks.on_exit(fn ->
       Application.put_env(:kiln_cms, KilnCMS.Experiments, original)
@@ -24,6 +36,10 @@ defmodule KilnCMS.ExperimentFixtures do
 
     :ok
   end
+
+  @doc "Turn the deployment-wide switch on for this test only."
+  @spec enable!() :: :ok
+  def enable!, do: put_config(enabled: true)
 
   @doc """
   A running experiment on `document`, with a control and one patched variant.

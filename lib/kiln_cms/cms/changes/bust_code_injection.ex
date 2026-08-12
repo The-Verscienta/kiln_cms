@@ -20,7 +20,12 @@ defmodule KilnCMS.CMS.Changes.BustCodeInjection do
     # snippet under a fresh TTL. That is the exposure this exists to close,
     # reached by a shorter road.
     Ash.Changeset.after_transaction(changeset, fn _changeset, result ->
-      with {:ok, record} <- result, do: KilnCMS.Cache.bust_code_injection(record.org_id)
+      with {:ok, record} <- result do
+        KilnCMS.Cache.bust_code_injection(record.org_id)
+        # Delivery ETag folds head generation (#1079): injection HTML is in `<head>`.
+        KilnCMS.Cache.bump_head_generation(record.org_id)
+      end
+
       result
     end)
   end

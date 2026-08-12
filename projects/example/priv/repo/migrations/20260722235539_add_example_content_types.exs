@@ -1,4 +1,4 @@
-defmodule KilnCMS.Repo.Migrations.AddAcupunctureContentTypes do
+defmodule KilnCMS.Repo.Migrations.AddExampleContentTypes do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 

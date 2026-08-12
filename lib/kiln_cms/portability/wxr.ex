@@ -38,6 +38,7 @@ defmodule KilnCMS.Portability.WXR do
   import SweetXml, only: [sigil_x: 2]
 
   alias KilnCMS.Blocks.Html
+  alias KilnCMS.Xml
 
   @typedoc """
   One importable record, source-neutral. `blocks` is typed-block input, ready
@@ -91,6 +92,12 @@ defmodule KilnCMS.Portability.WXR do
   """
   @spec parse(String.t()) :: {:ok, parsed()} | {:error, term()}
   def parse(xml) when is_binary(xml) do
+    with :ok <- Xml.check_name_budget(xml) do
+      do_parse(xml)
+    end
+  end
+
+  defp do_parse(xml) do
     doc = SweetXml.parse(xml, dtd: :none)
 
     case SweetXml.xpath(doc, ~x"//channel"o) do

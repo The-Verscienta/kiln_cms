@@ -16,6 +16,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.FormField
   alias KilnCMS.Forms.Autoresponder
+  alias KilnCMS.Forms.EmbedPolicy
 
   import KilnCMSWeb.BlockComponents, only: [public_form_field: 1, field_width_class: 1]
 
@@ -278,8 +279,15 @@ defmodule KilnCMSWeb.FormBuilderLive do
   # served for *this* form (#648), and `nil` is how "nobody but this site" is
   # spelled. Computed once when `:form` is assigned rather than per render,
   # since building it scans the allowlist.
-  defp assign_embed_policy(socket, form),
-    do: assign(socket, :embed_origins_label, KilnCMSWeb.Embed.allowed_origins_label(form))
+  #
+  # `EmbedPolicy.effective/1` first, so a form with no list of its own shows
+  # its org's configured default here too (#1131) — otherwise this panel would
+  # tell an admin their form is closed while the served response is actually
+  # governed by an org-wide allowlist nobody here can see.
+  defp assign_embed_policy(socket, form) do
+    label = form |> EmbedPolicy.effective() |> KilnCMSWeb.Embed.allowed_origins_label()
+    assign(socket, :embed_origins_label, label)
+  end
 
   # The Embed tab edits `embed_origins` as one line of origins, with a radio for
   # which of its three states is meant — `nil` (inherit the deployment's
@@ -1034,7 +1042,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
                   checked={embed_mode(@form) == "inherit"}
                   class="size-4 accent-primary"
                 />
-                {gettext("Use the deployment default")}
+                {gettext("Use this site's default")}
               </label>
 
               <label class="flex items-center gap-2 text-sm">

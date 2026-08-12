@@ -29,6 +29,29 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **The admin delivery-cache purge reaches every node** (#1138).
+  `KilnCMS.Cache.flush_delivery/0` (the System console button and
+  `mix kiln.cache.flush`) used to clear only the node that served the request,
+  so after a template deploy other nodes kept serving stale markup for the full
+  TTL while the UI reported thousands of entries dropped. It now broadcasts a
+  `ClusterBust` full clear (`bust_published/0` stays node-local on purpose). The
+  printed count remains **this node's** drop. The same issue lifted
+  `PublicPath`'s per-row type-registry scan into a shared
+  `Slugs.descriptors_for_records/1` memo used by effective SEO too.
+- **A delivery page's ETag now moves when `<head>` settings change** (#1079).
+  Feed autodiscovery (and branding / code injection / calendar alternates) are
+  derived per request from org settings, but the HTML ETag only hashed the
+  content row — so an admin who dropped a type from `/editor/feeds` still saw
+  revalidating clients 304 the old `<link rel="alternate">` into a feed that
+  now 404s. A per-org head-generation token is folded into the ETag and bumped
+  from the same Bust* changes that already clear layout-facing caches.
+- **Visual editing opens the locale variant you clicked** (#1104). Both
+  Presentation and in-context consoles resolved a record by slug pinned to the
+  default locale, so a click on `/fr/…` opened (and could write) the English
+  document once #502 shared block ids across translations. The stega payload and
+  `bridge.js` now carry `locale`; both consoles take `?locale=` (default when
+  absent); Presentation refuses a payload naming a record it did not load. The
+  fired `:json` artifact includes `locale` so the address is complete.
 - **Presentation preview iframe is sandboxed when it shares the console's
   origin** (#1059). A bare iframe meant `PRESENTATION_PREVIEW_URL` pointed at
   Kiln's own delivery host gave framed scripts (code injection, stored XSS)
@@ -38,7 +61,6 @@ migration, a rewritten column, a dropped config key).
   click-to-edit bridge accepts opaque `postMessage` origins when the frame is
   deliberately opaque, guarded by window identity. Docs state the cookie
   tradeoff; the console banners the same-origin case.
-
 - **A dead app-icon URL no longer keeps `apple-touch-icon` pointed at a 404**
   (#1147). Save-time verification stored the measured edge once; nothing
   re-checked it, so a CDN that later 404'd still looked installable to every
@@ -69,8 +91,84 @@ migration, a rewritten column, a dropped config key).
   happened yet — ruling out both sessions silently failing to save as a
   vacuous pass, the same class of gap #1067's hardening closed for this
   file's presence waits.
+- **Four tests' copies of the experiments config fixture now bust the cache
+  on restore, like the one that already did** (#1120). The same
+  get/put/`on_exit`-restore block for `:kiln_cms, KilnCMS.Experiments` was
+  copied — as a `put_experiments/1` helper — into
+  `test/kiln_cms/experiments/sticky_test.exs`,
+  `test/kiln_cms/experiments/health_test.exs`,
+  `test/kiln_cms_web/live/overview_experiment_warning_test.exs`, and
+  `test/mix/tasks/kiln_experiment_test.exs` (as `sticky_on/0` +
+  `put_experiments/1`). `KilnCMS.ExperimentFixtures.enable!/0` was the same
+  block **plus** `KilnCMS.Cache.bust_experiments/1` on restore; none of the
+  four copies busted.
+
+  Harmless while `Experiments.enabled?/0` and `Sticky.enabled?/0` were plain
+  config reads. Not harmless once a test flips the flag and then reads
+  `Experiments.running/1` (as `health_test.exs` has done since #1110, to
+  catch a `select` regression): the flag restores correctly on `on_exit`, but
+  a cached running set survives into the next `async: false` test in the same
+  partition — an unreproducible cross-test flake that passes isolated, fails
+  under load, and moves with the seed.
+
+  All four now delegate to a new `ExperimentFixtures.put_config/1`, which
+  `enable!/0` is defined in terms of — one place that knows the flag and the
+  cache have to move together. Two more inline (not helper-shaped, so not
+  caught by grepping for `put_experiments`) copies of the same unbust block
+  turned up while fixing this and are filed separately as #1210.
+
+### Security
+
+- **The three prompt builders' data fence now carries a per-call nonce
+  instead of a static, publicly-known delimiter** (#1065). #945 twice had to
+  widen `KilnCMS.LLM.Fence`'s shape matcher — a padding class missing a whole
+  Unicode category, then a rule-character class missing box-drawing glyphs —
+  because the set of glyph runs a model reads as "the data ended" has no
+  closed definition, so no character class ever finishes that job.
+
+  `Fence.nonce/0` generates an unguessable token once per `build/1` call;
+  `KilnCMS.Ask.Prompt`, `KilnCMS.Assist.Prompt` and `KilnCMS.Seo.Prompt` each
+  thread it through every region in that prompt as
+  `-----BEGIN <nonce>-----` / `-----END <nonce>-----`. The data cannot
+  contain the closing token because the attacker cannot guess it, so closing
+  the fence stops being a matching problem and becomes a guessing one.
+  `Fence.region/3` is the only way to build a fenced block now — a call site
+  can no longer forget to escape a value or forget to use the marker the
+  system prompt actually named, which is the shape that once let
+  `document.title` sit outside `Seo.Prompt`'s fence for the whole life of
+  that module (#945).
+
+  The shape matcher (`Fence.defence/1`) stays as a second layer — cheap, it
+  still reads a legitimate horizontal rule as prose rather than a
+  false-positive close, and it now also neutralizes an attacker's *guess* at
+  a BEGIN/END-shaped marker line, so a forged token with the wrong nonce
+  reads as a rule rather than a plausible (if mismatched) close.
+
+  Not a complete answer: a nonce closes the shape problem, not the framing
+  one. A model can still be talked out of the "this is data" instruction by
+  prose inside the region itself, and in all three builders the untrusted
+  text is the last thing before the model's turn — the position an attacker
+  most wants. The real defences are unchanged: the generators get no tools,
+  and every response is constrained by its own normalizer (`KilnCMS.Ask`,
+  `KilnCMS.Assist.Suggestion`, `KilnCMS.Seo.Draft`).
 
 ### Added
+
+- **A per-org default for the form embed allowlist** (#1131). Follow-up to
+  #648, which put the `frame-ancestors` allowlist on the **form**: correct
+  per-partner, but every existing form — and every new one — was still
+  governed by the deployment-wide `EMBED_ORIGINS` until an admin opened it
+  and picked a mode, and `EMBED_ORIGINS` has no tenant dimension, so on a
+  multi-org deployment that was necessarily the union of every org's
+  embedders. The ladder gained a rung: `form.embed_origins ->
+  KilnCMS.CMS.SiteEmbedSettings.embed_origins -> EMBED_ORIGINS`, resolved by
+  the new `KilnCMS.Forms.EmbedPolicy` (admin-only settings resource, managed
+  through the generic Ash Admin UI like `FormSpamSettings` rather than a
+  bespoke page). A form's own list, including an explicit `[]` close, still
+  overrides the org default; the org default still overrides the deployment.
+  The Embed tab's "inherit" radio now says "Use this site's default" — it
+  already deliberately avoided naming an actual value (#1130), and now that
+  value is the org's own rather than the deployment's.
 
 - **Boot warns when the chain cannot detect splices** (#1056). With
   `audit_anchor_every_write` on (or any `history_anchors` row already present)
@@ -132,6 +230,30 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **A losing workflow-transition race now returns a 409, not an opaque 400
+  plus a spammed stacktrace** (#923). #879's compare-and-swap on `publish`,
+  `unpublish`, `submit_for_review`, `return_to_draft` and `archive` raises
+  `Ash.Error.Changes.StaleRecord` when two actors race the same transition
+  and the loser's `UPDATE` matches no rows — the same race
+  `AshStateMachine.Errors.NoMatchingTransition` reports when the state was
+  already wrong *before* the request; `StaleRecord` is what it looks like
+  when the state goes wrong *during* the request instead. Neither
+  `AshJsonApi.ToJsonApiError` nor `AshGraphql.Error` was implemented for it,
+  so it fell through AshJsonApi's fallback branch — an opaque
+  `something_went_wrong` 400 indistinguishable from a real server fault,
+  plus a formatted stacktrace warning logged per request (the exact #880
+  failure mode, now reachable on every CAS-guarded transition instead of
+  just the state-was-already-wrong case).
+
+  `KilnCMSWeb.AshStateMachineErrors` — already the home for
+  `NoMatchingTransition`'s translation — gains the matching `StaleRecord`
+  impls, reporting the same `invalid_state_transition` 409 code. The detail
+  message is necessarily more generic than `NoMatchingTransition`'s:
+  `StaleRecord` carries only the resource, not which record or action raced,
+  since that is genuinely all a zero-rows `UPDATE` can report.
+
+  Item 2 from the same review — `:archive` firing no webhook — was already
+  filed and fixed separately as #914.
 - **A missing responsive-label image encoder (no AVIF build, a `thumb.avif`
   past a dimension ceiling) re-decoded the source on every regeneration run,
   forever** (#1036). #1000 recorded which full-size alternates a source

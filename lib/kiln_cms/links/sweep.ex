@@ -48,6 +48,8 @@ defmodule KilnCMS.Links.Sweep do
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.Entry
   alias KilnCMS.CMS.ExternalLink
+  alias KilnCMS.CMS.Fragments
+  alias KilnCMS.CMS.TypedBlocks
   alias KilnCMS.Links.CheckWorker
   alias KilnCMS.Links.Extract
   alias KilnCMS.Links.Settings
@@ -134,17 +136,36 @@ defmodule KilnCMS.Links.Sweep do
     |> Ash.stream!(authorize?: false, tenant: org_id, stream_with: :full_read)
     |> Stream.flat_map(fn record ->
       case type_fun.(record) do
-        nil -> []
-        type -> [%{type: type, id: record.id, title: record.title, blocks: record.blocks}]
+        nil ->
+          []
+
+        type ->
+          [
+            %{
+              type: type,
+              id: record.id,
+              title: record.title,
+              blocks: record.blocks,
+              audience: Map.get(record, :audience)
+            }
+          ]
       end
     end)
   end
 
   defp observe_document(document, org_id) do
     document.blocks
-    |> Extract.from_blocks()
+    |> TypedBlocks.to_typed()
+    |> Fragments.expand(org_id,
+      audiences: audiences_for(document),
+      ancestry: [{document.type, document.id}]
+    )
+    |> Extract.from_typed()
     |> Enum.count(&observe(&1, document, org_id))
   end
+
+  defp audiences_for(%{audience: audience}) when audience in [nil, :public], do: []
+  defp audiences_for(%{audience: audience}), do: [audience]
 
   defp observe(occurrence, document, org_id) do
     attrs = %{

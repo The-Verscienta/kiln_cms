@@ -156,6 +156,16 @@ defmodule KilnClientTest do
       assert params["fields"] == %{"post" => "title"}
     end
 
+    test "text_search/3 forwards :tag_ids alongside :custom_filter" do
+      stub_doc(empty_doc())
+
+      assert {:ok, _} =
+               KilnClient.text_search("posts", "elixir", tag_ids: ["t1", "t2"])
+
+      assert_received {:request, "/api/json/posts/search/published", params}
+      assert params["tag_ids"] == ["t1", "t2"]
+    end
+
     test "text_search/3 published: false uses the base route" do
       stub_doc(empty_doc())
 
