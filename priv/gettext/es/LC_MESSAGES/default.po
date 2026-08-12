@@ -6023,6 +6023,11 @@ msgstr "Las tareas abiertas de un contenido se marcan como completadas al public
 msgid "Open tasks stay open when their content publishes. Individual tasks can opt in."
 msgstr "Las tareas abiertas siguen abiertas al publicarse su contenido. Cada tarea puede optar por lo contrario."
 
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Open the editor's Compliance panel"
+msgstr "Abrir el panel de Cumplimiento del editor"
+
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #: lib/kiln_cms_web/live/presentation_live.ex
 #, elixir-autogen, elixir-format
