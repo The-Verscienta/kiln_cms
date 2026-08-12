@@ -62,6 +62,19 @@ defmodule KilnCMS.Cache.ClusterBustTest do
       assert branding == Cache.branding_key(org)
     end
 
+    test "puts a new head-generation token locally and broadcasts it (#1079)", %{org: org} do
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, ClusterBust.topic())
+
+      assert Cache.head_generation(org) == "0"
+
+      Cache.bump_head_generation(org)
+      token = Cache.head_generation(org)
+      refute token == "0"
+
+      assert_receive {:put_keys, [{key, ^token}]}
+      assert key == Cache.head_generation_key(org)
+    end
+
     # Keys, not a name for the thing being invalidated. A node running older
     # code cannot misinterpret a key it does not recognise — it deletes nothing.
     test "the payload is the keys themselves", %{org: org} do
@@ -163,6 +176,16 @@ defmodule KilnCMS.Cache.ClusterBustTest do
       _ = :sys.get_state(ClusterBust)
 
       refute cached?(key)
+    end
+
+    test "puts the values it is told about (#1079)", %{org: org} do
+      key = Cache.head_generation_key(org)
+      Cachex.del(Cache.cache_name(), key)
+
+      send(ClusterBust, {:put_keys, [{key, "gen-from-peer"}]})
+      _ = :sys.get_state(ClusterBust)
+
+      assert Cache.head_generation(org) == "gen-from-peer"
     end
 
     test "leaves keys it was not told about alone", %{org: org} do

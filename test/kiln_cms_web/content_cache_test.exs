@@ -135,6 +135,35 @@ defmodule KilnCMSWeb.ContentCacheTest do
     assert response(conn2, 304) == ""
   end
 
+  test "a feed-settings save moves the delivery ETag so a 304 cannot keep stale head links (#1079)",
+       %{conn: conn} do
+    page = published_page("Head Gen")
+
+    conn1 = get(conn, ~p"/#{page.slug}")
+    assert html_response(conn1, 200) =~ "Head Gen"
+    assert [etag] = get_resp_header(conn1, "etag")
+
+    # Content row unchanged — only the site's syndication policy moved. Before
+    # #1079 this still 304'd and left the old feed autodiscovery links in place.
+    admin =
+      Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+        email: "etag-feeds-#{System.unique_integer([:positive])}@example.com",
+        hashed_password: Bcrypt.hash_pwd_salt("password1234!"),
+        confirmed_at: DateTime.utc_now(),
+        role: :admin
+      })
+
+    CMS.save_feed_settings!(%{excluded_types: ["post"]},
+      actor: admin,
+      tenant: KilnCMS.Accounts.default_org_id()
+    )
+
+    conn2 = conn |> put_req_header("if-none-match", etag) |> get(~p"/#{page.slug}")
+    assert html_response(conn2, 200) =~ "Head Gen"
+    assert [etag2] = get_resp_header(conn2, "etag")
+    refute etag2 == etag
+  end
+
   test "a 404 for an unknown slug is not cacheable", %{conn: conn} do
     conn = get(conn, ~p"/no-such-slug-#{System.unique_integer([:positive])}")
     assert response(conn, 404)
