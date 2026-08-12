@@ -20,6 +20,10 @@ and review submissions in the same builder.
   removes its submissions.
 - `FormSpamSettings` — one row per org, a disallowed-keyword list for the
   spam scorer below. Admin-only, never delivered.
+- `SiteEmbedSettings` — one row per org, this org's default `frame-ancestors`
+  allowlist for forms that set none of their own (below). Admin-only, never
+  delivered — same shape as `FormSpamSettings`, edited through the generic
+  Ash Admin resource UI rather than a page of its own.
 
 ## Rendering
 
@@ -42,17 +46,24 @@ self-sizing iframe of `GET /forms/<slug>/embed` onto a third-party page.
 
 That route serves its own CSP, because the site-wide `frame-ancestors 'self'`
 would block the iframe. Which parents may frame it is set **on the form**, in
-the Embed tab's *Who may embed this form* control, with the deployment-wide
-`EMBED_ORIGINS` as the default for forms that leave it alone (see
-[`KilnCMSWeb.Embed`](../lib/kiln_cms_web/embed.ex)):
+the Embed tab's *Who may embed this form* control, falling back through this
+org's own default (`SiteEmbedSettings`, #1131) and then the deployment-wide
+`EMBED_ORIGINS` for forms that leave it alone (see
+[`KilnCMSWeb.Embed`](../lib/kiln_cms_web/embed.ex) and
+[`KilnCMS.Forms.EmbedPolicy`](../lib/kiln_cms/forms/embed_policy.ex)):
 
 | Embed tab | `frame-ancestors` | Effect |
 | --- | --- | --- |
-| **Use the deployment default** (unset — the default) | whatever `EMBED_ORIGINS` says | The single-org setup: one variable, every form. |
-| **This site only** | `'self'` | Cross-site embedding off for this form, whatever the deployment allows. |
-| **Only these sites** | `'self' https://acme.com https://blog.acme.com` | This form's own allowlist, **instead of** the deployment's. `'self'` is always kept, so allowlisting a partner never removes same-origin framing. |
+| **Use this site's default** (unset — the default) | this org's `SiteEmbedSettings`, or `EMBED_ORIGINS` if this org has set none | The multi-org setup: one setting per org, every form in it. |
+| **This site only** | `'self'` | Cross-site embedding off for this form, whatever the org or the deployment allows. |
+| **Only these sites** | `'self' https://acme.com https://blog.acme.com` | This form's own allowlist, **instead of** the org's or the deployment's. `'self'` is always kept, so allowlisting a partner never removes same-origin framing. |
 
-And the deployment default itself:
+An org's own default (`SiteEmbedSettings`, admin-only) works the same way one
+rung up: unset inherits `EMBED_ORIGINS`, `[]` closes every form in the org
+that has none of its own, and a list replaces the deployment's for the org.
+
+And the deployment default itself, for an org that has set no default of its
+own:
 
 | `EMBED_ORIGINS` | `frame-ancestors` | Effect |
 | --- | --- | --- |
@@ -69,12 +80,18 @@ pasting the snippet there.
 **Your own logs will tell you too** (#650). A browser framing the embed page
 sends Fetch Metadata (`Sec-Fetch-Dest: iframe` with a `Sec-Fetch-Site` that is
 not `same-origin`), so when that arrives and the form's policy is closed the CMS
-logs a warning naming the parent origin — and naming *which* of the two settings
+logs a warning naming the parent origin — and naming *which* of the settings
 closed it, so you edit the one actually in force rather than the one you happen
 to know about. At most once an hour per node, so a busy embed route cannot flood
 the log. Note a sibling subdomain counts as blocked: `frame-ancestors 'self'`
 matches the *origin*, so `https://blog.acme.com` framing `https://acme.com`'s
 CMS needs an allowlist entry like any unrelated host.
+
+(The warning still only ever names "this form's own" or `EMBED_ORIGINS` — an
+org default of `[]` that closed the form reads as "this form's own" in the
+message, a known imprecision documented on `KilnCMS.Forms.EmbedPolicy`. The
+*policy* served is always correct; only this log line's wording can point at
+the wrong one of the two commoner settings.)
 
 The warning fires only while the policy allows **nobody**. A *partial* list —
 one parent allowed, another forgotten — leaves the forgotten parent just as
@@ -112,23 +129,29 @@ another org's form is cross-site and needs an allowlist entry. `EMBED_ORIGINS`
 has no tenant dimension, so as a deployment-wide allowlist it has to be the
 *union* of every org's embedders — and that union is what every org's forms
 would become framable by, which is the overlay-and-harvest attack above one
-tenant boundary over. Set the allowlist on the form instead and each org
-authorises only its own embedders; a form's list replaces the deployment's
-rather than extending it, so an org can also narrow below what someone else
+tenant boundary over. Set the allowlist on the form (or, for a whole org at
+once, on `SiteEmbedSettings`) instead and each org authorises only its own
+embedders; a form's list replaces the org's and the deployment's rather than
+extending them, so a form — or an org — can narrow below what someone else
 needed added globally.
 
 Who owns the setting follows the risk: `frame-ancestors` on this page governs
 who may overlay *this org's* form and harvest into *this org's* submissions, so
-an org admin sets it. It grants nothing across the tenant boundary — framing
-org B's embed page conveys no access to org A. There is no operator ceiling over
-it for the same reason: an org admin may open framing on their own forms that
-`EMBED_ORIGINS` leaves closed.
+an org admin sets it, at either grain. It grants nothing across the tenant
+boundary — framing org B's embed page conveys no access to org A. There is no
+operator ceiling over it for the same reason: an org admin may open framing on
+their own forms, or their own org's default, that `EMBED_ORIGINS` leaves
+closed (see #1133 for the residual this leaves for a hosted deployment).
 
-**On a multi-org deployment, set the allowlist per form and leave
-`EMBED_ORIGINS` unset.** A form that has not been given one still inherits the
-deployment's, so an untouched form on a multi-org instance is governed by the
-shared union exactly as before — the per-form control is what closes that, and
-it only closes it for forms that use it.
+**On a multi-org deployment, set an org default (`SiteEmbedSettings`) rather
+than `EMBED_ORIGINS`.** One setting per org reaches every form in it that
+hasn't been given its own list, without touching another org's; leave
+`EMBED_ORIGINS` unset the way #648 already recommended. A form (or an org)
+that has been given no default of its own still inherits the next rung
+up — for an org with no default configured, that is still the deployment's
+shared union exactly as before #1131, so an org that wants isolation has to
+actually set its own default, not merely rely on nobody else changing
+`EMBED_ORIGINS`.
 
 **Revoking an origin takes up to a minute to reach everyone.** The embed page is
 served `Cache-Control: public, max-age=60`, so a shared cache or a browser that
