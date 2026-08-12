@@ -2,7 +2,8 @@ defmodule Mix.Tasks.Kiln.Cache.Flush do
   @shortdoc "Drop every delivery cache (published content + fired artifacts)"
   @moduledoc """
   Clears both in-BEAM delivery caches — `KilnCMS.Cache` (published records) and
-  `KilnCMS.Firing.Cache` (fired artifact bodies) — for the node it runs on (#483).
+  `KilnCMS.Firing.Cache` (fired artifact bodies) — on **every** node in the
+  cluster (#483 / #1138).
 
       mix kiln.cache.flush
 
@@ -14,10 +15,12 @@ defmodule Mix.Tasks.Kiln.Cache.Flush do
 
   Two reasons, and the second is the one that bites. The caches live in the
   serving node's memory, so a separately started `mix` task clears its own empty
-  ones and reports zero. And `@requirements ["app.start"]` boots a *full second
-  application node* against the same database — every Oban queue comes up and
-  starts draining production `:mail`, `:billing` and `:webhooks` jobs, then the
-  task exits mid-job and leaves them to retry.
+  ones and reports zero — then broadcasts a cluster clear that still hits the
+  live nodes, which is rarely what you meant while pointed at production. And
+  `@requirements ["app.start"]` boots a *full second application node* against
+  the same database — every Oban queue comes up and starts draining production
+  `:mail`, `:billing` and `:webhooks` jobs, then the task exits mid-job and
+  leaves them to retry.
 
   The prod image ships a release and has no `mix` at all, so this is reachable
   only from a checkout pointed at a production database — which is exactly the
@@ -38,9 +41,8 @@ defmodule Mix.Tasks.Kiln.Cache.Flush do
   precise busters (`KilnCMS.Cache.bust/3`, `bust_sitemap/1`, `bust_llms/1`) when
   the affected record is known.
 
-  **Per node.** These are in-process caches with no shared tier, so on a
-  multi-node deployment this clears one node and leaves the others. Run it on
-  each, or restart them.
+  The printed counts are **this node's** drop; other nodes clear too without
+  their counts being summed here (#1138).
   """
   use Mix.Task
 
@@ -51,9 +53,9 @@ defmodule Mix.Tasks.Kiln.Cache.Flush do
     %{published: published, artifacts: artifacts} = KilnCMS.Cache.flush_delivery()
 
     Mix.shell().info(
-      "Flushed the delivery cache on this node: " <>
+      "Flushed the delivery cache on every node (this node's drop: " <>
         "#{published} published entr#{plural(published)}, " <>
-        "#{artifacts} fired artifact#{if artifacts == 1, do: "", else: "s"}."
+        "#{artifacts} fired artifact#{if artifacts == 1, do: "", else: "s"})."
     )
   end
 

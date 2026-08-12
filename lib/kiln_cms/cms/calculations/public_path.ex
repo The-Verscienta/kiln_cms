@@ -10,19 +10,16 @@ defmodule KilnCMS.CMS.Calculations.PublicPath do
   alias KilnCMS.CMS.Slugs
 
   @impl true
-  def load(query, _opts, _context) do
-    if Ash.Resource.Info.attribute(query.resource, :type_definition_id),
-      do: [:slug, :path_alias, :type_definition_id],
-      else: [:slug, :path_alias]
-  end
+  def load(query, _opts, _context), do: Slugs.path_calculation_loads(query)
 
   @impl true
   def calculate(records, _opts, _context) do
-    Enum.map(records, fn record ->
-      case Slugs.descriptor_for_record(record) do
-        nil -> nil
-        ct -> Slugs.public_path_for(ct, record)
-      end
+    records
+    |> Slugs.descriptors_for_records()
+    |> Enum.zip(records)
+    |> Enum.map(fn
+      {nil, _record} -> nil
+      {ct, record} -> Slugs.public_path_for(ct, record)
     end)
   end
 end

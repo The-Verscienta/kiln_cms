@@ -835,11 +835,39 @@ if config_env() == :prod do
         normalized
     end
 
-  config :kiln_cms, :branding,
-    site_name: System.get_env("SITE_NAME"),
-    logo_url: System.get_env("BRAND_LOGO_URL"),
-    favicon_url: System.get_env("BRAND_FAVICON_URL"),
-    primary_color: brand_primary_color
+  branding_config = []
+
+  branding_config =
+    if site_name = System.get_env("SITE_NAME") do
+      Keyword.put(branding_config, :site_name, site_name)
+    else
+      branding_config
+    end
+
+  branding_config =
+    if logo_url = System.get_env("BRAND_LOGO_URL") do
+      Keyword.put(branding_config, :logo_url, logo_url)
+    else
+      branding_config
+    end
+
+  branding_config =
+    if favicon_url = System.get_env("BRAND_FAVICON_URL") do
+      Keyword.put(branding_config, :favicon_url, favicon_url)
+    else
+      branding_config
+    end
+
+  branding_config =
+    if brand_primary_color do
+      Keyword.put(branding_config, :primary_color, brand_primary_color)
+    else
+      branding_config
+    end
+
+  if branding_config != [] do
+    config :kiln_cms, :branding, branding_config
+  end
 
   config :kiln_cms, KilnCMSWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],
