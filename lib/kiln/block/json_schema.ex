@@ -329,6 +329,19 @@ defmodule Kiln.Block.JsonSchema do
   # `required` still earns its place independent of nullability: it says the
   # **key is present**, which is what `additionalProperties: false` and the
   # `.d.ts` optionality read.
+  #
+  # KNOWN GAP (code-review finding #2 on PR #1250): this narrowing is only
+  # true going forward. A row written *before* #935 landed could already hold
+  # a `nil` in what is now a required nested field, and nothing re-validates
+  # existing rows on read — `KilnCMS.CMS.BlockUnion.cast_stored`/
+  # `to_union_stored` only coerce types, they never enforce `allow_nil?`
+  # (that gap in the read path is *why* #935's write-side hole existed at
+  # all). Such a row keeps violating this schema, forever, with nothing
+  # flagging it. There is no data migration here — no single default is
+  # editorially safe to backfill a missing required value with — but
+  # `mix kiln.blocks.audit_required` (`KilnCMS.Blocks.RequiredFieldAudit`)
+  # scans for and reports affected rows, read-only, so an operator can decide
+  # what to do with each one.
   defp field_schema(%Field{} = field) do
     field.type
     |> type_schema(!field.required)

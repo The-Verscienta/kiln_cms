@@ -408,9 +408,11 @@ Notable properties:
   not invent one, while a point-in-time read (`?as_of=`) serves the values
   stored at that instant — which may include fields since removed;
 - a `required: true` block field is listed in `required` (the key is always
-  present) but is still nullable. Container children bypass the embedded
-  resource's `allow_nil?`, so a nested block can carry a nil where its
-  top-level twin cannot, and both share one definition.
+  present) **and** is non-nullable — a container child now runs through the
+  same Ash cast a top-level block does (#935), so a nested block cannot carry
+  a nil there any more than its top-level twin can, and both share one
+  definition. A row written before that fix could still hold a legacy nil in
+  such a field; `mix kiln.blocks.audit_required` finds them.
 
 It publishes **shape**, not editorial content: field `help_text` and a
 `:select`'s option list are deliberately withheld, as is the organization id.
