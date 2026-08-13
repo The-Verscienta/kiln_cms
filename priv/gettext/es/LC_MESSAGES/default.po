@@ -6327,9 +6327,9 @@ msgid "Permanently deleted."
 msgstr "Eliminado permanentemente."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
-#, elixir-autogen, elixir-format, fuzzy
+#, elixir-autogen, elixir-format
 msgid "Photos from Unsplash — importing adds a copy to your library and inserts it here."
-msgstr "Fotos de Unsplash: al importar se añade una copia a su biblioteca."
+msgstr "Fotos de Unsplash: al importar se añade una copia a su biblioteca y se inserta aquí."
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
