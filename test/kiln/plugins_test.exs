@@ -37,7 +37,12 @@ defmodule Kiln.PluginsTest do
     assert manifest.version == "1.2.3"
     assert manifest.summary == "Test fixture exercising every plugin seam."
     assert manifest.homepage == "https://example.com/fixture-plugin"
-    assert manifest.blocks == [FixturePlugin.CalloutBlock]
+
+    assert manifest.blocks == [
+             FixturePlugin.CalloutBlock,
+             FixturePlugin.RestrictedRequiredBlock
+           ]
+
     # Rating is the one with real behaviour; Tokenless and Exploding exist to
     # cover `type_token_definitions/1`'s probe and rescue branches (#804), which
     # no CORE field type can reach.
@@ -73,7 +78,7 @@ defmodule Kiln.PluginsTest do
       assert output =~ "Test fixture exercising every plugin seam."
       assert output =~ "https://example.com/fixture-plugin"
       # Contribution summary is pluralized and omits zero-count kinds.
-      assert output =~ "1 block, 3 field types, 1 nav item, 1 admin route"
+      assert output =~ "2 blocks, 3 field types, 1 nav item, 1 admin route"
     end
   end
 

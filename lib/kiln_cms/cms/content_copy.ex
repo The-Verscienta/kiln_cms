@@ -184,22 +184,47 @@ defmodule KilnCMS.CMS.ContentCopy do
   defp reset_restricted(blocks, nil), do: {blocks, []}
 
   defp reset_restricted(blocks, role) do
-    Enum.map_reduce(blocks, [], fn block, reset ->
+    Enum.flat_map_reduce(blocks, [], fn block, reset ->
       case block_module(block) do
-        nil -> {block, reset}
+        nil -> {[block], reset}
         module -> reset_block(block, module, role, reset)
       end
     end)
     |> then(fn {blocks, reset} -> {blocks, reset |> Enum.uniq() |> Enum.sort()} end)
   end
 
-  defp reset_block(%{"value" => value} = block, module, role, reset) when is_map(value) do
-    {value, reset} = reset_fields(value, module, role, reset)
-    {value, reset} = reset_nested(value, module, role, reset)
-    {%{block | "value" => value}, reset}
+  # A field this role cannot edit, declared `required: true` with no default,
+  # cannot be reset the way an optional restricted field is — there is no
+  # default to fall back to (nulling it is not "resetting to the default", it
+  # is producing an invalid block: post-#935 `TypedBlocks.validate_child!`
+  # refuses a nil there, same as it always has for a top-level block). Rather
+  # than let that hard-fail the *entire* duplicate/translate write, the block
+  # holding it is dropped from the copy outright and reported withheld,
+  # instead of `reset_fields/4` ever being asked to null a field that has no
+  # safe null.
+  #
+  # Dormant today: no currently-registered block combines `required: true`
+  # with `editable_by:` (code-review finding #7 on PR #1250, following #935)
+  # — this is a safety net, not a presently-reachable path.
+  defp unsafe_reset?(module, role) do
+    module
+    |> Kiln.Block.Info.fields()
+    |> Enum.any?(&(&1.required and not Kiln.Block.Policy.can_edit_field?(module, &1.name, role)))
   end
 
-  defp reset_block(block, _module, _role, reset), do: {block, reset}
+  defp drop_note(module), do: "#{block_name(module)} (dropped: holds a restricted required field)"
+
+  defp reset_block(%{"value" => value} = block, module, role, reset) when is_map(value) do
+    if unsafe_reset?(module, role) do
+      {[], [drop_note(module) | reset]}
+    else
+      {value, reset} = reset_fields(value, module, role, reset)
+      {value, reset} = reset_nested(value, module, role, reset)
+      {[%{block | "value" => value}], reset}
+    end
+  end
+
+  defp reset_block(block, _module, _role, reset), do: {[block], reset}
 
   # `columns` nests its children as raw maps rather than union members (a
   # recursive-type compile cycle), so `dump_blocks/2` never recursed into
@@ -235,7 +260,7 @@ defmodule KilnCMS.CMS.ContentCopy do
       blocks
       |> List.wrap()
       |> Enum.filter(&is_map/1)
-      |> Enum.map_reduce(reset, &reset_nested_child(&1, role, &2))
+      |> Enum.flat_map_reduce(reset, &reset_nested_child(&1, role, &2))
     end)
   end
 
@@ -267,11 +292,16 @@ defmodule KilnCMS.CMS.ContentCopy do
   defp reset_nested_child(child, role, reset) do
     case nested_child_module(child) do
       nil ->
-        {child, reset}
+        {[child], reset}
 
       module ->
-        {child, reset} = reset_fields(child, module, role, reset)
-        reset_nested(child, module, role, reset)
+        if unsafe_reset?(module, role) do
+          {[], [drop_note(module) | reset]}
+        else
+          {child, reset} = reset_fields(child, module, role, reset)
+          {child, reset} = reset_nested(child, module, role, reset)
+          {[child], reset}
+        end
     end
   end
 
