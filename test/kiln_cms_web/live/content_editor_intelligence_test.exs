@@ -217,4 +217,45 @@ defmodule KilnCMSWeb.ContentEditorIntelligenceTest do
 
     assert html =~ "Add some content"
   end
+
+  # #1076: computing a never-published draft's centroid (the same #852 path
+  # above) now draws on `KilnCMS.LLM.Budget`'s `"search_embedding"` bucket. A
+  # blocked call must not read as "no duplicates" — see `intel_outcome/1` and
+  # its comment in `KilnCMSWeb.ContentEditorLive`.
+  test "a spent embedding budget flashes instead of reading as a clean bill of health", %{
+    conn: conn
+  } do
+    actor = authed_user(:admin)
+    _twin = indexed_page(actor, "brewing herbal tea slowly", title: "Same")
+
+    draft =
+      CMS.create_page!(
+        %{
+          title: "Same",
+          slug: slug(),
+          blocks: [%{type: :rich_text, content: "<p>brewing herbal tea slowly</p>", order: 0}]
+        },
+        actor: actor
+      )
+
+    # `{0, _}` refuses unconditionally regardless of what any other test in
+    # this run already spent against the shared default org — the same "zero
+    # ceiling" shape `KilnCMS.Search.RelatedTest` uses to prove the negative.
+    original = Application.get_env(:kiln_cms, KilnCMS.Search, [])
+
+    Application.put_env(
+      :kiln_cms,
+      KilnCMS.Search,
+      Keyword.put(original, :embedding_per_org_limit, {0, :timer.hours(1)})
+    )
+
+    on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Search, original) end)
+
+    html = conn |> open(actor, draft) |> analyze()
+
+    assert html =~ "rate limit"
+    # The ordinary empty state must NOT also render — that copy is a *result*
+    # ("nothing similar found"), and this is the absence of one.
+    refute html =~ "possible duplicate"
+  end
 end

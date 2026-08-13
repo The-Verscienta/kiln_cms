@@ -136,6 +136,25 @@ defmodule KilnCMS.Search.VectorCache do
   @spec embed_document(String.t()) :: [float()] | nil
   def embed_document(text) when is_binary(text), do: embed(Search.document_prefix() <> text)
 
+  @doc """
+  Whether `text` already has a cached vector — i.e. whether `embed_document/1`
+  would answer from ETS rather than reaching the model.
+
+  `KilnCMS.Search.Related.suggest_tags/2` checks this before spending a
+  `KilnCMS.LLM.Budget` unit on a tag (#1076): a name this cache (or any earlier
+  caller's) has already embedded costs nothing to embed again, and charging
+  for it anyway would size the budget to the taxonomy's word list rather than
+  to genuine inference volume.
+
+  Racy against a concurrent `embed_document/1` committing the same key, same
+  as everywhere else this cache is read — the worst case is one avoidable
+  charge, not a wrong vector.
+  """
+  @spec cached?(String.t()) :: boolean()
+  def cached?(text) when is_binary(text) do
+    match?({:ok, true}, Cachex.exists?(@cache, key(Search.document_prefix() <> text)))
+  end
+
   @doc false
   # Exported so a test can assert on an entry's presence and expiry without
   # restating the key shape — a second spelling would drift and quietly test

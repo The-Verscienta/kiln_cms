@@ -2178,6 +2178,11 @@ msgstr ""
 msgid "Content gaps"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Content intelligence is at its rate limit right now. Please try again shortly."
+msgstr ""
+
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Content item"

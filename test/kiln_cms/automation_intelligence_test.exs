@@ -6,6 +6,7 @@ defmodule KilnCMS.AutomationIntelligenceTest do
 
   import Swoosh.TestAssertions
 
+  alias KilnCMS.Accounts
   alias KilnCMS.Automation
   alias KilnCMS.Automation.Rule
   alias KilnCMS.Automation.RuleWorker
@@ -405,6 +406,187 @@ defmodule KilnCMS.AutomationIntelligenceTest do
         end)
 
       assert log =~ "dropping rather than retrying"
+    end
+  end
+
+  # ── embedding budget (#1076) ───────────────────────────────────────────────
+  #
+  # `flag_duplicates` and `suggest_tags` reach a model inference the same way
+  # `suggest_metadata` reaches `KilnCMS.Seo.draft/2` — `RuleWorker` passes
+  # `unattended?: true`, so both draw on `KilnCMS.LLM.Budget`'s
+  # `"search_embedding"` bucket instead of running on no ceiling at all. Each
+  # test provisions its own org: `KilnCMS.Search.Related`'s org bucket key is
+  # `record.org_id`, a real column, not a caller-chosen string, so isolating
+  # from every other suite's spend against the shared default org needs a
+  # genuine second org (`Accounts.create_organization!/2`).
+  describe "embedding budget (#1076)" do
+    defp with_search(config) do
+      previous = Application.get_env(:kiln_cms, KilnCMS.Search, [])
+      Application.put_env(:kiln_cms, KilnCMS.Search, Keyword.merge(previous, config))
+      on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Search, previous) end)
+    end
+
+    defp budget_org do
+      Accounts.create_organization!(
+        %{name: "AI budget org", slug: "aiq-budget-#{System.unique_integer([:positive])}"},
+        authorize?: false
+      )
+    end
+
+    defp draft_in(org, actor, text, title) do
+      CMS.create_post!(
+        %{
+          title: title,
+          slug: "ai-#{System.unique_integer([:positive])}",
+          blocks: [%{type: :rich_text, content: "<p>#{text}</p>", order: 0}]
+        },
+        actor: actor,
+        tenant: org
+      )
+    end
+
+    # The skip reason is logged at `Logger.info` — advisory, not a warning —
+    # and the test env's default level (`:warning`, `config/test.exs`) would
+    # otherwise hide it from `capture_log`. A per-module override reaches it
+    # without touching the global level every other test in the suite relies on.
+    defp capture_rule_worker_log(fun) do
+      Logger.put_module_level(RuleWorker, :info)
+      log = ExUnit.CaptureLog.capture_log(fun)
+      Logger.delete_module_level(RuleWorker)
+      log
+    end
+
+    test "flag_duplicates spends the embedding budget unattended, and stops gracefully once it's spent" do
+      # Room for exactly one computed centroid.
+      with_search(embedding_per_org_limit: {1, :timer.hours(1)}, embedding_unattended_share: 1.0)
+      actor = admin()
+      org = budget_org()
+
+      r =
+        rule(%{
+          trigger_event: :published,
+          action: :flag_duplicates,
+          config: %{"to" => "eds@example.com"},
+          org_id: org.id
+        })
+
+      first = draft_in(org, actor, "aaa unattended passage", "One")
+      second = draft_in(org, actor, "bbb unattended passage", "Two")
+
+      # Spends the org's one unit computing `first`'s centroid — nothing else
+      # is indexed yet, so there is nothing to find, but the call itself must
+      # not crash or retry.
+      assert :ok = run_rule(r, first, "post.published")
+      refute_email_sent()
+
+      # The budget is now spent. This must be a logged no-op, not an Oban
+      # retry — retrying re-enters `run/3` and would try the same computation
+      # again on every attempt, forever, against a budget that never recovers
+      # inside the retry window.
+      # `level: :info` — the skip reason is logged at `Logger.info` (advisory,
+      # not a warning), and the test env's default level (`:warning`) would
+      # otherwise hide it from `capture_log`.
+      log =
+        capture_rule_worker_log(fn ->
+          assert :ok = run_rule(r, second, "post.published")
+        end)
+
+      refute_email_sent()
+      assert log =~ "embedding budget spent"
+    end
+
+    test "suggest_tags spends the embedding budget unattended, and stops gracefully once it's spent" do
+      with_search(embedding_per_org_limit: {1, :timer.hours(1)}, embedding_unattended_share: 1.0)
+      actor = admin()
+      org = budget_org()
+
+      uniq = System.unique_integer([:positive])
+
+      CMS.create_tag!(%{name: "unattended budget tag #{uniq}", slug: "aiq-tag-#{uniq}"},
+        actor: actor,
+        tenant: org
+      )
+
+      r =
+        rule(%{
+          trigger_event: :published,
+          action: :suggest_tags,
+          config: %{"to" => "eds@example.com"},
+          org_id: org.id
+        })
+
+      first = draft_in(org, actor, "aaa tag passage", "One")
+      second = draft_in(org, actor, "bbb tag passage", "Two")
+
+      # Same "the one unit goes to the centroid" shape as `flag_duplicates`
+      # above; whether the tag itself also ranked is not the point here.
+      assert :ok = run_rule(r, first, "post.published")
+
+      # `level: :info` — the skip reason is logged at `Logger.info` (advisory,
+      # not a warning), and the test env's default level (`:warning`) would
+      # otherwise hide it from `capture_log`.
+      log =
+        capture_rule_worker_log(fn ->
+          assert :ok = run_rule(r, second, "post.published")
+        end)
+
+      refute_email_sent()
+      assert log =~ "embedding budget spent"
+    end
+
+    test "unattended_share: 0.0 is reported as a setting, not an overload" do
+      with_search(embedding_per_org_limit: {10, :timer.hours(1)}, embedding_unattended_share: 0.0)
+      actor = admin()
+      org = budget_org()
+
+      r =
+        rule(%{
+          trigger_event: :published,
+          action: :flag_duplicates,
+          config: %{"to" => "eds@example.com"},
+          org_id: org.id
+        })
+
+      post = draft_in(org, actor, "an unattended-disabled passage", "Off")
+
+      log =
+        capture_rule_worker_log(fn ->
+          assert :ok = run_rule(r, post, "post.published")
+        end)
+
+      refute_email_sent()
+      assert log =~ "embedding is switched off for unattended callers"
+    end
+
+    test "the editor's own duplicates/tags panel keeps its reserve while automation is refused" do
+      # The #943 shape, proven end to end: an admin's `flag_duplicates` rule
+      # cannot leave `KilnCMSWeb.ContentEditorLive`'s panel rate-limited by
+      # something it can't see.
+      with_search(embedding_per_org_limit: {2, :timer.hours(1)}, embedding_unattended_share: 0.5)
+      actor = admin()
+      org = budget_org()
+
+      r =
+        rule(%{
+          trigger_event: :published,
+          action: :flag_duplicates,
+          config: %{"to" => "eds@example.com"},
+          org_id: org.id
+        })
+
+      spent_by_rule = draft_in(org, actor, "rule-side passage", "Rule")
+      assert :ok = run_rule(r, spent_by_rule, "post.published")
+
+      # Half of 2 is 1 — the rule already spent it, so a second unattended call
+      # is refused…
+      other = draft_in(org, actor, "another rule-side passage", "Rule two")
+      assert :ok = run_rule(r, other, "post.published")
+      refute_email_sent()
+
+      # …but an editor's own panel call (no `unattended?`) still has its
+      # reserved half.
+      editor_side = draft_in(org, actor, "editor-side passage", "Editor")
+      assert is_list(KilnCMS.Search.Related.near_duplicates(editor_side, user_id: actor.id))
     end
   end
 end

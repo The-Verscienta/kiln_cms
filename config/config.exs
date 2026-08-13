@@ -206,7 +206,21 @@ config :kiln_cms, KilnCMS.Search,
   # sides. A config key rather than a literal for the reason its sibling is one:
   # the number is a property of the model, and an operator who changes the model
   # has no way to change this.
-  near_duplicate_threshold: 0.1
+  near_duplicate_threshold: 0.1,
+  # Rate-limit budget for computing an embedding on demand: the fallback in
+  # `KilnCMS.Search.Related.centroid/2` for a document with no stored vector
+  # (one model inference per block), plus one inference per un-cached tag in
+  # `suggest_tags/2` (#1076). Both buckets must pass, same shape as
+  # `KilnCMS.Seo`'s below; sized well above that one because a single local
+  # embedding is far cheaper than an LLM completion, and `suggest_tags/2` can
+  # spend one unit per untagged taxonomy tag in a single call.
+  embedding_per_user_limit: {60, :timer.minutes(1)},
+  embedding_per_org_limit: {600, :timer.hours(1)},
+  # The share of `embedding_per_org_limit` that UNATTENDED callers (the
+  # `flag_duplicates` / `suggest_tags` automation reactions) may spend, the
+  # same #943 reserve `KilnCMS.Seo`'s `unattended_share` implements. The
+  # remainder stays available to an editor's own duplicates/tags panel.
+  embedding_unattended_share: 0.5
 
 # AI-assisted SEO drafting (#60). The deterministic analysis and score in the
 # editor are ALWAYS on and need none of this — the block below gates the
