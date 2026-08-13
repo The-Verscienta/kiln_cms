@@ -468,7 +468,12 @@ defmodule KilnCMS.CMS.BlockFieldPolicyTest do
       collided =
         columns_children([
           quote_block(%{"id" => a, "text" => "A", "featured" => false}),
-          quote_block(%{"id" => a, "text" => "", "featured" => true})
+          # Non-empty on purpose (#935): an empty string on a required `:string`
+          # field casts to `nil` (`Ash.Type.String`'s default `allow_empty?:
+          # false`), which the nested cast now refuses same as a top-level
+          # block always did — this test is about the id collision, not text
+          # validity, so the decoy still needs a real value.
+          quote_block(%{"id" => a, "text" => "B", "featured" => true})
         ])
 
       assert {:error, error} =

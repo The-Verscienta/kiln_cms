@@ -20,6 +20,35 @@ defmodule KilnCMS.CMS.TypedBlocks do
   alias KilnCMS.Blocks.{Gallery, Heading, HowTo, Image, Quote, RichText}
   alias KilnCMS.HTMLSanitizer
 
+  defmodule InvalidChildBlockError do
+    @moduledoc """
+    Raised by `TypedBlocks.sanitize_children/2` when a nested block child fails
+    the same Ash cast a top-level block already goes through — e.g. a `field
+    ..., required: true` (`allow_nil?: false`) attribute is missing (#935).
+
+    `struct_from_typed_map/1` used to rebuild a container's children with a bare
+    `struct/2`, which never ran that cast, so a required nested field could be
+    `nil` in delivery while the same block at the top level could not. Raising
+    here and rescuing at `KilnCMS.CMS.BlockUnion`'s cast entry points turns that
+    into an ordinary `{:error, ...}` cast failure, so an invalid nested child
+    fails the whole write exactly like an invalid top-level block does, instead
+    of being silently stored with the gap.
+    """
+    defexception [:block_type, :errors]
+
+    @impl true
+    def message(%{block_type: type, errors: errors}) do
+      "nested #{type} block is invalid: " <> format_errors(errors)
+    end
+
+    defp format_errors(errors) do
+      Enum.map_join(errors, "; ", fn
+        kw when is_list(kw) -> "#{Keyword.get(kw, :field)}: #{Keyword.get(kw, :message)}"
+        other -> inspect(other)
+      end)
+    end
+  end
+
   # Guards recursion for the nested `columns` block: hostile API input can't force
   # unbounded nesting on cast (columns nested past this depth are dropped). The
   # editor caps nesting well below this, so real content is never affected.
@@ -28,6 +57,16 @@ defmodule KilnCMS.CMS.TypedBlocks do
   # Every block module in the storage union — core + plugin (D18), from the
   # same compile-time source as `BlockUnion` itself.
   @block_modules Enum.map(KilnCMS.Blocks.union_types(), fn {_name, opts} -> opts[:type] end)
+
+  # String `_type` → atom, for *registered* block types only (core + plugin).
+  # Used both by the legacy/typed-map struct builder below and by nested-child
+  # write validation (`validate_child!/2`) to tell "unrecognized type" (left
+  # untouched — it becomes `Custom` lazily on read, same as any unknown legacy
+  # block) from "known type, invalid data" (rejected on write, see
+  # `InvalidChildBlockError`).
+  @type_atoms Map.new(KilnCMS.Blocks.union_types(), fn {name, _opts} ->
+                {to_string(name), name}
+              end)
 
   @doc """
   Normalize any block representation to typed block structs.
@@ -315,6 +354,7 @@ defmodule KilnCMS.CMS.TypedBlocks do
             |> adopt_artifact_id()
             |> sanitize_columns_block(depth + 1)
             |> drop_nils()
+            |> validate_child!("columns")
           ]
 
         {name, attrs} ->
@@ -324,9 +364,49 @@ defmodule KilnCMS.CMS.TypedBlocks do
             |> adopt_artifact_id()
             |> sanitize_attrs()
             |> drop_nils()
+            |> validate_child!(name)
           ]
       end
     end)
+  end
+
+  # Runs the SAME Ash cast a top-level block goes through (via `BlockUnion` →
+  # `Ash.Type.Union.cast_input` → the embedded resource's `:create` action) on
+  # a nested child, so `allow_nil?: false` (`field ..., required: true`), type
+  # coercion, and any other Ash-level constraint apply to a nested block exactly
+  # as they already do to a top-level one (#935). Raises `InvalidChildBlockError`
+  # on failure — caught at `KilnCMS.CMS.BlockUnion`'s cast entry points and
+  # turned into a normal cast error, so an invalid nested child fails the whole
+  # write rather than being silently stored with a gap.
+  #
+  # An unregistered `name` (a plugin not currently installed, or a genuinely
+  # unknown `_type`) is left untouched — there is no embedded resource to cast
+  # against, and that already-existing "becomes Custom on read" tolerance
+  # (`struct_from_typed_map/1`) is unrelated to this issue.
+  defp validate_child!(attrs, name) do
+    case Map.fetch(@type_atoms, name) do
+      {:ok, type_atom} ->
+        case KilnCMS.Blocks.fetch(type_atom) do
+          {:ok, mod} -> cast_child!(mod, attrs)
+          :error -> attrs
+        end
+
+      :error ->
+        attrs
+    end
+  end
+
+  defp cast_child!(mod, attrs) do
+    case Ash.Type.cast_input(mod, attrs, []) do
+      {:ok, _struct} ->
+        attrs
+
+      # `mod`'s `cast_input/2` (an embedded resource — see
+      # `Ash.EmbeddableType.single_embed_implementation/1`) already ran the
+      # error through `Ash.EmbeddableType.handle_errors/1` before returning it.
+      {:error, error} ->
+        raise InvalidChildBlockError, block_type: attrs["_type"], errors: List.wrap(error)
+    end
   end
 
   # Build a typed struct from a typed map (string or atom keys), upcasting first.
@@ -349,9 +429,6 @@ defmodule KilnCMS.CMS.TypedBlocks do
     end
   end
 
-  @type_atoms Map.new(KilnCMS.Blocks.union_types(), fn {name, _opts} ->
-                {to_string(name), name}
-              end)
   defp block_type_atom(map), do: Map.get(@type_atoms, to_string(get(map, :_type)), :custom)
 
   defp typed_struct_kv(mod, map) do
