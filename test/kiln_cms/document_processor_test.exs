@@ -45,6 +45,184 @@ defmodule KilnCMS.DocumentProcessorTest do
              DocumentProcessor.validate_upload("/nonexistent/#{System.unique_integer()}")
   end
 
+  describe "office documents and zip archives (#808)" do
+    # A REAL zip, built by `:zip.create/3` — the central directory reflects
+    # the actual entries, so this exercises `:zip.list_dir/1` the same way a
+    # genuine upload would rather than a hand-rolled shortcut.
+    defp build_zip(files) do
+      {:ok, {_name, bin}} =
+        :zip.create(~c"in_memory.zip", files, [:memory])
+
+      tmp_file(bin)
+    end
+
+    defp utf16le(ascii), do: for(<<byte <- ascii>>, into: <<>>, do: <<byte::little-16>>)
+
+    # A minimal OLE2 compound file: just enough for `classify_ole/1` to work
+    # with — the 8-byte signature, then the application's stream name
+    # somewhere in the probe window, UTF-16LE-encoded the way the real
+    # directory sector stores it. Not a structurally valid compound file (no
+    # FAT, no real directory sectors) — this module doesn't parse those, it
+    # sniffs for the marker, so a fixture that only satisfies the sniff is
+    # the right level of fidelity.
+    defp ole_fixture(stream_name) do
+      tmp_file(
+        <<0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1>> <>
+          :binary.copy(<<0>>, 512) <> utf16le(stream_name) <> :binary.copy(<<0>>, 64)
+      )
+    end
+
+    test "accepts a docx: zip signature + [Content_Types].xml + word/document.xml" do
+      path =
+        build_zip([
+          {~c"[Content_Types].xml", "<Types/>"},
+          {~c"word/document.xml", "<document/>"}
+        ])
+
+      assert {:ok,
+              %{
+                ext: ".docx",
+                content_type:
+                  "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              }} = DocumentProcessor.validate_upload(path)
+    end
+
+    test "accepts an xlsx: zip signature + [Content_Types].xml + xl/workbook.xml" do
+      path =
+        build_zip([
+          {~c"[Content_Types].xml", "<Types/>"},
+          {~c"xl/workbook.xml", "<workbook/>"}
+        ])
+
+      assert {:ok,
+              %{
+                ext: ".xlsx",
+                content_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              }} = DocumentProcessor.validate_upload(path)
+    end
+
+    test "accepts a pptx: zip signature + [Content_Types].xml + ppt/presentation.xml" do
+      path =
+        build_zip([
+          {~c"[Content_Types].xml", "<Types/>"},
+          {~c"ppt/presentation.xml", "<presentation/>"}
+        ])
+
+      assert {:ok,
+              %{
+                ext: ".pptx",
+                content_type:
+                  "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+              }} = DocumentProcessor.validate_upload(path)
+    end
+
+    test "a zip carrying [Content_Types].xml but no recognized office part is refused" do
+      # Some other OOXML-family document (Visio, OneNote, …) — #808 only asked
+      # for docx/xlsx/pptx, and deny-by-default means an unrecognized one is
+      # refused rather than guessed at.
+      path = build_zip([{~c"[Content_Types].xml", "<Types/>"}, {~c"visio/pages.xml", "<x/>"}])
+
+      assert {:error, :unsupported_format} = DocumentProcessor.validate_upload(path)
+    end
+
+    test "accepts a plain zip: zip signature without [Content_Types].xml" do
+      path = build_zip([{~c"readme.txt", "hello"}, {~c"data/values.csv", "a,b,c\n1,2,3\n"}])
+
+      assert {:ok, %{ext: ".zip", content_type: "application/zip"}} =
+               DocumentProcessor.validate_upload(path)
+    end
+
+    test "rejects a file with a .zip-looking name but non-zip bytes" do
+      path = tmp_file("not actually a zip")
+      assert {:error, :unsupported_format} = DocumentProcessor.validate_upload(path)
+    end
+
+    test "rejects a file that starts with the zip signature but has no valid central directory" do
+      path = tmp_file(<<0x50, 0x4B, 0x03, 0x04>> <> "garbage, not a real archive")
+      assert {:error, :unsupported_format} = DocumentProcessor.validate_upload(path)
+    end
+
+    test "accepts a legacy .doc: OLE2 signature + the WordDocument stream name" do
+      path = ole_fixture("WordDocument")
+
+      assert {:ok, %{ext: ".doc", content_type: "application/msword"}} =
+               DocumentProcessor.validate_upload(path)
+    end
+
+    test "accepts a legacy .xls: OLE2 signature + the Workbook stream name" do
+      path = ole_fixture("Workbook")
+
+      assert {:ok, %{ext: ".xls", content_type: "application/vnd.ms-excel"}} =
+               DocumentProcessor.validate_upload(path)
+    end
+
+    test "accepts a legacy .ppt: OLE2 signature + the PowerPoint Document stream name" do
+      path = ole_fixture("PowerPoint Document")
+
+      assert {:ok, %{ext: ".ppt", content_type: "application/vnd.ms-powerpoint"}} =
+               DocumentProcessor.validate_upload(path)
+    end
+
+    test "an OLE2 file with none of the known stream names is refused" do
+      # The signature is shared by unrelated formats (.msi, .msg, …) — without
+      # a recognized stream name this module has no basis to call it one of
+      # the three it means to accept.
+      path = ole_fixture("SomeUnrelatedStream")
+      assert {:error, :unsupported_format} = DocumentProcessor.validate_upload(path)
+    end
+
+    test "rejects a decompression bomb: a tiny compressed entry declaring an enormous uncompressed size" do
+      # Hand-crafted central directory rather than a real multi-hundred-MB
+      # fixture — the point is that `DocumentProcessor` never has to inflate
+      # anything to catch this, so the test doesn't either. A single entry
+      # whose LOCAL and CENTRAL headers both declare 4 GB uncompressed for 4
+      # bytes of actual (stored) data: an absurd ratio and past the absolute
+      # cap, without a single real byte of bomb on disk.
+      name = "bomb.bin"
+      data = "AAAA"
+      compressed_size = byte_size(data)
+      declared_uncompressed = 4_000_000_000
+
+      local_header =
+        <<0x50, 0x4B, 0x03, 0x04>> <>
+          <<20::little-16, 0::little-16, 0::little-16>> <>
+          <<0::little-16, 0::little-16>> <>
+          <<0::little-32>> <>
+          <<compressed_size::little-32, declared_uncompressed::little-32>> <>
+          <<byte_size(name)::little-16, 0::little-16>> <>
+          name
+
+      local_entry = local_header <> data
+
+      central_header =
+        <<0x50, 0x4B, 0x01, 0x02>> <>
+          <<20::little-16, 20::little-16, 0::little-16, 0::little-16>> <>
+          <<0::little-16, 0::little-16>> <>
+          <<0::little-32>> <>
+          <<compressed_size::little-32, declared_uncompressed::little-32>> <>
+          <<byte_size(name)::little-16, 0::little-16, 0::little-16>> <>
+          <<0::little-16, 0::little-16, 0::little-32>> <>
+          <<0::little-32>> <>
+          name
+
+      eocd =
+        <<0x50, 0x4B, 0x05, 0x06>> <>
+          <<0::little-16, 0::little-16, 1::little-16, 1::little-16>> <>
+          <<byte_size(central_header)::little-32, byte_size(local_entry)::little-32>> <>
+          <<0::little-16>>
+
+      path = tmp_file(local_entry <> central_header <> eocd)
+
+      assert {:error, :zip_bomb} = DocumentProcessor.validate_upload(path)
+    end
+
+    test "an ordinary zip well under the caps is accepted, not flagged as a bomb" do
+      path = build_zip([{~c"notes.txt", String.duplicate("hello world ", 100)}])
+
+      assert {:ok, %{ext: ".zip"}} = DocumentProcessor.validate_upload(path)
+    end
+  end
+
   describe "strip_metadata/1 (#807)" do
     defp pdf_with_metadata, do: tmp_file(KilnCMS.PdfFixtures.pdf(metadata: true))
 

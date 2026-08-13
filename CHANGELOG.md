@@ -25,6 +25,25 @@ migration, a rewritten column, a dropped config key).
 
 <!-- Releases are cut from `main`; see docs/releasing.md. -->
 
+## [Unreleased]
+
+### Added
+
+- **Office documents and zip archives in the document library** (#808).
+  Follow-up to #481, which scoped the gated document library to PDF only for
+  v1: `KilnCMS.DocumentProcessor` now byte-validates `.docx`/`.xlsx`/`.pptx`
+  (a zip signature plus an internal `[Content_Types].xml` and a
+  format-specific main part), legacy `.doc`/`.xls`/`.ppt` (an OLE2
+  compound-file signature plus the application's own root stream name), and
+  plain `.zip` — never the client's claimed filename/MIME, same
+  deny-by-default posture as PDF. A zip's declared central-directory
+  metadata is checked for decompression-bomb shape (over 500 MB declared
+  uncompressed, a declared ratio past 100:1, or more than 10,000 entries)
+  without ever inflating archive content. `#807`'s qpdf-based metadata strip
+  still only understands PDF, so office/zip uploads are stored as uploaded
+  rather than refused — the gated-download route, audience policy, and
+  storage relocation from #481 needed no changes.
+
 ## [0.6.0] - 2026-08-12
 
 ### Added

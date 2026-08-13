@@ -95,6 +95,36 @@ defmodule KilnCMS.Media.IngestTest do
       assert String.starts_with?(stored, "%PDF-")
       assert byte_size(stored) > 100
     end
+
+    # #808: `DocumentProcessor.strip_metadata/1` only knows PDF (it shells out
+    # to qpdf, which cannot open a zip at all). Before this only PDF ever
+    # reached the `:document` kind, so nothing pinned that a non-PDF document
+    # is stored rather than refused with `:strip_failed` from a qpdf call
+    # that was never going to succeed.
+    test "a docx is stored as uploaded, with no strip attempt" do
+      path = Path.join(System.tmp_dir!(), "ingest-#{System.unique_integer([:positive])}.docx")
+
+      {:ok, {_name, bin}} =
+        :zip.create(
+          ~c"in_memory.docx",
+          [
+            {~c"[Content_Types].xml", "<Types/>"},
+            {~c"word/document.xml", "<document>hello</document>"}
+          ],
+          [:memory]
+        )
+
+      File.write!(path, bin)
+      on_exit(fn -> File.rm(path) end)
+
+      assert {:ok, item} = Ingest.store_file(path, "report.docx", actor: actor())
+
+      assert item.content_type ==
+               "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+      {:ok, stored} = KilnCMS.Storage.fetch(item.storage_key)
+      assert stored == bin
+    end
   end
 
   describe "max_upload_size/0" do
