@@ -67,6 +67,10 @@ defmodule KilnCMS.Blocks do
   @spec core_types() :: [atom()]
   def core_types, do: Keyword.keys(@core_blocks)
 
+  @doc "The core block modules (excluding plugin contributions)."
+  @spec core_modules() :: [module()]
+  def core_modules, do: Keyword.values(@core_blocks)
+
   @doc "All block modules using `Kiln.Block` — the app's own plus plugin-contributed."
   @spec modules() :: [module()]
   def modules do

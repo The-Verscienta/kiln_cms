@@ -87,10 +87,10 @@ defmodule KilnCMS.JsonSchemaValidator do
       {"required", keys} when is_map(value) ->
         for key <- keys, not Map.has_key?(value, key), do: "#{path}: missing required #{key}"
 
-      {"properties", properties} when is_map(value) ->
+      {"properties", properties} when is_map(value) and not is_struct(value) ->
         Enum.flat_map(value, &check_property(&1, properties, root, path))
 
-      {"additionalProperties", false} when is_map(value) ->
+      {"additionalProperties", false} when is_map(value) and not is_struct(value) ->
         declared = schema |> Map.get("properties", %{}) |> Map.keys() |> MapSet.new()
 
         for key <- Map.keys(value),

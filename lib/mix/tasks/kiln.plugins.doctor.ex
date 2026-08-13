@@ -26,9 +26,11 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
 
   alias Kiln.Block.Info
   alias Kiln.Block.JsonSchema
+  alias Kiln.Block.Sample
   alias KilnCMS.Blocks
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.JsonSchemaValidator
+  alias KilnCMS.SchemaExport
 
   @requirements ["compile"]
 
@@ -51,13 +53,19 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
         Mix.raise("""
         Plugin configuration problems:
 
-        #{Enum.map_join(problems, "\n", &("  * " <> &1))}
+        #{Enum.map_join(problems, "\n", &bulleted/1)}
         """)
     end
   end
 
   defp names([]), do: "(none)"
   defp names(plugins), do: Enum.map_join(plugins, ", ", & &1.name())
+
+  # A rescued exception's `Exception.message/1` can itself be multi-line
+  # (`Protocol.UndefinedError`, for one) — only the first line would land
+  # under the bullet and the rest would print flush against the margin.
+  # Collapsing to one line keeps every problem exactly one bulleted entry.
+  defp bulleted(problem), do: "  * " <> String.replace(problem, "\n", " ")
 
   defp plugin_problems(plugin) do
     if Code.ensure_loaded?(plugin) and function_exported?(plugin, :domains, 0) do
@@ -195,17 +203,24 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
   # when `lib/kiln/plugins.ex` compiled, so every other check in this task
   # already reads `plugin.blocks()` off the runtime config instead — the same
   # reason `mix kiln.plugins.doctor` is testable via `Application.put_env` at
-  # all. `Blocks.modules() -- Kiln.Plugins.blocks()` backs out that compile-time
-  # plugin set to approximate "core blocks", then re-adds the blocks the
-  # *current* `plugins` list actually declares.
+  # all. `Blocks.core_modules/0` supplies "core blocks" directly rather than
+  # backing them out of `Blocks.modules() -- Kiln.Plugins.blocks()`.
+  #
+  # Plugin blocks are listed *before* the core set in the concatenation:
+  # `JsonSchema.block_modules/1` (which `defs/1` calls) dedupes by `_type` via
+  # `Enum.uniq_by/2`, which keeps the *first* module for a given name. A
+  # plugin block whose `_type` collides with a core block's — already flagged
+  # separately by `block_collisions/1` — must still resolve to the plugin's
+  # own schema here, not the core block's, or its conformance check would
+  # silently validate against the wrong shape.
   defp block_schema_problems(plugins) do
-    plugin_blocks = Enum.flat_map(plugins, & &1.blocks())
-    core_blocks = Blocks.modules() -- Kiln.Plugins.blocks()
-    defs = JsonSchema.defs(Enum.uniq(core_blocks ++ plugin_blocks))
+    blocks_by_plugin = Map.new(plugins, &{&1, &1.blocks()})
+    plugin_blocks = blocks_by_plugin |> Map.values() |> List.flatten()
+    defs = JsonSchema.defs(Enum.uniq(plugin_blocks ++ Blocks.core_modules()))
     document = %{"$defs" => defs}
 
     Enum.flat_map(plugins, fn plugin ->
-      Enum.flat_map(plugin.blocks(), &block_render_problems(plugin, &1, defs, document))
+      Enum.flat_map(blocks_by_plugin[plugin], &block_render_problems(plugin, &1, defs, document))
     end)
   end
 
@@ -213,9 +228,16 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
     with true <- Code.ensure_loaded?(module) and function_exported?(module, :render, 2),
          name when not is_nil(name) <- Info.name(module),
          schema when not is_nil(schema) <- Map.get(defs, JsonSchema.def_name(name)) do
-      rendered = module |> populated_block() |> Blocks.render(:json)
-      validation = JsonSchemaValidator.validate(rendered, schema, document)
-      block_validation_problems(plugin, name, validation)
+      # Both the populated branch (every field carrying a value) and the empty
+      # branch (`struct(module)`) — a block like `KilnCMS.Blocks.Video` takes a
+      # different `:json` path depending on which fields are present, and the
+      # core conformance test checks both for exactly that reason.
+      [Sample.populated(module), struct(module)]
+      |> Enum.flat_map(fn block ->
+        rendered = Blocks.render(block, :json)
+        validation = JsonSchemaValidator.validate(rendered, schema, document)
+        block_validation_problems(plugin, name, validation)
+      end)
     else
       _ -> []
     end
@@ -235,30 +257,6 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
         "exported schema (#{error}) — reconcile via c:Kiln.Block.Renderer.json_schema/0"
     end
   end
-
-  # A block with every declared field carrying a value of its declared type —
-  # the populated branch of `render/2`, same as the core conformance test.
-  defp populated_block(module) do
-    module
-    |> Info.fields()
-    |> Enum.reduce(struct(module, id: Ecto.UUID.generate()), fn field, block ->
-      Map.put(block, field.name, sample_value(field.type))
-    end)
-  end
-
-  defp sample_value(:integer), do: 3
-  defp sample_value(:float), do: 1.5
-  defp sample_value(:boolean), do: true
-  defp sample_value(:date), do: Date.utc_today()
-  defp sample_value(:datetime), do: DateTime.utc_now()
-  defp sample_value(:url), do: "https://example.com/a"
-  defp sample_value(:email), do: "editor@example.com"
-  defp sample_value(:color), do: "#112233"
-  defp sample_value(:rich_text), do: [%{"_type" => "block", "children" => []}]
-  defp sample_value({:array, :map}), do: [%{}]
-  defp sample_value({:array, inner}), do: [sample_value(inner)]
-  defp sample_value(type) when type in [:map, :object, :reference], do: %{}
-  defp sample_value(_scalar), do: "sample"
 
   # ── field type cast/2 vs its widget's implied shape (#937) ─────────────────
   #
@@ -280,15 +278,23 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
     Enum.flat_map(plugins, fn plugin ->
       plugin.field_types()
       |> Enum.filter(&field_type_module?/1)
-      |> Enum.reject(&(Code.ensure_loaded?(&1) and function_exported?(&1, :json_schema, 1)))
+      # `field_type_module?/1` already established `mod` is loaded, so this
+      # doesn't need to re-check — just read the callback off it.
+      |> Enum.reject(&function_exported?(&1, :json_schema, 1))
       |> Enum.flat_map(&field_type_divergence(plugin, &1))
     end)
   end
 
-  defp field_type_module?(mod),
-    do:
-      Code.ensure_loaded?(mod) and function_exported?(mod, :cast, 2) and
-        function_exported?(mod, :name, 0)
+  # `plugin.field_types()` is unvalidated third-party input — a non-atom entry
+  # crashes `Code.ensure_loaded?/1` with a `FunctionClauseError` that isn't
+  # about *this* module at all, and without a rescue here it takes the whole
+  # doctor run down instead of being reported as that plugin's own problem.
+  defp field_type_module?(mod) do
+    Code.ensure_loaded?(mod) and function_exported?(mod, :cast, 2) and
+      function_exported?(mod, :name, 0)
+  rescue
+    _ -> false
+  end
 
   defp field_type_divergence(plugin, mod) do
     definition =
@@ -307,7 +313,15 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
       composite_divergence(plugin, mod, definition, parts)
     end
   rescue
-    _ -> []
+    e ->
+      # `inspect(mod)` rather than `mod.name()`: the exception being reported
+      # may be `mod.name()` itself raising (it runs above, building
+      # `definition`), and calling it again here would just raise past the
+      # rescue instead of producing a message.
+      [
+        "#{plugin.name()}: field type #{inspect(mod)} raised while checking cast/2 " <>
+          "(#{Exception.message(e)})"
+      ]
   end
 
   defp scalar_divergence(plugin, mod, definition) do
@@ -373,15 +387,22 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
   defp widget_sample("checkbox"), do: "true"
   defp widget_sample(_), do: "sample"
 
-  defp widget_kind("number"), do: "number"
-  defp widget_kind("range"), do: "number"
-  defp widget_kind("checkbox"), do: "boolean"
-  defp widget_kind(_), do: "string"
+  # Delegates to `KilnCMS.SchemaExport.html_input_json_type/1` rather than
+  # reimplementing its clause table — that function already answers exactly
+  # "what JSON type does this HTML input type imply", the same question this
+  # module asks of a widget.
+  defp widget_kind(html_type), do: SchemaExport.html_input_json_type(html_type)
 
   defp value_kind(v) when is_binary(v), do: "string"
   defp value_kind(v) when is_boolean(v), do: "boolean"
   defp value_kind(v) when is_number(v), do: "number"
   defp value_kind(v) when is_list(v), do: "array"
+  # `cast/2` may legitimately hand back a native date/time struct rather than
+  # the ISO 8601 string it will eventually be delivered as — without this,
+  # `is_map/1` below classified it as `"object"`, a false-positive divergence
+  # against any ordinary string-typed widget.
+  defp value_kind(%mod{}) when mod in [Date, DateTime, NaiveDateTime, Time], do: "string"
+  defp value_kind(%_{}), do: "unknown"
   defp value_kind(v) when is_map(v), do: "object"
   defp value_kind(nil), do: "null"
   defp value_kind(_), do: "unknown"
