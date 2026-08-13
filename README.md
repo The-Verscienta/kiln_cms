@@ -207,7 +207,7 @@ the front-end integration guide.
   unset only when the app is internet-facing directly, where the header is spoofable.
   Unset *behind* a proxy, every request looks like it came from the proxy, so all
   rate-limit bucket collapses into one counter for the entire internet: one
-  noisy client exhausts `:auth` (20/min) for everybody, and the per-IP brute-force
+  noisy client exhausts `:auth` (40/min) for everybody, and the per-IP brute-force
   protection on `/sign-in` stops being per-IP. Nothing errors — the app logs a warning
   once per node the first time a forwarded request arrives while this is unset (#564).
 - **Invite-only mode:** set `config :kiln_cms, :registration_enabled, false` to disable

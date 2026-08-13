@@ -7,7 +7,20 @@ defmodule KilnCMSWeb.RateLimit do
   @default_limits %{
     gql: {60, :timer.minutes(1)},
     api: {120, :timer.minutes(1)},
-    auth: {20, :timer.minutes(1)},
+    # Doubled from the original 20/min (#747). A two-factor sign-in is *two*
+    # requests through this bucket — `POST /sign-in` (or `/api/auth/sign_in`)
+    # for the password, then `/sign-in/verify` (or `.../sign_in/verify`) for
+    # the code — and every mistyped code costs another. 20/min was sized when
+    # a sign-in was one request; 40 keeps the same "twenty sign-ins a minute
+    # from one address" headroom now that a 2FA account spends two per attempt,
+    # without changing what actually bounds credential guessing — that is the
+    # per-account budget (`KilnCMS.Accounts.AccountThrottle`), not this one.
+    # This bucket stays the *volume* bound rather than the guessing bound
+    # precisely because it is per-IP and shared addresses (an office or CI
+    # runner's egress NAT) are expected to collide on it — the per-account
+    # budget is what has to hold up under that collision, same reasoning as
+    # `:register`'s own bucket above.
+    auth: {40, :timer.minutes(1)},
     # Account creation (#724). Its own bucket rather than a share of `:auth`,
     # so a burst of legitimate sign-ups from one office NAT cannot lock
     # *sign-in* for everyone behind it. Tighter in absolute terms because

@@ -23,7 +23,7 @@ defmodule KilnCMSWeb.Plugs.ClientIp do
   entire internet:
 
     * **availability** — one noisy client exhausts the bucket for everyone;
-      `:auth` and `:form` are 20/min *in total*, across all users;
+      `:auth` is 40/min and `:form` is 20/min *in total*, across all users;
     * **security** — per-IP brute-force protection on `/api/auth/sign_in` and
       `/sign-in` stops being per-IP, so the control is not doing what the threat
       model says it does.

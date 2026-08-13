@@ -133,11 +133,26 @@ config :kiln_cms, :analytics_enabled, false
 # callers that have not moved onto ConnCase's unique default) that the real
 # production ceilings would 429 unrelated assertions.
 #
-# `:auth` and `:register` used to be raised too (#715, #724), because every
+# `:register` used to be raised alongside `:auth` (#715, #724), because every
 # ConnCase request peered from `127.0.0.1` and shared one bucket. ConnCase's
-# setup now mints a per-test address (#936), so those two can exercise the
-# shipped ceilings. Files that deliberately share an address — proving a
+# setup now mints a per-test address (#936), so `:register` exercises the
+# shipped ceiling. Files that deliberately share an address — proving a
 # per-account budget is not per-IP — opt back in with `loopback_conn/0`.
+#
+# `:auth` itself went back to being raised (#747), not because #936 didn't
+# work — it did, for every test that uses ConnCase's per-test `conn` — but a
+# long tail of controller/LiveView tests still build their own bare
+# `build_conn()` against an `:auth`-bucket route (a redirect-to-/sign-in
+# assertion, a replay/hold/tamper case reusing the setup `conn`, …), which
+# peers from loopback and pools onto one `auth:127.0.0.1` bucket regardless of
+# #936. #726 then added real volume to that shared bucket — every two-factor
+# verify is a *second* `:auth` request alongside its sign-in — and #747 also
+# doubled the production ceiling for the same reason, so the untouched test
+# default would have filled twice as fast per 2FA test as it used to. Sized
+# generously against the suite's own volume, not against production —
+# `SignInRateLimitTest` reads this value rather than hardcoding it, so it
+# still spends a real, finite budget on its own address to prove the
+# boundary; it is just a larger one now.
 #
 # `:unlock` stays raised: the lock suite still posts a dozen passphrases from
 # one address in a window (#496).
@@ -145,6 +160,7 @@ config :kiln_cms, KilnCMSWeb.RateLimit,
   limits: %{
     api: {1_000_000, :timer.minutes(1)},
     delivery: {1_000_000, :timer.minutes(1)},
+    auth: {500, :timer.minutes(1)},
     # Same reason (#496): the lock suite posts a dozen passphrases from one
     # address in one window, and the shipped 10/min would 429 whichever test
     # happened to run last. `RateLimit.default_limits/0` still pins the real
