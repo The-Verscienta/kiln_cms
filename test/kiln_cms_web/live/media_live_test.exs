@@ -532,6 +532,100 @@ defmodule KilnCMSWeb.MediaLiveTest do
       refute Enum.any?(CMS.list_media_items!(actor: editor))
     end
 
+    test "uploading a docx stores it as a document, unstripped (#808)", %{
+      conn: conn,
+      root: root
+    } do
+      editor = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")
+
+      {:ok, {_name, docx}} =
+        :zip.create(
+          ~c"in_memory.docx",
+          [
+            {~c"[Content_Types].xml", "<Types/>"},
+            {~c"word/document.xml", "<document>hello</document>"}
+          ],
+          [:memory]
+        )
+
+      input =
+        file_input(lv, "#upload-form", :media, [
+          %{
+            name: "report.docx",
+            content: docx,
+            type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          }
+        ])
+
+      assert render_upload(input, "report.docx")
+
+      html = lv |> element("#upload-form") |> render_submit()
+      assert html =~ "report.docx"
+
+      assert [item] = CMS.list_media_items!(actor: editor)
+      assert item.filename == "report.docx"
+
+      assert item.content_type ==
+               "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+      assert item.width == nil
+      assert File.exists?(Path.join(root, item.storage_key))
+    end
+
+    test "a zip whose central directory declares an absurd uncompressed size is rejected (#808)",
+         %{conn: conn} do
+      editor = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")
+
+      name = "bomb.bin"
+      data = "AAAA"
+      compressed_size = byte_size(data)
+      declared_uncompressed = 4_000_000_000
+
+      local_header =
+        <<0x50, 0x4B, 0x03, 0x04>> <>
+          <<20::little-16, 0::little-16, 0::little-16>> <>
+          <<0::little-16, 0::little-16>> <>
+          <<0::little-32>> <>
+          <<compressed_size::little-32, declared_uncompressed::little-32>> <>
+          <<byte_size(name)::little-16, 0::little-16>> <>
+          name
+
+      local_entry = local_header <> data
+
+      central_header =
+        <<0x50, 0x4B, 0x01, 0x02>> <>
+          <<20::little-16, 20::little-16, 0::little-16, 0::little-16>> <>
+          <<0::little-16, 0::little-16>> <>
+          <<0::little-32>> <>
+          <<compressed_size::little-32, declared_uncompressed::little-32>> <>
+          <<byte_size(name)::little-16, 0::little-16, 0::little-16>> <>
+          <<0::little-16, 0::little-16, 0::little-32>> <>
+          <<0::little-32>> <>
+          name
+
+      eocd =
+        <<0x50, 0x4B, 0x05, 0x06>> <>
+          <<0::little-16, 0::little-16, 1::little-16, 1::little-16>> <>
+          <<byte_size(central_header)::little-32, byte_size(local_entry)::little-32>> <>
+          <<0::little-16>>
+
+      bomb = local_entry <> central_header <> eocd
+
+      input =
+        file_input(lv, "#upload-form", :media, [
+          %{name: "bomb.zip", content: bomb, type: "application/zip"}
+        ])
+
+      assert render_upload(input, "bomb.zip")
+
+      html = lv |> element("#upload-form") |> render_submit()
+      assert html =~ "Upload failed"
+      assert html =~ "bomb.zip"
+      refute Enum.any?(CMS.list_media_items!(actor: editor))
+    end
+
     @tag :qpdf
     test "a document under the document cap but over the (smaller) image cap still uploads", %{
       conn: conn

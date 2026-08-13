@@ -3280,8 +3280,8 @@ msgstr "Documents de ce lancement"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
-msgid "Documents: PDF up to 25 MB"
-msgstr "Documents : PDF jusqu'à 25 Mo"
+msgid "Documents: PDF, Word, Excel, PowerPoint, ZIP up to 25 MB"
+msgstr "Documents : PDF, Word, Excel, PowerPoint, ZIP jusqu'à 25 Mo"
 
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format

@@ -4,9 +4,38 @@ defmodule KilnCMS.DocumentProcessor do
   analogue for the document library, deny-by-default and magic-byte-sniffed
   (never the client-supplied filename/MIME).
 
-  PDF only for v1: `@allowed_formats` is a single-entry map so the shape
-  matches `ImageProcessor.validate_upload/1`'s and stays trivial to extend
-  when office-doc/zip support lands (tracked separately, out of scope here).
+  PDF was v1. #808 added the rest of what an editor actually has lying
+  around: `.docx`/`.xlsx`/`.pptx` (OOXML — a zip with an internal
+  `[Content_Types].xml` and a format-specific part), legacy `.doc`/`.xls`/
+  `.ppt` (OLE2 compound files), and plain `.zip`. Every one of those is
+  still recognized from its **bytes**, never the claimed filename/MIME — see
+  `classify_zip/1` and `classify_ole/1`.
+
+  ## Zip is a container, not a format (#808)
+
+  A `.docx`/`.xlsx`/`.pptx`/`.zip` upload is, at the byte level, an
+  attacker-controlled archive whose *declared* central-directory metadata
+  (entry count, compressed/uncompressed size per entry) this module reads to
+  decide whether to accept the file — and reading that metadata is itself a
+  decompression bomb's classic amplification point: a tiny compressed blob
+  can declare an enormous uncompressed size, or millions of entries, without
+  the reader ever inflating a single byte. `zip_bomb?/1` rejects on exactly
+  that declared metadata (`@max_zip_uncompressed_bytes`,
+  `@max_zip_compression_ratio`, `@max_zip_entries` below), via
+  `:zip.list_dir/1` — which reads only the central directory, the same
+  region a real decompressor consults before it allocates anything. Nothing
+  in this module ever calls a function that inflates archive content; that
+  is the one line it does not cross.
+
+  ## Office formats are not stripped (yet)
+
+  `strip_metadata/1` still only knows PDF — it shells out to qpdf, which
+  cannot open a zip or an OLE2 file at all. `KilnCMS.Media.Ingest` only
+  routes a `.pdf` document through it; every other document kind (office or
+  zip) is stored as uploaded, same posture as A/V before #820 landed.
+  A metadata strip for OOXML/OLE2 is a real gap (both formats carry author
+  names and, for OLE2, the authoring machine's path) but a different tool
+  and a different issue — not assumed away here, just not yet built.
 
   `strip_metadata/1` removes the `/Info` dictionary and the XMP metadata stream
   before the blob is stored (#807), the document-library counterpart to
@@ -87,18 +116,84 @@ defmodule KilnCMS.DocumentProcessor do
   # same way one attached to a Page does.
   @pruned_keys ["/Metadata", "/PieceInfo"]
 
-  # Canonical {extension, content_type} per magic-byte signature this module
-  # recognizes. Deny-by-default: anything else is rejected, same posture as
-  # ImageProcessor's `@allowed_formats`.
-  @allowed_formats %{
-    "%PDF-" => {".pdf", "application/pdf"}
+  # How many header bytes are enough to recognize PDF, OOXML/plain-zip, and
+  # OLE2 by their leading signature. All three signatures live in the first
+  # handful of bytes; 1024 leaves headroom without reading anything close to
+  # the whole file for the (common) case of a signature this module rejects
+  # outright.
+  @header_bytes 1024
+
+  # OLE2 stream names live in the compound file's directory sector, which for
+  # a small document is well within the first few KB — this module does not
+  # parse the FAT to find it exactly (that is real parsing, not sniffing, and
+  # nothing else here does that either). 8 KB is generous for the documents
+  # this library actually holds and still bounded/cheap to read.
+  @ole_probe_bytes 8192
+
+  # A zip's declared uncompressed TOTAL, read from the central directory
+  # alone. 500 MB is far past any legitimate document bundle this library
+  # holds (`KilnCMS.Media.Ingest`'s own cap on the file as STORED is 25 MB —
+  # see `@max_document_size` there) while still well short of what a bomb
+  # needs to be a problem for whatever eventually reads this metadata.
+  @max_zip_uncompressed_bytes 500_000_000
+
+  # A genuine document — mostly XML/text, plus whatever already-compressed
+  # images it embeds — does not approach this. A bomb built from a repeating
+  # byte reaches 1000:1 or more from a file of a few KB; 100:1 is comfortably
+  # above anything real and comfortably below anything designed to amplify.
+  @max_zip_compression_ratio 100
+
+  # An OOXML package is dozens to a few hundred parts; a legitimate plain-zip
+  # upload to a document library is not meaningfully different. Past this,
+  # the central directory itself — which `zip_entries/1` reads in full to
+  # answer this question — is doing the amplifying, independent of any one
+  # entry's declared size.
+  @max_zip_entries 10_000
+
+  # OOXML packages (docx/xlsx/pptx) all carry this at the archive root; it is
+  # what distinguishes "a zip that happens to be an Office document" from
+  # any other zip. The three main-part paths below are what distinguish
+  # *which* Office document — a macro-enabled variant (.docm/.xlsm/.pptm)
+  # carries the same paths and is classified the same as its non-macro
+  # sibling, which is fine: nothing here executes content, it only stores and
+  # serves bytes.
+  @ooxml_marker "[Content_Types].xml"
+  @ooxml_parts %{
+    "word/document.xml" =>
+      {".docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
+    "xl/workbook.xml" =>
+      {".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
+    "ppt/presentation.xml" =>
+      {".pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"}
+  }
+
+  # Legacy OLE2 offers no equivalent of `[Content_Types].xml` — the signature
+  # alone is shared by Word/Excel/PowerPoint (and by unrelated formats this
+  # module does not accept, like .msi/.msg). What distinguishes them is the
+  # name of the stream each application writes at the document's root,
+  # searched for here as the raw UTF-16LE bytes the compound file directory
+  # stores them as. A signature match with none of these present is refused
+  # rather than guessed at — the same deny-by-default posture as everything
+  # else in this module.
+  @ole_streams %{
+    "WordDocument" => {".doc", "application/msword"},
+    "PowerPoint Document" => {".ppt", "application/vnd.ms-powerpoint"},
+    "Workbook" => {".xls", "application/vnd.ms-excel"},
+    # Excel's pre-BIFF8 (95 and earlier) stream name — rare, kept for the
+    # same reason the OOXML side keeps macro-enabled variants: a file that is
+    # genuinely one of the three formats this module means to accept
+    # shouldn't be refused because it's an older dialect of it.
+    "Book" => {".xls", "application/vnd.ms-excel"}
   }
 
   @doc """
-  Returns `{:ok, %{ext: ".pdf", content_type: "application/pdf"}}` when `path`
-  starts with a recognized document magic byte signature. Rejects anything
-  else — including a file that merely has a `.pdf` extension — with
-  `{:error, :unsupported_format}`.
+  Returns `{:ok, %{ext: ext, content_type: content_type}}` when `path` starts
+  with a recognized document magic byte signature — PDF, OOXML
+  (docx/xlsx/pptx), legacy OLE2 (doc/xls/ppt), or a plain zip. Rejects
+  anything else — including a file that merely has a matching extension —
+  with `{:error, :unsupported_format}`, and a zip/OOXML file whose declared
+  central-directory metadata looks like a decompression bomb with
+  `{:error, :zip_bomb}` (see the moduledoc).
   """
   # `path` is a LiveView upload's own server-generated temp file, never user
   # input — the traversal warning is a false positive (same reasoning as
@@ -107,18 +202,136 @@ defmodule KilnCMS.DocumentProcessor do
   @spec validate_upload(Path.t()) ::
           {:ok, %{ext: String.t(), content_type: String.t()}} | {:error, term()}
   def validate_upload(path) when is_binary(path) do
-    case File.open(path, [:read, :binary], &IO.binread(&1, 1024)) do
-      {:ok, header} when is_binary(header) -> match_signature(header)
-      _ -> {:error, :unsupported_format}
+    case read_prefix(path, @header_bytes) do
+      {:ok, header} -> classify_by_signature(header, path)
+      :error -> {:error, :unsupported_format}
     end
   end
 
-  defp match_signature(header) do
-    @allowed_formats
-    |> Enum.find(fn {sig, _fmt} -> String.starts_with?(header, sig) end)
+  defp classify_by_signature(<<"%PDF-", _rest::binary>>, _path),
+    do: {:ok, %{ext: ".pdf", content_type: "application/pdf"}}
+
+  defp classify_by_signature(
+         <<0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1, _rest::binary>>,
+         path
+       ),
+       do: classify_ole(path)
+
+  defp classify_by_signature(<<0x50, 0x4B, 0x03, 0x04, _rest::binary>>, path),
+    do: classify_zip(path)
+
+  defp classify_by_signature(_header, _path), do: {:error, :unsupported_format}
+
+  # ── OOXML / plain zip (#808) ────────────────────────────────────────────
+
+  # `:zip.list_dir/1` reads only the central directory (a fixed-size record
+  # per entry, near the end of the file) — never the entries' own compressed
+  # data. That is true whether the file is 1 KB or 1 GB, which is what makes
+  # it safe to call before any size cap has been applied to `path`.
+  defp classify_zip(path) do
+    case zip_entries(path) do
+      {:ok, entries} ->
+        if zip_bomb?(entries), do: {:error, :zip_bomb}, else: classify_zip_entries(entries)
+
+      {:error, _reason} ->
+        {:error, :unsupported_format}
+    end
+  end
+
+  # `path` is a server-generated temp file, never user input — same false
+  # positive as `validate_upload/1`'s own read.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp zip_entries(path) do
+    case :zip.list_dir(String.to_charlist(path)) do
+      {:ok, entries} -> {:ok, entries}
+      {:error, reason} -> {:error, reason}
+    end
+  rescue
+    # A file that merely starts with the zip signature but is otherwise
+    # garbage can make the zip module raise rather than return an error
+    # tuple (a malformed length field read as an offset, for instance).
+    # "We could not establish this is a zip" is the same answer either way.
+    _error -> {:error, :unreadable}
+  end
+
+  # Declared metadata only — see the moduledoc. `file_info` is the bare
+  # Erlang `:file.file_info()` record (not an Elixir struct), so its
+  # uncompressed `size` is read positionally rather than by field name.
+  defp zip_bomb?(entries) do
+    totals =
+      Enum.reduce(entries, %{count: 0, uncompressed: 0, compressed: 0}, fn
+        {:zip_file, _name, file_info, _comment, _offset, comp_size}, acc ->
+          %{
+            count: acc.count + 1,
+            uncompressed: acc.uncompressed + elem(file_info, 1),
+            compressed: acc.compressed + comp_size
+          }
+
+        # `:zip.list_dir/1` may lead with a `:zip_comment` record — not a
+        # file, nothing to total.
+        _other, acc ->
+          acc
+      end)
+
+    cond do
+      totals.count > @max_zip_entries -> true
+      totals.uncompressed > @max_zip_uncompressed_bytes -> true
+      # Nonzero declared content compressing to nothing isn't achievable by
+      # any real method (stored data can't shrink, and deflate has overhead)
+      # — flagged the same as an absurd ratio rather than divided by zero.
+      totals.compressed == 0 -> totals.uncompressed > 0
+      totals.uncompressed / totals.compressed > @max_zip_compression_ratio -> true
+      true -> false
+    end
+  end
+
+  defp classify_zip_entries(entries) do
+    names = for {:zip_file, name, _fi, _c, _o, _cs} <- entries, do: to_string(name)
+
+    if @ooxml_marker in names,
+      do: classify_ooxml_parts(names),
+      else: {:ok, %{ext: ".zip", content_type: "application/zip"}}
+  end
+
+  defp classify_ooxml_parts(names) do
+    @ooxml_parts
+    |> Enum.find(fn {part, _fmt} -> part in names end)
     |> case do
-      {_sig, {ext, content_type}} -> {:ok, %{ext: ext, content_type: content_type}}
+      {_part, {ext, content_type}} -> {:ok, %{ext: ext, content_type: content_type}}
+      # Carries `[Content_Types].xml` but none of the three main parts this
+      # module knows how to name — some other OOXML-family format (Visio,
+      # OneNote, …). Deny-by-default: not one of the formats #808 asked for.
       nil -> {:error, :unsupported_format}
+    end
+  end
+
+  # ── Legacy OLE2 (#808) ──────────────────────────────────────────────────
+
+  defp classify_ole(path) do
+    case read_prefix(path, @ole_probe_bytes) do
+      {:ok, probe} -> classify_ole_probe(probe)
+      :error -> {:error, :unsupported_format}
+    end
+  end
+
+  defp classify_ole_probe(probe) do
+    @ole_streams
+    |> Enum.find(fn {stream, _fmt} -> :binary.match(probe, utf16le(stream)) != :nomatch end)
+    |> case do
+      {_stream, {ext, content_type}} -> {:ok, %{ext: ext, content_type: content_type}}
+      nil -> {:error, :unsupported_format}
+    end
+  end
+
+  defp utf16le(ascii), do: for(<<byte <- ascii>>, into: <<>>, do: <<byte::little-16>>)
+
+  # `path` is a server-generated temp file, never user input — same false
+  # positive as `validate_upload/1`'s own read.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp read_prefix(path, bytes) do
+    case File.open(path, [:read, :binary], &IO.binread(&1, bytes)) do
+      {:ok, data} when is_binary(data) -> {:ok, data}
+      _ -> :error
     end
   end
 
