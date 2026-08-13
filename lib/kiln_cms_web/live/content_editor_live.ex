@@ -133,10 +133,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
           # while no pop-out is watching.
           Phoenix.PubSub.subscribe(KilnCMS.PubSub, Presence.preview_topic(kind, id))
           # Block discussions: threads and block tasks changing anywhere —
-          # another editor's window, the API, `AutoCompleteTasks` on publish —
-          # arrive as `{:block_thread_changed, _}` / `{:block_task_changed, _}`
-          # on the collab topic, which also carries this document's typing
-          # indicators. Reusing it costs no new subscription.
+          # another editor's window, the API, `AutoCompleteTasks` on publish,
+          # or an editorial-intelligence rule delivering a document-level
+          # comment in the background (#946) — arrive as
+          # `{:block_thread_changed, _}` / `{:block_task_changed, _}` on the
+          # collab topic, which also carries this document's typing
+          # indicators. `BroadcastComment` fires that topic unconditionally
+          # (block-scoped or the `nil` block_id a document-level comment
+          # carries), and the handler below reloads the whole comment list
+          # regardless of which block_id it names — so the Document notes
+          # panel (which reads `@comments` too) picks up an automation
+          # comment through this one subscription, no second one needed.
           Collab.subscribe(kind, record.id)
         end
 
@@ -560,6 +567,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Debounced draft autosave fired by the timer scheduled in `validate`.
   def handle_info(:autosave, socket), do: {:noreply, perform_autosave(socket)}
+
+  # This session's own `broadcast_preview/1` echoing back (or another
+  # editor's) — `PreviewLive` is the intended audience, not us.
+  def handle_info({:preview_update, _payload}, socket), do: {:noreply, socket}
 
   # Drafting results. Note the double wrap: `start_async` wraps the function's
   # own return, so a successful generation arrives as `{:ok, {_version, {:ok, _}}}`.

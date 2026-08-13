@@ -73,7 +73,12 @@ defmodule KilnCMS.Automation.Validations.ActionConfig do
   # appears, not deferred like a function body) so `&deliver_as_required/1`
   # can capture it.
   defp deliver_as_required(config) do
-    case Map.get(config, "deliver_as", "email") do
+    # `Map.get(config, "deliver_as", "email")` would only default on an
+    # *absent* key — an explicit `"deliver_as": null` (a JSON author's natural
+    # way to write "use the default") stores as a present key with a `nil`
+    # value and falls through to `_other -> []` below, requiring nothing and
+    # silently bypassing the `to` check every other spelling of "email" gets.
+    case Map.get(config, "deliver_as") || "email" do
       "email" -> [{"to", :email}]
       "task" -> [{"assignee", :uuid}]
       "comment" -> []
@@ -135,7 +140,12 @@ defmodule KilnCMS.Automation.Validations.ActionConfig do
   enforces it, and so a test can assert every kind in
   `KilnCMS.Automation.Rule.action_kinds/0` has an entry.
   """
-  @spec shape(atom()) :: %{required: list(), optional: list()} | nil
+  # `optional(:required_when)`, not just `required:`/`optional:` — the four
+  # intelligence-reaction shapes carry it (see `conditional_required/2`
+  # below), and a spec that omitted it made dialyzer conclude that clause's
+  # pattern, and `deliver_as_required/1` itself, could never match/run.
+  @spec shape(atom()) ::
+          %{optional(:required_when) => atom(), required: list(), optional: list()} | nil
   def shape(action), do: Map.get(@shapes, action)
 
   @doc "The shape table, keyed by action kind."

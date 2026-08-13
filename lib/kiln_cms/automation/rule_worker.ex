@@ -475,6 +475,20 @@ defmodule KilnCMS.Automation.RuleWorker do
 
         :ok
     end
+  rescue
+    # `findings_text/2` runs finder-generated HTML through `Floki.parse_fragment!/1`,
+    # which raises on malformed markup — unlike `deliver_as_email/3`, which sends
+    # the HTML as-is and never parses it. Same advisory posture as the transient
+    # mail error above: drop rather than let Oban retry a generation that already
+    # ran (and already spent the LLM budget) for a body that will fail to parse
+    # again identically next time.
+    error in [Floki.ParseError] ->
+      Logger.warning(
+        "Automation intelligence rule couldn't parse its findings into a comment: " <>
+          "#{Exception.message(error)}"
+      )
+
+      :ok
   end
 
   # A task assigned to `config["assignee"]`, due `config["due_in_days"]` (#946)
@@ -511,6 +525,16 @@ defmodule KilnCMS.Automation.RuleWorker do
 
         :ok
     end
+  rescue
+    # See the matching rescue on `deliver_as_comment/3`: `findings_text/2` can
+    # raise on malformed finder HTML, and this path (unlike email) parses it.
+    error in [Floki.ParseError] ->
+      Logger.warning(
+        "Automation intelligence rule couldn't parse its findings into a task: " <>
+          "#{Exception.message(error)}"
+      )
+
+      :ok
   end
 
   defp due_in_days(%{"due_in_days" => n}) when is_integer(n) and n > 0, do: n
