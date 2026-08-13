@@ -449,6 +449,49 @@ defmodule Mix.Tasks.Kiln.ExperimentTest do
     test "show raises on an unknown name", _ctx do
       assert_raise Mix.Error, ~r/No experiment named/, fn -> run(["show", "nope-#{name()}"]) end
     end
+
+    # #1007: the results-panel sanity check, distinct from #1008's `blocked_line`
+    # above — this experiment is perfectly healthy (it CAN convert), the numbers
+    # it already produced just do not add up, which is worth a look regardless
+    # of whether it came from a scripted client or an ordinary double submit.
+    test "show flags a variant with more conversions than impressions", ctx do
+      doc = page(ctx.actor)
+      form = ExperimentFixtures.goal_form!(ctx.org_id)
+      exp_name = name()
+      run(["create", exp_name, "--type", "page", "--document", doc.id, "--form", form.id])
+      run(["variant", exp_name, "--variant", "Control", "--control"])
+
+      %{variants: [control]} = find(ctx.org_id, exp_name)
+
+      Experiments.record_conversion!(control.id, authorize?: false, tenant: ctx.org_id)
+      Experiments.record_conversion!(control.id, authorize?: false, tenant: ctx.org_id)
+
+      out = run(["show", exp_name])
+
+      assert out =~ "0 served"
+      assert out =~ "2 converted"
+      assert out =~ "2 conversions were recorded against only 0 impressions"
+    end
+
+    test "show says nothing extra when conversions stay within impressions", ctx do
+      doc = page(ctx.actor)
+      form = ExperimentFixtures.goal_form!(ctx.org_id)
+      exp_name = name()
+      run(["create", exp_name, "--type", "page", "--document", doc.id, "--form", form.id])
+      run(["variant", exp_name, "--variant", "Control", "--control"])
+
+      %{variants: [control]} = find(ctx.org_id, exp_name)
+
+      Experiments.record_impression!(control.id, authorize?: false, tenant: ctx.org_id)
+      Experiments.record_impression!(control.id, authorize?: false, tenant: ctx.org_id)
+      Experiments.record_conversion!(control.id, authorize?: false, tenant: ctx.org_id)
+
+      out = run(["show", exp_name])
+
+      assert out =~ "2 served"
+      assert out =~ "1 converted"
+      refute out =~ "conversions were recorded against"
+    end
   end
 
   test "an unrecognised subcommand prints usage", _ctx do
