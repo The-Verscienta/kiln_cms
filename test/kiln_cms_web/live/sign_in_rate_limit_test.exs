@@ -15,12 +15,18 @@ defmodule KilnCMSWeb.SignInRateLimitTest do
   hides the rest with a CSS class — so which page a caller is on does not bound
   which form they can submit, and each needs its own charge.
 
-  The `:auth` limit is left at its real value and every test works on an
-  address of its own — the action tests build one into the context by hand, the
-  page tests hand one to the page with `client_conn/1`. Tightening the limit
-  app-wide would be the obvious way to write this and is wrong: the limit is
-  global while the counters are per-address, so a tightened limit refuses every
-  *other* suite's requests from `127.0.0.1` for as long as this file runs.
+  The `:auth` limit is read from `RateLimit.limits/0` rather than hardcoded or
+  locally tightened, and every test works on an address of its own — the
+  action tests build one into the context by hand, the page tests hand one to
+  the page with `client_conn/1`. Tightening the limit app-wide would be the
+  obvious way to write this and is wrong: the limit is global while the
+  counters are per-address, so a tightened limit refuses every *other* suite's
+  requests from `127.0.0.1` for as long as this file runs. `config/test.exs`
+  does raise `:auth` above its production ceiling (#747, for files elsewhere
+  that still share the loopback address), which only means `auth_limit/0`
+  spends a larger real budget — the boundary this file exists to prove is
+  read, not restated, so it moves with that config rather than going stale
+  against it.
 
   Measuring on a per-test address rather than on the loopback bucket is also
   what keeps the delta assertions below stable — see

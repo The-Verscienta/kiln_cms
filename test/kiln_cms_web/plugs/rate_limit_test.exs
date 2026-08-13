@@ -5,11 +5,16 @@ defmodule KilnCMSWeb.Plugs.RateLimitTest do
 
   test "the production auth limit is the one the threat model states" do
     # `config/test.exs` overrides `:auth` so the suite's own `/sign-in` and
-    # `/api/auth/*` traffic cannot exhaust it (#715). That override used to be
-    # absent, which is what pinned the production number — every other test now
-    # reads the configured value, so without this nothing would notice
-    # `@default_limits` being loosened.
-    assert %{auth: {20, 60_000}} = Map.take(KilnCMSWeb.RateLimit.default_limits(), [:auth])
+    # `/api/auth/*` traffic cannot exhaust it (#715, #747). That override used
+    # to be absent, which is what pinned the production number — every other
+    # test now reads the configured value, so without this nothing would
+    # notice `@default_limits` being loosened.
+    #
+    # 40, not 20 (#747): a two-factor sign-in spends this bucket twice — once
+    # for the password, once for the code — so the ceiling was doubled to keep
+    # the same "twenty sign-ins a minute from one address" headroom it had
+    # when a sign-in was a single request.
+    assert %{auth: {40, 60_000}} = Map.take(KilnCMSWeb.RateLimit.default_limits(), [:auth])
   end
 
   test "returns 429 when the auth bucket is exceeded", %{conn: conn} do
