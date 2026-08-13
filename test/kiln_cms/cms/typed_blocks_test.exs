@@ -101,6 +101,44 @@ defmodule KilnCMS.CMS.TypedBlocksTest do
     end
   end
 
+  describe "InvalidChildBlockError.message/1 (#5/#6): readable errors, not struct dumps" do
+    alias KilnCMS.CMS.TypedBlocks.InvalidChildBlockError
+
+    test "a bare Ash/Splode exception is formatted via Exception.message/1, not inspect/1" do
+      # `Ash.Type.cast_input` on an embedded resource returns Splode exception
+      # structs (`Ash.Error.Changes.Required` for a missing required field), not
+      # keyword lists — the old `is_list(kw)` clause never matched them, so this
+      # fell through to `inspect(other)` and leaked the raw struct.
+      error = Ash.Error.Changes.Required.exception(field: :text, type: :attribute)
+
+      message =
+        Exception.message(%InvalidChildBlockError{block_type: "claim", errors: [error]})
+
+      assert message =~ "text"
+      assert message =~ "required"
+      refute message =~ "%Ash.Error"
+      refute message =~ "splode:"
+    end
+
+    test "a Splode exception's :vars are substituted into its message template" do
+      # `Exception.message/1` on a Splode exception substitutes `:vars` into the
+      # message — the hand-rolled keyword-list branch never did this, so a
+      # constraint violation showed the literal `%{min}` placeholder.
+      error =
+        Ash.Error.Changes.InvalidAttribute.exception(
+          field: :text,
+          message: "must be at least %{min} characters",
+          vars: [min: 3]
+        )
+
+      message =
+        Exception.message(%InvalidChildBlockError{block_type: "quote", errors: [error]})
+
+      assert message =~ "must be at least 3 characters"
+      refute message =~ "%{min}"
+    end
+  end
+
   defp required_for("image"), do: %{"url" => "/x.png"}
   defp required_for("rich_text"), do: %{"body" => []}
   defp required_for("quote"), do: %{"text" => "q"}

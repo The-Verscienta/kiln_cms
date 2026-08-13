@@ -43,6 +43,16 @@ defmodule KilnCMS.CMS.TypedBlocks do
 
     defp format_errors(errors) do
       Enum.map_join(errors, "; ", fn
+        # The common shape: `Ash.Type.cast_input` on an embedded resource
+        # returns a list of Splode exception structs (`Ash.Error.Changes.Required`
+        # for a missing `required: true` field, `Ash.Error.Changes.InvalidAttribute`
+        # for a constraint violation, ...), not keyword lists — the clause below
+        # never matched them, so this fell through to `inspect(other)` and leaked
+        # a raw struct dump instead of a human-readable message.
+        # `Exception.message/1` also substitutes any Splode `:vars` into the
+        # message template, so a constraint error's `%{min}`-style placeholder
+        # comes back with the real value rather than the literal token.
+        error when is_exception(error) -> Exception.message(error)
         kw when is_list(kw) -> "#{Keyword.get(kw, :field)}: #{Keyword.get(kw, :message)}"
         other -> inspect(other)
       end)
@@ -129,6 +139,11 @@ defmodule KilnCMS.CMS.TypedBlocks do
   @doc false
   # cast_input target: a tag-shaped map (`%{"_type" => name, ...attrs}`) the union
   # matches by its `_type` tag. Everything is sanitized (this is user input).
+  #
+  # Can RAISE `InvalidChildBlockError` (not reflected in a `!` suffix, since
+  # every `KilnCMS.CMS.BlockUnion` cast entry point rescues it right at the
+  # call site — see the note on each there) when `value` contains a `columns`
+  # child that fails the same Ash cast a top-level block goes through (#935).
   def to_union_input(nil), do: nil
 
   def to_union_input(value) do
@@ -387,7 +402,7 @@ defmodule KilnCMS.CMS.TypedBlocks do
     case Map.fetch(@type_atoms, name) do
       {:ok, type_atom} ->
         case KilnCMS.Blocks.fetch(type_atom) do
-          {:ok, mod} -> cast_child!(mod, attrs)
+          {:ok, mod} -> cast_child!(mod, type_atom, attrs)
           :error -> attrs
         end
 
@@ -396,10 +411,21 @@ defmodule KilnCMS.CMS.TypedBlocks do
     end
   end
 
-  defp cast_child!(mod, attrs) do
-    case Ash.Type.cast_input(mod, attrs, []) do
-      {:ok, _struct} ->
-        attrs
+  # Returns the CAST struct's own attrs, not the original `attrs` — so type
+  # coercion (a string `"3"` cast to the integer `:level` field) and defaults
+  # apply to a nested child exactly as they already do to a top-level one,
+  # instead of leaving the pre-cast, possibly-wrong-typed value in storage
+  # forever (`columns.columns` is untyped `{:array, :map}` with no downstream
+  # re-cast to catch the divergence later).
+  #
+  # `child_constraints/1` passes the same constraints the top-level union
+  # member declares (currently none do, but a future one might), rather than a
+  # hardcoded `[]` — the point of this cast is to be *the same* Ash cast a
+  # top-level block goes through.
+  defp cast_child!(mod, type_atom, attrs) do
+    case Ash.Type.cast_input(mod, attrs, child_constraints(type_atom)) do
+      {:ok, struct} ->
+        struct |> attrs_of() |> drop_nils() |> preserve_absent_id(attrs)
 
       # `mod`'s `cast_input/2` (an embedded resource — see
       # `Ash.EmbeddableType.single_embed_implementation/1`) already ran the
@@ -407,6 +433,25 @@ defmodule KilnCMS.CMS.TypedBlocks do
       {:error, error} ->
         raise InvalidChildBlockError, block_type: attrs["_type"], errors: List.wrap(error)
     end
+  end
+
+  defp child_constraints(type_atom) do
+    KilnCMS.Blocks.union_types()
+    |> Keyword.get(type_atom, [])
+    |> Keyword.get(:constraints, [])
+  end
+
+  # The embedded resource's `:id` is a `uuid_primary_key`, which the `:create`
+  # action `cast_child!` casts through always generates when the input carries
+  # none — so `attrs_of/1`'s output must not be trusted for `id` verbatim, or
+  # every id-less nested child would get silently stamped with one on write.
+  # That stamping is `EnforceBlockFieldPolicy`'s (#865/#954) business, not
+  # this cast's: whether a child carries an id at all decides whether its
+  # restricted fields are bound by id or governed by the tree-wide multiset.
+  defp preserve_absent_id(coerced_attrs, original_attrs) do
+    if Map.has_key?(original_attrs, "id"),
+      do: coerced_attrs,
+      else: Map.delete(coerced_attrs, "id")
   end
 
   # Build a typed struct from a typed map (string or atom keys), upcasting first.

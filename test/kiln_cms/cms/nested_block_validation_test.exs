@@ -99,7 +99,12 @@ defmodule KilnCMS.CMS.NestedBlockValidationTest do
       assert {:error, error} =
                create_page(user(:admin), [columns_with(%{"_type" => "claim"})])
 
-      assert Exception.message(error) =~ "claim"
+      # Post-#9-fix, the surfaced error is the original `Ash.Error.Changes.Required`
+      # (preserved via `BlockUnion`'s rescue returning `e.errors` rather than a
+      # formatted string), so it names the missing FIELD rather than the block
+      # type — a client's per-field error handling now fires the same way it
+      # would for an invalid top-level block.
+      assert Exception.message(error) =~ "text is required"
     end
 
     test "creating a page with a valid nested child succeeds and stores the value" do
@@ -116,7 +121,7 @@ defmodule KilnCMS.CMS.NestedBlockValidationTest do
       assert {:error, error} =
                create_page(user(:admin), [columns_with(%{"_type" => "callout"})])
 
-      assert Exception.message(error) =~ "callout"
+      assert Exception.message(error) =~ "text is required"
     end
 
     test "updating a page to introduce an invalid nested child is refused" do
@@ -128,7 +133,45 @@ defmodule KilnCMS.CMS.NestedBlockValidationTest do
                  actor: user(:admin)
                )
 
-      assert Exception.message(error) =~ "claim"
+      assert Exception.message(error) =~ "text is required"
+    end
+  end
+
+  describe "nested error shape (#9): the original per-field Ash error survives" do
+    # `BlockUnion`'s rescue used to collapse a nested validation failure into a
+    # bare formatted string, which Ash then wrapped as one generic
+    # `Ash.Error.Changes.InvalidAttribute` scoped to `field: :blocks` — losing
+    # which nested field, on which resource, actually failed. Returning the
+    # original exception list instead lets Ash's own error-class machinery
+    # preserve it, same as a top-level failure already gets.
+    test "the underlying Ash.Error.Changes.Required is preserved, not a generic :blocks error" do
+      assert {:error, %Ash.Error.Invalid{errors: errors}} =
+               create_page(user(:admin), [columns_with(%{"_type" => "claim"})])
+
+      assert [%Ash.Error.Changes.Required{field: :text, resource: KilnCMS.Blocks.Claim}] = errors
+    end
+  end
+
+  describe "nested child type coercion (the cast result is kept, not discarded)" do
+    # `KilnCMS.Blocks.Heading.level` is `:integer`; a string `"3"` is a value a
+    # form post or a loose API client sends. A top-level block already coerces
+    # it through `Ash.Type.Union.cast_input`; this pins the nested one to the
+    # same behavior — `cast_child!` used to run the cast only to check it
+    # succeeded and then return the original, un-coerced `attrs`, so a nested
+    # heading kept the string forever (`columns.columns` is untyped
+    # `{:array, :map}`, so nothing downstream ever re-cast it).
+    test "a nested heading's string level is coerced to an integer, matching a top-level one" do
+      {:ok, top} =
+        create_page(user(:admin), [%{"_type" => "heading", "text" => "hi", "level" => "3"}])
+
+      {:ok, nested} =
+        create_page(user(:admin), [
+          columns_with(%{"_type" => "heading", "text" => "hi", "level" => "3"})
+        ])
+
+      assert [%Ash.Union{value: %{level: 3}}] = top.blocks
+      assert [%Ash.Union{value: columns}] = nested.blocks
+      assert [%{"blocks" => [%{"level" => 3}]}] = columns.columns
     end
   end
 end
