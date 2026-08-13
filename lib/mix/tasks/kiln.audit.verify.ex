@@ -49,6 +49,30 @@ defmodule Mix.Tasks.Kiln.Audit.Verify do
   it — see `mix kiln.audit.checkpoint` and #666. With the default `None` witness,
   this task's guarantee against laundering beyond the attested prefix is only as
   strong as an operator reading these lines.
+
+  ## A TAMPERED line may be the #598 bug, not tampering (#1058)
+
+  #598 fixed the CAUSE of a false `{:tampered, …}` — a version row that became
+  visible late no longer sorts into an already-anchored range — but it could
+  not repair a document that had already hit it: that anchor committed to an
+  order the table no longer holds, and the verdict stays red forever. A
+  deployment upgrading past #598 keeps a population of permanently-red
+  documents sitting next to any that are genuinely tampered, and the two
+  verdicts are byte-identical.
+
+  A TAMPERED line is annotated when the chain COULD be that bug — at least one
+  of its anchors predates #598 (`payload_version` is nil rather than `6`, so
+  its fold order was inferred from a timestamp rather than assigned at write
+  time):
+
+      post/my-post (…): TAMPERED — anchored history does not reproduce the
+      recorded chain hash (chain predates the #598 fold-order fix — this may
+      be the ordering bug rather than tampering; see #1058)
+
+  This is a triage hint, not a softer verdict: the exit code and the failure
+  count both still treat it as tampering. It exists so a sweep with a handful
+  of unexplainable reds can be read as "these are worth investigating first"
+  instead of N identical alarms.
   """
   use Mix.Task
 
@@ -100,14 +124,16 @@ defmodule Mix.Tasks.Kiln.Audit.Verify do
         # chain has an attested head by definition, and a tampered one has
         # already failed. Keeps the extra signature pass off the healthy path.
         gap = gap_for(verdict, storage, record)
+        legacy? = legacy_fold_order?(verdict, storage, record)
 
-        line(ct.type, record, verdict, gap, keyed?)
-        {verdict, gap}
+        line(ct.type, record, verdict, gap, keyed?, legacy?)
+        {verdict, gap, legacy?}
       end
 
-    tampered = Enum.count(results, &match?({{:tampered, _}, _}, &1))
-    gaps = Enum.count(results, &match?({_, {:gap, _, _}}, &1))
-    unattested = Enum.count(results, &match?({_, :unattested}, &1))
+    tampered = Enum.count(results, &match?({{:tampered, _}, _, _}, &1))
+    gaps = Enum.count(results, &match?({_, {:gap, _, _}, _}, &1))
+    unattested = Enum.count(results, &match?({_, :unattested, _}, &1))
+    legacy_tampered = Enum.count(results, &match?({{:tampered, _}, _, true}, &1))
 
     Mix.shell().info(
       "#{length(results)} anchored document(s) checked, #{tampered} failure(s), " <>
@@ -115,6 +141,7 @@ defmodule Mix.Tasks.Kiln.Audit.Verify do
         "#{unattested} with no attested anchor at all."
     )
 
+    report_legacy_fold_order(tampered, legacy_tampered)
     report_attestation(gaps, unattested, keyed?)
 
     # A short or absent attested prefix fails the run only where the deployment
@@ -129,6 +156,26 @@ defmodule Mix.Tasks.Kiln.Audit.Verify do
     do: Chain.attested_gap(storage, record.id, record.org_id)
 
   defp gap_for(_verdict, _storage, _record), do: :none
+
+  # Only asked about documents that already failed (#1058): a chain that reads
+  # `:verified`/`:unsigned`/`:unverifiable` never lands on the tampered line
+  # this exists to annotate, so paying for the extra anchor read there would
+  # cost every healthy document something this task never prints.
+  defp legacy_fold_order?({:tampered, _}, storage, record),
+    do: Chain.predates_fold_order?(storage, record.id, record.org_id)
+
+  defp legacy_fold_order?(_verdict, _storage, _record), do: false
+
+  defp report_legacy_fold_order(0, _legacy_tampered), do: :ok
+  defp report_legacy_fold_order(_tampered, 0), do: :ok
+
+  defp report_legacy_fold_order(tampered, legacy_tampered) do
+    Mix.shell().info(
+      "#{legacy_tampered} of #{tampered} TAMPERED document(s) predate the #598 " <>
+        "fold-order fix and may be that bug rather than genuine tampering — see the lines " <>
+        "marked '(chain predates the #598 fold-order fix …)' and #1058."
+    )
+  end
 
   defp report_attestation(0, 0, _keyed?), do: :ok
 
@@ -154,7 +201,12 @@ defmodule Mix.Tasks.Kiln.Audit.Verify do
   # A gap outranks the verdict in the wording, because it is the stronger
   # statement: `:unsigned` says nothing was signed, while a gap says something
   # WAS and stopped. Calling that "intact" is the claim #811 objected to.
-  defp line(type, record, verdict, {:gap, attested, head}, _keyed?) do
+  #
+  # Unreachable with `legacy? == true`: `legacy_fold_order?/3` only returns
+  # true for a `{:tampered, _}` verdict, and a gap's verdict is always
+  # `:unsigned`/`:unverifiable` — but the arity has to agree with the other
+  # clauses, so it is accepted and ignored rather than assumed away.
+  defp line(type, record, verdict, {:gap, attested, head}, _keyed?, _legacy?) do
     Mix.shell().error(
       "#{type}/#{record.slug} (#{record.id}): ATTESTED ONLY TO VERSION #{attested} — " <>
         "versions #{attested + 1}-#{head} are anchored but #{unattested_because(verdict)}, " <>
@@ -165,14 +217,14 @@ defmodule Mix.Tasks.Kiln.Audit.Verify do
   # Only shouted where a key IS configured. On a deployment that signs nothing,
   # "no attested anchor" is every document's normal state, and printing it as an
   # error per record is a wall of red that says only what the operator chose.
-  defp line(type, record, verdict, :unattested, true) do
+  defp line(type, record, verdict, :unattested, true, _legacy?) do
     Mix.shell().error(
       "#{type}/#{record.slug} (#{record.id}): NO ATTESTED ANCHOR — every anchor in this " <>
         "chain is #{unattested_because(verdict)}, so none of its history is attested"
     )
   end
 
-  defp line(type, record, verdict, _no_gap, _keyed?) do
+  defp line(type, record, verdict, _no_gap, _keyed?, legacy?) do
     status =
       case verdict do
         :verified ->
@@ -185,11 +237,22 @@ defmodule Mix.Tasks.Kiln.Audit.Verify do
           "intact (signed by an unregistered key — see KILN_PROVENANCE_RETIRED_KEY_FILES)"
 
         {:tampered, reason} ->
-          "TAMPERED — #{reason}"
+          "TAMPERED — #{reason}#{legacy_annotation(legacy?)}"
       end
 
     Mix.shell().info("#{type}/#{record.slug} (#{record.id}): #{status}")
   end
+
+  # A sibling annotation on the tampered line (#1058), never a softer verdict:
+  # the status string still starts "TAMPERED", the count above still counts
+  # it, and the exit code still fails on it. This only tells a human reading
+  # the sweep which reds are worth investigating first.
+  defp legacy_annotation(true),
+    do:
+      " (chain predates the #598 fold-order fix — this may be the ordering bug " <>
+        "rather than tampering; see #1058)"
+
+  defp legacy_annotation(false), do: ""
 
   defp unattested_because(:unsigned), do: "unsigned"
   defp unattested_because(:unverifiable), do: "signed by an unregistered key"

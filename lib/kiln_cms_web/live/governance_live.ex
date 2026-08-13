@@ -111,6 +111,9 @@ defmodule KilnCMSWeb.GovernanceLive do
   # `%{attested, next, head}` when the attested prefix stops short of the head
   # (#811), else nil. Resolved in `Governance.trail/3`, not here — see there.
   attr :gap_range, :map, default: nil
+  # Whether this chain's anchors could have hit the pre-#598 false-tamper bug
+  # (#1058). Resolved in `Governance.trail/3` — see there.
+  attr :predates_fold_order?, :boolean, default: false
 
   # Tamper-evidence status from the signed history anchors (#356).
   defp chain_badge(assigns) do
@@ -168,6 +171,21 @@ defmodule KilnCMSWeb.GovernanceLive do
       >
         <.icon name="hero-exclamation-triangle" class="size-3.5" />
         {gettext("HISTORY TAMPERED: %{reason}", reason: elem(@chain, 1))}
+      </span>
+      <%!-- #1058: a SIBLING note, never a softer color or the verdict's own
+            text — the verdict above stays red and stays "TAMPERED" regardless.
+            Shown only next to a red verdict: on any other chain state this
+            fact is not what a reader needs, and repeating it on every row
+            would train them to stop reading it here too. --%>
+      <span
+        :if={match?({:tampered, _}, @chain) and @predates_fold_order?}
+        class="mt-1 block rounded bg-warning/10 px-1.5 py-0.5 text-xs text-warning-ink"
+        data-role="chain-legacy-note"
+      >
+        <.icon name="hero-information-circle" class="size-3.5" />
+        {gettext(
+          "This document's chain was anchored before the fold order was assigned, so this verdict may be the ordering bug rather than tampering — see #598."
+        )}
       </span>
     </p>
     """
@@ -495,7 +513,11 @@ defmodule KilnCMSWeb.GovernanceLive do
         <p class="text-sm text-base-content/60">
           {@trail.item.type} · {@trail.item.state}
         </p>
-        <.chain_badge chain={@trail.chain} gap_range={@trail.chain_gap_range} />
+        <.chain_badge
+          chain={@trail.chain}
+          gap_range={@trail.chain_gap_range}
+          predates_fold_order?={@trail.predates_fold_order?}
+        />
         <.witnessed_badge witnessed={@trail.witnessed} />
         <p :if={@trail.unanchored_tail > 0} class="mt-1 text-xs text-base-content/60">
           {gettext("%{count} edit(s) since the last anchor — covered at the next publish.",

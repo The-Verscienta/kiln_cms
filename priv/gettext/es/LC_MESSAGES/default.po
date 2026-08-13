@@ -8920,6 +8920,11 @@ msgstr "Este contenido ya no existe: el lanzamiento no se publicará tal como es
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
+msgid "This document's chain was anchored before the fold order was assigned, so this verdict may be the ordering bug rather than tampering — see #598."
+msgstr "La cadena de este documento se ancló antes de que se asignara el orden de fusión, por lo que este veredicto podría ser el error de ordenación en vez de una alteración: véase #598."
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
 msgid "This document's checkpoint entry could not be read — it cannot be verified"
 msgstr "No se ha podido leer la entrada del punto de control de este documento: no se puede verificar"
 

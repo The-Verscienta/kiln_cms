@@ -8920,6 +8920,11 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
+msgid "This document's chain was anchored before the fold order was assigned, so this verdict may be the ordering bug rather than tampering — see #598."
+msgstr ""
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
 msgid "This document's checkpoint entry could not be read — it cannot be verified"
 msgstr ""
 
