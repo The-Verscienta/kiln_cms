@@ -233,5 +233,137 @@ defmodule Kiln.PluginsTest do
       assert error.message =~ "must be absolute"
       assert error.message =~ "must live under /editor"
     end
+
+    # #937: `test/kiln/block/json_schema_test.exs` proves the *core* render/schema
+    # agreement, but a hex-dep plugin never runs the core suite — this is the
+    # only place a plugin's own `:json` render gets checked against what
+    # `GET /api/schema` publishes for it.
+    test "passes for a plugin block whose :json render matches its exported schema" do
+      defmodule ConformantBlock do
+        use Kiln.Block
+
+        block :conformant do
+          field :label, :string, required: true
+        end
+
+        @impl Kiln.Block.Renderer
+        def render(block, :web), do: block.label || ""
+        def render(block, :json), do: %{"_type" => "conformant", "label" => block.label}
+        def render(_block, _surface), do: nil
+
+        @impl Kiln.Block.Renderer
+        def search_text(block), do: block.label || ""
+      end
+
+      defmodule ConformantBlockPlugin do
+        use Kiln.Plugin
+        def blocks, do: [ConformantBlock]
+      end
+
+      Application.put_env(:kiln_cms, :plugins, [ConformantBlockPlugin])
+
+      assert Mix.Tasks.Kiln.Plugins.Doctor.run([]) == :ok
+    end
+
+    test "flags a plugin block whose :json render adds a key its schema doesn't declare" do
+      defmodule ComputedKeyBlock do
+        use Kiln.Block
+
+        block :computed_key do
+          field :text, :string, required: true
+        end
+
+        # No `json_schema/0` patch declaring `"surprise"` — the exact #937 bug:
+        # a computed render key with no field and no patch.
+        @impl Kiln.Block.Renderer
+        def render(block, :web), do: block.text || ""
+
+        def render(block, :json),
+          do: %{"_type" => "computed_key", "text" => block.text, "surprise" => "computed"}
+
+        def render(_block, _surface), do: nil
+
+        @impl Kiln.Block.Renderer
+        def search_text(block), do: block.text || ""
+      end
+
+      defmodule ComputedKeyPlugin do
+        use Kiln.Plugin
+        def blocks, do: [ComputedKeyBlock]
+      end
+
+      Application.put_env(:kiln_cms, :plugins, [ComputedKeyPlugin])
+
+      error = assert_raise Mix.Error, fn -> Mix.Tasks.Kiln.Plugins.Doctor.run([]) end
+
+      assert error.message =~
+               "block :computed_key :json render disagrees with its exported schema"
+
+      assert error.message =~ "undeclared property surprise"
+    end
+
+    # #937: `KilnCMS.CMS.FieldTypes.Recurrence` is the in-tree reason
+    # `c:Kiln.FieldType.json_schema/1` exists — its widget is a text input but
+    # `cast/2` stores a list. A plugin type in the same situation that never
+    # declares the callback ships a schema `SchemaExport` infers wrong.
+    test "flags a plugin field type whose cast/2 output diverges from its widget" do
+      defmodule DivergentFieldType do
+        use Kiln.FieldType
+        # Default (unoverridden) widget is a plain text input — implies a
+        # string — but this returns a list, same shape of bug as Recurrence.
+        def cast(_value, _definition), do: {:ok, ["a", "b"]}
+      end
+
+      defmodule DivergentFieldPlugin do
+        use Kiln.Plugin
+        def field_types, do: [DivergentFieldType]
+      end
+
+      Application.put_env(:kiln_cms, :plugins, [DivergentFieldPlugin])
+
+      error = assert_raise Mix.Error, fn -> Mix.Tasks.Kiln.Plugins.Doctor.run([]) end
+      assert error.message =~ "field type :divergent_field_type"
+      assert error.message =~ "cast/2 returns array"
+      assert error.message =~ "implies string"
+      assert error.message =~ "c:Kiln.FieldType.json_schema/1"
+    end
+
+    test "passes for a plugin field type whose cast/2 output matches its widget" do
+      defmodule ConformantFieldType do
+        use Kiln.FieldType
+        def input_type, do: "number"
+        def cast(value, _definition), do: {:ok, String.to_integer(to_string(value))}
+      end
+
+      defmodule ConformantFieldPlugin do
+        use Kiln.Plugin
+        def field_types, do: [ConformantFieldType]
+      end
+
+      Application.put_env(:kiln_cms, :plugins, [ConformantFieldPlugin])
+
+      assert Mix.Tasks.Kiln.Plugins.Doctor.run([]) == :ok
+    end
+
+    # A type that declares `json_schema/1` has already told `SchemaExport` its
+    # real delivered shape, so the widget probe would be checking the wrong
+    # thing — this proves the check skips it rather than false-positiving on
+    # exactly the escape hatch #937 asks plugins to use.
+    test "does not probe a field type that already declares json_schema/1" do
+      defmodule SelfDescribingFieldType do
+        use Kiln.FieldType
+        def cast(_value, _definition), do: {:ok, ["a", "b"]}
+        def json_schema(_definition), do: %{"type" => "array", "items" => %{"type" => "string"}}
+      end
+
+      defmodule SelfDescribingFieldPlugin do
+        use Kiln.Plugin
+        def field_types, do: [SelfDescribingFieldType]
+      end
+
+      Application.put_env(:kiln_cms, :plugins, [SelfDescribingFieldPlugin])
+
+      assert Mix.Tasks.Kiln.Plugins.Doctor.run([]) == :ok
+    end
   end
 end
