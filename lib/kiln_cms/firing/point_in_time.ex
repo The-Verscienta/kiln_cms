@@ -323,10 +323,21 @@ defmodule KilnCMS.Firing.PointInTime do
   # A fireable document struct of `resource` from the replayed (string-keyed)
   # state. The firing engine reads `.blocks` (via `TypedBlocks.to_typed`, which
   # tolerates the stored map shape), `.title`/`.slug`, and derives the type from
-  # the struct module. Restricted to real attributes so a stray change key can't
-  # blow up on `String.to_existing_atom`.
+  # the struct module — but also reads `.type_definition_id` directly for a
+  # dynamic type (`Engine.public_type/1`, `CustomFields.definitions/1`,
+  # `SchemaOrg.resolve/1`), all unconditionally in `:preview` mode too. So the
+  # name set here is `VersionFields.tracked_fields/1` (#711) — "what a version
+  # can contain," the same declaration `VersionSnapshot.current/1` reads off the
+  # resource — rather than `content_fields/1`, whose bookkeeping exclusion drops
+  # `type_definition_id` and would silently mislabel every historical artifact
+  # for a dynamic type (wrong `"type"`, missing custom fields, default
+  # schema.org `@type`). Restricted at all so a stray change key from a
+  # since-removed attribute can't blow up on `String.to_existing_atom`.
   defp build_document(state, resource, id, org_id) do
-    names = resource |> Ash.Resource.Info.attributes() |> MapSet.new(&to_string(&1.name))
+    names =
+      resource
+      |> KilnCMS.CMS.VersionFields.tracked_fields()
+      |> MapSet.new(&to_string/1)
 
     attrs =
       for {key, value} <- state, MapSet.member?(names, key), into: %{} do
