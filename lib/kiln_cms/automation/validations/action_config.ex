@@ -19,6 +19,21 @@ defmodule KilnCMS.Automation.Validations.ActionConfig do
     * **A missing `to`** on `:send_email` or on any of the four intelligence
       reactions, all of which deliver by email and nothing else.
 
+  ## `deliver_as` (#946)
+
+  The four intelligence reactions no longer only email. `deliver_as` picks the
+  landing place — `"email"` (the default, so an existing rule with no
+  `deliver_as` key keeps working unchanged), `"comment"`, or `"task"` — and
+  what else is required depends on which: `"email"` still needs `to`;
+  `"task"` needs `assignee` (and takes an optional `due_in_days`); `"comment"`
+  needs nothing further. That is a requirement conditional on a sibling key's
+  *value*, which the required/optional lists above can't express on their own
+  — a shape may carry a `:required_when` tag naming a resolver
+  (`deliver_as_required/1`, the only one there is) that `check/2` calls with
+  the config, after the unconditional `:required` list, to get the additional
+  fields the config as given needs. Deliberately narrow: this is the one
+  shape that needs it, not a general conditional-validation language.
+
   ## Why unknown keys are refused, not ignored
 
   A typo is the failure this exists to catch, and an ignored key is a typo that
@@ -37,6 +52,36 @@ defmodule KilnCMS.Automation.Validations.ActionConfig do
   use Ash.Resource.Validation
 
   alias KilnCMS.Social.Account
+
+  # The four intelligence reactions share this whole optional set — every key
+  # any `deliver_as` value could need — because `check/2`'s `unknown/2` refuses
+  # anything outside `required ++ optional` regardless of which `deliver_as`
+  # is chosen, and it has no visibility into `:required_when` (see
+  # `deliver_as_required/1` below) when computing that combined set.
+  @deliver_as_optional [
+    {"deliver_as", :deliver_as},
+    {"to", :email},
+    {"assignee", :uuid},
+    {"due_in_days", :integer}
+  ]
+
+  # `deliver_as` (#946): which fields the four intelligence reactions need
+  # beyond the base shape depends on where the finding is going. No key at all
+  # reads as `"email"` — the pre-#946 behaviour every existing rule already
+  # relies on — so an absent `deliver_as` still needs `to`, exactly as before.
+  # Defined ahead of `@shapes` below (a module attribute is evaluated where it
+  # appears, not deferred like a function body) so `&deliver_as_required/1`
+  # can capture it.
+  defp deliver_as_required(config) do
+    case Map.get(config, "deliver_as", "email") do
+      "email" -> [{"to", :email}]
+      "task" -> [{"assignee", :uuid}]
+      "comment" -> []
+      # Not a recognized value — `typed/2` reports it against `:deliver_as`
+      # once the value is checked; nothing extra to require here.
+      _other -> []
+    end
+  end
 
   # One entry per action kind. `:required` must be present and well-typed;
   # `:optional` must be well-typed when present; anything else is refused.
@@ -61,12 +106,25 @@ defmodule KilnCMS.Automation.Validations.ActionConfig do
       required: [{"provider", :provider}],
       optional: [{"template", :template}]
     },
-    flag_duplicates: %{required: [{"to", :email}], optional: []},
-    suggest_tags: %{required: [{"to", :email}], optional: []},
-    suggest_links: %{required: [{"to", :email}], optional: []},
+    flag_duplicates: %{
+      required: [],
+      optional: @deliver_as_optional,
+      required_when: :deliver_as
+    },
+    suggest_tags: %{
+      required: [],
+      optional: @deliver_as_optional,
+      required_when: :deliver_as
+    },
+    suggest_links: %{
+      required: [],
+      optional: @deliver_as_optional,
+      required_when: :deliver_as
+    },
     suggest_metadata: %{
-      required: [{"to", :email}],
-      optional: [{"allow_egress", :boolean}]
+      required: [],
+      optional: [{"allow_egress", :boolean} | @deliver_as_optional],
+      required_when: :deliver_as
     }
   }
 
@@ -102,8 +160,9 @@ defmodule KilnCMS.Automation.Validations.ActionConfig do
 
   defp check(shape, config) when is_map(config) do
     known = Enum.map(shape.required ++ shape.optional, &elem(&1, 0))
+    required = shape.required ++ conditional_required(shape, config)
 
-    with :ok <- missing(shape.required, config),
+    with :ok <- missing(required, config),
          :ok <- unknown(known, config) do
       typed(shape.required ++ shape.optional, config)
     end
@@ -112,6 +171,11 @@ defmodule KilnCMS.Automation.Validations.ActionConfig do
   # A non-map `config` can't reach here through the resource (the attribute is
   # `:map`), but a validation that assumes its input is a courtesy to nobody.
   defp check(_shape, _config), do: error("must be a JSON object.")
+
+  defp conditional_required(%{required_when: :deliver_as}, config),
+    do: deliver_as_required(config)
+
+  defp conditional_required(_shape, _config), do: []
 
   defp missing(required, config) do
     case Enum.find(required, fn {key, _type} -> blank?(Map.get(config, key)) end) do
@@ -163,9 +227,25 @@ defmodule KilnCMS.Automation.Validations.ActionConfig do
     well_typed?(:string, value) and Enum.any?(Account.providers(), &(to_string(&1) == value))
   end
 
+  defp well_typed?(:deliver_as, value) do
+    well_typed?(:string, value) and value in ~w(email comment task)
+  end
+
+  # A uuid string, shallow-checked (format only) the same way `:email` is —
+  # `assignee` naming a user who exists and is an editor/admin is
+  # `KilnCMS.CMS.Validations.AssigneeIsEditor`'s job, at task-assignment time.
+  defp well_typed?(:uuid, value) do
+    well_typed?(:string, value) and match?({:ok, _}, Ecto.UUID.cast(value))
+  end
+
+  defp well_typed?(:integer, value), do: is_integer(value) and value > 0
+
   defp expectation(:boolean), do: "must be the JSON boolean true or false (not a string)"
   defp expectation(:email), do: "must be an email address"
   defp expectation(:provider), do: "must be one of #{list(Account.providers())}"
+  defp expectation(:deliver_as), do: "must be one of email, comment, task"
+  defp expectation(:uuid), do: "must be a uuid"
+  defp expectation(:integer), do: "must be a positive whole number"
   defp expectation(_type), do: "must be a non-empty string"
 
   defp blank?(nil), do: true

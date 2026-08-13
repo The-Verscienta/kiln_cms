@@ -226,6 +226,50 @@ defmodule KilnCMSWeb.ContentEditorCommentsTest do
     end
   end
 
+  describe "document-level comments (#946)" do
+    test "an automation-authored, block-less comment shows in Document notes as 'Automation'",
+         %{conn: conn} do
+      editor = authed_user(:editor)
+      target = page(editor)
+
+      {:ok, doc_comment} =
+        CMS.add_comment(
+          %{
+            content_type: "page",
+            content_id: target.id,
+            block_id: nil,
+            body: "Possible duplicates of this document were found.",
+            created_by_rule_id: Ecto.UUID.generate()
+          },
+          actor: nil,
+          authorize?: false
+        )
+
+      {lv, html} = open_editor(conn, editor, target)
+
+      assert html =~ "Document notes"
+      assert html =~ "Possible duplicates of this document were found."
+      assert html =~ "Automation"
+      refute html =~ "No document-level comments."
+
+      # It does not leak into either block's own thread panel — each still
+      # reports zero comments of its own when opened.
+      assert open_panel(lv, target, 0) =~ "No comments on this block yet."
+      assert open_panel(lv, target, 1) =~ "No comments on this block yet."
+
+      refute is_nil(doc_comment.id)
+    end
+
+    test "with no document-level comments, the panel says so", %{conn: conn} do
+      editor = authed_user(:editor)
+      target = page(editor)
+
+      {_lv, html} = open_editor(conn, editor, target)
+
+      assert html =~ "No document-level comments."
+    end
+  end
+
   test "a viewer sees the editor gate, not the comment controls", %{conn: conn} do
     viewer = authed_user(:viewer)
     target = page(authed_user(:editor))

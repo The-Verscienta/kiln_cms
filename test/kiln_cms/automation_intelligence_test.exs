@@ -138,6 +138,142 @@ defmodule KilnCMS.AutomationIntelligenceTest do
     refute_email_sent()
   end
 
+  # ── deliver_as (#946): comment/task/email fan-out ─────────────────────────
+
+  describe "deliver_as" do
+    defp editor do
+      Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+        email: "ai-editor-#{System.unique_integer([:positive])}@example.com",
+        hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+        confirmed_at: DateTime.utc_now(),
+        role: :editor
+      })
+    end
+
+    test "comment: posts a document-level comment with no author, provenance on the rule" do
+      actor = admin()
+
+      r =
+        rule(%{
+          trigger_event: :published,
+          action: :flag_duplicates,
+          config: %{"deliver_as" => "comment"}
+        })
+
+      anchor = indexed_post(actor, "the same exact passage twice over", "Same A")
+      _dup = indexed_post(actor, "the same exact passage twice over", "Same A")
+
+      assert :ok = run_rule(r, anchor, "post.published")
+      refute_email_sent()
+
+      assert [comment] = CMS.list_comments_for_document!("post", anchor.id, authorize?: false)
+      assert is_nil(comment.author_id)
+      assert is_nil(comment.block_id)
+      assert comment.created_by_rule_id == r.id
+      assert comment.body =~ "possible duplicates"
+      assert comment.body =~ "Same A"
+      # The finder's HTML markup doesn't leak into the plain-text comment body.
+      refute comment.body =~ "<li>"
+      refute comment.body =~ "<ul>"
+    end
+
+    test "task: assigns to config's assignee, due date from due_in_days, note from the findings" do
+      actor = admin()
+      assignee = editor()
+
+      r =
+        rule(%{
+          trigger_event: :published,
+          action: :flag_duplicates,
+          config: %{"deliver_as" => "task", "assignee" => assignee.id, "due_in_days" => 5}
+        })
+
+      anchor = indexed_post(actor, "another shared passage right here", "Same B")
+      _dup = indexed_post(actor, "another shared passage right here", "Same B")
+
+      assert :ok = run_rule(r, anchor, "post.published")
+      refute_email_sent()
+
+      assert [task] = CMS.list_tasks_for!("post", anchor.id, authorize?: false)
+      assert is_nil(task.creator_id)
+      assert task.created_by_rule_id == r.id
+      assert task.assignee_id == assignee.id
+      assert task.due_on == Date.add(Date.utc_today(), 5)
+      assert task.note =~ "possible duplicates"
+      assert task.note =~ "Same B"
+    end
+
+    test "task: due_in_days defaults to 3 when not given" do
+      actor = admin()
+      assignee = editor()
+
+      r =
+        rule(%{
+          trigger_event: :published,
+          action: :flag_duplicates,
+          config: %{"deliver_as" => "task", "assignee" => assignee.id}
+        })
+
+      anchor = indexed_post(actor, "yet another shared passage here too", "Same C")
+      _dup = indexed_post(actor, "yet another shared passage here too", "Same C")
+
+      assert :ok = run_rule(r, anchor, "post.published")
+
+      assert [task] = CMS.list_tasks_for!("post", anchor.id, authorize?: false)
+      assert task.due_on == Date.add(Date.utc_today(), 3)
+    end
+
+    test "task: an assignee who is no longer an editor is a logged no-op, not a crash" do
+      actor = admin()
+
+      viewer =
+        Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+          email: "ai-viewer-#{System.unique_integer([:positive])}@example.com",
+          hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+          confirmed_at: DateTime.utc_now(),
+          role: :viewer
+        })
+
+      r =
+        rule(%{
+          trigger_event: :published,
+          action: :flag_duplicates,
+          config: %{"deliver_as" => "task", "assignee" => viewer.id}
+        })
+
+      anchor = indexed_post(actor, "a passage shared once more for good measure", "Same D")
+      _dup = indexed_post(actor, "a passage shared once more for good measure", "Same D")
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert :ok = run_rule(r, anchor, "post.published")
+        end)
+
+      assert log =~ "couldn't assign its findings as a task"
+      assert CMS.list_tasks_for!("post", anchor.id, authorize?: false) == []
+    end
+
+    test "no deliver_as key at all still emails, unchanged" do
+      actor = admin()
+
+      r =
+        rule(%{
+          trigger_event: :published,
+          action: :flag_duplicates,
+          config: %{"to" => "eds@example.com"}
+        })
+
+      anchor = indexed_post(actor, "the last shared passage in this file", "Same E")
+      _dup = indexed_post(actor, "the last shared passage in this file", "Same E")
+
+      assert :ok = run_rule(r, anchor, "post.published")
+
+      assert_email_sent(fn email -> assert email.subject =~ "possible duplicates" end)
+      assert CMS.list_comments_for_document!("post", anchor.id, authorize?: false) == []
+      assert CMS.list_tasks_for!("post", anchor.id, authorize?: false) == []
+    end
+  end
+
   test "suggest_tags emails ranked suggestions and skips when there are none" do
     actor = admin()
     uniq = System.unique_integer([:positive])

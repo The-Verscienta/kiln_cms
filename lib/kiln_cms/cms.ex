@@ -468,6 +468,10 @@ defmodule KilnCMS.CMS do
       define :get_comment, action: :read, get_by: [:id]
       define :list_comments_for, action: :for_content, args: [:content_type, :content_id]
 
+      define :list_comments_for_document,
+        action: :for_document,
+        args: [:content_type, :content_id]
+
       define :list_comments_for_block,
         action: :for_block,
         args: [:content_type, :content_id, :block_id]

@@ -49,7 +49,7 @@ defmodule KilnCMS.CMS.Comment do
     create :add do
       description "Add a comment to a block (starts or continues its one thread)."
       primary? true
-      accept [:content_type, :content_id, :block_id, :body]
+      accept [:content_type, :content_id, :block_id, :body, :created_by_rule_id]
 
       change KilnCMS.CMS.Changes.RouteToBlockThread
       change KilnCMS.CMS.Changes.BroadcastComment
@@ -125,6 +125,24 @@ defmodule KilnCMS.CMS.Comment do
       prepare build(sort: [inserted_at: :asc])
     end
 
+    # A document-level counterpart to `:for_block` (#946): the editorial-
+    # intelligence reactions (`flag_duplicates`, `suggest_metadata`) have a
+    # finding about the whole document, not one block, so their comments carry
+    # `block_id: nil` — this is the read `RouteToBlockThread` uses to group
+    # them into their own one thread per document, the same way `:for_block`
+    # groups a block's comments into theirs.
+    read :for_document do
+      argument :content_type, :string, allow_nil?: false
+      argument :content_id, :uuid, allow_nil?: false
+
+      filter expr(
+               content_type == ^arg(:content_type) and content_id == ^arg(:content_id) and
+                 is_nil(block_id)
+             )
+
+      prepare build(sort: [inserted_at: :asc])
+    end
+
     read :for_block do
       argument :content_type, :string, allow_nil?: false
       argument :content_id, :uuid, allow_nil?: false
@@ -182,7 +200,13 @@ defmodule KilnCMS.CMS.Comment do
 
     # The block's own stable id (`Kiln.Block`'s `uuid_primary_key :id`), not
     # FK-checked — blocks are embedded in a jsonb array, not a table.
-    attribute :block_id, :uuid, allow_nil?: false, public?: true
+    #
+    # `allow_nil? true` (#946): a comment from an editorial-intelligence
+    # automation reaction (`flag_duplicates`, `suggest_metadata`) is about the
+    # whole document, not one block, so it carries no block to anchor to.
+    # `RouteToBlockThread` groups every `block_id: nil` comment on the same
+    # document into its own thread, the same way it groups a block's.
+    attribute :block_id, :uuid, allow_nil?: true, public?: true
 
     # nil on the comment that starts a block's thread; the root's own id on
     # every reply. Never client-writable — `RouteToBlockThread` sets it.
@@ -198,11 +222,24 @@ defmodule KilnCMS.CMS.Comment do
 
     # The user who wrote the comment — stamped from the acting user, not
     # accepted from input.
+    #
+    # `allow_nil? true` (#946): an editorial-intelligence reaction posts a
+    # comment with no actor at all (see `KilnCMS.Automation.RuleWorker`), so
+    # there is no user to stamp — the stamping `change` in `:add` simply
+    # leaves this unset in that case. `created_by_rule_id` carries the honest
+    # provenance instead of inventing a system user (see that attribute).
     attribute :author_id, :uuid do
-      allow_nil? false
+      allow_nil? true
       writable? false
       public? true
     end
+
+    # Which automation rule posted this comment, when nothing did (#946) — set
+    # only when `author_id` is nil. A bare uuid, not FK-checked, matching the
+    # `automation_rule_id` precedent on `KilnCMS.Social.Post` /
+    # `KilnCMS.Newsletter.NewsletterSend`: it names the rule for an editor
+    # reading the thread without pretending automation is a user.
+    attribute :created_by_rule_id, :uuid, public?: true
 
     attribute :resolved_at, :utc_datetime_usec do
       writable? false

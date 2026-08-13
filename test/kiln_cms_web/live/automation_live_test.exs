@@ -198,7 +198,12 @@ defmodule KilnCMSWeb.AutomationLiveTest do
         |> form("#new-rule-form", rule: %{action: "suggest_metadata"})
         |> render_change()
 
-      assert html =~ "suggest_metadata accepts: to (required), allow_egress"
+      # #946: `to` is no longer unconditionally required — it's the intelligence
+      # reactions' `deliver_as` axis (email/comment/task) now, and what's
+      # required depends on which, so the hint lists every key that axis could
+      # need rather than annotating one as always-required.
+      assert html =~
+               "suggest_metadata accepts: allow_egress, deliver_as, to, assignee, due_in_days"
 
       html =
         view

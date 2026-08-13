@@ -1533,6 +1533,7 @@ msgstr "Remplit automatiquement l'URL canonique à plusieurs segments de chaque 
 
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/automation_live.ex
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Automation"
 msgstr "Automatisation"
@@ -3379,6 +3380,11 @@ msgstr "Nom d'affichage"
 #, elixir-autogen, elixir-format
 msgid "Do"
 msgstr "Exécuter"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Document notes"
+msgstr "Notes du document"
 
 #: lib/kiln_cms_web/live/release_preview_live.ex
 #, elixir-autogen, elixir-format
@@ -5605,6 +5611,11 @@ msgstr "Aucun envoi pour le moment."
 #, elixir-autogen, elixir-format
 msgid "No description — search engines will write their own."
 msgstr "Aucune description — les moteurs de recherche rédigeront la leur."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "No document-level comments."
+msgstr "Aucun commentaire au niveau du document."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format

@@ -132,15 +132,15 @@ defmodule KilnCMS.Notifications do
   # the system: a participant's own read policy is about what they may open in
   # the editor, not about whether they are part of a conversation they already
   # joined.
+  #
+  # `comment.block_id` can be nil (#946): an editorial-intelligence reaction's
+  # document-level finding has no single block to be "on", so its thread's
+  # other participants are read via `list_comments_for_document!` instead —
+  # `:for_block`'s `block_id` argument is `allow_nil? false` and would raise
+  # given nil, the same split `KilnCMS.CMS.Changes.RouteToBlockThread` makes.
   defp thread_audience(comment, record) do
     participants =
-      KilnCMS.CMS.list_comments_for_block!(
-        comment.content_type,
-        comment.content_id,
-        comment.block_id,
-        authorize?: false,
-        tenant: comment.org_id
-      )
+      thread_participants(comment)
       |> Enum.map(& &1.author_id)
 
     author = record |> Ash.load!(:author, authorize?: false) |> Map.get(:author)
@@ -151,6 +151,25 @@ defmodule KilnCMS.Notifications do
     |> Enum.map(&user_by_id/1)
     |> Enum.reject(&is_nil/1)
     |> Enum.filter(&wants?(&1, :comment))
+  end
+
+  defp thread_participants(%{block_id: nil} = comment) do
+    KilnCMS.CMS.list_comments_for_document!(
+      comment.content_type,
+      comment.content_id,
+      authorize?: false,
+      tenant: comment.org_id
+    )
+  end
+
+  defp thread_participants(comment) do
+    KilnCMS.CMS.list_comments_for_block!(
+      comment.content_type,
+      comment.content_id,
+      comment.block_id,
+      authorize?: false,
+      tenant: comment.org_id
+    )
   end
 
   defp author_id(%{id: id}), do: id

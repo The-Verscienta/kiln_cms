@@ -139,6 +139,88 @@ defmodule KilnCMS.CMS.CommentTest do
     assert {:error, %Ash.Error.Forbidden{}} = CMS.resolve_comment(root, %{}, actor: viewer)
   end
 
+  test "an automation-authored comment has no author but does have a rule id (#946)" do
+    type = "post"
+    content_id = Ecto.UUID.generate()
+    rule_id = Ecto.UUID.generate()
+
+    {:ok, comment} =
+      CMS.add_comment(
+        %{
+          content_type: type,
+          content_id: content_id,
+          block_id: nil,
+          body: "Possible duplicates found",
+          created_by_rule_id: rule_id
+        },
+        actor: nil,
+        authorize?: false
+      )
+
+    assert is_nil(comment.author_id)
+    assert comment.created_by_rule_id == rule_id
+    assert is_nil(comment.block_id)
+    assert is_nil(comment.thread_id)
+  end
+
+  test "document-level comments (block_id nil) group into their own thread, separate from any block's" do
+    type = "post"
+    content_id = Ecto.UUID.generate()
+    block_id = Ecto.UUID.generate()
+    editor = user(:editor)
+
+    {:ok, block_root} =
+      CMS.add_comment(
+        %{content_type: type, content_id: content_id, block_id: block_id, body: "Block note"},
+        actor: editor
+      )
+
+    {:ok, doc_root} =
+      CMS.add_comment(
+        %{
+          content_type: type,
+          content_id: content_id,
+          block_id: nil,
+          body: "Document-level finding one",
+          created_by_rule_id: Ecto.UUID.generate()
+        },
+        actor: nil,
+        authorize?: false
+      )
+
+    assert is_nil(doc_root.thread_id)
+    refute doc_root.id == block_root.id
+
+    {:ok, doc_reply} =
+      CMS.add_comment(
+        %{
+          content_type: type,
+          content_id: content_id,
+          block_id: nil,
+          body: "Document-level finding two",
+          created_by_rule_id: Ecto.UUID.generate()
+        },
+        actor: nil,
+        authorize?: false
+      )
+
+    # The second document-level comment threads under the first, not under the
+    # unrelated block's thread.
+    assert doc_reply.thread_id == doc_root.id
+
+    assert [listed_root, listed_reply] =
+             CMS.list_comments_for_document!(type, content_id, authorize?: false)
+
+    assert listed_root.id == doc_root.id
+    assert listed_reply.id == doc_reply.id
+
+    # And the block's own thread is untouched by the document-level ones.
+    assert [listed_block_root] =
+             CMS.list_comments_for_block!(type, content_id, block_id, actor: editor)
+
+    assert listed_block_root.id == block_root.id
+  end
+
   test "list_comments_for returns every comment on a content record, across blocks" do
     editor = user(:editor)
     type = "post"

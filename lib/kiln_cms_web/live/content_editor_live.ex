@@ -6273,6 +6273,70 @@ defmodule KilnCMSWeb.ContentEditorLive do
     """
   end
 
+  attr :comments, :list, required: true
+
+  # Document-level comment threads (#946): findings from an editorial-
+  # intelligence reaction with no single block to anchor to
+  # (`flag_duplicates`, `suggest_metadata`) land here — `block_id: nil`,
+  # grouped by `RouteToBlockThread` the same way a block's comments are.
+  # Read-only from a human's side today: automation is the only writer of a
+  # `block_id: nil` comment, so there is no compose form, only
+  # resolve/unresolve on each thread's root (shared with
+  # `KilnCMSWeb.BlockDiscussionComponents.block_discussion/1`'s
+  # `comment_resolve`/`comment_unresolve` events, which key on comment id and
+  # so work here unchanged).
+  defp document_comment_panel(assigns) do
+    thread = document_thread(assigns.comments)
+    assigns = assign(assigns, :thread, thread)
+
+    ~H"""
+    <div class="space-y-2">
+      <p :if={@thread == []} class="text-xs text-base-content/60">
+        {gettext("No document-level comments.")}
+      </p>
+
+      <div :for={comment <- @thread} class="rounded border border-base-content/15 p-2 text-xs">
+        <div class="flex items-center justify-between gap-2 text-base-content/60">
+          <span>{comment_author_label(comment)}</span>
+          <time datetime={DateTime.to_iso8601(comment.inserted_at)}>
+            {Calendar.strftime(comment.inserted_at, "%b %-d, %H:%M")}
+          </time>
+        </div>
+        <%!-- Rendered as a text node, never raw markup — same as
+              `KilnCMSWeb.BlockDiscussionComponents.block_discussion/1`'s
+              block-level thread. --%>
+        <p class="mt-1 break-words">{comment.body}</p>
+        <button
+          :if={is_nil(comment.thread_id)}
+          type="button"
+          phx-click={if comment.resolved_at, do: "comment_unresolve", else: "comment_resolve"}
+          phx-value-id={comment.id}
+          class="mt-1 text-base-content/60 underline hover:text-base-content"
+        >
+          {if comment.resolved_at, do: gettext("Reopen thread"), else: gettext("Resolve thread")}
+        </button>
+      </div>
+    </div>
+    """
+  end
+
+  defp document_thread(comments), do: Enum.filter(comments, &is_nil(&1.block_id))
+
+  defp comment_author_label(%{author: %{name: name}}) when is_binary(name) and name != "",
+    do: name
+
+  defp comment_author_label(%{author: %{email: email}}) when not is_nil(email),
+    do: to_string(email)
+
+  # No actor at all — an editorial-intelligence automation reaction posted
+  # this one (#946; `author_id` is nullable for exactly this case). Named
+  # generically rather than by rule, so a since-deleted/renamed rule doesn't
+  # leave the label stale or broken.
+  defp comment_author_label(%{created_by_rule_id: id}) when not is_nil(id),
+    do: gettext("Automation")
+
+  defp comment_author_label(_comment), do: gettext("Someone")
+
   attr :form, :any, required: true
   attr :media, :list, required: true
   attr :current_org, :any, required: true
@@ -8677,6 +8741,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   assignable_users={@assignable_users}
                   auto_complete_default={@auto_complete_default}
                 />
+              </.inspector_section>
+
+              <.inspector_section title={gettext("Document notes")}>
+                <.document_comment_panel comments={@comments} />
               </.inspector_section>
 
               <.inspector_section title={gettext("Release")}>

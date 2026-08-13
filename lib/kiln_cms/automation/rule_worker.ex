@@ -25,6 +25,34 @@ defmodule KilnCMS.Automation.RuleWorker do
       `:suggest_metadata` — the editorial-intelligence reactions (#377); see
       below.
 
+  ## Where an intelligence reaction's findings land (#946)
+
+  All four intelligence reactions deliver through `deliver_findings/2`, which
+  fans out on `config["deliver_as"]`:
+
+    * `"email"` (default — an existing rule with no `deliver_as` key behaves
+      exactly as before) — an HTML email to `config["to"]`, unchanged.
+    * `"comment"` — `CMS.add_comment/2` on the document under review, with no
+      actor and `block_id: nil` (there is no single block a document-level
+      finding is about): `RouteToBlockThread` groups every such comment on
+      the same document into its own thread, the same way it groups a
+      block's. Threads, resolves, and is visible to whoever opens the
+      document next — the whole reason #946 exists.
+    * `"task"` — `CMS.assign_task/2` on the document, assignee from
+      `config["assignee"]`, due `config["due_in_days"]` (default 3) days out.
+
+  Neither `Comment` nor `Task` has an actor to stamp when automation is the
+  writer — `author_id`/`creator_id` are nullable for exactly this case
+  (`created_by_rule_id` carries the honest provenance instead: see those
+  attributes on `KilnCMS.CMS.Comment`/`KilnCMS.CMS.Task`). Both targets'
+  `body`/`note` are plain strings capped at `KilnCMS.Limits.paragraph()`, so
+  a finding's HTML body is turned to text (`html_to_text/1`) before it lands
+  there — the finder bodies themselves don't change shape.
+
+  Failing to create the comment/task is logged and dropped, same posture as
+  a failed email delivery: these reactions are advisory, and the expensive
+  generation work already happened (see the moduledoc section below).
+
   ## The editorial-intelligence reactions suggest, and never write
 
   `docs/automation.md` states it as a rule and this is where it is enforced:
@@ -54,6 +82,7 @@ defmodule KilnCMS.Automation.RuleWorker do
   require Logger
 
   alias KilnCMS.Automation
+  alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
 
   @impl Oban.Worker
@@ -316,13 +345,14 @@ defmodule KilnCMS.Automation.RuleWorker do
           org_id: org_id,
           rule_id: rule_id,
           config: config,
-          content_type: event_type(event)
+          content_type: event_type(event),
+          content_id: record.id
         }
 
         record
         |> finder.(context)
         |> attribute(context)
-        |> deliver_findings(config)
+        |> deliver_findings(context)
 
       {:error, error} ->
         {:error, error}
@@ -354,27 +384,37 @@ defmodule KilnCMS.Automation.RuleWorker do
 
   defp attribute(findings, _context), do: findings
 
-  defp deliver_findings(:none, _config), do: :ok
+  defp deliver_findings(:none, _context), do: :ok
 
   # A reason the finder couldn't run at all — an unconfigured generator, an
   # exhausted budget, a provider that fell over. Logged and dropped rather than
   # returned as an error: see the moduledoc on why these reactions don't retry.
-  defp deliver_findings({:skip, reason}, _config) do
+  defp deliver_findings({:skip, reason}, _context) do
     Logger.info("Automation intelligence rule produced nothing: #{reason}")
     :ok
   end
 
-  # The delivery half of the same no-retry posture. `Mail.deliver_for_worker/2`
-  # *raises* on a transient failure (greylisting, a DNS blip, a refused relay)
-  # so Oban retries the job — and a retry re-enters `run/3` from the top, which
-  # for `:suggest_metadata` means generating the draft again. A greylisted
-  # relay during a bulk move to `in_review` would then bill five generations,
-  # and ship five copies of each body off-site, to deliver one email.
-  #
-  # Only these reactions swallow it. A `:send_email` or `:newsletter` rule is
-  # the message; here the message is advisory and the expensive part already
-  # happened.
-  defp deliver_findings({subject, html_body}, config) do
+  # Fan out on `deliver_as` (#946; see the moduledoc section). Every branch
+  # keeps the same no-retry posture as the original email-only path: the
+  # expensive generation already happened, so a delivery failure here is
+  # logged and dropped rather than raised for Oban to retry.
+  defp deliver_findings({subject, html_body}, context) do
+    case Map.get(context.config, "deliver_as", "email") do
+      "comment" -> deliver_as_comment(subject, html_body, context)
+      "task" -> deliver_as_task(subject, html_body, context)
+      _email -> deliver_as_email(subject, html_body, context.config)
+    end
+  end
+
+  # The original path, unchanged: an HTML email to `config["to"]`.
+  # `Mail.deliver_for_worker/2` *raises* on a transient failure (greylisting, a
+  # DNS blip, a refused relay) so Oban retries the job — and a retry re-enters
+  # `run/3` from the top, which for `:suggest_metadata` means generating the
+  # draft again. A greylisted relay during a bulk move to `in_review` would
+  # then bill five generations, and ship five copies of each body off-site, to
+  # deliver one email. Only these reactions swallow it; a `:send_email` or
+  # `:newsletter` rule is the message, here the message is advisory.
+  defp deliver_as_email(subject, html_body, config) do
     send_rule_email(config, escape(subject, :text), html_body)
   rescue
     error in [KilnCMS.Mail.TransientDeliveryError] ->
@@ -402,6 +442,112 @@ defmodule KilnCMS.Automation.RuleWorker do
       Logger.warning("Automation email rule missing a `to` address; skipping.")
       :ok
     end
+  end
+
+  # A document-level comment (#946): no actor (automation has none) and no
+  # `block_id` (the finding is about the whole document, not one block) —
+  # `RouteToBlockThread` groups it with any earlier automation comment on the
+  # same document into their own thread. `created_by_rule_id` is the honest
+  # provenance in place of a user.
+  defp deliver_as_comment(subject, html_body, context) do
+    body = findings_text(subject, html_body)
+
+    case CMS.add_comment(
+           %{
+             content_type: context.content_type,
+             content_id: context.content_id,
+             block_id: nil,
+             body: body,
+             created_by_rule_id: context.rule_id
+           },
+           actor: nil,
+           authorize?: false,
+           tenant: context.org_id
+         ) do
+      {:ok, _comment} ->
+        :ok
+
+      {:error, error} ->
+        Logger.warning(
+          "Automation intelligence rule couldn't post its findings as a comment: " <>
+            "#{Exception.message(error)}"
+        )
+
+        :ok
+    end
+  end
+
+  # A task assigned to `config["assignee"]`, due `config["due_in_days"]` (#946)
+  # — `ActionConfig` requires `assignee` whenever `deliver_as` is `"task"`, but
+  # a since-deleted/demoted user or a stale config can still slip past it (the
+  # save-time check can't see a change that happens later), so a rejection
+  # from `AssigneeIsEditor` or a missing/invalid `assignee` lands here rather
+  # than crashing the job — same advisory posture as every other branch.
+  defp deliver_as_task(subject, html_body, context) do
+    note = findings_text(subject, html_body)
+    config = context.config
+
+    case CMS.assign_task(
+           %{
+             content_type: context.content_type,
+             content_id: context.content_id,
+             assignee_id: config["assignee"],
+             due_on: Date.add(Date.utc_today(), due_in_days(config)),
+             note: note,
+             created_by_rule_id: context.rule_id
+           },
+           actor: nil,
+           authorize?: false,
+           tenant: context.org_id
+         ) do
+      {:ok, _task} ->
+        :ok
+
+      {:error, error} ->
+        Logger.warning(
+          "Automation intelligence rule couldn't assign its findings as a task: " <>
+            "#{Exception.message(error)}"
+        )
+
+        :ok
+    end
+  end
+
+  defp due_in_days(%{"due_in_days" => n}) when is_integer(n) and n > 0, do: n
+  defp due_in_days(_config), do: 3
+
+  # `Comment.body` / `Task.note` are plain strings capped at
+  # `KilnCMS.Limits.paragraph()` (both fields, same limit) — the finder bodies
+  # are HTML (see `link_findings/2` etc. below), so this turns one into the
+  # other rather than changing what the finders return.
+  defp findings_text(subject, html_body) do
+    (subject <> "\n\n" <> html_to_text(html_body))
+    |> String.slice(0, KilnCMS.Limits.paragraph())
+  end
+
+  # No general-purpose HTML→text utility exists elsewhere in the codebase
+  # (Floki, the parser dependency, is used in `KilnCMS.Blocks.Html` but only
+  # via `Floki.text/1` on already-parsed content fragments, not exposed as a
+  # converter) — this is deliberately minimal, scoped to the small, fixed set
+  # of tags the finders below actually emit (`p`, `ul`, `li`, `strong`, `em`,
+  # `code`). Block/list boundaries become newlines first so the result reads
+  # as more than one run-on line; `Floki.text/1` then strips the remaining
+  # markup and decodes entities (so `escape(_, :html)`'s `&amp;` round-trips
+  # back to `&`).
+  defp html_to_text(html) do
+    text =
+      html
+      |> String.replace(~r/<li[^>]*>/i, "\n- ")
+      |> String.replace(~r{</(p|li|ul|div)>}i, "\n")
+      |> String.replace(~r{<br\s*/?>}i, "\n")
+      |> Floki.parse_fragment!()
+      |> Floki.text()
+
+    text
+    |> String.split("\n")
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("\n")
   end
 
   # ── #377 box 1: auto internal-linking ─────────────────────────────────────
