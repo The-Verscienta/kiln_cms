@@ -494,22 +494,15 @@ an id naming **two** children in one submission is always refused — that
 collision would otherwise let a decoy satisfy the binding while the rendered
 child lost the value.
 
-The binding is **required, not gated** (#954, #865). It used to apply only to
-clients that demonstrably round-tripped ids, because nested child ids could not
-be read back on a draft — `blocks` is not `public?` and GraphQL hides it, and
-the fired artifact's `_id` exists only for published content. The
-`block_ids` calculation (`KilnCMS.CMS.Calculations.BlockIds`) closed that gap:
-it projects the tree to `_id`/`_type` only — no field values — on any
-policy-scoped read, so a draft's ids are editor-readable like the rest of the
-authoring surface. An id-less submission against an identified stored tree is
-now refused, naming `block_ids` as the surface to read ids from, rather than
-silently falling back to the count-only multiset.
-
-Two narrow, deliberate carve-outs remain: a `restore_version` fold that carries
-no ids (the tree is our own vetted history, keyed on the action name so it
-cannot be forged onto a plain update), and a *stored* tree whose children carry
-no ids to begin with (an old or headlessly-authored row), which binds nothing
-and stays governed by the multiset until an id-stamping save gives it identity.
+The binding is **required, not gated** (#954, #865): an id-less submission
+against an identified stored tree is refused, not silently downgraded to the
+count-only multiset. `KilnCMS.CMS.Calculations.BlockIds` is what makes that
+enforceable — it's what closed the gap that used to require gating (nested
+child ids were unreadable on a draft) — and it, along with the two narrow
+carve-outs that remain (`restore_version`, and a stored tree whose children
+never had ids to begin with), is documented in full at
+`KilnCMS.CMS.Changes.EnforceBlockFieldPolicy`'s moduledoc rather than
+repeated here.
 
 See residual risk 8 in [`threat-model.md`](threat-model.md) for what this does
 and does not guarantee — in particular that a wholly id-less stored tree keeps
