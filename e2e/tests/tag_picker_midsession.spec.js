@@ -63,6 +63,8 @@ const {
   signInAsEditor,
   newDraftContent,
   newGuardedContext,
+  createTag,
+  deleteContentByTitle,
 } = require("./fixtures");
 
 test.describe("tag picker mid-session growth", () => {
@@ -75,10 +77,11 @@ test.describe("tag picker mid-session growth", () => {
     const stamp = Date.now();
     const attached = `e2e-948-attach-${stamp}`;
     const distractor = `e2e-948-distract-${stamp}`;
+    const draftTitle = `E2E 948 Draft ${stamp}`;
 
     // Cleanup runs even if an assertion below throws, so a failed run doesn't
-    // leave a tag behind to break the *next* run's empty state (see blocker 1
-    // above).
+    // leave a tag — or this draft — behind to break the *next* run's empty
+    // state (see blocker 1 above).
     let editorSession;
     try {
       await signInAsAdmin(page);
@@ -91,6 +94,10 @@ test.describe("tag picker mid-session growth", () => {
       // this test drives through.
       await newDraftContent(page, "post");
       const draftUrl = page.url();
+      // A unique title, so cleanup can find this exact draft afterwards by
+      // search (`deleteContentByTitle`) rather than leaving an untitled row
+      // behind for the life of the suite's persistent database.
+      await page.fill('input[name$="[title]"]', draftTitle);
       await page.getByRole("tab", { name: /settings/i }).click();
 
       const picker = page.locator("#tag-picker");
@@ -105,14 +112,11 @@ test.describe("tag picker mid-session growth", () => {
       const editorPage = editorSession.page;
       await signInAsEditor(editorPage);
 
-      // Plain, ungrouped tags (leave the group `<select>` on its "— Ungrouped
-      // —" prompt) — see blocker 1 above for why this test doesn't create a
-      // tag group.
+      // Plain, ungrouped tags (no `group` option — see blocker 1 above for
+      // why this test doesn't create a tag group).
       await editorPage.goto("/editor/taxonomy");
       for (const name of [attached, distractor]) {
-        await editorPage.fill('#new-tag-form input[name$="[name]"]', name);
-        await editorPage.locator("#new-tag-form button[type=submit]").click();
-        await expect(editorPage.getByText(name, { exact: true }).first()).toBeVisible();
+        await createTag(editorPage, name);
       }
 
       // Attach only `attached` to the draft, from the editor's own session.
@@ -196,7 +200,8 @@ test.describe("tag picker mid-session growth", () => {
       for (let waited = 0; waited <= 2600; waited += 250) {
         const text = (await indicator.textContent())?.trim();
         expect(text).toBe("Saved");
-        await page.waitForTimeout(250);
+        // No point sleeping after the last sample — nothing checks again.
+        if (waited < 2600) await page.waitForTimeout(250);
       }
 
       await expect(section.getByRole("checkbox", { name: distractor })).toBeHidden();
@@ -219,6 +224,11 @@ test.describe("tag picker mid-session growth", () => {
         await row.getByRole("button", { name: `Delete ${name}` }).click();
         await expect(page.getByText(name, { exact: true })).toHaveCount(0);
       }
+
+      // The draft itself, so a failed or successful run alike leaves nothing
+      // behind for the suite's persistent, never-reset database — matching
+      // the tags' own cleanup above.
+      await deleteContentByTitle(page, draftTitle);
 
       if (editorSession) await editorSession.context.close();
     }

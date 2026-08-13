@@ -115,6 +115,56 @@ async function newDraftPage(page) {
   return newDraftContent(page, "page");
 }
 
+// A tag group scoped to specific content types, from the taxonomy page.
+// `contentTypes` is required (not defaulted) rather than optional: the
+// suite's database is persistent and never reset between specs (`workers:
+// 1`, only `mix e2e.reset` drops it), so a group left unrestricted applies
+// to every content type forever and can make another spec's "no tags yet"
+// starting state unreachable — see tag_picker_midsession.spec.js. Making
+// every caller name its content types is a structural nudge against
+// repeating that mistake, not just a comment asking nicely.
+async function createTagGroup(page, name, contentTypes) {
+  if (!Array.isArray(contentTypes) || contentTypes.length === 0) {
+    throw new Error("createTagGroup: contentTypes must be a non-empty array (e.g. [\"page\"])");
+  }
+  await page.goto("/editor/taxonomy");
+  await page.fill('#new-tag_group-form input[name$="[name]"]', name);
+  for (const type of contentTypes) {
+    await page.check(`#new-tag_group-form input[type="checkbox"][value="${type}"]`);
+  }
+  await page.locator("#new-tag_group-form button[type=submit]").click();
+  await base.expect(page.locator("#new-tag-form select").getByText(name)).toBeAttached();
+}
+
+// A single tag from the taxonomy page (`/editor/taxonomy`), optionally under
+// an existing group. Assumes the caller is already on that page.
+async function createTag(page, name, { group } = {}) {
+  await page.fill('#new-tag-form input[name$="[name]"]', name);
+  if (group) {
+    await page.selectOption('#new-tag-form select[name$="[tag_group_id]"]', { label: group });
+  }
+  await page.locator("#new-tag-form button[type=submit]").click();
+  // The row renders the name and the auto-derived slug, which are the same
+  // string here — assert on the first match rather than fighting that.
+  await base.expect(page.getByText(name, { exact: true }).first()).toBeVisible();
+}
+
+// Deletes a piece of content (admin-only, bulk-select UI) by its exact
+// title, via the /editor overview's search filter + bulk-delete action.
+// Best-effort: if nothing matches, this is a no-op rather than a failure —
+// callers use it from cleanup, where the thing to delete may never have
+// been created if an earlier step in the test already failed.
+async function deleteContentByTitle(page, title) {
+  await page.goto(`/editor?q=${encodeURIComponent(title)}`);
+  const checkbox = page.getByRole("checkbox", { name: `Select ${title}`, exact: true });
+  if ((await checkbox.count()) === 0) return;
+
+  await checkbox.check();
+  await page.locator('button[phx-click="bulk"][phx-value-action="delete"]').click();
+  await page.locator('button[phx-click="confirm_bulk"]').click();
+  await base.expect(checkbox).toHaveCount(0);
+}
+
 // The block inserter (#29) is a closed dropdown: its options only become
 // visible/clickable after the "Add block" trigger opens the menu (the
 // BlockInserter JS hook toggles `data-inserter-menu`'s `hidden` attribute).
@@ -146,4 +196,7 @@ module.exports = {
   newDraftPage,
   newDraftContent,
   addBlock,
+  createTagGroup,
+  createTag,
+  deleteContentByTitle,
 };
