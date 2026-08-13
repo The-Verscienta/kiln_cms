@@ -112,6 +112,50 @@ defmodule KilnCMS.Firing.PointInTimeTest do
              )
   end
 
+  # #711: `replay/4` and `restore_version` both fold through `VersionSnapshot`
+  # now, but `build_document/4` used to derive its own attribute-name set
+  # independently of `VersionFields` — a second place the two paths could
+  # quietly disagree even with the fold itself unified. This proves they don't:
+  # a PointInTime replay at a version's instant and a restore to that same
+  # version land on the same values for every field a restore actually moves.
+  test "a PointInTime replay and a restore to the same version agree on every restorable field" do
+    admin = admin()
+    org = KilnCMS.Accounts.default_org_id()
+
+    post =
+      CMS.create_post!(
+        %{title: "First", slug: slug(), seo_title: "SEO one", seo_description: "Desc one"},
+        actor: admin
+      )
+
+    post = CMS.publish_post!(post, %{}, actor: admin)
+
+    [publish_version] =
+      post_versions(post.id) |> Enum.filter(&(&1.version_action_name == :publish))
+
+    # Move history on past the instant under test, so a restore has to fold
+    # backward through it rather than trivially reading the current row. Keep
+    # threading the returned struct — restoring from a stale one (with an
+    # outdated optimistic-lock version) would silently lose to the update below.
+    post = CMS.update_post!(post, %{title: "Second", seo_title: "SEO two"}, actor: admin)
+
+    as_of = publish_version.version_inserted_at
+
+    assert {:ok, replayed} = PointInTime.snapshot_state(org, CMS.Post, post.id, as_of)
+
+    restored = CMS.restore_post_version!(post, %{version_id: publish_version.id}, actor: admin)
+
+    current = KilnCMS.CMS.VersionSnapshot.current(restored)
+
+    for field <- KilnCMS.CMS.VersionFields.restorable_fields(CMS.Post) do
+      key = to_string(field)
+
+      assert Map.get(replayed, key) == Map.get(current, key),
+             "#{key} diverged: PointInTime replay #{inspect(Map.get(replayed, key))} vs " <>
+               "restore_version #{inspect(Map.get(current, key))}"
+    end
+  end
+
   defp post_versions(source_id) do
     CMS.Post.Version
     |> Ash.Query.filter(version_source_id == ^source_id)
