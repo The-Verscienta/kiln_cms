@@ -34,6 +34,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMS.Accounts.Scoping
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.Unsplash
 
   # The fields the SEO suggestion writes if the author accepts it.
   # `maybe_sync_slug/3` can also move `slug` off a `seo_keywords` accept, but
@@ -238,6 +239,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # nil = not searching (browse the mounted window); a list = DB search
          # results, so the picker also finds items beyond that window.
          |> assign(:picker_media, nil)
+         # Unsplash search tab inside the image picker (mirrors `MediaLive`'s
+         # own Unsplash tab — see `KilnCMS.Unsplash`). `picker_tab` switches
+         # the drawer between the library grid and this search panel;
+         # `reset_picker/1` puts it back to `:library` whenever the drawer
+         # closes, so reopening it never lands on a stale search.
+         |> assign(:unsplash_enabled?, Unsplash.enabled?())
+         |> assign(:picker_tab, :library)
+         |> assign(:unsplash_query, "")
+         |> assign(:unsplash_photos, [])
+         |> assign(:unsplash_page, 1)
+         |> assign(:unsplash_more?, false)
+         |> assign(:unsplash_searching?, false)
+         |> assign(:unsplash_importing, MapSet.new())
          |> assign(
            :media,
            # The picker grid needs only these fields; a select keeps 500
@@ -609,6 +623,46 @@ defmodule KilnCMSWeb.ContentEditorLive do
      socket
      |> assign(:assist_running?, false)
      |> put_flash(:error, gettext("Couldn't generate text. Please try again."))}
+  end
+
+  def handle_async(:unsplash_search, result, socket) do
+    socket = assign(socket, :unsplash_searching?, false)
+
+    case result do
+      # A result for a query the author has since replaced — drop it.
+      {:ok, {query, _page, _result}} when query != socket.assigns.unsplash_query ->
+        {:noreply, socket}
+
+      {:ok, {_query, page, {:ok, %{photos: photos, more?: more?}}}} ->
+        photos = if page == 1, do: photos, else: socket.assigns.unsplash_photos ++ photos
+
+        {:noreply,
+         socket
+         |> assign(:unsplash_photos, photos)
+         |> assign(:unsplash_page, page)
+         |> assign(:unsplash_more?, more?)}
+
+      _error ->
+        {:noreply,
+         put_flash(socket, :error, gettext("Unsplash search failed — please try again."))}
+    end
+  end
+
+  def handle_async({:unsplash_import, id}, result, socket) do
+    socket =
+      assign(socket, :unsplash_importing, MapSet.delete(socket.assigns.unsplash_importing, id))
+
+    case result do
+      {:ok, {:ok, item}} ->
+        socket
+        |> assign(:media, [media_row(item) | socket.assigns.media])
+        |> route_picked_item(item)
+        |> then(&{:noreply, &1})
+
+      _error ->
+        {:noreply,
+         put_flash(socket, :error, gettext("Couldn't import that photo from Unsplash."))}
+    end
   end
 
   defp assign_record(socket, record) do
@@ -2136,6 +2190,77 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, socket |> assign(:media_query, q) |> assign(:picker_media, results)}
   end
 
+  # --- Unsplash (image picker tab) --------------------------------------------
+  #
+  # Mirrors `KilnCMSWeb.MediaLive`'s own Unsplash tab (search + import), except
+  # importing here has to land the new item on whatever the picker was opened
+  # for — see `route_picked_item/2` below — rather than just refreshing a
+  # library grid.
+
+  def handle_event("picker_tab", %{"tab" => tab}, socket) when tab in ~w(library unsplash) do
+    {:noreply, assign(socket, :picker_tab, String.to_existing_atom(tab))}
+  end
+
+  def handle_event("unsplash_search", %{"q" => q}, socket) when is_binary(q) do
+    if socket.assigns.unsplash_enabled? do
+      case String.trim(q) do
+        "" ->
+          {:noreply,
+           socket
+           |> assign(:unsplash_query, "")
+           |> assign(:unsplash_photos, [])
+           |> assign(:unsplash_more?, false)
+           |> assign(:unsplash_searching?, false)}
+
+        query ->
+          {:noreply,
+           socket
+           |> assign(:unsplash_query, query)
+           |> assign(:unsplash_page, 1)
+           |> assign(:unsplash_searching?, true)
+           |> start_async(:unsplash_search, fn -> {query, 1, Unsplash.search(query, 1)} end)}
+      end
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("unsplash_load_more", _params, socket) do
+    if socket.assigns.unsplash_enabled? do
+      %{unsplash_query: query, unsplash_page: page} = socket.assigns
+      next = page + 1
+
+      {:noreply,
+       socket
+       |> assign(:unsplash_searching?, true)
+       |> start_async(:unsplash_search, fn -> {query, next, Unsplash.search(query, next)} end)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("unsplash_import", %{"id" => id}, socket) when is_binary(id) do
+    if socket.assigns.unsplash_enabled? do
+      photo = Enum.find(socket.assigns.unsplash_photos, &(&1.id == id))
+
+      if is_nil(photo) or MapSet.member?(socket.assigns.unsplash_importing, id) do
+        {:noreply, socket}
+      else
+        actor = socket.assigns.actor
+        org = socket.assigns.current_org
+
+        {:noreply,
+         socket
+         |> assign(:unsplash_importing, MapSet.put(socket.assigns.unsplash_importing, id))
+         |> start_async({:unsplash_import, id}, fn ->
+           Unsplash.import_photo(photo, actor: actor, tenant: org)
+         end)}
+      end
+    else
+      {:noreply, socket}
+    end
+  end
+
   # Server-side tag vocabulary filter (#1149). The box lives inside the content
   # form, so the TagFilter hook stops propagation and pushes this event rather
   # than letting `phx-change` mark the document dirty on every keystroke.
@@ -2173,42 +2298,24 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, socket}
   end
 
-  # Set the social card image from the library (#476).
+  # Set the social card image from the library (#476). No `id` in the match —
+  # `apply_pick(:seo_image, ...)` never reads it, so binding it here would be
+  # an unguarded client value with nothing to guard it against (#764).
   def handle_event("pick_image", %{"index" => "seo_image", "url" => url}, socket)
       when is_binary(url),
-      do: {:noreply, socket |> put_seo_image(url) |> reset_picker()}
+      do: {:noreply, socket |> apply_pick(:seo_image, nil, url) |> reset_picker()}
 
   # Set the featured image from the library (#154).
   def handle_event("pick_image", %{"index" => "featured", "id" => media_id}, socket)
-      when is_binary(media_id) do
-    params = AshPhoenix.Form.params(socket.assigns.form) |> Map.put("featured_image_id", media_id)
-
-    {:noreply,
-     socket
-     |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
-     |> reset_picker()
-     |> mark_dirty()}
-  end
+      when is_binary(media_id),
+      do: {:noreply, socket |> apply_pick(:featured, media_id, nil) |> reset_picker()}
 
   # Insert a library image as a brand-new image block (browser opened from the
   # editor chrome): the URL becomes the block content and its id is stashed in
   # `data` so delivery can build srcset.
   def handle_event("pick_image", %{"index" => "new", "id" => media_id, "url" => url}, socket)
-      when is_binary(media_id) and is_binary(url) do
-    form =
-      AshPhoenix.Form.add_form(socket.assigns.form, socket.assigns.form.name <> "[blocks]",
-        params: %{
-          "_union_type" => "image",
-          "id" => Ash.UUID.generate(),
-          "url" => url,
-          "media_id" => media_id
-        }
-      )
-
-    socket = socket |> assign(:form, form) |> reset_picker()
-    broadcast_preview(socket)
-    {:noreply, mark_dirty(socket)}
-  end
+      when is_binary(media_id) and is_binary(url),
+      do: {:noreply, socket |> apply_pick(:new, media_id, url) |> reset_picker()}
 
   # Fill the existing image block identified by `bid`. Its current position is
   # resolved from the live form now, not captured when the picker opened, so a
@@ -2216,32 +2323,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def handle_event("pick_image", %{"index" => "block", "bid" => bid} = p, socket)
       when is_binary(bid) do
     %{"id" => media_id, "url" => url} = p
-
-    case block_index_by_id(socket.assigns.form, bid) do
-      nil ->
-        # The target block is gone (removed by a co-editor) — drop the pick.
-        {:noreply, reset_picker(socket)}
-
-      index ->
-        # Rebuild the FULL block set from the live form (each block as an input
-        # map keyed by its stable id), then merge the image into the target. A
-        # pristine form's `params` carries no blocks at all, so a partial update
-        # would drop every other block — this carries them all through, ids intact
-        # (the same full-set pattern the inline preview + in-context editor use).
-        blocks =
-          socket.assigns.form
-          |> full_blocks_input()
-          |> List.update_at(index, &Map.merge(&1, %{"url" => url, "media_id" => media_id}))
-
-        params =
-          socket.assigns.form
-          |> AshPhoenix.Form.params()
-          |> Map.put("blocks", blocks)
-
-        socket = socket |> revalidate(params) |> reset_picker()
-        broadcast_preview(socket)
-        {:noreply, mark_dirty(socket)}
-    end
+    {:noreply, socket |> apply_pick({:block, bid}, media_id, url) |> reset_picker()}
   end
 
   # Open the file-library drawer to fill a specific `:file` block (#481).
@@ -2948,6 +3030,86 @@ defmodule KilnCMSWeb.ContentEditorLive do
       _ ->
         {:noreply, put_flash(socket, :error, gettext("Couldn't restore that version."))}
     end
+  end
+
+  # Apply a picked media item to whatever the picker was opened for. Shared by
+  # the "pick_image" handlers above and `route_picked_item/2` below (an
+  # Unsplash import landing on the same target), so there is exactly one place
+  # that knows how a pick reaches the form/blocks.
+  defp apply_pick(socket, :seo_image, _media_id, url), do: put_seo_image(socket, url)
+
+  defp apply_pick(socket, :featured, media_id, _url) do
+    params = AshPhoenix.Form.params(socket.assigns.form) |> Map.put("featured_image_id", media_id)
+
+    socket
+    |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
+    |> mark_dirty()
+  end
+
+  defp apply_pick(socket, :new, media_id, url) do
+    form =
+      AshPhoenix.Form.add_form(socket.assigns.form, socket.assigns.form.name <> "[blocks]",
+        params: %{
+          "_union_type" => "image",
+          "id" => Ash.UUID.generate(),
+          "url" => url,
+          "media_id" => media_id
+        }
+      )
+
+    socket = assign(socket, :form, form)
+    broadcast_preview(socket)
+    mark_dirty(socket)
+  end
+
+  defp apply_pick(socket, {:block, bid}, media_id, url) do
+    case block_index_by_id(socket.assigns.form, bid) do
+      # The target block is gone (removed by a co-editor) — drop the pick.
+      nil ->
+        socket
+
+      index ->
+        # Rebuild the FULL block set from the live form (each block as an input
+        # map keyed by its stable id), then merge the image into the target. A
+        # pristine form's `params` carries no blocks at all, so a partial update
+        # would drop every other block — this carries them all through, ids intact
+        # (the same full-set pattern the inline preview + in-context editor use).
+        blocks =
+          socket.assigns.form
+          |> full_blocks_input()
+          |> List.update_at(index, &Map.merge(&1, %{"url" => url, "media_id" => media_id}))
+
+        params =
+          socket.assigns.form
+          |> AshPhoenix.Form.params()
+          |> Map.put("blocks", blocks)
+
+        socket = revalidate(socket, params)
+        broadcast_preview(socket)
+        mark_dirty(socket)
+    end
+  end
+
+  # Land a freshly-imported Unsplash `MediaItem` exactly where clicking it in
+  # the library grid would have: the gallery's multi-select just appends to
+  # `@picked` (same as `toggle_pick`) and leaves the drawer open for more
+  # picks, while every single-select target goes through `apply_pick/4` and
+  # then closes the picker, matching `pick_image`'s own behavior.
+  defp route_picked_item(socket, item) do
+    case socket.assigns.picking do
+      {:gallery, _bid} ->
+        assign(socket, :picked, socket.assigns.picked ++ [%{id: item.id, url: item.url}])
+
+      picking ->
+        socket |> apply_pick(picking, item.id, item.url) |> reset_picker()
+    end
+  end
+
+  # The row shape `@media` carries (see the mount-time `select:` in `mount/3`),
+  # built from a just-created `MediaItem` so an imported photo shows up in the
+  # browse grid too if the picker stays open (gallery multi-select).
+  defp media_row(item) do
+    %{id: item.id, url: item.url, alt: item.alt, caption: item.caption, filename: item.filename}
   end
 
   # A restore can fail for a reason the editor can act on — a category deleted or
@@ -4134,6 +4296,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:picked, [])
     |> assign(:media_query, "")
     |> assign(:picker_media, nil)
+    |> assign(:picker_tab, :library)
     |> assign(:file_picking, nil)
     |> assign(:file_query, "")
     |> assign(:picker_files, nil)
@@ -6351,6 +6514,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
   attr :results, :list, default: nil
   attr :query, :string, required: true
   attr :picked, :list, default: []
+  attr :unsplash_enabled?, :boolean, required: true
+  attr :picker_tab, :atom, required: true
+  attr :unsplash_query, :string, required: true
+  attr :unsplash_photos, :list, required: true
+  attr :unsplash_more?, :boolean, required: true
+  attr :unsplash_searching?, :boolean, required: true
+  attr :unsplash_importing, :any, required: true
 
   # Media-library browser as a right-side drawer (Theme D). It slides in beside the
   # editor rather than a full-screen modal that blanks the whole surface, so you
@@ -6358,6 +6528,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # image block, `index = :new`), the featured-image field (`:featured`), or an
   # image block (`{:block, id}`). Browse + search + insert; while a query is active
   # `results` (a DB search) replaces the browse window.
+  #
+  # A second tab, gated on `@unsplash_enabled?`, searches Unsplash directly
+  # (mirrors `KilnCMSWeb.MediaLive`'s own tab) so importing a stock photo
+  # doesn't require a round trip through `/media` first (#487-adjacent).
+  # Every picking mode gets it, including gallery multi-select — an editor
+  # building a gallery should be able to pull several Unsplash photos into it
+  # without leaving this drawer.
   defp image_picker(assigns) do
     assigns =
       assigns
@@ -6368,7 +6545,34 @@ defmodule KilnCMSWeb.ContentEditorLive do
     <.modal id="image-picker-dialog" on_close="close_picker" variant={:drawer}>
       <:title>{picker_title(@index)}</:title>
 
-      <div class="flex-1 overflow-y-auto p-4">
+      <div :if={@unsplash_enabled?} class="flex gap-1 border-b border-base-content/10 px-4 pt-3">
+        <button
+          type="button"
+          phx-click="picker_tab"
+          phx-value-tab="library"
+          aria-selected={to_string(@picker_tab == :library)}
+          class={[
+            "px-3 py-1.5 text-sm",
+            @picker_tab == :library && "border-b-2 border-primary font-medium"
+          ]}
+        >
+          {gettext("Library")}
+        </button>
+        <button
+          type="button"
+          phx-click="picker_tab"
+          phx-value-tab="unsplash"
+          aria-selected={to_string(@picker_tab == :unsplash)}
+          class={[
+            "px-3 py-1.5 text-sm",
+            @picker_tab == :unsplash && "border-b-2 border-primary font-medium"
+          ]}
+        >
+          {gettext("Unsplash")}
+        </button>
+      </div>
+
+      <div :if={@picker_tab == :library} class="flex-1 overflow-y-auto p-4">
         <form :if={@media != []} id="media-browser-filter" phx-change="search_media" class="mb-3">
           <input
             type="text"
@@ -6426,6 +6630,101 @@ defmodule KilnCMSWeb.ContentEditorLive do
             >
               {position}
             </span>
+          </button>
+        </div>
+      </div>
+
+      <div :if={@unsplash_enabled? and @picker_tab == :unsplash} class="flex-1 overflow-y-auto p-4">
+        <form id="editor-unsplash-search" phx-submit="unsplash_search" class="flex gap-2">
+          <label for="editor-unsplash-search-input" class="sr-only">
+            {gettext("Search Unsplash photos")}
+          </label>
+          <input
+            id="editor-unsplash-search-input"
+            type="text"
+            name="q"
+            value={@unsplash_query}
+            placeholder={gettext("Search Unsplash photos")}
+            autocomplete="off"
+            class="field-input min-w-0 flex-1"
+          />
+          <.button type="submit" variant="primary" phx-disable-with={gettext("Searching…")}>
+            {gettext("Search")}
+          </.button>
+        </form>
+
+        <p class="mt-2 text-xs text-base-content/60">
+          {gettext(
+            "Photos from Unsplash — importing adds a copy to your library and inserts it here."
+          )}
+        </p>
+
+        <p
+          :if={@unsplash_searching? and @unsplash_photos == []}
+          class="mt-3 text-sm text-base-content/60"
+          role="status"
+        >
+          {gettext("Searching…")}
+        </p>
+
+        <p
+          :if={!@unsplash_searching? and @unsplash_photos == [] and @unsplash_query != ""}
+          class="mt-3 text-sm text-base-content/60"
+          role="status"
+        >
+          {gettext("No photos match “%{query}”.", query: @unsplash_query)}
+        </p>
+
+        <ul
+          :if={@unsplash_photos != []}
+          class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3"
+          id="editor-unsplash-grid"
+        >
+          <li
+            :for={photo <- @unsplash_photos}
+            id={"editor-unsplash-#{photo.id}"}
+            class="overflow-hidden rounded border border-base-content/10"
+          >
+            <img
+              src={photo.thumb_url}
+              alt={photo.alt || gettext("Unsplash photo")}
+              loading="lazy"
+              class="aspect-square w-full object-cover"
+            />
+            <div class="flex items-center justify-between gap-2 p-2">
+              <p class="min-w-0 truncate text-[10px] text-base-content/70">
+                <a
+                  href={photo.photographer_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="hover:underline"
+                >
+                  {photo.photographer}
+                </a>
+              </p>
+              <button
+                type="button"
+                phx-click="unsplash_import"
+                phx-value-id={photo.id}
+                disabled={MapSet.member?(@unsplash_importing, photo.id)}
+                class="btn btn-sm btn-default shrink-0"
+              >
+                {if MapSet.member?(@unsplash_importing, photo.id),
+                  do: gettext("Importing…"),
+                  else: gettext("Import")}
+              </button>
+            </div>
+          </li>
+        </ul>
+
+        <div :if={@unsplash_more?} class="mt-3 flex justify-center">
+          <button
+            type="button"
+            phx-click="unsplash_load_more"
+            disabled={@unsplash_searching?}
+            class="btn btn-default"
+          >
+            {if @unsplash_searching?, do: gettext("Loading…"), else: gettext("Load more")}
           </button>
         </div>
       </div>
@@ -8867,6 +9166,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
         results={@picker_media}
         query={@media_query}
         picked={@picked}
+        unsplash_enabled?={@unsplash_enabled?}
+        picker_tab={@picker_tab}
+        unsplash_query={@unsplash_query}
+        unsplash_photos={@unsplash_photos}
+        unsplash_more?={@unsplash_more?}
+        unsplash_searching?={@unsplash_searching?}
+        unsplash_importing={@unsplash_importing}
       />
 
       <.file_picker

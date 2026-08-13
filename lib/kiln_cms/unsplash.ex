@@ -16,6 +16,8 @@ defmodule KilnCMS.Unsplash do
   (`req_options: [plug: {Req.Test, KilnCMS.Unsplash}]`).
   """
 
+  alias KilnCMS.Media.Ingest
+
   @api_base "https://api.unsplash.com"
   # Search-result thumbnails hotlink from here; the router adds it to the CSP
   # img-src while the integration is enabled (see `csp_img_src/0`).
@@ -87,6 +89,40 @@ defmodule KilnCMS.Unsplash do
     do: "Photo by #{name} on Unsplash"
 
   def attribution(_photo), do: "Photo from Unsplash"
+
+  @doc """
+  Download a photo and ingest it via `KilnCMS.Media.Ingest`, in one step.
+
+  Shared by every caller that imports an Unsplash result into the library
+  (the media library's own Unsplash tab and the content editor's image
+  picker), so the download → store → cleanup sequence lives once. `opts`
+  passes through to `Ingest.store_file/3` (`:actor`/`:tenant` at minimum);
+  `:alt` and `:caption` are always the photo's own, so a caller cannot
+  override attribution.
+  """
+  @spec import_photo(photo(), keyword()) :: {:ok, struct()} | {:error, term()}
+  # `download/1` returns a server-generated temp path — the File.rm
+  # traversal warning is a false positive.
+  # sobelow_skip ["Traversal.FileModule"]
+  def import_photo(photo, opts) do
+    with {:ok, path} <- download(photo) do
+      try do
+        # No extension: `Ingest` appends the one it sniffs from the bytes.
+        # No per-kind cap: this is a full-resolution original the caller
+        # cannot resize, and the pre-extraction Unsplash path applied no
+        # cap at all.
+        opts
+        |> Keyword.merge(
+          max_bytes: Ingest.max_upload_size(),
+          alt: photo.alt,
+          caption: attribution(photo)
+        )
+        |> then(&Ingest.store_file(path, "unsplash-#{photo.id}", &1))
+      after
+        File.rm(path)
+      end
+    end
+  end
 
   defp photo(p) do
     %{

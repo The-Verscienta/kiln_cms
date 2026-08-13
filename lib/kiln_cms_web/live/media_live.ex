@@ -262,7 +262,9 @@ defmodule KilnCMSWeb.MediaLive do
         {:noreply,
          socket
          |> assign(:unsplash_importing, MapSet.put(socket.assigns.unsplash_importing, id))
-         |> start_async({:unsplash_import, id}, fn -> import_unsplash(photo, actor, org) end)}
+         |> start_async({:unsplash_import, id}, fn ->
+           Unsplash.import_photo(photo, actor: actor, tenant: org)
+         end)}
       end
     else
       {:noreply, socket}
@@ -432,7 +434,7 @@ defmodule KilnCMSWeb.MediaLive do
   # --- ingest ----------------------------------------------------------------
 
   # The upload pipeline (sniff -> cap -> strip -> store -> item -> derive) is
-  # `KilnCMS.Media.Ingest`, shared with the Unsplash import here and the bulk
+  # `KilnCMS.Media.Ingest`, shared with `Unsplash.import_photo/2` and the bulk
   # importers (#487). This module keeps only the LiveView-shaped edges: what a
   # temp file is called, and what the editor is told when one fails.
   #
@@ -442,33 +444,6 @@ defmodule KilnCMSWeb.MediaLive do
     case Ingest.store_file(path, entry.client_name, actor: actor, tenant: org) do
       {:ok, _item} -> :ok
       {:error, reason} -> {:error, reason}
-    end
-  end
-
-  # Import an Unsplash photo: download (which also reports the download to
-  # Unsplash, per their guidelines), then the same pipeline as a direct upload.
-  # Runs inside start_async.
-  #
-  # `Unsplash.download/1` returns a server-generated temp path — the File.rm
-  # traversal warning is a false positive.
-  # sobelow_skip ["Traversal.FileModule"]
-  defp import_unsplash(photo, actor, org) do
-    with {:ok, path} <- Unsplash.download(photo) do
-      try do
-        # No extension: `Ingest` appends the one it sniffs from the bytes.
-        # No per-kind cap: this is a full-resolution original the editor cannot
-        # resize, and the pre-extraction Unsplash path applied no cap at all.
-        # `Unsplash.download/1` is the only source, so the bytes are ours.
-        Ingest.store_file(path, "unsplash-#{photo.id}",
-          actor: actor,
-          tenant: org,
-          max_bytes: Ingest.max_upload_size(),
-          alt: photo.alt,
-          caption: Unsplash.attribution(photo)
-        )
-      after
-        File.rm(path)
-      end
     end
   end
 
