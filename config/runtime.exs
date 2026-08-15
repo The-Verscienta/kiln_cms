@@ -202,6 +202,19 @@ with {:ok, enabled?} <- Env.fetch("VISUAL_EDITING_ENABLED") do
   config :kiln_cms, :visual_editing_enabled, enabled?
 end
 
+# ## The console/delivery origin split (#740)
+#
+# KILN_CONSOLE_HOST=console.example.com serves the editor console ONLY on that
+# host and never serves tenant content there, so any script that runs on a
+# tenant's public site is cross-origin to the console (its cookies are not
+# attached, its DOM is not reachable). Unset (the default), console and site
+# share an origin as before. Add the console host to CHECK_ORIGINS. Org
+# resolution is still host-derived, so the console host is the DEFAULT org's
+# console — right for a single-org deployment; see docs/multi-tenancy.md.
+if console_host = System.get_env("KILN_CONSOLE_HOST") do
+  config :kiln_cms, :console_host, console_host
+end
+
 # ## A/V metadata stripping — fail closed (#820)
 #
 # An MP4 off a phone carries GPS, device model and a local wall-clock date, and

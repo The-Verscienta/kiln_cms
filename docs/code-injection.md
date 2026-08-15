@@ -44,16 +44,27 @@ org. So on a shared-origin deployment, granting one site's admin code injection
 is close to granting them the console.
 
 This is inherent to same-origin code injection — Ghost's works the same way —
-and the mitigations are deployment-level:
+and the mitigation is deployment-level, and now built in (#740):
 
-- Serve the console from a host no tenant controls, with tenant sites on their
-  own hosts. This is the real fix and it is worth doing before you hand this
-  role to anyone you would not also make a platform admin.
+- **Serve the console from a host no tenant controls.** Set
+  `KILN_CONSOLE_HOST=console.example.com` (and add it to `CHECK_ORIGINS`):
+  every console route is then served **only** on that host — an editor who
+  types `/editor` on the site is redirected there — and the console host
+  serves **no tenant content**, so a snippet on `acme.example` is cross-origin
+  to `console.example.com`: the console's cookies are not attached to its
+  requests and its DOM is not reachable. Which routes are "console" is a
+  decision the router owns (`KilnCMSWeb.Surface`), pinned by a test, not a
+  prefix guess — `/api`, `/auth` and `/media` all begin routes on both sides.
+  On a multi-org deployment the console host reaches the **default org's**
+  console only (org resolution is still host-derived; per-tenant console
+  hosts are the follow-up), so it fits a single-org deployment today, which
+  is where this feature is most used. Do this before you hand this role to
+  anyone you would not also make a platform admin.
 - Or treat "org admin" as equivalent to console access on that deployment, and
   staff it accordingly.
 
 The `:delivery` pipeline keeps the markup out of console *pages*. It does not
-make a same-origin script harmless, and nothing in the application can.
+make a same-origin script harmless — only a separate origin does.
 
 ## CSP: why your snippet needs an allowlist
 

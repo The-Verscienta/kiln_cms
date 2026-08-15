@@ -405,8 +405,21 @@ defmodule KilnCMSWeb.Tenant do
   # Whether strict matching refuses this host at all. Deliberately one predicate
   # across both unresolved cases: *which* hosts are refused is a policy question
   # with a single answer, and only what the caller is told about the refusal
-  # depends on why the lookup came back empty.
-  defp refused?(host), do: strict_host?() and not canonical_host?(host)
+  # depends on why the lookup came back empty. The console host (#740) names no
+  # tenant by design; it is the default org's console and is never refused,
+  # strict or not — the same standing the canonical apex has.
+  defp refused?(host),
+    do: strict_host?() and not canonical_host?(host) and not console_host?(host)
+
+  # `KILN_CONSOLE_HOST`, when set — see `KilnCMSWeb.Plugs.ConsoleHost`.
+  defp console_host?(host) when is_binary(host) do
+    case KilnCMSWeb.Plugs.ConsoleHost.console_host() do
+      nil -> false
+      console -> normalize(host) == console
+    end
+  end
+
+  defp console_host?(_host), do: false
 
   @doc """
   `fetch_org/1` for a socket's connect info, whose host lives at `[:uri, :host]`.
