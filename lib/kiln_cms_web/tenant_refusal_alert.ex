@@ -33,6 +33,14 @@ defmodule KilnCMSWeb.TenantRefusalAlert do
   than "is this surface being flooded" (see the #678 issue history for the
   attempt that got this wrong the first time).
 
+  And never for `fetch_org/1`'s `:unavailable` — a host whose lookup *failed*
+  rather than found nothing (#341). Every message here names
+  `TENANT_STRICT_HOST` as the cause and the hosts as ones the deployment does
+  not serve; for a database that is down, both halves are wrong, and the alert
+  would fire once per surface for the length of every outage while pointing the
+  operator at a setting that has nothing to do with it. It used to fire even
+  with strict matching **off**, where the setting it names is not on at all.
+
   `source` is one of a fixed, small set (`:plug`, `:live`, `:gql`, `:bridge`,
   `:collab`) — bounded, unlike the host itself, so the tag can safely go in
   a Sentry fingerprint and answer which surface a flood is landing on.

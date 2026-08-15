@@ -14,9 +14,46 @@ defmodule KilnCMSWeb.Plugs.SetTenant do
   yields an org, so a bare-host / `localhost` request transparently serves the
   default org — the non-breaking single-host behavior.
 
-  Under `TENANT_STRICT_HOST=true` (#563) that last fallback is gone and an
-  unresolvable host gets a bare `404` here, in the endpoint: no tenant assigned,
+  Under `TENANT_STRICT_HOST=true` (#563) that last fallback is gone and a host
+  that names no org gets a bare `404` here, in the endpoint: no tenant assigned,
   the router never reached, the pipeline halted.
+
+  ## 404 for an unknown host, 503 for an unreachable database (#341)
+
+  A host that could not be *looked up* — Postgres down — is a different answer,
+  not a variant of the same one, and `KilnCMSWeb.Tenant.fetch_org/1` reports it
+  as `:unavailable`. Strict matching still refuses it (falling back would serve
+  the default org on an unrecognized host, the #563 leak), but as a plain-text
+  `503` carrying `retry-after`: the host may well exist, and 404 is what a CDN
+  caches, an uptime monitor pages a tenant about, and a search engine
+  deindexes on.
+
+  With strict matching **off** — the default single-host install, where nothing
+  is ever refused — an unresolvable host now falls back to the default org
+  during an outage exactly as it does normally, and this plug never sees the
+  refusal at all. That is load-bearing for #341: this plug halts above the
+  router, so refusing here is refusing *before* the content cache that is
+  supposed to keep serving without a database, and it used to do exactly that
+  the moment a host's `KilnCMS.Cache.Hosts` entry aged out mid-outage.
+
+  Both refusals keep the host-agnostic exemption below.
+
+  ### What the 503 costs on the un-metered path
+
+  This plug halts above every rate limiter (they all live in router pipelines),
+  so a refusal here is metered by nothing — the concern #659 is about. The
+  refusal itself is not the new cost: a failed read is deliberately never cached
+  (#1124, so a blip cannot be remembered as "no such org"), which means one
+  lookup attempt per request for the length of the outage, exactly as the 404
+  cost before it.
+
+  What is new is that a 503 *invites* the retry a 404 does not, so a client that
+  backs off on "gone" will keep asking on "try again". That is the honest
+  answer's price, `retry-after` is the lever, and it is bounded the same way
+  every other outage cost is: the lookups fail fast against a database that is
+  down rather than queueing. A deployment that cannot absorb it should terminate
+  unknown hosts at the proxy, which is the same advice the distinct-host flood
+  gets below.
 
   It answers directly rather than raising a `plug_status: 404` exception for the
   error renderer, for two reasons. The 404 template renders `Layouts.public`,
@@ -105,31 +142,62 @@ defmodule KilnCMSWeb.Plugs.SetTenant do
   @impl true
   def init(opts), do: opts
 
+  # Matches `KilnCMSWeb.ArtifactController`'s, which answers the same outage one
+  # layer further in: a client that retries both gets one interval, not two.
+  @retry_after_seconds 2
+
   @impl true
   def call(conn, _opts) do
     case KilnCMSWeb.Tenant.fetch_org(conn.host) do
       {:ok, org} -> put_tenant(conn, org)
-      :error -> reject(conn)
+      :error -> reject(conn, :unknown_host)
+      :unavailable -> reject(conn, :unavailable)
     end
   end
 
-  defp reject(conn) do
+  # The host-agnostic exemption covers both refusals. A probe or a provider
+  # webhook is no more host-scoped during an outage than it is normally, and
+  # `HealthController` reports a database that is down far better than a refusal
+  # from up here could — a 503 from this plug would take readiness's *answer*
+  # and replace it with the plug's opinion of the Host header.
+  defp reject(conn, reason) do
     if host_agnostic?(conn) do
       put_tenant(conn, KilnCMSWeb.Tenant.resolve_org(conn.host))
     else
-      # Debug, not warning: on the public internet an unmatched Host is constant
-      # background scanning, and one log line per rejection is the same
-      # unbounded write the plain response is avoiding. An operator debugging a
-      # tenant that won't resolve drops the level and sees exactly which host
-      # missed.
-      Logger.debug(fn -> "SetTenant: rejected unknown host #{inspect(conn.host)}" end)
-      KilnCMSWeb.TenantRefusalAlert.notify(:plug, conn.host)
-
-      conn
-      |> put_resp_content_type("text/plain")
-      |> send_resp(404, "Not Found: this server does not serve the requested host.\n")
-      |> halt()
+      refuse(conn, reason)
     end
+  end
+
+  defp refuse(conn, :unknown_host) do
+    # Debug, not warning: on the public internet an unmatched Host is constant
+    # background scanning, and one log line per rejection is the same
+    # unbounded write the plain response is avoiding. An operator debugging a
+    # tenant that won't resolve drops the level and sees exactly which host
+    # missed.
+    Logger.debug(fn -> "SetTenant: rejected unknown host #{inspect(conn.host)}" end)
+    KilnCMSWeb.TenantRefusalAlert.notify(:plug, conn.host)
+
+    conn
+    |> put_resp_content_type("text/plain")
+    |> send_resp(404, "Not Found: this server does not serve the requested host.\n")
+    |> halt()
+  end
+
+  defp refuse(conn, :unavailable) do
+    # No `TenantRefusalAlert`: it counts hosts this deployment does not serve and
+    # names `TENANT_STRICT_HOST` as the cause (#678). This host may be perfectly
+    # real — the database is what could not say — so feeding it there would turn
+    # every outage into a flood alert diagnosing the wrong thing.
+    #
+    # Debug for the same unbounded-write reason as above, and because an
+    # unreachable database is already saying so through every other component.
+    Logger.debug(fn -> "SetTenant: host #{inspect(conn.host)} unresolvable (lookup failed)" end)
+
+    conn
+    |> put_resp_content_type("text/plain")
+    |> put_resp_header("retry-after", Integer.to_string(@retry_after_seconds))
+    |> send_resp(503, "Service Unavailable: the host cannot be resolved right now.\n")
+    |> halt()
   end
 
   # The plug runs ahead of the router, but the router module is compiled and can

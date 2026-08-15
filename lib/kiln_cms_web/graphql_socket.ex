@@ -42,6 +42,13 @@ defmodule KilnCMSWeb.GraphqlSocket do
         )
 
         :error
+
+      # The lookup failed rather than found nothing. A socket has no 503 to
+      # send, so the connect is refused either way and the client retries — but
+      # it is not alerted, because the refusal alert counts hosts this
+      # deployment does not serve and this may be one it does.
+      :unavailable ->
+        :error
     end
   end
 

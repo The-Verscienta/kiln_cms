@@ -199,6 +199,22 @@ router.
 > apex itself (it resolves to the default org, and is never refused even if the
 > database is briefly unreachable). Anything else now gets a 404.
 
+**404 means "no such host"; a database outage gets a 503** (#341). A host that
+could not be *looked up* is a different answer from one that matches no org, and
+Kiln keeps them apart:
+
+- With `TENANT_STRICT_HOST` **off** — the default, and the whole single-host
+  install — a failed lookup falls back to the default org exactly as an
+  unmatched host does. Nothing is refused in this mode, including during an
+  outage, which is what lets warm content keep being served from cache without a
+  database (#341): tenant resolution runs in the endpoint, *above* the cache.
+- With it **on**, an unresolvable host is still refused (falling back would serve
+  the default org on an unrecognized host, which is what this setting exists to
+  prevent), but as a plain-text `503` with `retry-after`, not a `404`. The host
+  may well exist; a 404 is what a CDN caches, an uptime monitor pages the tenant
+  about, and a search engine deindexes on. The health-probe and webhook
+  exemptions above apply to this refusal too.
+
 **The refusal no longer costs a query every time** (#659). A refused request is
 halted before the router, and every rate limiter lives in a router pipeline — so
 turning this on originally took the path out of the `:delivery` ceiling and left
