@@ -494,15 +494,19 @@ an id naming **two** children in one submission is always refused — that
 collision would otherwise let a decoy satisfy the binding while the rendered
 child lost the value.
 
-The binding applies only to clients that round-trip ids, because nested child
-ids **cannot be read back** — `blocks` is not `public?` and the fired artifact
-carries `_id`, not `id`. A headless `block_tree` client cannot learn one, and
-`restore_version` takes only a `version_id`, so requiring ids would lock both
-out with no remedy. Those callers stay on the count-only rule.
+The binding is **required, not gated** (#954, #865): an id-less submission
+against an identified stored tree is refused, not silently downgraded to the
+count-only multiset. `KilnCMS.CMS.Calculations.BlockIds` is what makes that
+enforceable — it's what closed the gap that used to require gating (nested
+child ids were unreadable on a draft) — and it, along with the two narrow
+carve-outs that remain (`restore_version`, and a stored tree whose children
+never had ids to begin with), is documented in full at
+`KilnCMS.CMS.Changes.EnforceBlockFieldPolicy`'s moduledoc rather than
+repeated here.
 
 See residual risk 8 in [`threat-model.md`](threat-model.md) for what this does
-and does not guarantee — in particular that a caller dropping every nested id
-keeps the re-target, and that reusing another block's id remains open.
+and does not guarantee — in particular that a wholly id-less stored tree keeps
+the re-target until stamped, and that reusing another block's id remains open.
 
 ## Coverage
 
