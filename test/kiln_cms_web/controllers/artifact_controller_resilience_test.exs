@@ -49,16 +49,56 @@ defmodule KilnCMSWeb.ArtifactControllerResilienceTest do
   # machine, and flaked under full-suite scheduler contention (#1145, same
   # shape as the three budget bugs #1125 fixed). The loop returns on the first
   # message, so a generous deadline costs nothing when it passes.
-  defp without_db(fun) do
+  defp without_db(fun, retries \\ 3) do
+    warm_tenant_resolution()
+
     parent = self()
     spawn(fn -> send(parent, {:without_db, fun.()}) end)
 
-    receive do
-      {:without_db, result} -> result
-    after
-      30_000 -> flunk("timed out")
+    resp =
+      receive do
+        {:without_db, result} -> result
+      after
+        30_000 -> flunk("timed out")
+      end
+
+    if host_refused?(resp) and retries > 0 do
+      without_db(fun, retries - 1)
+    else
+      resp
     end
   end
+
+  # `KilnCMSWeb.Plugs.SetTenant` resolves the request's organization from its
+  # `Host` in the endpoint, ahead of the router, and that resolution is a
+  # database lookup unless `KilnCMS.Cache.Hosts` already holds the answer. A
+  # failed read is not a miss (#1124), so during the outage a cold host cache
+  # makes `Tenant.fetch_org/1` return `:error` and the request is refused as an
+  # unknown host — a plain 404, before the controller is reached at all.
+  #
+  # That is a property of tenant resolution, not of delivery, and delivery is
+  # what this suite is about. So prime the entry here, from the test process,
+  # which still has its database connection — as a deployment already serving
+  # traffic when Postgres went away would have it primed. It used to be primed
+  # only incidentally, by whichever test happened to issue the first request, so
+  # the cold-content test below failed whenever it ran first.
+  defp warm_tenant_resolution do
+    host = build_conn().host
+
+    assert {:ok, _org} = KilnCMSWeb.Tenant.fetch_org(host)
+    assert {:ok, cached} = Cachex.get(KilnCMS.Cache.Hosts.cache_name(), host)
+    refute is_nil(cached), "host resolution for #{host} was not cached, so the outage will 404"
+  end
+
+  # The host cache is global and other suites clear it wholesale
+  # (`live_host_uri_test`), so the entry warmed above can still be dropped
+  # between the warm-up and the dispatch. Matched on the refusal `SetTenant`
+  # actually sends rather than on any 404, so a delivery path that genuinely
+  # starts answering 404 fails the assertion instead of being retried away.
+  defp host_refused?(%Plug.Conn{status: 404} = resp),
+    do: resp.resp_body =~ "does not serve the requested host"
+
+  defp host_refused?(_resp), do: false
 
   # Warm the caches (resolution + fired body) while the DB is up, then dispatch
   # the same GET from a process with no DB access. The content cache is global
