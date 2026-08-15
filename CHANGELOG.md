@@ -254,6 +254,15 @@ migration, a rewritten column, a dropped config key).
   Save, for the same reason `last_reviewed_at` is not in `default_accept`: an
   editor who saves a typo fix has not re-read the piece.
 
+  The governance dashboard gains a **Content health** section — counts by
+  health, the ten most urgent records, and an admin-only CSV export at
+  `GET /editor/governance/health.csv`. It distinguishes "we checked and nothing
+  is late" from "nothing here has a review cadence at all", which a count alone
+  cannot: a panel rendering `0 overdue` for a site that has never set a cadence
+  states something false in a reassuring voice. Recomputed per load rather than
+  stored, and cheap because the filter runs in Postgres — a site with forty
+  thousand fresh pages reads none of them.
+
 - **Office documents and zip archives in the document library** (#808).
   Follow-up to #481, which scoped the gated document library to PDF only for
   v1: `KilnCMS.DocumentProcessor` now byte-validates `.docx`/`.xlsx`/`.pptx`

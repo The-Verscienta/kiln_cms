@@ -36,6 +36,10 @@ defmodule KilnCMSWeb.GovernanceLive do
     # resolved per page load like the witness status beside it — see
     # `KilnCMS.Compliance.Report` for why there is no findings table.
     |> assign(:claims, Compliance.Report.for_org(socket.assigns.current_org.id))
+    # Content freshness (docs/content-lifecycles.md). Recomputed per load like
+    # the two panels above, and for the same reason: `health` is a calculation,
+    # so a stored count would be wrong from the moment a deadline passed.
+    |> assign(:health, KilnCMS.CMS.HealthSummary.for_org(socket.assigns.current_org.id))
   end
 
   defp apply_action(socket, :show, %{"type" => type, "id" => id}) do
@@ -252,11 +256,100 @@ defmodule KilnCMSWeb.GovernanceLive do
       page_title={@page_title}
       active={:governance}
     >
-      <.index :if={is_nil(@trail)} content={@content} witness={@witness} claims={@claims} />
+      <.index
+        :if={is_nil(@trail)}
+        content={@content}
+        witness={@witness}
+        claims={@claims}
+        health={@health}
+      />
       <.detail :if={@trail} trail={@trail} consent_form={@consent_form} />
     </Layouts.console>
     """
   end
+
+  attr :health, :map, required: true
+
+  # Whether the library is rotting (docs/content-lifecycles.md).
+  #
+  # #500's calendar answers "what is due this month" and the sweep answers it
+  # for a scheduler. Neither answers the question a compliance officer has,
+  # which is the aggregate one: how much of what we publish has gone past the
+  # date we said we would re-read it by.
+  #
+  # "No cadences set" is rendered rather than skipped, for the same reason
+  # `claims_panel/1` renders "off": a panel showing `0 overdue` on a site that
+  # has never set a review cadence states something false in a reassuring voice,
+  # and "we checked, nothing is late" is the opposite fact from "we have never
+  # asked".
+  defp health_panel(assigns) do
+    ~H"""
+    <section class="card card-pad space-y-3" data-role="content-health">
+      <div class="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 class="text-lg font-medium">{gettext("Content health")}</h2>
+        <.link
+          :if={@health.in_use? and @health.worst != []}
+          href={~p"/editor/governance/health.csv"}
+          class="text-xs link"
+        >
+          {gettext("Export CSV")}
+        </.link>
+      </div>
+
+      <p :if={not @health.in_use?} class="text-sm text-base-content/70">
+        {gettext(
+          "No published content on this site carries a review cadence or an unpublish date, so there is nothing to age. Set one on a record's Settings tab to start tracking freshness."
+        )}
+      </p>
+
+      <div :if={@health.in_use?} class="flex flex-wrap gap-2">
+        <span
+          :for={health <- KilnCMS.CMS.HealthSummary.unhealthy()}
+          class={[
+            "inline-flex items-baseline gap-1.5 rounded-lg px-2.5 py-1 text-sm",
+            @health.counts[health] == 0 && "bg-base-200 text-base-content/50",
+            @health.counts[health] > 0 && count_tone(health)
+          ]}
+        >
+          <span class="font-semibold tabular-nums">{@health.counts[health]}</span>
+          {health_label(health)}
+        </span>
+      </div>
+
+      <p
+        :if={@health.in_use? and @health.worst == []}
+        class="text-sm text-base-content/60"
+      >
+        {gettext("Everything with a cadence is inside it.")}
+      </p>
+
+      <p :if={@health.truncated?} class="text-sm text-warning">
+        {gettext("Counts are capped per content type — there may be more than shown.")}
+      </p>
+
+      <ul :if={@health.worst != []} class="divide-y divide-base-content/10">
+        <li :for={row <- @health.worst} class="flex flex-wrap items-baseline gap-2 py-2">
+          <.link
+            navigate={~p"/editor/content/#{row.type}/#{row.id}"}
+            class="text-sm font-medium hover:underline"
+          >
+            {row.title}
+          </.link>
+          <span class="text-xs text-base-content/50">{row.label}</span>
+          <.health_badge health={row.health} due_at={row.due_at} />
+          <span :if={row.due_at} class="text-xs text-base-content/60">
+            {gettext("due %{date}", date: Calendar.strftime(row.due_at, "%Y-%m-%d"))}
+          </span>
+        </li>
+      </ul>
+    </section>
+    """
+  end
+
+  defp count_tone(:expired), do: "bg-error/12 text-error-ink"
+  defp count_tone(:overdue), do: "bg-error/12 text-error-ink"
+  defp count_tone(:due), do: "bg-warning/20 text-warning-ink"
+  defp count_tone(_due_soon), do: "bg-info/12 text-info-ink"
 
   attr :claims, :map, required: true
 
@@ -460,6 +553,7 @@ defmodule KilnCMSWeb.GovernanceLive do
   attr :content, :list, required: true
   attr :witness, :map, required: true
   attr :claims, :map, required: true
+  attr :health, :map, required: true
 
   defp index(assigns) do
     ~H"""
@@ -473,6 +567,7 @@ defmodule KilnCMSWeb.GovernanceLive do
 
       <.witness_panel witness={@witness} />
       <.claims_panel claims={@claims} />
+      <.health_panel health={@health} />
 
       <p :if={@content == []} class="text-sm text-base-content/60">{gettext("No content yet.")}</p>
 

@@ -286,6 +286,24 @@ Lifecycle tasks are tagged `kind: :lifecycle_review` (manual ones are
 `:manual`), and they opt out of #501's auto-complete-on-publish: republishing
 the same stale document is exactly what the review exists to question.
 
+### On the governance dashboard
+
+`/editor/governance` carries a **Content health** section: counts across
+`:due_soon` / `:due` / `:overdue` / `:expired`, the ten most urgent records, and
+a CSV export of all of them (`GET /editor/governance/health.csv`, admin-only).
+
+It distinguishes two things a count alone cannot. A site where nothing carries a
+review cadence says so — because a panel rendering `0 overdue` for a site that
+has never set one is stating something false in a reassuring voice, and "we
+checked, nothing is late" is the opposite fact from "we have never asked". Only
+once something *is* tracked does the panel report a clean bill.
+
+The counts are recomputed per page load rather than stored, for the same reason
+`health` is a calculation: a stored count is wrong from the moment a deadline
+passes. It is cheap because the query filters on `health` in Postgres, so a site
+with forty thousand fresh pages reads none of them — the result set is the
+problem list, not the library.
+
 ### In the editor
 
 The content editor's header carries a health pill next to the workflow state

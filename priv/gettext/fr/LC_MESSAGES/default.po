@@ -2395,6 +2395,11 @@ msgstr "Un contenu peut porter autant d'étiquettes que nécessaire."
 msgid "Content gaps"
 msgstr "Lacunes de contenu"
 
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Content health"
+msgstr "État du contenu"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Content intelligence is at its rate limit right now. Please try again shortly."
@@ -2861,6 +2866,11 @@ msgstr "Vérification de cette clé d'accès impossible — réessayez."
 #, elixir-autogen, elixir-format
 msgid "Count"
 msgstr "Nombre"
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Counts are capped per content type — there may be more than shown."
+msgstr "Les décomptes sont plafonnés par type de contenu — il peut y en avoir plus que ce qui est affiché."
 
 #: lib/kiln_cms_web/live/analytics_live.ex
 #, elixir-autogen, elixir-format
@@ -4000,6 +4010,11 @@ msgstr "Chaque requête relit la base de données jusqu'à ce que le cache se re
 msgid "Every scanned slug already matches its derivation."
 msgstr "Chaque slug analysé correspond déjà à sa dérivation."
 
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Everything with a cadence is inside it."
+msgstr "Tout ce qui a une cadence la respecte."
+
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -4058,6 +4073,7 @@ msgid "Export (JSON)"
 msgstr "Exporter (JSON)"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
+#: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Export CSV"
 msgstr "Exporter en CSV"
@@ -6009,6 +6025,11 @@ msgstr "Aucune URL d'aperçu configurée."
 #, elixir-autogen, elixir-format
 msgid "No public index of published entries, so this type never syndicates. Turn that on in Content types first."
 msgstr "Pas d'index public des entrées publiées : ce type n'est donc jamais diffusé. Activez-le d'abord dans Types de contenu."
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "No published content on this site carries a review cadence or an unpublish date, so there is nothing to age. Set one on a record's Settings tab to start tracking freshness."
+msgstr "Aucun contenu publié sur ce site ne porte de cadence de révision ni de date de dépublication : il n'y a donc rien qui vieillisse. Définissez-en une dans l'onglet Réglages d'un enregistrement pour suivre la fraîcheur."
 
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #, elixir-autogen, elixir-format
@@ -11000,6 +11021,11 @@ msgstr "brouillon"
 #, elixir-autogen, elixir-format
 msgid "draft created"
 msgstr "brouillon créé"
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "due %{date}"
+msgstr "à réviser le %{date}"
 
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format

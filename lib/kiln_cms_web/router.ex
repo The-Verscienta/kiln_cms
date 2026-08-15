@@ -445,6 +445,10 @@ defmodule KilnCMSWeb.Router do
     # controller against the `:browser`-loaded user.
     get "/editor/governance/:type/:id/export.json", GovernanceController, :export
     get "/editor/governance/:type/:id/export.csv", GovernanceController, :export_csv
+    # Org-wide rather than per item. Three segments against the pair's four, so
+    # the router tells them apart on arity and this cannot be read as a content
+    # type called "health".
+    get "/editor/governance/health.csv", GovernanceController, :export_health_csv
 
     # Form entries export (#477) — file download, admin-gated in the
     # controller (submissions are visitor-provided data, frequently PII;
