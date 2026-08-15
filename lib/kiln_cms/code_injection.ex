@@ -41,8 +41,6 @@ defmodule KilnCMS.CodeInjection do
   alias KilnCMS.Accounts
   alias KilnCMS.CMS
 
-  require Logger
-
   defstruct head_html: nil,
             footer_html: nil,
             script_src: [],
@@ -77,9 +75,18 @@ defmodule KilnCMS.CodeInjection do
   def for_org(nil), do: for_org(Accounts.default_org_id())
 
   def for_org(org_id) when is_binary(org_id) do
-    KilnCMS.Cache.fetch(KilnCMS.Cache.code_injection_key(org_id), @ttl, fn ->
-      resolve(org_id)
-    end) || empty()
+    # One read-and-degrade rule for every per-org settings resolver (#1080):
+    # `:error` (not nil) on an infrastructure failure, which is not cached, so
+    # a transient fault degrades to "no injection" for one request rather than
+    # for the whole TTL.
+    KilnCMS.OrgSettings.resolve(org_id,
+      cache_key: KilnCMS.Cache.code_injection_key(org_id),
+      ttl: @ttl,
+      read: &CMS.list_site_code_injection(authorize?: false, tenant: &1),
+      build: &build/1,
+      fallback: &empty/0,
+      label: "code injection"
+    )
   end
 
   def for_org(_), do: empty()
@@ -222,14 +229,10 @@ defmodule KilnCMS.CodeInjection do
     end
   end
 
-  defp resolve(org_id) do
-    case row(org_id) do
-      :error -> nil
-      nil -> empty()
-      %{enabled: false} -> empty()
-      row -> build(row)
-    end
-  end
+  # No row, or a row switched off, both resolve to nothing — and both are
+  # cached as such (see `KilnCMS.OrgSettings`).
+  defp build(nil), do: empty()
+  defp build(%{enabled: false}), do: empty()
 
   defp build(row) do
     %__MODULE__{
@@ -246,23 +249,5 @@ defmodule KilnCMS.CodeInjection do
 
   defp blank_to_nil(value) do
     if String.trim(value) == "", do: nil, else: value
-  end
-
-  # `:error` (not nil) on an infrastructure failure, so `resolve/1` can decline
-  # to cache it — a transient fault degrades to "no injection" for one request
-  # rather than for the whole TTL.
-  defp row(org_id) do
-    case CMS.list_site_code_injection(authorize?: false, tenant: org_id) do
-      {:ok, [row | _]} -> row
-      {:ok, []} -> nil
-      {:error, reason} -> log_error(reason)
-    end
-  rescue
-    error -> log_error(error)
-  end
-
-  defp log_error(reason) do
-    Logger.warning("Code injection unreadable, serving none: #{inspect(reason)}")
-    :error
   end
 end

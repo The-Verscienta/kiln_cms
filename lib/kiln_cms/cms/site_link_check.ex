@@ -24,28 +24,18 @@ defmodule KilnCMS.CMS.SiteLinkCheck do
   not in `default_accept`: a settings form that could backdate it would make the
   report's "checked as of" line say whatever the last person to save wanted.
   """
-  use Ash.Resource,
-    domain: KilnCMS.CMS,
-    data_layer: AshPostgres.DataLayer,
-    authorizers: [Ash.Policy.Authorizer]
-
-  postgres do
-    table "site_link_check"
-    repo KilnCMS.Repo
-  end
+  # The shared one-row-per-org shape comes from `KilnCMS.CMS.OrgSettings`
+  # (#1080). Editors read it: the report page shows whether checking is on, and
+  # an editor looking at an empty report deserves to know it is empty because
+  # nothing has run rather than because nothing is broken. Deciding that this
+  # deployment makes outbound requests is an admin act.
+  use KilnCMS.CMS.OrgSettings,
+    table: "site_link_check",
+    accept: [:external_enabled],
+    read: :editor,
+    update?: false
 
   actions do
-    defaults [:read]
-
-    default_accept [:external_enabled]
-
-    create :save do
-      primary? true
-      upsert? true
-      upsert_identity :one_per_org
-      upsert_fields [:external_enabled]
-    end
-
     # Written by `KilnCMS.Links.Sweep` when a run finishes, system-side. Its own
     # action rather than a field on `:save` so no settings form can reach it.
     update :record_sweep do
@@ -53,43 +43,9 @@ defmodule KilnCMS.CMS.SiteLinkCheck do
       accept []
       change set_attribute(:last_swept_at, &DateTime.utc_now/0)
     end
-
-    destroy :destroy do
-      primary? true
-      require_atomic? false
-    end
-  end
-
-  policies do
-    # Editors read it: the report page shows whether checking is on, and an
-    # editor looking at an empty report deserves to know it is empty because
-    # nothing has run rather than because nothing is broken.
-    policy action_type(:read) do
-      authorize_if KilnCMS.CMS.Checks.OrgEditor
-    end
-
-    # Deciding that this deployment makes outbound requests is an admin act.
-    policy action_type([:create, :update, :destroy]) do
-      authorize_if KilnCMS.CMS.Checks.OrgAdmin
-    end
-  end
-
-  multitenancy do
-    strategy :attribute
-    attribute :org_id
-    global? !Application.compile_env(:kiln_cms, :strict_tenancy, true)
   end
 
   attributes do
-    uuid_primary_key :id
-
-    attribute :org_id, :uuid do
-      allow_nil? false
-      default &KilnCMS.Accounts.default_org_id/0
-      writable? false
-      public? false
-    end
-
     attribute :external_enabled, :boolean do
       default false
       allow_nil? false
@@ -102,20 +58,5 @@ defmodule KilnCMS.CMS.SiteLinkCheck do
       writable? false
       public? true
     end
-
-    timestamps()
-  end
-
-  relationships do
-    belongs_to :organization, KilnCMS.Accounts.Organization do
-      source_attribute :org_id
-      define_attribute? false
-      attribute_writable? false
-      public? false
-    end
-  end
-
-  identities do
-    identity :one_per_org, [:org_id]
   end
 end

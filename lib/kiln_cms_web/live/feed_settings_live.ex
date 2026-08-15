@@ -182,30 +182,13 @@ defmodule KilnCMSWeb.FeedSettingsLive do
   defp source_label(%{source: :dynamic}), do: gettext("Custom")
   defp source_label(_descriptor), do: gettext("Built-in")
 
+  # Shared with the other settings pages (#1080).
   defp error_message(error) do
-    case error do
-      %Ash.Error.Forbidden{} ->
-        gettext("You don't have permission to change this site's feed settings.")
-
-      _other ->
-        error
-        |> Ash.Error.to_error_class()
-        |> Map.get(:errors, [])
-        |> Enum.map_join(" ", &describe_error/1)
-        |> case do
-          "" -> gettext("Feed settings could not be saved.")
-          message -> message
-        end
-    end
+    ash_error_message(error,
+      forbidden: gettext("You don't have permission to change this site's feed settings."),
+      fallback: gettext("Feed settings could not be saved.")
+    )
   end
-
-  defp describe_error(%{message: message} = error) when is_binary(message) do
-    Enum.reduce(Map.get(error, :vars, []), message, fn {key, value}, acc ->
-      String.replace(acc, "%{#{key}}", to_string(value))
-    end)
-  end
-
-  defp describe_error(error), do: Exception.message(error)
 
   @impl true
   def render(assigns) do

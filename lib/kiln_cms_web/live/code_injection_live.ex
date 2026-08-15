@@ -133,30 +133,13 @@ defmodule KilnCMSWeb.CodeInjectionLive do
 
   defp blank_to_nil(value), do: value
 
+  # Shared with the other settings pages (#1080).
   defp error_message(error) do
-    case error do
-      %Ash.Error.Forbidden{} ->
-        gettext("You don't have permission to change this site's code injection.")
-
-      _ ->
-        error
-        |> Ash.Error.to_error_class()
-        |> Map.get(:errors, [])
-        |> Enum.map_join(" ", &describe_error/1)
-        |> case do
-          "" -> gettext("Code injection could not be saved.")
-          message -> message
-        end
-    end
+    ash_error_message(error,
+      forbidden: gettext("You don't have permission to change this site's code injection."),
+      fallback: gettext("Code injection could not be saved.")
+    )
   end
-
-  defp describe_error(%{message: message} = error) when is_binary(message) do
-    Enum.reduce(Map.get(error, :vars, []), message, fn {key, value}, acc ->
-      String.replace(acc, "%{#{key}}", to_string(value))
-    end)
-  end
-
-  defp describe_error(error), do: Exception.message(error)
 
   @impl true
   def render(assigns) do

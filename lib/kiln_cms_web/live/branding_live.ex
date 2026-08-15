@@ -178,28 +178,15 @@ defmodule KilnCMSWeb.BrandingLive do
 
   defp blank_to_nil(value), do: value
 
+  # Shared with the other settings pages (#1080) — this copy used to render
+  # `"field: message"` without interpolating the error's `vars`, so a refused
+  # brand token arrived as a literal `%{value}` template.
   defp error_message(error) do
-    case error do
-      %Ash.Error.Forbidden{} ->
-        gettext("You don't have permission to change this site's branding.")
-
-      _ ->
-        error
-        |> Ash.Error.to_error_class()
-        |> Map.get(:errors, [])
-        |> Enum.map_join(" ", &describe_error/1)
-        |> case do
-          "" -> gettext("Branding could not be saved.")
-          message -> message
-        end
-    end
+    ash_error_message(error,
+      forbidden: gettext("You don't have permission to change this site's branding."),
+      fallback: gettext("Branding could not be saved.")
+    )
   end
-
-  defp describe_error(%{field: field, message: message}) when not is_nil(field),
-    do: "#{field}: #{message}"
-
-  defp describe_error(%{message: message}) when is_binary(message), do: message
-  defp describe_error(error), do: Exception.message(error)
 
   # The values in force right now, used as input placeholders so an admin can
   # see what a blank field will inherit.

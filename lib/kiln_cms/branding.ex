@@ -80,11 +80,21 @@ defmodule KilnCMS.Branding do
   def for_org(nil), do: for_org(Accounts.default_org_id())
 
   def for_org(org_id) when is_binary(org_id) do
-    # `resolve/1` returns nil only on an infrastructure failure, which the cache
-    # then declines to store — so a transient error degrades to the operator
-    # defaults for one request rather than for the whole TTL.
-    KilnCMS.Cache.fetch(KilnCMS.Cache.branding_key(org_id), @ttl, fn -> resolve(org_id) end) ||
-      defaults()
+    # One read-and-degrade rule for every per-org settings resolver (#1080):
+    # a transient failure degrades to the operator defaults for one request
+    # rather than for the whole TTL, and "no row" is cached as `build(nil)`.
+    KilnCMS.OrgSettings.resolve(org_id,
+      cache_key: KilnCMS.Cache.branding_key(org_id),
+      ttl: @ttl,
+      # A system read: the row is world-readable by policy, but the layout
+      # renders for anonymous visitors with no actor, and skipping the
+      # authorizer keeps the cache-miss path cheap. Tenant-scoped, so strict
+      # tenancy is satisfied.
+      read: &KilnCMS.CMS.list_site_branding(tenant: &1, authorize?: false),
+      build: &build/1,
+      fallback: &defaults/0,
+      label: "branding"
+    )
   end
 
   def for_org(_), do: defaults()
@@ -119,13 +129,6 @@ defmodule KilnCMS.Branding do
   """
   @spec branded?(t()) :: boolean()
   def branded?(%__MODULE__{} = brand), do: brand.site_name != @default_site_name
-
-  defp resolve(org_id) do
-    case row(org_id) do
-      :error -> nil
-      row -> build(row)
-    end
-  end
 
   defp build(row) do
     color = pick(row && row.brand_color, config(:primary_color), nil)
@@ -211,27 +214,6 @@ defmodule KilnCMS.Branding do
   end
 
   defp present(_), do: nil
-
-  # A system read: the row is world-readable by policy, but the layout renders
-  # for anonymous visitors with no actor, and skipping the authorizer keeps the
-  # cache-miss path cheap. Tenant-scoped, so strict tenancy is satisfied.
-  #
-  # Returns the row, `nil` when the site has none, or `:error` on an
-  # infrastructure failure (which must NOT be cached).
-  defp row(org_id) do
-    case KilnCMS.CMS.list_site_branding(tenant: org_id, authorize?: false) do
-      {:ok, [row | _rest]} -> row
-      {:ok, []} -> nil
-      _ -> :error
-    end
-  rescue
-    # e.g. the table doesn't exist yet mid-rolling-deploy. Every page renders
-    # through here, so degrade to the operator defaults rather than 500ing the
-    # whole install.
-    error ->
-      Logger.warning("branding lookup failed, using defaults: #{Exception.message(error)}")
-      :error
-  end
 
   # The brand colour is held to the same grammar wherever it comes from, so an
   # environment variable can't become the injection vector the database column

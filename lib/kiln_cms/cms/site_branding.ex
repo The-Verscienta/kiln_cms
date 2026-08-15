@@ -22,10 +22,50 @@ defmodule KilnCMS.CMS.SiteBranding do
   `KilnCMS.Mail.ensure_settings!/0` pattern) would turn every anonymous page
   view into an `INSERT`, since branding renders on the public delivery path.
   """
-  use Ash.Resource,
-    domain: KilnCMS.CMS,
-    data_layer: AshPostgres.DataLayer,
-    authorizers: [Ash.Policy.Authorizer],
+  # The shared one-row-per-org shape comes from `KilnCMS.CMS.OrgSettings`
+  # (#1080). Branding renders on every public page (header logo, title suffix,
+  # JSON-LD publisher), so the tokens are public information — same rationale
+  # as `KilnCMS.CMS.Redirect`; the read is tenant-scoped, so it exposes only the
+  # requesting site's own row. Writes are an org-admin act, resolved against
+  # the REQUEST's org (no platform-admin bypass needed:
+  # `Scoping.effective_tier/2`'s first clause already returns `:admin` for a
+  # platform admin on every org).
+  #
+  # The settings form saves the whole token set in one `:save` whether or not a
+  # row exists yet — no get-or-create race. `upsert_fields` is explicit so a
+  # partial submission can't null out a field it didn't render; listing
+  # `app_icon_url` and `app_icon_size` both does NOT pair them — AshPostgres
+  # filters `upsert_fields` down to the attributes actually in the changeset,
+  # so a write carrying only the URL would leave the old size in place.
+  # `Changes.PairAppIcon` (on `:save` and `:update`, with the `app_icon_size`
+  # argument — not an attribute: the measured edge may only be written together
+  # with the URL it measured) is what makes them one decision; the entries here
+  # only say the columns are upsertable at all.
+  use KilnCMS.CMS.OrgSettings,
+    table: "site_branding",
+    accept: [
+      :site_name,
+      :logo_url,
+      :favicon_url,
+      :social_image_url,
+      :app_icon_url,
+      :brand_color,
+      :show_attribution
+    ],
+    upsert_fields: [
+      :site_name,
+      :logo_url,
+      :favicon_url,
+      :social_image_url,
+      :app_icon_url,
+      :app_icon_size,
+      :app_icon_verify_failures,
+      :brand_color,
+      :show_attribution
+    ],
+    read: :public,
+    save_arguments: [{:app_icon_size, :integer}],
+    save_changes: [KilnCMS.CMS.Changes.PairAppIcon],
     extensions: [AshOban]
 
   # Consecutive nightly verify failures before `app_icon_size` is cleared
@@ -35,11 +75,6 @@ defmodule KilnCMS.CMS.SiteBranding do
   @doc "How many consecutive re-verify failures clear `app_icon_size` (#1147)."
   @spec app_icon_failure_threshold() :: pos_integer()
   def app_icon_failure_threshold, do: @app_icon_failure_threshold
-
-  postgres do
-    table "site_branding"
-    repo KilnCMS.Repo
-  end
 
   oban do
     use_tenant_from_record? true
@@ -63,67 +98,6 @@ defmodule KilnCMS.CMS.SiteBranding do
   end
 
   actions do
-    defaults [:read]
-
-    default_accept [
-      :site_name,
-      :logo_url,
-      :favicon_url,
-      :social_image_url,
-      :app_icon_url,
-      :brand_color,
-      :show_attribution
-    ]
-
-    # `require_atomic? false` throughout: the cache-bust and colour-normalize
-    # changes run in Elixir, not SQL. Branding writes are rare (an admin saving a
-    # settings form), so a transaction per write costs nothing here.
-    destroy :destroy do
-      primary? true
-      require_atomic? false
-    end
-
-    # The settings form saves the whole token set in one action whether or not a
-    # row exists yet — no get-or-create race. `upsert_fields` is explicit so a
-    # partial submission can't null out a field it didn't render.
-    create :save do
-      primary? true
-      upsert? true
-      upsert_identity :one_per_org
-
-      # Not an attribute: the measured edge may only be written together with
-      # the URL it measured. See `KilnCMS.CMS.Changes.PairAppIcon`.
-      argument :app_icon_size, :integer
-
-      change KilnCMS.CMS.Changes.PairAppIcon
-
-      upsert_fields [
-        :site_name,
-        :logo_url,
-        :favicon_url,
-        :social_image_url,
-        # Listing both here does NOT pair them — AshPostgres filters
-        # `upsert_fields` down to the attributes actually in the changeset, so
-        # a write carrying only the URL would leave the old size in place.
-        # `Changes.PairAppIcon` is what makes them one decision; these two
-        # entries only say the columns are upsertable at all.
-        :app_icon_url,
-        :app_icon_size,
-        :app_icon_verify_failures,
-        :brand_color,
-        :show_attribution
-      ]
-    end
-
-    update :update do
-      primary? true
-      require_atomic? false
-
-      argument :app_icon_size, :integer
-
-      change KilnCMS.CMS.Changes.PairAppIcon
-    end
-
     # Rows with a configured icon URL — feed for the nightly re-verify (#1147).
     read :with_app_icon do
       description "Site branding rows that have an app icon URL to re-check."
@@ -142,22 +116,8 @@ defmodule KilnCMS.CMS.SiteBranding do
   end
 
   policies do
-    # Branding renders on every public page (header logo, title suffix, JSON-LD
-    # publisher), so the tokens are public information — same rationale as
-    # `KilnCMS.CMS.Redirect`. The read is tenant-scoped, so this exposes only the
-    # requesting site's own row.
-    policy action_type(:read) do
-      authorize_if always()
-    end
-
-    # Writes are an org-admin act, resolved against the REQUEST's org. No
-    # platform-admin bypass is needed: `Scoping.effective_tier/2`'s first clause
-    # already returns `:admin` for a platform admin on every org.
-    policy action_type([:create, :update, :destroy]) do
-      authorize_if KilnCMS.CMS.Checks.OrgAdmin
-    end
-
     # The nightly re-verify reads + updates as a trusted system job (no actor).
+    # Appended after the shared read/write policies `OrgSettings` emits.
     bypass AshOban.Checks.AshObanInteraction do
       authorize_if always()
     end
@@ -172,24 +132,7 @@ defmodule KilnCMS.CMS.SiteBranding do
     validate KilnCMS.CMS.Validations.BrandTokens
   end
 
-  multitenancy do
-    strategy :attribute
-    attribute :org_id
-    global? !Application.compile_env(:kiln_cms, :strict_tenancy, true)
-  end
-
   attributes do
-    uuid_primary_key :id
-
-    # The owning organization (epic #336) — same contract as every per-site
-    # resource: set from the tenant, never accepted from input.
-    attribute :org_id, :uuid do
-      allow_nil? false
-      default &KilnCMS.Accounts.default_org_id/0
-      writable? false
-      public? false
-    end
-
     attribute :site_name, :string, public?: true, constraints: [max_length: KilnCMS.Limits.line()]
 
     # A relative path, or an absolute https:// URL on a host the CSP `img-src`
@@ -249,18 +192,5 @@ defmodule KilnCMS.CMS.SiteBranding do
       allow_nil? false
       public? true
     end
-
-    timestamps()
-  end
-
-  relationships do
-    belongs_to :organization, KilnCMS.Accounts.Organization do
-      source_attribute :org_id
-      define_attribute? false
-    end
-  end
-
-  identities do
-    identity :one_per_org, [:org_id]
   end
 end

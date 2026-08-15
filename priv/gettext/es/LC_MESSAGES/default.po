@@ -9301,6 +9301,7 @@ msgstr "El bloque al que estaba anclada esta tarea ha sido eliminado."
 msgid "The campaign couldn't be recorded — check the details."
 msgstr "No se pudo registrar la campaña: compruebe los detalles."
 
+#: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "The change could not be saved."
@@ -10611,6 +10612,11 @@ msgstr "No tienes permiso para cambiar la configuración de feeds de este sitio.
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to change this site's form settings."
 msgstr "No tiene permiso para cambiar la configuración de formularios de este sitio."
+
+#: lib/kiln_cms_web/components/core_components.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to change this."
+msgstr "No tiene permiso para cambiar esto."
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format

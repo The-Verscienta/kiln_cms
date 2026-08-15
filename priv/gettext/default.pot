@@ -9301,6 +9301,7 @@ msgstr ""
 msgid "The campaign couldn't be recorded — check the details."
 msgstr ""
 
+#: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "The change could not be saved."
@@ -10610,6 +10611,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/form_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to change this site's form settings."
+msgstr ""
+
+#: lib/kiln_cms_web/components/core_components.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to change this."
 msgstr ""
 
 #: lib/kiln_cms_web/live/media_live.ex

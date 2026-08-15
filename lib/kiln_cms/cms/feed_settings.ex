@@ -23,94 +23,35 @@ defmodule KilnCMS.CMS.FeedSettings do
   issue exists to remove. `/editor/feeds` writes explicit lists on save and drops
   the whole row on "reset", which is how an admin gets back to `nil`.
   """
-  use Ash.Resource,
-    domain: KilnCMS.CMS,
-    data_layer: AshPostgres.DataLayer,
-    authorizers: [Ash.Policy.Authorizer],
-    extensions: [AshAdmin.Resource]
+  # The shared one-row-per-org shape comes from `KilnCMS.CMS.OrgSettings`
+  # (#1080). Never delivered as a document the way branding is: the resolved
+  # policy reaches the delivery path through `KilnCMS.Feeds`, which reads it as
+  # a system read. So no public read here.
+  use KilnCMS.CMS.OrgSettings,
+    table: "feed_settings",
+    accept: [:excluded_types, :full_content_types],
+    read: :admin,
+    admin_columns: [:excluded_types, :full_content_types, :updated_at]
 
   # A ceiling on how many type names one list may carry. Comfortably above any
   # real site's type count, and there only so a settings row can never make a
   # per-request `not in` scan unbounded.
   @max_types 1_000
 
-  admin do
-    resource_group :content
-    table_columns [:excluded_types, :full_content_types, :updated_at]
-  end
-
-  postgres do
-    table "feed_settings"
-    repo KilnCMS.Repo
-  end
-
-  actions do
-    defaults [:read]
-
-    default_accept [:excluded_types, :full_content_types]
-
-    # On a conflict AshPostgres narrows `upsert_fields` to the attributes the
-    # changeset actually carries, so omitting one column leaves it alone rather
-    # than nulling it — which is what makes a partial
-    # `save_feed_settings(%{full_content_types: […]})` safe. That narrowing is
-    # computed across a whole *batch*, so a bulk upsert mixing rows that set
-    # different columns would write NULL into the one a given row omitted, and a
-    # NULL here does not mean "unchanged", it means "inherit the operator
-    # config" — the inversion #719 exists to remove. Write these one row at a
-    # time, which is all `/editor/feeds` and the code interface ever do.
-    create :save do
-      primary? true
-      upsert? true
-      upsert_identity :one_per_org
-      upsert_fields [:excluded_types, :full_content_types]
-
-      change KilnCMS.CMS.Changes.BustFeedSettings
-    end
-
-    update :update do
-      primary? true
-      require_atomic? false
-
-      change KilnCMS.CMS.Changes.BustFeedSettings
-    end
-
-    destroy :destroy do
-      primary? true
-      require_atomic? false
-
-      change KilnCMS.CMS.Changes.BustFeedSettings
-    end
-  end
-
-  policies do
-    # Never delivered as a document the way branding is: the resolved policy
-    # reaches the delivery path through `KilnCMS.Feeds`, which reads it as a
-    # system read. So no public read here.
-    policy action_type(:read) do
-      authorize_if KilnCMS.CMS.Checks.OrgAdmin
-    end
-
-    policy action_type([:create, :update, :destroy]) do
-      authorize_if KilnCMS.CMS.Checks.OrgAdmin
-    end
-  end
-
-  multitenancy do
-    strategy :attribute
-    attribute :org_id
-    global? !Application.compile_env(:kiln_cms, :strict_tenancy, true)
+  # On a conflict AshPostgres narrows the `:save` upsert's fields to the
+  # attributes the changeset actually carries, so omitting one column leaves it
+  # alone rather than nulling it — which is what makes a partial
+  # `save_feed_settings(%{full_content_types: […]})` safe. That narrowing is
+  # computed across a whole *batch*, so a bulk upsert mixing rows that set
+  # different columns would write NULL into the one a given row omitted, and a
+  # NULL here does not mean "unchanged", it means "inherit the operator
+  # config" — the inversion #719 exists to remove. Write these one row at a
+  # time, which is all `/editor/feeds` and the code interface ever do.
+  changes do
+    change KilnCMS.CMS.Changes.BustFeedSettings, on: [:create, :update, :destroy]
   end
 
   attributes do
-    uuid_primary_key :id
-
-    attribute :org_id, :uuid do
-      allow_nil? false
-      default &KilnCMS.Accounts.default_org_id/0
-      writable? false
-      public? false
-    end
-
     # Content-type **names** (`"post"`, `"page"`, a dynamic type's own name), the
     # same spelling `config :kiln_cms, :feeds` uses and the one `ContentTypes`
     # descriptors carry. Names rather than ids because compiled types have no
@@ -137,20 +78,5 @@ defmodule KilnCMS.CMS.FeedSettings do
       public? true
       constraints max_length: @max_types, items: [max_length: KilnCMS.Limits.line()]
     end
-
-    timestamps()
-  end
-
-  relationships do
-    belongs_to :organization, KilnCMS.Accounts.Organization do
-      source_attribute :org_id
-      define_attribute? false
-      attribute_writable? false
-      public? false
-    end
-  end
-
-  identities do
-    identity :one_per_org, [:org_id]
   end
 end
