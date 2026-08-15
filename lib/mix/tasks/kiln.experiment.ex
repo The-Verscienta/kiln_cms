@@ -136,7 +136,21 @@ defmodule Mix.Tasks.Kiln.Experiment do
     "  #{if variant.control, do: "*", else: " "} " <>
       "#{String.pad_trailing(variant.name, 20)} " <>
       "weight=#{variant.weight}  #{impressions} served  #{conversions} converted" <>
-      rate(impressions, conversions)
+      rate(impressions, conversions) <>
+      anomaly_suffix(impressions, conversions)
+  end
+
+  # A sanity check on the numbers themselves (#1007), separate from
+  # `blocked_line/1`: that one says the experiment cannot produce a result at
+  # all, this says a variant IS producing one that does not add up — more
+  # conversions than impressions, which `Experiments.anomaly_reason/2` treats
+  # as worth a look rather than something to hide from an operator reading
+  # this line. A flag, not a block: the row still prints.
+  defp anomaly_suffix(impressions, conversions) do
+    case Experiments.anomaly_reason(impressions, conversions) do
+      nil -> ""
+      {_reason, sentence} -> "\n    ! #{sentence}"
+    end
   end
 
   defp create(org_id, name, opts) do

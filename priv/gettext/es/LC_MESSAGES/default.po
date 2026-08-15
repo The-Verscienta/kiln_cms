@@ -2178,6 +2178,11 @@ msgstr "El contenido puede llevar cualquier número de etiquetas."
 msgid "Content gaps"
 msgstr "Lagunas de contenido"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Content intelligence is at its rate limit right now. Please try again shortly."
+msgstr "La inteligencia de contenido ha alcanzado su límite de velocidad en este momento. Vuelve a intentarlo en breve."
+
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Content item"
@@ -8917,6 +8922,11 @@ msgstr "Este contenido cambió en otro lugar. Recargue para obtener la última v
 #, elixir-autogen, elixir-format
 msgid "This content no longer exists — the release will not publish as it stands."
 msgstr "Este contenido ya no existe: el lanzamiento no se publicará tal como está."
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "This document's chain was anchored before the fold order was assigned, so this verdict may be the ordering bug rather than tampering — see #598."
+msgstr "La cadena de este documento se ancló antes de que se asignara el orden de fusión, por lo que este veredicto podría ser el error de ordenación en vez de una alteración: véase #598."
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format

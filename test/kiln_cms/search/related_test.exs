@@ -3,9 +3,11 @@ defmodule KilnCMS.Search.RelatedTest do
   # async: false — toggles the global KilnCMS.Search app env (stub embedder).
   use KilnCMS.DataCase, async: false
 
+  alias KilnCMS.Accounts
   alias KilnCMS.CMS
   alias KilnCMS.Search.BlockIndexer
   alias KilnCMS.Search.Related
+  alias KilnCMS.Search.VectorCache
 
   setup do
     original = Application.get_env(:kiln_cms, KilnCMS.Search, [])
@@ -433,5 +435,201 @@ defmodule KilnCMS.Search.RelatedTest do
     assert Related.related_documents(post) == []
     assert Related.near_duplicates(post) == []
     assert Related.suggest_tags(post) == []
+  end
+
+  # ── embedding budget (#1076) ────────────────────────────────────────────
+  #
+  # A model inference (the computed-centroid fallback, and each un-cached tag
+  # embedding) now draws on `KilnCMS.LLM.Budget`'s `"search_embedding"`
+  # bucket, the same #943 shape `KilnCMS.Seo.draft/2` uses. Every test here
+  # provisions its OWN org (`Accounts.create_organization!/2`, real rows —
+  # `KilnCMS.Search.Related`'s org bucket key is `record.org_id`, not a
+  # caller-chosen string the way `KilnCMS.Seo.draft/2`'s tests get away with)
+  # so a tightened limit in one test can never be starved by budget another
+  # test already spent against the shared default org.
+  describe "embedding budget (#1076)" do
+    setup do
+      org =
+        Accounts.create_organization!(
+          %{name: "Budget org", slug: "budget-#{System.unique_integer([:positive])}"},
+          authorize?: false
+        )
+
+      %{org: org, actor: admin()}
+    end
+
+    defp put_embedding_budget(overrides) do
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Search,
+        Application.get_env(:kiln_cms, KilnCMS.Search, []) |> Keyword.merge(overrides)
+      )
+    end
+
+    # Same shape as `unindexed_draft/3` above but tenant-scoped, so the
+    # document (and the budget charge it triggers) lands in the test's own org.
+    defp draft_in(org, actor, text, opts) do
+      CMS.create_post!(
+        %{
+          title: Keyword.get(opts, :title, "Doc"),
+          slug: slug(),
+          blocks: [%{type: :rich_text, content: "<p>#{text}</p>", order: 0}]
+        },
+        actor: actor,
+        tenant: org
+      )
+    end
+
+    test "computing an unpublished document's centroid spends the org's embedding budget",
+         %{org: org, actor: actor} do
+      put_embedding_budget(
+        embedding_per_user_limit: {100, :timer.minutes(1)},
+        embedding_per_org_limit: {1, :timer.hours(1)},
+        embedding_unattended_share: 1.0
+      )
+
+      first = draft_in(org, actor, "first unpublished passage", title: "One")
+      second = draft_in(org, actor, "second unpublished passage", title: "Two")
+
+      # The org's single unit is spent computing the first draft's centroid —
+      # neither document has a stored vector, so both would otherwise compute.
+      assert is_list(Related.near_duplicates(first, user_id: "caller"))
+      assert {:error, {:rate_limited, _}} = Related.near_duplicates(second, user_id: "caller")
+    end
+
+    test "a PUBLISHED anchor never spends the embedding budget, even at a zero ceiling",
+         %{org: org, actor: actor} do
+      # Mirrors the "not computed on demand" test above, but proves the
+      # NEGATIVE for the budget specifically: a limit of 0 would refuse any
+      # call that actually reached `charge_embedding_budget/1`.
+      put_embedding_budget(embedding_per_org_limit: {0, :timer.hours(1)})
+
+      published =
+        draft_in(org, actor, "unique passage about kiln firing", title: "Same")
+        |> CMS.publish_post!(%{}, actor: actor)
+
+      assert Related.near_duplicates(published, user_id: "caller") == []
+      assert Related.related_documents(published, user_id: "caller") == []
+    end
+
+    test "suggest_tags spends one unit per un-cached tag, and a cached one is free",
+         %{org: org, actor: actor} do
+      uniq = System.unique_integer([:positive])
+      # Distinct, never-before-embedded names so this test's cache state can't
+      # ride on a name another test already embedded.
+      tag_a =
+        CMS.create_tag!(%{name: "budget tag alpha #{uniq}", slug: "bta-#{uniq}"},
+          actor: actor,
+          tenant: org
+        )
+
+      tag_b =
+        CMS.create_tag!(%{name: "budget tag beta #{uniq}", slug: "btb-#{uniq}"},
+          actor: actor,
+          tenant: org
+        )
+
+      refute VectorCache.cached?(tag_a.name)
+      refute VectorCache.cached?(tag_b.name)
+
+      # Room for the centroid (1) plus exactly one tag (1); the second tag is
+      # refused, and refusing it is what makes `suggest_tags/2` return the
+      # error instead of a truncated ranking (see its doc).
+      put_embedding_budget(
+        embedding_per_user_limit: {100, :timer.minutes(1)},
+        embedding_per_org_limit: {2, :timer.hours(1)},
+        embedding_unattended_share: 1.0
+      )
+
+      post = draft_in(org, actor, "brewing herbal tea slowly", title: "Teas")
+
+      assert {:error, {:rate_limited, _}} =
+               Related.suggest_tags(post, threshold: 2.0, user_id: "caller")
+
+      # Exactly one of the two tags got far enough to be cached; the other
+      # never reached the model — and the org's budget is now fully spent
+      # (centroid + one tag = 2/2), so anything from here on must be free.
+      {cached_tag, uncached_tag} =
+        if VectorCache.cached?(tag_a.name), do: {tag_a, tag_b}, else: {tag_b, tag_a}
+
+      assert VectorCache.cached?(cached_tag.name)
+      refute VectorCache.cached?(uncached_tag.name)
+
+      # A second document, PUBLISHED and indexed so its own centroid comes from
+      # `stored_vectors/1` (no fresh charge), with the still-uncached tag
+      # already applied (so it's excluded from candidates, and nothing here
+      # needs the model). If the cache hit cost anything, this would also come
+      # back `{:error, {:rate_limited, _}}` — the org has zero room left.
+      other_post =
+        CMS.create_post!(
+          %{
+            title: "More teas",
+            slug: slug(),
+            blocks: [%{type: :rich_text, content: "<p>brewing herbal tea slowly</p>", order: 0}],
+            tag_ids: [uncached_tag.id]
+          },
+          actor: actor,
+          tenant: org
+        )
+        |> CMS.publish_post!(%{}, actor: actor)
+
+      {:ok, _} = BlockIndexer.reindex(other_post)
+
+      other_post =
+        CMS.get_post!(other_post.id, authorize?: false, load: [:tags], tenant: org)
+
+      suggestions = Related.suggest_tags(other_post, threshold: 2.0, user_id: "caller")
+      assert Enum.map(suggestions, & &1.tag.id) == [cached_tag.id]
+    end
+
+    test "an unattended caller stops at its share while the editor's panel keeps working",
+         %{org: org, actor: actor} do
+      put_embedding_budget(
+        embedding_per_user_limit: {100, :timer.minutes(1)},
+        embedding_per_org_limit: {4, :timer.hours(1)},
+        embedding_unattended_share: 0.5
+      )
+
+      unattended_opts = [user_id: "rule-caller", unattended?: true]
+      editor_opts = [user_id: "editor-caller"]
+
+      d1 = draft_in(org, actor, "aaa", title: "A")
+      d2 = draft_in(org, actor, "bbb", title: "B")
+      d3 = draft_in(org, actor, "ccc", title: "C")
+
+      assert is_list(Related.near_duplicates(d1, unattended_opts))
+      assert is_list(Related.near_duplicates(d2, unattended_opts))
+      # Half of 4 is 2 — the automation reaction stops there.
+      assert {:error, {:rate_limited, _}} = Related.near_duplicates(d3, unattended_opts)
+
+      # The reserved half is still there for the editor's own panel.
+      assert is_list(Related.near_duplicates(d3, editor_opts))
+    end
+
+    test "unattended_share: 0.0 refuses unattended calls and says it's a setting, not an overload",
+         %{org: org, actor: actor} do
+      put_embedding_budget(
+        embedding_per_org_limit: {10, :timer.hours(1)},
+        embedding_unattended_share: 0.0
+      )
+
+      draft = draft_in(org, actor, "some passage", title: "Off")
+
+      assert {:error, :unattended_disabled} =
+               Related.near_duplicates(draft, user_id: "rule", unattended?: true)
+    end
+  end
+
+  describe "the shipped embedding budget defaults (#1076)" do
+    test "are sized for calls, not for the SEO draft budget's scale" do
+      # Deliberately outside the describe above, which overrides these keys: a
+      # test that asserts the value its own setup wrote would stay green while
+      # someone narrowed the shipped defaults in config/config.exs.
+      assert {user_count, _window} = KilnCMS.Search.embedding_per_user_limit()
+      assert {org_count, _window} = KilnCMS.Search.embedding_per_org_limit()
+      assert is_integer(user_count) and user_count > 0
+      assert is_integer(org_count) and org_count > 0
+      assert KilnCMS.Search.embedding_unattended_share() == 0.5
+    end
   end
 end

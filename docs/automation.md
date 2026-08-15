@@ -100,10 +100,21 @@ Two consequences worth knowing:
   `per_org_limit` if you mean to run them broadly.
 
   **This covers the SEO draft budget only.** `flag_duplicates` and
-  `suggest_tags` reach `KilnCMS.Search.Related`, which computes an embedding
-  per block for a document that has none stored — and that inference is on no
-  budget bucket at all (#1076). A rule scoped to `in_review` is exactly the
-  case that computes rather than reads.
+  `suggest_tags` have their own bucket — see below.
+- **`flag_duplicates` and `suggest_tags` spend a separate embedding budget**
+  (#1076). Both reach `KilnCMS.Search.Related`, which computes an embedding per
+  block for a document that has none stored, and `suggest_tags` additionally
+  embeds every taxonomy tag not already cached. That is
+  `config :kiln_cms, KilnCMS.Search` `embedding_per_user_limit` (default
+  60/minute) / `embedding_per_org_limit` (default 600/hour) — higher than the
+  SEO draft budget because a single local embedding is far cheaper than an LLM
+  completion, and `suggest_tags` can spend one unit per untagged taxonomy tag
+  in a single call. `embedding_unattended_share` (default `0.5`) is the same
+  #943 reserve as `unattended_share` above, so a rule can't leave an editor's
+  own "duplicates & tags" panel rate-limited by something it can't see. A rule
+  scoped to `in_review` is exactly the case that computes rather than reads —
+  a bulk move to that state now stops spending embeddings once the reserve is
+  hit, instead of running unbounded.
 - **`suggest_metadata` needs `"allow_egress": true`** when the configured model
   provider is off-site (`KilnCMS.Seo.egress?/0`). The editor panel is one
   person deciding to spend one request; a rule is every matching document,

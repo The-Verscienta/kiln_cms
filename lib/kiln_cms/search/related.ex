@@ -15,8 +15,36 @@ defmodule KilnCMS.Search.Related do
 
   Everything is org-scoped and a no-op (empty results) when semantic search is
   disabled, mirroring the rest of the search stack.
+
+  ## Budget (#1076)
+
+  `near_duplicates/2` and `suggest_tags/2` can both fall onto the
+  model-inference path documented on `centroid/2` below — an unpublished
+  document has no stored vector, so its centroid is computed on demand, one
+  inference per block. `suggest_tags/2` additionally embeds every taxonomy tag
+  not already cached. Both are routed through `KilnCMS.LLM.Budget` under the
+  `"search_embedding"` feature (limits: `KilnCMS.Search.embedding_per_user_limit/0`
+  / `embedding_per_org_limit/0` / `embedding_unattended_share/0`), the same
+  shape `KilnCMS.Seo.draft/2` uses for LLM drafting (#943).
+
+  A blocked call returns `{:error, {:rate_limited, retry_after_ms}}` or
+  `{:error, :unattended_disabled}` instead of a list — callers that always
+  expect `[neighbour()]` (or `[%{tag:, distance:}]`) need to handle that,
+  the same as `KilnCMS.Seo.draft/2`'s callers handle its `{:error, _}`.
+  `related_documents/2` never charges the budget in practice: its anchor is
+  always a published document, and `centroid/2` never computes on a published
+  one (see there) — so it degrades a block to `[]` rather than propagating,
+  keeping its long-standing "always a list" contract for the public surface.
+
+  Pass `:user_id` for the per-caller bucket (an automation rule uses a synthetic
+  `"automation:<rule_id>"` identity — see `KilnCMS.Automation.RuleWorker`) and
+  `unattended?: true` for a call nobody is waiting on, so it draws on the
+  reserve share rather than the full org allowance. The org id is always
+  `record.org_id` — never a separate option — since every caller already holds
+  the record.
   """
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.LLM.Budget
   alias KilnCMS.Search
   alias KilnCMS.Search.BlockIndexer
   alias KilnCMS.Search.VectorCache
@@ -45,10 +73,20 @@ defmodule KilnCMS.Search.Related do
   def related_documents(record, opts \\ []) do
     limit = Keyword.get(opts, :limit, 5)
 
-    record
-    |> neighbours(limit * 4)
-    |> resolve(record.org_id, published_only?: true, actor: nil)
-    |> Enum.take(limit)
+    # `{:error, _}` degrades to `[]` here rather than propagating (unlike
+    # `near_duplicates/2` and `suggest_tags/2`): this is the public
+    # reader-facing surface and has always answered a plain list. In practice
+    # it never happens — the anchor is a published document, and `centroid/2`
+    # never computes on one (see there), so nothing here reaches the budget.
+    case neighbours(record, limit * 4, budget_context(record, opts)) do
+      {:error, _reason} ->
+        []
+
+      list ->
+        list
+        |> resolve(record.org_id, published_only?: true, actor: nil)
+        |> Enum.take(limit)
+    end
   end
 
   @doc """
@@ -66,15 +104,25 @@ defmodule KilnCMS.Search.Related do
   audience, so on an actor-facing surface — the editor's panel — the actor is
   the only thing standing between a granular-RBAC-restricted editor (#332) and
   the title of a draft in a content type they were not given.
+
+  Pass `:user_id` and `:unattended?` for the `KilnCMS.LLM.Budget` check the
+  moduledoc describes (#1076) — a budget-blocked call returns `{:error,
+  {:rate_limited, ms}}` or `{:error, :unattended_disabled}` instead of a list.
   """
-  @spec near_duplicates(struct(), keyword()) :: [neighbour()]
+  @spec near_duplicates(struct(), keyword()) ::
+          [neighbour()] | {:error, {:rate_limited, non_neg_integer()} | :unattended_disabled}
   def near_duplicates(record, opts \\ []) do
     threshold = Keyword.get(opts, :threshold, Search.near_duplicate_threshold())
 
-    record
-    |> neighbours(Keyword.get(opts, :limit, 20))
-    |> Enum.filter(&(&1.distance <= threshold))
-    |> resolve(record.org_id, published_only?: false, actor: opts[:actor])
+    case neighbours(record, Keyword.get(opts, :limit, 20), budget_context(record, opts)) do
+      {:error, reason} ->
+        {:error, reason}
+
+      list ->
+        list
+        |> Enum.filter(&(&1.distance <= threshold))
+        |> resolve(record.org_id, published_only?: false, actor: opts[:actor])
+    end
   end
 
   @doc """
@@ -117,11 +165,23 @@ defmodule KilnCMS.Search.Related do
   tempting thing to write here because `:semantic_max_distance` sits three
   lines above it in `config/config.exs` and does mean "no ceiling"; this one
   does not have that spelling.
+
+  Pass `:user_id` and `:unattended?` for the `KilnCMS.LLM.Budget` check the
+  moduledoc describes (#1076): the centroid fallback and each un-cached tag
+  embedding both draw on it, so a budget-blocked call returns `{:error,
+  {:rate_limited, ms}}` or `{:error, :unattended_disabled}` instead of a list
+  — including partway through the taxonomy, in which case nothing already
+  scored is returned either. That is deliberate: a truncated ranking (the
+  first N tags alphabetically, say) is a worse answer than none, because
+  nothing about it tells the caller it stopped early.
   """
-  @spec suggest_tags(struct(), keyword()) :: [%{tag: struct(), distance: float()}]
+  @spec suggest_tags(struct(), keyword()) ::
+          [%{tag: struct(), distance: float()}]
+          | {:error, {:rate_limited, non_neg_integer()} | :unattended_disabled}
   def suggest_tags(record, opts \\ []) do
     actor = opts[:actor]
     threshold = Keyword.get(opts, :threshold, Search.suggest_tags_threshold())
+    budget_ctx = budget_context(record, opts)
 
     unless is_number(threshold) do
       raise ArgumentError,
@@ -132,7 +192,7 @@ defmodule KilnCMS.Search.Related do
     end
 
     with true <- Search.semantic?(),
-         centroid when is_list(centroid) <- centroid(record) do
+         centroid when is_list(centroid) <- centroid(record, budget_ctx) do
       applied =
         record
         |> Map.get(:tags)
@@ -140,25 +200,26 @@ defmodule KilnCMS.Search.Related do
         |> Enum.reject(&match?(%Ash.NotLoaded{}, &1))
         |> MapSet.new(& &1.id)
 
-      KilnCMS.CMS.list_tags!(
-        actor: actor,
-        authorize?: not is_nil(actor),
-        tenant: record.org_id
-      )
-      |> Enum.reject(&MapSet.member?(applied, &1.id))
-      |> Enum.flat_map(fn tag ->
-        case tag_vector(tag.name) do
-          vector when is_list(vector) ->
-            [%{tag: tag, distance: cosine_distance(centroid, vector)}]
+      candidates =
+        KilnCMS.CMS.list_tags!(
+          actor: actor,
+          authorize?: not is_nil(actor),
+          tenant: record.org_id
+        )
+        |> Enum.reject(&MapSet.member?(applied, &1.id))
 
-          _ ->
-            []
-        end
-      end)
-      |> Enum.filter(&(&1.distance <= threshold))
-      |> Enum.sort_by(& &1.distance)
-      |> Enum.take(Keyword.get(opts, :limit, 5))
+      case tag_suggestions(candidates, centroid, budget_ctx) do
+        {:error, reason} ->
+          {:error, reason}
+
+        {:ok, scored} ->
+          scored
+          |> Enum.filter(&(&1.distance <= threshold))
+          |> Enum.sort_by(& &1.distance)
+          |> Enum.take(Keyword.get(opts, :limit, 5))
+      end
     else
+      {:error, reason} -> {:error, reason}
       _ -> []
     end
   end
@@ -193,10 +254,12 @@ defmodule KilnCMS.Search.Related do
   # ── internals ─────────────────────────────────────────────────────────────
 
   # Nearest foreign block embeddings to this document's centroid, aggregated
-  # per document by minimum distance.
-  defp neighbours(record, fetch_limit) do
+  # per document by minimum distance. `{:error, reason}` propagates from a
+  # budget-blocked centroid computation (#1076) instead of collapsing to `[]`,
+  # so a caller that needs to tell "nothing similar" from "couldn't check" can.
+  defp neighbours(record, fetch_limit, budget_ctx) do
     with true <- Search.semantic?(),
-         centroid when is_list(centroid) <- centroid(record) do
+         centroid when is_list(centroid) <- centroid(record, budget_ctx) do
       KilnCMS.SearchIndex.nearest_block_embeddings!(
         %{vector: centroid, exclude_document_id: record.id, limit: fetch_limit * 3},
         authorize?: false,
@@ -211,6 +274,7 @@ defmodule KilnCMS.Search.Related do
       |> Enum.take(fetch_limit)
       |> Enum.map(fn {type, id, distance} -> %{type: type, id: id, distance: distance} end)
     else
+      {:error, reason} -> {:error, reason}
       _ -> []
     end
   end
@@ -223,9 +287,9 @@ defmodule KilnCMS.Search.Related do
   # has never been published had no centroid — which meant `near_duplicates/2`,
   # a **pre**-publication check, only became available once the thing it exists
   # to prevent had already happened.
-  defp centroid(record) do
+  defp centroid(record, budget_ctx) do
     case stored_vectors(record) do
-      [] -> unindexed_centroid(record)
+      [] -> unindexed_centroid(record, budget_ctx)
       vectors -> mean(vectors)
     end
   end
@@ -240,9 +304,16 @@ defmodule KilnCMS.Search.Related do
   # the empty-`stored_vectors` state, and a crawler walking the site would then
   # drive N sequential inferences per request through one `Nx.Serving`. Gating
   # on state means the reader-facing surface keeps exactly the cheap behaviour
-  # it had, whatever the index looks like.
-  defp unindexed_centroid(%{state: :published}), do: nil
-  defp unindexed_centroid(record), do: computed_centroid(record)
+  # it had, whatever the index looks like — and it is why `related_documents/2`
+  # never reaches the budget check below: its anchor is always published.
+  defp unindexed_centroid(%{state: :published}, _budget_ctx), do: nil
+
+  defp unindexed_centroid(record, budget_ctx) do
+    case charge_embedding_budget(budget_ctx) do
+      :ok -> computed_centroid(record)
+      {:error, reason} -> {:error, reason}
+    end
+  end
 
   defp stored_vectors(record) do
     storage = KilnCMS.Firing.Engine.document_type(record)
@@ -344,7 +415,70 @@ defmodule KilnCMS.Search.Related do
   # `published:record:*` entries `Firing.Delivery` serves from during a database
   # outage. An org with 500 tags running suggestions could evict pages that
   # would then 503.
-  defp tag_vector(name), do: VectorCache.embed_document(name)
+  #
+  # `VectorCache.cached?/1` gates the `KilnCMS.LLM.Budget` charge (#1076): a
+  # name already in the cache costs nothing to embed again, and charging for it
+  # anyway would size the budget to the taxonomy's word list instead of to
+  # actual inference volume — the exact failure `VectorCache` exists to avoid.
+  defp tag_vector(name, budget_ctx) do
+    if VectorCache.cached?(name) do
+      VectorCache.embed_document(name)
+    else
+      case charge_embedding_budget(budget_ctx) do
+        :ok -> VectorCache.embed_document(name)
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  # Scores each candidate tag against the centroid, stopping (and discarding
+  # anything already scored) the moment a budget check fails — see
+  # `suggest_tags/2`'s doc for why a partial ranking is worse than none.
+  defp tag_suggestions(tags, centroid, budget_ctx) do
+    Enum.reduce_while(tags, {:ok, []}, fn tag, {:ok, acc} ->
+      case tag_vector(tag.name, budget_ctx) do
+        {:error, reason} ->
+          {:halt, {:error, reason}}
+
+        vector when is_list(vector) ->
+          {:cont, {:ok, [%{tag: tag, distance: cosine_distance(centroid, vector)} | acc]}}
+
+        _ ->
+          {:cont, {:ok, acc}}
+      end
+    end)
+    |> case do
+      {:ok, acc} -> {:ok, Enum.reverse(acc)}
+      error -> error
+    end
+  end
+
+  # `record.org_id` — never a caller-supplied option — is the org bucket key,
+  # since every caller here already holds the record. `:user_id` and
+  # `:unattended?` come from `opts` because those genuinely vary per call: an
+  # editor's own id for the panel, a synthetic `"automation:<rule_id>"` and
+  # `unattended?: true` for `KilnCMS.Automation.RuleWorker` (#1076, mirroring
+  # #943's `KilnCMS.Seo.draft/2` precedent).
+  defp budget_context(record, opts) do
+    %{
+      org_id: record.org_id,
+      user_id: opts[:user_id],
+      unattended?: Keyword.get(opts, :unattended?, false)
+    }
+  end
+
+  defp charge_embedding_budget(%{org_id: org_id, user_id: user_id, unattended?: unattended?}) do
+    Budget.check("search_embedding", org_id, user_id, embedding_budget_limits(unattended?))
+  end
+
+  defp embedding_budget_limits(unattended?) do
+    [
+      per_user: Search.embedding_per_user_limit(),
+      per_org: Search.embedding_per_org_limit(),
+      unattended?: unattended?,
+      unattended_share: Search.embedding_unattended_share()
+    ]
+  end
 
   defp mean(vectors) do
     count = length(vectors)

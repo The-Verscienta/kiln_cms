@@ -141,6 +141,15 @@ defmodule KilnCMS.Experiments do
   defdelegate switched_off?(org_id), to: KilnCMS.Experiments.Health
 
   @doc """
+  `nil` if a variant's impression/conversion totals are plausible, `{reason,
+  sentence}` if they are not — currently just `conversions > impressions`
+  (#1007). See `KilnCMS.Experiments.Health.anomaly_reason/2`.
+  """
+  @spec anomaly_reason(non_neg_integer(), non_neg_integer()) ::
+          KilnCMS.Experiments.Health.reason() | nil
+  defdelegate anomaly_reason(impressions, conversions), to: KilnCMS.Experiments.Health
+
+  @doc """
   Whether `experiment`'s goal converts on a page **later** than the assignment.
 
   The one statement of that list (#1115). It is not arbitrary: a later-page goal

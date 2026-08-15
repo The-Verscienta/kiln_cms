@@ -223,6 +223,39 @@ defmodule KilnCMS.Search do
   def near_duplicate_threshold, do: cfg(:near_duplicate_threshold, 0.1)
 
   @doc """
+  Rate-limit budget for computing an embedding on demand — see
+  `KilnCMS.LLM.Budget` and `KilnCMS.Search.Related`'s `centroid/2` fallback,
+  which costs one model inference **per block** for a document that has no
+  stored vector (#852), plus `suggest_tags/2`'s one inference per taxonomy tag
+  not already in `KilnCMS.Search.VectorCache` (#1076).
+
+  Sized well above `KilnCMS.Seo.draft/2`'s default per-user scale (20 calls a
+  minute): a single local embedding is far cheaper than an LLM completion,
+  and `suggest_tags/2` alone can spend one unit per untagged tag in the
+  site's taxonomy in a single call.
+  Like the SEO budget, this counts **calls that actually reach the model** —
+  `VectorCache` hits are free and are not charged — not the token/compute
+  volume behind each one.
+  """
+  @spec embedding_per_user_limit() :: {pos_integer(), pos_integer()}
+  def embedding_per_user_limit, do: cfg(:embedding_per_user_limit, {60, :timer.minutes(1)})
+
+  @doc "The org-wide half of `embedding_per_user_limit/0` — see there."
+  @spec embedding_per_org_limit() :: {pos_integer(), pos_integer()}
+  def embedding_per_org_limit, do: cfg(:embedding_per_org_limit, {600, :timer.hours(1)})
+
+  @doc """
+  The share of `embedding_per_org_limit/0` an unattended caller — the
+  `flag_duplicates` / `suggest_tags` automation reactions — may spend before
+  they stop, reserving the remainder for an editor's own panel. Mirrors
+  `KilnCMS.Seo.unattended_share/0`, the #943 precedent this follows: see
+  `KilnCMS.LLM.Budget` for the mechanism. `0.0` keeps these reactions off this
+  budget entirely; `1.0` lets them spend the whole org allowance.
+  """
+  @spec embedding_unattended_share() :: float()
+  def embedding_unattended_share, do: cfg(:embedding_unattended_share, 0.5)
+
+  @doc """
   Nx `defn_options` for the local Bumblebee servings. Uses the EXLA compiler when
   the `:exla` dependency is compiled in (dev/test); otherwise returns `[]` so the
   servings fall back to Nx's default backend instead of crashing on a missing

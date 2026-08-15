@@ -547,11 +547,32 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # that was replaced underneath them.
   def handle_async(:content_intel, {:ok, {version, %{} = intel}}, socket) do
     if version == socket.assigns.editor_version do
-      {:noreply,
-       socket
-       |> assign(:intel_loading?, false)
-       |> assign(:intel_duplicates, intel.duplicates)
-       |> assign(:intel_tags, intel.tags)}
+      {duplicates, duplicates_ok?} = intel_outcome(intel.duplicates)
+      {tags, tags_ok?} = intel_outcome(intel.tags)
+
+      socket =
+        socket
+        |> assign(:intel_loading?, false)
+        |> assign(:intel_duplicates, duplicates)
+        |> assign(:intel_tags, tags)
+
+      # Same reasoning as the `{:exit, reason}` clause below: `[]` alone reads
+      # as the panel's ordinary "nothing similar found" empty state, which is a
+      # *result* — and a `KilnCMS.LLM.Budget`-blocked call (#1076) is the
+      # absence of one. Without the flash the two are indistinguishable, and an
+      # author would reasonably publish the duplicate the click never checked.
+      if duplicates_ok? and tags_ok? do
+        {:noreply, socket}
+      else
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           gettext(
+             "Content intelligence is at its rate limit right now. Please try again shortly."
+           )
+         )}
+      end
     else
       {:noreply, assign(socket, :intel_loading?, false)}
     end
@@ -4356,17 +4377,29 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # a suggestion for a tag this editor's picker doesn't list is an Add button
     # with no checkbox to tick.
     actor = socket.assigns.actor
+    # `user_id`, not `org_id`: both calls take the org bucket key from the
+    # record itself (`KilnCMS.Search.Related`'s `"search_embedding"` budget,
+    # #1076) — this is only the per-caller half, same as `actor.id` for the
+    # SEO panel's `KilnCMS.Seo.draft/2` call above.
+    actor_id = actor && actor.id
 
     socket
     |> assign(:intel_loading?, true)
     |> start_async(:content_intel, fn ->
       {version,
        %{
-         duplicates: Related.near_duplicates(record, actor: actor),
-         tags: Related.suggest_tags(record, actor: actor)
+         duplicates: Related.near_duplicates(record, actor: actor, user_id: actor_id),
+         tags: Related.suggest_tags(record, actor: actor, user_id: actor_id)
        }}
     end)
   end
+
+  # Normalizes a `KilnCMS.Search.Related` result to a displayable list plus
+  # whether it was a real answer — `{:error, _}` (a `KilnCMS.LLM.Budget` block,
+  # #1076) renders as an empty list too, but the second value tells
+  # `handle_async(:content_intel, ...)` apart from a genuine "nothing found".
+  defp intel_outcome({:error, _reason}), do: {[], false}
+  defp intel_outcome(list) when is_list(list), do: {list, true}
 
   # Tick a suggested tag in the form's `tag_ids`, then drop it from the panel.
   #

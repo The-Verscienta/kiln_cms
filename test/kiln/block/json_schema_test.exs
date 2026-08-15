@@ -15,6 +15,7 @@ defmodule Kiln.Block.JsonSchemaTest do
 
   alias Kiln.Block.Info
   alias Kiln.Block.JsonSchema
+  alias Kiln.Block.Sample
   alias KilnCMS.Blocks
 
   describe "derivation" do
@@ -239,14 +240,11 @@ defmodule Kiln.Block.JsonSchemaTest do
   end
 
   # A block with every declared field carrying a value of its declared type, so
-  # the render takes its populated branch.
-  defp populated(module) do
-    module
-    |> Info.fields()
-    |> Enum.reduce(struct(module, id: Ecto.UUID.generate()), fn field, block ->
-      Map.put(block, field.name, sample(field.type))
-    end)
-  end
+  # the render takes its populated branch. Fixed date/datetime keep the
+  # assertion deterministic across runs — `Kiln.Block.Sample.populated/3`'s
+  # doctor-task caller wants "now" instead, hence the override.
+  defp populated(module),
+    do: Sample.populated(module, ~D[2026-08-07], ~U[2026-08-07 00:00:00Z])
 
   # A block with only its `required: true` fields filled — the emptiest a
   # block can legitimately be post-#935, since the write path can no longer
@@ -269,17 +267,5 @@ defmodule Kiln.Block.JsonSchemaTest do
     |> Map.new(&{to_string(&1.name), sample(&1.type)})
   end
 
-  defp sample(:integer), do: 3
-  defp sample(:float), do: 1.5
-  defp sample(:boolean), do: true
-  defp sample(:date), do: ~D[2026-08-07]
-  defp sample(:datetime), do: ~U[2026-08-07 00:00:00Z]
-  defp sample(:url), do: "https://example.com/a"
-  defp sample(:email), do: "editor@example.com"
-  defp sample(:color), do: "#112233"
-  defp sample(:rich_text), do: [%{"_type" => "block", "children" => []}]
-  defp sample({:array, :map}), do: [%{}]
-  defp sample({:array, inner}), do: [sample(inner)]
-  defp sample(type) when type in [:map, :object, :reference], do: %{}
-  defp sample(_scalar), do: "sample"
+  defp sample(type), do: Sample.sample_value(type, ~D[2026-08-07], ~U[2026-08-07 00:00:00Z])
 end

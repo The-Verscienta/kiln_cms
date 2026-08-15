@@ -280,7 +280,15 @@ defmodule KilnCMS.Governance do
         chain: verdict,              # KilnCMS.Governance.Chain.verdict/0
         chain_gap: attested_gap,     # how far attestation reaches (#811)
         chain_gap_range: %{attested, next, head} | nil,   # the same, for display
+        predates_fold_order?: boolean,  # chain COULD have hit the #598 false-tamper bug (#1058)
         consents: [%KilnCMS.CMS.Consent{}]}
+
+  `predates_fold_order?` is a sibling fact, never a softener: it says nothing
+  about whether `chain` above is accurate, only whether the chain's anchors
+  were folded in an order assigned at write time (#598) or inferred from a
+  timestamp — the distinction that decides whether a `{:tampered, …}` verdict
+  on this document could be the ordering bug rather than real tampering. See
+  `KilnCMS.Governance.Chain.predates_fold_order?/1` and #1058.
   """
   @spec trail(String.t(), Ash.UUID.t(), Ash.UUID.t()) :: map() | nil
   def trail(type, id, org_id) do
@@ -342,6 +350,11 @@ defmodule KilnCMS.Governance do
             {:gap, attested, head} -> %{attested: attested, next: attested + 1, head: head}
             _no_gap -> nil
           end,
+        # Whether this chain could have hit the pre-#598 false-tamper bug
+        # (#1058): does NOT change `chain` above, only whether a red verdict on
+        # it is worth investigating first. Reuses the anchors already loaded for
+        # the gap and boundary reads — no second query.
+        predates_fold_order?: KilnCMS.Governance.Chain.predates_fold_order?(anchors),
         # Edits since the last anchor — covered at the next publish.
         unanchored_tail: KilnCMS.Governance.Chain.unanchored_tail(versions, anchor),
         # Which checkpoint currently witnesses this document, and how strongly

@@ -3,15 +3,22 @@ defmodule KilnCMS.JsonSchemaValidator do
   A deliberately small JSON Schema validator, for asserting that Kiln's own
   exported schema (#430) describes Kiln's own output.
 
-  Test-only, and not a general-purpose implementation: it covers exactly the
-  keywords `KilnCMS.SchemaExport` emits — `$ref`, `oneOf`, `const`, `enum`,
-  `type` (including type arrays), `properties`, `required`, `items`,
+  Not a general-purpose implementation: it covers exactly the keywords
+  `KilnCMS.SchemaExport` emits — `$ref`, `oneOf`, `const`, `enum`, `type`
+  (including type arrays), `properties`, `required`, `items`,
   `additionalProperties: false`. Anything else is treated as satisfied.
 
   Pulling in a real validator would be the honest choice for validating
   *arbitrary* schemas; for validating one schema we generate ourselves, a
   hundred lines with no dependency is the better trade — and a keyword this
   does not implement is a keyword we do not emit.
+
+  Lives in `lib/` rather than `test/support` (#937) so it has exactly one
+  implementation shared by both callers: `test/kiln/block/json_schema_test.exs`
+  (the core conformance suite) and `mix kiln.plugins.doctor`, which runs the
+  same conformance check against every plugin-contributed block at
+  `precommit` time — a third-party plugin never runs the core test suite, so
+  the check that would have caught its drift has to live somewhere it does.
   """
 
   @doc """
@@ -80,10 +87,10 @@ defmodule KilnCMS.JsonSchemaValidator do
       {"required", keys} when is_map(value) ->
         for key <- keys, not Map.has_key?(value, key), do: "#{path}: missing required #{key}"
 
-      {"properties", properties} when is_map(value) ->
+      {"properties", properties} when is_map(value) and not is_struct(value) ->
         Enum.flat_map(value, &check_property(&1, properties, root, path))
 
-      {"additionalProperties", false} when is_map(value) ->
+      {"additionalProperties", false} when is_map(value) and not is_struct(value) ->
         declared = schema |> Map.get("properties", %{}) |> Map.keys() |> MapSet.new()
 
         for key <- Map.keys(value),
