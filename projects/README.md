@@ -81,8 +81,12 @@ content types, a two-pass Directus ETL importer) — lives in the
 under `kiln/`, and was extracted from this repo where it originally landed
 (#236).
 
-One subproject is committed in-tree: `example/` (`Example.Catalog`,
-the holistic-acupuncture site's four content types + Sanity import — see its
+One subproject is committed in-tree: `example/` (`Example.Catalog`) — a
+deliberately subject-agnostic showcase for a fictional generic company
+("Acme"), built to demonstrate as much of kiln_cms's own capability surface
+as it can (custom fields, a plugin-contributed block and field type, a
+no-code dynamic content type, events, multi-locale content, audience
+gating, and seeded automation/webhook/experiment/release examples — see its
 README). It follows the same contract: the domain compiles but stays
 **dormant** — core config never registers it, its migrations and snapshots
 live under `example/priv/` (not the core `priv/`), and

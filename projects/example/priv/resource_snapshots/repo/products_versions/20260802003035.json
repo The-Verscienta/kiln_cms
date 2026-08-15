@@ -102,30 +102,6 @@
       "generated?": false,
       "precision": null,
       "primary_key?": false,
-      "references": null,
-      "scale": null,
-      "size": null,
-      "source": "chain_signature",
-      "type": "text"
-    },
-    {
-      "allow_nil?": true,
-      "default": "nil",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": null,
-      "scale": null,
-      "size": null,
-      "source": "chain_key_id",
-      "type": "text"
-    },
-    {
-      "allow_nil?": true,
-      "default": "nil",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
       "references": {
         "deferrable": false,
         "destination_attribute": "id",
@@ -139,7 +115,7 @@
           "global": null,
           "strategy": null
         },
-        "name": "conditions_versions_user_id_fkey",
+        "name": "products_versions_user_id_fkey",
         "on_delete": "nilify",
         "on_update": "update",
         "primary_key?": true,
@@ -191,7 +167,7 @@
   ],
   "custom_statements": [],
   "has_create_action": true,
-  "hash": "A1348D7724C77A237DE65C1F4A2578E329BAFF406E9B7B8F71F73A7AA2E6E1E0",
+  "hash": "B4A7348E9B9FE2A07560BF09FA45B0976E36CD581F9C5AC6EA6CFE1CB2910A5F",
   "identities": [],
   "multitenancy": {
     "attribute": "org_id",
@@ -200,5 +176,5 @@
   },
   "repo": "Elixir.KilnCMS.Repo",
   "schema": null,
-  "table": "conditions_versions"
+  "table": "products_versions"
 }

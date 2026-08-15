@@ -8,7 +8,7 @@ defmodule KilnCMS.Repo.Migrations.AddExampleContentSearchVectors do
 
   import KilnCMS.Migrations
 
-  @tables ~w(conditions team_members testimonials faqs)
+  @tables ~w(products team_members testimonials faqs)
 
   def up do
     Enum.each(@tables, &add_search_vector/1)

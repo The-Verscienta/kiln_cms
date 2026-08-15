@@ -31,7 +31,7 @@
           "global": null,
           "strategy": null
         },
-        "name": "conditions_org_id_fkey",
+        "name": "products_org_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -365,7 +365,7 @@
           "global": null,
           "strategy": null
         },
-        "name": "conditions_author_id_fkey",
+        "name": "products_author_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -396,7 +396,7 @@
           "global": false,
           "strategy": "attribute"
         },
-        "name": "conditions_category_id_fkey",
+        "name": "products_category_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -427,7 +427,7 @@
           "global": false,
           "strategy": "attribute"
         },
-        "name": "conditions_featured_image_id_fkey",
+        "name": "products_featured_image_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -458,7 +458,7 @@
       ],
       "include": null,
       "message": null,
-      "name": "conditions_path_alias_index",
+      "name": "products_path_alias_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -478,7 +478,7 @@
       ],
       "include": null,
       "message": null,
-      "name": "conditions_embedding_hnsw_index",
+      "name": "products_embedding_hnsw_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -498,7 +498,7 @@
       ],
       "include": null,
       "message": null,
-      "name": "conditions_title_trgm_index",
+      "name": "products_title_trgm_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -525,7 +525,7 @@
       ],
       "include": null,
       "message": null,
-      "name": "conditions_slug_locale_lookup_index",
+      "name": "products_slug_locale_lookup_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -541,7 +541,7 @@
     {
       "all_tenants?": false,
       "base_filter": null,
-      "index_name": "conditions_unique_slug_index",
+      "index_name": "products_unique_slug_index",
       "keys": [
         {
           "type": "atom",
@@ -564,5 +564,5 @@
   },
   "repo": "Elixir.KilnCMS.Repo",
   "schema": null,
-  "table": "conditions"
+  "table": "products"
 }

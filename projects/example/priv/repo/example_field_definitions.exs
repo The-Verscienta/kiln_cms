@@ -1,5 +1,5 @@
-# Custom-field definitions for the acupuncture content types
-# (Condition, TeamMember, Testimonial, Faq). Run with:
+# Custom-field definitions for the "Acme" example catalog (Product,
+# TeamMember, Testimonial, Faq) plus two on the core `post` type. Run with:
 #
 #     mix run projects/example/priv/repo/example_field_definitions.exs
 #
@@ -8,12 +8,15 @@
 # source of truth and safe to re-run after edits.
 #
 # Fields the core Content resource already covers are deliberately absent:
-# title (name/question/author), excerpt (short bio / description / quote),
-# blocks (bio / detailed description / answer), featured_image (photo/avatar),
-# seo_*, and related_conditions (ContentLink). Sanity's list-of-string and
-# list-of-object fields map to :text with a one-entry-per-line convention
-# (" | "-separated parts for structured entries) — the registry has no
-# repeating-group type.
+# title (name/question/author), excerpt (short description/quote), blocks
+# (body/bio/answer), featured_image (photo), seo_*, and the standard
+# related-content relationship (used for Testimonial → Product links). List
+# data maps to :text with a one-entry-per-line convention (" | "-separated
+# parts for structured entries) — the registry has no repeating-group type.
+#
+# `price`'s `field_type: :money` is a plugin-contributed custom field type
+# (`Example.FieldTypes.Money`, registered via `Example.Plugin.field_types/0`)
+# — every other field here uses a core type.
 
 alias KilnCMS.Accounts
 alias KilnCMS.CMS
@@ -30,13 +33,12 @@ admin =
               "or set ADMIN_EMAIL."
   end
 
-condition_categories = ~w(pain mental-health womens-health digestive immune other)
-
-faq_categories =
-  ~w(about-acupuncture treatment-process insurance-payment appointments-policies safety-side-effects our-practice)
+product_categories = ~w(hardware software services accessories other)
+department_options = ~w(engineering sales support leadership other)
+faq_categories = ~w(getting-started billing account security integrations general)
 
 definitions = [
-  # --- post (core type; fields for the migrated Sanity blog) ---------------
+  # --- post (core type; a byline for posts authored by a team member) ------
   %{
     content_type: :post,
     name: "featured",
@@ -49,7 +51,7 @@ definitions = [
     name: "author_name",
     label: "Author name",
     field_type: :string,
-    help_text: "Display byline (practitioners are not CMS users)."
+    help_text: "Display byline (team members are not necessarily CMS users)."
   },
   %{
     content_type: :post,
@@ -59,89 +61,75 @@ definitions = [
     help_text: "Team-member slug the byline links to."
   },
 
-  # --- condition -----------------------------------------------------------
+  # --- product ---------------------------------------------------------------
   %{
-    content_type: :condition,
+    content_type: :product,
     name: "category",
     label: "Category",
     field_type: :select,
-    options: condition_categories,
+    options: product_categories,
     required: true,
-    help_text: "Grouping used by the conditions index page filters."
+    help_text: "Grouping used by the products index page filters and the alias pattern."
   },
   %{
-    content_type: :condition,
-    name: "icon",
-    label: "Icon",
-    field_type: :text,
-    help_text: "Emoji or inline SVG shown on the conditions grid card."
-  },
-  %{
-    content_type: :condition,
-    name: "symptoms",
-    label: "Common symptoms",
-    field_type: :text,
-    help_text: "One symptom per line."
-  },
-  %{
-    content_type: :condition,
-    name: "treatment_duration",
-    label: "Typical treatment duration",
+    content_type: :product,
+    name: "sku",
+    label: "SKU",
     field_type: :string,
-    help_text: "e.g. \"6–12 sessions over 2–3 months\""
+    help_text: "Stock-keeping unit / product code."
   },
   %{
-    content_type: :condition,
+    content_type: :product,
+    name: "price",
+    label: "Price",
+    field_type: :money,
+    help_text: "Amount and ISO currency code, e.g. 49.00 USD."
+  },
+  %{
+    content_type: :product,
+    name: "features",
+    label: "Key features",
+    field_type: :text,
+    help_text: "One feature per line."
+  },
+  %{
+    content_type: :product,
     name: "featured",
     label: "Featured on homepage",
     field_type: :boolean,
     default: "false"
   },
   %{
-    content_type: :condition,
+    content_type: :product,
     name: "display_order",
     label: "Display order",
     field_type: :integer,
     default: "0",
-    help_text: "Lower numbers sort first on the conditions index."
+    help_text: "Lower numbers sort first on the products index."
   },
 
-  # --- team_member ---------------------------------------------------------
+  # --- team_member -----------------------------------------------------------
   %{
     content_type: :team_member,
     name: "role",
     label: "Role",
     field_type: :string,
     required: true,
-    help_text: "e.g. \"Licensed Acupuncturist\""
+    help_text: "e.g. \"Senior Product Engineer\""
   },
   %{
     content_type: :team_member,
-    name: "credentials",
-    label: "Credentials",
-    field_type: :string,
-    help_text: "Post-nominal letters, e.g. \"L.Ac., MSOM\"."
+    name: "department",
+    label: "Department",
+    field_type: :select,
+    options: department_options
   },
   %{
     content_type: :team_member,
-    name: "specialties",
-    label: "Specialties",
+    name: "social_links",
+    label: "Social links",
     field_type: :text,
-    help_text: "One specialty per line."
-  },
-  %{
-    content_type: :team_member,
-    name: "certifications",
-    label: "Certifications",
-    field_type: :text,
-    help_text: "One per line: Title | Issuing organization | Year."
-  },
-  %{
-    content_type: :team_member,
-    name: "education",
-    label: "Education",
-    field_type: :text,
-    help_text: "One per line: Degree | School | Year."
+    help_text: "One per line: Platform | URL."
   },
   %{
     content_type: :team_member,
@@ -167,13 +155,14 @@ definitions = [
     help_text: "Lower numbers sort first on the About page."
   },
 
-  # --- testimonial ---------------------------------------------------------
+  # --- testimonial -------------------------------------------------------------
   %{
     content_type: :testimonial,
-    name: "condition_treated",
-    label: "Condition treated",
+    name: "customer_title",
+    label: "Customer title/company",
     field_type: :string,
-    help_text: "Free-text condition shown under the author name."
+    help_text:
+      "Free-text attribution shown under the author name, e.g. \"VP Engineering, Globex\"."
   },
   %{
     content_type: :testimonial,
@@ -198,7 +187,7 @@ definitions = [
   %{
     content_type: :testimonial,
     name: "verified",
-    label: "Verified patient",
+    label: "Verified customer",
     field_type: :boolean,
     default: "false"
   },
@@ -230,7 +219,7 @@ definitions = [
   }
 ]
 
-IO.puts("Seeding acupuncture custom-field definitions…")
+IO.puts("Seeding Acme example custom-field definitions…")
 
 tenant = KilnCMS.Accounts.default_org_id()
 

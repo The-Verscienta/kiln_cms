@@ -1,37 +1,32 @@
-# Import the holistic-acupuncture Sanity export into KilnCMS.
+# Seeds the "Acme" example catalog with synthetic demo content. Unlike the
+# overlay's old Sanity-derived import, this is fully self-contained — no
+# external export file, so it runs out of the box against any activated
+# overlay. Run with:
 #
-#     mix run projects/example/priv/repo/example_import.exs path/to/kiln-export.json
+#     mix run projects/example/priv/repo/example_import.exs
 #
-# The export file is produced by the Astro repo's scripts/export-to-kiln.js:
-# media entries (metadata-only, pointing at Cloudflare Images), categories,
-# tags, and one record per document with blocks already in Kiln's typed shape
-# (rich_text bodies are canonical Portable Text). Image blocks arrive with a
-# "media_ref" (Sanity asset ref) which this script swaps for the created
-# MediaItem's UUID + URL.
-#
-# Idempotent by natural key: media by URL, categories/tags by slug, content by
-# slug — existing records are updated, missing ones created. Records publish
-# unless the export marks them `"published": false`.
-#
-# After publishing, each record's `published_at` is restored to the Sanity
-# value with a direct Repo update — the publish action stamps "now" and the
-# attribute is deliberately not writable through the API, so a one-time
-# migration bypass is the least invasive way to preserve original blog dates.
+# Idempotent by (slug, locale): existing records are updated, missing ones
+# created and published. Safe to re-run after edits to this file.
 #
 # Requires the example overlay to be active (config/project.exs registers
-# Example.Catalog — see projects/example/README.md). Run
-# projects/example/priv/repo/example_field_definitions.exs first
-# (custom-field values are validated against the definitions on every write).
+# Example.Catalog — see projects/example/README.md), and must run after
+# `example_field_definitions.exs` (custom-field values are validated against
+# the definitions on every write) and `example_dynamic_types.exs` (the Event
+# entries below need the "event" type to already exist).
+#
+# Deliberately skips real media/featured images: kiln_cms's media pipeline
+# expects Cloudflare-hosted assets (`csp_img_src` in `project.exs`), which a
+# synthetic seed can't produce without a real upload step. Every other block
+# type is fair game, and the seeded bodies deliberately mix several different
+# ones (heading, rich_text, quote, accordion, how_to, divider, the
+# plugin-contributed `stat`, and the core `form` block) so the block editor's
+# breadth is visible in seeded content, not just structurally available.
 
-import Ecto.Query
+require Ash.Query
 
 alias Example.Catalog
 alias KilnCMS.Accounts
 alias KilnCMS.CMS
-alias KilnCMS.Repo
-
-[path | _] = System.argv()
-export = path |> File.read!() |> Jason.decode!()
 
 admin_email = System.get_env("ADMIN_EMAIL", "admin@kiln.test")
 
@@ -44,248 +39,314 @@ admin =
 tenant = Accounts.default_org_id()
 opts = [actor: admin, tenant: tenant]
 
-# --- Media -----------------------------------------------------------------
+# --- Request-a-demo form (embedded via the `form` block on one Product) ----
 
-existing_media = CMS.list_media_items!(opts) |> Map.new(&{&1.url, &1})
+form =
+  case CMS.get_active_form_by_slug("request-a-demo", opts ++ [not_found_error?: false]) do
+    {:ok, %{} = form} ->
+      form
 
-media_by_ref =
-  Map.new(export["media"], fn m ->
-    attrs = %{
-      filename: m["filename"],
-      content_type: m["content_type"],
-      width: m["width"],
-      height: m["height"],
-      url: m["url"],
-      variants: m["variants"] || %{},
-      alt: m["alt"]
-    }
+    _not_found ->
+      form =
+        CMS.create_form!(
+          %{name: "Request a demo", slug: "request-a-demo", submit_label: "Request demo"},
+          opts
+        )
 
-    item =
-      case Map.fetch(existing_media, m["url"]) do
-        {:ok, item} -> CMS.update_media_item!(item, attrs, opts)
-        :error -> CMS.create_media_item!(attrs, opts)
-      end
+      existing_fields = CMS.form_fields_for!(form.id, opts) |> MapSet.new(& &1.name)
 
-    {m["sanity_ref"], item}
-  end)
+      [
+        %{name: "name", label: "Name", field_type: :string, required: true, position: 0},
+        %{name: "email", label: "Work email", field_type: :email, required: true, position: 1},
+        %{name: "company", label: "Company", field_type: :string, position: 2}
+      ]
+      |> Enum.reject(&MapSet.member?(existing_fields, &1.name))
+      |> Enum.each(&CMS.create_form_field!(Map.put(&1, :form_id, form.id), opts))
 
-IO.puts("media: #{map_size(media_by_ref)} ready")
+      form
+  end
 
-# --- Categories / tags -----------------------------------------------------
+IO.puts("form: #{form.slug} ready")
 
-categories =
-  Map.new(export["categories"], fn %{"slug" => slug, "name" => name} ->
-    case CMS.get_category_by_slug(slug, opts ++ [not_found_error?: false]) do
-      {:ok, %{} = cat} -> {slug, cat}
-      _ -> {slug, CMS.create_category!(%{name: name, slug: slug}, opts)}
-    end
-  end)
-
-tags =
-  Map.new(export["tags"], fn %{"slug" => slug, "name" => name} ->
-    case CMS.get_tag_by_slug(slug, opts ++ [not_found_error?: false]) do
-      {:ok, %{} = tag} -> {slug, tag}
-      _ -> {slug, CMS.create_tag!(%{name: name, slug: slug}, opts)}
-    end
-  end)
-
-IO.puts("categories: #{map_size(categories)}, tags: #{map_size(tags)}")
-
-# --- Content ---------------------------------------------------------------
-
-# Swap image blocks' media_ref (Sanity asset ref) for MediaItem UUID + URL.
-resolve_blocks = fn blocks ->
-  Enum.map(blocks || [], fn
-    %{"_type" => "image", "media_ref" => ref} = block ->
-      case Map.fetch(media_by_ref, ref) do
-        {:ok, item} ->
-          block
-          |> Map.delete("media_ref")
-          |> Map.merge(%{"media_id" => item.id, "url" => item.url})
-          |> then(fn b ->
-            if b["alt"] in [nil, ""], do: Map.put(b, "alt", item.alt || ""), else: b
-          end)
-
-        :error ->
-          Map.delete(block, "media_ref")
-      end
-
-    block ->
-      block
-  end)
-end
+# --- Shared helpers ----------------------------------------------------------
 
 # Per-type code interfaces (bang variants; create/list arity 2, update/publish
-# arity 3: record, params, opts). `post` is a core type on KilnCMS.CMS; the
-# four acupuncture types live on the overlay's Example.Catalog domain.
+# arity 3: record, params, opts). `domain` is `KilnCMS.CMS` for the core
+# `post` type mentioned in field definitions but not seeded here, `Example.Catalog`
+# for the overlay's own four types.
 interfaces =
-  Map.new(~w(post condition team_member testimonial faq), fn type ->
+  Map.new(~w(product team_member testimonial faq), fn type ->
     plural = if type == "faq", do: "faqs", else: "#{type}s"
-    domain = if type == "post", do: CMS, else: Catalog
 
     {type,
      %{
-       list: Function.capture(domain, :"list_#{plural}!", 2),
-       create: Function.capture(domain, :"create_#{type}!", 2),
-       update: Function.capture(domain, :"update_#{type}!", 3),
-       publish: Function.capture(domain, :"publish_#{type}!", 3)
+       list: Function.capture(Catalog, :"list_#{plural}!", 2),
+       create: Function.capture(Catalog, :"create_#{type}!", 2),
+       update: Function.capture(Catalog, :"update_#{type}!", 3),
+       publish: Function.capture(Catalog, :"publish_#{type}!", 3)
      }}
   end)
 
-table_for = %{
-  "post" => "posts",
-  "condition" => "conditions",
-  "team_member" => "team_members",
-  "testimonial" => "testimonials",
-  "faq" => "faqs"
-}
+# Upserts by (slug, locale) and publishes drafts. Returns the row.
+upsert_publish = fn type, attrs ->
+  %{list: list, create: create, update: update, publish: publish} = interfaces[type]
+  locale = Map.get(attrs, :locale, "en")
 
-# Existing rows per type, keyed by slug, for idempotent re-runs.
-existing_by_type =
-  Map.new(interfaces, fn {type, %{list: list}} ->
-    {type, list.(%{}, opts) |> Map.new(&{&1.slug, &1})}
-  end)
+  existing =
+    list.(%{}, opts)
+    |> Enum.find(&(&1.slug == attrs.slug and &1.locale == locale))
 
-counts = %{created: 0, updated: 0, published: 0, failed: 0}
+  row =
+    case existing do
+      nil -> create.(attrs, opts)
+      row -> update.(row, Map.delete(attrs, :slug), opts)
+    end
 
-{counts, imported} =
-  Enum.reduce(export["records"], {counts, %{}}, fn record, {counts, imported} ->
-    type = record["type"]
-    %{create: create, update: update, publish: publish} = interfaces[type]
+  if row.state in [:draft, :in_review], do: publish.(row, %{}, opts), else: row
+end
 
-    optional =
-      [
-        excerpt: record["excerpt"],
-        seo_title: record["seo_title"],
-        seo_description: record["seo_description"],
-        category_id: record["category_slug"] && categories[record["category_slug"]].id,
-        featured_image_id:
-          record["featured_image_ref"] &&
-            case media_by_ref[record["featured_image_ref"]] do
-              nil -> nil
-              item -> item.id
-            end,
-        tag_ids:
-          record["tag_slugs"] &&
-            record["tag_slugs"]
-            |> Enum.uniq()
-            |> Enum.map(&(tags[&1] && tags[&1].id))
-            |> Enum.reject(&is_nil/1)
-      ]
-      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
-      |> Map.new()
+# --- Products ----------------------------------------------------------------
 
-    attrs =
-      Map.merge(
+money = fn amount, currency -> %{"amount" => amount, "currency" => currency} end
+
+products =
+  [
+    %{
+      title: "Widget Pro",
+      slug: "widget-pro",
+      excerpt: "Our flagship widget, built for teams that ship fast.",
+      custom_fields: %{
+        "category" => "hardware",
+        "sku" => "WP-100",
+        "price" => money.(99.0, "USD"),
+        "features" => "Aluminum housing\nWireless sync\n2-year warranty",
+        "featured" => true,
+        "display_order" => 0
+      },
+      blocks: [
+        %{"_type" => "heading", "text" => "Everything you need, out of the box", "level" => 2},
         %{
-          title: record["title"],
-          slug: record["slug"],
-          blocks: resolve_blocks.(record["blocks"]),
-          custom_fields: record["custom_fields"] || %{}
+          "_type" => "rich_text",
+          "legacy_html" => "<p>Widget Pro pairs with every Acme product below.</p>"
         },
-        optional
+        %{"_type" => "stat", "value" => "10,000+", "label" => "customers served"},
+        %{
+          "_type" => "accordion",
+          "title" => "Specs",
+          "panels" => [
+            %{"title" => "Dimensions", "content" => "12 × 8 × 3 cm"},
+            %{"title" => "Battery", "content" => "18-hour typical use"}
+          ]
+        }
+      ]
+    },
+    %{
+      title: "Cloud Sync",
+      slug: "cloud-sync",
+      excerpt: "Real-time sync for every Acme device.",
+      custom_fields: %{
+        "category" => "software",
+        "sku" => "CS-200",
+        "price" => money.(29.0, "USD"),
+        "features" => "End-to-end encryption\nOffline queue\nAudit log",
+        "featured" => true,
+        "display_order" => 1
+      },
+      blocks: [
+        %{
+          "_type" => "how_to",
+          "name" => "Connect a device",
+          "steps" => [
+            %{"name" => "Install", "text" => "Download Cloud Sync from your device's app store."},
+            %{"name" => "Sign in", "text" => "Use your Acme account to sign in."},
+            %{"name" => "Sync", "text" => "Devices sync automatically once signed in."}
+          ]
+        },
+        %{"_type" => "divider"},
+        %{"_type" => "form", "form_slug" => "request-a-demo"}
+      ]
+    },
+    %{
+      title: "Onboarding Package",
+      slug: "onboarding-package",
+      excerpt: "White-glove setup for larger teams.",
+      # Audience-gated (#337): only signed-in `:member` readers see this record.
+      audience: :member,
+      custom_fields: %{
+        "category" => "services",
+        "sku" => "OB-300",
+        "price" => money.(499.0, "USD"),
+        "display_order" => 2
+      },
+      blocks: [
+        %{"_type" => "rich_text", "legacy_html" => "<p>Available to registered customers.</p>"}
+      ]
+    },
+    %{
+      title: "Internal Beta Kit",
+      slug: "internal-beta-kit",
+      excerpt: "Early-access hardware for design partners.",
+      # Passphrase-locked (#496): the passphrase is "acme-preview-2026".
+      # `access_password` is a write-only argument — `Changes.ApplyAccessPassword`
+      # hashes it into `access_password_hash`/`password_fingerprint`.
+      access_password: "acme-preview-2026",
+      custom_fields: %{
+        "category" => "accessories",
+        "sku" => "BK-400",
+        "price" => money.(0.0, "USD"),
+        "display_order" => 3
+      },
+      blocks: [
+        %{
+          "_type" => "quote",
+          "text" => "Design-partner exclusive — do not share outside your org.",
+          "citation" => "Acme Beta Program"
+        }
+      ]
+    },
+    %{
+      title: "Widget Case",
+      slug: "widget-case",
+      excerpt: "A protective case for Widget Pro.",
+      custom_fields: %{
+        "category" => "accessories",
+        "sku" => "WC-500",
+        "price" => money.(15.0, "USD"),
+        "display_order" => 4
+      },
+      blocks: [%{"_type" => "rich_text", "legacy_html" => "<p>Fits Widget Pro snugly.</p>"}]
+    }
+  ]
+  |> Enum.map(&upsert_publish.("product", &1))
+  |> Map.new(&{&1.slug, &1})
+
+IO.puts("products: #{map_size(products)} ready")
+
+# --- Team members --------------------------------------------------------------
+
+team_members =
+  [
+    %{
+      title: "Ada Rivera",
+      slug: "ada-rivera",
+      excerpt: "Senior Product Engineer",
+      custom_fields: %{
+        "role" => "Senior Product Engineer",
+        "department" => "engineering",
+        "social_links" =>
+          "GitHub | https://github.com/example\nLinkedIn | https://linkedin.com/in/example",
+        "years_experience" => 8,
+        "email" => "ada@acme.example"
+      },
+      blocks: [
+        %{
+          "_type" => "rich_text",
+          "legacy_html" => "<p>Ada leads the Widget Pro platform team.</p>"
+        }
+      ]
+    },
+    %{
+      title: "Marcus Chen",
+      slug: "marcus-chen",
+      excerpt: "Head of Customer Support",
+      custom_fields: %{
+        "role" => "Head of Customer Support",
+        "department" => "support",
+        "years_experience" => 6,
+        "email" => "marcus@acme.example"
+      },
+      blocks: []
+    },
+    %{
+      title: "Priya Nathan",
+      slug: "priya-nathan",
+      excerpt: "VP Sales",
+      custom_fields: %{
+        "role" => "VP Sales",
+        "department" => "sales",
+        "years_experience" => 11,
+        "email" => "priya@acme.example"
+      },
+      blocks: []
+    }
+  ]
+  |> Enum.map(&upsert_publish.("team_member", &1))
+  |> Map.new(&{&1.slug, &1})
+
+IO.puts("team_members: #{map_size(team_members)} ready")
+
+# --- Testimonials (linked to a Product via ContentLink) ---------------------
+
+testimonials_attrs = [
+  %{
+    title: "Globex Corp",
+    slug: "globex-corp",
+    excerpt: "\"Widget Pro paid for itself in a month.\"",
+    custom_fields: %{
+      "customer_title" => "Operations Lead, Globex Corp",
+      "rating" => 5,
+      "review_date" => "2026-06-02",
+      "featured" => true,
+      "verified" => true
+    },
+    blocks: [
+      %{
+        "_type" => "quote",
+        "text" => "Widget Pro paid for itself in a month.",
+        "citation" => "Operations Lead, Globex Corp"
+      }
+    ],
+    related_product_slug: "widget-pro"
+  },
+  %{
+    title: "Initech",
+    slug: "initech",
+    excerpt: "\"Cloud Sync just works, across every device.\"",
+    custom_fields: %{
+      "customer_title" => "CTO, Initech",
+      "rating" => 4,
+      "review_date" => "2026-05-14",
+      "verified" => true
+    },
+    blocks: [
+      %{
+        "_type" => "quote",
+        "text" => "Cloud Sync just works, across every device.",
+        "citation" => "CTO, Initech"
+      }
+    ],
+    related_product_slug: "cloud-sync"
+  }
+]
+
+testimonials =
+  testimonials_attrs
+  |> Enum.map(&upsert_publish.("testimonial", Map.delete(&1, :related_product_slug)))
+  |> Map.new(&{&1.slug, &1})
+
+links_created =
+  testimonials_attrs
+  |> Enum.reduce(0, fn %{slug: slug, related_product_slug: product_slug}, n ->
+    with %{} = testimonial <- testimonials[slug],
+         %{} = product <- products[product_slug],
+         # `Ash.exists?/2` on a filtered query, not a `list_content_links!`
+         # scan or a `content_links` relationship load: `kind` is an
+         # open-ended atom column (`Ash.Type.Atom.EctoType`), and Ecto
+         # decodes every matched row's `kind` into a struct field —
+         # including one this run never referenced as a literal atom, which
+         # raises rather than returning an unmatched value. `exists?`
+         # filters `kind == :related` server-side, so Postgres excludes
+         # any other-kind row before a row is ever materialized.
+         false <-
+           KilnCMS.CMS.ContentLink
+           |> Ash.Query.filter(
+             source_id == ^testimonial.id and target_id == ^product.id and kind == :related
+           )
+           |> Ash.exists?(opts) do
+      CMS.create_content_link!(
+        %{source_id: testimonial.id, target_id: product.id, kind: :related},
+        opts
       )
-
-    # Concurrent Oban jobs (embedding, notifications) can collide with the
-    # loop on the same row (optimistic lock / pool contention), so retry a
-    # failed record once before counting it as failed. The retry re-reads the
-    # row from the DB — attempt 1 may have created it before failing at
-    # publish, which the pre-loop snapshot can't know about.
-    import_one = fn lookup ->
-      {verb, row} =
-        case lookup.(record["slug"]) do
-          {:ok, existing} -> {:updated, update.(existing, Map.delete(attrs, :slug), opts)}
-          :error -> {:created, create.(attrs, opts)}
-        end
-
-      published? = record["published"] != false and row.state in [:draft, :in_review]
-      row = if published?, do: publish.(row, %{}, opts), else: row
-      {verb, published?, row}
-    end
-
-    snapshot_lookup = fn slug -> Map.fetch(existing_by_type[type], slug) end
-
-    fresh_lookup = fn slug ->
-      %{list: list} = interfaces[type]
-
-      case list.(%{}, opts) |> Enum.find(&(&1.slug == slug)) do
-        nil -> :error
-        row -> {:ok, row}
-      end
-    end
-
-    result =
-      try do
-        {:ok, import_one.(snapshot_lookup)}
-      rescue
-        _ ->
-          Process.sleep(250)
-
-          try do
-            {:ok, import_one.(fresh_lookup)}
-          rescue
-            e -> {:error, e}
-          end
-      end
-
-    case result do
-      {:ok, {verb, published?, row}} ->
-        counts =
-          counts
-          |> Map.update!(verb, &(&1 + 1))
-          |> then(&if published?, do: Map.update!(&1, :published, fn n -> n + 1 end), else: &1)
-
-        {counts, Map.put(imported, {type, record["slug"]}, row)}
-
-      {:error, e} ->
-        IO.puts(
-          "  FAILED #{type}/#{record["slug"]}: #{Exception.message(e) |> String.slice(0, 300)}"
-        )
-
-        {Map.update!(counts, :failed, &(&1 + 1)), imported}
-    end
-  end)
-
-IO.inspect(counts, label: "content")
-
-# --- Related conditions (second pass, now that all ids exist) --------------
-
-related_updates =
-  export["records"]
-  |> Enum.filter(&(&1["type"] == "condition" and (&1["related_slugs"] || []) != []))
-  |> Enum.reduce(0, fn record, n ->
-    with %{} = row <- imported[{"condition", record["slug"]}] do
-      ids =
-        record["related_slugs"]
-        |> Enum.map(&imported[{"condition", &1}])
-        |> Enum.reject(&is_nil/1)
-        |> Enum.map(& &1.id)
-
-      if ids != [] do
-        interfaces["condition"].update.(row, %{related_condition_ids: ids}, opts)
-        n + 1
-      else
-        n
-      end
-    else
-      _ -> n
-    end
-  end)
-
-IO.puts("related-condition links: #{related_updates}")
-
-# --- Restore original publish dates (direct Repo update; see header) -------
-
-restored =
-  export["records"]
-  |> Enum.filter(& &1["published_at"])
-  |> Enum.reduce(0, fn record, n ->
-    with %{} = row <- imported[{record["type"], record["slug"]}],
-         {:ok, dt, _} <- DateTime.from_iso8601(record["published_at"]) do
-      table = table_for[record["type"]]
-
-      from(r in table, where: r.id == ^Ecto.UUID.dump!(row.id))
-      |> Repo.update_all(set: [published_at: dt])
 
       n + 1
     else
@@ -293,5 +354,148 @@ restored =
     end
   end)
 
-IO.puts("published_at restored: #{restored}")
+IO.puts(
+  "testimonials: #{map_size(testimonials)} ready, #{links_created} new related-product links"
+)
+
+# --- FAQs (one seeded in two locales) ---------------------------------------
+
+faqs_attrs = [
+  %{
+    title: "How do I get started?",
+    slug: "getting-started",
+    locale: "en",
+    custom_fields: %{"category" => "getting-started", "featured" => true, "display_order" => 0},
+    blocks: [
+      %{
+        "_type" => "rich_text",
+        "legacy_html" => "<p>Create an account, then follow the setup wizard.</p>"
+      }
+    ]
+  },
+  %{
+    title: "¿Cómo empiezo?",
+    slug: "getting-started",
+    locale: "es",
+    custom_fields: %{"category" => "getting-started", "featured" => true, "display_order" => 0},
+    blocks: [
+      %{
+        "_type" => "rich_text",
+        "legacy_html" => "<p>Crea una cuenta y sigue el asistente de configuración.</p>"
+      }
+    ]
+  },
+  %{
+    title: "What payment methods do you accept?",
+    slug: "payment-methods",
+    custom_fields: %{"category" => "billing", "display_order" => 0},
+    blocks: [
+      %{
+        "_type" => "rich_text",
+        "legacy_html" => "<p>All major credit cards and ACH transfer.</p>"
+      }
+    ]
+  },
+  %{
+    title: "How do I reset my password?",
+    slug: "reset-password",
+    custom_fields: %{"category" => "account", "display_order" => 0},
+    blocks: [
+      %{
+        "_type" => "rich_text",
+        "legacy_html" => "<p>Use the \"Forgot password\" link on the sign-in page.</p>"
+      }
+    ]
+  },
+  %{
+    title: "Do you offer integrations?",
+    slug: "integrations",
+    custom_fields: %{"category" => "integrations", "display_order" => 0},
+    blocks: [
+      %{"_type" => "rich_text", "legacy_html" => "<p>Yes — see our integrations directory.</p>"}
+    ]
+  }
+]
+
+faqs =
+  faqs_attrs
+  |> Enum.map(&upsert_publish.("faq", &1))
+
+IO.puts("faqs: #{length(faqs)} ready (including 1 entry in 2 locales)")
+
+# --- Events (admin-defined dynamic type, D17) -------------------------------
+
+event_type =
+  case CMS.get_type_definition_by_name("event", opts) do
+    {:ok, type} -> type
+    _ -> raise "No \"event\" type — run example_dynamic_types.exs first."
+  end
+
+existing_entries =
+  CMS.list_entries!(%{}, opts) |> Enum.filter(&(&1.type_definition_id == event_type.id))
+
+upsert_publish_entry = fn attrs ->
+  attrs = Map.put(attrs, :type_definition_id, event_type.id)
+
+  row =
+    case Enum.find(existing_entries, &(&1.slug == attrs.slug)) do
+      nil -> CMS.create_entry!(attrs, opts)
+      row -> CMS.update_entry!(row, Map.drop(attrs, [:slug, :type_definition_id]), opts)
+    end
+
+  if row.state in [:draft, :in_review], do: CMS.publish_entry!(row, %{}, opts), else: row
+end
+
+events =
+  [
+    %{
+      title: "Product Launch Webinar",
+      slug: "product-launch-webinar",
+      excerpt: "See Widget Pro's newest features live.",
+      custom_fields: %{
+        "schedule" => %{
+          "start" => "2026-09-15T18:00:00",
+          "end" => "2026-09-15T19:00:00",
+          "time_zone" => "America/New_York"
+        },
+        "location" => "Online"
+      },
+      blocks: [
+        %{"_type" => "rich_text", "legacy_html" => "<p>Join us for a live walkthrough.</p>"}
+      ]
+    },
+    %{
+      title: "Acme User Conference",
+      slug: "acme-user-conference",
+      excerpt: "Two days of workshops and customer talks.",
+      custom_fields: %{
+        "schedule" => %{
+          "start" => "2026-10-06T09:00:00",
+          "end" => "2026-10-07T17:00:00",
+          "time_zone" => "America/Chicago"
+        },
+        "location" => "Austin, TX"
+      },
+      blocks: [%{"_type" => "heading", "text" => "Two days, one Acme", "level" => 2}]
+    },
+    %{
+      title: "Weekly Office Hours",
+      slug: "weekly-office-hours",
+      excerpt: "Drop-in Q&A with the Acme product team.",
+      custom_fields: %{
+        "schedule" => %{
+          "start" => "2026-08-18T16:00:00",
+          "end" => "2026-08-18T16:30:00",
+          "time_zone" => "America/New_York"
+        },
+        "recurrence" => %{"rrule" => "FREQ=WEEKLY;BYDAY=TU"},
+        "location" => "Online"
+      },
+      blocks: []
+    }
+  ]
+  |> Enum.map(upsert_publish_entry)
+
+IO.puts("events: #{length(events)} ready")
+
 IO.puts("Import finished.")

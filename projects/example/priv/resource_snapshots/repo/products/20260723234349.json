@@ -31,7 +31,7 @@
           "global": null,
           "strategy": null
         },
-        "name": "conditions_org_id_fkey",
+        "name": "products_org_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -139,18 +139,6 @@
       "references": null,
       "scale": null,
       "size": null,
-      "source": "path_alias",
-      "type": "text"
-    },
-    {
-      "allow_nil?": true,
-      "default": "nil",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": null,
-      "scale": null,
-      "size": null,
       "source": "seo_image",
       "type": "text"
     },
@@ -191,30 +179,6 @@
       "type": "text"
     },
     {
-      "allow_nil?": true,
-      "default": "nil",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": null,
-      "scale": null,
-      "size": null,
-      "source": "access_password_hash",
-      "type": "text"
-    },
-    {
-      "allow_nil?": true,
-      "default": "nil",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": null,
-      "scale": null,
-      "size": null,
-      "source": "password_fingerprint",
-      "type": "text"
-    },
-    {
       "allow_nil?": false,
       "default": "%{}",
       "generated?": false,
@@ -225,18 +189,6 @@
       "size": null,
       "source": "custom_fields",
       "type": "map"
-    },
-    {
-      "allow_nil?": true,
-      "default": "nil",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": null,
-      "scale": null,
-      "size": null,
-      "source": "next_occurrence_at",
-      "type": "utc_datetime_usec"
     },
     {
       "allow_nil?": true,
@@ -284,42 +236,6 @@
       "scale": null,
       "size": null,
       "source": "unpublish_at",
-      "type": "utc_datetime_usec"
-    },
-    {
-      "allow_nil?": false,
-      "default": "\"unpublish\"",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": null,
-      "scale": null,
-      "size": null,
-      "source": "expiry_action",
-      "type": "text"
-    },
-    {
-      "allow_nil?": true,
-      "default": "nil",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": null,
-      "scale": null,
-      "size": null,
-      "source": "review_after_days",
-      "type": "bigint"
-    },
-    {
-      "allow_nil?": true,
-      "default": "nil",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": null,
-      "scale": null,
-      "size": null,
-      "source": "last_reviewed_at",
       "type": "utc_datetime_usec"
     },
     {
@@ -437,7 +353,7 @@
           "global": null,
           "strategy": null
         },
-        "name": "conditions_author_id_fkey",
+        "name": "products_author_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -468,7 +384,7 @@
           "global": false,
           "strategy": "attribute"
         },
-        "name": "conditions_category_id_fkey",
+        "name": "products_category_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -499,7 +415,7 @@
           "global": false,
           "strategy": "attribute"
         },
-        "name": "conditions_featured_image_id_fkey",
+        "name": "products_featured_image_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -519,28 +435,6 @@
     {
       "all_tenants?": true,
       "concurrently": false,
-      "error_fields": [
-        "path_alias"
-      ],
-      "fields": [
-        {
-          "type": "atom",
-          "value": "path_alias"
-        }
-      ],
-      "include": null,
-      "message": null,
-      "name": "conditions_path_alias_index",
-      "nulls_distinct": true,
-      "prefix": null,
-      "table": null,
-      "unique": false,
-      "using": null,
-      "where": "path_alias IS NOT NULL"
-    },
-    {
-      "all_tenants?": true,
-      "concurrently": false,
       "error_fields": [],
       "fields": [
         {
@@ -550,7 +444,7 @@
       ],
       "include": null,
       "message": null,
-      "name": "conditions_embedding_hnsw_index",
+      "name": "products_embedding_hnsw_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -570,7 +464,7 @@
       ],
       "include": null,
       "message": null,
-      "name": "conditions_title_trgm_index",
+      "name": "products_title_trgm_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -597,89 +491,23 @@
       ],
       "include": null,
       "message": null,
-      "name": "conditions_slug_locale_lookup_index",
+      "name": "products_slug_locale_lookup_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
       "unique": false,
       "using": null,
       "where": null
-    },
-    {
-      "all_tenants?": false,
-      "concurrently": false,
-      "error_fields": [
-        "next_occurrence_at"
-      ],
-      "fields": [
-        {
-          "type": "atom",
-          "value": "next_occurrence_at"
-        }
-      ],
-      "include": null,
-      "message": null,
-      "name": "conditions_next_occurrence_index",
-      "nulls_distinct": true,
-      "prefix": null,
-      "table": null,
-      "unique": false,
-      "using": null,
-      "where": "next_occurrence_at IS NOT NULL"
-    },
-    {
-      "all_tenants?": false,
-      "concurrently": false,
-      "error_fields": [
-        "unpublish_at"
-      ],
-      "fields": [
-        {
-          "type": "atom",
-          "value": "unpublish_at"
-        }
-      ],
-      "include": null,
-      "message": null,
-      "name": "conditions_unpublish_at_index",
-      "nulls_distinct": true,
-      "prefix": null,
-      "table": null,
-      "unique": false,
-      "using": null,
-      "where": "unpublish_at IS NOT NULL AND state = 'published'"
-    },
-    {
-      "all_tenants?": false,
-      "concurrently": false,
-      "error_fields": [
-        "last_reviewed_at"
-      ],
-      "fields": [
-        {
-          "type": "atom",
-          "value": "last_reviewed_at"
-        }
-      ],
-      "include": null,
-      "message": null,
-      "name": "conditions_last_reviewed_at_index",
-      "nulls_distinct": true,
-      "prefix": null,
-      "table": null,
-      "unique": false,
-      "using": null,
-      "where": "review_after_days IS NOT NULL AND state = 'published'"
     }
   ],
   "custom_statements": [],
   "has_create_action": true,
-  "hash": "737A4BD18681777B836FF7B4DCA7F57B46FE7C5D76486D36FD37E6106C444B98",
+  "hash": "A09D31FF3365E5A961380ED8EE460DE2E04FB90835785568FE6145DC17DB75EB",
   "identities": [
     {
       "all_tenants?": false,
       "base_filter": null,
-      "index_name": "conditions_unique_slug_index",
+      "index_name": "products_unique_slug_index",
       "keys": [
         {
           "type": "atom",
@@ -702,5 +530,5 @@
   },
   "repo": "Elixir.KilnCMS.Repo",
   "schema": null,
-  "table": "conditions"
+  "table": "products"
 }
