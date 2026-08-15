@@ -68,6 +68,13 @@ msgid_plural "%{count} a11y issues"
 msgstr[0] "%{count} problema de accesibilidad"
 msgstr[1] "%{count} problemas de accesibilidad"
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} block with an unresolved discussion"
+msgid_plural "%{count} blocks with unresolved discussions"
+msgstr[0] "%{count} bloque con un debate sin resolver"
+msgstr[1] "%{count} bloques con debates sin resolver"
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} checkpoint has not been published to the witness."
@@ -180,6 +187,13 @@ msgid "%{count} open task"
 msgid_plural "%{count} open tasks"
 msgstr[0] "%{count} tarea abierta"
 msgstr[1] "%{count} tareas abiertas"
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} open task anchored to a block"
+msgid_plural "%{count} open tasks anchored to a block"
+msgstr[0] "%{count} tarea abierta anclada a un bloque"
+msgstr[1] "%{count} tareas abiertas ancladas a un bloque"
 
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
@@ -644,6 +658,11 @@ msgstr "No se puede crear una copia de seguridad en esta instalación."
 #, elixir-autogen, elixir-format
 msgid "A bearer token widens reads and search to include drafts. Delivery sites attaching a service key should use the published-only routes (the /published twins) so drafts can never leak."
 msgstr "Un token bearer amplía las lecturas y la búsqueda para incluir borradores. Los sitios de entrega que adjunten una clave de servicio deben usar las rutas exclusivas de contenido publicado (las gemelas /published) para que los borradores nunca se filtren."
+
+#: lib/kiln_cms_web/live/task_live.ex
+#, elixir-autogen, elixir-format
+msgid "A block"
+msgstr "Un bloque"
 
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #, elixir-autogen, elixir-format
@@ -1133,6 +1152,7 @@ msgstr "Tras cambiar las convenciones de slug, todos los slugs existentes parece
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/newsletter_live.ex
+#: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
 msgid "All"
 msgstr "Todos"
@@ -1320,6 +1340,11 @@ msgstr "Analizar el contenido"
 msgid "Anchored history verified — chain intact, signature valid"
 msgstr "Historial anclado verificado: cadena intacta, firma válida"
 
+#: lib/kiln_cms_web/live/task_live.ex
+#, elixir-autogen, elixir-format
+msgid "Anchored to"
+msgstr "Anclado a"
+
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
 msgid "Announce published content on Bluesky or Mastodon. Add an account here, then add an Automation rule with the \"Social post\" reaction."
@@ -1470,6 +1495,7 @@ msgstr "Archivos generados"
 msgid "AshGraphql and AshJsonApi expose your content model to any frontend, with signed preview tokens for drafts."
 msgstr "AshGraphql y AshJsonApi exponen su modelo de contenido a cualquier frontend, con tokens de vista previa firmados para los borradores."
 
+#: lib/kiln_cms_web/components/block_discussion_components.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
@@ -1480,6 +1506,11 @@ msgstr "Asignar"
 #, elixir-autogen, elixir-format
 msgid "Assign to…"
 msgstr "Asignar a…"
+
+#: lib/kiln_cms_web/components/block_discussion_components.ex
+#, elixir-autogen, elixir-format
+msgid "Assignee"
+msgstr "Responsable"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -1811,6 +1842,7 @@ msgstr "Vista de calendario"
 msgid "Can't reschedule into the past."
 msgstr "No se puede reprogramar al pasado."
 
+#: lib/kiln_cms_web/components/block_discussion_components.ex
 #: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -2015,6 +2047,11 @@ msgstr "Elija una entrada publicada para enviar."
 msgid "Choose a social image"
 msgstr "Elegir una imagen social"
 
+#: lib/kiln_cms_web/components/block_discussion_components.ex
+#, elixir-autogen, elixir-format
+msgid "Choose a task…"
+msgstr "Elige una tarea…"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Choose a video or audio file"
@@ -2024,6 +2061,11 @@ msgstr "Elegir un archivo de vídeo o audio"
 #, elixir-autogen, elixir-format
 msgid "Choose an XLIFF file first."
 msgstr "Elige primero un archivo XLIFF."
+
+#: lib/kiln_cms_web/components/block_discussion_components.ex
+#, elixir-autogen, elixir-format
+msgid "Choose an editor…"
+msgstr "Elige un editor…"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -2213,6 +2255,11 @@ msgstr "Comparar seleccionadas"
 #, elixir-autogen, elixir-format
 msgid "Compare versions"
 msgstr "Comparar versiones"
+
+#: lib/kiln_cms_web/components/block_discussion_components.ex
+#, elixir-autogen, elixir-format
+msgid "Complete it"
+msgstr "Completarla"
 
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
@@ -2622,6 +2669,11 @@ msgstr "No se pudo generar el texto. Inténtalo de nuevo."
 msgid "Couldn't import that photo from Unsplash."
 msgstr "No se pudo importar esa foto de Unsplash."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't move that task."
+msgstr "No se pudo mover esa tarea."
+
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't ping that webhook."
@@ -2897,6 +2949,11 @@ msgstr "Crear redirección"
 #, elixir-autogen, elixir-format
 msgid "Create release"
 msgstr "Crear lanzamiento"
+
+#: lib/kiln_cms_web/components/block_discussion_components.ex
+#, elixir-autogen, elixir-format
+msgid "Create task"
+msgstr "Crear tarea"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -3445,6 +3502,11 @@ msgstr "¿Desconectar el proveedor de pagos? No se podrán vender nuevas suscrip
 msgid "Discussion on this block"
 msgstr "Debate en este bloque"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Discussions on removed blocks"
+msgstr "Debates sobre bloques eliminados"
+
 #: lib/kiln_cms_web/live/api_key_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/translations_live.ex
@@ -3545,6 +3607,7 @@ msgid_plural "Dropped %{count} published entries and %{artifacts} artifact entri
 msgstr[0] "Se eliminaron %{count} entrada publicada y %{artifacts} entradas de artefactos."
 msgstr[1] "Se eliminaron %{count} entradas publicadas y %{artifacts} entradas de artefactos."
 
+#: lib/kiln_cms_web/components/block_discussion_components.ex
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
 msgid "Due"
@@ -5090,6 +5153,11 @@ msgstr "Deje todo sin marcar para ofrecer este grupo en todos los tipos de conte
 msgid "Leave blank to keep the current one."
 msgstr "Déjelo en blanco para conservar el actual."
 
+#: lib/kiln_cms_web/components/block_discussion_components.ex
+#, elixir-autogen, elixir-format
+msgid "Leave it open"
+msgstr "Dejarla abierta"
+
 #: lib/kiln_cms_web/components/block_components.ex
 #, elixir-autogen, elixir-format
 msgid "Leave this field empty"
@@ -5115,6 +5183,11 @@ msgstr "Biblioteca (%{count})"
 #, elixir-autogen, elixir-format
 msgid "Light"
 msgstr "Claro"
+
+#: lib/kiln_cms_web/components/block_discussion_components.ex
+#, elixir-autogen, elixir-format
+msgid "Link existing"
+msgstr "Vincular existente"
 
 #: lib/kiln_cms_web/controllers/newsletter_controller.ex
 #, elixir-autogen, elixir-format
@@ -6110,6 +6183,7 @@ msgstr "No la usa ningún documento publicado."
 msgid "Not yet anchored — anchors are minted at publish"
 msgstr "Aún sin anclar: los anclajes se generan al publicar"
 
+#: lib/kiln_cms_web/components/block_discussion_components.ex
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Note"
@@ -6266,6 +6340,11 @@ msgstr "Al expirar"
 #, elixir-autogen, elixir-format
 msgid "On go-live"
 msgstr "Al publicarse"
+
+#: lib/kiln_cms_web/components/block_discussion_components.ex
+#, elixir-autogen, elixir-format
+msgid "On publish"
+msgstr "Al publicar"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -8471,6 +8550,16 @@ msgstr "Texto de una línea"
 msgid "Single sign-on failed — the identity couldn't be verified or linked. Try again, or contact an administrator."
 msgstr "Falló el inicio de sesión único: no se pudo verificar o vincular la identidad. Inténtelo de nuevo o contacte con un administrador."
 
+#: lib/kiln_cms_web/components/block_discussion_components.ex
+#, elixir-autogen, elixir-format
+msgid "Site default (completes it)"
+msgstr "Valor por defecto del sitio (la completa)"
+
+#: lib/kiln_cms_web/components/block_discussion_components.ex
+#, elixir-autogen, elixir-format
+msgid "Site default (leaves it open)"
+msgstr "Valor por defecto del sitio (la deja abierta)"
+
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
 msgid "Site name"
@@ -8919,10 +9008,20 @@ msgstr "Slug de destino"
 msgid "Target type"
 msgstr "Tipo de destino"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Task created on this block."
+msgstr "Tarea creada en este bloque."
+
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "Task due"
 msgstr "Tarea vencida"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Task moved to this block."
+msgstr "Tarea movida a este bloque."
 
 #: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/task_live.ex
@@ -9180,6 +9279,11 @@ msgstr "El icono de la aplicación se guardó, pero todavía no es instalable: %
 msgid "The backup status can't be determined."
 msgstr "No se puede determinar el estado de las copias de seguridad."
 
+#: lib/kiln_cms_web/live/task_live.ex
+#, elixir-autogen, elixir-format
+msgid "The block this task was anchored to has been removed."
+msgstr "El bloque al que estaba anclada esta tarea ha sido eliminado."
+
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #, elixir-autogen, elixir-format
 msgid "The campaign couldn't be recorded — check the details."
@@ -9371,6 +9475,11 @@ msgstr "El título mide unos %{pixels}px de ancho, por encima de los %{max}px qu
 msgid "The update check is misconfigured: KILN_UPDATE_REPO must be owner/name, and KILN_UPDATE_RELEASES_URL a full http(s) URL. No check was made."
 msgstr "La comprobación de actualizaciones está mal configurada: KILN_UPDATE_REPO debe tener el formato propietario/nombre y KILN_UPDATE_RELEASES_URL ser una URL http(s) completa. No se realizó ninguna comprobación."
 
+#: lib/kiln_cms_web/live/task_live.ex
+#, elixir-autogen, elixir-format
+msgid "The whole document"
+msgstr "Todo el documento"
+
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
 msgid "Theme"
@@ -9405,6 +9514,11 @@ msgstr "Tercio"
 #, elixir-autogen, elixir-format
 msgid "This block needs at least %{count} characters to work from."
 msgstr "Este bloque necesita al menos %{count} caracteres para trabajar."
+
+#: lib/kiln_cms_web/components/block_discussion_components.ex
+#, elixir-autogen, elixir-format
+msgid "This block was removed. The discussion and its tasks are kept."
+msgstr "Este bloque fue eliminado. Se conservan el debate y sus tareas."
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -9866,6 +9980,11 @@ msgstr "Desarchivar"
 #, elixir-autogen, elixir-format
 msgid "Unarchive %{count} selected item(s)? They return to draft."
 msgstr "¿Desarchivar %{count} elemento(s) seleccionado(s)? Vuelven a borrador."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Unassigned"
+msgstr "Sin asignar"
 
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
@@ -11220,6 +11339,11 @@ msgstr "lanzamiento publicado"
 #, elixir-autogen, elixir-format
 msgid "released"
 msgstr "publicada el"
+
+#: lib/kiln_cms_web/live/task_live.ex
+#, elixir-autogen, elixir-format
+msgid "removed block"
+msgstr "bloque eliminado"
 
 #: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex

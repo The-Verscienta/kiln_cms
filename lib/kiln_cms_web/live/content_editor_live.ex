@@ -237,6 +237,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # itself after `@typing_ttl` so a peer who closes the tab mid-word
          # doesn't type forever.
          |> assign(:typing, %{})
+         # The task form inside a block's discussion (nil = closed). Separate
+         # from `task_draft`, which belongs to the settings panel's
+         # document-level assignment — two forms, two drafts, so opening one
+         # never half-fills the other.
+         |> assign(:block_task_draft, nil)
          # Internal-link suggestions (#377). `nil` = never opened; loading is
          # deferred to first open because it costs a pgvector query plus a
          # record read per neighbour, which no page-load should pay.
@@ -2105,6 +2110,96 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   def handle_event("presence_focus", _params, socket), do: {:noreply, socket}
 
+  # ── Turning a block's discussion into a task ────────────────────────────────
+
+  # Seeded from the thread rather than blank: the assignee from the first
+  # `@mention` the root comment resolves, the note from its body, a due date a
+  # week out. The common case is then one click and a confirm, and every field
+  # is still editable — a seed the author has to correct is cheaper than a form
+  # they have to fill.
+  def handle_event("block_task_open", %{"bid" => block_id}, socket)
+      when is_binary(block_id) and block_id != "",
+      do: {:noreply, assign(socket, :block_task_draft, seed_block_task(socket, block_id))}
+
+  def handle_event("block_task_open", _params, socket), do: {:noreply, socket}
+
+  def handle_event("block_task_close", _params, socket),
+    do: {:noreply, assign(socket, :block_task_draft, nil)}
+
+  def handle_event("block_task_draft", %{"task_assignee_id" => v}, socket) when is_binary(v),
+    do: {:noreply, put_block_task_draft(socket, "assignee_id", v)}
+
+  def handle_event("block_task_draft", %{"task_due_on" => v}, socket) when is_binary(v),
+    do: {:noreply, put_block_task_draft(socket, "due_on", v)}
+
+  def handle_event("block_task_draft", %{"task_note" => v}, socket) when is_binary(v),
+    do: {:noreply, put_block_task_draft(socket, "note", v)}
+
+  def handle_event("block_task_draft", %{"task_auto_complete" => v}, socket) when is_binary(v),
+    do: {:noreply, put_block_task_draft(socket, "auto_complete", v)}
+
+  def handle_event("block_task_draft", _params, socket), do: {:noreply, socket}
+
+  def handle_event("block_task_submit", %{"bid" => block_id}, socket)
+      when is_binary(block_id) and block_id != "" do
+    draft = socket.assigns.block_task_draft || %{}
+
+    attrs = %{
+      content_type: to_string(socket.assigns.kind),
+      content_id: socket.assigns.record.id,
+      block_id: block_id,
+      assignee_id: blank_to_nil(draft["assignee_id"]),
+      due_on: blank_to_nil(draft["due_on"]),
+      note: blank_to_nil(draft["note"]),
+      auto_complete_on_publish: tri_state(draft["auto_complete"])
+    }
+
+    case CMS.assign_task(attrs, actor: socket.assigns.actor, tenant: socket.assigns.current_org) do
+      {:ok, _task} ->
+        {:noreply,
+         socket
+         |> reload_tasks()
+         |> assign(:block_task_draft, nil)
+         |> put_flash(:info, gettext("Task created on this block."))}
+
+      {:error, _error} ->
+        {:noreply, put_flash(socket, :error, gettext("Couldn't assign that task."))}
+    end
+  end
+
+  def handle_event("block_task_submit", _params, socket), do: {:noreply, socket}
+
+  # Re-anchor a task that was filed against the whole document. Only tasks with
+  # no block of their own are offered (see `linkable_tasks/2`), and the id is
+  # checked against that same list rather than trusted: a pushed payload names
+  # whatever it likes.
+  def handle_event("block_task_link", %{"link_task_id" => id}, socket)
+      when is_binary(id) and id != "" do
+    block_id = socket.assigns.comment_block
+
+    with true <- is_binary(block_id),
+         task when not is_nil(task) <-
+           Enum.find(socket.assigns.tasks, &(&1.id == id and is_nil(&1.block_id))) do
+      case CMS.update_task(task, %{block_id: block_id},
+             actor: socket.assigns.actor,
+             tenant: socket.assigns.current_org
+           ) do
+        {:ok, _task} ->
+          {:noreply,
+           socket
+           |> reload_tasks()
+           |> put_flash(:info, gettext("Task moved to this block."))}
+
+        {:error, _error} ->
+          {:noreply, put_flash(socket, :error, gettext("Couldn't move that task."))}
+      end
+    else
+      _no_such_open_task -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("block_task_link", _params, socket), do: {:noreply, socket}
+
   def handle_event("comment_add", %{"bid" => block_id}, socket)
       when is_binary(block_id) and block_id != "" do
     body = socket.assigns.comment_draft
@@ -3401,6 +3496,113 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> Ash.Query.filter(role in [:editor, :admin])
     |> Ash.read!(authorize?: false)
   end
+
+  # ── The comment → task bridge ───────────────────────────────────────────────
+
+  defp put_block_task_draft(socket, key, value) do
+    assign(socket, :block_task_draft, Map.put(socket.assigns.block_task_draft || %{}, key, value))
+  end
+
+  # What the drawer's task form opens with. The note is the root comment's own
+  # words — that is what the task is *about* — truncated to the column's limit
+  # so a long thread doesn't fail the write on a length constraint the author
+  # never saw.
+  defp seed_block_task(socket, block_id) do
+    root =
+      socket.assigns.comments
+      |> Enum.filter(&(&1.block_id == block_id))
+      |> Enum.find(&is_nil(&1.thread_id))
+
+    %{
+      "assignee_id" => seeded_assignee(socket, root),
+      "due_on" => Date.to_iso8601(Date.add(Date.utc_today(), 7)),
+      "note" => seeded_note(root),
+      "auto_complete" => ""
+    }
+  end
+
+  # The first person the root comment unambiguously mentions. `resolve/2` is
+  # the same call `NotifyComment` makes, so whoever was emailed about the
+  # comment is whoever the task is offered to — and an ambiguous `@alice`
+  # seeds nobody here for the same reason it notifies nobody there.
+  #
+  # Only editors can hold a task (`AssigneeIsEditor`), so a mention of a viewer
+  # is dropped at the seed rather than offered and rejected on submit.
+  defp seeded_assignee(_socket, nil), do: ""
+
+  defp seeded_assignee(socket, %{body: body}) do
+    assignable = MapSet.new(socket.assigns.assignable_users, fn {_label, id} -> id end)
+
+    body
+    |> Mentions.resolve(socket.assigns.mention_roster)
+    |> Enum.map(& &1.id)
+    |> Enum.find("", &MapSet.member?(assignable, &1))
+  end
+
+  defp seeded_note(nil), do: ""
+
+  defp seeded_note(%{body: body}) when is_binary(body),
+    do: String.slice(body, 0, KilnCMS.Limits.paragraph())
+
+  defp seeded_note(_root), do: ""
+
+  # The open tasks on this document that no block has claimed. Anchored ones
+  # are deliberately absent: moving a task off the block it already names would
+  # empty that block's pin, which is not what "link existing" sounds like.
+  defp linkable_tasks(tasks) do
+    tasks
+    |> Enum.filter(&is_nil(&1.block_id))
+    |> Enum.map(&{task_link_label(&1), &1.id})
+  end
+
+  defp task_link_label(%{note: note} = task) when is_binary(note) and note != "",
+    do: "#{task_assignee_label(task)} — #{String.slice(note, 0, 40)}"
+
+  defp task_link_label(task), do: task_assignee_label(task)
+
+  defp task_assignee_label(%{assignee: %{name: name}}) when is_binary(name) and name != "",
+    do: name
+
+  defp task_assignee_label(%{assignee: %{email: email}}) when not is_nil(email),
+    do: to_string(email)
+
+  defp task_assignee_label(_task), do: gettext("Unassigned")
+
+  # Blocks that no longer exist in the document but still carry a thread or a
+  # task, oldest discussion first.
+  #
+  # Deleting a block cascades nothing — the anchor is soft (`Task`'s moduledoc
+  # says why) — so without this the thread would simply stop being rendered:
+  # still in the database, still counted by every org-wide read, invisible to
+  # the one person who could act on it. Rendering them under the block tree is
+  # what makes "kept" mean something.
+  #
+  # Read off the form rather than the saved record, so a block deleted in this
+  # session shows up here before the save lands.
+  defp orphan_block_ids(form, comments, tasks) do
+    present =
+      form
+      |> AshPhoenix.Form.value(:blocks)
+      |> List.wrap()
+      |> Enum.map(&block_form_id/1)
+      |> MapSet.new()
+
+    (Enum.map(comments, & &1.block_id) ++ Enum.map(tasks, & &1.block_id))
+    |> Enum.reject(&(is_nil(&1) or MapSet.member?(present, &1)))
+    |> Enum.uniq()
+  end
+
+  # `AshPhoenix.Form.value(form, :blocks)` yields the **nested forms**, not
+  # maps, so the id has to be asked for the same way the template's
+  # `bf[:id].value` asks. Reading `.id` off the struct instead silently gives
+  # nil for every block, which makes every discussed block look orphaned — it
+  # renders each one's panel twice, under duplicate DOM ids.
+  defp block_form_id(%AshPhoenix.Form{} = block_form),
+    do: AshPhoenix.Form.value(block_form, :id)
+
+  defp block_form_id(%{"id" => id}), do: id
+  defp block_form_id(%{id: id}), do: id
+  defp block_form_id(_block), do: nil
 
   # ── Typing indicators ───────────────────────────────────────────────────────
 
@@ -8614,6 +8816,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
                       }
                       viewers={block_viewers(@editors, @actor.id, bf[:id].value)}
                       typing={typing_names(@typing, bf[:id].value)}
+                      task_draft={if @comment_block == bf[:id].value, do: @block_task_draft}
+                      assignable_users={@assignable_users}
+                      linkable_tasks={linkable_tasks(@tasks)}
+                      auto_complete_default={@auto_complete_default}
                     />
                     <%!-- Inline "+" to insert a block right after this one (B2). --%>
                     <.block_inserter
@@ -8624,6 +8830,36 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     />
                   </div>
                 </.inputs_for>
+              </div>
+
+              <%!-- Discussions whose block is gone. Deleting a block cascades
+                    nothing, so without this section the thread would simply
+                    stop being rendered — still stored, still counted by every
+                    org-wide read, invisible to the one person who could close
+                    it out. --%>
+              <div
+                :if={orphan_block_ids(@form, @comments, @tasks) != []}
+                class="space-y-2 rounded border border-dashed border-base-content/20 p-3"
+              >
+                <p class="text-sm font-medium text-base-content/70">
+                  {gettext("Discussions on removed blocks")}
+                </p>
+                <.block_discussion
+                  :for={orphan_id <- orphan_block_ids(@form, @comments, @tasks)}
+                  block_id={orphan_id}
+                  comments={@comments}
+                  tasks={@tasks}
+                  orphan?={true}
+                  open?={@comment_block == orphan_id}
+                  draft={if @comment_block == orphan_id, do: @comment_draft}
+                  suggestions={if @comment_block == orphan_id, do: @mention_suggestions, else: []}
+                  viewers={[]}
+                  typing={typing_names(@typing, orphan_id)}
+                  task_draft={if @comment_block == orphan_id, do: @block_task_draft}
+                  assignable_users={@assignable_users}
+                  linkable_tasks={linkable_tasks(@tasks)}
+                  auto_complete_default={@auto_complete_default}
+                />
               </div>
 
               <%!-- Inviting empty state when a page has no blocks yet (Theme A). --%>

@@ -475,6 +475,8 @@ defmodule KilnCMS.CMS do
       define :list_unresolved_threads_for,
         action: :unresolved_for_content,
         args: [:content_type, :content_id]
+
+      define :list_unresolved_threads, action: :unresolved
     end
 
     # Editorial tasks: assignments, due dates, a workload view (#501) — the

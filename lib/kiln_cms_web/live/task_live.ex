@@ -9,6 +9,19 @@ defmodule KilnCMSWeb.TaskLive do
   not denormalized onto the task — same reasoning as `Comment`/`Consent`'s
   soft-polymorphic content ref: a stored title would go stale the moment the
   content is renamed.
+
+  ## Block-anchored tasks
+
+  A task may name one block (`Task.block_id`). The block is resolved the same
+  live way the title is — through the record's `block_ids` calculation, which
+  projects the tree to `_id`/`_type` and no field values — so a row says
+  *which kind of block* and links straight to its discussion, without this
+  page reading block content it has no business rendering.
+
+  A block that has since been deleted is labelled rather than hidden. Nothing
+  cascades when a block goes (see `KilnCMS.CMS.Task`'s moduledoc), so the task
+  is still real and still somebody's; a row that quietly stopped mentioning
+  its block would make it look like whole-document work.
   """
   use KilnCMSWeb, :live_view
 
@@ -22,6 +35,10 @@ defmodule KilnCMSWeb.TaskLive do
      socket
      |> assign(:page_title, gettext("Tasks"))
      |> assign(:view, :mine)
+     # `handle_params/3` overwrites both from the URL a moment later; they are
+     # assigned here because `load_tasks/1` below reads them and mount runs
+     # first.
+     |> assign(:scope, :all)
      |> assign(:is_admin, KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin)
      |> load_site_default()
      |> load_tasks()}
@@ -38,8 +55,24 @@ defmodule KilnCMSWeb.TaskLive do
   @impl true
   def handle_params(params, _uri, socket) do
     view = if params["view"] == "team", do: :team, else: :mine
-    {:noreply, socket |> assign(:view, view) |> load_tasks()}
+
+    {:noreply,
+     socket
+     |> assign(:view, view)
+     |> assign(:scope, scope_param(params["scope"]))
+     |> load_tasks()}
   end
+
+  # `all` is the default because a filter that hides rows by default hides
+  # work. `block` narrows to block-anchored tasks (the triage queue),
+  # `document` to the ones about the whole record.
+  defp scope_param("block"), do: :block
+  defp scope_param("document"), do: :document
+  defp scope_param(_all_or_unknown), do: :all
+
+  defp in_scope?(_task, :all), do: true
+  defp in_scope?(%{block_id: block_id}, :block), do: not is_nil(block_id)
+  defp in_scope?(%{block_id: block_id}, :document), do: is_nil(block_id)
 
   # The site default (#818). Editor-visible because the rows below say what
   # publishing will do to them, and that sentence is wrong if you cannot see the
@@ -93,11 +126,14 @@ defmodule KilnCMSWeb.TaskLive do
     actor = socket.assigns.current_user
     org = socket.assigns.current_org
 
+    scope = socket.assigns.scope
+
     case socket.assigns.view do
       :mine ->
         tasks =
           CMS.list_tasks_for_assignee!(actor.id, actor: actor, tenant: org)
-          |> Enum.map(&with_title(&1, actor, org))
+          |> Enum.filter(&in_scope?(&1, scope))
+          |> decorate(actor, org)
 
         assign(socket, :my_tasks, tasks)
 
@@ -105,7 +141,8 @@ defmodule KilnCMSWeb.TaskLive do
         tasks =
           CMS.list_tasks!(actor: actor, tenant: org, query: [filter: [status: :open]])
           |> Ash.load!(:assignee, authorize?: false, tenant: org)
-          |> Enum.map(&with_title(&1, actor, org))
+          |> Enum.filter(&in_scope?(&1, scope))
+          |> decorate(actor, org)
           |> Enum.sort_by(&(&1.due_on || ~D[9999-12-31]), Date)
           |> Enum.group_by(&assignee_label/1)
           |> Enum.sort_by(&elem(&1, 0))
@@ -114,19 +151,53 @@ defmodule KilnCMSWeb.TaskLive do
     end
   end
 
-  defp with_title(task, actor, org) do
-    title =
-      case ContentTypes.get_record(task.content_type, task.content_id,
-             actor: actor,
-             tenant: org,
-             query: [select: [:id, :title]]
-           ) do
-        {:ok, record} -> record.title
-        _ -> gettext("(content unavailable)")
-      end
+  # One record read per distinct piece of content, not one per task: a review
+  # queue is routinely several tasks on the same page, and the block lookup
+  # would otherwise re-read (and re-project) the same block tree for each.
+  defp decorate(tasks, actor, org) do
+    records =
+      tasks
+      |> Enum.map(&{&1.content_type, &1.content_id})
+      |> Enum.uniq()
+      |> Map.new(fn {type, id} -> {{type, id}, fetch_record(type, id, actor, org)} end)
 
-    Map.put(task, :content_title, title)
+    Enum.map(tasks, fn task ->
+      record = Map.get(records, {task.content_type, task.content_id})
+
+      task
+      |> Map.put(:content_title, title_of(record))
+      |> Map.put(:block_label, block_label(record, task.block_id))
+    end)
   end
+
+  defp fetch_record(type, id, actor, org) do
+    case ContentTypes.get_record(type, id,
+           actor: actor,
+           tenant: org,
+           query: [select: [:id, :title], load: [:block_ids]]
+         ) do
+      {:ok, record} -> record
+      _unreadable -> nil
+    end
+  end
+
+  defp title_of(nil), do: gettext("(content unavailable)")
+  defp title_of(%{title: title}), do: title
+
+  # `nil` for a document-level task (no block to name), a type for a block that
+  # is still there, and `:removed` for one that is not — three states the row
+  # renders differently, rather than two and a silence.
+  defp block_label(_record, nil), do: nil
+  defp block_label(nil, _block_id), do: :removed
+
+  defp block_label(%{block_ids: blocks}, block_id) do
+    case Enum.find(List.wrap(blocks), &(&1["_id"] == block_id)) do
+      %{"_type" => type} when is_binary(type) -> type
+      _gone -> :removed
+    end
+  end
+
+  defp block_label(_record, _block_id), do: :removed
 
   defp assignee_label(%{assignee: %{name: name}}) when is_binary(name) and name != "", do: name
   defp assignee_label(%{assignee: %{email: email}}), do: to_string(email)
@@ -170,6 +241,30 @@ defmodule KilnCMSWeb.TaskLive do
               {gettext("Team workload")}
             </.link>
           </div>
+        </div>
+
+        <%!-- Which anchor, not which state: every row here is already open.
+              `All` is the default because a filter that hides work by default
+              hides work. --%>
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-xs text-base-content/60">{gettext("Anchored to")}</span>
+          <.link
+            :for={
+              {value, label} <- [
+                {:all, gettext("All")},
+                {:block, gettext("A block")},
+                {:document, gettext("The whole document")}
+              ]
+            }
+            patch={scope_path(@view, value)}
+            class={[
+              "rounded-full border px-2.5 py-0.5 text-xs",
+              @scope == value && "border-primary bg-primary/10 text-primary",
+              @scope != value && "border-base-content/20 hover:bg-base-200"
+            ]}
+          >
+            {label}
+          </.link>
         </div>
 
         <%!-- The site default (#818). Stated for every editor, changeable by an
@@ -236,6 +331,13 @@ defmodule KilnCMSWeb.TaskLive do
     """
   end
 
+  # `?scope=` rides the same patch the view tabs use, so a chosen filter
+  # survives a reload and can be linked to.
+  defp scope_path(:team, :all), do: ~p"/editor/tasks?view=team"
+  defp scope_path(:team, scope), do: ~p"/editor/tasks?view=team&scope=#{scope}"
+  defp scope_path(_mine, :all), do: ~p"/editor/tasks"
+  defp scope_path(_mine, scope), do: ~p"/editor/tasks?scope=#{scope}"
+
   attr :task, :map, required: true
   attr :auto_complete_default, :boolean, required: true
 
@@ -249,6 +351,31 @@ defmodule KilnCMSWeb.TaskLive do
         >
           {@task.content_title}
         </.link>
+        <%!-- Links onto the block's own discussion (`?comment=`, the editor's
+              existing landing param) rather than the top of the document —
+              the point of anchoring a task to a block is not having to hunt
+              for it. --%>
+        <.link
+          :if={is_binary(@task.block_label)}
+          navigate={
+            ~p"/editor/content/#{@task.content_type}/#{@task.content_id}?comment=#{@task.block_id}"
+          }
+          class="ml-2 inline-flex items-center gap-1 rounded-full border border-base-content/20 px-2 py-0.5 text-xs hover:bg-base-200"
+        >
+          <.icon name="hero-chat-bubble-left-right" class="size-3" />
+          {@task.block_label}
+        </.link>
+        <%!-- The block is gone but the task is not: nothing cascades. Said
+              plainly, because a row that just stopped mentioning its block
+              would read as whole-document work. --%>
+        <span
+          :if={@task.block_label == :removed}
+          class="ml-2 inline-flex items-center gap-1 rounded-full border border-base-content/15 px-2 py-0.5 text-xs text-base-content/50"
+          title={gettext("The block this task was anchored to has been removed.")}
+        >
+          <.icon name="hero-chat-bubble-left-right" class="size-3" />
+          {gettext("removed block")}
+        </span>
         <p :if={@task.note} class="truncate text-xs text-base-content/60">{@task.note}</p>
         <%!-- Only when this task DISAGREES with the site (#818). The banner
               above states the site rule; repeating it on every row would be

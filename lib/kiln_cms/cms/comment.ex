@@ -125,6 +125,21 @@ defmodule KilnCMS.CMS.Comment do
       prepare build(sort: [inserted_at: :asc])
     end
 
+    read :unresolved do
+      description """
+      Every unresolved thread root in the org — the whole-site twin of
+      `:unresolved_for_content`, for the overview's "what needs attention"
+      count.
+
+      Its own read rather than a nil-content variant of the sibling: an
+      argument that means "all content when omitted" is the kind of filter that
+      silently returns the world when a caller forgets to pass it.
+      """
+
+      filter expr(is_nil(thread_id) and is_nil(resolved_at))
+      prepare build(sort: [inserted_at: :asc])
+    end
+
     read :for_block do
       argument :content_type, :string, allow_nil?: false
       argument :content_id, :uuid, allow_nil?: false

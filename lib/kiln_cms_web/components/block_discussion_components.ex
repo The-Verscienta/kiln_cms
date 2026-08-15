@@ -47,6 +47,11 @@ defmodule KilnCMSWeb.BlockDiscussionComponents do
   attr :suggestions, :list, default: []
   attr :viewers, :list, default: []
   attr :typing, :list, default: []
+  attr :task_draft, :map, default: nil
+  attr :assignable_users, :list, default: []
+  attr :linkable_tasks, :list, default: []
+  attr :auto_complete_default, :boolean, default: true
+  attr :orphan?, :boolean, default: false
 
   def block_discussion(assigns) do
     thread = thread_for_block(assigns.comments, assigns.block_id)
@@ -78,6 +83,18 @@ defmodule KilnCMSWeb.BlockDiscussionComponents do
         aria-label={gettext("Discussion on this block")}
         class="mt-2 space-y-2 rounded border border-base-content/15 bg-base-200/40 p-2"
       >
+        <%!-- The block this thread annotates is gone from the document. Nothing
+              cascaded when it was deleted — the anchor is soft — so the
+              discussion and its tasks are still here and still readable. Said
+              plainly, because a thread about a paragraph nobody can find is
+              otherwise just confusing. --%>
+        <p
+          :if={@orphan?}
+          class="rounded bg-base-content/5 px-2 py-1 text-xs text-base-content/60"
+        >
+          {gettext("This block was removed. The discussion and its tasks are kept.")}
+        </p>
+
         <div :if={@block_tasks != []} class="space-y-1">
           <div
             :for={task <- @block_tasks}
@@ -127,6 +144,165 @@ defmodule KilnCMSWeb.BlockDiscussionComponents do
         </p>
 
         <.composer block_id={@block_id} draft={@draft} suggestions={@suggestions} />
+
+        <.task_bridge
+          block_id={@block_id}
+          draft={@task_draft}
+          assignable_users={@assignable_users}
+          linkable_tasks={@linkable_tasks}
+          auto_complete_default={@auto_complete_default}
+        />
+      </div>
+    </div>
+    """
+  end
+
+  attr :block_id, :string, required: true
+  attr :draft, :map, default: nil
+  attr :assignable_users, :list, required: true
+  attr :linkable_tasks, :list, required: true
+  attr :auto_complete_default, :boolean, required: true
+
+  # Turning a discussion into accountable work, without leaving the block.
+  #
+  # Two affordances rather than one, because they answer different questions.
+  # "Create" is the common case and comes seeded from the thread — assignee
+  # from the first `@mention` the root comment resolves, note from its body,
+  # due a week out — so the usual path is one click and a confirm. "Link
+  # existing" is triage: a task somebody already filed against the whole
+  # document turns out to be about *this* paragraph, and re-anchoring it is
+  # better than filing a second one that says the same thing.
+  #
+  # Only tasks with no block of their own are offered for linking. Stealing one
+  # already anchored elsewhere would silently empty another block's pin, which
+  # is not what "link this task here" sounds like it does.
+  #
+  # No `<form>`, for the reason the composer above spells out: this sits inside
+  # the editor's main content form, which cannot nest one.
+  defp task_bridge(assigns) do
+    ~H"""
+    <div class="border-t border-base-content/10 pt-2">
+      <div :if={is_nil(@draft)} class="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          phx-click="block_task_open"
+          phx-value-bid={@block_id}
+          class="btn btn-sm btn-default"
+        >
+          <.icon name="hero-clipboard-document-check" class="size-3.5" />
+          {gettext("Create task")}
+        </button>
+
+        <div :if={@linkable_tasks != []} class="flex items-center gap-1">
+          <label for={"link-task-#{@block_id}"} class="text-xs text-base-content/60">
+            {gettext("Link existing")}
+          </label>
+          <select
+            id={"link-task-#{@block_id}"}
+            name="link_task_id"
+            phx-change="block_task_link"
+            class="field-input text-xs"
+          >
+            <option value="">{gettext("Choose a task…")}</option>
+            <option :for={{label, id} <- @linkable_tasks} value={id}>{label}</option>
+          </select>
+        </div>
+      </div>
+
+      <div :if={@draft} class="space-y-2">
+        <div>
+          <label for={"task-assignee-#{@block_id}"} class="text-xs text-base-content/60">
+            {gettext("Assignee")}
+          </label>
+          <select
+            id={"task-assignee-#{@block_id}"}
+            name="task_assignee_id"
+            phx-change="block_task_draft"
+            class="field-input text-xs"
+          >
+            <option value="">{gettext("Choose an editor…")}</option>
+            <option
+              :for={{label, id} <- @assignable_users}
+              value={id}
+              selected={@draft["assignee_id"] == id}
+            >
+              {label}
+            </option>
+          </select>
+        </div>
+
+        <div>
+          <label for={"task-due-#{@block_id}"} class="text-xs text-base-content/60">
+            {gettext("Due")}
+          </label>
+          <input
+            id={"task-due-#{@block_id}"}
+            type="date"
+            name="task_due_on"
+            value={@draft["due_on"]}
+            phx-change="block_task_draft"
+            class="field-input text-xs"
+          />
+        </div>
+
+        <div>
+          <label for={"task-note-#{@block_id}"} class="text-xs text-base-content/60">
+            {gettext("Note")}
+          </label>
+          <textarea
+            id={"task-note-#{@block_id}"}
+            name="task_note"
+            rows="2"
+            phx-change="block_task_draft"
+            phx-debounce="blur"
+            class="field-input text-xs"
+          >{@draft["note"]}</textarea>
+        </div>
+
+        <%!-- `nil` is a real third value here (#818), not an omission: it means
+              "whatever the site is set to", which is the only way a task can
+              follow a setting an admin changes later. --%>
+        <div>
+          <label for={"task-auto-#{@block_id}"} class="text-xs text-base-content/60">
+            {gettext("On publish")}
+          </label>
+          <select
+            id={"task-auto-#{@block_id}"}
+            name="task_auto_complete"
+            phx-change="block_task_draft"
+            class="field-input text-xs"
+          >
+            <option value="" selected={@draft["auto_complete"] in [nil, ""]}>
+              {if @auto_complete_default,
+                do: gettext("Site default (completes it)"),
+                else: gettext("Site default (leaves it open)")}
+            </option>
+            <option value="true" selected={@draft["auto_complete"] == "true"}>
+              {gettext("Complete it")}
+            </option>
+            <option value="false" selected={@draft["auto_complete"] == "false"}>
+              {gettext("Leave it open")}
+            </option>
+          </select>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            phx-click="block_task_submit"
+            phx-value-bid={@block_id}
+            class="btn btn-sm btn-primary"
+          >
+            {gettext("Assign")}
+          </button>
+          <button
+            type="button"
+            phx-click="block_task_close"
+            class="text-xs text-base-content/60 underline hover:text-base-content"
+          >
+            {gettext("Cancel")}
+          </button>
+        </div>
       </div>
     </div>
     """
