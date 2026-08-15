@@ -696,6 +696,14 @@ defmodule KilnCMSWeb.Layouts do
             path: ~p"/editor/funnels",
             icon: "hero-funnel"
           },
+          # Content experiments (#982). Beside Funnels: both are "measure what
+          # this content does", and an experiment's goal can be a funnel.
+          %{
+            key: :experiments,
+            label: gettext("Experiments"),
+            path: ~p"/editor/experiments",
+            icon: "hero-beaker"
+          },
           %{
             key: :webhooks,
             label: gettext("Webhooks"),
