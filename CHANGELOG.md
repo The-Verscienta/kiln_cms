@@ -164,6 +164,22 @@ migration, a rewritten column, a dropped config key).
   code injection is most used) and a multi-org console host is the follow-up.
   Off by default — nothing changes for an existing deployment. Docs:
   `code-injection.md`, env-var table.
+- **The two-factor hold's dependency on AshAuthentication is now pinned in
+  both directions** (#1172). The #742 hold parks a first-factor token by
+  moving its stored row off the `"user"` purpose, which is only a defence
+  because AshAuthentication's `validate_token/3` looks the row up under
+  exactly that purpose — and only when `KilnCMS.Accounts.User` sets
+  `require_token_presence_for_authentication?` and `store_all_tokens?`.
+  A new `KilnCMS.Accounts.SecondFactorHoldExtension` (verifier
+  `KilnCMS.Accounts.Verifiers.SecondFactorHoldContract`) turns flipping
+  either setting, or pointing `token_resource` away from
+  `KilnCMS.Accounts.Token`, into a compile error that names the hold. And a
+  new test drives a held token through the dep's *own* bearer and session
+  round trips (`retrieve_from_bearer/3`,
+  `authenticate_resource_from_session/4`) rather than through Kiln's
+  callers, so a future AshAuthentication that quietly *widened* its purpose
+  filter goes red on the next `mix.lock` bump instead of leaving the hold a
+  green no-op.
 
 ## [0.6.0] - 2026-08-12
 

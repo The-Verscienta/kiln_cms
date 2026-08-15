@@ -9,7 +9,10 @@ defmodule KilnCMS.Accounts.User do
     domain: KilnCMS.Accounts,
     data_layer: AshPostgres.DataLayer,
     authorizers: [Ash.Policy.Authorizer],
-    extensions: [AshAuthentication]
+    # `SecondFactorHoldExtension` carries no DSL of its own: it is the
+    # compile-time pin on the `tokens` settings below that the two-factor hold
+    # (#742) depends on. See `KilnCMS.Accounts.Verifiers.SecondFactorHoldContract`.
+    extensions: [AshAuthentication, KilnCMS.Accounts.SecondFactorHoldExtension]
 
   # The remember-me cookie's name, which is `__Host-`-prefixed exactly when the
   # session cookie is (#699). Resolved here rather than written as a literal

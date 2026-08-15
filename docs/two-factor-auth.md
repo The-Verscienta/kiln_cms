@@ -66,6 +66,18 @@ every sign-in, after the first factor.
   why the browser prompt calls `claim/1` at all, when the single use a session
   blob needs is the deleted session key.
 
+  That dependency on AshAuthentication is pinned rather than assumed
+  ([#1172](https://github.com/The-Verscienta/kiln_cms/issues/1172)).
+  `KilnCMS.Accounts.SecondFactorHoldExtension` fails the compile if `User`
+  ever turns off `require_token_presence_for_authentication?` or
+  `store_all_tokens?`, or points `token_resource` away from
+  `KilnCMS.Accounts.Token` — any of which would leave the hold a silent no-op
+  with every test green. And
+  `test/kiln_cms/accounts/second_factor_hold_contract_test.exs` drives a held
+  token through the dep's *own* bearer and session round trips, so a future
+  AshAuthentication that quietly widened its purpose filter would go red on
+  the `mix.lock` bump rather than re-opening #742 unnoticed.
+
   Held rather than revoked, because the exchange may still complete — and the
   release is filtered on the hold purpose **in the UPDATE's own WHERE**, so a
   token revoked mid-window is not resurrected by a late redemption even if the
