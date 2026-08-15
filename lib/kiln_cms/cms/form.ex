@@ -107,6 +107,11 @@ defmodule KilnCMS.CMS.Form do
     # than a looser one: full origin, no keyword sources, no bare `*`, and no
     # character that could end the directive or the header.
     validate {KilnCMS.CMS.Validations.CspOrigins, fields: [:embed_origins]}
+
+    # After the shape check, and only under `EMBED_ORIGINS_LOCKED` (#1133): a
+    # list that reaches outside the operator's ceiling is refused, naming the
+    # offending entries and never the ceiling. See `KilnCMS.Forms.EmbedCeiling`.
+    validate {KilnCMS.CMS.Validations.EmbedCeiling, field: :embed_origins}
   end
 
   # Multi-tenancy (epic #336): a form belongs to one site, so its slug is unique

@@ -4,6 +4,10 @@ defmodule KilnCMS.Forms.EmbedPolicy do
 
       form.embed_origins  ->  SiteEmbedSettings.embed_origins  ->  EMBED_ORIGINS
 
+  — and, since #1133, the place the operator's ceiling is applied on the read:
+  under `EMBED_ORIGINS_LOCKED`, whichever tenant rung answers is clamped to
+  `EMBED_ORIGINS` before it is served (`KilnCMS.Forms.EmbedCeiling`).
+
   `KilnCMSWeb.Embed` already resolves the form-vs-deployment half — its own
   `own_origins/1` is "the only reader of the [form] attribute's shape," and
   every function there still means exactly what its own moduledoc says.
@@ -35,6 +39,7 @@ defmodule KilnCMS.Forms.EmbedPolicy do
   """
 
   alias KilnCMS.CMS.SiteEmbedSettings
+  alias KilnCMS.Forms.EmbedCeiling
 
   @doc """
   This org's configured default, or `nil` when it has none (no row, or a row
@@ -77,16 +82,25 @@ defmodule KilnCMS.Forms.EmbedPolicy do
   @spec effective(map() | nil) :: map() | nil
   def effective(nil), do: nil
 
-  def effective(%{embed_origins: origins} = form) when is_list(origins), do: form
+  def effective(%{embed_origins: origins} = form) when is_list(origins), do: clamp(form)
 
   def effective(%{embed_origins: %Ash.NotLoaded{}} = form), do: form
 
   def effective(%{embed_origins: nil} = form) do
     case org_default(Map.get(form, :org_id)) do
       nil -> form
-      origins -> %{form | embed_origins: origins}
+      origins -> clamp(%{form | embed_origins: origins})
     end
   end
 
   def effective(form), do: form
+
+  # The operator's ceiling (#1133), applied to whichever tenant rung answered —
+  # the form's own list or its org's — and never to `nil`, which is already the
+  # ceiling itself (`EMBED_ORIGINS`). Identity when `EMBED_ORIGINS_LOCKED` is
+  # off. Applied on the read as well as refused on the write, so a list saved
+  # before the cap was turned on cannot keep the page wider than the operator
+  # now allows.
+  defp clamp(%{embed_origins: origins} = form) when is_list(origins),
+    do: %{form | embed_origins: EmbedCeiling.clamp(origins)}
 end

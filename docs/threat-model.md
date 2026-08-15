@@ -598,13 +598,23 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    `KilnCMS.Forms.EmbedPolicy`, inserts a per-org default between the form and
    the deployment — `form.embed_origins -> SiteEmbedSettings.embed_origins ->
    EMBED_ORIGINS` — so an org decides once and every untouched form in that
-   org inherits it, rather than the deployment-wide union. **What is still not
-   closed** is the same operator-ceiling point #648 already named: today an
-   org admin can open framing — on a form, or now on the org default — that
-   the operator had left closed. That remains deliberate (the allowlist
-   governs who may overlay *that org's* forms and harvest *that org's*
-   submissions, and grants nothing across the tenant boundary), but it is a
-   change of who holds the control and worth stating.
+   org inherits it, rather than the deployment-wide union. **The operator
+   ceiling, closed in #1133 — as an opt-in.** By default an org admin can
+   still open framing — on a form, or on the org default — that the operator
+   had left closed; that stays deliberate (the allowlist governs who may
+   overlay *that org's* forms and harvest *that org's* submissions, and grants
+   nothing across the tenant boundary). But an operator who wants the other
+   reading sets `EMBED_ORIGINS_LOCKED=true`, and `EMBED_ORIGINS` becomes the
+   *most* a tenant may open as well as the default: a per-form or per-org
+   list may narrow it but every entry must be covered by it, writes outside
+   it are refused (naming the entry, never the ceiling), and the served
+   header is clamped to it too, so a list saved before the cap cannot keep a
+   page wider than the operator now allows (`KilnCMS.Forms.EmbedCeiling`).
+   With the cap off nothing changes; with `EMBED_ORIGINS=*` the cap is a
+   ceiling of everything; with `EMBED_ORIGINS` unset it is a ceiling of
+   nothing. It also gives the operator the switch an org-admin compromise
+   used to lack: under the cap, a taken-over admin account cannot re-open the
+   overlay-and-harvest surface #562 closed beyond what the operator listed.
 2. **Passphrase-locked content is weak by construction (#496).** A shared secret
    typed into a public form is not access control in the sense the rest of this
    document uses the phrase: there is no per-reader identity, so no audit trail

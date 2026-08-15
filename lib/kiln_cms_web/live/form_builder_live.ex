@@ -1033,6 +1033,14 @@ defmodule KilnCMSWeb.FormBuilderLive do
                   "This setting applies to this form only — another site's forms are unaffected by what you allow here."
                 )}
               </p>
+              <%!-- #1133: the operator's ceiling. Says that one exists, never
+                   what is in it — the list would enumerate other sites'
+                   partners on a shared deployment (#1130). --%>
+              <p :if={KilnCMS.Forms.EmbedCeiling.locked?()} class="text-xs text-base-content/60">
+                {gettext(
+                  "The operator of this deployment has capped which sites may embed forms. You can narrow that list here but not add to it — ask them to allow a site that is refused."
+                )}
+              </p>
 
               <label class="flex items-center gap-2 text-sm">
                 <input

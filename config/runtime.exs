@@ -168,6 +168,13 @@ if config_env() != :test do
   if embed_origins = System.get_env("EMBED_ORIGINS") do
     config :kiln_cms, :embed_origins, KilnCMSWeb.Embed.parse_env(embed_origins)
   end
+
+  # EMBED_ORIGINS_LOCKED=true makes EMBED_ORIGINS a *ceiling* as well as the
+  # default (#1133): an org admin's per-form or per-site allowlist (#648, #1131)
+  # may narrow it but not reach outside it — writes are refused and the served
+  # frame-ancestors is clamped. Off by default, so nothing changes for a
+  # deployment that never sets it. See KilnCMS.Forms.EmbedCeiling.
+  config :kiln_cms, :embed_origins_locked, Env.flag("EMBED_ORIGINS_LOCKED", false)
 end
 
 # ## Reading time (#492) — words per minute for `reading_time_minutes`

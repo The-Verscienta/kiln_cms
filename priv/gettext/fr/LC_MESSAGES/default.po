@@ -8776,6 +8776,11 @@ msgstr "Le modèle n'a rien renvoyé d'exploitable. Réessayez ou reformulez vot
 msgid "The oldest covers history up to %{at}."
 msgstr "Le plus ancien couvre l'historique jusqu'au %{at}."
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "The operator of this deployment has capped which sites may embed forms. You can narrow that list here but not add to it — ask them to allow a site that is refused."
+msgstr "L'opérateur de ce déploiement a plafonné les sites autorisés à intégrer des formulaires. Vous pouvez restreindre cette liste ici, mais pas l'élargir — demandez-lui d'autoriser un site refusé."
+
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "The path must start with /."
