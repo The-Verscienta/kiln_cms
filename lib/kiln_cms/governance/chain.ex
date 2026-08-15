@@ -1151,6 +1151,39 @@ defmodule KilnCMS.Governance.Chain do
   @spec attested_gap([struct()]) :: attested_gap()
   def attested_gap(anchors) when is_list(anchors), do: gap_from(anchors)
 
+  @doc """
+  Whether this chain could have hit the pre-#598 false-tamper bug (#1058).
+
+  `recorded_order/1` already draws this exact line to decide whether
+  `versions_asc/4` can trust the recorded fold order: every anchor's
+  `payload_version` is `6` only from #598 on (nil on everything minted
+  before). A chain where every anchor is v6 was ALWAYS folded in an order
+  assigned at write time, never inferred from `version_inserted_at` — so it
+  cannot have taken a late-arriving row inside an already-anchored range, and
+  a `{:tampered, …}` verdict on it is a genuine finding.
+
+  A chain with even one pre-#598 anchor could have. That anchor (and every
+  anchor chained from it, since each seeds from its predecessor's hash) had
+  its order inferred from a wall-clock timestamp, which #598's module docs
+  say is exactly what let a late row land mid-sequence and permanently break
+  an earlier anchor's reproduction — indistinguishable, byte-for-byte, from
+  real tampering.
+
+  **This does not soften or replace the verdict.** `verify/4` and
+  `verify_loaded/4` still say `{:tampered, …}` on both populations — this is
+  a sibling fact so a human triaging a page of reds knows which ones are
+  worth investigating first. See #1058.
+  """
+  @spec predates_fold_order?(String.t(), Ash.UUID.t(), Ash.UUID.t() | nil) :: boolean()
+  def predates_fold_order?(type, source_id, org_id) do
+    type |> anchors(source_id, org_id) |> predates_fold_order?()
+  end
+
+  @doc "As `predates_fold_order?/3`, over an already-loaded anchor list (order doesn't matter)."
+  @spec predates_fold_order?([struct()]) :: boolean()
+  def predates_fold_order?(anchors) when is_list(anchors),
+    do: Enum.any?(anchors, &(&1.payload_version != 6))
+
   defp gap_from([]), do: :none
 
   defp gap_from([head | _] = anchors) do

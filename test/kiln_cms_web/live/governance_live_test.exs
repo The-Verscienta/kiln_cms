@@ -11,6 +11,7 @@ defmodule KilnCMSWeb.GovernanceLiveTest do
 
   @moduletag :capture_log
 
+  import Ecto.Query
   import Phoenix.LiveViewTest
 
   alias KilnCMS.Accounts.User
@@ -175,6 +176,58 @@ defmodule KilnCMSWeb.GovernanceLiveTest do
 
     assert [consent] = CMS.list_consents_for!("post", post.id, authorize?: false)
     assert consent.kind == :reviewer_signoff
+  end
+
+  # #1058: the annotation rides ALONGSIDE the red verdict, never replacing or
+  # softening it — both the TAMPERED text and the note must be present.
+  test "a tampered chain that predates the #598 fold-order fix carries the triage note",
+       %{conn: conn} do
+    admin = authed_user(:admin)
+    post = CMS.create_post!(%{title: "Legacy Chain", slug: slug()}, actor: admin)
+    CMS.publish_post!(post, %{}, actor: admin)
+
+    org = KilnCMS.Accounts.default_org_id()
+    [anchor] = KilnCMS.Governance.Chain.anchors("post", post.id, org)
+
+    KilnCMS.Repo.update_all(
+      from(a in "history_anchors", where: a.id == type(^anchor.id, :binary_id)),
+      set: [payload_version: nil]
+    )
+
+    KilnCMS.Repo.update_all(
+      from(v in "posts_versions",
+        where: v.version_source_id == type(^post.id, :binary_id),
+        update: [set: [changes: type(^%{"title" => "Doctored"}, :map)]]
+      ),
+      []
+    )
+
+    {:ok, _view, html} = live(log_in(conn, admin), ~p"/editor/governance/post/#{post.id}")
+
+    assert html =~ "HISTORY TAMPERED"
+    assert html =~ "chain-legacy-note"
+    assert html =~ "may be the ordering bug rather than tampering"
+  end
+
+  # The other half: an all-v6 chain never earned the doubt, so the note must
+  # not appear next to it even though the verdict is the same red TAMPERED.
+  test "an ordinary tampered chain (no legacy anchor) has no triage note", %{conn: conn} do
+    admin = authed_user(:admin)
+    post = CMS.create_post!(%{title: "Genuine Chain", slug: slug()}, actor: admin)
+    CMS.publish_post!(post, %{}, actor: admin)
+
+    KilnCMS.Repo.update_all(
+      from(v in "posts_versions",
+        where: v.version_source_id == type(^post.id, :binary_id),
+        update: [set: [changes: type(^%{"title" => "Doctored"}, :map)]]
+      ),
+      []
+    )
+
+    {:ok, _view, html} = live(log_in(conn, admin), ~p"/editor/governance/post/#{post.id}")
+
+    assert html =~ "HISTORY TAMPERED"
+    refute html =~ "chain-legacy-note"
   end
 
   test "old → new value diffs are shown in the timeline (#352)", %{conn: conn} do
