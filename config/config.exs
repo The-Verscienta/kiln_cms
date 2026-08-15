@@ -534,6 +534,11 @@ config :kiln_cms, :av_metadata_strip, :sync
 # once older than `:media_quarantine_max_age_hours` (24). `false` disables.
 config :kiln_cms, :media_quarantine_reaper_cron, "20 * * * *"
 
+# Hourly sweep of the federation replay nonce store (#967,
+# `KilnCMS.Federation.SeenSignatureSweeper`): rows past their `expires_at`
+# cannot verify anyway, so this is hygiene. `false` disables.
+config :kiln_cms, :federation_nonce_sweep_cron, "40 * * * *"
+
 # Whether booting enqueues the one-off occurrence backfill (#766). On, because
 # the alternative is an upgrade step a human has to remember, and the feature
 # silently does nothing until they do — the migration cannot fill
