@@ -4,6 +4,14 @@
 // `@playwright/test` directly, so every spec picks up the LiveView navigation
 // guard below.
 const base = require("@playwright/test");
+const config = require("../playwright.config");
+
+// The same baseURL playwright.config.js resolves for the `page`/`context`
+// fixtures — `browser.newContext()` doesn't inherit it (that only happens
+// inside @playwright/test's own fixture factory), so `newGuardedContext`
+// below has to pass it explicitly or a relative `page.goto("/sign-in")`
+// throws "Cannot navigate to invalid URL".
+const BASE_URL = config.use.baseURL;
 
 // Wait until a freshly loaded LiveView has actually *joined* its channel.
 //
@@ -63,7 +71,7 @@ const test = base.test.extend({
 // the same record (e.g. #948's mid-session tag attach). The caller owns the
 // returned context and must `.close()` it.
 async function newGuardedContext(browser) {
-  const context = await browser.newContext();
+  const context = await browser.newContext({ baseURL: BASE_URL });
   const page = guardNavigation(await context.newPage());
   return { context, page };
 }
@@ -165,6 +173,39 @@ async function deleteContentByTitle(page, title) {
   await base.expect(checkbox).toHaveCount(0);
 }
 
+// Deletes a piece of content by kind + id, via the same /editor overview
+// bulk-delete action as `deleteContentByTitle`, but locating the row by its
+// `li#{kind}-{id}` markup instead of a title search. Use this over
+// `deleteContentByTitle` when the record's title may never have been set —
+// e.g. a draft created by `newDraftContent` where a failure happened before
+// the caller's own title `fill()` landed, leaving it as "Untitled …" forever
+// findable only by the id captured right after creation. Best-effort, same
+// as `deleteContentByTitle`: a missing row is a no-op.
+async function deleteContentById(page, kind, id) {
+  await page.goto("/editor");
+  const row = page.locator(`li[id="${kind}-${id}"]`);
+  if ((await row.count()) === 0) return;
+
+  await row.getByRole("checkbox").check();
+  await page.locator('button[phx-click="bulk"][phx-value-action="delete"]').click();
+  await page.locator('button[phx-click="confirm_bulk"]').click();
+  await base.expect(row).toHaveCount(0);
+}
+
+// Deletes a single tag by name from the taxonomy page (`/editor/taxonomy`).
+// Best-effort, same as `deleteContentByTitle`: a missing row is a no-op
+// rather than a failure, since callers use this from cleanup where the tag
+// may never have been created if an earlier step already failed.
+async function deleteTagByName(page, name) {
+  await page.goto("/editor/taxonomy");
+  const row = page.locator("li").filter({ hasText: name }).first();
+  if ((await row.count()) === 0) return;
+
+  page.once("dialog", dialog => dialog.accept());
+  await row.getByRole("button", { name: `Delete ${name}` }).click();
+  await base.expect(page.getByText(name, { exact: true })).toHaveCount(0);
+}
+
 // The block inserter (#29) is a closed dropdown: its options only become
 // visible/clickable after the "Add block" trigger opens the menu (the
 // BlockInserter JS hook toggles `data-inserter-menu`'s `hidden` attribute).
@@ -199,4 +240,6 @@ module.exports = {
   createTagGroup,
   createTag,
   deleteContentByTitle,
+  deleteContentById,
+  deleteTagByName,
 };

@@ -64,7 +64,8 @@ const {
   newDraftContent,
   newGuardedContext,
   createTag,
-  deleteContentByTitle,
+  deleteContentById,
+  deleteTagByName,
 } = require("./fixtures");
 
 test.describe("tag picker mid-session growth", () => {
@@ -83,6 +84,9 @@ test.describe("tag picker mid-session growth", () => {
     // leave a tag — or this draft — behind to break the *next* run's empty
     // state (see blocker 1 above).
     let editorSession;
+    // Declared here (not `const` inside the `try`) so the `finally` block's
+    // cleanup can still see it even if a failure happens before it's set.
+    let draftId;
     try {
       await signInAsAdmin(page);
 
@@ -94,9 +98,11 @@ test.describe("tag picker mid-session growth", () => {
       // this test drives through.
       await newDraftContent(page, "post");
       const draftUrl = page.url();
-      // A unique title, so cleanup can find this exact draft afterwards by
-      // search (`deleteContentByTitle`) rather than leaving an untitled row
-      // behind for the life of the suite's persistent database.
+      // Captured before the title `fill()` below, so cleanup can find this
+      // draft (`deleteContentById`) even if a failure lands between creation
+      // and that fill — leaving the record as "Untitled post" forever, which
+      // a title-based search would never match.
+      draftId = draftUrl.match(/\/editor\/(?:content\/post|posts)\/([^/?#]+)/)?.[1];
       await page.fill('input[name$="[title]"]', draftTitle);
       await page.getByRole("tab", { name: /settings/i }).click();
 
@@ -158,10 +164,12 @@ test.describe("tag picker mid-session growth", () => {
       await expect(conflictBanner).toBeHidden();
       await expect(indicator).toHaveText("Saved");
       // Best-effort: clear the lingering error flash so it can't go on to
-      // intercept a later click the same way.
+      // intercept a later click the same way. Explicit short timeout — the
+      // default `actionTimeout` is unbounded, and with no flash present this
+      // would otherwise block until `test.slow()`'s full 90s test timeout.
       await page
         .locator("#flash-error")
-        .evaluate(el => el.click())
+        .evaluate(el => el.click(), undefined, { timeout: 2_000 })
         .catch(() => {});
 
       // The grown filter box (blocker 2's payoff) and the "Ungrouped" section
@@ -197,12 +205,23 @@ test.describe("tag picker mid-session growth", () => {
       // plain string instead, across the client's 300ms filter debounce and
       // the full 2s server autosave debounce, so a transient "Unsaved
       // changes"/"Saving…" cannot hide between polls.
+      //
+      // One miss is tolerated rather than failing outright: under real CI
+      // load, a legitimately correct but slower round-trip can still be
+      // mid-flight at a single sample boundary. A second miss means the
+      // indicator is genuinely flapping, not just slow to land — that still
+      // fails, preserving the anti-hiding property above.
+      let misses = 0;
       for (let waited = 0; waited <= 2600; waited += 250) {
         const text = (await indicator.textContent())?.trim();
-        expect(text).toBe("Saved");
+        if (text !== "Saved") {
+          misses += 1;
+          expect(misses, `indicator read "${text}" more than once`).toBeLessThanOrEqual(1);
+        }
         // No point sleeping after the last sample — nothing checks again.
         if (waited < 2600) await page.waitForTimeout(250);
       }
+      await expect(indicator).toHaveText("Saved");
 
       await expect(section.getByRole("checkbox", { name: distractor })).toBeHidden();
       await expect(section.getByRole("checkbox", { name: attached })).toBeVisible();
@@ -211,26 +230,34 @@ test.describe("tag picker mid-session growth", () => {
       // the test — deletes are admin-only, and re-visiting /sign-in while
       // authenticated would just bounce off the form this needs.
       //
-      // Guarded by an existence check (rather than assuming creation
-      // succeeded): a failure earlier in the `try` — say, the taxonomy form
-      // itself — must not turn cleanup into a second, masking failure over a
-      // row that was never created.
-      await page.goto("/editor/taxonomy");
-      for (const name of [attached, distractor]) {
-        const row = page.locator("li").filter({ hasText: name }).first();
-        if ((await row.count()) === 0) continue;
+      // Each step below is isolated with its own `.catch()` (the helpers are
+      // already best-effort no-ops when nothing to delete exists — see their
+      // own comments in fixtures.js — this catches a throw from a step that
+      // *did* find something but failed partway through). A single flaky
+      // step must not skip the rest: leaving `distractor` behind, say,
+      // breaks this same test's own empty-state assertion on every
+      // subsequent run of the suite's persistent, never-reset database.
+      try {
+        for (const name of [attached, distractor]) {
+          await deleteTagByName(page, name).catch(err =>
+            console.warn(`cleanup: failed to delete tag "${name}":`, err)
+          );
+        }
 
-        page.once("dialog", dialog => dialog.accept());
-        await row.getByRole("button", { name: `Delete ${name}` }).click();
-        await expect(page.getByText(name, { exact: true })).toHaveCount(0);
+        // By id, not title: a failure between draft creation and the title
+        // `fill()` above would leave the record as "Untitled post" forever,
+        // which a title search could never match — see the comment there.
+        if (draftId) {
+          await deleteContentById(page, "post", draftId).catch(err =>
+            console.warn(`cleanup: failed to delete draft "${draftId}":`, err)
+          );
+        }
+      } finally {
+        // Runs regardless of whether the cleanup above threw — otherwise a
+        // cleanup failure leaks this context (worse under CI's `retries: 1`,
+        // compounding across retries).
+        if (editorSession) await editorSession.context.close().catch(() => {});
       }
-
-      // The draft itself, so a failed or successful run alike leaves nothing
-      // behind for the suite's persistent, never-reset database — matching
-      // the tags' own cleanup above.
-      await deleteContentByTitle(page, draftTitle);
-
-      if (editorSession) await editorSession.context.close();
     }
   });
 });

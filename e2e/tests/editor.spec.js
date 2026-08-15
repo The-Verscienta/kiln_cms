@@ -10,6 +10,7 @@ const {
   addBlock,
   createTagGroup,
   createTag,
+  deleteTagByName,
 } = require("./fixtures");
 
 test.describe("editor journey", () => {
@@ -296,83 +297,102 @@ test.describe("editor journey", () => {
     const group = `E2E Group ${stamp}`;
     const [alpha, beta] = [`e2e-alpha-${stamp}`, `e2e-beta-${stamp}`];
 
-    // A group with two tags, so there is a section to collapse and a sibling
-    // inside it that a fold-away would hide. Scoped to "page" content only
-    // (#948): left unrestricted, this group would apply to every content type
-    // forever on the suite's persistent, never-reset-between-specs database,
-    // which is exactly what made the tag picker's *empty* state (#524)
-    // unreachable for any other spec — see tag_picker_midsession.spec.js.
-    // `createTagGroup` requires naming the content types for exactly this
-    // reason: an unscoped group is a mistake to make once, not something a
-    // future spec should be able to repeat by accident.
-    await createTagGroup(page, group, ["page"]);
+    // Cleanup runs even if an assertion below throws, so a failed run doesn't
+    // leave this group — or its tags — behind for the life of the suite's
+    // persistent, never-reset-between-specs database (see the scoping
+    // comment above `createTagGroup` for why an unscoped or leaked group
+    // matters: it can make a future spec's "page"-kind empty-state
+    // unreachable, exactly as it did for tag_picker_midsession.spec.js).
+    try {
+      // A group with two tags, so there is a section to collapse and a sibling
+      // inside it that a fold-away would hide. Scoped to "page" content only
+      // (#948): left unrestricted, this group would apply to every content type
+      // forever on the suite's persistent, never-reset-between-specs database,
+      // which is exactly what made the tag picker's *empty* state (#524)
+      // unreachable for any other spec — see tag_picker_midsession.spec.js.
+      // `createTagGroup` requires naming the content types for exactly this
+      // reason: an unscoped group is a mistake to make once, not something a
+      // future spec should be able to repeat by accident.
+      await createTagGroup(page, group, ["page"]);
 
-    for (const name of [alpha, beta]) {
-      await createTag(page, name, { group });
+      for (const name of [alpha, beta]) {
+        await createTag(page, name, { group });
+      }
+
+      await newDraftPage(page);
+      await page.getByRole("tab", { name: /settings/i }).click();
+
+      const picker = page.locator("#tag-picker");
+      const section = picker.locator("details[data-tag-section]").filter({ hasText: group });
+      const filter = picker.locator("[data-tag-filter-input]");
+      const title = page.locator('input[name$="[title]"]');
+
+      // Nothing is tagged on a fresh draft, so the section mounts collapsed.
+      await expect(section).toHaveJSProperty("open", false);
+
+      // Opened by hand, it survives the per-keystroke validate patch — the
+      // app-wide <details> preservation in app.js's `onBeforeElUpdated`.
+      await section.locator("summary").click();
+      await expect(section).toHaveJSProperty("open", true);
+      await title.fill("E2E Tag Picker");
+      await page.waitForTimeout(700);
+      await expect(section).toHaveJSProperty("open", true);
+
+      // Closed by hand, it stays closed across the next patch too. This is the
+      // direction the old code broke: the server re-rendered `open` from the tick
+      // count, and any change to that value overrode the editor's toggle.
+      await section.locator("summary").click();
+      await expect(section).toHaveJSProperty("open", false);
+      await title.fill("E2E Tag Picker 2");
+      await page.waitForTimeout(700);
+      await expect(section).toHaveJSProperty("open", false);
+
+      // Narrowing force-opens the section holding the hit, and clearing the box
+      // undoes exactly that — unless the editor ticked something while it was
+      // open (#523 / #1149: filter is a server round-trip now).
+      await filter.fill("alpha");
+      await expect(section).toHaveJSProperty("open", true);
+      await filter.fill("");
+      await expect(section).toHaveJSProperty("open", false);
+
+      // But once the editor has ticked something in a force-opened section,
+      // clearing the box must not fold it away under them: the box they just
+      // ticked and the sibling they were reaching for both have to stay put.
+      await filter.fill("alpha");
+      await expect(section).toHaveJSProperty("open", true);
+      await section.getByRole("checkbox", { name: alpha }).check();
+      await page.waitForTimeout(700);
+      await filter.fill("");
+      await expect(section).toHaveJSProperty("open", true);
+      await expect(section.getByRole("checkbox", { name: alpha })).toBeChecked();
+      await expect(section.getByRole("checkbox", { name: beta })).toBeVisible();
+
+      // And the original report: unticking the section's last tag must not fold
+      // it shut. This is the crossing that the old server-rendered `open` got
+      // wrong — the value moved true→false, which is precisely the patch on which
+      // `onBeforeElUpdated` stops preserving the editor's own toggle, so the
+      // section vanished under the cursor with `beta` still unticked inside it.
+      await section.getByRole("checkbox", { name: alpha }).uncheck();
+      await page.waitForTimeout(700);
+      await expect(section).toHaveJSProperty("open", true);
+      await expect(section.getByRole("checkbox", { name: beta })).toBeVisible();
+
+      // Let the debounced autosave land: persisting the (now empty) tag set
+      // reloads the record, and that reload must not re-judge the section either.
+      await page.waitForTimeout(2500);
+      await expect(section).toHaveJSProperty("open", true);
+    } finally {
+      // Tags first — deleting the group nilifies rather than cascades (see
+      // `delete_confirm/2` in taxonomy_live.ex), but naming both explicitly
+      // rather than relying on that keeps this cleanup correct even if that
+      // behavior ever changes. Each step is isolated: a throw from one must
+      // not skip the rest and leave something behind.
+      for (const name of [alpha, beta, group]) {
+        await deleteTagByName(page, name).catch(err =>
+          console.warn(`cleanup: failed to delete "${name}":`, err)
+        );
+      }
     }
-
-    await newDraftPage(page);
-    await page.getByRole("tab", { name: /settings/i }).click();
-
-    const picker = page.locator("#tag-picker");
-    const section = picker.locator("details[data-tag-section]").filter({ hasText: group });
-    const filter = picker.locator("[data-tag-filter-input]");
-    const title = page.locator('input[name$="[title]"]');
-
-    // Nothing is tagged on a fresh draft, so the section mounts collapsed.
-    await expect(section).toHaveJSProperty("open", false);
-
-    // Opened by hand, it survives the per-keystroke validate patch — the
-    // app-wide <details> preservation in app.js's `onBeforeElUpdated`.
-    await section.locator("summary").click();
-    await expect(section).toHaveJSProperty("open", true);
-    await title.fill("E2E Tag Picker");
-    await page.waitForTimeout(700);
-    await expect(section).toHaveJSProperty("open", true);
-
-    // Closed by hand, it stays closed across the next patch too. This is the
-    // direction the old code broke: the server re-rendered `open` from the tick
-    // count, and any change to that value overrode the editor's toggle.
-    await section.locator("summary").click();
-    await expect(section).toHaveJSProperty("open", false);
-    await title.fill("E2E Tag Picker 2");
-    await page.waitForTimeout(700);
-    await expect(section).toHaveJSProperty("open", false);
-
-    // Narrowing force-opens the section holding the hit, and clearing the box
-    // undoes exactly that — unless the editor ticked something while it was
-    // open (#523 / #1149: filter is a server round-trip now).
-    await filter.fill("alpha");
-    await expect(section).toHaveJSProperty("open", true);
-    await filter.fill("");
-    await expect(section).toHaveJSProperty("open", false);
-
-    // But once the editor has ticked something in a force-opened section,
-    // clearing the box must not fold it away under them: the box they just
-    // ticked and the sibling they were reaching for both have to stay put.
-    await filter.fill("alpha");
-    await expect(section).toHaveJSProperty("open", true);
-    await section.getByRole("checkbox", { name: alpha }).check();
-    await page.waitForTimeout(700);
-    await filter.fill("");
-    await expect(section).toHaveJSProperty("open", true);
-    await expect(section.getByRole("checkbox", { name: alpha })).toBeChecked();
-    await expect(section.getByRole("checkbox", { name: beta })).toBeVisible();
-
-    // And the original report: unticking the section's last tag must not fold
-    // it shut. This is the crossing that the old server-rendered `open` got
-    // wrong — the value moved true→false, which is precisely the patch on which
-    // `onBeforeElUpdated` stops preserving the editor's own toggle, so the
-    // section vanished under the cursor with `beta` still unticked inside it.
-    await section.getByRole("checkbox", { name: alpha }).uncheck();
-    await page.waitForTimeout(700);
-    await expect(section).toHaveJSProperty("open", true);
-    await expect(section.getByRole("checkbox", { name: beta })).toBeVisible();
-
-    // Let the debounced autosave land: persisting the (now empty) tag set
-    // reloads the record, and that reload must not re-judge the section either.
-    await page.waitForTimeout(2500);
-    await expect(section).toHaveJSProperty("open", true);
   });
 
   // #893. The nested heading-level `<select>` had no `name`, so LiveView routed
