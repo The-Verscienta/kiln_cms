@@ -32,6 +32,14 @@ defmodule KilnCMS.Experiments.Assignment do
   @type choice :: Variant.t() | nil
 
   @doc """
+  Sort by id \u2014 the deterministic tie-break used wherever two nodes must agree
+  on an order the database does not promise. Shared here so a future change to
+  the rule only needs updating in one place.
+  """
+  @spec sort_by_id([%{id: term()}]) :: [%{id: term()}]
+  def sort_by_id(list), do: Enum.sort_by(list, & &1.id)
+
+  @doc """
   Choose a variant, weighted.
 
   `key` is `nil` for stateless assignment or a caller-supplied string for
@@ -44,7 +52,7 @@ defmodule KilnCMS.Experiments.Assignment do
   def choose([], _key), do: nil
 
   def choose(variants, key) do
-    ordered = Enum.sort_by(variants, & &1.id)
+    ordered = sort_by_id(variants)
     total = Enum.sum_by(ordered, & &1.weight)
 
     cond do
@@ -81,7 +89,7 @@ defmodule KilnCMS.Experiments.Assignment do
   @spec choose_bucket([Variant.t()], non_neg_integer(), pos_integer()) :: choice()
   def choose_bucket(variants, bucket, buckets)
       when is_integer(bucket) and bucket >= 0 and is_integer(buckets) and buckets > 0 do
-    ordered = Enum.sort_by(variants, & &1.id)
+    ordered = sort_by_id(variants)
     total = Enum.sum_by(ordered, & &1.weight)
 
     if total <= 0, do: nil, else: pick_bucket(ordered, bucket, 0, total, buckets)

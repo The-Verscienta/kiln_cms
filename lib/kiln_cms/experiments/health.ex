@@ -149,7 +149,7 @@ defmodule KilnCMS.Experiments.Health do
     {:conversions_exceed_impressions,
      "#{conversions} conversions were recorded against only #{impressions} impressions — " <>
        "a variant does not usually convert more than it was shown, so this total is worth " <>
-       "checking before it is read as a rate (see KilnCMS.Experiments.Delivery, #1007)"}
+       "checking before it is read as a rate"}
   end
 
   def anomaly_reason(_impressions, _conversions), do: nil
