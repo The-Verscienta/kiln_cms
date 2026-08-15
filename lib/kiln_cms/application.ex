@@ -202,7 +202,11 @@ defmodule KilnCMS.Application do
     {:task_digest_cron, KilnCMS.Notifications.TaskDigestWorker, "KILN_TASK_DIGEST_CRON",
      "task due-soon/overdue digests will NOT be sent on a schedule. See #501."},
     {:occurrence_sweep_cron, KilnCMS.Events.SweepWorker, "KILN_OCCURRENCE_SWEEP_CRON",
-     "finished events will stay at the top of the \"what's on\" index. See #766."}
+     "finished events will stay at the top of the \"what's on\" index. See #766."},
+    {:media_quarantine_reaper_cron, KilnCMS.Media.QuarantineReaper,
+     "KILN_MEDIA_QUARANTINE_REAPER_CRON",
+     "quarantined A/V uploads whose metadata strip never completed will NOT be " <>
+       "cleaned up. See #1122."}
   ]
 
   # `false` (or nil) on any key leaves that entry out, for a deployment driving

@@ -86,7 +86,13 @@ defmodule KilnCMSWeb.MediaDownloadController do
     actor = conn.assigns[:current_user]
     org_id = KilnCMSWeb.Tenant.current_org_id(conn)
 
+    # A quarantined item (#1122) is a 404 for everyone — an editor can read the
+    # row, but its bytes are the unstripped upload sitting in private storage,
+    # and both routes here read private storage for a gated item. The read
+    # policy already hides the row from non-editors; this is the second half,
+    # for the one reader the policy lets through.
     case CMS.get_media_item(id, actor: actor, tenant: org_id) do
+      {:ok, %{quarantined: true}} -> send_resp(conn, 404, "Not found")
       {:ok, item} -> serve_fun.(conn, item, org_id)
       _ -> send_resp(conn, 404, "Not found")
     end

@@ -22,7 +22,10 @@ defmodule KilnCMS.CMS.Checks.MediaInAudience do
   def filter(actor, context, _opts) do
     case Scoping.audiences(actor, Map.get(context, :subject)) do
       [] -> false
-      audiences -> expr(audience in ^audiences)
+      # Never a quarantined item (#1122): the audience-holder would otherwise
+      # be able to reach the unstripped private blob through the download
+      # controller before the strip ran.
+      audiences -> expr(audience in ^audiences and quarantined == false)
     end
   end
 end
