@@ -51,6 +51,16 @@ msgstr "%{action} : %{count} mis à jour, %{skipped} ignoré(s)"
 msgid "%{checked} links checked, %{waiting} still to check."
 msgstr "%{checked} liens vérifiés, %{waiting} restants."
 
+#: lib/kiln_cms_web/components/block_discussion_components.ex
+#, elixir-autogen, elixir-format
+msgid "%{comments} and %{tasks} on this block"
+msgstr "%{comments} et %{tasks} sur ce bloc"
+
+#: lib/kiln_cms_web/components/block_discussion_components.ex
+#, elixir-autogen, elixir-format
+msgid "%{comments} on this block"
+msgstr "%{comments} sur ce bloc"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} a11y issue"
@@ -65,12 +75,19 @@ msgid_plural "%{count} checkpoints have not been published to the witness."
 msgstr[0] "%{count} point de contrôle n'a pas été publié auprès du témoin."
 msgstr[1] "%{count} points de contrôle n'ont pas été publiés auprès du témoin."
 
-#: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} comment"
 msgid_plural "%{count} comments"
 msgstr[0] "%{count} commentaire"
 msgstr[1] "%{count} commentaires"
+
+#: lib/kiln_cms_web/components/block_discussion_components.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} comment · Resolved"
+msgid_plural "%{count} comments · Resolved"
+msgstr[0] "%{count} commentaire · Résolu"
+msgstr[1] "%{count} commentaires · Résolu"
 
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/analytics_live.ex
@@ -157,6 +174,13 @@ msgid_plural "%{count} open comments — open them in the editor"
 msgstr[0] "%{count} commentaire ouvert — ouvrez-le dans l'éditeur"
 msgstr[1] "%{count} commentaires ouverts — ouvrez-les dans l'éditeur"
 
+#: lib/kiln_cms_web/components/block_discussion_components.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} open task"
+msgid_plural "%{count} open tasks"
+msgstr[0] "%{count} tâche ouverte"
+msgstr[1] "%{count} tâches ouvertes"
+
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} page"
@@ -194,6 +218,13 @@ msgstr "%{count} publié(s) sans modification depuis plus de %{days} jours"
 #, elixir-autogen, elixir-format
 msgid "%{count} renames failed — re-run the preview to see what's left."
 msgstr "%{count} renommages ont échoué — relancez l'aperçu pour voir ce qu'il reste."
+
+#: lib/kiln_cms_web/components/block_discussion_components.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} resolved comment"
+msgid_plural "%{count} resolved comments"
+msgstr[0] "%{count} commentaire résolu"
+msgstr[1] "%{count} commentaires résolus"
 
 #: lib/kiln_cms_web/live/search_palette_live.ex
 #, elixir-autogen, elixir-format
@@ -254,6 +285,13 @@ msgid_plural "%{count} tasks assigned to you"
 msgstr[0] "%{count} tâche qui vous est assignée"
 msgstr[1] "%{count} tâches qui vous sont assignées"
 
+#: lib/kiln_cms_web/components/block_discussion_components.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} unresolved comment"
+msgid_plural "%{count} unresolved comments"
+msgstr[0] "%{count} commentaire non résolu"
+msgstr[1] "%{count} commentaires non résolus"
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} unused recovery codes remain."
@@ -297,6 +335,11 @@ msgstr "%{failed} en échec en 24 h · %{disabled} désactivés automatiquement"
 msgid "%{locale} is not a configured locale"
 msgstr "%{locale} n'est pas une locale configurée"
 
+#: lib/kiln_cms_web/components/block_discussion_components.ex
+#, elixir-autogen, elixir-format
+msgid "%{names} are typing…"
+msgstr "%{names} sont en train d'écrire…"
+
 #: lib/kiln_cms_web/live/form_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{name} (copy)"
@@ -306,6 +349,16 @@ msgstr "%{name} (copie)"
 #, elixir-autogen, elixir-format
 msgid "%{name} is editing this field"
 msgstr "%{name} modifie ce champ"
+
+#: lib/kiln_cms_web/components/block_discussion_components.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} is on this block"
+msgstr "%{name} est sur ce bloc"
+
+#: lib/kiln_cms_web/components/block_discussion_components.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} is typing…"
+msgstr "%{name} est en train d'écrire…"
 
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
@@ -431,10 +484,25 @@ msgstr "%{size} Mo"
 msgid "%{size} · %{count} file(s) · %{trigger}"
 msgstr "%{size} · %{count} fichier(s) · %{trigger}"
 
+#: lib/kiln_cms_web/components/block_discussion_components.ex
+#, elixir-autogen, elixir-format
+msgid "%{tasks} on this block"
+msgstr "%{tasks} sur ce bloc"
+
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{type} (unknown)"
 msgstr "%{type} (inconnu)"
+
+#: lib/kiln_cms_web/components/block_discussion_components.ex
+#, elixir-autogen, elixir-format
+msgid "%{who} — due %{date}%{note}"
+msgstr "%{who} — échéance le %{date}%{note}"
+
+#: lib/kiln_cms_web/components/block_discussion_components.ex
+#, elixir-autogen, elixir-format
+msgid "%{who}%{note}"
+msgstr "%{who}%{note}"
 
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
@@ -467,6 +535,11 @@ msgstr "(non défini)"
 #, elixir-autogen, elixir-format
 msgid "(untitled)"
 msgstr "(sans titre)"
+
+#: lib/kiln_cms_web/components/block_discussion_components.ex
+#, elixir-autogen, elixir-format
+msgid "(won't notify)"
+msgstr "(ne notifiera personne)"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -1958,6 +2031,7 @@ msgstr "Effacer"
 msgid "Click a highlighted region in your site to edit it here."
 msgstr "Cliquez sur une zone mise en évidence de votre site pour la modifier ici."
 
+#: lib/kiln_cms_web/components/block_discussion_components.ex
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/presentation_live.ex
@@ -2026,7 +2100,7 @@ msgstr "Origines séparées par des virgules (schéma et hôte, éventuellement 
 msgid "Comma-separated; the first keyphrase drives the auto-derived slug."
 msgstr "Séparés par des virgules ; la première expression clé détermine le slug dérivé automatiquement."
 
-#: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "Comment"
 msgstr "Commenter"
@@ -3260,6 +3334,11 @@ msgstr "Déconnecter"
 #, elixir-autogen, elixir-format
 msgid "Disconnect the payment provider? No new memberships can be sold until you reconnect."
 msgstr "Déconnecter le prestataire de paiement ? Aucun nouvel abonnement ne pourra être vendu avant une reconnexion."
+
+#: lib/kiln_cms_web/components/block_discussion_components.ex
+#, elixir-autogen, elixir-format
+msgid "Discussion on this block"
+msgstr "Discussion sur ce bloc"
 
 #: lib/kiln_cms_web/live/api_key_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -5048,6 +5127,11 @@ msgstr "Niveaux d'abonnement"
 msgid "Memberships aren't set up on this site. Please check back later."
 msgstr "Les abonnements ne sont pas configurés sur ce site. Revenez plus tard."
 
+#: lib/kiln_cms_web/components/block_discussion_components.ex
+#, elixir-autogen, elixir-format
+msgid "Mention a teammate"
+msgstr "Mentionner un collègue"
+
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
 msgid "Menu"
@@ -5397,7 +5481,7 @@ msgid_plural "No claim issues found in %{count} applicable checks."
 msgstr[0] "Aucun problème d’allégation trouvé dans %{count} vérification applicable."
 msgstr[1] "Aucun problème d’allégation trouvé dans %{count} vérifications applicables."
 
-#: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "No comments on this block yet."
 msgstr "Aucun commentaire sur ce bloc pour l'instant."
@@ -7089,7 +7173,7 @@ msgstr "Renouvellement le %{date}"
 msgid "Reopen for editing"
 msgstr "Rouvrir pour modification"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "Reopen thread"
 msgstr "Rouvrir le fil"
@@ -7176,15 +7260,10 @@ msgstr "Réinitialiser aux valeurs par défaut"
 msgid "Reset your password"
 msgstr "Réinitialiser votre mot de passe"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "Resolve thread"
 msgstr "Résoudre le fil"
-
-#: lib/kiln_cms_web/live/content_editor_live.ex
-#, elixir-autogen, elixir-format
-msgid "Resolved"
-msgstr "Résolu"
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
@@ -7795,7 +7874,7 @@ msgstr "Sélectionnez-en deux pour voir ce qui a changé entre elles."
 msgid "Semantic search is off, so there is nothing to compare against."
 msgstr "La recherche sémantique est désactivée, il n'y a donc rien à quoi comparer."
 
-#: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "Send"
 msgstr "Envoyer"
@@ -8133,7 +8212,7 @@ msgstr "Contenu supprimé (réversible). Restaurer le remet à sa place. La corb
 msgid "Some tiers grant an audience that is no longer configured. Restore it in config :kiln_cms, :audiences, or retire those tiers."
 msgstr "Certains niveaux accordent une audience qui n'est plus configurée. Rétablissez-la dans config :kiln_cms, :audiences, ou retirez ces niveaux."
 
-#: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "Someone"
 msgstr "Quelqu'un"
@@ -8193,6 +8272,11 @@ msgstr "Spam"
 #, elixir-autogen, elixir-format
 msgid "Spring campaign"
 msgstr "Campagne de printemps"
+
+#: lib/kiln_cms_web/components/block_discussion_components.ex
+#, elixir-autogen, elixir-format
+msgid "Start a discussion on this block"
+msgstr "Démarrer une discussion sur ce bloc"
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/release_live.ex
@@ -9299,6 +9383,11 @@ msgstr "Type"
 msgid "Type / to format this text or insert a block below."
 msgstr "Tapez / pour mettre en forme ce texte ou insérer un bloc ci-dessous."
 
+#: lib/kiln_cms_web/components/block_discussion_components.ex
+#, elixir-autogen, elixir-format
+msgid "Type @ to bring someone in."
+msgstr "Tapez @ pour inviter quelqu'un."
+
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
 msgid "Typed queries over published content — by-slug lookups, taxonomy, and keyword/semantic search. POST queries to the endpoint below (GET with a ?query= parameter also works). The interactive GraphiQL playground is available in development environments only."
@@ -9852,12 +9941,12 @@ msgstr "Attesté par le point de contrôle n° %{sequence} à la position d'ancr
 msgid "Working…"
 msgstr "En cours…"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "Write a comment"
 msgstr "Écrire un commentaire"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "Write a comment…"
 msgstr "Écrire un commentaire…"

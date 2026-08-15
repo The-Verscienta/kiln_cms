@@ -21,6 +21,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   import Ash.Expr, only: [expr: 1]
   import KilnCMSWeb.AccessibilityComponents, only: [a11y_findings: 1, a11y_grade_badge: 1]
+  import KilnCMSWeb.BlockDiscussionComponents, only: [block_discussion: 1]
 
   import KilnCMSWeb.ComplianceComponents,
     only: [compliance_findings: 1, compliance_grade_badge: 1]
@@ -34,6 +35,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMS.Accounts.Scoping
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.Mentions
+  alias KilnCMS.Collab
   alias KilnCMS.Unsplash
 
   # The fields the SEO suggestion writes if the author accepts it.
@@ -129,6 +132,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
           # Preview-window joins/leaves, so broadcast_preview/1 can no-op
           # while no pop-out is watching.
           Phoenix.PubSub.subscribe(KilnCMS.PubSub, Presence.preview_topic(kind, id))
+          # Block discussions: threads and block tasks changing anywhere —
+          # another editor's window, the API, `AutoCompleteTasks` on publish —
+          # arrive as `{:block_thread_changed, _}` / `{:block_task_changed, _}`
+          # on the collab topic, which also carries this document's typing
+          # indicators. Reusing it costs no new subscription.
+          Collab.subscribe(kind, record.id)
         end
 
         {:ok,
@@ -217,6 +226,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # landing side of the shared preview's comment pins (#802).
          |> assign(:comment_block, params["comment"])
          |> assign(:comment_draft, nil)
+         # Mention autocomplete: the candidates for the `@…` currently being
+         # typed in the open composer. Filtered in memory from `mention_roster`
+         # (loaded once — an org's editor roster doesn't change mid-session),
+         # so a keystroke costs no query.
+         |> assign(:mention_roster, mention_roster())
+         |> assign(:mention_suggestions, [])
+         # Who is typing into which block's composer, as `block_id => %{name =>
+         # timer_ref}`. Transient and never persisted; each entry cancels
+         # itself after `@typing_ttl` so a peer who closes the tab mid-word
+         # doesn't type forever.
+         |> assign(:typing, %{})
          # Internal-link suggestions (#377). `nil` = never opened; loading is
          # deferred to first open because it costs a pgvector query plus a
          # record read per neighbour, which no page-load should pay.
@@ -454,6 +474,44 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
     {:noreply, socket}
   end
+
+  # A block's thread or its tasks changed — here, in another editor's window,
+  # through the API, or via `AutoCompleteTasks` on publish. The message names
+  # the block but carries no rows: each session re-reads with its OWN actor and
+  # tenant, so a peer who may no longer read this content simply keeps what it
+  # has. Reloading the whole document's list rather than the one block is
+  # deliberate — it's one query either way, and the alternative is merging a
+  # partial result into an assign that another message may already have moved.
+  def handle_info({:block_thread_changed, _block_id}, socket),
+    do: {:noreply, reload_comments(socket)}
+
+  def handle_info({:block_task_changed, _block_id}, socket),
+    do: {:noreply, reload_tasks(socket)}
+
+  # Someone is typing into a block's composer. Transient: no row, no Presence
+  # entry, just an assign that expires on its own (see `note_typing/3`). Our
+  # own echo is dropped — a composer that told you *you* were typing would be
+  # both useless and permanently on.
+  def handle_info({:typing, user_id, name, block_id}, socket) do
+    if user_id == socket.assigns.actor.id do
+      {:noreply, socket}
+    else
+      {:noreply, note_typing(socket, block_id, name)}
+    end
+  end
+
+  # A typing indicator aged out. Keyed on `{block_id, name}` rather than a
+  # blanket clear, so one peer falling silent doesn't erase another who is
+  # still going.
+  def handle_info({:typing_expired, block_id, name}, socket),
+    do: {:noreply, clear_typing(socket, block_id, name)}
+
+  # Coarse block ops from `Collab.apply_op/4` ride the topic this LiveView now
+  # subscribes to for discussions. It applies block edits through the form and
+  # the CRDT channel rather than this message, so there is nothing to do — but
+  # the clause has to exist, because an unmatched `handle_info` takes the
+  # editor down with a `FunctionClauseError`.
+  def handle_info({:block_op, _op}, socket), do: {:noreply, socket}
 
   # A collaborator focused (field set) or left (field nil) a field. Ignore our
   # own echo — we only render *other* people's cursors.
@@ -1992,8 +2050,60 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def handle_event("comment_close", _params, socket), do: {:noreply, close_comment_panel(socket)}
 
   def handle_event("comment_draft", params, socket) do
-    {:noreply, assign(socket, :comment_draft, params["comment_body"])}
+    body = params["comment_body"]
+
+    {:noreply,
+     socket
+     |> assign(:comment_draft, body)
+     |> suggest_mentions(body)}
   end
+
+  # The composer's hook says the author is typing. Broadcast-only: nothing is
+  # stored, and our own echo is dropped on receipt rather than here, so the
+  # message shape stays the same for every recipient.
+  def handle_event("comment_typing", %{"bid" => block_id}, socket)
+      when is_binary(block_id) and block_id != "" do
+    Phoenix.PubSub.broadcast(
+      KilnCMS.PubSub,
+      Collab.topic(socket.assigns.kind, socket.assigns.record.id),
+      {:typing, socket.assigns.actor.id, Presence.display_name(socket.assigns.actor), block_id}
+    )
+
+    {:noreply, socket}
+  end
+
+  def handle_event("comment_typing", _params, socket), do: {:noreply, socket}
+
+  # Insert the chosen handle in place of the partial `@…` the author was
+  # typing. Done server-side against `comment_draft` — the assign the Send
+  # button reads — so the textarea and the value that will actually be posted
+  # cannot disagree.
+  def handle_event("mention_pick", %{"handle" => handle}, socket) when is_binary(handle) do
+    draft = complete_mention(socket.assigns.comment_draft, handle)
+
+    {:noreply,
+     socket
+     |> assign(:comment_draft, draft)
+     |> assign(:mention_suggestions, [])
+     |> push_event("mention:inserted", %{value: draft})}
+  end
+
+  def handle_event("mention_pick", _params, socket), do: {:noreply, socket}
+
+  # Block-scoped presence (advisory only — nothing here locks a block). The
+  # browser sends the focused block on `focusin` and an explicit `nil` on
+  # `focusout`, so both shapes are legitimate and each gets its own guarded
+  # head rather than one that binds whatever arrives (#764). An empty string is
+  # a blur too — a card rendered before its block had an id.
+  def handle_event("presence_focus", %{"bid" => block_id}, socket)
+      when is_binary(block_id) and block_id != "",
+      do: {:noreply, focus_block(socket, block_id)}
+
+  def handle_event("presence_focus", %{"bid" => block_id}, socket)
+      when is_binary(block_id) or is_nil(block_id),
+      do: {:noreply, focus_block(socket, nil)}
+
+  def handle_event("presence_focus", _params, socket), do: {:noreply, socket}
 
   def handle_event("comment_add", %{"bid" => block_id}, socket)
       when is_binary(block_id) and block_id != "" do
@@ -2011,7 +2121,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
              tenant: socket.assigns.current_org
            ) do
         {:ok, _comment} ->
-          {:noreply, socket |> reload_comments() |> assign(:comment_draft, nil)}
+          {:noreply,
+           socket
+           |> reload_comments()
+           |> assign(:comment_draft, nil)
+           |> assign(:mention_suggestions, [])}
 
         {:error, _error} ->
           {:noreply, put_flash(socket, :error, gettext("Couldn't add comment."))}
@@ -3229,9 +3343,132 @@ defmodule KilnCMSWeb.ContentEditorLive do
     assign(socket, :comments, comments)
   end
 
+  # ── Mentions in the composer (#801) ─────────────────────────────────────────
+
+  # Suggestions for the `@…` the cursor is *in*, or none.
+  #
+  # Keyed on the trailing partial handle rather than every `@` in the body:
+  # re-opening a dropdown over a mention the author finished three sentences
+  # ago would fight the person typing. `Mentions.suggest/3` owns which handle
+  # is offered, so what the dropdown inserts is always something
+  # `Mentions.resolve/2` will resolve.
+  defp suggest_mentions(socket, body) do
+    case partial_handle(body) do
+      nil ->
+        assign(socket, :mention_suggestions, [])
+
+      query ->
+        suggestions =
+          query
+          |> Mentions.suggest(socket.assigns.mention_roster)
+          |> Enum.map(&%{name: user_label(&1.user), handle: &1.handle, ambiguous?: &1.ambiguous?})
+
+        assign(socket, :mention_suggestions, suggestions)
+    end
+  end
+
+  # The handle being typed at the very end of the body, if any. Requires the
+  # `@` to start a word (so an email address doesn't open a dropdown) and
+  # allows it to be the last character, because that is when the author most
+  # wants to be shown the roster.
+  defp partial_handle(body) when is_binary(body) do
+    case Regex.run(~r/(?<![\w@])@([\p{L}\p{N}._-]*)$/u, body, capture: :all_but_first) do
+      [query] -> query
+      nil -> nil
+    end
+  end
+
+  defp partial_handle(_body), do: nil
+
+  # Replace the trailing partial handle with the chosen one, and leave a space
+  # so the author keeps typing prose rather than extending the mention.
+  defp complete_mention(body, handle) when is_binary(body),
+    do: String.replace(body, ~r/(?<![\w@])@[\p{L}\p{N}._-]*$/u, "@#{handle} ")
+
+  defp complete_mention(_body, handle), do: "@#{handle} "
+
+  # The roster mentions resolve against: this org's members, the same set
+  # `NotifyComment` passes to `Mentions.resolve/2` after the write. Loaded once
+  # at mount — a dropdown that suggested someone the notifier would then not
+  # find is the one failure worth spending a query to avoid, and reusing the
+  # same source is how that is guaranteed rather than hoped for.
+  #
+  # `authorize?: false` for the same reason `assignable_users/0` needs it:
+  # `User`'s read policy is self-only, so listing anyone else's name for a
+  # dropdown takes a system read.
+  defp mention_roster do
+    Accounts.User
+    |> Ash.Query.filter(role in [:editor, :admin])
+    |> Ash.read!(authorize?: false)
+  end
+
+  # ── Typing indicators ───────────────────────────────────────────────────────
+
+  # How long a "typing…" survives without another keystroke. Long enough to
+  # bridge the gap between words, short enough that a closed tab stops typing
+  # while the reader is still looking at the composer.
+  @typing_ttl :timer.seconds(3)
+
+  defp note_typing(socket, block_id, name) do
+    for_block = Map.get(socket.assigns.typing, block_id, %{})
+
+    # One timer per {block, person}: a new keystroke replaces the old timer, so
+    # the indicator rides continuous typing rather than blinking every 3s.
+    case Map.get(for_block, name) do
+      nil -> :noop
+      old_ref -> Process.cancel_timer(old_ref)
+    end
+
+    ref = Process.send_after(self(), {:typing_expired, block_id, name}, @typing_ttl)
+
+    assign(
+      socket,
+      :typing,
+      Map.put(socket.assigns.typing, block_id, Map.put(for_block, name, ref))
+    )
+  end
+
+  # `focus_block/5` fails harmlessly when this session isn't tracked yet (a
+  # still-connecting mount, or a focus arriving after the entry went), which is
+  # why its result is discarded rather than matched on: block focus is
+  # advisory, and there is nothing useful to do about a miss.
+  defp focus_block(socket, block_id) do
+    Presence.focus_block(
+      self(),
+      socket.assigns.kind,
+      socket.assigns.record.id,
+      socket.assigns.actor.id,
+      block_id
+    )
+
+    socket
+  end
+
+  # The peers focused on one block, never including ourselves — the pin is
+  # there to say who *else* is looking, and an avatar of your own face beside
+  # the block you are editing is noise.
+  defp block_viewers(editors, self_id, block_id) do
+    Enum.filter(editors, &(&1.id != self_id and &1.block_id == block_id))
+  end
+
+  defp typing_names(typing, block_id) do
+    typing |> Map.get(block_id, %{}) |> Map.keys() |> Enum.sort()
+  end
+
+  defp clear_typing(socket, block_id, name) do
+    for_block = socket.assigns.typing |> Map.get(block_id, %{}) |> Map.delete(name)
+
+    typing =
+      if for_block == %{},
+        do: Map.delete(socket.assigns.typing, block_id),
+        else: Map.put(socket.assigns.typing, block_id, for_block)
+
+    assign(socket, :typing, typing)
+  end
+
   # Batch-loads `:author` on the whole list in one query rather than once per
-  # comment at render time (`comment_author_label/1` reads it back off the
-  # struct — no per-row load in the template). `authorize?: false` on the load
+  # comment at render time (the component reads it back off the struct — no
+  # per-row load in the template). `authorize?: false` on the load
   # only: `User`'s read policy is self-only (`id == actor(:id)`), so showing
   # who wrote a comment — ordinary display data, not sensitive — would
   # otherwise fail to load for every author but the viewer themselves. The
@@ -3244,10 +3481,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # ── Editorial tasks (#501): handle_event helpers ────────────────────────────
 
+  # Open tasks only, filtered in SQL rather than in memory — the same one query
+  # feeds the settings panel's task list and every block's discussion pin, so
+  # the per-block counts cost nothing beyond this read no matter how many
+  # blocks the document has.
   defp load_tasks(kind, record_id, actor, org) do
     to_string(kind)
-    |> CMS.list_tasks_for!(record_id, actor: actor, tenant: org)
-    |> Enum.filter(&(&1.status == :open))
+    |> CMS.list_open_tasks_for!(record_id, actor: actor, tenant: org)
     |> Ash.load!(:assignee, authorize?: false, tenant: org)
   end
 
@@ -3364,6 +3604,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
     socket
     |> assign(:comment_block, nil)
     |> assign(:comment_draft, nil)
+    # Suggestions belong to the draft that is being discarded — leaving them
+    # assigned would reopen the dropdown over the next block's empty composer.
+    |> assign(:mention_suggestions, [])
   end
 
   defp run_workflow(socket, action)
@@ -6030,136 +6273,6 @@ defmodule KilnCMSWeb.ContentEditorLive do
     """
   end
 
-  attr :block_id, :string, required: true
-  attr :comments, :list, required: true
-  attr :open?, :boolean, required: true
-  attr :draft, :string, default: nil
-
-  # Block-level editorial comment thread (#404) — same toggle-button-into-
-  # inline-panel shape as `assist_panel/1` above, and the same reason the
-  # textarea keeps its own unprefixed `phx-change`/`phx-debounce="blur"`
-  # rather than living inside a `<form>`: this sits inside the main content
-  # form, which can't nest one.
-  #
-  # Unlike `assist_panel/1`, rendered for every block type (outside all the
-  # per-type conditionals) — a comment can land on any block, not just rich
-  # text.
-  defp comment_panel(assigns) do
-    thread = thread_for_block(assigns.comments, assigns.block_id)
-    assigns = assign(assigns, :thread, thread)
-
-    ~H"""
-    <div class="mt-2">
-      <button
-        type="button"
-        phx-click={if @open?, do: "comment_close", else: "comment_open"}
-        phx-value-bid={@block_id}
-        aria-expanded={to_string(@open?)}
-        class={[
-          "inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs hover:bg-base-200",
-          if(thread_resolved?(@thread),
-            do: "border-base-content/20 text-base-content/50",
-            else: "border-base-content/20"
-          )
-        ]}
-      >
-        <.icon name="hero-chat-bubble-left-right" class="size-3.5" />
-        {if @thread == [],
-          do: gettext("Comment"),
-          else:
-            ngettext("%{count} comment", "%{count} comments", length(@thread), count: length(@thread))}
-        <span :if={thread_resolved?(@thread)} class="text-success">
-          · {gettext("Resolved")}
-        </span>
-      </button>
-
-      <div
-        :if={@open?}
-        class="mt-2 space-y-2 rounded border border-base-content/15 bg-base-200/40 p-2"
-      >
-        <div :if={@thread == []} class="text-xs text-base-content/60">
-          {gettext("No comments on this block yet.")}
-        </div>
-
-        <div :for={comment <- @thread} class="rounded bg-base-100 p-2 text-xs">
-          <div class="flex items-center justify-between gap-2 text-base-content/60">
-            <span>{comment_author_label(comment)}</span>
-            <time datetime={DateTime.to_iso8601(comment.inserted_at)}>
-              {Calendar.strftime(comment.inserted_at, "%b %-d, %H:%M")}
-            </time>
-          </div>
-          <%!-- Rendered as a text node, never raw markup: a comment is
-                editor-typed prose, not HTML. --%>
-          <p class="mt-1 break-words">{comment.body}</p>
-          <button
-            :if={is_nil(comment.thread_id)}
-            type="button"
-            phx-click={if comment.resolved_at, do: "comment_unresolve", else: "comment_resolve"}
-            phx-value-id={comment.id}
-            class="mt-1 text-base-content/60 underline hover:text-base-content"
-          >
-            {if comment.resolved_at, do: gettext("Reopen thread"), else: gettext("Resolve thread")}
-          </button>
-        </div>
-
-        <%!-- See `assist_panel/1`'s textarea for why this is unprefixed with
-              its own phx-change/phx-debounce="blur" rather than a nested
-              <form>: the Send button reads @comment_draft (synced on blur),
-              never anything from its own click event. --%>
-        <textarea
-          name="comment_body"
-          rows="2"
-          phx-change="comment_draft"
-          phx-debounce="blur"
-          aria-label={gettext("Write a comment")}
-          placeholder={gettext("Write a comment…")}
-          class="field-input text-xs"
-        >{@draft}</textarea>
-
-        <div class="flex items-center gap-2">
-          <button
-            type="button"
-            phx-click="comment_add"
-            phx-value-bid={@block_id}
-            class="btn btn-sm btn-default"
-          >
-            {gettext("Send")}
-          </button>
-          <button
-            type="button"
-            phx-click="comment_close"
-            class="text-xs text-base-content/60 underline hover:text-base-content"
-          >
-            {gettext("Close")}
-          </button>
-        </div>
-      </div>
-    </div>
-    """
-  end
-
-  # This block's thread, oldest first — the root (if any) followed by its
-  # replies. `RouteToBlockThread` guarantees every comment sharing a block id
-  # already belongs to the same one thread, so no grouping-by-thread-id is
-  # needed here; `comments` is already sorted by `inserted_at` from
-  # `list_comments_for!`.
-  defp thread_for_block(comments, block_id),
-    do: Enum.filter(comments, &(&1.block_id == block_id))
-
-  # A thread with no comments yet is not "resolved" — there's nothing to
-  # reopen. Otherwise resolved iff its root (thread_id: nil) carries a
-  # resolved_at.
-  defp thread_resolved?([]), do: false
-  defp thread_resolved?(thread), do: Enum.any?(thread, &(is_nil(&1.thread_id) and &1.resolved_at))
-
-  defp comment_author_label(%{author: %{name: name}}) when is_binary(name) and name != "",
-    do: name
-
-  defp comment_author_label(%{author: %{email: email}}) when not is_nil(email),
-    do: to_string(email)
-
-  defp comment_author_label(_comment), do: gettext("Someone")
-
   attr :form, :any, required: true
   attr :media, :list, required: true
   attr :current_org, :any, required: true
@@ -8211,9 +8324,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
               <div id="blocks-sortable" phx-hook="Sortable" class="space-y-3">
                 <.inputs_for :let={bf} field={@form[:blocks]}>
+                  <%!-- `BlockPresence` reports focus in and out of this card so
+                        peers can see which block someone is on. `focusin`/
+                        `focusout` rather than `phx-focus`/`phx-blur`: those bind
+                        the non-bubbling `focus`/`blur`, which never fire for a
+                        card whose focusable children are the inputs inside it. --%>
                   <div
                     id={"block-#{bf.index}"}
                     data-sort-id={bf.index}
+                    phx-hook="BlockPresence"
+                    data-block-id={bf[:id].value}
                     class="group rounded border border-base-content/15 p-3"
                   >
                     <%!-- Carries the block's stable id into save/validate params so
@@ -8482,12 +8602,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     <%!-- Comments (#404) are rendered here, outside every
                           per-type branch above, so they apply to any block
                           type — unlike AI assist, which is rich_text-only. --%>
-                    <.comment_panel
+                    <.block_discussion
                       :if={bf[:id].value}
                       block_id={bf[:id].value}
                       comments={@comments}
+                      tasks={@tasks}
                       open?={@comment_block == bf[:id].value}
                       draft={if @comment_block == bf[:id].value, do: @comment_draft}
+                      suggestions={
+                        if @comment_block == bf[:id].value, do: @mention_suggestions, else: []
+                      }
+                      viewers={block_viewers(@editors, @actor.id, bf[:id].value)}
+                      typing={typing_names(@typing, bf[:id].value)}
                     />
                     <%!-- Inline "+" to insert a block right after this one (B2). --%>
                     <.block_inserter

@@ -93,6 +93,90 @@ const Hooks = {
       })
     },
   },
+  // Block-scoped presence: tell the server which block this editor is on, so
+  // peers see "Alice is here" beside the block rather than only in the
+  // document roster.
+  //
+  // focusin/focusout, not phx-focus/phx-blur — those bind focus/blur, which do
+  // not bubble, so a card whose focusable children are the inputs inside it
+  // would never fire them.
+  //
+  // The blur is deferred a tick and cancelled by any focusin that follows:
+  // tabbing from one input to the next inside the same block emits
+  // focusout-then-focusin, and sending the intervening null would make the
+  // avatar flicker off and on for every field the author moves through.
+  BlockPresence: {
+    mounted() {
+      this.blockId = this.el.dataset.blockId || null
+      this.pending = null
+
+      this.onIn = () => {
+        clearTimeout(this.pending)
+        this.pending = null
+        if (this.sent === this.blockId) return
+        this.sent = this.blockId
+        this.pushEvent("presence_focus", {bid: this.blockId})
+      }
+
+      this.onOut = () => {
+        clearTimeout(this.pending)
+        this.pending = setTimeout(() => {
+          this.sent = null
+          this.pushEvent("presence_focus", {bid: null})
+        }, 120)
+      }
+
+      this.el.addEventListener("focusin", this.onIn)
+      this.el.addEventListener("focusout", this.onOut)
+    },
+    updated() {
+      // A reorder re-renders this card with a different block's data; keep the
+      // id we report in step with what is now inside it.
+      this.blockId = this.el.dataset.blockId || null
+    },
+    destroyed() {
+      clearTimeout(this.pending)
+      this.el.removeEventListener("focusin", this.onIn)
+      this.el.removeEventListener("focusout", this.onOut)
+    },
+  },
+  // The comment composer's `@` autocomplete and typing indicator.
+  //
+  // The dropdown itself is server-rendered from `@mention_suggestions` — this
+  // hook only throttles what reaches the server and puts the caret back after
+  // a pick, because a mention the server did not choose is a mention
+  // `Mentions.resolve/2` may refuse to resolve.
+  MentionAutocomplete: {
+    mounted() {
+      this.blockId = this.el.dataset.blockId || null
+      this.lastTyping = 0
+
+      this.onInput = () => {
+        // One typing broadcast per 1.5s per composer, well inside the server's
+        // 3s expiry: continuous typing keeps the indicator lit without one
+        // message per keystroke going out to every editor on the document.
+        const now = Date.now()
+        if (now - this.lastTyping > 1500) {
+          this.lastTyping = now
+          this.pushEvent("comment_typing", {bid: this.blockId})
+        }
+      }
+
+      // The server owns the draft, so a pick rewrites the textarea's value;
+      // restore the caret to the end or the author resumes typing mid-handle.
+      this.onInserted = ({value}) => {
+        this.el.value = value
+        this.el.focus()
+        this.el.setSelectionRange(value.length, value.length)
+      }
+
+      this.el.addEventListener("input", this.onInput)
+      this.handleEvent("mention:inserted", this.onInserted)
+    },
+    destroyed() {
+      this.el.removeEventListener("input", this.onInput)
+    },
+  },
   // Deep-link focus from an external front end (#355): when the structured
   // editor is opened as /editor/content/:type/:id?focus=<field>, scroll that
   // field's input into view, pulse it, and focus it. Custom fields anchor by
