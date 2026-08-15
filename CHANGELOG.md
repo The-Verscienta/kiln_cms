@@ -335,6 +335,29 @@ migration, a rewritten column, a dropped config key).
   Downstream callers of `PendingSignIn.mint/4` rename the call; the return
   value is unchanged.
 
+### Security
+
+- **`/live` root joins are budgeted per client address** (#1183). #678 metered
+  only the joins a tenant refused; a flood of joins that each named a valid
+  host — or replayed a scraped `data-phx-session` token — cost a session
+  verify, the route's hooks, a `mount/3` and a render each and was counted
+  nowhere. New `KilnCMSWeb.LiveJoinBudget`, an `on_mount` hook declared by
+  `KilnCMSWeb.live_view/0` on every Kiln LiveView module (ahead of
+  `LiveRouteGuard`, so a url-less join is charged before it is refused),
+  charges each **connected root** mount to a new `:live_join` bucket in
+  `KilnCMSWeb.RateLimit` (300/minute per address by default — a flood
+  ceiling, not a usage cap: a root join is one per page *load*, not per
+  click). The dead render, nested `live_render` children and in-session
+  navigation are not charged. Over budget, `TooManyJoinsError`
+  (`plug_status: 429`) is raised before `mount/3`; the channel turns that into
+  a `reload` reply and stops the process, and the JS client backs off with
+  jitter. The address is resolved exactly as `SignInLive` resolves it
+  (`ClientIp.resolve/2` over `:x_headers`/`:peer_data`, keyed by
+  `RateLimit.client_key/1`). Override like any bucket via
+  `config :kiln_cms, KilnCMSWeb.RateLimit, limits: %{live_join: …}`. Events on
+  an established socket and the `/ws/*` families remain uncounted (threat
+  model item 10).
+
 ## [0.6.0] - 2026-08-12
 
 ### Added

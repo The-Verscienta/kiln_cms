@@ -66,7 +66,9 @@ defmodule KilnCMSWeb do
 
       # Attached to the LiveView module rather than to a `live_session`, because
       # the router's hooks are exactly what a url-less join skips (#688). A hook
-      # declared here survives that, and refuses the join.
+      # declared here survives that, and refuses the join. The join budget
+      # (#1183) sits FIRST so a join the guard refuses is still charged.
+      on_mount KilnCMSWeb.LiveJoinBudget
       on_mount KilnCMSWeb.LiveRouteGuard
 
       # Appends a catch-all `handle_event/3` after the module body, so a pushed
