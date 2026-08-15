@@ -396,6 +396,15 @@ test.describe("editor journey", () => {
       'button[phx-click="col_add_child"][phx-value-col="0"][phx-value-type="heading"]',
     );
 
+    // A fresh child starts with an empty `text` (#935: `Heading.text` is
+    // `required: true`, and nested children are now cast through the same
+    // Ash validation a top-level block already went through — the write
+    // this test's Save button triggers below would otherwise be refused,
+    // exactly as it already is for a top-level heading with no text). The
+    // level select below is what's under test; this just gets the child
+    // into a savable state first.
+    await page.fill('input[placeholder="Heading text"]', "Nested heading");
+
     // The control under test. A heading child starts at level 2.
     const level = page.locator('select[phx-change="col_update_child"]').first();
     await expect(level).toBeVisible();
