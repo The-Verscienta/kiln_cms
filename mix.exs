@@ -117,7 +117,10 @@ defmodule KilnCMS.MixProject do
         # A dependency function named for the #1172 hold contract's own
         # explanation of why it works — ExDoc does not index AshAuthentication's
         # docs from this project.
-        "AshAuthentication.Plug.Helpers.validate_token/3"
+        "AshAuthentication.Plug.Helpers.validate_token/3",
+        # Private — named by FormSettingsLive's moduledoc for the contradiction
+        # rule it mirrors, not something callers outside FormBuilderLive reach.
+        "KilnCMSWeb.FormBuilderLive.form_params/1"
       ],
       extras: extras(),
       groups_for_extras: groups_for_extras(),

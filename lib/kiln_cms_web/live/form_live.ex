@@ -169,7 +169,12 @@ defmodule KilnCMSWeb.FormLive do
           <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
             &larr; {gettext("All content")}
           </.link>
-          <h1 class="mt-1 text-2xl font-semibold">{gettext("Forms")}</h1>
+          <div class="mt-1 flex flex-wrap items-center justify-between gap-3">
+            <h1 class="text-2xl font-semibold">{gettext("Forms")}</h1>
+            <.link navigate={~p"/editor/forms/settings"} class="btn btn-ghost btn-sm">
+              {gettext("Form settings")}
+            </.link>
+          </div>
           <p class="text-sm text-base-content/70">
             {gettext(
               "Build public forms, place them on content with the form block, and review submissions here."
