@@ -71,19 +71,26 @@ defmodule KilnCMS.Blocks do
   @spec core_modules() :: [module()]
   def core_modules, do: Keyword.values(@core_blocks)
 
-  @doc "All block modules using `Kiln.Block` — the app's own plus plugin-contributed."
-  @spec modules() :: [module()]
-  def modules do
-    app_modules =
-      case :application.get_key(:kiln_cms, :modules) do
-        {:ok, mods} -> Enum.filter(mods, &kiln_block?/1)
-        _ -> []
-      end
+  @doc """
+  All block modules using `Kiln.Block` — the core set plus every
+  **registered** plugin's contributions (`Kiln.Plugins.blocks/0`, backed by
+  `Application.compile_env(:kiln_cms, :plugins)`).
 
-    # Plugin blocks may live in another OTP app (hex-dep plugins), which the
-    # app-modules scan can't see.
-    Enum.uniq(app_modules ++ Kiln.Plugins.blocks())
-  end
+  Deliberately *not* a raw scan of every `Kiln.Block`-implementing module
+  compiled into the app: `projects/` is always in `elixirc_paths` (every env,
+  including a core-only build — see `projects/README.md`), so a downstream
+  overlay's plugin can contribute a block that compiles into this very app
+  while its owning plugin stays unregistered and dormant. A scan can't tell
+  "compiled" from "active" — it would report that block here, feed it into
+  the public schema export (`KilnCMS.SchemaExport`) and every nested-write
+  validation that iterates this list, even on a build where the block is
+  reachable nowhere in the actual `BlockUnion` storage type
+  (`union_types/0`, built from this exact same core-plus-registered-plugins
+  set). `mix kiln.plugins.doctor`'s own JSON-schema conformance check already
+  avoids this trap the same way — see its `block_schema_problems/1`.
+  """
+  @spec modules() :: [module()]
+  def modules, do: Enum.uniq(core_modules() ++ Kiln.Plugins.blocks())
 
   @doc "Map of `_type` discriminator → block module."
   @spec registry() :: %{atom() => module()}
@@ -134,17 +141,5 @@ defmodule KilnCMS.Blocks do
     else
       search_text(block)
     end
-  end
-
-  defp kiln_block?(module) do
-    Code.ensure_loaded?(module) and
-      function_exported?(module, :render, 2) and
-      Kiln.Block.Renderer in behaviours(module)
-  end
-
-  # A module can declare several `@behaviour`s; module_info/1 returns one
-  # `:behaviour` entry per declaration, so collect them all (not just the first).
-  defp behaviours(module) do
-    for {:behaviour, list} <- module.module_info(:attributes), behaviour <- list, do: behaviour
   end
 end
