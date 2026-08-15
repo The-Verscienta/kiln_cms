@@ -33,52 +33,136 @@ async function waitForLiveConnected(page) {
   });
 }
 
-// Wrap the navigation methods so the guard runs after every full page load.
-// In-app live navigation (phx-click → push_navigate) reuses the already-
-// connected socket, so only full loads need it.
+// Wrap a page's navigation methods so the guard runs after every full page
+// load. In-app live navigation (phx-click → push_navigate) reuses the
+// already-connected socket, so only full loads need it. Shared by the `page`
+// fixture below and by `newGuardedContext` — a hand-rolled `browser.newContext()`
+// (a second, independent session — see there) gets a page the fixture never
+// touches, and without this it would be exposed to the exact join-race flake
+// this guard exists for.
+function guardNavigation(page) {
+  for (const method of ["goto", "reload"]) {
+    const navigate = page[method].bind(page);
+    page[method] = async (...args) => {
+      const response = await navigate(...args);
+      await waitForLiveConnected(page);
+      return response;
+    };
+  }
+  return page;
+}
+
 const test = base.test.extend({
   page: async ({ page }, use) => {
-    for (const method of ["goto", "reload"]) {
-      const navigate = page[method].bind(page);
-      page[method] = async (...args) => {
-        const response = await navigate(...args);
-        await waitForLiveConnected(page);
-        return response;
-      };
-    }
-    await use(page);
+    await use(guardNavigation(page));
   },
 });
+
+// A second, independent browser session (its own cookies/storage) — for
+// journeys that need two genuinely different signed-in users interacting with
+// the same record (e.g. #948's mid-session tag attach). The caller owns the
+// returned context and must `.close()` it.
+async function newGuardedContext(browser) {
+  const context = await browser.newContext();
+  const page = guardNavigation(await context.newPage());
+  return { context, page };
+}
 
 // ── Shared journey helpers ──────────────────────────────────────────────────
 // Here rather than copied into each spec: `addBlock`'s `:visible` filter and
 // `newDraftPage`'s dropdown fallback were both worked out the hard way, and a
 // second copy is a second thing to forget to update.
 
-// Demo admin seeded by priv/repo/seeds.exs (mix e2e.setup).
+// Demo admin + editor seeded by priv/repo/seeds.exs (mix e2e.setup).
 const ADMIN = { email: "admin@kiln.test", password: "kilnadmin123" };
+const EDITOR = { email: "editor@kiln.test", password: "kilneditor123" };
 
-async function signInAsAdmin(page) {
+async function signInAs(page, { email, password }) {
   await page.goto("/sign-in");
-  await page.fill('input[name="user[email]"]', ADMIN.email);
-  await page.fill('input[name="user[password]"]', ADMIN.password);
+  await page.fill('input[name="user[email]"]', email);
+  await page.fill('input[name="user[password]"]', password);
   await page.getByRole("button", { name: /sign in/i }).click();
   // Editors/admins land on the console overview by default after sign-in
-  // (#157); this seeded user has the :admin role (see priv/repo/seeds.exs).
+  // (#157); both seeded users carry an editorial role (see priv/repo/seeds.exs).
   await base.expect(page).toHaveURL("/editor/overview");
 }
 
-// Start a fresh draft page from the editor index (the `new` handler creates an
-// "Untitled …" draft and navigates into the editor). Past
-// @max_inline_new_buttons content types the per-type "New …" buttons collapse
-// into the #content-new-menu <details> dropdown, so open it first.
-async function newDraftPage(page) {
+async function signInAsAdmin(page) {
+  await signInAs(page, ADMIN);
+}
+
+// A second, non-admin identity — used where a journey needs two genuinely
+// different sessions (e.g. #948's mid-session tag attach), rather than the
+// same admin account open twice.
+async function signInAsEditor(page) {
+  await signInAs(page, EDITOR);
+}
+
+// Start a fresh draft of `kind` ("page" by default) from the editor index (the
+// `new` handler creates an "Untitled …" draft and navigates into the editor).
+// Past @max_inline_new_buttons content types the per-type "New …" buttons
+// collapse into the #content-new-menu <details> dropdown, so open it first.
+async function newDraftContent(page, kind = "page") {
   await page.goto("/editor");
   const newMenu = page.locator("#content-new-menu summary");
   if (await newMenu.count()) await newMenu.click();
-  await page.click('button[phx-click="new"][phx-value-kind="page"]');
-  await page.waitForURL(/\/editor\/(content\/page|pages)\//);
+  await page.click(`button[phx-click="new"][phx-value-kind="${kind}"]`);
+  await page.waitForURL(new RegExp(`/editor/(content/${kind}|${kind}s)/`));
   await base.expect(page.locator('form[id$="-editor"]')).toBeVisible();
+}
+
+async function newDraftPage(page) {
+  return newDraftContent(page, "page");
+}
+
+// A tag group scoped to specific content types, from the taxonomy page.
+// `contentTypes` is required (not defaulted) rather than optional: the
+// suite's database is persistent and never reset between specs (`workers:
+// 1`, only `mix e2e.reset` drops it), so a group left unrestricted applies
+// to every content type forever and can make another spec's "no tags yet"
+// starting state unreachable — see tag_picker_midsession.spec.js. Making
+// every caller name its content types is a structural nudge against
+// repeating that mistake, not just a comment asking nicely.
+async function createTagGroup(page, name, contentTypes) {
+  if (!Array.isArray(contentTypes) || contentTypes.length === 0) {
+    throw new Error("createTagGroup: contentTypes must be a non-empty array (e.g. [\"page\"])");
+  }
+  await page.goto("/editor/taxonomy");
+  await page.fill('#new-tag_group-form input[name$="[name]"]', name);
+  for (const type of contentTypes) {
+    await page.check(`#new-tag_group-form input[type="checkbox"][value="${type}"]`);
+  }
+  await page.locator("#new-tag_group-form button[type=submit]").click();
+  await base.expect(page.locator("#new-tag-form select").getByText(name)).toBeAttached();
+}
+
+// A single tag from the taxonomy page (`/editor/taxonomy`), optionally under
+// an existing group. Assumes the caller is already on that page.
+async function createTag(page, name, { group } = {}) {
+  await page.fill('#new-tag-form input[name$="[name]"]', name);
+  if (group) {
+    await page.selectOption('#new-tag-form select[name$="[tag_group_id]"]', { label: group });
+  }
+  await page.locator("#new-tag-form button[type=submit]").click();
+  // The row renders the name and the auto-derived slug, which are the same
+  // string here — assert on the first match rather than fighting that.
+  await base.expect(page.getByText(name, { exact: true }).first()).toBeVisible();
+}
+
+// Deletes a piece of content (admin-only, bulk-select UI) by its exact
+// title, via the /editor overview's search filter + bulk-delete action.
+// Best-effort: if nothing matches, this is a no-op rather than a failure —
+// callers use it from cleanup, where the thing to delete may never have
+// been created if an earlier step in the test already failed.
+async function deleteContentByTitle(page, title) {
+  await page.goto(`/editor?q=${encodeURIComponent(title)}`);
+  const checkbox = page.getByRole("checkbox", { name: `Select ${title}`, exact: true });
+  if ((await checkbox.count()) === 0) return;
+
+  await checkbox.check();
+  await page.locator('button[phx-click="bulk"][phx-value-action="delete"]').click();
+  await page.locator('button[phx-click="confirm_bulk"]').click();
+  await base.expect(checkbox).toHaveCount(0);
 }
 
 // The block inserter (#29) is a closed dropdown: its options only become
@@ -104,8 +188,15 @@ module.exports = {
   test,
   expect: base.expect,
   waitForLiveConnected,
+  newGuardedContext,
   ADMIN,
+  EDITOR,
   signInAsAdmin,
+  signInAsEditor,
   newDraftPage,
+  newDraftContent,
   addBlock,
+  createTagGroup,
+  createTag,
+  deleteContentByTitle,
 };
