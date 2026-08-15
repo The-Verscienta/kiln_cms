@@ -157,5 +157,43 @@ defmodule KilnCMS.CMS.CommentTest do
     assert length(CMS.list_comments_for!(type, content_id, actor: editor)) == 2
   end
 
+  test "unresolved_for_content counts blocks needing attention, not comments" do
+    editor = user(:editor)
+    type = "post"
+    content_id = Ecto.UUID.generate()
+    noisy_block = Ecto.UUID.generate()
+    quiet_block = Ecto.UUID.generate()
+    settled_block = Ecto.UUID.generate()
+
+    add = fn block_id, body ->
+      CMS.add_comment!(
+        %{content_type: type, content_id: content_id, block_id: block_id, body: body},
+        actor: editor
+      )
+    end
+
+    noisy_root = add.(noisy_block, "This whole section is wrong")
+    # Replies pile onto the same thread; the block still needs attention once.
+    add.(noisy_block, "Agreed")
+    add.(noisy_block, "Rewriting now")
+
+    quiet_root = add.(quiet_block, "Typo")
+
+    settled_root = add.(settled_block, "Check the date")
+    CMS.resolve_comment!(settled_root, %{}, actor: editor)
+
+    unresolved = CMS.list_unresolved_threads_for!(type, content_id, actor: editor)
+
+    assert Enum.map(unresolved, & &1.id) == [noisy_root.id, quiet_root.id]
+    assert Enum.map(unresolved, & &1.block_id) == [noisy_block, quiet_block]
+
+    # Reopening puts the block back in the list.
+    settled_root |> reload() |> CMS.unresolve_comment!(%{}, actor: editor)
+
+    assert CMS.list_unresolved_threads_for!(type, content_id, actor: editor)
+           |> Enum.map(& &1.block_id)
+           |> Enum.sort() == Enum.sort([noisy_block, quiet_block, settled_block])
+  end
+
   defp reload(comment), do: CMS.get_comment!(comment.id, authorize?: false)
 end

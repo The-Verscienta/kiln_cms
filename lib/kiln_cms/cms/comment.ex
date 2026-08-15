@@ -102,6 +102,29 @@ defmodule KilnCMS.CMS.Comment do
       prepare build(sort: [inserted_at: :asc])
     end
 
+    read :unresolved_for_content do
+      description """
+      The unresolved thread *roots* on a piece of content — one row per block
+      that still has an open discussion.
+
+      Only roots (`thread_id` is nil) are returned, because resolution is a
+      property of the block's one thread and a reply carries no resolved state
+      of its own. So the row count is the count of blocks needing attention,
+      which is what the editor header and the governance cards report — no
+      `Enum.uniq_by(:block_id)` at the call site to get it right.
+      """
+
+      argument :content_type, :string, allow_nil?: false
+      argument :content_id, :uuid, allow_nil?: false
+
+      filter expr(
+               content_type == ^arg(:content_type) and content_id == ^arg(:content_id) and
+                 is_nil(thread_id) and is_nil(resolved_at)
+             )
+
+      prepare build(sort: [inserted_at: :asc])
+    end
+
     read :for_block do
       argument :content_type, :string, allow_nil?: false
       argument :content_id, :uuid, allow_nil?: false
