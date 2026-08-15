@@ -21,7 +21,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   import Ash.Expr, only: [expr: 1]
   import KilnCMSWeb.AccessibilityComponents, only: [a11y_findings: 1, a11y_grade_badge: 1]
-  import KilnCMSWeb.BlockDiscussionComponents, only: [block_discussion: 1]
+
+  import KilnCMSWeb.BlockDiscussionComponents,
+    only: [block_discussion: 1, discussion_state: 3]
 
   import KilnCMSWeb.ComplianceComponents,
     only: [compliance_findings: 1, compliance_grade_badge: 1]
@@ -242,6 +244,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # document-level assignment — two forms, two drafts, so opening one
          # never half-fills the other.
          |> assign(:block_task_draft, nil)
+         # `?threads=unresolved` opens straight onto the blocks needing
+         # attention — the landing side of a "here's what's left" link, the
+         # same way `?comment=` lands on one block's thread.
+         |> assign(:thread_filter, thread_filter_param(params["threads"]))
          # Internal-link suggestions (#377). `nil` = never opened; loading is
          # deferred to first open because it costs a pgvector query plus a
          # record read per neighbour, which no page-load should pay.
@@ -2110,6 +2116,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   def handle_event("presence_focus", _params, socket), do: {:noreply, socket}
 
+  # Narrow the block tree to blocks needing attention, and back.
+  #
+  # An assign, not a URL patch: this LiveView has no `handle_params/3` — every
+  # param it cares about is read once at mount — and adding one so a display
+  # filter could round-trip through the address bar would put every future
+  # patch through a callback this module has never needed. `?threads=` is the
+  # way *in* to a filtered view; the chip is the way to change it once there.
+  def handle_event("toggle_thread_filter", _params, socket) do
+    filter = if socket.assigns.thread_filter == :unresolved, do: nil, else: :unresolved
+    {:noreply, assign(socket, :thread_filter, filter)}
+  end
+
   # ── Turning a block's discussion into a task ────────────────────────────────
 
   # Seeded from the thread rather than blank: the assignee from the first
@@ -3495,6 +3513,21 @@ defmodule KilnCMSWeb.ContentEditorLive do
     Accounts.User
     |> Ash.Query.filter(role in [:editor, :admin])
     |> Ash.read!(authorize?: false)
+  end
+
+  # ── The unresolved-discussion filter ────────────────────────────────────────
+
+  # `nil` rather than `:all` for "no filter": it is also the `data-thread-filter`
+  # attribute's value, and a nil attribute is simply absent, which is what the
+  # CSS rule keys on.
+  defp thread_filter_param("unresolved"), do: :unresolved
+  defp thread_filter_param(_none), do: nil
+
+  # Blocks with an open discussion, counted off the comments already in memory
+  # — one row per unresolved thread root, which is what the chip announces.
+  defp unresolved_block_count(comments) do
+    comments
+    |> Enum.count(&(is_nil(&1.thread_id) and is_nil(&1.resolved_at)))
   end
 
   # ── The comment → task bridge ───────────────────────────────────────────────
@@ -8515,6 +8548,36 @@ defmodule KilnCMSWeb.ContentEditorLive do
               <%!-- Announces keyboard reorder moves to screen readers (#171). --%>
               <p class="sr-only" role="status" aria-live="polite">{assigns[:moved_announcement]}</p>
 
+              <%!-- Narrow the tree to blocks with an open discussion. A count,
+                    not a bare chip: "Unresolved" alone leaves an editor
+                    guessing whether zero means "none" or "not loaded". Hidden
+                    entirely when there is nothing to filter — a control that
+                    can only ever hide everything is noise. --%>
+              <div :if={unresolved_block_count(@comments) > 0} class="flex items-center gap-2">
+                <button
+                  type="button"
+                  phx-click="toggle_thread_filter"
+                  aria-pressed={to_string(@thread_filter == :unresolved)}
+                  class={[
+                    "inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs transition-colors duration-150",
+                    @thread_filter == :unresolved &&
+                      "border-warning/40 bg-warning/10 text-warning-ink",
+                    @thread_filter != :unresolved && "border-base-content/20 hover:bg-base-200"
+                  ]}
+                >
+                  <.icon name="hero-chat-bubble-left-ellipsis" class="size-3.5" />
+                  {ngettext(
+                    "%{count} unresolved discussion",
+                    "%{count} unresolved discussions",
+                    unresolved_block_count(@comments),
+                    count: unresolved_block_count(@comments)
+                  )}
+                </button>
+                <span :if={@thread_filter == :unresolved} class="text-xs text-base-content/60">
+                  {gettext("Showing only blocks that need attention.")}
+                </span>
+              </div>
+
               <%!-- Insert a block before the first one (B2). --%>
               <.block_inserter
                 :if={blocks_count(@form) > 0}
@@ -8524,7 +8587,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
                 compact
               />
 
-              <div id="blocks-sortable" phx-hook="Sortable" class="space-y-3">
+              <div
+                id="blocks-sortable"
+                phx-hook="Sortable"
+                data-thread-filter={@thread_filter}
+                class="space-y-3"
+              >
                 <.inputs_for :let={bf} field={@form[:blocks]}>
                   <%!-- `BlockPresence` reports focus in and out of this card so
                         peers can see which block someone is on. `focusin`/
@@ -8536,6 +8604,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     data-sort-id={bf.index}
                     phx-hook="BlockPresence"
                     data-block-id={bf[:id].value}
+                    data-block-threads={discussion_state(@comments, @tasks, bf[:id].value)}
                     class="group rounded border border-base-content/15 p-3"
                   >
                     <%!-- Carries the block's stable id into save/validate params so

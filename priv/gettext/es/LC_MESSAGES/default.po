@@ -306,6 +306,13 @@ msgid_plural "%{count} unresolved comments"
 msgstr[0] "%{count} comentario sin resolver"
 msgstr[1] "%{count} comentarios sin resolver"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} unresolved discussion"
+msgid_plural "%{count} unresolved discussions"
+msgstr[0] "%{count} debate sin resolver"
+msgstr[1] "%{count} debates sin resolver"
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} unused recovery codes remain."
@@ -8435,6 +8442,11 @@ msgstr "Mostrar la línea «Con tecnología de» en el pie de página público"
 #, elixir-autogen, elixir-format
 msgid "Show the Compliance panel in the editor"
 msgstr "Mostrar el panel Cumplimiento en el editor"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Showing only blocks that need attention."
+msgstr "Mostrando solo los bloques que necesitan atención."
 
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format

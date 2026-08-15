@@ -838,3 +838,18 @@ pre.highlight .gs {
   user-select: none;
   white-space: nowrap;
 }
+
+/* Block discussion filter: hide blocks with no unresolved thread while the
+   editor's "Unresolved" chip is on.
+
+   CSS rather than a server-side `:if` on purpose. Every block card holds the
+   form inputs for that block; dropping one from the DOM would drop its fields
+   from the next submit, so filtering the block tree has to be a matter of
+   what is *displayed*, never of what is rendered. `display: none` keeps the
+   inputs submitting.
+
+   The state lives on each card as `data-block-threads`, written by the same
+   code that colours the pin, so the filter and the pin can never disagree. */
+[data-thread-filter="unresolved"] > [data-block-threads]:not([data-block-threads="unresolved"]) {
+  display: none;
+}
