@@ -223,6 +223,18 @@ defmodule KilnCMSWeb.AutomationLive do
       %{required: [], optional: []} ->
         gettext("no config")
 
+      # The four intelligence reactions (#946): `to`/`assignee` move here
+      # because whether they're required depends on `deliver_as`, which
+      # `ActionConfig.check/2` resolves via `:required_when` at save time —
+      # a resolver this rendering function has no config value to call (it
+      # describes the reaction in general, not one particular draft). Spell
+      # out the condition instead of just dropping the "(required)" marker
+      # the unconditional case below still shows (#1252 review: silently
+      # dropping it reintroduced the doc/enforcement drift #944 was about,
+      # for the still-mandatory default email case).
+      %{required_when: :deliver_as} = shape ->
+        deliver_as_config_keys(shape)
+
       shape ->
         [
           Enum.map(shape.required, fn {key, _type} -> "#{key} (#{gettext("required")})" end),
@@ -231,6 +243,14 @@ defmodule KilnCMSWeb.AutomationLive do
         |> List.flatten()
         |> Enum.join(", ")
     end
+  end
+
+  defp deliver_as_config_keys(shape) do
+    Enum.map_join(shape.optional, ", ", fn
+      {"to", _type} -> gettext(~s(to \(required unless deliver_as is "comment" or "task"\)))
+      {"assignee", _type} -> gettext(~s(assignee \(required when deliver_as is "task"\)))
+      {key, _type} -> key
+    end)
   end
 
   # An untouched form has no `action` value yet, while the select already shows
@@ -443,7 +463,7 @@ defmodule KilnCMSWeb.AutomationLive do
       </p>
       <p class="mt-1 text-xs text-base-content/60">
         {gettext(
-          "flag_duplicates, suggest_tags, suggest_links, suggest_metadata: to. They email their findings and never write to the record. suggest_metadata additionally needs allow_egress: true when the configured model provider is off-site."
+          "flag_duplicates, suggest_tags, suggest_links, suggest_metadata: deliver_as picks where a finding lands — email (default, needs to), comment, or task (needs assignee). suggest_metadata additionally needs allow_egress: true when the configured model provider is off-site."
         )}
       </p>
       <p class="mt-1 text-xs font-medium text-base-content/70">

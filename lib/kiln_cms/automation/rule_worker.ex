@@ -398,8 +398,15 @@ defmodule KilnCMS.Automation.RuleWorker do
   # keeps the same no-retry posture as the original email-only path: the
   # expensive generation already happened, so a delivery failure here is
   # logged and dropped rather than raised for Oban to retry.
+  #
+  # `Map.get(config, "deliver_as") || "email"`, not `Map.get(config,
+  # "deliver_as", "email")` — matches `ActionConfig.deliver_as_required/1`'s
+  # normalization exactly (#1252 review: the two used to disagree on an
+  # explicit `"deliver_as": null`, masked only by this `case`'s `_email`
+  # wildcard happening to route `nil` the same place `"email"` does; a future
+  # explicit `else` branch here would have silently stopped honoring that).
   defp deliver_findings({subject, html_body}, context) do
-    case Map.get(context.config, "deliver_as", "email") do
+    case Map.get(context.config, "deliver_as") || "email" do
       "comment" -> deliver_as_comment(subject, html_body, context)
       "task" -> deliver_as_task(subject, html_body, context)
       _email -> deliver_as_email(subject, html_body, context.config)
@@ -476,15 +483,20 @@ defmodule KilnCMS.Automation.RuleWorker do
         :ok
     end
   rescue
-    # `findings_text/2` runs finder-generated HTML through `Floki.parse_fragment!/1`,
-    # which raises on malformed markup — unlike `deliver_as_email/3`, which sends
-    # the HTML as-is and never parses it. Same advisory posture as the transient
-    # mail error above: drop rather than let Oban retry a generation that already
-    # ran (and already spent the LLM budget) for a body that will fail to parse
-    # again identically next time.
-    error in [Floki.ParseError] ->
+    # Anything raised while building or saving the comment — `findings_text/2`
+    # runs finder-generated HTML through `Floki.parse_fragment!/1`, which
+    # raises on malformed markup (unlike `deliver_as_email/3`, which sends the
+    # HTML as-is and never parses it); `CMS.add_comment`'s own pipeline can
+    # also raise, e.g. `RouteToBlockThread`'s advisory-lock query hitting a
+    # transient DB error (#1252 review: a rescue scoped to only
+    # `Floki.ParseError` let that kind of exception escape past the `{:error,
+    # _}` branch above and reach Oban as an unhandled crash). Same advisory
+    # posture as the transient mail error above either way: drop rather than
+    # let Oban retry a generation that already ran (and already spent the LLM
+    # budget) for a delivery-layer failure, not a content one.
+    error ->
       Logger.warning(
-        "Automation intelligence rule couldn't parse its findings into a comment: " <>
+        "Automation intelligence rule couldn't post its findings as a comment: " <>
           "#{Exception.message(error)}"
       )
 
@@ -526,11 +538,12 @@ defmodule KilnCMS.Automation.RuleWorker do
         :ok
     end
   rescue
-    # See the matching rescue on `deliver_as_comment/3`: `findings_text/2` can
-    # raise on malformed finder HTML, and this path (unlike email) parses it.
-    error in [Floki.ParseError] ->
+    # See the matching rescue on `deliver_as_comment/3` (#1252 review): not
+    # scoped to `Floki.ParseError` alone, so any exception raised while
+    # building or saving the task is dropped the same advisory way.
+    error ->
       Logger.warning(
-        "Automation intelligence rule couldn't parse its findings into a task: " <>
+        "Automation intelligence rule couldn't assign its findings as a task: " <>
           "#{Exception.message(error)}"
       )
 
@@ -549,15 +562,21 @@ defmodule KilnCMS.Automation.RuleWorker do
     |> String.slice(0, KilnCMS.Limits.paragraph())
   end
 
-  # No general-purpose HTML→text utility exists elsewhere in the codebase
-  # (Floki, the parser dependency, is used in `KilnCMS.Blocks.Html` but only
-  # via `Floki.text/1` on already-parsed content fragments, not exposed as a
-  # converter) — this is deliberately minimal, scoped to the small, fixed set
-  # of tags the finders below actually emit (`p`, `ul`, `li`, `strong`, `em`,
-  # `code`). Block/list boundaries become newlines first so the result reads
-  # as more than one run-on line; `Floki.text/1` then strips the remaining
-  # markup and decodes entities (so `escape(_, :html)`'s `&amp;` round-trips
-  # back to `&`).
+  # `KilnCMS.CMS.VersionDiff` has its own private HTML→text stripper too
+  # (`strip_html/1`, a bare regex tag-strip with no entity decoding, for
+  # diffing a legacy field's plain-text fallback projection) — not reused
+  # here on purpose (#1252 review flagged the two as undiscoverable
+  # duplicates of each other; cross-referenced rather than merged, since
+  # `VersionDiff`'s callers compare before/after text and entity-decoding or
+  # newline-normalizing that output risks diff noise this module has no
+  # reason to introduce). This one is deliberately minimal, scoped to the
+  # small, fixed set of tags the finders below actually emit (`p`, `ul`,
+  # `li`, `strong`, `em`, `code`). Block/list boundaries become newlines
+  # first so the result reads as more than one run-on line; `Floki.text/1`
+  # then strips the remaining markup and decodes entities (so
+  # `escape(_, :html)`'s `&amp;` round-trips back to `&`) — both things
+  # `VersionDiff.strip_html/1` deliberately doesn't do, which is why they
+  # aren't one function.
   defp html_to_text(html) do
     text =
       html

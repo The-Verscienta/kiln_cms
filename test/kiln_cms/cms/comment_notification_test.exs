@@ -181,6 +181,41 @@ defmodule KilnCMS.CMS.CommentNotificationTest do
     refute address(bob) in recipients(sent_emails(title))
   end
 
+  # #1252 review: an editorial-intelligence automation reaction (#946) posts
+  # comments built from record/duplicate titles, none of it sanitized against
+  # accidentally containing an `@handle`-shaped substring. Nobody deliberately
+  # typed such a body, so resolving mentions against it would let a document's
+  # own title (possibly a draft's) decide who gets emailed an excerpt of it.
+  test "an automation-authored comment never sends a mention email, even if its body contains a handle-shaped substring" do
+    alice = user("Alice Smith")
+    carol = user("Carol Danvers")
+    title = "Automated #{System.unique_integer([:positive])}"
+    page = a_page(alice, title)
+
+    {:ok, _comment} =
+      CMS.add_comment(
+        %{
+          content_type: "page",
+          content_id: page.id,
+          block_id: nil,
+          body: "Looks like a duplicate of #{handle(carol)}'s other draft",
+          created_by_rule_id: Ecto.UUID.generate()
+        },
+        actor: nil,
+        authorize?: false
+      )
+
+    drain()
+
+    emails = sent_emails(title)
+
+    refute Enum.any?(emails, &String.contains?(&1.subject, "mentioned you"))
+    refute address(carol) in recipients(emails)
+    # The page's own author still hears about it normally (not as a mention) —
+    # this only closes the accidental-mention side channel, not delivery.
+    assert address(alice) in recipients(emails)
+  end
+
   # The one token carrying free user input into an HTML email.
   test "a comment body cannot bring its own markup into the email" do
     alice = user("Alice Smith")

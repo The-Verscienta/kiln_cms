@@ -115,7 +115,17 @@ defmodule KilnCMS.Notifications do
   # A mention only fires on a NEW comment: resolving a thread re-reads a body
   # that was already delivered, and re-notifying everyone it names would turn
   # "resolved" into a second round of pings.
-  defp mentioned_users(%{body: body} = comment, record) do
+  #
+  # `author_id: nil` (#946) means nobody deliberately typed this body — it's
+  # an editorial-intelligence finding built from record/duplicate titles and
+  # suggestion text (`KilnCMS.Automation.RuleWorker`), none of it sanitized
+  # against accidentally containing an `@handle`-shaped substring. Resolving
+  # mentions against it anyway would let an unpublished document's own title
+  # decide who gets emailed an excerpt of it — a real person never chose to
+  # mention anyone, so nobody is (#1252 review). `thread_audience/2` still
+  # notifies the thread's normal participants either way.
+  defp mentioned_users(%{body: body, author_id: author_id} = comment, record)
+       when not is_nil(author_id) do
     if new_comment?(comment) do
       KilnCMS.CMS.Mentions.resolve(body, org_users(record))
     else
@@ -135,9 +145,9 @@ defmodule KilnCMS.Notifications do
   #
   # `comment.block_id` can be nil (#946): an editorial-intelligence reaction's
   # document-level finding has no single block to be "on", so its thread's
-  # other participants are read via `list_comments_for_document!` instead —
-  # `:for_block`'s `block_id` argument is `allow_nil? false` and would raise
-  # given nil, the same split `KilnCMS.CMS.Changes.RouteToBlockThread` makes.
+  # other participants are read via `Comment.thread_comments!/4`'s
+  # `:for_document` branch instead — `:for_block`'s `block_id` argument is
+  # `allow_nil? false` and would raise given nil.
   defp thread_audience(comment, record) do
     participants =
       thread_participants(comment)
@@ -153,17 +163,8 @@ defmodule KilnCMS.Notifications do
     |> Enum.filter(&wants?(&1, :comment))
   end
 
-  defp thread_participants(%{block_id: nil} = comment) do
-    KilnCMS.CMS.list_comments_for_document!(
-      comment.content_type,
-      comment.content_id,
-      authorize?: false,
-      tenant: comment.org_id
-    )
-  end
-
   defp thread_participants(comment) do
-    KilnCMS.CMS.list_comments_for_block!(
+    KilnCMS.CMS.Comment.thread_comments!(
       comment.content_type,
       comment.content_id,
       comment.block_id,

@@ -200,10 +200,14 @@ defmodule KilnCMSWeb.AutomationLiveTest do
 
       # #946: `to` is no longer unconditionally required — it's the intelligence
       # reactions' `deliver_as` axis (email/comment/task) now, and what's
-      # required depends on which, so the hint lists every key that axis could
-      # need rather than annotating one as always-required.
+      # required depends on which, so the hint spells out each field's
+      # condition instead of a single "(required)" that only ever held for
+      # the default email case (#1252 review: this used to render with no
+      # required marker at all, silently reintroducing the #944 doc drift).
       assert html =~
-               "suggest_metadata accepts: allow_egress, deliver_as, to, assignee, due_in_days"
+               "suggest_metadata accepts: allow_egress, deliver_as, " <>
+                 "to (required unless deliver_as is &quot;comment&quot; or &quot;task&quot;), " <>
+                 "assignee (required when deliver_as is &quot;task&quot;), due_in_days"
 
       html =
         view

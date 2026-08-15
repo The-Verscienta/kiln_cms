@@ -270,6 +270,25 @@ defmodule KilnCMSWeb.ContentEditorCommentsTest do
     end
   end
 
+  # #1252 review: the editor subscribes to `PreviewLive.topic(kind, id)` (the
+  # same topic `:preview_comments_changed` above arrives on) so it can pick up
+  # a document-level comment written elsewhere — but `PreviewLive` also
+  # broadcasts `{:preview_switch, id}` on that exact topic when a pop-out
+  # preview switches locale variant, which the editor had no `handle_info`
+  # clause for and no catch-all, crashing the LiveView.
+  test "a preview variant switch on the same topic does not crash the editor", %{conn: conn} do
+    editor = authed_user(:editor)
+    target = page(editor)
+
+    {lv, _html} = open_editor(conn, editor, target)
+
+    send(lv.pid, {:preview_switch, target.id})
+
+    # The process is still alive and rendering normally — a crash would have
+    # made every subsequent render/event call in this test raise.
+    assert render(lv) =~ target.title
+  end
+
   test "a viewer sees the editor gate, not the comment controls", %{conn: conn} do
     viewer = authed_user(:viewer)
     target = page(authed_user(:editor))

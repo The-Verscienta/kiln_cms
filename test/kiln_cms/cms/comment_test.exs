@@ -221,6 +221,82 @@ defmodule KilnCMS.CMS.CommentTest do
     assert listed_block_root.id == block_root.id
   end
 
+  test "a resolved document-level thread starts fresh, and a third finding joins that fresh thread rather than orphaning (#1252 review)" do
+    type = "post"
+    content_id = Ecto.UUID.generate()
+    editor = user(:editor)
+
+    {:ok, first} =
+      CMS.add_comment(
+        %{
+          content_type: type,
+          content_id: content_id,
+          block_id: nil,
+          body: "First finding",
+          created_by_rule_id: Ecto.UUID.generate()
+        },
+        actor: nil,
+        authorize?: false
+      )
+
+    {:ok, _} = CMS.resolve_comment(first, actor: editor)
+
+    {:ok, second} =
+      CMS.add_comment(
+        %{
+          content_type: type,
+          content_id: content_id,
+          block_id: nil,
+          body: "Second finding, after the resolve",
+          created_by_rule_id: Ecto.UUID.generate()
+        },
+        actor: nil,
+        authorize?: false
+      )
+
+    # A resolved root is not reused — the second finding starts its own,
+    # unresolved thread (the pre-existing, already-tested behavior).
+    assert is_nil(second.thread_id)
+    refute second.id == first.id
+
+    {:ok, third} =
+      CMS.add_comment(
+        %{
+          content_type: type,
+          content_id: content_id,
+          block_id: nil,
+          body: "Third finding, should join the second (still open) thread",
+          created_by_rule_id: Ecto.UUID.generate()
+        },
+        actor: nil,
+        authorize?: false
+      )
+
+    # The bug this pins: root selection used to pick the OLDEST thread_id-nil
+    # comment, so once two document-level roots existed it kept re-discovering
+    # the resolved `first` and starting yet another orphan instead of joining
+    # `second`, which is still open. It must join `second`, not become a
+    # third orphan root.
+    assert third.thread_id == second.id
+
+    # A fourth finding also joins `second` — it stays the active thread for
+    # every later comment until IT gets resolved.
+    {:ok, fourth} =
+      CMS.add_comment(
+        %{
+          content_type: type,
+          content_id: content_id,
+          block_id: nil,
+          body: "Fourth finding",
+          created_by_rule_id: Ecto.UUID.generate()
+        },
+        actor: nil,
+        authorize?: false
+      )
+
+    assert fourth.thread_id == second.id
+  end
+
   test "list_comments_for returns every comment on a content record, across blocks" do
     editor = user(:editor)
     type = "post"

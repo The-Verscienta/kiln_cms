@@ -10387,6 +10387,11 @@ msgstr ""
 msgid "archives"
 msgstr ""
 
+#: lib/kiln_cms_web/live/automation_live.ex
+#, elixir-autogen, elixir-format
+msgid "assignee (required when deliver_as is \"task\")"
+msgstr ""
+
 #: lib/kiln_cms_web/live/link_report_live.ex
 #, elixir-autogen, elixir-format
 msgid "block %{index}"
@@ -10546,7 +10551,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live.ex
 #, elixir-autogen, elixir-format
-msgid "flag_duplicates, suggest_tags, suggest_links, suggest_metadata: to. They email their findings and never write to the record. suggest_metadata additionally needs allow_egress: true when the configured model provider is off-site."
+msgid "flag_duplicates, suggest_tags, suggest_links, suggest_metadata: deliver_as picks where a finding lands — email (default, needs to), comment, or task (needs assignee). suggest_metadata additionally needs allow_egress: true when the configured model provider is off-site."
 msgstr ""
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
@@ -10964,6 +10969,11 @@ msgstr ""
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
 msgid "the rendered artifact: full block body, pre-compiled and CDN-cacheable."
+msgstr ""
+
+#: lib/kiln_cms_web/live/automation_live.ex
+#, elixir-autogen, elixir-format
+msgid "to (required unless deliver_as is \"comment\" or \"task\")"
 msgstr ""
 
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
