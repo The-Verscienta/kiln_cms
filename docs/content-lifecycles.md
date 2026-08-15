@@ -115,6 +115,56 @@ cadence is the per-record one. The alternative considered and rejected was a
 site-wide default: a fallback that reaches across every type at once is the
 shape that silently re-enables a cadence a team deliberately cleared.
 
+## The editorial calendar
+
+`/editor/calendar` plots everything time-bound in one org and one window:
+
+| Lane | Comes from |
+|---|---|
+| Scheduled publish | a draft/in-review record's `scheduled_at` |
+| Scheduled unpublish / archive / expired | a published record's `unpublish_at`, split by `expiry_action` |
+| Went live | `published_at` |
+| Review due | the `due_at` calculation |
+| Task due | an open `Task`'s `due_on` |
+| Release go-live / shipped | a `ContentRelease`'s `scheduled_at` and `published_at` |
+
+Nothing is stored. `KilnCMS.CMS.Calendar` derives every event from a column
+that already exists, so the calendar cannot disagree with the records it draws
+— and a materialized calendar table would need a write path on every one of
+those columns and be wrong between the write and the sweep.
+
+Three views share one `at` anchor, so switching keeps your place:
+
+* **Month** — the planning grid. Chips are capped per day cell with a "+N more"
+  overflow, so one busy Thursday cannot resize the row.
+* **Week** — seven tall columns with times, for when two things land on the
+  same afternoon.
+* **List** — chronological, the accessible baseline, and the mobile view: the
+  grids are `hidden md:block`, because seven columns on a phone is a horizontal
+  scroll.
+
+Filters (type, lane, health) are URL-persisted, so a filtered calendar is a
+link you can send:
+
+```
+/editor/calendar?view=list&at=2026-09-01&health=overdue
+```
+
+An unknown value in any filter shows everything rather than nothing — a
+hand-edited or stale URL should not render an empty calendar that looks like a
+calendar with nothing in it.
+
+The page is live. Any write that moves something plotted here broadcasts on the
+org's calendar topic (`KilnCMS.CMS.Changes.BroadcastCalendar`) and every open
+calendar re-queries — whether the write came from another editor's session, the
+API, or a scheduler. `:autosave` deliberately does not broadcast: one per
+debounce would wake every open grid in the org every few seconds while one
+person types.
+
+Every query runs as the signed-in editor under their org's tenant, so the
+calendar can only show what that person could already read one record at a
+time.
+
 ## Reading it
 
 Health is a normal field on the existing reads — there is no lifecycle

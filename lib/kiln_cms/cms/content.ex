@@ -1809,6 +1809,10 @@ defmodule KilnCMS.CMS.Content do
           validate KilnCMS.CMS.Validations.PathAliasValid
           validate KilnCMS.CMS.Validations.SeoUrls
           validate KilnCMS.CMS.Validations.ScheduleOrder
+          # Any open editorial calendar re-queries its window. NOT on
+          # `:autosave`: a broadcast per debounce would wake every open grid
+          # in the org every few seconds while one person types.
+          change KilnCMS.CMS.Changes.BroadcastCalendar
         end
 
         update :update do
@@ -1894,6 +1898,11 @@ defmodule KilnCMS.CMS.Content do
           # costs is one an operator asked for.
           validate {KilnCMS.CMS.Validations.ComplianceClaims, only_new: true},
             where: [attribute_equals(:state, :published)]
+
+          # Any open editorial calendar re-queries its window. NOT on
+          # `:autosave`: a broadcast per debounce would wake every open grid
+          # in the org every few seconds while one person types.
+          change KilnCMS.CMS.Changes.BroadcastCalendar
         end
 
         # Debounced draft autosave from the editor. Writes the same content as
@@ -2050,6 +2059,10 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.NotifyWebhooks
           change {KilnCMS.CMS.Changes.NotifyWorkflowEmail, event: :published}
           change KilnCMS.CMS.Changes.AutoCompleteTasks
+          # Any open editorial calendar re-queries its window. NOT on
+          # `:autosave`: a broadcast per debounce would wake every open grid
+          # in the org every few seconds while one person types.
+          change KilnCMS.CMS.Changes.BroadcastCalendar
         end
 
         update :publish_scheduled do
@@ -2085,6 +2098,10 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.NotifyWebhooks
           change {KilnCMS.CMS.Changes.NotifyWorkflowEmail, event: :published}
           change KilnCMS.CMS.Changes.AutoCompleteTasks
+          # Any open editorial calendar re-queries its window. NOT on
+          # `:autosave`: a broadcast per debounce would wake every open grid
+          # in the org every few seconds while one person types.
+          change KilnCMS.CMS.Changes.BroadcastCalendar
         end
 
         update :restore_version do
@@ -2123,6 +2140,10 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.ClearPublishedVersion
           change KilnCMS.CMS.Changes.DeleteArtifacts
           change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "unpublished"}
+          # Any open editorial calendar re-queries its window. NOT on
+          # `:autosave`: a broadcast per debounce would wake every open grid
+          # in the org every few seconds while one person types.
+          change KilnCMS.CMS.Changes.BroadcastCalendar
         end
 
         update :unpublish_scheduled do
@@ -2135,6 +2156,10 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.ClearPublishedVersion
           change KilnCMS.CMS.Changes.DeleteArtifacts
           change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "unpublished"}
+          # Any open editorial calendar re-queries its window. NOT on
+          # `:autosave`: a broadcast per debounce would wake every open grid
+          # in the org every few seconds while one person types.
+          change KilnCMS.CMS.Changes.BroadcastCalendar
         end
 
         # The `:archive` expiry action's worker — the same embargo end,
@@ -2161,6 +2186,10 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.ClearPublishedVersion
           change KilnCMS.CMS.Changes.DeleteArtifacts
           change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "unpublished"}
+          # Any open editorial calendar re-queries its window. NOT on
+          # `:autosave`: a broadcast per debounce would wake every open grid
+          # in the org every few seconds while one person types.
+          change KilnCMS.CMS.Changes.BroadcastCalendar
         end
 
         # A human attests this content is still correct, resetting the
@@ -2184,6 +2213,10 @@ defmodule KilnCMS.CMS.Content do
           require_atomic? false
           accept []
           change set_attribute(:last_reviewed_at, &DateTime.utc_now/0)
+          # Any open editorial calendar re-queries its window. NOT on
+          # `:autosave`: a broadcast per debounce would wake every open grid
+          # in the org every few seconds while one person types.
+          change KilnCMS.CMS.Changes.BroadcastCalendar
         end
 
         update :archive do
@@ -2211,6 +2244,11 @@ defmodule KilnCMS.CMS.Content do
           # correctly stays silent.
           change {KilnCMS.CMS.Changes.NotifyWebhooks,
                   event: "unpublished", only_when: :was_published}
+
+          # Any open editorial calendar re-queries its window. NOT on
+          # `:autosave`: a broadcast per debounce would wake every open grid
+          # in the org every few seconds while one person types.
+          change KilnCMS.CMS.Changes.BroadcastCalendar
         end
 
         # Sends archived content back to draft (the state-machine inverse of
@@ -2231,6 +2269,10 @@ defmodule KilnCMS.CMS.Content do
           accept []
           change filter(expr(^ref(:state) == :archived))
           change transition_state(:draft)
+          # Any open editorial calendar re-queries its window. NOT on
+          # `:autosave`: a broadcast per debounce would wake every open grid
+          # in the org every few seconds while one person types.
+          change KilnCMS.CMS.Changes.BroadcastCalendar
         end
 
         # Public delivery reads (`:public_by_slug`, `:published_translations`)

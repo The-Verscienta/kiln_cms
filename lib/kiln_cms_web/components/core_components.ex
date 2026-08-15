@@ -225,6 +225,69 @@ defmodule KilnCMSWeb.CoreComponents do
     """
   end
 
+  @doc """
+  Renders a status pill for a content record's lifecycle `health`
+  (`docs/content-lifecycles.md`).
+
+  Renders nothing at all for `:fresh`, and that is the design: healthy is the
+  overwhelming majority of every list, and a grey "Fresh" pill on four hundred
+  rows is noise that trains an editor to stop reading the column the one time
+  it says something. Absence means fine; a pill means act.
+
+  ## Examples
+
+      <.health_badge health={:overdue} />
+      <.health_badge health={record.health} due_at={record.due_at} />
+  """
+  attr :health, :atom, required: true
+  attr :due_at, :any, default: nil
+  attr :class, :any, default: nil
+
+  def health_badge(assigns) do
+    variant =
+      case assigns.health do
+        # Expiry is the loudest: the document is live past the date someone
+        # said it should stop being live.
+        :expired -> "error"
+        :overdue -> "error"
+        :due -> "warning"
+        :due_soon -> "info"
+        _ -> "neutral"
+      end
+
+    assigns =
+      assigns
+      |> assign(:variant, variant)
+      |> assign(:label, health_label(assigns.health))
+
+    ~H"""
+    <span :if={@health not in [:fresh, nil]} title={health_title(@health, @due_at)}>
+      <.badge variant={@variant} class={@class}>{@label}</.badge>
+    </span>
+    """
+  end
+
+  @doc "Returns a translated human label for a lifecycle health atom."
+  def health_label(health) do
+    case health do
+      :fresh -> gettext("Fresh")
+      :due_soon -> gettext("Due soon")
+      :due -> gettext("Review due")
+      :overdue -> gettext("Overdue")
+      :expired -> gettext("Expired")
+      _ -> to_string(health)
+    end
+  end
+
+  # The badge says what; the tooltip says when, because "Overdue" without a
+  # date leaves the editor to open the record to find out how overdue.
+  defp health_title(:expired, _due_at), do: gettext("Past its unpublish date and still published")
+
+  defp health_title(_health, %DateTime{} = due_at),
+    do: gettext("Review due %{date}", date: Calendar.strftime(due_at, "%Y-%m-%d"))
+
+  defp health_title(_health, _due_at), do: nil
+
   @doc "Returns a translated human label for a content workflow state atom."
   def state_label(state) do
     case state do
