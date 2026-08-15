@@ -472,4 +472,28 @@ defmodule KilnCMS.Experiments.HealthTest do
       refute listed.id == healthy.id
     end
   end
+
+  # #1007's results-panel sanity check: a variant with more conversions than
+  # impressions is worth flagging, whatever produced it — a scripted client
+  # replaying an id across many separate requests (the bound
+  # `Delivery.record_content_view/3` cannot close by itself), or an ordinary
+  # double form submission. Either way it is not a rate an operator should
+  # read at face value.
+  describe "anomaly_reason/2" do
+    test "nil when conversions are within impressions" do
+      assert Experiments.anomaly_reason(10, 3) == nil
+      assert Experiments.anomaly_reason(3, 3) == nil
+      assert Experiments.anomaly_reason(0, 0) == nil
+    end
+
+    test "flags conversions exceeding impressions, whatever the sample size" do
+      assert {:conversions_exceed_impressions, sentence} = Experiments.anomaly_reason(1, 2)
+      assert sentence =~ "2 conversions"
+      assert sentence =~ "1 impressions"
+
+      # No impressions at all is the same failure, not a division-by-zero edge
+      # case with its own answer.
+      assert {:conversions_exceed_impressions, _sentence} = Experiments.anomaly_reason(0, 1)
+    end
+  end
 end

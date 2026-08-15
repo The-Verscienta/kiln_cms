@@ -113,6 +113,48 @@ defmodule KilnCMS.Experiments.Health do
   def blocked_reason(_experiment), do: nil
 
   @doc """
+  `nil` if a variant's own totals are plausible, `{reason, sentence}` if they
+  are not (#1007 — a results-panel sanity check, not a prevention).
+
+  The opposite question from `blocked_reason/1`. That one says an experiment
+  cannot produce a result at all; this says a variant IS producing one, in
+  numbers that are worth a second look before being read as a rate.
+
+  Only the one unambiguous case: more conversions than impressions for the
+  same variant. In the ordinary run of the site this does not happen — an
+  impression is booked before a conversion can follow it, whether that is one
+  exposure converting once (`Delivery.count_exposure/4`, `:content_view` and
+  `:funnel_completion`) or an arm being served before its form can be posted
+  (`:form_submission`) — so it is a strong signal rather than routine noise.
+  It is not a *proof* of abuse: a double form submission (back-button resubmit,
+  a double-bound submit handler) books a second conversion off the same page
+  view, and would trip this too. Either cause is worth a look, which is why
+  this stays a flag rather than a rule that discards a row.
+
+  It is also the multiplier `Delivery.record_content_view/3` cannot fully
+  close (#1007): that function bounds a single request to at most one
+  conversion, and `Delivery.record_conversion/3`'s form path is bounded by the
+  `:form` rate limit, honeypot and spam checks, but neither stops a client
+  from replaying, across many separate requests, an id it read off the page
+  without the impressions to match — this is the check that catches the
+  result rather than the request.
+
+  Deliberately not a rate ceiling instead: a rate has no value that is
+  implausible on its own — 100% of one impression is a legitimate, if
+  unreadable, result — while the count inequality needs no sample size to be
+  worth flagging.
+  """
+  @spec anomaly_reason(non_neg_integer(), non_neg_integer()) :: reason() | nil
+  def anomaly_reason(impressions, conversions) when conversions > impressions do
+    {:conversions_exceed_impressions,
+     "#{conversions} conversions were recorded against only #{impressions} impressions — " <>
+       "a variant does not usually convert more than it was shown, so this total is worth " <>
+       "checking before it is read as a rate (see KilnCMS.Experiments.Delivery, #1007)"}
+  end
+
+  def anomaly_reason(_impressions, _conversions), do: nil
+
+  @doc """
   Every running experiment for a site that cannot convert, as
   `[{experiment, reason}]`.
 

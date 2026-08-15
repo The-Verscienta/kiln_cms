@@ -138,15 +138,21 @@ defmodule KilnCMS.Experiments.Delivery do
   The cookie is attacker-controlled. The **containment** is the same as on the
   form path — the variant must belong to a *running* experiment on **this** site
   whose goal document is **this** page, so a stray uuid mints no `VariantDay`
-  row and another site's results cannot be written into. The **bound** is not:
-  this is a GET under the `:delivery` rate limit rather than a POST under the
-  much tighter `:form` one, and there is no honeypot or spam scoring in front of
-  it. So a scripted client can inflate an arm it could legitimately have been
-  served, considerably faster than it could through a form.
+  row and another site's results cannot be written into. The **bound** is
+  narrower: this is a GET under the `:delivery` rate limit rather than a POST
+  under the much tighter `:form` one, and there is no honeypot or spam scoring
+  in front of it. So a scripted client can inflate an arm it could legitimately
+  have been served, considerably faster than it could through a form.
 
-  That is inherent to a client-reported conversion on a cacheable GET and is not
-  closed here; it is worth knowing before reading a `content_view` result as
-  evidence. See #1007.
+  That per-request multiplier is what #1007 closes: whatever the cookie names —
+  up to `Sticky.max_exposures/0` arms, potentially spanning several running
+  experiments whose goal document is this same page — at most **one**
+  conversion is counted per request. See `convert/3` for the tie-break.
+
+  What remains open, and is inherent to any client-reported conversion on a
+  cacheable GET, is a visitor (or script) replaying the single arm it was
+  legitimately served, across many requests. That is worth knowing before
+  reading a `content_view` result as evidence.
   """
   @spec record_content_view(String.t(), struct(), Plug.Conn.t()) :: Plug.Conn.t()
   def record_content_view(content_type, %{id: id, org_id: org_id}, conn) do
@@ -201,12 +207,33 @@ defmodule KilnCMS.Experiments.Delivery do
     end
   end
 
+  # At most ONE conversion per request, whatever the exposure cookie names
+  # (#1007) — without this, a cookie carrying up to `Sticky.max_exposures/0`
+  # arms across that many running experiments whose goal document is this same
+  # page would convert every one of them in a single GET, which is exactly the
+  # multiplier a scripted client wants: several conversions bought for the
+  # price of one request, on a rate limit that was sized for a page view rather
+  # than a write.
+  #
+  # The tie-break is deterministic rather than "whichever the cookie lists
+  # first": `experiments` is sorted by id here, same as the variant sort below,
+  # for the same reason — the cookie is attacker-controlled and its ordering is
+  # not something this code should let pick the winner. `targeting/3` already
+  # walked `Experiments.running/1` in `inserted_at` order, so re-sorting by id
+  # trades "oldest experiment wins" for "lowest id wins"; both are arbitrary
+  # from a visitor's point of view, and id is the stable one two nodes agree on
+  # without a query.
   defp convert(conn, experiments, org_id) do
     {exposed, conn} = Sticky.exposures(conn)
-    converted = converted_variants(experiments, exposed)
-    Enum.each(converted, &count_conversion(&1, org_id))
 
-    if converted == [], do: conn, else: Sticky.put_exposures(conn, exposed -- converted)
+    case first_converted_variant(experiments, exposed) do
+      nil ->
+        conn
+
+      variant_id ->
+        count_conversion(variant_id, org_id)
+        Sticky.put_exposures(conn, exposed -- [variant_id])
+    end
   end
 
   defp count_conversion(variant_id, org_id) do
@@ -222,22 +249,20 @@ defmodule KilnCMS.Experiments.Delivery do
     |> Enum.filter(&goal_document?(&1, content_type, id))
   end
 
-  # One conversion per experiment, not per matching variant: a visitor carries at
-  # most one arm of any given experiment, and this says so rather than trusting a
-  # hand-edited cookie that lists both.
-  #
-  # Sorted by id first for the same reason `Assignment` sorts: `has_many` has no
-  # `sort`, so the row order Postgres happens to return is not a contract. A
-  # cookie naming two arms of one experiment must credit the same one on every
-  # node, or the tie is decided by which replica answered.
-  defp converted_variants(experiments, exposed) do
-    Enum.flat_map(experiments, fn experiment ->
+  # The first (by the tie-break above) experiment with a matching exposed
+  # variant, and within it the first (by id) matching variant — a visitor
+  # carries at most one arm of any given experiment, so trusting a hand-edited
+  # cookie that lists two would be trusting the attacker to pick.
+  defp first_converted_variant(experiments, exposed) do
+    experiments
+    |> Enum.sort_by(& &1.id)
+    |> Enum.find_value(fn experiment ->
       experiment.variants
       |> Enum.sort_by(& &1.id)
       |> Enum.find(&(&1.id in exposed))
       |> case do
-        nil -> []
-        variant -> [variant.id]
+        nil -> nil
+        variant -> variant.id
       end
     end)
   end
