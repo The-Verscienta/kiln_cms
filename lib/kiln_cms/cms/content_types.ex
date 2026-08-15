@@ -654,6 +654,10 @@ defmodule KilnCMS.CMS.ContentTypes do
   defp transition_fun(type, "return"), do: "return_#{type}_to_draft"
   defp transition_fun(type, "archive"), do: "archive_#{type}"
   defp transition_fun(type, "unarchive"), do: "unarchive_#{type}"
+  # Not a workflow transition — `:mark_reviewed` leaves `state` alone —
+  # but it is the same shape: a named, input-less update the editor surfaces as
+  # a button, which is what this dispatch exists to reach generically.
+  defp transition_fun(type, "mark_reviewed"), do: "mark_#{type}_reviewed"
 
   # Dynamic types resolve to the generic entry tier for interface naming, so
   # convention dispatch (`publish_entry`, `list_entry_versions!`, …) just works.

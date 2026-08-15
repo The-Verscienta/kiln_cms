@@ -29,6 +29,15 @@ defmodule KilnCMS.CMS.VersionFields do
       consent gate on `:publish` (#356).
     * `author_id` — attribution. Reverting the text of a document does not make
       a previous author responsible for it again.
+    * `expiry_action`, `review_after_days`, `last_reviewed_at` — lifecycle
+      (docs/content-lifecycles.md). The same argument as workflow, on the other
+      axis: these say when
+      the *live* document stops being trustworthy, not what it says. Restoring
+      them would move a deadline nobody re-set — and for `last_reviewed_at`
+      specifically it would forge an attestation, either erasing a review that
+      happened or reinstating one that has since been superseded. They are
+      reported by the diff (a cadence change is worth seeing in history) and
+      changed only by `:update` and `:mark_reviewed`.
 
   Anything excluded here is what `restorable?/2` answers `false` for, so the
   compare modal can mark those rows rather than leaving the editor to discover
@@ -55,7 +64,10 @@ defmodule KilnCMS.CMS.VersionFields do
   @block_field :blocks
 
   # Reported by the diff, deliberately untouched by a restore. See the moduledoc.
-  @not_restorable ~w(state published_at scheduled_at unpublish_at author_id)a
+  @not_restorable ~w(
+    state published_at scheduled_at unpublish_at author_id
+    expiry_action review_after_days last_reviewed_at
+  )a
 
   # Editorially significant first; anything else the resource declares (a dynamic
   # type's own columns, a future attribute) is appended alphabetically rather
@@ -69,7 +81,8 @@ defmodule KilnCMS.CMS.VersionFields do
   @field_order ~w(
     title slug path_alias excerpt state audience locale
     seo_title seo_description seo_keywords seo_image canonical_url
-    published_at scheduled_at unpublish_at
+    published_at scheduled_at unpublish_at expiry_action
+    review_after_days last_reviewed_at
     author_id category_id featured_image_id custom_fields
   )a
 

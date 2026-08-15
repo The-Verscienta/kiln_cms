@@ -29,6 +29,39 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **Content lifecycles: expiry actions and a freshness axis.** Content
+  now answers "when does this stop being live" and "when does someone need to
+  read this again", as a `health` calculation (`:fresh` / `:due_soon` / `:due`
+  / `:overdue` / `:expired`) orthogonal to `state` — a monograph whose annual
+  review lapsed is still, factually, published, so trust is its own axis rather
+  than a sixth workflow state.
+
+  The embargo end (`unpublish_at`) gains an `expiry_action`: `:unpublish` (the
+  existing behaviour, and the default), `:archive`, or `:flag` — which changes
+  nothing about the row and lets `health` read `:expired` indefinitely, for
+  content that must not silently vanish from a live site but does need someone
+  told its shelf life ran out. The first two run as AshOban triggers on the
+  same minute cron as scheduled publishing, partitioned in SQL by
+  `expiry_action`; `:flag` needs no worker, because the signal is the
+  calculation.
+
+  Freshness is `review_after_days` (1–1095, `nil` = no cadence) plus
+  `last_reviewed_at`, which only the new `mark_reviewed` action can write — it
+  is absent from `default_accept`, so no save, API client or automation can
+  claim a human re-read the piece. `due_at` counts from the last attestation,
+  or from `published_at` for content published under a cadence but never yet
+  reviewed, so nothing needs backfilling. Dynamic types can carry a per-type
+  default (`TypeDefinition.default_review_after_days`) that entries inherit
+  when they set none of their own.
+
+  `health` and `due_at` are expression calculations, so they filter and sort
+  in Postgres: `?filter[health]=overdue&sort=due_at` on every existing content
+  read, JSON:API and GraphQL alike. Version restore reports the lifecycle
+  columns in the diff but never writes them back — restoring an old version
+  must not move a deadline nobody re-set, and would forge an attestation
+  outright. Additive migration, all columns nullable or defaulted; existing
+  content reads `:fresh`. See `docs/content-lifecycles.md`.
+
 - **Office documents and zip archives in the document library** (#808).
   Follow-up to #481, which scoped the gated document library to PDF only for
   v1: `KilnCMS.DocumentProcessor` now byte-validates `.docx`/`.xlsx`/`.pptx`
