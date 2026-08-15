@@ -197,6 +197,18 @@ when semantic search is off:
   `suggest_tags(record, threshold: 2.0)` (the ceiling of cosine distance, so
   nothing is filtered) and read the distances off the result.
 
+  Tag-name vectors are **persisted** (`KilnCMS.Search.TagEmbedding`,
+  `tag_embeddings`, #1085): a name is stable and its vector is a pure function
+  of it, so it is embedded once — lazily, by the first `suggest_tags/2` call
+  that needs it, which is also where the embedding budget is charged — and
+  re-embedded only if the tag is renamed (the row stores the name it was
+  computed for). From then on the ceiling and the ranking are one exact
+  pgvector query (`ORDER BY embedding <=> centroid … WHERE distance <= ceiling
+  LIMIT n`) rather than a vector lookup and a cosine computation per unapplied
+  tag per call — the same shape `BlockEmbedding.nearest_to_vector` has for
+  blocks, minus the HNSW index: a taxonomy is hundreds of rows, and an exact
+  scan sidesteps the post-filter recall trap (#998).
+
 ### The two thresholds are measured, and one of them is a judgement call
 
 Both defaults above are properties of `BAAI/bge-small-en-v1.5`, and #1086

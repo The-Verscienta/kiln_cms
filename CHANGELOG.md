@@ -244,6 +244,27 @@ migration, a rewritten column, a dropped config key).
   Off by default — nothing changes for an existing deployment. Docs:
   `code-injection.md`, env-var table.
 
+### Changed
+
+- **`suggest_tags/2` persists tag-name vectors and ranks in one pgvector
+  query** (#1085). The #851 relevance ceiling filtered *after*
+  `Search.Related.suggest_tags/2` had fetched a vector and computed a
+  384-element cosine distance for every unapplied tag — 500 lookups and 500
+  dot products per call on a 500-tag org, per editor click and per automation
+  event, and the call could then legitimately return `[]` having done all of
+  it. New `KilnCMS.Search.TagEmbedding` (`tag_embeddings`, migration
+  `20260815213552`) stores each tag's name vector once; the row carries the
+  name it was computed for, so a rename re-embeds and nothing hooks the tag's
+  write path; deleting the tag cascades the row. Rows are filled lazily by the
+  first call that needs them (still through `VectorCache` and the #1076
+  embedding budget — a stored row is free, like a cached one), and from then
+  on the ceiling, the ranking and the limit are one exact `<=>` query — no
+  HNSW index, deliberately, since a taxonomy is hundreds of rows and an exact
+  scan sidesteps the #998 post-filter recall trap. `list_tags!` now selects
+  only `id`/`name` for the candidate list; winners are re-read as full rows.
+  Adds a migration; the `suggest_tags/2` contract (return shape, budget
+  errors, ceiling semantics) is unchanged.
+
 ## [0.6.0] - 2026-08-12
 
 ### Added
