@@ -459,12 +459,25 @@ defmodule KilnCMSWeb.CalendarLive do
   defp kind_label(:release_scheduled), do: gettext("release goes live")
   defp kind_label(:release_published), do: gettext("release shipped")
 
+  # Nine lanes over five accent tones, so two pairs need more than hue to tell
+  # them apart — and both pairs were, briefly, indistinguishable on screen while
+  # reading as distinct in the legend, which is worse than not splitting them at
+  # all.
+  #
+  # `:archive` is slate rather than a second red: filing something away is not
+  # the same event as taking it down, and rendering both in `error` made the
+  # `expiry_action` split show three names in two colours.
+  #
+  # `:review_due` is dashed rather than a paler amber: a deadline is a different
+  # KIND of thing from a scheduled action, alpha alone put it a hair from
+  # `:publish`, and a border STYLE survives being read by someone who cannot
+  # separate the hues.
   defp kind_class(:publish), do: "border-warning/40 bg-warning/10"
   defp kind_class(:unpublish), do: "border-error/40 bg-error/10"
-  defp kind_class(:archive), do: "border-error/40 bg-error/10"
-  defp kind_class(:expire), do: "border-error/60 bg-error/15 font-medium"
+  defp kind_class(:archive), do: "border-base-content/35 bg-base-content/10"
+  defp kind_class(:expire), do: "border-error/70 bg-error/20 font-medium"
   defp kind_class(:published), do: "border-success/40 bg-success/10"
-  defp kind_class(:review_due), do: "border-warning/50 bg-warning/15"
+  defp kind_class(:review_due), do: "border-dashed border-warning/70 bg-warning/10"
   defp kind_class(:task_due), do: "border-info/40 bg-info/10"
   defp kind_class(:release_scheduled), do: "border-primary/50 bg-primary/10 font-medium"
   defp kind_class(:release_published), do: "border-primary/30 bg-primary/5"
