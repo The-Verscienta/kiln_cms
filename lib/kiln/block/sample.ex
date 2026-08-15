@@ -29,11 +29,31 @@ defmodule Kiln.Block.Sample do
   end
 
   @doc """
+  A block with only its `required: true` fields carrying a value — the
+  emptiest a block can legitimately be post-#935: the write path (top-level or
+  nested) no longer stores one with a required field omitted, so a bare
+  `struct(module)` (every field `nil`) is a state `:json` render never has to
+  handle for a block with a required field, and checking it there produces a
+  false positive rather than a real gap. This is the render-conformance
+  counterpart to `populated/3`'s populated branch — some blocks (e.g.
+  `KilnCMS.Blocks.Video`) take a different `:json` path depending on which
+  *optional* fields are present, which is what this exercises for them.
+  """
+  @spec required_only(module(), Date.t(), DateTime.t()) :: struct()
+  def required_only(module, date \\ Date.utc_today(), datetime \\ DateTime.utc_now()) do
+    module
+    |> Info.fields()
+    |> Enum.filter(& &1.required)
+    |> Enum.reduce(struct(module, id: Ecto.UUID.generate()), fn field, block ->
+      Map.put(block, field.name, sample(field.type, date, datetime))
+    end)
+  end
+
+  @doc """
   The representative value `populated/3` would put in one field of the given
-  type. Exposed so a caller building a *partial* sample (e.g. only a block's
-  `required: true` fields — the emptiest a block can legitimately be post-#935,
-  since the write path no longer stores one with a required field omitted)
-  doesn't need its own copy of this per-type mapping.
+  type. Exposed so a caller building a *partial* sample (e.g. `required_only/3`,
+  or a string-keyed attrs map rather than a struct) doesn't need its own copy
+  of this per-type mapping.
   """
   @spec sample_value(term(), Date.t(), DateTime.t()) :: term()
   def sample_value(type, date \\ Date.utc_today(), datetime \\ DateTime.utc_now()),

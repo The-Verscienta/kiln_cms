@@ -248,15 +248,10 @@ defmodule Kiln.Block.JsonSchemaTest do
 
   # A block with only its `required: true` fields filled — the emptiest a
   # block can legitimately be post-#935, since the write path can no longer
-  # store one with a required field omitted (top-level or nested).
-  defp required_only(module) do
-    module
-    |> Info.fields()
-    |> Enum.filter(& &1.required)
-    |> Enum.reduce(struct(module, id: Ecto.UUID.generate()), fn field, block ->
-      Map.put(block, field.name, sample(field.type))
-    end)
-  end
+  # store one with a required field omitted (top-level or nested). Fixed
+  # date/datetime for the same determinism reason as `populated/1` above.
+  defp required_only(module),
+    do: Sample.required_only(module, ~D[2026-08-07], ~U[2026-08-07 00:00:00Z])
 
   # Same, but as the string-keyed attrs map `BlockUnion`'s cast accepts (no
   # `_type`/`id` — the caller adds those).

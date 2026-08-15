@@ -228,11 +228,14 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
     with true <- Code.ensure_loaded?(module) and function_exported?(module, :render, 2),
          name when not is_nil(name) <- Info.name(module),
          schema when not is_nil(schema) <- Map.get(defs, JsonSchema.def_name(name)) do
-      # Both the populated branch (every field carrying a value) and the empty
-      # branch (`struct(module)`) — a block like `KilnCMS.Blocks.Video` takes a
-      # different `:json` path depending on which fields are present, and the
-      # core conformance test checks both for exactly that reason.
-      [Sample.populated(module), struct(module)]
+      # Both the populated branch (every field carrying a value) and the
+      # required-only branch (`Sample.required_only/3` — the emptiest a block
+      # can legitimately be post-#935, not a bare `struct(module)` with every
+      # field nil, which a required field can no longer actually reach) — a
+      # block like `KilnCMS.Blocks.Video` takes a different `:json` path
+      # depending on which *optional* fields are present, and the core
+      # conformance test checks both branches for exactly that reason.
+      [Sample.populated(module), Sample.required_only(module)]
       |> Enum.flat_map(fn block ->
         rendered = Blocks.render(block, :json)
         validation = JsonSchemaValidator.validate(rendered, schema, document)
