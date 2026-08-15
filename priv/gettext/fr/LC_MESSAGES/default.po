@@ -2178,6 +2178,11 @@ msgstr "Un contenu peut porter autant d'étiquettes que nécessaire."
 msgid "Content gaps"
 msgstr "Lacunes de contenu"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Content intelligence is at its rate limit right now. Please try again shortly."
+msgstr "L'intelligence de contenu a atteint sa limite de débit pour le moment. Veuillez réessayer sous peu."
+
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Content item"

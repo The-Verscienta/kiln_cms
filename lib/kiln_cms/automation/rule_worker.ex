@@ -136,12 +136,21 @@ defmodule KilnCMS.Automation.RuleWorker do
   # Embedding-driven editorial intelligence (#377): notify editors of
   # near-duplicate content — a lightweight review gate ("on in_review → email
   # any suspiciously similar documents"). Silent when nothing is found.
+  #
+  # `in_review` is exactly the state with no stored vector, so this is the
+  # branch that computes an embedding per block rather than reading one — on
+  # `KilnCMS.LLM.Budget`'s `"search_embedding"` bucket since #1076, the same
+  # #943 shape `suggest_metadata` below uses for `KilnCMS.Seo`'s.
   defp run(%{action: :flag_duplicates} = rule, event, payload) do
     intelligence(rule, event, payload, &duplicate_findings/2)
   end
 
   # Tag suggestions for the document under review (#377), from the existing
   # taxonomy ranked by semantic similarity. Silent when nothing to suggest.
+  #
+  # Same computed-centroid cost as `:flag_duplicates` above, plus one more
+  # inference per taxonomy tag not already in `KilnCMS.Search.VectorCache` —
+  # both against the same `"search_embedding"` budget (#1076).
   defp run(%{action: :suggest_tags} = rule, event, payload) do
     intelligence(rule, event, payload, &tag_findings/2)
   end
@@ -536,10 +545,19 @@ defmodule KilnCMS.Automation.RuleWorker do
       "so a human sees it before the public does.</p>"
   end
 
-  defp duplicate_findings(record, _context) do
-    case KilnCMS.Search.Related.near_duplicates(record) do
+  # `unattended?: true` + the per-rule identity is the same #943 shape
+  # `draft_findings/2` below uses for `KilnCMS.Seo.draft/2` — see
+  # `KilnCMS.Search.Related`'s moduledoc and `budget_identity/1` (#1076).
+  defp duplicate_findings(record, context) do
+    case KilnCMS.Search.Related.near_duplicates(record,
+           unattended?: true,
+           user_id: budget_identity(context)
+         ) do
       [] ->
         :none
+
+      {:error, reason} ->
+        embedding_budget_skip(reason)
 
       dups ->
         items =
@@ -553,10 +571,16 @@ defmodule KilnCMS.Automation.RuleWorker do
     end
   end
 
-  defp tag_findings(record, _context) do
-    case KilnCMS.Search.Related.suggest_tags(record) do
+  defp tag_findings(record, context) do
+    case KilnCMS.Search.Related.suggest_tags(record,
+           unattended?: true,
+           user_id: budget_identity(context)
+         ) do
       [] ->
         :none
+
+      {:error, reason} ->
+        embedding_budget_skip(reason)
 
       suggestions ->
         items = Enum.map_join(suggestions, "", &"<li>#{escape(&1.tag.name, :html)}</li>")
@@ -565,6 +589,23 @@ defmodule KilnCMS.Automation.RuleWorker do
          "<p>Suggested tags for <strong>#{escape(record.title, :html)}</strong>:</p>" <>
            "<ul>#{items}</ul>"}
     end
+  end
+
+  # Spelled out rather than inspected, same as `draft_findings/2`'s twin: the
+  # unattended-disabled case is a standing setting, not an overload, and
+  # "rate limited, retry in 3600000ms" would send an operator to wait out a
+  # window that will never help.
+  defp embedding_budget_skip(:unattended_disabled) do
+    {:skip,
+     "embedding is switched off for unattended callers " <>
+       "(config :kiln_cms, KilnCMS.Search, embedding_unattended_share: 0.0)"}
+  end
+
+  defp embedding_budget_skip({:rate_limited, _ms}) do
+    {:skip,
+     "embedding budget spent: unattended rules stop once the org reaches " <>
+       "#{KilnCMS.Search.embedding_unattended_share()} of embedding_per_org_limit, " <>
+       "so the rest stays available to editors"}
   end
 
   defp default_body do
