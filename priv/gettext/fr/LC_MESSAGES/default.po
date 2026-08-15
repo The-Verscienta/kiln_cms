@@ -1747,6 +1747,11 @@ msgstr "Calendrier"
 msgid "Calendar view"
 msgstr "Vue du calendrier"
 
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Can't reschedule into the past."
+msgstr "Impossible de reprogrammer dans le passé."
+
 #: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -5115,6 +5120,16 @@ msgstr "Marquer comme spam"
 msgid "Mark done"
 msgstr "Marquer comme terminée"
 
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Mark reviewed"
+msgstr "Marquer comme révisé"
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Marked “%{title}” reviewed."
+msgstr "« %{title} » marqué comme révisé."
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Masonry"
@@ -5299,6 +5314,11 @@ msgstr "%{name} déplacé vers la corbeille."
 #, elixir-autogen, elixir-format
 msgid "Moved block to position %{pos} of %{count}"
 msgstr "Bloc déplacé à la position %{pos} sur %{count}"
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Moved “%{title}” to %{date}."
+msgstr "« %{title} » déplacé au %{date}."
 
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
@@ -8791,6 +8811,11 @@ msgstr "Ce formulaire n'existe pas."
 msgid "That funnel doesn't exist."
 msgstr "Cet entonnoir n'existe pas."
 
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "That is not a date this calendar can move something to."
+msgstr "Ce n'est pas une date vers laquelle ce calendrier peut déplacer un élément."
+
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "That item is no longer available — pick again."
@@ -8800,6 +8825,11 @@ msgstr "Cet élément n'est plus disponible — choisissez-en un autre."
 #, elixir-autogen, elixir-format
 msgid "That item is no longer available."
 msgstr "Cet élément n'est plus disponible."
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "That item is no longer on the calendar — reload to see why."
+msgstr "Cet élément n'est plus au calendrier — rechargez pour voir pourquoi."
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -10375,6 +10405,11 @@ msgstr "archivé"
 #, elixir-autogen, elixir-format
 msgid "archives"
 msgstr "est archivé"
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "arrow keys move it"
+msgstr "les touches fléchées le déplacent"
 
 #: lib/kiln_cms_web/live/link_report_live.ex
 #, elixir-autogen, elixir-format
