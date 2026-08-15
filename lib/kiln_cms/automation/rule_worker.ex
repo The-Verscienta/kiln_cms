@@ -222,6 +222,118 @@ defmodule KilnCMS.Automation.RuleWorker do
     end
   end
 
+  # "When health goes overdue, put it in someone's queue"
+  # (docs/content-lifecycles.md). The remediation half of content lifecycles:
+  # the sweep detects staleness, this turns it into work in the tool the team
+  # already uses.
+  #
+  # ## Idempotent, because the trigger repeats
+  #
+  # The health sweep re-fires every day a record stays overdue — that is what
+  # makes it a reminder rather than a one-shot notification. So this asks
+  # whether an open task of the same kind already exists on that content before
+  # creating one. Without that, a monograph nobody has got to in a fortnight
+  # carries fourteen identical tasks, and the queue that was meant to surface
+  # the problem is the problem.
+  #
+  # The check-then-create is not atomic, and deliberately isn't defended with a
+  # unique index: the sweep is a single daily job per org, so the only way to
+  # race it is to run two sweeps at once, and the cost of losing that race is
+  # one duplicate reminder — not worth a partial unique index on a table that is
+  # otherwise free of them.
+  defp run(%{action: :create_task, config: config, org_id: org_id}, event, payload) do
+    with type when is_binary(type) <- event_type(event),
+         id when is_binary(id) <- payload["id"],
+         [] <- open_lifecycle_tasks(type, id, org_id),
+         {:ok, assignee_id} <- task_assignee(config, payload, org_id) do
+      create_lifecycle_task(config, type, id, assignee_id, event, payload, org_id)
+    else
+      # An open task is already carrying this — the reminder has landed.
+      [_ | _] -> :ok
+      _ -> :ok
+    end
+  end
+
+  defp open_lifecycle_tasks(type, id, org_id) do
+    KilnCMS.CMS.list_open_tasks_of_kind!(type, id, :lifecycle_review,
+      authorize?: false,
+      tenant: org_id
+    )
+  rescue
+    error ->
+      Logger.warning("Lifecycle task lookup failed for #{type}/#{id}: #{inspect(error)}")
+      # Treat a failed probe as "already handled" rather than creating blind:
+      # a missed reminder is recoverable on tomorrow's sweep, a storm of
+      # duplicates is not.
+      [:unknown]
+  end
+
+  # The content's author, when they are still an editor — "the person who wrote
+  # it should re-read it" is the right default, and `AssigneeIsEditor` is what
+  # decides whether that is still true. Otherwise the rule's configured
+  # assignee, which is what makes the rule usable on imported content with no
+  # author, or content whose author has since left.
+  defp task_assignee(config, payload, org_id) do
+    candidates =
+      [payload["author_id"], config["assignee_id"]]
+      |> Enum.filter(&is_binary/1)
+
+    case Enum.find(candidates, &editor?(&1, org_id)) do
+      nil -> :error
+      id -> {:ok, id}
+    end
+  end
+
+  defp editor?(id, _org_id) do
+    case Ash.get(KilnCMS.Accounts.User, id, authorize?: false) do
+      {:ok, %{role: role}} -> role in [:editor, :admin]
+      _ -> false
+    end
+  end
+
+  defp create_lifecycle_task(config, type, id, assignee_id, event, payload, org_id) do
+    due_in = task_due_in_days(config)
+
+    attrs = %{
+      content_type: type,
+      content_id: id,
+      assignee_id: assignee_id,
+      kind: :lifecycle_review,
+      due_on: Date.add(Date.utc_today(), due_in),
+      note: task_note(config, event, payload),
+      # A lifecycle review is not finished by publishing — a republish of the
+      # same stale document is exactly what the review exists to question. So
+      # it opts out of #501's auto-complete-on-publish default.
+      auto_complete_on_publish: false
+    }
+
+    case KilnCMS.CMS.assign_task(attrs, authorize?: false, tenant: org_id) do
+      {:ok, _task} ->
+        :ok
+
+      {:error, error} ->
+        Logger.warning("Lifecycle task creation failed for #{type}/#{id}: #{inspect(error)}")
+        :ok
+    end
+  end
+
+  # Bounded so a typo in a rule's config cannot schedule a review for the year
+  # 3000 (or for yesterday, which would arrive already overdue).
+  defp task_due_in_days(config) do
+    case config["due_in_days"] do
+      n when is_integer(n) and n >= 1 and n <= 365 -> n
+      _ -> 7
+    end
+  end
+
+  # `{{type}}` and `{{event}}` resolve from the event string, so a rule can say
+  # "Expired: {{title}}" and "Review due — {{title}}" with one template if it
+  # wants to serve both triggers.
+  defp task_note(config, event, payload) do
+    template = config["note"] || "Review due — {{title}}"
+    render(template, event, payload, :text)
+  end
+
   defp announce_to(record, provider, org_id, rule_id, template) do
     KilnCMS.Social.accounts_for_provider!(provider, authorize?: false, tenant: org_id)
     |> Enum.each(fn account ->

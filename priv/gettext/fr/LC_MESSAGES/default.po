@@ -5361,9 +5361,15 @@ msgid "Mark done"
 msgstr "Marquer comme terminée"
 
 #: lib/kiln_cms_web/live/calendar_live.ex
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Mark reviewed"
 msgstr "Marquer comme révisé"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Marked reviewed — the freshness clock is reset."
+msgstr "Marqué comme révisé — le compteur de fraîcheur repart."
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format

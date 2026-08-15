@@ -19,7 +19,9 @@ on top.
 
 Manage rules at **`/editor/automation`** (admin-only). A rule is:
 
-- **When** — a lifecycle trigger: `published`, `unpublished`, or `updated`.
+- **When** — a lifecycle trigger: `published`, `unpublished`, `updated`,
+  `in_review`, `returned_to_draft`, `assigned`, `overdue`, or the freshness
+  pair `health_overdue` / `health_expired`.
 - **Content type** — a specific type (`post`, a dynamic type's name) or *any*.
 - **Do** — one reaction (below), configured with a small JSON `config`.
 
@@ -30,6 +32,7 @@ Manage rules at **`/editor/automation`** (admin-only). A rule is:
 | `send_email` | Deliver an email via the MTA | `to`, `subject`, `body` (templated) |
 | `broadcast` | `Phoenix.PubSub` broadcast `{:automation_event, event, payload}` | `topic` (default `"automation"`) |
 | `invalidate_cache` | Bust the record's content cache (+ sitemap/llms) | — |
+| `create_task` | Raise an editorial `Task` on the record, assigned to its author (falling back to `assignee_id`). Idempotent per {content, kind} | `assignee_id`, `due_in_days` (1–365, default 7), `note` (templated) |
 | `reindex` | Re-fire the record (refreshes artifacts + search indexes) | — |
 | `newsletter` | Send the published document to subscribers (#376) | `segment_id` (omit = all confirmed), `subject` (defaults to the title) |
 | `flag_duplicates` | Email near-duplicate findings for the document (#377) | `to` |

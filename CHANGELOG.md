@@ -216,6 +216,44 @@ migration, a rewritten column, a dropped config key).
   subject to the record's own policy, so an editor scoped by `editable_types`
   cannot move what they cannot edit.
 
+- **Stale content raises real work: a freshness sweep, two automation triggers,
+  and a `create_task` reaction.** Health told you something had gone stale; this
+  is what puts it in somebody's queue.
+
+  `KilnCMS.CMS.HealthSweep` runs daily (`KILN_HEALTH_SWEEP_CRON`, 07:30 by
+  default — before the task digest, so a task it raises lands in that morning's
+  email rather than tomorrow's), finds published content whose `health` is
+  `:overdue` or `:expired`, emits `[:kiln_cms, :lifecycle, :health_sweep]`
+  telemetry with the counts, and dispatches `<type>.health_overdue` /
+  `<type>.health_expired` through the same funnel every other editorial event
+  uses. A sweep exists because every other trigger hangs off a write, and
+  freshness lapses because time passed — nobody did anything, which is exactly
+  the problem, so there is nothing to hang it off.
+
+  The sweep itself changes nothing: it is a read plus an event, so what happens
+  next is a rule the team configured, or nothing. "Overdue" means different
+  things to a newsroom and to a clinical library, and one hard-coded reaction
+  would be wrong for one of them. `:due`/`:due_soon` deliberately do not fire —
+  a trigger on "falls due next week" sends the same reminder every day for a
+  week, which is how a team learns to filter reminders out.
+
+  The new `:create_task` reaction raises an editorial Task assigned to the
+  content's author when they are still an editor, falling back to the rule's
+  configured assignee — which is what makes it usable on imported content with
+  no author. It is **idempotent per {content, kind}**: the sweep re-fires daily
+  for as long as content stays overdue, so without that a monograph nobody got
+  to in a fortnight would carry fourteen identical tasks. Lifecycle tasks are
+  tagged `kind: :lifecycle_review` (a new column — manual ones are `:manual`)
+  and opt out of #501's auto-complete-on-publish, because republishing the same
+  stale document is exactly what the review exists to question.
+
+  The content editor's header now carries a health pill next to the workflow
+  state badge — the two axes are orthogonal, and an editor needs both at a
+  glance — with a **Mark reviewed** button beside it when the health is `:due`,
+  `:overdue` or `:expired`. A button of its own rather than something riding on
+  Save, for the same reason `last_reviewed_at` is not in `default_accept`: an
+  editor who saves a typo fix has not re-read the piece.
+
 - **Office documents and zip archives in the document library** (#808).
   Follow-up to #481, which scoped the gated document library to PDF only for
   v1: `KilnCMS.DocumentProcessor` now byte-validates `.docx`/`.xlsx`/`.pptx`

@@ -1420,7 +1420,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
     ContentTypes.get_record!(kind, id,
       actor: actor,
       tenant: org,
-      load: [:category, :featured_image, :tags, related_name(kind)]
+      # `health`/`due_at` are expression calculations, so they cost a couple of
+      # columns in the same SELECT rather than a second query
+      # (docs/content-lifecycles.md).
+      load: [:category, :featured_image, :tags, :health, :due_at, related_name(kind)]
     )
   end
 
@@ -3117,6 +3120,36 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   def handle_event("workflow", %{"action" => action}, socket) when is_binary(action) do
     {:noreply, run_workflow(socket, action)}
+  end
+
+  # A human attests the content is still correct (docs/content-lifecycles.md).
+  # Its own event rather than a `workflow` action, because it is not one: `state`
+  # does not move, and `run_workflow`'s flash ("Updated to published") would be
+  # a lie about what just happened.
+  def handle_event("mark_reviewed", _params, socket) do
+    %{kind: kind, record: record, actor: actor} = socket.assigns
+
+    if socket.assigns.may_write? do
+      case ContentTypes.transition(kind, "mark_reviewed", record,
+             actor: actor,
+             tenant: record.org_id
+           ) do
+        {:ok, _updated} ->
+          # Re-fetched rather than assigning the action's own result: `health`
+          # and `due_at` are calculations, so the returned record carries them
+          # as `%Ash.NotLoaded{}` — which is truthy, so the pill would render
+          # from a value that is not there.
+          {:noreply,
+           socket
+           |> assign_record(fetch!(kind, record.id, actor, record.org_id))
+           |> put_flash(:info, gettext("Marked reviewed — the freshness clock is reset."))}
+
+        _ ->
+          {:noreply, put_flash(socket, :error, gettext("That action isn't allowed right now."))}
+      end
+    else
+      {:noreply, socket}
+    end
   end
 
   # One-click translation: duplicate this record's content into a new draft in
@@ -9730,6 +9763,24 @@ defmodule KilnCMSWeb.ContentEditorLive do
             <span class="size-1.5 rounded-full bg-current opacity-70"></span>
             {state_label(@record.state)}
           </span>
+          <%!-- The freshness axis, next to the workflow one because they are
+                orthogonal and an editor needs both at a glance: this document
+                is Published *and* eight months past its review
+                (docs/content-lifecycles.md). Renders nothing when fresh, which
+                is nearly always. --%>
+          <.health_badge health={@record.health} due_at={@record.due_at} />
+          <%!-- Only when the health is actually asking. The attestation is a
+                deliberate act, so it gets a button of its own rather than
+                riding on Save — an editor who saves a typo fix has not
+                re-read the piece. --%>
+          <.button
+            :if={@record.health in [:due, :overdue, :expired]}
+            type="button"
+            phx-click="mark_reviewed"
+            size="sm"
+          >
+            {gettext("Mark reviewed")}
+          </.button>
           <%!-- After saving a schedule, nothing else says it exists (U-M4). --%>
           <span
             :if={@record.scheduled_at && @record.state in [:draft, :in_review]}
