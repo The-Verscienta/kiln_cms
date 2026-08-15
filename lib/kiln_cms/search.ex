@@ -229,9 +229,10 @@ defmodule KilnCMS.Search do
   stored vector (#852), plus `suggest_tags/2`'s one inference per taxonomy tag
   not already in `KilnCMS.Search.VectorCache` (#1076).
 
-  Sized well above `KilnCMS.Seo.per_user_limit/0`'s scale: a single local
-  embedding is far cheaper than an LLM completion, and `suggest_tags/2` alone
-  can spend one unit per untagged tag in the site's taxonomy in a single call.
+  Sized well above `KilnCMS.Seo.draft/2`'s default per-user scale (20 calls a
+  minute): a single local embedding is far cheaper than an LLM completion,
+  and `suggest_tags/2` alone can spend one unit per untagged tag in the
+  site's taxonomy in a single call.
   Like the SEO budget, this counts **calls that actually reach the model** —
   `VectorCache` hits are free and are not charged — not the token/compute
   volume behind each one.
