@@ -59,6 +59,10 @@ defmodule KilnCMSWeb.GovernanceController do
       item: trail.item,
       generated_at: DateTime.utc_now(),
       chain: chain_status(trail.chain),
+      # Sibling fact, not part of the verdict (#1058): whether this chain's
+      # anchors could have hit the pre-#598 false-tamper bug. See
+      # `KilnCMS.Governance.Chain.predates_fold_order?/1`.
+      chain_predates_fold_order?: trail.predates_fold_order?,
       unanchored_tail: trail.unanchored_tail,
       timeline:
         Enum.map(trail.timeline, fn event ->

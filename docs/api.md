@@ -111,7 +111,9 @@ Notes:
 
 - Invalid credentials return a generic **401** (`{"errors": [...]}`) — the
   response never reveals whether the email exists. Missing fields return **422**.
-- The endpoint is rate-limited per IP under the tight `auth` bucket (20/min).
+- The endpoint is rate-limited per IP under the tight `auth` bucket (40/min —
+  a two-factor sign-in spends two of it, one for the password and one for the
+  code).
 - Tokens are verified against the `KilnCMS.Accounts.Token` store
   (`require_token_presence_for_authentication?` is on), so revocation (sign-out /
   log-out-everywhere) takes effect immediately.
@@ -694,7 +696,7 @@ Over the limit returns **429** with a `retry-after` header.
 |--------|-----------------|-----------------------|
 | `api`  | `/api/json/*`, `GET /api/content/:type/:slug` (fired artifacts), `GET /api/locales`, `GET /api/search` | 120 requests / minute |
 | `gql`  | `/gql`          | 60 requests / minute  |
-| `auth` | sign-in / auth  | 20 requests / minute  |
+| `auth` | sign-in / auth  | 40 requests / minute  |
 | `docs` | `/api/json/swaggerui` | 60 requests / minute |
 | `unlock` | `POST /api/content/:type/:slug/unlock` (and the built-in site's lock form) | 10 requests / minute |
 

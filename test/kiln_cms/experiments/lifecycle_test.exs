@@ -10,9 +10,13 @@ defmodule KilnCMS.Experiments.LifecycleTest do
   """
   use KilnCMS.DataCase, async: false
 
+  require Ash.Query
+
   alias KilnCMS.CMS
   alias KilnCMS.ExperimentFixtures
   alias KilnCMS.Experiments
+  alias KilnCMS.Experiments.Delivery
+  alias KilnCMS.Experiments.Sticky
 
   setup do
     org_id = KilnCMS.Accounts.default_org_id()
@@ -474,6 +478,94 @@ defmodule KilnCMS.Experiments.LifecycleTest do
       later_idx = Enum.find_index(ids, &(&1 == later.id))
 
       assert earlier_idx < later_idx
+    end
+  end
+
+  # #1007. Containment already stopped a stray uuid or another site's variant
+  # id from converting anything — the gap was the BOUND: the exposure cookie
+  # can name up to `Sticky.max_exposures/0` arms, and nothing stopped a single
+  # request from converting every one of them if they happened to span several
+  # running experiments that all use this page as their goal document. That is
+  # several conversions bought for the price of one GET, on a rate limit sized
+  # for a page view rather than a write.
+  describe "record_content_view/3 bounds conversions to one per request (#1007)" do
+    setup ctx do
+      ExperimentFixtures.enable!()
+      ExperimentFixtures.put_config(sticky: true)
+
+      # `:start` (via `Validations.GoalConfigured`) requires a `:content_view`
+      # goal to name a real, published document — unlike the EXPERIMENTED
+      # document, which the fixtures elsewhere leave as a bare uuid.
+      goal =
+        %{title: "Goal", slug: "lc-goal-#{System.unique_integer([:positive])}"}
+        |> CMS.create_page!(actor: ctx.actor)
+        |> CMS.publish_page!(%{}, actor: ctx.actor)
+
+      %{goal_id: goal.id}
+    end
+
+    # A distinct experimented "document" per experiment — a partial unique
+    # index refuses two running experiments on the same one — but both name
+    # `goal_id` as their `:content_view` goal, which is exactly the ordinary
+    # case of two different pages under test converting on the same shared
+    # landing/goal page.
+    defp content_view_experiment!(ctx, goal_id) do
+      document = %{id: Ash.UUID.generate(), org_id: ctx.org_id}
+
+      ExperimentFixtures.running!(document, "page", %{"fields" => %{"title" => "Varied"}},
+        org_id: ctx.org_id,
+        goal: :content_view,
+        goal_content_type: "page",
+        goal_document_id: goal_id
+      )
+    end
+
+    defp variant_conversions(variant, org_id) do
+      KilnCMS.Experiments.VariantDay
+      |> Ash.Query.filter(variant_id == ^variant.id)
+      |> Ash.read!(authorize?: false, tenant: org_id)
+      |> Enum.map(& &1.conversions)
+      |> Enum.sum()
+    end
+
+    test "a cookie naming arms of two running experiments converts only one", ctx do
+      {_exp1, _control1, treatment1} = content_view_experiment!(ctx, ctx.goal_id)
+      {_exp2, _control2, treatment2} = content_view_experiment!(ctx, ctx.goal_id)
+
+      # Built directly through `Sticky`, the same way the exposure cookie is
+      # actually populated (`Delivery.count_exposure/4`) — an attacker-writable
+      # cookie naming both arms is indistinguishable from this at the point
+      # `record_content_view/3` reads it.
+      conn = Plug.Test.conn(:get, "/")
+      {:new, conn} = Sticky.remember_exposure(conn, treatment1.id)
+      {:new, conn} = Sticky.remember_exposure(conn, treatment2.id)
+
+      conn = Delivery.record_content_view("page", %{id: ctx.goal_id, org_id: ctx.org_id}, conn)
+
+      total =
+        variant_conversions(treatment1, ctx.org_id) + variant_conversions(treatment2, ctx.org_id)
+
+      assert total == 1, "expected exactly one conversion across both experiments, got #{total}"
+
+      # The exposure that did NOT convert stays on the conn, spendable on a
+      # later request — only the one actually credited is removed. Confirms
+      # this is a bound on counting, not a silent drop of the other exposure.
+      {remaining, _conn} = Sticky.exposures(conn)
+      assert length(remaining) == 1
+      assert hd(remaining) in [treatment1.id, treatment2.id]
+    end
+
+    test "a cookie naming one valid arm still converts exactly once", ctx do
+      {_exp, _control, treatment} = content_view_experiment!(ctx, ctx.goal_id)
+
+      conn = Plug.Test.conn(:get, "/")
+      {:new, conn} = Sticky.remember_exposure(conn, treatment.id)
+
+      conn = Delivery.record_content_view("page", %{id: ctx.goal_id, org_id: ctx.org_id}, conn)
+
+      assert variant_conversions(treatment, ctx.org_id) == 1
+      {remaining, _conn} = Sticky.exposures(conn)
+      assert remaining == []
     end
   end
 end

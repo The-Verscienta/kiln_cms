@@ -325,10 +325,18 @@ defmodule KilnCMS.SchemaExport do
 
   defp input_json_type(_module, false), do: "string"
 
-  defp html_input_json_type("number"), do: "number"
-  defp html_input_json_type("range"), do: "number"
-  defp html_input_json_type("checkbox"), do: "boolean"
-  defp html_input_json_type(_), do: "string"
+  @doc """
+  The JSON type an HTML input type implies (`"number"` → `"number"`, etc).
+
+  Public so `mix kiln.plugins.doctor` (#937) can compare a plugin field
+  type's `cast/2` output against what its editor widget implies, rather than
+  reimplementing this table.
+  """
+  @spec html_input_json_type(String.t()) :: String.t()
+  def html_input_json_type("number"), do: "number"
+  def html_input_json_type("range"), do: "number"
+  def html_input_json_type("checkbox"), do: "boolean"
+  def html_input_json_type(_), do: "string"
 
   # ── document assembly ───────────────────────────────────────────────────────
 

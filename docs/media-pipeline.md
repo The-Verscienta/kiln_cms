@@ -254,17 +254,45 @@ reference removes the usage.
 The drawer lists at most 25 referrers plus a total, because a site logo can be
 referenced by every document on the site and each one costs its own fetch.
 
-## Documents (#481)
+## Documents (#481, #808)
 
-The media library also accepts **documents** — PDF only in v1 — uploaded
-through the same `/media` picker (`.pdf` alongside the image extensions),
-byte-validated by `KilnCMS.DocumentProcessor` the same way images are by
-`ImageProcessor` (a magic-byte check — `%PDF-`, never the client's claimed
-filename/MIME — deny-by-default). A document has no `width`/`height`
+The media library also accepts **documents** — PDF in v1, joined by office
+formats and zip archives in #808 — uploaded through the same `/media` picker
+(`.pdf`/`.docx`/`.xlsx`/`.pptx`/`.doc`/`.xls`/`.ppt`/`.zip` alongside the
+image extensions), byte-validated by `KilnCMS.DocumentProcessor` the same way
+images are by `ImageProcessor` (a magic-byte check, never the client's
+claimed filename/MIME — deny-by-default). A document has no `width`/`height`
 (that's the library's own image/document discriminator: `content_type
 LIKE 'image/%'`, with a `NULL` content_type defaulting to "image" for
 backward compatibility with rows written before #481) and no responsive
 variants.
+
+### Office documents and zip archives (#808)
+
+`.docx`/`.xlsx`/`.pptx` are recognized as OOXML: a zip signature (`PK\x03\x04`)
+plus an internal `[Content_Types].xml` entry and a format-specific main part
+(`word/document.xml`, `xl/workbook.xml`, `ppt/presentation.xml`) — that
+combination is what distinguishes an Office document from an arbitrary zip,
+which is accepted too (as plain `.zip`) when the zip signature matches but
+`[Content_Types].xml` doesn't. Legacy `.doc`/`.xls`/`.ppt` are recognized by
+the OLE2 compound-file signature plus the application's own root stream name
+(`WordDocument`, `Workbook`, `PowerPoint Document`).
+
+Because a zip's own central directory can *declare* whatever
+compressed/uncompressed sizes it likes, `DocumentProcessor` reads that
+declared metadata via `:zip.list_dir/1` — which touches only the central
+directory, never any entry's compressed data — and refuses the upload as a
+decompression bomb before anything is stored: over 500 MB of declared
+uncompressed content, a declared compression ratio past 100:1, or more than
+10,000 entries. Nothing in the validation path ever inflates archive
+content.
+
+**Office/zip uploads are not metadata-stripped.** #807's qpdf-based strip
+only understands PDF; it cannot open a zip or an OLE2 file at all, so
+`KilnCMS.Media.Ingest` stores these formats as uploaded, the same posture A/V
+had before #820. A `.docx` still carries its author/revision history and a
+legacy `.doc`/`.xls`/`.ppt` still carries the authoring machine's path — a
+real gap, tracked separately rather than assumed away.
 
 ### PDF metadata stripping (#807)
 

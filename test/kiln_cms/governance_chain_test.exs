@@ -221,6 +221,41 @@ defmodule KilnCMS.Governance.ChainTest do
     )
   end
 
+  # Turns a freshly minted (v6) anchor into a legitimately signed pre-#598
+  # anchor: re-sign its own values under the v5 payload shape (#1058) and drop
+  # the columns only v6 carries. `payload_version` nil plus a valid v5
+  # signature is exactly what an anchor minted before #598 shipped looks like
+  # — not a v6 anchor with one column blanked out, which would just fail its
+  # own signature check instead of exercising the fallback this is for.
+  defp downgrade_to_legacy_anchor!(anchor) do
+    v5_payload =
+      Canonical.encode(%{
+        "v" => 5,
+        "type" => anchor.resource_type,
+        "source_id" => anchor.source_id,
+        "chain_hash" => anchor.chain_hash,
+        "attribution_hash" => anchor.attribution_hash,
+        "version_count" => anchor.version_count,
+        "prev_anchor_id" => anchor.prev_anchor_id,
+        "prev_anchor_digest" => anchor.prev_anchor_digest,
+        "last_version_id" => anchor.last_version_id,
+        "last_version_at" =>
+          anchor.last_version_at && DateTime.to_iso8601(anchor.last_version_at),
+        "sequence" => anchor.sequence
+      })
+
+    {:ok, signature} = Signer.sign(v5_payload)
+
+    KilnCMS.Repo.update_all(
+      from(a in "history_anchors", where: a.id == type(^anchor.id, :binary_id)),
+      set: [
+        signature: signature,
+        payload_version: nil,
+        folded_version_ids: []
+      ]
+    )
+  end
+
   test "publishing mints a signed anchor and the chain verifies" do
     page = published_page(admin())
 
@@ -1087,6 +1122,96 @@ defmodule KilnCMS.Governance.ChainTest do
         assert {:tampered, "anchor signature does not verify"} =
                  Chain.verify(Page, "page", page.id, page.org_id)
       end
+    end
+  end
+
+  describe "predates_fold_order?/1 and /3 (#1058)" do
+    test "false for a freshly minted chain — every anchor is v6" do
+      actor = admin()
+      page = published_page(actor)
+
+      refute Chain.predates_fold_order?("page", page.id, page.org_id)
+      refute Chain.predates_fold_order?(Chain.anchors("page", page.id, page.org_id))
+    end
+
+    test "false for a document with no anchors at all" do
+      refute Chain.predates_fold_order?(
+               "page",
+               Ecto.UUID.generate(),
+               KilnCMS.Accounts.default_org_id()
+             )
+
+      refute Chain.predates_fold_order?([])
+    end
+
+    test "true once an anchor carries no payload_version — the pre-#598 shape" do
+      actor = admin()
+      page = published_page(actor)
+      [anchor] = Chain.anchors("page", page.id, page.org_id)
+
+      KilnCMS.Repo.update_all(
+        from(a in "history_anchors", where: a.id == type(^anchor.id, :binary_id)),
+        set: [payload_version: nil]
+      )
+
+      assert Chain.predates_fold_order?("page", page.id, page.org_id)
+      assert Chain.predates_fold_order?(Chain.anchors("page", page.id, page.org_id))
+    end
+
+    test "true when only the OLDEST of several anchors predates the fix" do
+      actor = admin()
+      page = published_page(actor)
+      [first] = Chain.anchors("page", page.id, page.org_id)
+
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+      assert length(Chain.anchors("page", page.id, page.org_id)) == 2
+
+      KilnCMS.Repo.update_all(
+        from(a in "history_anchors", where: a.id == type(^first.id, :binary_id)),
+        set: [payload_version: nil]
+      )
+
+      # One anchor with an inferred (not recorded) fold order is enough — the
+      # WHOLE chain falls back to timestamp order (`versions_asc/4`), so a
+      # newer, v6 anchor cannot un-expose an older one to the bug.
+      assert Chain.predates_fold_order?("page", page.id, page.org_id)
+    end
+
+    # The concrete distinction #1058 exists for: the same TAMPERED verdict,
+    # reached two different ways. Only the first is the #598 bug.
+    test "flags the #598-shaped false tamper and leaves ordinary tampering unflagged" do
+      # A pre-#598 anchor whose covered version is displaced by a row that
+      # sorts earlier by timestamp — the false positive #598 fixed the CAUSE
+      # of but could not repair on a chain anchored before it shipped.
+      legacy_actor = admin()
+      legacy_page = published_page(legacy_actor)
+      [legacy_anchor] = Chain.anchors("page", legacy_page.id, legacy_page.org_id)
+
+      downgrade_to_legacy_anchor!(legacy_anchor)
+      backdated_version!(legacy_page)
+
+      assert {:tampered, reason} = Chain.verify(Page, "page", legacy_page.id, legacy_page.org_id)
+      assert reason =~ "anchored history does not reproduce the recorded chain hash"
+      assert Chain.predates_fold_order?("page", legacy_page.id, legacy_page.org_id)
+
+      # Ordinary content tampering on a chain with no legacy anchor: same
+      # verdict shape, but nothing here predates the fix.
+      genuine_actor = admin()
+      genuine_page = published_page(genuine_actor)
+
+      KilnCMS.Repo.update_all(
+        from(v in "pages_versions",
+          where: v.version_source_id == type(^genuine_page.id, :binary_id),
+          update: [set: [changes: type(^%{"title" => "Doctored"}, :map)]]
+        ),
+        []
+      )
+
+      assert {:tampered, _reason} =
+               Chain.verify(Page, "page", genuine_page.id, genuine_page.org_id)
+
+      refute Chain.predates_fold_order?("page", genuine_page.id, genuine_page.org_id)
     end
   end
 

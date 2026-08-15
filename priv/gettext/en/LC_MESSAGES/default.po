@@ -3280,7 +3280,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
-msgid "Documents: PDF up to 25 MB"
+msgid "Documents: PDF, Word, Excel, PowerPoint, ZIP up to 25 MB"
 msgstr ""
 
 #: lib/kiln_cms_web/live/slug_regen_live.ex
@@ -8916,6 +8916,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/release_preview_live.ex
 #, elixir-autogen, elixir-format
 msgid "This content no longer exists — the release will not publish as it stands."
+msgstr ""
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "This document's chain was anchored before the fold order was assigned, so this verdict may be the ordering bug rather than tampering — see #598."
 msgstr ""
 
 #: lib/kiln_cms_web/live/governance_live.ex

@@ -155,8 +155,8 @@ defmodule KilnCMSWeb.SignInLive do
   end
 
   # An unresolvable address shares one node-wide bucket, so this is the shape of
-  # a total sign-in outage: `:auth` is 20/min, and if `connect_info` ever stops
-  # carrying `:peer_data` the 21st attempt from *anyone* is refused. The
+  # a total sign-in outage: `:auth` is 40/min, and if `connect_info` ever stops
+  # carrying `:peer_data` the 41st attempt from *anyone* is refused. The
   # endpoint's declaration makes that unreachable today, which is exactly why it
   # would be an endpoint edit that broke it — so say so out loud rather than
   # leaving an operator to diagnose a silent, global refusal.

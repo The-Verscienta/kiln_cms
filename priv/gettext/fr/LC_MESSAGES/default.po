@@ -3280,8 +3280,8 @@ msgstr "Documents de ce lancement"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
-msgid "Documents: PDF up to 25 MB"
-msgstr "Documents : PDF jusqu'à 25 Mo"
+msgid "Documents: PDF, Word, Excel, PowerPoint, ZIP up to 25 MB"
+msgstr "Documents : PDF, Word, Excel, PowerPoint, ZIP jusqu'à 25 Mo"
 
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
@@ -8917,6 +8917,11 @@ msgstr "Ce contenu a été modifié ailleurs. Rechargez pour obtenir la dernièr
 #, elixir-autogen, elixir-format
 msgid "This content no longer exists — the release will not publish as it stands."
 msgstr "Ce contenu n'existe plus : le lancement ne pourra pas être publié en l'état."
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "This document's chain was anchored before the fold order was assigned, so this verdict may be the ordering bug rather than tampering — see #598."
+msgstr "La chaîne de ce document a été ancrée avant que l'ordre de fusion ne soit attribué : ce verdict pourrait donc être le bug d'ordonnancement plutôt qu'une altération — voir #598."
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format

@@ -257,14 +257,22 @@ defmodule KilnCMS.Media.Ingest do
   # carries is the identifying kind and storing it unstripped is the outcome
   # #807 exists to prevent.
   #
+  # Matched on `ext: ".pdf"` specifically, not `kind: :document` generally
+  # (#808): `DocumentProcessor.strip_metadata/1` shells out to qpdf, which
+  # cannot open a zip or an OLE2 file at all — trying would refuse every
+  # office/zip upload with `:strip_failed`. Every other document extension
+  # falls through to the plain `store_and_create/5` clause below, same as a
+  # caption track. See the moduledoc's "Office formats are not stripped
+  # (yet)" section.
+  #
   # `stripped` is `DocumentProcessor`'s own server-built temp file, never
   # caller input — the traversal warning is a false positive.
   # sobelow_skip ["Traversal.FileModule"]
-  defp persist(path, %{kind: :document, ext: ext, content_type: content_type}, filename, opts) do
+  defp persist(path, %{kind: :document, ext: ".pdf", content_type: content_type}, filename, opts) do
     case DocumentProcessor.strip_metadata(path) do
       {:ok, stripped} ->
         try do
-          store_and_create(stripped, ext, content_type, filename, opts)
+          store_and_create(stripped, ".pdf", content_type, filename, opts)
         after
           File.rm(stripped)
         end

@@ -2,6 +2,8 @@ defmodule KilnCMS.GovernanceTest do
   @moduledoc "Governance trail assembly (#352)."
   use KilnCMS.DataCase, async: true
 
+  import Ecto.Query
+
   alias KilnCMS.CMS
   alias KilnCMS.Governance
 
@@ -41,6 +43,27 @@ defmodule KilnCMS.GovernanceTest do
     org = KilnCMS.Accounts.default_org_id()
     assert Governance.trail("post", Ecto.UUID.generate(), org) == nil
     assert Governance.trail("nope", Ecto.UUID.generate(), org) == nil
+  end
+
+  # #1058: a sibling fact next to the verdict, not a change to it — see
+  # `KilnCMS.Governance.Chain.predates_fold_order?/1` for what it actually
+  # checks (every anchor's `payload_version`).
+  test "trail surfaces whether the chain predates the #598 fold-order fix" do
+    admin = admin()
+    org = KilnCMS.Accounts.default_org_id()
+    post = CMS.create_post!(%{title: "Fold Order", slug: slug()}, actor: admin)
+    CMS.publish_post!(post, %{}, actor: admin)
+
+    refute Governance.trail("post", post.id, org).predates_fold_order?
+
+    [anchor] = KilnCMS.Governance.Chain.anchors("post", post.id, org)
+
+    KilnCMS.Repo.update_all(
+      from(a in "history_anchors", where: a.id == type(^anchor.id, :binary_id)),
+      set: [payload_version: nil]
+    )
+
+    assert Governance.trail("post", post.id, org).predates_fold_order?
   end
 
   test "content_index lists content" do

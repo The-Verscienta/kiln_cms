@@ -8,6 +8,8 @@ const {
   signInAsAdmin,
   newDraftPage,
   addBlock,
+  createTagGroup,
+  createTag,
 } = require("./fixtures");
 
 test.describe("editor journey", () => {
@@ -295,19 +297,18 @@ test.describe("editor journey", () => {
     const [alpha, beta] = [`e2e-alpha-${stamp}`, `e2e-beta-${stamp}`];
 
     // A group with two tags, so there is a section to collapse and a sibling
-    // inside it that a fold-away would hide.
-    await page.goto("/editor/taxonomy");
-    await page.fill('#new-tag_group-form input[name$="[name]"]', group);
-    await page.locator("#new-tag_group-form button[type=submit]").click();
-    await expect(page.locator("#new-tag-form select").getByText(group)).toBeAttached();
+    // inside it that a fold-away would hide. Scoped to "page" content only
+    // (#948): left unrestricted, this group would apply to every content type
+    // forever on the suite's persistent, never-reset-between-specs database,
+    // which is exactly what made the tag picker's *empty* state (#524)
+    // unreachable for any other spec — see tag_picker_midsession.spec.js.
+    // `createTagGroup` requires naming the content types for exactly this
+    // reason: an unscoped group is a mistake to make once, not something a
+    // future spec should be able to repeat by accident.
+    await createTagGroup(page, group, ["page"]);
 
     for (const name of [alpha, beta]) {
-      await page.fill('#new-tag-form input[name$="[name]"]', name);
-      await page.selectOption('#new-tag-form select[name$="[tag_group_id]"]', { label: group });
-      await page.locator("#new-tag-form button[type=submit]").click();
-      // The row renders the name and the auto-derived slug, which are the same
-      // string here — assert on the first match rather than fighting that.
-      await expect(page.getByText(name, { exact: true }).first()).toBeVisible();
+      await createTag(page, name, { group });
     }
 
     await newDraftPage(page);

@@ -14,7 +14,7 @@ defmodule KilnCMSWeb.MediaLive do
   alias KilnCMS.Unsplash
   alias KilnCMSWeb.Params
 
-  @accept ~w(.jpg .jpeg .png .webp .gif .pdf .mp4 .m4a .webm .mp3 .vtt)
+  @accept ~w(.jpg .jpeg .png .webp .gif .pdf .docx .xlsx .pptx .doc .xls .ppt .zip .mp4 .m4a .webm .mp3 .vtt)
   @max_entries 10
   # Phoenix's `allow_upload` takes one ceiling for every entry (there's no
   # per-accept-type cap in the API), so this is the LARGEST of the per-type
@@ -897,7 +897,7 @@ defmodule KilnCMSWeb.MediaLive do
               {gettext("Images: PNG, JPG, WEBP, GIF up to 10 MB")}
             </p>
             <p class="text-xs text-base-content/70">
-              {gettext("Documents: PDF up to 25 MB")}
+              {gettext("Documents: PDF, Word, Excel, PowerPoint, ZIP up to 25 MB")}
             </p>
             <p class="text-xs text-base-content/70">
               {gettext(
