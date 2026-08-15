@@ -308,23 +308,43 @@ defmodule Kiln.Block.JsonSchema do
     }
   end
 
-  # Always nullable, including for `required: true` fields, and that is not
-  # laziness — it is what delivery actually emits.
+  # A `required: true` field is non-nullable; anything else stays nullable — a
+  # `:json` render emits its declared keys whether or not they carry a value.
   #
   # `required: true` becomes `allow_nil?: false` on the embedded attribute, so a
-  # **top-level** block cannot carry a nil there. A block nested inside a
-  # container can: `KilnCMS.CMS.TypedBlocks` rebuilds children with a bare
-  # `struct/2`, which never runs the Ash cast, so a stored
-  # `%{"_type" => "heading"}` inside a `columns` fires `"text" => nil`. Both
-  # shapes come back through the same `#/$defs/block_heading`, so the schema has
-  # to admit their union or a legitimately published document matches zero
-  # `oneOf` branches. (Confirmed against a real render, not inferred.)
+  # top-level block cannot carry a nil there. Until #935, a block nested inside
+  # a container *could*: `KilnCMS.CMS.TypedBlocks.struct_from_typed_map/1`
+  # rebuilt children with a bare `struct/2`, which never ran the Ash cast, so a
+  # stored `%{"_type" => "heading"}` inside a `columns` fired `"text" => nil`.
+  # Both shapes came back through the same `#/$defs/block_heading`, so the
+  # schema had to admit their union or a legitimately published document
+  # matched zero `oneOf` branches.
   #
-  # `required` still earns its place: it says the **key is present**, which is
-  # what `additionalProperties: false` and the `.d.ts` optionality read.
+  # `TypedBlocks.sanitize_children/2` now runs every nested child through the
+  # same Ash cast a top-level block gets (`KilnCMS.CMS.BlockUnion`'s cast entry
+  # points), refusing the whole write if a required nested field is missing —
+  # so a nested block is exactly as valid as a top-level one, and this can go
+  # back to reflecting that.
+  #
+  # `required` still earns its place independent of nullability: it says the
+  # **key is present**, which is what `additionalProperties: false` and the
+  # `.d.ts` optionality read.
+  #
+  # KNOWN GAP (code-review finding #2 on PR #1250): this narrowing is only
+  # true going forward. A row written *before* #935 landed could already hold
+  # a `nil` in what is now a required nested field, and nothing re-validates
+  # existing rows on read — `KilnCMS.CMS.BlockUnion.cast_stored`/
+  # `to_union_stored` only coerce types, they never enforce `allow_nil?`
+  # (that gap in the read path is *why* #935's write-side hole existed at
+  # all). Such a row keeps violating this schema, forever, with nothing
+  # flagging it. There is no data migration here — no single default is
+  # editorially safe to backfill a missing required value with — but
+  # `mix kiln.blocks.audit_required` (`KilnCMS.Blocks.RequiredFieldAudit`)
+  # scans for and reports affected rows, read-only, so an operator can decide
+  # what to do with each one.
   defp field_schema(%Field{} = field) do
     field.type
-    |> type_schema(true)
+    |> type_schema(!field.required)
     |> put_unless_nil("description", field.description)
     |> put_default(field.default)
   end

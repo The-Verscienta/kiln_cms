@@ -34,6 +34,30 @@ defmodule KilnCMS.FixturePlugin.CalloutBlock do
   defp esc(value), do: value |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
 end
 
+defmodule KilnCMS.FixturePlugin.RestrictedRequiredBlock do
+  @moduledoc """
+  A plugin-contributed block type (test fixture): combines `required: true`
+  with `editable_by:` on the same field — a combination no CORE block
+  currently uses (code-review finding #7 on PR #1250, following #935).
+  `KilnCMS.CMS.ContentCopyTest` exercises the duplicate/translate path this is
+  for; nothing else in the suite should notice this block exists.
+  """
+  use Kiln.Block
+
+  block :restricted_required do
+    field :locked_text, :string, required: true, editable_by: [:admin]
+  end
+
+  @impl Kiln.Block.Renderer
+  def render(block, :json),
+    do: %{"_type" => "restricted_required", "locked_text" => block.locked_text}
+
+  def render(_block, _surface), do: nil
+
+  @impl Kiln.Block.Renderer
+  def search_text(block), do: block.locked_text || ""
+end
+
 defmodule KilnCMS.FixturePlugin.FieldTypes.Rating do
   @moduledoc """
   A plugin-contributed custom field type (test fixture, D18): a 1–5 star
@@ -177,7 +201,8 @@ defmodule KilnCMS.FixturePlugin do
   def homepage, do: "https://example.com/fixture-plugin"
 
   @impl true
-  def blocks, do: [KilnCMS.FixturePlugin.CalloutBlock]
+  def blocks,
+    do: [KilnCMS.FixturePlugin.CalloutBlock, KilnCMS.FixturePlugin.RestrictedRequiredBlock]
 
   @impl true
   def field_types,

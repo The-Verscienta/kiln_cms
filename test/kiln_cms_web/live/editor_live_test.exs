@@ -3015,6 +3015,19 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       [_, child_id] = Regex.run(~r/data-child-id="([^"]+)"/, render(lv))
 
+      # A freshly-added nested heading starts with `text: ""`, and `text` is
+      # `required: true` — an empty string casts to `nil` on write
+      # (`Ash.Type.String`'s default `allow_empty?: false`), which the nested
+      # cast now refuses same as a top-level block always did (#935). Fill it
+      # in the way the editor's own nested-child input does, or the submit
+      # below fails and this test would be asserting on an unsaved page.
+      render_hook(lv, "col_update_child", %{
+        "id" => id,
+        "child" => child_id,
+        "field" => "text",
+        "value" => "Nested heading"
+      })
+
       # A heading child starts at level 2, so 3 is a real change.
       lv
       |> element(~s(select[name="col_child[#{id}][#{child_id}][level]"]))
@@ -3070,6 +3083,16 @@ defmodule KilnCMSWeb.EditorLiveTest do
       |> render_click()
 
       [_, child_id] = Regex.run(~r/data-child-id="([^"]+)"/, render(lv))
+
+      # See the #935 note in "changing a nested heading's level persists it":
+      # a freshly-added heading's `text` starts `""`, which now refuses the
+      # save (`required: true`), so fill it before exercising the tamper.
+      render_hook(lv, "col_update_child", %{
+        "id" => id,
+        "child" => child_id,
+        "field" => "text",
+        "value" => "Nested heading"
+      })
 
       for bad <- ["_type", "id"] do
         render_hook(lv, "col_update_child", %{

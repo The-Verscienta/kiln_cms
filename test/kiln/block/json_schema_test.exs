@@ -24,17 +24,23 @@ defmodule Kiln.Block.JsonSchemaTest do
 
       assert schema["type"] == "object"
       assert schema["properties"]["_type"] == %{"const" => "heading"}
-      assert schema["properties"]["text"] == %{"type" => ["string", "null"]}
+      # Non-nullable: `text` is `required: true`, and #935 made a nested child
+      # exactly as valid as a top-level one, so the schema no longer has to
+      # admit the union of "present" and "missing" for this field.
+      assert schema["properties"]["text"] == %{"type" => "string"}
       assert schema["x-kiln-block-version"] == 2
     end
 
-    test "a required field is listed as required — but still nullable" do
+    test "a required field is listed as required — and is no longer nullable" do
       schema = JsonSchema.for_module(KilnCMS.Blocks.Claim)
 
       assert schema["required"] == ["_type", "text"]
-      # Nullable despite `required: true`: a nested child bypasses the embedded
-      # resource's `allow_nil?`, and both shapes share this one definition.
-      assert schema["properties"]["text"] == %{"type" => ["string", "null"]}
+      # `TypedBlocks.sanitize_children/2` now casts a nested child through the
+      # same Ash `allow_nil?: false` a top-level block already enforced (#935),
+      # so both shapes share this one definition without either being a lie.
+      assert schema["properties"]["text"] == %{"type" => "string"}
+      # An optional field stays nullable — a `:json` render always emits its
+      # declared keys, whether or not they carry a value.
       assert schema["properties"]["source_title"]["type"] == ["string", "null"]
     end
 
@@ -155,27 +161,36 @@ defmodule Kiln.Block.JsonSchemaTest do
       end
     end
 
-    test "an empty block validates too", %{defs: defs} do
+    test "the emptiest a block can legitimately be still validates", %{defs: defs} do
       # The other half of the branch coverage: `video`/`file`/`audio` take a
       # different `:json` path with no source, and `rich_text` takes its
-      # legacy-HTML fallback.
+      # legacy-HTML fallback. Required fields are filled (a bare `struct/2`
+      # cannot come from a real write post-#935 — every `required: true` field
+      # is `allow_nil?: false`, top-level and nested alike), everything else is
+      # left nil/default.
       for module <- Blocks.modules() do
-        assert_valid(module |> struct() |> Blocks.render(:json), module, defs)
+        assert_valid(module |> required_only() |> Blocks.render(:json), module, defs)
       end
     end
 
-    # The case that made every `required: true` field nullable. `TypedBlocks`
-    # rebuilds a container's children with a bare `struct/2`, so a nested block
-    # never runs the Ash cast and a `required` field arrives nil — through the
-    # same `$defs` entry as its validated top-level twin.
-    test "a bare nested child validates against the same block schema", %{defs: defs} do
+    # #935: a nested child is now cast through the same Ash `allow_nil?: false`
+    # a top-level block always was (`TypedBlocks.sanitize_children/2`), so a
+    # validly-authored one renders required fields exactly as non-null as its
+    # top-level twin — through the very `$defs` entry both shapes share. The
+    # write-time refusal of an *invalid* nested child (the other half of #935)
+    # is covered at the write-action level in
+    # `KilnCMS.CMS.NestedBlockValidationTest`, not here — this module only
+    # asserts what a schema says about a rendered value, not what storage
+    # accepts.
+    test "a validly-cast nested child renders required fields non-null, like its top-level twin",
+         %{defs: defs} do
       for module <- Blocks.modules() do
         type = to_string(Info.name(module))
+        child_attrs = module |> required_only_attrs() |> Map.put("_type", type)
 
-        nested = %{
-          "_type" => "columns",
-          "columns" => [%{"blocks" => [%{"_type" => type}]}]
-        }
+        nested =
+          %{"_type" => "columns", "columns" => [%{"blocks" => [child_attrs]}]}
+          |> KilnCMS.CMS.TypedBlocks.to_union_input()
 
         [child] =
           [nested]
@@ -230,4 +245,22 @@ defmodule Kiln.Block.JsonSchemaTest do
   # doctor-task caller wants "now" instead, hence the override.
   defp populated(module),
     do: Sample.populated(module, ~D[2026-08-07], ~U[2026-08-07 00:00:00Z])
+
+  # A block with only its `required: true` fields filled — the emptiest a
+  # block can legitimately be post-#935, since the write path can no longer
+  # store one with a required field omitted (top-level or nested). Fixed
+  # date/datetime for the same determinism reason as `populated/1` above.
+  defp required_only(module),
+    do: Sample.required_only(module, ~D[2026-08-07], ~U[2026-08-07 00:00:00Z])
+
+  # Same, but as the string-keyed attrs map `BlockUnion`'s cast accepts (no
+  # `_type`/`id` — the caller adds those).
+  defp required_only_attrs(module) do
+    module
+    |> Info.fields()
+    |> Enum.filter(& &1.required)
+    |> Map.new(&{to_string(&1.name), sample(&1.type)})
+  end
+
+  defp sample(type), do: Sample.sample_value(type, ~D[2026-08-07], ~U[2026-08-07 00:00:00Z])
 end
