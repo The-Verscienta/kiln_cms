@@ -28,7 +28,7 @@ defmodule KilnCMSWeb.TwoFactorControllerTest do
   # the "nothing to hold" path and pass with the hold deleted.
   defp with_pending(conn, user, token) do
     blob =
-      PendingSignIn.mint(:session, KilnCMSWeb.Endpoint, %{
+      PendingSignIn.mint_and_hold(:session, KilnCMSWeb.Endpoint, %{
         user
         | __metadata__: Map.put(user.__metadata__, :token, token)
       })

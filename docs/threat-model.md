@@ -346,7 +346,7 @@ build if a resource is ever registered without that authorizer.
     password-alone compromise leaves nothing to revoke, and it leaves something.
 
     Since #742 the row's **use** is withheld too, on both doors.
-    `PendingSignIn.mint/4` moves it to the `pending_second_factor` purpose and
+    `PendingSignIn.mint_and_hold/4` moves it to the `pending_second_factor` purpose and
     shortens its expiry to the length of the step, and `claim/1` puts it back
     once a code verifies. `AshAuthentication` requires a row under the `user`
     purpose to authenticate a JWT (`require_token_presence_for_authentication?`),

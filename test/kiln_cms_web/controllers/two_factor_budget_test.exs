@@ -48,14 +48,13 @@ defmodule KilnCMSWeb.TwoFactorBudgetTest do
     user
   end
 
-  # The state a browser is in after the first factor and before the second —
-  # first factor and before the second.
+  # The state a browser is in after the first factor and before the second.
+  # A real, stored first-factor JWT rather than a stub (#1171): `mint_and_hold/4`
+  # holds the stored row, and a stub has none — the "nothing to hold" branch is
+  # silent, so a stub here would exercise a path no sign-in ever takes.
   defp with_pending(conn, user) do
-    token =
-      PendingSignIn.mint(:session, KilnCMSWeb.Endpoint, %{
-        user
-        | __metadata__: %{token: "stub.jwt.token"}
-      })
+    {user, _token} = TwoFactorFixtures.with_first_factor_token(user)
+    token = PendingSignIn.mint_and_hold(:session, KilnCMSWeb.Endpoint, user)
 
     conn
     |> put_private(:plug_skip_csrf_protection, true)
@@ -182,11 +181,8 @@ defmodule KilnCMSWeb.TwoFactorBudgetTest do
     # payload shape or the salt breaks this loudly instead of leaving it asserting
     # against a blob the controller can no longer read.
     defp api_verify(user, code) do
-      pending =
-        PendingSignIn.mint(:encrypted, KilnCMSWeb.Endpoint, %{
-          user
-          | __metadata__: %{token: "stub"}
-        })
+      {user, _token} = TwoFactorFixtures.with_first_factor_token(user)
+      pending = PendingSignIn.mint_and_hold(:encrypted, KilnCMSWeb.Endpoint, user)
 
       unique_ip(build_conn())
       |> put_req_header("content-type", "application/json")

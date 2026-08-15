@@ -68,7 +68,7 @@ defmodule KilnCMSWeb.TwoFactorController do
          {:ok, user} <- SecondFactor.check(user, code),
          # In the `with`, not beside it, and for the headless gate's reason
          # (#743) plus one of this door's own (#742): claiming releases the
-         # first-factor token `mint/4` held, and a session established on a token
+         # first-factor token `mint_and_hold/4` held, and a session established on a token
          # still parked in the store is a sign-in that answers 401 on its very
          # next request. The `:session` blob's single use is still the deleted
          # session key — the claim half of this is a no-op here — but the release

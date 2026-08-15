@@ -28,7 +28,7 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
     {user, secret} =
       TwoFactorFixtures.enabled_user([role: :editor] ++ Enum.to_list(extra))
 
-    # `PendingSignIn.mint/3` reads the first-factor token out of `__metadata__`,
+    # `PendingSignIn.mint_and_hold/4` reads the first-factor token out of `__metadata__`,
     # which a seeded user does not carry — the sign-in strategy puts it there.
     {%{user | __metadata__: Map.put(user.__metadata__, :token, "stub.jwt.token")}, secret}
   end
@@ -40,7 +40,7 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
       test "#{mode}: carries the user and the first-factor token" do
         {user, _secret} = enabled_user()
 
-        blob = PendingSignIn.mint(@mode, @endpoint, user)
+        blob = PendingSignIn.mint_and_hold(@mode, @endpoint, user)
 
         assert {:ok, pending} = PendingSignIn.resolve(@mode, @endpoint, blob)
         assert pending.user.id == user.id
@@ -50,7 +50,7 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
 
       test "#{mode}: a garbage, missing or tampered blob is :error" do
         {user, _secret} = enabled_user()
-        blob = PendingSignIn.mint(@mode, @endpoint, user)
+        blob = PendingSignIn.mint_and_hold(@mode, @endpoint, user)
 
         assert :error = PendingSignIn.resolve(@mode, @endpoint, "not-a-blob")
         assert :error = PendingSignIn.resolve(@mode, @endpoint, nil)
@@ -61,7 +61,7 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
         # Honouring the blob anyway would complete a sign-in on a factor that no
         # longer exists.
         {user, _secret} = enabled_user()
-        blob = PendingSignIn.mint(@mode, @endpoint, user)
+        blob = PendingSignIn.mint_and_hold(@mode, @endpoint, user)
 
         Ash.Seed.update!(user, %{totp_confirmed_at: nil})
 
@@ -76,8 +76,8 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
       # which the client *holds* — would be redeemable as a browser one.
       {user, _secret} = enabled_user()
 
-      session = PendingSignIn.mint(:session, @endpoint, user)
-      encrypted = PendingSignIn.mint(:encrypted, @endpoint, user)
+      session = PendingSignIn.mint_and_hold(:session, @endpoint, user)
+      encrypted = PendingSignIn.mint_and_hold(:encrypted, @endpoint, user)
 
       assert :error = PendingSignIn.resolve(:encrypted, @endpoint, session)
       assert :error = PendingSignIn.resolve(:session, @endpoint, encrypted)
@@ -90,7 +90,7 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
       # fixed.
       {user, _secret} = enabled_user()
 
-      encrypted = PendingSignIn.mint(:encrypted, @endpoint, user)
+      encrypted = PendingSignIn.mint_and_hold(:encrypted, @endpoint, user)
       refute decoded_anywhere?(encrypted, "stub.jwt.token")
     end
 
@@ -106,7 +106,7 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
       # the first version of this test passed with the option deleted.
       {user, _secret} = enabled_user()
 
-      assert embedded_max_age(PendingSignIn.mint(:session, @endpoint, user)) ==
+      assert embedded_max_age(PendingSignIn.mint_and_hold(:session, @endpoint, user)) ==
                PendingSignIn.max_age()
 
       # The signed mode is the one whose term is readable without the key, and
@@ -121,7 +121,7 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
   describe "single use" do
     test "an encrypted blob carries a jti, and claiming it succeeds once" do
       {user, _secret} = enabled_user()
-      blob = PendingSignIn.mint(:encrypted, @endpoint, user)
+      blob = PendingSignIn.mint_and_hold(:encrypted, @endpoint, user)
 
       assert {:ok, %{jti: jti} = resolved} = PendingSignIn.resolve(:encrypted, @endpoint, blob)
       assert is_binary(jti)
@@ -140,7 +140,7 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
       # first. A node-local cache answered "unspent" on every node that had not
       # seen the redemption.
       {user, _secret} = enabled_user()
-      blob = PendingSignIn.mint(:encrypted, @endpoint, user)
+      blob = PendingSignIn.mint_and_hold(:encrypted, @endpoint, user)
 
       assert {:ok, resolved} = PendingSignIn.resolve(:encrypted, @endpoint, blob)
 
@@ -161,7 +161,7 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
       # add a write per browser sign-in against a replay that already requires
       # the session cookie.
       {user, _secret} = enabled_user()
-      blob = PendingSignIn.mint(:session, @endpoint, user)
+      blob = PendingSignIn.mint_and_hold(:session, @endpoint, user)
 
       assert {:ok, %{jti: nil} = resolved} = PendingSignIn.resolve(:session, @endpoint, blob)
       assert :ok = PendingSignIn.claim(resolved)
@@ -172,8 +172,8 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
     test "survives the session round trip, and defaults to false" do
       {user, _secret} = enabled_user()
 
-      ticked = PendingSignIn.mint(:session, @endpoint, user, remember_me?: true)
-      plain = PendingSignIn.mint(:session, @endpoint, user)
+      ticked = PendingSignIn.mint_and_hold(:session, @endpoint, user, remember_me?: true)
+      plain = PendingSignIn.mint_and_hold(:session, @endpoint, user)
 
       assert {:ok, %{remember_me?: true}} = PendingSignIn.resolve(:session, @endpoint, ticked)
       assert {:ok, %{remember_me?: false}} = PendingSignIn.resolve(:session, @endpoint, plain)
@@ -184,7 +184,7 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
       # not be able to read a `true` here and act on it.
       {user, _secret} = enabled_user()
 
-      blob = PendingSignIn.mint(:encrypted, @endpoint, user, remember_me?: true)
+      blob = PendingSignIn.mint_and_hold(:encrypted, @endpoint, user, remember_me?: true)
 
       assert {:ok, %{remember_me?: remember?}} =
                PendingSignIn.resolve(:encrypted, @endpoint, blob)
@@ -220,7 +220,7 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
 
         assert usable?(token), "precondition: a freshly stored token authenticates"
 
-        PendingSignIn.mint(@mode, @endpoint, user)
+        PendingSignIn.mint_and_hold(@mode, @endpoint, user)
 
         refute usable?(token)
         assert row(token).purpose == Token.second_factor_hold_purpose()
@@ -230,7 +230,7 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
         {user, token} = held_user()
         expiry = row(token).expires_at
 
-        blob = PendingSignIn.mint(@mode, @endpoint, user)
+        blob = PendingSignIn.mint_and_hold(@mode, @endpoint, user)
         assert {:ok, resolved} = PendingSignIn.resolve(@mode, @endpoint, blob)
 
         assert :ok = PendingSignIn.claim(resolved)
@@ -246,7 +246,7 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
         {user, token} = held_user()
         natural = row(token).expires_at
 
-        PendingSignIn.mint(@mode, @endpoint, user)
+        PendingSignIn.mint_and_hold(@mode, @endpoint, user)
 
         refute usable?(token)
 
@@ -268,7 +268,7 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
       # purpose, in the UPDATE's own WHERE, and finds nothing to put back.
       {user, token} = held_user()
 
-      blob = PendingSignIn.mint(:encrypted, @endpoint, user)
+      blob = PendingSignIn.mint_and_hold(:encrypted, @endpoint, user)
       Ash.Seed.update!(row(token), %{purpose: "revocation"})
 
       assert {:ok, resolved} = PendingSignIn.resolve(:encrypted, @endpoint, blob)
@@ -290,7 +290,7 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
       # code that closes it.
       {user, token} = held_user()
 
-      blob = PendingSignIn.mint(:encrypted, @endpoint, user)
+      blob = PendingSignIn.mint_and_hold(:encrypted, @endpoint, user)
       assert {:ok, resolved} = PendingSignIn.resolve(:encrypted, @endpoint, blob)
 
       # Someone else spends this blob's jti first.
@@ -316,7 +316,7 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
       # back under `"user"` with the JWT's own expiry.
       {user, token} = held_user()
 
-      blob = PendingSignIn.mint(:encrypted, @endpoint, user)
+      blob = PendingSignIn.mint_and_hold(:encrypted, @endpoint, user)
       Ash.Seed.update!(row(token), %{expires_at: DateTime.add(DateTime.utc_now(), -5, :second)})
 
       assert {:ok, resolved} = PendingSignIn.resolve(:encrypted, @endpoint, blob)
@@ -335,7 +335,7 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
       # which is the outcome the fail-soft half exists to rule out.
       {user, token} = held_user()
 
-      blob = PendingSignIn.mint(:encrypted, @endpoint, user)
+      blob = PendingSignIn.mint_and_hold(:encrypted, @endpoint, user)
       KilnCMS.Repo.delete!(row(token))
 
       assert {:ok, resolved} = PendingSignIn.resolve(:encrypted, @endpoint, blob)
@@ -348,11 +348,11 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
       # moment its own hold expires.
       {user, token} = held_user()
 
-      PendingSignIn.mint(:encrypted, @endpoint, user)
+      PendingSignIn.mint_and_hold(:encrypted, @endpoint, user)
       first = row(token).expires_at
 
       Ash.Seed.update!(row(token), %{expires_at: DateTime.add(first, -120, :second)})
-      PendingSignIn.mint(:encrypted, @endpoint, user)
+      PendingSignIn.mint_and_hold(:encrypted, @endpoint, user)
 
       assert DateTime.compare(row(token).expires_at, first) in [:eq, :gt]
       assert row(token).purpose == Token.second_factor_hold_purpose()
@@ -480,12 +480,76 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
 
     test "a blob carrying something that is not a JWT neither raises nor holds" do
       # `Joken.peek_claims/1` raises on anything that is not a well-formed token,
-      # and `mint/4` is on the sign-in path: an absence has to stay an absence.
+      # and `mint_and_hold/4` is on the sign-in path: an absence has to stay an absence.
       {user, _secret} = enabled_user()
 
-      assert is_binary(PendingSignIn.mint(:encrypted, @endpoint, user, token: "stub.jwt.token"))
+      assert is_binary(
+               PendingSignIn.mint_and_hold(:encrypted, @endpoint, user, token: "stub.jwt.token")
+             )
     end
   end
+
+  describe "mint_and_hold/4 refuses the caller's own credential (#1171)" do
+    # The hold is a side effect a caller cannot opt out of, so the one call it
+    # must never accept is a step-up prompt handing over the token that
+    # authenticates the request itself — that would sign the caller out.
+    # A first-factor sign-in never trips this: the strategy's fresh token is not
+    # the one (if any) the request arrived with.
+    test "raises when the token is the conn's session credential, and holds nothing" do
+      {user, token} = held_user()
+
+      conn =
+        Phoenix.ConnTest.build_conn()
+        |> Plug.Test.init_test_session(%{"user_token" => token})
+
+      assert_raise ArgumentError, ~r/would sign the caller out/, fn ->
+        PendingSignIn.mint_and_hold(:session, conn, user)
+      end
+
+      assert usable?(token), "a refused hold must leave the session's token untouched"
+    end
+
+    test "raises when the token is the conn's bearer credential" do
+      {user, token} = held_user()
+
+      conn =
+        Phoenix.ConnTest.build_conn()
+        |> Plug.Conn.assign(:current_user, user)
+
+      assert_raise ArgumentError, ~r/would sign the caller out/, fn ->
+        PendingSignIn.mint_and_hold(:encrypted, conn, user, token: token)
+      end
+
+      assert usable?(token)
+    end
+
+    test "a conn authenticated by a DIFFERENT token is fine — that is a plain sign-in" do
+      {user, fresh} = held_user()
+      {_same_user, other} = TwoFactorFixtures.with_first_factor_token(user)
+
+      conn = Plug.Test.init_test_session(endpoint_conn(), %{"user_token" => other})
+
+      blob = PendingSignIn.mint_and_hold(:session, conn, user, token: fresh)
+
+      assert is_binary(blob)
+      refute usable?(fresh)
+      assert usable?(other), "only the token being minted is held, never the request's"
+    end
+
+    test "a conn with no session fetched and no current user is a plain sign-in" do
+      {user, token} = held_user()
+
+      blob = PendingSignIn.mint_and_hold(:encrypted, endpoint_conn(), user)
+
+      assert is_binary(blob)
+      refute usable?(token)
+    end
+  end
+
+  # A conn `Phoenix.Token` can key off, as one that has been through the
+  # endpoint would be.
+  defp endpoint_conn,
+    do: Plug.Conn.put_private(Phoenix.ConnTest.build_conn(), :phoenix_endpoint, @endpoint)
 
   # A 2FA account carrying a first-factor token the store has actually seen.
   defp held_user do
