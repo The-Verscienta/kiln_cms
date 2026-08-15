@@ -87,9 +87,22 @@ end
 
 `:string` and `:rich_text` are prose unless a field says otherwise;
 `{:array, :map}` fields opt in by naming their keys; `:unsupported` marks text
-this exporter cannot round-trip safely (raw HTML, an opaque legacy payload)
-and makes the export **report** it rather than drop it silently. Rich text is
-segmented per Portable Text block, with tables segmented per cell.
+this exporter cannot round-trip safely (an opaque legacy payload) and makes
+the export **report** it rather than drop it silently. Rich text is segmented
+per Portable Text block, with tables segmented per cell.
+
+A `rich_text` block whose prose still lives in the transitional `legacy_html`
+(stored TipTap HTML, pre-Portable-Text content) **is** exported (#1106): the
+HTML is converted through `KilnCMS.Blocks.PortableText.from_html/1` and cut
+into the same `….body.k:b0` units the editor's own body would give, inline
+markup becoming the same `<pc>` codes — never raw tags a vendor could break.
+On import the translation lands in `body` as Portable Text (and the target's
+stale HTML is cleared, as any save does once `body` is authoritative): the
+source keeps its HTML, the translation is born migrated, and only the blocks
+the file actually addressed are touched. What is still reported rather than
+sent is a `custom` block's `content`/`data` — an untyped map has no
+defensible extraction rule, so the operator sees the block and field named
+in `warnings` and translates it by hand.
 
 ### Unit ids
 

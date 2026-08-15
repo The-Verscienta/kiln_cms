@@ -95,6 +95,23 @@ migration, a rewritten column, a dropped config key).
   Off by default — nothing changes for an existing deployment; `EMBED_ORIGINS=*`
   under the cap is a ceiling of everything, an unset `EMBED_ORIGINS` under it
   closes cross-site framing deployment-wide.
+- **XLIFF export now carries `legacy_html` prose** (#1106). A `rich_text`
+  block whose text still lived in the transitional stored TipTap HTML was
+  declared `translatable: :unsupported` and only *reported* in the export's
+  warnings, leaving the operator to translate it by hand. New
+  `KilnCMS.Blocks.PortableText.from_html/1` converts stored TipTap HTML to
+  Portable Text (through TipTap's own JSON shape and `from_tiptap/1`, so
+  styles, marks, `markDefs` links, lists, code blocks, tables and the
+  `b0`/`b1` keys come out exactly as the editor would have saved them — it is
+  also the converter the Phase C data migration wants), and
+  `KilnCMS.CMS.Xliff.Units` now sees such a block through it: the prose is cut
+  into ordinary `….body.k:b0` units with the same `<pc>` inline codes as any
+  rich-text unit, never raw tags. On import the translation lands in `body`
+  as Portable Text (the target's stale HTML is cleared as on any save once
+  `body` is authoritative); the source keeps its HTML, and a legacy block the
+  file did not address is left exactly as stored. `custom.content`/`.data`
+  stay reported, not sent — an untyped map has no defensible extraction rule
+  — and `docs/localization-workflows.md` says so.
 
 ## [0.6.0] - 2026-08-12
 

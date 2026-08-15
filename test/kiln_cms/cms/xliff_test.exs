@@ -147,6 +147,31 @@ defmodule KilnCMS.CMS.XliffTest do
     end
 
     test "reports prose it cannot round-trip instead of dropping it silently" do
+      # A `custom` block's payload is the honest end state (#1106 option 3): an
+      # untyped map has no defensible extraction rule, so it is reported.
+      actor = admin()
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Custom",
+            slug: slug(),
+            locale: "en",
+            blocks: [%{"_type" => "custom", "data" => %{"headline" => "Some prose"}}]
+          },
+          actor: actor
+        )
+
+      {units, warnings} = Units.extract(CMS.get_page!(page.id, actor: actor))
+
+      refute Enum.any?(units, &String.contains?(&1.id, "data"))
+      assert [%{field: :data, reason: :unsupported_field}] = warnings
+    end
+
+    # #1106. Stored TipTap HTML used to be reported and left out; now it is
+    # converted through `PortableText.from_html/1` and cut into the same body
+    # units the editor's own Portable Text would give.
+    test "legacy_html prose is exported as body units, with inline marks, and not warned about" do
       actor = admin()
 
       page =
@@ -155,15 +180,50 @@ defmodule KilnCMS.CMS.XliffTest do
             title: "Legacy",
             slug: slug(),
             locale: "en",
-            blocks: [%{"_type" => "rich_text", "legacy_html" => "<p>Old prose</p>"}]
+            blocks: [
+              %{
+                "_type" => "rich_text",
+                "legacy_html" =>
+                  "<h2>Old title</h2><p>Old <strong>bold</strong> prose with <a href=\"https://x.test\">a link</a></p>"
+              }
+            ]
           },
           actor: actor
         )
 
       {units, warnings} = Units.extract(CMS.get_page!(page.id, actor: actor))
 
+      assert warnings == []
+
+      body_units = Enum.filter(units, &String.contains?(&1.id, ".body.k:"))
+      assert length(body_units) == 2
+      assert Enum.map(body_units, & &1.id) |> Enum.all?(&(&1 =~ ~r/\.body\.k:b\d$/))
+
+      [heading, para] = body_units
+      assert heading.runs == [%{text: "Old title", marks: []}]
+      assert Enum.map(para.runs, & &1.text) == ["Old ", "bold", " prose with ", "a link"]
+      assert Enum.at(para.runs, 1).marks == ["strong"]
+      assert [%{"_type" => "link", "href" => "https://x.test"}] = para.mark_defs
       refute Enum.any?(units, &String.contains?(&1.id, "legacy_html"))
-      assert [%{field: :legacy_html, reason: :unsupported_field}] = warnings
+    end
+
+    test "a legacy block whose HTML holds no prose at all is neither a unit nor a warning" do
+      actor = admin()
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Empty legacy",
+            slug: slug(),
+            locale: "en",
+            blocks: [%{"_type" => "rich_text", "legacy_html" => "<p></p>"}]
+          },
+          actor: actor
+        )
+
+      {units, warnings} = Units.extract(CMS.get_page!(page.id, actor: actor))
+      assert Enum.map(units, & &1.id) == ["title"]
+      assert warnings == []
     end
   end
 
@@ -557,6 +617,66 @@ defmodule KilnCMS.CMS.XliffTest do
     assert report.applied == []
     assert length(report.unchanged) > 5
     assert fr_variant(en, actor).updated_at == fr_before.updated_at
+  end
+
+  # #1106. Migrate-on-translate: the source keeps its stored HTML, the
+  # translation is born as Portable Text — and only for the blocks the file
+  # actually addressed.
+  test "round trip on legacy_html: the translation lands in body as Portable Text" do
+    actor = admin()
+    shared = slug()
+
+    en =
+      CMS.create_page!(
+        %{
+          title: "Legacy round trip",
+          slug: shared,
+          locale: "en",
+          blocks: [
+            %{"_type" => "rich_text", "legacy_html" => "<p>First <em>legacy</em> paragraph</p>"},
+            %{"_type" => "rich_text", "legacy_html" => "<p>Second legacy paragraph</p>"}
+          ]
+        },
+        actor: actor
+      )
+
+    en = CMS.get_page!(en.id, actor: actor)
+    assert {:ok, %{xliff: xml}} = Xliff.export(:page, en, "fr", actor: actor)
+
+    # Translate only the FIRST block's unit; the second is echoed untranslated.
+    first_only =
+      Regex.replace(~r{<source([^>]*)>(.*?)</source>}s, xml, fn whole, attrs, inner ->
+        if String.contains?(inner, "First"),
+          do:
+            "<source#{attrs}>#{inner}</source><target#{attrs}>#{String.replace(inner, "First", "Premier")}</target>",
+          else: whole
+      end)
+
+    assert {:ok, [report]} = Xliff.import(first_only, actor: actor)
+    assert report.error == nil
+    assert report.unknown == []
+    assert Enum.any?(report.applied, &String.contains?(&1, ".body.k:"))
+
+    fr = CMS.get_page!(report.record.id, actor: actor)
+
+    # The translated block: body is Portable Text carrying the translation with
+    # its mark, and the stale HTML is gone (`TypedBlocks` nils it once body is
+    # authoritative).
+    first = fr.blocks |> Enum.at(0) |> Map.fetch!(:value)
+    assert [%{"children" => children}] = first.body
+    assert Enum.map(children, & &1["text"]) == ["Premier ", "legacy", " paragraph"]
+    assert Enum.at(children, 1)["marks"] == ["em"]
+    assert first.legacy_html in [nil, ""]
+
+    # The untouched block is exactly as stored — nothing was migrated that
+    # nothing translated.
+    second = fr.blocks |> Enum.at(1) |> Map.fetch!(:value)
+    assert second.body in [nil, []]
+    assert second.legacy_html == "<p>Second legacy paragraph</p>"
+
+    # And the source is untouched either way.
+    en = CMS.get_page!(en.id, actor: actor)
+    assert en.blocks |> Enum.at(0) |> Map.fetch!(:value) |> Map.fetch!(:legacy_html) =~ "First"
   end
 
   # ── import behaviour ───────────────────────────────────────────────────────

@@ -45,6 +45,266 @@ defmodule KilnCMS.Blocks.PortableText do
   def from_tiptap(list) when is_list(list), do: list
   def from_tiptap(_), do: []
 
+  # ── stored TipTap HTML → Portable Text ─────────────────────────────────────
+
+  @doc """
+  Convert stored TipTap **HTML** (a `rich_text` block's transitional
+  `legacy_html`) to a list of PT block maps (#1106).
+
+  Goes through TipTap's own JSON shape and `from_tiptap/1` rather than building
+  PT directly, so a `<p>`, `<h2>`, `<ul><li>`, `<blockquote>`, `<pre><code>`,
+  `<hr>`, `<table>` and every inline mark (`<strong>`/`<b>`, `<em>`/`<i>`,
+  `<u>`, `<s>`/`<del>`/`<strike>`, `<code>`, `<a href>`, `<br>`) land in the
+  exact PT the editor would have saved for the same document — same block
+  styles, same mark names, same `markDefs` link shape, same `b0`/`b1` keys.
+  That is what makes it usable both as the Phase C data migration and by the
+  XLIFF exporter: a unit cut from a converted `legacy_html` is addressed like a
+  unit cut from a body the editor wrote.
+
+  Coverage is the editor's, and so are the gaps: an `<img>` inside prose is
+  dropped, exactly as `from_tiptap/1` drops an embedded object (images are
+  their own block in Kiln, not prose); an unknown block-level element
+  contributes its inline text as a paragraph, an unknown inline element its
+  children unmarked; comments and scripts are dropped. Whitespace-only text
+  between blocks is ignored. Malformed HTML parses as Floki parses it —
+  leniently — rather than raising.
+
+  `nil`/blank → `[]`.
+  """
+  @spec from_html(binary() | nil) :: [pt_block()]
+  def from_html(nil), do: []
+
+  def from_html(html) when is_binary(html) do
+    if String.trim(html) == "" do
+      []
+    else
+      case Floki.parse_fragment(keep_inline_gaps(html)) do
+        {:ok, nodes} -> from_tiptap(%{"type" => "doc", "content" => html_blocks(nodes)})
+        {:error, _reason} -> []
+      end
+    end
+  end
+
+  # mochiweb (Floki's parser) drops a whitespace-only text node between two
+  # tags — so `<em>b</em> <a>c</a>` would come back as "bc". A single space
+  # between tags on one line is prose (TipTap serializes inline runs that way);
+  # a run holding a newline is markup formatting between blocks and can go.
+  # `&#32;` is decoded to a space *after* the drop and survives.
+  defp keep_inline_gaps(html), do: Regex.replace(~r/>[ \t]+</, html, ">&#32;<")
+
+  @html_block_tags ~w(p h1 h2 h3 h4 h5 h6 blockquote ul ol pre hr table div section article
+                     header footer aside main figure figcaption details summary address dl dt dd)
+
+  @html_marks %{
+    "strong" => "bold",
+    "b" => "bold",
+    "em" => "italic",
+    "i" => "italic",
+    "u" => "underline",
+    "s" => "strike",
+    "del" => "strike",
+    "strike" => "strike",
+    "code" => "code"
+  }
+
+  # Top-level nodes → TipTap block nodes. Loose inline content between block
+  # elements (a bare text node, a `<strong>` at the top) is gathered into a
+  # paragraph, as TipTap itself would on paste.
+  defp html_blocks(nodes) do
+    {blocks, pending} =
+      Enum.reduce(nodes, {[], []}, fn node, {blocks, pending} ->
+        if block_node?(node) do
+          {blocks ++ flush_inline(pending) ++ html_block(node), []}
+        else
+          {blocks, pending ++ [node]}
+        end
+      end)
+
+    blocks ++ flush_inline(pending)
+  end
+
+  defp block_node?({tag, _attrs, _children}), do: tag in @html_block_tags
+  defp block_node?(_text_or_comment), do: false
+
+  defp flush_inline([]), do: []
+
+  defp flush_inline(nodes) do
+    case html_inline(nodes, []) do
+      [] -> []
+      inline -> [%{"type" => "paragraph", "content" => inline}]
+    end
+  end
+
+  defp html_block({"p", _attrs, children}), do: [paragraph(children)]
+
+  defp html_block({"h" <> level, _attrs, children}) when level in ~w(1 2 3 4 5 6) do
+    [
+      %{
+        "type" => "heading",
+        "attrs" => %{"level" => String.to_integer(level)},
+        "content" => html_inline(children, [])
+      }
+    ]
+  end
+
+  defp html_block({"blockquote", _attrs, children}),
+    do: [%{"type" => "blockquote", "content" => paragraphs_from(children)}]
+
+  defp html_block({tag, _attrs, children}) when tag in ["ul", "ol"] do
+    type = if tag == "ol", do: "orderedList", else: "bulletList"
+
+    items =
+      children
+      |> Enum.filter(&match?({"li", _, _}, &1))
+      |> Enum.map(fn {"li", _attrs, li_children} -> list_item(li_children) end)
+
+    [%{"type" => type, "content" => items}]
+  end
+
+  defp html_block({"pre", _attrs, children}) do
+    # `<pre><code class="language-x">…</code></pre>` is TipTap's code block;
+    # the text is taken verbatim, marks and all inner tags flattened.
+    {inner, language} =
+      case children do
+        [{"code", attrs, inner}] -> {inner, code_language(attrs)}
+        other -> {other, nil}
+      end
+
+    node = %{
+      "type" => "codeBlock",
+      "content" => [%{"type" => "text", "text" => Floki.text(inner)}]
+    }
+
+    [if(language, do: Map.put(node, "attrs", %{"language" => language}), else: node)]
+  end
+
+  defp html_block({"hr", _attrs, _children}), do: [%{"type" => "horizontalRule"}]
+
+  defp html_block({"table", _attrs, children}) do
+    rows =
+      children
+      |> Enum.flat_map(fn
+        {section, _attrs, rows} when section in ["thead", "tbody", "tfoot"] -> rows
+        row -> [row]
+      end)
+      |> Enum.filter(&match?({"tr", _, _}, &1))
+      |> Enum.map(fn {"tr", _attrs, cells} -> table_row(cells) end)
+
+    [%{"type" => "table", "content" => rows}]
+  end
+
+  # Any other block-level container: its own block children become blocks; its
+  # loose inline content becomes a paragraph. `<figure>`/`<div>` wrappers around
+  # prose fall out this way rather than being dropped.
+  defp html_block({_tag, _attrs, children}), do: html_blocks(children)
+
+  defp paragraph(children), do: %{"type" => "paragraph", "content" => html_inline(children, [])}
+
+  # A container whose children TipTap requires to be paragraphs (blockquote,
+  # list item): block children pass through, loose inline is wrapped.
+  defp paragraphs_from(children) do
+    case html_blocks(children) do
+      [] -> [%{"type" => "paragraph", "content" => []}]
+      blocks -> blocks
+    end
+  end
+
+  defp list_item(children) do
+    {nested, rest} = Enum.split_with(children, &match?({tag, _, _} when tag in ["ul", "ol"], &1))
+
+    %{
+      "type" => "listItem",
+      "content" => paragraphs_from(rest) ++ Enum.flat_map(nested, &html_block/1)
+    }
+  end
+
+  defp table_row(cells) do
+    content =
+      cells
+      |> Enum.filter(&match?({tag, _, _} when tag in ["td", "th"], &1))
+      |> Enum.map(fn {tag, attrs, children} ->
+        %{
+          "type" => if(tag == "th", do: "tableHeader", else: "tableCell"),
+          "attrs" => cell_attrs(attrs),
+          "content" => paragraphs_from(children)
+        }
+      end)
+
+    %{"type" => "tableRow", "content" => content}
+  end
+
+  defp cell_attrs(attrs) do
+    Enum.reduce(["colspan", "rowspan"], %{}, fn key, acc ->
+      case span_attr(attrs, key) do
+        n when is_integer(n) -> Map.put(acc, key, n)
+        nil -> acc
+      end
+    end)
+  end
+
+  # `colspan`/`rowspan` as an integer greater than one, else nil.
+  defp span_attr(attrs, key) do
+    with {_, value} <- List.keyfind(attrs, key, 0),
+         {n, _rest} when n > 1 <- Integer.parse(value) do
+      n
+    else
+      _ -> nil
+    end
+  end
+
+  defp code_language(attrs) do
+    case List.keyfind(attrs, "class", 0) do
+      {_, class} ->
+        class
+        |> String.split()
+        |> Enum.find_value(fn
+          "language-" <> lang -> lang
+          _ -> nil
+        end)
+
+      nil ->
+        nil
+    end
+  end
+
+  # Inline children → TipTap inline nodes (`text` with `marks`, `hardBreak`).
+  # `marks` accumulate down the tree so `<strong><em>x</em></strong>` is one
+  # text node with both.
+  defp html_inline(nodes, marks) do
+    Enum.flat_map(nodes, fn
+      text when is_binary(text) ->
+        if text == "", do: [], else: [text_node(text, marks)]
+
+      {"br", _attrs, _children} ->
+        [%{"type" => "hardBreak"}]
+
+      {"a", attrs, children} ->
+        case List.keyfind(attrs, "href", 0) do
+          {_, href} when is_binary(href) and href != "" ->
+            html_inline(children, marks ++ [%{"type" => "link", "attrs" => %{"href" => href}}])
+
+          _ ->
+            html_inline(children, marks)
+        end
+
+      {tag, _attrs, children} when is_map_key(@html_marks, tag) ->
+        html_inline(children, marks ++ [%{"type" => Map.fetch!(@html_marks, tag)}])
+
+      # A block element nested where only inline is expected (a `<p>` inside a
+      # `<li>` handled by `paragraphs_from/1` never reaches here; a stray one
+      # elsewhere contributes its text).
+      {_tag, _attrs, children} ->
+        html_inline(children, marks)
+
+      # Comments, doctype, PI: nothing.
+      _other ->
+        []
+    end)
+  end
+
+  defp text_node(text, []), do: %{"type" => "text", "text" => text}
+  defp text_node(text, marks), do: %{"type" => "text", "text" => text, "marks" => marks}
+
   # One TipTap node can emit several PT blocks (each list item is its own PT
   # block), so nodes return {blocks, next_key}.
   defp blocks_from_node(%{"type" => "blockquote"} = node, key) do
