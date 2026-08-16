@@ -56,7 +56,8 @@ defmodule KilnCMS.CMS.TypeDefinition do
         :has_published_feed,
         :icon,
         :description,
-        :schema_org_type
+        :schema_org_type,
+        :default_review_after_days
       ]
 
       change KilnCMS.CMS.Changes.DefaultPathSegment
@@ -82,7 +83,8 @@ defmodule KilnCMS.CMS.TypeDefinition do
         :has_published_feed,
         :icon,
         :description,
-        :schema_org_type
+        :schema_org_type,
+        :default_review_after_days
       ]
 
       validate KilnCMS.CMS.Validations.SlugPatternTokens
@@ -270,6 +272,23 @@ defmodule KilnCMS.CMS.TypeDefinition do
       default: "Article",
       public?: true,
       constraints: [max_length: KilnCMS.Limits.identifier()]
+
+    # The freshness cadence entries of this type inherit when they set none of
+    # their own (docs/content-lifecycles.md) — "every clinical monograph is
+    # re-read yearly" stated
+    # once, on the type, instead of on each of four hundred entries.
+    #
+    # A default, not a floor: an entry that sets `review_after_days` overrides
+    # this, and `nil` on both means the type simply has no review cadence. The
+    # fallback is resolved in the entry's `effective_review_after_days`
+    # calculation, so raising it here moves every inheriting entry's `due_at`
+    # on the next read rather than needing a backfill.
+    #
+    # Same bounds as the entry-level field, for the same reasons.
+    attribute :default_review_after_days, :integer do
+      public? true
+      constraints min: 1, max: 1095
+    end
 
     timestamps()
   end

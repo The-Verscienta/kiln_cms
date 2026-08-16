@@ -213,7 +213,8 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
       assert VersionDiff.diffable_fields(KilnCMS.CMS.Post) ==
                ~w(title slug path_alias excerpt state audience locale
                   seo_title seo_description seo_keywords seo_image canonical_url
-                  published_at scheduled_at unpublish_at
+                  published_at scheduled_at unpublish_at expiry_action
+                  review_after_days last_reviewed_at
                   author_id category_id featured_image_id custom_fields)a
 
       assert VersionFields.restorable_fields(KilnCMS.CMS.Post) ==

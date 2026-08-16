@@ -205,6 +205,9 @@ defmodule KilnCMS.CMS do
       define :publish_scheduled_page, action: :publish_scheduled
       define :unpublish_page, action: :unpublish
       define :archive_page, action: :archive
+      # Freshness attestation (#500) — its own interface, not a `update_page` call
+      # with a timestamp, because `last_reviewed_at` is not acceptable input.
+      define :mark_page_reviewed, action: :mark_reviewed
       define :unarchive_page, action: :unarchive
       define :restore_page_version, action: :restore_version
       define :destroy_page, action: :destroy
@@ -242,6 +245,9 @@ defmodule KilnCMS.CMS do
       define :publish_scheduled_post, action: :publish_scheduled
       define :unpublish_post, action: :unpublish
       define :archive_post, action: :archive
+      # Freshness attestation (#500) — its own interface, not a `update_post` call
+      # with a timestamp, because `last_reviewed_at` is not acceptable input.
+      define :mark_post_reviewed, action: :mark_reviewed
       define :unarchive_post, action: :unarchive
       define :restore_post_version, action: :restore_version
       define :destroy_post, action: :destroy
@@ -300,6 +306,9 @@ defmodule KilnCMS.CMS do
       define :publish_scheduled_entry, action: :publish_scheduled
       define :unpublish_entry, action: :unpublish
       define :archive_entry, action: :archive
+      # Freshness attestation (#500) — its own interface, not a `update_entry` call
+      # with a timestamp, because `last_reviewed_at` is not acceptable input.
+      define :mark_entry_reviewed, action: :mark_reviewed
       define :unarchive_entry, action: :unarchive
       define :restore_entry_version, action: :restore_version
       define :destroy_entry, action: :destroy

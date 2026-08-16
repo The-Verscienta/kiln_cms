@@ -4742,6 +4742,11 @@ msgstr "Último error"
 msgid "Last posted %{when}"
 msgstr "Última publicación: %{when}"
 
+#: lib/kiln_cms_web/components/version_diff_components.ex
+#, elixir-autogen, elixir-format
+msgid "Last reviewed"
+msgstr "Última revisión"
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Last run failed"
@@ -5897,6 +5902,11 @@ msgstr "Sin conexión"
 #, elixir-autogen, elixir-format
 msgid "Older posts →"
 msgstr "Entradas anteriores →"
+
+#: lib/kiln_cms_web/components/version_diff_components.ex
+#, elixir-autogen, elixir-format
+msgid "On expiry"
+msgstr "Al expirar"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
@@ -7250,6 +7260,11 @@ msgstr "Devolver"
 #, elixir-autogen, elixir-format
 msgid "Reverse DNS is set in your hosting provider's panel, not in your DNS zone."
 msgstr "El DNS inverso se configura en el panel de su proveedor de hosting, no en su zona DNS."
+
+#: lib/kiln_cms_web/components/version_diff_components.ex
+#, elixir-autogen, elixir-format
+msgid "Review every (days)"
+msgstr "Revisar cada (días)"
 
 #: lib/kiln_cms_web/controllers/manifest_controller.ex
 #, elixir-autogen, elixir-format

@@ -54,6 +54,14 @@ defmodule KilnCMS.CMS.Content do
   # is swept to the trash.
   @untitled_sweep_days Application.compile_env(:kiln_cms, [:drafts, :untitled_sweep_days], 7)
 
+  # The window on either side of a review deadline (docs/content-lifecycles.md).
+  # One constant, used
+  # twice and symmetrically: content falling due inside it reads `:due_soon`,
+  # content past due but still inside it reads `:due`, and past that it is
+  # `:overdue`. A second, differently-sized constant for the escalation would be
+  # two arbitrary numbers where the calendar's own week is already one.
+  @review_grace_days 7
+
   @doc false
   # Safety net for reads exposed on the public API: when neither the caller
   # (Ash.Query.limit) nor the paginator bounded the query, cap it so a broad
@@ -294,6 +302,8 @@ defmodule KilnCMS.CMS.Content do
     purge_scheduler = Module.concat([resource, Schedulers, PurgeTrashed])
     sweep_worker = Module.concat([resource, Workers, SweepUntitled])
     sweep_scheduler = Module.concat([resource, Schedulers, SweepUntitled])
+    archive_worker = Module.concat([resource, Workers, ArchiveScheduled])
+    archive_scheduler = Module.concat([resource, Schedulers, ArchiveScheduled])
 
     accept =
       [:title, :slug, :path_alias] ++
@@ -311,6 +321,12 @@ defmodule KilnCMS.CMS.Content do
           :custom_fields,
           :scheduled_at,
           :unpublish_at,
+          # Lifecycle (docs/content-lifecycles.md): the review cadence and what the
+          # embargo end does when it fires. `last_reviewed_at` is deliberately
+          # NOT here — it is an attestation, set only by `:mark_reviewed`, so an
+          # ordinary save can never claim a human re-read the piece.
+          :review_after_days,
+          :expiry_action,
           :category_id,
           :featured_image_id
         ]
@@ -1223,6 +1239,58 @@ defmodule KilnCMS.CMS.Content do
         end
       end
 
+    # The review cadence actually in force for a record: its own
+    # `review_after_days`, or — for the dynamic entry tier, which is the tier
+    # whose types an operator defines and therefore the tier where a per-type
+    # default has somewhere to live — the owning `TypeDefinition`'s default.
+    #
+    # Spliced as a raw expression fragment into both `effective_review_after_days`
+    # and `due_at` rather than having the second reference the first. Chaining
+    # expression calculations works, but this one crosses a relationship on one
+    # of the two tiers, and a duplicated three-line fragment is a smaller thing
+    # to get wrong than a join that only exists on `Entry`.
+    #
+    # Compiled types (`Page`, `Post`, anything from `mix kiln.gen.content`) have
+    # no `TypeDefinition` row to fall back to, so for them the effective cadence
+    # is simply the per-record one. That asymmetry is stated in
+    # `docs/content-lifecycles.md`; the alternative — a site-wide default — was
+    # not taken, because a fallback that reaches across every type at once is the
+    # shape that silently re-enables a cadence a team deliberately cleared.
+    cadence_expr =
+      if dynamic? do
+        quote do
+          if is_nil(^ref(:review_after_days)) do
+            type_definition.default_review_after_days
+          else
+            ^ref(:review_after_days)
+          end
+        end
+      else
+        quote do
+          ^ref(:review_after_days)
+        end
+      end
+
+    # When this record next needs a human to re-read it: the last attestation —
+    # or, for content published under a cadence but never yet reviewed, the
+    # publish itself — plus the cadence.
+    #
+    # No guard for the null cases: every one of them (no cadence, never
+    # published, never reviewed) makes one operand NULL, and NULL propagates
+    # through the arithmetic to a NULL `due_at`, which is exactly "not due".
+    due_at_expr =
+      quote do
+        datetime_add(
+          if is_nil(^ref(:last_reviewed_at)) do
+            ^ref(:published_at)
+          else
+            ^ref(:last_reviewed_at)
+          end,
+          unquote(cadence_expr),
+          :day
+        )
+      end
+
     # Compiled types export the discovery hooks `KilnCMS.CMS.ContentTypes`
     # scans for. The entry tier deliberately does NOT — dynamic types are
     # discovered from `TypeDefinition` rows — and instead marks itself so
@@ -1321,6 +1389,7 @@ defmodule KilnCMS.CMS.Content do
         format_fields published_at: {KilnCMS.CMS.Admin, :format_datetime, []},
                       scheduled_at: {KilnCMS.CMS.Admin, :format_datetime, []},
                       unpublish_at: {KilnCMS.CMS.Admin, :format_datetime, []},
+                      last_reviewed_at: {KilnCMS.CMS.Admin, :format_datetime, []},
                       inserted_at: {KilnCMS.CMS.Admin, :format_datetime, []},
                       updated_at: {KilnCMS.CMS.Admin, :format_datetime, []}
 
@@ -1342,6 +1411,7 @@ defmodule KilnCMS.CMS.Content do
           :publish,
           :unpublish,
           :archive,
+          :mark_reviewed,
           :restore,
           :restore_version
         ]
@@ -1349,7 +1419,14 @@ defmodule KilnCMS.CMS.Content do
         destroy_actions [:destroy, :purge]
 
         # Handy derived values on the show view.
-        show_calculations [:published, :word_count, :reading_time_minutes]
+        show_calculations [
+          :published,
+          :word_count,
+          :reading_time_minutes,
+          :health,
+          :due_at,
+          :effective_review_after_days
+        ]
 
         form do
           field :seo_description, type: :long_text
@@ -1425,6 +1502,10 @@ defmodule KilnCMS.CMS.Content do
           transition :unpublish, from: :published, to: :draft
           transition :unpublish_scheduled, from: :published, to: :draft
           transition :archive, from: [:draft, :in_review, :published], to: :archived
+          # The `:archive` expiry action. `from: :published` only — the
+          # trigger's `where` selects published rows, and an embargo end has no
+          # meaning for content that was never live.
+          transition :archive_scheduled, from: :published, to: :archived
           # Archive must not be a one-way door (audit U-H3): a mistaken (or
           # bulk) archive is recoverable by returning the record to draft.
           transition :unarchive, from: :archived, to: :draft
@@ -1462,6 +1543,12 @@ defmodule KilnCMS.CMS.Content do
           # The embargo end: take published content back down once its
           # `unpublish_at` passes (same minute-cron cadence as scheduled
           # publishing).
+          #
+          # `expiry_action == :unpublish` partitions this against
+          # `:archive_scheduled` below in SQL, and excludes `:flag` from both:
+          # a flagged record keeps its past `unpublish_at` precisely so the
+          # `health` calculation can keep reading `:expired`, which a worker
+          # that cleared the timestamp would erase within a minute.
           trigger :unpublish_scheduled do
             action :unpublish_scheduled
             queue :scheduling
@@ -1471,12 +1558,31 @@ defmodule KilnCMS.CMS.Content do
 
             where expr(
                     ^ref(:state) == :published and not is_nil(^ref(:unpublish_at)) and
-                      ^ref(:unpublish_at) <= now()
+                      ^ref(:unpublish_at) <= now() and ^ref(:expiry_action) == :unpublish
                   )
 
             worker_read_action :read
             worker_module_name unquote(unpub_worker)
             scheduler_module_name unquote(unpub_scheduler)
+          end
+
+          # The same embargo end for content configured to archive rather than
+          # return to draft. Identical cadence and shape to the trigger
+          # above; the `expiry_action` predicates are mutually exclusive.
+          trigger :archive_scheduled do
+            action :archive_scheduled
+            queue :scheduling
+            scheduler_cron "* * * * *"
+            list_tenants KilnCMS.Accounts.ListOrgIds
+
+            where expr(
+                    ^ref(:state) == :published and not is_nil(^ref(:unpublish_at)) and
+                      ^ref(:unpublish_at) <= now() and ^ref(:expiry_action) == :archive
+                  )
+
+            worker_read_action :read
+            worker_module_name unquote(archive_worker)
+            scheduler_module_name unquote(archive_scheduler)
           end
 
           trigger :purge_trashed do
@@ -1593,6 +1699,33 @@ defmodule KilnCMS.CMS.Content do
           index [:next_occurrence_at],
             name: unquote("#{table}_next_occurrence_index"),
             where: "next_occurrence_at IS NOT NULL"
+
+          # The two expiry schedulers' scan: `state = 'published' AND
+          # unpublish_at <= now()`, once a minute, per org, per content table.
+          # Partial on both predicates because the rows that satisfy them are a
+          # rounding error against the table — an embargo is a rare thing to set,
+          # and the scan otherwise degrades linearly with a site's archive.
+          #
+          # `expiry_action` is NOT in the index: it partitions three ways with no
+          # selectivity to add once the partial predicate has already cut the set
+          # to "published rows carrying an embargo end", which is small enough to
+          # filter in the heap.
+          index [:unpublish_at],
+            name: unquote("#{table}_unpublish_at_index"),
+            where: "unpublish_at IS NOT NULL AND state = 'published'"
+
+          # The freshness sweep and the calendar's review-due lane both ask for
+          # published content carrying a cadence, ordered by when it falls due.
+          # `due_at` itself is a calculation over two columns and a possible
+          # join, so it cannot be indexed directly; this indexes the term the
+          # sweep actually ranges on and leaves the arithmetic to the heap.
+          #
+          # NULLS FIRST is not requested and not needed: a record with a cadence
+          # but no `last_reviewed_at` counts from `published_at`, and the sweep's
+          # window drops NULL `due_at` rows before ordering arises.
+          index [:last_reviewed_at],
+            name: unquote("#{table}_last_reviewed_at_index"),
+            where: "review_after_days IS NOT NULL AND state = 'published'"
         end
       end
 
@@ -1993,15 +2126,64 @@ defmodule KilnCMS.CMS.Content do
         end
 
         update :unpublish_scheduled do
-          # Run by the AshOban scheduler once `unpublish_at` has passed — the
-          # scheduled mirror of `:unpublish`, clearing the schedule so the
-          # trigger can't re-fire.
+          # Run by the AshOban scheduler once `unpublish_at` has passed on a
+          # record whose `expiry_action` is `:unpublish` — the scheduled mirror
+          # of `:unpublish`, clearing the schedule so the trigger can't re-fire.
           require_atomic? false
           change transition_state(:draft)
           change set_attribute(:unpublish_at, nil)
           change KilnCMS.CMS.Changes.ClearPublishedVersion
           change KilnCMS.CMS.Changes.DeleteArtifacts
           change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "unpublished"}
+        end
+
+        # The `:archive` expiry action's worker — the same embargo end,
+        # landing on `:archived` instead of `:draft`.
+        #
+        # A separate action and a separate trigger rather than one worker
+        # branching on `expiry_action`, because the branch is a *state
+        # transition*: `AshStateMachine` wants each declared, and a single
+        # action carrying two `transition_state` changes is not a thing. Two
+        # triggers whose `where` clauses partition on `expiry_action` also mean
+        # the partition is enforced in SQL, so neither worker can ever pick up a
+        # record the other owns — or a `:flag` record, which belongs to neither.
+        #
+        # `unpublish_at` is cleared here for the reason it is above: an archived
+        # record can be unarchived, and one that came back to draft still
+        # carrying a past embargo end would be re-expired the minute it was
+        # published again, by a deadline nobody re-set.
+        update :archive_scheduled do
+          require_atomic? false
+          change transition_state(:archived)
+          change set_attribute(:unpublish_at, nil)
+          # Same teardown as `:archive` on a published record — the artifacts and
+          # the published version would otherwise orphan (#879 pt 3).
+          change KilnCMS.CMS.Changes.ClearPublishedVersion
+          change KilnCMS.CMS.Changes.DeleteArtifacts
+          change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "unpublished"}
+        end
+
+        # A human attests this content is still correct, resetting the
+        # freshness clock. Deliberately its own action rather than a field on
+        # `:update`:
+        #
+        #   * `last_reviewed_at` is absent from `default_accept`, so no ordinary
+        #     save — and no API client, and no automation — can claim a review
+        #     happened. The only way to write it is to mean it.
+        #   * `store_action_name?(true)` puts `:mark_reviewed` on the PaperTrail
+        #     version, so "who said this was still right, and when" is answerable
+        #     from history rather than inferred from a timestamp.
+        #   * `CoalesceAutosaveVersions` only ever collapses `:autosave` rows, so
+        #     an attestation is never merged away by a later editing run.
+        #
+        # `accept []`: there is no content input. Any state, not just published —
+        # attesting a draft before it goes live is a reasonable thing to do, and
+        # the record simply reads `:fresh` (as all unpublished content does)
+        # until the publish makes the cadence bite.
+        update :mark_reviewed do
+          require_atomic? false
+          accept []
+          change set_attribute(:last_reviewed_at, &DateTime.utc_now/0)
         end
 
         update :archive do
@@ -2550,10 +2732,57 @@ defmodule KilnCMS.CMS.Content do
         # the time passes (cleared on publish).
         attribute :scheduled_at, :utc_datetime_usec, public?: true
 
-        # The embargo end: when set, the AshOban scheduler unpublishes this
-        # record (back to draft, artifacts deleted) once the time passes
-        # (cleared on unpublish).
+        # The embargo end: when set, the AshOban scheduler retires this record
+        # once the time passes. What "retires" means is `expiry_action` below;
+        # for the default `:unpublish` it goes back to draft with its artifacts
+        # deleted, and the timestamp is cleared so the trigger can't re-fire.
         attribute :unpublish_at, :utc_datetime_usec, public?: true
+
+        # What the embargo end does when `unpublish_at` passes. One
+        # timestamp, three outcomes — rather than a second `expires_at` column
+        # racing this one:
+        #
+        #   * `:unpublish` — back to draft, artifacts deleted (the behaviour
+        #     that shipped, hence the default; recoverable, nothing is lost).
+        #   * `:archive` — straight to `:archived`. More final, and the right
+        #     answer for content that should leave the editor's working set
+        #     rather than reappear in the draft list every quarter.
+        #   * `:flag` — nothing happens to the row. It stays published and
+        #     `unpublish_at` stays in the past, which is precisely what makes
+        #     `health` read `:expired` forever: the signal is the calculation,
+        #     not a state change. For content that must not silently vanish
+        #     from a live site (a legal notice, a drug monograph) but does need
+        #     a human told that its stated shelf life has run out.
+        #
+        # `:flag` is the reason the two scheduler triggers below both exclude
+        # it in their `where` — a flagged record is never picked up by either,
+        # so no worker has to know how to do nothing.
+        attribute :expiry_action, :atom do
+          allow_nil? false
+          default :unpublish
+          public? true
+          constraints one_of: [:unpublish, :archive, :flag]
+        end
+
+        # Freshness cadence: how many days a published record stays
+        # trustworthy before a human should re-read it. `nil` means "no cadence"
+        # and is the default for everything that exists today — freshness is
+        # opt-in per piece, with a per-type default for the dynamic entry tier
+        # (`TypeDefinition.default_review_after_days`). Bounded at three years
+        # because a cadence longer than that is indistinguishable from none, and
+        # at one day below because the sweep runs daily.
+        attribute :review_after_days, :integer do
+          public? true
+          constraints min: 1, max: 1095
+        end
+
+        # When a human last attested this content is still correct — the one
+        # timestamp PaperTrail cannot give you, because "someone edited it" and
+        # "someone confirmed it is still right" are different claims and only
+        # the second resets the clock. Written solely by `:mark_reviewed` (it is
+        # absent from `default_accept`), and seeded at publish for content that
+        # has a cadence but has never been reviewed.
+        attribute :last_reviewed_at, :utc_datetime_usec, public?: true
 
         # Denormalized plain-text maintained by `Changes.SetSearchText` and
         # queried by the `search` action. Internal.
@@ -2657,6 +2886,78 @@ defmodule KilnCMS.CMS.Content do
         # can't contain it).
         calculate :published, :boolean, expr(^ref(:state) == :published) do
           public? true
+        end
+
+        # --- lifecycle (docs/content-lifecycles.md) --------------------------
+        #
+        # All three are **expression** calculations, and that is the design, not
+        # an implementation detail. A stored `health` column is a staleness bug
+        # with a cron job attached: it is wrong for every row between the moment
+        # a deadline passes and the moment a sweep gets to it, which is the exact
+        # window an editor is asking the question in. Computed in SQL, it is
+        # right on every read — and it filters and sorts, so
+        # `?filter[health]=overdue` and the editor's Health column are one
+        # `WHERE`, not a full scan in Elixir.
+
+        # The cadence in force — the record's own, else the type's default (the
+        # entry tier only). See `cadence_expr` above.
+        calculate :effective_review_after_days, :integer, expr(unquote(cadence_expr)) do
+          public? true
+        end
+
+        # When a human should next re-read this. NULL means "never" — no
+        # cadence, or nothing to count from.
+        calculate :due_at, :utc_datetime_usec, expr(unquote(due_at_expr)) do
+          public? true
+        end
+
+        # The freshness axis, orthogonal to `state` — which is why `:expired` is
+        # a health value and not a sixth state: the state machine answers "where
+        # is this in the publishing workflow", and a live document whose shelf
+        # life ran out is still, factually, published.
+        #
+        #   :fresh    — nothing to do. Also everything unpublished: only live
+        #               content ages, a draft cannot mislead a reader.
+        #   :due_soon — falls due within the week. Warn, don't nag.
+        #   :due      — past due, within a week's grace.
+        #   :overdue  — past due by more than a week.
+        #   :expired  — `unpublish_at` has passed and the row is still published.
+        #
+        # For the `:unpublish`/`:archive` expiry actions that is a sub-minute
+        # window before the cron catches it; for `:flag` it is permanent, and
+        # permanent is the point.
+        #
+        # `:due` and `:overdue` split on the same seven days `:due_soon` uses,
+        # so the escalation is symmetric around the deadline rather than picking
+        # a second arbitrary constant.
+        calculate :health,
+                  :atom,
+                  expr(
+                    cond do
+                      ^ref(:state) != :published ->
+                        :fresh
+
+                      not is_nil(^ref(:unpublish_at)) and ^ref(:unpublish_at) <= now() ->
+                        :expired
+
+                      is_nil(unquote(due_at_expr)) ->
+                        :fresh
+
+                      unquote(due_at_expr) <= ago(unquote(@review_grace_days), :day) ->
+                        :overdue
+
+                      unquote(due_at_expr) <= now() ->
+                        :due
+
+                      unquote(due_at_expr) <= from_now(unquote(@review_grace_days), :day) ->
+                        :due_soon
+
+                      true ->
+                        :fresh
+                    end
+                  ) do
+          public? true
+          constraints one_of: [:fresh, :due_soon, :due, :overdue, :expired]
         end
 
         # Total word count across the embedded block tree.
