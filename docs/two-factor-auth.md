@@ -57,7 +57,7 @@ every sign-in, after the first factor.
   abandoned at the prompt used to leave a live, usable row that nobody held, for
   the JWT's full lifetime.
 
-  `PendingSignIn.mint/4` therefore moves that row to the `pending_second_factor`
+  `PendingSignIn.mint_and_hold/4` therefore moves that row to the `pending_second_factor`
   purpose and shortens its expiry to the length of this step, and
   `PendingSignIn.claim/1` puts it back once a code verifies. AshAuthentication
   requires a row under the `user` purpose to authenticate a JWT

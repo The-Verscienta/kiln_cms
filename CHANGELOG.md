@@ -318,6 +318,22 @@ migration, a rewritten column, a dropped config key).
   only `id`/`name` for the candidate list; winners are re-read as full rows.
   Adds a migration; the `suggest_tags/2` contract (return shape, budget
   errors, ceiling semantics) is unchanged.
+- **`PendingSignIn.mint/4` is now `mint_and_hold/4`, and refuses the caller's
+  own credential** (#1171). Since #1170 the pending-blob mint also parks the
+  first-factor token in the token store (#742), a database write that disables
+  a credential — but nothing in the name, the `@spec` or a call site said so.
+  The rename puts the side effect where a call site shows it; there is
+  deliberately no pure `mint/4` beside it, since a wrapper that skips the hold
+  is exactly the door that ends up unguarded. When `context` is a `Plug.Conn`
+  and the token about to be held is the one that authenticates that request
+  (the session's `user_token` or the bearer token on `assigns.current_user`),
+  it now raises rather than silently signing the caller out — the trap a future
+  step-up / sudo-mode prompt would otherwise walk into. The two remaining test
+  helpers that minted with a fabricated `"stub.jwt.token"` now use
+  `TwoFactorFixtures.with_first_factor_token/1`, so nothing in the suite
+  exercises the silent "not a JWT, nothing to hold" branch by accident.
+  Downstream callers of `PendingSignIn.mint/4` rename the call; the return
+  value is unchanged.
 
 ## [0.6.0] - 2026-08-12
 

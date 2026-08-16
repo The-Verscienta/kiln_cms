@@ -25,7 +25,10 @@ defmodule KilnCMSWeb.AuthController do
       |> withhold_remember_me()
       |> put_session(
         :pending_2fa,
-        PendingSignIn.mint(:session, conn, user, token: token, remember_me?: remember_me?)
+        PendingSignIn.mint_and_hold(:session, conn, user,
+          token: token,
+          remember_me?: remember_me?
+        )
       )
       |> redirect(to: ~p"/sign-in/verify")
     else

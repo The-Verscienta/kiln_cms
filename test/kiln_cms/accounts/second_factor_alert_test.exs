@@ -59,14 +59,13 @@ defmodule KilnCMS.Accounts.SecondFactorAlertTest do
 
   defp enabled_user, do: TwoFactorFixtures.enabled_user(role: :editor)
 
-  # The state a browser is in after the first factor and before the second —
-  # first factor and before the second.
+  # The state a browser is in after the first factor and before the second.
+  # A real, stored first-factor JWT rather than a stub (#1171): `mint_and_hold/4`
+  # holds the stored row, and a stub has none — the "nothing to hold" branch is
+  # silent, so a stub here would exercise a path no sign-in ever takes.
   defp with_pending(user) do
-    token =
-      PendingSignIn.mint(:session, KilnCMSWeb.Endpoint, %{
-        user
-        | __metadata__: %{token: "stub.jwt.token"}
-      })
+    {user, _token} = TwoFactorFixtures.with_first_factor_token(user)
+    token = PendingSignIn.mint_and_hold(:session, KilnCMSWeb.Endpoint, user)
 
     build_conn()
     |> unique_ip()

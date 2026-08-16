@@ -32,7 +32,7 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   interchangeable. Same `max_age/0` for both, because it is the same step.
 
   It is passed on the **mint** as well as the read, but not as a ceiling — a
-  reader that supplies its own `max_age` wins, so `mint/4` cannot stop a future
+  reader that supplies its own `max_age` wins, so `mint_and_hold/4` cannot stop a future
   caller reading a stale blob. What it sets is the *default* for a reader that
   passes none: `Plug.Crypto` embeds `Keyword.get(opts, :max_age, 86400)` into
   the term, so without it the blob's own lifetime would be a day. The five
@@ -110,7 +110,8 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   here narrows `tokens.token_lifetime`. #761 bounded how many an attacker could
   cause by looping the password step; it did not stop them existing.
 
-  So `mint/4` **holds** the token as it wraps it — `hold_for_second_factor` moves
+  So `mint_and_hold/4` **holds** the token as it wraps it (#1171 put the hold in
+  the name, so a call site shows it) — `hold_for_second_factor` moves
   the row off the `"user"` purpose that AshAuthentication's own
   `validate_token/3` requires of anything it authenticates, and shortens its
   expiry to the length of this step. From that instant the JWT authenticates
@@ -173,13 +174,27 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   def max_age, do: @max_age
 
   @doc """
-  Mint the blob for `user`, who has just passed the first factor.
+  Mint the blob for `user`, who has just passed the first factor, and **hold**
+  the first-factor token it carries.
 
-  Also **holds** the first-factor token in the token store, so it authenticates
-  nothing until `claim/1` releases it — see the moduledoc. That is a side effect
-  on a function named `mint`, and it lives here rather than at the two call sites
-  for the reason the whole module exists: a defence written twice is a defence
-  that is eventually only on one door.
+  Two things, and the name says both on purpose (#1171): the token is written
+  into the blob *and* parked in the token store, so it authenticates nothing
+  until `claim/1` releases it — see the moduledoc. The hold lives here rather
+  than at the two call sites for the reason the whole module exists: a defence
+  written twice is a defence that is eventually only on one door. There is
+  deliberately no pure `mint/4` beside it — a wrapper that skips the hold is
+  exactly the door that ends up unguarded, and no production caller wants one.
+
+  ## Refuses to hold the caller's own credential
+
+  A step-up or sudo-mode re-prompt is the natural next surface, and the natural
+  mistake in building it is to hand this function the user's **current, live**
+  token — which would silently de-authenticate the very session that is asking
+  for the re-prompt. So when `context` is a `Plug.Conn`, and the token about to
+  be held is the one that authenticates that conn (the session's `user_token`, or
+  the bearer token on `assigns.current_user`), this raises `ArgumentError` rather
+  than parking it. A first-factor sign-in never trips it: the token the strategy
+  just minted is not the one (if any) the request arrived with.
 
   Options:
 
@@ -190,11 +205,12 @@ defmodule KilnCMS.Accounts.PendingSignIn do
       *intent* only. The cookie itself is withheld at the first factor and
       issued once the code verifies (#699). Ignored by `:encrypted`.
   """
-  @spec mint(mode(), context(), Accounts.User.t(), keyword()) :: String.t()
-  def mint(mode, context, user, opts \\ []) when is_map_key(@modes, mode) do
+  @spec mint_and_hold(mode(), context(), Accounts.User.t(), keyword()) :: String.t()
+  def mint_and_hold(mode, context, user, opts \\ []) when is_map_key(@modes, mode) do
     %{jti?: jti?, remember_me?: carries_remember_me?} = Map.fetch!(@modes, mode)
     token = Keyword.get_lazy(opts, :token, fn -> user.__metadata__.token end)
 
+    refuse_own_credential!(context, token)
     hold_first_factor(token)
 
     %{
@@ -247,14 +263,14 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   end
 
   # Only a bad *blob* falls through to `:error`. An unknown mode raises, because
-  # `mint/4` raises on one too and the pair has to fail the same way: a silent
+  # `mint_and_hold/4` raises on one too and the pair has to fail the same way: a silent
   # `:error` from a typo would resolve forever, and both gates render that as a
   # redirect back to `/sign-in` — an unbreakable loop with no exception, no log
   # line, and nothing in the suite to catch it.
   def resolve(mode, _context, _blob) when is_map_key(@modes, mode), do: :error
 
   @doc """
-  Complete this attempt: release the first-factor token `mint/4` held, and claim
+  Complete this attempt: release the first-factor token `mint_and_hold/4` held, and claim
   the blob so it cannot be redeemed again.
 
     * `:ok` — this caller got it, and the token it holds now authenticates.
@@ -356,6 +372,48 @@ defmodule KilnCMS.Accounts.PendingSignIn do
     do: Enum.any?(errors, &match?(%{field: :jti}, &1))
 
   defp already_claimed?(_other), do: false
+
+  # #1171. The hold is a side effect a caller cannot opt out of, so the one call
+  # it must never make is the one that would take *its own* session down: a
+  # step-up prompt handing over the token that authenticates the request. Both
+  # places a conn carries that token are checked — AshAuthentication's session
+  # key (`"user_token"`, what `store_in_session/2` writes) and the bearer path,
+  # which lands the token on `assigns.current_user.__metadata__.token`.
+  # Compared by jti rather than by string, so a re-encoded copy of the same
+  # credential does not slip past. Anything that is not a `Plug.Conn` (an
+  # endpoint module, a socket) carries no request credential to compare against.
+  defp refuse_own_credential!(%Plug.Conn{} = conn, token) do
+    with jti when is_binary(jti) <- Accounts.Token.peeked_jti(token),
+         true <- jti in conn_credential_jtis(conn) do
+      raise ArgumentError,
+            "PendingSignIn.mint_and_hold/4 was handed the token that authenticates " <>
+              "this request; holding it would sign the caller out. A step-up prompt " <>
+              "must mint a fresh first-factor token rather than re-use the session's."
+    else
+      _ -> :ok
+    end
+  end
+
+  defp refuse_own_credential!(_context, _token), do: :ok
+
+  defp conn_credential_jtis(%Plug.Conn{} = conn) do
+    session_token =
+      case conn.private do
+        %{plug_session: %{} = session} -> Map.get(session, "user_token")
+        _ -> nil
+      end
+
+    bearer_token =
+      case conn.assigns do
+        %{current_user: %Accounts.User{__metadata__: %{token: token}}} -> token
+        _ -> nil
+      end
+
+    [session_token, bearer_token]
+    |> Enum.filter(&is_binary/1)
+    |> Enum.map(&Accounts.Token.peeked_jti/1)
+    |> Enum.filter(&is_binary/1)
+  end
 
   # #742 / #1173. Park the first-factor token for the length of this step.
   #
@@ -508,7 +566,7 @@ defmodule KilnCMS.Accounts.PendingSignIn do
 
   # A mode that carries a `jti` must have one. A mode that does not carries
   # `nil` — and, importantly, is not allowed to *supply* one: a payload is only
-  # ever built by `mint/4`, but reading a jti the mode did not mint would let
+  # ever built by `mint_and_hold/4`, but reading a jti the mode did not mint would let
   # `claim/1` record a value nothing ever checks against.
   defp minted_jti(true, payload) do
     case Map.get(payload, "jti") do
