@@ -149,10 +149,11 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
         for mod <- plugin.field_types(), do: {plugin, mod}
       end)
 
+    # `field_type_module?/1` (below) is the one place this contract check
+    # lives — it also carries the `rescue` a non-atom `field_types()` entry
+    # needs, so this can't safely duplicate the check inline without losing it.
     contract =
-      for {plugin, mod} <- declared,
-          not (Code.ensure_loaded?(mod) and function_exported?(mod, :cast, 2) and
-                 function_exported?(mod, :name, 0)) do
+      for {plugin, mod} <- declared, not field_type_module?(mod) do
         "#{plugin.name()}: field type #{inspect(mod)} does not implement Kiln.FieldType"
       end
 
@@ -163,9 +164,7 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
 
     collisions =
       declared
-      |> Enum.filter(fn {_plugin, mod} ->
-        Code.ensure_loaded?(mod) and function_exported?(mod, :name, 0)
-      end)
+      |> Enum.filter(fn {_plugin, mod} -> field_type_module?(mod) end)
       |> Enum.group_by(fn {_plugin, mod} -> mod.name() end)
       |> Enum.flat_map(fn {name, owners} ->
         cond do
@@ -245,11 +244,7 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
       _ -> []
     end
   rescue
-    e ->
-      [
-        "#{plugin.name()}: block #{inspect(module)} raised while checking its :json render " <>
-          "against its schema (#{Exception.message(e)})"
-      ]
+    e -> [raised_message(plugin, module, "its :json render against its schema", e)]
   end
 
   defp block_validation_problems(_plugin, _name, :ok), do: []
@@ -300,50 +295,55 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
   end
 
   defp field_type_divergence(plugin, mod) do
+    html_type = if function_exported?(mod, :input_type, 0), do: mod.input_type(), else: "text"
+
     definition =
       struct(FieldDefinition,
         name: "sample_field",
         field_type: mod.name(),
         required: false,
-        options: []
+        content_type: probe_content_type(),
+        # A select/enum-style `cast/2` legitimately validates its input against
+        # `definition.options` (the real struct field this stands in for) —
+        # an empty list would refuse every possible probe value unconditionally
+        # and this check would never actually run for such a type, so it
+        # carries the one value `scalar_divergence` is about to try.
+        options: [widget_sample(html_type)]
       )
 
-    parts = if function_exported?(mod, :input_parts, 1), do: mod.input_parts(definition), else: []
-
-    if parts == [] do
-      scalar_divergence(plugin, mod, definition)
-    else
-      composite_divergence(plugin, mod, definition, parts)
+    case SchemaExport.parts(mod, definition) do
+      [] -> scalar_divergence(plugin, mod, html_type, definition)
+      parts -> composite_divergence(plugin, mod, definition, parts)
     end
   rescue
-    e ->
-      # `inspect(mod)` rather than `mod.name()`: the exception being reported
-      # may be `mod.name()` itself raising (it runs above, building
-      # `definition`), and calling it again here would just raise past the
-      # rescue instead of producing a message.
-      [
-        "#{plugin.name()}: field type #{inspect(mod)} raised while checking cast/2 " <>
-          "(#{Exception.message(e)})"
-      ]
+    e -> [raised_message(plugin, mod, "cast/2", e)]
   end
 
-  defp scalar_divergence(plugin, mod, definition) do
-    html_type = if function_exported?(mod, :input_type, 0), do: mod.input_type(), else: "text"
+  # A synthetic probe `definition` inevitably leaves most `FieldDefinition`
+  # fields unset (there's no real content write to draw them from), but
+  # `content_type`/`type_definition_id` being BOTH nil is a state a real
+  # definition never has (see `FieldDefinition`'s own moduledoc) — and a
+  # `cast/2` that reasonably reads `definition.content_type` (the core
+  # `coerce_reference/3` does exactly this) raises on it, which this check's
+  # `rescue` then reports as a plugin problem for a plugin that works
+  # correctly against every real definition it's ever actually called with.
+  # Picking a real, compiled content type closes that gap without needing to
+  # guess anything content-type-specific about what the plugin itself does.
+  defp probe_content_type do
+    case KilnCMS.CMS.ContentTypes.types() do
+      [type | _] -> type
+      [] -> nil
+    end
+  end
 
+  defp scalar_divergence(plugin, mod, html_type, definition) do
     case mod.cast(widget_sample(html_type), definition) do
       {:ok, value} ->
-        expected = widget_kind(html_type)
-        actual = value_kind(value)
-
-        if actual == expected do
-          []
-        else
-          [
-            "#{plugin.name()}: field type #{inspect(mod.name())}'s cast/2 returns #{actual} for " <>
-              "a value its #{inspect(html_type)} widget submits, but that widget implies " <>
-              "#{expected} — declare c:Kiln.FieldType.json_schema/1 if this is intentional"
-          ]
-        end
+        divergence_message(plugin, mod, widget_kind(html_type), value_kind(value), fn expected,
+                                                                                      actual ->
+          "cast/2 returns #{actual} for a value its #{inspect(html_type)} widget submits, " <>
+            "but that widget implies #{expected}"
+        end)
 
       _ ->
         []
@@ -356,7 +356,13 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
 
     case mod.cast(sample, definition) do
       {:ok, result} when is_map(result) ->
-        Enum.flat_map(parts, &part_divergence(plugin, mod, &1, result))
+        # `cast/2`'s contract only requires a JSON-native return, not that its
+        # keys match `input_parts/1`'s exact key type — an idiomatic
+        # atom-keyed composite return (e.g. `%{lat: 1.0}`) is JSON-native too
+        # (Jason stringifies atom keys on encode, so it round-trips correctly
+        # through the real jsonb write path) and must not read as "missing".
+        stringified = Map.new(result, fn {k, v} -> {to_string(k), v} end)
+        Enum.flat_map(parts, &part_divergence(plugin, mod, &1, stringified))
 
       {:ok, other} ->
         [
@@ -371,23 +377,49 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
   end
 
   defp part_divergence(plugin, mod, part, result) do
-    expected = widget_kind(Map.get(part, :type, "text"))
-    actual = result |> Map.get(part.key) |> value_kind()
+    actual = result |> Map.get(to_string(part.key)) |> value_kind()
 
-    if actual == expected do
-      []
-    else
-      [
-        "#{plugin.name()}: field type #{inspect(mod.name())}'s cast/2 returns #{actual} " <>
-          "for part #{inspect(part.key)}, but that part's widget implies #{expected} — " <>
-          "declare c:Kiln.FieldType.json_schema/1 if this is intentional"
-      ]
-    end
+    divergence_message(plugin, mod, widget_kind(Map.get(part, :type, "text")), actual, fn
+      expected, actual ->
+        "cast/2 returns #{actual} for part #{inspect(part.key)}, but that part's widget " <>
+          "implies #{expected}"
+    end)
+  end
+
+  # Shared by `scalar_divergence/4` and `part_divergence/4`: both ask "does
+  # what cast/2 returned match what the widget implies", and both end with
+  # the same escape hatch — keeping that one place means a future reword
+  # can't land in one and not the other the way it already had.
+  defp divergence_message(_plugin, _mod, expected, actual, _describe) when actual == expected,
+    do: []
+
+  defp divergence_message(plugin, mod, expected, actual, describe) do
+    [
+      "#{plugin.name()}: field type #{inspect(mod.name())}'s " <>
+        describe.(expected, actual) <>
+        " — declare c:Kiln.FieldType.json_schema/1 if this is intentional"
+    ]
+  end
+
+  # Shared by every `rescue` in this section: same "X raised while checking Y"
+  # shape, one place to reword.
+  defp raised_message(plugin, subject, action, exception) do
+    "#{plugin.name()}: #{inspect(subject)} raised while checking #{action} " <>
+      "(#{Exception.message(exception)})"
   end
 
   defp widget_sample("number"), do: "3"
   defp widget_sample("range"), do: "3"
   defp widget_sample("checkbox"), do: "true"
+  defp widget_sample("date"), do: "2026-01-01"
+  defp widget_sample("datetime-local"), do: "2026-01-01T00:00:00"
+  defp widget_sample("month"), do: "2026-01"
+  defp widget_sample("week"), do: "2026-W01"
+  defp widget_sample("time"), do: "00:00"
+  defp widget_sample("email"), do: "sample@example.com"
+  defp widget_sample("url"), do: "https://example.com"
+  defp widget_sample("color"), do: "#112233"
+  defp widget_sample("tel"), do: "+15555550100"
   defp widget_sample(_), do: "sample"
 
   # Delegates to `KilnCMS.SchemaExport.html_input_json_type/1` rather than
@@ -396,6 +428,13 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
   # module asks of a widget.
   defp widget_kind(html_type), do: SchemaExport.html_input_json_type(html_type)
 
+  # Not the same question `KilnCMS.JsonSchemaValidator.type_matches?/2` answers,
+  # despite the overlapping is_binary/is_boolean/is_number/is_list/is_map
+  # cases: that function tests a value against one *named* schema type from an
+  # already-JSON-serialized `:json` render; this classifies a *raw* value
+  # straight off `cast/2`, which can still be a native `Date`/`DateTime`
+  # struct (never a bare struct once it's gone through JSON). Two different
+  # value domains, so not consolidated.
   defp value_kind(v) when is_binary(v), do: "string"
   defp value_kind(v) when is_boolean(v), do: "boolean"
   defp value_kind(v) when is_number(v), do: "number"

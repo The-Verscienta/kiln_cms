@@ -300,7 +300,16 @@ defmodule KilnCMS.SchemaExport do
     end
   end
 
-  defp parts(module, definition) do
+  @doc """
+  `module`'s declared composite input parts for `definition`, or `[]` if it
+  doesn't implement `c:Kiln.FieldType.input_parts/1`.
+
+  Public for the same reason `html_input_json_type/1` is: so `mix
+  kiln.plugins.doctor` (#937) can ask "is this composite, and what are its
+  parts" the same way this module does, rather than reimplementing the guard.
+  """
+  @spec parts(module(), struct()) :: [Kiln.FieldType.input_part()]
+  def parts(module, definition) do
     if function_exported?(module, :input_parts, 1), do: module.input_parts(definition), else: []
   end
 
