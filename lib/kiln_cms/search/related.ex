@@ -500,31 +500,29 @@ defmodule KilnCMS.Search.Related do
       )
       |> Map.new(&{&1.tag_id, &1})
 
-    missing =
-      Enum.reject(candidates, fn tag ->
-        case Map.get(stored, tag.id) do
-          %{name: name, embedding: embedding} when is_list(embedding) -> name == tag.name
-          _missing_or_empty -> false
-        end
-      end)
-
+    missing = Enum.reject(candidates, &current_embedding?(&1, stored))
     uncached = Enum.count(missing, &(not VectorCache.cached?(&1.name)))
 
     embedding_charge(budget_ctx, uncached, fn ->
-      Enum.each(missing, fn tag ->
-        case tag_vector(tag.name) do
-          vector when is_list(vector) ->
-            store_tag_embedding(tag, vector, org_id)
-
-          # The embedder answered nothing for this name; skip it (it will
-          # simply not rank) rather than fail every other tag's suggestion.
-          _ ->
-            :ok
-        end
-      end)
-
+      Enum.each(missing, &embed_and_store_tag(&1, org_id))
       :ok
     end)
+  end
+
+  defp current_embedding?(tag, stored) do
+    case Map.get(stored, tag.id) do
+      %{name: name, embedding: embedding} when is_list(embedding) -> name == tag.name
+      _missing_or_empty -> false
+    end
+  end
+
+  # The embedder answering nothing for this name is skipped (it will simply not
+  # rank) rather than failing every other tag's suggestion.
+  defp embed_and_store_tag(tag, org_id) do
+    case tag_vector(tag.name) do
+      vector when is_list(vector) -> store_tag_embedding(tag, vector, org_id)
+      _ -> :ok
+    end
   end
 
   defp store_tag_embedding(tag, vector, org_id) do
