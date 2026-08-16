@@ -101,6 +101,8 @@ defmodule KilnCMS.MixProject do
       # instead of blanket-suppressing warnings for whole files.
       skip_code_autolink_to: [
         "KilnCMS.Application",
+        "KilnCMS.Application.start/2",
+        "KilnCMS.Governance.Chain.any_history_anchors?/0",
         "KilnCMS.PostgrexTypes",
         "KilnCMS.Repo.installed_extensions/0",
         "KilnCMSWeb.Telemetry.init/1",
