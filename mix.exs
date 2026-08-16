@@ -125,7 +125,15 @@ defmodule KilnCMS.MixProject do
         # the name it had at the time (#1171 later renamed it to
         # `mint_and_hold/4`). Historical entries describe the past, not the
         # current surface, and must not be rewritten to keep this passing.
-        "KilnCMS.Accounts.PendingSignIn.mint/4"
+        "KilnCMS.Accounts.PendingSignIn.mint/4",
+        # Private — LiveJoinBudget's moduledoc names the reason
+        # SignInLive.charge_here?/1 gives for the same connected-root-only
+        # shape, not something callers outside SignInLive reach.
+        "KilnCMSWeb.SignInLive.charge_here?/1",
+        # A Phoenix dependency module with no public docs of its own — named
+        # for what it does with a 4xx raised during mount, not something
+        # ExDoc can link to.
+        "Phoenix.LiveView.Channel"
       ],
       extras: extras(),
       groups_for_extras: groups_for_extras(),
