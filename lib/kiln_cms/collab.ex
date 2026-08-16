@@ -17,8 +17,16 @@ defmodule KilnCMS.Collab do
 
   @topic_prefix "content"
 
-  @doc "PubSub topic for a document's collaborative session."
-  @spec topic(atom(), term()) :: String.t()
+  @doc """
+  PubSub topic for a document's collaborative session.
+
+  `type` is the editor's content-kind atom (`:page`), or the string form the
+  soft-polymorphic resources store it as (`"page"`, from `Comment.content_type`
+  / `Task.content_type`) — they interpolate to the same topic, which is what
+  lets `Changes.BroadcastComment` and `Changes.BroadcastTaskBlock` reach the
+  editors from a resource action without knowing the atom.
+  """
+  @spec topic(atom() | String.t(), term()) :: String.t()
   def topic(type, id), do: "#{@topic_prefix}:#{type}:#{id}"
 
   @doc "Subscribe the calling process to a document's collaborative events."

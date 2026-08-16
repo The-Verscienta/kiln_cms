@@ -471,6 +471,10 @@ defmodule KilnCMS.CMS do
       define :list_comments_for_block,
         action: :for_block,
         args: [:content_type, :content_id, :block_id]
+
+      define :list_unresolved_threads_for,
+        action: :unresolved_for_content,
+        args: [:content_type, :content_id]
     end
 
     # Editorial tasks: assignments, due dates, a workload view (#501) — the
@@ -485,6 +489,16 @@ defmodule KilnCMS.CMS do
       define :list_tasks, action: :read
       define :list_tasks_for, action: :for_content, args: [:content_type, :content_id]
       define :list_tasks_for_assignee, action: :for_assignee, args: [:assignee_id]
+
+      # Block-anchored tasks (the ownership half of inline block discussions).
+      # `assign_task` already accepts `block_id`; this is the positional twin
+      # of `list_comments_for_block`, for call sites that have the block in
+      # hand rather than a map to build.
+      define :list_tasks_for_block,
+        action: :for_block,
+        args: [:content_type, :content_id, :block_id]
+
+      define :list_open_tasks_for, action: :open_for_content, args: [:content_type, :content_id]
 
       define :list_tasks_open_due_between,
         action: :open_due_between,

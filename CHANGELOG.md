@@ -62,6 +62,36 @@ migration, a rewritten column, a dropped config key).
   outright. Additive migration, all columns nullable or defaulted; existing
   content reads `:fresh`. See `docs/content-lifecycles.md`.
 
+- **Block-anchored editorial tasks** — the model half of inline block
+  discussions. `KilnCMS.CMS.Task` gains a nullable `block_id`, the same stable
+  `Kiln.Block` id `Comment` already anchors to and soft for the same reason
+  (blocks live in a jsonb array, not a table). `nil` stays the default and the
+  original meaning — a task on the whole document — so every existing task is
+  unchanged and no backfill runs; the migration adds one column and widens
+  `tasks_content_lookup_index` to carry `block_id` as its trailing column, so
+  `:for_content` keeps matching on the leading prefix. New reads `:for_block`
+  and `:open_for_content` (with `CMS.list_tasks_for_block/4` and
+  `CMS.list_open_tasks_for/3`), plus `Comment.:unresolved_for_content` /
+  `CMS.list_unresolved_threads_for/3`, which returns unresolved thread *roots*
+  — one row per block still needing attention, not one per comment.
+  `:assign` and `:update` both accept `block_id`, so an existing
+  document-level task can be re-anchored to a block during triage, or cleared
+  back.
+
+  Deleting a block does not touch its tasks or threads: the anchor is soft, so
+  they survive as readable orphans rather than disappearing with the
+  paragraph. Publishing still auto-completes a document's open tasks including
+  block-scoped ones, with `auto_complete_on_publish: false` the unchanged way
+  to outlive a publish.
+
+  Two new PubSub announcements ride topics that already exist, so no new
+  subscription and no new infrastructure: `{:block_task_changed, block_id}`
+  from `Changes.BroadcastTaskBlock` and `{:block_thread_changed, block_id}`
+  from `Changes.BroadcastComment` (which keeps its existing preview-pin
+  broadcast), both on `KilnCMS.Collab.topic/2`. Re-anchoring a task announces
+  both the old and new block, so a count can leave one and join the other in
+  the same moment.
+
 - **Office documents and zip archives in the document library** (#808).
   Follow-up to #481, which scoped the gated document library to PDF only for
   v1: `KilnCMS.DocumentProcessor` now byte-validates `.docx`/`.xlsx`/`.pptx`

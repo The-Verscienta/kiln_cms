@@ -11,6 +11,19 @@ defmodule KilnCMS.CMS.Task do
   Deliberately lightweight: no sub-tasks, no priority levels, no board — an
   assignee, a due date, a note, and a status.
 
+  ## Block anchoring
+
+  Optionally narrowed one level further by `block_id` — the same stable
+  `Kiln.Block` id `Comment` anchors to, and soft for the same reason (blocks
+  live in a jsonb array, not a table). `nil` is the original shape and stays
+  the default: a task on the whole document. A `block_id` says "this
+  *paragraph* is what needs work", which is what turns a block's comment
+  thread into accountable follow-up without leaving the block.
+
+  Because the anchor is soft, deleting a block does **not** delete its tasks —
+  they become orphans, still readable through `:for_content`, shown with a
+  "block removed" label rather than vanishing silently. Nothing cascades.
+
   A record's open tasks are auto-completed when it publishes (see
   `KilnCMS.CMS.Changes.AutoCompleteTasks`, attached to `:publish` /
   `:publish_scheduled`) — publishing is the natural "done" signal for
@@ -25,7 +38,7 @@ defmodule KilnCMS.CMS.Task do
 
   admin do
     resource_group :content
-    table_columns [:content_type, :assignee_id, :due_on, :status, :inserted_at]
+    table_columns [:content_type, :block_id, :assignee_id, :due_on, :status, :inserted_at]
   end
 
   postgres do
@@ -33,7 +46,13 @@ defmodule KilnCMS.CMS.Task do
     repo KilnCMS.Repo
 
     custom_indexes do
-      index [:org_id, :content_type, :content_id], name: "tasks_content_lookup_index"
+      # `block_id` trails the content columns rather than getting an index of
+      # its own: `:for_content` (three-column equality) still matches on the
+      # leading prefix, and `:for_block` gets the whole key. Same single-index
+      # shape `Comment` uses for the same pair of reads.
+      index [:org_id, :content_type, :content_id, :block_id],
+        name: "tasks_content_lookup_index"
+
       index [:org_id, :assignee_id, :status], name: "tasks_assignee_lookup_index"
     end
   end
@@ -44,7 +63,16 @@ defmodule KilnCMS.CMS.Task do
     create :assign do
       description "Assign an editorial task on a piece of content."
       primary? true
-      accept [:content_type, :content_id, :assignee_id, :due_on, :note, :auto_complete_on_publish]
+
+      accept [
+        :content_type,
+        :content_id,
+        :block_id,
+        :assignee_id,
+        :due_on,
+        :note,
+        :auto_complete_on_publish
+      ]
 
       validate KilnCMS.CMS.Validations.AssigneeIsEditor
 
@@ -56,12 +84,13 @@ defmodule KilnCMS.CMS.Task do
       end
 
       change KilnCMS.CMS.Changes.NotifyTaskAssigned
+      change KilnCMS.CMS.Changes.BroadcastTaskBlock
     end
 
     update :update do
-      description "Reassign a task, or change its due date / note."
+      description "Reassign a task, change its due date / note, or re-anchor it to a block."
       primary? true
-      accept [:assignee_id, :due_on, :note, :auto_complete_on_publish]
+      accept [:assignee_id, :due_on, :note, :auto_complete_on_publish, :block_id]
       require_atomic? false
 
       validate KilnCMS.CMS.Validations.AssigneeIsEditor
@@ -80,6 +109,7 @@ defmodule KilnCMS.CMS.Task do
       end
 
       change {KilnCMS.CMS.Changes.NotifyTaskAssigned, only_when: :reassigned}
+      change KilnCMS.CMS.Changes.BroadcastTaskBlock
     end
 
     update :complete do
@@ -87,6 +117,7 @@ defmodule KilnCMS.CMS.Task do
       accept []
       require_atomic? false
 
+      change KilnCMS.CMS.Changes.BroadcastTaskBlock
       change set_attribute(:status, :done)
       change set_attribute(:completed_at, &DateTime.utc_now/0)
 
@@ -103,6 +134,7 @@ defmodule KilnCMS.CMS.Task do
       accept []
       require_atomic? false
 
+      change KilnCMS.CMS.Changes.BroadcastTaskBlock
       change set_attribute(:status, :open)
       change set_attribute(:completed_at, nil)
       change set_attribute(:completed_by_id, nil)
@@ -124,6 +156,43 @@ defmodule KilnCMS.CMS.Task do
       argument :content_id, :uuid, allow_nil?: false
 
       filter expr(content_type == ^arg(:content_type) and content_id == ^arg(:content_id))
+      prepare build(sort: [inserted_at: :asc])
+    end
+
+    read :for_block do
+      description "A single block's tasks — the block-anchored twin of `Comment.for_block`."
+      argument :content_type, :string, allow_nil?: false
+      argument :content_id, :uuid, allow_nil?: false
+      argument :block_id, :uuid, allow_nil?: false
+
+      filter expr(
+               content_type == ^arg(:content_type) and content_id == ^arg(:content_id) and
+                 block_id == ^arg(:block_id)
+             )
+
+      prepare build(sort: [inserted_at: :asc])
+    end
+
+    read :open_for_content do
+      description """
+      Every open task on a piece of content, block-anchored or not — one query
+      the editor groups by `block_id` in memory to drive per-block counts.
+
+      Deliberately not a grouped/aggregate read: an editor open on a document
+      has tens of tasks, not thousands, and returning the rows means the same
+      query serves both the gutter counts and the task list without a second
+      round trip. Grouping server-side would save nothing and cost a read that
+      can't show *which* tasks.
+      """
+
+      argument :content_type, :string, allow_nil?: false
+      argument :content_id, :uuid, allow_nil?: false
+
+      filter expr(
+               content_type == ^arg(:content_type) and content_id == ^arg(:content_id) and
+                 status == :open
+             )
+
       prepare build(sort: [inserted_at: :asc])
     end
 
@@ -211,6 +280,16 @@ defmodule KilnCMS.CMS.Task do
     # types too.
     attribute :content_type, :string, allow_nil?: false, public?: true
     attribute :content_id, :uuid, allow_nil?: false, public?: true
+
+    # Optional narrowing to one block (`Kiln.Block`'s `uuid_primary_key :id`),
+    # not FK-checked — blocks are embedded in a jsonb array, not a table, the
+    # same reason `Comment.block_id` is soft. Unlike `Comment`'s, nullable:
+    # `nil` is a task on the whole document, which is every task that existed
+    # before this column and the default for the settings-panel form.
+    attribute :block_id, :uuid do
+      allow_nil? true
+      public? true
+    end
 
     attribute :due_on, :date, public?: true
     attribute :note, :string, public?: true, constraints: [max_length: KilnCMS.Limits.paragraph()]
