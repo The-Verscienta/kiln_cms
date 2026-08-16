@@ -9624,8 +9624,6 @@ msgid "The campaign couldn't be recorded — check the details."
 msgstr ""
 
 #: lib/kiln_cms_web/components/core_components.ex
-#: lib/kiln_cms_web/live/experiment_live.ex
-#: lib/kiln_cms_web/live/experiments_live.ex
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "The change could not be saved."
