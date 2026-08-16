@@ -174,6 +174,30 @@ migration, a rewritten column, a dropped config key).
   file did not address is left exactly as stored. `custom.content`/`.data`
   stay reported, not sent — an untyped map has no defensible extraction rule
   — and `docs/localization-workflows.md` says so.
+- **The A/V metadata strip can be deferred to a worker, behind a quarantine**
+  (#1122). #1112 bounded the synchronous strip; it still runs on the upload
+  request, holding the editor's media page for a full read+write of a 500 MB
+  video and peaking at ~2× the file on `TMPDIR`. `KILN_AV_STRIP_MODE=deferred`
+  moves it off the request: `Ingest` stores the upload as it arrived in
+  **private** storage under its final key and creates the `MediaItem`
+  `quarantined: true` (new column, migration `20260815222346`, default
+  `false`); while quarantined the row is unreachable from every non-editor
+  read — a second condition in the read policy beside `audience == :public`,
+  and inside `Checks.MediaInAudience`, so JSON:API/GraphQL are covered too —
+  and `/media/:id/download`/`/stream` answer 404 to everyone (both read
+  private storage for a gated item). New `KilnCMS.Media.AVStripWorker` strips
+  with the same `AVProcessor.strip_metadata/2`, re-checks the size cap,
+  promotes the stripped copy to the public key, releases the quarantine (a
+  system-only `:release_quarantine` action), deletes the private blob and only
+  then enqueues derivation; a standing failure is refused under
+  `REQUIRE_AV_METADATA_STRIP=true` (row purged, blob deleted) or promoted
+  unstripped with the same warning otherwise, and a transient one is retried.
+  New `KilnCMS.Media.QuarantineReaper` (hourly, `KILN_MEDIA_QUARANTINE_REAPER_CRON`)
+  removes any item still quarantined after `KILN_MEDIA_QUARANTINE_MAX_AGE_HOURS`
+  (24). Deferred needs private storage and falls back to `sync` with a
+  one-time warning otherwise; `sync` stays the default, so nothing changes for
+  an existing deployment. The media library shows a quarantined item as
+  processing; `docs/media-pipeline.md` gains the deferred path.
 
 ### Security
 

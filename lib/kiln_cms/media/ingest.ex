@@ -309,9 +309,145 @@ defmodule KilnCMS.Media.Ingest do
   # lapse silently and unobserved. So it fails closed and says to try again.
   #
   # `stripped` is `AVProcessor`'s own generated temp path.
+  #
+  # **The deferred path (#1122).** With `av_metadata_strip: :deferred` and
+  # private storage available, none of the above happens on the LiveView
+  # process: the upload is stored **privately** under its final key with the
+  # row created `quarantined: true`, and `KilnCMS.Media.AVStripWorker` strips,
+  # promotes the stripped copy to the public key, releases the quarantine and
+  # only then enqueues derivation. Until then the row is invisible to every
+  # non-editor read (policy), a 404 on `/media/:id/download|stream`, and its
+  # `url` points at nothing. What the sync path bounds at two minutes and ~2x
+  # the file on `System.tmp_dir!()`, the deferred path moves off the request
+  # entirely — but it needs somewhere to hold the unstripped original that no
+  # delivery route serves from, and that is what `Storage.store_private/2` is
+  # (#481): a private blob has no `url/1` at all. Without a private store the
+  # sync path runs, with a one-time warning: silently degrading to "stored
+  # public and unstripped for a while" would be worse than the thing being
+  # deferred.
   # sobelow_skip ["Traversal.FileModule"]
   defp persist(path, %{kind: kind, ext: ext, content_type: content_type} = spec, filename, opts)
        when kind in [:video, :audio] do
+    if defer_av_strip?() do
+      quarantine_av(path, ext, content_type, filename, opts)
+    else
+      strip_av_now(path, spec, ext, content_type, filename, opts)
+    end
+  end
+
+  # A caption track is text this codebase already parsed — no container, nothing
+  # to strip, and no reason to hand it to ffmpeg.
+  defp persist(path, %{ext: ext, content_type: content_type}, filename, opts),
+    do: store_and_create(path, ext, content_type, filename, opts)
+
+  # #1122. Stage the upload as it arrived, privately, and hand the strip to the
+  # worker. The size cap was checked on the received bytes already; the worker
+  # re-checks the stripped copy against the same cap before promoting, exactly
+  # as the sync path does. `:strip_deferred` in the create attrs is what keeps
+  # `create_item/5` from enqueuing derivation — that is the worker's, after
+  # promotion, or `VariantWorker`/`AVWorker` would fetch a public key that has
+  # nothing behind it yet.
+  defp quarantine_av(path, ext, content_type, filename, opts) do
+    key = Storage.generate_key_with_ext(ext)
+
+    case Storage.store_private(key, path) do
+      {:ok, ^key} ->
+        case create_item(
+               key,
+               content_type,
+               stored_size(path),
+               with_ext(filename, ext),
+               Keyword.put(opts, :quarantined?, true)
+             ) do
+          {:ok, item} ->
+            max_bytes =
+              Keyword.get(opts, :max_bytes) || cap_for(%{kind: MediaKind.of(content_type)})
+
+            enqueue_strip(item, ext, max_bytes)
+            {:ok, item}
+
+          {:error, _reason} = error ->
+            error
+        end
+
+      _ ->
+        {:error, :storage_failed}
+    end
+  end
+
+  # Not `insert_job/2`: a missed derivation costs variants, a missed strip job
+  # leaves a quarantined row nobody can serve until `QuarantineReaper` removes
+  # it, so the message has to say what an operator should do about it.
+  defp enqueue_strip(item, ext, max_bytes) do
+    args = %{media_item_id: item.id, org_id: item.org_id, ext: ext, max_bytes: max_bytes}
+
+    case Oban.insert(KilnCMS.Media.AVStripWorker.new(args)) do
+      {:ok, _job} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.error(
+          "Media #{item.id} was quarantined but its metadata-strip job was not queued: " <>
+            "#{inspect(reason)}. It will not be served; the quarantine reaper removes it " <>
+            "after #{KilnCMS.Media.QuarantineReaper.max_age_hours()}h — re-upload the file."
+        )
+
+        :ok
+    end
+  rescue
+    error ->
+      Logger.error(
+        "Media #{item.id} was quarantined but its strip job was not queued: #{inspect(error)}"
+      )
+
+      :ok
+  end
+
+  @doc """
+  Whether A/V uploads are staged to a private quarantine and stripped by
+  `KilnCMS.Media.AVStripWorker` (#1122), rather than remuxed inline on the
+  upload request.
+
+  `config :kiln_cms, :av_metadata_strip, :deferred` (`KILN_AV_STRIP_MODE`)
+  opts in; `:sync` (the default) is #1112's bounded synchronous path. Deferred
+  additionally needs `Storage.private_available?/0` — on the S3 adapter that is
+  an operator-configured private bucket — and falls back to the sync path,
+  with a warning, when it is not.
+  """
+  @spec defer_av_strip?() :: boolean()
+  def defer_av_strip? do
+    case Application.get_env(:kiln_cms, :av_metadata_strip, :sync) do
+      :deferred ->
+        if Storage.private_available?() do
+          true
+        else
+          warn_no_private_storage()
+          false
+        end
+
+      _sync ->
+        false
+    end
+  end
+
+  # Once per node, not once per upload — the condition is a standing property
+  # of the deployment, and an operator who set `:deferred` without a private
+  # bucket needs to hear it once, not on every video.
+  defp warn_no_private_storage do
+    unless :persistent_term.get({__MODULE__, :warned_no_private_storage}, false) do
+      :persistent_term.put({__MODULE__, :warned_no_private_storage}, true)
+
+      Logger.warning(
+        "av_metadata_strip is :deferred but this deployment has no private storage " <>
+          "(KilnCMS.Storage.private_available?/0 is false), so A/V uploads are being " <>
+          "stripped synchronously instead. Configure a private bucket to defer the strip."
+      )
+    end
+  end
+
+  # `stripped` is `AVProcessor`'s own generated temp path (see above).
+  # sobelow_skip ["Traversal.FileModule"]
+  defp strip_av_now(path, spec, ext, content_type, filename, opts) do
     case AVProcessor.strip_metadata(path, ext) do
       {:ok, stripped} ->
         try do
@@ -349,11 +485,6 @@ defmodule KilnCMS.Media.Ingest do
         store_unstripped_av(path, ext, content_type, filename, opts, reason)
     end
   end
-
-  # A caption track is text this codebase already parsed — no container, nothing
-  # to strip, and no reason to hand it to ffmpeg.
-  defp persist(path, %{ext: ext, content_type: content_type}, filename, opts),
-    do: store_and_create(path, ext, content_type, filename, opts)
 
   defp store_unstripped_av(path, ext, content_type, filename, opts, reason) do
     if require_av_strip?() do
@@ -426,8 +557,13 @@ defmodule KilnCMS.Media.Ingest do
       }
       |> put_present(:alt, opts[:alt])
       |> put_present(:caption, opts[:caption])
+      |> put_quarantined(Keyword.get(opts, :quarantined?, false))
 
     case CMS.create_media_item(attrs, Keyword.take(opts, [:actor, :tenant])) do
+      {:ok, %{quarantined: true} = item} ->
+        # Derivation is the strip worker's to enqueue, after promotion (#1122).
+        {:ok, item}
+
       {:ok, item} ->
         enqueue_processing(item)
         {:ok, item}
@@ -435,7 +571,10 @@ defmodule KilnCMS.Media.Ingest do
       {:error, reason} ->
         # Reclaim the blob: the row is what makes it reachable, so without this
         # a refused create leaves bytes nothing will ever reference or delete.
-        Storage.delete(key)
+        # A quarantined upload's blob is in the private store.
+        if Keyword.get(opts, :quarantined?, false),
+          do: Storage.delete_private(key),
+          else: Storage.delete(key)
 
         # `:create_failed`, not the raw Ash error. `MediaLive` maps this atom to
         # a localized "couldn't be saved" — handing it the struct instead sent
@@ -445,6 +584,9 @@ defmodule KilnCMS.Media.Ingest do
         {:error, :create_failed}
     end
   end
+
+  defp put_quarantined(attrs, true), do: Map.put(attrs, :quarantined, true)
+  defp put_quarantined(attrs, false), do: attrs
 
   # The stored blob's real size, for `MediaItem.byte_size` — which for an image
   # is the *stripped* copy rather than what arrived.

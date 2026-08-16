@@ -6597,6 +6597,11 @@ msgstr "Visualizaciones de contenido que respetan la privacidad — solo recuent
 msgid "Probing…"
 msgstr "Sondeando…"
 
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Processing…"
+msgstr "Procesando…"
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Profile"
@@ -9168,6 +9173,11 @@ msgstr "El vocabulario de este sitio"
 #, elixir-autogen, elixir-format
 msgid "This unsubscribe link is invalid."
 msgstr "Este enlace para darse de baja no es válido."
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "This upload's metadata is being stripped in the background. It is not visible on the site or in the API until that finishes."
+msgstr "Los metadatos de esta subida se están eliminando en segundo plano. No será visible en el sitio ni en la API hasta que termine."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format

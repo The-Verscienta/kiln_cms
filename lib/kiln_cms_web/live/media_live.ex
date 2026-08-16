@@ -1311,12 +1311,29 @@ defmodule KilnCMSWeb.MediaLive do
             />
           </div>
         </div>
+        <%!-- A quarantined A/V upload (#1122): its metadata strip is still
+             pending, its bytes are in private storage and the stream route
+             404s until it is promoted — so say so instead of rendering a
+             player that cannot load. The library refreshes on the worker's
+             broadcast when it lands. --%>
+        <div
+          :if={@item.quarantined}
+          class="mt-4 rounded-lg border border-base-300 bg-base-200 p-4 text-sm"
+          role="status"
+        >
+          <p class="font-medium">{gettext("Processing…")}</p>
+          <p class="mt-1 text-base-content/70">
+            {gettext(
+              "This upload's metadata is being stripped in the background. It is not visible on the site or in the API until that finishes."
+            )}
+          </p>
+        </div>
         <%!-- A/V (#494) previews in a real player rather than an <img>, and
              plays through the authorized stream route so a gated item
              previews here exactly as it would on a page. `preload="metadata"`
              keeps opening the drawer from pulling down a whole video. --%>
         <video
-          :if={MediaKind.of(@item.content_type) == :video}
+          :if={MediaKind.of(@item.content_type) == :video and not @item.quarantined}
           id={"media-preview-#{@item.id}"}
           src={~p"/media/#{@item.id}/stream"}
           poster={poster_url(@item)}
@@ -1326,7 +1343,7 @@ defmodule KilnCMSWeb.MediaLive do
           class="mt-4 max-h-64 w-full rounded bg-black"
         />
         <audio
-          :if={MediaKind.of(@item.content_type) == :audio}
+          :if={MediaKind.of(@item.content_type) == :audio and not @item.quarantined}
           id={"media-preview-#{@item.id}"}
           src={~p"/media/#{@item.id}/stream"}
           controls

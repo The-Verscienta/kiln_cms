@@ -388,6 +388,57 @@ and install ffmpeg.** That gets you the same contract PDFs already have. The
 `:warning` exists so the gap is visible in logs rather than assumed away — but a
 log line is not a control, and nobody should treat the default as one.
 
+### The deferred strip, behind a quarantine (#1122)
+
+The table above is the **synchronous** path: the remux runs on the upload
+request, inside `consume_uploaded_entries`, so a 500 MB video holds the
+editor's media page for a full read+write (bounded at two minutes, #1112) and
+peaks at ~2× the file on `TMPDIR`. Set `KILN_AV_STRIP_MODE=deferred` and none
+of that happens on the request:
+
+1. `Ingest` stores the upload **as it arrived, in private storage** under its
+   final key, and creates the `MediaItem` with `quarantined: true`.
+2. While quarantined, the row is unreachable from every non-editor read
+   surface — that is written into the read policy (`SiteEmbed`-style: a second
+   condition next to `audience == :public`, and inside `Checks.MediaInAudience`
+   for gated audiences), not a UI filter, so JSON:API and GraphQL reads are
+   covered too; `/media/:id/download` and `/stream` answer 404 to everyone,
+   editors included, since both routes read private storage for a gated item;
+   and the row's `url` points at a public key that has nothing behind it.
+   Editors see the item in the library so they know it exists.
+3. `KilnCMS.Media.AVStripWorker` (queue `:media`) copies the private blob to
+   a temp file, runs the same `strip_metadata/2`, re-checks the size cap,
+   **stores the stripped copy at the public key, releases the quarantine
+   (a system-only action), deletes the private blob, and only then enqueues
+   derivation** (`AVWorker` — probe, poster), which fetches from public storage
+   and must not run before promotion.
+4. Failure outcomes are the table's, one step later: a transient one
+   (`insufficient_space`, `timeout`) is retried by Oban; a standing one (no
+   ffmpeg, un-remuxable container) is **refused** under
+   `REQUIRE_AV_METADATA_STRIP=true` — row purged, private blob deleted, error
+   logged naming the item — and otherwise promoted as it arrived with the
+   same `:warning`.
+5. `KilnCMS.Media.QuarantineReaper` (hourly, `KILN_MEDIA_QUARANTINE_REAPER_CRON`)
+   removes any item still quarantined after `KILN_MEDIA_QUARANTINE_MAX_AGE_HOURS`
+   (24): a strip job that was never queued or never succeeded must not leave a
+   private blob and a permanently held row.
+
+| `KILN_AV_STRIP_MODE` | private storage | Result |
+| --- | --- | --- |
+| `sync` (default) | either | the table above, on the upload request |
+| `deferred` | available (Local always; S3 with a private bucket) | quarantined on upload; stripped, promoted and released by the worker |
+| `deferred` | **not** available | falls back to `sync`, with a one-time `:warning` naming the fix |
+
+The fallback is deliberate for the reason the PDF strip refuses rather than
+degrades: a control that silently does not apply is worse than no control, and
+"stored public and unstripped for a while" would be exactly that. Deferred
+needs somewhere to hold the unstripped original that no delivery route serves
+from, and that is what private storage *is* — a private blob has no `url/1` at
+all. Not viable, and recorded so it is not re-proposed: streaming the strip
+(ffmpeg on stdin, output to the adapter) — `-movflags +faststart` requires a
+seekable output, and `-i pipe:0` cannot read a non-faststart MP4 whose `moov`
+is at the tail, which is what a phone export often is.
+
 **A password-protected PDF is refused**, with `is password-protected, so its
 metadata can't be removed — upload an unlocked copy`. qpdf cannot open a
 user-password-encrypted file, so it cannot strip one, and storing it unstripped

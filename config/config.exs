@@ -522,6 +522,18 @@ config :kiln_cms, :task_digest_cron, "0 8 * * *"
 # itself.
 config :kiln_cms, :occurrence_sweep_cron, "50 * * * *"
 
+# The deferred A/V metadata strip (#1122). `:sync` (default) remuxes on the
+# upload request, bounded (#1112); `:deferred` stages the upload to PRIVATE
+# storage as `quarantined: true` and `KilnCMS.Media.AVStripWorker` strips,
+# promotes and releases it — needs `Storage.private_available?/0`, else falls
+# back to `:sync` with a warning. `KILN_AV_STRIP_MODE` in runtime.exs.
+config :kiln_cms, :av_metadata_strip, :sync
+
+# Hourly sweep of quarantined items whose strip never completed
+# (`KilnCMS.Media.QuarantineReaper`, #1122): private blob deleted, row purged,
+# once older than `:media_quarantine_max_age_hours` (24). `false` disables.
+config :kiln_cms, :media_quarantine_reaper_cron, "20 * * * *"
+
 # Whether booting enqueues the one-off occurrence backfill (#766). On, because
 # the alternative is an upgrade step a human has to remember, and the feature
 # silently does nothing until they do — the migration cannot fill

@@ -126,7 +126,11 @@ defmodule KilnCMS.CMS.MediaItem do
     :focal_x,
     :focal_y
   ]
-  @create_accept @writable_fields
+  # `:quarantined` (#1122) is accepted on `:create` only — `Ingest` sets it when
+  # it stages an A/V upload to private storage ahead of the deferred metadata
+  # strip — and released only by the system `:release_quarantine` action below,
+  # never through the editor's `:update`.
+  @create_accept @writable_fields ++ [:quarantined]
 
   actions do
     # Not atomic: the `BustMediaCache` after-action runs an in-BEAM side effect.
@@ -203,6 +207,18 @@ defmodule KilnCMS.CMS.MediaItem do
       end
     end
 
+    # System-only (#1122): `KilnCMS.Media.AVStripWorker` calls this once the
+    # deferred strip has run and the stripped blob is at the item's public key.
+    # Also carries the stripped size, for the same reason the synchronous path
+    # records the stripped copy's size rather than the upload's. Never in
+    # `default_accept`; `forbid_if always()` below, so only `authorize?: false`
+    # from the worker reaches it.
+    update :release_quarantine do
+      accept [:byte_size]
+      require_atomic? false
+      change set_attribute(:quarantined, false)
+    end
+
     # Permanent hard delete (bypasses archival). The caller is responsible for
     # removing the storage blobs; admin-only via the destroy policy.
     destroy :purge do
@@ -272,9 +288,17 @@ defmodule KilnCMS.CMS.MediaItem do
     # `:public` item stays open to everyone, and anything else is checked
     # against the actor's held audiences the same way gated content is
     # (`Checks.MediaInAudience`).
+    #
+    # A **quarantined** item (#1122) — an A/V upload whose metadata strip is
+    # still pending, its blob held in private storage — is readable by editors
+    # (the library shows it as processing) and by nobody else, whatever its
+    # audience: the row would otherwise hand a stranger a working `url` the
+    # moment the strip finished, and hand an audience-holder the unstripped
+    # private blob before it did. Written into the policy, not a UI filter,
+    # because the JSON:API and GraphQL surfaces read through this too.
     policy action_type(:read) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
-      authorize_if expr(^ref(:audience) == :public)
+      authorize_if expr(^ref(:audience) == :public and ^ref(:quarantined) == false)
       authorize_if KilnCMS.CMS.Checks.MediaInAudience
     end
 
@@ -300,6 +324,13 @@ defmodule KilnCMS.CMS.MediaItem do
     # should ever be able to bump it directly (mirrors `ContentView`'s
     # system-only counter writes).
     policy action([:increment_downloads]) do
+      forbid_if always()
+    end
+
+    # Releasing a quarantine is the strip worker's act alone (`authorize?:
+    # false`, #1122): an editor who could release one would be publishing an
+    # unstripped upload.
+    policy action([:release_quarantine]) do
       forbid_if always()
     end
   end
@@ -447,6 +478,17 @@ defmodule KilnCMS.CMS.MediaItem do
     # (upload, `Media.Transform`, `Changes.MigrateMediaStorage`).
     attribute :storage_key, :string, public?: false
     attribute :url, :string, public?: true, constraints: [max_length: KilnCMS.Limits.url()]
+
+    # #1122. `true` while a deferred A/V metadata strip is pending: the blob is
+    # in PRIVATE storage under `storage_key`, `url` points at nothing yet, and
+    # the read policy above hides the row from everyone but editors. Cleared by
+    # `:release_quarantine` once the stripped blob is at the public key.
+    # `public? false`: not a headless-surface field.
+    attribute :quarantined, :boolean do
+      default false
+      allow_nil? false
+      public? false
+    end
 
     # Focal point (0.0–1.0) for smart cropping.
     attribute :focal_x, :float, default: 0.5, public?: true
