@@ -187,7 +187,55 @@ defmodule KilnCMSWeb.CalendarLiveTest do
       # The week view shows times; the month grid does not.
       assert week =~ "09:00"
 
-      list = lv |> element("a", "List") |> render_click()
+      # --- DIAGNOSTIC PROBE (temporary, not part of the fix) ---------------
+      # This click is the one that hangs in CI. Race it against a watchdog so
+      # we can dump every process whose stacktrace mentions something
+      # interesting before the outer ExUnit 60s timeout fires and destroys
+      # all the evidence.
+      probe = Task.async(fn -> lv |> element("a", "List") |> render_click() end)
+
+      list =
+        case Task.yield(probe, 8_000) do
+          {:ok, result} ->
+            result
+
+          nil ->
+            IO.puts(:stderr, "\n=== CALENDAR HANG PROBE: still running after 8s ===")
+            IO.puts(:stderr, "lv.pid = #{inspect(lv.pid)}")
+
+            for pid <- Process.list() do
+              case Process.info(pid, [
+                     :current_stacktrace,
+                     :registered_name,
+                     :status,
+                     :message_queue_len,
+                     :dictionary,
+                     :initial_call
+                   ]) do
+                nil ->
+                  :ok
+
+                info ->
+                  stack = Keyword.get(info, :current_stacktrace, [])
+                  text = inspect(stack) <> inspect(Keyword.get(info, :initial_call))
+
+                  if text =~ "KilnCMS" or text =~ "Ecto" or text =~ "DBConnection" or
+                       text =~ "Phoenix.LiveView" or text =~ "Phoenix.Presence" or
+                       text =~ "Phoenix.Tracker" or text =~ "Ash." do
+                    IO.puts(:stderr, "--- #{inspect(pid)} ---")
+                    IO.puts(:stderr, "  registered_name: #{inspect(Keyword.get(info, :registered_name))}")
+                    IO.puts(:stderr, "  initial_call:    #{inspect(Keyword.get(info, :initial_call))}")
+                    IO.puts(:stderr, "  status:          #{inspect(Keyword.get(info, :status))}")
+                    IO.puts(:stderr, "  message_queue:   #{inspect(Keyword.get(info, :message_queue_len))}")
+                    IO.puts(:stderr, "  stacktrace:\n#{Exception.format_stacktrace(stack)}")
+                  end
+              end
+            end
+
+            IO.puts(:stderr, "=== END PROBE DUMP ===\n")
+            Task.await(probe, 40_000)
+        end
+
       assert list =~ page.title
     end
 

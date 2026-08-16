@@ -126,77 +126,12 @@ jobs:
         # on the migrations the `test` alias applies.
         run: mix test test/kiln/core_agnostic_test.exs
 
-      - name: Check the gettext catalogs are up to date
-        # `--check-up-to-date` only guards default.pot, so it happily passes
-        # while the per-locale .po files rot — which is exactly how fr/es drifted
-        # 525 messages behind the source and silently fell back to English.
-        # Merging and diffing guards the .po files too, and prints the drift.
-        run: |
-          mix gettext.extract --merge
-          git diff --exit-code -- priv/gettext || {
-            echo "::error::Gettext catalogs are out of date. Run 'mix gettext.extract --merge' and commit priv/gettext, translating any new msgids."
-            exit 1
-          }
-
-      - name: Check the gettext catalogs are actually translated
-        # The drift check above only proves the catalogs match the source — it
-        # passes just as happily on an empty msgstr (silently renders English)
-        # or a bogus fuzzy (renders a *wrong* translation, which is worse).
-        # Both shipped past it repeatedly; see the task's moduledoc.
-        run: mix kiln.gettext.check
-
-      - name: Check formatting
-        run: mix format --check-formatted
-
-      - name: Credo
-        run: mix credo --strict
-
-      - name: Sobelow (security scan)
-        run: mix sobelow --config
-
-      # PDF metadata stripping (#807) shells out to qpdf, and the tests that
-      # prove an uploaded PDF really loses its /Info and XMP need a real one.
-      #
-      # The options arrived in qpdf 11.10. Ubuntu 24.04 packages 11.9.0 — one
-      # minor short — and 26.04 packages 12.3.2, so whether these tests run
-      # depends on where `ubuntu-latest` currently points. `test_helper.exs`
-      # excludes the `:qpdf` tag when the installed qpdf can't strip and says
-      # so on stderr, so this degrades visibly rather than silently passing.
-      # The line below reports it in the job log too, where someone will
-      # actually see it. The RELEASE image is Debian trixie (qpdf 12.2.0) and
-      # is not affected either way. Whatever this job excludes, the
-      # `qpdf_metadata_stripping` job below still runs on a trixie-based
-      # container regardless of where `ubuntu-latest` points, so the `:qpdf`
-      # tests never go fully dark (#907).
-      - name: Install qpdf (PDF metadata stripping tests)
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends qpdf
-          qpdf --version | head -1
-          if qpdf --help=all 2>&1 | grep -q -- '--remove-info'; then
-            echo "qpdf supports --remove-info; :qpdf tests will run"
-          else
-            echo "::warning::qpdf $(qpdf --version | head -1) predates 11.10 —" \
-                 ":qpdf tests (#807 PDF metadata stripping) will be EXCLUDED"
-          fi
-
-      # Same reasoning as qpdf above, for A/V (#820). Without ffmpeg here, the
-      # :ffmpeg tests are excluded everywhere that matters and the strip — a
-      # privacy control — would be pinned by nothing: a change to the argv that
-      # silently stopped removing GPS would merge green. The `:no_ffmpeg` pair
-      # is excluded once this is installed, which is the intent; between the
-      # two tags, one always runs.
-      - name: Install ffmpeg (A/V metadata stripping tests)
-        run: |
-          sudo apt-get install -y --no-install-recommends ffmpeg
-          ffmpeg -version | head -1
-          ffprobe -version | head -1
+      # --- DIAGNOSTIC BRANCH: gettext/format/credo/sobelow/qpdf/ffmpeg steps
+      # temporarily removed to get to `mix test` faster. Not part of the fix;
+      # this branch exists only to capture a hang stacktrace from real CI.
 
       - name: Run tests
-        run: mix test
-
-      - name: Dialyzer
-        run: mix dialyzer
+        run: mix test test/kiln_cms_web/live/calendar_live_test.exs --trace --seed 0
 
   # Deliberately its own job rather than a step in `build` (#51). The advisory
   # database moves on its own schedule, so this gate can fail on a PR that
