@@ -698,5 +698,106 @@ defmodule Kiln.PluginsTest do
       error = assert_raise Mix.Error, fn -> Mix.Tasks.Kiln.Plugins.Doctor.run([]) end
       assert error.message =~ "does not implement Kiln.FieldType"
     end
+
+    # A synthetic `definition.options` used to always be `[]`, so a select-style
+    # cast/2 that validates membership against it — the same pattern the core
+    # `:select` custom field uses — always saw `{:error, _}` and was silently
+    # exempted from the divergence check, hiding a real bug like this one.
+    test "does not silently skip a field type whose cast/2 validates against definition.options" do
+      defmodule SelectDivergentFieldType do
+        use Kiln.FieldType
+
+        def cast(value, %{options: options}) do
+          if value in options,
+            do: {:ok, [value]},
+            else: {:error, "not one of #{inspect(options)}"}
+        end
+      end
+
+      defmodule SelectDivergentFieldPlugin do
+        use Kiln.Plugin
+        def field_types, do: [SelectDivergentFieldType]
+      end
+
+      Application.put_env(:kiln_cms, :plugins, [SelectDivergentFieldPlugin])
+
+      error = assert_raise Mix.Error, fn -> Mix.Tasks.Kiln.Plugins.Doctor.run([]) end
+      assert error.message =~ "field type :select_divergent_field_type"
+      assert error.message =~ "cast/2 returns array"
+      assert error.message =~ "implies string"
+    end
+
+    # `widget_sample/1` used to hand every non-numeric/checkbox widget the
+    # literal "sample", which a real date parser rejects outright — the
+    # divergence check never ran for a date-format type as a result.
+    test "does not silently skip a field type whose cast/2 parses a real date format" do
+      defmodule DateDivergentFieldType do
+        use Kiln.FieldType
+        def input_type, do: "date"
+
+        def cast(value, _definition) do
+          case Date.from_iso8601(value) do
+            {:ok, date} -> {:ok, [Date.to_iso8601(date)]}
+            {:error, _} = error -> error
+          end
+        end
+      end
+
+      defmodule DateDivergentFieldPlugin do
+        use Kiln.Plugin
+        def field_types, do: [DateDivergentFieldType]
+      end
+
+      Application.put_env(:kiln_cms, :plugins, [DateDivergentFieldPlugin])
+
+      error = assert_raise Mix.Error, fn -> Mix.Tasks.Kiln.Plugins.Doctor.run([]) end
+      assert error.message =~ "field type :date_divergent_field_type"
+      assert error.message =~ "cast/2 returns array"
+      assert error.message =~ "implies string"
+    end
+
+    # cast/2's contract only requires a JSON-native return — nothing requires
+    # its composite map to use the exact string keys input_parts/1 declared,
+    # and an atom-keyed return round-trips correctly through the real jsonb
+    # write path (Jason stringifies atom keys on encode).
+    test "accepts an atom-keyed composite cast/2 result" do
+      defmodule AtomKeyedCompositeFieldType do
+        use Kiln.FieldType
+        def input_parts(_definition), do: [%{key: "lat", label: "Lat", type: "number"}]
+        def cast(%{"lat" => lat}, _definition), do: {:ok, %{lat: String.to_integer(lat)}}
+      end
+
+      defmodule AtomKeyedCompositeFieldPlugin do
+        use Kiln.Plugin
+        def field_types, do: [AtomKeyedCompositeFieldType]
+      end
+
+      Application.put_env(:kiln_cms, :plugins, [AtomKeyedCompositeFieldPlugin])
+
+      assert Mix.Tasks.Kiln.Plugins.Doctor.run([]) == :ok
+    end
+
+    # The synthetic probe definition used to leave content_type/type_definition_id
+    # both nil — a state a real FieldDefinition never has — so a cast/2 that
+    # reasonably reads definition.content_type (the same pattern the core
+    # coerce_reference/3 uses) raised and was misreported as a plugin bug.
+    test "does not crash the whole run on a field type whose cast/2 reads definition.content_type" do
+      defmodule ContentTypeReadingFieldType do
+        use Kiln.FieldType
+
+        def cast(value, %{content_type: type}) when is_atom(type) and not is_nil(type) do
+          {:ok, value}
+        end
+      end
+
+      defmodule ContentTypeReadingFieldPlugin do
+        use Kiln.Plugin
+        def field_types, do: [ContentTypeReadingFieldType]
+      end
+
+      Application.put_env(:kiln_cms, :plugins, [ContentTypeReadingFieldPlugin])
+
+      assert Mix.Tasks.Kiln.Plugins.Doctor.run([]) == :ok
+    end
   end
 end
