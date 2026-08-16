@@ -648,6 +648,13 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    more than one org exists. Terminating unknown hosts at the proxy is still
    worth doing as well.
 
+   A host whose lookup could not *run* — Postgres down — is refused too, since
+   falling back would reopen exactly this leak on an unrecognized host, but with
+   a `503` rather than a `404` (#341): the host may well exist, and the two
+   answers must not be conflated. With the control **off** a failed lookup takes
+   the same default-org fallback an unmatched host does, so an outage refuses
+   nothing that a working database would have served.
+
    Surfaces outside the control, none of which reads the ambient tenant:
    `Plug.Static` (both mounts, including `/uploads` under the local storage
    adapter — UUID-keyed assets answer on any host, as they would behind a CDN);

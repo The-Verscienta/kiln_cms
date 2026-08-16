@@ -141,7 +141,49 @@ defmodule KilnCMSWeb.ArtifactControllerResilienceTest do
     assert json_response(resp, 200)["html"] =~ "Cached"
   end
 
+  test "serves warm content on a host resolution never cached, so the outage cannot 404 it" do
+    slug = published_page()
+    path = ~p"/api/content/page/#{slug}"
+
+    # Warm the content cache on the usual host, then ask on one no request in
+    # this run has ever resolved — so `KilnCMS.Cache.Hosts` cannot answer for it
+    # and tenant resolution has to survive the outage on its own. With strict
+    # matching off (the default here, and the default everywhere) an
+    # unresolvable host is the default org, which is where the warm entry is.
+    #
+    # This is the whole #341 promise in one request, and it used to fail: a
+    # failed read was reported as "no such org", and `SetTenant` refused in the
+    # endpoint — above the router, so above this cache — with "this server does
+    # not serve the requested host". Every host did that once its resolution
+    # aged out mid-outage (5 min positive TTL, 1 min negative).
+    assert json_response(warm_then_get_from_cold_host(path), 200)["slug"] == slug
+  end
+
+  # `warm_then_get_without_db/2` for a host whose *resolution* is cold too, with
+  # the same retry and for the same reason: a concurrent async test busting the
+  # content cache between the warm-up and the dispatch shows up as a 503, which
+  # says nothing about the host. Each attempt invents a new host, so no attempt
+  # can be answered by the entry a previous one wrote.
+  defp warm_then_get_from_cold_host(path, retries \\ 3) do
+    assert json_response(get(build_conn(), path), 200)
+
+    host = "outage-e2e-#{System.unique_integer([:positive])}.#{KilnCMSWeb.Tenant.base_host()}"
+    resp = without_db(fn -> get(%{build_conn() | host: host}, path) end)
+
+    if resp.status == 503 and retries > 0 do
+      warm_then_get_from_cold_host(path, retries - 1)
+    else
+      resp
+    end
+  end
+
   test "degrades to a retryable 503 for cold content during an outage" do
+    # No tenant warm-up needed, and that is now guaranteed rather than lucky:
+    # with strict matching off, a host whose lookup fails resolves to the default
+    # org like any other unresolvable host (#341), so this reaches the controller
+    # whether or not anything cached `www.example.com` first. Run alone, before
+    # that fix, it 404'd in `SetTenant` every time — a *tenant* refusal wearing
+    # the same status as a missing page, which is how it hid.
     cold_slug = "res-cold-#{System.unique_integer([:positive])}"
 
     resp = without_db(fn -> get(build_conn(), ~p"/api/content/page/#{cold_slug}") end)

@@ -19,13 +19,15 @@ defmodule KilnCMSWeb.Tenant do
   so an existing single-host install is unaffected, and recommended for every
   multi-tenant one.
 
-  `fetch_org/1` is the single resolver — `{:ok, org}` or `:error` under strict
-  matching — shared by `KilnCMSWeb.Plugs.SetTenant` (from `conn.host`), the
-  LiveView `:assign_current_org` on_mount hook (from the socket's `host_uri`)
-  and all three sockets (`GraphqlSocket`, `BridgeSocket`, `CollabSocket`, from
-  the connect URI via `fetch_org_from_connect_info/1`). `resolve_org/1` is the
-  never-failing form, for callers with no way to reject a request. Lookups are
-  Cachex-cached so resolution isn't a DB hit per request.
+  `fetch_org/1` is the single resolver — `{:ok, org}`, `:error` under strict
+  matching, or `:unavailable` when the lookup itself failed on a host strict
+  matching would have refused anyway — shared by `KilnCMSWeb.Plugs.SetTenant`
+  (from `conn.host`), the LiveView `:assign_current_org` on_mount hook (from
+  the socket's `host_uri`) and all three sockets (`GraphqlSocket`,
+  `BridgeSocket`, `CollabSocket`, from the connect URI via
+  `fetch_org_from_connect_info/1`). `resolve_org/1` is the never-failing form,
+  for callers with no way to reject a request. Lookups are Cachex-cached so
+  resolution isn't a DB hit per request.
 
   ## What strict matching does not cover
 
@@ -86,6 +88,46 @@ defmodule KilnCMSWeb.Tenant do
 
       opts
       |> Keyword.put_new(:message, "no organization is configured for host #{inspect(host)}")
+      |> then(&struct!(__MODULE__, &1))
+    end
+
+    def exception(message) when is_binary(message), do: %__MODULE__{message: message}
+  end
+
+  defmodule UnavailableError do
+    @moduledoc """
+    Raised when a request's host could not be resolved because the lookup
+    **failed** — Postgres down — rather than because it matches no organization
+    (#1124 separated the two; `KilnCMSWeb.Tenant.fetch_org/1` returns
+    `:unavailable`).
+
+    Only reachable under `TENANT_STRICT_HOST` and off the canonical base host:
+    everywhere else a failed read falls back to the default org, because
+    everywhere else an unresolvable host does.
+
+    `plug_status: 503`, and the difference from `UnknownHostError`'s 404 is the
+    entire point — the host may well exist, and 404 is what a CDN caches, an
+    uptime monitor pages a tenant about, and a search engine deindexes on.
+
+    That status also puts the raise *outside* the range LiveView's channel turns
+    into a client reload, so a mount costs a crash report instead. Deliberate:
+    reloading would only re-run the same failed resolution through `SetTenant`
+    for the same 503, and unlike a made-up-host probe — which this must never be
+    confused with, hence the deliberately quiet 404 there — an outage is
+    something the operator wants reported. It is bounded by the outage, not by
+    what a client chooses to send.
+    """
+    defexception [:host, :message, plug_status: 503]
+
+    @impl true
+    def exception(opts) when is_list(opts) do
+      host = opts[:host]
+
+      opts
+      |> Keyword.put_new(
+        :message,
+        "the organization for host #{inspect(host)} could not be resolved; the lookup failed"
+      )
       |> then(&struct!(__MODULE__, &1))
     end
 
@@ -305,39 +347,66 @@ defmodule KilnCMSWeb.Tenant do
   @doc """
   Resolve the organization for a request host.
 
-  `{:ok, org}` for a host that matches an org (subdomain, custom domain, or the
-  canonical base host). For anything else — a bare hostname, `localhost`, an IP
-  literal, an attacker-supplied `Host` — this is `{:ok, default_org}` normally
-  and `:error` when `strict_host?/0` is on.
+  Three outcomes, and the third is the one to read carefully:
 
-  The canonical base host is never refused, even under strict matching — the
-  deployment must always answer on its own name. Every lookup below collapses a
-  failed read to `nil`, so without this clause a default org whose seed row is
-  missing, or a Postgres restart caught mid-request, would 404 the apex. Note
-  the clause covers *only* the apex: a tenant subdomain or custom domain during
-  the same outage still gets `:error`, since nothing here can tell "no such org"
-  apart from "could not ask".
+    * `{:ok, org}` — the host matches an org (subdomain, custom domain, or the
+      canonical base host), or it matches none and the lenient fallback applies.
+    * `:error` — the host names **no org** and `strict_host?/0` is on.
+    * `:unavailable` — the lookup could not be *performed* (Postgres down) for a
+      host strict matching would refuse.
 
-  Callers that can reject the request should use this and turn `:error` into a
-  404 or a refused socket; `resolve_org/1` is the never-failing form for those
-  that cannot.
+  Both of the last two refuse the request, but they answer different questions,
+  and a caller that collapses them tells the client a lie — "no such host"
+  about a host that may well exist. See `UnavailableError` and
+  `KilnCMSWeb.Plugs.SetTenant`, which answers the second with a retryable 503.
+
+  ## A failed read is not a miss (#1124, #341)
+
+  #1124 gave the lookups below an `:error` distinct from `nil`, so a transient
+  blip could not be *cached* as "no such org" for the negative TTL. What it did
+  not settle is what an uncached failed read should mean, and the behavior it
+  inherited — refuse — is wrong wherever nothing is meant to be refused:
+
+    * **Strict matching off** (the default, and the whole single-host install):
+      a failed read now falls back to the default org, exactly as a miss does.
+      That path refuses nothing by construction, so refusing on an
+      infrastructure failure was a behavior no configuration asked for — and
+      since `SetTenant` halts in the endpoint, above the router, the request was
+      refused *before* reaching the content cache #341 exists to serve it from.
+      Once a host's `KilnCMS.Cache.Hosts` entry aged out mid-outage, every
+      request on it got "this server does not serve the requested host". This is
+      also what the code did *before* #1124, when every lookup collapsed a
+      failed read to `nil` — the docstring's promise about the apex was written
+      against that version and had quietly stopped being true.
+
+    * **Strict matching on**, off the canonical host: falling back would serve
+      the default org's content and branding on an unrecognized host, which is
+      the leak #563 exists to prevent — so the request is still refused, as
+      `:unavailable` rather than as `:error`.
+
+  The canonical base host is never refused either way. The deployment must
+  always answer on its own name, and serving the default org there is what
+  strict matching does for that host anyway, so the apex costs nothing to keep
+  up: `default_org/0` degrades to an id-only struct, which is all a
+  cache-served request needs.
+
+  Callers that can reject the request should use this; `resolve_org/1` is the
+  never-failing form for those that cannot.
   """
-  @spec fetch_org(String.t() | nil) :: {:ok, Accounts.Organization.t()} | :error
+  @spec fetch_org(String.t() | nil) :: {:ok, Accounts.Organization.t()} | :error | :unavailable
   def fetch_org(host) do
     case known_org(host) do
-      %Accounts.Organization{} = org ->
-        {:ok, org}
-
-      :error ->
-        :error
-
-      nil ->
-        cond do
-          strict_host?() and not canonical_host?(host) -> :error
-          true -> {:ok, default_org()}
-        end
+      %Accounts.Organization{} = org -> {:ok, org}
+      :error -> if refused?(host), do: :unavailable, else: {:ok, default_org()}
+      nil -> if refused?(host), do: :error, else: {:ok, default_org()}
     end
   end
+
+  # Whether strict matching refuses this host at all. Deliberately one predicate
+  # across both unresolved cases: *which* hosts are refused is a policy question
+  # with a single answer, and only what the caller is told about the refusal
+  # depends on why the lookup came back empty.
+  defp refused?(host), do: strict_host?() and not canonical_host?(host)
 
   @doc """
   `fetch_org/1` for a socket's connect info, whose host lives at `[:uri, :host]`.
@@ -347,9 +416,12 @@ defmodule KilnCMSWeb.Tenant do
   accessor, and of the reasoning about what an absent host means. A missing host
   (no `connect_info`, as in a bare test connect) resolves to the default org, or
   is refused under `TENANT_STRICT_HOST` (#563), exactly as a request whose
-  `Host` matches nothing would be.
+  `Host` matches nothing would be — `:unavailable` included, which a socket
+  refuses like `:error` for want of anything better to send over a transport
+  that has no 503.
   """
-  @spec fetch_org_from_connect_info(map()) :: {:ok, Accounts.Organization.t()} | :error
+  @spec fetch_org_from_connect_info(map()) ::
+          {:ok, Accounts.Organization.t()} | :error | :unavailable
   def fetch_org_from_connect_info(connect_info) do
     fetch_org(connect_info_host(connect_info))
   end
@@ -431,11 +503,15 @@ defmodule KilnCMSWeb.Tenant do
   # stores as its own `:unresolved` sentinel, because Cachex uses `nil` for "not
   # present" and a cached miss has to be distinguishable from never having asked.
   #
-  # This function is the only thing that writes a negative entry, and it now
+  # This function is the only thing that writes a negative entry, and it
   # distinguishes a genuine miss (`nil`) from a failed read (`:error`) — the
-  # latter is passed through uncached so a transient DB blip does not 404 a real
-  # tenant for the negative TTL (#1124). `Cache.Hosts` only caches `:unresolved`
-  # for a true `nil`, never for `:error`.
+  # latter is passed through uncached so a transient DB blip is not remembered
+  # as "no such org" for the negative TTL (#1124). `Cache.Hosts` only caches
+  # `:unresolved` for a true `nil`, never for `:error`.
+  #
+  # Not caching it was only half the fix: what the uncached `:error` then *means*
+  # is `fetch_org/1`'s call, and until it was made the blip still refused the
+  # request outright. See that function.
   defp resolve_known(host) do
     if host == base_host() do
       case Accounts.default_org() do

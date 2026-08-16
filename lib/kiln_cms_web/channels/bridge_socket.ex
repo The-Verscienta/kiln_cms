@@ -204,6 +204,12 @@ defmodule KilnCMSWeb.BridgeSocket do
         )
 
         :error
+
+      # A failed lookup, not an unserved host: refused the same way (a socket
+      # has no 503 to send) but never alerted — the alert counts hosts this
+      # deployment does not serve, and this may be one it does.
+      :unavailable ->
+        :error
     end
   end
 

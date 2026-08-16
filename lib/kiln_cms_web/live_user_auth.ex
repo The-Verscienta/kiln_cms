@@ -314,6 +314,13 @@ defmodule KilnCMSWeb.LiveUserAuth do
       :error ->
         KilnCMSWeb.TenantRefusalAlert.notify(:live, host)
         raise KilnCMSWeb.Tenant.UnknownHostError, host: host
+
+      # A lookup that could not run, not a host nobody serves — so it raises the
+      # 503 twin and does *not* alert: the refusal alert counts unserved hosts
+      # and names `TENANT_STRICT_HOST` as the cause, which is the wrong
+      # diagnosis for a database that is down.
+      :unavailable ->
+        raise KilnCMSWeb.Tenant.UnavailableError, host: host
     end
   end
 

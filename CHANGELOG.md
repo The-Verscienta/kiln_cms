@@ -187,6 +187,25 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **A database outage no longer 404s every request as an unknown host** (#341).
+  `KilnCMSWeb.Tenant.fetch_org/1` reported a lookup that *failed* the same way
+  it reports a host that matches no org, and `KilnCMSWeb.Plugs.SetTenant` turned
+  that into "this server does not serve the requested host" — in the endpoint,
+  above the router, and therefore above the content cache that is supposed to
+  keep answering without a database. With `TENANT_STRICT_HOST` **off** (the
+  default, where nothing is ever refused) every request was refused this way
+  once the host's `KilnCMS.Cache.Hosts` entry aged out mid-outage, and
+  `TenantRefusalAlert` blamed a setting that was not even on. #1124 stopped a
+  failed read being *cached* as a miss; what it did not settle was what the
+  uncached failure should mean. It now falls back to the default org exactly as
+  an unmatched host does. With strict matching **on**, an unresolvable host is
+  still refused off the canonical apex — falling back there would serve the
+  default org's content on an unrecognized host, the leak #563 prevents — but as
+  a plain-text `503` with `retry-after` rather than a `404` that claims the host
+  does not exist; the health-probe and billing-webhook exemptions cover it too,
+  and the refusal alert deliberately does not fire for it. The LiveView mount
+  path raises the matching `KilnCMSWeb.Tenant.UnavailableError` (`plug_status:
+  503`); the three sockets refuse as before, without alerting.
 - **The admin delivery-cache purge reaches every node** (#1138).
   `KilnCMS.Cache.flush_delivery/0` (the System console button and
   `mix kiln.cache.flush`) used to clear only the node that served the request,
