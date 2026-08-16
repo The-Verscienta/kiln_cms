@@ -127,9 +127,10 @@ defmodule KilnCMS.Seo do
   @spec draft(Document.t(), keyword()) :: {:ok, Draft.t()} | {:error, term()}
   def draft(%Document{} = document, opts \\ []) do
     with :ok <- check_enabled(),
-         :ok <- check_length(document),
-         :ok <- Budget.check("seo", opts[:org_id], opts[:user_id], budget_limits(opts)) do
-      run(document, opts)
+         :ok <- check_length(document) do
+      Budget.charge("seo", opts[:org_id], opts[:user_id], budget_limits(opts), fn ->
+        run(document, opts)
+      end)
     end
   end
 

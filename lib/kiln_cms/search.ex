@@ -256,6 +256,29 @@ defmodule KilnCMS.Search do
   def embedding_unattended_share, do: cfg(:embedding_unattended_share, 0.5)
 
   @doc """
+  `KilnCMS.LLM.Budget` limits for the `"search_embedding"` feature, shared by
+  every caller that computes an embedding on demand
+  (`KilnCMS.Search.Related`, `KilnCMS.Search.BlockSearch`) — one assembly
+  point so the two buckets and the unattended reserve share stay in sync
+  across callers (#1076).
+
+  `units` is the number of inferences the call will actually perform if the
+  check passes — 1 for a single query or tag embedding, or an uncached
+  block/tag count for a batch — so the budget is charged for real inference
+  volume, not once per call regardless of how much work the call does.
+  """
+  @spec embedding_budget_limits(boolean(), pos_integer()) :: keyword()
+  def embedding_budget_limits(unattended?, units \\ 1) do
+    [
+      per_user: embedding_per_user_limit(),
+      per_org: embedding_per_org_limit(),
+      unattended?: unattended?,
+      unattended_share: embedding_unattended_share(),
+      units: units
+    ]
+  end
+
+  @doc """
   Nx `defn_options` for the local Bumblebee servings. Uses the EXLA compiler when
   the `:exla` dependency is compiled in (dev/test); otherwise returns `[]` so the
   servings fall back to Nx's default backend instead of crashing on a missing
