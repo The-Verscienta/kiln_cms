@@ -16,7 +16,7 @@ defmodule KilnCMS.Repo.Migrations.AddExampleSeoKeywords do
       add :seo_keywords, :text
     end
 
-    alter table(:conditions) do
+    alter table(:products) do
       add :seo_keywords, :text
     end
 
@@ -30,7 +30,7 @@ defmodule KilnCMS.Repo.Migrations.AddExampleSeoKeywords do
       remove :seo_keywords
     end
 
-    alter table(:conditions) do
+    alter table(:products) do
       remove :seo_keywords
     end
 

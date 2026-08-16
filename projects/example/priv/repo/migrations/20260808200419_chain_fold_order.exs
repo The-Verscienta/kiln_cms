@@ -18,7 +18,7 @@ defmodule KilnCMS.Repo.Migrations.ChainFoldOrder do
       add :chain_key_id, :text
     end
 
-    alter table(:conditions_versions) do
+    alter table(:products_versions) do
       add :chain_signature, :text
       add :chain_key_id, :text
     end
@@ -35,7 +35,7 @@ defmodule KilnCMS.Repo.Migrations.ChainFoldOrder do
       remove :chain_signature
     end
 
-    alter table(:conditions_versions) do
+    alter table(:products_versions) do
       remove :chain_key_id
       remove :chain_signature
     end

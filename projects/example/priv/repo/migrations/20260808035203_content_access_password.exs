@@ -18,7 +18,7 @@ defmodule KilnCMS.Repo.Migrations.ContentAccessPassword do
       add :password_fingerprint, :text
     end
 
-    alter table(:conditions) do
+    alter table(:products) do
       add :access_password_hash, :text
       add :password_fingerprint, :text
     end
@@ -35,7 +35,7 @@ defmodule KilnCMS.Repo.Migrations.ContentAccessPassword do
       remove :access_password_hash
     end
 
-    alter table(:conditions) do
+    alter table(:products) do
       remove :password_fingerprint
       remove :access_password_hash
     end

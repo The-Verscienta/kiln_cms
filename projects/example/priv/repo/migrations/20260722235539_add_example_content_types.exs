@@ -203,13 +203,13 @@ defmodule KilnCMS.Repo.Migrations.AddExampleContentTypes do
           )
     end
 
-    create table(:conditions, primary_key: false) do
+    create table(:products, primary_key: false) do
       add :id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true
 
       add :org_id,
           references(:organizations,
             column: :id,
-            name: "conditions_org_id_fkey",
+            name: "products_org_id_fkey",
             type: :uuid,
             prefix: "public"
           ),
@@ -249,7 +249,7 @@ defmodule KilnCMS.Repo.Migrations.AddExampleContentTypes do
       add :author_id,
           references(:users,
             column: :id,
-            name: "conditions_author_id_fkey",
+            name: "products_author_id_fkey",
             type: :uuid,
             prefix: "public"
           )
@@ -257,7 +257,7 @@ defmodule KilnCMS.Repo.Migrations.AddExampleContentTypes do
       add :category_id,
           references(:categories,
             column: :id,
-            name: "conditions_category_id_fkey",
+            name: "products_category_id_fkey",
             type: :uuid,
             prefix: "public"
           )
@@ -265,27 +265,25 @@ defmodule KilnCMS.Repo.Migrations.AddExampleContentTypes do
       add :featured_image_id,
           references(:media_items,
             column: :id,
-            name: "conditions_featured_image_id_fkey",
+            name: "products_featured_image_id_fkey",
             type: :uuid,
             prefix: "public"
           )
     end
 
-    create index(:conditions, [:slug, :locale], name: "conditions_slug_locale_lookup_index")
+    create index(:products, [:slug, :locale], name: "products_slug_locale_lookup_index")
 
-    create index(:conditions, ["title gin_trgm_ops"],
-             name: "conditions_title_trgm_index",
+    create index(:products, ["title gin_trgm_ops"],
+             name: "products_title_trgm_index",
              using: "gin"
            )
 
-    create index(:conditions, ["embedding vector_cosine_ops"],
-             name: "conditions_embedding_hnsw_index",
+    create index(:products, ["embedding vector_cosine_ops"],
+             name: "products_embedding_hnsw_index",
              using: "hnsw"
            )
 
-    create unique_index(:conditions, [:org_id, :slug, :locale],
-             name: "conditions_unique_slug_index"
-           )
+    create unique_index(:products, [:org_id, :slug, :locale], name: "products_unique_slug_index")
 
     create table(:testimonials_versions, primary_key: false) do
       add :id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true
@@ -392,7 +390,7 @@ defmodule KilnCMS.Repo.Migrations.AddExampleContentTypes do
 
     create unique_index(:faqs, [:org_id, :slug, :locale], name: "faqs_unique_slug_index")
 
-    create table(:conditions_versions, primary_key: false) do
+    create table(:products_versions, primary_key: false) do
       add :id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true
       add :version_action_type, :text, null: false
       add :version_action_name, :text, null: false
@@ -411,7 +409,7 @@ defmodule KilnCMS.Repo.Migrations.AddExampleContentTypes do
       add :user_id,
           references(:users,
             column: :id,
-            name: "conditions_versions_user_id_fkey",
+            name: "products_versions_user_id_fkey",
             type: :uuid,
             prefix: "public",
             on_delete: :nilify_all,
@@ -452,9 +450,9 @@ defmodule KilnCMS.Repo.Migrations.AddExampleContentTypes do
 
     drop table(:team_members_versions)
 
-    drop constraint(:conditions_versions, "conditions_versions_user_id_fkey")
+    drop constraint(:products_versions, "products_versions_user_id_fkey")
 
-    drop table(:conditions_versions)
+    drop table(:products_versions)
 
     drop constraint(:faqs, "faqs_org_id_fkey")
 
@@ -480,29 +478,27 @@ defmodule KilnCMS.Repo.Migrations.AddExampleContentTypes do
 
     drop table(:testimonials_versions)
 
-    drop constraint(:conditions, "conditions_org_id_fkey")
+    drop constraint(:products, "products_org_id_fkey")
 
-    drop constraint(:conditions, "conditions_author_id_fkey")
+    drop constraint(:products, "products_author_id_fkey")
 
-    drop constraint(:conditions, "conditions_category_id_fkey")
+    drop constraint(:products, "products_category_id_fkey")
 
-    drop constraint(:conditions, "conditions_featured_image_id_fkey")
+    drop constraint(:products, "products_featured_image_id_fkey")
 
-    drop_if_exists unique_index(:conditions, [:org_id, :slug, :locale],
-                     name: "conditions_unique_slug_index"
+    drop_if_exists unique_index(:products, [:org_id, :slug, :locale],
+                     name: "products_unique_slug_index"
                    )
 
-    drop_if_exists index(:conditions, ["embedding vector_cosine_ops"],
-                     name: "conditions_embedding_hnsw_index"
+    drop_if_exists index(:products, ["embedding vector_cosine_ops"],
+                     name: "products_embedding_hnsw_index"
                    )
 
-    drop_if_exists index(:conditions, ["title gin_trgm_ops"], name: "conditions_title_trgm_index")
+    drop_if_exists index(:products, ["title gin_trgm_ops"], name: "products_title_trgm_index")
 
-    drop_if_exists index(:conditions, [:slug, :locale],
-                     name: "conditions_slug_locale_lookup_index"
-                   )
+    drop_if_exists index(:products, [:slug, :locale], name: "products_slug_locale_lookup_index")
 
-    drop table(:conditions)
+    drop table(:products)
 
     drop constraint(:faqs_versions, "faqs_versions_user_id_fkey")
 

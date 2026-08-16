@@ -26,12 +26,12 @@ defmodule KilnCMS.Repo.Migrations.NextOccurrenceIndex do
              where: "next_occurrence_at IS NOT NULL"
            )
 
-    alter table(:conditions) do
+    alter table(:products) do
       add :next_occurrence_at, :utc_datetime_usec
     end
 
-    create index(:conditions, [:org_id, :next_occurrence_at],
-             name: "conditions_next_occurrence_index",
+    create index(:products, [:org_id, :next_occurrence_at],
+             name: "products_next_occurrence_index",
              where: "next_occurrence_at IS NOT NULL"
            )
 
@@ -54,11 +54,11 @@ defmodule KilnCMS.Repo.Migrations.NextOccurrenceIndex do
       remove :next_occurrence_at
     end
 
-    drop_if_exists index(:conditions, [:org_id, :next_occurrence_at],
-                     name: "conditions_next_occurrence_index"
+    drop_if_exists index(:products, [:org_id, :next_occurrence_at],
+                     name: "products_next_occurrence_index"
                    )
 
-    alter table(:conditions) do
+    alter table(:products) do
       remove :next_occurrence_at
     end
 

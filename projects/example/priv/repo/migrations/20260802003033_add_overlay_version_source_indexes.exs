@@ -12,7 +12,7 @@ defmodule KilnCMS.Repo.Migrations.AddOverlayVersionSourceIndexes do
 
     create index(:testimonials_versions, [:org_id, :version_source_id, :version_inserted_at, :id])
 
-    create index(:conditions_versions, [:org_id, :version_source_id, :version_inserted_at, :id])
+    create index(:products_versions, [:org_id, :version_source_id, :version_inserted_at, :id])
 
     create index(:team_members_versions, [:org_id, :version_source_id, :version_inserted_at, :id])
   end
@@ -25,7 +25,7 @@ defmodule KilnCMS.Repo.Migrations.AddOverlayVersionSourceIndexes do
                      :id
                    ])
 
-    drop_if_exists index(:conditions_versions, [
+    drop_if_exists index(:products_versions, [
                      :org_id,
                      :version_source_id,
                      :version_inserted_at,

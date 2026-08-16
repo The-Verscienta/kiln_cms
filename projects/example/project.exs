@@ -43,7 +43,7 @@ config :kiln_cms,
   ],
   # Scanned by `KilnCMS.CMS.ContentTypes` for content types, and (via
   # `Application.compile_env/3`) by the GraphQL schema and JSON:API router —
-  # registering the catalog here exposes conditions/team-members/testimonials/
+  # registering the catalog here exposes products/team-members/testimonials/
   # faqs on every delivery surface with no core edits.
   content_domains: [KilnCMS.CMS, Example.Catalog]
 

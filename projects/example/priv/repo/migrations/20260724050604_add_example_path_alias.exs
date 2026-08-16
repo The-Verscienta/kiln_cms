@@ -26,12 +26,12 @@ defmodule KilnCMS.Repo.Migrations.AddExamplePathAlias do
              where: "path_alias IS NOT NULL"
            )
 
-    alter table(:conditions) do
+    alter table(:products) do
       add :path_alias, :text
     end
 
-    create index(:conditions, [:path_alias],
-             name: "conditions_path_alias_index",
+    create index(:products, [:path_alias],
+             name: "products_path_alias_index",
              where: "path_alias IS NOT NULL"
            )
 
@@ -52,9 +52,9 @@ defmodule KilnCMS.Repo.Migrations.AddExamplePathAlias do
       remove :path_alias
     end
 
-    drop_if_exists index(:conditions, [:path_alias], name: "conditions_path_alias_index")
+    drop_if_exists index(:products, [:path_alias], name: "products_path_alias_index")
 
-    alter table(:conditions) do
+    alter table(:products) do
       remove :path_alias
     end
 

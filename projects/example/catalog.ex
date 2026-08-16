@@ -1,10 +1,15 @@
 defmodule Example.Catalog do
   @moduledoc """
-  The holistic-acupuncture site's content catalog — a *project* domain layered
-  on the reusable KilnCMS core (see `projects/example/README.md`).
+  A fictional company's ("Acme") content catalog — a *project* domain layered
+  on the reusable KilnCMS core (see `projects/example/README.md`), and the
+  in-tree worked example of what building on kiln_cms looks like. Deliberately
+  subject-matter-agnostic: every type here is something virtually any company
+  has an analogue for, so it demonstrates the platform's capabilities rather
+  than one vertical's content model.
 
-  Holds the content types migrated from the site's legacy Sanity backend
-  (conditions, team members, testimonials, FAQs). Each is built on
+  Holds four content types (products, team members, testimonials, FAQs) plus
+  one admin-defined dynamic type (events — see `example_dynamic_types.exs`,
+  no Elixir module needed). Each compiled resource is built on
   `KilnCMS.CMS.Content` with `domain: __MODULE__`, so it inherits the block
   editor, publishing workflow, versioning, search, SEO and relationships while
   keeping the core project-agnostic.
@@ -31,30 +36,30 @@ defmodule Example.Catalog do
   end
 
   resources do
-    resource Example.Catalog.Condition do
-      define :list_conditions, action: :read
-      define :get_condition, action: :read, get_by: [:id]
-      define :get_published_condition_by_slug, action: :public_by_slug, args: [:slug, :locale]
-      define :search_conditions, action: :search, args: [:query]
-      define :create_condition, action: :create
-      define :update_condition, action: :update
-      define :submit_condition_for_review, action: :submit_for_review
-      define :return_condition_to_draft, action: :return_to_draft
-      define :publish_condition, action: :publish
-      define :publish_scheduled_condition, action: :publish_scheduled
-      define :unpublish_condition, action: :unpublish
-      define :archive_condition, action: :archive
-      define :unarchive_condition, action: :unarchive
-      define :restore_condition_version, action: :restore_version
-      define :destroy_condition, action: :destroy
-      define :list_trashed_conditions, action: :trashed
-      define :restore_condition, action: :restore
-      define :purge_condition, action: :purge
-      define :list_published_conditions, action: :published
+    resource Example.Catalog.Product do
+      define :list_products, action: :read
+      define :get_product, action: :read, get_by: [:id]
+      define :get_published_product_by_slug, action: :public_by_slug, args: [:slug, :locale]
+      define :search_products, action: :search, args: [:query]
+      define :create_product, action: :create
+      define :update_product, action: :update
+      define :submit_product_for_review, action: :submit_for_review
+      define :return_product_to_draft, action: :return_to_draft
+      define :publish_product, action: :publish
+      define :publish_scheduled_product, action: :publish_scheduled
+      define :unpublish_product, action: :unpublish
+      define :archive_product, action: :archive
+      define :unarchive_product, action: :unarchive
+      define :restore_product_version, action: :restore_version
+      define :destroy_product, action: :destroy
+      define :list_trashed_products, action: :trashed
+      define :restore_product, action: :restore
+      define :purge_product, action: :purge
+      define :list_published_products, action: :published
     end
 
-    resource Example.Catalog.Condition.Version do
-      define :list_condition_versions, action: :read
+    resource Example.Catalog.Product.Version do
+      define :list_product_versions, action: :read
     end
 
     resource Example.Catalog.TeamMember do

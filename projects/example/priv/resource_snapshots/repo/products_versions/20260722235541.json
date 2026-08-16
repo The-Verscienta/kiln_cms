@@ -115,7 +115,7 @@
           "global": null,
           "strategy": null
         },
-        "name": "conditions_versions_user_id_fkey",
+        "name": "products_versions_user_id_fkey",
         "on_delete": "nilify",
         "on_update": "update",
         "primary_key?": true,
@@ -143,5 +143,5 @@
   },
   "repo": "Elixir.KilnCMS.Repo",
   "schema": null,
-  "table": "conditions_versions"
+  "table": "products_versions"
 }
