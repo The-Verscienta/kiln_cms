@@ -81,7 +81,7 @@ defmodule KilnCMSWeb.ExperimentLive do
         {:noreply, socket |> put_flash(:info, gettext("Experiment started.")) |> reload()}
 
       {:error, error} ->
-        {:noreply, put_flash(socket, :error, ash_error_message(error))}
+        {:noreply, put_flash(socket, :error, experiment_error(error))}
     end
   end
 
@@ -99,7 +99,7 @@ defmodule KilnCMSWeb.ExperimentLive do
          |> reload()}
 
       {:error, error} ->
-        {:noreply, put_flash(socket, :error, ash_error_message(error))}
+        {:noreply, put_flash(socket, :error, experiment_error(error))}
     end
   end
 
@@ -109,7 +109,7 @@ defmodule KilnCMSWeb.ExperimentLive do
         {:noreply, socket |> put_flash(:info, gettext("Experiment archived.")) |> reload()}
 
       {:error, error} ->
-        {:noreply, put_flash(socket, :error, ash_error_message(error))}
+        {:noreply, put_flash(socket, :error, experiment_error(error))}
     end
   end
 
@@ -128,7 +128,7 @@ defmodule KilnCMSWeb.ExperimentLive do
          |> push_navigate(to: ~p"/editor/experiments")}
 
       {:error, error} ->
-        {:noreply, put_flash(socket, :error, ash_error_message(error))}
+        {:noreply, put_flash(socket, :error, experiment_error(error))}
     end
   end
 
@@ -201,7 +201,7 @@ defmodule KilnCMSWeb.ExperimentLive do
         {:noreply, socket}
 
       {:error, error} ->
-        {:noreply, put_flash(socket, :error, ash_error_message(error))}
+        {:noreply, put_flash(socket, :error, experiment_error(error))}
     end
   end
 
@@ -211,7 +211,7 @@ defmodule KilnCMSWeb.ExperimentLive do
       {:noreply, socket |> put_flash(:info, gettext("Variant removed.")) |> reload()}
     else
       {:ok, _} -> {:noreply, socket |> put_flash(:info, gettext("Variant removed.")) |> reload()}
-      {:error, error} -> {:noreply, put_flash(socket, :error, ash_error_message(error))}
+      {:error, error} -> {:noreply, put_flash(socket, :error, experiment_error(error))}
       _none -> {:noreply, socket}
     end
   end
@@ -422,21 +422,13 @@ defmodule KilnCMSWeb.ExperimentLive do
   defp actor_opts(socket),
     do: [actor: socket.assigns.current_user, tenant: socket.assigns.current_org]
 
-  # An Ash write error as one sentence for the flash. `Exception.message/1`
-  # interpolates an error's `vars` (reading `.message` off the struct hands
-  # back a raw `%{value}` template).
-  defp ash_error_message(%Ash.Error.Forbidden{}),
-    do: gettext("You don't have permission to change experiments on this site.")
-
-  defp ash_error_message(error) do
-    error
-    |> Ash.Error.to_error_class()
-    |> Map.get(:errors, [])
-    |> Enum.map_join(" ", &Exception.message/1)
-    |> case do
-      "" -> gettext("The change could not be saved.")
-      message -> message
-    end
+  # The generic `KilnCMSWeb.CoreComponents.ash_error_message/2` (#1080) covers
+  # this write error-to-flash-sentence translation now; only the Forbidden
+  # sentence is page-specific.
+  defp experiment_error(error) do
+    ash_error_message(error,
+      forbidden: gettext("You don't have permission to change experiments on this site.")
+    )
   end
 
   defp promote_error(:not_concluded), do: gettext("Conclude the experiment before promoting.")
@@ -451,7 +443,7 @@ defmodule KilnCMSWeb.ExperimentLive do
     do: gettext("The document's content type is no longer on this site.")
 
   defp promote_error(:document_missing), do: gettext("The document under test no longer exists.")
-  defp promote_error({:update_failed, error}), do: ash_error_message(error)
+  defp promote_error({:update_failed, error}), do: experiment_error(error)
 
   defp percent(nil), do: "—"
   defp percent(rate), do: "#{Float.round(rate * 100, 1)}%"
