@@ -192,12 +192,15 @@ jobs:
           ffmpeg -version | head -1
           ffprobe -version | head -1
 
-      - name: Run tests
+      - name: DIAG isolated stress run
         run: |
-          for i in 1 2 3 4 5; do
-            echo "=== DIAG mix test attempt $i ==="
-            mix test || { echo "=== DIAG FAILED on attempt $i ==="; exit 1; }
+          for i in 1 2 3 4 5 6 7 8; do
+            echo "=== DIAG isolated attempt $i ==="
+            mix test test/kiln_cms_web/live/content_editor_block_threads_test.exs || echo "=== DIAG isolated FAILED on attempt $i (continuing) ==="
           done
+
+      - name: Run tests
+        run: mix test
 
       - name: Dialyzer
         run: mix dialyzer

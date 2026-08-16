@@ -262,6 +262,22 @@ defmodule KilnCMSWeb.ContentEditorBlockThreadsTest do
       assert pin_state(render(ctx.lv), block_id(ctx.page)) == "tasks"
     end
 
+    # TEMP DIAGNOSTIC — 40 duplicates of "a thread started elsewhere lights
+    # this pin" to maximize the odds of hitting the flaky failure within a
+    # single, fast, isolated run of just this file (heavy self-contention on
+    # the DB pool + scheduler rather than diffuse whole-suite noise). Remove
+    # before merge.
+    for n <- 1..40 do
+      test "DIAG duplicate #{n} — a thread started elsewhere lights this pin", ctx do
+        assert pin_state(render(ctx.lv), block_id(ctx.page)) == "empty"
+
+        comment(ctx.page, block_id(ctx.page), ctx.editor, "From another window")
+        send(ctx.lv.pid, {:block_thread_changed, block_id(ctx.page)})
+
+        assert pin_state(render(ctx.lv), block_id(ctx.page)) == "unresolved"
+      end
+    end
+
     test "a coarse block op on the shared topic is ignored, not fatal", ctx do
       Phoenix.PubSub.broadcast(
         KilnCMS.PubSub,
