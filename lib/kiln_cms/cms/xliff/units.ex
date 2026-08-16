@@ -55,12 +55,17 @@ defmodule KilnCMS.CMS.Xliff.Units do
 
   ## What is not a unit
 
-  A rich-text block whose prose is still in `legacy_html`, and a `custom`
-  block's opaque payload, are declared `translatable: :unsupported` on the
-  field (`Kiln.Block.Info.translatable/1`) and come back from `extract/1` as
-  **warnings**. An operator sending a file to a vendor needs to know which text
-  is not in it; silence there is the failure mode the whole feature exists to
-  avoid.
+  A `custom` block's opaque payload is declared `translatable: :unsupported` on
+  the field (`Kiln.Block.Info.translatable/1`) and comes back from `extract/1`
+  as a **warning**. An operator sending a file to a vendor needs to know which
+  text is not in it; silence there is the failure mode the whole feature exists
+  to avoid.
+
+  A rich-text block whose prose is still in `legacy_html` used to be reported
+  the same way. Since #1106 it is **converted** — `PortableText.from_html/1`,
+  inside the walk — and cut into ordinary `body` units, so its prose is in the
+  file with the same inline codes as everything else; the translation lands in
+  `body` as Portable Text (see `materialize_legacy_html/2`).
   """
 
   alias KilnCMS.Blocks
@@ -269,16 +274,56 @@ defmodule KilnCMS.CMS.Xliff.Units do
 
       module ->
         translatable = Map.new(Kiln.Block.Info.translatable(module))
+        {walked, materialized?} = materialize_legacy_html(block, module)
 
-        module
-        |> Kiln.Block.Info.fields()
-        |> Enum.reduce({block, acc}, fn field, {block, acc} ->
-          walk_field(block, field, Map.get(translatable, field.name), ctx, fun, acc)
-        end)
+        {walked, acc} =
+          module
+          |> Kiln.Block.Info.fields()
+          |> Enum.reduce({walked, acc}, fn field, {block, acc} ->
+            walk_field(block, field, Map.get(translatable, field.name), ctx, fun, acc)
+          end)
+
+        # A legacy block whose converted body came back untouched — extraction,
+        # or an import that addressed none of its paragraphs — is handed back
+        # exactly as stored, so nothing is migrated that nothing translated.
+        {legacy_result(block, walked, materialized?), acc}
     end
   end
 
   defp walk_block(other, _index, _ctx, _fun, acc), do: {other, acc}
+
+  # #1106. A `rich_text` block whose prose still lives in `legacy_html` (the
+  # transitional stored TipTap HTML) has nothing in `body` to cut units from —
+  # and `legacy_html` is `translatable: :unsupported`, because a vendor editing
+  # raw markup writes broken tags back. So the walk sees such a block through
+  # `PortableText.from_html/1`: the converted body is cut into units under the
+  # same `…/body/k:b0` addresses the editor's own body would have (the
+  # converter emits the same `b0`/`b1` keys TipTap→PT does), inline markup
+  # becomes the same `<pc>` codes every rich-text unit already carries, and an
+  # applied translation lands in `body` — Portable Text, which render and
+  # save both prefer, and which `TypedBlocks.sanitize_attrs/1` completes by
+  # nilling `legacy_html` on the way in. Migrate-on-translate: the source keeps
+  # its HTML, the translation is born as PT.
+  defp materialize_legacy_html(block, KilnCMS.Blocks.RichText) do
+    if carries_content?(block, "legacy_html") and not carries_content?(block, "body") do
+      case Blocks.PortableText.from_html(Map.get(block, "legacy_html")) do
+        [] -> {block, false}
+        body -> {Map.put(block, "body", body), true}
+      end
+    else
+      {block, false}
+    end
+  end
+
+  defp materialize_legacy_html(block, _module), do: {block, false}
+
+  defp legacy_result(_original, walked, false), do: walked
+
+  defp legacy_result(original, walked, true) do
+    if Map.get(walked, "body") == Blocks.PortableText.from_html(Map.get(original, "legacy_html")),
+      do: original,
+      else: walked
+  end
 
   # A `{:array, :map}` field is walked twice over: once for its declared
   # translatable keys, and once for child blocks. A `columns` block has only
@@ -321,7 +366,7 @@ defmodule KilnCMS.CMS.Xliff.Units do
     do: walk_text(block, Atom.to_string(field.name), ctx, fun, acc)
 
   defp walk_field(block, field, :unsupported, ctx, fun, acc) do
-    if carries_content?(block, Atom.to_string(field.name)) do
+    if carries_content?(block, Atom.to_string(field.name)) and not shadowed?(block, field) do
       {_keep, acc} = fun.(unsupported(ctx, field.name), acc)
       {block, acc}
     else
@@ -330,6 +375,13 @@ defmodule KilnCMS.CMS.Xliff.Units do
   end
 
   defp walk_field(block, _field, _kind, _ctx, _fun, acc), do: {block, acc}
+
+  # `legacy_html` with a non-empty `body` alongside is the materialized case
+  # (`materialize_legacy_html/2`) — or a stale copy PT already shadows, which
+  # `TypedBlocks` nils on save. Either way its prose IS in the file, as body
+  # units, so it is not reported as left out (#1106).
+  defp shadowed?(block, %{name: :legacy_html}), do: carries_content?(block, "body")
+  defp shadowed?(_block, _field), do: false
 
   # `TypedBlocks.input_map/1` drops nil values, so a field that was never set is
   # simply absent — and `List.wrap(nil)` is `[]`. Putting that back would add an

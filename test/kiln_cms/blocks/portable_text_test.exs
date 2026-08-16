@@ -543,4 +543,111 @@ defmodule KilnCMS.Blocks.PortableTextTest do
       assert json |> PortableText.from_tiptap() |> PortableText.to_html() == "<p>hi</p>"
     end
   end
+
+  # #1106. Stored TipTap HTML → the same PT the editor would have saved.
+  describe "from_html/1" do
+    test "block styles, inline marks, links, hard breaks" do
+      html =
+        "<h2>Title</h2><p>Hello <strong>bold <em>both</em></strong> and " <>
+          "<a href=\"https://x.test\">link</a><br>next</p>"
+
+      pt = PortableText.from_html(html)
+
+      assert [%{"style" => "h2", "children" => [%{"text" => "Title", "marks" => []}]}, para] = pt
+      assert para["style"] == "normal"
+
+      assert Enum.map(para["children"], &{&1["text"], &1["marks"]}) == [
+               {"Hello ", []},
+               {"bold ", ["strong"]},
+               {"both", ["strong", "em"]},
+               {" and ", []},
+               {"link", ["lk0"]},
+               {"\n", []},
+               {"next", []}
+             ]
+
+      assert para["markDefs"] == [
+               %{"_key" => "lk0", "_type" => "link", "href" => "https://x.test"}
+             ]
+    end
+
+    test "is the same PT from_tiptap/1 gives for the equivalent TipTap doc — keys included" do
+      html = "<p>One <b>two</b></p><ul><li><p>a</p></li><li><p>b</p></li></ul>"
+
+      doc =
+        tiptap([
+          %{
+            "type" => "paragraph",
+            "content" => [
+              %{"type" => "text", "text" => "One "},
+              %{"type" => "text", "text" => "two", "marks" => [%{"type" => "bold"}]}
+            ]
+          },
+          %{
+            "type" => "bulletList",
+            "content" => [
+              %{
+                "type" => "listItem",
+                "content" => [
+                  %{"type" => "paragraph", "content" => [%{"type" => "text", "text" => "a"}]}
+                ]
+              },
+              %{
+                "type" => "listItem",
+                "content" => [
+                  %{"type" => "paragraph", "content" => [%{"type" => "text", "text" => "b"}]}
+                ]
+              }
+            ]
+          }
+        ])
+
+      assert PortableText.from_html(html) == PortableText.from_tiptap(doc)
+    end
+
+    test "lists (nested), blockquote, code block with language, rule, table" do
+      html =
+        "<ul><li>one<ul><li>nested</li></ul></li></ul><blockquote><p>q</p></blockquote>" <>
+          "<pre><code class=\"language-elixir\">IO.puts 1</code></pre><hr>" <>
+          "<table><tbody><tr><th>H</th><td colspan=\"2\">c</td></tr></tbody></table>"
+
+      pt = PortableText.from_html(html)
+
+      assert [
+               %{"listItem" => "bullet", "level" => 1},
+               %{"listItem" => "bullet", "level" => 2},
+               %{"style" => "blockquote"},
+               %{"style" => "code", "language" => "elixir"},
+               %{"_type" => "hr"},
+               %{"_type" => "table", "rows" => [%{"cells" => [header, cell]}]}
+             ] = pt
+
+      assert header["header"] == true
+      assert cell["colspan"] == 2
+    end
+
+    test "loose inline at the top level becomes a paragraph; blank, nil and comments are nothing" do
+      assert [%{"style" => "normal", "children" => [%{"text" => "loose "}, %{"text" => "text"}]}] =
+               PortableText.from_html("loose <b>text</b><!-- c -->")
+
+      assert PortableText.from_html("") == []
+      assert PortableText.from_html("   ") == []
+      assert PortableText.from_html(nil) == []
+      assert PortableText.from_html("<!-- only -->") == []
+    end
+
+    test "an <img> inside prose is dropped, as from_tiptap/1 drops embedded objects; wrappers unwrap" do
+      pt =
+        PortableText.from_html(
+          "<div><figure><img src=\"x.png\"><figcaption>cap</figcaption></figure><p>t</p></div>"
+        )
+
+      assert Enum.map(pt, &PortableText.to_plain_text([&1])) == ["cap", "t"]
+    end
+
+    test "round-trips through to_html/1 for the editor's own shapes" do
+      html = "<h3>H</h3><p>a <em>b</em> <a href=\"https://x.test\">c</a></p><ul><li>i</li></ul>"
+      assert html |> PortableText.from_html() |> PortableText.to_html() == html
+    end
+  end
 end
