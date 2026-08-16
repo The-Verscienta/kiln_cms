@@ -20,6 +20,10 @@ defmodule KilnCMSWeb.OfflineControllerTest do
     original = Application.get_env(:kiln_cms, :branding)
     Application.put_env(:kiln_cms, :branding, [])
 
+    # Enter clean as well as leave clean — a cached branding entry outlives the
+    # test that wrote it by up to the TTL. See `KilnCMSWeb.ManifestControllerTest`.
+    KilnCMS.Cache.bust_branding(Accounts.default_org_id())
+
     on_exit(fn ->
       Application.put_env(:kiln_cms, :branding, original)
       KilnCMS.Cache.bust_branding(Accounts.default_org_id())

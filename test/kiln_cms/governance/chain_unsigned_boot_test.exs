@@ -3,7 +3,16 @@ defmodule KilnCMS.Governance.ChainUnsignedBootTest do
   Boot advisory when the chain is in use without a signing key (#1056).
   """
   # async: false — mutates `:audit_anchor_every_write` / Provenance config.
-  use ExUnit.Case, async: false
+  #
+  # `DataCase` rather than a bare `ExUnit.Case`, because `unsigned_while_in_use?/0`
+  # reads `history_anchors`: without a sandbox owner of its own this test borrowed
+  # whichever *other* sync test had put the sandbox in shared mode, and under a
+  # full-suite run that owner can exit while the query is in flight —
+  # `** (EXIT) shutdown: "owner … exited"`, at random, in a test that looks
+  # database-free. `Chain.any_history_anchors?/0` rescues so a database that is
+  # not up yet is not read as a misconfiguration, but a checkout against a dead
+  # owner is an **exit**, and `rescue` does not catch exits.
+  use KilnCMS.DataCase, async: false
 
   alias KilnCMS.Governance.Chain
 

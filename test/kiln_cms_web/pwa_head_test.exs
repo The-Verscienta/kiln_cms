@@ -89,6 +89,10 @@ defmodule KilnCMSWeb.PwaHeadTest do
   # unmistakably-broken look the stock mark avoids.
   describe "the iOS home-screen icon (#629)" do
     setup do
+      # Both ends: a cached branding entry outlives the test that wrote it by up
+      # to the TTL, so this has to start from a clean resolve as well as leave
+      # one behind. See `KilnCMSWeb.ManifestControllerTest`.
+      KilnCMS.Cache.bust_branding(KilnCMS.Accounts.default_org_id())
       on_exit(fn -> KilnCMS.Cache.bust_branding(KilnCMS.Accounts.default_org_id()) end)
       :ok
     end
