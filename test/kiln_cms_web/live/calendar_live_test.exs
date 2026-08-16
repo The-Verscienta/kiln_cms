@@ -372,5 +372,68 @@ defmodule KilnCMSWeb.CalendarLiveTest do
 
       assert render(lv) =~ title
     end
+
+    # A burst of writes elsewhere (a bulk import, a release going out, or —
+    # heavily, in this suite — every other async test sharing the default org)
+    # queues one `:calendar_changed` per write. Re-running the window query
+    # once per message rather than once per burst is what turns a busy org
+    # into a mailbox this LiveView can never catch up on: every later
+    # `render`/`render_click` is just another message, handled strictly after
+    # whatever backlog of stale, already-superseded re-queries arrived first.
+    # `handle_info/2` drains the mailbox before it re-queries, so N messages
+    # cost the one re-query they actually need — proven here by counting
+    # `KilnCMS.Repo`'s own query telemetry rather than timing, which would be
+    # exactly the kind of load-sensitive assertion this bug already hid behind.
+    test "a burst of change notifications is coalesced into one re-query", %{conn: conn} do
+      admin = authed_admin()
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/calendar")
+
+      test_pid = self()
+      handler_id = "calendar-coalesce-#{System.unique_integer([:positive])}"
+
+      # `:telemetry.execute/3` runs each handler synchronously, IN THE PROCESS
+      # THAT EMITTED THE EVENT — no message passing involved. So `self()`
+      # inside this handler is whatever process just issued a query, and this
+      # attachment (a VM-wide hook, since `:telemetry` has no per-test scope)
+      # only reports queries `lv.pid` itself issued, ignoring the hundreds of
+      # queries every other concurrently-running async test is also firing
+      # against the same repo.
+      :telemetry.attach(
+        handler_id,
+        [:kiln_cms, :repo, :query],
+        fn _event, _measurements, _metadata, %{lv_pid: lv_pid, test_pid: test_pid} ->
+          if self() == lv_pid, do: send(test_pid, :repo_query)
+        end,
+        %{lv_pid: lv.pid, test_pid: test_pid}
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      # Give the mailbox a real burst to drain — comfortably more messages
+      # than any single `load_events/1` run could plausibly issue queries for.
+      for _ <- 1..20, do: send(lv.pid, {:calendar_changed, Ash.UUID.generate()})
+
+      # Forces the LiveView to actually process its mailbox before we count:
+      # `render/1` is itself a message, so it cannot return before every
+      # `:calendar_changed` already queued ahead of it has been handled.
+      render(lv)
+
+      query_count =
+        Stream.repeatedly(fn ->
+          receive do
+            :repo_query -> 1
+          after
+            0 -> nil
+          end
+        end)
+        |> Enum.take_while(&(&1 == 1))
+        |> length()
+
+      assert query_count > 0, "expected the drained burst to still run its one re-query"
+
+      assert query_count < 20,
+             "20 :calendar_changed messages ran #{query_count} queries — " <>
+               "handle_info/2 is re-querying per message instead of coalescing the burst"
+    end
   end
 end
