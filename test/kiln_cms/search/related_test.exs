@@ -250,6 +250,121 @@ defmodule KilnCMS.Search.RelatedTest do
     refute Enum.any?(Related.suggest_tags(post, threshold: 2.0), &(&1.tag.id == tea.id))
   end
 
+  # #1085: the tag-name vector is persisted, so the ceiling and the ranking are
+  # one pgvector query instead of N lookups + N cosine computations per call.
+  describe "suggest_tags persists tag-name vectors (#1085)" do
+    alias KilnCMS.SearchIndex
+
+    defp stored_rows(tags) do
+      SearchIndex.tag_embeddings_for!(Enum.map(tags, & &1.id), authorize?: false)
+    end
+
+    test "the first call stores one row per candidate; a second call reads them back" do
+      actor = admin()
+      uniq = System.unique_integer([:positive])
+      tea = CMS.create_tag!(%{name: "persist tea #{uniq}", slug: "pt-#{uniq}"}, actor: actor)
+      cars = CMS.create_tag!(%{name: "persist cars #{uniq}", slug: "pc-#{uniq}"}, actor: actor)
+      post = indexed_post(actor, "brewing herbal tea slowly")
+
+      assert stored_rows([tea, cars]) == []
+
+      first = Related.suggest_tags(post, threshold: 2.0)
+      assert Enum.map(first, & &1.tag.id) |> Enum.sort() == Enum.sort([tea.id, cars.id])
+
+      rows = stored_rows([tea, cars])
+      assert length(rows) == 2
+      assert Enum.all?(rows, &(is_list(&1.embedding) and length(&1.embedding) == 384))
+      assert Enum.map(rows, & &1.name) |> Enum.sort() == Enum.sort([tea.name, cars.name])
+
+      # Same answer, same distances, from the table — and it is the TABLE, not
+      # the ETS cache, that answers: wipe the cache and nothing changes.
+      Cachex.clear(VectorCache.cache_name())
+      refute VectorCache.cached?(tea.name)
+      assert Related.suggest_tags(post, threshold: 2.0) == first
+      # …and no inference ran to produce it (a cache miss would have re-filled it).
+      refute VectorCache.cached?(tea.name)
+    end
+
+    test "the winners come back as full tag rows, not the id/name projection" do
+      actor = admin()
+      uniq = System.unique_integer([:positive])
+      tag = CMS.create_tag!(%{name: "full row #{uniq}", slug: "fr-#{uniq}"}, actor: actor)
+      post = indexed_post(actor, "brewing herbal tea slowly")
+
+      [%{tag: suggested}] =
+        Related.suggest_tags(post, threshold: 2.0, limit: 1)
+        |> Enum.filter(&(&1.tag.id == tag.id))
+
+      assert suggested.slug == tag.slug
+      refute match?(%Ash.NotLoaded{}, suggested.slug)
+    end
+
+    test "a renamed tag is re-embedded — the stored name is the freshness check" do
+      actor = admin()
+      uniq = System.unique_integer([:positive])
+      tag = CMS.create_tag!(%{name: "before rename #{uniq}", slug: "rn-#{uniq}"}, actor: actor)
+      post = indexed_post(actor, "brewing herbal tea slowly")
+
+      Related.suggest_tags(post, threshold: 2.0)
+      [%{name: stored_name, embedding: before}] = stored_rows([tag])
+      assert stored_name == tag.name
+
+      tag = CMS.update_tag!(tag, %{name: "after rename #{uniq}"}, actor: actor)
+      Related.suggest_tags(post, threshold: 2.0)
+
+      [%{name: stored_name, embedding: after_vec}] = stored_rows([tag])
+      assert stored_name == "after rename #{uniq}"
+      # The stub is deterministic per text, so a different name is a different vector.
+      refute after_vec == before
+    end
+
+    test "deleting the tag takes its vector with it" do
+      actor = admin()
+      uniq = System.unique_integer([:positive])
+      tag = CMS.create_tag!(%{name: "doomed #{uniq}", slug: "dm-#{uniq}"}, actor: actor)
+      post = indexed_post(actor, "brewing herbal tea slowly")
+
+      Related.suggest_tags(post, threshold: 2.0)
+      assert [_row] = stored_rows([tag])
+
+      CMS.destroy_tag!(tag, actor: actor)
+      assert stored_rows([tag]) == []
+    end
+
+    test "the ceiling is applied in the query: a tight one answers [] with rows stored" do
+      actor = admin()
+      uniq = System.unique_integer([:positive])
+      tag = CMS.create_tag!(%{name: "far away #{uniq}", slug: "fa-#{uniq}"}, actor: actor)
+      post = indexed_post(actor, "brewing herbal tea slowly")
+
+      # Cosine distance is never negative, so a negative ceiling admits nothing —
+      # and the fill still happened, so the next call is a pure query.
+      assert Related.suggest_tags(post, threshold: -1.0) == []
+      assert [_row] = stored_rows([tag])
+    end
+
+    test "nearest_to_vector only ranks the ids it is given (the authorized candidate set)" do
+      actor = admin()
+      uniq = System.unique_integer([:positive])
+      a = CMS.create_tag!(%{name: "given a #{uniq}", slug: "ga-#{uniq}"}, actor: actor)
+      b = CMS.create_tag!(%{name: "not given b #{uniq}", slug: "gb-#{uniq}"}, actor: actor)
+      post = indexed_post(actor, "brewing herbal tea slowly")
+      Related.suggest_tags(post, threshold: 2.0)
+
+      {:ok, vector} = KilnCMS.StubEmbedder.embed("anything")
+
+      ids =
+        SearchIndex.nearest_tag_embeddings!(
+          %{vector: vector, tag_ids: [a.id], threshold: 2.0, limit: 10},
+          authorize?: false
+        )
+        |> Enum.map(& &1.tag_id)
+
+      assert ids == [a.id]
+      refute b.id in ids
+    end
+  end
+
   # #851: ranking alone always suggests something, because the candidate set is
   # the site's whole tag list. On a five-tag site the top five were all five.
   describe "suggest_tags relevance ceiling (#851)" do

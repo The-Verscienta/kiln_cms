@@ -104,7 +104,8 @@ Two consequences worth knowing:
 - **`flag_duplicates` and `suggest_tags` spend a separate embedding budget**
   (#1076). Both reach `KilnCMS.Search.Related`, which computes an embedding per
   block for a document that has none stored, and `suggest_tags` additionally
-  embeds every taxonomy tag not already cached. That is
+  embeds every taxonomy tag whose name has no **stored** vector yet — once per
+  tag, not per call, since #1085 persists it in `tag_embeddings`. That is
   `config :kiln_cms, KilnCMS.Search` `embedding_per_user_limit` (default
   60/minute) / `embedding_per_org_limit` (default 600/hour) — higher than the
   SEO draft budget because a single local embedding is far cheaper than an LLM

@@ -49,6 +49,8 @@ defmodule KilnCMS.Search.Related do
   alias KilnCMS.Search.BlockIndexer
   alias KilnCMS.Search.VectorCache
 
+  require Ash.Query
+
   @typedoc """
   A scored neighbouring document. `path` is the canonical *public page* path
   (alias-aware); note `KilnCMSWeb.RelatedController` deliberately emits an
@@ -200,23 +202,23 @@ defmodule KilnCMS.Search.Related do
         |> Enum.reject(&match?(%Ash.NotLoaded{}, &1))
         |> MapSet.new(& &1.id)
 
+      # `select:` two fields (#1085): a 500-tag org loads 500 authorized rows
+      # here to use `id` and `name`, and the suggestions carry the tag back to
+      # the caller, so the rows are re-read for the winners only below.
       candidates =
         KilnCMS.CMS.list_tags!(
           actor: actor,
           authorize?: not is_nil(actor),
-          tenant: record.org_id
+          tenant: record.org_id,
+          query: [select: [:id, :name]]
         )
         |> Enum.reject(&MapSet.member?(applied, &1.id))
 
-      case tag_suggestions(candidates, centroid, budget_ctx) do
-        {:error, reason} ->
-          {:error, reason}
-
-        {:ok, scored} ->
-          scored
-          |> Enum.filter(&(&1.distance <= threshold))
-          |> Enum.sort_by(& &1.distance)
-          |> Enum.take(Keyword.get(opts, :limit, 5))
+      # Make sure every candidate has a stored, current vector — the only
+      # inference this function does, and only the first time a tag (or a
+      # renamed tag) is seen; then the ceiling and the ranking are one query.
+      with :ok <- ensure_tag_embeddings(candidates, record.org_id, budget_ctx) do
+        nearest_tags(candidates, centroid, threshold, Keyword.get(opts, :limit, 5), record.org_id)
       end
     else
       {:error, reason} -> {:error, reason}
@@ -407,6 +409,105 @@ defmodule KilnCMS.Search.Related do
     end
   end
 
+  # #1085: the tags among `candidates` (already the actor's authorized,
+  # unapplied list) whose persisted vector sits within `threshold` of the
+  # centroid — nearest first, `limit` at most — as one pgvector query against
+  # `KilnCMS.Search.TagEmbedding`. Ranked, filtered and truncated in SQL, so a
+  # call that answers `[]` costs one query rather than N lookups and N cosine
+  # computations that the ceiling then throws away.
+  #
+  # The winning tags are re-read by id (their full rows are what callers render
+  # and `RuleWorker` applies); the candidate list only carried `id`/`name`.
+  defp nearest_tags([], _centroid, _threshold, _limit, _org_id), do: []
+
+  defp nearest_tags(candidates, centroid, threshold, limit, org_id) do
+    by_id = Map.new(candidates, &{&1.id, &1})
+
+    KilnCMS.SearchIndex.nearest_tag_embeddings!(
+      %{
+        vector: centroid,
+        tag_ids: Map.keys(by_id),
+        threshold: threshold * 1.0,
+        limit: limit
+      },
+      authorize?: false,
+      tenant: org_id
+    )
+    |> Enum.map(fn row ->
+      %{tag: Map.fetch!(by_id, row.tag_id), distance: row.semantic_distance}
+    end)
+    |> rehydrate_tags(org_id)
+  end
+
+  # `select: [:id, :name]` above left every other tag field `%Ash.NotLoaded{}`;
+  # a caller (the editor panel, `RuleWorker.apply_tags`) wants the row it would
+  # get from `list_tags!/1`. One read for the winners only — at most `limit`.
+  defp rehydrate_tags([], _org_id), do: []
+
+  defp rehydrate_tags(scored, org_id) do
+    ids = Enum.map(scored, & &1.tag.id)
+
+    full =
+      KilnCMS.CMS.Tag
+      |> Ash.Query.filter(id in ^ids)
+      |> Ash.read!(authorize?: false, tenant: org_id)
+      |> Map.new(&{&1.id, &1})
+
+    Enum.map(scored, fn %{tag: %{id: id}} = entry ->
+      %{entry | tag: Map.get(full, id, entry.tag)}
+    end)
+  end
+
+  # Persist a vector for every candidate that has none, or whose stored row was
+  # computed for a previous name (a rename). Missing/stale rows are the only
+  # ones that reach the model; `tag_vector/2` still routes through
+  # `VectorCache` and charges the embedding budget exactly as before (#1076),
+  # and a refused charge stops the fill and fails the whole call — see
+  # `suggest_tags/2`'s doc for why a partial ranking is worse than none. Rows
+  # already written before the refusal stay: they are correct, and the next
+  # call is cheaper for them.
+  defp ensure_tag_embeddings([], _org_id, _budget_ctx), do: :ok
+
+  defp ensure_tag_embeddings(candidates, org_id, budget_ctx) do
+    stored =
+      KilnCMS.SearchIndex.tag_embeddings_for!(Enum.map(candidates, & &1.id),
+        authorize?: false,
+        tenant: org_id
+      )
+      |> Map.new(&{&1.tag_id, &1})
+
+    candidates
+    |> Enum.reject(fn tag ->
+      case Map.get(stored, tag.id) do
+        %{name: name, embedding: embedding} when is_list(embedding) -> name == tag.name
+        _missing_or_empty -> false
+      end
+    end)
+    |> Enum.reduce_while(:ok, fn tag, :ok ->
+      case tag_vector(tag.name, budget_ctx) do
+        {:error, reason} ->
+          {:halt, {:error, reason}}
+
+        vector when is_list(vector) ->
+          store_tag_embedding(tag, vector, org_id)
+          {:cont, :ok}
+
+        # The embedder answered nothing for this name; skip it (it will simply
+        # not rank) rather than fail every other tag's suggestion.
+        _ ->
+          {:cont, :ok}
+      end
+    end)
+  end
+
+  defp store_tag_embedding(tag, vector, org_id) do
+    KilnCMS.SearchIndex.upsert_tag_embedding!(
+      %{tag_id: tag.id, name: tag.name, embedding: vector, embedded_at: DateTime.utc_now()},
+      authorize?: false,
+      tenant: org_id
+    )
+  end
+
   # Tag-name vectors are pure functions of the (stable) name — memoized so a
   # 500-tag org doesn't re-run 500 model inferences per triggering event.
   #
@@ -428,28 +529,6 @@ defmodule KilnCMS.Search.Related do
         :ok -> VectorCache.embed_document(name)
         {:error, reason} -> {:error, reason}
       end
-    end
-  end
-
-  # Scores each candidate tag against the centroid, stopping (and discarding
-  # anything already scored) the moment a budget check fails — see
-  # `suggest_tags/2`'s doc for why a partial ranking is worse than none.
-  defp tag_suggestions(tags, centroid, budget_ctx) do
-    Enum.reduce_while(tags, {:ok, []}, fn tag, {:ok, acc} ->
-      case tag_vector(tag.name, budget_ctx) do
-        {:error, reason} ->
-          {:halt, {:error, reason}}
-
-        vector when is_list(vector) ->
-          {:cont, {:ok, [%{tag: tag, distance: cosine_distance(centroid, vector)} | acc]}}
-
-        _ ->
-          {:cont, {:ok, acc}}
-      end
-    end)
-    |> case do
-      {:ok, acc} -> {:ok, Enum.reverse(acc)}
-      error -> error
     end
   end
 
@@ -486,16 +565,6 @@ defmodule KilnCMS.Search.Related do
     vectors
     |> Enum.zip_with(& &1)
     |> Enum.map(&(Enum.sum(&1) / count))
-  end
-
-  defp cosine_distance(a, b) do
-    dot = a |> Enum.zip_with(b, &*/2) |> Enum.sum()
-
-    norm =
-      :math.sqrt(Enum.sum(Enum.map(a, &(&1 * &1)))) *
-        :math.sqrt(Enum.sum(Enum.map(b, &(&1 * &1))))
-
-    if norm == 0.0, do: 1.0, else: 1.0 - dot / norm
   end
 
   # Stored vectors round-trip as `Pgvector` structs or plain lists.
