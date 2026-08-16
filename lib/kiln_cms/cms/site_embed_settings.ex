@@ -90,6 +90,11 @@ defmodule KilnCMS.CMS.SiteEmbedSettings do
     # header-injection characters, checked here rather than trusting every
     # form's own validation to catch a value that never passed through it.
     validate {KilnCMS.CMS.Validations.CspOrigins, fields: [:embed_origins]}
+
+    # After the shape check, and only under `EMBED_ORIGINS_LOCKED` (#1133): a
+    # list that reaches outside the operator's ceiling is refused, naming the
+    # offending entries and never the ceiling. See `KilnCMS.Forms.EmbedCeiling`.
+    validate {KilnCMS.CMS.Validations.EmbedCeiling, field: :embed_origins}
   end
 
   multitenancy do

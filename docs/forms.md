@@ -71,6 +71,21 @@ own:
 | `https://acme.com,https://blog.acme.com` | `'self' https://acme.com https://blog.acme.com` | The intended production setting for a single-org deployment. |
 | `*` | `*` | Any site may frame the form. |
 
+**The operator can make it a ceiling** (#1133). Set `EMBED_ORIGINS_LOCKED=true`
+and `EMBED_ORIGINS` is the *most* any form or org in the deployment may open
+as well as the default: a form's or org's own list may narrow it (a subset,
+or "This site only") but every entry must be covered by it — same scheme,
+same port, the same host or a subdomain of a `*.`-wildcarded one. An admin
+who saves an entry outside it is refused, with the message naming the
+refused entry and *not* the ceiling (which on a shared deployment would list
+every other org's partners), and told to ask the operator. Lists saved
+before the cap was turned on are clamped to it when served, so turning it
+on takes effect immediately without a data fix. The Embed tab says a cap
+exists when one does. With the cap off — the default — nothing above
+changes; `EMBED_ORIGINS=*` under the cap is a ceiling of everything, and an
+unset `EMBED_ORIGINS` under the cap closes framing deployment-wide whatever
+a tenant writes.
+
 **The default is closed** (#562). Copying the snippet onto an external site
 before allowing that site renders a blank iframe and a CSP violation in that
 site's console — the builder's Embed tab says so, and also shows the origins

@@ -76,6 +76,25 @@ migration, a rewritten column, a dropped config key).
   still only understands PDF, so office/zip uploads are stored as uploaded
   rather than refused — the gated-download route, audience policy, and
   storage relocation from #481 needed no changes.
+- **`EMBED_ORIGINS_LOCKED` — an operator ceiling over what a tenant may open
+  to framing** (#1133). Since #648/#1131 an org admin can set a per-form or
+  per-org `frame-ancestors` allowlist, which quietly turned `EMBED_ORIGINS`
+  from an allowlist into a default; the operator could express "closed by
+  default" or "open by default", but not "capped". Setting
+  `EMBED_ORIGINS_LOCKED=true` makes `EMBED_ORIGINS` the ceiling as well: a
+  tenant's list may narrow it but every entry must be covered by it (same
+  scheme and port; the same host, or a proper subdomain of a `*.`-wildcarded
+  ceiling entry — a wildcarded tenant entry needs a wildcard at least as wide
+  above it). New `KilnCMS.Forms.EmbedCeiling` owns the rule;
+  `KilnCMS.CMS.Validations.EmbedCeiling` refuses the write on both
+  `Form.embed_origins` and `SiteEmbedSettings.embed_origins`, naming the
+  refused entries and **never the ceiling** (which on a shared deployment is
+  every org's partners); `KilnCMS.Forms.EmbedPolicy.effective/1` clamps the
+  served header too, so a list saved before the cap was turned on takes no
+  effect beyond it. The builder's Embed tab says a cap exists when one does.
+  Off by default — nothing changes for an existing deployment; `EMBED_ORIGINS=*`
+  under the cap is a ceiling of everything, an unset `EMBED_ORIGINS` under it
+  closes cross-site framing deployment-wide.
 
 ## [0.6.0] - 2026-08-12
 
