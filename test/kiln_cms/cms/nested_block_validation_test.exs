@@ -82,9 +82,14 @@ defmodule KilnCMS.CMS.NestedBlockValidationTest do
     # Genericity across the whole registry (#935 explicitly calls out "any
     # plugin block with a required field") — the fixture plugin's `callout`
     # block (`test/support/fixture_plugin.ex`) is registered for the test
-    # suite, so it is exercised here alongside every core block.
-    test "every registered block type with a required field is refused when nested bare" do
-      for module <- Blocks.modules(), Enum.any?(Info.fields(module), & &1.required) do
+    # suite, so it is exercised here alongside every core block. A required
+    # field that ALSO declares a `default:` is excluded — omitting it casts
+    # fine (the default fills in), so it is not expected to be refused;
+    # `RestrictedRequiredDefaultBlock` (post-#1250 review finding #2's
+    # fixture) is that case.
+    test "every registered block type with an undefaulted required field is refused when nested bare" do
+      for module <- Blocks.modules(),
+          Enum.any?(Info.fields(module), &(&1.required and is_nil(&1.default))) do
         type = to_string(Info.name(module))
         nested = columns_with(%{"_type" => type})
 
@@ -172,6 +177,37 @@ defmodule KilnCMS.CMS.NestedBlockValidationTest do
       assert [%Ash.Union{value: %{level: 3}}] = top.blocks
       assert [%Ash.Union{value: columns}] = nested.blocks
       assert [%{"blocks" => [%{"level" => 3}]}] = columns.columns
+    end
+  end
+
+  describe "BlockUnion rescue clause coverage (post-#1250 review finding #5)" do
+    # `:blocks` is stored as `{:array, BlockUnion}`, so every real CMS write
+    # (create/update) dispatches through `cast_input_array/2`/
+    # `prepare_change_array/3` — already covered above (the "CMS write
+    # actions"/"nested error shape" describes). `cast_input/2` and
+    # `prepare_change/3` (the *singular*, non-array clauses) are `@impl Ash.Type`
+    # callbacks the array attribute never reaches, so nothing in the "full
+    # stack" tests exercises their rescue bodies at all — pinned directly here
+    # instead, so a future refactor can't silently turn them back into the
+    # old formatted-string rescue (or drop the rescue) with nothing to catch it.
+    test "cast_input/2's rescue returns the original error list, not a formatted string" do
+      assert {:error, [%Ash.Error.Changes.Required{field: :text}]} =
+               Ash.Type.cast_input(BlockUnion, columns_with(%{"_type" => "claim"}))
+    end
+
+    test "prepare_change/3's list clause rescue returns the original error list" do
+      assert {:error, [%Ash.Error.Changes.Required{field: :text}]} =
+               Ash.Type.prepare_change(
+                 BlockUnion,
+                 nil,
+                 [columns_with(%{"_type" => "claim"})],
+                 []
+               )
+    end
+
+    test "prepare_change/3's fallback (non-list) clause rescue returns the original error list" do
+      assert {:error, [%Ash.Error.Changes.Required{field: :text}]} =
+               Ash.Type.prepare_change(BlockUnion, nil, columns_with(%{"_type" => "claim"}), [])
     end
   end
 end

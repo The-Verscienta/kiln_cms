@@ -426,6 +426,19 @@ defmodule KilnCMS.CMS.ContentTypes do
   def types, do: Enum.map(all(), & &1.type)
 
   @doc """
+  Every resource that carries a `blocks` tree, as `{type, resource}` pairs:
+  every compiled content type plus the generic `Entry` tier (dynamic types).
+
+  The set `KilnCMS.Firing.Sweep` re-fires and `KilnCMS.Blocks.RequiredFieldAudit`
+  scans — both need "every resource carrying blocks" and had each redefined it
+  identically before this was pulled out to the one place that needs updating
+  when a new tier is added.
+  """
+  @spec blocks_resources() :: [{atom(), module()}]
+  def blocks_resources,
+    do: Enum.uniq(Enum.map(all(), &{&1.type, &1.resource}) ++ [entry: CMS.Entry])
+
+  @doc """
   Look up a content type by its atom or string type. Returns nil if unknown.
 
   A string first resolves against compiled types (via `to_existing_atom`, so

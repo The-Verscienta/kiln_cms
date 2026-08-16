@@ -101,6 +101,38 @@ defmodule KilnCMS.Blocks do
   def fetch(type) when is_atom(type), do: Map.fetch(registry(), type)
 
   @doc """
+  Resolve the block module for a raw `_type`-tagged map — a `columns`
+  child, which is never cast through `TypedBlocks`/`Ash.Type.Union` and so
+  stays whatever shape it was written as (string or atom `"_type"`/`:_type`
+  key, string or atom tag value). `nil` for a missing, unregistered, or
+  malformed tag.
+
+  The shared "raw nested child -> registered block module" step
+  `KilnCMS.CMS.ContentCopy` and `KilnCMS.Blocks.RequiredFieldAudit` each need
+  when walking a tree outside the write-time cast pipeline.
+  """
+  @spec module_for_tagged_map(map()) :: module() | nil
+  def module_for_tagged_map(%{} = map) do
+    with type when not is_nil(type) <- Map.get(map, "_type") || Map.get(map, :_type),
+         type_atom when not is_nil(type_atom) <- existing_atom(type),
+         {:ok, module} <- fetch(type_atom) do
+      module
+    else
+      _ -> nil
+    end
+  end
+
+  def module_for_tagged_map(_other), do: nil
+
+  defp existing_atom(type) when is_atom(type), do: type
+
+  defp existing_atom(type) when is_binary(type) do
+    String.to_existing_atom(type)
+  rescue
+    ArgumentError -> nil
+  end
+
+  @doc """
   Serialize a block struct to a surface (dispatches to the block module).
 
   For the `:json` delivery surface the block's stable `id` is injected as `_id`

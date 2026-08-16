@@ -78,6 +78,14 @@ defmodule KilnCMS.CMS.TypedBlocks do
                 {to_string(name), name}
               end)
 
+  # Type atom → the union member's declared constraints, for `cast_child!/3`
+  # (currently none do, but a future one might). Hoisted alongside
+  # `@block_modules`/`@type_atoms` from the same compile-time source rather
+  # than calling `KilnCMS.Blocks.union_types()` fresh per nested cast.
+  @type_constraints Map.new(KilnCMS.Blocks.union_types(), fn {name, opts} ->
+                      {name, Keyword.get(opts, :constraints, [])}
+                    end)
+
   @doc """
   Normalize any block representation to typed block structs.
 
@@ -435,11 +443,7 @@ defmodule KilnCMS.CMS.TypedBlocks do
     end
   end
 
-  defp child_constraints(type_atom) do
-    KilnCMS.Blocks.union_types()
-    |> Keyword.get(type_atom, [])
-    |> Keyword.get(:constraints, [])
-  end
+  defp child_constraints(type_atom), do: Map.get(@type_constraints, type_atom, [])
 
   # The embedded resource's `:id` is a `uuid_primary_key`, which the `:create`
   # action `cast_child!` casts through always generates when the input carries

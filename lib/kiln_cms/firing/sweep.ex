@@ -35,13 +35,9 @@ defmodule KilnCMS.Firing.Sweep do
 
   alias KilnCMS.Firing.FireWorker
 
-  # The storage tiers with fired artifacts: every compiled content type in the
-  # ContentTypes registry, plus the generic Entry tier (dynamic types) — the
-  # same set `KilnCMS.Firing.References` resolves job type strings against.
-  defp resources do
-    compiled = Enum.map(KilnCMS.CMS.ContentTypes.all(), &{&1.type, &1.resource})
-    Enum.uniq(compiled ++ [entry: KilnCMS.CMS.Entry])
-  end
+  # The storage tiers with fired artifacts — the same set
+  # `KilnCMS.Firing.References` resolves job type strings against.
+  defp resources, do: KilnCMS.CMS.ContentTypes.blocks_resources()
 
   # Oban.insert_all skips unique checks, so insert in modest chunks to keep
   # any single INSERT bounded; duplicates with in-flight publish jobs are fine.
