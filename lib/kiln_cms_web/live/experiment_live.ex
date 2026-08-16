@@ -154,7 +154,7 @@ defmodule KilnCMSWeb.ExperimentLive do
     {:noreply, assign(socket, :editing, %{id: nil, name: "", weight: 1, patch: %{}})}
   end
 
-  def handle_event("edit_variant", %{"id" => id}, socket) do
+  def handle_event("edit_variant", %{"id" => id}, socket) when is_binary(id) do
     case Enum.find(socket.assigns.experiment.variants, &(&1.id == id)) do
       nil -> {:noreply, socket}
       variant -> {:noreply, assign(socket, :editing, variant)}
@@ -205,7 +205,7 @@ defmodule KilnCMSWeb.ExperimentLive do
     end
   end
 
-  def handle_event("delete_variant", %{"id" => id}, socket) do
+  def handle_event("delete_variant", %{"id" => id}, socket) when is_binary(id) do
     with %Variant{} = variant <- Enum.find(socket.assigns.experiment.variants, &(&1.id == id)),
          :ok <- Experiments.destroy_variant(variant, actor_opts(socket)) do
       {:noreply, socket |> put_flash(:info, gettext("Variant removed.")) |> reload()}

@@ -52,7 +52,8 @@ defmodule KilnCMSWeb.ExperimentsLive do
   end
 
   @impl true
-  def handle_event("pick_type", %{"experiment" => %{"content_type" => type}}, socket) do
+  def handle_event("pick_type", %{"experiment" => %{"content_type" => type}}, socket)
+      when is_binary(type) do
     {:noreply,
      socket
      |> assign(:new_type, type)
@@ -60,7 +61,8 @@ defmodule KilnCMSWeb.ExperimentsLive do
      |> assign(:new_goal, socket.assigns.new_goal)}
   end
 
-  def handle_event("pick_type", %{"experiment" => %{"goal" => goal}}, socket) do
+  def handle_event("pick_type", %{"experiment" => %{"goal" => goal}}, socket)
+      when is_binary(goal) do
     {:noreply, assign(socket, :new_goal, goal)}
   end
 
