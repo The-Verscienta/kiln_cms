@@ -193,7 +193,11 @@ jobs:
           ffprobe -version | head -1
 
       - name: Run tests
-        run: mix test
+        run: |
+          for i in 1 2 3 4 5; do
+            echo "=== DIAG mix test attempt $i ==="
+            mix test || { echo "=== DIAG FAILED on attempt $i ==="; exit 1; }
+          done
 
       - name: Dialyzer
         run: mix dialyzer
