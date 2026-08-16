@@ -25,7 +25,7 @@ migration, a rewritten column, a dropped config key).
 
 <!-- Releases are cut from `main`; see docs/releasing.md. -->
 
-## [Unreleased]
+## [0.7.0] - 2026-08-16
 
 ### Added
 
@@ -4131,6 +4131,8 @@ one that can't be described by a changelog diff. Before moving the pin:
 
 After this release, `mix kiln.update --check` does all of the above for you.
 
-[Unreleased]: https://github.com/The-Verscienta/kiln_cms/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/The-Verscienta/kiln_cms/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/The-Verscienta/kiln_cms/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/The-Verscienta/kiln_cms/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/The-Verscienta/kiln_cms/releases/tag/v0.5.0
 [0.1.0]: https://github.com/The-Verscienta/kiln_cms/releases/tag/v0.1.0
