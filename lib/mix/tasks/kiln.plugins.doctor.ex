@@ -37,13 +37,20 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
   @impl Mix.Task
   def run(_argv) do
     plugins = Application.get_env(:kiln_cms, :plugins, [])
+    # `plugin.blocks()`/`plugin.field_types()` are plain function calls a
+    # plugin author can make arbitrarily expensive (a DB lookup, a hex.pm
+    # fetch — nothing forbids it); each is otherwise called twice below
+    # (once per check that needs it), so every check reads off these instead.
+    blocks_by_plugin = Map.new(plugins, &{&1, &1.blocks()})
+    field_types_by_plugin = Map.new(plugins, &{&1, &1.field_types()})
 
     problems =
       Enum.flat_map(plugins, &plugin_problems/1) ++
-        block_collisions(plugins) ++
-        field_type_problems(plugins) ++
+        block_collisions(plugins, blocks_by_plugin) ++
+        field_type_problems(plugins, field_types_by_plugin) ++
         queue_collisions(plugins) ++
-        block_schema_problems(plugins) ++ field_type_schema_problems(plugins)
+        block_schema_problems(plugins, blocks_by_plugin) ++
+        field_type_schema_problems(plugins, field_types_by_plugin)
 
     case problems do
       [] ->
@@ -124,12 +131,12 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
     nav ++ routes ++ editor_routes ++ public_routes
   end
 
-  defp block_collisions(plugins) do
+  defp block_collisions(plugins, blocks_by_plugin) do
     core = KilnCMS.Blocks.core_types()
 
     plugins
     |> Enum.flat_map(fn plugin ->
-      for mod <- plugin.blocks(), do: {Kiln.Block.Info.name(mod), plugin.name()}
+      for mod <- blocks_by_plugin[plugin], do: {Kiln.Block.Info.name(mod), plugin.name()}
     end)
     |> Enum.group_by(&elem(&1, 0))
     |> Enum.flat_map(fn {name, owners} ->
@@ -143,16 +150,14 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
 
   # Field types must implement the contract; names must be unique across core
   # and all plugins (same stance as blocks).
-  defp field_type_problems(plugins) do
+  defp field_type_problems(plugins, field_types_by_plugin) do
     declared =
       Enum.flat_map(plugins, fn plugin ->
-        for mod <- plugin.field_types(), do: {plugin, mod}
+        for mod <- field_types_by_plugin[plugin], do: {plugin, mod}
       end)
 
     contract =
-      for {plugin, mod} <- declared,
-          not (Code.ensure_loaded?(mod) and function_exported?(mod, :cast, 2) and
-                 function_exported?(mod, :name, 0)) do
+      for {plugin, mod} <- declared, not field_type_module?(mod) do
         "#{plugin.name()}: field type #{inspect(mod)} does not implement Kiln.FieldType"
       end
 
@@ -163,9 +168,7 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
 
     collisions =
       declared
-      |> Enum.filter(fn {_plugin, mod} ->
-        Code.ensure_loaded?(mod) and function_exported?(mod, :name, 0)
-      end)
+      |> Enum.filter(fn {_plugin, mod} -> field_type_named?(mod) end)
       |> Enum.group_by(fn {_plugin, mod} -> mod.name() end)
       |> Enum.flat_map(fn {name, owners} ->
         cond do
@@ -206,22 +209,73 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
   # all. `Blocks.core_modules/0` supplies "core blocks" directly rather than
   # backing them out of `Blocks.modules() -- Kiln.Plugins.blocks()`.
   #
-  # Plugin blocks are listed *before* the core set in the concatenation:
-  # `JsonSchema.block_modules/1` (which `defs/1` calls) dedupes by `_type` via
-  # `Enum.uniq_by/2`, which keeps the *first* module for a given name. A
-  # plugin block whose `_type` collides with a core block's — already flagged
-  # separately by `block_collisions/1` — must still resolve to the plugin's
-  # own schema here, not the core block's, or its conformance check would
-  # silently validate against the wrong shape.
-  defp block_schema_problems(plugins) do
-    blocks_by_plugin = Map.new(plugins, &{&1, &1.blocks()})
-    plugin_blocks = blocks_by_plugin |> Map.values() |> List.flatten()
-    defs = JsonSchema.defs(Enum.uniq(plugin_blocks ++ Blocks.core_modules()))
+  # Two failure modes need guarding against before `JsonSchema.defs/1` runs:
+  #
+  #   * a plugin block's own `c:Kiln.Block.Renderer.json_schema/0` raising —
+  #     `for_module/1` calls it with no rescue of its own, unlike every other
+  #     call into plugin-authored code in this file (see `field_type_module?/1`
+  #     below), so unguarded it would take the whole doctor run down instead
+  #     of being reported as that plugin's own problem. Each plugin block's
+  #     callback is probed first; one that raises is excluded from the `$defs`
+  #     build entirely (core blocks aren't probed — a raise there is a core
+  #     bug, already covered by `test/kiln/block/json_schema_test.exs`, not a
+  #     plugin's).
+  #
+  #   * two *different* plugins declaring a block with the same `_type` name —
+  #     `JsonSchema.block_modules/1` (which `defs/1` calls) dedupes by `_type`
+  #     via `Enum.uniq_by/2`, keeping only the first module for a given name.
+  #     Plugin blocks are listed *before* the core set in the concatenation so
+  #     a plugin/core collision always resolves to the plugin's own schema
+  #     rather than the core block's (needed so that check isn't silently
+  #     validated against the wrong shape either). But which of *two* plugin
+  #     modules sharing a name comes first is decided by Erlang map iteration
+  #     order over `blocks_by_plugin`, not declaration order — nondeterministic.
+  #     `winners` is exactly the module set `JsonSchema.block_modules/1` kept,
+  #     so only the module that actually produced the `$defs` entry for its
+  #     name gets its render checked against it; the other is already flagged
+  #     as a naming conflict by `block_collisions/1` and skipped here rather
+  #     than validated against a schema that isn't its own.
+  defp block_schema_problems(plugins, blocks_by_plugin) do
+    probed =
+      for plugin <- plugins, module <- blocks_by_plugin[plugin] do
+        {plugin, module, probe_block_json_schema(module)}
+      end
+
+    schema_raise_problems =
+      for {plugin, module, {:error, message}} <- probed do
+        "#{plugin.name()}: block #{inspect(module)}'s json_schema/0 raised (#{message})"
+      end
+
+    unsound = MapSet.new(for {_plugin, module, {:error, _}} <- probed, do: module)
+
+    plugin_blocks =
+      blocks_by_plugin
+      |> Map.values()
+      |> List.flatten()
+      |> Enum.reject(&MapSet.member?(unsound, &1))
+
+    candidates = Enum.uniq(plugin_blocks ++ Blocks.core_modules())
+    defs = JsonSchema.defs(candidates)
+    winners = MapSet.new(JsonSchema.block_modules(candidates))
     document = %{"$defs" => defs}
 
-    Enum.flat_map(plugins, fn plugin ->
-      Enum.flat_map(blocks_by_plugin[plugin], &block_render_problems(plugin, &1, defs, document))
-    end)
+    schema_raise_problems ++
+      Enum.flat_map(plugins, fn plugin ->
+        blocks_by_plugin[plugin]
+        |> Enum.reject(&MapSet.member?(unsound, &1))
+        |> Enum.filter(&MapSet.member?(winners, &1))
+        |> Enum.flat_map(&block_render_problems(plugin, &1, defs, document))
+      end)
+  end
+
+  defp probe_block_json_schema(module) do
+    if Code.ensure_loaded?(module) and function_exported?(module, :json_schema, 0) do
+      module.json_schema()
+    end
+
+    :ok
+  rescue
+    e -> {:error, Exception.message(e)}
   end
 
   defp block_render_problems(plugin, module, defs, document) do
@@ -246,10 +300,12 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
     end
   rescue
     e ->
-      [
-        "#{plugin.name()}: block #{inspect(module)} raised while checking its :json render " <>
-          "against its schema (#{Exception.message(e)})"
-      ]
+      raised_problem(
+        plugin,
+        "block #{inspect(module)}",
+        "checking its :json render against its schema",
+        e
+      )
   end
 
   defp block_validation_problems(_plugin, _name, :ok), do: []
@@ -277,9 +333,9 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
   # placeholder (a date format, an enum) answers `{:error, _}` and is skipped
   # rather than flagged — this catches a type that silently returns the wrong
   # *shape*, not one that merely dislikes the probe's sample value.
-  defp field_type_schema_problems(plugins) do
+  defp field_type_schema_problems(plugins, field_types_by_plugin) do
     Enum.flat_map(plugins, fn plugin ->
-      plugin.field_types()
+      field_types_by_plugin[plugin]
       |> Enum.filter(&field_type_module?/1)
       # `field_type_module?/1` already established `mod` is loaded, so this
       # doesn't need to re-check — just read the callback off it.
@@ -295,6 +351,15 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
   defp field_type_module?(mod) do
     Code.ensure_loaded?(mod) and function_exported?(mod, :cast, 2) and
       function_exported?(mod, :name, 0)
+  rescue
+    _ -> false
+  end
+
+  # Same unvalidated-input hazard as `field_type_module?/1` above (a non-atom
+  # `mod` crashes `Code.ensure_loaded?/1`), but for the collision check, which
+  # only needs `name/0` — not the full contract `field_type_module?/1` checks.
+  defp field_type_named?(mod) do
+    Code.ensure_loaded?(mod) and function_exported?(mod, :name, 0)
   rescue
     _ -> false
   end
@@ -316,15 +381,19 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
       composite_divergence(plugin, mod, definition, parts)
     end
   rescue
-    e ->
-      # `inspect(mod)` rather than `mod.name()`: the exception being reported
-      # may be `mod.name()` itself raising (it runs above, building
-      # `definition`), and calling it again here would just raise past the
-      # rescue instead of producing a message.
-      [
-        "#{plugin.name()}: field type #{inspect(mod)} raised while checking cast/2 " <>
-          "(#{Exception.message(e)})"
-      ]
+    # `inspect(mod)` rather than `mod.name()`: the exception being reported
+    # may be `mod.name()` itself raising (it runs above, building
+    # `definition`), and calling it again here would just raise past the
+    # rescue instead of producing a message.
+    e -> raised_problem(plugin, "field type #{inspect(mod)}", "checking cast/2", e)
+  end
+
+  # Shared "this plugin's own code raised" message, used by every rescue in
+  # this task that reports one (`block_render_problems/4`,
+  # `field_type_divergence/2`) — kept as one template so the phrasing doesn't
+  # drift between them.
+  defp raised_problem(plugin, subject, action, exception) do
+    ["#{plugin.name()}: #{subject} raised while #{action} (#{Exception.message(exception)})"]
   end
 
   defp scalar_divergence(plugin, mod, definition) do
@@ -332,18 +401,14 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
 
     case mod.cast(widget_sample(html_type), definition) do
       {:ok, value} ->
-        expected = widget_kind(html_type)
-        actual = value_kind(value)
-
-        if actual == expected do
-          []
-        else
-          [
-            "#{plugin.name()}: field type #{inspect(mod.name())}'s cast/2 returns #{actual} for " <>
-              "a value its #{inspect(html_type)} widget submits, but that widget implies " <>
-              "#{expected} — declare c:Kiln.FieldType.json_schema/1 if this is intentional"
-          ]
-        end
+        divergence_problem(
+          plugin,
+          mod,
+          value_kind(value),
+          widget_kind(html_type),
+          "for a value its #{inspect(html_type)} widget submits",
+          "that widget"
+        )
 
       _ ->
         []
@@ -371,19 +436,43 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
   end
 
   defp part_divergence(plugin, mod, part, result) do
-    expected = widget_kind(Map.get(part, :type, "text"))
     actual = result |> Map.get(part.key) |> value_kind()
+    expected = widget_kind(Map.get(part, :type, "text"))
 
-    if actual == expected do
-      []
-    else
+    divergence_problem(
+      plugin,
+      mod,
+      actual,
+      expected,
+      "for part #{inspect(part.key)}",
+      "that part's widget"
+    )
+  end
+
+  # Shared "cast/2 returns the wrong JSON kind" message, used by both the
+  # scalar (`scalar_divergence/3`) and composite-part (`part_divergence/4`)
+  # checks — `location`/`widget_ref` are the only wording that differs
+  # between them ("a value its ... widget submits" vs "part ...").
+  defp divergence_problem(plugin, mod, actual, expected, location, widget_ref) do
+    if divergent?(actual, expected) do
       [
         "#{plugin.name()}: field type #{inspect(mod.name())}'s cast/2 returns #{actual} " <>
-          "for part #{inspect(part.key)}, but that part's widget implies #{expected} — " <>
-          "declare c:Kiln.FieldType.json_schema/1 if this is intentional"
+          "#{location}, but #{widget_ref} implies #{expected} — declare " <>
+          "c:Kiln.FieldType.json_schema/1 if this is intentional"
       ]
+    else
+      []
     end
   end
+
+  # `"unknown"` means `value_kind/1` couldn't classify `actual` at all (some
+  # JSON-encodable struct neither it nor `widget_kind/1` has a case for, since
+  # the latter never returns `"unknown"` itself) — that's inconclusive, not a
+  # mismatch. Flagging it would false-positive on any plugin struct this table
+  # simply hasn't been taught about yet, the same reason `Decimal` earned an
+  # explicit `value_kind/1` clause instead of being left to fall through here.
+  defp divergent?("unknown", _expected), do: false
+  defp divergent?(actual, expected), do: actual != expected
 
   defp widget_sample("number"), do: "3"
   defp widget_sample("range"), do: "3"
@@ -405,6 +494,13 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
   # `is_map/1` below classified it as `"object"`, a false-positive divergence
   # against any ordinary string-typed widget.
   defp value_kind(%mod{}) when mod in [Date, DateTime, NaiveDateTime, Time], do: "string"
+  # `Decimal` is the common non-builtin numeric struct a field type's cast/2
+  # returns (currency, precision-sensitive amounts) without declaring
+  # `json_schema/1` — `Jason.Encoder` renders it as a JSON *string*
+  # (`Decimal.to_string/1`), matching what an ordinary text-input widget
+  # already implies, so it belongs with the date/time family above rather
+  # than falling through to `"unknown"`.
+  defp value_kind(%Decimal{}), do: "string"
   defp value_kind(%_{}), do: "unknown"
   defp value_kind(v) when is_map(v), do: "object"
   defp value_kind(nil), do: "null"
