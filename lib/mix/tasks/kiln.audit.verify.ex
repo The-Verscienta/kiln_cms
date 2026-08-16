@@ -83,6 +83,12 @@ defmodule Mix.Tasks.Kiln.Audit.Verify do
 
   @requirements ["app.start"]
 
+  # The #1058 triage fact, worded once and shared by the per-line annotation
+  # (`legacy_annotation/1`) and the aggregate summary (`report_legacy_fold_order/2`)
+  # so a rewording only ever happens in one place.
+  @fold_order_explainer "chain predates the #598 fold-order fix — this may be the " <>
+                          "ordering bug rather than tampering; see #1058"
+
   @impl Mix.Task
   def run(_args) do
     # One signing-key resolution for the whole sweep, not one per anchor (#643).
@@ -126,7 +132,7 @@ defmodule Mix.Tasks.Kiln.Audit.Verify do
         gap = gap_for(verdict, storage, record)
         legacy? = legacy_fold_order?(verdict, storage, record)
 
-        line(ct.type, record, verdict, gap, keyed?, legacy?)
+        line(ct.type, record, verdict, %{gap: gap, legacy?: legacy?}, keyed?)
         {verdict, gap, legacy?}
       end
 
@@ -161,6 +167,13 @@ defmodule Mix.Tasks.Kiln.Audit.Verify do
   # `:verified`/`:unsigned`/`:unverifiable` never lands on the tampered line
   # this exists to annotate, so paying for the extra anchor read there would
   # cost every healthy document something this task never prints.
+  #
+  # Same tradeoff `gap_for/3` above already makes: `Chain.verify/4` loaded
+  # this exact anchor list moments ago and does not expose it, so a TAMPERED
+  # verdict pays for a second, identical query rather than `verify/4` growing
+  # a way to hand back what it already read. Only tampered/legacy records pay
+  # it, and only once per sweep, so it is accepted rather than plumbed
+  # through.
   defp legacy_fold_order?({:tampered, _}, storage, record),
     do: Chain.predates_fold_order?(storage, record.id, record.org_id)
 
@@ -171,9 +184,9 @@ defmodule Mix.Tasks.Kiln.Audit.Verify do
 
   defp report_legacy_fold_order(tampered, legacy_tampered) do
     Mix.shell().info(
-      "#{legacy_tampered} of #{tampered} TAMPERED document(s) predate the #598 " <>
-        "fold-order fix and may be that bug rather than genuine tampering — see the lines " <>
-        "marked '(chain predates the #598 fold-order fix …)' and #1058."
+      "#{legacy_tampered} of #{tampered} failing document(s) predate the #598 fold-order " <>
+        "fix and may be that bug rather than genuine tampering — see the lines marked " <>
+        "\"(#{@fold_order_explainer})\"."
     )
   end
 
@@ -202,11 +215,10 @@ defmodule Mix.Tasks.Kiln.Audit.Verify do
   # statement: `:unsigned` says nothing was signed, while a gap says something
   # WAS and stopped. Calling that "intact" is the claim #811 objected to.
   #
-  # Unreachable with `legacy? == true`: `legacy_fold_order?/3` only returns
-  # true for a `{:tampered, _}` verdict, and a gap's verdict is always
-  # `:unsigned`/`:unverifiable` — but the arity has to agree with the other
-  # clauses, so it is accepted and ignored rather than assumed away.
-  defp line(type, record, verdict, {:gap, attested, head}, _keyed?, _legacy?) do
+  # Triage facts (gap, legacy?) travel together in one map so each clause
+  # destructures only the key it needs, rather than every clause needing the
+  # same arity — see #1058.
+  defp line(type, record, verdict, %{gap: {:gap, attested, head}}, _keyed?) do
     Mix.shell().error(
       "#{type}/#{record.slug} (#{record.id}): ATTESTED ONLY TO VERSION #{attested} — " <>
         "versions #{attested + 1}-#{head} are anchored but #{unattested_because(verdict)}, " <>
@@ -217,14 +229,14 @@ defmodule Mix.Tasks.Kiln.Audit.Verify do
   # Only shouted where a key IS configured. On a deployment that signs nothing,
   # "no attested anchor" is every document's normal state, and printing it as an
   # error per record is a wall of red that says only what the operator chose.
-  defp line(type, record, verdict, :unattested, true, _legacy?) do
+  defp line(type, record, verdict, %{gap: :unattested}, true) do
     Mix.shell().error(
       "#{type}/#{record.slug} (#{record.id}): NO ATTESTED ANCHOR — every anchor in this " <>
         "chain is #{unattested_because(verdict)}, so none of its history is attested"
     )
   end
 
-  defp line(type, record, verdict, _no_gap, _keyed?, legacy?) do
+  defp line(type, record, verdict, %{legacy?: legacy?}, _keyed?) do
     status =
       case verdict do
         :verified ->
@@ -247,11 +259,7 @@ defmodule Mix.Tasks.Kiln.Audit.Verify do
   # the status string still starts "TAMPERED", the count above still counts
   # it, and the exit code still fails on it. This only tells a human reading
   # the sweep which reds are worth investigating first.
-  defp legacy_annotation(true),
-    do:
-      " (chain predates the #598 fold-order fix — this may be the ordering bug " <>
-        "rather than tampering; see #1058)"
-
+  defp legacy_annotation(true), do: " (#{@fold_order_explainer})"
   defp legacy_annotation(false), do: ""
 
   defp unattested_because(:unsigned), do: "unsigned"

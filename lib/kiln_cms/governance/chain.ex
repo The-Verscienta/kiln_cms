@@ -1181,8 +1181,13 @@ defmodule KilnCMS.Governance.Chain do
 
   @doc "As `predates_fold_order?/3`, over an already-loaded anchor list (order doesn't matter)."
   @spec predates_fold_order?([struct()]) :: boolean()
-  def predates_fold_order?(anchors) when is_list(anchors),
-    do: Enum.any?(anchors, &(&1.payload_version != 6))
+  # `recorded_order/1` draws the identical line — v6-throughout vs. not — so
+  # this derives from it rather than re-testing `payload_version` itself. The
+  # one place they must diverge: `recorded_order([])` is `[]` (there is no
+  # order to record), which is not the same fact as "predates the fix". A
+  # document with zero anchors has never been folded at all, legacy or not.
+  def predates_fold_order?([]), do: false
+  def predates_fold_order?(anchors) when is_list(anchors), do: recorded_order(anchors) == []
 
   defp gap_from([]), do: :none
 

@@ -108,8 +108,10 @@ defmodule Mix.Tasks.Kiln.Audit.VerifyTest do
 
     # The aggregate triage line: some fixture content elsewhere in the suite
     # could in principle also be anchored, so this only pins the shape, not an
-    # exact count.
-    assert output =~ ~r/[1-9]\d* of [1-9]\d* TAMPERED document\(s\) predate the #598/
+    # exact count. Deliberately does NOT restate "TAMPERED" (#1058) — a script
+    # grepping stdout for that word should not double-count this line on top
+    # of the per-document line it summarizes.
+    assert output =~ ~r/[1-9]\d* of [1-9]\d* failing document\(s\) predate the #598/
   end
 
   test "an ordinary TAMPERED chain (no legacy anchor) is NOT annotated" do
