@@ -76,6 +76,18 @@
       "references": null,
       "scale": null,
       "size": null,
+      "source": "block_id",
+      "type": "uuid"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
       "source": "due_on",
       "type": "date"
     },
@@ -279,7 +291,8 @@
       "error_fields": [
         "org_id",
         "content_type",
-        "content_id"
+        "content_id",
+        "block_id"
       ],
       "fields": [
         {
@@ -293,6 +306,10 @@
         {
           "type": "atom",
           "value": "content_id"
+        },
+        {
+          "type": "atom",
+          "value": "block_id"
         }
       ],
       "include": null,
@@ -340,7 +357,7 @@
   ],
   "custom_statements": [],
   "has_create_action": true,
-  "hash": "BDEDCBCA22430C3AE89C7584202357AE1D87F23C8B2EEA97238A74A713D8AD2B",
+  "hash": "D1BAD82F3F4FC9076645258AF40A2043B66D8E5DA07E1B8740D466C2BDDE4B16",
   "identities": [],
   "multitenancy": {
     "attribute": "org_id",
