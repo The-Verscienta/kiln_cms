@@ -96,8 +96,6 @@ defmodule KilnCMS.Feeds do
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Feeds.Policy
 
-  require Logger
-
   @default_entry_limit 50
   # A feed reader that ignores `<updated>` still shouldn't be able to make a site
   # serialize its entire archive.
@@ -128,12 +126,22 @@ defmodule KilnCMS.Feeds do
   def policy(_other), do: unavailable()
 
   defp for_org_id(org_id) do
-    # `resolve/1` returns nil only on an infrastructure failure, which the cache
-    # then declines to store — so a transient error degrades for one request
-    # rather than for the whole TTL. It degrades to `unavailable/0`, NOT to the
-    # operator config: see that function.
-    KilnCMS.Cache.fetch(KilnCMS.Cache.feed_policy_key(org_id), @ttl, fn -> resolve(org_id) end) ||
-      unavailable()
+    # One read-and-degrade rule for every per-org settings resolver (#1080): a
+    # transient failure degrades for one request rather than for the whole
+    # TTL. It degrades to `unavailable/0`, NOT to the operator config — see
+    # that function; `KilnCMS.OrgSettings.resolve/2` takes the fallback as a
+    # function precisely so this stays a per-setting decision (#1077).
+    KilnCMS.OrgSettings.resolve(org_id,
+      cache_key: KilnCMS.Cache.feed_policy_key(org_id),
+      ttl: @ttl,
+      # A system read: the row is admin-only by policy, but feeds render for
+      # anonymous readers with no actor. Tenant-scoped, so strict tenancy is
+      # satisfied.
+      read: &KilnCMS.CMS.list_feed_settings(tenant: &1, authorize?: false),
+      build: &build/1,
+      fallback: &unavailable/0,
+      label: "feed settings"
+    )
   end
 
   @doc "The operator-level (config-only) policy, ignoring any per-site row."
@@ -238,13 +246,6 @@ defmodule KilnCMS.Feeds do
     end
   end
 
-  defp resolve(org_id) do
-    case row(org_id) do
-      :error -> nil
-      row -> build(row)
-    end
-  end
-
   @doc """
   The resolved policy for a `FeedSettings` row (or `nil` for a site that has
   none) — the config layer already folded in underneath.
@@ -278,32 +279,6 @@ defmodule KilnCMS.Feeds do
   # value nothing can match.
   defp normalize(names) do
     for name <- List.wrap(names), is_binary(name) or is_atom(name), do: to_string(name)
-  end
-
-  # A system read: this resolves for anonymous feed fetches with no actor, and
-  # the row is admin-only by policy. Tenant-scoped, so strict tenancy is
-  # satisfied.
-  #
-  # Returns the row, `nil` when the site has none, or `:error` on an
-  # infrastructure failure (which must NOT be cached).
-  defp row(org_id) do
-    case KilnCMS.CMS.list_feed_settings(tenant: org_id, authorize?: false) do
-      {:ok, [row | _rest]} -> row
-      {:ok, []} -> nil
-      _other -> :error
-    end
-  rescue
-    # e.g. the table doesn't exist yet mid-rolling-deploy. Every feed fetch and
-    # every delivery page's autodiscovery block comes through here, so degrade
-    # rather than 500ing the site — to `unavailable/0`, which is summaries-only,
-    # NOT to the operator config. The message says which, because "using
-    # defaults" would describe the fallback this deliberately does not take.
-    error ->
-      Logger.warning(
-        "feed settings lookup failed; syndicating summaries only: #{Exception.message(error)}"
-      )
-
-      :error
   end
 
   # The `:feeds` key is operator-written and may be anything at all — including

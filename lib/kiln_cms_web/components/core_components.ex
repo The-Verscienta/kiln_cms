@@ -1012,4 +1012,43 @@ defmodule KilnCMSWeb.CoreComponents do
         )
     end
   end
+
+  @doc """
+  One sentence for an Ash write error, for a settings page's flash (#1080).
+
+  `KilnCMSWeb.BrandingLive`, `CodeInjectionLive` and `FeedSettingsLive` each
+  carried a private copy of this and the copies had already drifted:
+  Branding's rendered `"field: message"` **without** interpolating an error's
+  `vars`, so a refused CSP origin or brand token reached the admin as a literal
+  `%{value}` template — the exact bug #648 fixed in one of the others. Now one
+  copy: every error is rendered through `Exception.message/1`, which is what
+  Splode interpolates `vars` in (reading `.message` off the struct hands back
+  the raw template — see FormBuilderLive's private `error_message/1`).
+
+  Options:
+
+    * `:forbidden` — the sentence for `%Ash.Error.Forbidden{}` (the caller
+      knows what "this" is; the default is generic).
+    * `:fallback` — the sentence when the error class carries no message at
+      all. Defaults to a generic "could not be saved".
+  """
+  @spec ash_error_message(term(), keyword()) :: String.t()
+  def ash_error_message(error, opts \\ [])
+
+  def ash_error_message(%Ash.Error.Forbidden{}, opts) do
+    Keyword.get_lazy(opts, :forbidden, fn ->
+      gettext("You don't have permission to change this.")
+    end)
+  end
+
+  def ash_error_message(error, opts) do
+    error
+    |> Ash.Error.to_error_class()
+    |> Map.get(:errors, [])
+    |> Enum.map_join(" ", &Exception.message/1)
+    |> case do
+      "" -> Keyword.get_lazy(opts, :fallback, fn -> gettext("The change could not be saved.") end)
+      message -> message
+    end
+  end
 end

@@ -473,6 +473,34 @@ migration, a rewritten column, a dropped config key).
   an established socket and the `/ws/*` families remain uncounted (threat
   model item 10).
 
+### Changed
+
+- **One shape for the nine per-org settings resources, and one resolver for
+  their cached reads** (#1080). `SiteBranding`, `SiteCodeInjection`,
+  `FormSpamSettings`, `SiteEditorialSettings`, `SiteLinkCheck`,
+  `SiteCompliance`, `FeedSettings`, `SiteEmbedSettings` and
+  `Federation.SiteFederation` each spelled out, by hand, the same tenancy
+  block (`global?` — the security-relevant line a tenth resource could omit
+  with no compile error), the `writable?: false` `org_id`, the `:one_per_org`
+  identity, the upsert-on-identity `:save`, the `OrgAdmin` write policy and
+  the `belongs_to :organization`. New `KilnCMS.CMS.OrgSettings` (`use …,
+  table:, accept:, read:, …`) emits that half in the shape `KilnCMS.CMS.Content`
+  and `KilnCMS.CMS.Taxonomy` already use; every one of the nine is migrated
+  onto it (no migration — `mix ash.codegen --check` is clean), and a test
+  pins that no resource in the app declares `:one_per_org` by hand. New
+  `KilnCMS.OrgSettings.resolve/2` is the one cached, layered read behind
+  `KilnCMS.Branding`, `KilnCMS.CodeInjection` and `KilnCMS.Feeds` — never
+  caches a `nil`, degrades on a raise, caches "no row" as the operator config,
+  and takes the *fallback* as the caller's function so #1077's "the operator
+  default is the wrong direction to fail on the disclosure axis" stays a
+  per-setting decision. `KilnCMSWeb.CoreComponents.ash_error_message/2`
+  replaces the three settings pages' private error renderers, which had
+  already drifted (Branding's did not interpolate an error's `vars`, so a
+  refused token reached the admin as a literal `%{value}` template).
+  Downstream: a project's own per-org settings resource should `use
+  KilnCMS.CMS.OrgSettings`; the nine resources' actions, policies, columns and
+  code interfaces are unchanged.
+
 ## [0.6.0] - 2026-08-12
 
 ### Added
