@@ -2420,42 +2420,9 @@ defmodule KilnCMSWeb.EditorLiveTest do
       refute html =~ ~s(name="form[tag_ids][]")
     end
 
-    # #1149: the mount window is capped; the filter round-trips so a tag past
-    # the window is still reachable, and an attached tag outside the window
-    # still has a checkbox (detach must stay possible).
-    test "the tag picker loads a capped window and filters the full vocabulary", %{conn: conn} do
-      previous = Application.get_env(:kiln_cms, :editor, [])
-      Application.put_env(:kiln_cms, :editor, Keyword.put(previous, :max_tags, 3))
-      on_exit(fn -> Application.put_env(:kiln_cms, :editor, previous) end)
-
-      editor = authed_user(:editor)
-      # Alphabetical: aaa, bbb, ccc fill the window; zzz is past it.
-      for name <- ~w(aaa bbb ccc) do
-        Ash.Seed.seed!(Tag, %{name: name, slug: "t-#{uniq()}-#{name}"})
-      end
-
-      zzz = Ash.Seed.seed!(Tag, %{name: "zzz", slug: "t-#{uniq()}-zzz"})
-
-      post =
-        CMS.create_post!(%{title: "T", slug: "p-#{uniq()}", tag_ids: [zzz.id]}, actor: editor)
-
-      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
-
-      assert html =~ "Showing the first 3 tags"
-      assert html =~ "aaa"
-      assert html =~ "bbb"
-      assert html =~ "ccc"
-      # Attached past the window is still rendered (union), so detach works.
-      assert html =~ "zzz"
-      assert html =~ ~s(value="#{zzz.id}")
-
-      html = render_hook(lv, "filter_tags", %{"q" => "zzz"})
-      refute html =~ "Showing the first"
-      assert html =~ "zzz"
-      refute html =~ "aaa"
-      refute html =~ "bbb"
-      refute html =~ "ccc"
-    end
+    # The capped mount window (#1149) is exercised by
+    # `KilnCMSWeb.EditorTagWindowTest`, which is `async: false` because setting
+    # the cap means writing VM-global application env — see its moduledoc.
 
     # The state is also reachable mid-session, and this is the route most
     # editors take into it: the record's only tag came from a group later scoped
