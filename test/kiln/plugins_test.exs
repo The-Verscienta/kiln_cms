@@ -370,5 +370,333 @@ defmodule Kiln.PluginsTest do
 
       assert Mix.Tasks.Kiln.Plugins.Doctor.run([]) == :ok
     end
+
+    # Post-merge review of #937/PR #1251, finding 1: `for_module/1` (called by
+    # `JsonSchema.defs/1`, in turn called by `block_schema_problems/2`) has no
+    # rescue around a plugin block's own `json_schema/0` — unlike every other
+    # call into plugin-authored code in this task. Without a guard, a plugin
+    # whose `json_schema/0` raises takes the *entire* doctor run down instead
+    # of being reported as that one plugin's own problem.
+    test "flags a plugin block whose json_schema/0 raises without crashing the doctor run" do
+      defmodule ExplodingSchemaBlock do
+        use Kiln.Block
+
+        block :exploding_schema do
+          field :text, :string, required: true
+        end
+
+        @impl Kiln.Block.Renderer
+        def render(block, :web), do: block.text || ""
+        def render(block, :json), do: %{"_type" => "exploding_schema", "text" => block.text}
+        def render(_block, _surface), do: nil
+
+        @impl Kiln.Block.Renderer
+        def search_text(block), do: block.text || ""
+
+        @impl Kiln.Block.Renderer
+        def json_schema, do: raise("boom")
+      end
+
+      defmodule ExplodingSchemaPlugin do
+        use Kiln.Plugin
+        def blocks, do: [ExplodingSchemaBlock]
+      end
+
+      Application.put_env(:kiln_cms, :plugins, [ExplodingSchemaPlugin])
+
+      error = assert_raise Mix.Error, fn -> Mix.Tasks.Kiln.Plugins.Doctor.run([]) end
+
+      assert error.message =~ "ExplodingSchemaBlock"
+      assert error.message =~ "json_schema/0 raised"
+      assert error.message =~ "boom"
+    end
+
+    # Finding 4: the only pre-existing collision test reused the literal same
+    # core module as the "plugin" block, which only exercises identity dedup
+    # (`Enum.uniq/1` on the candidate list never even sees two entries for
+    # `:heading`). This uses a genuinely distinct plugin module with a
+    # different field shape, proving `block_schema_problems/2` resolves the
+    # collision to the *plugin's own* schema — if it fell back to validating
+    # against core Heading's schema (which has no `caption` property and
+    # requires `text`), this plugin's conformant render would fail.
+    test "a plugin block colliding with a core block's name still validates against its own schema" do
+      defmodule DistinctHeadingBlock do
+        use Kiln.Block
+
+        block :heading do
+          field :caption, :string, required: true
+        end
+
+        @impl Kiln.Block.Renderer
+        def render(block, :web), do: block.caption || ""
+        def render(block, :json), do: %{"_type" => "heading", "caption" => block.caption}
+        def render(_block, _surface), do: nil
+
+        @impl Kiln.Block.Renderer
+        def search_text(block), do: block.caption || ""
+      end
+
+      defmodule DistinctHeadingPlugin do
+        use Kiln.Plugin
+        def blocks, do: [DistinctHeadingBlock]
+      end
+
+      Application.put_env(:kiln_cms, :plugins, [DistinctHeadingPlugin])
+
+      error = assert_raise Mix.Error, fn -> Mix.Tasks.Kiln.Plugins.Doctor.run([]) end
+
+      assert error.message =~ "block :heading collides with a core block"
+      refute error.message =~ "disagrees with its exported schema"
+    end
+
+    # Finding 2: when two *different* plugins declare a block with the same
+    # `_type`, the shared `$defs` map only keeps one module's schema
+    # (`JsonSchema.block_modules/1`'s `Enum.uniq_by/2`) — but the pre-fix
+    # lookup in `block_render_problems/4` matched by name only, so the
+    # "losing" plugin's render silently validated against the "winning"
+    # plugin's unrelated schema. Both blocks here are internally conformant
+    # (each matches its own derived schema) but have disjoint field shapes,
+    # so any cross-validation between them fails loudly — this proves neither
+    # gets checked against the other's schema.
+    test "two different plugins declaring the same block name are not validated against each other's schema" do
+      defmodule DuplicateBlockA do
+        use Kiln.Block
+
+        block :duplicated_block do
+          field :alpha, :string, required: true
+        end
+
+        @impl Kiln.Block.Renderer
+        def render(block, :web), do: block.alpha || ""
+        def render(block, :json), do: %{"_type" => "duplicated_block", "alpha" => block.alpha}
+        def render(_block, _surface), do: nil
+
+        @impl Kiln.Block.Renderer
+        def search_text(block), do: block.alpha || ""
+      end
+
+      defmodule DuplicateBlockB do
+        use Kiln.Block
+
+        block :duplicated_block do
+          field :beta, :integer, required: true
+        end
+
+        @impl Kiln.Block.Renderer
+        def render(block, :web), do: to_string(block.beta || 0)
+        def render(block, :json), do: %{"_type" => "duplicated_block", "beta" => block.beta}
+        def render(_block, _surface), do: nil
+
+        @impl Kiln.Block.Renderer
+        def search_text(block), do: to_string(block.beta || 0)
+      end
+
+      defmodule DuplicateBlockAPlugin do
+        use Kiln.Plugin
+        def blocks, do: [DuplicateBlockA]
+      end
+
+      defmodule DuplicateBlockBPlugin do
+        use Kiln.Plugin
+        def blocks, do: [DuplicateBlockB]
+      end
+
+      Application.put_env(:kiln_cms, :plugins, [DuplicateBlockAPlugin, DuplicateBlockBPlugin])
+
+      error = assert_raise Mix.Error, fn -> Mix.Tasks.Kiln.Plugins.Doctor.run([]) end
+
+      assert error.message =~ "block :duplicated_block declared by multiple plugins"
+      refute error.message =~ "block :duplicated_block :json render disagrees"
+    end
+
+    # Finding 3: `value_kind/1` classified every struct except the date/time
+    # family as `"unknown"`, but `widget_kind/1` never returns `"unknown"` —
+    # so any field type whose `cast/2` correctly returns another
+    # JSON-encodable struct without declaring `json_schema/1` was
+    # unconditionally flagged as diverging. `Decimal` is the common case
+    # (currency/precision-sensitive amounts); `Jason.Encoder` renders it as a
+    # JSON string, matching what the default text-input widget already
+    # implies.
+    test "does not false-positive on a field type whose cast/2 returns a Decimal" do
+      defmodule DecimalFieldType do
+        use Kiln.FieldType
+        def cast(_value, _definition), do: {:ok, Decimal.new("3.14")}
+      end
+
+      defmodule DecimalFieldPlugin do
+        use Kiln.Plugin
+        def field_types, do: [DecimalFieldType]
+      end
+
+      Application.put_env(:kiln_cms, :plugins, [DecimalFieldPlugin])
+
+      assert Mix.Tasks.Kiln.Plugins.Doctor.run([]) == :ok
+    end
+
+    # Same finding, the general case: a struct `value_kind/1` has no specific
+    # clause for at all should be inconclusive rather than an automatic
+    # mismatch — the doctor task cannot know it's wrong, only that it can't
+    # classify it.
+    test "does not flag an unrecognized struct return as a divergence" do
+      defmodule OpaqueStructFieldType do
+        use Kiln.FieldType
+        def cast(_value, _definition), do: {:ok, URI.parse("https://example.com")}
+      end
+
+      defmodule OpaqueStructFieldPlugin do
+        use Kiln.Plugin
+        def field_types, do: [OpaqueStructFieldType]
+      end
+
+      Application.put_env(:kiln_cms, :plugins, [OpaqueStructFieldPlugin])
+
+      assert Mix.Tasks.Kiln.Plugins.Doctor.run([]) == :ok
+    end
+
+    # Finding 5: every field-type-divergence test up to this point uses a
+    # scalar field type — `composite_divergence/4`/`part_divergence/4` (the
+    # `input_parts/1` branch, `KilnCMS.CMS.FieldTypes.Geolocation`'s shape)
+    # had zero coverage. Covers the pass case, a per-part divergence, and the
+    # "declares composite but cast/2 doesn't return a map" branch.
+    test "passes for a composite field type whose parts all match their widgets" do
+      defmodule ConformantCompositeFieldType do
+        use Kiln.FieldType
+
+        def input_parts(_definition) do
+          [
+            %{key: "amount", label: "Amount", type: "number"},
+            %{key: "note", label: "Note", type: "text"}
+          ]
+        end
+
+        def cast(_value, _definition), do: {:ok, %{"amount" => 3, "note" => "sample"}}
+      end
+
+      defmodule ConformantCompositeFieldPlugin do
+        use Kiln.Plugin
+        def field_types, do: [ConformantCompositeFieldType]
+      end
+
+      Application.put_env(:kiln_cms, :plugins, [ConformantCompositeFieldPlugin])
+
+      assert Mix.Tasks.Kiln.Plugins.Doctor.run([]) == :ok
+    end
+
+    test "flags a composite field type whose part kind diverges from its part widget" do
+      defmodule DivergentCompositeFieldType do
+        use Kiln.FieldType
+
+        def input_parts(_definition) do
+          [
+            %{key: "amount", label: "Amount", type: "number"},
+            %{key: "note", label: "Note", type: "text"}
+          ]
+        end
+
+        # `amount`'s widget is a number input (implies "number"), but this
+        # returns a list — same shape of bug as the scalar case, on one part.
+        def cast(_value, _definition), do: {:ok, %{"amount" => ["3"], "note" => "sample"}}
+      end
+
+      defmodule DivergentCompositeFieldPlugin do
+        use Kiln.Plugin
+        def field_types, do: [DivergentCompositeFieldType]
+      end
+
+      Application.put_env(:kiln_cms, :plugins, [DivergentCompositeFieldPlugin])
+
+      error = assert_raise Mix.Error, fn -> Mix.Tasks.Kiln.Plugins.Doctor.run([]) end
+      assert error.message =~ "field type :divergent_composite_field_type"
+      assert error.message =~ "cast/2 returns array"
+      assert error.message =~ ~s(for part "amount")
+      assert error.message =~ "implies number"
+    end
+
+    test "flags a composite field type whose cast/2 doesn't return an object" do
+      defmodule NonObjectCompositeFieldType do
+        use Kiln.FieldType
+
+        def input_parts(_definition) do
+          [%{key: "amount", label: "Amount", type: "number"}]
+        end
+
+        def cast(_value, _definition), do: {:ok, "just a string"}
+      end
+
+      defmodule NonObjectCompositeFieldPlugin do
+        use Kiln.Plugin
+        def field_types, do: [NonObjectCompositeFieldType]
+      end
+
+      Application.put_env(:kiln_cms, :plugins, [NonObjectCompositeFieldPlugin])
+
+      error = assert_raise Mix.Error, fn -> Mix.Tasks.Kiln.Plugins.Doctor.run([]) end
+      assert error.message =~ "declares composite input_parts/1"
+      assert error.message =~ "cast/2 returns string, not an object"
+    end
+
+    # Finding 6: three rescue clauses added during #937's own review-fix pass
+    # had zero test coverage. Each fixture below is designed to raise at
+    # exactly the point its rescue guards.
+    test "flags a plugin block whose render/2 itself raises, not just json_schema/0" do
+      defmodule ExplodingRenderBlock do
+        use Kiln.Block
+
+        block :exploding_render do
+          field :text, :string, required: true
+        end
+
+        @impl Kiln.Block.Renderer
+        def render(block, :web), do: block.text || ""
+        def render(_block, :json), do: raise("kaboom")
+        def render(_block, _surface), do: nil
+
+        @impl Kiln.Block.Renderer
+        def search_text(block), do: block.text || ""
+      end
+
+      defmodule ExplodingRenderPlugin do
+        use Kiln.Plugin
+        def blocks, do: [ExplodingRenderBlock]
+      end
+
+      Application.put_env(:kiln_cms, :plugins, [ExplodingRenderPlugin])
+
+      error = assert_raise Mix.Error, fn -> Mix.Tasks.Kiln.Plugins.Doctor.run([]) end
+      assert error.message =~ "ExplodingRenderBlock"
+      assert error.message =~ "raised while checking its :json render against its schema"
+      assert error.message =~ "kaboom"
+    end
+
+    test "flags a plugin field type whose cast/2 itself raises" do
+      defmodule ExplodingCastFieldType do
+        use Kiln.FieldType
+        def cast(_value, _definition), do: raise("cast blew up")
+      end
+
+      defmodule ExplodingCastFieldPlugin do
+        use Kiln.Plugin
+        def field_types, do: [ExplodingCastFieldType]
+      end
+
+      Application.put_env(:kiln_cms, :plugins, [ExplodingCastFieldPlugin])
+
+      error = assert_raise Mix.Error, fn -> Mix.Tasks.Kiln.Plugins.Doctor.run([]) end
+      assert error.message =~ "ExplodingCastFieldType"
+      assert error.message =~ "raised while checking cast/2"
+      assert error.message =~ "cast blew up"
+    end
+
+    test "does not crash when a plugin declares a non-atom field type entry" do
+      defmodule NonAtomFieldTypePlugin do
+        use Kiln.Plugin
+        def field_types, do: ["not_a_module"]
+      end
+
+      Application.put_env(:kiln_cms, :plugins, [NonAtomFieldTypePlugin])
+
+      error = assert_raise Mix.Error, fn -> Mix.Tasks.Kiln.Plugins.Doctor.run([]) end
+      assert error.message =~ "does not implement Kiln.FieldType"
+    end
   end
 end
