@@ -1,8 +1,8 @@
 defmodule KilnCMS.CMS.ContentLifecycleTest do
   @moduledoc """
-  Content lifecycles (content lifecycles): the freshness axis (`review_after_days` /
+  Content lifecycles: the freshness axis (`review_after_days` /
   `last_reviewed_at` / `due_at` / `health`) and the three expiry actions the
-  embargo end can take.
+  embargo end can take. See `docs/content-lifecycles.md`.
 
   Health is an expression calculation, so every assertion here is also an
   assertion that it computes **in SQL** — the filter tests below would raise out

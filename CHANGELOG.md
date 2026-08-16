@@ -124,6 +124,29 @@ migration, a rewritten column, a dropped config key).
   both the old and new block, so a count can leave one and join the other in
   the same moment.
 
+- **The editorial calendar grew week and list views, filters, and live
+  updates.** `/editor/calendar` was a month grid; the query behind it now lives
+  in `KilnCMS.CMS.Calendar` as a projection with its own tests, and the page
+  offers three views over one shared anchor so switching keeps your place.
+  Week gives seven tall columns with times; List is chronological, is the
+  accessible baseline, and carries small screens on its own (the grids are
+  `hidden md:block` — seven columns on a phone is a horizontal scroll).
+
+  The new review-due lane plots the `due_at` calculation, and an embargo end
+  now says what it will actually do — unpublish, archive, or merely expire —
+  rather than reading "unpublish" for all three. Type, lane and health filters
+  are URL-persisted, so a filtered calendar is a link you can send; an unknown
+  value shows everything rather than nothing, since a stale URL rendering an
+  empty grid is indistinguishable from a genuinely empty month.
+
+  The page is live: any write that moves something plotted there broadcasts on
+  the org's calendar topic and every open calendar re-queries, whether the
+  write came from another editor's session, the API, or a scheduler.
+  `:autosave` deliberately does not broadcast — one per debounce would wake
+  every open grid in the org every few seconds while one person types. Month
+  cells cap their chips with a "+N more" overflow so one busy day cannot resize
+  the row, and an empty window renders an empty state rather than a blank grid.
+
 - **Office documents and zip archives in the document library** (#808).
   Follow-up to #481, which scoped the gated document library to PDF only for
   v1: `KilnCMS.DocumentProcessor` now byte-validates `.docx`/`.xlsx`/`.pptx`

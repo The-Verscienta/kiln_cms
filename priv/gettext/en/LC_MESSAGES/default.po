@@ -546,6 +546,13 @@ msgstr ""
 msgid "+ Assign"
 msgstr ""
 
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "+%{count} more"
+msgid_plural "+%{count} more"
+msgstr[0] "+%{count} more"
+msgstr[1] "+%{count} more"
+
 #: lib/kiln_cms_web/components/accessibility_components.ex
 #, elixir-autogen, elixir-format
 msgid "1 heading has no text — it structures the page while saying nothing."
@@ -1147,6 +1154,11 @@ msgstr ""
 msgid "All forms"
 msgstr ""
 
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "All lanes"
+msgstr "All lanes"
+
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
 msgid "All menus"
@@ -1172,6 +1184,7 @@ msgstr ""
 msgid "All time"
 msgstr ""
 
+#: lib/kiln_cms_web/live/calendar_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "All types"
@@ -1311,6 +1324,11 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Any content type"
 msgstr ""
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Any health"
+msgstr "Any health"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -1723,6 +1741,11 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Calendar"
 msgstr ""
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Calendar view"
+msgstr "Calendar view"
 
 #: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/billing_live.ex
@@ -3449,6 +3472,11 @@ msgstr ""
 msgid "Due %{date}"
 msgstr ""
 
+#: lib/kiln_cms_web/components/core_components.ex
+#, elixir-autogen, elixir-format
+msgid "Due soon"
+msgstr "Due soon"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
@@ -3810,10 +3838,16 @@ msgstr ""
 msgid "Experiments are switched off for this deployment, so no arm is served."
 msgstr ""
 
+#: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
 msgid "Expired"
 msgstr ""
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Expired (flagged)"
+msgstr "Expired (flagged)"
 
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
@@ -4131,6 +4165,11 @@ msgstr ""
 msgid "Fragment"
 msgstr ""
 
+#: lib/kiln_cms_web/components/core_components.ex
+#, elixir-autogen, elixir-format
+msgid "Fresh"
+msgstr "Fresh"
+
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "Fri"
@@ -4229,6 +4268,11 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Go live at"
 msgstr ""
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Go to content"
+msgstr "Go to content"
 
 #: lib/kiln_cms_web/controllers/error_html/403.html.heex
 #: lib/kiln_cms_web/controllers/error_html/404.html.heex
@@ -4398,6 +4442,11 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Headless delivery"
 msgstr ""
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Health"
+msgstr "Health"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -4784,6 +4833,11 @@ msgstr ""
 msgid "Label only"
 msgstr ""
 
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Lane"
+msgstr "Lane"
+
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
 msgid "Language"
@@ -4931,6 +4985,11 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Links to"
 msgstr ""
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "List"
+msgstr "List"
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -5163,6 +5222,11 @@ msgstr ""
 msgid "Mon"
 msgstr ""
 
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Month"
+msgstr "Month"
+
 #: lib/kiln_cms_web/controllers/content_html/search.html.heex
 #, elixir-autogen, elixir-format
 msgid "More content"
@@ -5356,6 +5420,11 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Next month"
 msgstr ""
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Next week"
+msgstr "Next week"
 
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
@@ -5917,6 +5986,11 @@ msgstr ""
 msgid "Nothing matches “%{query}”."
 msgstr ""
 
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nothing scheduled in this window"
+msgstr "Nothing scheduled in this window"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Nothing similar found."
@@ -6227,6 +6301,7 @@ msgstr ""
 msgid "Outdent"
 msgstr ""
 
+#: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
 msgid "Overdue"
@@ -6342,6 +6417,11 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Password changed."
 msgstr ""
+
+#: lib/kiln_cms_web/components/core_components.ex
+#, elixir-autogen, elixir-format
+msgid "Past its unpublish date and still published"
+msgstr "Past its unpublish date and still published"
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
@@ -6571,6 +6651,11 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Previous month"
 msgstr ""
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Previous week"
+msgstr "Previous week"
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
@@ -6934,7 +7019,6 @@ msgstr ""
 msgid "Related pages worth linking to from this one."
 msgstr ""
 
-#: lib/kiln_cms_web/live/calendar_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/release_live.ex
@@ -6986,6 +7070,11 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Release scheduled."
 msgstr ""
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Release shipped"
+msgstr "Release shipped"
 
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/release_live.ex
@@ -7345,8 +7434,19 @@ msgstr ""
 msgid "Reverse DNS is set in your hosting provider's panel, not in your DNS zone."
 msgstr ""
 
+#: lib/kiln_cms_web/components/core_components.ex
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Review due"
+msgstr "Review due"
+
+#: lib/kiln_cms_web/components/core_components.ex
+#, elixir-autogen, elixir-format
+msgid "Review due %{date}"
+msgstr "Review due %{date}"
+
 #: lib/kiln_cms_web/components/version_diff_components.ex
-#, elixir-autogen, elixir-format, fuzzy
+#, elixir-autogen, elixir-format
 msgid "Review every (days)"
 msgstr ""
 
@@ -7670,10 +7770,20 @@ msgstr ""
 msgid "Schedule"
 msgstr ""
 
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Schedule a publish, set an embargo end, or give content a review cadence."
+msgstr "Schedule a publish, set an embargo end, or give content a review cadence."
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Scheduled"
 msgstr ""
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Scheduled archive"
+msgstr "Scheduled archive"
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #, elixir-autogen, elixir-format
@@ -9380,6 +9490,7 @@ msgid "Two-factor authentication is on."
 msgstr ""
 
 #: lib/kiln_cms_web/live/analytics_live.ex
+#: lib/kiln_cms_web/live/calendar_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/slug_regen_live.ex
@@ -9845,6 +9956,11 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
+msgid "Week"
+msgstr "Week"
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
 msgid "Went live"
 msgstr ""
 
@@ -10255,6 +10371,11 @@ msgstr ""
 msgid "archived"
 msgstr ""
 
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "archives"
+msgstr "archives"
+
 #: lib/kiln_cms_web/live/link_report_live.ex
 #, elixir-autogen, elixir-format
 msgid "block %{index}"
@@ -10381,6 +10502,11 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "edit"
 msgstr ""
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "expires"
+msgstr "expires"
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -10709,6 +10835,11 @@ msgstr ""
 msgid "required"
 msgstr ""
 
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "review due"
+msgstr "review due"
+
 #: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format
 msgid "scheduled"
@@ -10828,6 +10959,11 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "to add blocks."
 msgstr ""
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "today"
+msgstr "today"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
