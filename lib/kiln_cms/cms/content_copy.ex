@@ -172,12 +172,102 @@ defmodule KilnCMS.CMS.ContentCopy do
     {:ok, dumped} =
       Ash.Type.dump_to_embedded(attribute.type, record.blocks || [], attribute.constraints)
 
-    dumped
-    |> then(fn blocks ->
-      if Keyword.get(opts, :keep_ids?, false), do: blocks, else: Enum.map(blocks, &strip_ids/1)
-    end)
-    |> reset_restricted(Keyword.get(opts, :role))
+    {blocks, legacy_notes} =
+      dumped
+      |> then(fn blocks ->
+        if Keyword.get(opts, :keep_ids?, false), do: blocks, else: Enum.map(blocks, &strip_ids/1)
+      end)
+      |> drop_stale_required()
+
+    {blocks, restricted_notes} = reset_restricted(blocks, Keyword.get(opts, :role))
+    {blocks, (legacy_notes ++ restricted_notes) |> Enum.uniq() |> Enum.sort()}
   end
+
+  # A pre-#935 nested child — the shape `columns` children were always stored
+  # as, raw maps that skipped Ash validation entirely until #935 added
+  # `TypedBlocks.validate_child!` — can already hold `nil` in a field this
+  # codebase now declares `required: true`. Before #935 that gap just rode
+  # along silently on a duplicate/translate copy; #935 makes the copy's
+  # write-time re-cast reject it, hard-failing the *entire* action for any
+  # actor (`reset_restricted/2` below is a no-op for `nil` role, i.e. admin —
+  # there is nothing here for it to catch).
+  #
+  # Runs before role-based restriction reset, and independent of role: this is
+  # about the *source* value already being invalid, not about who is copying
+  # it. Drops only the specific block/child holding the stale `nil`, the same
+  # "can't produce a valid value, so remove rather than corrupt" rule
+  # `unsafe_reset?/2` already applies to the required + restricted case,
+  # rather than failing the whole duplicate/translate write.
+  defp drop_stale_required(blocks) do
+    Enum.flat_map_reduce(blocks, [], fn block, notes ->
+      case block_module(block) do
+        nil -> {[block], notes}
+        module -> drop_stale_required_block(block, module, notes)
+      end
+    end)
+  end
+
+  defp drop_stale_required_block(%{"value" => value} = block, module, notes) when is_map(value) do
+    if stale_required?(value, module) do
+      {[], [stale_required_note(module) | notes]}
+    else
+      {value, notes} = drop_stale_required_nested(value, module, notes)
+      {[%{block | "value" => value}], notes}
+    end
+  end
+
+  defp drop_stale_required_block(block, _module, notes), do: {[block], notes}
+
+  # Only `columns` nests children (see `reset_nested/3`'s note on the same
+  # shape), so it is the one module whose children need walking here too.
+  defp drop_stale_required_nested(value, KilnCMS.Blocks.Columns, notes) do
+    update_field(value, :columns, "columns", fn columns ->
+      columns
+      |> List.wrap()
+      |> Enum.filter(&is_map/1)
+      |> Enum.map_reduce(notes, &drop_stale_required_column/2)
+    end)
+  end
+
+  defp drop_stale_required_nested(value, _module, notes), do: {value, notes}
+
+  defp drop_stale_required_column(column, notes) do
+    update_field(column, :blocks, "blocks", fn blocks ->
+      blocks
+      |> List.wrap()
+      |> Enum.filter(&is_map/1)
+      |> Enum.flat_map_reduce(notes, &drop_stale_required_nested_child/2)
+    end)
+  end
+
+  defp drop_stale_required_nested_child(child, notes) do
+    case nested_child_module(child) do
+      nil ->
+        {[child], notes}
+
+      module ->
+        if stale_required?(child, module) do
+          {[], [stale_required_note(module) | notes]}
+        else
+          {child, notes} = drop_stale_required_nested(child, module, notes)
+          {[child], notes}
+        end
+    end
+  end
+
+  defp stale_required?(carrier, module) do
+    module
+    |> Kiln.Block.Info.fields()
+    |> Enum.any?(&(&1.required and is_nil(stale_field_value(carrier, &1.name))))
+  end
+
+  # Tolerant of both key shapes `dump_to_embedded` produces: atom keys on a
+  # top-level block's own `"value"`, string keys on a nested child (never
+  # re-cast until #935's `validate_child!`).
+  defp stale_field_value(%{} = map, name), do: Map.get(map, name, Map.get(map, to_string(name)))
+
+  defp stale_required_note(module),
+    do: "#{block_name(module)} (dropped: legacy content left a required field nil)"
 
   # `nil` role = admin, or an actor-less internal caller: nothing is restricted,
   # matching the policy bypass `EnforceBlockFieldPolicy` respects.
@@ -203,13 +293,21 @@ defmodule KilnCMS.CMS.ContentCopy do
   # instead of `reset_fields/4` ever being asked to null a field that has no
   # safe null.
   #
-  # Dormant today: no currently-registered block combines `required: true`
-  # with `editable_by:` (code-review finding #7 on PR #1250, following #935)
-  # — this is a safety net, not a presently-reachable path.
+  # Rarely reachable today: only one currently-registered block (a test
+  # fixture) combines `required: true` with `editable_by:` at all, and this
+  # only trips when that combination ALSO has no `default:` — the DSL allows
+  # `required: true` (`allow_nil?: false`) and `default:` together, and when
+  # both are present `reset_fields/4` can reset the field to its declared
+  # default same as any other restricted field, so the block does not need to
+  # be dropped (code-review finding #2 on this PR's own review, following
+  # #1250's finding #7).
   defp unsafe_reset?(module, role) do
     module
     |> Kiln.Block.Info.fields()
-    |> Enum.any?(&(&1.required and not Kiln.Block.Policy.can_edit_field?(module, &1.name, role)))
+    |> Enum.any?(fn field ->
+      field.required and is_nil(field.default) and
+        not Kiln.Block.Policy.can_edit_field?(module, field.name, role)
+    end)
   end
 
   defp drop_note(module), do: "#{block_name(module)} (dropped: holds a restricted required field)"
@@ -305,15 +403,7 @@ defmodule KilnCMS.CMS.ContentCopy do
     end
   end
 
-  defp nested_child_module(child) do
-    with type when not is_nil(type) <- Map.get(child, "_type") || Map.get(child, :_type),
-         type_atom when not is_nil(type_atom) <- to_atom(type),
-         {:ok, module} <- KilnCMS.Blocks.fetch(type_atom) do
-      module
-    else
-      _ -> nil
-    end
-  end
+  defp nested_child_module(child), do: KilnCMS.Blocks.module_for_tagged_map(child)
 
   defp reset_fields(value, module, role, reset) do
     declared = MapSet.new(Kiln.Block.Info.fields(module), & &1.name)

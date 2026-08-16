@@ -58,6 +58,32 @@ defmodule KilnCMS.FixturePlugin.RestrictedRequiredBlock do
   def search_text(block), do: block.locked_text || ""
 end
 
+defmodule KilnCMS.FixturePlugin.RestrictedRequiredDefaultBlock do
+  @moduledoc """
+  A plugin-contributed block type (test fixture): combines `required: true`,
+  `editable_by:`, AND `default:` on the same field — the DSL allows
+  `allow_nil?: false` and a `default:` together, so a required + restricted
+  field CAN be reset to its declared default rather than forcing the whole
+  block to be dropped (code-review finding #2 on the review following PR
+  #1250/#935). `RestrictedRequiredBlock` (no default) is the case where a drop
+  is the only option; this is the case where it is not.
+  """
+  use Kiln.Block
+
+  block :restricted_required_default do
+    field :locked_text, :string, required: true, editable_by: [:admin], default: "redacted"
+  end
+
+  @impl Kiln.Block.Renderer
+  def render(block, :json),
+    do: %{"_type" => "restricted_required_default", "locked_text" => block.locked_text}
+
+  def render(_block, _surface), do: nil
+
+  @impl Kiln.Block.Renderer
+  def search_text(block), do: block.locked_text || ""
+end
+
 defmodule KilnCMS.FixturePlugin.FieldTypes.Rating do
   @moduledoc """
   A plugin-contributed custom field type (test fixture, D18): a 1–5 star
@@ -202,7 +228,11 @@ defmodule KilnCMS.FixturePlugin do
 
   @impl true
   def blocks,
-    do: [KilnCMS.FixturePlugin.CalloutBlock, KilnCMS.FixturePlugin.RestrictedRequiredBlock]
+    do: [
+      KilnCMS.FixturePlugin.CalloutBlock,
+      KilnCMS.FixturePlugin.RestrictedRequiredBlock,
+      KilnCMS.FixturePlugin.RestrictedRequiredDefaultBlock
+    ]
 
   @impl true
   def field_types,
