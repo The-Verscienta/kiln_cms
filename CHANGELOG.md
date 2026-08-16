@@ -62,6 +62,22 @@ migration, a rewritten column, a dropped config key).
   outright. Additive migration, all columns nullable or defaulted; existing
   content reads `:fresh`. See `docs/content-lifecycles.md`.
 
+- **An unresolved-discussion filter over the block tree.** A chip above the
+  blocks reads `N unresolved discussions` and narrows the tree to just those
+  blocks; `?threads=unresolved` lands there directly, and `Esc` closes an open
+  panel. The filter hides with CSS keyed on a `data-block-threads` state each
+  block card carries, written by the same function that colours the pin — so
+  the filter and the pin cannot disagree, and, more importantly, no block is
+  ever dropped from the render: a block card holds that block's form inputs,
+  and removing one would drop its fields from the next save. The chip is
+  absent entirely when nothing is unresolved.
+
+  `KilnCMS.CMS.TaskBlockPerformanceTest` now asserts the two cost claims the
+  feature rests on rather than assuming them: reading a document's discussions
+  is two queries whatever its block count (twenty blocks, twenty threads,
+  twenty tasks — still two), and `Task.:for_block` is served by
+  `tasks_content_lookup_index` rather than a table scan.
+
 - **A block's discussion can become accountable work.** The thread panel gains
   **Create task**, seeded from the thread itself: assignee from the first
   `@mention` the root comment resolves (the same `Mentions.resolve/2` call that

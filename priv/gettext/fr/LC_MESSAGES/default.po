@@ -306,6 +306,13 @@ msgid_plural "%{count} unresolved comments"
 msgstr[0] "%{count} commentaire non résolu"
 msgstr[1] "%{count} commentaires non résolus"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} unresolved discussion"
+msgid_plural "%{count} unresolved discussions"
+msgstr[0] "%{count} discussion non résolue"
+msgstr[1] "%{count} discussions non résolues"
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} unused recovery codes remain."
@@ -8435,6 +8442,11 @@ msgstr "Afficher la mention « Propulsé par » dans le pied de page public"
 #, elixir-autogen, elixir-format
 msgid "Show the Compliance panel in the editor"
 msgstr "Afficher le panneau Conformité dans l'éditeur"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Showing only blocks that need attention."
+msgstr "Affichage des blocs nécessitant votre attention uniquement."
 
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format

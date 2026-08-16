@@ -306,6 +306,13 @@ msgid_plural "%{count} unresolved comments"
 msgstr[0] ""
 msgstr[1] ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format, fuzzy
+msgid "%{count} unresolved discussion"
+msgid_plural "%{count} unresolved discussions"
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} unused recovery codes remain."
@@ -8434,6 +8441,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Show the Compliance panel in the editor"
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Showing only blocks that need attention."
 msgstr ""
 
 #: lib/kiln_cms_web/live/redirect_live.ex

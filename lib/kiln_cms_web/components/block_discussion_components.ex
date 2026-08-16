@@ -76,11 +76,19 @@ defmodule KilnCMSWeb.BlockDiscussionComponents do
         <.block_viewers viewers={@viewers} />
       </div>
 
+      <%!-- Escape closes the panel and returns focus to the pin that opened
+            it (`comment_close` clears `@comment_block`, so the panel's
+            elements go and the pin is what remains at that spot in the tab
+            order). Bound on the panel rather than the window: the editor has
+            no other Escape handler today, and a window-level one here would
+            quietly claim the key for every future modal in this LiveView. --%>
       <div
         :if={@open?}
         id={"thread-#{@block_id}"}
         role="group"
         aria-label={gettext("Discussion on this block")}
+        phx-keydown="comment_close"
+        phx-key="Escape"
         class="mt-2 space-y-2 rounded border border-base-content/15 bg-base-200/40 p-2"
       >
         <%!-- The block this thread annotates is gone from the document. Nothing
@@ -484,6 +492,24 @@ defmodule KilnCMSWeb.BlockDiscussionComponents do
   """
   def thread_unresolved?([]), do: false
   def thread_unresolved?(thread), do: not thread_resolved?(thread)
+
+  @doc """
+  A block's discussion state — `:unresolved`, `:tasks`, `:resolved` or
+  `:empty` — from the document's whole comment and task lists.
+
+  Public because the block *card* carries it too (`data-block-threads`), which
+  is what the editor's "Unresolved" filter hides on. Computed here rather than
+  duplicated there, so the filter and the pin cannot disagree about which
+  blocks are unresolved.
+  """
+  @spec discussion_state([struct()], [struct()], String.t()) ::
+          :unresolved | :tasks | :resolved | :empty
+  def discussion_state(comments, tasks, block_id) do
+    pin_state(
+      thread_for_block(comments, block_id),
+      Enum.filter(tasks, &(&1.block_id == block_id))
+    )
+  end
 
   # Unresolved outranks tasks: a task is work somebody has already accepted,
   # an open thread is a decision nobody has made.
