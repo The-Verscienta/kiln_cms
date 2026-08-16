@@ -131,7 +131,7 @@ jobs:
       # this branch exists only to capture a hang stacktrace from real CI.
 
       - name: Run tests
-        run: mix test test/kiln_cms_web/live/calendar_live_test.exs --trace --seed 0
+        run: mix test
 
   # Deliberately its own job rather than a step in `build` (#51). The advisory
   # database moves on its own schedule, so this gate can fail on a PR that
