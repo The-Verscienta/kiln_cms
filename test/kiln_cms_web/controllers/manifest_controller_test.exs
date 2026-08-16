@@ -16,6 +16,20 @@ defmodule KilnCMSWeb.ManifestControllerTest do
     original = Application.get_env(:kiln_cms, :branding)
     Application.put_env(:kiln_cms, :branding, [])
 
+    # Enter clean, not merely leave clean.
+    #
+    # `KilnCMS.Branding.for_org/1` is Cachex-backed with a five-minute TTL, and
+    # the entry outlives the transaction that produced it — so a branded
+    # `site_name` cached for the default org by an earlier test is still there
+    # when this module runs and is read as *this* site's branding. `async:
+    # false` buys nothing against it: the whole async phase runs first, and its
+    # leftovers are exactly what is being inherited.
+    #
+    # Every module here that asserts on the default org's branding does the
+    # same, for the same reason: `KilnCMS.BrandingTest`,
+    # `KilnCMSWeb.OfflineControllerTest`, `KilnCMSWeb.PwaHeadTest`.
+    KilnCMS.Cache.bust_branding(Accounts.default_org_id())
+
     on_exit(fn ->
       Application.put_env(:kiln_cms, :branding, original)
       KilnCMS.Cache.bust_branding(Accounts.default_org_id())
