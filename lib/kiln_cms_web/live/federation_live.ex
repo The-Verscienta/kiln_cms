@@ -99,7 +99,7 @@ defmodule KilnCMSWeb.FederationLive do
   # ── followers and blocks ───────────────────────────────────────────────────
 
   def handle_event("block", %{"kind" => kind, "value" => value} = params, socket)
-      when kind in ["actor", "instance"] do
+      when kind in ["actor", "instance"] and is_binary(value) do
     reason = blank_to_nil(params["reason"])
 
     case Federation.block_and_drop(
@@ -122,7 +122,7 @@ defmodule KilnCMSWeb.FederationLive do
   def handle_event("block", _params, socket),
     do: {:noreply, put_flash(socket, :error, gettext("Something went wrong."))}
 
-  def handle_event("unblock", %{"id" => id}, socket) do
+  def handle_event("unblock", %{"id" => id}, socket) when is_binary(id) do
     with %{} = block <- Enum.find(socket.assigns.blocks, &(&1.id == id)),
          :ok <- Federation.unblock(block, actor_opts(socket)) do
       {:noreply, socket |> put_flash(:info, gettext("Unblocked.")) |> load()}
@@ -133,7 +133,7 @@ defmodule KilnCMSWeb.FederationLive do
     end
   end
 
-  def handle_event("remove_follower", %{"id" => id}, socket) do
+  def handle_event("remove_follower", %{"id" => id}, socket) when is_binary(id) do
     with %{} = follower <- Enum.find(socket.assigns.followers, &(&1.id == id)),
          :ok <- Federation.destroy_follower(follower, actor_opts(socket)) do
       {:noreply, socket |> put_flash(:info, gettext("Follower removed.")) |> load()}
