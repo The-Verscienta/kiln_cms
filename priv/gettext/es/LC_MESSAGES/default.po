@@ -7279,6 +7279,7 @@ msgid "Reopen for editing"
 msgstr "Reabrir para editar"
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Reopen thread"
 msgstr "Reabrir hilo"
@@ -7366,6 +7367,7 @@ msgid "Reset your password"
 msgstr "Restablecer su contraseña"
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Resolve thread"
 msgstr "Resolver hilo"
@@ -8339,6 +8341,7 @@ msgid "Some tiers grant an audience that is no longer configured. Restore it in 
 msgstr "Algunos niveles conceden una audiencia que ya no está configurada. Restáurela en config :kiln_cms, :audiences, o retire esos niveles."
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Someone"
 msgstr "Alguien"
