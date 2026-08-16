@@ -297,6 +297,31 @@ migration, a rewritten column, a dropped config key).
   inherit / this-site-only / list tri-state a form's Embed tab offers, never
   printing the deployment's own list; and the spam keywords one per line.
   Declared before `/editor/forms/:id` so the literal segment wins.
+- **ActivityPub federation, phase 2: the admin page, blocks, and a replay
+  nonce store** (#967). New `/editor/federation` (`KilnCMSWeb.FederationLive`,
+  admin-only) shows both halves of the gate, the handle and actor id, the
+  editable profile (`display_name`/`summary` — the `:save` action, unused
+  until now), every follower with its delivery health and how many a publish
+  will reach, the recent delivery ledger with failures, and enables/disables
+  from the page (minting the permanent identity exactly as `mix kiln.federation
+  enable` does). New **`KilnCMS.Federation.Block`** (`federation_blocks`,
+  migration `20260815230106`): block an actor URI or an instance host;
+  blocking drops the followers it covers, and the inbox refuses a `Follow`
+  from a blocked actor or instance before writing anything — the durable
+  answer to an abusive follower that a bare delete was not. New
+  **`KilnCMS.Federation.SeenSignature`** (`federation_seen_signatures`): a
+  verified inbound signature's hash is inserted with the hash as primary key,
+  so a byte-identical resend inside the 300-second date window is refused as
+  a replay on every node (the #743 shape; a store outage falls back to the
+  date window and logs); swept hourly by `SeenSignatureSweeper`
+  (`KILN_FEDERATION_NONCE_SWEEP_CRON`). Also: `Federation.active_settings/2`
+  replaces the three near-identical settings queries in `Inbox`,
+  `AnnounceWorker` and `DeliveryWorker`; `DeliveryWorker` reads a follower by
+  id (`get_follower`) instead of the whole list; `Follower.deliverable` now
+  carries the drop-ceiling rule and is what `AnnounceWorker` fans out to;
+  `SiteFederation.record_delivery` is written on every successful delivery.
+  Key rotation is documented as an explicit position (not automated, and why)
+  in `docs/federation.md`. Nav gains "Federation" beside Webhooks.
 
 ### Changed
 

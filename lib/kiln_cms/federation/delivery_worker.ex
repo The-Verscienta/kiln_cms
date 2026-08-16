@@ -135,6 +135,12 @@ defmodule KilnCMS.Federation.DeliveryWorker do
       Federation.record_follower_success(follower, authorize?: false, tenant: org_id)
     end
 
+    # The site's own "last federated" line (#967) — system-side, its own
+    # action so no settings form can backdate it.
+    with {:ok, settings} <- Federation.active_settings(org_id) do
+      Federation.record_site_delivery(settings, authorize?: false, tenant: org_id)
+    end
+
     :ok
   end
 
@@ -165,13 +171,12 @@ defmodule KilnCMS.Federation.DeliveryWorker do
     :ok
   end
 
+  # One query for the three callers (#967) — `Federation.active_settings/2`;
+  # this one signs, so it needs the private key.
   defp site_settings(org_id) do
-    case Federation.list_site_federation(authorize?: false, tenant: org_id) do
-      {:ok, [%{enabled: true, origin: origin} = settings]} when is_binary(origin) ->
-        if SiteFederation.private_key_pem(settings), do: {:ok, settings}, else: :skip
-
-      _other ->
-        :skip
+    case Federation.active_settings(org_id, require_key?: true) do
+      {:ok, settings} -> {:ok, settings}
+      :off -> :skip
     end
   end
 
@@ -180,15 +185,9 @@ defmodule KilnCMS.Federation.DeliveryWorker do
   # than `Ash.get/3` so this stays on the code-interface contract AGENTS.md
   # sets; the list is bounded by the per-site follower ceiling.
   defp follower(%{follower_id: id}, org_id) do
-    case Federation.list_followers(authorize?: false, tenant: org_id) do
-      {:ok, followers} ->
-        case Enum.find(followers, &(&1.id == id)) do
-          nil -> :error
-          follower -> {:ok, follower}
-        end
-
-      _other ->
-        :error
+    case Federation.get_follower(id, authorize?: false, tenant: org_id) do
+      {:ok, follower} -> {:ok, follower}
+      _other -> :error
     end
   end
 

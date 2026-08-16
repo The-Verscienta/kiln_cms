@@ -422,6 +422,9 @@ defmodule KilnCMSWeb.Router do
       # editor-visible on the analytics dashboard.
       live "/editor/funnels", FunnelLive, :index
       live "/editor/funnels/:id", FunnelBuilderLive, :edit
+      # ActivityPub federation (#967): the gate, the handle, followers, the
+      # delivery ledger and the block list. Admin-only, like webhooks.
+      live "/editor/federation", FederationLive, :index
       live "/editor/api-keys", ApiKeyLive, :index
       # Which Kiln core this instance runs, and whether upstream has a newer
       # release. Reports only — updating is `mix kiln.update` (see SystemLive).

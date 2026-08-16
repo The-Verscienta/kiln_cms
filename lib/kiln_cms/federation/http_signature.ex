@@ -115,6 +115,55 @@ defmodule KilnCMS.Federation.HttpSignature do
     end
   end
 
+  @doc """
+  Record a **verified** signature in the replay nonce store (#967), refusing it
+  if it has been seen already.
+
+  Called by the inbox after `verify/6` says `:ok`, never before. The row's
+  expiry is twice the date window, so a signature is held for as long as its
+  `Date` could still verify. `:ok`, or `{:error, "signature replayed"}`; a
+  store that cannot be written answers `:ok` and logs — a nonce-store outage
+  must not take the inbox down, and the date window still bounds replay to
+  what phase 1 accepted.
+  """
+  @spec record_seen([{String.t(), String.t()}]) :: :ok | {:error, String.t()}
+  def record_seen(headers) do
+    with {:ok, params} <- parse_signature(header(headers, "signature")),
+         {:ok, signature} <- Map.fetch(params, "signature") do
+      hash = :crypto.hash(:sha256, signature) |> Base.encode16(case: :lower)
+      expires_at = DateTime.add(DateTime.utc_now(), 2 * @max_skew_seconds, :second)
+
+      %{signature_hash: hash, expires_at: expires_at}
+      |> KilnCMS.Federation.record_seen_signature(authorize?: false)
+      |> interpret_record()
+    else
+      _ -> {:error, "signature header is malformed"}
+    end
+  rescue
+    error -> log_nonce_failure(error)
+  end
+
+  defp interpret_record({:ok, _row}), do: :ok
+
+  # The primary-key conflict is the replay; anything else is the store failing.
+  defp interpret_record({:error, %Ash.Error.Invalid{errors: errors}}) do
+    if Enum.any?(errors, &match?(%{field: :signature_hash}, &1)),
+      do: {:error, "signature replayed"},
+      else: log_nonce_failure(errors)
+  end
+
+  defp interpret_record({:error, error}), do: log_nonce_failure(error)
+
+  defp log_nonce_failure(detail) do
+    require Logger
+
+    Logger.warning(
+      "federation replay store unavailable, accepting on the date window: #{inspect(detail)}"
+    )
+
+    :ok
+  end
+
   @doc "The `keyId` a signature header claims, without verifying anything."
   @spec key_id([{String.t(), String.t()}]) :: {:ok, String.t()} | {:error, String.t()}
   def key_id(headers) do

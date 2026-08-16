@@ -313,6 +313,11 @@ msgstr "%{count} en attente de révision"
 msgid "%{count} webhook failures in 24h"
 msgstr "%{count} échecs de webhook en 24 h"
 
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} will be delivered to"
+msgstr "%{count} recevront les envois"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} word"
@@ -508,6 +513,11 @@ msgstr "%{who}%{note}"
 #, elixir-autogen, elixir-format
 msgid "(content unavailable)"
 msgstr "(contenu indisponible)"
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "(dropped from delivery)"
+msgstr "(exclu des envois)"
 
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
@@ -857,6 +867,7 @@ msgstr "La configuration de l'action doit être un JSON valide."
 
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/billing_live.ex
+#: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Actions"
 msgstr "Actions"
@@ -879,6 +890,16 @@ msgstr "Actif"
 #, elixir-autogen, elixir-format
 msgid "Active (accepting submissions)"
 msgstr "Actif (accepte les soumissions)"
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Activity"
+msgstr "Activité"
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Actor"
+msgstr "Acteur"
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
@@ -1470,6 +1491,7 @@ msgstr "Assignation"
 msgid "Attempting to reconnect"
 msgstr "Tentative de reconnexion"
 
+#: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Attempts"
@@ -1611,14 +1633,45 @@ msgid "Billing is not configured yet. Until both secrets resolve, no tier is off
 msgstr "La facturation n'est pas encore configurée. Tant que les deux secrets ne sont pas résolus, aucun niveau n'est proposé et aucune page de paiement n'est accessible."
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
+#: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Block"
 msgstr "Bloc"
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Block actor"
+msgstr "Bloquer l'acteur"
 
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex
 #, elixir-autogen, elixir-format
 msgid "Block editor"
 msgstr "Éditeur de blocs"
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Block instance"
+msgstr "Bloquer l'instance"
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Block this actor? Its follow is removed and future follows are refused."
+msgstr "Bloquer cet acteur ? Son abonnement est supprimé et les suivants refusés."
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Block this whole instance? Every follower on it is removed and future follows from it are refused."
+msgstr "Bloquer toute cette instance ? Tous ses abonnés sont supprimés et les futurs abonnements depuis celle-ci refusés."
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Blocked"
+msgstr "Bloqués"
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Blocked. Matching followers were removed."
+msgstr "Bloqué. Les abonnés correspondants ont été supprimés."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -3215,6 +3268,7 @@ msgstr "Supprimer « %{name} » ?"
 msgid "Deleted."
 msgstr "Supprimé."
 
+#: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Delivered"
@@ -3244,6 +3298,11 @@ msgstr "Mode d'envoi"
 #, elixir-autogen, elixir-format
 msgid "Delivery test"
 msgstr "Test d'envoi"
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Deployment"
+msgstr "Déploiement"
 
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -3355,6 +3414,16 @@ msgstr "Répertoire"
 msgid "Disable"
 msgstr "Désactiver"
 
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Disable federation"
+msgstr "Désactiver la fédération"
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Disable federation? Followers stop receiving posts; the identity is kept."
+msgstr "Désactiver la fédération ? Les abonnés ne reçoivent plus les publications ; l'identité est conservée."
+
 #: lib/kiln_cms_web/live/social_live.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
@@ -3383,6 +3452,7 @@ msgstr "Discussion sur ce bloc"
 msgid "Dismiss"
 msgstr "Ignorer"
 
+#: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Display name"
@@ -3707,6 +3777,11 @@ msgstr "Vider la corbeille"
 msgid "Enable"
 msgstr "Activer"
 
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Enable federation"
+msgstr "Activer la fédération"
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Enable two-factor authentication"
@@ -3717,6 +3792,11 @@ msgstr "Activer l'authentification à deux facteurs"
 #, elixir-autogen, elixir-format
 msgid "Enabled"
 msgstr "Activé"
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Enabling mints this site's permanent actor identity. The handle cannot be renamed once other servers know it — pick the username with care."
+msgstr "L'activation crée l'identité d'acteur permanente de ce site. L'identifiant ne peut plus être renommé une fois connu des autres serveurs — choisissez le nom d'utilisateur avec soin."
 
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
@@ -3928,12 +4008,18 @@ msgstr "Exporter la piste d'audit (CSV)"
 msgid "Export trail (JSON)"
 msgstr "Exporter la piste d'audit (JSON)"
 
+#: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #: lib/kiln_cms_web/live/release_live.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Failed"
 msgstr "Échec"
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Failures"
+msgstr "Échecs"
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
@@ -3950,6 +4036,22 @@ msgstr "Image à la une"
 #, elixir-autogen, elixir-format
 msgid "February"
 msgstr "février"
+
+#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Federation"
+msgstr "Fédération"
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Federation disabled. The identity is kept, so re-enabling restores the same handle."
+msgstr "Fédération désactivée. L'identité est conservée : la réactiver restaure le même identifiant."
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Federation enabled. This site's handle is now permanent."
+msgstr "Fédération activée. L'identifiant de ce site est désormais permanent."
 
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -4130,6 +4232,16 @@ msgstr "La densité de l'expression clé cible est de %{density}% — au-delà d
 #, elixir-autogen, elixir-format
 msgid "Focus keyphrase density is %{density}% — below the %{min}% guideline."
 msgstr "La densité de l'expression clé cible est de %{density}% — en dessous du seuil recommandé de %{min}%."
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Follower removed."
+msgstr "Abonné supprimé."
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Followers"
+msgstr "Abonnés"
 
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #, elixir-autogen, elixir-format
@@ -4407,6 +4519,7 @@ msgstr "HTTP %{status}"
 msgid "Half"
 msgstr "Moitié"
 
+#: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
 msgid "Handle"
@@ -4529,6 +4642,11 @@ msgstr "Requêtes"
 msgid "Host matching is off, and this deployment has more than one organization"
 msgstr "La correspondance d'hôte est désactivée et ce déploiement comporte plusieurs organisations"
 
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Host or actor URI"
+msgstr "Hôte ou URI de l'acteur"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Hover a block and click Edit to change it on the page."
@@ -4643,6 +4761,11 @@ msgstr "Les sauvegardes depuis l'application sont désactivées (BACKUP_ENABLED)
 #, elixir-autogen, elixir-format
 msgid "Inactive"
 msgstr "Inactif"
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Inbox"
+msgstr "Boîte de réception"
 
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -4846,6 +4969,7 @@ msgstr "KilnCMS associe les ressources Ash, un éditeur de blocs LiveView, l'his
 msgid "KilnCMS test email"
 msgstr "E-mail de test KilnCMS"
 
+#: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Kind"
@@ -4900,7 +5024,13 @@ msgstr "Dernière vérification"
 msgid "Last checkpoint"
 msgstr "Dernier point de contrôle"
 
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Last delivered"
+msgstr "Dernier envoi"
+
 #: lib/kiln_cms_web/live/billing_live.ex
+#: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Last error"
 msgstr "Dernière erreur"
@@ -5929,6 +6059,11 @@ msgstr "Aucune vue enregistrée pour le moment."
 msgid "No webhooks yet."
 msgstr "Aucun webhook pour le moment."
 
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nobody follows this site yet."
+msgstr "Personne ne suit encore ce site."
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
@@ -6005,6 +6140,11 @@ msgstr "Rien à venir."
 msgid "Nothing has asked for a URL this site can't serve."
 msgstr "Personne n'a demandé une URL que ce site ne peut pas servir."
 
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nothing has been delivered yet."
+msgstr "Rien n'a encore été envoyé."
+
 #: lib/kiln_cms_web/live/compliance_live.ex
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -6020,6 +6160,11 @@ msgstr "Rien n'a encore écrit %{path}. Soit aucune sauvegarde n'a été lancée
 #, elixir-autogen, elixir-format
 msgid "Nothing in this release"
 msgstr "Ce lancement est vide"
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nothing is blocked."
+msgstr "Rien n'est bloqué."
 
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
@@ -6323,6 +6468,11 @@ msgstr "Options — une par ligne"
 msgid "Organization & relationships"
 msgstr "Organisation et relations"
 
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Origin"
+msgstr "Origine"
+
 #: lib/kiln_cms_web/live/analytics_live.ex
 #, elixir-autogen, elixir-format
 msgid "Other"
@@ -6517,6 +6667,7 @@ msgid "Payment overdue"
 msgstr "Paiement en retard"
 
 #: lib/kiln_cms_web/live/account_live.ex
+#: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Pending"
@@ -6745,10 +6896,16 @@ msgstr "Test en cours…"
 msgid "Processing…"
 msgstr "Traitement en cours…"
 
+#: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Profile"
 msgstr "Profil"
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Profile saved."
+msgstr "Profil enregistré."
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -6895,6 +7052,11 @@ msgstr "Citation"
 msgid "Re-derive slugs through the current rules (patterns, keywords, stop words). Preview first; applying renames through the normal update flow, so published URLs leave 301 redirects behind."
 msgstr "Redérivez les slugs selon les règles actuelles (modèles, mots-clés, mots vides). Prévisualisez d'abord ; l'application effectue les renommages via le flux de mise à jour normal, de sorte que les URL publiées laissent des redirections 301 derrière elles."
 
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Re-enable federation"
+msgstr "Réactiver la fédération"
+
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
 msgid "Read + write"
@@ -6930,6 +7092,11 @@ msgstr "La lisibilité est de %{score}/100 — des mots et des phrases plus cour
 msgid "Reading time is an estimate at %{wpm} words per minute."
 msgstr "Le temps de lecture est une estimation à %{wpm} mots par minute."
 
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reason"
+msgstr "Motif"
+
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
 msgid "Recent announcements"
@@ -6940,6 +7107,7 @@ msgstr "Annonces récentes"
 msgid "Recent campaigns"
 msgstr "Campagnes récentes"
 
+#: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Recent deliveries"
@@ -7179,6 +7347,7 @@ msgstr "Dernière version rechargée."
 
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
 #: lib/kiln_cms_web/live/social_live.ex
@@ -7252,6 +7421,11 @@ msgstr "Supprimer ce compte ?"
 #, elixir-autogen, elixir-format
 msgid "Remove this column and its blocks?"
 msgstr "Supprimer cette colonne et ses blocs ?"
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Remove this follower? It can follow again unless you block it."
+msgstr "Supprimer cet abonné ? Il pourra se réabonner sauf si vous le bloquez."
 
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
@@ -7768,6 +7942,7 @@ msgstr "Enregistrer la source de la clé"
 msgid "Save preferences"
 msgstr "Enregistrer les préférences"
 
+#: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Save profile"
@@ -8281,6 +8456,11 @@ msgstr "Secret de signature"
 msgid "Similar content"
 msgstr "Contenu similaire"
 
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Since"
+msgstr "Depuis"
+
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Single line text"
@@ -8429,6 +8609,7 @@ msgid "Something went wrong!"
 msgstr "Une erreur s'est produite !"
 
 #: lib/kiln_cms_web/live/billing_live.ex
+#: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/form_live.ex
 #: lib/kiln_cms_web/live/form_settings_live.ex
@@ -8485,6 +8666,7 @@ msgid "Start a discussion on this block"
 msgstr "Démarrer une discussion sur ce bloc"
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
+#: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/release_live.ex
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
@@ -8498,6 +8680,7 @@ msgstr "État :"
 
 #: lib/kiln_cms_web/live/api_key_live.ex
 #: lib/kiln_cms_web/live/billing_live.ex
+#: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #: lib/kiln_cms_web/live/release_live.ex
@@ -8653,6 +8836,11 @@ msgstr "Les suggestions sont générées par %{provider}. Le titre, l'extrait et
 #, elixir-autogen, elixir-format
 msgid "Summarize"
 msgstr "Résumer"
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Summary"
+msgstr "Résumé"
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
@@ -8996,6 +9184,11 @@ msgstr "L'état des sauvegardes ne peut pas être déterminé."
 #, elixir-autogen, elixir-format
 msgid "The campaign couldn't be recorded — check the details."
 msgstr "La campagne n'a pas pu être enregistrée — vérifiez les détails."
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "The change could not be saved."
+msgstr "La modification n'a pas pu être enregistrée."
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
@@ -9350,6 +9543,16 @@ msgstr "Ceci exécute du code sur votre site public."
 msgid "This setting applies to this form only — another site's forms are unaffected by what you allow here."
 msgstr "Ce réglage ne s'applique qu'à ce formulaire — les formulaires des autres sites ne sont pas affectés par ce que vous autorisez ici."
 
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site"
+msgstr "Ce site"
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site as an ActivityPub actor: who follows it, how deliveries are going, and who is refused."
+msgstr "Ce site en tant qu'acteur ActivityPub : qui le suit, comment se passent les envois et qui est refusé."
+
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
 msgid "This site follows the operator defaults again."
@@ -9664,6 +9867,16 @@ msgstr "Désarchiver"
 msgid "Unarchive %{count} selected item(s)? They return to draft."
 msgstr "Désarchiver %{count} élément(s) sélectionné(s) ? Ils repassent en brouillon."
 
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Unblock"
+msgstr "Débloquer"
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Unblocked."
+msgstr "Débloqué."
+
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #, elixir-autogen, elixir-format
 msgid "Unchanged"
@@ -9903,6 +10116,11 @@ msgstr "Utilisée pour ouvrir les sessions de paiement et du portail de facturat
 msgid "User"
 msgstr "Utilisateur"
 
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Username"
+msgstr "Nom d'utilisateur"
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Valid for one hour."
@@ -10087,6 +10305,11 @@ msgstr "Ce à quoi un document de ce site est confronté en ce moment : les règ
 msgid "What a match on these phrases means"
 msgstr "Ce que signifie une correspondance sur ces expressions"
 
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "What other servers show for this actor. Peers refetch it on their own schedule."
+msgstr "Ce que les autres serveurs affichent pour cet acteur. Les pairs le récupèrent à leur propre rythme."
+
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
 msgid "What runs on this site"
@@ -10103,6 +10326,7 @@ msgid "What's on, soonest first."
 msgstr "À l'affiche, du plus proche au plus lointain."
 
 #: lib/kiln_cms_web/live/automation_live.ex
+#: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/governance_live.ex
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
@@ -10241,6 +10465,11 @@ msgstr "Vous n'avez pas la permission de modifier la vérification des allégati
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to change this site's code injection."
 msgstr "Vous n'avez pas la permission de modifier l'injection de code de ce site."
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to change this site's federation settings."
+msgstr "Vous n'avez pas la permission de modifier les paramètres de fédération de ce site."
 
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -10464,6 +10693,11 @@ msgstr "Option par défaut sans configuration : collez le secret ici. Chiffré a
 msgid "active"
 msgstr "active"
 
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "actor"
+msgstr "acteur"
+
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #, elixir-autogen, elixir-format
 msgid "added just before </body>"
@@ -10610,6 +10844,16 @@ msgstr "n'a pas pu voir ses métadonnées supprimées, il n'a donc pas été enr
 msgid "deleted"
 msgstr "supprimé"
 
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "disabled (identity kept)"
+msgstr "désactivée (identité conservée)"
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "disabled — every federation route 404s until the operator sets KILN_FEDERATION_ENABLED"
+msgstr "désactivée — toutes les routes de fédération répondent 404 tant que l'opérateur n'a pas défini KILN_FEDERATION_ENABLED"
+
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "draft"
@@ -10630,6 +10874,11 @@ msgstr "par ex. site-marketing"
 #, elixir-autogen, elixir-format
 msgid "edit"
 msgstr "modification"
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "enabled"
+msgstr "activée"
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
@@ -10695,6 +10944,11 @@ msgstr "les dimensions de l'image sont trop grandes"
 #, elixir-autogen, elixir-format
 msgid "in review"
 msgstr "en révision"
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "instance"
+msgstr "instance"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -10810,6 +11064,11 @@ msgstr "manquant"
 #, elixir-autogen, elixir-format
 msgid "never"
 msgstr "jamais"
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "never enabled"
+msgstr "jamais activée"
 
 #: lib/kiln_cms_web/live/automation_live.ex
 #, elixir-autogen, elixir-format

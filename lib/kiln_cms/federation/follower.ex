@@ -30,9 +30,22 @@ defmodule KilnCMS.Federation.Follower do
 
     default_accept []
 
+    # Followers a publish fans out to: not yet at the drop ceiling. The rule
+    # lives here so the fan-out (`AnnounceWorker`) and the federation page's
+    # "will be delivered to" count read the same set (#967).
     read :deliverable do
       description "Followers a publish should be delivered to."
-      prepare build(sort: [inserted_at: :asc])
+      # A preparation, not a `filter expr(...)`: the ceiling is the domain
+      # module's, and referring to it in a `filter` at DSL-build time is a
+      # compile-time dependency Follower → Federation → Follower (deadlock).
+      prepare fn query, _context ->
+        require Ash.Query
+        ceiling = KilnCMS.Federation.drop_follower_after()
+
+        query
+        |> Ash.Query.filter(consecutive_failures < ^ceiling)
+        |> Ash.Query.sort(inserted_at: :asc)
+      end
     end
 
     create :follow do

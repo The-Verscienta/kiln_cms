@@ -63,16 +63,32 @@ defmodule KilnCMS.Federation do
   resources do
     resource KilnCMS.Federation.SiteFederation do
       define :list_site_federation, action: :read
+      define :save_site_federation, action: :save
       define :enable_site_federation, action: :enable, args: [:origin, :username]
       define :disable_site_federation, action: :disable
+      define :record_site_delivery, action: :record_delivery
     end
 
     resource KilnCMS.Federation.Follower do
       define :list_followers, action: :read
+      define :get_follower, action: :read, get_by: [:id]
+      define :deliverable_followers, action: :deliverable
       define :follow, action: :follow, args: [:actor_uri, :inbox_uri]
       define :destroy_follower, action: :destroy
       define :record_follower_failure, action: :record_failure
       define :record_follower_success, action: :record_success
+    end
+
+    # Actor / instance blocks (#967): the durable "not this one".
+    resource KilnCMS.Federation.Block do
+      define :list_blocks, action: :read
+      define :block, action: :block
+      define :unblock, action: :destroy
+    end
+
+    # The replay nonce store (#967). System-only; see the resource.
+    resource KilnCMS.Federation.SeenSignature do
+      define :record_seen_signature, action: :record
     end
 
     resource KilnCMS.Federation.Delivery do
@@ -101,6 +117,91 @@ defmodule KilnCMS.Federation do
   """
   @spec drop_follower_after() :: pos_integer()
   def drop_follower_after, do: Keyword.get(config(), :drop_follower_after, 12)
+
+  @doc """
+  The site's federation settings, if federation is on for this deployment AND
+  this site and the site has minted its identity — the one query
+  `Inbox.settings/1`, `AnnounceWorker.site_settings/1` and
+  `DeliveryWorker.site_settings/1` used to carry three near-identical copies of
+  (#967).
+
+  `{:ok, settings}` or `:off`. Pass `require_key?: true` for a caller that is
+  about to *sign* — the delivery worker — so a site whose private key is
+  unavailable (a rotated `FEDERATION_KEY_SECRET`, an unreadable secret) is
+  `:off` to it while the inbox, which only verifies, still answers.
+  """
+  @spec active_settings(Ash.UUID.t(), keyword()) :: {:ok, struct()} | :off
+  def active_settings(org_id, opts \\ []) do
+    with true <- enabled?(),
+         {:ok, [%{enabled: true, origin: origin} = settings]} when is_binary(origin) <-
+           list_site_federation(authorize?: false, tenant: org_id),
+         true <-
+           not Keyword.get(opts, :require_key?, false) or
+             is_binary(KilnCMS.Federation.SiteFederation.private_key_pem(settings)) do
+      {:ok, settings}
+    else
+      _ -> :off
+    end
+  end
+
+  @doc """
+  Whether `actor_uri` — or the instance it lives on — is blocked for `org_id`
+  (#967). Read as the system: this is the inbox asking before it writes.
+  """
+  @spec blocked?(String.t(), Ash.UUID.t()) :: boolean()
+  def blocked?(actor_uri, org_id) when is_binary(actor_uri) do
+    host = actor_host(actor_uri)
+
+    require Ash.Query
+
+    KilnCMS.Federation.Block
+    |> Ash.Query.filter(
+      (kind == :actor and value == ^actor_uri) or (kind == :instance and value == ^host)
+    )
+    |> Ash.exists?(authorize?: false, tenant: org_id)
+  end
+
+  @doc """
+  Block an actor URI or an instance host for `org_id`, and drop every follower
+  it covers so deliveries stop with the block (#967). Authorized as `opts`'
+  actor (admin) for the block; the follower removal runs as the system, since
+  it is a consequence of the block, not a second decision.
+  """
+  @spec block_and_drop(:actor | :instance, String.t(), String.t() | nil, keyword()) ::
+          {:ok, struct()} | {:error, term()}
+  def block_and_drop(kind, value, reason, opts) when kind in [:actor, :instance] do
+    tenant = Keyword.fetch!(opts, :tenant)
+
+    with {:ok, block} <- block(%{kind: kind, value: value, reason: reason}, opts) do
+      drop_covered_followers(block, KilnCMS.Accounts.org_id(tenant))
+      {:ok, block}
+    end
+  end
+
+  defp drop_covered_followers(%{kind: :actor, value: uri}, org_id) do
+    require Ash.Query
+
+    KilnCMS.Federation.Follower
+    |> Ash.Query.filter(actor_uri == ^uri)
+    |> Ash.bulk_destroy!(:destroy, %{}, authorize?: false, tenant: org_id, strategy: :atomic)
+  end
+
+  defp drop_covered_followers(%{kind: :instance, value: host}, org_id) do
+    # Hosts are compared in Elixir: `actor_uri` is a URL and the host is a
+    # substring of it, and a follower list is bounded by `max_followers/0`.
+    list_followers!(authorize?: false, tenant: org_id)
+    |> Enum.filter(&(actor_host(&1.actor_uri) == host))
+    |> Enum.each(&destroy_follower(&1, authorize?: false, tenant: org_id))
+  end
+
+  @doc "The lowercased host of an actor URI, or `nil` for something that is not a URL."
+  @spec actor_host(String.t()) :: String.t() | nil
+  def actor_host(uri) when is_binary(uri) do
+    case URI.parse(uri) do
+      %URI{host: host} when is_binary(host) and host != "" -> String.downcase(host)
+      _ -> nil
+    end
+  end
 
   @doc """
   React to an editorial event by enqueuing federation deliveries.
