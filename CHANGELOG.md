@@ -62,6 +62,33 @@ migration, a rewritten column, a dropped config key).
   outright. Additive migration, all columns nullable or defaulted; existing
   content reads `:fresh`. See `docs/content-lifecycles.md`.
 
+- **A block's discussion can become accountable work.** The thread panel gains
+  **Create task**, seeded from the thread itself: assignee from the first
+  `@mention` the root comment resolves (the same `Mentions.resolve/2` call that
+  decided who was emailed about it, so the person told is the person offered
+  the work), note from its body, due a week out, and the `nil`-means-site-default
+  publish behaviour intact. **Link existing** re-anchors a task already filed
+  against the whole document; tasks already anchored to another block are not
+  offered, since moving one would silently empty that block's pin.
+
+  `TaskLive` speaks block: each row names the block's **type** and links onto
+  its discussion (`?comment=`, the editor's existing landing param), with an
+  `Anchored to` filter — `All` (default) / `A block` / `The whole document` —
+  that survives a reload. The overview gains two counts: blocks with
+  unresolved discussions, and open tasks anchored to a block.
+
+  A task's assignment email now names the block and deep-links to it. It names
+  the block's **type only**, read through the id-only `block_ids` projection:
+  block fields can sit behind `editable_by` grants and an email has no actor to
+  check them against, so quoting the paragraph would be a way around a policy
+  rather than a nicety. `task.assigned` webhook payloads carry `block_id`.
+
+  **Deleting a block still cascades nothing**, and that is now visible rather
+  than merely true: the editor renders a "Discussions on removed blocks"
+  section beneath the block tree so an orphaned thread can still be read and
+  closed out, `TaskLive` labels the row `removed block` instead of going quiet,
+  and the email says the block has since been removed.
+
 - **Inline block discussions in the content editor** — the surface half. Every
   block's comment control became a **discussion pin** that says, at a glance,
   whether the block needs attention: an unresolved thread (warning-toned), open

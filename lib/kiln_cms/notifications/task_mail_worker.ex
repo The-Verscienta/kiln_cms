@@ -40,18 +40,53 @@ defmodule KilnCMS.Notifications.TaskMailWorker do
 
   defp build_assigned_email(args) do
     title = content_title(args["content_type"], args["content_id"], args["org_id"])
-    url = editor_url(args["content_type"], args["content_id"])
+    block_id = args["block_id"]
+
+    url =
+      editor_url(args["content_type"], args["content_id"], block_id)
 
     body = """
     <p>#{h(actor_display(args["actor_name"]))} assigned you a task on <strong>#{h(title)}</strong>.</p>
+    #{block_line(args["content_type"], args["content_id"], args["org_id"], block_id)}
     #{due_line(args["due_on"])}
     #{note_line(args["note"])}
-    <p><a href="#{url}">Open it in the editor</a>.</p>
+    <p><a href="#{url}">#{if block_id, do: "Open that block in the editor", else: "Open it in the editor"}</a>.</p>
     """
 
     base(args["to"])
     |> subject(plain("Task assigned: #{title}"))
     |> html_body(body)
+  end
+
+  # Which block the task is about, named by **type** and nothing else.
+  #
+  # Read through the `block_ids` calculation, which projects the tree to
+  # `_id`/`_type` and carries no field values at all. That matters here: block
+  # content can sit behind `editable_by` field grants
+  # (`Changes.EnforceBlockFieldPolicy`), and an email is a surface with no
+  # actor to check them against — quoting the paragraph would be a way around
+  # a policy rather than a nicety. The type plus a deep link is enough to know
+  # where you are going, and needs no such judgement.
+  defp block_line(_content_type, _content_id, _org_id, nil), do: ""
+
+  defp block_line(content_type, content_id, org_id, block_id) do
+    case ContentTypes.get_record(content_type, content_id,
+           authorize?: false,
+           tenant: org_id,
+           query: [select: [:id], load: [:block_ids]]
+         ) do
+      {:ok, %{block_ids: blocks}} ->
+        case Enum.find(List.wrap(blocks), &(&1["_id"] == block_id)) do
+          %{"_type" => type} when is_binary(type) -> "<p>On the #{h(type)} block.</p>"
+          # The block has been deleted since. The task is still real — nothing
+          # cascades — so say so rather than drop the line and imply the task
+          # is about the whole document.
+          _gone -> "<p>On a block that has since been removed.</p>"
+        end
+
+      _unreadable ->
+        ""
+    end
   end
 
   defp build_digest_email(args) do
@@ -141,4 +176,15 @@ defmodule KilnCMS.Notifications.TaskMailWorker do
   defp editor_url("page", id), do: url(~p"/editor/pages/#{id}")
   defp editor_url("post", id), do: url(~p"/editor/posts/#{id}")
   defp editor_url(kind, id), do: url(~p"/editor/content/#{kind}/#{id}")
+
+  # `?comment=<block_id>` is the editor's existing landing param (the shared
+  # preview's pins already use it), so a block task's email opens the same
+  # drawer a pin does rather than needing a second deep-link vocabulary.
+  defp editor_url(kind, id, nil), do: editor_url(kind, id)
+
+  defp editor_url("page", id, block_id), do: url(~p"/editor/pages/#{id}?comment=#{block_id}")
+  defp editor_url("post", id, block_id), do: url(~p"/editor/posts/#{id}?comment=#{block_id}")
+
+  defp editor_url(kind, id, block_id),
+    do: url(~p"/editor/content/#{kind}/#{id}?comment=#{block_id}")
 end
