@@ -2405,6 +2405,16 @@ msgstr "Estado del contenido"
 msgid "Content intelligence is at its rate limit right now. Please try again shortly."
 msgstr "La inteligencia de contenido ha alcanzado su límite de velocidad en este momento. Vuelve a intentarlo en breve."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Content intelligence is at its rate limit. Try again in %{seconds}s."
+msgstr "La inteligencia de contenido ha alcanzado su límite de velocidad. Vuelve a intentarlo en %{seconds}s."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Content intelligence isn't available for unattended callers right now."
+msgstr "La inteligencia de contenido no está disponible para llamadas no supervisadas en este momento."
+
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Content item"
