@@ -70,4 +70,44 @@ defmodule KilnCMS.Config.Report do
 
     :ok
   end
+
+  @doc """
+  Run `fun`, taking `default` if it cannot answer (#1288).
+
+  The other half of a solvability warning: these checks need the database, and
+  a check that *breaks* when the database cannot answer is a worse failure than
+  the one it describes. `KilnCMSWeb.Tenant.org_count/0` says so in as many
+  words, and `KilnCMS.Governance.Chain.any_history_anchors?/0` cites it as the
+  model — so this is the one place that decides what "cannot answer" covers,
+  rather than two `rescue` clauses that each decide half of it.
+
+  Both of them used a bare `rescue`, which is exactly half. A `Repo` read is a
+  `:gen_server.call` into the pool: a refused connection or a `:queue_timeout`
+  *raises* `DBConnection.ConnectionError` and was covered, but a call into a
+  pool process that is not alive — crashed, or still restarting under its
+  supervisor after repeated connect failures — **exits**, and `rescue` does not
+  catch exits. "The database is not up yet" and "the pool is restarting" are
+  the same operational moment, and only one of them was handled. Both callers
+  run inside `KilnCMS.Application.start/2`, so the exit took the boot down
+  instead of dropping the advisory.
+
+  Deliberately narrow in two ways. It catches `:exit` and not `:throw` — a
+  throw out of a database read is a programmer error somewhere, and a guard
+  that quietly turned it into `default` would bury it. And it takes a `default`
+  from the caller rather than assuming one: `org_count/0`'s is `:unknown`,
+  which its `gap?/1` then judges, and `false` would be a different (wrong)
+  answer there.
+
+  Not a general-purpose "try this and shrug" — it is for a read whose only
+  consumer is an advisory. Anything a request or a write depends on should
+  fail loudly.
+  """
+  @spec probe(default, (-> result)) :: default | result when default: term(), result: term()
+  def probe(default, fun) when is_function(fun, 0) do
+    fun.()
+  rescue
+    _error -> default
+  catch
+    :exit, _reason -> default
+  end
 end

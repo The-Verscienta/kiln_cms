@@ -333,15 +333,21 @@ defmodule KilnCMSWeb.Tenant do
   organization's create, and one runs during boot — a count that raised in any of
   them would turn an advisory into a worse failure than the one it describes. A
   database that is not up yet is not evidence of a misconfiguration.
+
+  "Cannot be answered" means raised **or exited** (#1288). It was a bare
+  `rescue` here, which covers a refused connection but not a `:gen_server.call`
+  into a pool process that is not alive — so the boot check this exists for
+  could still take the boot down. `KilnCMS.Config.Report.probe/2` owns that
+  distinction for both readers of this shape.
   """
   @spec org_count() :: non_neg_integer() | :unknown
   def org_count do
-    case Ash.count(KilnCMS.Accounts.Organization, authorize?: false) do
-      {:ok, n} -> n
-      _error -> :unknown
-    end
-  rescue
-    _error -> :unknown
+    KilnCMS.Config.Report.probe(:unknown, fn ->
+      case Ash.count(KilnCMS.Accounts.Organization, authorize?: false) do
+        {:ok, n} -> n
+        _error -> :unknown
+      end
+    end)
   end
 
   @doc """
