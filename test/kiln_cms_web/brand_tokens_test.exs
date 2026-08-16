@@ -21,14 +21,9 @@ defmodule KilnCMSWeb.BrandTokensTest do
   setup do
     # The unbranded cases read the DEFAULT org — `/`, `/blog` and the bare
     # `Layouts.public` render all resolve to it — and this module never brands
-    # it, so what it needs is the entry side, not the exit side: another test's
-    # branding, cached under a five-minute TTL and outliving the row that
-    # produced it, is read here as this site's own. `KilnCMS.PushTest` leaves
-    # exactly that behind (`site_name: "Wordmark Co"`, seeded on the default
-    # org and resolved without a bust after), and this asserted "KilnCMS"
-    # against it. Same shape as `KilnCMSWeb.ManifestControllerTest`.
-    KilnCMS.Cache.bust_branding(Accounts.default_org_id())
-
+    # it, so what it needs is the *entry* side. That is no longer this module's
+    # job: `KilnCMS.DataCase.setup_sandbox/1` drops the default org's aggregate
+    # cache entries before every test.
     org = seed_org()
     on_exit(fn -> KilnCMS.Cache.bust_branding(org.id) end)
     %{org: org}
