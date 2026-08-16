@@ -165,6 +165,49 @@ Every query runs as the signed-in editor under their org's tenant, so the
 calendar can only show what that person could already read one record at a
 time.
 
+### Rescheduling from the grid
+
+On the month and week grids, a chip in a reschedulable lane can be dragged to
+another day, or moved with the arrow keys while focused — ←/→ by a day, ↑/↓ by
+a week, matching the grid's own geometry. Both paths do the same thing; the
+outcome is announced in an `aria-live` region, because a chip moving is not
+something a screen reader can otherwise report.
+
+The day moves and the time of day does not: a 09:00 publish dragged to Thursday
+is a 09:00 Thursday publish.
+
+| Lane | Drag moves |
+|---|---|
+| Scheduled publish | `scheduled_at` |
+| Scheduled unpublish / archive / expired | `unpublish_at` |
+| Release go-live | the release's `scheduled_at` |
+| Went live, release shipped | — history; nothing to reschedule |
+| Task due | — the chip carries the task's *content* id; reschedule from the task list |
+| Review due | — see below |
+
+**Review-due chips do not drag, deliberately.** `due_at` is derived from
+`last_reviewed_at` and the cadence, so dragging it could only write one of
+those two: moving `last_reviewed_at` forges an attestation, and changing
+`review_after_days` alters the cadence permanently in order to move a single
+deadline. Neither is what "give me another week" means. Those chips carry a
+**Mark reviewed** button instead — which resets the clock honestly — and it
+appears only when the health is `:due`, `:overdue` or `:expired`, because a
+review falling due next month is not asking for anything.
+
+Two refusals, both returning an inline error and snapping the chip back:
+
+* **Into the past.** Uniform across lanes: a backwards drag is nearly always a
+  slip, and every lane's past date means something abrupt — a publish that
+  fires within the minute, an embargo end that takes a live page down now.
+* **Not in the window.** The move is looked up against the events the editor's
+  calendar actually loaded. That is the authorization boundary as much as an
+  ergonomic one: the window came from a policy-scoped, org-scoped read, so a
+  socket cannot move a record it could not already see.
+
+The write itself is then subject to the record's own policy, so an editor
+scoped by `editable_types` to other types cannot move what they cannot edit,
+and the calendar route is editor-gated, so a viewer never reaches it at all.
+
 ## Reading it
 
 Health is a normal field on the existing reads — there is no lifecycle

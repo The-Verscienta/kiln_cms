@@ -147,6 +147,32 @@ migration, a rewritten column, a dropped config key).
   cells cap their chips with a "+N more" overflow so one busy day cannot resize
   the row, and an empty window renders an empty state rather than a blank grid.
 
+- **The editorial calendar became a control surface: drag-to-reschedule and
+  Mark reviewed.** On the month and week grids a chip can be dragged to another
+  day, or moved with the arrow keys while focused (←/→ a day, ↑/↓ a week, so the
+  keyboard path matches the grid's geometry rather than being a bolted-on
+  alternative). Both paths send the same event with the same payload — the
+  target date — because two shapes into one handler is how a guard ends up
+  silently not matching one of them. The outcome is announced in an `aria-live`
+  region, since a chip moving is not something a screen reader can report. The
+  day moves and the time of day does not.
+
+  Review-due chips deliberately do not drag. `due_at` is derived from
+  `last_reviewed_at` and the cadence, so dragging it could only write one of
+  those: moving the attestation forges it, and changing the cadence alters it
+  permanently to move one deadline. Those chips carry **Mark reviewed**
+  instead — which resets the clock honestly — shown only when the health is
+  actually asking (`:due`, `:overdue`, `:expired`).
+
+  Two refusals return an inline error and snap the chip back: a move into the
+  past (uniform across lanes, because every lane's past date means something
+  abrupt and a backwards drag is nearly always a slip), and a move of anything
+  not in the loaded window. The second is an authorization boundary as much as
+  an ergonomic one — the window came from a policy-scoped, org-scoped read, so
+  a socket cannot move a record it could not already see. The write is then
+  subject to the record's own policy, so an editor scoped by `editable_types`
+  cannot move what they cannot edit.
+
 - **Office documents and zip archives in the document library** (#808).
   Follow-up to #481, which scoped the gated document library to PDF only for
   v1: `KilnCMS.DocumentProcessor` now byte-validates `.docx`/`.xlsx`/`.pptx`

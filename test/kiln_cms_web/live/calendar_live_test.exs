@@ -17,15 +17,24 @@ defmodule KilnCMSWeb.CalendarLiveTest do
 
   @password "password123456"
 
-  defp authed_admin do
+  defp authed_admin, do: authed_user(:admin)
+  defp authed_viewer, do: authed_user(:viewer)
+
+  defp authed_user(role, extra \\ %{}) do
     email = "cal-#{System.unique_integer([:positive])}@example.com"
 
-    Ash.Seed.seed!(User, %{
-      email: email,
-      hashed_password: Bcrypt.hash_pwd_salt(@password),
-      confirmed_at: DateTime.utc_now(),
-      role: :admin
-    })
+    Ash.Seed.seed!(
+      User,
+      Map.merge(
+        %{
+          email: email,
+          hashed_password: Bcrypt.hash_pwd_salt(@password),
+          confirmed_at: DateTime.utc_now(),
+          role: role
+        },
+        extra
+      )
+    )
 
     strategy = AshAuthentication.Info.strategy!(User, :password)
 
@@ -434,6 +443,217 @@ defmodule KilnCMSWeb.CalendarLiveTest do
       assert query_count < 20,
              "20 :calendar_changed messages ran #{query_count} queries — " <>
                "handle_info/2 is re-querying per message instead of coalescing the burst"
+    end
+  end
+
+  describe "reschedule" do
+    defp scheduled_page(admin, at, attrs \\ %{}) do
+      CMS.create_page!(
+        Map.merge(
+          %{
+            title: "Movable #{System.unique_integer([:positive])}",
+            slug: slug(),
+            scheduled_at: at
+          },
+          attrs
+        ),
+        actor: admin
+      )
+    end
+
+    # Anchor everything a fortnight out, so "one day later" is never in the past
+    # and never crosses out of the rendered month.
+    defp soon, do: Date.utc_today() |> Date.add(14)
+
+    test "moves a scheduled publish to the dropped day, keeping its time", %{conn: conn} do
+      admin = authed_admin()
+      at = DateTime.new!(soon(), ~T[09:30:00])
+      page = scheduled_page(admin, at)
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/calendar")
+
+      target = Date.add(soon(), 1)
+
+      render_hook(lv, "reschedule", %{
+        "id" => page.id,
+        "type" => "page",
+        "kind" => "publish",
+        "date" => Date.to_iso8601(target)
+      })
+
+      reloaded = CMS.get_page!(page.id, actor: admin)
+      assert DateTime.to_date(reloaded.scheduled_at) == target
+      # The day moved; the time of day did not. Truncated because the column
+      # is `utc_datetime_usec` and the fixture's literal carries no microseconds.
+      assert reloaded.scheduled_at |> DateTime.to_time() |> Time.truncate(:second) ==
+               ~T[09:30:00]
+    end
+
+    test "moves an embargo end, whatever its expiry action", %{conn: conn} do
+      admin = authed_admin()
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Embargo #{System.unique_integer([:positive])}",
+            slug: slug(),
+            expiry_action: :archive
+          },
+          actor: admin
+        )
+
+      page = CMS.publish_page!(page, %{}, actor: admin)
+
+      page =
+        CMS.update_page!(page, %{unpublish_at: DateTime.new!(soon(), ~T[17:00:00])}, actor: admin)
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/calendar")
+
+      target = Date.add(soon(), 2)
+
+      render_hook(lv, "reschedule", %{
+        "id" => page.id,
+        "type" => "page",
+        "kind" => "archive",
+        "date" => Date.to_iso8601(target)
+      })
+
+      assert DateTime.to_date(CMS.get_page!(page.id, actor: admin).unpublish_at) == target
+    end
+
+    test "refuses a move into the past and leaves the record alone", %{conn: conn} do
+      admin = authed_admin()
+      at = DateTime.new!(soon(), ~T[09:00:00])
+      page = scheduled_page(admin, at)
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/calendar")
+
+      html =
+        render_hook(lv, "reschedule", %{
+          "id" => page.id,
+          "type" => "page",
+          "kind" => "publish",
+          "date" => Date.to_iso8601(Date.add(Date.utc_today(), -1))
+        })
+
+      assert html =~ "Can&#39;t reschedule into the past" or
+               html =~ "Can't reschedule into the past"
+
+      assert DateTime.compare(CMS.get_page!(page.id, actor: admin).scheduled_at, at) == :eq
+    end
+
+    test "refuses an event that is not in the rendered window", %{conn: conn} do
+      admin = authed_admin()
+      # Scheduled far outside the default month, so the calendar never loaded it.
+      far = DateTime.new!(Date.shift(Date.utc_today(), year: 2), ~T[09:00:00])
+      page = scheduled_page(admin, far)
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/calendar")
+
+      html =
+        render_hook(lv, "reschedule", %{
+          "id" => page.id,
+          "type" => "page",
+          "kind" => "publish",
+          "date" => Date.to_iso8601(soon())
+        })
+
+      assert html =~ "no longer on the calendar"
+      # The window lookup is the authorization boundary, so nothing moved.
+      assert DateTime.compare(CMS.get_page!(page.id, actor: admin).scheduled_at, far) == :eq
+    end
+
+    test "a viewer never reaches the calendar at all", %{conn: conn} do
+      # The route lives in the `:editor_routes` live session, so the boundary
+      # for a viewer is the mount, not the event handler — there is no forged
+      # payload to test, because there is no socket to send one on.
+      assert {:error, {:redirect, _}} =
+               conn |> log_in(authed_viewer()) |> live(~p"/editor/calendar")
+    end
+
+    test "an editor scoped to other types cannot move what they cannot edit", %{conn: conn} do
+      admin = authed_admin()
+      at = DateTime.new!(soon(), ~T[09:00:00])
+      page = scheduled_page(admin, at)
+
+      # Granular RBAC (#332): this editor may author posts, not pages. The page
+      # is still *readable*, so it is on their calendar and the window lookup
+      # succeeds — the refusal has to come from the write's own policy.
+      scoped =
+        authed_user(:editor, %{editable_types: ["post"]})
+
+      {:ok, lv, _html} = conn |> log_in(scoped) |> live(~p"/editor/calendar")
+
+      render_hook(lv, "reschedule", %{
+        "id" => page.id,
+        "type" => "page",
+        "kind" => "publish",
+        "date" => Date.to_iso8601(Date.add(soon(), 1))
+      })
+
+      assert DateTime.compare(CMS.get_page!(page.id, actor: admin).scheduled_at, at) == :eq
+    end
+
+    test "announces the move for a screen reader", %{conn: conn} do
+      admin = authed_admin()
+      page = scheduled_page(admin, DateTime.new!(soon(), ~T[09:00:00]))
+
+      {:ok, lv, html} = conn |> log_in(admin) |> live(~p"/editor/calendar")
+      # The live region exists before anything happens — one inserted later is
+      # not reliably announced.
+      assert html =~ ~s(aria-live="polite")
+
+      moved =
+        render_hook(lv, "reschedule", %{
+          "id" => page.id,
+          "type" => "page",
+          "kind" => "publish",
+          "date" => Date.to_iso8601(Date.add(soon(), 1))
+        })
+
+      assert moved =~ "Moved"
+    end
+  end
+
+  describe "mark reviewed from the calendar" do
+    test "an overdue chip attests, and the chip stops asking", %{conn: conn} do
+      admin = authed_admin()
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Stale #{System.unique_integer([:positive])}",
+            slug: slug(),
+            review_after_days: 5
+          },
+          actor: admin
+        )
+
+      page = CMS.publish_page!(page, %{}, actor: admin)
+
+      page
+      |> Ash.Changeset.for_update(:backdate_published_at, %{
+        published_at: DateTime.add(DateTime.utc_now(), -20 * 86_400, :second)
+      })
+      |> Ash.update!(authorize?: false)
+
+      # due_at is 15 days back, so anchor the list window there.
+      at = Date.add(Date.utc_today(), -15)
+
+      {:ok, lv, html} =
+        conn |> log_in(admin) |> live(~p"/editor/calendar?view=list&at=#{Date.to_iso8601(at)}")
+
+      assert html =~ "Mark reviewed"
+
+      after_click =
+        lv
+        |> element("button[phx-value-id='#{page.id}'][phx-click='mark_reviewed']")
+        |> render_click()
+
+      assert CMS.get_page!(page.id, actor: admin).last_reviewed_at
+      # The clock reset, so the review-due chip has moved out of this window
+      # entirely — and with it the button.
+      refute after_click =~ "Mark reviewed"
     end
   end
 end
