@@ -132,7 +132,12 @@ defmodule KilnCMS.Search.TagEmbedding do
     end
 
     # The name the vector was computed for — the freshness check (moduledoc).
-    attribute :name, :string, allow_nil?: false, public?: true
+    # Same ceiling as `Tag.name` itself (`KilnCMS.CMS.Taxonomy`): this column
+    # only ever holds a copy of an already-bounded tag name, never independent
+    # user input.
+    attribute :name, :string, allow_nil?: false, public?: true do
+      constraints max_length: KilnCMS.Limits.line()
+    end
     attribute :embedding, KilnCMS.Search.Vector, public?: true
     attribute :embedded_at, :utc_datetime_usec, public?: true
   end
