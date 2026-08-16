@@ -43,6 +43,30 @@ defmodule KilnCMS.CMS.TaskTest do
     drain()
   end
 
+  test "an automation-assigned task has no creator but does have a rule id (#946)" do
+    assignee = user(:editor)
+    rule_id = Ecto.UUID.generate()
+
+    {:ok, task} =
+      CMS.assign_task(
+        %{
+          content_type: "page",
+          content_id: Ecto.UUID.generate(),
+          assignee_id: assignee.id,
+          due_on: Date.add(Date.utc_today(), 3),
+          note: "Suggested by automation",
+          created_by_rule_id: rule_id
+        },
+        actor: nil,
+        authorize?: false
+      )
+
+    assert is_nil(task.creator_id)
+    assert task.created_by_rule_id == rule_id
+    assert task.assignee_id == assignee.id
+    drain()
+  end
+
   test "a task cannot be assigned to a viewer, or reassigned to one (#501 security review)" do
     editor = user(:editor)
     viewer = user(:viewer)

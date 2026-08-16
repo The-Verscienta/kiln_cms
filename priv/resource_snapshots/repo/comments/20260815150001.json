@@ -31,7 +31,7 @@
           "global": null,
           "strategy": null
         },
-        "name": "tasks_org_id_fkey",
+        "name": "comments_org_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -88,56 +88,51 @@
       "references": null,
       "scale": null,
       "size": null,
-      "source": "due_on",
-      "type": "date"
-    },
-    {
-      "allow_nil?": true,
-      "default": "nil",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": null,
-      "scale": null,
-      "size": null,
-      "source": "note",
-      "type": "text"
-    },
-    {
-      "allow_nil?": true,
-      "default": "nil",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": null,
-      "scale": null,
-      "size": null,
-      "source": "auto_complete_on_publish",
-      "type": "boolean"
+      "source": "thread_id",
+      "type": "uuid"
     },
     {
       "allow_nil?": false,
-      "default": "\"open\"",
+      "default": "nil",
       "generated?": false,
       "precision": null,
       "primary_key?": false,
       "references": null,
       "scale": null,
       "size": null,
-      "source": "status",
+      "source": "body",
       "type": "text"
     },
     {
-      "allow_nil?": false,
-      "default": "\"manual\"",
+      "allow_nil?": true,
+      "default": "nil",
       "generated?": false,
       "precision": null,
       "primary_key?": false,
-      "references": null,
+      "references": {
+        "deferrable": false,
+        "destination_attribute": "id",
+        "destination_attribute_default": null,
+        "destination_attribute_generated": null,
+        "index?": false,
+        "match_type": null,
+        "match_with": null,
+        "multitenancy": {
+          "attribute": null,
+          "global": null,
+          "strategy": null
+        },
+        "name": "comments_author_id_fkey",
+        "on_delete": null,
+        "on_update": null,
+        "primary_key?": true,
+        "schema": "public",
+        "table": "users"
+      },
       "scale": null,
       "size": null,
-      "source": "kind",
-      "type": "text"
+      "source": "author_id",
+      "type": "uuid"
     },
     {
       "allow_nil?": true,
@@ -148,7 +143,19 @@
       "references": null,
       "scale": null,
       "size": null,
-      "source": "completed_at",
+      "source": "created_by_rule_id",
+      "type": "uuid"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "resolved_at",
       "type": "utc_datetime_usec"
     },
     {
@@ -170,7 +177,7 @@
           "global": null,
           "strategy": null
         },
-        "name": "tasks_completed_by_id_fkey",
+        "name": "comments_resolved_by_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -179,62 +186,7 @@
       },
       "scale": null,
       "size": null,
-      "source": "completed_by_id",
-      "type": "uuid"
-    },
-    {
-      "allow_nil?": true,
-      "default": "nil",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": null,
-      "scale": null,
-      "size": null,
-      "source": "overdue_notified_on",
-      "type": "date"
-    },
-    {
-      "allow_nil?": true,
-      "default": "nil",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": {
-        "deferrable": false,
-        "destination_attribute": "id",
-        "destination_attribute_default": null,
-        "destination_attribute_generated": null,
-        "index?": false,
-        "match_type": null,
-        "match_with": null,
-        "multitenancy": {
-          "attribute": null,
-          "global": null,
-          "strategy": null
-        },
-        "name": "tasks_creator_id_fkey",
-        "on_delete": null,
-        "on_update": null,
-        "primary_key?": true,
-        "schema": "public",
-        "table": "users"
-      },
-      "scale": null,
-      "size": null,
-      "source": "creator_id",
-      "type": "uuid"
-    },
-    {
-      "allow_nil?": true,
-      "default": "nil",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": null,
-      "scale": null,
-      "size": null,
-      "source": "created_by_rule_id",
+      "source": "resolved_by_id",
       "type": "uuid"
     },
     {
@@ -260,37 +212,6 @@
       "size": null,
       "source": "updated_at",
       "type": "utc_datetime_usec"
-    },
-    {
-      "allow_nil?": false,
-      "default": "nil",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": {
-        "deferrable": false,
-        "destination_attribute": "id",
-        "destination_attribute_default": null,
-        "destination_attribute_generated": null,
-        "index?": false,
-        "match_type": null,
-        "match_with": null,
-        "multitenancy": {
-          "attribute": null,
-          "global": null,
-          "strategy": null
-        },
-        "name": "tasks_assignee_id_fkey",
-        "on_delete": null,
-        "on_update": null,
-        "primary_key?": true,
-        "schema": "public",
-        "table": "users"
-      },
-      "scale": null,
-      "size": null,
-      "source": "assignee_id",
-      "type": "uuid"
     }
   ],
   "base_filter": null,
@@ -326,39 +247,7 @@
       ],
       "include": null,
       "message": null,
-      "name": "tasks_content_lookup_index",
-      "nulls_distinct": true,
-      "prefix": null,
-      "table": null,
-      "unique": false,
-      "using": null,
-      "where": null
-    },
-    {
-      "all_tenants?": false,
-      "concurrently": false,
-      "error_fields": [
-        "org_id",
-        "assignee_id",
-        "status"
-      ],
-      "fields": [
-        {
-          "type": "atom",
-          "value": "org_id"
-        },
-        {
-          "type": "atom",
-          "value": "assignee_id"
-        },
-        {
-          "type": "atom",
-          "value": "status"
-        }
-      ],
-      "include": null,
-      "message": null,
-      "name": "tasks_assignee_lookup_index",
+      "name": "comments_block_lookup_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -369,7 +258,7 @@
   ],
   "custom_statements": [],
   "has_create_action": true,
-  "hash": "D1BAD82F3F4FC9076645258AF40A2043B66D8E5DA07E1B8740D466C2BDDE4B16",
+  "hash": "CD3570994D00C974104B1B985B7C6664FCB98FB994E6F4140631449F486BE06A",
   "identities": [],
   "multitenancy": {
     "attribute": "org_id",
@@ -378,5 +267,5 @@
   },
   "repo": "Elixir.KilnCMS.Repo",
   "schema": null,
-  "table": "tasks"
+  "table": "comments"
 }

@@ -105,6 +105,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
                           2_000
                         )
 
+  # Coalescing delay for `{:preview_comments_changed, _}` (#1252 review): one
+  # trigger event can fan out several `deliver_as: "comment"` automation
+  # rules onto the same document in one Oban batch (see
+  # `RouteToBlockThread`'s moduledoc), each broadcasting separately — without
+  # this, an editor with the document open got one full comment-list reload
+  # per broadcast instead of one for what's effectively a single visible
+  # update. Short relative to `@autosave_debounce_ms`: this coalesces a burst
+  # arriving over milliseconds, not idle-typing.
+  @comments_reload_debounce_ms 300
+
   # Stable per-collaborator colors for live focus cursors. Static class strings
   # so Tailwind keeps them.
   @cursor_colors ~w(
@@ -135,10 +145,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
           # while no pop-out is watching.
           Phoenix.PubSub.subscribe(KilnCMS.PubSub, Presence.preview_topic(kind, id))
           # Block discussions: threads and block tasks changing anywhere —
-          # another editor's window, the API, `AutoCompleteTasks` on publish —
-          # arrive as `{:block_thread_changed, _}` / `{:block_task_changed, _}`
-          # on the collab topic, which also carries this document's typing
-          # indicators. Reusing it costs no new subscription.
+          # another editor's window, the API, `AutoCompleteTasks` on publish,
+          # or an editorial-intelligence rule delivering a document-level
+          # comment in the background (#946) — arrive as
+          # `{:block_thread_changed, _}` / `{:block_task_changed, _}` on the
+          # collab topic, which also carries this document's typing
+          # indicators. `BroadcastComment` fires that topic unconditionally
+          # (block-scoped or the `nil` block_id a document-level comment
+          # carries), and the handler below reloads the whole comment list
+          # regardless of which block_id it names — so the Document notes
+          # panel (which reads `@comments` too) picks up an automation
+          # comment through this one subscription, no second one needed.
           Collab.subscribe(kind, record.id)
         end
 
@@ -170,6 +187,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # Debounced draft autosave: pending timer ref + status indicator state.
          |> assign(:autosave_timer, nil)
          |> assign(:save_state, :saved)
+         # Debounced comments reload (#1252 review) — see @comments_reload_debounce_ms.
+         |> assign(:comments_reload_timer, nil)
          # Set when an optimistic-lock conflict blocks saving until reload.
          |> assign(:conflict, false)
          # Bumped on server-driven form replacement (conflict reload, version
@@ -486,15 +505,31 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, socket}
   end
 
-  # A block's thread or its tasks changed — here, in another editor's window,
-  # through the API, or via `AutoCompleteTasks` on publish. The message names
-  # the block but carries no rows: each session re-reads with its OWN actor and
-  # tenant, so a peer who may no longer read this content simply keeps what it
-  # has. Reloading the whole document's list rather than the one block is
+  # A block's thread changed — here, in another editor's window, through the
+  # API, or an editorial-intelligence rule delivering a document-level
+  # comment in the background (#946). The message names the block but
+  # carries no rows: each session re-reads with its OWN actor and tenant, so
+  # a peer who may no longer read this content simply keeps what it has.
+  # Reloading the whole document's list rather than the one block is
   # deliberate — it's one query either way, and the alternative is merging a
   # partial result into an assign that another message may already have moved.
-  def handle_info({:block_thread_changed, _block_id}, socket),
-    do: {:noreply, reload_comments(socket)}
+  #
+  # Debounced (#1252 review): a single trigger event can fan out several
+  # editorial-intelligence reactions into the same Oban batch, each landing a
+  # `deliver_as: "comment"` finding — several broadcasts back-to-back for one
+  # visible update — so this cancels any pending reload and schedules a fresh
+  # one instead of reloading on every single message.
+  def handle_info({:block_thread_changed, _block_id}, socket) do
+    if ref = socket.assigns.comments_reload_timer, do: Process.cancel_timer(ref)
+
+    timer = Process.send_after(self(), :reload_comments, @comments_reload_debounce_ms)
+    {:noreply, assign(socket, :comments_reload_timer, timer)}
+  end
+
+  # The debounced reload `{:block_thread_changed, _}` above schedules.
+  def handle_info(:reload_comments, socket) do
+    {:noreply, socket |> assign(:comments_reload_timer, nil) |> reload_comments()}
+  end
 
   def handle_info({:block_task_changed, _block_id}, socket),
     do: {:noreply, reload_tasks(socket)}
@@ -571,6 +606,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Debounced draft autosave fired by the timer scheduled in `validate`.
   def handle_info(:autosave, socket), do: {:noreply, perform_autosave(socket)}
+
+  # This session's own `broadcast_preview/1` echoing back (or another
+  # editor's) — `PreviewLive` is the intended audience, not us.
+  def handle_info({:preview_update, _payload}, socket), do: {:noreply, socket}
+
+  # `PreviewLive`'s own "switch locale variant" broadcast (#1252 review), sent
+  # on the same topic this LiveView subscribes to above so it can pick up
+  # comments written elsewhere (#946) — that pop-out's audience, not this
+  # LiveView's. Left unhandled before this, a variant switch in the preview
+  # pane crashed every open editor subscribed to the same content with a
+  # `FunctionClauseError`; ignored here the same way `{:preview_update, _}`
+  # already is.
+  def handle_info({:preview_switch, _id}, socket), do: {:noreply, socket}
 
   # Drafting results. Note the double wrap: `start_async` wraps the function's
   # own return, so a successful generation arrives as `{:ok, {_version, {:ok, _}}}`.
@@ -6558,6 +6606,81 @@ defmodule KilnCMSWeb.ContentEditorLive do
     """
   end
 
+  attr :comments, :list, required: true
+
+  # Document-level comment threads (#946): findings from an editorial-
+  # intelligence reaction with no single block to anchor to
+  # (`flag_duplicates`, `suggest_metadata`) land here — `block_id: nil`,
+  # grouped by `RouteToBlockThread` the same way a block's comments are.
+  # Read-only from a human's side today: automation is the only writer of a
+  # `block_id: nil` comment, so there is no compose form, only
+  # resolve/unresolve on each thread's root (shared with
+  # `KilnCMSWeb.BlockDiscussionComponents.block_discussion/1`'s
+  # `comment_resolve`/`comment_unresolve` events, which key on comment id and
+  # so work here unchanged).
+  defp document_comment_panel(assigns) do
+    thread = document_thread(assigns.comments)
+    assigns = assign(assigns, :thread, thread)
+
+    ~H"""
+    <div class="space-y-2">
+      <p :if={@thread == []} class="text-xs text-base-content/60">
+        {gettext("No document-level comments.")}
+      </p>
+
+      <div :for={comment <- @thread} class="rounded border border-base-content/15 p-2 text-xs">
+        <.comment_row comment={comment} />
+      </div>
+    </div>
+    """
+  end
+
+  attr :comment, :map, required: true
+
+  # `document_comment_panel/1`'s document thread — the same per-comment markup
+  # `KilnCMSWeb.BlockDiscussionComponents.block_discussion/1` renders for a
+  # block's own thread, kept in its own function so a future second caller
+  # here does not have to copy-paste it (#1252 review).
+  defp comment_row(assigns) do
+    ~H"""
+    <div class="flex items-center justify-between gap-2 text-base-content/60">
+      <span>{comment_author_label(@comment)}</span>
+      <time datetime={DateTime.to_iso8601(@comment.inserted_at)}>
+        {Calendar.strftime(@comment.inserted_at, "%b %-d, %H:%M")}
+      </time>
+    </div>
+    <%!-- Rendered as a text node, never raw markup: a comment is
+          editor-typed prose, not HTML. --%>
+    <p class="mt-1 break-words">{@comment.body}</p>
+    <button
+      :if={is_nil(@comment.thread_id)}
+      type="button"
+      phx-click={if @comment.resolved_at, do: "comment_unresolve", else: "comment_resolve"}
+      phx-value-id={@comment.id}
+      class="mt-1 text-base-content/60 underline hover:text-base-content"
+    >
+      {if @comment.resolved_at, do: gettext("Reopen thread"), else: gettext("Resolve thread")}
+    </button>
+    """
+  end
+
+  defp document_thread(comments), do: Enum.filter(comments, &is_nil(&1.block_id))
+
+  defp comment_author_label(%{author: %{name: name}}) when is_binary(name) and name != "",
+    do: name
+
+  defp comment_author_label(%{author: %{email: email}}) when not is_nil(email),
+    do: to_string(email)
+
+  # No actor at all — an editorial-intelligence automation reaction posted
+  # this one (#946; `author_id` is nullable for exactly this case). Named
+  # generically rather than by rule, so a since-deleted/renamed rule doesn't
+  # leave the label stale or broken.
+  defp comment_author_label(%{created_by_rule_id: id}) when not is_nil(id),
+    do: gettext("Automation")
+
+  defp comment_author_label(_comment), do: gettext("Someone")
+
   attr :form, :any, required: true
   attr :media, :list, required: true
   attr :current_org, :any, required: true
@@ -9032,6 +9155,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   assignable_users={@assignable_users}
                   auto_complete_default={@auto_complete_default}
                 />
+              </.inspector_section>
+
+              <.inspector_section title={gettext("Document notes")}>
+                <.document_comment_panel comments={@comments} />
               </.inspector_section>
 
               <.inspector_section title={gettext("Release")}>

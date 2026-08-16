@@ -529,6 +529,12 @@ defmodule KilnCMS.CMS.VersionDiff do
   defp portable_text(body) when is_list(body), do: PortableText.to_plain_text(body)
   defp portable_text(_body), do: ""
 
+  # `KilnCMS.Automation.RuleWorker` has its own private HTML→text converter
+  # too (`html_to_text/1`, Floki-based — decodes entities and preserves
+  # block/list boundaries as newlines) — see the cross-reference there
+  # (#1252 review) for why the two aren't merged: this one collapses
+  # everything to one line on purpose, since diffing plain text wants a
+  # comparable flat string, not the finder-body prose the other is for.
   defp strip_html(html) when is_binary(html) do
     html
     |> String.replace(~r/<[^>]*>/, " ")

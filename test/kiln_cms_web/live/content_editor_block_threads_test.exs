@@ -243,6 +243,14 @@ defmodule KilnCMSWeb.ContentEditorBlockThreadsTest do
       # rather than trusting a payload.
       send(ctx.lv.pid, {:block_thread_changed, block_id(ctx.page)})
 
+      # `{:block_thread_changed, _}` only *schedules* the reload now (#1252 —
+      # debounced so a burst of automation-delivered comments coalesces into
+      # one reload rather than one per message). Firing the debounce timer
+      # message directly, the same way the draft-autosave tests fire
+      # `:autosave` (`editor_live_test.exs`), is the deterministic stand-in
+      # for waiting out `@comments_reload_debounce_ms` in real time.
+      send(ctx.lv.pid, :reload_comments)
+
       assert pin_state(render(ctx.lv), block_id(ctx.page)) == "unresolved"
     end
 

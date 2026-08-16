@@ -89,6 +89,7 @@ defmodule KilnCMS.CMS.Task do
         :due_on,
         :note,
         :auto_complete_on_publish,
+        :created_by_rule_id,
         :kind
       ]
 
@@ -374,11 +375,23 @@ defmodule KilnCMS.CMS.Task do
 
     # The user who created the task — stamped from the acting user, not
     # accepted from input.
+    #
+    # `allow_nil? true` (#946): an editorial-intelligence reaction assigns a
+    # task with no actor at all (see `KilnCMS.Automation.RuleWorker`), so
+    # there is no user to stamp — the stamping `change` in `:assign` simply
+    # leaves this unset in that case. `created_by_rule_id` carries the honest
+    # provenance instead of inventing a system user (see that attribute).
     attribute :creator_id, :uuid do
-      allow_nil? false
+      allow_nil? true
       writable? false
       public? true
     end
+
+    # Which automation rule assigned this task, when nothing did (#946) — set
+    # only when `creator_id` is nil. A bare uuid, not FK-checked, matching the
+    # `automation_rule_id` precedent on `KilnCMS.Social.Post` /
+    # `KilnCMS.Newsletter.NewsletterSend`.
+    attribute :created_by_rule_id, :uuid, public?: true
 
     timestamps()
   end

@@ -115,7 +115,17 @@ defmodule KilnCMS.Notifications do
   # A mention only fires on a NEW comment: resolving a thread re-reads a body
   # that was already delivered, and re-notifying everyone it names would turn
   # "resolved" into a second round of pings.
-  defp mentioned_users(%{body: body} = comment, record) do
+  #
+  # `author_id: nil` (#946) means nobody deliberately typed this body — it's
+  # an editorial-intelligence finding built from record/duplicate titles and
+  # suggestion text (`KilnCMS.Automation.RuleWorker`), none of it sanitized
+  # against accidentally containing an `@handle`-shaped substring. Resolving
+  # mentions against it anyway would let an unpublished document's own title
+  # decide who gets emailed an excerpt of it — a real person never chose to
+  # mention anyone, so nobody is (#1252 review). `thread_audience/2` still
+  # notifies the thread's normal participants either way.
+  defp mentioned_users(%{body: body, author_id: author_id} = comment, record)
+       when not is_nil(author_id) do
     if new_comment?(comment) do
       KilnCMS.CMS.Mentions.resolve(body, org_users(record))
     else
@@ -132,15 +142,15 @@ defmodule KilnCMS.Notifications do
   # the system: a participant's own read policy is about what they may open in
   # the editor, not about whether they are part of a conversation they already
   # joined.
+  #
+  # `comment.block_id` can be nil (#946): an editorial-intelligence reaction's
+  # document-level finding has no single block to be "on", so its thread's
+  # other participants are read via `Comment.thread_comments!/4`'s
+  # `:for_document` branch instead — `:for_block`'s `block_id` argument is
+  # `allow_nil? false` and would raise given nil.
   defp thread_audience(comment, record) do
     participants =
-      KilnCMS.CMS.list_comments_for_block!(
-        comment.content_type,
-        comment.content_id,
-        comment.block_id,
-        authorize?: false,
-        tenant: comment.org_id
-      )
+      thread_participants(comment)
       |> Enum.map(& &1.author_id)
 
     author = record |> Ash.load!(:author, authorize?: false) |> Map.get(:author)
@@ -151,6 +161,16 @@ defmodule KilnCMS.Notifications do
     |> Enum.map(&user_by_id/1)
     |> Enum.reject(&is_nil/1)
     |> Enum.filter(&wants?(&1, :comment))
+  end
+
+  defp thread_participants(comment) do
+    KilnCMS.CMS.Comment.thread_comments!(
+      comment.content_type,
+      comment.content_id,
+      comment.block_id,
+      authorize?: false,
+      tenant: comment.org_id
+    )
   end
 
   defp author_id(%{id: id}), do: id

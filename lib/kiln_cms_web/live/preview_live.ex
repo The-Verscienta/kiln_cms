@@ -348,7 +348,7 @@ defmodule KilnCMSWeb.PreviewLive do
     kind
     |> to_string()
     |> CMS.list_comments_for!(record_id, actor: actor, tenant: org)
-    |> Enum.filter(&(is_nil(&1.thread_id) and is_nil(&1.resolved_at)))
+    |> Enum.filter(&(is_nil(&1.thread_id) and is_nil(&1.resolved_at) and not is_nil(&1.block_id)))
     |> Enum.reduce(%{}, fn comment, acc ->
       Map.update(acc, comment.block_id, 1, &(&1 + 1))
     end)
@@ -358,13 +358,22 @@ defmodule KilnCMSWeb.PreviewLive do
   end
 
   # A thread's pin shows the whole conversation's size, not just its root.
+  #
+  # `not is_nil(&1.block_id)` (#1252 review): a document-level automation
+  # thread (#946) has no block to pin a marker on, and this map is keyed and
+  # read by real block ids only (`@comment_counts[block[:id]]` above) — an
+  # unfiltered nil `block_id` would silently fold that thread's activity into
+  # a `nil` map key nothing here reads, rather than surfacing it or being
+  # excluded on purpose.
   defp reply_counts(roots, kind, record_id, actor, org) do
     open_blocks = Map.keys(roots)
 
     kind
     |> to_string()
     |> CMS.list_comments_for!(record_id, actor: actor, tenant: org)
-    |> Enum.filter(&(not is_nil(&1.thread_id) and &1.block_id in open_blocks))
+    |> Enum.filter(
+      &(not is_nil(&1.thread_id) and not is_nil(&1.block_id) and &1.block_id in open_blocks)
+    )
     |> Enum.reduce(roots, fn reply, acc ->
       Map.update(acc, reply.block_id, 1, &(&1 + 1))
     end)

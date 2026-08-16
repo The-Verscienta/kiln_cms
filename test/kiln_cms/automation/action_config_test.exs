@@ -234,6 +234,124 @@ defmodule KilnCMS.Automation.ActionConfigTest do
     end
   end
 
+  describe "deliver_as (#946)" do
+    test "an absent deliver_as still needs `to`, exactly as before" do
+      result = create(%{trigger_event: :in_review, action: :flag_duplicates, config: %{}})
+
+      assert {:error, _} = result
+      assert messages(result) =~ "missing `to`"
+    end
+
+    test "deliver_as: email needs `to`, same as no deliver_as at all" do
+      assert {:ok, _} =
+               create(%{
+                 trigger_event: :in_review,
+                 action: :flag_duplicates,
+                 config: %{"deliver_as" => "email", "to" => "eds@example.com"}
+               })
+
+      result =
+        create(%{
+          trigger_event: :in_review,
+          action: :flag_duplicates,
+          config: %{"deliver_as" => "email"}
+        })
+
+      assert {:error, _} = result
+      assert messages(result) =~ "missing `to`"
+    end
+
+    test "deliver_as: comment needs nothing further" do
+      for action <- [:flag_duplicates, :suggest_tags, :suggest_links, :suggest_metadata] do
+        assert {:ok, _} =
+                 create(%{
+                   trigger_event: :in_review,
+                   action: action,
+                   config: %{"deliver_as" => "comment"}
+                 })
+      end
+    end
+
+    test "deliver_as: task needs an assignee, and due_in_days is optional" do
+      result =
+        create(%{
+          trigger_event: :in_review,
+          action: :suggest_tags,
+          config: %{"deliver_as" => "task"}
+        })
+
+      assert {:error, _} = result
+      assert messages(result) =~ "missing `assignee`"
+
+      assert {:ok, _} =
+               create(%{
+                 trigger_event: :in_review,
+                 action: :suggest_tags,
+                 config: %{"deliver_as" => "task", "assignee" => Ash.UUID.generate()}
+               })
+
+      assert {:ok, _} =
+               create(%{
+                 trigger_event: :in_review,
+                 action: :suggest_tags,
+                 config: %{
+                   "deliver_as" => "task",
+                   "assignee" => Ash.UUID.generate(),
+                   "due_in_days" => 5
+                 }
+               })
+    end
+
+    test "assignee must be a uuid" do
+      result =
+        create(%{
+          trigger_event: :in_review,
+          action: :suggest_tags,
+          config: %{"deliver_as" => "task", "assignee" => "not-a-uuid"}
+        })
+
+      assert {:error, _} = result
+      assert messages(result) =~ "must be a uuid"
+    end
+
+    test "due_in_days must be a positive whole number" do
+      result =
+        create(%{
+          trigger_event: :in_review,
+          action: :suggest_tags,
+          config: %{
+            "deliver_as" => "task",
+            "assignee" => Ash.UUID.generate(),
+            "due_in_days" => -1
+          }
+        })
+
+      assert {:error, _} = result
+      assert messages(result) =~ "must be a positive whole number"
+    end
+
+    test "an unrecognized deliver_as value is refused" do
+      result =
+        create(%{
+          trigger_event: :in_review,
+          action: :suggest_tags,
+          config: %{"deliver_as" => "carrier_pigeon", "to" => "eds@example.com"}
+        })
+
+      assert {:error, _} = result
+      assert messages(result) =~ "must be one of email, comment, task"
+    end
+
+    test "suggest_metadata still accepts allow_egress alongside deliver_as" do
+      assert {:ok, _} =
+               create(%{
+                 trigger_event: :in_review,
+                 action: :suggest_metadata,
+                 config: %{"deliver_as" => "comment", "allow_egress" => true}
+               })
+    end
+  end
+
   describe "shapes that are not just required keys" do
     test "an optional key of the wrong type is refused" do
       result =

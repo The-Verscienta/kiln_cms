@@ -1640,6 +1640,7 @@ msgstr "Remplit automatiquement l'URL canonique à plusieurs segments de chaque 
 
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/automation_live.ex
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Automation"
 msgstr "Automatisation"
@@ -3662,6 +3663,11 @@ msgstr "Document"
 #, elixir-autogen, elixir-format
 msgid "Document fields"
 msgstr "Champs du document"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Document notes"
+msgstr "Notes du document"
 
 #: lib/kiln_cms_web/live/release_preview_live.ex
 #, elixir-autogen, elixir-format
@@ -6102,6 +6108,11 @@ msgstr "Aucune description — les moteurs de recherche rédigeront la leur."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
+msgid "No document-level comments."
+msgstr "Aucun commentaire au niveau du document."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
 msgid "No documents match “%{query}”."
 msgstr "Aucun document ne correspond à « %{query} »."
 
@@ -7881,6 +7892,7 @@ msgid "Reopen for editing"
 msgstr "Rouvrir pour modification"
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Reopen thread"
 msgstr "Rouvrir le fil"
@@ -7968,6 +7980,7 @@ msgid "Reset your password"
 msgstr "Réinitialiser votre mot de passe"
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Resolve thread"
 msgstr "Résoudre le fil"
@@ -8990,6 +9003,7 @@ msgid "Some tiers grant an audience that is no longer configured. Restore it in 
 msgstr "Certains niveaux accordent une audience qui n'est plus configurée. Rétablissez-la dans config :kiln_cms, :audiences, ou retirez ces niveaux."
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Someone"
 msgstr "Quelqu'un"
@@ -11303,6 +11317,11 @@ msgstr "est archivé"
 msgid "arrow keys move it"
 msgstr "les touches fléchées le déplacent"
 
+#: lib/kiln_cms_web/live/automation_live.ex
+#, elixir-autogen, elixir-format
+msgid "assignee (required when deliver_as is \"task\")"
+msgstr "assignee (obligatoire lorsque deliver_as vaut « task »)"
+
 #: lib/kiln_cms_web/live/link_report_live.ex
 #, elixir-autogen, elixir-format
 msgid "block %{index}"
@@ -11487,8 +11506,8 @@ msgstr "le fichier est trop volumineux pour son type"
 
 #: lib/kiln_cms_web/live/automation_live.ex
 #, elixir-autogen, elixir-format
-msgid "flag_duplicates, suggest_tags, suggest_links, suggest_metadata: to. They email their findings and never write to the record. suggest_metadata additionally needs allow_egress: true when the configured model provider is off-site."
-msgstr "flag_duplicates, suggest_tags, suggest_links, suggest_metadata : to. Ces réactions envoient leurs résultats par e-mail et n'écrivent jamais dans l'enregistrement. suggest_metadata nécessite en plus allow_egress: true lorsque le fournisseur de modèle configuré est hors site."
+msgid "flag_duplicates, suggest_tags, suggest_links, suggest_metadata: deliver_as picks where a finding lands — email (default, needs to), comment, or task (needs assignee). suggest_metadata additionally needs allow_egress: true when the configured model provider is off-site."
+msgstr "flag_duplicates, suggest_tags, suggest_links, suggest_metadata : deliver_as détermine où atterrit un résultat — email (par défaut, nécessite to), comment, ou task (nécessite assignee). suggest_metadata nécessite en plus allow_egress: true lorsque le fournisseur de modèle configuré est hors site."
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -11951,6 +11970,11 @@ msgstr "l'artefact rendu : corps de blocs complet, précompilé et pouvant être
 #, elixir-autogen, elixir-format
 msgid "these counters look wrong"
 msgstr "ces compteurs semblent erronés"
+
+#: lib/kiln_cms_web/live/automation_live.ex
+#, elixir-autogen, elixir-format
+msgid "to (required unless deliver_as is \"comment\" or \"task\")"
+msgstr "to (obligatoire sauf si deliver_as vaut « comment » ou « task »)"
 
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #, elixir-autogen, elixir-format

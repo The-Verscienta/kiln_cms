@@ -128,18 +128,6 @@
       "type": "text"
     },
     {
-      "allow_nil?": false,
-      "default": "\"manual\"",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": null,
-      "scale": null,
-      "size": null,
-      "source": "kind",
-      "type": "text"
-    },
-    {
       "allow_nil?": true,
       "default": "nil",
       "generated?": false,
@@ -369,7 +357,7 @@
   ],
   "custom_statements": [],
   "has_create_action": true,
-  "hash": "D1BAD82F3F4FC9076645258AF40A2043B66D8E5DA07E1B8740D466C2BDDE4B16",
+  "hash": "ECB66BF600CD807E3C984AE4AA80ED5AE34135E08D7704DBBC648A33D1131082",
   "identities": [],
   "multitenancy": {
     "attribute": "org_id",
