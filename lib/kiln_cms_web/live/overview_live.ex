@@ -529,53 +529,9 @@ defmodule KilnCMSWeb.OverviewLive do
   # its own so the strip translates.
   defp blocked_row({experiment, {reason, _sentence}}), do: {experiment.name, reason}
 
-  defp blocked_headline(:sticky_off),
-    do: gettext("its goal converts on a later page, and sticky assignment is off")
-
-  defp blocked_headline(:no_goal_form), do: gettext("no goal form is set")
-  defp blocked_headline(:goal_form_missing), do: gettext("its goal form has been deleted")
-  defp blocked_headline(:no_target), do: gettext("no goal document is set")
-  defp blocked_headline(:no_goal_funnel), do: gettext("no goal funnel is set")
-
-  defp blocked_headline(:goal_is_self),
-    do: gettext("its goal document is the experimented document itself")
-
-  defp blocked_headline(:goal_type_unknown),
-    do: gettext("its goal content type is not a type on this site")
-
-  defp blocked_headline(:goal_document_missing),
-    do: gettext("its goal document has been deleted")
-
-  defp blocked_headline(:funnel_ends_here),
-    do: gettext("its funnel now ends on the experimented document itself")
-
-  defp blocked_headline(:funnel_target_missing),
-    do: gettext("its funnel no longer resolves to a document")
-
-  defp blocked_headline(:document_missing),
-    do: gettext("the document under test has been deleted")
-
-  defp blocked_headline(:document_unpublished),
-    do: gettext("the document under test is not published, so no arm is served")
-
-  defp blocked_headline(:goal_document_unpublished),
-    do: gettext("its goal document is not published")
-
-  defp blocked_headline(:goal_form_inactive),
-    do: gettext("its goal form is no longer accepting submissions")
-
-  # "could not be read" is deliberately NOT "has been deleted": a pool timeout
-  # and a deletion are the same tuple at the call site, and telling an admin a
-  # form was removed sends them to restore something nobody touched.
-  defp blocked_headline(:goal_unreadable),
-    do: gettext("its goal could not be read — this may be temporary")
-
-  defp blocked_headline(:unknown_goal),
-    do: gettext("its goal is one this version cannot check")
-
-  # Deliberately total: a reason added to `Health` and not here would otherwise
-  # crash the overview, which is a worse outcome than a vaguer sentence.
-  defp blocked_headline(_other), do: gettext("its goal can no longer be reached")
+  # One phrase per reason atom, shared with the experiments panel (#1087) —
+  # `KilnCMSWeb.ExperimentPhrases`, so the two surfaces cannot grow separate lists.
+  defp blocked_headline(reason), do: KilnCMSWeb.ExperimentPhrases.blocked_headline(reason)
 
   defp assign_backup_warning(socket) do
     status = KilnCMS.Backups.status()

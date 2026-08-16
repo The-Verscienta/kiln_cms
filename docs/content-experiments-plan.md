@@ -328,11 +328,31 @@ keyed assignment, impression/conversion counters, the `form_submission` goal, th
 task (`mix kiln.experiment`) to create, start and conclude, so the engine is
 operable before there is a UI — the alternative is shipping something inert.
 
-**Phase 2 — the editor**
+**Phase 2 — the editor** — **done** (#982)
 
-`/editor/experiments`: create an experiment against a document, author variants
-against the real block tree, watch results, promote a winner. This is where the
-feature becomes usable by the people it is for.
+`/editor/experiments` (`KilnCMSWeb.ExperimentsLive`) creates an experiment
+against a document picked from the site's content (content type + document,
+the funnel builder's pickers) with its goal, and creates the control with it.
+`/editor/experiments/:id` (`KilnCMSWeb.ExperimentLive`) authors variants
+**against the real block tree**: the patchable scalars
+(`Variant.patchable_fields/0`) and every addressable block's `:string` fields
+are rendered prefilled with the document's current values, and the form is
+diffed against the document on save so the patch is sparse by construction —
+nothing an editor left alone is pinned. Rich-text bodies are not offered (a
+Portable Text body is not a one-line input) and neither is a block with no
+readable `id`. A running experiment's variants are shown locked, with the
+reason, rather than offered for edit. Results are
+`KilnCMS.Experiments.Results.summarize/2`: per-variant impressions,
+conversions and rate, and a **sample-size floor** (`config :kiln_cms,
+KilnCMS.Experiments, results_floor:`, default 100 impressions per arm) below
+which no leader is called; above it the strictly-highest rate is "leading" —
+a comparison, never a significance claim, and still no sequential testing or
+peeking correction. A blocked experiment (#1008/#1087) shows its reason above
+the counters through `KilnCMSWeb.ExperimentPhrases`, the one phrase list the
+overview strip also uses. **Promote** is `KilnCMS.Experiments.Promotion`:
+the winning patch written into the document through the content type's
+ordinary `:update` as the promoting admin — a normal version, artifacts,
+webhooks — and refused for a control winner or an unconcluded experiment.
 
 **Phase 3 — measurement depth**
 
@@ -340,8 +360,8 @@ The sticky-assignment cookie and the `content_view` goal on top of it — **done
 (#984) and funnel-completion on top of it (#1010); see
 [`data-flows.md`](data-flows.md#sticky-assignment-cookie-984) for what is stored
 and why. Surfacing an experiment that can no longer convert is **done** (#1008) — see
-below. Still open: a results panel with a sample-size floor (#982) and bounding
-conversion abuse on the new GET path (#1007).
+below. The results panel with a sample-size floor is **done** (#982); bounding
+conversion abuse on the new GET path is #1007.
 
 ### Health: an experiment that can no longer convert (#1008)
 

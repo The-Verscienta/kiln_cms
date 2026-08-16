@@ -359,6 +359,28 @@ migration, a rewritten column, a dropped config key).
   code injection is most used) and a multi-org console host is the follow-up.
   Off by default — nothing changes for an existing deployment. Docs:
   `code-injection.md`, env-var table.
+- **Content experiments: the editor UI** (#982, #499 phase 2; closes #1087).
+  `/editor/experiments` (`KilnCMSWeb.ExperimentsLive`) creates an experiment
+  against a document picked from the site's content — content type +
+  document, the funnel builder's pickers — with its goal (form / page /
+  funnel), and creates the control with it. `/editor/experiments/:id`
+  (`KilnCMSWeb.ExperimentLive`) authors variants **against the real block
+  tree**: the patchable scalars and every addressable block's text fields are
+  rendered prefilled and the form is diffed against the document on save, so a
+  patch is sparse by construction and keyed by the block's stable id. A
+  running experiment's variants are shown locked with the reason. Results
+  (`KilnCMS.Experiments.Results`) show per-variant impressions, conversions
+  and rate with a **sample-size floor** (`config :kiln_cms,
+  KilnCMS.Experiments, results_floor:`, default 100 impressions per arm) below
+  which no arm is called; above it the highest rate is "leading" — a
+  comparison, never a significance claim. A blocked experiment shows its
+  reason above the counters (#1087) via new `KilnCMSWeb.ExperimentPhrases`,
+  the one phrase list the overview strip now uses too. **Promote** is new
+  `KilnCMS.Experiments.Promotion` — the winning patch written into the
+  document through the ordinary `:update` as the promoting admin, a normal
+  version and webhooks — refused for a control winner or an unconcluded
+  experiment. Nav gains "Experiments" beside Funnels.
+
 - **The two-factor hold's dependency on AshAuthentication is now pinned in
   both directions** (#1172). The #742 hold parks a first-factor token by
   moving its stored row off the `"user"` purpose, which is only a defence
