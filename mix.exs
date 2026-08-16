@@ -1,7 +1,7 @@
 defmodule KilnCMS.MixProject do
   use Mix.Project
 
-  @version "0.6.0"
+  @version "0.7.0"
   @source_url "https://github.com/The-Verscienta/kiln_cms"
 
   def project do
