@@ -204,7 +204,12 @@ config :kiln_cms, KilnCMS.Repo,
   hostname: System.get_env("POSTGRES_HOST", "localhost"),
   database: "kiln_cms_test#{System.get_env("MIX_TEST_PARTITION")}",
   pool: Ecto.Adapters.SQL.Sandbox,
-  pool_size: System.schedulers_online() * 2
+  # DIAGNOSTIC (temporary): forced down from `schedulers_online() * 2` to
+  # deliberately starve the pool under the full async suite, to see whether
+  # forced checkout contention reproduces the calendar_live_test.exs 60s
+  # silent hang, or only ever produces the fast (~1s) DBConnection.ConnectionError
+  # already seen elsewhere (SiteBranding fallback, ChainUnsignedBootTest).
+  pool_size: 2
 
 # We don't run a server during test. If one is required,
 # you can enable the server option below.
