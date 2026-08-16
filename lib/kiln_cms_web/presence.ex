@@ -8,6 +8,26 @@ defmodule KilnCMSWeb.Presence do
   keyed by user id; metadata carries the display name. Joins/leaves arrive as
   `%Phoenix.Socket.Broadcast{event: "presence_diff"}` to subscribers of that
   topic.
+
+  ## Which *block* someone is on
+
+  The same meta carries an optional `block_id` (`focus_block/5`), so the editor
+  can show "Alice is on this block" beside a block's discussion rather than only
+  "Alice is here somewhere". One nullable field in the existing meta, on the
+  existing topic — not a topic per block, which would fan one document out into
+  as many Presence topics as it has paragraphs for a signal every peer wants
+  anyway.
+
+  Meta rather than a transient broadcast (which is what `{:cursor, _}` is) for
+  one reason: a `presence_diff` carries current state, so an editor who joins
+  late learns where everyone already is. A broadcast would leave them blind
+  until the next time somebody happened to move.
+
+  **Deliberately ephemeral.** Nothing about block focus is stored. On
+  reconnect the LiveView re-tracks at document level with no `block_id`, and
+  the browser re-sends it on the next `focusin`. There is no state to
+  reconcile, and a dropped connection can't leave a stale "Alice is here"
+  behind after the presence entry goes.
   """
   use Phoenix.Presence,
     otp_app: :kiln_cms,
@@ -25,10 +45,25 @@ defmodule KilnCMSWeb.Presence do
 
     track(pid, topic, user.id, %{
       name: display_name(user),
+      block_id: nil,
       online_at: System.system_time(:second)
     })
 
     topic
+  end
+
+  @doc """
+  Record which block `user_id` is focused on, or `nil` on blur.
+
+  `update/4` on the entry `track_editor/4` already made — same topic, same key,
+  same pid — so peers get one `presence_diff` with the new meta rather than a
+  leave/join pair. Returns `{:error, :nopresence}` when the caller isn't
+  tracked yet (a disconnected mount that never tracked, or a focus arriving
+  after the entry went), which callers may ignore: block focus is advisory, and
+  there is nothing to retry.
+  """
+  def focus_block(pid, kind, id, user_id, block_id) do
+    update(pid, topic(kind, id), user_id, &Map.put(&1, :block_id, block_id))
   end
 
   @doc "Presence topic for open pop-out preview windows of a content item."
@@ -89,13 +124,20 @@ defmodule KilnCMSWeb.Presence do
     kind |> preview_topic(id) |> list() |> map_size() > 0
   end
 
-  @doc "The distinct editors currently on a content item, as `%{id, name}` maps."
+  @doc """
+  The distinct editors currently on a content item, as `%{id, name, block_id}`
+  maps — `block_id` being the block they last focused, or `nil`.
+
+  `block_id` is read with a default rather than off the struct: an entry
+  tracked by an older node mid-deploy has no such key, and a roster that
+  crashed on it would take the whole editor down for a cosmetic field.
+  """
   def editors(kind, id) do
     kind
     |> topic(id)
     |> list()
     |> Enum.map(fn {user_id, %{metas: [meta | _]}} ->
-      %{id: user_id, name: meta.name}
+      %{id: user_id, name: meta.name, block_id: Map.get(meta, :block_id)}
     end)
   end
 

@@ -62,6 +62,38 @@ migration, a rewritten column, a dropped config key).
   outright. Additive migration, all columns nullable or defaulted; existing
   content reads `:fresh`. See `docs/content-lifecycles.md`.
 
+- **Inline block discussions in the content editor** — the surface half. Every
+  block's comment control became a **discussion pin** that says, at a glance,
+  whether the block needs attention: an unresolved thread (warning-toned), open
+  tasks anchored to that block, a settled discussion, or nothing yet. A block
+  carrying both reads unresolved — a task is work somebody has already
+  accepted, a thread is a decision nobody has made — and still shows its task
+  count, so the precedence hides nothing. The open panel lists the block's own
+  tasks with assignee, due date and note above the thread.
+
+  The counts now move **live**. The editor subscribes to `Collab.topic/2`, so a
+  thread started in another editor's window, a task assigned through the API,
+  or `AutoCompleteTasks` closing tasks on publish all move this session's pins
+  without a reload.
+
+  **Block-scoped presence**: focusing a block records it in the existing
+  `editing:<kind>:<id>` Presence meta (`Presence.focus_block/5`,
+  `Presence.editors/2` now returns `block_id`), so peers see stacked initials
+  beside the block someone is on rather than only in the document roster.
+  Advisory — nothing locks a block — and entirely ephemeral: a reconnect
+  re-tracks at document level and the browser re-sends on the next focus.
+  A transient typing indicator rides the same topic, expiring on its own.
+
+  **`@` autocomplete in the composer**, from a roster read once at mount, with
+  a rule worth stating: the handle offered is always one `Mentions.resolve/2`
+  will resolve. Two Alices are offered as `@alicesmith` and `@alicejones`,
+  never as the `@alice` that would notify neither, and the only case nothing
+  can fix — two members whose names normalise identically — is labelled as not
+  notifying rather than silently failing. New `KilnCMS.CMS.Mentions.suggest/3`.
+
+  New `KilnCMSWeb.BlockDiscussionComponents` holds the markup, so this did not
+  grow the editor LiveView by the size of the feature.
+
 - **Block-anchored editorial tasks** — the model half of inline block
   discussions. `KilnCMS.CMS.Task` gains a nullable `block_id`, the same stable
   `Kiln.Block` id `Comment` already anchors to and soft for the same reason
