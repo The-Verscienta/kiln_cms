@@ -40,7 +40,8 @@ defmodule Kiln.PluginsTest do
 
     assert manifest.blocks == [
              FixturePlugin.CalloutBlock,
-             FixturePlugin.RestrictedRequiredBlock
+             FixturePlugin.RestrictedRequiredBlock,
+             FixturePlugin.RestrictedRequiredDefaultBlock
            ]
 
     # Rating is the one with real behaviour; Tokenless and Exploding exist to
@@ -78,7 +79,7 @@ defmodule Kiln.PluginsTest do
       assert output =~ "Test fixture exercising every plugin seam."
       assert output =~ "https://example.com/fixture-plugin"
       # Contribution summary is pluralized and omits zero-count kinds.
-      assert output =~ "2 blocks, 3 field types, 1 nav item, 1 admin route"
+      assert output =~ "3 blocks, 3 field types, 1 nav item, 1 admin route"
     end
   end
 
