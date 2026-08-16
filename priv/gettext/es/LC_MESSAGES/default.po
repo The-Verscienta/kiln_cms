@@ -10811,15 +10811,15 @@ msgstr "Webhooks"
 msgid "Wed"
 msgstr "mié"
 
-#: lib/kiln_cms_web/live/experiment_live.ex
-#, elixir-autogen, elixir-format
-msgid "Weight"
-msgstr "Peso"
-
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "Week"
 msgstr "Semana"
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Weight"
+msgstr "Peso"
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
