@@ -307,7 +307,16 @@ defmodule KilnCMS.Automation.RuleWorker do
       auto_complete_on_publish: false
     }
 
-    case KilnCMS.CMS.assign_task(attrs, authorize?: false, tenant: org_id) do
+    # No system actor exists yet in this codebase (every other `assign_task`
+    # caller is a human editor's own session) — `:assign`'s change only sets
+    # `creator_id` when an actor is present, and that column is NOT NULL, so
+    # a bare system call raises. The assignee is the most meaningful stand-in
+    # available for a rule-generated task: they are who acts on it.
+    case KilnCMS.CMS.assign_task(attrs,
+           actor: %{id: assignee_id},
+           authorize?: false,
+           tenant: org_id
+         ) do
       {:ok, _task} ->
         :ok
 
