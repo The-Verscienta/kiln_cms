@@ -32,6 +32,20 @@ defmodule KilnCMSWeb.CalendarLive do
   re-queries the window. The message carries only an id: the window is small
   and the filters are server-side, so re-running the projection is cheaper and
   much simpler than working out whether that one id is in view.
+
+  A burst of writes (a bulk import, a release going out, a scheduler sweep —
+  or simply many things saving at once) queues one `:calendar_changed` per
+  write, and each one asks for exactly the same thing: re-run the window
+  query. `handle_info/2` drains every additional `:calendar_changed` already
+  waiting in the mailbox before it re-queries, so a burst of N writes costs
+  one re-query rather than N run back to back. Without that, this process's
+  own mailbox — not the database — becomes the bottleneck: every message is
+  handled strictly in arrival order, so a `render_click`/`render` call queued
+  behind a long run of stale, superseded re-queries waits for all of them
+  first. That is what a heavily-loaded shared org (the test suite's default
+  org, or in principle a very busy production one) turns into an apparent
+  hang: not a slow query and not a deadlock, just a mailbox that fell behind
+  its own reactivity and had no way to catch up.
   """
   use KilnCMSWeb, :live_view
 
@@ -75,9 +89,25 @@ defmodule KilnCMSWeb.CalendarLive do
   # window rather than patching the one id in: the window is a month at most,
   # and reconciling one event against three views' worth of grouping is more
   # code than the query costs.
+  #
+  # `drain_calendar_changed/0` first, so a burst already queued behind this
+  # message collapses into the one re-query it actually needs (see the
+  # moduledoc's "Live" section) instead of running once per message.
   @impl true
   def handle_info({:calendar_changed, _id}, socket) do
+    drain_calendar_changed()
     {:noreply, load_events(socket)}
+  end
+
+  # Non-blocking: `after 0` returns immediately once the mailbox holds no more
+  # `:calendar_changed` messages, so this costs nothing beyond a mailbox scan
+  # when writes are not currently bursting.
+  defp drain_calendar_changed do
+    receive do
+      {:calendar_changed, _id} -> drain_calendar_changed()
+    after
+      0 -> :ok
+    end
   end
 
   @impl true
