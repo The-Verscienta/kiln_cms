@@ -260,6 +260,18 @@ migration, a rewritten column, a dropped config key).
   filter goes red on the next `mix.lock` bump instead of leaving the hold a
   green no-op.
 
+- **`/editor/forms/settings` — a production-reachable page for the per-site
+  form settings** (#1232). `KilnCMS.CMS.SiteEmbedSettings` (#1131) and
+  `KilnCMS.CMS.FormSpamSettings` (#477) were both managed only through the
+  generic AshAdmin resource UI, which `config/prod.exs` compiles out
+  (`dev_routes: false`) — so on a production deployment an org admin had no
+  in-product way to set either, which for the embed default undercut #1131's
+  whole point. New `KilnCMSWeb.FormSettingsLive` (admin live session, linked
+  from the Forms page) edits both: the org-wide embed default as the same
+  inherit / this-site-only / list tri-state a form's Embed tab offers, never
+  printing the deployment's own list; and the spam keywords one per line.
+  Declared before `/editor/forms/:id` so the literal segment wins.
+
 ### Changed
 
 - **`suggest_tags/2` persists tag-name vectors and ranks in one pgvector

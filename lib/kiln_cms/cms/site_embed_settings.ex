@@ -27,11 +27,11 @@ defmodule KilnCMS.CMS.SiteEmbedSettings do
   half of the ladder.
 
   Admin-only, like `KilnCMS.CMS.FormSpamSettings` (never delivered to a
-  visitor, no `paper_trail`), managed through the generic Ash Admin resource
-  UI rather than a bespoke settings page — this is a short-lived allowlist an
-  org admin edits rarely, not something that needs its own polished screen.
-  One row per org, created lazily by `:save` so a site that never sets a
-  default costs nothing.
+  visitor, no `paper_trail`). Edited on `/editor/forms/settings`
+  (`KilnCMSWeb.FormSettingsLive`, #1232) — it shipped managed only through
+  the generic Ash Admin resource UI, which is compiled out in production, so
+  an org admin had no way to reach it there. One row per org, created lazily
+  by `:save` so a site that never sets a default costs nothing.
   """
   use Ash.Resource,
     domain: KilnCMS.CMS,

@@ -8,7 +8,8 @@ defmodule KilnCMS.CMS.FormSpamSettings do
   rendered to a visitor, so it carries no `paper_trail` history and no public
   read policy. The row is created lazily by `:save` (upsert on the
   one-per-org identity) — never by a read, so a site with no configured
-  keywords costs nothing until an admin actually sets some.
+  keywords costs nothing until an admin actually sets some. Edited on
+  `/editor/forms/settings` (`KilnCMSWeb.FormSettingsLive`, #1232).
   """
   use Ash.Resource,
     domain: KilnCMS.CMS,

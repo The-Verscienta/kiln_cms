@@ -411,6 +411,11 @@ defmodule KilnCMSWeb.Router do
       live "/editor/governance", GovernanceLive, :index
       live "/editor/governance/:type/:id", GovernanceLive, :show
       live "/editor/forms", FormLive, :index
+      # Per-site form settings (#1232): the org-wide embed allowlist (#1131) and
+      # the spam keyword list (#477), which had no production-reachable UI
+      # (AshAdmin is compiled out under `dev_routes: false`). Declared BEFORE
+      # `/editor/forms/:id` so the literal segment wins the match.
+      live "/editor/forms/settings", FormSettingsLive, :index
       live "/editor/forms/:id", FormBuilderLive, :edit
       # Funnel definitions (#621, phase 4 of docs/advanced-analytics-plan.md) —
       # admin-only like the rest of this block; the derived report (#622) is

@@ -22,8 +22,12 @@ and review submissions in the same builder.
   spam scorer below. Admin-only, never delivered.
 - `SiteEmbedSettings` — one row per org, this org's default `frame-ancestors`
   allowlist for forms that set none of their own (below). Admin-only, never
-  delivered — same shape as `FormSpamSettings`, edited through the generic
-  Ash Admin resource UI rather than a page of its own.
+  delivered — same shape as `FormSpamSettings`.
+
+Both are edited on **`/editor/forms/settings`** (`KilnCMSWeb.FormSettingsLive`,
+#1232), linked from the Forms page. They used to be reachable only through the
+generic Ash Admin resource UI, which `config/prod.exs` compiles out — so on a
+production deployment neither had any in-product UI at all.
 
 ## Rendering
 
@@ -195,7 +199,7 @@ Shipped core checks:
 | Check | Signal | Weight |
 | --- | --- | --- |
 | `LinkDensity` | 3+ links in the free-text fields | 40 |
-| `DisallowedKeywords` | matches the org's own keyword list (`FormSpamSettings`, `/editor/forms` has no UI for it yet — manage it via `/admin`) | 50 |
+| `DisallowedKeywords` | matches the org's own keyword list (`FormSpamSettings`, edited on `/editor/forms/settings`) | 50 |
 | `FillTime` | submitted in under 1.5s of the form rendering (a signed, unforgeable "now" token rides in a hidden field) | 30 |
 | `LocaleMismatch` | predominantly non-Latin script against a Latin-script declared locale | 35 |
 

@@ -729,6 +729,11 @@ msgstr "Un lien partageable montrant le site tel que ce lancement le laisserait.
 msgid "A short summary shown in listings and used as a fallback for social shares."
 msgstr "Un court résumé affiché dans les listes et utilisé par défaut pour les partages sur les réseaux sociaux."
 
+#: lib/kiln_cms_web/live/form_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "A submission whose text contains any of these words or phrases is scored as spam and held for review rather than delivered. Matching ignores case and applies to every form on this site."
+msgstr "Un envoi dont le texte contient l'un de ces mots ou expressions est noté comme indésirable et retenu pour révision au lieu d'être livré. La correspondance ignore la casse et s'applique à tous les formulaires de ce site."
+
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
 msgid "A tier's audience can't change — existing members would keep an entitlement nothing would revoke. Retire this tier and create a new one instead."
@@ -927,6 +932,7 @@ msgid "Add an item"
 msgstr "Ajouter un élément"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
+#: lib/kiln_cms_web/live/form_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Add at least one site to embed on, or choose “This site only”."
 msgstr "Ajoutez au moins un site, ou choisissez « Ce site uniquement »."
@@ -1992,6 +1998,7 @@ msgid "Choose video"
 msgstr "Choisir une vidéo"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
+#: lib/kiln_cms_web/live/form_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Choose “Only these sites” to use the list you typed, or clear the box."
 msgstr "Choisissez « Uniquement ces sites » pour utiliser la liste saisie, ou videz le champ."
@@ -2114,6 +2121,7 @@ msgid "Coming off the site"
 msgstr "Retiré du site"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
+#: lib/kiln_cms_web/live/form_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Comma-separated origins (scheme and host, optionally a port). Pages on this form's own site may always frame it."
 msgstr "Origines séparées par des virgules (schéma et hôte, éventuellement un port). Les pages du site du formulaire peuvent toujours l'afficher."
@@ -3652,6 +3660,21 @@ msgstr "Code d'intégration"
 msgid "Embed code copied to clipboard."
 msgstr "Code d'intégration copié dans le presse-papiers."
 
+#: lib/kiln_cms_web/live/form_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Embed default"
+msgstr "Intégration par défaut"
+
+#: lib/kiln_cms_web/live/form_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Embed default could not be saved."
+msgstr "L'intégration par défaut n'a pas pu être enregistrée."
+
+#: lib/kiln_cms_web/live/form_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Embed default saved."
+msgstr "Intégration par défaut enregistrée."
+
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Embed on another site"
@@ -4143,6 +4166,12 @@ msgstr "Formulaire introuvable."
 msgid "Form preview"
 msgstr "Aperçu du formulaire"
 
+#: lib/kiln_cms_web/live/form_live.ex
+#: lib/kiln_cms_web/live/form_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Form settings"
+msgstr "Paramètres des formulaires"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Formatted text with bold, italic, and lists"
@@ -4150,6 +4179,7 @@ msgstr "Texte mis en forme avec gras, italique et listes"
 
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/form_live.ex
+#: lib/kiln_cms_web/live/form_settings_live.ex
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Forms"
@@ -6097,6 +6127,13 @@ msgstr "À la publication : la laisser ouverte (réglage du site)"
 msgid "On-site searches that returned nothing. Each is a reader who looked for something this site doesn't cover."
 msgstr "Recherches sur le site n'ayant rien renvoyé. Chacune correspond à un lecteur qui a cherché quelque chose que ce site ne couvre pas."
 
+#: lib/kiln_cms_web/live/form_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "One per line. %{count} keyword saved."
+msgid_plural "One per line. %{count} keywords saved."
+msgstr[0] "Un par ligne. %{count} mot-clé enregistré."
+msgstr[1] "Un par ligne. %{count} mots-clés enregistrés."
+
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
 msgid "One per line. Matched case-insensitively on whole words, so \"cures\" does not match \"secures\". Whitespace between words is flexible, so a phrase still matches text the editor wrapped across a line."
@@ -6138,6 +6175,7 @@ msgid "Only the %{count} most recently updated published documents were scanned;
 msgstr "Seuls les %{count} documents publiés les plus récemment mis à jour ont été analysés ; il peut y en avoir d'autres."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
+#: lib/kiln_cms_web/live/form_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Only these sites:"
 msgstr "Uniquement ces sites :"
@@ -7660,6 +7698,7 @@ msgstr "sam."
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
+#: lib/kiln_cms_web/live/form_settings_live.ex
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #: lib/kiln_cms_web/live/menu_live.ex
@@ -7755,6 +7794,7 @@ msgstr "Enregistré."
 #: lib/kiln_cms_web/live/compliance_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/feed_settings_live.ex
+#: lib/kiln_cms_web/live/form_settings_live.ex
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #, elixir-autogen, elixir-format
 msgid "Saving…"
@@ -8082,6 +8122,11 @@ msgstr "Paramètres"
 msgid "Settings & keys"
 msgstr "Paramètres et clés"
 
+#: lib/kiln_cms_web/live/form_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Settings that apply to every form on this site. A form's own Embed tab can still override the embed default for that form alone."
+msgstr "Paramètres qui s'appliquent à tous les formulaires de ce site. L'onglet Intégration d'un formulaire peut toujours remplacer l'intégration par défaut pour ce seul formulaire."
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Setup key"
@@ -8246,6 +8291,11 @@ msgstr "Sites autorisés à intégrer ce formulaire"
 msgid "Sites allowed to embed this form: %{origins}"
 msgstr "Sites autorisés à intégrer ce formulaire : %{origins}"
 
+#: lib/kiln_cms_web/live/form_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sites allowed to embed this site's forms"
+msgstr "Sites autorisés à intégrer les formulaires de ce site"
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Size"
@@ -8361,6 +8411,7 @@ msgstr "Une erreur s'est produite !"
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/form_live.ex
+#: lib/kiln_cms_web/live/form_settings_live.ex
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
 #: lib/kiln_cms_web/live/funnel_live.ex
 #: lib/kiln_cms_web/live/mail_settings_live.ex
@@ -8382,6 +8433,26 @@ msgstr "Affirmation sourcée avec métadonnées de citation"
 #, elixir-autogen, elixir-format
 msgid "Spam"
 msgstr "Spam"
+
+#: lib/kiln_cms_web/live/form_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Spam keywords"
+msgstr "Mots-clés indésirables"
+
+#: lib/kiln_cms_web/live/form_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Spam keywords could not be saved."
+msgstr "Les mots-clés indésirables n'ont pas pu être enregistrés."
+
+#: lib/kiln_cms_web/live/form_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Spam keywords saved."
+msgstr "Mots-clés indésirables enregistrés."
+
+#: lib/kiln_cms_web/live/form_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Spam keywords, one per line"
+msgstr "Mots-clés indésirables, un par ligne"
 
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
@@ -8911,6 +8982,11 @@ msgstr "La vérification de la connexion a échoué. Consultez les journaux du s
 msgid "The database and, on local storage, your uploaded media."
 msgstr "La base de données et, en stockage local, vos fichiers importés."
 
+#: lib/kiln_cms_web/live/form_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "The default for every form on this site that has not chosen its own list on its Embed tab. Pages on this site may always frame its forms."
+msgstr "La valeur par défaut pour tous les formulaires de ce site qui n'ont pas choisi leur propre liste dans l'onglet Intégration. Les pages de ce site peuvent toujours encadrer ses formulaires."
+
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
 msgid "The description is about %{pixels}px wide — over the %{max}px Google shows, so it may be cut off."
@@ -8991,6 +9067,7 @@ msgid "The oldest covers history up to %{at}."
 msgstr "Le plus ancien couvre l'historique jusqu'au %{at}."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
+#: lib/kiln_cms_web/live/form_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "The operator of this deployment has capped which sites may embed forms. You can narrow that list here but not add to it — ask them to allow a site that is refused."
 msgstr "L'opérateur de ce déploiement a plafonné les sites autorisés à intégrer des formulaires. Vous pouvez restreindre cette liste ici, mais pas l'élargir — demandez-lui d'autoriser un site refusé."
@@ -9255,6 +9332,7 @@ msgid "This site is using the deployment defaults."
 msgstr "Ce site utilise les valeurs par défaut du déploiement."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
+#: lib/kiln_cms_web/live/form_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "This site only"
 msgstr "Ce site uniquement"
@@ -9754,6 +9832,11 @@ msgstr "Utiliser le thème clair"
 msgid "Use system theme"
 msgstr "Utiliser le thème du système"
 
+#: lib/kiln_cms_web/live/form_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Use the deployment default"
+msgstr "Utiliser la valeur par défaut du déploiement"
+
 #: lib/kiln_cms_web/live/compliance_live.ex
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -10032,6 +10115,11 @@ msgstr "Qui peut créer quoi sur ce site : les membres, leur niveau de capacité
 msgid "Who may embed this form"
 msgstr "Qui peut intégrer ce formulaire"
 
+#: lib/kiln_cms_web/live/form_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Who may embed this site's forms"
+msgstr "Qui peut intégrer les formulaires de ce site"
+
 #: lib/kiln_cms_web/controllers/content_html/lock.html.heex
 #, elixir-autogen, elixir-format
 msgid "Whoever shared this page with you can give you the passphrase."
@@ -10128,6 +10216,11 @@ msgstr "Vous n'avez pas la permission de modifier l'injection de code de ce site
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to change this site's feed settings."
 msgstr "Vous n'avez pas la permission de modifier les paramètres de flux de ce site."
+
+#: lib/kiln_cms_web/live/form_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to change this site's form settings."
+msgstr "Vous n'avez pas la permission de modifier les paramètres des formulaires de ce site."
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -10772,6 +10865,11 @@ msgstr "ok"
 #, elixir-autogen, elixir-format
 msgid "on manual trigger"
 msgstr "déclenchement manuel"
+
+#: lib/kiln_cms_web/live/form_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "one keyword or phrase per line"
+msgstr "un mot-clé ou une expression par ligne"
 
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
