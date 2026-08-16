@@ -76,6 +76,18 @@
       "references": null,
       "scale": null,
       "size": null,
+      "source": "block_id",
+      "type": "uuid"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
       "source": "due_on",
       "type": "date"
     },
@@ -279,7 +291,8 @@
       "error_fields": [
         "org_id",
         "content_type",
-        "content_id"
+        "content_id",
+        "block_id"
       ],
       "fields": [
         {
@@ -293,6 +306,10 @@
         {
           "type": "atom",
           "value": "content_id"
+        },
+        {
+          "type": "atom",
+          "value": "block_id"
         }
       ],
       "include": null,
