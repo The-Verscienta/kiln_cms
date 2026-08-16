@@ -18,6 +18,7 @@ defmodule KilnCMSWeb.SurfaceTest do
     /editor/billing /editor/branding /editor/calendar /editor/code-injection
     /editor/compliance /editor/content/:type/:id /editor/feeds /editor/fields
     /editor/fixture /editor/forms /editor/forms/:id /editor/forms/:id/entries/export.csv
+    /editor/forms/settings
     /editor/funnels /editor/funnels/:id /editor/governance /editor/governance/:type/:id
     /editor/governance/:type/:id/export.csv /editor/governance/:type/:id/export.json
     /editor/links /editor/mail /editor/menus /editor/menus/:id /editor/newsletter
