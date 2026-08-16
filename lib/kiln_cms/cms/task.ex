@@ -60,6 +60,23 @@ defmodule KilnCMS.CMS.Task do
   actions do
     defaults [:read]
 
+    # The automation's idempotency probe (docs/content-lifecycles.md): the
+    # health sweep re-fires every day a record stays overdue, so the reaction
+    # asks this before creating anything. Narrow on purpose — content, kind and
+    # open-ness — because that triple is exactly "someone has already been asked
+    # to do this and has not done it yet".
+    read :open_for_content_kind do
+      description "Open tasks of one kind on one piece of content."
+      argument :content_type, :string, allow_nil?: false
+      argument :content_id, :uuid, allow_nil?: false
+      argument :kind, :atom, allow_nil?: false
+
+      filter expr(
+               content_type == ^arg(:content_type) and content_id == ^arg(:content_id) and
+                 kind == ^arg(:kind) and status == :open
+             )
+    end
+
     create :assign do
       description "Assign an editorial task on a piece of content."
       primary? true
@@ -71,7 +88,8 @@ defmodule KilnCMS.CMS.Task do
         :assignee_id,
         :due_on,
         :note,
-        :auto_complete_on_publish
+        :auto_complete_on_publish,
+        :kind
       ]
 
       validate KilnCMS.CMS.Validations.AssigneeIsEditor
@@ -314,6 +332,24 @@ defmodule KilnCMS.CMS.Task do
     attribute :status, :atom do
       constraints one_of: [:open, :done]
       default :open
+      allow_nil? false
+      public? true
+    end
+
+    # Who raised this task, in kind rather than by creator. `:manual` is an
+    # editor assigning work; `:lifecycle_review` is one raised automatically
+    # because a record's freshness lapsed (docs/content-lifecycles.md).
+    #
+    # A column rather than a convention on `note`, because it is what makes the
+    # automated half *idempotent*: a daily sweep re-fires for as long as content
+    # stays overdue, and "is there already an open lifecycle task on this
+    # content" has to be a query, not a string match on a human-editable field.
+    # It is also the axis the task list filters on — an editor who wants to see
+    # what they personally were asked to do should not have to wade through a
+    # quarter's worth of automated review reminders.
+    attribute :kind, :atom do
+      constraints one_of: [:manual, :lifecycle_review]
+      default :manual
       allow_nil? false
       public? true
     end

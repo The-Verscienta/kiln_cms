@@ -2395,6 +2395,11 @@ msgstr "El contenido puede llevar cualquier número de etiquetas."
 msgid "Content gaps"
 msgstr "Lagunas de contenido"
 
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Content health"
+msgstr "Estado del contenido"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Content intelligence is at its rate limit right now. Please try again shortly."
@@ -2861,6 +2866,11 @@ msgstr "No se pudo verificar esa clave de acceso: inténtelo de nuevo."
 #, elixir-autogen, elixir-format
 msgid "Count"
 msgstr "Recuento"
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Counts are capped per content type — there may be more than shown."
+msgstr "Los recuentos están limitados por tipo de contenido: puede haber más de los que se muestran."
 
 #: lib/kiln_cms_web/live/analytics_live.ex
 #, elixir-autogen, elixir-format
@@ -4000,6 +4010,11 @@ msgstr "Cada petición vuelve a leer la base de datos hasta que la caché se cal
 msgid "Every scanned slug already matches its derivation."
 msgstr "Todos los slugs analizados ya coinciden con su derivación."
 
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Everything with a cadence is inside it."
+msgstr "Todo lo que tiene una cadencia está dentro de ella."
+
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -4058,6 +4073,7 @@ msgid "Export (JSON)"
 msgstr "Exportar (JSON)"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
+#: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Export CSV"
 msgstr "Exportar CSV"
@@ -5361,9 +5377,15 @@ msgid "Mark done"
 msgstr "Marcar como hecha"
 
 #: lib/kiln_cms_web/live/calendar_live.ex
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Mark reviewed"
 msgstr "Marcar como revisado"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Marked reviewed — the freshness clock is reset."
+msgstr "Marcado como revisado: el contador de frescura se reinicia."
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
@@ -6003,6 +6025,11 @@ msgstr "No hay ninguna URL de vista previa configurada."
 #, elixir-autogen, elixir-format
 msgid "No public index of published entries, so this type never syndicates. Turn that on in Content types first."
 msgstr "No tiene índice público de entradas publicadas, así que este tipo nunca se sindica. Actívalo antes en Tipos de contenido."
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "No published content on this site carries a review cadence or an unpublish date, so there is nothing to age. Set one on a record's Settings tab to start tracking freshness."
+msgstr "Ningún contenido publicado en este sitio tiene una cadencia de revisión ni una fecha de despublicación, así que no hay nada que envejezca. Configure una en la pestaña Ajustes de un registro para empezar a controlar la frescura."
 
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #, elixir-autogen, elixir-format
@@ -10994,6 +11021,11 @@ msgstr "borrador"
 #, elixir-autogen, elixir-format
 msgid "draft created"
 msgstr "borrador creado"
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "due %{date}"
+msgstr "vence el %{date}"
 
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format

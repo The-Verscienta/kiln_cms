@@ -8,9 +8,15 @@ defmodule KilnCMSWeb.GovernanceController do
   (diffs, chain verdict), CSV is the flat spreadsheet-friendly twin (one row
   per timeline event or consent). Admin-only, gated by the signed-in user
   loaded in the `:browser` pipeline.
+
+  Also `GET /editor/governance/health.csv` — the whole site's unhealthy content
+  (docs/content-lifecycles.md), which is org-wide rather than per item and
+  exists because the dashboard panel shows ten rows and an audit wants all of
+  them.
   """
   use KilnCMSWeb, :controller
 
+  alias KilnCMS.CMS.HealthSummary
   alias KilnCMS.Governance
   alias KilnCMSWeb.CSV
 
@@ -128,4 +134,26 @@ defmodule KilnCMSWeb.GovernanceController do
 
   defp chain_status({:tampered, reason}), do: "tampered: #{reason}"
   defp chain_status(status), do: to_string(status)
+
+  # Every piece of content past (or approaching) its review cadence, org-wide.
+  #
+  # Not HTML: the body is a text/csv attachment, so browsers never render it as
+  # a document.
+  # sobelow_skip ["XSS.SendResp"]
+  def export_health_csv(conn, _params) do
+    if KilnCMSWeb.LiveUserAuth.effective_tier(conn) == :admin do
+      rows = HealthSummary.csv_rows(KilnCMSWeb.Tenant.current_org_id(conn))
+      header = ~w(type title health due_at id)
+
+      conn
+      |> put_resp_content_type("text/csv")
+      |> put_resp_header(
+        "content-disposition",
+        ~s(attachment; filename="content-health.csv")
+      )
+      |> send_resp(200, Enum.map_join([header | rows], &CSV.line/1))
+    else
+      conn |> put_status(:forbidden) |> json(%{error: "admin_required"})
+    end
+  end
 end
