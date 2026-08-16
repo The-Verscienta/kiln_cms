@@ -91,11 +91,11 @@ defmodule KilnCMSWeb.ExperimentsLive do
              |> push_navigate(to: ~p"/editor/experiments/#{experiment.id}")}
 
           {:error, error} ->
-            {:noreply, put_flash(socket, :error, ash_error_message(error))}
+            {:noreply, put_flash(socket, :error, experiment_error(error))}
         end
 
       {:error, error} ->
-        {:noreply, put_flash(socket, :error, ash_error_message(error))}
+        {:noreply, put_flash(socket, :error, experiment_error(error))}
     end
   end
 
@@ -210,21 +210,13 @@ defmodule KilnCMSWeb.ExperimentsLive do
   defp actor_opts(socket),
     do: [actor: socket.assigns.current_user, tenant: socket.assigns.current_org]
 
-  # An Ash write error as one sentence for the flash. `Exception.message/1`
-  # interpolates an error's `vars` (reading `.message` off the struct hands
-  # back a raw `%{value}` template).
-  defp ash_error_message(%Ash.Error.Forbidden{}),
-    do: gettext("You don't have permission to change experiments on this site.")
-
-  defp ash_error_message(error) do
-    error
-    |> Ash.Error.to_error_class()
-    |> Map.get(:errors, [])
-    |> Enum.map_join(" ", &Exception.message/1)
-    |> case do
-      "" -> gettext("The change could not be saved.")
-      message -> message
-    end
+  # The generic `KilnCMSWeb.CoreComponents.ash_error_message/2` (#1080) covers
+  # this write error-to-flash-sentence translation now; only the Forbidden
+  # sentence is page-specific.
+  defp experiment_error(error) do
+    ash_error_message(error,
+      forbidden: gettext("You don't have permission to change experiments on this site.")
+    )
   end
 
   defp document_title(titles, experiment),
