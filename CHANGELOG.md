@@ -517,6 +517,29 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **The xmerl name-budget scanner no longer trips OTP 29's dialyzer** (#599
+  family). `KilnCMS.Xml.check_name_budget/2` threaded a `MapSet` through the
+  accumulator of its recursive scan. On Elixir 1.20+ a MapSet's internal is the
+  opaque `:sets.set/1`, and opacity survives a *contract* but not a success
+  typing — so the untyped `put_name/3` inferred the unrolled
+  `{:set, …} | %{_ => []}` union for its return, and feeding that back into the
+  accumulator raised `call_without_opaque` at two call sites. Invisible on CI,
+  which pins OTP 27. Neither seeding through `MapSet.new/1` nor annotating the
+  private helpers with `MapSet.t/1` specs clears it, and the
+  build-the-set-once-at-the-end shape used elsewhere cannot apply, because the
+  budget has to be enforced *during* the scan rather than after it. The set is
+  now a plain map — `map_size/1` is O(1) like `MapSet.size/1` and `:sets` v2
+  stores exactly that shape underneath, so behaviour and cost are unchanged.
+
+  The `#1105` caller tests asserting that the guard interns no atoms were
+  themselves load-order dependent: `:erlang.system_info(:atom_count)` counts
+  lazy module loading as readily as interning by the parser, so opening the
+  measurement window around a call path's *first* invocation charged ~38 atoms
+  of module load to the guard. They passed or failed on whether `mix test`
+  happened to recompile in the same VM, on unmodified `main` as much as on a
+  diff. Each now warms the path first with a document crafted from different
+  tag names — different, because a same-name warm-up interns the measured names
+  and lets a guard that has stopped refusing pass green.
 - **A database outage no longer 404s every request as an unknown host** (#341).
   `KilnCMSWeb.Tenant.fetch_org/1` reported a lookup that *failed* the same way
   it reports a host that matches no org, and `KilnCMSWeb.Plugs.SetTenant` turned
