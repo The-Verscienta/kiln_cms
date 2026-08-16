@@ -31,10 +31,19 @@ defmodule KilnCMS.Search.Related do
   `{:error, :unattended_disabled}` instead of a list — callers that always
   expect `[neighbour()]` (or `[%{tag:, distance:}]`) need to handle that,
   the same as `KilnCMS.Seo.draft/2`'s callers handle its `{:error, _}`.
-  `related_documents/2` never charges the budget in practice: its anchor is
-  always a published document, and `centroid/2` never computes on a published
-  one (see there) — so it degrades a block to `[]` rather than propagating,
-  keeping its long-standing "always a list" contract for the public surface.
+  `related_documents/2` degrades a budget block to `[]` rather than
+  propagating it, keeping its long-standing "always a list" contract for the
+  public `/api/related` surface — whose own anchor is always a published
+  document, and `centroid/2` never computes on one (see there), so *that*
+  caller never reaches the budget below.
+
+  It is reached another way: `KilnCMS.Seo.Links.suggest/2` calls
+  `related_documents/2` against the document **currently being edited** —
+  routinely unpublished — for both the editor's internal-link panel and its
+  `:suggest_links` automation twin. Both must forward `:user_id` /
+  `:unattended?` through `suggest/2`'s own opts for the reserve guarantee
+  below to hold; a call with no budget context attached still charges the
+  org's raw bucket, just with no per-user throttle and no unattended reserve.
 
   Pass `:user_id` for the per-caller bucket (an automation rule uses a synthetic
   `"automation:<rule_id>"` identity — see `KilnCMS.Automation.RuleWorker`) and
@@ -77,9 +86,11 @@ defmodule KilnCMS.Search.Related do
 
     # `{:error, _}` degrades to `[]` here rather than propagating (unlike
     # `near_duplicates/2` and `suggest_tags/2`): this is the public
-    # reader-facing surface and has always answered a plain list. In practice
-    # it never happens — the anchor is a published document, and `centroid/2`
-    # never computes on one (see there), so nothing here reaches the budget.
+    # reader-facing surface and has always answered a plain list. It never
+    # happens *through this surface* — the anchor is a published document, and
+    # `centroid/2` never computes on one (see there) — but `KilnCMS.Seo.Links`
+    # calls this same function against an unpublished draft, so the budget
+    # below is reachable, just not from here (see the moduledoc).
     case neighbours(record, limit * 4, budget_context(record, opts)) do
       {:error, _reason} ->
         []
@@ -310,11 +321,20 @@ defmodule KilnCMS.Search.Related do
   # never reaches the budget check below: its anchor is always published.
   defp unindexed_centroid(%{state: :published}, _budget_ctx), do: nil
 
+  # Charges one unit per block the embed will actually reach the model for —
+  # not one flat unit per call — so the budget tracks real inference volume.
+  # `raw_cached?/1` uses the exact key `computed_centroid/1` (by way of
+  # `BlockIndexer.block_vectors/1`) is about to look up, so a document whose
+  # centroid was already computed and cached (by an earlier call in the same
+  # panel load, say) costs nothing here, matching `ensure_tag_embeddings/3`
+  # below.
   defp unindexed_centroid(record, budget_ctx) do
-    case charge_embedding_budget(budget_ctx) do
-      :ok -> computed_centroid(record)
-      {:error, reason} -> {:error, reason}
-    end
+    uncached =
+      record
+      |> BlockIndexer.embedding_inputs()
+      |> Enum.count(&(not VectorCache.raw_cached?(&1)))
+
+    embedding_charge(budget_ctx, uncached, fn -> computed_centroid(record) end)
   end
 
   defp stored_vectors(record) do
@@ -460,12 +480,16 @@ defmodule KilnCMS.Search.Related do
 
   # Persist a vector for every candidate that has none, or whose stored row was
   # computed for a previous name (a rename). Missing/stale rows are the only
-  # ones that reach the model; `tag_vector/2` still routes through
-  # `VectorCache` and charges the embedding budget exactly as before (#1076),
-  # and a refused charge stops the fill and fails the whole call — see
-  # `suggest_tags/2`'s doc for why a partial ranking is worse than none. Rows
-  # already written before the refusal stay: they are correct, and the next
-  # call is cheaper for them.
+  # ones that reach the model. `VectorCache.cached?/1` gates the batch charge
+  # below (#1076): a name already in the cache costs nothing to embed again,
+  # and charging for it anyway would size the budget to the taxonomy's word
+  # list instead of to actual inference volume — the exact failure
+  # `VectorCache` exists to avoid. Checked once for the whole missing set — one
+  # budget round trip charging the real uncached count, not one round trip per
+  # tag — and a refused charge stops the fill before any of it runs, leaving
+  # every candidate exactly as cached as it was; see `suggest_tags/2`'s doc for
+  # why a partial ranking is worse than none. Rows already written by an
+  # earlier call stay: they are correct, and this call is cheaper for them.
   defp ensure_tag_embeddings([], _org_id, _budget_ctx), do: :ok
 
   defp ensure_tag_embeddings(candidates, org_id, budget_ctx) do
@@ -476,27 +500,30 @@ defmodule KilnCMS.Search.Related do
       )
       |> Map.new(&{&1.tag_id, &1})
 
-    candidates
-    |> Enum.reject(fn tag ->
-      case Map.get(stored, tag.id) do
-        %{name: name, embedding: embedding} when is_list(embedding) -> name == tag.name
-        _missing_or_empty -> false
-      end
-    end)
-    |> Enum.reduce_while(:ok, fn tag, :ok ->
-      case tag_vector(tag.name, budget_ctx) do
-        {:error, reason} ->
-          {:halt, {:error, reason}}
+    missing =
+      Enum.reject(candidates, fn tag ->
+        case Map.get(stored, tag.id) do
+          %{name: name, embedding: embedding} when is_list(embedding) -> name == tag.name
+          _missing_or_empty -> false
+        end
+      end)
 
-        vector when is_list(vector) ->
-          store_tag_embedding(tag, vector, org_id)
-          {:cont, :ok}
+    uncached = Enum.count(missing, &(not VectorCache.cached?(&1.name)))
 
-        # The embedder answered nothing for this name; skip it (it will simply
-        # not rank) rather than fail every other tag's suggestion.
-        _ ->
-          {:cont, :ok}
-      end
+    embedding_charge(budget_ctx, uncached, fn ->
+      Enum.each(missing, fn tag ->
+        case tag_vector(tag.name) do
+          vector when is_list(vector) ->
+            store_tag_embedding(tag, vector, org_id)
+
+          # The embedder answered nothing for this name; skip it (it will
+          # simply not rank) rather than fail every other tag's suggestion.
+          _ ->
+            :ok
+        end
+      end)
+
+      :ok
     end)
   end
 
@@ -516,21 +543,7 @@ defmodule KilnCMS.Search.Related do
   # `published:record:*` entries `Firing.Delivery` serves from during a database
   # outage. An org with 500 tags running suggestions could evict pages that
   # would then 503.
-  #
-  # `VectorCache.cached?/1` gates the `KilnCMS.LLM.Budget` charge (#1076): a
-  # name already in the cache costs nothing to embed again, and charging for it
-  # anyway would size the budget to the taxonomy's word list instead of to
-  # actual inference volume — the exact failure `VectorCache` exists to avoid.
-  defp tag_vector(name, budget_ctx) do
-    if VectorCache.cached?(name) do
-      VectorCache.embed_document(name)
-    else
-      case charge_embedding_budget(budget_ctx) do
-        :ok -> VectorCache.embed_document(name)
-        {:error, reason} -> {:error, reason}
-      end
-    end
-  end
+  defp tag_vector(name), do: VectorCache.embed_document(name)
 
   # `record.org_id` — never a caller-supplied option — is the org bucket key,
   # since every caller here already holds the record. `:user_id` and
@@ -546,17 +559,19 @@ defmodule KilnCMS.Search.Related do
     }
   end
 
-  defp charge_embedding_budget(%{org_id: org_id, user_id: user_id, unattended?: unattended?}) do
-    Budget.check("search_embedding", org_id, user_id, embedding_budget_limits(unattended?))
-  end
+  # `units` is how many uncached inputs the caller is about to embed — 0 skips
+  # the budget round trip entirely (a fully-cached call is free and must stay
+  # free, not merely cheap), matching `VectorCache.cached?/1`'s guarantee.
+  defp embedding_charge(_budget_ctx, 0, fun), do: fun.()
 
-  defp embedding_budget_limits(unattended?) do
-    [
-      per_user: Search.embedding_per_user_limit(),
-      per_org: Search.embedding_per_org_limit(),
-      unattended?: unattended?,
-      unattended_share: Search.embedding_unattended_share()
-    ]
+  defp embedding_charge(%{org_id: org_id, user_id: user_id, unattended?: unattended?}, units, fun) do
+    Budget.charge(
+      "search_embedding",
+      org_id,
+      user_id,
+      Search.embedding_budget_limits(unattended?, units),
+      fun
+    )
   end
 
   defp mean(vectors) do

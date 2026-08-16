@@ -612,6 +612,61 @@ defmodule KilnCMS.Search.RelatedTest do
       assert {:error, {:rate_limited, _}} = Related.near_duplicates(second, user_id: "caller")
     end
 
+    test "a multi-block document's centroid charges once per uncached block, not once per call",
+         %{org: org, actor: actor} do
+      # Post-merge review finding 2 (#1076): a flat one-unit-per-call charge
+      # undercounts a document with several blocks (each is a real inference)
+      # and overcounts a document whose centroid is already cached (a second
+      # call is a pure cache hit, not a fresh one). Three distinct, non-empty
+      # blocks so there are three real inferences to account for if none are
+      # cached yet.
+      post =
+        CMS.create_post!(
+          %{
+            title: "Three blocks",
+            slug: slug(),
+            blocks: [
+              %{type: :rich_text, content: "<p>first unique multiblock passage</p>", order: 0},
+              %{type: :rich_text, content: "<p>second unique multiblock passage</p>", order: 1},
+              %{type: :rich_text, content: "<p>third unique multiblock passage</p>", order: 2}
+            ]
+          },
+          actor: actor,
+          tenant: org
+        )
+
+      any_cached? = fn ->
+        post |> BlockIndexer.embedding_inputs() |> Enum.any?(&VectorCache.raw_cached?/1)
+      end
+
+      # Room for the centroid call to be *checked*, but not enough for all
+      # three blocks: charging per call (the old behaviour) would let this
+      # through for the price of one; charging per block correctly refuses it.
+      put_embedding_budget(
+        embedding_per_user_limit: {100, :timer.minutes(1)},
+        embedding_per_org_limit: {2, :timer.hours(1)},
+        embedding_unattended_share: 1.0
+      )
+
+      assert {:error, {:rate_limited, _}} = Related.near_duplicates(post, user_id: "caller")
+
+      # The charge for the whole uncached set is checked before any of it
+      # runs, so a refusal costs zero real inferences — not "two out of
+      # three": nothing was embedded or cached.
+      refute any_cached?.()
+
+      # Room for all three: the call succeeds, and every block is now cached.
+      put_embedding_budget(embedding_per_org_limit: {100, :timer.hours(1)})
+      assert is_list(Related.near_duplicates(post, user_id: "caller"))
+      assert post |> BlockIndexer.embedding_inputs() |> Enum.all?(&VectorCache.raw_cached?/1)
+
+      # A second call against the same content is a pure cache hit for every
+      # block — free even at zero remaining budget, unlike the flat per-call
+      # charge this replaces (which would bill a fresh unit here).
+      put_embedding_budget(embedding_per_org_limit: {0, :timer.hours(1)})
+      assert is_list(Related.near_duplicates(post, user_id: "caller"))
+    end
+
     test "a PUBLISHED anchor never spends the embedding budget, even at a zero ceiling",
          %{org: org, actor: actor} do
       # Mirrors the "not computed on demand" test above, but proves the
@@ -627,7 +682,7 @@ defmodule KilnCMS.Search.RelatedTest do
       assert Related.related_documents(published, user_id: "caller") == []
     end
 
-    test "suggest_tags spends one unit per un-cached tag, and a cached one is free",
+    test "suggest_tags charges once for the whole uncached batch, and cached tags are free",
          %{org: org, actor: actor} do
       uniq = System.unique_integer([:positive])
       # Distinct, never-before-embedded names so this test's cache state can't
@@ -647,54 +702,41 @@ defmodule KilnCMS.Search.RelatedTest do
       refute VectorCache.cached?(tag_a.name)
       refute VectorCache.cached?(tag_b.name)
 
-      # Room for the centroid (1) plus exactly one tag (1); the second tag is
-      # refused, and refusing it is what makes `suggest_tags/2` return the
-      # error instead of a truncated ranking (see its doc).
+      post = draft_in(org, actor, "brewing herbal tea slowly", title: "Teas")
+
+      # Room for the centroid (1) but only one of the two uncached tags. The
+      # batch charge (#1076) is all-or-nothing — checked once against the real
+      # uncached count rather than tag by tag — so when it can't afford the
+      # whole taxonomy it charges (and embeds) nothing, rather than spending a
+      # real inference on a tag whose ranking is about to be discarded anyway
+      # (see `suggest_tags/2`'s doc on why a partial ranking is never returned).
       put_embedding_budget(
         embedding_per_user_limit: {100, :timer.minutes(1)},
         embedding_per_org_limit: {2, :timer.hours(1)},
         embedding_unattended_share: 1.0
       )
 
-      post = draft_in(org, actor, "brewing herbal tea slowly", title: "Teas")
-
       assert {:error, {:rate_limited, _}} =
                Related.suggest_tags(post, threshold: 2.0, user_id: "caller")
 
-      # Exactly one of the two tags got far enough to be cached; the other
-      # never reached the model — and the org's budget is now fully spent
-      # (centroid + one tag = 2/2), so anything from here on must be free.
-      {cached_tag, uncached_tag} =
-        if VectorCache.cached?(tag_a.name), do: {tag_a, tag_b}, else: {tag_b, tag_a}
+      # Neither tag reached the model — the batch was refused as a whole.
+      refute VectorCache.cached?(tag_a.name)
+      refute VectorCache.cached?(tag_b.name)
 
-      assert VectorCache.cached?(cached_tag.name)
-      refute VectorCache.cached?(uncached_tag.name)
+      # Room for everything: the centroid is already cached from the attempt
+      # above (free this time), and both tags now fit in one batch charge.
+      put_embedding_budget(embedding_per_org_limit: {100, :timer.hours(1)})
 
-      # A second document, PUBLISHED and indexed so its own centroid comes from
-      # `stored_vectors/1` (no fresh charge), with the still-uncached tag
-      # already applied (so it's excluded from candidates, and nothing here
-      # needs the model). If the cache hit cost anything, this would also come
-      # back `{:error, {:rate_limited, _}}` — the org has zero room left.
-      other_post =
-        CMS.create_post!(
-          %{
-            title: "More teas",
-            slug: slug(),
-            blocks: [%{type: :rich_text, content: "<p>brewing herbal tea slowly</p>", order: 0}],
-            tag_ids: [uncached_tag.id]
-          },
-          actor: actor,
-          tenant: org
-        )
-        |> CMS.publish_post!(%{}, actor: actor)
+      assert [_, _] = Related.suggest_tags(post, threshold: 2.0, user_id: "caller")
+      assert VectorCache.cached?(tag_a.name)
+      assert VectorCache.cached?(tag_b.name)
 
-      {:ok, _} = BlockIndexer.reindex(other_post)
+      # Back to zero room. A fully-cached batch never reaches the budget at
+      # all — if either cache hit charged anything, this would come back
+      # `{:error, {:rate_limited, _}}` same as the first call above.
+      put_embedding_budget(embedding_per_org_limit: {0, :timer.hours(1)})
 
-      other_post =
-        CMS.get_post!(other_post.id, authorize?: false, load: [:tags], tenant: org)
-
-      suggestions = Related.suggest_tags(other_post, threshold: 2.0, user_id: "caller")
-      assert Enum.map(suggestions, & &1.tag.id) == [cached_tag.id]
+      assert [_, _] = Related.suggest_tags(post, threshold: 2.0, user_id: "caller")
     end
 
     test "an unattended caller stops at its share while the editor's panel keeps working",
