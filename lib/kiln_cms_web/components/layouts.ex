@@ -702,6 +702,14 @@ defmodule KilnCMSWeb.Layouts do
             path: ~p"/editor/webhooks",
             icon: "hero-bolt"
           },
+          # ActivityPub federation (#967) — beside Webhooks: both are "what
+          # this site tells other servers", and both are admin-only.
+          %{
+            key: :federation,
+            label: gettext("Federation"),
+            path: ~p"/editor/federation",
+            icon: "hero-globe-alt"
+          },
           %{
             key: :redirects,
             label: gettext("Redirects"),

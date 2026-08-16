@@ -30,6 +30,9 @@ defmodule KilnCMS.Notifications.Tasks do
         "task_id" => task.id,
         "content_type" => task.content_type,
         "content_id" => task.content_id,
+        # Which block, when the task is anchored to one — the assignee opens
+        # straight onto the paragraph rather than onto a document and a hunt.
+        "block_id" => task.block_id,
         "org_id" => task.org_id,
         "due_on" => task.due_on && Date.to_iso8601(task.due_on),
         "note" => task.note,
@@ -64,6 +67,7 @@ defmodule KilnCMS.Notifications.Tasks do
       "id" => task.id,
       "content_type" => task.content_type,
       "content_id" => task.content_id,
+      "block_id" => task.block_id,
       "assignee_id" => task.assignee_id,
       "due_on" => task.due_on && Date.to_iso8601(task.due_on)
     }

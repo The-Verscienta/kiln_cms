@@ -28,6 +28,11 @@ defmodule KilnCMS.Automation.Rule do
   # "." and matches the verb against this list, so a literal `"task"` type
   # works with no executor changes — a rule scoped to `content_type: "task"`
   # matches exactly like one scoped to `content_type: "page"`.
+  # `:health_overdue` / `:health_expired` are the lifecycle axis
+  # (docs/content-lifecycles.md), dispatched by `KilnCMS.CMS.HealthSweep` rather
+  # than by a write. They are the reason that sweep exists: freshness lapses
+  # because time passed, so there is no editorial event to hang them off —
+  # nobody *did* anything, which is precisely the problem.
   @triggers [
     :published,
     :unpublished,
@@ -35,7 +40,9 @@ defmodule KilnCMS.Automation.Rule do
     :in_review,
     :returned_to_draft,
     :assigned,
-    :overdue
+    :overdue,
+    :health_overdue,
+    :health_expired
   ]
 
   # Reactions. HTTP/Slack notifications are the (signed, SSRF-safe) webhook
@@ -59,6 +66,12 @@ defmodule KilnCMS.Automation.Rule do
   # optional `"template"`. It is the one reaction that writes somewhere the
   # operator cannot quietly undo, which is why the machinery behind it is
   # at-most-once rather than at-least-once.
+  # `:create_task` turns a trigger into assigned work in the tool the team
+  # already uses (#501's `Task`), which is the whole remediation half of content
+  # lifecycles: "this went stale" is only useful if it lands in someone's queue.
+  # It is idempotent per {content, kind} — see `KilnCMS.CMS.Task.kind` — because
+  # the health sweep re-fires daily for as long as content stays overdue, and a
+  # reminder that breeds one task per day is worse than no reminder.
   @action_kinds [
     :send_email,
     :broadcast,
@@ -69,7 +82,8 @@ defmodule KilnCMS.Automation.Rule do
     :suggest_tags,
     :suggest_links,
     :suggest_metadata,
-    :social_post
+    :social_post,
+    :create_task
   ]
 
   @doc "Lifecycle events a rule can trigger on."

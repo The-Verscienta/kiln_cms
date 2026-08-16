@@ -271,7 +271,12 @@ defmodule KilnCMSWeb.FederationControllerTest do
       key_id = Keyword.get(opts, :key_id, @remote_actor <> "#main-key")
 
       {:ok, headers} =
-        HttpSignature.sign("#{@origin}/actor/inbox", key_id, body, private_key_pem: remote_pem)
+        HttpSignature.sign(
+          "#{@origin}/actor/inbox",
+          key_id,
+          body,
+          [private_key_pem: remote_pem] ++ Keyword.take(opts, [:date])
+        )
 
       Enum.reduce(headers, conn, fn {name, value}, acc -> put_req_header(acc, name, value) end)
       |> put_req_header("content-type", "application/activity+json")
@@ -431,7 +436,10 @@ defmodule KilnCMSWeb.FederationControllerTest do
       assert_received :actor_fetched
     end
 
-    # Repeats from the same actor were re-fetched on every request.
+    # Repeats from the same actor were re-fetched on every request. The second
+    # request is a *fresh* signature (a later `Date`): a byte-identical resend
+    # is a replay and is refused by the nonce store (#967), which the test
+    # below pins.
     test "a second activity from the same actor is served from cache", %{
       conn: conn,
       remote_pem: remote_pem
@@ -439,8 +447,79 @@ defmodule KilnCMSWeb.FederationControllerTest do
       assert conn |> post_signed(follow_activity(), remote_pem) |> response(202)
       assert_received :actor_fetched
 
-      assert conn |> post_signed(follow_activity(), remote_pem) |> response(202)
+      later = HttpSignature.http_date(DateTime.add(DateTime.utc_now(), 1, :second))
+      assert conn |> post_signed(follow_activity(), remote_pem, date: later) |> response(202)
       refute_received :actor_fetched
+    end
+
+    # #967: a blocked actor, or a blocked instance, is refused before anything
+    # is written — the durable answer to an abusive follower.
+    test "a Follow from a blocked actor is accepted (202) but never recorded", %{
+      conn: conn,
+      org_id: org_id,
+      remote_pem: remote_pem
+    } do
+      KilnCMS.Federation.block!(%{kind: :actor, value: @remote_actor, reason: "spam"},
+        authorize?: false,
+        tenant: org_id
+      )
+
+      assert conn |> post_signed(follow_activity(), remote_pem) |> response(202)
+      assert [] == Ash.read!(Follower, authorize?: false, tenant: org_id)
+      assert [] == Ash.read!(KilnCMS.Federation.Delivery, authorize?: false, tenant: org_id)
+    end
+
+    test "a Follow from a blocked INSTANCE is refused too, and blocking drops the existing follower",
+         %{conn: conn, org_id: org_id, remote_pem: remote_pem} do
+      assert conn |> post_signed(follow_activity(), remote_pem) |> response(202)
+      assert [_follower] = Ash.read!(Follower, authorize?: false, tenant: org_id)
+
+      # Block the whole instance: the recorded follower goes with it.
+      assert {:ok, _block} =
+               KilnCMS.Federation.block_and_drop(:instance, "Remote.Example", "abusive",
+                 authorize?: false,
+                 tenant: org_id
+               )
+
+      assert [] == Ash.read!(Follower, authorize?: false, tenant: org_id)
+
+      # And a fresh follow (new date, so not a replay) is refused before write.
+      later = HttpSignature.http_date(DateTime.add(DateTime.utc_now(), 2, :second))
+      assert conn |> post_signed(follow_activity(), remote_pem, date: later) |> response(202)
+      assert [] == Ash.read!(Follower, authorize?: false, tenant: org_id)
+
+      # Normalized on the way in: the host is stored downcased.
+      assert [%{kind: :instance, value: "remote.example"}] =
+               Ash.read!(KilnCMS.Federation.Block, authorize?: false, tenant: org_id)
+    end
+
+    # #967: the replay nonce store. Inside the 300-second date window a
+    # byte-identical signed request used to replay freely.
+    test "a byte-identical replay of a verified request is refused", %{
+      conn: conn,
+      remote_pem: remote_pem,
+      org_id: org_id
+    } do
+      body = Jason.encode!(follow_activity())
+
+      {:ok, headers} =
+        HttpSignature.sign("#{@origin}/actor/inbox", @remote_actor <> "#main-key", body,
+          private_key_pem: remote_pem
+        )
+
+      send_it = fn ->
+        Enum.reduce(headers, conn, fn {name, value}, acc -> put_req_header(acc, name, value) end)
+        |> put_req_header("content-type", "application/activity+json")
+        |> post("/actor/inbox", body)
+      end
+
+      assert send_it.() |> response(202)
+      # Same bytes, same signature, still inside the date window: replayed.
+      assert send_it.() |> response(401)
+
+      # And exactly one row was recorded, keyed by the signature.
+      assert 1 == Ash.count!(KilnCMS.Federation.SeenSignature, authorize?: false)
+      _ = org_id
     end
 
     # A remote server's bad minute must not be remembered as a bad ten.

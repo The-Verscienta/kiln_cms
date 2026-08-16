@@ -425,6 +425,25 @@ if cron = System.get_env("KILN_OCCURRENCE_SWEEP_CRON") do
   config :kiln_cms, :occurrence_sweep_cron, cron
 end
 
+# When the federation replay nonce store is swept (#967). `false` disables;
+# the store is only written when federation is on.
+if cron = System.get_env("KILN_FEDERATION_NONCE_SWEEP_CRON") do
+  config :kiln_cms, :federation_nonce_sweep_cron, cron
+end
+
+# ## Content lifecycles: the freshness sweep (docs/content-lifecycles.md)
+#
+# When the sweep looks for content that has gone past its review cadence and
+# dispatches the `health_overdue` / `health_expired` automation triggers. Safe
+# to leave scheduled everywhere: with no review cadences set, it matches nothing
+# and dispatches nothing. Daily is the right period — freshness is a cadence
+# measured in months, so a reminder that lands at 07:30 rather than 07:31 is the
+# same reminder. `false` (or driving `KilnCMS.CMS.HealthSweep.run/0` yourself)
+# turns it off.
+if cron = System.get_env("KILN_HEALTH_SWEEP_CRON") do
+  config :kiln_cms, :health_sweep_cron, cron
+end
+
 # And whether booting queues the one-off backfill that gives pre-existing
 # content its first value. On by default because the alternative is an upgrade
 # step someone has to remember, and the index is simply empty until they do.

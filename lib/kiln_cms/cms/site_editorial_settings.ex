@@ -31,64 +31,18 @@ defmodule KilnCMS.CMS.SiteEditorialSettings do
   `KilnCMS.CMS.TaskSettings.auto_complete?/2` rather than reading either half
   directly.
   """
-  use Ash.Resource,
-    domain: KilnCMS.CMS,
-    data_layer: AshPostgres.DataLayer,
-    authorizers: [Ash.Policy.Authorizer]
-
-  postgres do
-    table "site_editorial_settings"
-    repo KilnCMS.Repo
-  end
-
-  actions do
-    defaults [:read]
-
-    default_accept [:auto_complete_tasks_on_publish]
-
-    create :save do
-      primary? true
-      upsert? true
-      upsert_identity :one_per_org
-      upsert_fields [:auto_complete_tasks_on_publish]
-    end
-
-    destroy :destroy do
-      primary? true
-      require_atomic? false
-    end
-  end
-
-  policies do
-    # Editors read it: the task list and the content editor's task panel both
-    # explain what publishing will do to an open task, and that sentence is
-    # wrong if they cannot see the setting.
-    policy action_type(:read) do
-      authorize_if KilnCMS.CMS.Checks.OrgEditor
-    end
-
-    # Changing what publishing does to everyone's tasks is an admin act.
-    policy action_type([:create, :update, :destroy]) do
-      authorize_if KilnCMS.CMS.Checks.OrgAdmin
-    end
-  end
-
-  multitenancy do
-    strategy :attribute
-    attribute :org_id
-    global? !Application.compile_env(:kiln_cms, :strict_tenancy, true)
-  end
+  # The shared one-row-per-org shape — tenancy, `:one_per_org`, the `:save`
+  # upsert, the write policy — comes from `KilnCMS.CMS.OrgSettings` (#1080).
+  # Editors read it: the task list and the content editor's task panel both
+  # explain what publishing will do to an open task, and that sentence is
+  # wrong if they cannot see the setting. Changing it is an admin act.
+  use KilnCMS.CMS.OrgSettings,
+    table: "site_editorial_settings",
+    accept: [:auto_complete_tasks_on_publish],
+    read: :editor,
+    update?: false
 
   attributes do
-    uuid_primary_key :id
-
-    attribute :org_id, :uuid do
-      allow_nil? false
-      default &KilnCMS.Accounts.default_org_id/0
-      writable? false
-      public? false
-    end
-
     # `true` is what #501 shipped unconditionally. See the moduledoc on why this
     # default is the opposite of `SiteLinkCheck`'s.
     attribute :auto_complete_tasks_on_publish, :boolean do
@@ -96,20 +50,5 @@ defmodule KilnCMS.CMS.SiteEditorialSettings do
       allow_nil? false
       public? true
     end
-
-    timestamps()
-  end
-
-  relationships do
-    belongs_to :organization, KilnCMS.Accounts.Organization do
-      source_attribute :org_id
-      define_attribute? false
-      attribute_writable? false
-      public? false
-    end
-  end
-
-  identities do
-    identity :one_per_org, [:org_id]
   end
 end

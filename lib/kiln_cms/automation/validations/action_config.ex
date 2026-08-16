@@ -130,6 +130,18 @@ defmodule KilnCMS.Automation.Validations.ActionConfig do
       required: [],
       optional: [{"allow_egress", :boolean} | @deliver_as_optional],
       required_when: :deliver_as
+    },
+    create_task: %{
+      required: [],
+      # All optional: with none of them the reaction still works — it assigns to
+      # the content's author, a week out, with a default note. `assignee_id` is
+      # the fallback for content whose author cannot hold a task, which is a
+      # thing a team discovers rather than anticipates.
+      optional: [
+        {"assignee_id", :string},
+        {"due_in_days", :day_count},
+        {"note", :template}
+      ]
     }
   }
 
@@ -226,6 +238,12 @@ defmodule KilnCMS.Automation.Validations.ActionConfig do
   # is not a thing to guess at on an egress gate. `RuleWorker` already fails
   # closed on it; this makes the near-miss visible where it was typed.
   defp well_typed?(:boolean, value), do: is_boolean(value)
+
+  # A review window, in days. Bounded here as well as in `RuleWorker` — the
+  # worker clamps because it must not trust stored config (a rule may predate
+  # this validation, or be seeded), and this refuses because a typo is worth
+  # catching where it was typed rather than silently becoming seven.
+  defp well_typed?(:day_count, value), do: is_integer(value) and value >= 1 and value <= 365
   defp well_typed?(:string, value), do: is_binary(value) and String.trim(value) != ""
   defp well_typed?(:template, value), do: well_typed?(:string, value)
 
@@ -251,6 +269,7 @@ defmodule KilnCMS.Automation.Validations.ActionConfig do
   defp well_typed?(:integer, value), do: is_integer(value) and value > 0
 
   defp expectation(:boolean), do: "must be the JSON boolean true or false (not a string)"
+  defp expectation(:day_count), do: "must be a whole number of days between 1 and 365"
   defp expectation(:email), do: "must be an email address"
   defp expectation(:provider), do: "must be one of #{list(Account.providers())}"
   defp expectation(:deliver_as), do: "must be one of email, comment, task"

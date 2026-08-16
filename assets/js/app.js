@@ -760,6 +760,97 @@ const Hooks = {
       this.sorter && this.sorter.destroy()
     },
   },
+
+  // Drag-and-keyboard rescheduling on the editorial calendar's month/week grid.
+  //
+  // One hook on the whole grid rather than one per day: the day cells are drop
+  // targets for each other, so they have to share a Sortable group, and a hook
+  // per cell would create and destroy forty-two of them on every month change.
+  //
+  // Both paths end in the same server event with the same payload — the target
+  // DATE, computed here. The alternative (drag sends a date, keys send a delta)
+  // is two payload shapes into one handler, which is how a guard clause ends up
+  // silently not matching one of them.
+  //
+  // Only chips marked `data-reschedulable` move. A go-live that already
+  // happened is history, and a review-due date is derived from an attestation
+  // and a cadence — there is no honest way to drag it without falsifying one of
+  // them, so it stays put and offers "Mark reviewed" instead.
+  CalendarDrag: {
+    mounted() {
+      this.sorters = []
+      this.setup()
+      // Arrow keys move a focused chip: ←/→ by a day, ↑/↓ by a week, which is
+      // what the grid's own geometry implies. Delegated on the container so it
+      // survives LiveView patching the cells underneath.
+      this.onKeyDown = e => this.nudge(e)
+      this.el.addEventListener("keydown", this.onKeyDown)
+    },
+
+    updated() {
+      this.setup()
+    },
+
+    destroyed() {
+      this.el.removeEventListener("keydown", this.onKeyDown)
+      this.teardown()
+    },
+
+    teardown() {
+      this.sorters.forEach(s => s.destroy())
+      this.sorters = []
+    },
+
+    setup() {
+      this.teardown()
+
+      this.el.querySelectorAll("[data-calendar-drop]").forEach(list => {
+        this.sorters.push(
+          Sortable.create(list, {
+            group: "calendar",
+            animation: 150,
+            draggable: "[data-reschedulable]",
+            ghostClass: "opacity-40",
+            onEnd: evt => {
+              const date = evt.to.dataset.calendarDrop
+              // Dropped back where it started — nothing moved, so don't write.
+              if (!date || date === evt.from.dataset.calendarDrop) return
+              this.reschedule(evt.item, date)
+            },
+          }),
+        )
+      })
+    },
+
+    nudge(e) {
+      const chip = e.target.closest("[data-reschedulable]")
+      if (!chip) return
+
+      const days = {ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7}[e.key]
+      if (days === undefined) return
+
+      // The chip is a link; arrows would otherwise scroll the page under it.
+      e.preventDefault()
+
+      const from = chip.dataset.eventDate
+      if (!from) return
+
+      // Parse as UTC noon, not midnight: adding days to a midnight Date drifts
+      // across a DST boundary in local time and lands on the wrong day.
+      const at = new Date(`${from}T12:00:00Z`)
+      at.setUTCDate(at.getUTCDate() + days)
+      this.reschedule(chip, at.toISOString().slice(0, 10))
+    },
+
+    reschedule(chip, date) {
+      this.pushEvent("reschedule", {
+        id: chip.dataset.eventId,
+        type: chip.dataset.eventType,
+        kind: chip.dataset.eventKind,
+        date: date,
+      })
+    },
+  },
 }
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")

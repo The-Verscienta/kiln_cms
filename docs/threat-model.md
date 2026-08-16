@@ -346,7 +346,7 @@ build if a resource is ever registered without that authorizer.
     password-alone compromise leaves nothing to revoke, and it leaves something.
 
     Since #742 the row's **use** is withheld too, on both doors.
-    `PendingSignIn.mint/4` moves it to the `pending_second_factor` purpose and
+    `PendingSignIn.mint_and_hold/4` moves it to the `pending_second_factor` purpose and
     shortens its expiry to the length of the step, and `claim/1` puts it back
     once a code verifies. `AshAuthentication` requires a row under the `user`
     purpose to authenticate a JWT (`require_token_presence_for_authentication?`),
@@ -921,6 +921,18 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
     item 3 above) — but a flood of *valid*, successfully-resolving joins is
     still free and still uncounted. That's this item's actual gap, and it
     remains open; tracked in #1183.
+    **Narrowed by #1183:** `/live` **root joins** are now charged per client
+    address (`KilnCMSWeb.LiveJoinBudget`, the `:live_join` bucket in
+    `KilnCMSWeb.RateLimit`, 300/minute by default). It is an `on_mount` hook on
+    every Kiln LiveView *module* — ahead of `LiveRouteGuard`, so a url-less
+    join is charged before it is refused — and only a connected root mount
+    pays: the dead render is an HTTP request, a nested child was covered by
+    its parent's join, and patch/navigate inside a `live_session` does not
+    remount. Over budget, the join raises a 429 before `mount/3`, which the
+    channel turns into a `reload` reply and a stopped process (no mount, no
+    render); the JS client backs off with jitter. Still uncounted, and still
+    this item's remaining gap: events on an established socket, and joins on
+    the `/ws/gql`, `/ws/bridge` and `/ws/collab` families.
 11. **Periodic CSP re-review** as the editor adds third-party assets. The
     runtime `img-src` is widened by `CSP_IMG_SRC` and by the Unsplash
     integration — the only externally-influenced part of the policy.

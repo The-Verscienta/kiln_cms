@@ -94,6 +94,20 @@ defmodule KilnCMSWeb.OverviewLive do
       :my_open_tasks,
       length(CMS.list_tasks_for_assignee!(actor.id, actor: actor, tenant: org))
     )
+    # Editorial discussion, org-wide: blocks somebody is still waiting on an
+    # answer about, and block-anchored work nobody has closed out. One row per
+    # unresolved *thread root*, so this counts blocks needing attention rather
+    # than comments written.
+    |> assign(
+      :unresolved_threads,
+      length(CMS.list_unresolved_threads!(actor: actor, tenant: org))
+    )
+    |> assign(:open_block_tasks, open_block_task_count(actor, org))
+  end
+
+  defp open_block_task_count(actor, org) do
+    CMS.list_tasks!(actor: actor, tenant: org, query: [filter: [status: :open]])
+    |> Enum.count(&(not is_nil(&1.block_id)))
   end
 
   # One narrow-select fetch per content type; every content-shaped metric
@@ -308,6 +322,30 @@ defmodule KilnCMSWeb.OverviewLive do
                     count: @my_open_tasks
                   )}
                 </.link>
+              </li>
+              <li :if={@open_block_tasks > 0}>
+                <.link
+                  navigate={~p"/editor/tasks?view=team&scope=block"}
+                  class="text-primary hover:underline"
+                >
+                  {ngettext(
+                    "%{count} open task anchored to a block",
+                    "%{count} open tasks anchored to a block",
+                    @open_block_tasks,
+                    count: @open_block_tasks
+                  )}
+                </.link>
+              </li>
+              <%!-- No link: an unresolved thread is reached through the block
+                    it annotates, and there is no list of threads to send
+                    anyone to. The number is the signal. --%>
+              <li :if={@unresolved_threads > 0} class="text-base-content/60">
+                {ngettext(
+                  "%{count} block with an unresolved discussion",
+                  "%{count} blocks with unresolved discussions",
+                  @unresolved_threads,
+                  count: @unresolved_threads
+                )}
               </li>
               <li :if={Map.get(@by_state, :in_review, 0) > 0}>
                 <.link navigate={~p"/editor?status=in_review"} class="text-primary hover:underline">

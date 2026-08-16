@@ -79,16 +79,28 @@ defmodule KilnCMS.CMS.SiteCodeInjection do
   or written to disk an hour ago. Editing the snippet re-derives it; nothing can
   drift, because `Changes.HashInlineScripts` recomputes on every write.
   """
-  use Ash.Resource,
-    domain: KilnCMS.CMS,
-    data_layer: AshPostgres.DataLayer,
-    authorizers: [Ash.Policy.Authorizer],
+  # The shared one-row-per-org shape comes from `KilnCMS.CMS.OrgSettings`
+  # (#1080). Public reads, like `SiteBranding` — the snippet is served to
+  # anonymous visitors, so its contents are not a secret; tenant-scoped, so it
+  # is only ever the requesting site's own row. Writing arbitrary script into a
+  # site's pages is an org-admin act, resolved against the REQUEST's org
+  # (`Scoping.effective_tier/2` already returns `:admin` for a platform admin
+  # on every org, so no bypass clause is needed). `script_hashes` is derived by
+  # `Changes.HashInlineScripts`, so it is upsertable without being accepted.
+  use KilnCMS.CMS.OrgSettings,
+    table: "site_code_injection",
+    accept: [:head_html, :footer_html, :script_src, :connect_src, :img_src, :enabled],
+    upsert_fields: [
+      :head_html,
+      :footer_html,
+      :script_src,
+      :connect_src,
+      :img_src,
+      :enabled,
+      :script_hashes
+    ],
+    read: :public,
     extensions: [AshPaperTrail.Resource]
-
-  postgres do
-    table "site_code_injection"
-    repo KilnCMS.Repo
-  end
 
   # "Who turned on the tracker, and when" is the question this surface will
   # actually be asked, so the answer is recorded rather than reconstructed.
@@ -124,54 +136,6 @@ defmodule KilnCMS.CMS.SiteCodeInjection do
     reference_source?(false)
   end
 
-  actions do
-    defaults [:read]
-
-    default_accept [:head_html, :footer_html, :script_src, :connect_src, :img_src, :enabled]
-
-    create :save do
-      primary? true
-      upsert? true
-      upsert_identity :one_per_org
-
-      upsert_fields [
-        :head_html,
-        :footer_html,
-        :script_src,
-        :connect_src,
-        :img_src,
-        :enabled,
-        :script_hashes
-      ]
-    end
-
-    update :update do
-      primary? true
-      require_atomic? false
-    end
-
-    destroy :destroy do
-      primary? true
-      require_atomic? false
-    end
-  end
-
-  policies do
-    # Public reads, like `SiteBranding` — the snippet is served to anonymous
-    # visitors, so its contents are not a secret. Tenant-scoped, so this is only
-    # ever the requesting site's own row.
-    policy action_type(:read) do
-      authorize_if always()
-    end
-
-    # Writing arbitrary script into a site's pages is an org-admin act, resolved
-    # against the REQUEST's org. `Scoping.effective_tier/2` already returns
-    # `:admin` for a platform admin on every org, so no bypass clause is needed.
-    policy action_type([:create, :update, :destroy]) do
-      authorize_if KilnCMS.CMS.Checks.OrgAdmin
-    end
-  end
-
   changes do
     change KilnCMS.CMS.Changes.HashInlineScripts, on: [:create, :update]
     change KilnCMS.CMS.Changes.BustCodeInjection, on: [:create, :update, :destroy]
@@ -181,22 +145,7 @@ defmodule KilnCMS.CMS.SiteCodeInjection do
     validate KilnCMS.CMS.Validations.CspOrigins
   end
 
-  multitenancy do
-    strategy :attribute
-    attribute :org_id
-    global? !Application.compile_env(:kiln_cms, :strict_tenancy, true)
-  end
-
   attributes do
-    uuid_primary_key :id
-
-    attribute :org_id, :uuid do
-      allow_nil? false
-      default &KilnCMS.Accounts.default_org_id/0
-      writable? false
-      public? false
-    end
-
     # Emitted verbatim, at the end of `<head>` and just before `</body>`
     # respectively. Nothing is sanitized — see the moduledoc.
     #
@@ -252,20 +201,5 @@ defmodule KilnCMS.CMS.SiteCodeInjection do
       writable? false
       public? true
     end
-
-    timestamps()
-  end
-
-  relationships do
-    belongs_to :organization, KilnCMS.Accounts.Organization do
-      source_attribute :org_id
-      define_attribute? false
-      attribute_writable? false
-      public? false
-    end
-  end
-
-  identities do
-    identity :one_per_org, [:org_id]
   end
 end

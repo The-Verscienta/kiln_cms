@@ -101,6 +101,8 @@ defmodule KilnCMS.MixProject do
       # instead of blanket-suppressing warnings for whole files.
       skip_code_autolink_to: [
         "KilnCMS.Application",
+        "KilnCMS.Application.start/2",
+        "KilnCMS.Governance.Chain.any_history_anchors?/0",
         "KilnCMS.PostgrexTypes",
         "KilnCMS.Repo.installed_extensions/0",
         "KilnCMSWeb.Telemetry.init/1",
@@ -113,7 +115,33 @@ defmodule KilnCMS.MixProject do
         # is correct and useful — `KilnCMS.CMS.Calculations.RelatedLinks`
         # explains a real behaviour of it — but ExDoc has nothing to link a
         # hidden module to, and the docs gate runs `--warnings-as-errors`.
-        "AshAi.Serializer"
+        "AshAi.Serializer",
+        # A dependency function named for the #1172 hold contract's own
+        # explanation of why it works — ExDoc does not index AshAuthentication's
+        # docs from this project.
+        "AshAuthentication.Plug.Helpers.validate_token/3",
+        # Private — named by FormSettingsLive's moduledoc for the contradiction
+        # rule it mirrors, not something callers outside FormBuilderLive reach.
+        "KilnCMSWeb.FormBuilderLive.form_params/1",
+        # CHANGELOG history for the 0.6.0 release, naming the function under
+        # the name it had at the time (#1171 later renamed it to
+        # `mint_and_hold/4`). Historical entries describe the past, not the
+        # current surface, and must not be rewritten to keep this passing.
+        "KilnCMS.Accounts.PendingSignIn.mint/4",
+        # Private — LiveJoinBudget's moduledoc names the reason
+        # SignInLive.charge_here?/1 gives for the same connected-root-only
+        # shape, not something callers outside SignInLive reach.
+        "KilnCMSWeb.SignInLive.charge_here?/1",
+        # A Phoenix dependency module with no public docs of its own — named
+        # for what it does with a 4xx raised during mount, not something
+        # ExDoc can link to.
+        "Phoenix.LiveView.Channel",
+        # CHANGELOG entry for the #599 family xmerl dialyzer fix, naming the
+        # opaque Erlang/Elixir types the fix works around. ExDoc autolinks
+        # code-formatted references inside extras (CHANGELOG.md included), and
+        # neither is a KilnCMS module ExDoc can resolve.
+        ":sets.set/1",
+        "MapSet.t/1"
       ],
       extras: extras(),
       groups_for_extras: groups_for_extras(),

@@ -276,15 +276,20 @@ defmodule KilnCMS.Governance.Chain do
   # Cross-tenant presence only — a boot advisory must not depend on which org
   # the default tenant would pick. Failure (DB not up yet) is not evidence of
   # a misconfiguration, same shape as `Tenant.org_count/0`.
+  #
+  # Guarded by `Config.Report.probe/2` rather than a bare `rescue` (#1288): a
+  # `Repo` read can *exit* as well as raise — a call into a pool process that
+  # is not alive — and `rescue` does not catch exits, so this ran inside
+  # `Application.start/2` with half a guard.
   defp any_history_anchors? do
     import Ecto.Query
 
-    case Repo.one(from(a in "history_anchors", select: 1, limit: 1)) do
-      1 -> true
-      _ -> false
-    end
-  rescue
-    _error -> false
+    KilnCMS.Config.Report.probe(false, fn ->
+      case Repo.one(from(a in "history_anchors", select: 1, limit: 1)) do
+        1 -> true
+        _ -> false
+      end
+    end)
   end
 
   @doc """

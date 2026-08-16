@@ -119,8 +119,15 @@ Verification checks, in order:
   Requiring the set is the whole property: without `digest` in it, a signature
   is not bound to a body at all, so a captured request could be replayed with a
   substituted activity and a recomputed `Digest`;
-- the date is within five minutes. Phase 1 has no nonce store, so the window is
-  what bounds a replay;
+- the date is within five minutes, **and** the signature has not been seen
+  before (#967). A verified signature's SHA-256 is inserted into
+  `federation_seen_signatures` — the insert is the check, the hash is the
+  primary key, so a byte-identical resend fails the unique constraint and is
+  answered 401 whatever its `Date` says. Postgres, not a node-local cache, so
+  a replay landing on another node is refused there too. Rows are held for
+  twice the date window and swept hourly (`KilnCMS.Federation.SeenSignatureSweeper`,
+  `KILN_FEDERATION_NONCE_SWEEP_CRON`); a store that cannot be written logs and
+  falls back to the date window alone rather than taking the inbox down;
 - `host` is checked against the site's **pinned origin**, not against the
   request. `conn.host` is the caller's own `Host` header, so verifying against
   it would bind a signature to nothing — the same signed request would replay
@@ -199,11 +206,57 @@ fediverse forces:
 
 Ledger rows are pruned after 30 days.
 
+## Managing it: `/editor/federation` (#967)
+
+Phase 2 of #491. The admin page shows the two halves of the gate (the
+deployment's `KILN_FEDERATION_ENABLED`, which only an operator sets, and the
+site's own switch), the handle and actor id, the editable profile
+(`display_name` / `summary`), every follower with when it followed, when it
+was last delivered to and how many deliveries in a row have failed (a row at
+the drop ceiling is marked, and the header says how many followers a publish
+will actually reach — `Follower`'s `:deliverable` read, the same set
+`AnnounceWorker` fans out to), the recent delivery ledger with each failure's
+status and error, and the **block list**.
+
+**Blocks** are the durable answer to an abusive follower — a bare delete was
+not, because the next `Follow` upserted the row back. A block names an
+**actor** (an exact URI) or an **instance** (a host, matched against the host
+of the actor's URI, so a domain minting a fresh actor per follow is one row).
+Blocking removes the followers it covers, so deliveries stop with the block,
+and the inbox refuses a `Follow` from a blocked actor or instance *before*
+writing anything (`KilnCMS.Federation.Inbox`, `check_not_blocked/2`) — with a
+202, like every other ignored activity, so the remote server does not retry.
+Enabling from the page mints the identity exactly as `mix kiln.federation
+enable` does; the mix task remains for a shell.
+
+The site's own `last_delivered_at` (`SiteFederation.record_delivery`) is now
+written by `DeliveryWorker` on every successful delivery and shown on the page.
+
+## Key rotation (#967) — the explicit position
+
+There is **no automatic rotation**, and that is a decision rather than a gap.
+Peers cache `publicKeyPem` from the actor document at follow time and refetch
+it on their own schedule (Mastodon: on a signature failure, at most every few
+hours), so a `KilnCMS.Provenance.KeyRegistry`-style retired-key set — where a
+verifier consults the registry — buys nothing here: the verifier is someone
+else's server. Rotating therefore means publishing a new key under the same
+`keyId` and accepting that deliveries to each peer fail until that peer
+refetches, which its own retry-and-refetch loop does. What Kiln guarantees is
+that the *identity* survives: the handle, the actor id and the `keyId` are
+permanent, so a rotation is a new PEM behind an unchanged URL, never a new
+actor. To rotate today: generate a new keypair, write it with `:enable`'s
+`MintIdentity` change disabled (a mix task is the right shape for this and is
+deliberately not shipped until someone needs it — an accidental rotation is a
+day of failed deliveries), and expect the delivery ledger to show a burst of
+failures that clears as peers refetch. Do not rotate to recover from a leaked
+key on the assumption peers will pick it up promptly; they may not, and the
+old key signs valid-looking traffic until they do — treat that as the incident
+it is.
+
 ## What phase 1 does not do
 
-- No admin UI (phase 2).
-- No key rotation. Peers cache `publicKeyPem` from the actor document at follow
-  time, so rotation means re-signing under a new key and letting them re-fetch.
+- ~~No admin UI (phase 2).~~ Done in #967 — see above.
+- ~~No key rotation.~~ Not automated, by decision — see above.
 - No inbound replies, likes or boosts — accepted with a 202 and dropped. A 4xx
   would make the sending server retry for days over something not built yet,
   which is a way to get an instance blocked.

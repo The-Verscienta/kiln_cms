@@ -46,7 +46,7 @@ defmodule KilnCMS.Accounts.SignInAlert do
       code prompt exactly as a password does. For those users the compromised
       thing is their **mailbox** or their **identity provider**, and a mail
       telling them to change their Kiln password leaves the actual hole open.
-      (The headless gate is password-only — `PendingSignIn.mint/4` has one
+      (The headless gate is password-only — `PendingSignIn.mint_and_hold/4` has one
       caller — but one mail serves both.)
 
     * **The budget is shared with the settings forms.** Since #727,

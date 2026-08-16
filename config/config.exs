@@ -534,6 +534,22 @@ config :kiln_cms, :av_metadata_strip, :sync
 # once older than `:media_quarantine_max_age_hours` (24). `false` disables.
 config :kiln_cms, :media_quarantine_reaper_cron, "20 * * * *"
 
+# Hourly sweep of the federation replay nonce store (#967,
+# `KilnCMS.Federation.SeenSignatureSweeper`): rows past their `expires_at`
+# cannot verify anyway, so this is hygiene. `false` disables.
+config :kiln_cms, :federation_nonce_sweep_cron, "40 * * * *"
+
+# When the content-freshness sweep runs (docs/content-lifecycles.md): finds
+# published content whose `health` has gone :overdue or :expired and dispatches
+# an automation event per record, so a team can turn staleness into assigned
+# work. Daily, and early — a review reminder is a cadence measured in months, so
+# the minute it lands does not matter, but it should be waiting when someone
+# starts their day rather than arriving mid-afternoon. Before the task digest
+# (08:00) so a task this raises is in the morning's digest rather than
+# tomorrow's. `false` disables the schedule for a deployment driving
+# `KilnCMS.CMS.HealthSweep.run/0` itself.
+config :kiln_cms, :health_sweep_cron, "30 7 * * *"
+
 # Whether booting enqueues the one-off occurrence backfill (#766). On, because
 # the alternative is an upgrade step a human has to remember, and the feature
 # silently does nothing until they do — the migration cannot fill

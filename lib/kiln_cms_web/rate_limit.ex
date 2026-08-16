@@ -53,7 +53,15 @@ defmodule KilnCMSWeb.RateLimit do
     # `:form` bucket would silently drop real events — and a dropped entitlement
     # event is a paying member locked out. Generous per IP; the real authorization
     # is the HMAC signature, not the rate limit.
-    billing_webhook: {300, :timer.minutes(1)}
+    billing_webhook: {300, :timer.minutes(1)},
+    # `/live` root joins per client address (#1183, `KilnCMSWeb.LiveJoinBudget`).
+    # A flood ceiling, not a usage cap: a root join happens once per page LOAD
+    # (patch/navigate inside a live_session does not remount), so twenty editors
+    # behind one office NAT reloading a few times a minute stay far under it,
+    # while a scripted replay of one scraped `data-phx-session` token is over
+    # it in seconds. Sized like `:delivery` — the same "one address, one
+    # minute" shape — rather than like `:auth`, because a mount is not a guess.
+    live_join: {300, :timer.minutes(1)}
   }
 
   @doc false

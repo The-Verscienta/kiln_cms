@@ -17,15 +17,24 @@ defmodule KilnCMSWeb.CalendarLiveTest do
 
   @password "password123456"
 
-  defp authed_admin do
+  defp authed_admin, do: authed_user(:admin)
+  defp authed_viewer, do: authed_user(:viewer)
+
+  defp authed_user(role, extra \\ %{}) do
     email = "cal-#{System.unique_integer([:positive])}@example.com"
 
-    Ash.Seed.seed!(User, %{
-      email: email,
-      hashed_password: Bcrypt.hash_pwd_salt(@password),
-      confirmed_at: DateTime.utc_now(),
-      role: :admin
-    })
+    Ash.Seed.seed!(
+      User,
+      Map.merge(
+        %{
+          email: email,
+          hashed_password: Bcrypt.hash_pwd_salt(@password),
+          confirmed_at: DateTime.utc_now(),
+          role: role
+        },
+        extra
+      )
+    )
 
     strategy = AshAuthentication.Info.strategy!(User, :password)
 
@@ -371,6 +380,280 @@ defmodule KilnCMSWeb.CalendarLiveTest do
       )
 
       assert render(lv) =~ title
+    end
+
+    # A burst of writes elsewhere (a bulk import, a release going out, or —
+    # heavily, in this suite — every other async test sharing the default org)
+    # queues one `:calendar_changed` per write. Re-running the window query
+    # once per message rather than once per burst is what turns a busy org
+    # into a mailbox this LiveView can never catch up on: every later
+    # `render`/`render_click` is just another message, handled strictly after
+    # whatever backlog of stale, already-superseded re-queries arrived first.
+    # `handle_info/2` drains the mailbox before it re-queries, so N messages
+    # cost the one re-query they actually need — proven here by counting
+    # `KilnCMS.Repo`'s own query telemetry rather than timing, which would be
+    # exactly the kind of load-sensitive assertion this bug already hid behind.
+    test "a burst of change notifications is coalesced into one re-query", %{conn: conn} do
+      admin = authed_admin()
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/calendar")
+
+      test_pid = self()
+      handler_id = "calendar-coalesce-#{System.unique_integer([:positive])}"
+
+      # `:telemetry.execute/3` runs each handler synchronously, IN THE PROCESS
+      # THAT EMITTED THE EVENT — no message passing involved. So `self()`
+      # inside this handler is whatever process just issued a query, and this
+      # attachment (a VM-wide hook, since `:telemetry` has no per-test scope)
+      # only reports queries `lv.pid` itself issued, ignoring the hundreds of
+      # queries every other concurrently-running async test is also firing
+      # against the same repo.
+      :telemetry.attach(
+        handler_id,
+        [:kiln_cms, :repo, :query],
+        fn _event, _measurements, _metadata, %{lv_pid: lv_pid, test_pid: test_pid} ->
+          if self() == lv_pid, do: send(test_pid, :repo_query)
+        end,
+        %{lv_pid: lv.pid, test_pid: test_pid}
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      # Give the mailbox a real burst to drain — comfortably more messages
+      # than any single `load_events/1` run could plausibly issue queries for.
+      for _ <- 1..20, do: send(lv.pid, {:calendar_changed, Ash.UUID.generate()})
+
+      # Forces the LiveView to actually process its mailbox before we count:
+      # `render/1` is itself a message, so it cannot return before every
+      # `:calendar_changed` already queued ahead of it has been handled.
+      render(lv)
+
+      query_count =
+        Stream.repeatedly(fn ->
+          receive do
+            :repo_query -> 1
+          after
+            0 -> nil
+          end
+        end)
+        |> Enum.take_while(&(&1 == 1))
+        |> length()
+
+      assert query_count > 0, "expected the drained burst to still run its one re-query"
+
+      assert query_count < 20,
+             "20 :calendar_changed messages ran #{query_count} queries — " <>
+               "handle_info/2 is re-querying per message instead of coalescing the burst"
+    end
+  end
+
+  describe "reschedule" do
+    defp scheduled_page(admin, at, attrs \\ %{}) do
+      CMS.create_page!(
+        Map.merge(
+          %{
+            title: "Movable #{System.unique_integer([:positive])}",
+            slug: slug(),
+            scheduled_at: at
+          },
+          attrs
+        ),
+        actor: admin
+      )
+    end
+
+    # Anchor everything a fortnight out, so "one day later" is never in the past
+    # and never crosses out of the rendered month.
+    defp soon, do: Date.utc_today() |> Date.add(14)
+
+    test "moves a scheduled publish to the dropped day, keeping its time", %{conn: conn} do
+      admin = authed_admin()
+      at = DateTime.new!(soon(), ~T[09:30:00])
+      page = scheduled_page(admin, at)
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/calendar")
+
+      target = Date.add(soon(), 1)
+
+      render_hook(lv, "reschedule", %{
+        "id" => page.id,
+        "type" => "page",
+        "kind" => "publish",
+        "date" => Date.to_iso8601(target)
+      })
+
+      reloaded = CMS.get_page!(page.id, actor: admin)
+      assert DateTime.to_date(reloaded.scheduled_at) == target
+      # The day moved; the time of day did not. Truncated because the column
+      # is `utc_datetime_usec` and the fixture's literal carries no microseconds.
+      assert reloaded.scheduled_at |> DateTime.to_time() |> Time.truncate(:second) ==
+               ~T[09:30:00]
+    end
+
+    test "moves an embargo end, whatever its expiry action", %{conn: conn} do
+      admin = authed_admin()
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Embargo #{System.unique_integer([:positive])}",
+            slug: slug(),
+            expiry_action: :archive
+          },
+          actor: admin
+        )
+
+      page = CMS.publish_page!(page, %{}, actor: admin)
+
+      page =
+        CMS.update_page!(page, %{unpublish_at: DateTime.new!(soon(), ~T[17:00:00])}, actor: admin)
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/calendar")
+
+      target = Date.add(soon(), 2)
+
+      render_hook(lv, "reschedule", %{
+        "id" => page.id,
+        "type" => "page",
+        "kind" => "archive",
+        "date" => Date.to_iso8601(target)
+      })
+
+      assert DateTime.to_date(CMS.get_page!(page.id, actor: admin).unpublish_at) == target
+    end
+
+    test "refuses a move into the past and leaves the record alone", %{conn: conn} do
+      admin = authed_admin()
+      at = DateTime.new!(soon(), ~T[09:00:00])
+      page = scheduled_page(admin, at)
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/calendar")
+
+      html =
+        render_hook(lv, "reschedule", %{
+          "id" => page.id,
+          "type" => "page",
+          "kind" => "publish",
+          "date" => Date.to_iso8601(Date.add(Date.utc_today(), -1))
+        })
+
+      assert html =~ "Can&#39;t reschedule into the past" or
+               html =~ "Can't reschedule into the past"
+
+      assert DateTime.compare(CMS.get_page!(page.id, actor: admin).scheduled_at, at) == :eq
+    end
+
+    test "refuses an event that is not in the rendered window", %{conn: conn} do
+      admin = authed_admin()
+      # Scheduled far outside the default month, so the calendar never loaded it.
+      far = DateTime.new!(Date.shift(Date.utc_today(), year: 2), ~T[09:00:00])
+      page = scheduled_page(admin, far)
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/calendar")
+
+      html =
+        render_hook(lv, "reschedule", %{
+          "id" => page.id,
+          "type" => "page",
+          "kind" => "publish",
+          "date" => Date.to_iso8601(soon())
+        })
+
+      assert html =~ "no longer on the calendar"
+      # The window lookup is the authorization boundary, so nothing moved.
+      assert DateTime.compare(CMS.get_page!(page.id, actor: admin).scheduled_at, far) == :eq
+    end
+
+    test "a viewer never reaches the calendar at all", %{conn: conn} do
+      # The route lives in the `:editor_routes` live session, so the boundary
+      # for a viewer is the mount, not the event handler — there is no forged
+      # payload to test, because there is no socket to send one on.
+      assert {:error, {:redirect, _}} =
+               conn |> log_in(authed_viewer()) |> live(~p"/editor/calendar")
+    end
+
+    test "an editor scoped to other types cannot move what they cannot edit", %{conn: conn} do
+      admin = authed_admin()
+      at = DateTime.new!(soon(), ~T[09:00:00])
+      page = scheduled_page(admin, at)
+
+      # Granular RBAC (#332): this editor may author posts, not pages. The page
+      # is still *readable*, so it is on their calendar and the window lookup
+      # succeeds — the refusal has to come from the write's own policy.
+      scoped =
+        authed_user(:editor, %{editable_types: ["post"]})
+
+      {:ok, lv, _html} = conn |> log_in(scoped) |> live(~p"/editor/calendar")
+
+      render_hook(lv, "reschedule", %{
+        "id" => page.id,
+        "type" => "page",
+        "kind" => "publish",
+        "date" => Date.to_iso8601(Date.add(soon(), 1))
+      })
+
+      assert DateTime.compare(CMS.get_page!(page.id, actor: admin).scheduled_at, at) == :eq
+    end
+
+    test "announces the move for a screen reader", %{conn: conn} do
+      admin = authed_admin()
+      page = scheduled_page(admin, DateTime.new!(soon(), ~T[09:00:00]))
+
+      {:ok, lv, html} = conn |> log_in(admin) |> live(~p"/editor/calendar")
+      # The live region exists before anything happens — one inserted later is
+      # not reliably announced.
+      assert html =~ ~s(aria-live="polite")
+
+      moved =
+        render_hook(lv, "reschedule", %{
+          "id" => page.id,
+          "type" => "page",
+          "kind" => "publish",
+          "date" => Date.to_iso8601(Date.add(soon(), 1))
+        })
+
+      assert moved =~ "Moved"
+    end
+  end
+
+  describe "mark reviewed from the calendar" do
+    test "an overdue chip attests, and the chip stops asking", %{conn: conn} do
+      admin = authed_admin()
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Stale #{System.unique_integer([:positive])}",
+            slug: slug(),
+            review_after_days: 5
+          },
+          actor: admin
+        )
+
+      page = CMS.publish_page!(page, %{}, actor: admin)
+
+      page
+      |> Ash.Changeset.for_update(:backdate_published_at, %{
+        published_at: DateTime.add(DateTime.utc_now(), -20 * 86_400, :second)
+      })
+      |> Ash.update!(authorize?: false)
+
+      # due_at is 15 days back, so anchor the list window there.
+      at = Date.add(Date.utc_today(), -15)
+
+      {:ok, lv, html} =
+        conn |> log_in(admin) |> live(~p"/editor/calendar?view=list&at=#{Date.to_iso8601(at)}")
+
+      assert html =~ "Mark reviewed"
+
+      after_click =
+        lv
+        |> element("button[phx-value-id='#{page.id}'][phx-click='mark_reviewed']")
+        |> render_click()
+
+      assert CMS.get_page!(page.id, actor: admin).last_reviewed_at
+      # The clock reset, so the review-due chip has moved out of this window
+      # entirely — and with it the button.
+      refute after_click =~ "Mark reviewed"
     end
   end
 end

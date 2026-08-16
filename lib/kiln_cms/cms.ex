@@ -479,6 +479,8 @@ defmodule KilnCMS.CMS do
       define :list_unresolved_threads_for,
         action: :unresolved_for_content,
         args: [:content_type, :content_id]
+
+      define :list_unresolved_threads, action: :unresolved
     end
 
     # Editorial tasks: assignments, due dates, a workload view (#501) — the
@@ -492,6 +494,12 @@ defmodule KilnCMS.CMS do
       define :get_task, action: :read, get_by: [:id]
       define :list_tasks, action: :read
       define :list_tasks_for, action: :for_content, args: [:content_type, :content_id]
+
+      # The lifecycle automation's idempotency probe — see `Task.kind`.
+      define :list_open_tasks_of_kind,
+        action: :open_for_content_kind,
+        args: [:content_type, :content_id, :kind]
+
       define :list_tasks_for_assignee, action: :for_assignee, args: [:assignee_id]
 
       # Block-anchored tasks (the ownership half of inline block discussions).

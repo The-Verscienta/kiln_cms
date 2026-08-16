@@ -117,8 +117,11 @@ defmodule KilnCMS.Federation.Inbox do
 
     with {:ok, key_id} <- HttpSignature.key_id(headers),
          true <- RemoteActor.owns_key?(remote, key_id),
-         pem when is_binary(pem) <- remote.public_key_pem do
-      HttpSignature.verify("post", inbox_path(), headers, raw_body, pem, host: host)
+         pem when is_binary(pem) <- remote.public_key_pem,
+         :ok <- HttpSignature.verify("post", inbox_path(), headers, raw_body, pem, host: host) do
+      # Only a signature that verified is recorded — see `SeenSignature`. A
+      # second arrival of the same one is a replay, whatever its `Date` says.
+      HttpSignature.record_seen(headers)
     else
       false -> {:error, "signature key does not belong to the sending actor"}
       nil -> {:error, "sending actor publishes no public key"}
@@ -188,7 +191,8 @@ defmodule KilnCMS.Federation.Inbox do
   # 5xx on an inbound activity, and a 500 is exactly what makes a remote server
   # retry for days — so a racing upsert or a database hiccup must not raise.
   defp record_follow(activity, identity, remote, org_id) do
-    with :ok <- check_inbox_host(remote),
+    with :ok <- check_not_blocked(remote, org_id),
+         :ok <- check_inbox_host(remote),
          :ok <- check_follower_ceiling(org_id) do
       do_record_follow(activity, identity, remote, org_id)
     else
@@ -196,6 +200,15 @@ defmodule KilnCMS.Federation.Inbox do
         Logger.info("Federation inbox refused a follow: #{reason}")
         :ok
     end
+  end
+
+  # An actor, or an instance, this site has blocked (#967) is refused before
+  # anything is written — the durable answer to an abusive follower, which a
+  # bare delete was not (the next Follow re-upserted the row).
+  defp check_not_blocked(remote, org_id) do
+    if Federation.blocked?(remote.id, org_id),
+      do: {:error, "the actor or its instance is blocked on this site"},
+      else: :ok
   end
 
   # A follower's inbox is a URL from the follower's own document, and every
@@ -285,16 +298,9 @@ defmodule KilnCMS.Federation.Inbox do
   @doc "Whether federation is on for this deployment and this site."
   @spec settings(Ash.UUID.t()) :: {:ok, struct()} | :error
   def settings(org_id) do
-    if Federation.enabled?() do
-      case Ash.read(KilnCMS.Federation.SiteFederation, authorize?: false, tenant: org_id) do
-        {:ok, [%{enabled: true, origin: origin} = settings]} when is_binary(origin) ->
-          {:ok, settings}
-
-        _other ->
-          :error
-      end
-    else
-      :error
+    case Federation.active_settings(org_id) do
+      {:ok, settings} -> {:ok, settings}
+      :off -> :error
     end
   end
 end

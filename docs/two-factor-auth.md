@@ -57,7 +57,7 @@ every sign-in, after the first factor.
   abandoned at the prompt used to leave a live, usable row that nobody held, for
   the JWT's full lifetime.
 
-  `PendingSignIn.mint/4` therefore moves that row to the `pending_second_factor`
+  `PendingSignIn.mint_and_hold/4` therefore moves that row to the `pending_second_factor`
   purpose and shortens its expiry to the length of this step, and
   `PendingSignIn.claim/1` puts it back once a code verifies. AshAuthentication
   requires a row under the `user` purpose to authenticate a JWT
@@ -65,6 +65,18 @@ every sign-in, after the first factor.
   authenticates nothing, wherever it is. Both gates, one code path — which is
   why the browser prompt calls `claim/1` at all, when the single use a session
   blob needs is the deleted session key.
+
+  That dependency on AshAuthentication is pinned rather than assumed
+  ([#1172](https://github.com/The-Verscienta/kiln_cms/issues/1172)).
+  `KilnCMS.Accounts.SecondFactorHoldExtension` fails the compile if `User`
+  ever turns off `require_token_presence_for_authentication?` or
+  `store_all_tokens?`, or points `token_resource` away from
+  `KilnCMS.Accounts.Token` — any of which would leave the hold a silent no-op
+  with every test green. And
+  `test/kiln_cms/accounts/second_factor_hold_contract_test.exs` drives a held
+  token through the dep's *own* bearer and session round trips, so a future
+  AshAuthentication that quietly widened its purpose filter would go red on
+  the `mix.lock` bump rather than re-opening #742 unnoticed.
 
   Held rather than revoked, because the exchange may still complete — and the
   release is filtered on the hold purpose **in the UPDATE's own WHERE**, so a

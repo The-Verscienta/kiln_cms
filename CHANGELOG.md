@@ -62,6 +62,49 @@ migration, a rewritten column, a dropped config key).
   outright. Additive migration, all columns nullable or defaulted; existing
   content reads `:fresh`. See `docs/content-lifecycles.md`.
 
+- **An unresolved-discussion filter over the block tree.** A chip above the
+  blocks reads `N unresolved discussions` and narrows the tree to just those
+  blocks; `?threads=unresolved` lands there directly, and `Esc` closes an open
+  panel. The filter hides with CSS keyed on a `data-block-threads` state each
+  block card carries, written by the same function that colours the pin — so
+  the filter and the pin cannot disagree, and, more importantly, no block is
+  ever dropped from the render: a block card holds that block's form inputs,
+  and removing one would drop its fields from the next save. The chip is
+  absent entirely when nothing is unresolved.
+
+  `KilnCMS.CMS.TaskBlockPerformanceTest` now asserts the two cost claims the
+  feature rests on rather than assuming them: reading a document's discussions
+  is two queries whatever its block count (twenty blocks, twenty threads,
+  twenty tasks — still two), and `Task.:for_block` is served by
+  `tasks_content_lookup_index` rather than a table scan.
+
+- **A block's discussion can become accountable work.** The thread panel gains
+  **Create task**, seeded from the thread itself: assignee from the first
+  `@mention` the root comment resolves (the same `Mentions.resolve/2` call that
+  decided who was emailed about it, so the person told is the person offered
+  the work), note from its body, due a week out, and the `nil`-means-site-default
+  publish behaviour intact. **Link existing** re-anchors a task already filed
+  against the whole document; tasks already anchored to another block are not
+  offered, since moving one would silently empty that block's pin.
+
+  `TaskLive` speaks block: each row names the block's **type** and links onto
+  its discussion (`?comment=`, the editor's existing landing param), with an
+  `Anchored to` filter — `All` (default) / `A block` / `The whole document` —
+  that survives a reload. The overview gains two counts: blocks with
+  unresolved discussions, and open tasks anchored to a block.
+
+  A task's assignment email now names the block and deep-links to it. It names
+  the block's **type only**, read through the id-only `block_ids` projection:
+  block fields can sit behind `editable_by` grants and an email has no actor to
+  check them against, so quoting the paragraph would be a way around a policy
+  rather than a nicety. `task.assigned` webhook payloads carry `block_id`.
+
+  **Deleting a block still cascades nothing**, and that is now visible rather
+  than merely true: the editor renders a "Discussions on removed blocks"
+  section beneath the block tree so an orphaned thread can still be read and
+  closed out, `TaskLive` labels the row `removed block` instead of going quiet,
+  and the email says the block has since been removed.
+
 - **Inline block discussions in the content editor** — the surface half. Every
   block's comment control became a **discussion pin** that says, at a glance,
   whether the block needs attention: an unresolved thread (warning-toned), open
@@ -146,6 +189,79 @@ migration, a rewritten column, a dropped config key).
   every open grid in the org every few seconds while one person types. Month
   cells cap their chips with a "+N more" overflow so one busy day cannot resize
   the row, and an empty window renders an empty state rather than a blank grid.
+
+- **The editorial calendar became a control surface: drag-to-reschedule and
+  Mark reviewed.** On the month and week grids a chip can be dragged to another
+  day, or moved with the arrow keys while focused (←/→ a day, ↑/↓ a week, so the
+  keyboard path matches the grid's geometry rather than being a bolted-on
+  alternative). Both paths send the same event with the same payload — the
+  target date — because two shapes into one handler is how a guard ends up
+  silently not matching one of them. The outcome is announced in an `aria-live`
+  region, since a chip moving is not something a screen reader can report. The
+  day moves and the time of day does not.
+
+  Review-due chips deliberately do not drag. `due_at` is derived from
+  `last_reviewed_at` and the cadence, so dragging it could only write one of
+  those: moving the attestation forges it, and changing the cadence alters it
+  permanently to move one deadline. Those chips carry **Mark reviewed**
+  instead — which resets the clock honestly — shown only when the health is
+  actually asking (`:due`, `:overdue`, `:expired`).
+
+  Two refusals return an inline error and snap the chip back: a move into the
+  past (uniform across lanes, because every lane's past date means something
+  abrupt and a backwards drag is nearly always a slip), and a move of anything
+  not in the loaded window. The second is an authorization boundary as much as
+  an ergonomic one — the window came from a policy-scoped, org-scoped read, so
+  a socket cannot move a record it could not already see. The write is then
+  subject to the record's own policy, so an editor scoped by `editable_types`
+  cannot move what they cannot edit.
+
+- **Stale content raises real work: a freshness sweep, two automation triggers,
+  and a `create_task` reaction.** Health told you something had gone stale; this
+  is what puts it in somebody's queue.
+
+  `KilnCMS.CMS.HealthSweep` runs daily (`KILN_HEALTH_SWEEP_CRON`, 07:30 by
+  default — before the task digest, so a task it raises lands in that morning's
+  email rather than tomorrow's), finds published content whose `health` is
+  `:overdue` or `:expired`, emits `[:kiln_cms, :lifecycle, :health_sweep]`
+  telemetry with the counts, and dispatches `<type>.health_overdue` /
+  `<type>.health_expired` through the same funnel every other editorial event
+  uses. A sweep exists because every other trigger hangs off a write, and
+  freshness lapses because time passed — nobody did anything, which is exactly
+  the problem, so there is nothing to hang it off.
+
+  The sweep itself changes nothing: it is a read plus an event, so what happens
+  next is a rule the team configured, or nothing. "Overdue" means different
+  things to a newsroom and to a clinical library, and one hard-coded reaction
+  would be wrong for one of them. `:due`/`:due_soon` deliberately do not fire —
+  a trigger on "falls due next week" sends the same reminder every day for a
+  week, which is how a team learns to filter reminders out.
+
+  The new `:create_task` reaction raises an editorial Task assigned to the
+  content's author when they are still an editor, falling back to the rule's
+  configured assignee — which is what makes it usable on imported content with
+  no author. It is **idempotent per {content, kind}**: the sweep re-fires daily
+  for as long as content stays overdue, so without that a monograph nobody got
+  to in a fortnight would carry fourteen identical tasks. Lifecycle tasks are
+  tagged `kind: :lifecycle_review` (a new column — manual ones are `:manual`)
+  and opt out of #501's auto-complete-on-publish, because republishing the same
+  stale document is exactly what the review exists to question.
+
+  The content editor's header now carries a health pill next to the workflow
+  state badge — the two axes are orthogonal, and an editor needs both at a
+  glance — with a **Mark reviewed** button beside it when the health is `:due`,
+  `:overdue` or `:expired`. A button of its own rather than something riding on
+  Save, for the same reason `last_reviewed_at` is not in `default_accept`: an
+  editor who saves a typo fix has not re-read the piece.
+
+  The governance dashboard gains a **Content health** section — counts by
+  health, the ten most urgent records, and an admin-only CSV export at
+  `GET /editor/governance/health.csv`. It distinguishes "we checked and nothing
+  is late" from "nothing here has a review cadence at all", which a count alone
+  cannot: a panel rendering `0 overdue` for a site that has never set a cadence
+  states something false in a reassuring voice. Recomputed per load rather than
+  stored, and cheap because the filter runs in Postgres — a site with forty
+  thousand fresh pages reads none of them.
 
 - **Office documents and zip archives in the document library** (#808).
   Follow-up to #481, which scoped the gated document library to PDF only for
@@ -243,6 +359,147 @@ migration, a rewritten column, a dropped config key).
   code injection is most used) and a multi-org console host is the follow-up.
   Off by default — nothing changes for an existing deployment. Docs:
   `code-injection.md`, env-var table.
+- **The two-factor hold's dependency on AshAuthentication is now pinned in
+  both directions** (#1172). The #742 hold parks a first-factor token by
+  moving its stored row off the `"user"` purpose, which is only a defence
+  because AshAuthentication's `validate_token/3` looks the row up under
+  exactly that purpose — and only when `KilnCMS.Accounts.User` sets
+  `require_token_presence_for_authentication?` and `store_all_tokens?`.
+  A new `KilnCMS.Accounts.SecondFactorHoldExtension` (verifier
+  `KilnCMS.Accounts.Verifiers.SecondFactorHoldContract`) turns flipping
+  either setting, or pointing `token_resource` away from
+  `KilnCMS.Accounts.Token`, into a compile error that names the hold. And a
+  new test drives a held token through the dep's *own* bearer and session
+  round trips (`retrieve_from_bearer/3`,
+  `authenticate_resource_from_session/4`) rather than through Kiln's
+  callers, so a future AshAuthentication that quietly *widened* its purpose
+  filter goes red on the next `mix.lock` bump instead of leaving the hold a
+  green no-op.
+
+- **`/editor/forms/settings` — a production-reachable page for the per-site
+  form settings** (#1232). `KilnCMS.CMS.SiteEmbedSettings` (#1131) and
+  `KilnCMS.CMS.FormSpamSettings` (#477) were both managed only through the
+  generic AshAdmin resource UI, which `config/prod.exs` compiles out
+  (`dev_routes: false`) — so on a production deployment an org admin had no
+  in-product way to set either, which for the embed default undercut #1131's
+  whole point. New `KilnCMSWeb.FormSettingsLive` (admin live session, linked
+  from the Forms page) edits both: the org-wide embed default as the same
+  inherit / this-site-only / list tri-state a form's Embed tab offers, never
+  printing the deployment's own list; and the spam keywords one per line.
+  Declared before `/editor/forms/:id` so the literal segment wins.
+- **ActivityPub federation, phase 2: the admin page, blocks, and a replay
+  nonce store** (#967). New `/editor/federation` (`KilnCMSWeb.FederationLive`,
+  admin-only) shows both halves of the gate, the handle and actor id, the
+  editable profile (`display_name`/`summary` — the `:save` action, unused
+  until now), every follower with its delivery health and how many a publish
+  will reach, the recent delivery ledger with failures, and enables/disables
+  from the page (minting the permanent identity exactly as `mix kiln.federation
+  enable` does). New **`KilnCMS.Federation.Block`** (`federation_blocks`,
+  migration `20260815230106`): block an actor URI or an instance host;
+  blocking drops the followers it covers, and the inbox refuses a `Follow`
+  from a blocked actor or instance before writing anything — the durable
+  answer to an abusive follower that a bare delete was not. New
+  **`KilnCMS.Federation.SeenSignature`** (`federation_seen_signatures`): a
+  verified inbound signature's hash is inserted with the hash as primary key,
+  so a byte-identical resend inside the 300-second date window is refused as
+  a replay on every node (the #743 shape; a store outage falls back to the
+  date window and logs); swept hourly by `SeenSignatureSweeper`
+  (`KILN_FEDERATION_NONCE_SWEEP_CRON`). Also: `Federation.active_settings/2`
+  replaces the three near-identical settings queries in `Inbox`,
+  `AnnounceWorker` and `DeliveryWorker`; `DeliveryWorker` reads a follower by
+  id (`get_follower`) instead of the whole list; `Follower.deliverable` now
+  carries the drop-ceiling rule and is what `AnnounceWorker` fans out to;
+  `SiteFederation.record_delivery` is written on every successful delivery.
+  Key rotation is documented as an explicit position (not automated, and why)
+  in `docs/federation.md`. Nav gains "Federation" beside Webhooks.
+
+### Changed
+
+- **`suggest_tags/2` persists tag-name vectors and ranks in one pgvector
+  query** (#1085). The #851 relevance ceiling filtered *after*
+  `Search.Related.suggest_tags/2` had fetched a vector and computed a
+  384-element cosine distance for every unapplied tag — 500 lookups and 500
+  dot products per call on a 500-tag org, per editor click and per automation
+  event, and the call could then legitimately return `[]` having done all of
+  it. New `KilnCMS.Search.TagEmbedding` (`tag_embeddings`, migration
+  `20260815213552`) stores each tag's name vector once; the row carries the
+  name it was computed for, so a rename re-embeds and nothing hooks the tag's
+  write path; deleting the tag cascades the row. Rows are filled lazily by the
+  first call that needs them (still through `VectorCache` and the #1076
+  embedding budget — a stored row is free, like a cached one), and from then
+  on the ceiling, the ranking and the limit are one exact `<=>` query — no
+  HNSW index, deliberately, since a taxonomy is hundreds of rows and an exact
+  scan sidesteps the #998 post-filter recall trap. `list_tags!` now selects
+  only `id`/`name` for the candidate list; winners are re-read as full rows.
+  Adds a migration; the `suggest_tags/2` contract (return shape, budget
+  errors, ceiling semantics) is unchanged.
+- **`PendingSignIn.mint/4` is now `mint_and_hold/4`, and refuses the caller's
+  own credential** (#1171). Since #1170 the pending-blob mint also parks the
+  first-factor token in the token store (#742), a database write that disables
+  a credential — but nothing in the name, the `@spec` or a call site said so.
+  The rename puts the side effect where a call site shows it; there is
+  deliberately no pure `mint/4` beside it, since a wrapper that skips the hold
+  is exactly the door that ends up unguarded. When `context` is a `Plug.Conn`
+  and the token about to be held is the one that authenticates that request
+  (the session's `user_token` or the bearer token on `assigns.current_user`),
+  it now raises rather than silently signing the caller out — the trap a future
+  step-up / sudo-mode prompt would otherwise walk into. The two remaining test
+  helpers that minted with a fabricated `"stub.jwt.token"` now use
+  `TwoFactorFixtures.with_first_factor_token/1`, so nothing in the suite
+  exercises the silent "not a JWT, nothing to hold" branch by accident.
+  Downstream callers of `PendingSignIn.mint/4` rename the call; the return
+  value is unchanged.
+
+### Security
+
+- **`/live` root joins are budgeted per client address** (#1183). #678 metered
+  only the joins a tenant refused; a flood of joins that each named a valid
+  host — or replayed a scraped `data-phx-session` token — cost a session
+  verify, the route's hooks, a `mount/3` and a render each and was counted
+  nowhere. New `KilnCMSWeb.LiveJoinBudget`, an `on_mount` hook declared by
+  `KilnCMSWeb.live_view/0` on every Kiln LiveView module (ahead of
+  `LiveRouteGuard`, so a url-less join is charged before it is refused),
+  charges each **connected root** mount to a new `:live_join` bucket in
+  `KilnCMSWeb.RateLimit` (300/minute per address by default — a flood
+  ceiling, not a usage cap: a root join is one per page *load*, not per
+  click). The dead render, nested `live_render` children and in-session
+  navigation are not charged. Over budget, `TooManyJoinsError`
+  (`plug_status: 429`) is raised before `mount/3`; the channel turns that into
+  a `reload` reply and stops the process, and the JS client backs off with
+  jitter. The address is resolved exactly as `SignInLive` resolves it
+  (`ClientIp.resolve/2` over `:x_headers`/`:peer_data`, keyed by
+  `RateLimit.client_key/1`). Override like any bucket via
+  `config :kiln_cms, KilnCMSWeb.RateLimit, limits: %{live_join: …}`. Events on
+  an established socket and the `/ws/*` families remain uncounted (threat
+  model item 10).
+
+### Changed
+
+- **One shape for the nine per-org settings resources, and one resolver for
+  their cached reads** (#1080). `SiteBranding`, `SiteCodeInjection`,
+  `FormSpamSettings`, `SiteEditorialSettings`, `SiteLinkCheck`,
+  `SiteCompliance`, `FeedSettings`, `SiteEmbedSettings` and
+  `Federation.SiteFederation` each spelled out, by hand, the same tenancy
+  block (`global?` — the security-relevant line a tenth resource could omit
+  with no compile error), the `writable?: false` `org_id`, the `:one_per_org`
+  identity, the upsert-on-identity `:save`, the `OrgAdmin` write policy and
+  the `belongs_to :organization`. New `KilnCMS.CMS.OrgSettings` (`use …,
+  table:, accept:, read:, …`) emits that half in the shape `KilnCMS.CMS.Content`
+  and `KilnCMS.CMS.Taxonomy` already use; every one of the nine is migrated
+  onto it (no migration — `mix ash.codegen --check` is clean), and a test
+  pins that no resource in the app declares `:one_per_org` by hand. New
+  `KilnCMS.OrgSettings.resolve/2` is the one cached, layered read behind
+  `KilnCMS.Branding`, `KilnCMS.CodeInjection` and `KilnCMS.Feeds` — never
+  caches a `nil`, degrades on a raise, caches "no row" as the operator config,
+  and takes the *fallback* as the caller's function so #1077's "the operator
+  default is the wrong direction to fail on the disclosure axis" stays a
+  per-setting decision. `KilnCMSWeb.CoreComponents.ash_error_message/2`
+  replaces the three settings pages' private error renderers, which had
+  already drifted (Branding's did not interpolate an error's `vars`, so a
+  refused token reached the admin as a literal `%{value}` template).
+  Downstream: a project's own per-org settings resource should `use
+  KilnCMS.CMS.OrgSettings`; the nine resources' actions, policies, columns and
+  code interfaces are unchanged.
 
 ## [0.6.0] - 2026-08-12
 
@@ -335,6 +592,29 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **The xmerl name-budget scanner no longer trips OTP 29's dialyzer** (#599
+  family). `KilnCMS.Xml.check_name_budget/2` threaded a `MapSet` through the
+  accumulator of its recursive scan. On Elixir 1.20+ a MapSet's internal is the
+  opaque `:sets.set/1`, and opacity survives a *contract* but not a success
+  typing — so the untyped `put_name/3` inferred the unrolled
+  `{:set, …} | %{_ => []}` union for its return, and feeding that back into the
+  accumulator raised `call_without_opaque` at two call sites. Invisible on CI,
+  which pins OTP 27. Neither seeding through `MapSet.new/1` nor annotating the
+  private helpers with `MapSet.t/1` specs clears it, and the
+  build-the-set-once-at-the-end shape used elsewhere cannot apply, because the
+  budget has to be enforced *during* the scan rather than after it. The set is
+  now a plain map — `map_size/1` is O(1) like `MapSet.size/1` and `:sets` v2
+  stores exactly that shape underneath, so behaviour and cost are unchanged.
+
+  The `#1105` caller tests asserting that the guard interns no atoms were
+  themselves load-order dependent: `:erlang.system_info(:atom_count)` counts
+  lazy module loading as readily as interning by the parser, so opening the
+  measurement window around a call path's *first* invocation charged ~38 atoms
+  of module load to the guard. They passed or failed on whether `mix test`
+  happened to recompile in the same VM, on unmodified `main` as much as on a
+  diff. Each now warms the path first with a document crafted from different
+  tag names — different, because a same-name warm-up interns the measured names
+  and lets a guard that has stopped refusing pass green.
 - **A database outage no longer 404s every request as an unknown host** (#341).
   `KilnCMSWeb.Tenant.fetch_org/1` reported a lookup that *failed* the same way
   it reports a host that matches no org, and `KilnCMSWeb.Plugs.SetTenant` turned

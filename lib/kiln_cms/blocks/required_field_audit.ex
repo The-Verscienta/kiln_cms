@@ -54,13 +54,7 @@ defmodule KilnCMS.Blocks.RequiredFieldAudit do
     end
   end
 
-  # Every compiled content type plus the generic Entry tier (dynamic types) —
-  # the same set `KilnCMS.Firing.Sweep.resources/0` iterates, since both need
-  # "every resource carrying `blocks`".
-  defp resources do
-    compiled = Enum.map(KilnCMS.CMS.ContentTypes.all(), &{&1.type, &1.resource})
-    Enum.uniq(compiled ++ [entry: KilnCMS.CMS.Entry])
-  end
+  defp resources, do: KilnCMS.CMS.ContentTypes.blocks_resources()
 
   defp stream_records(resource, org_id) do
     resource
@@ -98,7 +92,7 @@ defmodule KilnCMS.Blocks.RequiredFieldAudit do
   # `{:array, :map}` — see `KilnCMS.Blocks.Columns`), so it is still the raw,
   # string-keyed map it was written as.
   defp scan_block(%{} = map, path) do
-    case block_module(map) do
+    case Blocks.module_for_tagged_map(map) do
       nil -> []
       mod -> scan(mod, map, path)
     end
@@ -142,22 +136,4 @@ defmodule KilnCMS.Blocks.RequiredFieldAudit do
   end
 
   defp scan_column(_other, _path), do: []
-
-  defp block_module(%{} = map) do
-    with type when not is_nil(type) <- Map.get(map, "_type") || Map.get(map, :_type),
-         type_atom when not is_nil(type_atom) <- safe_atom(type),
-         {:ok, mod} <- Blocks.fetch(type_atom) do
-      mod
-    else
-      _ -> nil
-    end
-  end
-
-  defp safe_atom(type) when is_atom(type), do: type
-
-  defp safe_atom(type) when is_binary(type) do
-    String.to_existing_atom(type)
-  rescue
-    ArgumentError -> nil
-  end
 end

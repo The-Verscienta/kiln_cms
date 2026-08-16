@@ -35,7 +35,7 @@ defmodule KilnCMSWeb.ApiAuthController do
   `store_all_tokens?` — *stores* the first-factor JWT before this controller
   gets to look at `totp_enabled?`. What the second factor withholds is the
   caller's access to it. Since #742 it also withholds its *use*:
-  `PendingSignIn.mint/4` parks the stored row off the purpose authentication
+  `PendingSignIn.mint_and_hold/4` parks the stored row off the purpose authentication
   requires, and `claim/1` puts it back once the code lands, so an abandoned
   exchange leaves an inert row that expires with the step rather than a live
   credential nobody holds.
@@ -229,7 +229,7 @@ defmodule KilnCMSWeb.ApiAuthController do
     |> put_status(:ok)
     |> json(%{
       two_factor_required: true,
-      pending_token: PendingSignIn.mint(:encrypted, conn, user),
+      pending_token: PendingSignIn.mint_and_hold(:encrypted, conn, user),
       expires_in: PendingSignIn.max_age()
     })
   end

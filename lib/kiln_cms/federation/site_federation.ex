@@ -38,30 +38,21 @@ defmodule KilnCMS.Federation.SiteFederation do
   schedule; there is no retired-key set that helps. Rotating means re-signing
   under a new key and letting peers re-fetch, which is a phase-2 concern.
   """
-  use Ash.Resource,
+  # The shared one-row-per-org shape comes from `KilnCMS.CMS.OrgSettings`
+  # (#1080). Editors read it: the federation panel shows whether the site is
+  # followable, and an editor looking at an empty follower list deserves to
+  # know it is empty because federation is off. Deciding this deployment
+  # federates is an admin act. `origin`, `username` and the keypair are all
+  # absent from `accept`: identity is minted once by `:enable` and is not a
+  # thing a settings form edits.
+  use KilnCMS.CMS.OrgSettings,
     domain: KilnCMS.Federation,
-    data_layer: AshPostgres.DataLayer,
-    authorizers: [Ash.Policy.Authorizer]
-
-  postgres do
-    table "site_federation"
-    repo KilnCMS.Repo
-  end
+    table: "site_federation",
+    accept: [:enabled, :display_name, :summary],
+    read: :editor,
+    update?: false
 
   actions do
-    defaults [:read]
-
-    # `origin`, `username` and the keypair are all absent: identity is minted
-    # once by `:enable` and is not a thing a settings form edits.
-    default_accept [:enabled, :display_name, :summary]
-
-    create :save do
-      primary? true
-      upsert? true
-      upsert_identity :one_per_org
-      upsert_fields [:enabled, :display_name, :summary]
-    end
-
     # Turn federation on, minting this site's permanent identity. Idempotent by
     # upsert on the org, but the identity fields are only written when absent —
     # re-enabling a site that was switched off keeps the actor its followers
@@ -99,43 +90,9 @@ defmodule KilnCMS.Federation.SiteFederation do
       accept []
       change set_attribute(:last_delivered_at, &DateTime.utc_now/0)
     end
-
-    destroy :destroy do
-      primary? true
-      require_atomic? false
-    end
-  end
-
-  policies do
-    # Editors read it: the federation panel shows whether the site is
-    # followable, and an editor looking at an empty follower list deserves to
-    # know it is empty because federation is off.
-    policy action_type(:read) do
-      authorize_if KilnCMS.CMS.Checks.OrgEditor
-    end
-
-    # Deciding this deployment federates is an admin act.
-    policy action_type([:create, :update, :destroy]) do
-      authorize_if KilnCMS.CMS.Checks.OrgAdmin
-    end
-  end
-
-  multitenancy do
-    strategy :attribute
-    attribute :org_id
-    global? !Application.compile_env(:kiln_cms, :strict_tenancy, true)
   end
 
   attributes do
-    uuid_primary_key :id
-
-    attribute :org_id, :uuid do
-      allow_nil? false
-      default &KilnCMS.Accounts.default_org_id/0
-      writable? false
-      public? false
-    end
-
     attribute :enabled, :boolean do
       default false
       allow_nil? false
@@ -181,21 +138,6 @@ defmodule KilnCMS.Federation.SiteFederation do
       writable? false
       public? true
     end
-
-    timestamps()
-  end
-
-  relationships do
-    belongs_to :organization, KilnCMS.Accounts.Organization do
-      source_attribute :org_id
-      define_attribute? false
-      attribute_writable? false
-      public? false
-    end
-  end
-
-  identities do
-    identity :one_per_org, [:org_id]
   end
 
   @doc """

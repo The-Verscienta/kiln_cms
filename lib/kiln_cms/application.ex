@@ -206,7 +206,13 @@ defmodule KilnCMS.Application do
     {:media_quarantine_reaper_cron, KilnCMS.Media.QuarantineReaper,
      "KILN_MEDIA_QUARANTINE_REAPER_CRON",
      "quarantined A/V uploads whose metadata strip never completed will NOT be " <>
-       "cleaned up. See #1122."}
+       "cleaned up. See #1122."},
+    {:federation_nonce_sweep_cron, KilnCMS.Federation.SeenSignatureSweeper,
+     "KILN_FEDERATION_NONCE_SWEEP_CRON",
+     "the federation replay nonce store will grow without bound. See #967."},
+    {:health_sweep_cron, KilnCMS.CMS.Workers.HealthSweepWorker, "KILN_HEALTH_SWEEP_CRON",
+     "content that has gone past its review cadence will NOT raise automation " <>
+       "events. See docs/content-lifecycles.md."}
   ]
 
   # `false` (or nil) on any key leaves that entry out, for a deployment driving

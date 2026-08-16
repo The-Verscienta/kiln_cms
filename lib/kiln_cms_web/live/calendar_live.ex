@@ -32,6 +32,20 @@ defmodule KilnCMSWeb.CalendarLive do
   re-queries the window. The message carries only an id: the window is small
   and the filters are server-side, so re-running the projection is cheaper and
   much simpler than working out whether that one id is in view.
+
+  A burst of writes (a bulk import, a release going out, a scheduler sweep —
+  or simply many things saving at once) queues one `:calendar_changed` per
+  write, and each one asks for exactly the same thing: re-run the window
+  query. `handle_info/2` drains every additional `:calendar_changed` already
+  waiting in the mailbox before it re-queries, so a burst of N writes costs
+  one re-query rather than N run back to back. Without that, this process's
+  own mailbox — not the database — becomes the bottleneck: every message is
+  handled strictly in arrival order, so a `render_click`/`render` call queued
+  behind a long run of stale, superseded re-queries waits for all of them
+  first. That is what a heavily-loaded shared org (the test suite's default
+  org, or in principle a very busy production one) turns into an apparent
+  hang: not a slow query and not a deadlock, just a mailbox that fell behind
+  its own reactivity and had no way to catch up.
   """
   use KilnCMSWeb, :live_view
 
@@ -54,7 +68,12 @@ defmodule KilnCMSWeb.CalendarLive do
       )
     end
 
-    {:ok, assign(socket, :page_title, gettext("Calendar"))}
+    {:ok,
+     socket
+     |> assign(:page_title, gettext("Calendar"))
+     # Present from the first render: an aria-live region inserted later is not
+     # announced by every screen reader, so it has to exist (empty) up front.
+     |> assign(:announcement, nil)}
   end
 
   @impl true
@@ -75,15 +94,190 @@ defmodule KilnCMSWeb.CalendarLive do
   # window rather than patching the one id in: the window is a month at most,
   # and reconciling one event against three views' worth of grouping is more
   # code than the query costs.
+  #
+  # `drain_calendar_changed/0` first, so a burst already queued behind this
+  # message collapses into the one re-query it actually needs (see the
+  # moduledoc's "Live" section) instead of running once per message.
   @impl true
   def handle_info({:calendar_changed, _id}, socket) do
+    drain_calendar_changed()
     {:noreply, load_events(socket)}
+  end
+
+  # Non-blocking: `after 0` returns immediately once the mailbox holds no more
+  # `:calendar_changed` messages, so this costs nothing beyond a mailbox scan
+  # when writes are not currently bursting.
+  defp drain_calendar_changed do
+    receive do
+      {:calendar_changed, _id} -> drain_calendar_changed()
+    after
+      0 -> :ok
+    end
   end
 
   @impl true
   def handle_event("filter", params, socket) when is_map(params) do
     {:noreply, push_patch(socket, to: calendar_path(socket.assigns, filters_from_params(params)))}
   end
+
+  # Drag or arrow-key reschedule. Both paths send the same shape — the target
+  # date — because two shapes into one handler is how a guard ends up silently
+  # not matching one of them (#764).
+  def handle_event(
+        "reschedule",
+        %{"id" => id, "type" => type, "kind" => kind, "date" => date},
+        socket
+      )
+      when is_binary(id) and is_binary(type) and is_binary(kind) and is_binary(date) do
+    # The event must be one currently in this editor's window. That is not
+    # belt-and-braces: the window was built by a policy-scoped, org-scoped read,
+    # so looking the event up here means a socket cannot move a record it could
+    # not already see — and it is also where the chip's existing time-of-day
+    # comes from, so a drag moves the day and leaves 09:00 alone.
+    with {:ok, event} <- find_event(socket.assigns.events, id, kind),
+         {:ok, date} <- parse_date(date),
+         :ok <- refuse_past(date),
+         {:ok, message} <- do_reschedule(event, date, socket) do
+      {:noreply, socket |> announce(message) |> load_events()}
+    else
+      {:error, message} ->
+        # Re-render from the server's state, which snaps the optimistically
+        # moved chip back to where the data still says it belongs.
+        {:noreply, socket |> announce(message) |> put_flash(:error, message) |> load_events()}
+    end
+  end
+
+  def handle_event("mark_reviewed", %{"id" => id, "type" => type}, socket)
+      when is_binary(id) and is_binary(type) do
+    with {:ok, event} <- find_event(socket.assigns.events, id, "review_due"),
+         {:ok, record} <- fetch_record(event, socket),
+         {:ok, _record} <-
+           ContentTypes.transition(event.type, "mark_reviewed", record,
+             actor: socket.assigns.current_user,
+             tenant: socket.assigns.current_org
+           ) do
+      message = gettext("Marked “%{title}” reviewed.", title: event.title)
+      {:noreply, socket |> announce(message) |> put_flash(:info, message) |> load_events()}
+    else
+      {:error, message} when is_binary(message) ->
+        {:noreply, socket |> announce(message) |> put_flash(:error, message)}
+
+      {:error, error} ->
+        message = error_message(error)
+        {:noreply, socket |> announce(message) |> put_flash(:error, message)}
+    end
+  end
+
+  # --- writes -----------------------------------------------------------------
+
+  # Which lanes can be dragged, and what each one actually writes.
+  #
+  # `:published` and `:release_published` are absent because they are history —
+  # you cannot reschedule something that already happened.
+  #
+  # `:review_due` is absent for a subtler reason, and it is a deliberate
+  # departure from the plan, which asked for it. `due_at` is *derived* from
+  # `last_reviewed_at` and the cadence. Dragging it could only write one of
+  # those two: moving `last_reviewed_at` forges an attestation — the one thing
+  # the whole design refuses to let anything but a human review do — and
+  # changing `review_after_days` alters the cadence permanently to move a single
+  # deadline. Neither is what "give me another week" means, so the chip offers
+  # "Mark reviewed" instead, which resets the clock honestly.
+  #
+  # `:task_due` is absent because the projection carries a task's *content* id
+  # (the chip links to the content), so there is nothing here to address the
+  # task by. Tasks are rescheduled from the task list.
+  @reschedulable ~w(publish unpublish archive expire release_scheduled)
+
+  defp do_reschedule(%{kind: :release_scheduled} = event, date, socket) do
+    with {:ok, release} <-
+           KilnCMS.CMS.get_release(event.id,
+             actor: socket.assigns.current_user,
+             tenant: socket.assigns.current_org
+           ),
+         {:ok, _release} <-
+           KilnCMS.CMS.schedule_release(release, %{scheduled_at: at_on(event, date)},
+             actor: socket.assigns.current_user,
+             tenant: socket.assigns.current_org
+           ) do
+      {:ok, moved_message(event, date)}
+    else
+      {:error, error} -> {:error, error_message(error)}
+    end
+  end
+
+  defp do_reschedule(event, date, socket) do
+    attrs =
+      case event.kind do
+        :publish -> %{scheduled_at: at_on(event, date)}
+        kind when kind in [:unpublish, :archive, :expire] -> %{unpublish_at: at_on(event, date)}
+      end
+
+    with {:ok, record} <- fetch_record(event, socket),
+         {:ok, _record} <-
+           ContentTypes.update(event.type, record, attrs,
+             actor: socket.assigns.current_user,
+             tenant: socket.assigns.current_org
+           ) do
+      {:ok, moved_message(event, date)}
+    else
+      {:error, error} -> {:error, error_message(error)}
+    end
+  end
+
+  defp fetch_record(event, socket) do
+    ContentTypes.get_record(event.type, event.id,
+      actor: socket.assigns.current_user,
+      tenant: socket.assigns.current_org
+    )
+  end
+
+  # The new day, carrying the chip's existing time of day — a 09:00 publish
+  # dragged to Thursday is a 09:00 Thursday publish, not a midnight one.
+  defp at_on(event, date), do: DateTime.new!(date, DateTime.to_time(event.at), "Etc/UTC")
+
+  defp find_event(events, id, kind) do
+    case Enum.find(events, &(&1.id == id and to_string(&1.kind) == kind)) do
+      nil -> {:error, gettext("That item is no longer on the calendar — reload to see why.")}
+      event -> {:ok, event}
+    end
+  end
+
+  defp parse_date(date) do
+    case Date.from_iso8601(date) do
+      {:ok, date} -> {:ok, date}
+      _ -> {:error, gettext("That is not a date this calendar can move something to.")}
+    end
+  end
+
+  # Refused uniformly rather than per lane. A backwards drag is nearly always a
+  # slip, and every lane's past date means something abrupt and irreversible-ish
+  # — a publish that fires within the minute, an embargo end that takes a live
+  # page down now. "Nothing happened, here is why" is the better answer to a
+  # slip than either of those.
+  defp refuse_past(date) do
+    if Date.before?(date, Date.utc_today()) do
+      {:error, gettext("Can't reschedule into the past.")}
+    else
+      :ok
+    end
+  end
+
+  defp moved_message(event, date) do
+    gettext("Moved “%{title}” to %{date}.",
+      title: event.title,
+      date: Calendar.strftime(date, "%-d %B %Y")
+    )
+  end
+
+  defp error_message(message) when is_binary(message), do: message
+  defp error_message(%{} = error), do: Exception.message(error)
+
+  # The screen-reader channel for a change that is otherwise only visible as a
+  # chip moving. Assigned rather than flashed for the success case: a toast per
+  # drag while rearranging a week is noise, but a silent move is unusable
+  # without sight of the grid.
+  defp announce(socket, message), do: assign(socket, :announcement, message)
 
   # --- window -----------------------------------------------------------------
 
@@ -265,12 +459,25 @@ defmodule KilnCMSWeb.CalendarLive do
   defp kind_label(:release_scheduled), do: gettext("release goes live")
   defp kind_label(:release_published), do: gettext("release shipped")
 
+  # Nine lanes over five accent tones, so two pairs need more than hue to tell
+  # them apart — and both pairs were, briefly, indistinguishable on screen while
+  # reading as distinct in the legend, which is worse than not splitting them at
+  # all.
+  #
+  # `:archive` is slate rather than a second red: filing something away is not
+  # the same event as taking it down, and rendering both in `error` made the
+  # `expiry_action` split show three names in two colours.
+  #
+  # `:review_due` is dashed rather than a paler amber: a deadline is a different
+  # KIND of thing from a scheduled action, alpha alone put it a hair from
+  # `:publish`, and a border STYLE survives being read by someone who cannot
+  # separate the hues.
   defp kind_class(:publish), do: "border-warning/40 bg-warning/10"
   defp kind_class(:unpublish), do: "border-error/40 bg-error/10"
-  defp kind_class(:archive), do: "border-error/40 bg-error/10"
-  defp kind_class(:expire), do: "border-error/60 bg-error/15 font-medium"
+  defp kind_class(:archive), do: "border-base-content/35 bg-base-content/10"
+  defp kind_class(:expire), do: "border-error/70 bg-error/20 font-medium"
   defp kind_class(:published), do: "border-success/40 bg-success/10"
-  defp kind_class(:review_due), do: "border-warning/50 bg-warning/15"
+  defp kind_class(:review_due), do: "border-dashed border-warning/70 bg-warning/10"
   defp kind_class(:task_due), do: "border-info/40 bg-info/10"
   defp kind_class(:release_scheduled), do: "border-primary/50 bg-primary/10 font-medium"
   defp kind_class(:release_published), do: "border-primary/30 bg-primary/5"
@@ -281,6 +488,30 @@ defmodule KilnCMSWeb.CalendarLive do
   defp event_path(%{type: type, id: id}), do: ~p"/editor/content/#{type}/#{id}"
 
   defp today?(date), do: date == Date.utc_today()
+
+  defp reschedulable?(event), do: to_string(event.kind) in @reschedulable
+
+  # The chip's tooltip doubles as its accessible description, so it is also
+  # where the keyboard affordance is stated — a `cursor-grab` says nothing to
+  # someone who is tabbing.
+  defp chip_title(event) do
+    base = "#{event.title} — #{event.label} #{kind_label(event.kind)}"
+
+    if reschedulable?(event) do
+      base <> " · " <> gettext("arrow keys move it")
+    else
+      base
+    end
+  end
+
+  # "Mark reviewed" belongs on a chip that is actually asking for one. A record
+  # whose review falls due next month does not need a button saying so on every
+  # calendar it appears on.
+  defp attestable?(%{kind: :review_due, health: health})
+       when health in [:due, :overdue, :expired],
+       do: true
+
+  defp attestable?(_event), do: false
 
   # --- render -----------------------------------------------------------------
 
@@ -364,6 +595,12 @@ defmodule KilnCMSWeb.CalendarLive do
         <div :if={@view == "list"}>
           <.event_list events={@events} />
         </div>
+
+        <%!-- Dragging a chip is a change with no text for a screen reader to
+              read, so the outcome — moved, refused, attested — is announced
+              here. `polite`, not `assertive`: it reports what the editor just
+              did, and should not cut across what they are reading next. --%>
+        <p class="sr-only" role="status" aria-live="polite">{@announcement}</p>
       </div>
     </Layouts.console>
     """
@@ -443,7 +680,7 @@ defmodule KilnCMSWeb.CalendarLive do
 
   defp grid(assigns) do
     ~H"""
-    <div class="overflow-x-auto">
+    <div class="overflow-x-auto" id="calendar-grid" phx-hook="CalendarDrag">
       <table class="w-full table-fixed border-collapse text-sm">
         <thead>
           <tr>
@@ -479,7 +716,7 @@ defmodule KilnCMSWeb.CalendarLive do
               <div class={["mb-1 text-xs", today?(day) && "font-bold text-primary"]}>
                 {day.day}
               </div>
-              <.day_chips events={Map.get(@by_day, day, [])} view={@view} />
+              <.day_chips events={Map.get(@by_day, day, [])} view={@view} day={day} />
             </td>
           </tr>
         </tbody>
@@ -490,6 +727,7 @@ defmodule KilnCMSWeb.CalendarLive do
 
   attr :events, :list, required: true
   attr :view, :string, required: true
+  attr :day, :any, required: true
 
   defp day_chips(assigns) do
     # Week columns are tall enough to show the day in full; month cells are not,
@@ -502,15 +740,23 @@ defmodule KilnCMSWeb.CalendarLive do
     assigns = assigns |> assign(:shown, shown) |> assign(:hidden, hidden)
 
     ~H"""
-    <ul class="space-y-1">
+    <%!-- Every day is a drop target, including empty ones — a day with nothing
+          in it is exactly where you want to drop something. --%>
+    <ul class="min-h-6 space-y-1" data-calendar-drop={Date.to_iso8601(@day)}>
       <li :for={ev <- @shown}>
         <.link
           navigate={event_path(ev)}
           class={[
             "block truncate rounded border px-1.5 py-0.5 text-xs hover:opacity-80",
-            kind_class(ev.kind)
+            kind_class(ev.kind),
+            reschedulable?(ev) && "cursor-grab active:cursor-grabbing"
           ]}
-          title={"#{ev.title} — #{ev.label} #{kind_label(ev.kind)}"}
+          title={chip_title(ev)}
+          data-reschedulable={reschedulable?(ev) && "true"}
+          data-event-id={ev.id}
+          data-event-type={ev.type}
+          data-event-kind={ev.kind}
+          data-event-date={Date.to_iso8601(DateTime.to_date(ev.at))}
         >
           <span :if={@view == "week"} class="mr-1 tabular-nums opacity-70">
             {Calendar.strftime(ev.at, "%H:%M")}
@@ -576,6 +822,16 @@ defmodule KilnCMSWeb.CalendarLive do
               {ev.label} {kind_label(ev.kind)}
             </span>
             <.health_badge health={ev.health} class="shrink-0" />
+            <button
+              :if={attestable?(ev)}
+              type="button"
+              phx-click="mark_reviewed"
+              phx-value-id={ev.id}
+              phx-value-type={ev.type}
+              class="btn btn-xs btn-default shrink-0"
+            >
+              {gettext("Mark reviewed")}
+            </button>
           </li>
         </ul>
       </li>

@@ -32,8 +32,6 @@ defmodule KilnCMS.Federation.AnnounceWorker do
   alias KilnCMS.Federation.DeliveryWorker
   alias KilnCMS.Federation.Follower
 
-  require Ash.Query
-
   @impl Oban.Worker
   def perform(%Oban.Job{args: args}) do
     %{"org_id" => org_id, "type" => type, "verb" => verb, "document_id" => document_id} = args
@@ -50,13 +48,11 @@ defmodule KilnCMS.Federation.AnnounceWorker do
 
   # ── gates ───────────────────────────────────────────────────────────────────
 
+  # One query for the three callers (#967) — `Federation.active_settings/2`.
   defp site_settings(org_id) do
-    case Federation.list_site_federation(authorize?: false, tenant: org_id) do
-      {:ok, [%{enabled: true, origin: origin} = settings]} when is_binary(origin) ->
-        {:ok, settings}
-
-      _other ->
-        :skip
+    case Federation.active_settings(org_id) do
+      {:ok, settings} -> {:ok, settings}
+      :off -> :skip
     end
   end
 
@@ -129,10 +125,9 @@ defmodule KilnCMS.Federation.AnnounceWorker do
     identity = Actor.identity(settings)
     activity = build(verb, document, identity, settings, org_id)
 
-    followers =
-      Follower
-      |> Ash.Query.filter(consecutive_failures < ^Federation.drop_follower_after())
-      |> Ash.read!(authorize?: false, tenant: org_id)
+    # `:deliverable` (#967) — the read that names the rule, rather than the
+    # rule restated here.
+    followers = Federation.deliverable_followers!(authorize?: false, tenant: org_id)
 
     Enum.each(followers, fn follower ->
       {:ok, delivery} =

@@ -411,12 +411,20 @@ defmodule KilnCMSWeb.Router do
       live "/editor/governance", GovernanceLive, :index
       live "/editor/governance/:type/:id", GovernanceLive, :show
       live "/editor/forms", FormLive, :index
+      # Per-site form settings (#1232): the org-wide embed allowlist (#1131) and
+      # the spam keyword list (#477), which had no production-reachable UI
+      # (AshAdmin is compiled out under `dev_routes: false`). Declared BEFORE
+      # `/editor/forms/:id` so the literal segment wins the match.
+      live "/editor/forms/settings", FormSettingsLive, :index
       live "/editor/forms/:id", FormBuilderLive, :edit
       # Funnel definitions (#621, phase 4 of docs/advanced-analytics-plan.md) —
       # admin-only like the rest of this block; the derived report (#622) is
       # editor-visible on the analytics dashboard.
       live "/editor/funnels", FunnelLive, :index
       live "/editor/funnels/:id", FunnelBuilderLive, :edit
+      # ActivityPub federation (#967): the gate, the handle, followers, the
+      # delivery ledger and the block list. Admin-only, like webhooks.
+      live "/editor/federation", FederationLive, :index
       live "/editor/api-keys", ApiKeyLive, :index
       # Which Kiln core this instance runs, and whether upstream has a newer
       # release. Reports only — updating is `mix kiln.update` (see SystemLive).
@@ -437,6 +445,10 @@ defmodule KilnCMSWeb.Router do
     # controller against the `:browser`-loaded user.
     get "/editor/governance/:type/:id/export.json", GovernanceController, :export
     get "/editor/governance/:type/:id/export.csv", GovernanceController, :export_csv
+    # Org-wide rather than per item. Three segments against the pair's four, so
+    # the router tells them apart on arity and this cannot be read as a content
+    # type called "health".
+    get "/editor/governance/health.csv", GovernanceController, :export_health_csv
 
     # Form entries export (#477) — file download, admin-gated in the
     # controller (submissions are visitor-provided data, frequently PII;
