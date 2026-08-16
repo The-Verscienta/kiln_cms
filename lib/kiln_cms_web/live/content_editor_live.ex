@@ -482,8 +482,25 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # has. Reloading the whole document's list rather than the one block is
   # deliberate — it's one query either way, and the alternative is merging a
   # partial result into an assign that another message may already have moved.
-  def handle_info({:block_thread_changed, _block_id}, socket),
-    do: {:noreply, reload_comments(socket)}
+  def handle_info({:block_thread_changed, block_id}, socket) do
+    # TEMP DIAGNOSTIC — investigating flaky "a thread started elsewhere
+    # lights this pin" CI failure. Remove before merge.
+    require Logger
+
+    Logger.warning(
+      "DIAG block_thread_changed bid=#{inspect(block_id)} record_id=#{inspect(socket.assigns.record.id)} " <>
+        "current_org=#{inspect(socket.assigns.current_org)} self=#{inspect(self())}"
+    )
+
+    socket = reload_comments(socket)
+
+    Logger.warning(
+      "DIAG reloaded comments count=#{length(socket.assigns.comments)} " <>
+        "entries=#{inspect(Enum.map(socket.assigns.comments, &{&1.id, &1.block_id, &1.org_id}))}"
+    )
+
+    {:noreply, socket}
+  end
 
   def handle_info({:block_task_changed, _block_id}, socket),
     do: {:noreply, reload_tasks(socket)}

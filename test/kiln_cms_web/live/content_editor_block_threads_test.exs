@@ -236,9 +236,18 @@ defmodule KilnCMSWeb.ContentEditorBlockThreadsTest do
     # (or through the API) moves this pin without anybody touching this
     # session.
     test "a thread started elsewhere lights this pin", ctx do
+      require Logger
       assert pin_state(render(ctx.lv), block_id(ctx.page)) == "empty"
 
-      comment(ctx.page, block_id(ctx.page), ctx.editor, "From another window")
+      root = comment(ctx.page, block_id(ctx.page), ctx.editor, "From another window")
+
+      Logger.warning(
+        "DIAG test created comment id=#{inspect(root.id)} block_id=#{inspect(root.block_id)} " <>
+          "org_id=#{inspect(root.org_id)} thread_id=#{inspect(root.thread_id)} " <>
+          "resolved_at=#{inspect(root.resolved_at)} page_id=#{inspect(ctx.page.id)} " <>
+          "expected_block_id=#{inspect(block_id(ctx.page))} lv_pid=#{inspect(ctx.lv.pid)}"
+      )
+
       # The write already broadcast; this only proves the handler re-reads
       # rather than trusting a payload.
       send(ctx.lv.pid, {:block_thread_changed, block_id(ctx.page)})
