@@ -1023,7 +1023,7 @@ defmodule KilnCMSWeb.CoreComponents do
   `%{value}` template — the exact bug #648 fixed in one of the others. Now one
   copy: every error is rendered through `Exception.message/1`, which is what
   Splode interpolates `vars` in (reading `.message` off the struct hands back
-  the raw template — see `KilnCMSWeb.FormBuilderLive.error_message/1`).
+  the raw template — see FormBuilderLive's private `error_message/1`).
 
   Options:
 
