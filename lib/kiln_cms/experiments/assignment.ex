@@ -35,8 +35,12 @@ defmodule KilnCMS.Experiments.Assignment do
   Sort by id \u2014 the deterministic tie-break used wherever two nodes must agree
   on an order the database does not promise. Shared here so a future change to
   the rule only needs updating in one place.
+
+  Deliberately unspecced: callers pass concrete struct lists (`Variant.t()`,
+  experiment structs with a nested `variants` list, ...) and a `[%{id: term()}]`
+  contract here would erase that struct type at the call boundary, degrading
+  Dialyzer's success typing for every caller instead of just this function.
   """
-  @spec sort_by_id([%{id: term()}]) :: [%{id: term()}]
   def sort_by_id(list), do: Enum.sort_by(list, & &1.id)
 
   @doc """
