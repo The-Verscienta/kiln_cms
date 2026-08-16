@@ -96,4 +96,53 @@ defmodule KilnCMS.Config.ReportTest do
 
     assert [first.fingerprint, second.fingerprint] |> Enum.uniq() |> length() == 2
   end
+
+  # #1288. The reads behind these warnings need the database, and both of them
+  # guarded themselves with a bare `rescue` — which is why the exit case below
+  # is the one that matters. A `rescue`-only guard passes every test that only
+  # ever raises, and that is exactly how it survived until a test exited.
+  describe "probe/2" do
+    test "returns what the function returns when it answers" do
+      assert Report.probe(:unknown, fn -> 3 end) == 3
+    end
+
+    test "takes the default when the read RAISES" do
+      assert Report.probe(:unknown, fn -> raise DBConnection.ConnectionError, "refused" end) ==
+               :unknown
+    end
+
+    test "takes the default when the read EXITS" do
+      # The half a `rescue` never covered. `Repo.one/1` is a `:gen_server.call`
+      # into the pool, and a call into a process that is not alive exits rather
+      # than raising — which is what a pool still restarting after repeated
+      # connect failures looks like from the caller.
+      assert Report.probe(:unknown, fn -> exit(:noproc) end) == :unknown
+      assert Report.probe(false, fn -> exit({:timeout, {GenServer, :call, []}}) end) == false
+    end
+
+    test "an exit from a real dead-process call is caught, not just a bare exit/1" do
+      # `exit/1` above proves the clause; this proves the shape it exists for.
+      # A `:gen_server.call` to a pid that has already stopped is the exact
+      # thing `DBConnection.Holder.checkout/3` does.
+      dead =
+        spawn(fn -> :ok end)
+        |> tap(fn pid ->
+          ref = Process.monitor(pid)
+          assert_receive {:DOWN, ^ref, :process, ^pid, _}
+        end)
+
+      assert Report.probe(:unknown, fn -> GenServer.call(dead, :anything) end) == :unknown
+    end
+
+    test "a THROW is not swallowed — that is a bug, not an unavailable database" do
+      assert catch_throw(Report.probe(:unknown, fn -> throw(:boom) end)) == :boom
+    end
+
+    test "the default is the caller's, not a hardcoded false" do
+      # `KilnCMSWeb.Tenant.org_count/0` needs `:unknown`, which `gap?/1` then
+      # judges; `false` would be a different and wrong answer there.
+      assert Report.probe(:unknown, fn -> exit(:noproc) end) == :unknown
+      assert Report.probe(0, fn -> exit(:noproc) end) == 0
+    end
+  end
 end
