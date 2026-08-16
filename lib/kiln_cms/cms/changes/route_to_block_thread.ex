@@ -33,8 +33,9 @@ defmodule KilnCMS.CMS.Changes.RouteToBlockThread do
   (#1252 review: taking it for every comment cost every human block comment a
   lock round-trip for a race this file already decided not to guard).
 
-  `KilnCMS.Governance.Chain.next_sequence/1` closes the same shape of race
-  (two concurrent writers computing "next"/"root") with a UNIQUE index and a
+  The private `next_sequence/1` in `KilnCMS.Governance.Chain` closes the same
+  shape of race (two concurrent writers computing "next"/"root") with a
+  UNIQUE index and a
   rescue-and-skip on the loser's insert instead of a lock (#1252 review
   raised the inconsistency). That pattern doesn't transfer directly here: it
   fits an insert that either is or isn't the first of its kind, decided by

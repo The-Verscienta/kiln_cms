@@ -162,9 +162,9 @@ defmodule KilnCMS.CMS.Comment do
   `block_id` (`:for_block`) or, when `block_id` is nil, to the document-level
   thread (`:for_document`) — the same nil-vs-real split
   `KilnCMS.CMS.Changes.RouteToBlockThread` needs to route a new comment and
-  `KilnCMS.Notifications.thread_participants/1` needs to notify a thread's
-  participants, factored here once so the split isn't reimplemented in both
-  (#1252 review).
+  the private `thread_participants/1` in `KilnCMS.Notifications` needs to
+  notify a thread's participants, factored here once so the split isn't
+  reimplemented in both (#1252 review).
   """
   def thread_comments!(content_type, content_id, nil, opts) do
     KilnCMS.CMS.list_comments_for_document!(content_type, content_id, opts)
