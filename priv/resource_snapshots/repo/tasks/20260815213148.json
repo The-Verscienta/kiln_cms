@@ -195,7 +195,7 @@
       "type": "date"
     },
     {
-      "allow_nil?": false,
+      "allow_nil?": true,
       "default": "nil",
       "generated?": false,
       "precision": null,
@@ -223,6 +223,18 @@
       "scale": null,
       "size": null,
       "source": "creator_id",
+      "type": "uuid"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "created_by_rule_id",
       "type": "uuid"
     },
     {
