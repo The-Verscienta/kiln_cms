@@ -120,7 +120,12 @@ defmodule KilnCMS.MixProject do
         "AshAuthentication.Plug.Helpers.validate_token/3",
         # Private — named by FormSettingsLive's moduledoc for the contradiction
         # rule it mirrors, not something callers outside FormBuilderLive reach.
-        "KilnCMSWeb.FormBuilderLive.form_params/1"
+        "KilnCMSWeb.FormBuilderLive.form_params/1",
+        # CHANGELOG history for the 0.6.0 release, naming the function under
+        # the name it had at the time (#1171 later renamed it to
+        # `mint_and_hold/4`). Historical entries describe the past, not the
+        # current surface, and must not be rewritten to keep this passing.
+        "KilnCMS.Accounts.PendingSignIn.mint/4"
       ],
       extras: extras(),
       groups_for_extras: groups_for_extras(),
