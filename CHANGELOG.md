@@ -113,6 +113,28 @@ migration, a rewritten column, a dropped config key).
   stay reported, not sent — an untyped map has no defensible extraction rule
   — and `docs/localization-workflows.md` says so.
 
+### Security
+
+- **The editor console can be served from a host no tenant controls** (#740,
+  steps 1–2 of the investigation on that issue). `https://acme.example/editor`
+  and `https://acme.example/` are one origin, so any script on a tenant's
+  public site (a delivery XSS; #490's supported code injection) could
+  `fetch("/editor/…", {credentials: "same-origin"})` in a signed-in editor's
+  browser. New `KilnCMSWeb.Surface` classifies every route as `:console`,
+  `:shared` or `:delivery` from what the router knows about it (its
+  `live_session`, pipelines and exact pattern — a prefix guess cannot do it:
+  `/api`, `/auth` and `/media` begin routes on both sides), pinned by a drift
+  test. New `KilnCMSWeb.Plugs.ConsoleHost`, ahead of the router: with
+  `KILN_CONSOLE_HOST` set, console routes on any other host redirect there
+  (`GET`) or 404, tenant content on the console host is a 404 (the bare host
+  goes to `/editor`), and shared routes serve on both — so delivery script is
+  cross-origin to the console. `Tenant.fetch_org/1` resolves the console host
+  to the default org, never refused even under `TENANT_STRICT_HOST`; org
+  resolution stays host-derived, so this fits a single-org deployment (where
+  code injection is most used) and a multi-org console host is the follow-up.
+  Off by default — nothing changes for an existing deployment. Docs:
+  `code-injection.md`, env-var table.
+
 ## [0.6.0] - 2026-08-12
 
 ### Added

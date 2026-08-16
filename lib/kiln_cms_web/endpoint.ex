@@ -185,6 +185,12 @@ defmodule KilnCMSWeb.Endpoint do
   # route. Scoped to API paths — browser pages stay same-origin.
   plug KilnCMSWeb.Plugs.ApiCORS
 
+  # The console/delivery origin split (#740): with KILN_CONSOLE_HOST set, a
+  # console route is only served on that host and tenant content never is.
+  # No-op when unset. Ahead of the router because it decides by the route the
+  # router *would* match, without dispatching.
+  plug KilnCMSWeb.Plugs.ConsoleHost
+
   plug KilnCMSWeb.Router
 
   # Force user-uploaded media to download rather than render inline, and disable
