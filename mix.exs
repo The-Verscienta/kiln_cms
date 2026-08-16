@@ -113,7 +113,11 @@ defmodule KilnCMS.MixProject do
         # is correct and useful — `KilnCMS.CMS.Calculations.RelatedLinks`
         # explains a real behaviour of it — but ExDoc has nothing to link a
         # hidden module to, and the docs gate runs `--warnings-as-errors`.
-        "AshAi.Serializer"
+        "AshAi.Serializer",
+        # A dependency function named for the #1172 hold contract's own
+        # explanation of why it works — ExDoc does not index AshAuthentication's
+        # docs from this project.
+        "AshAuthentication.Plug.Helpers.validate_token/3"
       ],
       extras: extras(),
       groups_for_extras: groups_for_extras(),
