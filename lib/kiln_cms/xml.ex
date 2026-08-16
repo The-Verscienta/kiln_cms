@@ -71,7 +71,7 @@ defmodule KilnCMS.Xml do
           :ok | {:error, {:too_many_names, pos_integer(), pos_integer()}}
   def check_name_budget(xml, max \\ @default_max_names)
       when is_binary(xml) and is_integer(max) and max > 0 do
-    case scan_names(xml, 0, MapSet.new(), max) do
+    case scan_names(xml, 0, %{}, max) do
       {:ok, _names} -> :ok
       {:error, count} -> {:error, {:too_many_names, count, max}}
     end
@@ -274,9 +274,20 @@ defmodule KilnCMS.Xml do
     end
   end
 
+  # The distinct-name set is a plain map, not a `MapSet`, and that is a dialyzer
+  # constraint rather than a style choice (#599 family). On Elixir 1.20+ a
+  # MapSet's internal is the opaque `:sets.set/1`; opacity survives a *contract*
+  # but not a success typing, so the untyped `put_name/3` here infers the
+  # unrolled `{:set, …} | %{_ => []}` union for its return. Feeding that back
+  # into the `scan_names/4` accumulator on the next iteration then trips
+  # `call_without_opaque` under OTP 29 (invisible on CI's OTP 27). The
+  # build-once-at-the-end shape used elsewhere cannot apply: the budget has to
+  # be enforced *during* the scan, before a crafted document is fully read.
+  # `map_size/1` is O(1) like `MapSet.size/1`, and `:sets` v2 stores exactly
+  # this shape underneath, so behaviour and cost are unchanged.
   defp put_name(names, name, max) do
-    names = MapSet.put(names, name)
-    count = MapSet.size(names)
+    names = Map.put(names, name, [])
+    count = map_size(names)
 
     if count > max do
       {:error, count}

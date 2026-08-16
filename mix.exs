@@ -135,7 +135,13 @@ defmodule KilnCMS.MixProject do
         # A Phoenix dependency module with no public docs of its own — named
         # for what it does with a 4xx raised during mount, not something
         # ExDoc can link to.
-        "Phoenix.LiveView.Channel"
+        "Phoenix.LiveView.Channel",
+        # CHANGELOG entry for the #599 family xmerl dialyzer fix, naming the
+        # opaque Erlang/Elixir types the fix works around. ExDoc autolinks
+        # code-formatted references inside extras (CHANGELOG.md included), and
+        # neither is a KilnCMS module ExDoc can resolve.
+        ":sets.set/1",
+        "MapSet.t/1"
       ],
       extras: extras(),
       groups_for_extras: groups_for_extras(),
