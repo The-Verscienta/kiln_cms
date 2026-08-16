@@ -12,6 +12,7 @@ defmodule KilnCMS.AutomationIntelligenceTest do
   alias KilnCMS.Automation.RuleWorker
   alias KilnCMS.CMS
   alias KilnCMS.Search.BlockIndexer
+  alias KilnCMS.Search.VectorCache
 
   defmodule StubEmbedder do
     @behaviour KilnCMS.Search.Embedder
@@ -723,6 +724,55 @@ defmodule KilnCMS.AutomationIntelligenceTest do
       # reserved half.
       editor_side = draft_in(org, actor, "editor-side passage", "Editor")
       assert is_list(KilnCMS.Search.Related.near_duplicates(editor_side, user_id: actor.id))
+    end
+
+    # Post-merge review finding 1 (#1076): `link_findings/2` used to call
+    # `KilnCMS.Seo.Links.suggest/2` with no budget context at all, so the
+    # `:suggest_links` reaction drew on the org's FULL allowance instead of
+    # the unattended reserve `:flag_duplicates`/`:suggest_tags` already had —
+    # able to drain the whole bucket and starve editors. Same shape as
+    # "flag_duplicates spends the embedding budget unattended" above, checked
+    # via `VectorCache` rather than a log line: `Seo.Links.suggest/2` always
+    # answers a plain list (it falls back to the keyword leg on a budget
+    # block), so the only observable proof the semantic leg was ever reached
+    # is whether it actually computed and cached a centroid.
+    test "suggest_links respects the unattended reserve the same way flag_duplicates does" do
+      with_search(embedding_per_org_limit: {2, :timer.hours(1)}, embedding_unattended_share: 0.5)
+      actor = admin()
+      org = budget_org()
+
+      r =
+        rule(%{
+          trigger_event: :in_review,
+          action: :suggest_links,
+          config: %{"to" => "eds@example.com"},
+          org_id: org.id
+        })
+
+      first = draft_in(org, actor, "rule-reserve link passage one", "Rule one")
+      second = draft_in(org, actor, "rule-reserve link passage two", "Rule two")
+
+      centroid_cached? = fn draft ->
+        draft |> BlockIndexer.embedding_inputs() |> Enum.all?(&VectorCache.raw_cached?/1)
+      end
+
+      # Half of 2 is 1 — the rule's first run computes and caches `first`'s
+      # centroid, spending it.
+      assert :ok = run_rule(r, first, "post.in_review")
+      assert centroid_cached?.(first)
+
+      # The second unattended call is refused by the reserve before it ever
+      # reaches the model. Without `link_findings/2` threading
+      # `unattended?: true` + a rule identity through `suggest/2` (this PR's
+      # fix), this call would instead spend the org's OTHER unit — the one
+      # the reserve exists to keep for a human.
+      assert :ok = run_rule(r, second, "post.in_review")
+      refute centroid_cached?.(second)
+
+      # …and the reserved half is still there for an editor's own panel call.
+      editor_side = draft_in(org, actor, "editor-reserve link passage", "Editor")
+      assert is_list(KilnCMS.Seo.Links.suggest(editor_side, user_id: actor.id))
+      assert centroid_cached?.(editor_side)
     end
   end
 end

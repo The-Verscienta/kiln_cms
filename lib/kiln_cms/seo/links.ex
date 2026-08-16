@@ -60,8 +60,15 @@ defmodule KilnCMS.Seo.Links do
   Hence no `:actor` or `:tenant` option — the tenant is the record's own org,
   and there is no per-actor scoping to apply (#869).
 
-  Options: `:limit` (default #{@default_limit}) and `:exclude_paths` — paths the
-  body already links to, so the panel doesn't suggest one that is already there.
+  Options: `:limit` (default #{@default_limit}), `:exclude_paths` — paths the
+  body already links to, so the panel doesn't suggest one that is already
+  there — and `:user_id` / `:unattended?`, forwarded to the semantic leg's
+  `Related.related_documents/2` for the `KilnCMS.LLM.Budget` reserve (#1076):
+  pass the editing user's id from an interactive caller, or `unattended?:
+  true` plus a synthetic rule identity from `KilnCMS.Automation.RuleWorker`.
+  Omitting both still works — the semantic leg simply charges the org's raw
+  bucket with no per-user throttle and no unattended reserve — but every
+  caller here should pass one or the other; see `Related`'s moduledoc.
   """
   @spec suggest(struct(), keyword()) :: [suggestion()]
   def suggest(record, opts \\ []) do
@@ -69,7 +76,7 @@ defmodule KilnCMS.Seo.Links do
     exclude = opts |> Keyword.get(:exclude_paths, []) |> MapSet.new()
 
     record
-    |> candidates(limit)
+    |> candidates(limit, opts)
     |> Enum.reject(&drop?(&1, record, exclude))
     |> Enum.uniq_by(& &1.id)
     |> Enum.take(limit)
@@ -84,17 +91,21 @@ defmodule KilnCMS.Seo.Links do
 
   # Over-fetch on both legs: self, already-linked and unresolvable-path
   # candidates are all filtered afterwards.
-  defp candidates(record, limit) do
-    case semantic(record, limit) do
+  defp candidates(record, limit, opts) do
+    case semantic(record, limit, opts) do
       [] -> keyword(record, limit)
       results -> results
     end
   end
 
-  defp semantic(record, limit) do
+  defp semantic(record, limit, opts) do
     if Search.semantic?() do
       record
-      |> Related.related_documents(limit: limit * 3)
+      |> Related.related_documents(
+        limit: limit * 3,
+        user_id: opts[:user_id],
+        unattended?: Keyword.get(opts, :unattended?, false)
+      )
       |> Enum.map(&Map.put(&1, :source, :semantic))
     else
       []

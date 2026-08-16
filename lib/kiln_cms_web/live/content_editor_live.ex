@@ -664,8 +664,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # that was replaced underneath them.
   def handle_async(:content_intel, {:ok, {version, %{} = intel}}, socket) do
     if version == socket.assigns.editor_version do
-      {duplicates, duplicates_ok?} = intel_outcome(intel.duplicates)
-      {tags, tags_ok?} = intel_outcome(intel.tags)
+      {duplicates, duplicates_reason} = intel_outcome(intel.duplicates)
+      {tags, tags_reason} = intel_outcome(intel.tags)
 
       socket =
         socket
@@ -678,17 +678,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
       # *result* — and a `KilnCMS.LLM.Budget`-blocked call (#1076) is the
       # absence of one. Without the flash the two are indistinguishable, and an
       # author would reasonably publish the duplicate the click never checked.
-      if duplicates_ok? and tags_ok? do
-        {:noreply, socket}
-      else
-        {:noreply,
-         put_flash(
-           socket,
-           :error,
-           gettext(
-             "Content intelligence is at its rate limit right now. Please try again shortly."
-           )
-         )}
+      # Either reason is shown — whichever call was blocked, the message names
+      # why, the same as `seo_error_message/1` does for the SEO panel.
+      case duplicates_reason || tags_reason do
+        nil -> {:noreply, socket}
+        reason -> {:noreply, put_flash(socket, :error, intel_error_message(reason))}
       end
     else
       {:noreply, assign(socket, :intel_loading?, false)}
@@ -4911,6 +4905,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
     record = socket.assigns.record
     # Paths the body already links to, so we don't suggest a link that's there.
     linked = socket.assigns.seo_body_stats.internal_link_paths
+    # `user_id`, not `actor`: the suggestion set itself is identical for every
+    # actor (#869, see below) — this is only the `KilnCMS.LLM.Budget`
+    # per-caller bucket for `suggest/2`'s semantic leg, same as `actor.id` for
+    # `load_content_intel/1` below (#1076).
+    actor_id = socket.assigns.actor && socket.assigns.actor.id
 
     socket
     |> assign(:seo_links_loading?, true)
@@ -4918,7 +4917,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       # No actor/tenant: `suggest/2` scopes to `record`'s own org and the
       # published/`:public` delivery boundary, so it is identical for every actor
       # (#869).
-      KilnCMS.Seo.Links.suggest(record, exclude_paths: linked)
+      KilnCMS.Seo.Links.suggest(record, exclude_paths: linked, user_id: actor_id)
     end)
   end
 
@@ -4953,12 +4952,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end)
   end
 
-  # Normalizes a `KilnCMS.Search.Related` result to a displayable list plus
-  # whether it was a real answer — `{:error, _}` (a `KilnCMS.LLM.Budget` block,
+  # Normalizes a `KilnCMS.Search.Related` result to a displayable list plus the
+  # blocking reason, if any — `{:error, reason}` (a `KilnCMS.LLM.Budget` block,
   # #1076) renders as an empty list too, but the second value tells
-  # `handle_async(:content_intel, ...)` apart from a genuine "nothing found".
-  defp intel_outcome({:error, _reason}), do: {[], false}
-  defp intel_outcome(list) when is_list(list), do: {list, true}
+  # `handle_async(:content_intel, ...)` apart from a genuine "nothing found",
+  # and carries enough detail for `intel_error_message/1` to say *why*, the
+  # same as `seo_error_message/1` does for the SEO panel's own budget errors.
+  defp intel_outcome({:error, reason}), do: {[], reason}
+  defp intel_outcome(list) when is_list(list), do: {list, nil}
 
   # Tick a suggested tag in the form's `tag_ids`, then drop it from the panel.
   #
@@ -5222,6 +5223,22 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp seo_error_message(_reason),
     do: gettext("Couldn't generate suggestions. Please try again.")
+
+  # Content intelligence (#339)'s own version of `seo_error_message/1` above —
+  # a separate function because its errors come from `KilnCMS.LLM.Budget` via
+  # `KilnCMS.Search.Related` (#1076) rather than `KilnCMS.Seo.draft/2`, so the
+  # reason shapes only partially overlap (no `:too_short` or `:disabled` here).
+  defp intel_error_message({:rate_limited, retry_after_ms}),
+    do:
+      gettext("Content intelligence is at its rate limit. Try again in %{seconds}s.",
+        seconds: max(div(retry_after_ms, 1000), 1)
+      )
+
+  defp intel_error_message(:unattended_disabled),
+    do: gettext("Content intelligence isn't available for unattended callers right now.")
+
+  defp intel_error_message(_reason),
+    do: gettext("Content intelligence is at its rate limit right now. Please try again shortly.")
 
   # ── Block-level AI assist (#60) ───────────────────────────────────────────
 

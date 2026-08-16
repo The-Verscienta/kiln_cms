@@ -103,6 +103,9 @@ defmodule KilnCMS.MixProject do
         "KilnCMS.Application",
         "KilnCMS.Application.start/2",
         "KilnCMS.Governance.Chain.any_history_anchors?/0",
+        # Private — VectorCache's moduledoc names the caller that decides
+        # whether a raw-cache hit is free (#1076).
+        "KilnCMS.Search.Related.unindexed_centroid/2",
         "KilnCMS.PostgrexTypes",
         "KilnCMS.Repo.installed_extensions/0",
         "KilnCMSWeb.Telemetry.init/1",

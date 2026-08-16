@@ -716,8 +716,16 @@ defmodule KilnCMS.Automation.RuleWorker do
 
   # ── #377 box 1: auto internal-linking ─────────────────────────────────────
 
-  defp link_findings(record, _context) do
-    case KilnCMS.Seo.Links.suggest(record) do
+  # `unattended?: true` + the per-rule identity — the same #1076 shape
+  # `duplicate_findings/2`/`tag_findings/2` below use — so an `in_review`
+  # rule draws on the embedding reserve rather than the full org allowance
+  # when the semantic leg falls onto the uncached-centroid path (a draft has
+  # no stored vector yet). See `KilnCMS.Search.Related`'s moduledoc (#1076).
+  defp link_findings(record, context) do
+    case KilnCMS.Seo.Links.suggest(record,
+           unattended?: true,
+           user_id: budget_identity(context)
+         ) do
       [] ->
         :none
 
@@ -801,15 +809,10 @@ defmodule KilnCMS.Automation.RuleWorker do
       # 3600000ms" would send an operator to wait out a window that will never
       # help.
       {:error, :unattended_disabled} ->
-        {:skip,
-         "SEO drafting is switched off for unattended callers " <>
-           "(config :kiln_cms, KilnCMS.Seo, unattended_share: 0.0)"}
+        budget_skip(:unattended_disabled, seo_budget_labels())
 
-      {:error, {:rate_limited, _ms}} ->
-        {:skip,
-         "SEO draft budget spent: unattended rules stop once the org reaches " <>
-           "#{KilnCMS.Seo.unattended_share()} of per_org_limit, so the rest stays " <>
-           "available to editors"}
+      {:error, {:rate_limited, _ms} = reason} ->
+        budget_skip(reason, seo_budget_labels())
 
       {:error, reason} ->
         {:skip, "SEO draft failed: #{inspect(reason)}"}
@@ -901,21 +904,45 @@ defmodule KilnCMS.Automation.RuleWorker do
     end
   end
 
-  # Spelled out rather than inspected, same as `draft_findings/2`'s twin: the
+  defp embedding_budget_skip(reason), do: budget_skip(reason, embedding_budget_labels())
+
+  # Translates a `KilnCMS.LLM.Budget` block into a `{:skip, message}` naming
+  # the config key an operator would change — shared by every unattended
+  # reaction that budgets a model call, so `draft_findings/2`'s (#943) and
+  # `embedding_budget_skip/1`'s (#1076) messages can't drift apart. The
   # unattended-disabled case is a standing setting, not an overload, and
   # "rate limited, retry in 3600000ms" would send an operator to wait out a
-  # window that will never help.
-  defp embedding_budget_skip(:unattended_disabled) do
+  # window that will never help — spelled out rather than inspected either way.
+  defp budget_skip(:unattended_disabled, %{feature: feature, module: module, share_key: share_key}) do
     {:skip,
-     "embedding is switched off for unattended callers " <>
-       "(config :kiln_cms, KilnCMS.Search, embedding_unattended_share: 0.0)"}
+     "#{feature} is switched off for unattended callers " <>
+       "(config :kiln_cms, #{inspect(module)}, #{share_key}: 0.0)"}
   end
 
-  defp embedding_budget_skip({:rate_limited, _ms}) do
+  defp budget_skip({:rate_limited, _ms}, %{feature: feature, share: share, org_limit_key: key}) do
     {:skip,
-     "embedding budget spent: unattended rules stop once the org reaches " <>
-       "#{KilnCMS.Search.embedding_unattended_share()} of embedding_per_org_limit, " <>
-       "so the rest stays available to editors"}
+     "#{feature} budget spent: unattended rules stop once the org reaches " <>
+       "#{share} of #{key}, so the rest stays available to editors"}
+  end
+
+  defp seo_budget_labels do
+    %{
+      feature: "SEO drafting",
+      module: KilnCMS.Seo,
+      share_key: :unattended_share,
+      share: KilnCMS.Seo.unattended_share(),
+      org_limit_key: "per_org_limit"
+    }
+  end
+
+  defp embedding_budget_labels do
+    %{
+      feature: "embedding",
+      module: KilnCMS.Search,
+      share_key: :embedding_unattended_share,
+      share: KilnCMS.Search.embedding_unattended_share(),
+      org_limit_key: "embedding_per_org_limit"
+    }
   end
 
   defp default_body do

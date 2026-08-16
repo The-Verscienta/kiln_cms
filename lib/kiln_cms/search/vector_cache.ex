@@ -155,6 +155,23 @@ defmodule KilnCMS.Search.VectorCache do
     match?({:ok, true}, Cachex.exists?(@cache, key(Search.document_prefix() <> text)))
   end
 
+  @doc """
+  As `cached?/1`, but for `embed/1`'s key — no `KilnCMS.Search.document_prefix/0`
+  applied.
+
+  `KilnCMS.Search.BlockIndexer.block_vectors/1` calls `embed/1` directly, not
+  `embed_document/1`: a block's embedding input already carries its ancestor
+  context (the heading trail above it), so it is not the bare span the
+  document/query instruction prefix is meant for, and `cached?/1`'s
+  prefixed key would never match what a block actually hashes to.
+  `KilnCMS.Search.Related.unindexed_centroid/2` checks this — not `cached?/1`
+  — to count the blocks a centroid computation would actually pay for (#1076).
+  """
+  @spec raw_cached?(String.t()) :: boolean()
+  def raw_cached?(text) when is_binary(text) do
+    match?({:ok, true}, Cachex.exists?(@cache, key(text)))
+  end
+
   @doc false
   # Exported so a test can assert on an entry's presence and expiry without
   # restating the key shape — a second spelling would drift and quietly test

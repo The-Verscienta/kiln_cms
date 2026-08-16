@@ -318,6 +318,13 @@ msgstr[1] "%{count} debates sin resolver"
 msgid "%{count} unused recovery codes remain."
 msgstr "Quedan %{count} códigos de recuperación sin usar."
 
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} variant"
+msgid_plural "%{count} variants"
+msgstr[0] "%{count} variante"
+msgstr[1] "%{count} variantes"
+
 #: lib/kiln_cms_web/live/preview_live.ex
 #: lib/kiln_cms_web/live/token_preview_live.ex
 #, elixir-autogen, elixir-format
@@ -562,6 +569,7 @@ msgstr "(este)"
 msgid "(unset)"
 msgstr "(sin definir)"
 
+#: lib/kiln_cms_web/live/experiment_live.ex
 #: lib/kiln_cms_web/live/link_report_live.ex
 #, elixir-autogen, elixir-format
 msgid "(untitled)"
@@ -701,6 +709,16 @@ msgstr "Un feed lo descargan lectores anónimos, agregadores y rastreadores. Con
 msgid "A flagged phrase"
 msgstr "Una expresión señalada"
 
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "A form is submitted"
+msgstr "Se envía un formulario"
+
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "A funnel is completed"
+msgstr "Se completa un embudo"
+
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
 msgid "A link is labelled with its own URL — a descriptive phrase carries more signal."
@@ -724,6 +742,11 @@ msgstr "Un enlace solo aparece aquí tras fallar %{count} comprobaciones seguida
 #, elixir-autogen, elixir-format
 msgid "A multi-segment canonical URL. When set, the flat slug URL 301s here; changing it leaves a redirect behind on published content."
 msgstr "Una URL canónica de varios segmentos. Cuando se define, la URL de slug plano redirige aquí con un 301; cambiarla deja una redirección en el contenido publicado."
+
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "A page is reached"
+msgstr "Se llega a una página"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -749,6 +772,11 @@ msgstr "Un lanzamiento necesita un nombre."
 #, elixir-autogen, elixir-format
 msgid "A request whose Host header matches no organization is served the default organization's content, branding and analytics — including a bare hostname, an IP address, or a Host a caller made up. With one organization that is the same site either way. With more than one it is another tenant's."
 msgstr "Una petición cuya cabecera Host no coincide con ninguna organización recibe el contenido, la marca y las analíticas de la organización predeterminada, incluidos un nombre de host simple, una dirección IP o un Host inventado por quien llama. Con una sola organización se trata del mismo sitio en cualquier caso. Con más de una es el de otro inquilino."
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "A running experiment's variants are locked: changing a split or a patch mid-run would invalidate every result gathered so far. Conclude it first."
+msgstr "Las variantes de un experimento en curso están bloqueadas: cambiar el reparto o un parche a mitad de la ejecución invalidaría todos los resultados recogidos hasta ahora. Conclúyalo primero."
 
 #: lib/kiln_cms/branding/app_icon.ex
 #, elixir-autogen, elixir-format
@@ -1101,6 +1129,11 @@ msgstr "Añadir al lanzamiento"
 msgid "Add typed fields to a content type without a code change. Editors fill them in the content editor; values are validated against these definitions."
 msgstr "Añada campos tipados a un tipo de contenido sin cambiar el código. Los editores los completan en el editor de contenido; los valores se validan contra estas definiciones."
 
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Add variant"
+msgstr "Añadir variante"
+
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Add webhook"
@@ -1445,6 +1478,7 @@ msgid "April"
 msgstr "abril"
 
 #: lib/kiln_cms_web/live/editor_live.ex
+#: lib/kiln_cms_web/live/experiment_live.ex
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Archive"
@@ -1465,6 +1499,11 @@ msgstr "Archivar tipo de contenido"
 msgid "Archive this content type? Its entries stop being served but are kept, and you can restore it later."
 msgstr "¿Archivar este tipo de contenido? Sus entradas dejan de servirse pero se conservan, y puede restaurarlo más tarde."
 
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Archive this experiment?"
+msgstr "¿Archivar este experimento?"
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Archive this published release? It can no longer be rolled back as a group."
@@ -1477,6 +1516,8 @@ msgstr "¿Archivar este lanzamiento? Sus elementos pendientes quedarán libres p
 
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
+#: lib/kiln_cms_web/live/experiment_live.ex
+#: lib/kiln_cms_web/live/experiments_live.ex
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Archived"
@@ -1707,12 +1748,18 @@ msgstr "¿Bloquear toda esta instancia? Se eliminan todos sus seguidores y se re
 msgid "Blocked"
 msgstr "Bloqueados"
 
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "Blocked — %{reason}"
+msgstr "Bloqueado: %{reason}"
+
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Blocked. Matching followers were removed."
 msgstr "Bloqueado. Se eliminaron los seguidores coincidentes."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
 msgid "Blocks"
 msgstr "Bloques"
@@ -1855,6 +1902,7 @@ msgstr "No se puede reprogramar al pasado."
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
+#: lib/kiln_cms_web/live/experiment_live.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/menu_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
@@ -2269,6 +2317,11 @@ msgstr "Comparar versiones"
 msgid "Complete it"
 msgstr "Completarla"
 
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "Completes a funnel"
+msgstr "Completa un embudo"
+
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
 msgid "Completes when its content publishes"
@@ -2288,6 +2341,27 @@ msgstr "Cumplimiento"
 #, elixir-autogen, elixir-format
 msgid "Complimentary"
 msgstr "De cortesía"
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Conclude"
+msgstr "Concluir"
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Conclude the experiment before promoting."
+msgstr "Concluya el experimento antes de promover."
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Conclude with winner"
+msgstr "Concluir con ganador"
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "Concluded"
+msgstr "Concluido"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -2406,6 +2480,16 @@ msgstr "Estado del contenido"
 msgid "Content intelligence is at its rate limit right now. Please try again shortly."
 msgstr "La inteligencia de contenido ha alcanzado su límite de velocidad en este momento. Vuelve a intentarlo en breve."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Content intelligence is at its rate limit. Try again in %{seconds}s."
+msgstr "La inteligencia de contenido ha alcanzado su límite de velocidad. Vuelve a intentarlo en %{seconds}s."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Content intelligence isn't available for unattended callers right now."
+msgstr "La inteligencia de contenido no está disponible para llamadas no supervisadas en este momento."
+
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Content item"
@@ -2417,6 +2501,7 @@ msgid "Content no longer exists"
 msgstr "El contenido ya no existe"
 
 #: lib/kiln_cms_web/live/automation_live.ex
+#: lib/kiln_cms_web/live/experiments_live.ex
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
@@ -2469,6 +2554,16 @@ msgstr "Contenido"
 #, elixir-autogen, elixir-format
 msgid "Continue"
 msgstr "Continuar"
+
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "Control"
+msgstr "Control"
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Conversions"
+msgstr "Conversiones"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/mail_settings_live.ex
@@ -2873,6 +2968,11 @@ msgstr "Recuento"
 msgid "Counts are capped per content type — there may be more than shown."
 msgstr "Los recuentos están limitados por tipo de contenido: puede haber más de los que se muestran."
 
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "Counts as a conversion"
+msgstr "Cuenta como conversión"
+
 #: lib/kiln_cms_web/live/analytics_live.ex
 #, elixir-autogen, elixir-format
 msgid "Counts below %{n} show as \"< %{n}\" rather than an exact number — a very small count can describe a single visitor's arrival."
@@ -2912,6 +3012,11 @@ msgstr "Crear una cuenta para suscribirte"
 #, elixir-autogen, elixir-format
 msgid "Create content type"
 msgstr "Crear tipo de contenido"
+
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "Create experiment"
+msgstr "Crear experimento"
 
 #: lib/kiln_cms_web/live/form_live.ex
 #, elixir-autogen, elixir-format
@@ -3171,6 +3276,7 @@ msgstr "Tipos definidos"
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
+#: lib/kiln_cms_web/live/experiment_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
@@ -3257,6 +3363,11 @@ msgstr "Eliminar envío"
 #, elixir-autogen, elixir-format
 msgid "Delete this block? This can't be undone."
 msgstr "¿Eliminar este bloque? Esta acción no se puede deshacer."
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Delete this draft experiment and its variants?"
+msgstr "¿Eliminar este borrador de experimento y sus variantes?"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -3543,6 +3654,16 @@ msgstr "Nombre para mostrar"
 msgid "Do"
 msgstr "Ejecutar"
 
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "Document"
+msgstr "Documento"
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Document fields"
+msgstr "Campos del documento"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Document notes"
@@ -3581,6 +3702,8 @@ msgstr "Documento descargable, p. ej. un PDF"
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
+#: lib/kiln_cms_web/live/experiment_live.ex
+#: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
 msgid "Draft"
 msgstr "Borrador"
@@ -3684,6 +3807,11 @@ msgstr "Duplicado como nuevo borrador. No se copiaron, porque tu rol no puede es
 msgid "Duration"
 msgstr "Duración"
 
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Each block's text fields, addressed by the block's stable id — a patch survives reordering."
+msgstr "Los campos de texto de cada bloque, identificados por el id estable del bloque: un parche sobrevive a la reordenación."
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Each code signs you in once if you lose your authenticator."
@@ -3703,6 +3831,7 @@ msgstr "Cada nivel concede una audiencia. Configure el precio en el panel de su 
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
+#: lib/kiln_cms_web/live/experiment_live.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/menu_live.ex
 #: lib/kiln_cms_web/live/social_live.ex
@@ -4016,6 +4145,11 @@ msgstr "Cada petición vuelve a leer la base de datos hasta que la caché se cal
 msgid "Every scanned slug already matches its derivation."
 msgstr "Todos los slugs analizados ya coinciden con su derivación."
 
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every variant is over the floor and no arm leads outright."
+msgstr "Todas las variantes superan el mínimo y ninguna lidera claramente."
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Everything with a cadence is inside it."
@@ -4032,10 +4166,52 @@ msgstr "Extracto"
 msgid "Expand"
 msgstr "Ampliar"
 
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Experiment archived."
+msgstr "Experimento archivado."
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Experiment concluded. The document is unchanged until you promote a winner."
+msgstr "Experimento concluido. El documento no cambia hasta que promueva una ganadora."
+
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "Experiment created. Add a variant, then start it."
+msgstr "Experimento creado. Añada una variante y luego inícielo."
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Experiment deleted."
+msgstr "Experimento eliminado."
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Experiment started."
+msgstr "Experimento iniciado."
+
+#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/live/experiment_live.ex
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "Experiments"
+msgstr "Experimentos"
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Experiments are switched off for this deployment, so no arm is served."
 msgstr "Los experimentos están desactivados en esta instalación, así que no se sirve ninguna variante."
+
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "Experiments are switched off on this deployment."
+msgstr "Los experimentos están desactivados en este despliegue."
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Experiments are switched off on this deployment: nothing is served or measured."
+msgstr "Los experimentos están desactivados en este despliegue: no se sirve ni se mide nada."
 
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/api_key_live.ex
@@ -4381,6 +4557,11 @@ msgstr "Vista previa del formulario"
 msgid "Form settings"
 msgstr "Configuración de formularios"
 
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "Form submission"
+msgstr "Envío de formulario"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Formatted text with bold, italic, and lists"
@@ -4529,6 +4710,26 @@ msgstr "Publicación"
 #, elixir-autogen, elixir-format
 msgid "Go-live date removed; the release is manual again."
 msgstr "Se quitó la fecha de publicación; el lanzamiento vuelve a ser manual."
+
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "Goal content type"
+msgstr "Tipo de contenido objetivo"
+
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "Goal document id"
+msgstr "Id del documento objetivo"
+
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "Goal form"
+msgstr "Formulario objetivo"
+
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "Goal funnel"
+msgstr "Embudo objetivo"
 
 #: lib/kiln_cms_web/components/advisory_components.ex
 #, elixir-autogen, elixir-format
@@ -4820,6 +5021,11 @@ msgstr "Importado %{name}: %{count} traducciones aplicadas."
 #, elixir-autogen, elixir-format
 msgid "Importing…"
 msgstr "Importando…"
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Impressions"
+msgstr "Impresiones"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -5596,6 +5802,7 @@ msgstr "Mis tareas"
 #: lib/kiln_cms_web/live/api_key_live.ex
 #: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/billing_live.ex
+#: lib/kiln_cms_web/live/experiments_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/form_live.ex
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
@@ -5661,6 +5868,11 @@ msgstr "Crear %{type}"
 #, elixir-autogen, elixir-format
 msgid "New content type"
 msgstr "Nuevo tipo de contenido"
+
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "New experiment"
+msgstr "Nuevo experimento"
 
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
@@ -5909,6 +6121,11 @@ msgstr "Ningún documento coincide con “%{query}”."
 msgid "No documents yet — upload a PDF in the"
 msgstr "Aún no hay documentos: sube un PDF en la"
 
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "No experiments yet."
+msgstr "Aún no hay experimentos."
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "No external witness is configured. Checkpoints are minted and stored in this database only, so they attest history against edits — but not against someone who can write to the database itself."
@@ -6150,6 +6367,11 @@ msgstr "Aún no hay etiquetas."
 msgid "No tiers yet"
 msgstr "Aún no hay niveles"
 
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "No usable result"
+msgstr "Sin resultado utilizable"
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "No versions recorded."
@@ -6202,6 +6424,11 @@ msgstr "No disponible"
 #, elixir-autogen, elixir-format
 msgid "Not configured"
 msgstr "Sin configurar"
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Not enough data to call a leader: every variant needs at least %{floor} impressions first. Rates on fewer are shown but not compared."
+msgstr "No hay datos suficientes para declarar una líder: cada variante necesita al menos %{floor} impresiones. Las tasas con menos se muestran pero no se comparan."
 
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -6462,6 +6689,11 @@ msgstr "Solo se envía cuando el formulario tiene un campo de correo electrónic
 #, elixir-autogen, elixir-format
 msgid "Only the %{count} most recently updated published documents were scanned; there may be more."
 msgstr "Solo se analizaron los %{count} documentos publicados actualizados más recientemente; puede haber más."
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Only these fields may be varied. Leave a field as it is to keep the document's value."
+msgstr "Solo estos campos pueden variarse. Deje un campo como está para conservar el valor del documento."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/form_settings_live.ex
@@ -6863,6 +7095,21 @@ msgstr "Expresiones que señalar"
 msgid "Pick a content item first."
 msgstr "Elija primero un elemento de contenido."
 
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "Pick a document…"
+msgstr "Elija un documento…"
+
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "Pick a form…"
+msgstr "Elija un formulario…"
+
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "Pick a funnel…"
+msgstr "Elija un embudo…"
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Pick a release first."
@@ -7036,6 +7283,11 @@ msgstr "Perfil guardado."
 msgid "Profile updated."
 msgstr "Perfil actualizado."
 
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Promote winner into document"
+msgstr "Promover la ganadora al documento"
+
 #: lib/kiln_cms_web/controllers/content_html/lock.html.heex
 #, elixir-autogen, elixir-format
 msgid "Protected"
@@ -7171,6 +7423,11 @@ msgstr "Pregunta"
 msgid "Quote"
 msgstr "Cita"
 
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Rate"
+msgstr "Tasa"
+
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
 msgid "Re-derive slugs through the current rules (patterns, keywords, stop words). Preview first; applying renames through the normal update flow, so published URLs leave 301 redirects behind."
@@ -7180,6 +7437,11 @@ msgstr "Vuelva a derivar los slugs con las reglas actuales (patrones, palabras c
 #, elixir-autogen, elixir-format
 msgid "Re-enable federation"
 msgstr "Reactivar la federación"
+
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reaches a page"
+msgstr "Llega a una página"
 
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
@@ -7471,6 +7733,7 @@ msgstr "Se recargó la última versión."
 
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/experiment_live.ex
 #: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
@@ -7585,6 +7848,11 @@ msgstr "¿Eliminar la configuración de feeds de este sitio y volver a seguir lo
 #, elixir-autogen, elixir-format
 msgid "Remove this subscriber?"
 msgstr "¿Eliminar este suscriptor?"
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Remove this variant?"
+msgstr "¿Quitar esta variante?"
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/release_live.ex
@@ -7767,6 +8035,11 @@ msgstr "Restaurar una versión revierte el contenido editorial. El estado del fl
 msgid "Restoring is a documented operations procedure, not a button here — see docs/backups.md. Secrets (SECRET_KEY_BASE above all) are not in these files and must be kept separately."
 msgstr "Restaurar es un procedimiento de operaciones documentado, no un botón aquí: consulta docs/backups.md. Los secretos (sobre todo SECRET_KEY_BASE) no están en estos archivos y deben guardarse aparte."
 
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Results"
+msgstr "Resultados"
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Retention"
@@ -7943,6 +8216,12 @@ msgstr "Reglas en vigor"
 msgid "Run a reaction when content is published, updated, or unpublished — email, an internal broadcast, cache invalidation, or a re-index. HTTP/Slack notifications are the Webhooks page's job."
 msgstr "Ejecuta una reacción cuando se publique, actualice o despublique contenido: correo, difusión interna, invalidación de caché o reindexación. Las notificaciones HTTP/Slack son competencia de la página de Webhooks."
 
+#: lib/kiln_cms_web/live/experiment_live.ex
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "Running"
+msgstr "En curso"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "SEO & scheduling"
@@ -8083,6 +8362,11 @@ msgstr "Guardar el secreto"
 #, elixir-autogen, elixir-format
 msgid "Save tier"
 msgstr "Guardar nivel"
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Save variant"
+msgstr "Guardar variante"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -8751,6 +9035,7 @@ msgid "Something went wrong!"
 msgstr "¡Algo salió mal!"
 
 #: lib/kiln_cms_web/live/billing_live.ex
+#: lib/kiln_cms_web/live/experiments_live.ex
 #: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/form_live.ex
@@ -8801,6 +9086,11 @@ msgstr "Palabras clave de spam, una por línea"
 #, elixir-autogen, elixir-format
 msgid "Spring campaign"
 msgstr "Campaña de primavera"
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Start"
+msgstr "Iniciar"
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
@@ -9100,6 +9390,11 @@ msgstr "Equipo"
 msgid "Team workload"
 msgstr "Carga de trabajo del equipo"
 
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "Test a headline, an excerpt or a block against a variant, measure which converts, and promote the winner into the document."
+msgstr "Pruebe un titular, un extracto o un bloque frente a una variante, mida cuál convierte y promueva la ganadora al documento."
+
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
@@ -9110,6 +9405,11 @@ msgstr "Probar la conexión"
 #, elixir-autogen, elixir-format
 msgid "Test ping queued — see deliveries below."
 msgstr "Prueba puesta en cola: consulte las entregas más abajo."
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Testing “%{title}”"
+msgstr "Probando «%{title}»"
 
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
@@ -9201,6 +9501,11 @@ msgstr "No funcionó: inténtalo de nuevo."
 #, elixir-autogen, elixir-format
 msgid "That doesn't look like an email address. Please go back and try again."
 msgstr "Eso no parece una dirección de correo electrónico. Vuelve atrás e inténtalo de nuevo."
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "That experiment doesn't exist."
+msgstr "Ese experimento no existe."
 
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
@@ -9358,6 +9663,11 @@ msgstr "El comando informa de las nuevas migraciones y de los pasos de actualiza
 msgid "The connection check crashed. Check the server logs."
 msgstr "La comprobación de la conexión falló. Consulte los registros del servidor."
 
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "The control won — the document already reads that way; nothing to promote."
+msgstr "Ganó el control: el documento ya dice eso; no hay nada que promover."
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "The database and, on local storage, your uploaded media."
@@ -9372,6 +9682,21 @@ msgstr "El valor por defecto para todos los formularios de este sitio que no hay
 #, elixir-autogen, elixir-format
 msgid "The description is about %{pixels}px wide — over the %{max}px Google shows, so it may be cut off."
 msgstr "La descripción mide unos %{pixels}px de ancho, por encima de los %{max}px que muestra Google, así que puede quedar cortada."
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "The document under test could not be read."
+msgstr "No se pudo leer el documento en prueba."
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "The document under test no longer exists."
+msgstr "El documento en prueba ya no existe."
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "The document's content type is no longer on this site."
+msgstr "El tipo de contenido del documento ya no está en este sitio."
 
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -9534,6 +9859,11 @@ msgstr "La comprobación de actualizaciones está mal configurada: KILN_UPDATE_R
 msgid "The whole document"
 msgstr "Todo el documento"
 
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "The winning variant no longer exists."
+msgstr "La variante ganadora ya no existe."
+
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
 msgid "Theme"
@@ -9620,6 +9950,16 @@ msgstr "La cadena de este documento se ancló antes de que se asignara el orden 
 msgid "This document's checkpoint entry could not be read — it cannot be verified"
 msgstr "No se ha podido leer la entrada del punto de control de este documento: no se puede verificar"
 
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "This experiment cannot convert: %{reason}."
+msgstr "Este experimento no puede convertir: %{reason}."
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "This experiment concluded without a winner."
+msgstr "Este experimento concluyó sin ganadora."
+
 #: lib/kiln_cms_web/live/presentation_live.ex
 #, elixir-autogen, elixir-format
 msgid "This field isn't inline-editable here."
@@ -9629,6 +9969,11 @@ msgstr "Este campo no se puede editar en línea aquí."
 #, elixir-autogen, elixir-format
 msgid "This form is inactive — the embed shows “Form not found” until you activate it."
 msgstr "Este formulario está inactivo: la incrustación muestra «Form not found» hasta que lo active."
+
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "This goal converts on a later page, which needs sticky assignment — off on this deployment, so the experiment will not start."
+msgstr "Este objetivo convierte en una página posterior, lo que requiere asignación persistente, desactivada en este despliegue, así que el experimento no se iniciará."
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
@@ -10061,6 +10406,11 @@ msgstr "Sin cambios"
 msgid "Ungrouped"
 msgstr "Sin grupo"
 
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "Unknown"
+msgstr "Desconocido"
+
 #: lib/kiln_cms_web/controllers/content_html/lock.html.heex
 #, elixir-autogen, elixir-format
 msgid "Unlock"
@@ -10299,10 +10649,35 @@ msgstr "Nombre de usuario"
 msgid "Valid for one hour."
 msgstr "Válido durante una hora."
 
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Variant"
+msgstr "Variante"
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Variant formats: %{formats}. Run this after changing them."
 msgstr "Formatos de variante: %{formats}. Ejecuta esto después de cambiarlos."
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Variant name"
+msgstr "Nombre de la variante"
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Variant removed."
+msgstr "Variante quitada."
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Variant saved."
+msgstr "Variante guardada."
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Variants"
+msgstr "Variantes"
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -10463,6 +10838,11 @@ msgstr "mié"
 msgid "Week"
 msgstr "Semana"
 
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Weight"
+msgstr "Peso"
+
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "Went live"
@@ -10567,6 +10947,11 @@ msgstr "Se publicará cuando se lance el lanzamiento."
 msgid "Will be unpublished when the release goes live."
 msgstr "Se despublicará cuando se lance el lanzamiento."
 
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Winner promoted — the document now carries the winning copy."
+msgstr "Ganadora promovida: el documento ahora lleva el texto ganador."
+
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
 msgid "With it on, the editor gains a Compliance panel that quotes back the phrases a document contains from a claims vocabulary — \"FDA approved\", \"no side effects\", \"guaranteed results\". It is advice: a match is a prompt to look, not a verdict, and nothing is blocked unless you separately turn on the publish gate."
@@ -10592,6 +10977,11 @@ msgstr "Escribe un comentario"
 msgid "Write a comment…"
 msgstr "Escribe un comentario…"
 
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "Write the winning variant into the document? This edits the live content like a normal save."
+msgstr "¿Escribir la variante ganadora en el documento? Esto edita el contenido publicado como un guardado normal."
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Writes new prose from your instruction. Describe what this section should say."
@@ -10613,6 +11003,11 @@ msgstr "Ha iniciado sesión"
 msgid "You are now signed out"
 msgstr "Ha cerrado la sesión"
 
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "You can author and start one, but no variant is served and nothing is measured until the operator turns experiments on."
+msgstr "Puede crear e iniciar uno, pero no se sirve ninguna variante ni se mide nada hasta que el operador active los experimentos."
+
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #: lib/kiln_cms_web/live/presentation_live.ex
 #, elixir-autogen, elixir-format
@@ -10623,6 +11018,12 @@ msgstr "Puedes ver este contenido, pero no editarlo."
 #, elixir-autogen, elixir-format
 msgid "You don't have a membership to manage yet."
 msgstr "Aún no tienes una suscripción que gestionar."
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to change experiments on this site."
+msgstr "No tiene permiso para cambiar los experimentos de este sitio."
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
@@ -11006,6 +11407,11 @@ msgstr "tipos de contenido · %{fields} campos · %{terms} términos de taxonom�
 msgid "content types · %{terms} taxonomy terms"
 msgstr "tipos de contenido · %{terms} términos de taxonomía"
 
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "control"
+msgstr "control"
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "couldn't be saved"
@@ -11148,62 +11554,62 @@ msgstr "está protegido con contraseña, por lo que no se pueden eliminar sus me
 msgid "items in the library"
 msgstr "elementos en la biblioteca"
 
-#: lib/kiln_cms_web/live/overview_live.ex
+#: lib/kiln_cms_web/experiment_phrases.ex
 #, elixir-autogen, elixir-format
 msgid "its funnel no longer resolves to a document"
 msgstr "su embudo ya no se resuelve en un documento"
 
-#: lib/kiln_cms_web/live/overview_live.ex
+#: lib/kiln_cms_web/experiment_phrases.ex
 #, elixir-autogen, elixir-format
 msgid "its funnel now ends on the experimented document itself"
 msgstr "su embudo termina ahora en el propio documento experimentado"
 
-#: lib/kiln_cms_web/live/overview_live.ex
+#: lib/kiln_cms_web/experiment_phrases.ex
 #, elixir-autogen, elixir-format
 msgid "its goal can no longer be reached"
 msgstr "ya no se puede alcanzar su objetivo"
 
-#: lib/kiln_cms_web/live/overview_live.ex
+#: lib/kiln_cms_web/experiment_phrases.ex
 #, elixir-autogen, elixir-format
 msgid "its goal content type is not a type on this site"
 msgstr "su tipo de contenido de objetivo no es un tipo de este sitio"
 
-#: lib/kiln_cms_web/live/overview_live.ex
+#: lib/kiln_cms_web/experiment_phrases.ex
 #, elixir-autogen, elixir-format
 msgid "its goal converts on a later page, and sticky assignment is off"
 msgstr "su objetivo convierte en una página posterior y la asignación persistente está desactivada"
 
-#: lib/kiln_cms_web/live/overview_live.ex
+#: lib/kiln_cms_web/experiment_phrases.ex
 #, elixir-autogen, elixir-format
 msgid "its goal could not be read — this may be temporary"
 msgstr "no se ha podido leer su objetivo; puede ser temporal"
 
-#: lib/kiln_cms_web/live/overview_live.ex
+#: lib/kiln_cms_web/experiment_phrases.ex
 #, elixir-autogen, elixir-format
 msgid "its goal document has been deleted"
 msgstr "su documento de objetivo se ha eliminado"
 
-#: lib/kiln_cms_web/live/overview_live.ex
+#: lib/kiln_cms_web/experiment_phrases.ex
 #, elixir-autogen, elixir-format
 msgid "its goal document is not published"
 msgstr "su documento de objetivo no está publicado"
 
-#: lib/kiln_cms_web/live/overview_live.ex
+#: lib/kiln_cms_web/experiment_phrases.ex
 #, elixir-autogen, elixir-format
 msgid "its goal document is the experimented document itself"
 msgstr "su documento de objetivo es el propio documento experimentado"
 
-#: lib/kiln_cms_web/live/overview_live.ex
+#: lib/kiln_cms_web/experiment_phrases.ex
 #, elixir-autogen, elixir-format
 msgid "its goal form has been deleted"
 msgstr "su formulario de objetivo se ha eliminado"
 
-#: lib/kiln_cms_web/live/overview_live.ex
+#: lib/kiln_cms_web/experiment_phrases.ex
 #, elixir-autogen, elixir-format
 msgid "its goal form is no longer accepting submissions"
 msgstr "su formulario de objetivo ya no acepta envíos"
 
-#: lib/kiln_cms_web/live/overview_live.ex
+#: lib/kiln_cms_web/experiment_phrases.ex
 #, elixir-autogen, elixir-format
 msgid "its goal is one this version cannot check"
 msgstr "su objetivo es uno que esta versión no puede comprobar"
@@ -11228,6 +11634,11 @@ msgstr "usado por última vez hace %{ago}"
 msgid "last used %{date}"
 msgstr "último uso el %{date}"
 
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "leading"
+msgstr "en cabeza"
+
 #: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format
 msgid "less than a minute"
@@ -11248,6 +11659,11 @@ msgstr "biblioteca de medios"
 msgid "missing"
 msgstr "ausente"
 
+#: lib/kiln_cms_web/experiment_phrases.ex
+#, elixir-autogen, elixir-format
+msgid "more conversions than impressions — these counters are not trustworthy"
+msgstr "más conversiones que impresiones: estos contadores no son fiables"
+
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
 msgid "never"
@@ -11263,17 +11679,17 @@ msgstr "nunca activada"
 msgid "no config"
 msgstr "ninguna configuración"
 
-#: lib/kiln_cms_web/live/overview_live.ex
+#: lib/kiln_cms_web/experiment_phrases.ex
 #, elixir-autogen, elixir-format
 msgid "no goal document is set"
 msgstr "no hay documento de objetivo definido"
 
-#: lib/kiln_cms_web/live/overview_live.ex
+#: lib/kiln_cms_web/experiment_phrases.ex
 #, elixir-autogen, elixir-format
 msgid "no goal form is set"
 msgstr "no hay formulario de objetivo definido"
 
-#: lib/kiln_cms_web/live/overview_live.ex
+#: lib/kiln_cms_web/experiment_phrases.ex
 #, elixir-autogen, elixir-format
 msgid "no goal funnel is set"
 msgstr "no hay embudo de objetivo definido"
@@ -11287,6 +11703,11 @@ msgstr "sin clave — el correo sale sin firmar"
 #, elixir-autogen, elixir-format
 msgid "no schedule"
 msgstr "sin programación"
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "no winner — just stop"
+msgstr "sin ganadora: solo detener"
 
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -11515,12 +11936,12 @@ msgstr "taxonomía"
 msgid "the XML could not be parsed"
 msgstr "no se pudo analizar el XML"
 
-#: lib/kiln_cms_web/live/overview_live.ex
+#: lib/kiln_cms_web/experiment_phrases.ex
 #, elixir-autogen, elixir-format
 msgid "the document under test has been deleted"
 msgstr "el documento en prueba se ha eliminado"
 
-#: lib/kiln_cms_web/live/overview_live.ex
+#: lib/kiln_cms_web/experiment_phrases.ex
 #, elixir-autogen, elixir-format
 msgid "the document under test is not published, so no arm is served"
 msgstr "el documento en prueba no está publicado, así que no se sirve ninguna variante"
@@ -11535,10 +11956,20 @@ msgstr "el archivo está vacío"
 msgid "the file names no target locale"
 msgstr "el archivo no indica ninguna configuración regional de destino"
 
+#: lib/kiln_cms_web/live/experiments_live.ex
+#, elixir-autogen, elixir-format
+msgid "the id of the page reaching which converts"
+msgstr "el id de la página cuya visita convierte"
+
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
 msgid "the rendered artifact: full block body, pre-compiled and CDN-cacheable."
 msgstr "el artefacto renderizado: cuerpo de bloques completo, precompilado y cacheable en CDN."
+
+#: lib/kiln_cms_web/experiment_phrases.ex
+#, elixir-autogen, elixir-format
+msgid "these counters look wrong"
+msgstr "estos contadores parecen incorrectos"
 
 #: lib/kiln_cms_web/live/automation_live.ex
 #, elixir-autogen, elixir-format
@@ -11621,10 +12052,20 @@ msgstr "tipo no compatible"
 msgid "vs. previous step"
 msgstr "frente al paso anterior"
 
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "weight %{weight}"
+msgstr "peso %{weight}"
+
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "went live"
 msgstr "se puso en línea"
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "winner"
+msgstr "ganadora"
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -11660,6 +12101,11 @@ msgstr "«%{name}» contiene %{count} etiqueta(s). ¿Eliminar el grupo de todos 
 #, elixir-autogen, elixir-format
 msgid "“%{name}” is used by %{count} item(s). Delete it anyway? The links will be removed."
 msgstr "«%{name}» se usa en %{count} elemento(s). ¿Eliminarlo de todos modos? Se quitarán los vínculos."
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "“Leading” means the highest rate so far over at least %{floor} impressions per arm — a comparison, not a significance test."
+msgstr "«En cabeza» significa la tasa más alta hasta ahora con al menos %{floor} impresiones por variante: una comparación, no una prueba de significancia."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format

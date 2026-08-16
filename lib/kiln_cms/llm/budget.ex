@@ -68,6 +68,11 @@ defmodule KilnCMS.LLM.Budget do
       reaction). Applies the reserve described above.
     * `:unattended_share` — the fraction of `:per_org` an unattended caller may
       let the org reach. **Required** when `:unattended?` is true.
+    * `:units` — how many units this call is about to spend if it proceeds
+      (default 1). A caller that will perform several inferences in one go —
+      an embedding computed per block, say — passes the real count so the
+      bucket is sized to actual volume rather than to "one call" regardless of
+      how much work that call does.
 
   Returns `{:error, :unattended_disabled}` — not a rate limit — when the share
   leaves no room at all. That is a standing configuration decision, and
@@ -77,11 +82,34 @@ defmodule KilnCMS.LLM.Budget do
   @spec check(String.t(), org_id :: term(), user_id :: term(), keyword()) ::
           :ok | {:error, {:rate_limited, non_neg_integer()} | :unattended_disabled}
   def check(feature, org_id, user_id, limits) do
-    with :ok <- bucket(feature, "user", user_id, Keyword.fetch!(limits, :per_user)),
+    units = Keyword.get(limits, :units, 1)
+
+    with :ok <- bucket(feature, "user", user_id, Keyword.fetch!(limits, :per_user), units),
          # BEFORE the org bucket, so a refused unattended call doesn't spend an
          # org unit on its way to being told no.
          :ok <- unattended(feature, org_id, limits) do
-      bucket(feature, "org", org_id, Keyword.fetch!(limits, :per_org))
+      bucket(feature, "org", org_id, Keyword.fetch!(limits, :per_org), units)
+    end
+  end
+
+  @doc """
+  Runs `fun` only when `check/4` passes; otherwise returns `check/4`'s own
+  `{:error, _}` without calling `fun`.
+
+  A caller that hand-assembles a `budget_context`/`opts` shape and threads it
+  through several functions before finally checking and acting on it (see
+  `KilnCMS.Search.Related`'s moduledoc, #1076) is a caller that can thread it
+  wrong at any hop — the check silently no-ops and the reserve it exists to
+  protect is not actually enforced. `charge/5` collapses "check, then act" to
+  one call, so the org id, user id and limits a feature needs are visible at
+  the one place the work actually happens.
+  """
+  @spec charge(String.t(), term(), term(), keyword(), (-> result)) :: result | {:error, term()}
+        when result: var
+  def charge(feature, org_id, user_id, limits, fun) when is_function(fun, 0) do
+    case check(feature, org_id, user_id, limits) do
+      :ok -> fun.()
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -149,10 +177,10 @@ defmodule KilnCMS.LLM.Budget do
   # `div(now, scale)`, so a `get/2` with the same scale sees the live count.
   defp spent(feature, kind, id, window_ms), do: get(bucket_key(feature, kind, id), window_ms)
 
-  defp bucket(_feature, _kind, nil, _limit), do: :ok
+  defp bucket(_feature, _kind, nil, _limit, _units), do: :ok
 
-  defp bucket(feature, kind, id, {count, window_ms}) do
-    case hit(bucket_key(feature, kind, id), window_ms, count) do
+  defp bucket(feature, kind, id, {count, window_ms}, units) do
+    case hit(bucket_key(feature, kind, id), window_ms, count, units) do
       {:allow, _count} -> :ok
       {:deny, retry_after_ms} -> {:error, {:rate_limited, retry_after_ms}}
     end

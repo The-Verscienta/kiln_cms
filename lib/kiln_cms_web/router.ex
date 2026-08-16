@@ -425,6 +425,11 @@ defmodule KilnCMSWeb.Router do
       # ActivityPub federation (#967): the gate, the handle, followers, the
       # delivery ledger and the block list. Admin-only, like webhooks.
       live "/editor/federation", FederationLive, :index
+      # Content experiments (#982, #499 phase 2) — create against a document,
+      # author variants against its block tree, read results, promote a winner.
+      # Admin-only: the resources' write policy is OrgAdmin.
+      live "/editor/experiments", ExperimentsLive, :index
+      live "/editor/experiments/:id", ExperimentLive, :show
       live "/editor/api-keys", ApiKeyLive, :index
       # Which Kiln core this instance runs, and whether upstream has a newer
       # release. Reports only — updating is `mix kiln.update` (see SystemLive).

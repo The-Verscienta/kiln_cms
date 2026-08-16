@@ -226,14 +226,21 @@ defmodule KilnCMSWeb.ContentEditorIntelligenceTest do
     conn: conn
   } do
     actor = authed_user(:admin)
-    _twin = indexed_page(actor, "brewing herbal tea slowly", title: "Same")
+    # A body distinct from every other test's ("brewing herbal tea slowly" is
+    # reused all over this file, including by an unpublished draft in "a
+    # never-published draft finds its duplicate (#852)" above) — since #1076's
+    # fix, a cache hit correctly bypasses the budget entirely, so reusing that
+    # text would let this test pass whether or not the budget check ran at all.
+    uniq = System.unique_integer([:positive])
+    text = "budget ceiling passage #{uniq}"
+    _twin = indexed_page(actor, text, title: "Same #{uniq}")
 
     draft =
       CMS.create_page!(
         %{
-          title: "Same",
+          title: "Same #{uniq}",
           slug: slug(),
-          blocks: [%{type: :rich_text, content: "<p>brewing herbal tea slowly</p>", order: 0}]
+          blocks: [%{type: :rich_text, content: "<p>#{text}</p>", order: 0}]
         },
         actor: actor
       )
