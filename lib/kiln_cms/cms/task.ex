@@ -95,6 +95,19 @@ defmodule KilnCMS.CMS.Task do
 
       validate KilnCMS.CMS.Validations.AssigneeIsEditor
 
+      # `created_by_rule_id` exists for automation's actor-less calls (see
+      # that attribute's docs); a real actor is a human editor, who never
+      # speaks for a rule (#1252 review — otherwise unenforced, so any caller
+      # with an actor could set it and spoof automation's provenance).
+      validate fn changeset, context ->
+        with %{id: _} <- context.actor,
+             true <- not is_nil(Ash.Changeset.get_attribute(changeset, :created_by_rule_id)) do
+          {:error, field: :created_by_rule_id, message: "can only be set by automation"}
+        else
+          _ -> :ok
+        end
+      end
+
       change fn changeset, context ->
         case context.actor do
           %{id: id} -> Ash.Changeset.force_change_attribute(changeset, :creator_id, id)
@@ -339,7 +352,10 @@ defmodule KilnCMS.CMS.Task do
 
     # Who raised this task, in kind rather than by creator. `:manual` is an
     # editor assigning work; `:lifecycle_review` is one raised automatically
-    # because a record's freshness lapsed (docs/content-lifecycles.md).
+    # because a record's freshness lapsed (docs/content-lifecycles.md);
+    # `:intelligence_finding` is one raised by an editorial-intelligence
+    # reaction's `deliver_as: "task"` (#946) — a distinct kind from
+    # `:lifecycle_review` since it isn't a freshness sweep (#1252 review).
     #
     # A column rather than a convention on `note`, because it is what makes the
     # automated half *idempotent*: a daily sweep re-fires for as long as content
@@ -349,7 +365,7 @@ defmodule KilnCMS.CMS.Task do
     # what they personally were asked to do should not have to wade through a
     # quarter's worth of automated review reminders.
     attribute :kind, :atom do
-      constraints one_of: [:manual, :lifecycle_review]
+      constraints one_of: [:manual, :lifecycle_review, :intelligence_finding]
       default :manual
       allow_nil? false
       public? true

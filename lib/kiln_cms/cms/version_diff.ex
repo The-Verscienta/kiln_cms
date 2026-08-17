@@ -530,14 +530,26 @@ defmodule KilnCMS.CMS.VersionDiff do
   defp portable_text(_body), do: ""
 
   # `KilnCMS.Automation.RuleWorker` has its own private HTML→text converter
-  # too (`html_to_text/1`, Floki-based — decodes entities and preserves
-  # block/list boundaries as newlines) — see the cross-reference there
-  # (#1252 review) for why the two aren't merged: this one collapses
-  # everything to one line on purpose, since diffing plain text wants a
-  # comparable flat string, not the finder-body prose the other is for.
+  # too (`html_to_text/1`, Floki-based — preserves block/list boundaries as
+  # newlines) — see the cross-reference there (#1252 review) for why the two
+  # aren't merged: this one collapses everything to one line on purpose,
+  # since diffing plain text wants a comparable flat string, not the
+  # finder-body prose the other is for.
+  #
+  # `Floki.parse_fragment/1` (not the raising `!` form: this runs on
+  # arbitrary stored/legacy markup, not finder-generated HTML) so an entity
+  # like `&amp;` decodes to `&` instead of surviving literally into the diff
+  # (#1252 review — the bare regex below used to be the whole
+  # implementation and had no entity decoding at all); malformed markup falls
+  # back to the plain tag-strip rather than losing the text entirely.
   defp strip_html(html) when is_binary(html) do
-    html
-    |> String.replace(~r/<[^>]*>/, " ")
+    text =
+      case Floki.parse_fragment(html) do
+        {:ok, tree} -> Floki.text(tree)
+        {:error, _reason} -> String.replace(html, ~r/<[^>]*>/, " ")
+      end
+
+    text
     |> String.replace(~r/\s+/u, " ")
     |> String.trim()
   end

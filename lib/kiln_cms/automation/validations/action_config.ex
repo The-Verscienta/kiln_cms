@@ -197,6 +197,15 @@ defmodule KilnCMS.Automation.Validations.ActionConfig do
   defp conditional_required(%{required_when: :deliver_as}, config),
     do: deliver_as_required(config)
 
+  # A shape declaring a `:required_when` tag with no matching clause above is
+  # a programmer error, not a config-authoring one — `required_when` only
+  # ever comes from `@shapes`, never from a rule's own config — so it fails
+  # loudly here rather than joining the plain no-tag case below and silently
+  # enforcing nothing (#1252 review).
+  defp conditional_required(%{required_when: other}, _config) do
+    raise "ActionConfig: no conditional_required/2 clause for required_when: #{inspect(other)}"
+  end
+
   defp conditional_required(_shape, _config), do: []
 
   defp missing(required, config) do

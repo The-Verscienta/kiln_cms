@@ -163,6 +163,35 @@ defmodule KilnCMS.CMS.CommentTest do
     assert is_nil(comment.thread_id)
   end
 
+  test "a real actor cannot post a block-less comment or spoof automation's rule id (#1252 review)" do
+    editor = user(:editor)
+    type = "post"
+    content_id = Ecto.UUID.generate()
+
+    assert {:error, %Ash.Error.Invalid{}} =
+             CMS.add_comment(
+               %{
+                 content_type: type,
+                 content_id: content_id,
+                 block_id: nil,
+                 body: "Not automation"
+               },
+               actor: editor
+             )
+
+    assert {:error, %Ash.Error.Invalid{}} =
+             CMS.add_comment(
+               %{
+                 content_type: type,
+                 content_id: content_id,
+                 block_id: Ecto.UUID.generate(),
+                 body: "Not automation",
+                 created_by_rule_id: Ecto.UUID.generate()
+               },
+               actor: editor
+             )
+  end
+
   test "document-level comments (block_id nil) group into their own thread, separate from any block's" do
     type = "post"
     content_id = Ecto.UUID.generate()
@@ -351,6 +380,40 @@ defmodule KilnCMS.CMS.CommentTest do
     assert CMS.list_unresolved_threads_for!(type, content_id, actor: editor)
            |> Enum.map(& &1.block_id)
            |> Enum.sort() == Enum.sort([noisy_block, quiet_block, settled_block])
+  end
+
+  test "unresolved counts exclude document-level (block_id nil) automation threads (#1252 review)" do
+    editor = user(:editor)
+    type = "post"
+    content_id = Ecto.UUID.generate()
+    block_id = Ecto.UUID.generate()
+
+    block_root =
+      CMS.add_comment!(
+        %{content_type: type, content_id: content_id, block_id: block_id, body: "Fix this"},
+        actor: editor
+      )
+
+    {:ok, _doc_root} =
+      CMS.add_comment(
+        %{
+          content_type: type,
+          content_id: content_id,
+          block_id: nil,
+          body: "Possible duplicates found",
+          created_by_rule_id: Ecto.UUID.generate()
+        },
+        actor: nil,
+        authorize?: false
+      )
+
+    # The document-level thread is unresolved too, but it isn't a block —
+    # only the real block-anchored thread should count (:unresolved_for_content
+    # feeds the editor's per-block chip; :unresolved feeds the org overview).
+    assert [only] = CMS.list_unresolved_threads_for!(type, content_id, actor: editor)
+    assert only.id == block_root.id
+
+    assert Enum.any?(CMS.list_unresolved_threads!(authorize?: false), &(&1.id == block_root.id))
   end
 
   defp reload(comment), do: CMS.get_comment!(comment.id, authorize?: false)

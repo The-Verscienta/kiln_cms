@@ -67,6 +67,23 @@ defmodule KilnCMS.CMS.TaskTest do
     drain()
   end
 
+  test "a real actor cannot spoof automation's rule id (#1252 review)" do
+    editor = user(:editor)
+    assignee = user(:editor)
+
+    assert {:error, %Ash.Error.Invalid{}} =
+             CMS.assign_task(
+               %{
+                 content_type: "page",
+                 content_id: Ecto.UUID.generate(),
+                 assignee_id: assignee.id,
+                 note: "Not automation",
+                 created_by_rule_id: Ecto.UUID.generate()
+               },
+               actor: editor
+             )
+  end
+
   test "a task cannot be assigned to a viewer, or reassigned to one (#501 security review)" do
     editor = user(:editor)
     viewer = user(:viewer)

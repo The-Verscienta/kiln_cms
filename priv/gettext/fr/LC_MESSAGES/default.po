@@ -1638,9 +1638,9 @@ msgstr "Désactivé automatiquement après %{count} envois en échec"
 msgid "Auto-fills each entry's multi-segment canonical URL. Same tokens plus [slug]; segments that expand empty drop out. Blank = flat URLs."
 msgstr "Remplit automatiquement l'URL canonique à plusieurs segments de chaque entrée. Mêmes jetons plus [slug] ; les segments dont l'expansion est vide sont supprimés. Vide = URL simples."
 
+#: lib/kiln_cms_web/components/block_discussion_components.ex
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/automation_live.ex
-#: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Automation"
 msgstr "Automatisation"
@@ -7892,7 +7892,6 @@ msgid "Reopen for editing"
 msgstr "Rouvrir pour modification"
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
-#: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Reopen thread"
 msgstr "Rouvrir le fil"
@@ -7980,7 +7979,6 @@ msgid "Reset your password"
 msgstr "Réinitialiser votre mot de passe"
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
-#: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Resolve thread"
 msgstr "Résoudre le fil"
@@ -9003,7 +9001,6 @@ msgid "Some tiers grant an audience that is no longer configured. Restore it in 
 msgstr "Certains niveaux accordent une audience qui n'est plus configurée. Rétablissez-la dans config :kiln_cms, :audiences, ou retirez ces niveaux."
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
-#: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Someone"
 msgstr "Quelqu'un"

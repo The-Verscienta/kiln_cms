@@ -124,26 +124,7 @@ defmodule KilnCMSWeb.BlockDiscussionComponents do
               from a collaborator without losing their place in the composer. --%>
         <div aria-live="polite" class="space-y-2">
           <div :for={comment <- @thread} class="rounded bg-base-100 p-2 text-xs">
-            <div class="flex items-center justify-between gap-2 text-base-content/60">
-              <span>{author_label(comment)}</span>
-              <time datetime={DateTime.to_iso8601(comment.inserted_at)}>
-                {Calendar.strftime(comment.inserted_at, "%b %-d, %H:%M")}
-              </time>
-            </div>
-            <%!-- Rendered as a text node, never raw markup: a comment is
-                  editor-typed prose, not HTML. --%>
-            <p class="mt-1 break-words">{comment.body}</p>
-            <button
-              :if={is_nil(comment.thread_id)}
-              type="button"
-              phx-click={if comment.resolved_at, do: "comment_unresolve", else: "comment_resolve"}
-              phx-value-id={comment.id}
-              class="mt-1 text-base-content/60 underline hover:text-base-content"
-            >
-              {if comment.resolved_at,
-                do: gettext("Reopen thread"),
-                else: gettext("Resolve thread")}
-            </button>
+            <.comment_card comment={comment} />
           </div>
         </div>
 
@@ -162,6 +143,39 @@ defmodule KilnCMSWeb.BlockDiscussionComponents do
         />
       </div>
     </div>
+    """
+  end
+
+  attr :comment, :map, required: true
+
+  @doc """
+  One comment's header (author + time), body, and resolve/reopen control.
+
+  Shared by `block_discussion/1`'s per-block thread and
+  `KilnCMSWeb.ContentEditorLive`'s document-level ("Document notes") thread
+  panel, so the two markups can't drift out of sync (#1252 review — they used
+  to be two copies of the same card).
+  """
+  def comment_card(assigns) do
+    ~H"""
+    <div class="flex items-center justify-between gap-2 text-base-content/60">
+      <span>{author_label(@comment)}</span>
+      <time datetime={DateTime.to_iso8601(@comment.inserted_at)}>
+        {Calendar.strftime(@comment.inserted_at, "%b %-d, %H:%M")}
+      </time>
+    </div>
+    <%!-- Rendered as a text node, never raw markup: a comment is
+          editor-typed prose, not HTML. --%>
+    <p class="mt-1 break-words">{@comment.body}</p>
+    <button
+      :if={is_nil(@comment.thread_id)}
+      type="button"
+      phx-click={if @comment.resolved_at, do: "comment_unresolve", else: "comment_resolve"}
+      phx-value-id={@comment.id}
+      class="mt-1 text-base-content/60 underline hover:text-base-content"
+    >
+      {if @comment.resolved_at, do: gettext("Reopen thread"), else: gettext("Resolve thread")}
+    </button>
     """
   end
 
@@ -598,9 +612,21 @@ defmodule KilnCMSWeb.BlockDiscussionComponents do
   defp typing_label(names),
     do: gettext("%{names} are typing…", names: Enum.join(names, ", "))
 
-  defp author_label(%{author: %{name: name}}) when is_binary(name) and name != "", do: name
-  defp author_label(%{author: %{email: email}}) when not is_nil(email), do: to_string(email)
-  defp author_label(_comment), do: gettext("Someone")
+  @doc """
+  A comment's byline: the author's name, falling back to their email, or
+  "Automation" for a nil-author comment an editorial-intelligence reaction
+  posted (`created_by_rule_id` set, #946) — named generically rather than by
+  rule, so a since-deleted/renamed rule doesn't leave the label stale or
+  broken — or "Someone" otherwise.
+
+  Public, and used by `comment_card/1` above as well as
+  `KilnCMSWeb.ContentEditorLive`'s document-level thread panel (#1252 review
+  — the two used to carry independent copies of this fallback chain).
+  """
+  def author_label(%{author: %{name: name}}) when is_binary(name) and name != "", do: name
+  def author_label(%{author: %{email: email}}) when not is_nil(email), do: to_string(email)
+  def author_label(%{created_by_rule_id: id}) when not is_nil(id), do: gettext("Automation")
+  def author_label(_comment), do: gettext("Someone")
 
   defp initials(name) when is_binary(name) do
     case name |> String.split(~r/\s+/, trim: true) |> Enum.take(2) do

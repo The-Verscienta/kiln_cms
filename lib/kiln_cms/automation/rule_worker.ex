@@ -580,48 +580,23 @@ defmodule KilnCMS.Automation.RuleWorker do
   defp deliver_as_comment(subject, html_body, context) do
     body = findings_text(subject, html_body)
 
-    case CMS.add_comment(
-           %{
-             content_type: context.content_type,
-             content_id: context.content_id,
-             block_id: nil,
-             body: body,
-             created_by_rule_id: context.rule_id
-           },
-           actor: nil,
-           authorize?: false,
-           tenant: context.org_id
-         ) do
-      {:ok, _comment} ->
-        :ok
-
-      {:error, error} ->
-        Logger.warning(
-          "Automation intelligence rule couldn't post its findings as a comment: " <>
-            "#{Exception.message(error)}"
+    deliver_advisory(
+      fn ->
+        CMS.add_comment(
+          %{
+            content_type: context.content_type,
+            content_id: context.content_id,
+            block_id: nil,
+            body: body,
+            created_by_rule_id: context.rule_id
+          },
+          actor: nil,
+          authorize?: false,
+          tenant: context.org_id
         )
-
-        :ok
-    end
-  rescue
-    # Anything raised while building or saving the comment — `findings_text/2`
-    # runs finder-generated HTML through `Floki.parse_fragment!/1`, which
-    # raises on malformed markup (unlike `deliver_as_email/3`, which sends the
-    # HTML as-is and never parses it); `CMS.add_comment`'s own pipeline can
-    # also raise, e.g. `RouteToBlockThread`'s advisory-lock query hitting a
-    # transient DB error (#1252 review: a rescue scoped to only
-    # `Floki.ParseError` let that kind of exception escape past the `{:error,
-    # _}` branch above and reach Oban as an unhandled crash). Same advisory
-    # posture as the transient mail error above either way: drop rather than
-    # let Oban retry a generation that already ran (and already spent the LLM
-    # budget) for a delivery-layer failure, not a content one.
-    error ->
-      Logger.warning(
-        "Automation intelligence rule couldn't post its findings as a comment: " <>
-          "#{Exception.message(error)}"
-      )
-
-      :ok
+      end,
+      "post its findings as a comment"
+    )
   end
 
   # A task assigned to `config["assignee"]`, due `config["due_in_days"]` (#946)
@@ -630,44 +605,60 @@ defmodule KilnCMS.Automation.RuleWorker do
   # save-time check can't see a change that happens later), so a rejection
   # from `AssigneeIsEditor` or a missing/invalid `assignee` lands here rather
   # than crashing the job — same advisory posture as every other branch.
+  #
+  # `kind: :intelligence_finding` (#1252 review) so this doesn't default to
+  # `:manual` and read, to any current or future "my assigned work" filter, as
+  # if a colleague personally handed the assignee this task.
   defp deliver_as_task(subject, html_body, context) do
     note = findings_text(subject, html_body)
     config = context.config
 
-    case CMS.assign_task(
-           %{
-             content_type: context.content_type,
-             content_id: context.content_id,
-             assignee_id: config["assignee"],
-             due_on: Date.add(Date.utc_today(), due_in_days(config)),
-             note: note,
-             created_by_rule_id: context.rule_id
-           },
-           actor: nil,
-           authorize?: false,
-           tenant: context.org_id
-         ) do
-      {:ok, _task} ->
+    deliver_advisory(
+      fn ->
+        CMS.assign_task(
+          %{
+            content_type: context.content_type,
+            content_id: context.content_id,
+            assignee_id: config["assignee"],
+            due_on: Date.add(Date.utc_today(), due_in_days(config)),
+            note: note,
+            created_by_rule_id: context.rule_id,
+            kind: :intelligence_finding
+          },
+          actor: nil,
+          authorize?: false,
+          tenant: context.org_id
+        )
+      end,
+      "assign its findings as a task"
+    )
+  end
+
+  # The shared advisory-delivery scaffold `deliver_as_comment/3` and
+  # `deliver_as_task/3` used to duplicate (#1252 review): both an `{:error,
+  # _}` from the Ash call and anything raised while building or saving the
+  # record — `findings_text/2` runs finder-generated HTML through
+  # `Floki.parse_fragment!/1`, which raises on malformed markup, and the Ash
+  # pipeline itself can raise (e.g. `RouteToBlockThread`'s advisory-lock query
+  # hitting a transient DB error) — are logged and dropped rather than
+  # retried, same posture as the transient mail error in `deliver_as_email/3`:
+  # the expensive generation already happened, so a delivery-layer failure
+  # here shouldn't cost it again.
+  defp deliver_advisory(fun, verb) do
+    case fun.() do
+      {:ok, _record} ->
         :ok
 
       {:error, error} ->
         Logger.warning(
-          "Automation intelligence rule couldn't assign its findings as a task: " <>
-            "#{Exception.message(error)}"
+          "Automation intelligence rule couldn't #{verb}: #{Exception.message(error)}"
         )
 
         :ok
     end
   rescue
-    # See the matching rescue on `deliver_as_comment/3` (#1252 review): not
-    # scoped to `Floki.ParseError` alone, so any exception raised while
-    # building or saving the task is dropped the same advisory way.
     error ->
-      Logger.warning(
-        "Automation intelligence rule couldn't assign its findings as a task: " <>
-          "#{Exception.message(error)}"
-      )
-
+      Logger.warning("Automation intelligence rule couldn't #{verb}: #{Exception.message(error)}")
       :ok
   end
 
@@ -695,9 +686,10 @@ defmodule KilnCMS.Automation.RuleWorker do
   # `li`, `strong`, `em`, `code`). Block/list boundaries become newlines
   # first so the result reads as more than one run-on line; `Floki.text/1`
   # then strips the remaining markup and decodes entities (so
-  # `escape(_, :html)`'s `&amp;` round-trips back to `&`) — both things
-  # `VersionDiff.strip_html/1` deliberately doesn't do, which is why they
-  # aren't one function.
+  # `escape(_, :html)`'s `&amp;` round-trips back to `&`) — the
+  # newline-preservation is the one thing `VersionDiff.strip_html/1`
+  # deliberately doesn't do (both decode entities as of #1252 review), which
+  # is why they aren't one function.
   defp html_to_text(html) do
     text =
       html

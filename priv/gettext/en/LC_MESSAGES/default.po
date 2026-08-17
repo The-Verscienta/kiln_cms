@@ -1638,9 +1638,9 @@ msgstr ""
 msgid "Auto-fills each entry's multi-segment canonical URL. Same tokens plus [slug]; segments that expand empty drop out. Blank = flat URLs."
 msgstr ""
 
+#: lib/kiln_cms_web/components/block_discussion_components.ex
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/automation_live.ex
-#: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Automation"
 msgstr ""
@@ -7892,7 +7892,6 @@ msgid "Reopen for editing"
 msgstr ""
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
-#: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Reopen thread"
 msgstr ""
@@ -7980,7 +7979,6 @@ msgid "Reset your password"
 msgstr ""
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
-#: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Resolve thread"
 msgstr ""
@@ -9003,7 +9001,6 @@ msgid "Some tiers grant an audience that is no longer configured. Restore it in 
 msgstr ""
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
-#: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Someone"
 msgstr ""
