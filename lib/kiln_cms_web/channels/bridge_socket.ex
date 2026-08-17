@@ -66,7 +66,12 @@ defmodule KilnCMSWeb.BridgeSocket do
 
   @impl true
   def connect(%{params: params} = info) do
-    with true <- KilnCMS.VisualEditing.enabled?(),
+    # Charged first, ahead of every other check (threat-model item 10's
+    # `/ws/*` gap — see `KilnCMSWeb.SocketJoinBudget`): a connect this
+    # deployment is about to refuse anyway still cost a handshake, so it
+    # still has to count.
+    with :ok <- KilnCMSWeb.SocketJoinBudget.charge(:bridge_join, info[:connect_info] || %{}),
+         true <- KilnCMS.VisualEditing.enabled?(),
          {:ok, ct, id} <- fetch_target(params),
          {:ok, org} <- fetch_org(info),
          actor <- authenticate(params["api_key"]),

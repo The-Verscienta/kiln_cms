@@ -92,6 +92,29 @@ defmodule KilnCMSWeb.CollabChannelTest do
     end
   end
 
+  describe "the join budget (threat-model item 10's /ws/* gap)" do
+    test "connect/3 charges the collab_join budget first, refusing an over-budget address before token verification runs",
+         %{actor: actor} do
+      previous = Application.get_env(:kiln_cms, KilnCMSWeb.RateLimit, [])
+      on_exit(fn -> Application.put_env(:kiln_cms, KilnCMSWeb.RateLimit, previous) end)
+
+      limits =
+        previous |> Keyword.get(:limits, %{}) |> Map.put(:collab_join, {1, :timer.minutes(1)})
+
+      Application.put_env(:kiln_cms, KilnCMSWeb.RateLimit, Keyword.put(previous, :limits, limits))
+
+      address = KilnCMS.RateLimitHelpers.client_address()
+      connect_info = %{peer_data: %{address: address, port: 111, ssl_cert: nil}, x_headers: []}
+
+      assert {:ok, _socket} = connect(CollabSocket, %{"token" => token(actor)}, connect_info)
+
+      # Same address, second attempt: over budget, refused before the token is
+      # even verified (a forged token here would also refuse — the budget has
+      # to be the reason, so the token stays valid).
+      assert :error = connect(CollabSocket, %{"token" => token(actor)}, connect_info)
+    end
+  end
+
   describe "join authorization (#655)" do
     test "a topic naming no document is refused", %{actor: actor} do
       assert {:error, %{reason: "not found"}} =

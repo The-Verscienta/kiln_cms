@@ -8,6 +8,16 @@ defmodule KilnCMSWeb.GraphqlSocket do
 
   @impl true
   def connect(params, socket, connect_info) do
+    # Charged first, ahead of tenant resolution (threat-model item 10's
+    # `/ws/*` gap — see `KilnCMSWeb.SocketJoinBudget`): a connect this
+    # deployment is about to refuse anyway still cost a handshake, so it still
+    # has to count.
+    with :ok <- KilnCMSWeb.SocketJoinBudget.charge(:gql_join, connect_info) do
+      do_connect(params, socket, connect_info)
+    end
+  end
+
+  defp do_connect(params, socket, connect_info) do
     # Resolve the tenant from the connecting host (epic #336) — a raw transport
     # bypasses the SetTenant plug, so without this the GraphQL context's
     # `tenant` stays nil and every subscription/query over the socket spans all

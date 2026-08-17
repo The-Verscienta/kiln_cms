@@ -29,6 +29,18 @@ migration, a rewritten column, a dropped config key).
 
 ### Security
 
+- **`/ws/gql`, `/ws/bridge` and `/ws/collab` connects are now budgeted per
+  client address**, closing the `/ws/*` half of `docs/threat-model.md` item
+  10's residual gap (the `/live` half was closed earlier by #1183). A new
+  `KilnCMSWeb.SocketJoinBudget`, mirroring `KilnCMSWeb.LiveJoinBudget`'s
+  shape, charges each socket's own `connect/1,2,3` first — ahead of
+  tenant/token/auth resolution — against its own `KilnCMSWeb.RateLimit`
+  bucket (`:gql_join`, `:bridge_join`, `:collab_join`; 300/minute per
+  address by default, each independent so a flood against the one of the
+  three anonymous by default cannot spend a budget a signed-in editor's
+  session then pays for). Frames on an established `/ws/collab` connection
+  are budgeted per account below (#1305); events on `/live` and subscription
+  documents on `/ws/gql` remain uncounted.
 - **Frames on an established `/ws/collab` connection are budgeted per
   account** (#1305). #1183 charged `/live` root joins, but once a socket was
   up nothing counted what a client sent over it: an authenticated editor

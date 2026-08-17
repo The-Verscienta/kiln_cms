@@ -1,8 +1,9 @@
 defmodule KilnCMSWeb.SocketEventBudget do
   @moduledoc """
   A per-**account** budget on the frames a client sends over an established
-  socket (#1305) — the residual `KilnCMSWeb.LiveJoinBudget` (#1183) and the
-  `/ws/*` connect budgets left open in `docs/threat-model.md` item 10.
+  socket (#1305) — the residual `KilnCMSWeb.LiveJoinBudget` (#1183) and
+  `KilnCMSWeb.SocketJoinBudget` (the `/ws/*` connects) left open in
+  `docs/threat-model.md` item 10.
 
   Those count *handshakes*: a `/live` root join, a `/ws/gql`, `/ws/bridge` or
   `/ws/collab` connect. Once a connection is up, nothing counted what a client
