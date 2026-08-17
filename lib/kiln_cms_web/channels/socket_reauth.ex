@@ -107,6 +107,47 @@ defmodule KilnCMSWeb.SocketReauth do
       :error
   end
 
+  @doc """
+  Close the **connection** a channel socket belongs to, so a refusal is one the
+  client recovers from.
+
+  A channel that refuses by returning `{:stop, {:shutdown, _}, socket}` is a
+  `phx_close` frame to the client (`Phoenix.Channel.Server.handle_result/2` →
+  `send_socket_close/2` → `Phoenix.Socket.socket_close/2`), and `phoenix.js`
+  treats `phx_close` as a finished leave: the channel goes to `closed`, is
+  removed from the socket, and **no rejoin is scheduled** — only `phx_error`
+  and a refused/timed-out join arm the rejoin timer. So a room closed that way
+  stays dead in that tab for as long as it is open, even after the grant that
+  closed it comes back; `assets/js/collab.js` keeps buffering the tab's edits
+  into a channel that will never send them.
+
+  Sending the transport the same `"disconnect"` broadcast
+  `KilnCMS.Accounts.SessionEviction` uses (#675) is what makes the refusal
+  recoverable: `Phoenix.Socket.__info__/2` stops the transport with close code
+  1001, `phoenix.js` reconnects on its backoff and rejoins every channel it
+  had, and each rejoin runs the channel's `join/3` — refused while the grant is
+  narrowed, admitted once it is restored. That is exactly the "evicted, then
+  reconnect and re-run the check" path the client already exercises.
+
+  Call it *before* returning the stop. Both messages go to the transport from
+  the channel process, so the broadcast is handled first and the transport is
+  already gone when the `phx_close` would have been written — the client sees
+  one closed socket, not a closed channel followed by a closed socket that then
+  rejoins nothing. (`socket.transport_pid` is the test process under
+  `Phoenix.ChannelTest`, so a test asserts on the broadcast directly.)
+  """
+  @spec close_connection(Phoenix.Socket.t()) :: :ok
+  def close_connection(%Phoenix.Socket{transport_pid: transport_pid})
+      when is_pid(transport_pid) do
+    send(transport_pid, %Phoenix.Socket.Broadcast{
+      topic: "socket_reauth",
+      event: "disconnect",
+      payload: %{}
+    })
+
+    :ok
+  end
+
   # The credential keys only, never the whole metadata map: `__metadata__` also
   # carries Ash's own bookkeeping for the read that produced the struct
   # (`:selected`, `:keyset`), and pasting the connect read's over the reload's

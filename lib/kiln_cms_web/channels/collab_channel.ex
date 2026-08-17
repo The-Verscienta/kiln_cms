@@ -92,11 +92,21 @@ defmodule KilnCMSWeb.CollabChannel do
   loses collaborative prose at checkpoint and is worth fixing, on the publish
   path rather than here (#1061).
 
-  A refusal **closes the channel** rather than pushing an error, which is what
-  eviction does and what the client already handles: Phoenix sends `phx_error`
-  on the channel process exiting, and `phoenix.js` retries the join on a
-  backoff. Those rejoins run the full `join/3` and are refused in turn, so no
-  update flows — and if the grant comes back, the room resumes on its own.
+  A refusal **closes the connection, then stops the channel** — never an error
+  reply, which `assets/js/collab.js` (pushing without a `.receive`) would not
+  see, and never the stop alone. A channel that stops with `{:shutdown, _}` is
+  a `phx_close` frame to the client, and `phoenix.js` treats `phx_close` as a
+  finished leave: the channel is marked closed and removed from the socket, and
+  no rejoin is ever scheduled (only `phx_error` and a refused join arm the
+  timer). Stopping alone therefore left the room dead in that tab until the
+  page was reloaded, buffering edits into a channel that would never send
+  them — even after the grant came back. `SocketReauth.close_connection/1`
+  sends the transport the same `"disconnect"` broadcast eviction uses, so what
+  the client sees is a socket closed with 1001: it reconnects on a backoff and
+  rejoins, each rejoin runs the full `join/3` and is refused in turn while the
+  grant is narrowed, so no update flows — and if the grant comes back, the
+  room resumes on its own. That is the path the client already handles for
+  eviction (#675), reached the same way.
 
   ## Every frame is charged to the account (#1305)
 
@@ -313,6 +323,9 @@ defmodule KilnCMSWeb.CollabChannel do
         end
 
       :error ->
+        # The connection, not just the channel: see the moduledoc and
+        # `SocketReauth.close_connection/1` on why the stop alone is final.
+        SocketReauth.close_connection(socket)
         {:stop, {:shutdown, :unauthorized}, socket}
     end
   end
@@ -367,8 +380,12 @@ defmodule KilnCMSWeb.CollabChannel do
   @impl true
   def handle_info(:reauthorize, socket) do
     case reauthorize(socket) do
-      {:ok, socket} -> {:noreply, schedule_reauth(socket)}
-      :error -> {:stop, {:shutdown, :unauthorized}, socket}
+      {:ok, socket} ->
+        {:noreply, schedule_reauth(socket)}
+
+      :error ->
+        SocketReauth.close_connection(socket)
+        {:stop, {:shutdown, :unauthorized}, socket}
     end
   end
 
@@ -443,7 +460,9 @@ defmodule KilnCMSWeb.CollabChannel do
       _refused ->
         # One line per closed room, not per rejoin: the client's refused rejoins
         # go through `join/3`, which stays silent.
-        Logger.info("Collab re-authorization refused for #{doc_key}, closing the channel (#775)")
+        Logger.info(
+          "Collab re-authorization refused for #{doc_key}, closing the connection (#775)"
+        )
 
         :error
     end
