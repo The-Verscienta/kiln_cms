@@ -25,6 +25,34 @@ migration, a rewritten column, a dropped config key).
 
 <!-- Releases are cut from `main`; see docs/releasing.md. -->
 
+## [Unreleased]
+
+### Security
+
+- **Frames on an established `/ws/collab` connection are budgeted per
+  connection** (#1305). #1183 charged `/live` root joins and its sibling
+  charges the `/ws/*` connects, but once a socket was up nothing counted what
+  a client sent over it: an authenticated editor holding one connection could
+  push Yjs updates and awareness frames without bound, each costing a
+  `DocServer` apply and a room fan-out, and every N of them a full
+  re-authorization (three database reads). New `KilnCMSWeb.SocketEventBudget`
+  charges every `handle_in/3` on `KilnCMSWeb.CollabChannel` — and the
+  `join/3` that opened it, ahead of the join's own authorization — to a new
+  `:collab_event` bucket in `KilnCMSWeb.RateLimit` (6,000/minute by default),
+  keyed on the websocket's transport pid rather than the client address:
+  legitimate collaboration is itself a high-frequency stream (two frames per
+  keystroke) and one office NAT holds many editors, so the ceiling is sized
+  against one human on one tab and the address-keyed join budgets bound how
+  many tabs an address gets. Over it, the channel stops
+  (`{:shutdown, :over_budget}`) so the client rejoins on a backoff and
+  re-applies the room's full state — never an error reply, which would drop a
+  Yjs update on the floor and leave that client silently diverged — and the
+  rejoin lands on the same spent key, so a close-and-rejoin loop is bounded
+  too. Override like any bucket via
+  `config :kiln_cms, KilnCMSWeb.RateLimit, limits: %{collab_event: …}`.
+  Events on `/live` and subscription documents on `/ws/gql` remain uncounted
+  (threat model item 10).
+
 ## [0.7.0] - 2026-08-16
 
 ### Added

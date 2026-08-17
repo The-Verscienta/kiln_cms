@@ -13,7 +13,9 @@ defmodule KilnCMSWeb.CollabChannelTest do
   import KilnCMS.OrgFixtures
 
   alias KilnCMS.CMS
+  alias KilnCMSWeb.CollabChannel
   alias KilnCMSWeb.CollabSocket
+  alias KilnCMSWeb.RateLimit
 
   @endpoint KilnCMSWeb.Endpoint
 
@@ -480,5 +482,124 @@ defmodule KilnCMSWeb.CollabChannelTest do
 
     assert {:error, %{reason: "collab disabled"}} =
              subscribe_and_join(socket!(actor), topic(page), %{"vsn" => @schema_vsn})
+  end
+
+  describe "per-connection event budget (#1305)" do
+    # `subscribe_and_join/3` builds every socket with the TEST process as its
+    # transport, so every channel a test opens here rides one "connection" and
+    # spends one budget — which is exactly the shape under test. The mechanics
+    # of the key (two transports, two budgets) are `SocketEventBudgetTest`'s.
+    setup do
+      previous = Application.get_env(:kiln_cms, RateLimit, [])
+      on_exit(fn -> Application.put_env(:kiln_cms, RateLimit, previous) end)
+
+      # Same reason as the #775 block: a room that closes itself takes a linked
+      # test process with it unless exits are trapped.
+      Process.flag(:trap_exit, true)
+      :ok
+    end
+
+    defp put_event_limit(limit) do
+      current = Application.get_env(:kiln_cms, RateLimit, [])
+
+      limits =
+        current
+        |> Keyword.get(:limits, %{})
+        |> Map.put(CollabChannel.event_bucket(), {limit, :timer.minutes(1)})
+
+      Application.put_env(:kiln_cms, RateLimit, Keyword.put(current, :limits, limits))
+    end
+
+    test "the channel charges the collab bucket" do
+      assert CollabChannel.event_bucket() == :collab_event
+      assert Map.has_key?(RateLimit.default_limits(), :collab_event)
+    end
+
+    test "the frame over the ceiling closes the channel; the ones under it are served",
+         %{actor: actor, page: page} do
+      # Join spends one; two awareness frames spend two; the third frame is
+      # over and stops the channel with its own reason — the reason a client
+      # can tell apart from a revoked grant in its logs, though it recovers
+      # from both the same way (rejoin on a backoff).
+      put_event_limit(3)
+      topic = topic(page)
+      {_reply, socket} = join!(actor, topic)
+      channel = socket.channel_pid
+
+      push(socket, "awareness", %{"cursor" => 1})
+      push(socket, "awareness", %{"cursor" => 2})
+      push(socket, "awareness", %{"cursor" => 3})
+
+      assert_receive {:EXIT, ^channel, {:shutdown, :over_budget}}, 2_000
+    end
+
+    test "the charge runs before the frame's work: an over-budget update is never applied",
+         %{actor: actor, page: page} do
+      # A room with a second peer, so "not applied" is observable: the peer
+      # would receive the relay if the update had been served. Limit 2 = the
+      # two joins; the update itself is the frame over.
+      put_event_limit(2)
+      topic = topic(page)
+      {_reply, sender} = join!(actor, topic)
+      {_reply2, _peer} = join!(actor, topic)
+      channel = sender.channel_pid
+
+      doc = Yex.Doc.new()
+      doc |> Yex.Doc.get_text("block-0") |> Yex.Text.insert(0, "flood")
+      {:ok, update} = Yex.encode_state_as_update(doc)
+
+      ref = push(sender, "update", %{"update" => Base.encode64(update)})
+
+      assert_receive {:EXIT, ^channel, {:shutdown, :over_budget}}, 2_000
+      refute_reply ref, :ok
+      refute_push "update", %{"update" => _}
+    end
+
+    test "unknown and wrong-shaped frames count too", %{actor: actor, page: page} do
+      # #764 made these free to send (ignored, not crashed). They are still
+      # frames on the connection, and a flood of them is still a flood.
+      put_event_limit(2)
+      {_reply, socket} = join!(actor, topic(page))
+      channel = socket.channel_pid
+
+      push(socket, "no_such_event", %{})
+      push(socket, "update", %{"update" => []})
+
+      assert_receive {:EXIT, ^channel, {:shutdown, :over_budget}}, 2_000
+    end
+
+    test "a rejoin over the same connection is refused before authorization runs",
+         %{actor: actor, page: page} do
+      # The amplifier: a closed channel's client rejoins immediately, and each
+      # `join/3` costs three authorization reads if it gets that far. The key
+      # is the connection, so the rejoin lands on the spent budget — and is
+      # refused with "over budget", not "not found", even for a topic that
+      # names no document at all: proof `authorize/3` never ran.
+      put_event_limit(1)
+      {_reply, socket} = join!(actor, topic(page))
+      channel = socket.channel_pid
+
+      push(socket, "awareness", %{})
+      assert_receive {:EXIT, ^channel, {:shutdown, :over_budget}}, 2_000
+
+      assert {:error, %{reason: "over budget"}} =
+               subscribe_and_join(socket!(actor), topic(page), %{"vsn" => @schema_vsn})
+
+      assert {:error, %{reason: "over budget"}} =
+               subscribe_and_join(socket!(actor), "collab:page:#{Ash.UUID.generate()}", %{
+                 "vsn" => @schema_vsn
+               })
+    end
+
+    test "the join is charged ahead of the flag and schema checks", %{actor: actor, page: page} do
+      # A join the room refuses anyway still costs a frame and still counts, so
+      # a flood of doomed joins cannot run for free. Limit 1: the first refused
+      # join spends it; the second is refused for the budget, not the schema.
+      put_event_limit(1)
+      socket = socket!(actor)
+
+      assert {:error, %{reason: "stale bundle"}} = subscribe_and_join(socket, topic(page), %{})
+      assert {:error, %{reason: "over budget"}} = subscribe_and_join(socket, topic(page), %{})
+    end
   end
 end
