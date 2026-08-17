@@ -51,6 +51,30 @@ defmodule KilnCMS.CMS.Comment do
       primary? true
       accept [:content_type, :content_id, :block_id, :body, :created_by_rule_id]
 
+      # `block_id: nil` and `created_by_rule_id` exist for automation's
+      # actor-less calls (see those attributes' docs); a real actor is a human
+      # editor, who always anchors to a block and never speaks for a rule
+      # (#1252 review — neither was otherwise enforced, so any caller with an
+      # actor could set them and spoof automation's provenance).
+      validate fn changeset, context ->
+        case context.actor do
+          %{id: _} ->
+            cond do
+              is_nil(Ash.Changeset.get_attribute(changeset, :block_id)) ->
+                {:error, field: :block_id, message: "is required"}
+
+              not is_nil(Ash.Changeset.get_attribute(changeset, :created_by_rule_id)) ->
+                {:error, field: :created_by_rule_id, message: "can only be set by automation"}
+
+              true ->
+                :ok
+            end
+
+          _ ->
+            :ok
+        end
+      end
+
       change KilnCMS.CMS.Changes.RouteToBlockThread
       change KilnCMS.CMS.Changes.BroadcastComment
       change {KilnCMS.CMS.Changes.NotifyComment, event: :comment_added}
@@ -112,6 +136,10 @@ defmodule KilnCMS.CMS.Comment do
       of its own. So the row count is the count of blocks needing attention,
       which is what the editor header and the governance cards report — no
       `Enum.uniq_by(:block_id)` at the call site to get it right.
+
+      Excludes `block_id: nil` roots (#946's document-level automation
+      threads) for the same reason: those aren't blocks, and counting them
+      here would mislabel a document-level thread as one (#1252 review).
       """
 
       argument :content_type, :string, allow_nil?: false
@@ -119,7 +147,7 @@ defmodule KilnCMS.CMS.Comment do
 
       filter expr(
                content_type == ^arg(:content_type) and content_id == ^arg(:content_id) and
-                 is_nil(thread_id) and is_nil(resolved_at)
+                 is_nil(thread_id) and is_nil(resolved_at) and not is_nil(block_id)
              )
 
       prepare build(sort: [inserted_at: :asc])
@@ -152,9 +180,12 @@ defmodule KilnCMS.CMS.Comment do
       Its own read rather than a nil-content variant of the sibling: an
       argument that means "all content when omitted" is the kind of filter that
       silently returns the world when a caller forgets to pass it.
+
+      Excludes `block_id: nil` roots, same as `:unresolved_for_content`
+      (#1252 review).
       """
 
-      filter expr(is_nil(thread_id) and is_nil(resolved_at))
+      filter expr(is_nil(thread_id) and is_nil(resolved_at) and not is_nil(block_id))
       prepare build(sort: [inserted_at: :asc])
     end
 

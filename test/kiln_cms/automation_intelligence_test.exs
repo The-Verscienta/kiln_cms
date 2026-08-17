@@ -202,6 +202,10 @@ defmodule KilnCMS.AutomationIntelligenceTest do
       assert task.due_on == Date.add(Date.utc_today(), 5)
       assert task.note =~ "possible duplicates"
       assert task.note =~ "Same B"
+      # Distinct from :manual (#1252 review): this task wasn't personally
+      # handed to the assignee, and a "my assigned work" filter keyed on
+      # kind shouldn't read it as if it were.
+      assert task.kind == :intelligence_finding
     end
 
     test "task: due_in_days defaults to 3 when not given" do
