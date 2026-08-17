@@ -1,9 +1,10 @@
 defmodule KilnCMSWeb.SocketEventBudgetTest do
   @moduledoc """
-  The per-connection frame budget's own mechanics (#1305): keyed on the
-  transport pid and nothing else, one bucket per socket family, refused when
-  spent. `KilnCMSWeb.CollabChannelTest` pins the wiring — that the channel
-  actually charges it, and where.
+  The per-account frame budget's own mechanics (#1305): keyed on the actor
+  the socket authenticated as (falling back to its transport), one bucket per
+  socket family, refused when spent, and a refusal that closes the connection
+  rather than the channel. `KilnCMSWeb.CollabChannelTest` pins the wiring —
+  that the channel actually charges it, and where.
 
   `config/test.exs` raises `:collab_event` to a million so the collab suite can
   push freely; the tests here lower it back through the same application env
@@ -11,88 +12,97 @@ defmodule KilnCMSWeb.SocketEventBudgetTest do
   """
   use ExUnit.Case, async: false
 
+  alias KilnCMS.RateLimitHelpers
   alias KilnCMSWeb.RateLimit
   alias KilnCMSWeb.SocketEventBudget
+
+  @moduletag :capture_log
 
   @bucket :collab_event
 
   setup do
-    previous = Application.get_env(:kiln_cms, RateLimit, [])
-    on_exit(fn -> Application.put_env(:kiln_cms, RateLimit, previous) end)
-    :ok
+    RateLimitHelpers.restore_limits_on_exit()
   end
 
-  defp put_limit(limit) do
-    current = Application.get_env(:kiln_cms, RateLimit, [])
+  defp put_limit(limit), do: RateLimitHelpers.put_limit(@bucket, limit)
 
-    limits =
-      current |> Keyword.get(:limits, %{}) |> Map.put(@bucket, {limit, :timer.minutes(1)})
-
-    Application.put_env(:kiln_cms, RateLimit, Keyword.put(current, :limits, limits))
+  # A socket as a channel sees it: the actor the connect resolved, and the
+  # transport pid the websocket runs in. `topic` only feeds the debug line.
+  defp socket_for(actor_id, transport_pid \\ self()) do
+    %Phoenix.Socket{
+      assigns: %{actor: %{id: actor_id}},
+      transport_pid: transport_pid,
+      topic: "collab:page:x"
+    }
   end
 
-  # A socket as a channel sees it: the transport pid is the websocket, and it
-  # is what the key is built from. Every other field is irrelevant here, and a
-  # fresh throwaway pid per "connection" keeps tests from sharing a window.
-  defp socket_on(transport_pid), do: %Phoenix.Socket{transport_pid: transport_pid}
+  defp actor_id, do: Ash.UUID.generate()
 
   defp fresh_pid, do: spawn(fn -> :ok end)
 
-  test "the key is the transport pid, spelled with its serial" do
-    pid = self()
-    key = SocketEventBudget.connection_key(pid)
+  test "the key is the account; a socket with no actor falls back to its transport" do
+    id = actor_id()
+    assert SocketEventBudget.key(socket_for(id)) == "actor:" <> id
 
-    assert key == "conn:" <> List.to_string(:erlang.pid_to_list(pid))
-    assert String.starts_with?(key, "conn:<")
+    anonymous = %Phoenix.Socket{transport_pid: self()}
+    assert SocketEventBudget.key(anonymous) =~ ~r/^conn:<\d+\.\d+\.\d+>$/
   end
 
-  test "frames are allowed up to the limit and refused past it, per connection" do
+  test "frames are allowed up to the limit and refused past it" do
     put_limit(2)
-    socket = socket_on(fresh_pid())
+    socket = socket_for(actor_id())
 
-    assert :ok = SocketEventBudget.charge(@bucket, socket)
-    assert :ok = SocketEventBudget.charge(@bucket, socket)
+    assert :allow = SocketEventBudget.charge(@bucket, socket)
+    assert :allow = SocketEventBudget.charge(@bucket, socket)
     assert {:deny, retry_after_ms} = SocketEventBudget.charge(@bucket, socket)
     assert is_integer(retry_after_ms) and retry_after_ms >= 0
   end
 
-  test "two connections do not share a budget, even for the same user" do
-    # THE property behind the key choice: an office of editors on one NAT (or
-    # one editor with two tabs) must not spend each other's frames — the join
-    # budgets already key on the address; this one keys on the socket.
+  test "two accounts do not share a budget, even over one connection" do
+    # An office of editors on one NAT — or, at the transport level, two
+    # actors whose sockets happen to run in one process — must not spend each
+    # other's frames.
     put_limit(1)
-    a = socket_on(fresh_pid())
-    b = socket_on(fresh_pid())
+    a = socket_for(actor_id())
+    b = socket_for(actor_id())
 
-    assert :ok = SocketEventBudget.charge(@bucket, a)
+    assert :allow = SocketEventBudget.charge(@bucket, a)
     assert {:deny, _} = SocketEventBudget.charge(@bucket, a)
-    # `b` carries the same assigns a second tab of the same user would; only
-    # its transport differs, and that is enough for a fresh budget.
-    assert :ok = SocketEventBudget.charge(@bucket, %{b | assigns: a.assigns})
+    assert :allow = SocketEventBudget.charge(@bucket, b)
   end
 
-  test "every channel and every rejoin over one connection spends the same budget" do
-    # The amplifier this closes: a channel stopped for flooding rejoins over the
-    # SAME websocket, so it must land on the same spent key — a fresh channel
-    # pid must not mean a fresh budget.
+  test "a reconnect, a second tab or a second room does not mint a fresh budget" do
+    # THE property behind keying on the account and not the connection: the
+    # honest recovery from a refusal is a reconnect, and a flooder's cheapest
+    # move is one too — a fresh transport pid must land on the same spent key.
     put_limit(1)
-    transport = fresh_pid()
-    first_channel = %{socket_on(transport) | channel_pid: fresh_pid(), topic: "collab:page:a"}
-    rejoined = %{socket_on(transport) | channel_pid: fresh_pid(), topic: "collab:page:a"}
-    other_room = %{socket_on(transport) | channel_pid: fresh_pid(), topic: "collab:page:b"}
+    id = actor_id()
+    first_tab = socket_for(id, fresh_pid())
+    reconnected = socket_for(id, fresh_pid())
+    other_room = %{socket_for(id, first_tab.transport_pid) | topic: "collab:page:y"}
 
-    assert :ok = SocketEventBudget.charge(@bucket, first_channel)
-    assert {:deny, _} = SocketEventBudget.charge(@bucket, rejoined)
+    assert :allow = SocketEventBudget.charge(@bucket, first_tab)
+    assert {:deny, _} = SocketEventBudget.charge(@bucket, reconnected)
     assert {:deny, _} = SocketEventBudget.charge(@bucket, other_room)
   end
 
-  test "the shipped ceiling is a per-connection flood ceiling, not a usage cap" do
+  test "close_connection/1 tells the transport to disconnect, the way eviction does" do
+    # The test process stands in for the websocket transport, so the message
+    # the transport would act on lands here. Same shape `SessionEviction`
+    # broadcasts (#675): `Phoenix.Socket` closes with code 1001 on it, which
+    # phoenix.js reconnects from — the only refusal it recovers from.
+    socket = socket_for(actor_id(), self())
+
+    assert :ok = SocketEventBudget.close_connection(socket)
+    assert_receive %Phoenix.Socket.Broadcast{event: "disconnect"}
+  end
+
+  test "the shipped ceiling is a per-account flood ceiling, not a usage cap" do
     # The number `docs/threat-model.md` item 10 states. Sized against one human
-    # on one tab: a keystroke is two frames and a mouse-drag selection
-    # re-announces the caret at the browser's event rate, so a busy minute is a
-    # few thousand frames — the ceiling has to clear that with room, and still
-    # be something a script reaches in seconds. Pinned to a range, so retuning
-    # is a deliberate change here as well as in `RateLimit`.
+    # given what the client emits — a Yjs update per keystroke and awareness
+    # coalesced to ~10/s (`assets/js/collab.js`), so a furious minute is well
+    # under 2,000 frames — and reached by a script in seconds. Pinned to a
+    # range, so retuning is a deliberate change here as well as in `RateLimit`.
     assert {limit, scale} = RateLimit.default_limits()[@bucket]
     assert scale == :timer.minutes(1)
     assert limit in 3_000..12_000

@@ -62,22 +62,25 @@ defmodule KilnCMSWeb.RateLimit do
     # it in seconds. Sized like `:delivery` — the same "one address, one
     # minute" shape — rather than like `:auth`, because a mount is not a guess.
     live_join: {300, :timer.minutes(1)},
-    # Frames on one established `/ws/collab` CONNECTION (#1305,
+    # Frames from one ACCOUNT over `/ws/collab` (#1305,
     # `KilnCMSWeb.SocketEventBudget`) — every `handle_in/3` and the `join/3`
-    # that opened the channel, keyed on the transport pid rather than the
-    # address, because legitimate collaboration is itself a high-frequency
-    # stream and one office NAT holds many editors. Sized against the fastest
-    # human on one tab: a keystroke is two frames (Yjs update + awareness, see
-    # `assets/js/collab.js`), so a fast typist is ~30 frames/s, and a mouse-drag
-    # selection re-announces the caret at the browser's event rate (60–120/s)
-    # for as long as the drag lasts. A busy human minute is a few thousand
-    # frames; a script is over this in seconds. It is a flood ceiling per
-    # connection: what it bounds is the per-frame work — a `DocServer` apply
-    # and a room fan-out per update, and a full re-authorization (three DB
-    # reads) every `SocketReauth.update_floor/0` of them — that a client
-    # holding one authenticated connection could otherwise cause without
-    # limit. Over it, the channel closes and the client's rejoin is refused
-    # on the same key until the window turns.
+    # that opened the channel, keyed on the actor rather than the address
+    # (legitimate collaboration is itself a high-frequency stream and one
+    # office NAT holds many editors) or the connection (a reconnect must not
+    # mint a fresh budget, and the honest recovery from a refusal IS a
+    # reconnect). Sized against the fastest human, given what the client emits:
+    # one Yjs update per keystroke (~15/s at the very fastest), and awareness
+    # frames COALESCED client-side to at most ten a second (`assets/js/collab.js`
+    # — without that, a mouse-drag selection re-announced the caret at the
+    # browser's event rate and one long drag could reach this on its own). A
+    # furious minute is therefore ~900 + 600 + the 15s heartbeat, well under
+    # 2,000; a script is over 6,000 in seconds. It is a flood ceiling per
+    # account: what it bounds is the per-frame work — a `DocServer` apply and a
+    # room fan-out per update, and a full re-authorization (three DB reads)
+    # every `SocketReauth.update_floor/0` of them — that one credential could
+    # otherwise cause without limit. Over it, the connection is closed and the
+    # account's rejoins are refused until the window turns; the client
+    # reconciles what it typed meanwhile on the join that succeeds.
     collab_event: {6_000, :timer.minutes(1)}
   }
 
@@ -139,9 +142,10 @@ defmodule KilnCMSWeb.RateLimit do
   Returns `:allow` or `{:deny, retry_after_ms}` for the given bucket key.
 
   The key is a client address from `client_key/1` for every address-keyed
-  bucket, and a connection key from `KilnCMSWeb.SocketEventBudget.connection_key/1`
-  for the per-connection event buckets (#1305). Whichever it is, one caller
-  spells it, so two charges for the same client land on the same key.
+  bucket, and an account (or connection) key from
+  `KilnCMSWeb.SocketEventBudget.key/1` for the socket event buckets (#1305).
+  Whichever it is, one function spells it, so two charges for the same client
+  land on the same key.
   """
   def check(bucket, key) when is_atom(bucket) and is_binary(key) do
     {limit, scale} = Map.fetch!(limits(), bucket)

@@ -69,7 +69,7 @@ defmodule KilnCMSWeb.LiveJoinBudget do
   The `/ws/gql`, `/ws/bridge` and `/ws/collab` sockets (their own `connect/3`
   callbacks are the analogous place; not in scope here — see the issue), and
   events on an established socket. `KilnCMSWeb.SocketEventBudget` (#1305) now
-  counts the latter for `/ws/collab`, per connection rather than per address;
+  counts the latter for `/ws/collab`, per account rather than per address;
   `/live` events and the rest remain in threat-model item 10.
   """
 

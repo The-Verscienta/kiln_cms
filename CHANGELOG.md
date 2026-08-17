@@ -30,25 +30,30 @@ migration, a rewritten column, a dropped config key).
 ### Security
 
 - **Frames on an established `/ws/collab` connection are budgeted per
-  connection** (#1305). #1183 charged `/live` root joins and its sibling
-  charges the `/ws/*` connects, but once a socket was up nothing counted what
-  a client sent over it: an authenticated editor holding one connection could
-  push Yjs updates and awareness frames without bound, each costing a
-  `DocServer` apply and a room fan-out, and every N of them a full
-  re-authorization (three database reads). New `KilnCMSWeb.SocketEventBudget`
-  charges every `handle_in/3` on `KilnCMSWeb.CollabChannel` — and the
-  `join/3` that opened it, ahead of the join's own authorization — to a new
-  `:collab_event` bucket in `KilnCMSWeb.RateLimit` (6,000/minute by default),
-  keyed on the websocket's transport pid rather than the client address:
-  legitimate collaboration is itself a high-frequency stream (two frames per
-  keystroke) and one office NAT holds many editors, so the ceiling is sized
-  against one human on one tab and the address-keyed join budgets bound how
-  many tabs an address gets. Over it, the channel stops
-  (`{:shutdown, :over_budget}`) so the client rejoins on a backoff and
-  re-applies the room's full state — never an error reply, which would drop a
-  Yjs update on the floor and leave that client silently diverged — and the
-  rejoin lands on the same spent key, so a close-and-rejoin loop is bounded
-  too. Override like any bucket via
+  account** (#1305). #1183 charged `/live` root joins, but once a socket was
+  up nothing counted what a client sent over it: an authenticated editor
+  holding one connection could push Yjs updates and awareness frames without
+  bound, each costing a `DocServer` apply and a room fan-out, and every N of
+  them a full re-authorization (three database reads). New
+  `KilnCMSWeb.SocketEventBudget` charges every `handle_in/3` on
+  `KilnCMSWeb.CollabChannel` — and the `join/3` that opened it, ahead of the
+  join's own authorization — to a new `:collab_event` bucket in
+  `KilnCMSWeb.RateLimit` (6,000/minute by default), keyed on the **actor** the
+  socket authenticated as: not the address (legitimate collaboration is itself
+  a high-frequency stream and one office NAT holds many editors) and not the
+  connection (a fresh websocket is a flooder's cheapest move, and the honest
+  recovery from a refusal is itself a reconnect). Over it, the *connection* is
+  closed — a channel stop alone is a `phx_close` the JS client treats as a
+  finished leave and never rejoins — so the client reconnects on a backoff,
+  its rejoins are refused until the window turns, and on the join that
+  succeeds it pushes back whatever local ops the room is missing, so nothing
+  typed meanwhile is lost. `assets/js/collab.js` now coalesces awareness
+  pushes to ~10/s (a mouse-drag selection used to emit at the browser's event
+  rate), resyncs its doc against the room's state on every successful join,
+  and treats an `"over budget"` join refusal as transient rather than seeding
+  the document as the first peer; the channel relays `awareness_request` at
+  most once per ten seconds per channel, since each relay makes every peer
+  send a frame of their own. Override like any bucket via
   `config :kiln_cms, KilnCMSWeb.RateLimit, limits: %{collab_event: …}`.
   Events on `/live` and subscription documents on `/ws/gql` remain uncounted
   (threat model item 10).

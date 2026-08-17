@@ -171,9 +171,9 @@ config :kiln_cms, KilnCMSWeb.RateLimit,
     # Every `live/2` in the suite is a root join from the same (unresolved)
     # address (#1183); `LiveJoinBudgetTest` lowers this back for its own tests.
     live_join: {1_000_000, :timer.minutes(1)},
-    # `subscribe_and_join/3` keys every channel a test opens on the TEST
-    # process's pid (#1305), and the collab suite pushes a few frames per test;
-    # raised out of the way, and `CollabChannelTest` lowers it back for its own
+    # Every frame the collab suite pushes is charged to the seeded actor
+    # (#1305), and one test's actor may push many; raised out of the way, and
+    # `CollabChannelTest`/`SocketEventBudgetTest` lower it back for their own
     # budget tests.
     collab_event: {1_000_000, :timer.minutes(1)}
   }

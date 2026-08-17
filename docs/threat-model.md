@@ -66,7 +66,7 @@ the router so preflights are answered before route matching).
 | Credential submits over `/live` | LiveView `"submit"` on the sign-in, register, reset-request and magic-link forms — **all four render on all three auth pages** | credentials → session / account / mail | charged on the *action*, since no plug can reach them: sign-in `:auth` (#715) + per-account (#478); registration `:register` (#724); reset and magic-link `:auth` (#724) + the per-address mail budget |
 | Editor / admin LiveViews | `/editor/**`, `/media` | session cookie + role | none, except the three TOTP actions on `/editor/settings`: per-account, the second factor's own bucket (#727) |
 | Media blobs | `/uploads/*` (`Plug.Static`) | none | none |
-| Sockets | `/live`, `/ws/collab`, `/ws/bridge` | session / signed token + per-document read / API key + per-document read | `/live` root joins `:live_join` per address (#1183); every frame on a `/ws/collab` connection `:collab_event` per transport (#1305); otherwise none (except the sign-in submit, above) |
+| Sockets | `/live`, `/ws/collab`, `/ws/bridge` | session / signed token + per-document read / API key + per-document read | `/live` root joins `:live_join` per address (#1183); every frame on a `/ws/collab` connection `:collab_event` per account (#1305); otherwise none (except the sign-in submit, above) |
 | Dev tools | `/dev/dashboard`, `/dev/mailbox`, `/admin`, `/gql/playground` | compile-gated off in prod | — |
 
 **The server-side Ash policies are the authorization boundary.** Every read and
@@ -934,26 +934,36 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
     this item's remaining gap: events on an established socket, and joins on
     the `/ws/gql`, `/ws/bridge` and `/ws/collab` families.
     **Narrowed by #1305:** frames on an established **`/ws/collab`**
-    connection are now charged, per *connection* rather than per address
-    (`KilnCMSWeb.SocketEventBudget`, the `:collab_event` bucket, 6,000/minute
-    per transport by default). Every `handle_in/3` — update, awareness, and
-    the ignored rest — and the `join/3` that opened the channel spend the same
-    budget, keyed on the websocket's transport pid, so a channel closed for
-    flooding rejoins onto the spent key and is refused before the join's
-    authorization reads run. Per connection because legitimate collaboration
-    *is* a high-frequency stream (two frames per keystroke) and one office NAT
-    holds many editors — the address-keyed join budgets bound how many sockets
-    an address gets, this bounds what one socket may send, and the two
-    compose. Over it, the channel stops (`phx_error`, rejoin on a backoff,
-    full state re-applied on the rejoin that succeeds), never an error reply,
-    since a dropped Yjs update would leave that client silently diverged.
-    Sized against the fastest human on one tab (a busy minute is a few
-    thousand frames), it is a flood ceiling per connection: what it bounds is
-    the `DocServer` apply and room fan-out per update, and the full
-    re-authorization (three DB reads) every `SocketReauth.update_floor/0` of
-    them. **Still uncounted:** events on `/live` (no lifecycle hook runs before
-    every `handle_event/3`; the sign-in submit stays the one charged case,
-    #715) and subscription documents on `/ws/gql`.
+    connection are now charged, per *account* rather than per address or per
+    connection (`KilnCMSWeb.SocketEventBudget`, the `:collab_event` bucket,
+    6,000/minute per actor by default). Every `handle_in/3` — update,
+    awareness, and the ignored rest — and the `join/3` that opened the channel
+    spend the same budget, keyed on the actor the socket authenticated as, so
+    a reconnect, a second tab or a second room does not mint a fresh budget
+    and a flooder is bounded per credential; a join over budget is refused
+    before its authorization reads. Per account because legitimate
+    collaboration *is* a high-frequency stream and one office NAT holds many
+    editors (address), and because a fresh websocket is the cheapest thing a
+    flooder has and the honest recovery from a refusal is itself a reconnect
+    (connection). Over it, the **connection is closed** — not the channel: a
+    `{:shutdown, _}` stop is `phx_close`, which `phoenix.js` treats as a
+    finished leave and never rejoins — so the client reconnects on a backoff,
+    its rejoins are refused until the window turns, and on the join that
+    succeeds it pushes back the local ops the room is missing (a Yjs
+    state-vector diff in `assets/js/collab.js`), so nothing typed meanwhile is
+    lost. Two things on the client are part of the control: awareness pushes
+    are coalesced to ~10/s (without that a mouse-drag selection emitted at the
+    browser's event rate and one long drag could reach the ceiling alone),
+    and an `"over budget"` join refusal is treated as transient rather than
+    seeding the document as the first peer. `awareness_request` — the one
+    frame that makes every *peer* send a frame — is relayed at most once per
+    ten seconds per channel, so one seat cannot spend the room's budgets
+    through it. What this bounds is the per-frame work: the `DocServer` apply
+    and room fan-out per update, and the full re-authorization (three DB
+    reads) every `SocketReauth.update_floor/0` of them. **Still uncounted:**
+    events on `/live` (no lifecycle hook runs before every `handle_event/3`;
+    the sign-in submit stays the one charged case, #715) and subscription
+    documents on `/ws/gql`.
 11. **Periodic CSP re-review** as the editor adds third-party assets. The
     runtime `img-src` is widened by `CSP_IMG_SRC` and by the Unsplash
     integration — the only externally-influenced part of the policy.

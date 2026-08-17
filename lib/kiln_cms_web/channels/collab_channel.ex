@@ -98,35 +98,46 @@ defmodule KilnCMSWeb.CollabChannel do
   backoff. Those rejoins run the full `join/3` and are refused in turn, so no
   update flows — and if the grant comes back, the room resumes on its own.
 
-  ## Every frame is charged to the connection (#1305)
+  ## Every frame is charged to the account (#1305)
 
   The join and every `handle_in/3` — `"update"`, `"awareness"`,
   `"awareness_request"` and the ignored rest alike — first spend one unit of
-  `KilnCMSWeb.SocketEventBudget`'s `:collab_event` bucket, keyed on the
-  websocket this channel rides (`socket.transport_pid`), so a client that has
-  connected once cannot then push frames without bound. The reasoning for the
-  key, the single bucket and the size is in that module and on the bucket in
-  `KilnCMSWeb.RateLimit`; what matters here is the order and the refusal:
+  `KilnCMSWeb.SocketEventBudget`'s `:collab_event` bucket, keyed on the actor
+  the socket authenticated as, so a client that has connected once cannot then
+  push frames without bound, and cannot reset the bound by reconnecting. The
+  reasoning for the key, the single bucket, the size and the shape of the
+  refusal is in that module and on the bucket in `KilnCMSWeb.RateLimit`; what
+  matters here is the order and the two refusals:
 
     * the charge runs **before** anything else the frame would cost — ahead of
       the `"update"` clause's re-authorization floor and its `DocServer` call,
       and ahead of `join/3`'s three authorization reads — so a flood pays the
       ETS increment and nothing more;
-    * an over-budget frame **stops the channel** (`{:shutdown, :over_budget}`),
-      the same closing the re-authorization above uses and for the same reason:
-      the client learns by `phx_error`, rejoins on a backoff, and gets the
-      room's full state back on the rejoin that succeeds — whereas an error
-      reply would drop a Yjs update on the floor and leave that client's
-      document quietly diverged (`assets/js/collab.js` pushes without a
-      `.receive`);
+    * an over-budget **frame closes the connection** and stops the channel:
+      `SocketEventBudget.close_connection/1`, then `{:shutdown, :over_budget}`.
+      Not just the stop — a stopped channel is `phx_close` to the client, which
+      `phoenix.js` treats as a finished leave and never rejoins — and not an
+      error reply, which `assets/js/collab.js` (pushing without a `.receive`)
+      would never see. The closed socket is what the client recovers from: it
+      reconnects on a backoff and rejoins, and on the join that succeeds it
+      pushes back whatever local ops the room is missing;
     * an over-budget **join** is refused with its own reason, `"over budget"`,
-      before `authorize/3` runs. It is the one refusal here that is not folded
-      into `"not found"`, because it answers nothing about the document — only
-      that this connection has been talking too much, which the caller already
-      knows. Since the key is the connection and not the channel, the rejoin a
-      stopped channel triggers lands on the same spent budget, so a script that
-      closes and rejoins in a loop is bounded by this too, not just its first
-      channel.
+      before `authorize/3` runs, and does *not* close the connection —
+      `phoenix.js` already retries a refused join on a backoff. It is the one
+      refusal here that is not folded into `"not found"`, because it answers
+      nothing about the document — only that this account has been talking
+      too much, which the caller already knows — and because the client has to
+      tell it apart from the sticky refusals: it must not seed a document as
+      the first peer on a refusal that will succeed a moment later.
+
+  One frame is bounded on its own, on top of the budget: `"awareness_request"`
+  makes every *other* peer answer with an `"awareness"` frame of their own,
+  which they are charged for. Relayed without limit, one connection could
+  spend every peer's budget through it and empty the room of honest editors
+  while staying attached itself. The honest client sends it once, on a join
+  that found peers, so this channel relays at most one per
+  `@awareness_request_interval_ms` per channel and drops the rest — the
+  requester still gets carets on the next periodic awareness refresh.
   """
   use Phoenix.Channel
 
@@ -137,8 +148,12 @@ defmodule KilnCMSWeb.CollabChannel do
   alias KilnCMSWeb.SocketEventBudget
   alias KilnCMSWeb.SocketReauth
 
-  # The `KilnCMSWeb.RateLimit` bucket every frame on a collab connection spends.
+  # The `KilnCMSWeb.RateLimit` bucket every frame from a collab account spends.
   @event_bucket :collab_event
+
+  # How often one channel may have an `"awareness_request"` relayed to the
+  # room — see the moduledoc on why this frame is bounded on its own.
+  @awareness_request_interval_ms :timer.seconds(10)
 
   # Must match SCHEMA_VSN in assets/js/collab.js. A peer whose bundle predates
   # the current ProseMirror node set is refused: y-prosemirror deletes nodes
@@ -147,16 +162,12 @@ defmodule KilnCMSWeb.CollabChannel do
   # for every peer. Refused clients degrade to solo editing with autosave.
   @schema_vsn 2
 
-  @doc "The `KilnCMSWeb.RateLimit` bucket every frame on a collab connection spends."
-  @spec event_bucket() :: atom()
-  def event_bucket, do: @event_bucket
-
   @impl true
   def join("collab:" <> key, params, socket) do
     cond do
       # First, before the flag and the schema check: a join the room is about
       # to refuse anyway still costs a frame, and still counts (#1305).
-      over_budget?(socket, "join") ->
+      match?({:deny, _}, SocketEventBudget.charge(@event_bucket, socket)) ->
         {:error, %{reason: "over budget"}}
 
       not Crdt.enabled?() ->
@@ -260,10 +271,16 @@ defmodule KilnCMSWeb.CollabChannel do
   # then dispatch. `handle_frame/3` below is the per-event logic; nothing calls
   # it except this clause, so no event can be served unbilled.
   def handle_in(event, payload, socket) do
-    if over_budget?(socket, event) do
-      {:stop, {:shutdown, :over_budget}, socket}
-    else
-      handle_frame(event, payload, socket)
+    case SocketEventBudget.charge(@event_bucket, socket) do
+      :allow ->
+        handle_frame(event, payload, socket)
+
+      {:deny, _retry_after_ms} ->
+        # Close the CONNECTION, then stop: the close is what the client
+        # recovers from (it reconnects and rejoins); the stop alone would be a
+        # `phx_close` it treats as final. See the moduledoc.
+        SocketEventBudget.close_connection(socket)
+        {:stop, {:shutdown, :over_budget}, socket}
     end
   end
 
@@ -309,9 +326,22 @@ defmodule KilnCMSWeb.CollabChannel do
 
   # A newcomer asking the room to re-announce its awareness states (so remote
   # carets appear immediately instead of on the next periodic refresh).
+  #
+  # Relayed at most once per `@awareness_request_interval_ms` per channel: each
+  # relay makes every peer send (and pay for) an `"awareness"` frame, so an
+  # unbounded relay is a way to spend the whole room's budget from one seat
+  # (#1305). A dropped request costs the requester nothing but a wait for the
+  # next periodic awareness refresh.
   defp handle_frame("awareness_request", _payload, socket) do
-    broadcast_from!(socket, "awareness_request", %{})
-    {:noreply, socket}
+    now = System.monotonic_time(:millisecond)
+    last = socket.assigns[:awareness_request_at]
+
+    if is_nil(last) or now - last >= @awareness_request_interval_ms do
+      broadcast_from!(socket, "awareness_request", %{})
+      {:noreply, assign(socket, :awareness_request_at, now)}
+    else
+      {:noreply, socket}
+    end
   end
 
   # Anything else is ignored rather than crashing the room (#764).
@@ -330,24 +360,6 @@ defmodule KilnCMSWeb.CollabChannel do
   defp handle_frame(event, _payload, socket) do
     Logger.debug("CollabChannel ignoring unhandled event #{inspect(event)}")
     {:noreply, socket}
-  end
-
-  # The charge (#1305). Logged at debug, not warning, for the reason
-  # `LiveJoinBudget` gives: client-triggerable, so a line per refusal is an
-  # unbounded write; the caller's stop/refusal is the signal that matters.
-  defp over_budget?(socket, event) do
-    case SocketEventBudget.charge(@event_bucket, socket) do
-      :ok ->
-        false
-
-      {:deny, retry_after_ms} ->
-        Logger.debug(fn ->
-          "CollabChannel: connection over its event budget on #{inspect(event)} " <>
-            "(retry in #{retry_after_ms}ms)"
-        end)
-
-        true
-    end
   end
 
   # --- periodic re-authorization (#775) ---------------------------------------

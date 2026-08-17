@@ -13,9 +13,8 @@ defmodule KilnCMSWeb.CollabChannelTest do
   import KilnCMS.OrgFixtures
 
   alias KilnCMS.CMS
-  alias KilnCMSWeb.CollabChannel
+  alias KilnCMS.RateLimitHelpers
   alias KilnCMSWeb.CollabSocket
-  alias KilnCMSWeb.RateLimit
 
   @endpoint KilnCMSWeb.Endpoint
 
@@ -484,14 +483,15 @@ defmodule KilnCMSWeb.CollabChannelTest do
              subscribe_and_join(socket!(actor), topic(page), %{"vsn" => @schema_vsn})
   end
 
-  describe "per-connection event budget (#1305)" do
-    # `subscribe_and_join/3` builds every socket with the TEST process as its
-    # transport, so every channel a test opens here rides one "connection" and
-    # spends one budget — which is exactly the shape under test. The mechanics
-    # of the key (two transports, two budgets) are `SocketEventBudgetTest`'s.
+  describe "per-account event budget (#1305)" do
+    # `subscribe_and_join/3` runs every socket a test opens with the TEST
+    # process as its transport, so the transport-bound side of a refusal (the
+    # disconnect the client recovers from) lands in this mailbox and can be
+    # asserted like any other push. Joins spend frames too, so each limit below
+    # is written as `joins + frames`. The budget's own mechanics (two accounts,
+    # two budgets; a reconnect keeps the key) are `SocketEventBudgetTest`'s.
     setup do
-      previous = Application.get_env(:kiln_cms, RateLimit, [])
-      on_exit(fn -> Application.put_env(:kiln_cms, RateLimit, previous) end)
+      RateLimitHelpers.restore_limits_on_exit()
 
       # Same reason as the #775 block: a room that closes itself takes a linked
       # test process with it unless exits are trapped.
@@ -499,56 +499,48 @@ defmodule KilnCMSWeb.CollabChannelTest do
       :ok
     end
 
-    defp put_event_limit(limit) do
-      current = Application.get_env(:kiln_cms, RateLimit, [])
+    @event_bucket :collab_event
 
-      limits =
-        current
-        |> Keyword.get(:limits, %{})
-        |> Map.put(CollabChannel.event_bucket(), {limit, :timer.minutes(1)})
+    defp put_event_limit(limit), do: RateLimitHelpers.put_limit(@event_bucket, limit)
 
-      Application.put_env(:kiln_cms, RateLimit, Keyword.put(current, :limits, limits))
-    end
-
-    test "the channel charges the collab bucket" do
-      assert CollabChannel.event_bucket() == :collab_event
-      assert Map.has_key?(RateLimit.default_limits(), :collab_event)
-    end
-
-    test "the frame over the ceiling closes the channel; the ones under it are served",
+    test "the frame over the ceiling closes the connection; the ones under it are served",
          %{actor: actor, page: page} do
-      # Join spends one; two awareness frames spend two; the third frame is
-      # over and stops the channel with its own reason — the reason a client
-      # can tell apart from a revoked grant in its logs, though it recovers
-      # from both the same way (rejoin on a backoff).
-      put_event_limit(3)
+      # A room with a peer, so "served" is observable: the peer's transport (this
+      # process) receives each relayed awareness frame. Two joins + two frames
+      # under the limit; the third frame is over.
+      put_event_limit(2 + 2)
       topic = topic(page)
-      {_reply, socket} = join!(actor, topic)
-      channel = socket.channel_pid
+      {_reply, sender} = join!(actor, topic)
+      {_reply2, _peer} = join!(actor, topic)
+      channel = sender.channel_pid
 
-      push(socket, "awareness", %{"cursor" => 1})
-      push(socket, "awareness", %{"cursor" => 2})
-      push(socket, "awareness", %{"cursor" => 3})
+      push(sender, "awareness", %{"cursor" => 1})
+      assert_push "awareness", %{"cursor" => 1}
+      push(sender, "awareness", %{"cursor" => 2})
+      assert_push "awareness", %{"cursor" => 2}
 
+      push(sender, "awareness", %{"cursor" => 3})
+
+      # What the client sees: its CONNECTION told to close (phoenix.js
+      # reconnects and rejoins from that), not merely a `phx_close` for one
+      # channel (which it would treat as a finished leave and never rejoin).
+      assert_receive %Phoenix.Socket.Broadcast{event: "disconnect"}, 2_000
       assert_receive {:EXIT, ^channel, {:shutdown, :over_budget}}, 2_000
+      refute_push "awareness", %{"cursor" => 3}
     end
 
     test "the charge runs before the frame's work: an over-budget update is never applied",
          %{actor: actor, page: page} do
-      # A room with a second peer, so "not applied" is observable: the peer
-      # would receive the relay if the update had been served. Limit 2 = the
-      # two joins; the update itself is the frame over.
+      # A peer would receive the relay if the update had been served, and the
+      # doc server would hold its text. Limit = the two joins; the update itself
+      # is the frame over.
       put_event_limit(2)
       topic = topic(page)
       {_reply, sender} = join!(actor, topic)
       {_reply2, _peer} = join!(actor, topic)
       channel = sender.channel_pid
 
-      doc = Yex.Doc.new()
-      doc |> Yex.Doc.get_text("block-0") |> Yex.Text.insert(0, "flood")
-      {:ok, update} = Yex.encode_state_as_update(doc)
-
-      ref = push(sender, "update", %{"update" => Base.encode64(update)})
+      ref = push(sender, "update", %{"update" => yjs_update("flood")})
 
       assert_receive {:EXIT, ^channel, {:shutdown, :over_budget}}, 2_000
       refute_reply ref, :ok
@@ -557,8 +549,8 @@ defmodule KilnCMSWeb.CollabChannelTest do
 
     test "unknown and wrong-shaped frames count too", %{actor: actor, page: page} do
       # #764 made these free to send (ignored, not crashed). They are still
-      # frames on the connection, and a flood of them is still a flood.
-      put_event_limit(2)
+      # frames from the account, and a flood of them is still a flood.
+      put_event_limit(1 + 1)
       {_reply, socket} = join!(actor, topic(page))
       channel = socket.channel_pid
 
@@ -568,27 +560,42 @@ defmodule KilnCMSWeb.CollabChannelTest do
       assert_receive {:EXIT, ^channel, {:shutdown, :over_budget}}, 2_000
     end
 
-    test "a rejoin over the same connection is refused before authorization runs",
+    test "the budget follows the account across a reconnect, and rejoins are refused before authorization",
          %{actor: actor, page: page} do
-      # The amplifier: a closed channel's client rejoins immediately, and each
-      # `join/3` costs three authorization reads if it gets that far. The key
-      # is the connection, so the rejoin lands on the spent budget — and is
-      # refused with "over budget", not "not found", even for a topic that
-      # names no document at all: proof `authorize/3` never ran.
+      # The amplifier a per-connection key would have left open: a closed
+      # connection's client reconnects (a fresh transport), and each `join/3`
+      # costs three authorization reads if it gets that far. The key is the
+      # account, so the rejoin over the NEW socket lands on the spent budget —
+      # and is refused with "over budget", not "not found", even for a topic
+      # that names no document at all: proof `authorize/3` never ran.
       put_event_limit(1)
       {_reply, socket} = join!(actor, topic(page))
       channel = socket.channel_pid
 
       push(socket, "awareness", %{})
       assert_receive {:EXIT, ^channel, {:shutdown, :over_budget}}, 2_000
+      # The frame refusal closed the (test-process) transport once — take that
+      # message, so the join refusals below can be shown NOT to add one.
+      assert_receive %Phoenix.Socket.Broadcast{event: "disconnect"}, 2_000
+
+      reconnected = socket!(actor)
 
       assert {:error, %{reason: "over budget"}} =
-               subscribe_and_join(socket!(actor), topic(page), %{"vsn" => @schema_vsn})
+               subscribe_and_join(reconnected, topic(page), %{"vsn" => @schema_vsn})
 
       assert {:error, %{reason: "over budget"}} =
-               subscribe_and_join(socket!(actor), "collab:page:#{Ash.UUID.generate()}", %{
+               subscribe_and_join(reconnected, "collab:page:#{Ash.UUID.generate()}", %{
                  "vsn" => @schema_vsn
                })
+
+      # A refused JOIN does not close the connection: phoenix.js already retries
+      # a refused join on a backoff, and closing would only make it dearer.
+      refute_receive %Phoenix.Socket.Broadcast{event: "disconnect"}
+
+      # Another account over the very same transport is unaffected — the key is
+      # the actor, not the process the sockets run in.
+      assert {:ok, %{"peers" => _}, _joined} =
+               subscribe_and_join(socket!(user(:admin)), topic(page), %{"vsn" => @schema_vsn})
     end
 
     test "the join is charged ahead of the flag and schema checks", %{actor: actor, page: page} do
@@ -600,6 +607,21 @@ defmodule KilnCMSWeb.CollabChannelTest do
 
       assert {:error, %{reason: "stale bundle"}} = subscribe_and_join(socket, topic(page), %{})
       assert {:error, %{reason: "over budget"}} = subscribe_and_join(socket, topic(page), %{})
+    end
+
+    test "awareness_request is relayed at most once per interval per channel",
+         %{actor: actor, page: page} do
+      # Each relay makes every peer send an awareness frame of their own and pay
+      # for it, so an unbounded relay lets one seat spend the whole room's
+      # budget. Two requests back to back: one relay.
+      topic = topic(page)
+      {_reply, requester} = join!(actor, topic)
+      {_reply2, _peer} = join!(actor, topic)
+
+      push(requester, "awareness_request", %{})
+      assert_push "awareness_request", %{}
+      push(requester, "awareness_request", %{})
+      refute_push "awareness_request", %{}
     end
   end
 end

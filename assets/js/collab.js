@@ -8,6 +8,22 @@
 // echoed. The join reply carries the authoritative doc state plus the peer
 // count — `peers === 1` means "you're first", which is the (race-tolerant
 // enough for a prototype) signal to seed fragments from the stored HTML.
+//
+// The server budgets every frame this file sends, per account
+// (KilnCMSWeb.SocketEventBudget, #1305), and closes the connection when the
+// account is over it. Three things here exist for that:
+//   * awareness pushes are coalesced (AWARENESS_PUSH_MS), so a mouse-drag
+//     selection — which re-announces the caret on every selection change —
+//     cannot emit at the browser's event rate; the ceiling is sized against
+//     what this file emits, so this IS the ceiling's input;
+//   * every successful join pushes back the local ops the server's state is
+//     missing, so a frame the server refused (or one in flight when it closed
+//     the connection) is recovered on the rejoin rather than lost;
+//   * an "over budget" join refusal is transient — the account's budget frees
+//     within the window and phoenix.js keeps retrying — so it must NOT resolve
+//     `whenReady` as the first peer: seeding from the stored HTML and then
+//     merging the room's real state on the retry that succeeds duplicates the
+//     document.
 import {Socket} from "phoenix"
 import * as Y from "yjs"
 import {
@@ -28,6 +44,18 @@ const REMOTE_ORIGIN = "kiln-collab-remote"
 // shared doc, so one stale tab would silently destroy every peer's tables.
 // A refused join falls back to solo editing below — safe, just not live.
 export const SCHEMA_VSN = 2
+
+// Awareness (caret/selection/name) pushes are coalesced to one frame per this
+// many ms — the latest local state wins, so nothing is lost by waiting — which
+// bounds what a drag-select can emit at ~10 frames/s instead of the browser's
+// event rate. Removals (`setLocalState(null)` on release) flush immediately so
+// remote carets still disappear at once.
+const AWARENESS_PUSH_MS = 100
+
+// A join refusal that clears on its own (the account's frame budget, #1305):
+// phoenix.js retries the join on a backoff, and the "ok" that eventually
+// arrives resolves `whenReady` — so this one must not resolve it as an error.
+const TRANSIENT_JOIN_ERRORS = new Set(["over budget"])
 
 let socket = null
 const docs = {} // topic -> {doc, chan, whenReady, refs}
@@ -66,13 +94,29 @@ export function acquireDoc(topic, token) {
 
     // Presence carets/names (the Yjs awareness protocol) ride the same
     // channel. Awareness handles liveness itself — local state re-broadcasts
-    // periodically and stale peers expire — we only relay the updates.
+    // periodically and stale peers expire — we only relay the updates,
+    // coalesced (see AWARENESS_PUSH_MS).
     const awareness = new Awareness(doc)
+
+    const pendingAwareness = new Set()
+    let awarenessTimer = null
+    const flushAwareness = () => {
+      awarenessTimer = null
+      if (pendingAwareness.size === 0) return
+      const changed = Array.from(pendingAwareness)
+      pendingAwareness.clear()
+      chan.push("awareness", {update: toBase64(encodeAwarenessUpdate(awareness, changed))})
+    }
 
     const pushAwareness = ({added, updated, removed}, origin) => {
       if (origin === REMOTE_ORIGIN) return
-      const changed = added.concat(updated, removed)
-      chan.push("awareness", {update: toBase64(encodeAwarenessUpdate(awareness, changed))})
+      added.concat(updated, removed).forEach(id => pendingAwareness.add(id))
+      if (removed.length > 0) {
+        if (awarenessTimer) clearTimeout(awarenessTimer)
+        flushAwareness()
+      } else if (!awarenessTimer) {
+        awarenessTimer = setTimeout(flushAwareness, AWARENESS_PUSH_MS)
+      }
     }
     awareness.on("update", pushAwareness)
 
@@ -105,14 +149,28 @@ export function acquireDoc(topic, token) {
     const whenReady = new Promise(resolve => {
       chan
         .join()
+        // Fires on every join that succeeds, the first and each rejoin after a
+        // reconnect (phoenix.js keeps the join push's hooks).
         .receive("ok", ({state, peers}) => {
-          Y.applyUpdate(doc, fromBase64(state), REMOTE_ORIGIN)
+          const remote = fromBase64(state)
+          Y.applyUpdate(doc, remote, REMOTE_ORIGIN)
+          // Sync step 2: whatever this doc has that the room's state doesn't
+          // — the update the server refused, the ones in flight when it closed
+          // the connection, anything typed while disconnected — goes back now.
+          // Empty (two bytes) on a fresh doc and after a clean handshake.
+          const missing = Y.encodeStateAsUpdate(doc, Y.encodeStateVectorFromUpdate(remote))
+          if (missing.length > 2) chan.push("update", {update: toBase64(missing)})
           if (peers > 1) chan.push("awareness_request", {})
           resolve({firstPeer: peers === 1})
         })
         // Join refused (flag off / stale token / stale-bundle schema vsn):
         // behave like a lone editor — autosave still works, collab doesn't.
-        .receive("error", () => resolve({firstPeer: true}))
+        // A TRANSIENT refusal is left pending: the retry that succeeds
+        // resolves it, and seeding now would duplicate the room's content.
+        .receive("error", ({reason} = {}) => {
+          if (TRANSIENT_JOIN_ERRORS.has(reason)) return
+          resolve({firstPeer: true})
+        })
     })
 
     docs[topic] = {doc, chan, awareness, whenReady, refs: 0, pushLocal, pushAwareness}
@@ -127,7 +185,8 @@ export function acquireDoc(topic, token) {
     whenReady: entry.whenReady,
     release() {
       if (--entry.refs > 0) return
-      // Announce the departure so remote carets disappear immediately.
+      // Announce the departure so remote carets disappear immediately (a
+      // removal flushes the coalesced awareness push synchronously).
       entry.awareness.setLocalState(null)
       entry.awareness.off("update", entry.pushAwareness)
       entry.awareness.destroy()
