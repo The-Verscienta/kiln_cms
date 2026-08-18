@@ -27,6 +27,26 @@ migration, a rewritten column, a dropped config key).
 
 ## [Unreleased]
 
+### Added
+
+- **Coverage is measured, reported and floored; the Playwright suite grows
+  from 14 journeys to 19** (#1314). CI's main test job now runs the suite under
+  line coverage (`mix coveralls.multiple --type json --type html`), uploads the
+  HTML/JSON report as the `coverage-report` artifact, prints a per-directory
+  rollup (`mix kiln.coverage.summary`, also written to the job summary) so the
+  editor / delivery / governance split is visible, and enforces
+  `minimum_coverage` in `coveralls.json` — a floor set just under the measured
+  number, so coverage cannot regress silently, not a target. Five new browser
+  journeys under `e2e/tests/`: content-list bulk actions (publish, unpublish,
+  delete), media upload + focal point, release create → ship → roll back,
+  dynamic content-type creation through to a draft of the new type, and a
+  comment thread with an `@mention` that lands in the mentioned user's inbox.
+  Two seams the journeys needed: the e2e server now processes Oban queues
+  (media measurement, release go-live) and mounts the dev-only Swoosh mailbox,
+  and `priv/repo/seeds.exs` gives the demo accounts display names ("Demo
+  Admin", "Demo Editor" — backfilled on an existing database), since a
+  nameless user has no `@handle` and cannot be mentioned.
+
 ### Security
 
 - **Frames on an established `/ws/collab` connection are budgeted per

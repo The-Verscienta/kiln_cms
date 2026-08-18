@@ -192,8 +192,33 @@ jobs:
           ffmpeg -version | head -1
           ffprobe -version | head -1
 
-      - name: Run tests
-        run: mix test
+      # `mix coveralls.multiple` is `mix test --cover` plus reports (#1314):
+      # the JSON one feeds the per-directory rollup below, the HTML one is
+      # uploaded as an artifact, and the `minimum_coverage` in coveralls.json
+      # is enforced here — a FLOOR set just under the measured number, so
+      # coverage cannot regress silently. It is not a target; see the note in
+      # coveralls.json before moving it in either direction. Cover-compiled
+      # modules run slower, so this step takes longer than a bare `mix test`
+      # did; that is the price of measuring, paid once per run.
+      - name: Run tests (with coverage)
+        run: mix coveralls.multiple --type json --type html
+
+      # One row per source directory (lib/kiln_cms_web/live, lib/kiln_cms/
+      # firing, …/governance, …) so the editor / delivery / governance split is
+      # visible without opening the report; also appended to the job summary.
+      # Runs when the report exists even if the step above failed the floor —
+      # that is precisely when the breakdown is wanted.
+      - name: Coverage by directory
+        if: ${{ !cancelled() && hashFiles('cover/excoveralls.json') != '' }}
+        run: mix kiln.coverage.summary
+
+      - name: Upload coverage report
+        if: ${{ !cancelled() && hashFiles('cover/excoveralls.json') != '' }}
+        uses: actions/upload-artifact@v5
+        with:
+          name: coverage-report
+          path: cover/
+          retention-days: 14
 
       - name: Dialyzer
         run: mix dialyzer

@@ -24,11 +24,18 @@ config :kiln_cms, KilnCMSWeb.Endpoint,
   code_reloader: false,
   debug_errors: false
 
-# Background jobs don't run during E2E — no cron firing the scheduled-publish /
-# purge triggers, no Bumblebee embedding, no outbound webhook/email delivery.
-# Publish/workflow actions are synchronous, so the editor journey needs none of
-# it. (Mirrors the test env.)
-config :kiln_cms, Oban, testing: :manual
+# Background jobs DO run during E2E, cron does not (#1314). The media journey
+# needs `KilnCMS.Media.VariantWorker`: an upload's `width`/`height` are
+# measured there, not at ingest, and the library's focal-point editor is gated
+# on `width` — under `testing: :manual` it never appeared and the journey could
+# not be driven. `plugins: []` drops the Cron plugin (no scheduled-publish /
+# purge / sweep triggers firing mid-journey) and the Pruner. The other queues
+# processing is harmless here: outbound mail lands in Swoosh's local mailbox
+# (config.exs), no webhook endpoints or embeddings are configured, and jobs
+# that fail just retry in the background. `Config` deep-merges keyword lists,
+# so there is no way to leave only `:media` running from this file without
+# restating every queue.
+config :kiln_cms, Oban, testing: :disabled, plugins: []
 
 config :kiln_cms, token_signing_secret: "e2eTokenSigningSecretForBrowserTests0"
 
@@ -48,6 +55,13 @@ config :kiln_cms, KilnCMSWeb.RateLimit, limits: %{auth: {1_000, :timer.minutes(1
 # Emails are stored locally (Swoosh.Adapters.Local from config.exs); disable the
 # external API client so the app boots without hackney.
 config :swoosh, :api_client, false
+
+# The dev-only browser tooling — chiefly the Swoosh mailbox at /dev/mailbox —
+# so a journey can observe what the server SENT, not just what it rendered:
+# the comment `@mention` spec (#1314) reads the mailbox's JSON to prove the
+# mentioned editor was actually notified. Compile-time (`Application.compile_env`
+# in the router), same as dev; `KilnCMS.Application` refuses it in :prod only.
+config :kiln_cms, dev_routes: true
 
 # Quiet, non-reloading server.
 config :logger, level: :warning

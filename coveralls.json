@@ -1,0 +1,34 @@
+{
+  "_comment": [
+    "Line-coverage settings for `mix coveralls.*` (excoveralls), #1314.",
+    "",
+    "`minimum_coverage` is a FLOOR, not a target: it sits just under the number",
+    "the full suite measured when it was last moved, so coverage cannot regress",
+    "silently. When a PR raises the measured number by a whole point or more,",
+    "raise this to just under the new number in the same PR. Never lower it to",
+    "make a red build green — that is the regression it exists to surface.",
+    "",
+    "`skip_files` are regexes on the source path. test/support is compiled",
+    "into the app under MIX_ENV=test (see elixirc_paths/1 in mix.exs) but is",
+    "test scaffolding, not code under test. Modules a dependency's macro",
+    "generates into this app (Spark DSL extensions, AshGraphql subscription",
+    "config, Postgrex type module, …) report under the dependency's own",
+    "source file — an absolute path into deps/ — and are that dependency's",
+    "code, not ours.",
+    "",
+    "Measured 2026-08-18 on the full suite: 83.0% (7,286 tests)."
+  ],
+  "skip_files": [
+    "^test/support/",
+    "(^|/)deps/"
+  ],
+  "coverage_options": {
+    "treat_no_relevant_lines_as_covered": false,
+    "output_dir": "cover/",
+    "minimum_coverage": 82.5,
+    "floor_coverage": true
+  },
+  "terminal_options": {
+    "file_column_width": 72
+  }
+}
