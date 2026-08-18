@@ -461,16 +461,30 @@ defmodule KilnCMSWeb.CalendarLiveTest do
       )
     end
 
-    # Anchor everything a fortnight out, so "one day later" is never in the past
-    # and never crosses out of the rendered month.
+    # Anchor everything a fortnight out, so "one day later" is never in the past.
+    # From the 16th of a month onward that lands in the *next* month, so the
+    # calendar has to be opened on `soon()`'s month rather than today's — the
+    # handler only moves events in the rendered window, and a chip that is
+    # not on the calendar is refused before the target date is even looked at.
     defp soon, do: Date.utc_today() |> Date.add(14)
+
+    # Mount the calendar on the month `soon()` falls in, and prove the fixture
+    # is actually on it: every reschedule below depends on that, and the
+    # "leaves the record alone" assertions would pass vacuously otherwise.
+    defp open_calendar_on(conn, user, %{title: title}) do
+      {:ok, lv, html} =
+        conn |> log_in(user) |> live(~p"/editor/calendar?at=#{Date.to_iso8601(soon())}")
+
+      assert html =~ title
+      {:ok, lv, html}
+    end
 
     test "moves a scheduled publish to the dropped day, keeping its time", %{conn: conn} do
       admin = authed_admin()
       at = DateTime.new!(soon(), ~T[09:30:00])
       page = scheduled_page(admin, at)
 
-      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/calendar")
+      {:ok, lv, _html} = open_calendar_on(conn, admin, page)
 
       target = Date.add(soon(), 1)
 
@@ -507,7 +521,7 @@ defmodule KilnCMSWeb.CalendarLiveTest do
       page =
         CMS.update_page!(page, %{unpublish_at: DateTime.new!(soon(), ~T[17:00:00])}, actor: admin)
 
-      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/calendar")
+      {:ok, lv, _html} = open_calendar_on(conn, admin, page)
 
       target = Date.add(soon(), 2)
 
@@ -526,7 +540,7 @@ defmodule KilnCMSWeb.CalendarLiveTest do
       at = DateTime.new!(soon(), ~T[09:00:00])
       page = scheduled_page(admin, at)
 
-      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/calendar")
+      {:ok, lv, _html} = open_calendar_on(conn, admin, page)
 
       html =
         render_hook(lv, "reschedule", %{
@@ -548,7 +562,8 @@ defmodule KilnCMSWeb.CalendarLiveTest do
       far = DateTime.new!(Date.shift(Date.utc_today(), year: 2), ~T[09:00:00])
       page = scheduled_page(admin, far)
 
-      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/calendar")
+      {:ok, lv, html} = conn |> log_in(admin) |> live(~p"/editor/calendar")
+      refute html =~ page.title
 
       html =
         render_hook(lv, "reschedule", %{
@@ -582,7 +597,7 @@ defmodule KilnCMSWeb.CalendarLiveTest do
       scoped =
         authed_user(:editor, %{editable_types: ["post"]})
 
-      {:ok, lv, _html} = conn |> log_in(scoped) |> live(~p"/editor/calendar")
+      {:ok, lv, _html} = open_calendar_on(conn, scoped, page)
 
       render_hook(lv, "reschedule", %{
         "id" => page.id,
@@ -598,7 +613,7 @@ defmodule KilnCMSWeb.CalendarLiveTest do
       admin = authed_admin()
       page = scheduled_page(admin, DateTime.new!(soon(), ~T[09:00:00]))
 
-      {:ok, lv, html} = conn |> log_in(admin) |> live(~p"/editor/calendar")
+      {:ok, lv, html} = open_calendar_on(conn, admin, page)
       # The live region exists before anything happens — one inserted later is
       # not reliably announced.
       assert html =~ ~s(aria-live="polite")
