@@ -382,9 +382,10 @@ defmodule KilnCMS.Search.MeilisearchTest do
     end
 
     test "enqueues every content tier, dynamic types included (#1012)" do
-      # `@sources` is the backfill's whole notion of what exists. Dropping a
-      # tier from it is silent — the task still reports "enqueued N" — which is
-      # exactly how dynamic types went unindexed in the first place.
+      # `Meilisearch.reindex_sources/0` is the backfill's whole notion of what
+      # exists. Dropping a tier from it is silent — the task still reports
+      # "enqueued N" — which is exactly how dynamic types went unindexed in the
+      # first place.
       actor = admin()
 
       definition =
@@ -421,6 +422,83 @@ defmodule KilnCMS.Search.MeilisearchTest do
 
       assert "entry_#{entry.id}" in indexed
       assert "page_#{page.id}" in indexed
+    end
+  end
+
+  describe "reindex_all/0 — the release-callable backfill" do
+    # The Mix task wraps this; a production release calls it over
+    # `bin/kiln_cms rpc`, so its return contract is what an operator reads.
+    defmodule FailingConfigureClient do
+      @behaviour KilnCMS.Search.Meilisearch.Client
+
+      @impl true
+      def request(:patch, "/indexes/" <> _, _body, _config), do: {:error, :boom}
+      def request(_method, _path, _body, _config), do: {:ok, %{}}
+    end
+
+    test "returns {:ok, count} of the published documents it enqueued" do
+      put_meili_env(enabled: true, client: StubClient, index: "test_idx")
+      actor = admin()
+
+      page =
+        CMS.create_page!(%{title: "Counted", slug: slug()}, actor: actor)
+        |> then(&CMS.publish_page!(&1, actor: actor))
+
+      # A draft is not published, so it must not be counted.
+      CMS.create_page!(%{title: "Draft", slug: slug()}, actor: actor)
+
+      drain()
+      flush()
+
+      assert {:ok, count} = Meilisearch.reindex_all()
+      assert count >= 1
+
+      # The settings PATCH ran before any document job was enqueued, and the
+      # published page's upsert is among the drained jobs.
+      assert_received {:meili, :patch, "/indexes/test_idx/settings", _}
+      drain()
+
+      indexed =
+        Stream.repeatedly(fn ->
+          receive do
+            {:meili, :put, "/indexes/test_idx/documents" <> _, [doc]} -> doc.id
+            {:meili, _, _, _} -> :other
+          after
+            0 -> nil
+          end
+        end)
+        |> Enum.take_while(&(&1 != nil))
+
+      assert "page_#{page.id}" in indexed
+    end
+
+    test "is :disabled, and enqueues nothing, when the backend is off" do
+      put_meili_env(enabled: false, client: StubClient, index: "test_idx")
+      actor = admin()
+
+      CMS.create_page!(%{title: "Unseen", slug: slug()}, actor: actor)
+      |> then(&CMS.publish_page!(&1, actor: actor))
+
+      drain()
+      flush()
+
+      assert :disabled = Meilisearch.reindex_all()
+      refute_received {:meili, _, _, _}
+    end
+
+    test "propagates a configure error and enqueues nothing" do
+      put_meili_env(enabled: true, client: FailingConfigureClient, index: "test_idx")
+      actor = admin()
+
+      CMS.create_page!(%{title: "Unseen", slug: slug()}, actor: actor)
+      |> then(&CMS.publish_page!(&1, actor: actor))
+
+      drain()
+      flush()
+
+      before = Oban.Job |> KilnCMS.Repo.all() |> length()
+      assert {:error, :boom} = Meilisearch.reindex_all()
+      assert Oban.Job |> KilnCMS.Repo.all() |> length() == before
     end
   end
 

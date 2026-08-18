@@ -2,8 +2,8 @@ defmodule Mix.Tasks.Kiln.Meili.Reindex do
   @shortdoc "Configure the Meilisearch index and (re)index all published content"
   @moduledoc """
   Applies the index settings (searchable/filterable/sortable attributes) and
-  enqueues a `KilnCMS.Search.MeilisearchWorker` upsert for every published Page
-  and Post, so the optional Meilisearch index is fully (re)built in the
+  enqueues a `KilnCMS.Search.MeilisearchWorker` upsert for every published Page,
+  Post and Entry, so the optional Meilisearch index is fully (re)built in the
   background. Run once after enabling the backend, or after changing what gets
   indexed.
 

@@ -46,8 +46,10 @@ migration, a rewritten column, a dropped config key).
   secret, passes optional variables through an `env_file` rather than listing
   them with empty defaults (several are presence-checked and an empty string
   counts as set), accepts an external `DATABASE_URL`, and wires both backup
-  paths (Postgres on the host loopback for the cron, a `backups` volume for
-  the in-app page). The `deploy-*.md` checklists stay under *Audits & release
+  paths onto one host directory (Postgres on the host loopback for the cron,
+  that directory bind-mounted at `BACKUP_DIR` for the in-app page; the image
+  now owns the default `/var/backups/kiln`, so a named volume there works
+  too). The `deploy-*.md` checklists stay under *Audits & release
   checklists*, each now opening with a banner that points at the guide — the
   P2/P3 ones as history, the staging and write-API ones as the still-current
   feature-enablement checklists.
