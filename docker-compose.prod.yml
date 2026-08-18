@@ -5,7 +5,9 @@
 # termination (put Caddy/Traefik/nginx on the host in front and set
 # TRUSTED_PROXIES), Postgres kept on the compose network with TLS off because
 # that traffic never leaves the host. Needs Docker Compose v2 (the `docker
-# compose` plugin), 2.20 or newer.
+# compose` plugin), 2.24 or newer — older releases evaluate the default branch
+# of `${DATABASE_URL:-…${POSTGRES_PASSWORD:?…}}` eagerly and abort the
+# external-Postgres path below.
 #
 #   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 #   docker compose -f docker-compose.prod.yml --env-file .env.prod --profile storage up -d  # + MinIO
@@ -24,8 +26,9 @@
 # How Compose reads that file (both ways, identically): `KEY=value` per line,
 # `$VAR` / `${VAR}` inside a value is EXPANDED (write `$$` for a literal `$`,
 # or single-quote the value), surrounding quotes are stripped, and ` #` starts
-# a comment. A secret containing `$word` would otherwise be silently shortened
-# — long enough to pass the `:?` guards, wrong enough to fail at the service.
+# a comment. A secret containing `$word` is otherwise shortened (Compose warns
+# `The "word" variable is not set`, and moves on) — long enough to pass the
+# `:?` guards, wrong enough to fail at the service.
 #
 # Optional variables are deliberately NOT listed under `environment:` with
 # empty defaults. Several are presence-checked (`S3_BUCKET`, `MEILI_URL`,
@@ -43,14 +46,24 @@
 #                           URL-safe — `openssl rand -hex 32`, never base64
 #                           (`/` `#` `?` `%` break or corrupt DATABASE_URL).
 #   optional, read here     PORT (4000), POOL_SIZE (10), POSTGRES_USER (kiln),
-#                           POSTGRES_DB (kiln_prod), KILN_IMAGE (kiln:local),
-#                           KILN_ENV_FILE (.env.prod), BACKUP_DIR,
-#                           GIT_SHA / BUILD_DATE (build stamp)
+#                           POSTGRES_DB (kiln_prod), POSTGRES_PORT (5432),
+#                           MINIO_PORT (9000), MINIO_CONSOLE_PORT (9001),
+#                           KILN_IMAGE (kiln:local), KILN_ENV_FILE (.env.prod),
+#                           BACKUP_DIR (/var/backups/kiln, in the container),
+#                           BACKUP_HOST_DIR (same path, on the host),
+#                           GIT_SHA / BUILD_DATE (build stamp).
+#                           The dev docker-compose.yml publishes 5432/9000/9001
+#                           on the same defaults — pick different *_PORT values
+#                           if both stacks run on one machine.
 #   external Postgres       set DATABASE_URL AND DATABASE_SSL=true (plus
 #                           DATABASE_SSL_CACERTFILE if you have the CA) in
-#                           .env.prod; they replace the bundled values, and the
-#                           bundled `postgres` service is then unused — start
-#                           with `up -d --no-deps app` or delete it.
+#                           .env.prod; they replace the bundled values. Then
+#                           DELETE the `postgres` service and the app's
+#                           `depends_on` below — otherwise it starts with no
+#                           password, restart-loops, and every plain `up -d`
+#                           (upgrades included) fails on the dependency.
+#                           (`up -d --no-deps app` works but has to be
+#                           remembered on every up; deleting does not.)
 #   optional, passed through TRUSTED_PROXIES (set it — see docs/deploy.md),
 #                           CHECK_ORIGINS, CORS_ORIGINS, S3_* / AWS_*,
 #                           CSP_IMG_SRC, MEILI_*, and anything else
@@ -66,11 +79,12 @@
 # works) so uploads survive image upgrades and can sit behind a CDN.
 #
 # Backups: Postgres is published on the host loopback (127.0.0.1:5432) so the
-# nightly host cron in docs/backups.md can `pg_dump` it, and the app has a
-# `backups` volume at BACKUP_DIR for the in-app Backups page. That volume is
-# created root-owned and the app runs as `nobody`; hand it over ONCE:
-#   docker compose -f docker-compose.prod.yml --env-file .env.prod \
-#     run --rm --no-deps --user root app chown nobody /var/backups/kiln
+# nightly host cron in docs/backups.md can `pg_dump` it, and the host's backup
+# directory is bind-mounted into the app at BACKUP_DIR so the cron and the
+# in-app Backups page read and write ONE directory (the page reports on cron's
+# manifest; that is the whole design). The app runs as `nobody` (uid 65534),
+# so create the host directory once, owned by it:
+#   sudo mkdir -p /var/backups/kiln && sudo chown 65534:65534 /var/backups/kiln
 
 # Namespaces containers, network and volumes as `kiln-prod_*`. Without it the
 # project name is the directory basename — the SAME as the dev
@@ -99,8 +113,9 @@ services:
     # default: a wrong path fails `up`, it does not silently drop variables.
     env_file:
       - ${KILN_ENV_FILE:-.env.prod}
-    # `environment:` wins over `env_file:` for the same key, so these are the
-    # values the stack REQUIRES to be as written.
+    # `environment:` wins over `env_file:` for the same key. Only PHX_SERVER is
+    # pinned; everything else here is `${VAR:-default}`, so a value in .env.prod
+    # is honoured and these are the defaults the stack falls back to.
     environment:
       # ---- required (the app raises on boot without the first three) ----
       # DATABASE_URL in .env.prod (an external/managed Postgres) replaces the
@@ -119,10 +134,12 @@ services:
       # the image ships no TLS. An external DATABASE_URL must come with
       # DATABASE_SSL=true in .env.prod, or it connects in the clear.
       DATABASE_SSL: ${DATABASE_SSL:-false}
-      # In-app backups (docs/backups.md) write here — the `backups` volume.
+      # In-app backups (docs/backups.md) write here — the host directory below.
       BACKUP_DIR: ${BACKUP_DIR:-/var/backups/kiln}
     volumes:
-      - backups:${BACKUP_DIR:-/var/backups/kiln}
+      # Bind mount, not a named volume: the host cron in docs/backups.md and
+      # the in-app Backups page must share one directory (see the header).
+      - ${BACKUP_HOST_DIR:-/var/backups/kiln}:${BACKUP_DIR:-/var/backups/kiln}
     ports:
       # Bind to loopback: the reverse proxy on THIS host forwards to
       # 127.0.0.1:${PORT}. Do not publish on 0.0.0.0 — a Docker-published port
@@ -136,8 +153,8 @@ services:
     # what a restart-triggering check must use. Restated so it is visible next
     # to the service; keep it on /live, never /up (docs/deploy.md). Note that
     # plain Docker/Compose only MARKS the container unhealthy — nothing
-    # restarts it unless an orchestrator (Swarm/Kubernetes) or an autoheal
-    # sidecar acts on the status.
+    # restarts it unless Swarm or an autoheal sidecar acts on the status
+    # (Kubernetes ignores this healthcheck entirely and uses its own probes).
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${PORT:-4000}/live || exit 1"]
       interval: 30s
@@ -147,8 +164,9 @@ services:
 
   postgres:
     # Postgres 17 + the `vector` extension (semantic search). Drop-in for
-    # postgres:17 on the same data volume. Unused (but still started unless
-    # you `--no-deps`) when DATABASE_URL points at an external database.
+    # postgres:17 on the same data volume. DELETE this service (and the app's
+    # `depends_on`) when DATABASE_URL points at an external database — see the
+    # header.
     image: pgvector/pgvector:pg17
     restart: unless-stopped
     environment:
@@ -255,7 +273,6 @@ services:
 
 volumes:
   postgres_data:
-  backups:
   minio_data:
   meili_data:
   dragonfly_data:

@@ -81,16 +81,6 @@ defmodule KilnCMS.Search.Meilisearch do
     end
   end
 
-  # Page, Post and every dynamic-type entry (D17). Entries are one source, not
-  # one per type: they all live in the `:entry` tier and fire under the `entry`
-  # storage key, which is the key `MeilisearchWorker.load/3` dispatches on
-  # (#1012).
-  @reindex_sources [
-    {KilnCMS.CMS.Page, &KilnCMS.CMS.list_pages!/1},
-    {KilnCMS.CMS.Post, &KilnCMS.CMS.list_posts!/1},
-    {KilnCMS.CMS.Entry, &KilnCMS.CMS.list_entries!/1}
-  ]
-
   @doc """
   Apply the index settings (`configure/0`) and enqueue a
   `KilnCMS.Search.MeilisearchWorker` upsert for every published Page, Post and
@@ -113,8 +103,22 @@ defmodule KilnCMS.Search.Meilisearch do
     case configure() do
       :disabled -> :disabled
       {:error, _} = error -> error
-      {:ok, _} -> {:ok, Enum.reduce(@reindex_sources, 0, &enqueue_reindex_source/2)}
+      {:ok, _} -> {:ok, Enum.reduce(reindex_sources(), 0, &enqueue_reindex_source/2)}
     end
+  end
+
+  # Page, Post and every dynamic-type entry (D17). Entries are one source, not
+  # one per type: they all live in the `:entry` tier and fire under the `entry`
+  # storage key, which is the key `MeilisearchWorker.load/3` dispatches on
+  # (#1012). A function, not a module attribute: captures evaluated in the
+  # module body are a compile-time dependency on `KilnCMS.CMS` (and its whole
+  # closure); inside a function body they are runtime calls.
+  defp reindex_sources do
+    [
+      {KilnCMS.CMS.Page, &KilnCMS.CMS.list_pages!/1},
+      {KilnCMS.CMS.Post, &KilnCMS.CMS.list_posts!/1},
+      {KilnCMS.CMS.Entry, &KilnCMS.CMS.list_entries!/1}
+    ]
   end
 
   defp enqueue_reindex_source({_resource, lister}, acc) do

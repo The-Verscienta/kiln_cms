@@ -174,8 +174,9 @@ on the last lines.
 Rolling back a migration is a manual step and never automatic, and because
 every boot re-runs `bin/migrate`, the order matters:
 
-1. **Stop the app** (`docker compose stop app`). A running or restarting
-   container would re-apply the migration you are about to undo.
+1. **Stop the app** (`docker compose -f docker-compose.prod.yml --env-file
+   .env.prod stop app`). A running or restarting container would re-apply the
+   migration you are about to undo.
 2. **Run the rollback from the image that contains the migration** — the
    *new* one, not the one you are rolling back to. `Ecto.Migrator` only sees
    migration files present in the image, so an older image would silently
@@ -230,9 +231,11 @@ The `HEALTHCHECK` in the Dockerfile — `interval=30s timeout=5s
 start-period=60s retries=3` — is what a plain `docker run` or Compose uses.
 **Plain Docker and Compose only mark the container `unhealthy`; nothing
 restarts it** — `restart:` policies react to the process exiting, not to
-health. If you want a wedged-but-alive node restarted on Compose, run an
-autoheal sidecar (e.g. `willfarrell/autoheal`, which watches that status) or
-use an orchestrator; Kubernetes and Swarm act on their own probes. Coolify
+health. Who does act on it: **Swarm** restarts a task whose container
+healthcheck fails, and an autoheal sidecar on Compose (e.g.
+`willfarrell/autoheal`) does the same by watching that status. **Kubernetes
+ignores the image `HEALTHCHECK` entirely** and only runs the probes you
+declare — point liveness at `/live` and readiness at `/up` yourself. Coolify
 uses the check to judge a deploy and to show status. Platforms with their own
 health-check UI ignore the Dockerfile values; set the same path and a start
 period of at least a minute there.
@@ -325,14 +328,22 @@ are worth repeating here:
   script — two front doors to one backup directory. Bump the client pin in the
   Dockerfile alongside any Postgres major upgrade.
 
-In the reference compose stack both doors are wired: Postgres is published on
-the host loopback (`127.0.0.1:5432`) so the cron in `backups.md` runs on the
-host against `postgres://kiln:…@127.0.0.1:5432/kiln_prod`, and the app has a
-`backups` volume mounted at `BACKUP_DIR` (`/var/backups/kiln`) for the in-app
-page. That volume is created root-owned while the app runs as `nobody`, so
-hand it over once — the compose file's header has the one-liner. On any other
-platform, give `BACKUP_DIR` a persistent, writable mount or the in-app page
-will report available and every job will fail at run time.
+In the reference compose stack both doors open on **one host directory**:
+Postgres is published on the host loopback (`127.0.0.1:5432`) so the cron in
+`backups.md` runs on the host against
+`postgres://kiln:…@127.0.0.1:5432/kiln_prod` and writes `/var/backups/kiln`,
+and that same directory is bind-mounted into the app at `BACKUP_DIR`, so the
+in-app page reads cron's manifest and cron's off-site copy and pruning cover
+what the page writes. Create it once, owned by the app's uid:
+
+```bash
+sudo mkdir -p /var/backups/kiln && sudo chown 65534:65534 /var/backups/kiln
+```
+
+On any other platform, give `BACKUP_DIR` a persistent mount writable by
+`nobody` (the image already owns the default path, so a fresh named volume
+mounted there works) or the in-app page will report available and every job
+will fail at run time.
 
 ## Optional infrastructure
 
@@ -364,9 +375,12 @@ pgvector Postgres, with MinIO, Meilisearch and Dragonfly behind the profiles
 above. It is a starting point, not a platform: it does not terminate TLS,
 does not schedule backups (it only makes them possible — above), and keeps
 Postgres on the compose network with TLS off because the traffic never leaves
-the host. It needs the Docker Compose v2 plugin (2.20 or newer); the project
-is namespaced `kiln-prod` so it never shares volumes with the dev
-`docker-compose.yml` on the same machine.
+the host. It needs the Docker Compose v2 plugin (2.24 or newer — older
+releases evaluate the nested default that lets `DATABASE_URL` replace the
+bundled Postgres eagerly); the project is namespaced `kiln-prod` so it never
+shares volumes with the dev `docker-compose.yml` on the same machine (they
+do share the default published ports 5432/9000/9001 — set `POSTGRES_PORT` /
+`MINIO_PORT` if both stacks are up).
 
 ```bash
 # .env.prod (at the repo root): SECRET_KEY_BASE, TOKEN_SIGNING_SECRET, PHX_HOST,
@@ -382,32 +396,26 @@ interpolates the compose file (image tag, ports, the required secrets — it
 **fails fast**, naming the variable, if `SECRET_KEY_BASE`,
 `TOKEN_SIGNING_SECRET`, `PHX_HOST` or `POSTGRES_PASSWORD` are unset), and the
 app service loads the same file as its `env_file`, so any optional variable
-you add there reaches the container. Four things to know about that file:
+you add there reaches the container. **The compose file's header is the
+contract for that file** — how Compose parses it (`$` expands; `$$` or single
+quotes for a literal), that it must sit at the repository root or
+`KILN_ENV_FILE` must name it, why optional variables are passed through rather
+than listed with empty defaults (several are presence-checked: `S3_BUCKET=`
+would switch the storage adapter to S3 with no bucket), and every variable
+the file itself reads. Two of its points matter before you write the file:
 
-- **It must be the same file both times.** The `env_file` path is resolved
-  from the repository root, not from wherever you pass `--env-file`; keep the
-  file elsewhere and you must also set `KILN_ENV_FILE` to that path. A
-  missing `env_file` is an error, never a silent "no optional variables".
 - **`POSTGRES_PASSWORD` is spliced into `DATABASE_URL`**, so it must be
   URL-safe — `openssl rand -hex 32`. Base64 output (`mix phx.gen.secret`,
   `openssl rand -base64`) contains `/` more often than not, and `/ # ? %`
   break or silently corrupt the URL while Postgres itself accepts them.
-- **Compose parses the file, in both roles**: `$VAR` inside a value is
-  expanded (write `$$` for a literal `$`, or single-quote the value), quotes
-  are stripped, ` #` starts a comment. A secret with a `$` in it would
-  otherwise be silently shortened.
-- **Optional variables are passed through, never listed with empty
-  defaults.** Several are **presence-checked** and treat an empty string as
-  "set" (`S3_BUCKET=` would switch the storage adapter to S3 with no bucket;
-  `MEILI_URL=` would enable a backend with no server) — absent stays absent.
-  The exceptions are the values the stack pins under `environment:`:
-  `PHX_SERVER`, `PORT`, `POOL_SIZE`, `BACKUP_DIR`. `DATABASE_URL` and
-  `DATABASE_SSL` take your `.env.prod` value first, so **an external or
-  managed Postgres is `DATABASE_URL=… DATABASE_SSL=true` in `.env.prod`**
-  (plus `DATABASE_SSL_CACERTFILE` if you have the CA) and `up -d --no-deps
-  app` to leave the bundled `postgres` service alone.
+- **An external or managed Postgres** is `DATABASE_URL=… DATABASE_SSL=true`
+  in `.env.prod` (plus `DATABASE_SSL_CACERTFILE` if you have the CA) — those
+  two take your value ahead of the bundled defaults; only `PHX_SERVER` is
+  pinned. Then **delete the `postgres` service and the app's `depends_on`**
+  from the compose file: left in, it starts with no password, restart-loops,
+  and every later plain `up -d` (upgrades included) fails on the dependency.
 
-The file's header enumerates everything it reads; every name is a row in
+Every name in that header is a row in
 [`environment-variables.md`](environment-variables.md).
 
 Put a proxy on the same host in front of `127.0.0.1:4000` — the app is
@@ -481,7 +489,8 @@ canonical list; in deploy order:
 
 For a running instance an upgrade is: read the release's `### Upgrading`
 section in [`CHANGELOG.md`](../CHANGELOG.md), rebuild or pull the new image,
-restart. Migrations run on boot; nothing else is automatic, and the changelog
+restart (on the reference stack, `docker compose -f docker-compose.prod.yml
+--env-file .env.prod up -d`). Migrations run on boot; nothing else is automatic, and the changelog
 section is where a release says if it needs more (a new required variable, a
 reindex, a backfill). Downstream projects that pin Kiln as a submodule move
 the pin with `mix kiln.update`, which prints that section before it does —
