@@ -16,24 +16,16 @@ defmodule KilnCMSWeb.SocketJoinBudgetTest do
   """
   use ExUnit.Case, async: false
 
-  import KilnCMS.RateLimitHelpers, only: [client_address: 0]
+  import KilnCMS.RateLimitHelpers, only: [client_address: 0, put_limit: 2, spent: 2]
 
+  alias KilnCMS.RateLimitHelpers
   alias KilnCMSWeb.RateLimit
   alias KilnCMSWeb.SocketJoinBudget
 
   @moduletag :capture_log
 
   setup do
-    previous = Application.get_env(:kiln_cms, RateLimit, [])
-    on_exit(fn -> Application.put_env(:kiln_cms, RateLimit, previous) end)
-    :ok
-  end
-
-  defp put_limit(bucket, limit) do
-    current = Application.get_env(:kiln_cms, RateLimit, [])
-
-    limits = current |> Keyword.get(:limits, %{}) |> Map.put(bucket, {limit, :timer.minutes(1)})
-    Application.put_env(:kiln_cms, RateLimit, Keyword.put(current, :limits, limits))
+    RateLimitHelpers.restore_limits_on_exit()
   end
 
   defp connect_info(address),
@@ -88,10 +80,14 @@ defmodule KilnCMSWeb.SocketJoinBudgetTest do
     end
 
     test "a connect_info with neither :peer_data nor :x_headers shares the unknown-client bucket, rather than crashing" do
-      put_limit(:gql_join, 1)
+      # The unknown-client key is node-wide and other socket tests in this
+      # window charge it too (a bare `connect/2` has no address), so a lowered
+      # limit here would see their spend as its own. Assert the DELTA on that
+      # key instead — the charge landed on the shared bucket, and did not crash.
+      before = spent(:gql_join, "unknown")
 
       assert :ok = SocketJoinBudget.charge(:gql_join, %{})
-      assert :error = SocketJoinBudget.charge(:gql_join, %{})
+      assert spent(:gql_join, "unknown") == before + 1
     end
   end
 end
