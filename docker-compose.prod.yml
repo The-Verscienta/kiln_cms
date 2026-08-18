@@ -1,0 +1,180 @@
+# KilnCMS — reference production Compose file (docs/deploy.md).
+#
+# App + Postgres, with the optional infrastructure behind profiles, mirroring
+# the dev `docker-compose.yml`. A starting point, not a platform: no TLS
+# termination (put Caddy/Traefik/nginx in front and set TRUSTED_PROXIES), no
+# backup schedule (docs/backups.md), Postgres kept on the compose network with
+# TLS off because that traffic never leaves the host.
+#
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod --profile storage up -d  # + MinIO
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod --profile search  up -d  # + Meilisearch
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod --profile cache   up -d  # + Dragonfly
+#
+# Configuration lives in ONE file, `.env.prod`, used two ways: `--env-file`
+# interpolates the `${...}` below (image tag, ports, the required secrets),
+# and the app service's `env_file:` hands the same file to the container
+# verbatim, so any optional variable you add there — S3_*, MEILI_*,
+# TRUSTED_PROXIES, SMTP_*, SENTRY_DSN, … (every row in
+# docs/environment-variables.md) — reaches the app with no edit here.
+#
+# Optional variables are deliberately NOT listed under `environment:` with
+# empty defaults. Several are presence-checked (`S3_BUCKET`, `MEILI_URL`,
+# `CORS_ORIGINS`, `CSP_IMG_SRC`, …): the app treats an EMPTY string as "set",
+# so `S3_BUCKET=` would switch the storage adapter to S3 with no bucket. Absent
+# must stay absent; env_file pass-through keeps it that way.
+#
+#   required in .env.prod   SECRET_KEY_BASE, TOKEN_SIGNING_SECRET, PHX_HOST,
+#                           POSTGRES_PASSWORD  (the `:?` forms below abort
+#                           `docker compose` naming the missing one)
+#   optional, read here     PORT (4000), POOL_SIZE (10), POSTGRES_USER (kiln),
+#                           POSTGRES_DB (kiln_prod), KILN_IMAGE (kiln:local),
+#                           GIT_SHA / BUILD_DATE (build stamp)
+#   optional, passed through TRUSTED_PROXIES (set it — see docs/deploy.md),
+#                           CHECK_ORIGINS, CORS_ORIGINS, S3_* / AWS_*,
+#                           CSP_IMG_SRC, MEILI_*, and anything else
+#   profile services        MINIO_ROOT_USER / MINIO_ROOT_PASSWORD (storage),
+#                           MEILI_MASTER_KEY (search)
+#
+# Media: with no S3_* set the app uses the Local adapter, which writes under
+# the release's own priv/uploads (/app/lib/kiln_cms-<version>/priv/uploads) —
+# a path that moves with every version bump. For a Docker deployment use
+# object storage (the `storage` profile runs MinIO; any S3-compatible bucket
+# works) so uploads survive image upgrades and can sit behind a CDN.
+
+services:
+  app:
+    # Build once with the stamp (see docs/releasing.md#build-stamping), or set
+    # KILN_IMAGE to an image your CI pushed and drop the `build:` block.
+    image: ${KILN_IMAGE:-kiln:local}
+    build:
+      context: .
+      args:
+        GIT_SHA: ${GIT_SHA:-}
+        BUILD_DATE: ${BUILD_DATE:-}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Everything optional arrives from here, verbatim (see the header).
+    env_file:
+      - path: .env.prod
+        required: false
+    # `environment:` wins over `env_file:` for the same key, so these are the
+    # values the stack REQUIRES to be as written.
+    environment:
+      # ---- required (the app raises on boot without the first three) ----
+      DATABASE_URL: ecto://${POSTGRES_USER:-kiln}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres/${POSTGRES_DB:-kiln_prod}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?set SECRET_KEY_BASE (mix phx.gen.secret)}
+      TOKEN_SIGNING_SECRET: ${TOKEN_SIGNING_SECRET:?set TOKEN_SIGNING_SECRET (mix phx.gen.secret)}
+      PHX_HOST: ${PHX_HOST:?set PHX_HOST to the public hostname (bare, no scheme)}
+      # bin/server (the image CMD) sets PHX_SERVER=true itself; stated here so
+      # the requirement is visible in one place.
+      PHX_SERVER: "true"
+      # ---- networking ----
+      PORT: ${PORT:-4000}
+      POOL_SIZE: ${POOL_SIZE:-10}
+      # Postgres is on the compose network only; TLS would be to ourselves.
+      # Keep the default (on) for any database that isn't in this file.
+      DATABASE_SSL: "false"
+    ports:
+      # Bind to loopback: the reverse proxy on this host forwards to it. Change
+      # to "${PORT:-4000}:${PORT:-4000}" only if the proxy runs elsewhere.
+      - "127.0.0.1:${PORT:-4000}:${PORT:-4000}"
+    # The image's own HEALTHCHECK probes /live (liveness — no DB), which is
+    # what a restart-triggering check must use. Restated so it is visible next
+    # to the service; keep it on /live, never /up (docs/deploy.md).
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${PORT:-4000}/live || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+
+  postgres:
+    # Postgres 17 + the `vector` extension (semantic search). Drop-in for
+    # postgres:17 on the same data volume.
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-kiln}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-kiln_prod}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # Not published: only the app (and a backup job on this network) reach it.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kiln} -d ${POSTGRES_DB:-kiln_prod}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ---- optional profiles ----------------------------------------------------
+
+  # S3-compatible object storage. Point the app at it with
+  #   S3_BUCKET=<bucket> S3_ENDPOINT_HOST=minio S3_ENDPOINT_SCHEME=http://
+  #   S3_ENDPOINT_PORT=9000 AWS_ACCESS_KEY_ID=$MINIO_ROOT_USER
+  #   AWS_SECRET_ACCESS_KEY=$MINIO_ROOT_PASSWORD
+  #   S3_PUBLIC_BASE_URL=https://<public host that serves the bucket>/<bucket>
+  # and create the bucket once (`mc mb`), public-read at the bucket level.
+  minio:
+    image: minio/minio:latest
+    profiles: ["storage", "all"]
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "127.0.0.1:${MINIO_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Typo-tolerant faceted search (docs/meilisearch.md). Point the app at it
+  # with MEILI_URL=http://meilisearch:7700 and the same MEILI_MASTER_KEY, then
+  # run `bin/kiln_cms rpc` / `mix kiln.meili.reindex` once. MEILI_ENV=production
+  # makes Meilisearch require a master key of 16+ bytes.
+  meilisearch:
+    image: getmeili/meilisearch:v1.11
+    profiles: ["search", "all"]
+    restart: unless-stopped
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?set MEILI_MASTER_KEY (16+ bytes)}
+      MEILI_ENV: production
+    volumes:
+      - meili_data:/meili_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Redis-compatible shared cache. Kiln's caches are in-process today (D2) and
+  # no shipped adapter reads this — see docs/deploy.md "Optional
+  # infrastructure". Kept so a multi-node deployment that adds a tier-2 cache
+  # adapter has the service defined; on a single node it does nothing for you.
+  dragonfly:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:latest
+    profiles: ["cache", "all"]
+    restart: unless-stopped
+    ulimits:
+      memlock: -1
+    volumes:
+      - dragonfly_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
+  minio_data:
+  meili_data:
+  dragonfly_data:
