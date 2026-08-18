@@ -172,6 +172,9 @@ defmodule KilnCMSWeb.CalendarController do
     |> Enum.find(&(&1.plural == plural or &1.path_segment == plural))
   end
 
+  # `authorize?: false`: a calendar subscriber has no actor, and taxonomy reads
+  # are world-readable anyway (`Taxonomy`'s read policy is `authorize_if
+  # always()`); `tenant:` keeps the slug lookup inside this site.
   defp tag_for(org_id, slug) do
     case CMS.get_tag_by_slug(slug, authorize?: false, tenant: org_id) do
       {:ok, tag} -> tag

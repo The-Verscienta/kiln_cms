@@ -140,6 +140,9 @@ defmodule KilnCMSWeb.TaskLive do
       :team ->
         tasks =
           CMS.list_tasks!(actor: actor, tenant: org, query: [filter: [status: :open]])
+          # `authorize?: false` on the assignee load only: `User` reads are
+          # admin-or-self, so an editor's team view would `nil` every colleague;
+          # display data (name) off tasks the actor already read under policy.
           |> Ash.load!(:assignee, authorize?: false, tenant: org)
           |> Enum.filter(&in_scope?(&1, scope))
           |> decorate(actor, org)

@@ -21,10 +21,25 @@ defmodule KilnCMSWeb.PreviewControllerTest do
   defp json_conn(conn), do: put_req_header(conn, "accept", "application/json")
 
   describe "PreviewToken" do
-    test "sign/verify round-trips a page reference" do
+    test "sign/verify round-trips a page reference, tenant included" do
       page = draft_page()
-      assert {:ok, %{type: :page, id: id}} = page |> PreviewToken.sign() |> PreviewToken.verify()
+
+      assert {:ok, %{type: :page, id: id, org_id: org_id}} =
+               page |> PreviewToken.sign() |> PreviewToken.verify()
+
       assert id == page.id
+      assert org_id == page.org_id
+    end
+
+    test "verify refuses a token that carries no tenant (#1309)" do
+      # A pre-#1309 payload: validly signed, but the read it would authorize
+      # has no tenant to scope it. Nothing may read tenant-less on its behalf.
+      page = draft_page()
+
+      legacy =
+        Phoenix.Token.sign(KilnCMSWeb.Endpoint, "content preview", %{type: :page, id: page.id})
+
+      assert {:error, :invalid} = PreviewToken.verify(legacy)
     end
 
     test "verify rejects a garbage token" do

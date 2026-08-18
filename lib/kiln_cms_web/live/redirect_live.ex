@@ -143,7 +143,7 @@ defmodule KilnCMSWeb.RedirectLive do
     socket
     |> assign(:redirects, redirects)
     |> assign(:capped?, length(redirects) == @limit)
-    |> assign(:targets, load_targets(redirects, socket.assigns.current_org))
+    |> assign(:targets, load_targets(redirects, socket))
   end
 
   defp filter_search(query, ""), do: query
@@ -203,31 +203,38 @@ defmodule KilnCMSWeb.RedirectLive do
   # Resolve every row's target in one read per content type: current path plus
   # whether it still resolves in delivery (published) — dead targets are the
   # prune candidates.
-  defp load_targets(redirects, org) do
+  #
+  # Read as the acting user, not `authorize?: false` (#1309): the page is
+  # admin-gated at mount, and `Checks.OrgAdmin` is that same tier, so the actor
+  # read returns exactly what the bypass did — while a role revoked after mount
+  # narrows to the policies instead of outliving the socket.
+  defp load_targets(redirects, socket) do
+    opts = [actor: socket.assigns.actor, tenant: socket.assigns.current_org]
+
     redirects
     |> Enum.group_by(& &1.target_type)
-    |> Enum.flat_map(fn {type, rows} -> targets_for_type(type, rows, org) end)
+    |> Enum.flat_map(fn {type, rows} -> targets_for_type(type, rows, opts) end)
     |> Map.new()
   end
 
-  defp targets_for_type(type, rows, org) do
-    case ContentTypes.get(type, org) do
+  defp targets_for_type(type, rows, opts) do
+    case ContentTypes.get(type, opts[:tenant]) do
       nil ->
         Enum.map(rows, &{&1.id, nil})
 
       ct ->
-        found = fetch_targets(ct, rows, org)
+        found = fetch_targets(ct, rows, opts)
         Enum.map(rows, &{&1.id, target_info(found[&1.target_id], ct)})
     end
   end
 
-  defp fetch_targets(ct, rows, org) do
+  defp fetch_targets(ct, rows, opts) do
     ids = rows |> Enum.map(& &1.target_id) |> Enum.uniq()
 
     Slugs.storage_resource(ct)
     |> Ash.Query.filter(id in ^ids)
     |> Ash.Query.select([:id, :slug, :state])
-    |> Ash.read!(authorize?: false, tenant: org)
+    |> Ash.read!(opts)
     |> Map.new(&{&1.id, &1})
   end
 
@@ -243,7 +250,7 @@ defmodule KilnCMSWeb.RedirectLive do
     locale = params["locale"] || I18n.default_locale()
 
     with {:ok, path} <- normalize_path(params["path"]),
-         {:ok, ct, record} <- find_target(params["type"], params["slug"], locale, org),
+         {:ok, ct, record} <- find_target(params["type"], params["slug"], locale, socket),
          :ok <- not_self(path, ct, record) do
       CMS.create_redirect!(
         %{path: path, locale: locale, target_type: to_string(ct.type), target_id: record.id},
@@ -264,10 +271,10 @@ defmodule KilnCMSWeb.RedirectLive do
     end
   end
 
-  defp find_target(type, slug, locale, org) do
-    with ct when not is_nil(ct) <- ContentTypes.get(type, org),
+  defp find_target(type, slug, locale, socket) do
+    with ct when not is_nil(ct) <- ContentTypes.get(type, socket.assigns.current_org),
          slug when slug not in [nil, ""] <- slug && String.trim(slug),
-         record when not is_nil(record) <- fetch_target(ct, slug, locale, org) do
+         record when not is_nil(record) <- fetch_target(ct, slug, locale, socket) do
       {:ok, ct, record}
     else
       _ ->
@@ -278,7 +285,11 @@ defmodule KilnCMSWeb.RedirectLive do
 
   # Any workflow state: a redirect at a draft target simply starts resolving
   # once the draft publishes.
-  defp fetch_target(ct, slug, locale, org) do
+  #
+  # Actor read, not `authorize?: false` — same reasoning as `load_targets/2`
+  # (and `MenuLive.fetch_target/3`): the admin bypass reads identically, and
+  # nobody below admin reaches this handler.
+  defp fetch_target(ct, slug, locale, socket) do
     query =
       Slugs.storage_resource(ct)
       |> Ash.Query.filter(slug == ^slug and locale == ^locale)
@@ -293,7 +304,7 @@ defmodule KilnCMSWeb.RedirectLive do
           query
       end
 
-    Ash.read_one!(query, authorize?: false, tenant: org)
+    Ash.read_one!(query, actor: socket.assigns.actor, tenant: socket.assigns.current_org)
   end
 
   defp not_self(path, ct, record) do

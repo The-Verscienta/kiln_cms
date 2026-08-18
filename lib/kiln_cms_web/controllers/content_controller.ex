@@ -9,6 +9,19 @@ defmodule KilnCMSWeb.ContentController do
   `/<plural>/<slug>` (resolved generically through `KilnCMS.CMS.ContentTypes`).
   Only published content is reachable; the read actions filter on
   `state == :published`, so an unpublished slug 404s rather than leaking a draft.
+
+  ## Why every read here runs `authorize?: false`
+
+  A site visitor has no actor: their read scope is the request — the audience
+  memberships and passphrase unlocks `reader_audiences/1` and `ContentLock`
+  pull off the session — and `KilnCMS.CMS.Content`'s read policies are written
+  against an actor. So delivery is the deliberate exception the policies
+  themselves name: it goes through dedicated read actions (`:public_by_slug`,
+  `:teaser_by_slug`, `:locked_by_slug`, `:published_translations`,
+  `:published`) whose *own filters* carry the published-state, audience and
+  unlock grants, and it is always tenant-scoped (`tenant: current_org_id/1`)
+  so one site can never serve another's records. Each bypass below points
+  back here; the per-site comment says which action's filter is the guard.
   """
   use KilnCMSWeb, :controller
 
@@ -33,6 +46,8 @@ defmodule KilnCMSWeb.ContentController do
     audiences = reader_audiences(conn)
     unlocks = ContentLock.grants(conn)
 
+    # Delivery bypass (moduledoc): `:public_by_slug` filters published + audience
+    # + unlock itself; `tenant:` scopes it to this site.
     fetch =
       &CMS.get_published_page_by_slug!(slug, &1, %{audiences: audiences, unlocks: unlocks},
         not_found_error?: false,
@@ -69,6 +84,8 @@ defmodule KilnCMSWeb.ContentController do
     audiences = reader_audiences(conn)
     unlocks = ContentLock.grants(conn)
 
+    # Delivery bypass (moduledoc): `:public_by_slug` filters published + audience
+    # + unlock itself; `tenant:` scopes it to this site.
     fetch =
       &CMS.get_published_post_by_slug!(slug, &1, %{audiences: audiences, unlocks: unlocks},
         not_found_error?: false,
@@ -97,6 +114,8 @@ defmodule KilnCMSWeb.ContentController do
     unlocks = ContentLock.grants(conn)
     ct = ContentTypes.get_by_path(type, org_id)
 
+    # Delivery bypass (moduledoc): the type's `:public_by_slug` filters
+    # published + audience + unlock itself; `tenant:` scopes it to this site.
     with ct when not is_nil(ct) <- ct,
          fetch =
            &ContentTypes.get_published_by_slug(ct.type, slug, &1,
@@ -284,6 +303,9 @@ defmodule KilnCMSWeb.ContentController do
   defp locked_record(conn, path, ct, locale) do
     slug = path |> String.split("/") |> List.last()
 
+    # Delivery bypass (moduledoc): `:locked_by_slug` returns only a published,
+    # in-audience, passphrase-locked record — the interstitial's inputs, never
+    # the body — and `tenant:` scopes it to this site.
     fetch = fn loc ->
       ContentTypes.get_locked_by_slug(ct.type, slug, loc,
         audiences: reader_audiences(conn),
@@ -354,6 +376,9 @@ defmodule KilnCMSWeb.ContentController do
     locale = locale(conn)
     org_id = current_org_id(conn)
 
+    # Delivery bypass (moduledoc): `:teaser_by_slug` selects only the teaser
+    # fields of a published, audience-gated record (the marketing surface for a
+    # reader outside the audience); `tenant:` scopes it to this site.
     fetch = fn loc ->
       ContentTypes.get_teaser_by_slug(ct.type, slug, loc,
         not_found_error?: false,
@@ -490,6 +515,10 @@ defmodule KilnCMSWeb.ContentController do
 
     # No `count: true` — only `more?` is used, and a count adds a full
     # COUNT(*) over published posts to every request.
+    #
+    # Delivery bypass (moduledoc): `:published` filters published + unlocked
+    # itself (audience-gated posts are listed on purpose, badged as such);
+    # `tenant:` scopes it to this site.
     %Ash.Page.Offset{results: posts, more?: more?} =
       CMS.list_published_posts!(
         authorize?: false,
@@ -1005,6 +1034,10 @@ defmodule KilnCMSWeb.ContentController do
   # Published locale variants of `slug`, scoped to the request's site (#336) so
   # hreflang/locale links never point at another org's content. Best-effort: a
   # content type without a translations interface simply yields none.
+  #
+  # Delivery bypass (moduledoc): `:published_translations` filters published +
+  # audience + unlock itself (no unlocks are passed, so a locked variant is
+  # simply not listed), and `tenant:` scopes it to this site.
   defp translations(ct, slug, org_id, audiences) do
     ContentTypes.list_translations(ct.type, slug,
       audiences: audiences,
@@ -1156,7 +1189,9 @@ defmodule KilnCMSWeb.ContentController do
 
       ids ->
         # Tenant-scoped so a page can only enrich media from its own site (#336);
-        # `authorize?: false` is the delivery bypass, so the tenant is the guard.
+        # `authorize?: false` is the delivery bypass (moduledoc), so the tenant
+        # is the guard — and the ids come from blocks of a record delivery
+        # already resolved as readable.
         CMS.list_media_items!(
           authorize?: false,
           tenant: org_id,

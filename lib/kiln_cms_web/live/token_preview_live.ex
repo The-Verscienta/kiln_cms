@@ -28,10 +28,14 @@ defmodule KilnCMSWeb.TokenPreviewLive do
 
   @impl true
   def mount(%{"token" => token}, _session, socket) do
-    with {:ok, %{type: type, id: id}} <- PreviewToken.verify(token),
+    with {:ok, %{type: type, id: id, org_id: org_id}} <- PreviewToken.verify(token),
          kind = to_string(type),
          true <- ContentTypes.type?(kind),
-         {:ok, record} <- ContentTypes.get_record(kind, id, authorize?: false) do
+         # `authorize?: false`: the signed token IS the grant (anonymous guests
+         # hold no actor); type, id and the tenant come from the token, never
+         # the URL — content is org-scoped, so the read carries `tenant:` (#1309).
+         {:ok, record} <-
+           ContentTypes.get_record(kind, id, authorize?: false, tenant: org_id) do
       socket =
         socket
         |> assign(:invalid?, false)

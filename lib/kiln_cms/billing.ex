@@ -111,7 +111,11 @@ defmodule KilnCMS.Billing do
   @spec get_settings() :: Settings.t() | nil
   def get_settings do
     # The row is a singleton (unique `singleton` column), so a bare read returns
-    # at most one record.
+    # at most one record. `authorize?: false`: no actor on the checkout/webhook
+    # paths (and `KilnCMS.Keys.fetch/1`), and `Settings` is a tenant-less,
+    # platform-admin-only singleton whose secret columns are vault-encrypted and
+    # `sensitive?`; the struct never leaves the server. The one web caller
+    # (`BillingLive`, via `ensure_settings!/0`) is itself platform-admin-gated.
     case list_settings!(authorize?: false) do
       [settings | _rest] -> settings
       [] -> nil
@@ -131,6 +135,10 @@ defmodule KilnCMS.Billing do
   end
 
   defp create_settings! do
+    # `authorize?: false` on the create: `ensure_settings!/0` takes no actor
+    # (`BillingLive` mounts behind `platform_admin?` and is the only caller), and
+    # `:init` accepts no attributes — it inserts the empty singleton row, which
+    # the identity makes a no-op on a race. Nothing caller-supplied reaches it.
     init_settings!(%{}, authorize?: false)
   rescue
     # Lost a concurrent-creation race on the singleton identity: the row exists
@@ -171,6 +179,12 @@ defmodule KilnCMS.Billing do
   """
   @spec verify_credentials() :: {:ok, Settings.t()} | {:error, term()}
   def verify_credentials do
+    # Both `record_billing_verification` writes below bypass authorization:
+    # this takes no actor (it runs in `BillingLive`'s `start_async`, which has
+    # already checked `platform_admin?` — the same tier `Settings`' policy
+    # requires), and the values written come from the provider's response and
+    # the resolved key prefix, never from user input. Threading the LiveView's
+    # actor through would let the policy do this instead (#1309).
     settings = ensure_settings!()
 
     with {:ok, config} <- credentials(),
@@ -184,6 +198,7 @@ defmodule KilnCMS.Billing do
           livemode: live_key?(config.secret_key),
           verification_error: nil
         },
+        # System write — bypass rationale at the top of the function.
         authorize?: false
       )
     else
@@ -191,6 +206,7 @@ defmodule KilnCMS.Billing do
         record_billing_verification(
           settings,
           %{verification_error: describe_error(reason)},
+          # Same system write as above (bypass rationale at the top).
           authorize?: false
         )
 
@@ -236,6 +252,10 @@ defmodule KilnCMS.Billing do
   """
   @spec anonymize_membership(struct()) :: :ok
   def anonymize_membership(membership) do
+    # `authorize?: false` is the only way in: `Membership`'s policy closes
+    # `:anonymize` to every actor (`forbid_if always()`), and the caller is
+    # `Accounts.Changes.AnonymizeUser` — an admin-policied erasure with no actor
+    # to hand down. `accept []`, tenant re-scoped to the row's own org.
     anonymize_membership_row(membership, authorize?: false, tenant: membership.org_id)
     :ok
   end
@@ -249,6 +269,12 @@ defmodule KilnCMS.Billing do
   """
   @spec anonymize_actor(Ash.UUID.t()) :: :ok
   def anonymize_actor(user_id) do
+    # The read and the bulk update both run `authorize?: false`: `MembershipEvent`
+    # is append-only to every actor (`forbid_if always()` on update), so the
+    # bypass is the only route, and the caller is `Accounts.Changes.AnonymizeUser`
+    # (`User.:anonymize`, admin-policied) with no actor in hand. `user_id` is the
+    # row being erased, not input; the filter carries the grant, `accept []`, and
+    # each org's sweep is scoped to its own tenant.
     Enum.each(KilnCMS.Accounts.list_org_ids(), fn org_id ->
       KilnCMS.Billing.MembershipEvent
       |> Ash.Query.for_read(:read, %{}, authorize?: false, tenant: org_id)

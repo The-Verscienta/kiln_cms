@@ -433,6 +433,10 @@ defmodule KilnCMSWeb.ArtifactController do
     Calendar.strftime(dt, "%a, %d %b %Y %H:%M:%S GMT")
   end
 
+  # Delivery bypass (see `KilnCMSWeb.ContentController`'s moduledoc): the
+  # anonymous reader has no actor; the `:public_by_slug` action's own filter
+  # carries the published + audience + unlock grant, and `tenant:` pins the
+  # read to this site.
   defp published(org_id, type, slug, locale, unlocks) do
     ContentTypes.get_published_by_slug(type, slug, locale,
       unlocks: unlocks,

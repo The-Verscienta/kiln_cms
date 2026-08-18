@@ -59,7 +59,14 @@ defmodule KilnCMS.CMS.Changes.BustContentCache do
   # one dynamic type's invalidation can't touch another's keys.
   defp cache_type(resource, record) do
     if function_exported?(resource, :__kiln_dynamic_entry__, 0) do
-      case KilnCMS.CMS.get_type_definition(record.type_definition_id, authorize?: false) do
+      # System read (`authorize?: false`) inside an after-transaction hook: no
+      # actor, and `tenant: record.org_id` because `TypeDefinition` is org-scoped
+      # — a tenant-less read errors under strict tenancy and the entry's cache
+      # would then be busted under the wrong key (#1309).
+      case KilnCMS.CMS.get_type_definition(record.type_definition_id,
+             authorize?: false,
+             tenant: record.org_id
+           ) do
         {:ok, definition} -> definition.name
         # Archived/gone definition: bust under a namespaced fallback key.
         _ -> "entry"

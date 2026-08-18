@@ -18,8 +18,8 @@ defmodule KilnCMSWeb.PreviewController do
   end
 
   def show(conn, %{"token" => token}) do
-    with {:ok, %{type: type, id: id}} <- PreviewToken.verify(token),
-         {:ok, record} <- fetch(type, id) do
+    with {:ok, %{type: type, id: id, org_id: org_id}} <- PreviewToken.verify(token),
+         {:ok, record} <- fetch(type, id, org_id) do
       json(conn, %{data: ContentSerializer.to_map(record)})
     else
       _ ->
@@ -33,11 +33,18 @@ defmodule KilnCMSWeb.PreviewController do
   end
 
   # The token carries the content type; resolve it generically via the registry.
-  defp fetch(type, id) do
+  #
+  # `authorize?: false` (moduledoc): the caller is anonymous — no actor — and the
+  # grant is the `Phoenix.Token` signature `PreviewToken.verify/1` checked above,
+  # which binds the read to the ONE record id an editor minted it for. The
+  # token's `org_id` is the tenant (#1309): content is org-scoped, so a
+  # tenant-less read would be refused under strict tenancy.
+  defp fetch(type, id, org_id) do
     if ContentTypes.type?(type),
       do:
         ContentTypes.get_record(type, id,
           authorize?: false,
+          tenant: org_id,
           # The payload carries both the stored SEO fields and their effective
           # values (#1102); loading the calculations here is what lets
           # `[category]` and `[field:<name>]` resolve to what the delivered page

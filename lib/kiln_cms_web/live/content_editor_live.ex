@@ -3795,6 +3795,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # feeds the settings panel's task list and every block's discussion pin, so
   # the per-block counts cost nothing beyond this read no matter how many
   # blocks the document has.
+  #
+  # `authorize?: false` on the `:assignee` load only, for the same reason as
+  # `load_comments/4`'s author load: `User`'s read policy is self-only, and the
+  # assignee's name is display data. The task list itself is policy-checked.
   defp load_tasks(kind, record_id, actor, org) do
     to_string(kind)
     |> CMS.list_open_tasks_for!(record_id, actor: actor, tenant: org)

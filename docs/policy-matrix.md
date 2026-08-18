@@ -46,6 +46,18 @@ Two non-role actors also appear below:
 - **anonymous** — no actor (`authorize?: true` with no `actor:`); the public site / headless API.
 - **system** — trusted internal callers running with `authorize?: false` (the delivery controller recording views, the webhook delivery worker, the AshOban scheduler). System calls bypass policies entirely and are intentionally *not* expressible as a role.
 
+  Because a system call skips *every* policy on the resource, each site is a
+  piece of the authorization surface this matrix does not show. So each one on
+  a request path has to say why it is safe: every `authorize?: false` under
+  `lib/kiln_cms_web/` sits next to a comment (trailing, or within the 12 lines
+  above) that names the bypass and gives the reason — a delivery action whose
+  own filter carries the published/audience/unlock grant, a tenant already
+  scoped by the router, a pre-auth flow with no actor, a system read of display
+  data on a self-only-read resource. `mix kiln.authz.check` (part of
+  `mix precommit` and CI) fails on a new one without that comment (#1309).
+  Non-web code is not gated yet — a system actor (#946) is the way to move
+  worker code *under* the policies instead of around them.
+
 Legend: ✅ allowed · ❌ forbidden · 🔎 allowed but row-filtered (reads return only the rows the policy permits, never an error) · ⚙️ system-only (`authorize?: false`).
 
 ## Content — `Page`, `Post`, `Entry` (`KilnCMS.CMS.Content` macro)
