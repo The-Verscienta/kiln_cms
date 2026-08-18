@@ -280,6 +280,7 @@ defmodule KilnCMS.Billing do
       |> Ash.Query.for_read(:read, %{}, authorize?: false, tenant: org_id)
       |> Ash.Query.filter(actor_id == ^user_id)
       |> Ash.bulk_update(:anonymize_actor, %{},
+        # Same bypass as the read above.
         authorize?: false,
         tenant: org_id,
         return_errors?: false

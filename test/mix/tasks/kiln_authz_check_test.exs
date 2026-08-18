@@ -181,6 +181,123 @@ defmodule Mix.Tasks.Kiln.Authz.CheckTest do
     end
   end
 
+  describe "unjustified/2 — one comment serves one site" do
+    test "a second bypass pasted under a justified one is red" do
+      source = """
+      defmodule A do
+        def go(conn) do
+          # `authorize?: false`: menus are display data; `Menu`'s read policy is
+          # `authorize_if always()` regardless; `tenant:` scopes the list.
+          menus = CMS.list_menus!(authorize?: false, tenant: org)
+
+          drafts = CMS.list_pages!(authorize?: false, tenant: org)
+          users = Accounts.list_users!(authorize?: false)
+        end
+      end
+      """
+
+      assert [{"a.ex", 7}, {"a.ex", 8}] == Check.unjustified(source, "a.ex")
+    end
+
+    test "a comment inside another call's span does not reach past it" do
+      source = """
+      defmodule A do
+        def go do
+          CMS.get!(
+            slug,
+            # bypass: delivery filter carries the grant
+            authorize?: false,
+            tenant: org
+          )
+
+          Ash.read!(Q, authorize?: false)
+        end
+      end
+      """
+
+      assert [{"a.ex", 10}] == Check.unjustified(source, "a.ex")
+    end
+
+    test "a comment naming something else nearby is not a justification" do
+      source = """
+      defmodule A do
+        def go(conn) do
+          # 401 Unauthorized when the header is missing; authorization is
+          # checked by the plug above.
+          Ash.read!(Q, authorize?: false)
+        end
+      end
+      """
+
+      assert [{"a.ex", 5}] == Check.unjustified(source, "a.ex")
+    end
+  end
+
+  describe "unjustified/2 — the window is the call, not the option" do
+    test "a comment above a call whose bypass is far down its option list" do
+      options = for i <- 1..14, do: "      opt#{i}: #{i},\n"
+
+      source = """
+      defmodule A do
+        # bypass: system read
+        def go do
+          CMS.list!(
+      #{options}      authorize?: false
+          )
+        end
+      end
+      """
+
+      assert [] == Check.unjustified(source, "a.ex")
+    end
+
+    test "a comment between the options, or on the closing line, counts" do
+      source = """
+      defmodule A do
+        def go do
+          CMS.list!(
+            authorize?: false,
+            # bypass: system read
+            tenant: org
+          )
+
+          CMS.other!(
+            authorize?: false
+          ) # bypass: system read
+        end
+      end
+      """
+
+      assert [] == Check.unjustified(source, "a.ex")
+    end
+
+    test "two bypass options in one call share its comment" do
+      source = """
+      defmodule A do
+        # bypass: fixture builder
+        def go, do: build(authorize?: false, nested: [authorize?: false])
+      end
+      """
+
+      assert [] == Check.unjustified(source, "a.ex")
+    end
+  end
+
+  describe "unjustified/2 — unparsable source" do
+    test "raises with the file, line and message rather than crashing" do
+      source = """
+      defmodule A do
+        def go, do: Ash.read!(Q, authorize?: false)
+      end
+      end
+      """
+
+      assert_raise Mix.Error, ~r/a\.ex:4: cannot parse: unexpected reserved word: end/, fn ->
+        Check.unjustified(source, "a.ex")
+      end
+    end
+  end
+
   describe "run/1" do
     @tag :tmp_dir
     test "goes red on an unexplained bypass and names the site", %{tmp_dir: dir} do

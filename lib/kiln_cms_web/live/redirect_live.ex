@@ -206,8 +206,9 @@ defmodule KilnCMSWeb.RedirectLive do
   #
   # Read as the acting user, not `authorize?: false` (#1309): the page is
   # admin-gated at mount, and `Checks.OrgAdmin` is that same tier, so the actor
-  # read returns exactly what the bypass did — while a role revoked after mount
-  # narrows to the policies instead of outliving the socket.
+  # read returns exactly what the bypass did. (`@actor` is the mount-time
+  # struct, so this is not a re-check of the role — a platform admin demoted
+  # mid-session keeps the tier until the socket ends; see LiveUserAuth.)
   defp load_targets(redirects, socket) do
     opts = [actor: socket.assigns.actor, tenant: socket.assigns.current_org]
 

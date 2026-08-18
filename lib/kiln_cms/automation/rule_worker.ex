@@ -81,12 +81,16 @@ defmodule KilnCMS.Automation.RuleWorker do
   (#946), so a policy check would refuse everything. What makes the bypass
   safe rather than an escalation:
 
-    * **Tenant is always the rule's own.** Every read/write below carries
-      `tenant: rule.org_id` (the job's `org_id` is what `Automation.dispatch/3`
-      read the rule under), so a rule can only touch its own site's rows.
+    * **Tenant is always the rule's own.** The rule itself is read under the
+      job's `org_id` (what `Automation.dispatch/3` read it under; a pre-#336 job
+      that carries none falls back to the default org), and every read/write
+      after that carries `tenant: rule.org_id`, so a rule can only touch its
+      own site's rows.
     * **The target document is chosen by the event, not the rule.** `payload["id"]`
-      / the event's type come from the content action that fired; a rule's
-      `config` never names a record to read or write.
+      / the event's type come from the content action that fired. The one
+      record a rule's `config` does name is the newsletter `segment_id`, and
+      `Newsletter.send_as_newsletter/2` resolves that under the document's own
+      tenant, so it cannot point across sites.
     * **Rules are authored only by org admins** (`KilnCMS.Automation.Rule` is
       `policy always() → OrgAdmin`), and each bypassed target write is one an
       `OrgAdmin` is already granted in that org (`Comment`/`Task` carry an
@@ -110,10 +114,11 @@ defmodule KilnCMS.Automation.RuleWorker do
   def perform(%Oban.Job{
         args: %{"rule_id" => rule_id, "event" => event, "payload" => payload} = args
       }) do
-    # `org_id` scopes the rule read to its own site (epic #336); pre-#336 jobs
-    # carry none — a nil tenant reads globally, finding the row by its unique id.
-    # `rule_id` was enqueued by `Automation.dispatch/3`, not supplied by a
-    # user; system read, `authorize?: false` per the moduledoc.
+    # `org_id` scopes the rule read to its own site (epic #336); a pre-#336 job
+    # carries none and reads under the default org (a non-default org's rule
+    # from that era is treated as gone). `rule_id` was enqueued by
+    # `Automation.dispatch/3`, not supplied by a user; system read,
+    # `authorize?: false` per the moduledoc.
     case Automation.get_rule(rule_id,
            authorize?: false,
            tenant: args["org_id"] || KilnCMS.Accounts.default_org_id()

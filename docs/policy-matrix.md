@@ -49,11 +49,13 @@ Two non-role actors also appear below:
   Because a system call skips *every* policy on the resource, each site is a
   piece of the authorization surface this matrix does not show. So each one on
   a request path has to say why it is safe: every `authorize?: false` under
-  `lib/kiln_cms_web/` sits next to a comment (trailing, or within the 12 lines
-  above) that names the bypass and gives the reason — a delivery action whose
-  own filter carries the published/audience/unlock grant, a tenant already
-  scoped by the router, a pre-auth flow with no actor, a system read of display
-  data on a self-only-read resource. `mix kiln.authz.check` (part of
+  `lib/kiln_cms_web/` sits next to a comment (within the 12 lines above the
+  call, or anywhere inside it) that names the bypass (`authorize?` or `bypass`)
+  and gives the reason — a delivery action whose own filter carries the
+  published/audience/unlock grant, a tenant already scoped by the router, a
+  pre-auth flow with no actor, a system read of display data on a
+  self-only-read resource. One comment covers one call: a second bypass pasted
+  under a justified one needs its own. `mix kiln.authz.check` (part of
   `mix precommit` and CI) fails on a new one without that comment (#1309).
   Non-web code is not gated yet — a system actor (#946) is the way to move
   worker code *under* the policies instead of around them.

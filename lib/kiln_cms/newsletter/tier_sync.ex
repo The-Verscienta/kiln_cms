@@ -36,9 +36,12 @@ defmodule KilnCMS.Newsletter.TierSync do
 
   ## Why every call here is `authorize?: false` (#1309)
 
-  There is no acting user: both callers are system bookkeeping (a billing
-  transition's `after_action`, the nightly reconcile), and `user_id` /
-  `org_id` come from a `Billing.Membership` row, never from a request. The
+  There is no acting user in hand: the callers are `Billing.Changes.RecordTransition`
+  (a membership transition's `after_action`, where `user_id` / `org_id` come
+  from the `Billing.Membership` row) and `Billing.MembershipTier`'s
+  `after_action` (an org admin's tier create/update, whose `name` / `slug` /
+  `description` feed `ensure_segment/1` — request-authored, but under a policy
+  that admitted only an `OrgAdmin` of that org). The
   Newsletter actions this drives (`Segment.for_tier`, `Subscriber.link_member`)
   are `forbid_if always()` — the bypass is the *only* way in — and every
   Newsletter read/write below carries `tenant: org_id`, so nothing crosses a
@@ -177,6 +180,7 @@ defmodule KilnCMS.Newsletter.TierSync do
            Newsletter.link_member_subscriber(
              user.id,
              %{email: to_string(user.email), name: user.name},
+             # bypass: `link_member` is forbid_if always() (see above)
              authorize?: false,
              tenant: org_id
            ) do

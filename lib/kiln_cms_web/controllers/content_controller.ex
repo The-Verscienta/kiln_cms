@@ -12,16 +12,20 @@ defmodule KilnCMSWeb.ContentController do
 
   ## Why every read here runs `authorize?: false`
 
-  A site visitor has no actor: their read scope is the request — the audience
-  memberships and passphrase unlocks `reader_audiences/1` and `ContentLock`
-  pull off the session — and `KilnCMS.CMS.Content`'s read policies are written
-  against an actor. So delivery is the deliberate exception the policies
-  themselves name: it goes through dedicated read actions (`:public_by_slug`,
-  `:teaser_by_slug`, `:locked_by_slug`, `:published_translations`,
-  `:published`) whose *own filters* carry the published-state, audience and
-  unlock grants, and it is always tenant-scoped (`tenant: current_org_id/1`)
-  so one site can never serve another's records. Each bypass below points
-  back here; the per-site comment says which action's filter is the guard.
+  A site visitor has no actor. `KilnCMS.CMS.Content`'s read policies do admit
+  an anonymous reader — `published` + `audience == :public` (+ no passphrase)
+  passes with no actor at all — but the rest of a visitor's read scope lives
+  on the *request*: the audience memberships and passphrase unlocks that
+  `reader_audiences/1` and `ContentLock` pull off the session cannot be
+  expressed through an actor the policies could evaluate. So delivery goes
+  through dedicated read actions (`:public_by_slug`, `:teaser_by_slug`,
+  `:locked_by_slug`, `:published_translations`, `:published`) whose *own
+  filters* carry the published-state, audience and unlock grants, and it is
+  always tenant-scoped (`tenant: current_org_id/1`) so one site can never
+  serve another's records. That is why the bypass — not "the policies need an
+  actor": a new anonymous read of plain public content should prefer the
+  policies. Each bypass below points back here; the per-site comment says
+  which action's filter is the guard.
   """
   use KilnCMSWeb, :controller
 

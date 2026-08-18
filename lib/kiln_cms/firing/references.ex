@@ -180,6 +180,7 @@ defmodule KilnCMS.Firing.References do
       %{from_type: from_type, from_id: from_id, to_type: to_type, to_id: to_id}
     end)
     |> Ash.bulk_create!(Firing.ReferenceEdge, :upsert,
+      # Same fire-path bypass as the destroy above (see that comment).
       authorize?: false,
       tenant: org_id,
       return_errors?: true,
@@ -340,7 +341,9 @@ defmodule KilnCMS.Firing.References do
   # would not see draft referrers of an out-of-scope type; the fetch is by an
   # id the edge table already holds, and only `title`/`state` are surfaced.
   defp load_any(org_id, :page, id), do: any(CMS.get_page(id, authorize?: false, tenant: org_id))
+  # (bypass: as above)
   defp load_any(org_id, :post, id), do: any(CMS.get_post(id, authorize?: false, tenant: org_id))
+  # (bypass: as above)
   defp load_any(org_id, :entry, id), do: any(CMS.get_entry(id, authorize?: false, tenant: org_id))
 
   defp load_any(org_id, type, id) do
@@ -420,9 +423,11 @@ defmodule KilnCMS.Firing.References do
   def load_published(org_id, :page, id),
     do: published(CMS.get_page(id, [authorize?: false, tenant: org_id] ++ fire_opts()))
 
+  # (bypass: as above)
   def load_published(org_id, :post, id),
     do: published(CMS.get_post(id, [authorize?: false, tenant: org_id] ++ fire_opts()))
 
+  # (bypass: as above)
   def load_published(org_id, :entry, id),
     do: published(CMS.get_entry(id, [authorize?: false, tenant: org_id] ++ fire_opts()))
 

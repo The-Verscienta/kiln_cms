@@ -600,7 +600,8 @@ verification, and the SSRF/egress protections applied to endpoint URLs.
 (curated public fields only). The token is a stateless `Phoenix.Token` with a
 **15-minute** expiry — share a draft without granting a standing credential. It
 binds one record *and its site*: the read it authorizes is scoped to the org
-the token was minted under, so a token can never resolve on another tenant.
+the token was minted under, and a token presented on another site's host is
+refused, so a draft is only ever served by the site that owns it.
 
 ## Cross-origin (CORS)
 
