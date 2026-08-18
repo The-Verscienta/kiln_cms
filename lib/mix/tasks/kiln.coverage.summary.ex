@@ -8,11 +8,11 @@ defmodule Mix.Tasks.Kiln.Coverage.Summary do
   so the editor / delivery / governance split is visible at a glance:
 
       directory                            files  relevant  covered      %
-      lib/kiln_cms/cms                        41      3120     2790   89.4
-      lib/kiln_cms/firing                     12       880      611   69.4
-      lib/kiln_cms_web/live                   54     10930     8014   73.3
+      lib/kiln_cms/cms                         N         N        N    N.N
+      lib/kiln_cms/firing                      N         N        N    N.N
+      lib/kiln_cms_web/live                    N         N        N    N.N
       …
-      TOTAL                                  612     48211    39002   80.9
+      TOTAL                                    N         N        N    N.N
 
   A file is grouped by its directory, truncated to depth 3 (`lib/<app>/<sub>`,
   `projects/<name>/<sub>`), so a deep tree rolls up under its feature
@@ -38,11 +38,14 @@ defmodule Mix.Tasks.Kiln.Coverage.Summary do
 
   @impl Mix.Task
   def run(args) do
-    {opts, _, _} =
-      OptionParser.parse(args, strict: [report: :string, depth: :integer])
+    {opts, _} = OptionParser.parse!(args, strict: [report: :string, depth: :integer])
 
     report = Keyword.get(opts, :report, @default_report)
     depth = Keyword.get(opts, :depth, @default_depth)
+
+    if depth < 1 do
+      Mix.raise("--depth must be a positive integer, got: #{depth}")
+    end
 
     files =
       case File.read(report) do
@@ -79,26 +82,23 @@ defmodule Mix.Tasks.Kiln.Coverage.Summary do
   """
   @spec summarize([map()], pos_integer()) :: [row()]
   def summarize(files, depth \\ @default_depth) do
-    files
-    |> Enum.group_by(&group_for(&1["name"], depth))
-    |> Enum.map(fn {dir, entries} ->
-      {relevant, covered} =
-        Enum.reduce(entries, {0, 0}, fn %{"coverage" => lines}, {rel, cov} ->
-          {rel + Enum.count(lines, &(&1 != nil)),
-           cov + Enum.count(lines, &(is_integer(&1) and &1 > 0))}
-        end)
+    groups = Enum.group_by(files, &group_for(&1["name"], depth))
+    rows = for {dir, entries} <- Enum.sort(groups), do: row(dir, entries)
+    rows ++ [row("TOTAL", files)]
+  end
 
-      {dir, length(entries), relevant, covered}
-    end)
-    |> Enum.sort()
-    |> then(fn rows ->
-      {files, relevant, covered} =
-        Enum.reduce(rows, {0, 0, 0}, fn {_, f, r, c}, {tf, tr, tc} ->
-          {tf + f, tr + r, tc + c}
+  # One aggregated row: nil is irrelevant, 0 relevant-but-uncovered, n > 0 covered.
+  defp row(dir, entries) do
+    {relevant, covered} =
+      Enum.reduce(entries, {0, 0}, fn %{"coverage" => lines}, acc ->
+        Enum.reduce(lines, acc, fn
+          nil, acc -> acc
+          0, {rel, cov} -> {rel + 1, cov}
+          _hits, {rel, cov} -> {rel + 1, cov + 1}
         end)
+      end)
 
-      rows ++ [{"TOTAL", files, relevant, covered}]
-    end)
+    {dir, length(entries), relevant, covered}
   end
 
   @doc """
@@ -119,18 +119,22 @@ defmodule Mix.Tasks.Kiln.Coverage.Summary do
     |> Path.join()
   end
 
-  @doc "Percentage covered, one decimal; 0.0 when nothing is relevant."
+  @doc """
+  Percentage covered, FLOORED to one decimal — the same arithmetic, in the
+  same order, as excoveralls' `Stats.get_coverage/2` under `floor_coverage`
+  (its default, and what coveralls.json sets), so this table and the `[TOTAL]`
+  line the gate compares against `minimum_coverage` never disagree by a
+  rounding step. The order matters: `covered / relevant * 100` and
+  `covered * 100 / relevant` floor differently for thousands of pairs (29/100
+  is 28.9 one way and 29.0 the other). 0.0 when nothing is relevant.
+  """
   @spec percent(non_neg_integer(), non_neg_integer()) :: float()
   def percent(_covered, 0), do: 0.0
-  def percent(covered, relevant), do: Float.round(covered * 100 / relevant, 1)
+  def percent(covered, relevant), do: Float.floor(covered / relevant * 100, 1)
 
   @doc false
   def format_table(rows) do
-    width =
-      rows
-      |> Enum.map(fn {dir, _, _, _} -> String.length(dir) end)
-      |> Enum.max(fn -> 9 end)
-      |> max(9)
+    width = Enum.reduce(rows, String.length("directory"), &max(String.length(elem(&1, 0)), &2))
 
     header =
       String.pad_trailing("directory", width) <>

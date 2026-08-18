@@ -16,7 +16,13 @@
     "source file — an absolute path into deps/ — and are that dependency's",
     "code, not ours.",
     "",
-    "Measured 2026-08-18 on the full suite: 83.0% (7,286 tests)."
+    "Measured 2026-08-18 on the full suite: 82.9% on CI (ubuntu-latest, which",
+    "excludes the :qpdf tests), 83.0% locally (7,286 tests). The floor is set",
+    "from the CI number — that is the environment that enforces it.",
+    "",
+    "terminal_options.print_files: the per-file table is off; the per-directory",
+    "rollup (`mix kiln.coverage.summary`) is the readable view, and the HTML",
+    "report has every file. `mix coveralls.detail` still prints sources."
   ],
   "skip_files": [
     "^test/support/",
@@ -29,6 +35,6 @@
     "floor_coverage": true
   },
   "terminal_options": {
-    "file_column_width": 72
+    "print_files": false
   }
 }

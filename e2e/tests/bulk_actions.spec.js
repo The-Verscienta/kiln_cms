@@ -10,35 +10,21 @@ const {
   expect,
   signInAsAdmin,
   newDraftPage,
+  saveDraft,
   deleteContentById,
 } = require("./fixtures");
 
-// Two drafts whose titles share a unique prefix, so `/editor?q=<prefix>`
-// filters the persistent e2e database down to exactly them. Returns their ids
-// (captured from the editor URL) so cleanup can find them even if a step
-// fails before the title lands.
-async function twoDrafts(page, prefix) {
-  const ids = [];
-  for (const n of [1, 2]) {
-    await newDraftPage(page);
-    const id = page.url().split("/").pop();
-    ids.push(id);
-    await page.fill('input[name$="[title]"]', `${prefix} ${n}`);
-    await page.fill('input[name$="[slug]"]', `${prefix.toLowerCase().replace(/\s+/g, "-")}-${n}`);
-    await page.getByRole("button", { name: /^save$/i }).click();
-    // The save round-trips before we navigate away, or the "Untitled" draft
-    // is what the list search would (not) find.
-    await expect(page.locator('input[name$="[title]"]')).toHaveValue(`${prefix} ${n}`);
-  }
-  return ids;
-}
-
 test.describe("content list bulk actions", () => {
-  const prefix = `E2E Bulk ${Date.now()}`;
+  /** @type {string} */
+  let prefix;
+  // Ids of the drafts this test created, pushed as soon as each exists (before
+  // its title lands) so cleanup can find them however far the journey got.
   /** @type {string[]} */
   let ids = [];
 
   test.beforeEach(async ({ page }) => {
+    prefix = `E2E Bulk ${Date.now()}`;
+    ids = [];
     await signInAsAdmin(page);
   });
 
@@ -51,12 +37,19 @@ test.describe("content list bulk actions", () => {
   });
 
   test("select all → publish → unpublish → delete, through the confirm bar", async ({ page }) => {
-    ids = await twoDrafts(page, prefix);
+    // Two drafts whose titles share a unique prefix, so `/editor?q=<prefix>`
+    // filters the persistent e2e database down to exactly them.
+    for (const n of [1, 2]) {
+      ids.push(await newDraftPage(page));
+      await saveDraft(page, {
+        title: `${prefix} ${n}`,
+        slug: `${prefix.toLowerCase().replace(/\s+/g, "-")}-${n}`,
+      });
+    }
 
     await page.goto(`/editor?q=${encodeURIComponent(prefix)}`);
-    const rows = page.locator(`li[id^="page-"]`).filter({ hasText: prefix });
-    await expect(rows).toHaveCount(2);
     for (const id of ids) await expect(page.locator(`li[id="page-${id}"]`)).toBeVisible();
+    await expect(page.locator(`li[id^="page-"]`).filter({ hasText: prefix })).toHaveCount(2);
 
     // Nothing selected: every verb is disabled, and "None selected" says so.
     const publish = page.locator('button[phx-click="bulk"][phx-value-action="publish"]');

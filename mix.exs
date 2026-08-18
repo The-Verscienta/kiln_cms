@@ -436,6 +436,7 @@ defmodule KilnCMS.MixProject do
         "coveralls.html": :test,
         "coveralls.json": :test,
         "coveralls.multiple": :test,
+        "kiln.coverage.summary": :test,
         "e2e.setup": :e2e,
         "e2e.reset": :e2e
       ]

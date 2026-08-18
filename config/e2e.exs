@@ -24,18 +24,43 @@ config :kiln_cms, KilnCMSWeb.Endpoint,
   code_reloader: false,
   debug_errors: false
 
-# Background jobs DO run during E2E, cron does not (#1314). The media journey
-# needs `KilnCMS.Media.VariantWorker`: an upload's `width`/`height` are
-# measured there, not at ingest, and the library's focal-point editor is gated
-# on `width` — under `testing: :manual` it never appeared and the journey could
-# not be driven. `plugins: []` drops the Cron plugin (no scheduled-publish /
-# purge / sweep triggers firing mid-journey) and the Pruner. The other queues
-# processing is harmless here: outbound mail lands in Swoosh's local mailbox
-# (config.exs), no webhook endpoints or embeddings are configured, and jobs
-# that fail just retry in the background. `Config` deep-merges keyword lists,
-# so there is no way to leave only `:media` running from this file without
-# restating every queue.
-config :kiln_cms, Oban, testing: :disabled, plugins: []
+# Background jobs DO run during E2E (#1314). The media journey needs
+# `KilnCMS.Media.VariantWorker`: an upload's `width`/`height` are measured
+# there, not at ingest, and the library's focal-point editor is gated on
+# `width` — under `testing: :manual` it never appeared and the journey could
+# not be driven. The releases journey likewise ships and rolls back through
+# `KilnCMS.CMS.Workers.ReleaseWorker`. Every queue runs: `Config` deep-merges
+# keyword lists, so there is no way to leave only `:media` running from this
+# file without restating every queue, and the rest is harmless here — outbound
+# mail lands in Swoosh's local mailbox (config.exs), no webhook endpoints or
+# embeddings are configured, and jobs that fail just retry in the background.
+#
+# The Oban Cron plugin from config.exs runs too — it cannot be dropped from
+# here (`plugins: []` would deep-merge into the base list and change nothing,
+# and AshOban refuses to boot without a Cron plugin because resources declare
+# `scheduler_cron`). What it fires is bounded: AshOban's every-minute
+# schedulers only act on rows whose `scheduled_at`/`unpublish_at`/release
+# go-live is already due, which no journey creates, and the app-level daily
+# and hourly sweeps are switched off below through the per-key knobs
+# `KilnCMS.Application.oban_config/0` honours, so a run that straddles HH:20
+# / HH:40 / HH:50 / 03:40 does not get a reaper, nonce sweep, occurrence sweep
+# or governance checkpoint running against the rows a spec is asserting on.
+config :kiln_cms, Oban, testing: :disabled
+
+config :kiln_cms,
+  governance_checkpoint_cron: false,
+  link_check_cron: false,
+  task_digest_cron: false,
+  occurrence_sweep_cron: false,
+  media_quarantine_reaper_cron: false,
+  federation_nonce_sweep_cron: false,
+  health_sweep_cron: false
+
+# Same reasoning as config/test.exs: application boot is outside any journey,
+# and with queues now running a boot-time backfill enqueue would execute
+# during whatever spec happens to be first (and inside the `mix run seeds.exs`
+# VM, which halts underneath it).
+config :kiln_cms, :occurrence_backfill_on_boot, false
 
 config :kiln_cms, token_signing_secret: "e2eTokenSigningSecretForBrowserTests0"
 
@@ -56,12 +81,15 @@ config :kiln_cms, KilnCMSWeb.RateLimit, limits: %{auth: {1_000, :timer.minutes(1
 # external API client so the app boots without hackney.
 config :swoosh, :api_client, false
 
-# The dev-only browser tooling — chiefly the Swoosh mailbox at /dev/mailbox —
-# so a journey can observe what the server SENT, not just what it rendered:
-# the comment `@mention` spec (#1314) reads the mailbox's JSON to prove the
-# mentioned editor was actually notified. Compile-time (`Application.compile_env`
-# in the router), same as dev; `KilnCMS.Application` refuses it in :prod only.
-config :kiln_cms, dev_routes: true
+# The Swoosh mailbox at /dev/mailbox, so a journey can observe what the server
+# SENT, not just what it rendered: the comment `@mention` spec (#1314) reads
+# the mailbox's JSON to prove the mentioned editor was actually notified. Its
+# own compile-time flag rather than `dev_routes` — that one also mounts
+# AshAdmin's unauthenticated actor picker, LiveDashboard and the GraphQL
+# playground, none of which a browser journey needs, and it stays dev-only (see
+# README's hardening checklist). `KilnCMS.Application` refuses either flag in a
+# :prod release.
+config :kiln_cms, mailbox_preview: true
 
 # Quiet, non-reloading server.
 config :logger, level: :warning

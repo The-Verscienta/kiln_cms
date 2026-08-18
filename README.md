@@ -197,6 +197,8 @@ the front-end integration guide.
 - **`dev_routes` must stay off.** It is only set in `config/dev.exs`; `config/prod.exs`
   sets it `false` explicitly and the app **refuses to boot** if a `:prod` release has it
   enabled (it would expose `/admin`, LiveDashboard, and the Swoosh mailbox unauthenticated).
+  The same goes for `mailbox_preview`, the narrower flag `config/e2e.exs` uses to mount
+  only the Swoosh mailbox for the browser suite.
 - **Database TLS is on by default.** The Postgres connection uses `ssl: true`; set
   `DATABASE_SSL=false` only for a provider that cannot offer TLS. Point
   `DATABASE_SSL_CACERTFILE` at the provider CA bundle to verify the server certificate

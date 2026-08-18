@@ -11,20 +11,41 @@ const {
   expect,
   signInAsAdmin,
   newDraftPage,
+  saveDraft,
   deleteContentById,
 } = require("./fixtures");
 
+// Accept the next native confirm and hand back its message, so the caller
+// asserts on the text AFTER the click. Asserting inside the handler would leave
+// the confirm open on a mismatch and hang the click until the test timeout.
+function acceptNextDialog(page) {
+  return new Promise(resolve => {
+    page.once("dialog", dialog => {
+      resolve(dialog.message());
+      return dialog.accept();
+    });
+  });
+}
+
 test.describe("content releases", () => {
-  const stamp = Date.now();
-  const releaseName = `E2E Release ${stamp}`;
-  const title = `E2E Release Page ${stamp}`;
-  const slug = `e2e-release-page-${stamp}`;
+  /** @type {string} */
+  let releaseName;
+  /** @type {string} */
+  let title;
+  /** @type {string} */
+  let slug;
   /** @type {string | null} */
   let pageId = null;
   /** @type {string | null} */
   let releaseUrl = null;
 
   test.beforeEach(async ({ page }) => {
+    const stamp = Date.now();
+    releaseName = `E2E Release ${stamp}`;
+    title = `E2E Release Page ${stamp}`;
+    slug = `e2e-release-page-${stamp}`;
+    pageId = null;
+    releaseUrl = null;
     await signInAsAdmin(page);
   });
 
@@ -35,12 +56,19 @@ test.describe("content releases", () => {
     // database is persistent, so leaving an open release behind would also
     // change what every later spec sees in the content list's "Add to
     // release" picker.
+    //
+    // If the journey died mid-flight the release may still be `:publishing` /
+    // `:rolling_back`, where the Archive button is hidden and the worker is
+    // still touching the page — so wait for a terminal state (the button
+    // appears) before archiving, and archive before deleting the page.
     if (releaseUrl) {
       await page.goto(releaseUrl);
       const archive = page.locator('button[phx-click="archive"]');
+      await expect(archive).toBeVisible({ timeout: 30_000 }).catch(() => {});
       if (await archive.count()) {
-        page.once("dialog", dialog => dialog.accept());
+        const accepted = acceptNextDialog(page);
         await archive.click();
+        await accepted;
         await expect(page.locator("#flash-info")).toContainText("Release archived.");
       }
       releaseUrl = null;
@@ -52,13 +80,13 @@ test.describe("content releases", () => {
   });
 
   test("create → add content → publish now → live → roll back → off the site", async ({ page }) => {
+    // Two worker round-trips (ship, roll back) plus a dozen navigations: take
+    // the tripled budget rather than racing the 30 s default.
+    test.slow();
+
     // A draft to ship.
-    await newDraftPage(page);
-    pageId = page.url().split("/").pop() ?? null;
-    await page.fill('input[name$="[title]"]', title);
-    await page.fill('input[name$="[slug]"]', slug);
-    await page.getByRole("button", { name: /^save$/i }).click();
-    await expect(page.locator('input[name$="[title]"]')).toHaveValue(title);
+    pageId = await newDraftPage(page);
+    await saveDraft(page, { title, slug });
     // Not live yet: the public route has nothing for a draft.
     expect((await page.request.get(`/${slug}`)).status()).toBe(404);
 
@@ -91,11 +119,9 @@ test.describe("content releases", () => {
     await expect(itemRow).toContainText("Publish");
     await expect(page.getByText("1 of", { exact: false })).toBeVisible();
 
-    page.once("dialog", async dialog => {
-      expect(dialog.message()).toContain("Publish this release now?");
-      await dialog.accept();
-    });
+    let confirm = acceptNextDialog(page);
     await page.locator('button[phx-click="publish_now"]').click();
+    expect(await confirm).toContain("Publish this release now?");
     await expect(page.locator("#flash-info")).toContainText("Publishing the release");
     // The worker finishes off-request and the page follows it over PubSub:
     // the badge flips to Published and the item is Applied without a reload.
@@ -108,11 +134,9 @@ test.describe("content releases", () => {
 
     // Roll back: the release and its item say so, and the page is a draft again.
     await page.goto(releaseUrl);
-    page.once("dialog", async dialog => {
-      expect(dialog.message()).toContain("Roll this release back?");
-      await dialog.accept();
-    });
+    confirm = acceptNextDialog(page);
     await page.locator('button[phx-click="roll_back"]').click();
+    expect(await confirm).toContain("Roll this release back?");
     await expect(page.locator("#flash-info")).toContainText("Rolling the release back");
     await expect(heading.getByText("Rolled back", { exact: true })).toBeVisible({ timeout: 20_000 });
     await expect(itemRow).toContainText("Rolled back");

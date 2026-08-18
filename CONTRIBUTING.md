@@ -216,6 +216,14 @@ the e2e DB) and then serves with `PHX_SERVER=true PORT=4002 mix phx.server`. To
 run against a server you started yourself, set `E2E_NO_WEBSERVER=1`. CI runs this
 suite as a separate `e2e` job (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
+Locally the harness reuses a server already listening on the port
+(`reuseExistingServer`), so after pulling a change to `config/e2e.exs` or the
+seeds, stop that server (or check nothing else — a sibling worktree, say — is
+holding `:4002`; `PORT=4012 POSTGRES_DB=kiln_cms_e2e_mine npx playwright test`
+runs isolated). Several journeys depend on server-side state only a fresh boot
+delivers: the media and release journeys need Oban queues running, the
+`@mention` journey needs the Swoosh mailbox route and named demo users.
+
 ## Commits & pull requests
 
 - Branch off `main`; keep commits focused with a clear imperative subject line.

@@ -35,7 +35,7 @@ config :logger, level: :info
 # Never expose dev-only tooling (AshAdmin, LiveDashboard, Swoosh mailbox) in a
 # production build. Set explicitly (not just left unset) and asserted again at
 # runtime in KilnCMS.Application.
-config :kiln_cms, dev_routes: false
+config :kiln_cms, dev_routes: false, mailbox_preview: false
 
 # Disable GraphQL schema introspection in production (reconnaissance hardening).
 config :kiln_cms, :graphql_introspection, false

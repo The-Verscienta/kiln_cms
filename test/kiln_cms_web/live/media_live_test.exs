@@ -398,6 +398,35 @@ defmodule KilnCMSWeb.MediaLiveTest do
       send(lv.pid, :refresh_media)
       assert render(lv) =~ ">late-arrival.png<"
     end
+
+    # #1314: the drawer is opened straight after an upload, before the variant
+    # worker has measured it. Its item must follow the same broadcast, or the
+    # focal-point editor (gated on `width`) never appears until it is closed
+    # and reopened — the grid behind it having refreshed long since.
+    test "an open drawer picks up the dimensions the worker wrote", %{conn: conn} do
+      item =
+        Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+          filename: "fresh-upload.png",
+          url: "/uploads/fresh-upload.png",
+          content_type: "image/png"
+        })
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media?id=#{item.id}")
+      refute render(lv) =~ "focal-editor-#{item.id}"
+
+      Ash.Seed.update!(item, %{width: 640, height: 480})
+
+      # A broadcast about SOME OTHER item refreshes the grid but leaves the
+      # drawer alone — re-reading it costs the reference-graph fan-out, which
+      # a bulk regeneration must not charge every open drawer for.
+      send(lv.pid, {:media_processed, Ash.UUID.generate()})
+      send(lv.pid, :refresh_media)
+      refute render(lv) =~ "focal-editor-#{item.id}"
+
+      send(lv.pid, {:media_processed, item.id})
+      send(lv.pid, :refresh_media)
+      assert render(lv) =~ "focal-editor-#{item.id}"
+    end
   end
 
   describe "upload" do

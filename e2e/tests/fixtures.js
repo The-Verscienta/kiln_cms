@@ -110,6 +110,10 @@ async function signInAsEditor(page) {
 // `new` handler creates an "Untitled …" draft and navigates into the editor).
 // Past @max_inline_new_buttons content types the per-type "New …" buttons
 // collapse into the #content-new-menu <details> dropdown, so open it first.
+//
+// Returns the new record's id (the last URL segment), so a caller can hold it
+// for cleanup before it has typed a title — the draft is findable by nothing
+// else until then.
 async function newDraftContent(page, kind = "page") {
   await page.goto("/editor");
   const newMenu = page.locator("#content-new-menu summary");
@@ -117,10 +121,29 @@ async function newDraftContent(page, kind = "page") {
   await page.click(`button[phx-click="new"][phx-value-kind="${kind}"]`);
   await page.waitForURL(new RegExp(`/editor/(content/${kind}|${kind}s)/`));
   await base.expect(page.locator('form[id$="-editor"]')).toBeVisible();
+  return new URL(page.url()).pathname.split("/").pop();
 }
 
 async function newDraftPage(page) {
   return newDraftContent(page, "page");
+}
+
+// Give the open draft a title (and slug), press Save, and wait for the server
+// to say so. The "Saved." flash is the only honest signal: an input still
+// holds whatever was typed into it whether or not the phx-submit landed, so
+// asserting on the field proves nothing, and navigating away before the save
+// round-trips leaves an "Untitled" draft the caller's next step then can't
+// find (see the fixture-race note on `waitForLiveConnected`).
+async function saveDraft(page, { title, slug }) {
+  await page.fill('input[name$="[title]"]', title);
+  if (slug) await page.fill('input[name$="[slug]"]', slug);
+  await save(page);
+}
+
+// Press Save on the open draft and wait for the "Saved." flash (see above).
+async function save(page) {
+  await page.getByRole("button", { name: /^save$/i }).click();
+  await base.expect(page.locator("#flash-info")).toContainText("Saved.");
 }
 
 // A tag group scoped to specific content types, from the taxonomy page.
@@ -236,6 +259,8 @@ module.exports = {
   signInAsEditor,
   newDraftPage,
   newDraftContent,
+  saveDraft,
+  save,
   addBlock,
   createTagGroup,
   createTag,

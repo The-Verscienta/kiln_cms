@@ -21,17 +21,23 @@ const {
   signInAsAdmin,
   signInAsEditor,
   newDraftPage,
+  save,
   addBlock,
   deleteContentById,
 } = require("./fixtures");
 
 test.describe("block discussions", () => {
-  const stamp = Date.now();
-  const title = `E2E Mention ${stamp}`;
+  /** @type {string} */
+  let stamp;
+  /** @type {string} */
+  let title;
   /** @type {string | null} */
   let pageId = null;
 
   test.beforeEach(async ({ page }) => {
+    stamp = String(Date.now());
+    title = `E2E Mention ${stamp}`;
+    pageId = null;
     await signInAsAdmin(page);
   });
 
@@ -44,15 +50,18 @@ test.describe("block discussions", () => {
     page,
     browser,
   }) => {
-    await newDraftPage(page);
-    pageId = page.url().split("/").pop() ?? null;
+    // A mail-worker round-trip and a second signed-in session on top of the
+    // editor journey: take the tripled budget rather than racing the 30 s.
+    test.slow();
+
+    pageId = await newDraftPage(page);
     const editorUrl = new URL(page.url()).pathname;
+    // Title and slug BEFORE the block, as editor.spec.js does — then one Save,
+    // so the title on the mention email is the real one, not "Untitled".
     await page.fill('input[name$="[title]"]', title);
     await page.fill('input[name$="[slug]"]', `e2e-mention-${stamp}`);
     await addBlock(page, "rich_text");
-    // Save so the title on the mention email is the real one, not "Untitled".
-    await page.getByRole("button", { name: /^save$/i }).click();
-    await expect(page.locator('input[name$="[title]"]')).toHaveValue(title);
+    await save(page);
 
     // The block's discussion pin: nothing yet.
     const pin = page.locator('button[phx-click="comment_open"]').first();
@@ -68,12 +77,16 @@ test.describe("block discussions", () => {
     // the unique handle. Ambiguous `@demo` is not offered as anyone's handle.
     const composer = page.locator(`#composer-${bid}`);
     await composer.fill("Please give this intro a second read @demoe");
+    // The roster is every editor/admin in the (persistent) database, so assert
+    // on the seeded editor's row rather than on the dropdown being exactly one
+    // entry long — and that "Demo" alone is not offered as anyone's handle.
     const listbox = page.getByRole("listbox", { name: "Mention a teammate" });
     await expect(listbox).toBeVisible();
-    await expect(listbox.getByRole("option")).toHaveCount(1);
-    await expect(listbox).toContainText("Demo Editor");
-    await expect(listbox).toContainText("@demoeditor");
-    await expect(listbox).not.toContainText("won't notify");
+    const editorOption = listbox.getByRole("option").filter({ hasText: "Demo Editor" });
+    await expect(editorOption).toHaveCount(1);
+    await expect(editorOption).toContainText("@demoeditor");
+    await expect(editorOption).not.toContainText("won't notify");
+    await expect(listbox.locator('button[phx-value-handle="demo"]')).toHaveCount(0);
 
     // Picking rewrites the composer server-side and closes the dropdown; the
     // hook restores focus with the caret at the end.

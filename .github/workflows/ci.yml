@@ -194,12 +194,14 @@ jobs:
 
       # `mix coveralls.multiple` is `mix test --cover` plus reports (#1314):
       # the JSON one feeds the per-directory rollup below, the HTML one is
-      # uploaded as an artifact, and the `minimum_coverage` in coveralls.json
-      # is enforced here — a FLOOR set just under the measured number, so
-      # coverage cannot regress silently. It is not a target; see the note in
-      # coveralls.json before moving it in either direction. Cover-compiled
-      # modules run slower, so this step takes longer than a bare `mix test`
-      # did; that is the price of measuring, paid once per run.
+      # uploaded as an artifact. The `minimum_coverage` FLOOR in coveralls.json
+      # (its comment says what it is and how to move it) is checked by the
+      # HTML reporter — excoveralls' JSON reporter never checks it — so
+      # `--type html` is the gate, not a nicety, and it is listed AFTER
+      # `--type json` on purpose: a floor failure exits inside the html step,
+      # and the JSON must already be on disk for the two steps below to run.
+      # Cover-compiled modules run slower, so this step takes longer than a
+      # bare `mix test` did; that is the price of measuring, paid once per run.
       - name: Run tests (with coverage)
         run: mix coveralls.multiple --type json --type html
 

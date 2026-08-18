@@ -67,10 +67,22 @@ defmodule Mix.Tasks.Kiln.Coverage.SummaryTest do
   end
 
   describe "percent/2" do
-    test "one decimal, and no division by zero on an all-irrelevant directory" do
-      assert Summary.percent(2, 3) == 66.7
+    # Floored, not rounded: excoveralls floors its own total (`floor_coverage`),
+    # and this table must never read a step above the number the gate saw —
+    # 82.96 is 82.9 to both, never 83.0 here.
+    test "floors to one decimal, and no division by zero on an all-irrelevant directory" do
+      assert Summary.percent(2, 3) == 66.6
+      assert Summary.percent(8_296, 10_000) == 82.9
       assert Summary.percent(0, 0) == 0.0
       assert Summary.percent(7, 7) == 100.0
+    end
+
+    # Same operand ORDER as excoveralls (`covered / relevant * 100`): the other
+    # order gives 29.0 here and 82.4 for 39552/48000, one step above the gate.
+    test "agrees with excoveralls' own arithmetic where the two orders differ" do
+      assert Summary.percent(29, 100) == 28.9
+      assert Summary.percent(39_552, 48_000) == 82.3
+      assert Summary.percent(39_696, 48_000) == 82.6
     end
   end
 

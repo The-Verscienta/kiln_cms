@@ -9,36 +9,64 @@ const {
   expect,
   signInAsAdmin,
   newDraftContent,
-  deleteContentById,
+  saveDraft,
 } = require("./fixtures");
 
 test.describe("dynamic content types", () => {
-  const stamp = Date.now();
-  const label = `E2E Recipe ${stamp}`;
-  const name = `e2e_recipe_${stamp}`;
-  const fieldName = `chef_${stamp}`;
-  /** @type {string | null} */
-  let draftId = null;
+  /** @type {string} */
+  let stamp;
+  /** @type {string} */
+  let label;
+  /** @type {string} */
+  let name;
+  /** @type {string} */
+  let fieldName;
 
   test.beforeEach(async ({ page }) => {
+    stamp = String(Date.now());
+    label = `E2E Recipe ${stamp}`;
+    name = `e2e_recipe_${stamp}`;
+    fieldName = `chef_${stamp}`;
     await signInAsAdmin(page);
   });
 
   test.afterEach(async ({ page }) => {
-    // Best-effort cleanup: the draft (if the journey got that far), then the
-    // type itself — archived, which is what the UI offers, and enough to take
-    // it out of every later spec's "New …" menu.
-    if (draftId) {
-      await deleteContentById(page, name, draftId);
-      draftId = null;
+    // Best-effort cleanup, in dependency order, so nothing of this run is left
+    // in the persistent e2e database however far the journey got:
+    //
+    //   1. every entry of the type — found by the row id's kind prefix rather
+    //      than a captured id, so an "Untitled" draft created before the
+    //      journey could note its id is caught too. Entries of an ARCHIVED type
+    //      drop out of the list, so this must come before step 3;
+    //   2. the field definition (its own row on /editor/fields);
+    //   3. the type itself — archived, which is what the UI offers, and enough
+    //      to take it out of every later spec's "New …" menu.
+    await page.goto("/editor");
+    const rows = page.locator(`li[id^="${name}-"]`);
+    if (await rows.count()) {
+      for (const row of await rows.all()) await row.getByRole("checkbox").check();
+      await page.locator('button[phx-click="bulk"][phx-value-action="delete"]').click();
+      await page.locator('button[phx-click="confirm_bulk"]').click();
+      await expect(rows).toHaveCount(0);
     }
-    await page.goto("/editor/types");
-    const row = page.locator("li[id^='type-']").filter({ hasText: name });
-    if (await row.count()) {
+
+    await page.goto("/editor/fields");
+    const field = page
+      .locator('li[id^="field-"]')
+      .filter({ has: page.locator(`code:text-is("${fieldName}")`) });
+    if (await field.count()) {
       page.once("dialog", dialog => dialog.accept());
-      await row.getByRole("button", { name: "Archive content type" }).click();
+      await field.getByRole("button", { name: "Delete field" }).click();
+      await expect(field).toHaveCount(0);
+    }
+
+    await page.goto("/editor/types");
+    const type = page.locator("li[id^='type-']").filter({ hasText: name });
+    if (await type.count()) {
+      page.once("dialog", dialog => dialog.accept());
+      await type.getByRole("button", { name: "Archive content type" }).click();
       await expect(page.locator("#flash-info")).toContainText("Content type archived.");
-      await expect(row).toHaveCount(0);
+      await expect(type).toHaveCount(0);
     }
   });
 
@@ -69,8 +97,7 @@ test.describe("dynamic content types", () => {
 
     // The content list now offers "New e2e recipe …" and the editor opens on
     // /editor/content/<name>/<id> with the custom field rendered.
-    await newDraftContent(page, name);
-    draftId = page.url().split("/").pop() ?? null;
+    const draftId = await newDraftContent(page, name);
     expect(page.url()).toContain(`/editor/content/${name}/`);
     // Custom fields sit in the inspector rail's Settings panel (with SEO and
     // Organization), which is CSS-hidden behind the default Preview tab.
@@ -81,11 +108,8 @@ test.describe("dynamic content types", () => {
     await expect(chef).toBeVisible();
 
     const title = `E2E Recipe Draft ${stamp}`;
-    await page.fill('input[name$="[title]"]', title);
-    await page.fill('input[name$="[slug]"]', `e2e-recipe-draft-${stamp}`);
     await chef.fill("Auguste Escoffier");
-    await page.getByRole("button", { name: /^save$/i }).click();
-    await expect(page.locator('input[name$="[title]"]')).toHaveValue(title);
+    await saveDraft(page, { title, slug: `e2e-recipe-draft-${stamp}` });
 
     // Persisted: a full reload renders the saved value from the record.
     await page.reload();

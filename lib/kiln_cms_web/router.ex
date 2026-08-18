@@ -947,6 +947,21 @@ defmodule KilnCMSWeb.Router do
       pipe_through :browser_dev_tools
 
       live_dashboard "/dashboard", metrics: KilnCMSWeb.Telemetry
+    end
+  end
+
+  # The Swoosh mailbox has a flag of its own as well as `dev_routes` (#1314):
+  # the browser E2E suite (config/e2e.exs) needs to read what the server SENT
+  # — a comment `@mention` proves itself by the email it produced — and
+  # `dev_routes` would drag AshAdmin's actor picker, LiveDashboard and the
+  # GraphQL playground into that server for nothing. Still unauthenticated,
+  # still compile-time, and `KilnCMS.Application` refuses it in :prod alongside
+  # `dev_routes`.
+  if Application.compile_env(:kiln_cms, :dev_routes, false) or
+       Application.compile_env(:kiln_cms, :mailbox_preview, false) do
+    scope "/dev" do
+      pipe_through :browser_dev_tools
+
       forward "/mailbox", Plug.Swoosh.MailboxPreview
     end
   end

@@ -53,6 +53,7 @@ defmodule KilnCMSWeb.MediaLive do
      |> assign(:view, :library)
      |> assign(:trashed, [])
      |> assign(:refresh_timer, nil)
+     |> assign(:selected_stale?, false)
      |> assign(:media, [])
      |> assign(:more?, false)
      |> assign(:total, 0)
@@ -416,8 +417,23 @@ defmodule KilnCMSWeb.MediaLive do
   # dimensions/thumbnail show without a manual reload. Completions arrive in
   # bursts (one broadcast per file, to every open MediaLive), so coalesce them
   # into a single re-query instead of one 500-row fetch per broadcast.
+  #
+  # The open drawer follows the broadcast too (#1314): `width`/`height` and the
+  # variants are written by the worker, so an item opened straight after upload
+  # was rendered from the pre-measurement row — no dimensions, no focal-point
+  # editor — and stayed that way until closed and reopened, while the grid
+  # behind it had already refreshed. Only when the broadcast is about the OPEN
+  # item, though: re-reading it costs the reference-graph fan-out
+  # (`assign_selected/2` → `References.usages/2`), which a bulk regeneration
+  # of a large library would otherwise charge every open drawer every 200 ms.
   @impl true
-  def handle_info({:media_processed, _id}, socket) do
+  def handle_info({:media_processed, id}, socket) do
+    socket =
+      case socket.assigns.selected do
+        %{id: ^id} -> assign(socket, :selected_stale?, true)
+        _ -> socket
+      end
+
     if socket.assigns.refresh_timer do
       {:noreply, socket}
     else
@@ -426,7 +442,15 @@ defmodule KilnCMSWeb.MediaLive do
   end
 
   def handle_info(:refresh_media, socket) do
-    {:noreply, socket |> assign(:refresh_timer, nil) |> reload_media()}
+    socket = socket |> assign(:refresh_timer, nil) |> reload_media()
+
+    case socket.assigns do
+      %{selected_stale?: true, selected: %{id: id}} ->
+        {:noreply, socket |> assign(:selected_stale?, false) |> assign_selected(id)}
+
+      _ ->
+        {:noreply, socket}
+    end
   end
 
   # --- helpers ---------------------------------------------------------------
