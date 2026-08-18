@@ -147,4 +147,35 @@ defmodule KilnCMS.RateLimitHelpers do
     |> :ets.select([{{{key, :_}, :"$1", :_}, [], [:"$1"]}])
     |> Enum.sum()
   end
+
+  @doc """
+  Lowers (or raises) one bucket for the rest of the test, through the same
+  application env `RateLimit.limits/0` reads.
+
+  `config/test.exs` raises the buckets the broad suites hammer to a million so
+  they cannot 429 each other; a test that wants to see a refusal lowers its own
+  bucket back with this. Merges into whatever is already configured, so the
+  other buckets keep their test-env values, and only touches this one entry.
+  Callers must be `async: false` (the env is global) and must restore — see
+  `restore_limits_on_exit/0`, which the same test's `setup` should call once.
+  """
+  @spec put_limit(atom(), pos_integer(), pos_integer()) :: :ok
+  def put_limit(bucket, limit, scale_ms \\ :timer.minutes(1))
+      when is_atom(bucket) and is_integer(limit) and limit > 0 do
+    current = Application.get_env(:kiln_cms, RateLimit, [])
+    limits = current |> Keyword.get(:limits, %{}) |> Map.put(bucket, {limit, scale_ms})
+    Application.put_env(:kiln_cms, RateLimit, Keyword.put(current, :limits, limits))
+  end
+
+  @doc """
+  Captures the current `RateLimit` env and puts it back when the test exits.
+  Call from `setup` before any `put_limit/3`. RESTORES rather than deletes:
+  `config/test.exs` sets this key at boot, and a delete would leave every
+  later module on the shipped limits.
+  """
+  @spec restore_limits_on_exit() :: :ok
+  def restore_limits_on_exit do
+    previous = Application.get_env(:kiln_cms, RateLimit, [])
+    ExUnit.Callbacks.on_exit(fn -> Application.put_env(:kiln_cms, RateLimit, previous) end)
+  end
 end

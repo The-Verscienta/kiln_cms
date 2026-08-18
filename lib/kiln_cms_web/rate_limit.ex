@@ -61,7 +61,27 @@ defmodule KilnCMSWeb.RateLimit do
     # while a scripted replay of one scraped `data-phx-session` token is over
     # it in seconds. Sized like `:delivery` — the same "one address, one
     # minute" shape — rather than like `:auth`, because a mount is not a guess.
-    live_join: {300, :timer.minutes(1)}
+    live_join: {300, :timer.minutes(1)},
+    # Frames from one ACCOUNT over `/ws/collab` (#1305,
+    # `KilnCMSWeb.SocketEventBudget`) — every `handle_in/3` and the `join/3`
+    # that opened the channel, keyed on the actor rather than the address
+    # (legitimate collaboration is itself a high-frequency stream and one
+    # office NAT holds many editors) or the connection (a reconnect must not
+    # mint a fresh budget, and the honest recovery from a refusal IS a
+    # reconnect). Sized against the fastest human, given what the client emits:
+    # one Yjs update per keystroke (~15/s at the very fastest), and awareness
+    # frames COALESCED client-side to at most ten a second (`assets/js/collab.js`
+    # — without that, a mouse-drag selection re-announced the caret at the
+    # browser's event rate and one long drag could reach this on its own). A
+    # furious minute is therefore ~900 + 600 + the 15s heartbeat, well under
+    # 2,000; a script is over 6,000 in seconds. It is a flood ceiling per
+    # account: what it bounds is the per-frame work — a `DocServer` apply and a
+    # room fan-out per update, and a full re-authorization (three DB reads)
+    # every `SocketReauth.update_floor/0` of them — that one credential could
+    # otherwise cause without limit. Over it, the connection is closed and the
+    # account's rejoins are refused until the window turns; the client
+    # reconciles what it typed meanwhile on the join that succeeds.
+    collab_event: {6_000, :timer.minutes(1)}
   }
 
   @doc false
@@ -118,15 +138,23 @@ defmodule KilnCMSWeb.RateLimit do
     end
   end
 
-  @doc "Returns `:allow` or `{:deny, retry_after_ms}` for the given bucket key."
-  def check(bucket, remote_ip) when is_atom(bucket) and is_binary(remote_ip) do
+  @doc """
+  Returns `:allow` or `{:deny, retry_after_ms}` for the given bucket key.
+
+  The key is a client address from `client_key/1` for every address-keyed
+  bucket, and an account (or connection) key from
+  `KilnCMSWeb.SocketEventBudget.key/1` for the socket event buckets (#1305).
+  Whichever it is, one function spells it, so two charges for the same client
+  land on the same key.
+  """
+  def check(bucket, key) when is_atom(bucket) and is_binary(key) do
     {limit, scale} = Map.fetch!(limits(), bucket)
 
-    case hit(bucket_key(bucket, remote_ip), scale, limit) do
+    case hit(bucket_key(bucket, key), scale, limit) do
       {:allow, _count} -> :allow
       {:deny, retry_after} -> {:deny, retry_after}
     end
   end
 
-  defp bucket_key(bucket, remote_ip), do: "#{bucket}:#{remote_ip}"
+  defp bucket_key(bucket, key), do: "#{bucket}:#{key}"
 end

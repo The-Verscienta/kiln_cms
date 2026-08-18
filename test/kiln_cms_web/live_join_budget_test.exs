@@ -16,25 +16,17 @@ defmodule KilnCMSWeb.LiveJoinBudgetTest do
   import KilnCMS.RateLimitHelpers, only: [client_conn: 1]
   import Phoenix.LiveViewTest
 
+  alias KilnCMS.RateLimitHelpers
   alias KilnCMSWeb.LiveJoinBudget
   alias KilnCMSWeb.RateLimit
 
   @moduletag :capture_log
 
   setup do
-    previous = Application.get_env(:kiln_cms, RateLimit, [])
-    on_exit(fn -> Application.put_env(:kiln_cms, RateLimit, previous) end)
-    :ok
+    RateLimitHelpers.restore_limits_on_exit()
   end
 
-  defp put_live_join_limit(limit) do
-    current = Application.get_env(:kiln_cms, RateLimit, [])
-
-    limits =
-      current |> Keyword.get(:limits, %{}) |> Map.put(:live_join, {limit, :timer.minutes(1)})
-
-    Application.put_env(:kiln_cms, RateLimit, Keyword.put(current, :limits, limits))
-  end
+  defp put_live_join_limit(limit), do: RateLimitHelpers.put_limit(:live_join, limit)
 
   # A public, anonymous-reachable LiveView root — the highest-volume surface.
   @path "/sign-in"

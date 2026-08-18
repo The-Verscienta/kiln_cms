@@ -97,6 +97,47 @@ defmodule KilnCMSWeb.CollabChannel do
   on the channel process exiting, and `phoenix.js` retries the join on a
   backoff. Those rejoins run the full `join/3` and are refused in turn, so no
   update flows — and if the grant comes back, the room resumes on its own.
+
+  ## Every frame is charged to the account (#1305)
+
+  The join and every `handle_in/3` — `"update"`, `"awareness"`,
+  `"awareness_request"` and the ignored rest alike — first spend one unit of
+  `KilnCMSWeb.SocketEventBudget`'s `:collab_event` bucket, keyed on the actor
+  the socket authenticated as, so a client that has connected once cannot then
+  push frames without bound, and cannot reset the bound by reconnecting. The
+  reasoning for the key, the single bucket, the size and the shape of the
+  refusal is in that module and on the bucket in `KilnCMSWeb.RateLimit`; what
+  matters here is the order and the two refusals:
+
+    * the charge runs **before** anything else the frame would cost — ahead of
+      the `"update"` clause's re-authorization floor and its `DocServer` call,
+      and ahead of `join/3`'s three authorization reads — so a flood pays the
+      ETS increment and nothing more;
+    * an over-budget **frame closes the connection** and stops the channel:
+      `SocketEventBudget.close_connection/1`, then `{:shutdown, :over_budget}`.
+      Not just the stop — a stopped channel is `phx_close` to the client, which
+      `phoenix.js` treats as a finished leave and never rejoins — and not an
+      error reply, which `assets/js/collab.js` (pushing without a `.receive`)
+      would never see. The closed socket is what the client recovers from: it
+      reconnects on a backoff and rejoins, and on the join that succeeds it
+      pushes back whatever local ops the room is missing;
+    * an over-budget **join** is refused with its own reason, `"over budget"`,
+      before `authorize/3` runs, and does *not* close the connection —
+      `phoenix.js` already retries a refused join on a backoff. It is the one
+      refusal here that is not folded into `"not found"`, because it answers
+      nothing about the document — only that this account has been talking
+      too much, which the caller already knows — and because the client has to
+      tell it apart from the sticky refusals: it must not seed a document as
+      the first peer on a refusal that will succeed a moment later.
+
+  One frame is bounded on its own, on top of the budget: `"awareness_request"`
+  makes every *other* peer answer with an `"awareness"` frame of their own,
+  which they are charged for. Relayed without limit, one connection could
+  spend every peer's budget through it and empty the room of honest editors
+  while staying attached itself. The honest client sends it once, on a join
+  that found peers, so this channel relays at most one per
+  `@awareness_request_interval_ms` per channel and drops the rest — the
+  requester still gets carets on the next periodic awareness refresh.
   """
   use Phoenix.Channel
 
@@ -104,7 +145,15 @@ defmodule KilnCMSWeb.CollabChannel do
 
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Collab.Crdt
+  alias KilnCMSWeb.SocketEventBudget
   alias KilnCMSWeb.SocketReauth
+
+  # The `KilnCMSWeb.RateLimit` bucket every frame from a collab account spends.
+  @event_bucket :collab_event
+
+  # How often one channel may have an `"awareness_request"` relayed to the
+  # room — see the moduledoc on why this frame is bounded on its own.
+  @awareness_request_interval_ms :timer.seconds(10)
 
   # Must match SCHEMA_VSN in assets/js/collab.js. A peer whose bundle predates
   # the current ProseMirror node set is refused: y-prosemirror deletes nodes
@@ -116,6 +165,11 @@ defmodule KilnCMSWeb.CollabChannel do
   @impl true
   def join("collab:" <> key, params, socket) do
     cond do
+      # First, before the flag and the schema check: a join the room is about
+      # to refuse anyway still costs a frame, and still counts (#1305).
+      match?({:deny, _}, SocketEventBudget.charge(@event_bucket, socket)) ->
+        {:error, %{reason: "over budget"}}
+
       not Crdt.enabled?() ->
         {:error, %{reason: "collab disabled"}}
 
@@ -213,6 +267,23 @@ defmodule KilnCMSWeb.CollabChannel do
   end
 
   @impl true
+  # The one place every inbound frame passes (#1305): charge the connection,
+  # then dispatch. `handle_frame/3` below is the per-event logic; nothing calls
+  # it except this clause, so no event can be served unbilled.
+  def handle_in(event, payload, socket) do
+    case SocketEventBudget.charge(@event_bucket, socket) do
+      :allow ->
+        handle_frame(event, payload, socket)
+
+      {:deny, _retry_after_ms} ->
+        # Close the CONNECTION, then stop: the close is what the client
+        # recovers from (it reconnects and rejoins); the stop alone would be a
+        # `phx_close` it treats as final. See the moduledoc.
+        SocketEventBudget.close_connection(socket)
+        {:stop, {:shutdown, :over_budget}, socket}
+    end
+  end
+
   # `is_binary(encoded)` is load-bearing, not decoration (#764). The payload is
   # client-chosen JSON, so `%{"update" => encoded}` constrains the key and never
   # the value — and `Base.decode64/2` has no clause for a list or a map.
@@ -228,7 +299,7 @@ defmodule KilnCMSWeb.CollabChannel do
   # gets no reply at all. That asymmetry is deliberate but harmless either way:
   # `assets/js/collab.js` pushes updates without a `.receive`, so nothing is
   # waiting on a reply.
-  def handle_in("update", %{"update" => encoded}, socket) when is_binary(encoded) do
+  defp handle_frame("update", %{"update" => encoded}, socket) when is_binary(encoded) do
     # The count floor (#775) runs BEFORE the update is applied, so the update
     # that trips it is refused rather than being the last one through.
     case count_update(socket) do
@@ -248,21 +319,35 @@ defmodule KilnCMSWeb.CollabChannel do
 
   # Cursor/selection/name presence — ephemeral by design: relayed to the other
   # clients and forgotten.
-  def handle_in("awareness", payload, socket) do
+  defp handle_frame("awareness", payload, socket) do
     broadcast_from!(socket, "awareness", payload)
     {:noreply, socket}
   end
 
   # A newcomer asking the room to re-announce its awareness states (so remote
   # carets appear immediately instead of on the next periodic refresh).
-  def handle_in("awareness_request", _payload, socket) do
-    broadcast_from!(socket, "awareness_request", %{})
-    {:noreply, socket}
+  #
+  # Relayed at most once per `@awareness_request_interval_ms` per channel: each
+  # relay makes every peer send (and pay for) an `"awareness"` frame, so an
+  # unbounded relay is a way to spend the whole room's budget from one seat
+  # (#1305). A dropped request costs the requester nothing but a wait for the
+  # next periodic awareness refresh.
+  defp handle_frame("awareness_request", _payload, socket) do
+    now = System.monotonic_time(:millisecond)
+    last = socket.assigns[:awareness_request_at]
+
+    if is_nil(last) or now - last >= @awareness_request_interval_ms do
+      broadcast_from!(socket, "awareness_request", %{})
+      {:noreply, assign(socket, :awareness_request_at, now)}
+    else
+      {:noreply, socket}
+    end
   end
 
   # Anything else is ignored rather than crashing the room (#764).
   #
-  # `handle_in/3` had no catch-all, so an unknown event name — or a known one
+  # `handle_in/3` had no catch-all (before #1305 moved the clauses here), so
+  # an unknown event name — or a known one
   # whose payload arrived in a shape its clause head does not match — was a
   # `FunctionClauseError`, which terminates that client's channel process and
   # drops it to a rejoin mid-edit. (Only that client's: see the `"update"`
@@ -272,7 +357,7 @@ defmodule KilnCMSWeb.CollabChannel do
   # gets here, so the only traffic is a stale build or someone poking the
   # socket; neither is worth an error-tracker event, and an error reply would
   # tell a prober which event names exist.
-  def handle_in(event, _payload, socket) do
+  defp handle_frame(event, _payload, socket) do
     Logger.debug("CollabChannel ignoring unhandled event #{inspect(event)}")
     {:noreply, socket}
   end
