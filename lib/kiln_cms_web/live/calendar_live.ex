@@ -91,7 +91,7 @@ defmodule KilnCMSWeb.CalendarLive do
   end
 
   # A write landed somewhere in this org that the calendar plots. Re-query the
-  # window rather than patching the one id in: the window is a month at most,
+  # window rather than patching the one id in: the window is six weeks at most,
   # and reconciling one event against three views' worth of grouping is more
   # code than the query costs.
   #
@@ -134,9 +134,15 @@ defmodule KilnCMSWeb.CalendarLive do
     # so looking the event up here means a socket cannot move a record it could
     # not already see — and it is also where the chip's existing time-of-day
     # comes from, so a drag moves the day and leaves 09:00 alone.
+    #
+    # `refuse_undraggable/1` is the server-side twin of `data-reschedulable`: the
+    # markup only offers a handle on draggable lanes, but the payload names its
+    # own kind, so a `review_due` or `published` chip pushed by hand would
+    # otherwise reach `do_reschedule/3`, which has no clause for it.
     with {:ok, event} <- find_event(socket.assigns.events, id, kind),
+         :ok <- refuse_undraggable(event),
          {:ok, date} <- parse_date(date),
-         :ok <- refuse_past(date),
+         :ok <- refuse_past(at_on(event, date)),
          {:ok, message} <- do_reschedule(event, date, socket) do
       {:noreply, socket |> announce(message) |> load_events()}
     else
@@ -243,6 +249,14 @@ defmodule KilnCMSWeb.CalendarLive do
     end
   end
 
+  defp refuse_undraggable(event) do
+    if reschedulable?(event) do
+      :ok
+    else
+      {:error, gettext("That item can't be moved by dragging.")}
+    end
+  end
+
   defp parse_date(date) do
     case Date.from_iso8601(date) do
       {:ok, date} -> {:ok, date}
@@ -255,8 +269,12 @@ defmodule KilnCMSWeb.CalendarLive do
   # — a publish that fires within the minute, an embargo end that takes a live
   # page down now. "Nothing happened, here is why" is the better answer to a
   # slip than either of those.
-  defp refuse_past(date) do
-    if Date.before?(date, Date.utc_today()) do
+  #
+  # Judged on the full timestamp the move would write, not the day: a drop onto
+  # *today* keeps the chip's time of day, so a 09:00 chip dropped at 15:00
+  # would be a publish six hours in the past — exactly the abrupt thing above.
+  defp refuse_past(%DateTime{} = at) do
+    if DateTime.before?(at, DateTime.utc_now()) do
       {:error, gettext("Can't reschedule into the past.")}
     else
       :ok
@@ -301,9 +319,15 @@ defmodule KilnCMSWeb.CalendarLive do
   defp parse_at(_params), do: Date.utc_today()
 
   # The half-open window each view asks the projection for.
+  #
+  # The month window is the *rendered grid*, not the calendar month: `days/2`
+  # pads the month out to full Mon–Sun weeks, and every one of those padding
+  # cells is a drop target. Querying only the month proper meant a chip dragged
+  # onto a trailing 2 September cell while viewing August was written and then
+  # vanished from the grid — the re-query never fetched it — and anything already
+  # scheduled on a padding day never drew a chip at all.
   defp window("month", at) do
-    first = Date.beginning_of_month(at)
-    {midnight(first), midnight(Date.add(Date.end_of_month(at), 1))}
+    {midnight(grid_first(at)), midnight(Date.add(grid_last(at), 1))}
   end
 
   defp window("week", at) do
@@ -339,10 +363,7 @@ defmodule KilnCMSWeb.CalendarLive do
   # Month renders full weeks (Mon–Sun) covering the month, chunked into rows;
   # week renders one such row. The list needs no calendar scaffold at all.
   defp days("month", at) do
-    first = at |> Date.beginning_of_month() |> Date.beginning_of_week()
-    last = at |> Date.end_of_month() |> Date.end_of_week()
-
-    first |> Date.range(last) |> Enum.chunk_every(7)
+    at |> grid_first() |> Date.range(grid_last(at)) |> Enum.chunk_every(7)
   end
 
   defp days("week", at) do
@@ -351,6 +372,9 @@ defmodule KilnCMSWeb.CalendarLive do
   end
 
   defp days("list", _at), do: []
+
+  defp grid_first(at), do: at |> Date.beginning_of_month() |> Date.beginning_of_week()
+  defp grid_last(at), do: at |> Date.end_of_month() |> Date.end_of_week()
 
   # --- filters ----------------------------------------------------------------
 
