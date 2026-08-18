@@ -1,10 +1,8 @@
 # Deploying / operating the staging-environment tooling
 
-> **Archived per-release checklist.** This is the rehearsal/verification
-> checklist for the staging-environment tooling, kept for history. It assumes you already know
-> how Kiln is deployed — for that, read [`deploy.md`](deploy.md), the
-> canonical deploy guide (required environment, image, boot, health
-> endpoints, first admin, backups, optional infrastructure).
+> **Feature-enablement checklist** for the staging-environment tooling — still the
+> operator checklist for turning it on. It assumes a deployed Kiln: how to
+> deploy at all is [`deploy.md`](deploy.md), the canonical deploy guide.
 
 Deploy + operator checklist for ephemeral staging / preview environments (#382,
 the actionable slice of #334). Shipped in #381. Feature guide:

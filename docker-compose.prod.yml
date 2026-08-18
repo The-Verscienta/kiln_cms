@@ -2,50 +2,89 @@
 #
 # App + Postgres, with the optional infrastructure behind profiles, mirroring
 # the dev `docker-compose.yml`. A starting point, not a platform: no TLS
-# termination (put Caddy/Traefik/nginx in front and set TRUSTED_PROXIES), no
-# backup schedule (docs/backups.md), Postgres kept on the compose network with
-# TLS off because that traffic never leaves the host.
+# termination (put Caddy/Traefik/nginx on the host in front and set
+# TRUSTED_PROXIES), Postgres kept on the compose network with TLS off because
+# that traffic never leaves the host. Needs Docker Compose v2 (the `docker
+# compose` plugin), 2.20 or newer.
 #
 #   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 #   docker compose -f docker-compose.prod.yml --env-file .env.prod --profile storage up -d  # + MinIO
 #   docker compose -f docker-compose.prod.yml --env-file .env.prod --profile search  up -d  # + Meilisearch
 #   docker compose -f docker-compose.prod.yml --env-file .env.prod --profile cache   up -d  # + Dragonfly
 #
-# Configuration lives in ONE file, `.env.prod`, used two ways: `--env-file`
-# interpolates the `${...}` below (image tag, ports, the required secrets),
-# and the app service's `env_file:` hands the same file to the container
-# verbatim, so any optional variable you add there — S3_*, MEILI_*,
+# Configuration lives in ONE file, `.env.prod` at the repository root, used two
+# ways: `--env-file` interpolates the `${...}` below (image tag, ports, the
+# required secrets), and the app service's `env_file:` hands the same file to
+# the container, so any optional variable you add there — S3_*, MEILI_*,
 # TRUSTED_PROXIES, SMTP_*, SENTRY_DSN, … (every row in
-# docs/environment-variables.md) — reaches the app with no edit here.
+# docs/environment-variables.md) — reaches the app with no edit here. Keep the
+# file elsewhere? Set KILN_ENV_FILE to the same path you pass to `--env-file`;
+# a missing env_file is an error, never a silent "no optional variables".
+#
+# How Compose reads that file (both ways, identically): `KEY=value` per line,
+# `$VAR` / `${VAR}` inside a value is EXPANDED (write `$$` for a literal `$`,
+# or single-quote the value), surrounding quotes are stripped, and ` #` starts
+# a comment. A secret containing `$word` would otherwise be silently shortened
+# — long enough to pass the `:?` guards, wrong enough to fail at the service.
 #
 # Optional variables are deliberately NOT listed under `environment:` with
 # empty defaults. Several are presence-checked (`S3_BUCKET`, `MEILI_URL`,
 # `CORS_ORIGINS`, `CSP_IMG_SRC`, …): the app treats an EMPTY string as "set",
 # so `S3_BUCKET=` would switch the storage adapter to S3 with no bucket. Absent
-# must stay absent; env_file pass-through keeps it that way.
+# must stay absent; env_file pass-through keeps it that way. `environment:`
+# below wins over env_file for the same key: PHX_SERVER, PORT, POOL_SIZE and
+# BACKUP_DIR are pinned or defaulted there, DATABASE_URL / DATABASE_SSL take
+# your .env.prod value first and fall back to the bundled Postgres.
 #
 #   required in .env.prod   SECRET_KEY_BASE, TOKEN_SIGNING_SECRET, PHX_HOST,
 #                           POSTGRES_PASSWORD  (the `:?` forms below abort
-#                           `docker compose` naming the missing one)
+#                           `docker compose` naming the missing one).
+#                           POSTGRES_PASSWORD is spliced into a URL: keep it
+#                           URL-safe — `openssl rand -hex 32`, never base64
+#                           (`/` `#` `?` `%` break or corrupt DATABASE_URL).
 #   optional, read here     PORT (4000), POOL_SIZE (10), POSTGRES_USER (kiln),
 #                           POSTGRES_DB (kiln_prod), KILN_IMAGE (kiln:local),
+#                           KILN_ENV_FILE (.env.prod), BACKUP_DIR,
 #                           GIT_SHA / BUILD_DATE (build stamp)
+#   external Postgres       set DATABASE_URL AND DATABASE_SSL=true (plus
+#                           DATABASE_SSL_CACERTFILE if you have the CA) in
+#                           .env.prod; they replace the bundled values, and the
+#                           bundled `postgres` service is then unused — start
+#                           with `up -d --no-deps app` or delete it.
 #   optional, passed through TRUSTED_PROXIES (set it — see docs/deploy.md),
 #                           CHECK_ORIGINS, CORS_ORIGINS, S3_* / AWS_*,
 #                           CSP_IMG_SRC, MEILI_*, and anything else
 #   profile services        MINIO_ROOT_USER / MINIO_ROOT_PASSWORD (storage),
-#                           MEILI_MASTER_KEY (search)
+#                           MEILI_MASTER_KEY (search) — only needed when that
+#                           profile is on; the service itself refuses to start
+#                           without them, so nothing here demands them.
 #
 # Media: with no S3_* set the app uses the Local adapter, which writes under
 # the release's own priv/uploads (/app/lib/kiln_cms-<version>/priv/uploads) —
 # a path that moves with every version bump. For a Docker deployment use
 # object storage (the `storage` profile runs MinIO; any S3-compatible bucket
 # works) so uploads survive image upgrades and can sit behind a CDN.
+#
+# Backups: Postgres is published on the host loopback (127.0.0.1:5432) so the
+# nightly host cron in docs/backups.md can `pg_dump` it, and the app has a
+# `backups` volume at BACKUP_DIR for the in-app Backups page. That volume is
+# created root-owned and the app runs as `nobody`; hand it over ONCE:
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod \
+#     run --rm --no-deps --user root app chown nobody /var/backups/kiln
+
+# Namespaces containers, network and volumes as `kiln-prod_*`. Without it the
+# project name is the directory basename — the SAME as the dev
+# docker-compose.yml's, so both stacks would share one `postgres_data` volume
+# and a `down -v` here would delete the dev database.
+name: kiln-prod
 
 services:
   app:
     # Build once with the stamp (see docs/releasing.md#build-stamping), or set
-    # KILN_IMAGE to an image your CI pushed and drop the `build:` block.
+    # KILN_IMAGE to an image your CI pushed. With `build:` present Compose
+    # pulls first and builds only if the pull fails, so a reachable KILN_IMAGE
+    # is never rebuilt here; a missing local `kiln:local` IS built, unstamped
+    # unless GIT_SHA/BUILD_DATE are exported.
     image: ${KILN_IMAGE:-kiln:local}
     build:
       context: .
@@ -56,15 +95,17 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    # Everything optional arrives from here, verbatim (see the header).
+    # Everything optional arrives from here (see the header). Required by
+    # default: a wrong path fails `up`, it does not silently drop variables.
     env_file:
-      - path: .env.prod
-        required: false
+      - ${KILN_ENV_FILE:-.env.prod}
     # `environment:` wins over `env_file:` for the same key, so these are the
     # values the stack REQUIRES to be as written.
     environment:
       # ---- required (the app raises on boot without the first three) ----
-      DATABASE_URL: ecto://${POSTGRES_USER:-kiln}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres/${POSTGRES_DB:-kiln_prod}
+      # DATABASE_URL in .env.prod (an external/managed Postgres) replaces the
+      # bundled one; POSTGRES_PASSWORD is then not needed for this line.
+      DATABASE_URL: ${DATABASE_URL:-ecto://${POSTGRES_USER:-kiln}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD (URL-safe, e.g. openssl rand -hex 32)}@postgres/${POSTGRES_DB:-kiln_prod}}
       SECRET_KEY_BASE: ${SECRET_KEY_BASE:?set SECRET_KEY_BASE (mix phx.gen.secret)}
       TOKEN_SIGNING_SECRET: ${TOKEN_SIGNING_SECRET:?set TOKEN_SIGNING_SECRET (mix phx.gen.secret)}
       PHX_HOST: ${PHX_HOST:?set PHX_HOST to the public hostname (bare, no scheme)}
@@ -74,16 +115,29 @@ services:
       # ---- networking ----
       PORT: ${PORT:-4000}
       POOL_SIZE: ${POOL_SIZE:-10}
-      # Postgres is on the compose network only; TLS would be to ourselves.
-      # Keep the default (on) for any database that isn't in this file.
-      DATABASE_SSL: "false"
+      # Off for the bundled Postgres: it is on the compose network only and
+      # the image ships no TLS. An external DATABASE_URL must come with
+      # DATABASE_SSL=true in .env.prod, or it connects in the clear.
+      DATABASE_SSL: ${DATABASE_SSL:-false}
+      # In-app backups (docs/backups.md) write here — the `backups` volume.
+      BACKUP_DIR: ${BACKUP_DIR:-/var/backups/kiln}
+    volumes:
+      - backups:${BACKUP_DIR:-/var/backups/kiln}
     ports:
-      # Bind to loopback: the reverse proxy on this host forwards to it. Change
-      # to "${PORT:-4000}:${PORT:-4000}" only if the proxy runs elsewhere.
+      # Bind to loopback: the reverse proxy on THIS host forwards to
+      # 127.0.0.1:${PORT}. Do not publish on 0.0.0.0 — a Docker-published port
+      # bypasses the host firewall, and with TRUSTED_PROXIES set the app
+      # honours X-Forwarded-For from whoever reaches it, so a direct client
+      # could spoof its address past the per-IP rate limits. A proxy on
+      # another machine belongs on a private interface (bind that address
+      # here) or inside this compose network.
       - "127.0.0.1:${PORT:-4000}:${PORT:-4000}"
     # The image's own HEALTHCHECK probes /live (liveness — no DB), which is
     # what a restart-triggering check must use. Restated so it is visible next
-    # to the service; keep it on /live, never /up (docs/deploy.md).
+    # to the service; keep it on /live, never /up (docs/deploy.md). Note that
+    # plain Docker/Compose only MARKS the container unhealthy — nothing
+    # restarts it unless an orchestrator (Swarm/Kubernetes) or an autoheal
+    # sidecar acts on the status.
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${PORT:-4000}/live || exit 1"]
       interval: 30s
@@ -93,18 +147,28 @@ services:
 
   postgres:
     # Postgres 17 + the `vector` extension (semantic search). Drop-in for
-    # postgres:17 on the same data volume.
+    # postgres:17 on the same data volume. Unused (but still started unless
+    # you `--no-deps`) when DATABASE_URL points at an external database.
     image: pgvector/pgvector:pg17
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-kiln}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      # The image itself refuses to initialise without a password, so this
+      # is loud when it matters and silent when DATABASE_URL is external.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
       POSTGRES_DB: ${POSTGRES_DB:-kiln_prod}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    # Not published: only the app (and a backup job on this network) reach it.
+    ports:
+      # Host loopback only, for the backup cron in docs/backups.md
+      # (`DATABASE_URL=postgres://kiln:…@127.0.0.1:5432/kiln_prod`) and for
+      # `psql` from the host. Not reachable from outside the machine.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kiln} -d ${POSTGRES_DB:-kiln_prod}"]
+      # `-h 127.0.0.1`: over TCP, not the socket — the entrypoint's temporary
+      # init-time server answers the socket before TCP is up, which would
+      # release `depends_on` a boot too early on a fresh volume.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${POSTGRES_USER:-kiln} -d ${POSTGRES_DB:-kiln_prod}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -116,15 +180,26 @@ services:
   #   S3_ENDPOINT_PORT=9000 AWS_ACCESS_KEY_ID=$MINIO_ROOT_USER
   #   AWS_SECRET_ACCESS_KEY=$MINIO_ROOT_PASSWORD
   #   S3_PUBLIC_BASE_URL=https://<public host that serves the bucket>/<bucket>
-  # and create the bucket once (`mc mb`), public-read at the bucket level.
+  # Media URLs are S3_PUBLIC_BASE_URL + key, served straight to browsers, so
+  # that host must be PUBLIC: MinIO is bound to loopback here, so put a vhost
+  # of your reverse proxy in front of 127.0.0.1:9000 (or a CDN in front of
+  # that) and add it to CSP_IMG_SRC. Create the bucket once, from inside the
+  # container (`mc` lives there):
+  #   docker compose -f docker-compose.prod.yml --env-file .env.prod --profile storage \
+  #     exec minio sh -c 'mc alias set local http://127.0.0.1:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" \
+  #       && mc mb --ignore-existing local/<bucket> && mc anonymous set download local/<bucket>'
   minio:
     image: minio/minio:latest
     profiles: ["storage", "all"]
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+      # `:-`, not `:?`: Compose interpolates the whole file even for profiles
+      # that are off, so a required-guard here would abort the plain `up`.
+      # MinIO itself refuses to start without a user (3+ chars) and password
+      # (8+ chars), which is the right place for that error.
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-}
     volumes:
       - minio_data:/data
     ports:
@@ -138,14 +213,19 @@ services:
 
   # Typo-tolerant faceted search (docs/meilisearch.md). Point the app at it
   # with MEILI_URL=http://meilisearch:7700 and the same MEILI_MASTER_KEY, then
-  # run `bin/kiln_cms rpc` / `mix kiln.meili.reindex` once. MEILI_ENV=production
-  # makes Meilisearch require a master key of 16+ bytes.
+  # backfill the index once from the running app:
+  #   docker compose -f docker-compose.prod.yml --env-file .env.prod \
+  #     exec app /app/bin/kiln_cms rpc 'KilnCMS.Search.Meilisearch.reindex_all()'
+  # (`mix kiln.meili.reindex` is the same thing from a checkout.)
+  # MEILI_ENV=production makes Meilisearch require a master key of 16+ bytes.
   meilisearch:
     image: getmeili/meilisearch:v1.11
     profiles: ["search", "all"]
     restart: unless-stopped
     environment:
-      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?set MEILI_MASTER_KEY (16+ bytes)}
+      # `:-` for the same reason as MinIO's; in production mode Meilisearch
+      # refuses to start without a 16+ byte key.
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-}
       MEILI_ENV: production
     volumes:
       - meili_data:/meili_data
@@ -156,7 +236,7 @@ services:
       retries: 10
 
   # Redis-compatible shared cache. Kiln's caches are in-process today (D2) and
-  # no shipped adapter reads this — see docs/deploy.md "Optional
+  # nothing in the app reads this — see docs/deploy.md "Optional
   # infrastructure". Kept so a multi-node deployment that adds a tier-2 cache
   # adapter has the service defined; on a single node it does nothing for you.
   dragonfly:
@@ -175,6 +255,7 @@ services:
 
 volumes:
   postgres_data:
+  backups:
   minio_data:
   meili_data:
   dragonfly_data:

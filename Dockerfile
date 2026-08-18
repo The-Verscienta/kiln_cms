@@ -238,7 +238,9 @@ USER nobody
 # hole).
 #
 # It probes `/live` (KilnCMSWeb.HealthController :live), NOT `/up`: this
-# healthcheck TRIGGERS RESTARTS, and `/up` returns 503 when the database is
+# healthcheck is the RESTART signal wherever something acts on it (Swarm,
+# Kubernetes, an autoheal sidecar — plain Docker/Compose only mark the
+# container unhealthy), and `/up` returns 503 when the database is
 # unreachable — restarting the app on a database outage it can't fix only
 # restart-storms the replicas (#816). `/live` returns 200 iff the endpoint is
 # serving, no database check; with the endpoint down the connection is refused.

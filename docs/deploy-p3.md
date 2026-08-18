@@ -1,10 +1,8 @@
 # Deploying the P3 waves
 
-> **Archived per-release checklist.** This is the rehearsal/verification
-> checklist for the P3 feature waves, kept for history. It assumes you already know
-> how Kiln is deployed — for that, read [`deploy.md`](deploy.md), the
-> canonical deploy guide (required environment, image, boot, health
-> endpoints, first admin, backups, optional infrastructure).
+> **Archived per-release checklist** for the P3 feature waves, kept for
+> history. How to deploy Kiln at all is [`deploy.md`](deploy.md), the
+> canonical deploy guide.
 
 Operator checklist for the P3 feature arc (docs/p3-plan.md): waves 0–3 —
 review-workflow events (#375), shared preview switcher (#378), 2FA recovery
