@@ -9,6 +9,10 @@ defmodule Mix.Tasks.Kiln.Meili.Reindex do
 
       mix kiln.meili.reindex
 
+  In a production release (no Mix) run the same thing over rpc:
+
+      bin/kiln_cms rpc 'KilnCMS.Search.Meilisearch.reindex_all()'
+
   Also the **removal** path, which is why it is worth running after an upgrade
   that narrows what belongs in the index: the worker turns a document it will
   not index into a `DELETE`, so a run enqueued over every published document
@@ -20,72 +24,32 @@ defmodule Mix.Tasks.Kiln.Meili.Reindex do
   """
   use Mix.Task
 
-  alias KilnCMS.CMS
-  alias KilnCMS.Firing.Engine
   alias KilnCMS.Search.Meilisearch
-  alias KilnCMS.Search.MeilisearchWorker
 
   @requirements ["app.start"]
 
-  # Page, Post and every dynamic-type entry (D17). Entries are one source, not
-  # one per type: they all live in the `:entry` tier and fire under the `entry`
-  # storage key, which is the key `MeilisearchWorker.load/3` dispatches on
-  # (#1012).
-  @sources [
-    {KilnCMS.CMS.Page, &CMS.list_pages!/1},
-    {KilnCMS.CMS.Post, &CMS.list_posts!/1},
-    {KilnCMS.CMS.Entry, &CMS.list_entries!/1}
-  ]
-
+  # The work is `KilnCMS.Search.Meilisearch.reindex_all/0`, so a production
+  # release (no Mix) can run the same thing over `bin/kiln_cms rpc`; this task
+  # is the checkout-side front door and only reports.
   @impl Mix.Task
   def run(_args) do
-    if Meilisearch.enabled?() do
-      case Meilisearch.configure() do
-        {:error, reason} ->
-          Mix.shell().error("Could not configure Meilisearch index: #{inspect(reason)}")
+    case Meilisearch.reindex_all() do
+      {:error, reason} ->
+        Mix.shell().error("Could not configure Meilisearch index: #{inspect(reason)}")
 
-        _ ->
-          count = Enum.reduce(@sources, 0, &enqueue_source/2)
-          Mix.shell().info("Configured index and enqueued #{count} published document(s).")
+      {:ok, count} ->
+        Mix.shell().info("Configured index and enqueued #{count} published document(s).")
 
-          Mix.shell().info(
-            "Anything not public to an anonymous visitor — audience-gated or " <>
-              "passphrase-locked — is REMOVED from the index as those jobs run."
-          )
-      end
-    else
-      Mix.shell().info(
-        "Meilisearch is disabled (config :kiln_cms, KilnCMS.Search.Meilisearch, enabled: false). " <>
-          "Enable it first; nothing enqueued."
-      )
-    end
-  end
-
-  defp enqueue_source({_resource, lister}, acc) do
-    # Strict tenancy (#419): list published docs per org (reads need a tenant).
-    published =
-      Enum.flat_map(KilnCMS.Accounts.list_org_ids(), fn org_id ->
-        lister.(
-          authorize?: false,
-          tenant: org_id,
-          query: [filter: [state: :published], select: [:id, :state, :org_id]]
+        Mix.shell().info(
+          "Anything not public to an anonymous visitor — audience-gated or " <>
+            "passphrase-locked — is REMOVED from the index as those jobs run."
         )
-      end)
 
-    published
-    |> Enum.map(fn record ->
-      type = Engine.document_type(record)
-
-      MeilisearchWorker.new(%{
-        "org_id" => record.org_id,
-        "op" => "upsert",
-        "type" => to_string(type),
-        "id" => record.id
-      })
-    end)
-    |> Enum.chunk_every(500)
-    |> Enum.each(&Oban.insert_all/1)
-
-    acc + length(published)
+      :disabled ->
+        Mix.shell().info(
+          "Meilisearch is disabled (config :kiln_cms, KilnCMS.Search.Meilisearch, enabled: false). " <>
+            "Enable it first; nothing enqueued."
+        )
+    end
   end
 end

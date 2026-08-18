@@ -41,12 +41,21 @@ migration, a rewritten column, a dropped config key).
   MinIO profiles (and that no shipped cache adapter uses Dragonfly), and where
   `environment-variables.md`, `backups.md` and `releasing.md` fit. A reference
   `docker-compose.prod.yml` (app + pgvector Postgres, optional profiles) sits
-  at the repository root; it fails fast naming any missing required secret and
-  passes optional variables through an `env_file` rather than listing them
-  with empty defaults, because several are presence-checked and an empty
-  string counts as set. The per-release `deploy-*.md` checklists stay where
-  they are, under *Audits & release checklists*, each now opening with an
-  archive banner that points at the guide.
+  at the repository root, namespaced `kiln-prod` so it never shares volumes
+  with the dev compose file; it fails fast naming any missing required
+  secret, passes optional variables through an `env_file` rather than listing
+  them with empty defaults (several are presence-checked and an empty string
+  counts as set), accepts an external `DATABASE_URL`, and wires both backup
+  paths (Postgres on the host loopback for the cron, a `backups` volume for
+  the in-app page). The `deploy-*.md` checklists stay under *Audits & release
+  checklists*, each now opening with a banner that points at the guide — the
+  P2/P3 ones as history, the staging and write-API ones as the still-current
+  feature-enablement checklists.
+- **`KilnCMS.Search.Meilisearch.reindex_all/0`** — the full Meilisearch
+  backfill as a release-callable function (`bin/kiln_cms rpc
+  'KilnCMS.Search.Meilisearch.reindex_all()'`), so a production release, which
+  has no Mix, can do what `mix kiln.meili.reindex` does from a checkout; the
+  Mix task now wraps it.
 
 ### Security
 
