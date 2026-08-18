@@ -112,22 +112,24 @@ defmodule KilnCMSWeb.SocketReauth do
   client recovers from.
 
   A channel that refuses by returning `{:stop, {:shutdown, _}, socket}` is a
-  `phx_close` frame to the client (`Phoenix.Channel.Server.handle_result/2` →
-  `send_socket_close/2` → `Phoenix.Socket.socket_close/2`), and `phoenix.js`
-  treats `phx_close` as a finished leave: the channel goes to `closed`, is
-  removed from the socket, and **no rejoin is scheduled** — only `phx_error`
-  and a refused/timed-out join arm the rejoin timer. So a room closed that way
-  stays dead in that tab for as long as it is open, even after the grant that
-  closed it comes back; `assets/js/collab.js` keeps buffering the tab's edits
-  into a channel that will never send them.
+  `phx_close` frame to the client (Phoenix's channel server treats a
+  `{:shutdown, _}` stop as a graceful close and has the transport encode
+  `phx_close` for the topic — not `phx_error`), and `phoenix.js` treats
+  `phx_close` as a finished leave: the channel goes to `closed`, is removed from
+  the socket, and **no rejoin is scheduled** — only `phx_error` and a
+  refused/timed-out join arm the rejoin timer. So a room closed that way stays
+  dead in that tab for as long as it is open, even after the grant that closed
+  it comes back; `assets/js/collab.js` keeps buffering the tab's edits into a
+  channel that will never send them.
 
   Sending the transport the same `"disconnect"` broadcast
   `KilnCMS.Accounts.SessionEviction` uses (#675) is what makes the refusal
-  recoverable: `Phoenix.Socket.__info__/2` stops the transport with close code
-  1001, `phoenix.js` reconnects on its backoff and rejoins every channel it
-  had, and each rejoin runs the channel's `join/3` — refused while the grant is
-  narrowed, admitted once it is restored. That is exactly the "evicted, then
-  reconnect and re-run the check" path the client already exercises.
+  recoverable: `Phoenix.Socket`'s transport handler for that broadcast stops
+  the transport with close code 1001, `phoenix.js` reconnects on its backoff
+  and rejoins every channel it had, and each rejoin runs the channel's `join/3`
+  — refused while the grant is narrowed, admitted once it is restored. That is
+  exactly the "evicted, then reconnect and re-run the check" path the client
+  already exercises.
 
   Call it *before* returning the stop. Both messages go to the transport from
   the channel process, so the broadcast is handled first and the transport is
