@@ -36,7 +36,12 @@ defmodule KilnCMSWeb.CollabSocket do
 
   @impl true
   def connect(%{"token" => token}, socket, connect_info) when is_binary(token) do
-    with {:ok, user_id} <-
+    # Charged first, ahead of token verification (threat-model item 10's
+    # `/ws/*` gap — see `KilnCMSWeb.SocketJoinBudget`): a connect this
+    # deployment is about to refuse anyway still cost a handshake, so it
+    # still has to count.
+    with :ok <- KilnCMSWeb.SocketJoinBudget.charge(:collab_join, connect_info),
+         {:ok, user_id} <-
            Phoenix.Token.verify(KilnCMSWeb.Endpoint, "collab", token, max_age: @max_age),
          # The struct match matters: a `not_found_error?: false` interface would
          # return `{:ok, nil}`, and an anonymous actor reads published content.

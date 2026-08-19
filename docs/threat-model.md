@@ -930,9 +930,7 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
     its parent's join, and patch/navigate inside a `live_session` does not
     remount. Over budget, the join raises a 429 before `mount/3`, which the
     channel turns into a `reload` reply and a stopped process (no mount, no
-    render); the JS client backs off with jitter. Still uncounted, and still
-    this item's remaining gap: events on an established socket, and joins on
-    the `/ws/gql`, `/ws/bridge` and `/ws/collab` families.
+    render); the JS client backs off with jitter.
     **Narrowed by #1305:** frames on an established **`/ws/collab`**
     connection are now charged, per *account* rather than per address or per
     connection (`KilnCMSWeb.SocketEventBudget`, the `:collab_event` bucket,
@@ -960,10 +958,28 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
     ten seconds per channel, so one seat cannot spend the room's budgets
     through it. What this bounds is the per-frame work: the `DocServer` apply
     and room fan-out per update, and the full re-authorization (three DB
-    reads) every `SocketReauth.update_floor/0` of them. **Still uncounted:**
-    events on `/live` (no lifecycle hook runs before every `handle_event/3`;
-    the sign-in submit stays the one charged case, #715) and subscription
-    documents on `/ws/gql`.
+    reads) every `SocketReauth.update_floor/0` of them.
+
+    **Narrowed further, the `/ws/*` half:** `/ws/gql`, `/ws/bridge` and
+    `/ws/collab` **connects** are now charged the same way, per client address,
+    each against its own bucket (`KilnCMSWeb.SocketJoinBudget`; `:gql_join`,
+    `:bridge_join`, `:collab_join` in `KilnCMSWeb.RateLimit`, 300/minute by
+    default each — three buckets rather than one shared, so a flood against
+    `/ws/gql`, the one of the three anonymous by default, cannot spend a budget
+    a signed-in editor's `/ws/collab` session then pays for from the same
+    office NAT). Charged first in each socket's own `connect/1,2,3`, ahead of
+    tenant/token/auth resolution, the same ordering `LiveJoinBudget` uses and
+    for the same reason: a connect this deployment is about to refuse anyway
+    still cost a handshake. A refused connect returns `:error` — there is no
+    4xx-during-mount shape to raise here, so the client's own reconnect logic
+    backs off and retries, the same as any other refused socket connect.
+
+    Still uncounted, and still this item's remaining gap: events on
+    `/live` (no lifecycle hook runs before every `handle_event/3`; the sign-in
+    submit stays the one charged case, #715) and subscription documents on
+    `/ws/gql`. `/ws/collab`'s frames are the one event surface counted so far
+    (#1305, above); the other two remain the harder problem that issue
+    described (no single choke point, no obvious per-event cost model).
 11. **Periodic CSP re-review** as the editor adds third-party assets. The
     runtime `img-src` is widened by `CSP_IMG_SRC` and by the Unsplash
     integration — the only externally-influenced part of the policy.

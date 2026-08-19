@@ -273,4 +273,37 @@ defmodule KilnCMSWeb.BridgeSocketTest do
                })
     end
   end
+
+  describe "the join budget (threat-model item 10's /ws/* gap)" do
+    test "connect/1 charges the bridge_join budget first, refusing an over-budget address before authorization runs" do
+      previous = Application.get_env(:kiln_cms, KilnCMSWeb.RateLimit, [])
+      on_exit(fn -> Application.put_env(:kiln_cms, KilnCMSWeb.RateLimit, previous) end)
+
+      limits =
+        previous |> Keyword.get(:limits, %{}) |> Map.put(:bridge_join, {1, :timer.minutes(1)})
+
+      Application.put_env(:kiln_cms, KilnCMSWeb.RateLimit, Keyword.put(previous, :limits, limits))
+
+      admin = user(:admin)
+      post = draft(admin)
+      k = key(admin)
+      address = KilnCMS.RateLimitHelpers.client_address()
+      connect_info = %{peer_data: %{address: address, port: 111, ssl_cert: nil}, x_headers: []}
+
+      assert {:ok, _state} =
+               BridgeSocket.connect(%{
+                 params: %{"type" => "post", "id" => post.id, "api_key" => k},
+                 connect_info: connect_info
+               })
+
+      # Same address, second attempt: over budget, refused before the api_key
+      # is even checked (a bogus key here would also refuse — the budget has
+      # to be the reason, so the key stays valid).
+      assert :error =
+               BridgeSocket.connect(%{
+                 params: %{"type" => "post", "id" => post.id, "api_key" => k},
+                 connect_info: connect_info
+               })
+    end
+  end
 end

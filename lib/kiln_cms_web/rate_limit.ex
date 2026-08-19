@@ -81,7 +81,18 @@ defmodule KilnCMSWeb.RateLimit do
     # otherwise cause without limit. Over it, the connection is closed and the
     # account's rejoins are refused until the window turns; the client
     # reconciles what it typed meanwhile on the join that succeeds.
-    collab_event: {6_000, :timer.minutes(1)}
+    collab_event: {6_000, :timer.minutes(1)},
+    # `/ws/gql`, `/ws/bridge`, `/ws/collab` connects per client address
+    # (`KilnCMSWeb.SocketJoinBudget`) — the `/ws/*` half of the same
+    # threat-model item `:live_join` closed the `/live` half of. Same "one
+    # address, one minute" flood-ceiling shape and size; three separate
+    # buckets rather than one shared with each other (or with `:live_join`/
+    # `:gql`) so a flood against the one of the three that is anonymous by
+    # default (`/ws/gql`) cannot spend a budget a signed-in editor's
+    # `/ws/collab` session then pays for from the same office NAT.
+    gql_join: {300, :timer.minutes(1)},
+    bridge_join: {300, :timer.minutes(1)},
+    collab_join: {300, :timer.minutes(1)}
   }
 
   @doc false

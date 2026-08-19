@@ -50,18 +50,23 @@ defmodule KilnCMSWeb.Endpoint do
   # `connect_info: [:uri]` so the socket can resolve its tenant from the
   # connecting host (epic #336) — a raw transport bypasses the SetTenant plug, so
   # without this GraphQL subscriptions/queries over the socket would span orgs.
+  # `:peer_data`/`:x_headers` (threat-model item 10, the `/ws/*` half of the
+  # #1183 follow-up) are what `KilnCMSWeb.SocketJoinBudget` keys the join
+  # budget's client address off — the same pair `/live` already carries, and
+  # for the same reason: a socket has no `conn.remote_ip` to read.
   socket "/ws/gql", KilnCMSWeb.GraphqlSocket,
-    websocket: [connect_info: [:uri]],
-    longpoll: [connect_info: [:uri]]
+    websocket: [connect_info: [:uri, :peer_data, :x_headers]],
+    longpoll: [connect_info: [:uri, :peer_data, :x_headers]]
 
   # Collaborative-editing CRDT prototype (token-authenticated; joins refuse
   # unless :collab_prototype is enabled — see KilnCMSWeb.CollabChannel).
   # `connect_info: [:uri]` for the same reason as `/ws/gql` above: the socket
   # resolves its tenant from the connecting host, and every join authorizes the
   # document under it (#655). This is also what brings the socket inside
-  # `TENANT_STRICT_HOST` (#563), which it previously sat outside.
+  # `TENANT_STRICT_HOST` (#563), which it previously sat outside. `:peer_data`/
+  # `:x_headers` for the join budget, same reason as `/ws/gql` above.
   socket "/ws/collab", KilnCMSWeb.CollabSocket,
-    websocket: [connect_info: [:uri]],
+    websocket: [connect_info: [:uri, :peer_data, :x_headers]],
     longpoll: false
 
   # Visual-editing bridge live-preview push (#355). A raw transport socket (plain
@@ -77,7 +82,9 @@ defmodule KilnCMSWeb.Endpoint do
       check_origin: {KilnCMSWeb.CORS, :check_socket_origin?, []},
       # The request URI carries the host the socket resolves its tenant from
       # (epic #336) — raw transports bypass the SetTenant plug pipeline.
-      connect_info: [:uri]
+      # `:peer_data`/`:x_headers` for the join budget, same reason as
+      # `/ws/gql` above.
+      connect_info: [:uri, :peer_data, :x_headers]
     ],
     longpoll: false
 
