@@ -334,10 +334,16 @@ Postgres is published on the host loopback (`127.0.0.1:5432`) so the cron in
 `postgres://kiln:…@127.0.0.1:5432/kiln_prod` and writes `/var/backups/kiln`,
 and that same directory is bind-mounted into the app at `BACKUP_DIR`, so the
 in-app page reads cron's manifest and cron's off-site copy and pruning cover
-what the page writes. Create it once, owned by the app's uid:
+what the page writes. One uid has to own that directory and both writers
+have to be it — the app runs as `nobody` (uid 65534) and makes its
+subdirectories `0700`, so a shared group does not help. Create it **before
+the first `up`** (Docker otherwise auto-creates a bind source root-owned; a
+later `chown` still fixes it) and run the `backups.md` cron as `nobody` (or
+as root) rather than as a third user:
 
 ```bash
 sudo mkdir -p /var/backups/kiln && sudo chown 65534:65534 /var/backups/kiln
+# crontab: 17 3 * * * nobody  DATABASE_URL=… BACKUP_DIR=/var/backups/kiln …/scripts/backup.sh all
 ```
 
 On any other platform, give `BACKUP_DIR` a persistent mount writable by
@@ -409,14 +415,17 @@ the file itself reads. Two of its points matter before you write the file:
   `openssl rand -base64`) contains `/` more often than not, and `/ # ? %`
   break or silently corrupt the URL while Postgres itself accepts them.
 - **An external or managed Postgres** is `DATABASE_URL=… DATABASE_SSL=true`
-  in `.env.prod` (plus `DATABASE_SSL_CACERTFILE` if you have the CA) — those
-  two take your value ahead of the bundled defaults; only `PHX_SERVER` is
-  pinned. Then **delete the `postgres` service and the app's `depends_on`**
+  in `.env.prod` (plus `DATABASE_SSL_CACERTFILE` if you have the CA) — like
+  everything under `environment:` except `PHX_SERVER`, they take your
+  `.env.prod` value ahead of the bundled default. Then **delete the
+  `postgres` service and the app's `depends_on`**
   from the compose file: left in, it starts with no password, restart-loops,
   and every later plain `up -d` (upgrades included) fails on the dependency.
 
-Every name in that header is a row in
-[`environment-variables.md`](environment-variables.md).
+Every *app* variable in that header is a row in
+[`environment-variables.md`](environment-variables.md); the header marks the
+handful the compose file alone reads (`KILN_IMAGE`, `KILN_ENV_FILE`,
+`BACKUP_HOST_DIR`, the `*_PORT` publish ports), which are not.
 
 Put a proxy on the same host in front of `127.0.0.1:4000` — the app is
 published on loopback only, on purpose. Caddy is the least configuration:
