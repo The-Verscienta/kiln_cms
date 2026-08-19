@@ -82,6 +82,74 @@ defmodule KilnCMS.Search.Meilisearch do
   end
 
   @doc """
+  Apply the index settings (`configure/0`) and enqueue a
+  `KilnCMS.Search.MeilisearchWorker` upsert for every published Page, Post and
+  Entry across every org, so the index is fully (re)built in the background.
+  Returns `{:ok, count}` with the number of documents enqueued.
+
+  This is the release-callable form of `mix kiln.meili.reindex` (which wraps
+  it) — a production OTP release has no Mix, so run it there as
+
+      bin/kiln_cms rpc 'KilnCMS.Search.Meilisearch.reindex_all()'
+
+  Also the **removal** path: the worker turns a document it will not index into
+  a `DELETE`, so a run enqueued over every published document evicts the ones
+  that should no longer be there (audience-gated or passphrase-locked content
+  indexed under an older rule, #1006/#496). No-op (`:disabled`) when the
+  backend is off.
+  """
+  @spec reindex_all() :: {:ok, non_neg_integer()} | {:error, term()} | :disabled
+  def reindex_all do
+    case configure() do
+      :disabled -> :disabled
+      {:error, _} = error -> error
+      {:ok, _} -> {:ok, Enum.reduce(reindex_sources(), 0, &enqueue_reindex_source/2)}
+    end
+  end
+
+  # Page, Post and every dynamic-type entry (D17). Entries are one source, not
+  # one per type: they all live in the `:entry` tier and fire under the `entry`
+  # storage key, which is the key `MeilisearchWorker.load/3` dispatches on
+  # (#1012). A function, not a module attribute: captures evaluated in the
+  # module body are a compile-time dependency on `KilnCMS.CMS` (and its whole
+  # closure); inside a function body they are runtime calls.
+  defp reindex_sources do
+    [
+      {KilnCMS.CMS.Page, &KilnCMS.CMS.list_pages!/1},
+      {KilnCMS.CMS.Post, &KilnCMS.CMS.list_posts!/1},
+      {KilnCMS.CMS.Entry, &KilnCMS.CMS.list_entries!/1}
+    ]
+  end
+
+  defp enqueue_reindex_source({_resource, lister}, acc) do
+    # Strict tenancy (#419): list published docs per org (reads need a tenant).
+    published =
+      Enum.flat_map(KilnCMS.Accounts.list_org_ids(), fn org_id ->
+        lister.(
+          authorize?: false,
+          tenant: org_id,
+          query: [filter: [state: :published], select: [:id, :state, :org_id]]
+        )
+      end)
+
+    published
+    |> Enum.map(fn record ->
+      type = Engine.document_type(record)
+
+      KilnCMS.Search.MeilisearchWorker.new(%{
+        "org_id" => record.org_id,
+        "op" => "upsert",
+        "type" => to_string(type),
+        "id" => record.id
+      })
+    end)
+    |> Enum.chunk_every(500)
+    |> Enum.each(&Oban.insert_all/1)
+
+    acc + length(published)
+  end
+
+  @doc """
   Upsert a single content record (Page/Post) into the index. Documents are keyed
   by `"<type>_<id>"`, so re-publishing replaces the prior document. No-op when
   disabled.

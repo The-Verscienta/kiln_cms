@@ -27,6 +27,38 @@ migration, a rewritten column, a dropped config key).
 
 ## [Unreleased]
 
+### Added
+
+- **A canonical deploy guide, `docs/deploy.md`** (#1312). Until now the only
+  deploy material was four per-release rehearsal checklists and a
+  four-sentence README section, so a new operator reconstructed "how do I
+  deploy this at all" from release-specific notes. The guide covers the
+  required environment (`DATABASE_URL`, `SECRET_KEY_BASE`,
+  `TOKEN_SIGNING_SECRET` raise on boot; `PHX_HOST`/`PHX_SERVER`), building
+  the image, what the boot `CMD` does (migrate, then serve), `/live` vs `/up`
+  and why a restart-triggering check must use the former, the first-admin
+  bootstrap, the backup/restore pointer, the optional Dragonfly/Meilisearch/
+  MinIO profiles (and that no shipped cache adapter uses Dragonfly), and where
+  `environment-variables.md`, `backups.md` and `releasing.md` fit. A reference
+  `docker-compose.prod.yml` (app + pgvector Postgres, optional profiles) sits
+  at the repository root, namespaced `kiln-prod` so it never shares volumes
+  with the dev compose file; it fails fast naming any missing required
+  secret, passes optional variables through an `env_file` rather than listing
+  them with empty defaults (several are presence-checked and an empty string
+  counts as set), accepts an external `DATABASE_URL`, and wires both backup
+  paths onto one host directory (Postgres on the host loopback for the cron,
+  that directory bind-mounted at `BACKUP_DIR` for the in-app page; the image
+  now owns the default `/var/backups/kiln`, so a named volume there works
+  too). The `deploy-*.md` checklists stay under *Audits & release
+  checklists*, each now opening with a banner that points at the guide — the
+  P2/P3 ones as history, the staging and write-API ones as the still-current
+  feature-enablement checklists.
+- **`KilnCMS.Search.Meilisearch.reindex_all/0`** — the full Meilisearch
+  backfill as a release-callable function (`bin/kiln_cms rpc
+  'KilnCMS.Search.Meilisearch.reindex_all()'`), so a production release, which
+  has no Mix, can do what `mix kiln.meili.reindex` does from a checkout; the
+  Mix task now wraps it.
+
 ### Security
 
 - **`/ws/gql`, `/ws/bridge` and `/ws/collab` connects are now budgeted per

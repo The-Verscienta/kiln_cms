@@ -1,5 +1,9 @@
 # Deploying the write API + visual-editing features
 
+> **Feature-enablement checklist** for the write API and visual-editing bridge — still the
+> operator checklist for turning it on. It assumes a deployed Kiln: how to
+> deploy at all is [`deploy.md`](deploy.md), the canonical deploy guide.
+
 Deploy checklist for the headless-write / visual-editing arc: **write-capable
 headless APIs (#330)** and the **visual-editing bridge + Presentation console
 (#355)**. Shipped across PRs #385, #388, #390, #391.

@@ -212,6 +212,7 @@ defmodule KilnCMS.MixProject do
       # Search
       "docs/meilisearch.md": [title: "Meilisearch backend"],
       # Operations & deployment
+      "docs/deploy.md": [],
       "docs/environment-variables.md": [],
       "docs/backups.md": [],
       "docs/observability.md": [],
@@ -325,6 +326,7 @@ defmodule KilnCMS.MixProject do
       ],
       Search: ["docs/meilisearch.md"],
       "Operations & deployment": [
+        "docs/deploy.md",
         "docs/environment-variables.md",
         "docs/backups.md",
         "docs/observability.md",

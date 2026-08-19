@@ -154,7 +154,7 @@ unless you invoke the scrub yourself.
 
 ## Docker / Coolify recipe
 
-Production here is a **manual Coolify _Redeploy_** on a VPS ([`deploy-p2.md`](deploy-p2.md)).
+Production here is a **manual Coolify _Redeploy_** on a VPS ([`deploy.md`](deploy.md)).
 The lean-ops way to get a staging box is to run the **same image** against a separate,
 scrubbed database — no new build, no new service definition:
 
@@ -246,5 +246,5 @@ the gaps the *data* carries — the *config* is already inert:
   feature (prerequisites, guards, teardown, rollback).
 - [`data-flows.md`](data-flows.md) — the authoritative map of what personal data Kiln
   holds and the `:anonymize` erasure action the scrub reuses.
-- [`deploy-p2.md`](deploy-p2.md) — the production Coolify redeploy posture this recipe
-  mirrors.
+- [`deploy.md`](deploy.md) — the canonical deploy guide; the production posture this
+  recipe mirrors.

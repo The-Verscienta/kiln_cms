@@ -165,8 +165,20 @@ mix ash.setup            # create DB + run migrations
 
 ## Deployment
 
-Multi-stage [`Dockerfile`](https://github.com/The-Verscienta/kiln_cms/blob/main/Dockerfile) builds an OTP release and includes **libvips**
-in the runtime image for image processing. Target: Coolify (RackNerd VPS) or Fly.io/Render.
+**[`docs/deploy.md`](docs/deploy.md) is the deploy guide** — required
+environment (`DATABASE_URL`, `SECRET_KEY_BASE`, `TOKEN_SIGNING_SECRET` raise
+on boot; `PHX_HOST`/`PHX_SERVER`), building the image, what runs at boot
+(migrations, then the server), which health endpoint to point what at (`/live`
+for restarts, `/up` for routing), the first-admin bootstrap, backups, and the
+optional infrastructure. [`docker-compose.prod.yml`](docker-compose.prod.yml)
+is a reference production stack (app + Postgres, with MinIO / Meilisearch /
+Dragonfly behind profiles).
+
+The multi-stage [`Dockerfile`](https://github.com/The-Verscienta/kiln_cms/blob/main/Dockerfile)
+builds an OTP release and includes **libvips** in the runtime image for image
+processing; it runs anywhere that runs a container — this project's own
+production is a manual Coolify Redeploy on one VPS, and Fly.io/Render/Kubernetes
+work the same way.
 
 Performance SLOs, Oban queue/`POOL_SIZE` tuning, and load-test recipes are in
 [`docs/performance.md`](docs/performance.md).
