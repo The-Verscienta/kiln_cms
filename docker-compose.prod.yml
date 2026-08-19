@@ -46,11 +46,14 @@
 #                           URL-safe — `openssl rand -hex 32`, never base64
 #                           (`/` `#` `?` `%` break or corrupt DATABASE_URL).
 #   optional, read here     PORT (4000), POOL_SIZE (10), POSTGRES_USER (kiln),
-#                           POSTGRES_DB (kiln_prod), POSTGRES_PORT (5432),
+#                           POSTGRES_DB (kiln_prod), BACKUP_DIR
+#                           (/var/backups/kiln, in the container) — app
+#                           variables, documented in environment-variables.md;
+#                           and, read by THIS FILE ONLY (not by the app, so
+#                           not in that table): POSTGRES_PORT (5432),
 #                           MINIO_PORT (9000), MINIO_CONSOLE_PORT (9001),
 #                           KILN_IMAGE (kiln:local), KILN_ENV_FILE (.env.prod),
-#                           BACKUP_DIR (/var/backups/kiln, in the container),
-#                           BACKUP_HOST_DIR (same path, on the host),
+#                           BACKUP_HOST_DIR (BACKUP_DIR's path on the host),
 #                           GIT_SHA / BUILD_DATE (build stamp).
 #                           The dev docker-compose.yml publishes 5432/9000/9001
 #                           on the same defaults — pick different *_PORT values
@@ -82,8 +85,12 @@
 # nightly host cron in docs/backups.md can `pg_dump` it, and the host's backup
 # directory is bind-mounted into the app at BACKUP_DIR so the cron and the
 # in-app Backups page read and write ONE directory (the page reports on cron's
-# manifest; that is the whole design). The app runs as `nobody` (uid 65534),
-# so create the host directory once, owned by it:
+# manifest; that is the whole design). The app runs as `nobody` (uid 65534)
+# and makes its subdirectories 0700, so ONE uid must own the directory and
+# both writers must be it: create it BEFORE the first `up` (Docker otherwise
+# auto-creates the bind source root-owned — a later chown still fixes it),
+# and run the backups.md cron as `nobody` (uid 65534) or as root, not as a
+# third user:
 #   sudo mkdir -p /var/backups/kiln && sudo chown 65534:65534 /var/backups/kiln
 
 # Namespaces containers, network and volumes as `kiln-prod_*`. Without it the

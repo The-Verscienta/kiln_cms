@@ -450,8 +450,9 @@ defmodule KilnCMS.Search.MeilisearchTest do
       drain()
       flush()
 
-      assert {:ok, count} = Meilisearch.reindex_all()
-      assert count >= 1
+      # Exactly the one published page: the draft is not counted, and the
+      # sandbox holds nothing else.
+      assert {:ok, 1} = Meilisearch.reindex_all()
 
       # The settings PATCH ran before any document job was enqueued, and the
       # published page's upsert is among the drained jobs.
