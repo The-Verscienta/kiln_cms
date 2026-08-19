@@ -103,6 +103,11 @@ defmodule KilnCMSWeb.ViewTracking do
   # across every statement and lower its throughput ceiling. Sharing the task
   # also means overload drops them together, so they under-count consistently
   # instead of drifting apart.
+  #
+  # `authorize?: false`: system-side bookkeeping on the delivery path — no actor
+  # (anonymous readers), tenant pinned to the viewed record's own org, and the
+  # `:record` policies on the three counters are `forbid_if always()` — only
+  # the counters' `OrgAdmin` bypass could pass, and a reader is not one.
   defp record(type, id, org_id, source) do
     opts = [authorize?: false, tenant: org_id]
     Analytics.record_view(type, id, opts)

@@ -164,6 +164,12 @@ defmodule KilnCMS.Firing.References do
     # Tenant-scoped (epic #336): destroy/create only touch this org's edges, so a
     # rebuild can never delete or upsert across a tenant boundary. `org_id` is set
     # from the tenant (writable? false), so it's not in the built attrs maps.
+    #
+    # Both writes below run `authorize?: false`: `rebuild/4` is called from
+    # `Engine.fire/2` on the fire path (workers, no actor), and
+    # `Firing.ReferenceEdge` closes create/update/destroy to every actor
+    # (`forbid_if always()`) — the edge graph is system bookkeeping derived
+    # from the document itself, and the tenant bounds what it can touch.
     Firing.ReferenceEdge
     |> Ash.Query.filter(from_type == ^from_type and from_id == ^from_id)
     |> Ash.bulk_destroy!(:destroy, %{}, authorize?: false, tenant: org_id)
@@ -174,6 +180,7 @@ defmodule KilnCMS.Firing.References do
       %{from_type: from_type, from_id: from_id, to_type: to_type, to_id: to_id}
     end)
     |> Ash.bulk_create!(Firing.ReferenceEdge, :upsert,
+      # Same fire-path bypass as the destroy above (see that comment).
       authorize?: false,
       tenant: org_id,
       return_errors?: true,
@@ -196,6 +203,9 @@ defmodule KilnCMS.Firing.References do
     # Tenant-scoped `edges_to` (epic #336): a wave only ever sees same-org
     # referrers, so a re-fire can never cross a tenant boundary. `org_id` is
     # carried in the job args so the worker restores it as its tenant.
+    # `authorize?: false` because the wave runs from `FireWorker`/`RefireWorker`
+    # (and `DeleteArtifacts`) with no actor; the read is tenant-scoped and only
+    # `{from_type, from_id}` pairs leave this function, as job args.
     {:ok, edges} = Firing.edges_to(to_type, to_id, authorize?: false, tenant: org_id)
 
     edges
@@ -239,6 +249,13 @@ defmodule KilnCMS.Firing.References do
   """
   @spec usages(Ash.UUID.t(), term()) :: %{total: non_neg_integer(), items: [map()]}
   def usages(org_id, media_id) do
+    # `authorize?: false` here and in `usage_counts/2` / `load_any/3` /
+    # `editor_kind/1`: this module takes no actor (the fire path has none), and
+    # the only callers are `MediaLive`, mounted behind `:live_editor_required` —
+    # the same editors-and-up audience `Firing.ReferenceEdge`'s read policy
+    # names. Every read is tenant-scoped to the caller's org, and only
+    # `title`/`state`/`kind` of each referrer is surfaced. Threading the
+    # LiveView's actor through would let the policy do this instead (#1309).
     {:ok, edges} = Firing.edges_to(:media, media_id, authorize?: false, tenant: org_id)
 
     referrers =
@@ -269,6 +286,7 @@ defmodule KilnCMS.Firing.References do
     Firing.ReferenceEdge
     |> Ash.Query.filter(to_type == :media and to_id in ^media_ids)
     |> Ash.Query.select([:to_id, :from_type, :from_id])
+    # Editor-gated caller, tenant-scoped — see `usages/2` on the bypass.
     |> Ash.read!(authorize?: false, tenant: org_id)
     |> Enum.uniq_by(&{&1.to_id, &1.from_type, &1.from_id})
     |> Enum.frequencies_by(& &1.to_id)
@@ -298,8 +316,16 @@ defmodule KilnCMS.Firing.References do
   # record itself knows its own dynamic name.
   defp editor_kind(%KilnCMS.CMS.Entry{} = record) do
     # A dynamic entry's editor segment is its own type's NAME, which lives on
-    # its definition — `:entry` is only the storage tier.
-    case CMS.get_type_definition(record.type_definition_id, authorize?: false) do
+    # its definition — `:entry` is only the storage tier. `authorize?: false`:
+    # editor-gated caller (see `usages/2`), and `TypeDefinition` reads are open
+    # to `OrgEditor` anyway; only `name` is used. `tenant: record.org_id`
+    # because `TypeDefinition` is org-scoped: the id comes off a same-org row,
+    # and under strict tenancy a tenant-less read would error and leave `kind`
+    # nil (#1309).
+    case CMS.get_type_definition(record.type_definition_id,
+           authorize?: false,
+           tenant: record.org_id
+         ) do
       {:ok, definition} -> definition.name
       _other -> nil
     end
@@ -310,13 +336,20 @@ defmodule KilnCMS.Firing.References do
   # `load_published/3` deliberately answers only for published documents — the
   # re-fire wave has no business with drafts. This one loads whatever is there,
   # so a document unpublished since it last fired still shows as a usage.
+  # `authorize?: false` (all four heads): editor-gated caller and tenant-scoped
+  # — see `usages/2`. Under the content read policy a type-scoped editor (#332)
+  # would not see draft referrers of an out-of-scope type; the fetch is by an
+  # id the edge table already holds, and only `title`/`state` are surfaced.
   defp load_any(org_id, :page, id), do: any(CMS.get_page(id, authorize?: false, tenant: org_id))
+  # (bypass: as above)
   defp load_any(org_id, :post, id), do: any(CMS.get_post(id, authorize?: false, tenant: org_id))
+  # (bypass: as above)
   defp load_any(org_id, :entry, id), do: any(CMS.get_entry(id, authorize?: false, tenant: org_id))
 
   defp load_any(org_id, type, id) do
     case CMS.ContentTypes.get(type) do
       %{source: :compiled, resource: resource} ->
+        # Same bypass rationale as the heads above (`usages/2`); tenant-scoped.
         any(Ash.get(resource, id, authorize?: false, tenant: org_id))
 
       _ ->
@@ -383,12 +416,18 @@ defmodule KilnCMS.Firing.References do
   """
   @spec load_published(Ash.UUID.t(), atom(), term()) ::
           {:ok, struct()} | :absent | :unknown_type | {:error, term()}
+  # The four heads read with `authorize?: false`: callers are `FireWorker` /
+  # `RefireWorker` only (Oban, no actor — the id and `org_id` come from job args
+  # the publish path wrote). The read is tenant-scoped, and `published/1`
+  # discards anything not `:published`, so a draft never leaves here.
   def load_published(org_id, :page, id),
     do: published(CMS.get_page(id, [authorize?: false, tenant: org_id] ++ fire_opts()))
 
+  # (bypass: as above)
   def load_published(org_id, :post, id),
     do: published(CMS.get_post(id, [authorize?: false, tenant: org_id] ++ fire_opts()))
 
+  # (bypass: as above)
   def load_published(org_id, :entry, id),
     do: published(CMS.get_entry(id, [authorize?: false, tenant: org_id] ++ fire_opts()))
 
@@ -396,6 +435,7 @@ defmodule KilnCMS.Firing.References do
   def load_published(org_id, type, id) do
     case CMS.ContentTypes.get(type) do
       %{source: :compiled, resource: resource} ->
+        # Worker path, tenant-scoped, published-only — bypass as the heads above.
         published(Ash.get(resource, id, [authorize?: false, tenant: org_id] ++ fire_opts()))
 
       _ ->

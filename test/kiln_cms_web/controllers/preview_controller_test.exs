@@ -21,10 +21,25 @@ defmodule KilnCMSWeb.PreviewControllerTest do
   defp json_conn(conn), do: put_req_header(conn, "accept", "application/json")
 
   describe "PreviewToken" do
-    test "sign/verify round-trips a page reference" do
+    test "sign/verify round-trips a page reference, tenant included" do
       page = draft_page()
-      assert {:ok, %{type: :page, id: id}} = page |> PreviewToken.sign() |> PreviewToken.verify()
+
+      assert {:ok, %{type: :page, id: id, org_id: org_id}} =
+               page |> PreviewToken.sign() |> PreviewToken.verify()
+
       assert id == page.id
+      assert org_id == page.org_id
+    end
+
+    test "verify refuses a token that carries no tenant (#1309)" do
+      # A pre-#1309 payload: validly signed, but the read it would authorize
+      # has no tenant to scope it. Nothing may read tenant-less on its behalf.
+      page = draft_page()
+
+      legacy =
+        Phoenix.Token.sign(KilnCMSWeb.Endpoint, "content preview", %{type: :page, id: page.id})
+
+      assert {:error, :invalid} = PreviewToken.verify(legacy)
     end
 
     test "verify rejects a garbage token" do
@@ -57,11 +72,22 @@ defmodule KilnCMSWeb.PreviewControllerTest do
     end
 
     test "404s when the referenced content doesn't exist", %{conn: conn} do
-      # A validly-signed token pointing at an id with no record.
-      token = PreviewToken.sign(%Page{id: Ecto.UUID.generate()})
+      # A validly-signed token for THIS site pointing at an id with no record —
+      # the org must be real, or `verify/1` refuses it before the read.
+      token = PreviewToken.sign(%Page{id: Ecto.UUID.generate(), org_id: draft_page().org_id})
 
       conn = conn |> json_conn() |> get(~p"/preview/#{token}")
-      assert json_response(conn, 404)
+      assert %{"errors" => [%{"code" => "invalid_preview"}]} = json_response(conn, 404)
+    end
+
+    test "404s when the token was minted for another site (#1309)", %{conn: conn} do
+      # Same record, but the token claims a different org than the one serving
+      # the request: refused rather than served under this site's name.
+      page = draft_page()
+      token = PreviewToken.sign(%{page | org_id: Ecto.UUID.generate()})
+
+      conn = conn |> json_conn() |> get(~p"/preview/#{token}")
+      assert %{"errors" => [%{"code" => "invalid_preview"}]} = json_response(conn, 404)
     end
   end
 end

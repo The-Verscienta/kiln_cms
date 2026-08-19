@@ -12,19 +12,36 @@ defmodule KilnCMS.CMS.PreviewToken do
   # link only exposes draft content briefly (was 1h).
   @max_age_seconds 900
 
-  @doc "Mint a preview token for a content record (any content type)."
+  @doc """
+  Mint a preview token for a content record (any content type).
+
+  The token carries the record's `org_id` alongside `{type, id}` (#1309): the
+  preview read runs `authorize?: false`, so the tenant in the token is what
+  scopes it — content resources are org-scoped and a tenant-less read is
+  refused under strict tenancy.
+  """
   @spec sign(struct()) :: String.t()
-  def sign(%resource{id: id}) do
-    Phoenix.Token.sign(KilnCMSWeb.Endpoint, @salt, %{type: type_for(resource), id: id})
+  def sign(%resource{id: id, org_id: org_id}) do
+    Phoenix.Token.sign(KilnCMSWeb.Endpoint, @salt, %{
+      type: type_for(resource),
+      id: id,
+      org_id: org_id
+    })
   end
 
   @doc """
-  Verify a preview token, returning `{:ok, %{type: type, id: id}}` or an error
-  (`:invalid` / `:expired`).
+  Verify a preview token, returning `{:ok, %{type: type, id: id, org_id: org_id}}`
+  or an error (`:invalid` / `:expired`). A token minted before the org was part
+  of the payload is `:invalid` — nothing may read tenant-less on its behalf.
   """
-  @spec verify(String.t()) :: {:ok, %{type: atom(), id: String.t()}} | {:error, atom()}
+  @spec verify(String.t()) ::
+          {:ok, %{type: atom(), id: String.t(), org_id: String.t()}} | {:error, atom()}
   def verify(token) when is_binary(token) do
-    Phoenix.Token.verify(KilnCMSWeb.Endpoint, @salt, token, max_age: @max_age_seconds)
+    case Phoenix.Token.verify(KilnCMSWeb.Endpoint, @salt, token, max_age: @max_age_seconds) do
+      {:ok, %{type: _, id: _, org_id: org_id} = claims} when is_binary(org_id) -> {:ok, claims}
+      {:ok, _legacy} -> {:error, :invalid}
+      error -> error
+    end
   end
 
   def verify(_), do: {:error, :invalid}

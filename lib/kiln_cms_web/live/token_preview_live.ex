@@ -28,10 +28,16 @@ defmodule KilnCMSWeb.TokenPreviewLive do
 
   @impl true
   def mount(%{"token" => token}, _session, socket) do
-    with {:ok, %{type: type, id: id}} <- PreviewToken.verify(token),
+    with {:ok, %{type: type, id: id, org_id: org_id}} <- PreviewToken.verify(token),
+         :ok <- same_site(org_id, socket.assigns[:current_org]),
          kind = to_string(type),
          true <- ContentTypes.type?(kind),
-         {:ok, record} <- ContentTypes.get_record(kind, id, authorize?: false) do
+         # `authorize?: false`: the signed token IS the grant (anonymous guests
+         # hold no actor); type, id and the tenant come from the token, never
+         # the URL — content is org-scoped, so the read carries `tenant:`, and
+         # `same_site/2` has pinned it to the serving org (#1309).
+         {:ok, record} <-
+           ContentTypes.get_record(kind, id, authorize?: false, tenant: org_id) do
       socket =
         socket
         |> assign(:invalid?, false)
@@ -80,6 +86,13 @@ defmodule KilnCMSWeb.TokenPreviewLive do
       socket
     end
   end
+
+  # A token minted on one site and opened on another's host is refused, as
+  # `ReleasePreviewLive` does: the draft must belong to the site whose layout
+  # (#680) wraps it, or one tenant's unpublished content is served under
+  # another's name.
+  defp same_site(org_id, %{id: org_id}), do: :ok
+  defp same_site(_org_id, _org), do: :error
 
   defp content_blocks(record) do
     record.blocks

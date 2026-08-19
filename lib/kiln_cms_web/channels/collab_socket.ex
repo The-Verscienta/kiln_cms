@@ -66,6 +66,10 @@ defmodule KilnCMSWeb.CollabSocket do
   # A token outlives the account it names by up to a day. Resolving now means a
   # deleted editor cannot keep collaborating on the strength of a token minted
   # before they were removed.
+  #
+  # `authorize?: false`: pre-auth — this read IS what produces the actor, so no
+  # actor exists yet, and `User`'s read policy is admin-or-self anyway. The id
+  # comes from a verified `Phoenix.Token`, not from the client.
   defp fetch_actor(user_id) when is_binary(user_id) do
     Accounts.get_user(user_id, authorize?: false)
   end

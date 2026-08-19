@@ -74,6 +74,31 @@ defmodule KilnCMS.Automation.RuleWorker do
   logged and dropped, not retried. Retrying a nice-to-have suggestion five
   times per document costs real tokens to tell an editor something they can ask
   for directly.
+
+  ## Why every Ash call here is `authorize?: false` (#1309)
+
+  An Oban worker has no request actor and there is no system actor yet
+  (#946), so a policy check would refuse everything. What makes the bypass
+  safe rather than an escalation:
+
+    * **Tenant is always the rule's own.** The rule itself is read under the
+      job's `org_id` (what `Automation.dispatch/3` read it under; a pre-#336 job
+      that carries none falls back to the default org), and every read/write
+      after that carries `tenant: rule.org_id`, so a rule can only touch its
+      own site's rows.
+    * **The target document is chosen by the event, not the rule.** `payload["id"]`
+      / the event's type come from the content action that fired. The one
+      record a rule's `config` does name is the newsletter `segment_id`, and
+      `Newsletter.send_as_newsletter/2` resolves that under the document's own
+      tenant, so it cannot point across sites.
+    * **Rules are authored only by org admins** (`KilnCMS.Automation.Rule` is
+      `policy always() → OrgAdmin`), and each bypassed target write is one an
+      `OrgAdmin` is already granted in that org (`Comment`/`Task` carry an
+      `OrgAdmin` bypass; `Social.Account` is admin-only) — so the bypass grants
+      the author nothing their own session couldn't do. Ash *validations*
+      (e.g. `AssigneeIsEditor` on `Task`) still run under `authorize?: false`.
+    * The one tenant-less read (`Accounts.User` in `editor?/2`) is a
+      by-primary-key lookup of a global row, and reads only `role`.
   """
   use Oban.Worker, queue: :default, max_attempts: 5
 
@@ -89,8 +114,11 @@ defmodule KilnCMS.Automation.RuleWorker do
   def perform(%Oban.Job{
         args: %{"rule_id" => rule_id, "event" => event, "payload" => payload} = args
       }) do
-    # `org_id` scopes the rule read to its own site (epic #336); pre-#336 jobs
-    # carry none — a nil tenant reads globally, finding the row by its unique id.
+    # `org_id` scopes the rule read to its own site (epic #336); a pre-#336 job
+    # carries none and reads under the default org (a non-default org's rule
+    # from that era is treated as gone). `rule_id` was enqueued by
+    # `Automation.dispatch/3`, not supplied by a user; system read,
+    # `authorize?: false` per the moduledoc.
     case Automation.get_rule(rule_id,
            authorize?: false,
            tenant: args["org_id"] || KilnCMS.Accounts.default_org_id()
@@ -145,6 +173,8 @@ defmodule KilnCMS.Automation.RuleWorker do
          # storage lookup is nil-safe where `get_record` would raise (same
          # guard the :reindex clause uses).
          storage when not is_nil(storage) <- ContentTypes.storage_type(type, org_id),
+         # System read of the event's own record under the rule's tenant
+         # (bypass rationale in the moduledoc).
          {:ok, record} <- ContentTypes.get_record(type, id, authorize?: false, tenant: org_id),
          :ok <- default_locale_only(record, event) do
       KilnCMS.Newsletter.send_as_newsletter(record,
@@ -219,6 +249,8 @@ defmodule KilnCMS.Automation.RuleWorker do
          storage when not is_nil(storage) <- ContentTypes.storage_type(type, org_id),
          {:ok, record} <-
            ContentTypes.get_record(type, id,
+             # System read of the event's own record under the rule's tenant
+             # (bypass rationale in the moduledoc).
              authorize?: false,
              tenant: org_id,
              # `KilnCMS.Social.Composer` posts the type's #805 default where the
@@ -285,6 +317,7 @@ defmodule KilnCMS.Automation.RuleWorker do
 
   defp open_lifecycle_tasks(type, id, org_id) do
     KilnCMS.CMS.list_open_tasks_of_kind!(type, id, :lifecycle_review,
+      # System read, tenant-scoped (bypass rationale in the moduledoc).
       authorize?: false,
       tenant: org_id
     )
@@ -313,6 +346,10 @@ defmodule KilnCMS.Automation.RuleWorker do
     end
   end
 
+  #
+  # Tenant-less `authorize?: false` lookup of the global `User` row by id —
+  # the same `role`-only check `AssigneeIsEditor` makes (roles are global, not
+  # per-org yet; see that validation's moduledoc). Reads only `role`.
   defp editor?(id, _org_id) do
     case Ash.get(KilnCMS.Accounts.User, id, authorize?: false) do
       {:ok, %{role: role}} -> role in [:editor, :admin]
@@ -341,6 +378,10 @@ defmodule KilnCMS.Automation.RuleWorker do
     # `creator_id` when an actor is present, and that column is NOT NULL, so
     # a bare system call raises. The assignee is the most meaningful stand-in
     # available for a rule-generated task: they are who acts on it.
+    #
+    # `authorize?: false` with a stand-in actor: the assignee has already
+    # passed `editor?/2` and `AssigneeIsEditor` still runs; tenant is the
+    # rule's own (moduledoc).
     case KilnCMS.CMS.assign_task(attrs,
            actor: %{id: assignee_id},
            authorize?: false,
@@ -372,6 +413,9 @@ defmodule KilnCMS.Automation.RuleWorker do
     render(template, event, payload, :text)
   end
 
+  # System read of the rule's own site's accounts (`Social.Account` is
+  # admin-only, and only an admin could have authored the rule) — bypass
+  # rationale in the moduledoc.
   defp announce_to(record, provider, org_id, rule_id, template) do
     KilnCMS.Social.accounts_for_provider!(provider, authorize?: false, tenant: org_id)
     |> Enum.each(fn account ->
@@ -487,6 +531,8 @@ defmodule KilnCMS.Automation.RuleWorker do
     with type when is_binary(type) <- event_type(event),
          id when is_binary(id) <- payload["id"],
          storage when not is_nil(storage) <- ContentTypes.storage_type(type, org_id) do
+      # System read of the event's own record under the rule's tenant (bypass
+      # rationale in the moduledoc).
       ContentTypes.get_record(type, id, authorize?: false, tenant: org_id, load: [:tags])
     else
       _ -> :skip
@@ -590,6 +636,8 @@ defmodule KilnCMS.Automation.RuleWorker do
             body: body,
             created_by_rule_id: context.rule_id
           },
+          # No actor exists for automation; `authorize?: false` under the
+          # rule's own tenant, on the event's own document (moduledoc).
           actor: nil,
           authorize?: false,
           tenant: context.org_id
@@ -625,6 +673,9 @@ defmodule KilnCMS.Automation.RuleWorker do
             created_by_rule_id: context.rule_id,
             kind: :intelligence_finding
           },
+          # No actor exists for automation; `authorize?: false` under the
+          # rule's own tenant — `AssigneeIsEditor` still vets `assignee`
+          # (moduledoc).
           actor: nil,
           authorize?: false,
           tenant: context.org_id

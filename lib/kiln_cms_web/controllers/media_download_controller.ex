@@ -294,6 +294,12 @@ defmodule KilnCMSWeb.MediaDownloadController do
   # `Task.Supervisor`-detached (`KilnCMSWeb.ViewTracking`'s pattern) — one
   # atomic UPDATE, not the multi-upsert cost a page view pays, so there's
   # nothing worth moving off the request path for.
+  #
+  # `authorize?: false`: `:increment_downloads` is a system counter write —
+  # its policy is `forbid_if always()`, so no non-admin actor passes it (only
+  # `MediaItem`'s `OrgAdmin` bypass would), and the download path may well be
+  # anonymous. The `item` was already read through the actor + tenant policy
+  # in `with_item/3`, and `tenant:` pins the write to the same site.
   defp track_download(item, org_id) do
     CMS.increment_media_downloads(item, authorize?: false, tenant: org_id)
   rescue

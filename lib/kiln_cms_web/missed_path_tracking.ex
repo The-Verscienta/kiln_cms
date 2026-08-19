@@ -116,6 +116,10 @@ defmodule KilnCMSWeb.MissedPathTracking do
   # task, so it never costs the request anything. The existence check is a point
   # read on the unique index; the count and the eviction only run for a path
   # that is genuinely new, against a table the cap keeps small by construction.
+  #
+  # `authorize?: false`: system-side bookkeeping on the 404 path — no actor
+  # (anonymous requests), tenant pinned to the resolved org, and `MissedPath`
+  # grants `:create` to no caller at all (delivery-only by policy).
   defp record(path, locale, org_id) do
     opts = [authorize?: false, tenant: org_id]
 
