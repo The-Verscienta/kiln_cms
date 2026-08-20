@@ -37,6 +37,8 @@ defmodule KilnCMS.MixProject do
       deps: deps(),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
       listeners: [Phoenix.CodeReloader],
+      # `mix coveralls.*` (#1314) — floor and skip list in coveralls.json.
+      test_coverage: [tool: ExCoveralls],
       # Never let `gettext.merge` copy a translation between non-identical
       # msgids. Its fuzzy matcher is Jaro distance on the msgid, and at the
       # 0.8 default our short UI strings collide constantly — "Site name" was
@@ -431,6 +433,20 @@ defmodule KilnCMS.MixProject do
     [
       preferred_envs: [
         precommit: :test,
+        # Every reporter excoveralls ships, not just the two CI uses: the dep is
+        # `only: :test`, so any one of them started in :dev fails on a missing
+        # module rather than on anything a reader could act on.
+        coveralls: :test,
+        "coveralls.cobertura": :test,
+        "coveralls.detail": :test,
+        "coveralls.github": :test,
+        "coveralls.html": :test,
+        "coveralls.json": :test,
+        "coveralls.lcov": :test,
+        "coveralls.multiple": :test,
+        "coveralls.post": :test,
+        "coveralls.xml": :test,
+        "kiln.coverage.summary": :test,
         "e2e.setup": :e2e,
         "e2e.reset": :e2e
       ]
@@ -475,6 +491,11 @@ defmodule KilnCMS.MixProject do
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
       {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false},
+      # Line coverage (#1314). `mix coveralls.*` wraps `mix test --cover`; the
+      # floor and skip list live in coveralls.json, the CI wiring in
+      # .github/workflows/ci.yml, the per-directory rollup in
+      # `mix kiln.coverage.summary`.
+      {:excoveralls, "~> 0.18", only: :test, runtime: false},
       # Dev only, and `mix docs` must be run under MIX_ENV=dev. Under `:test`,
       # `elixirc_paths` also compiles `test/support`, which puts `DataCase`,
       # the `Stub*` doubles and the fixture plugin into the published reference.

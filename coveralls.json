@@ -1,0 +1,44 @@
+{
+  "_comment": [
+    "Line-coverage settings for `mix coveralls.*` (excoveralls), #1314.",
+    "",
+    "`minimum_coverage` is a FLOOR, not a target: it sits just under the number",
+    "the full suite measured when it was last moved, so coverage cannot regress",
+    "silently. When a PR raises the measured number by a whole point or more,",
+    "raise this to just under the new number in the same PR. Never lower it to",
+    "make a red build green — that is the regression it exists to surface.",
+    "",
+    "`skip_files` are regexes on the source path. test/support is compiled",
+    "into the app under MIX_ENV=test (see elixirc_paths/1 in mix.exs) but is",
+    "test scaffolding, not code under test. Modules a dependency's macro",
+    "generates into this app (Spark DSL extensions, AshGraphql subscription",
+    "config, Postgrex type module, …) report under the dependency's own",
+    "source file — an absolute path into deps/ — and are that dependency's",
+    "code, not ours.",
+    "",
+    "Measured 2026-08-20 on the full suite, after merging main into this branch:",
+    "83.1% locally (7,344 tests). CI (ubuntu-latest) excludes the :qpdf tests and",
+    "so reads a step lower — it was 82.9% when the local number was 83.0%. The",
+    "floor is set from the CI number, that being the environment that enforces",
+    "it, and stays at 82.5 here: the rule above moves it on a whole point, not a",
+    "tenth. Re-state this measurement whenever you move the floor, so the next",
+    "reader can tell what the floor was actually checked against.",
+    "",
+    "terminal_options.print_files: the per-file table is off; the per-directory",
+    "rollup (`mix kiln.coverage.summary`) is the readable view, and the HTML",
+    "report has every file. `mix coveralls.detail` still prints sources."
+  ],
+  "skip_files": [
+    "^test/support/",
+    "(^|/)deps/"
+  ],
+  "coverage_options": {
+    "treat_no_relevant_lines_as_covered": false,
+    "output_dir": "cover/",
+    "minimum_coverage": 82.5,
+    "floor_coverage": true
+  },
+  "terminal_options": {
+    "print_files": false
+  }
+}

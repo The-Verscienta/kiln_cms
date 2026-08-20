@@ -23,12 +23,24 @@ alias KilnCMS.CMS
 # Roles can't be set through `register_with_password` (it always defaults to
 # :viewer so self-registration can't escalate), and we want the demo accounts
 # pre-confirmed, so seed them directly via Ash.Seed.
-seed_user = fn email, password, role ->
+#
+# A display name as well, for the DEMO accounts only: `@mentions` in editorial
+# comments resolve against the member's normalised NAME
+# (`KilnCMS.CMS.Mentions`), so a nameless user cannot be mentioned at all —
+# which made the mention journey undrivable against a seeded database
+# (#1314). An existing nameless demo user (a database seeded before this was
+# added) is backfilled rather than left as is, so re-running the seeds
+# converges on the same state a fresh one gets. `name` is nil whenever the
+# email was overridden: ADMIN_EMAIL is also how an operator bootstraps a REAL
+# admin (README), and that account's name is theirs to set — it is the byline
+# on everything they publish, and this script must stay safe to re-run.
+seed_user = fn email, password, role, name ->
   case Accounts.get_user_by_email(email, not_found_error?: false, authorize?: false) do
     {:ok, nil} ->
       user =
         Ash.Seed.seed!(User, %{
           email: email,
+          name: name,
           hashed_password: Bcrypt.hash_pwd_salt(password),
           confirmed_at: DateTime.utc_now(),
           role: role
@@ -36,6 +48,10 @@ seed_user = fn email, password, role ->
 
       IO.puts("  created #{role} user: #{email}")
       user
+
+    {:ok, %{name: current} = user} when current in [nil, ""] and is_binary(name) ->
+      IO.puts("  #{role} user already exists: #{email} (adding display name)")
+      Ash.Seed.update!(user, %{name: name})
 
     {:ok, user} ->
       IO.puts("  #{role} user already exists: #{email}")
@@ -48,9 +64,26 @@ admin_password = System.get_env("ADMIN_PASSWORD", "kilnadmin123")
 editor_email = System.get_env("EDITOR_EMAIL", "editor@kiln.test")
 editor_password = System.get_env("EDITOR_PASSWORD", "kilneditor123")
 
+# Only the stock demo addresses get a demo name — see `seed_user` above.
+demo_name = fn email, default_email, name -> if email == default_email, do: name end
+
 IO.puts("Seeding users…")
-admin = seed_user.(admin_email, admin_password, :admin)
-_editor = seed_user.(editor_email, editor_password, :editor)
+
+admin =
+  seed_user.(
+    admin_email,
+    admin_password,
+    :admin,
+    demo_name.(admin_email, "admin@kiln.test", "Demo Admin")
+  )
+
+_editor =
+  seed_user.(
+    editor_email,
+    editor_password,
+    :editor,
+    demo_name.(editor_email, "editor@kiln.test", "Demo Editor")
+  )
 
 # --- Demo content ----------------------------------------------------------
 

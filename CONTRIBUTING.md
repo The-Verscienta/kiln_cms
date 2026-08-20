@@ -172,11 +172,35 @@ green "No vulnerabilities found" — a pass that verified nothing.
 - Seed fixtures with `Ash.Seed.seed!` when you want to bypass the very
   policies/actions under test.
 
+### Coverage
+
+CI runs the suite under line coverage
+([excoveralls](https://github.com/parroty/excoveralls)) and enforces a
+**floor**, not a target: `minimum_coverage` in [`coveralls.json`](coveralls.json)
+sits just under the number the full suite last measured, so coverage cannot
+regress silently. When a PR raises the measured total by a whole point or more,
+raise the floor to just under the new number in the same PR; never lower it to
+turn a red build green — a build red on the floor is the regression it exists
+to surface. The HTML/JSON report is uploaded as the `coverage-report` artifact
+of the `Compile, lint, scan & test` job, and the job summary carries the
+per-directory rollup. Locally:
+
+```bash
+mix coveralls.multiple --type json --type html   # full suite under cover; writes cover/
+mix kiln.coverage.summary                        # one row per source directory
+```
+
+Cover-compiled modules run slower, so this takes longer than `mix test`. The
+usual `mix test` / `mix precommit` do not measure coverage.
+
 ### Browser E2E (Playwright)
 
 LiveView tests cover server-side events; the browser E2E suite (in `e2e/`)
 drives a real headless Chromium through the editor — TipTap rich text,
-SortableJS drag-reorder, and the create → edit → publish → view-live journey.
+SortableJS drag-reorder, the create → edit → publish → view-live journey,
+content-list bulk actions, media upload + focal point, release create → ship
+→ roll back, dynamic content-type creation, and comment threads with
+`@mention`.
 It runs in a dedicated `MIX_ENV=e2e` against its own `kiln_cms_e2e` database
 (no SQL sandbox — the browser hits the server out-of-process).
 
@@ -191,6 +215,14 @@ Playwright's `webServer` runs `mix e2e.setup` (build assets + create/migrate/see
 the e2e DB) and then serves with `PHX_SERVER=true PORT=4002 mix phx.server`. To
 run against a server you started yourself, set `E2E_NO_WEBSERVER=1`. CI runs this
 suite as a separate `e2e` job (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
+
+Locally the harness reuses a server already listening on the port
+(`reuseExistingServer`), so after pulling a change to `config/e2e.exs` or the
+seeds, stop that server (or check nothing else — a sibling worktree, say — is
+holding `:4002`; `PORT=4012 POSTGRES_DB=kiln_cms_e2e_mine npx playwright test`
+runs isolated). Several journeys depend on server-side state only a fresh boot
+delivers: the media and release journeys need Oban queues running, the
+`@mention` journey needs the Swoosh mailbox route and named demo users.
 
 ## Commits & pull requests
 

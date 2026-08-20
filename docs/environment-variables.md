@@ -680,10 +680,10 @@ task, so they matter only for the command that reads them.
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `ADMIN_EMAIL` | `admin@kiln.test` | Email of the admin user created by `mix run priv/repo/seeds.exs`. | [`priv/repo/seeds.exs:46`](../priv/repo/seeds.exs#L46) |
-| `ADMIN_PASSWORD` | `kilnadmin123` | That user's password. **The default is a published credential** — override it for anything reachable from a network. | [`priv/repo/seeds.exs:47`](../priv/repo/seeds.exs#L47) |
-| `EDITOR_EMAIL` | `editor@kiln.test` | Email of the seeded editor user. | [`priv/repo/seeds.exs:48`](../priv/repo/seeds.exs#L48) |
-| `EDITOR_PASSWORD` | `kilneditor123` | That user's password; same caveat as `ADMIN_PASSWORD`. | [`priv/repo/seeds.exs:49`](../priv/repo/seeds.exs#L49) |
+| `ADMIN_EMAIL` | `admin@kiln.test` | Email of the admin user created by `mix run priv/repo/seeds.exs`. | [`priv/repo/seeds.exs:62`](../priv/repo/seeds.exs#L62) |
+| `ADMIN_PASSWORD` | `kilnadmin123` | That user's password. **The default is a published credential** — override it for anything reachable from a network. | [`priv/repo/seeds.exs:63`](../priv/repo/seeds.exs#L63) |
+| `EDITOR_EMAIL` | `editor@kiln.test` | Email of the seeded editor user. | [`priv/repo/seeds.exs:64`](../priv/repo/seeds.exs#L64) |
+| `EDITOR_PASSWORD` | `kilneditor123` | That user's password; same caveat as `ADMIN_PASSWORD`. | [`priv/repo/seeds.exs:65`](../priv/repo/seeds.exs#L65) |
 | `KILN_STAGING_SCRUB` | unset | Authorizes the destructive scrub in a release (the Mix task uses `--yes`). **A sentinel word, not a boolean** — only the literal `confirm` authorizes it, so `true` deliberately does *not*, and the on/off rules above do not apply to this one. | [`KilnCMS.Staging`](../lib/kiln_cms/staging.ex#L33) |
 | `KILN_STAGING_FORCE` | `false` | Skip the ephemeral-database-name check that stops a scrub from running against something that doesn't look like a clone. This one **is** a boolean and follows the shared spellings — it previously matched the literal `1`, so `KILN_STAGING_FORCE=true` read as "not forced". | [`KilnCMS.Staging`](../lib/kiln_cms/staging.ex#L35) |
 | `STAGING_ADMIN_EMAIL` | unset | Admin account minted in the scrubbed clone. Unset (with no `--admin-email`) ⇒ the scrub reports `staging admin: NONE` and **nobody can sign in to the clone**, since the scrub removes the real users. | [`KilnCMS.Staging`](../lib/kiln_cms/staging.ex#L38) |

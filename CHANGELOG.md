@@ -29,6 +29,27 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **Coverage is measured, reported and floored; the Playwright suite grows
+  from 14 journeys to 19** (#1314). CI's main test job now runs the suite under
+  line coverage (`mix coveralls.multiple --type json --type html`), uploads the
+  HTML/JSON report as the `coverage-report` artifact, prints a per-directory
+  rollup (`mix kiln.coverage.summary`, also written to the job summary) so the
+  editor / delivery / governance split is visible, and enforces
+  `minimum_coverage` in `coveralls.json` — a floor set just under the measured
+  number, so coverage cannot regress silently, not a target. Five new browser
+  journeys under `e2e/tests/`: content-list bulk actions (publish, unpublish,
+  delete), media upload + focal point, release create → ship → roll back,
+  dynamic content-type creation through to a draft of the new type, and a
+  comment thread with an `@mention` that emails the mentioned user (asserted
+  through the Swoosh dev mailbox). Two seams the journeys needed: the e2e
+  server now processes Oban queues (media measurement, release go-live) and
+  mounts the Swoosh mailbox under a new `mailbox_preview` compile flag —
+  narrower than `dev_routes`, which stays dev-only and is refused in `:prod`
+  along with it — and `priv/repo/seeds.exs` gives the stock demo accounts
+  display names ("Demo Admin", "Demo Editor" — backfilled on an existing
+  database, and only for the default `admin@kiln.test` / `editor@kiln.test`
+  addresses, never an operator's own `ADMIN_EMAIL`), since a nameless user has
+  no `@handle` and cannot be mentioned.
 - **A canonical deploy guide, `docs/deploy.md`** (#1312). Until now the only
   deploy material was four per-release rehearsal checklists and a
   four-sentence README section, so a new operator reconstructed "how do I
@@ -60,6 +81,13 @@ migration, a rewritten column, a dropped config key).
   Mix task now wraps it.
 
 ### Fixed
+
+- **A media drawer opened straight after an upload now picks up the
+  dimensions the variant worker writes** (#1314). `width`/`height` (and so the
+  focal-point editor, which is gated on `width`) are measured in the
+  background; the grid refreshed on the worker's broadcast but the open
+  drawer kept rendering the pre-measurement row until closed and reopened. It
+  now re-reads its item when the broadcast is about that item.
 
 - **A collab room closed by periodic re-authorization now recovers when the
   grant comes back.** `KilnCMSWeb.CollabChannel`'s #775 re-check refused by

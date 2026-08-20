@@ -398,6 +398,72 @@ defmodule KilnCMSWeb.MediaLiveTest do
       send(lv.pid, :refresh_media)
       assert render(lv) =~ ">late-arrival.png<"
     end
+
+    # #1314: the drawer is opened straight after an upload, before the variant
+    # worker has measured it. Its item must follow the same broadcast, or the
+    # focal-point editor (gated on `width`) never appears until it is closed
+    # and reopened — the grid behind it having refreshed long since.
+    test "an open drawer picks up the dimensions the worker wrote", %{conn: conn} do
+      item = seed_unmeasured("fresh-upload.png")
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media?id=#{item.id}")
+      refute render(lv) =~ "focal-editor-#{item.id}"
+
+      Ash.Seed.update!(item, %{width: 640, height: 480})
+
+      # A broadcast about SOME OTHER item refreshes the grid but leaves the
+      # drawer alone — re-reading it costs the reference-graph fan-out, which
+      # a bulk regeneration must not charge every open drawer for.
+      send(lv.pid, {:media_processed, Ash.UUID.generate()})
+      send(lv.pid, :refresh_media)
+      refute render(lv) =~ "focal-editor-#{item.id}"
+
+      send(lv.pid, {:media_processed, item.id})
+      send(lv.pid, :refresh_media)
+      assert render(lv) =~ "focal-editor-#{item.id}"
+    end
+
+    # The staleness flag is a claim about the item currently in the drawer, so
+    # closing the drawer has to drop it. It used to survive: a broadcast about
+    # the item being closed left the flag set, and the next `:refresh_media`
+    # spent it re-reading whichever OTHER item the editor had opened since —
+    # charging that drawer the reference-graph fan-out the flag exists to avoid.
+    test "closing the drawer drops a pending staleness flag", %{conn: conn} do
+      closed = seed_unmeasured("closed-drawer.png")
+      opened = seed_unmeasured("opened-next.png")
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media?id=#{closed.id}")
+
+      # A broadcast about the OPEN item, with no refresh yet to consume it.
+      send(lv.pid, {:media_processed, closed.id})
+
+      # Close the drawer, then open a different item.
+      render_patch(lv, ~p"/media")
+      render_patch(lv, ~p"/media?id=#{opened.id}")
+
+      # Measure the second item behind the LiveView's back. A broadcast about
+      # neither of them must not pull it in: if the flag leaked, this refresh
+      # re-reads `opened` and its focal editor appears.
+      Ash.Seed.update!(opened, %{width: 640, height: 480})
+      send(lv.pid, {:media_processed, Ash.UUID.generate()})
+      send(lv.pid, :refresh_media)
+      refute render(lv) =~ "focal-editor-#{opened.id}"
+
+      # And a broadcast that IS about it still works.
+      send(lv.pid, {:media_processed, opened.id})
+      send(lv.pid, :refresh_media)
+      assert render(lv) =~ "focal-editor-#{opened.id}"
+    end
+  end
+
+  # A raster image the variant worker has not measured yet: no `width`, so no
+  # focal-point editor until one is written.
+  defp seed_unmeasured(filename) do
+    Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+      filename: filename,
+      url: "/uploads/#{filename}",
+      content_type: "image/png"
+    })
   end
 
   describe "upload" do

@@ -314,16 +314,21 @@ defmodule KilnCMS.Application do
   # expose AshAdmin (`/admin`, with an actor picker that can impersonate :admin),
   # LiveDashboard, and the Swoosh mailbox with no authentication. dev_routes is
   # compile-keyed (only config/dev.exs sets it), so this catches a mis-built
-  # release rather than a legitimate dev/test boot.
+  # release rather than a legitimate dev/test boot. `mailbox_preview` (#1314)
+  # is the narrower flag config/e2e.exs uses for the mailbox alone, and is
+  # refused for the same reason.
   defp assert_dev_routes_disabled_in_prod! do
     if Application.get_env(:kiln_cms, :compile_env) == :prod and
-         Application.get_env(:kiln_cms, :dev_routes) do
+         (Application.get_env(:kiln_cms, :dev_routes) or
+            Application.get_env(:kiln_cms, :mailbox_preview)) do
       raise """
-      Refusing to boot: `dev_routes` is enabled in a :prod release.
+      Refusing to boot: `dev_routes` (or `mailbox_preview`) is enabled in a :prod
+      release.
 
       This exposes /admin (AshAdmin), LiveDashboard, and the Swoosh mailbox
       without authentication. Rebuild the release without `config :kiln_cms,
-      dev_routes: true` (it should only ever be set in config/dev.exs).
+      dev_routes: true` / `mailbox_preview: true` (they should only ever be set
+      in config/dev.exs and config/e2e.exs).
       """
     end
   end
