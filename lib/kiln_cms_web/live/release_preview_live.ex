@@ -27,6 +27,9 @@ defmodule KilnCMSWeb.ReleasePreviewLive do
   def mount(%{"token" => token}, _session, socket) do
     with {:ok, %{release_id: id, org_id: org_id}} <- ReleasePreview.verify(token),
          :ok <- same_site(org_id, socket.assigns[:current_org]),
+         # `authorize?: false`: the signed token IS the grant — anonymous
+         # stakeholders hold no actor; id and tenant both come from the token
+         # (never the URL), and `same_site/2` pins it to the serving org.
          {:ok, release} <- CMS.get_release(id, authorize?: false, tenant: org_id) do
       entries = ReleasePreview.overlay(release)
 

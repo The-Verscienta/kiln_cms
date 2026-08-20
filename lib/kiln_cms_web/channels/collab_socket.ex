@@ -36,7 +36,12 @@ defmodule KilnCMSWeb.CollabSocket do
 
   @impl true
   def connect(%{"token" => token}, socket, connect_info) when is_binary(token) do
-    with {:ok, user_id} <-
+    # Charged first, ahead of token verification (threat-model item 10's
+    # `/ws/*` gap — see `KilnCMSWeb.SocketJoinBudget`): a connect this
+    # deployment is about to refuse anyway still cost a handshake, so it
+    # still has to count.
+    with :ok <- KilnCMSWeb.SocketJoinBudget.charge(:collab_join, connect_info),
+         {:ok, user_id} <-
            Phoenix.Token.verify(KilnCMSWeb.Endpoint, "collab", token, max_age: @max_age),
          # The struct match matters: a `not_found_error?: false` interface would
          # return `{:ok, nil}`, and an anonymous actor reads published content.
@@ -61,6 +66,10 @@ defmodule KilnCMSWeb.CollabSocket do
   # A token outlives the account it names by up to a day. Resolving now means a
   # deleted editor cannot keep collaborating on the strength of a token minted
   # before they were removed.
+  #
+  # `authorize?: false`: pre-auth — this read IS what produces the actor, so no
+  # actor exists yet, and `User`'s read policy is admin-or-self anyway. The id
+  # comes from a verified `Phoenix.Token`, not from the client.
   defp fetch_actor(user_id) when is_binary(user_id) do
     Accounts.get_user(user_id, authorize?: false)
   end

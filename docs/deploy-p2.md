@@ -1,5 +1,9 @@
 # Deploying the P2 features
 
+> **Archived per-release checklist** for the 2026-07 P2 feature set, kept for
+> history. How to deploy Kiln at all is [`deploy.md`](deploy.md), the
+> canonical deploy guide.
+
 Deploy checklist for the 2026-07 P2 feature set: signed provenance (#340),
 static/edge export (#353), DB-outage-resilient delivery (#341), editorial
 automation (#342), and multiplayer live preview (#343). Plus the

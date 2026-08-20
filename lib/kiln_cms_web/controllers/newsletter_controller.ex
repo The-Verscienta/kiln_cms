@@ -141,7 +141,9 @@ defmodule KilnCMSWeb.NewsletterController do
 
       subscriber ->
         # The token lookup spans orgs (the token is the secret); the update runs
-        # under the found subscriber's own site (epic #336).
+        # under the found subscriber's own site (epic #336). `authorize?: false`
+        # because there is no actor — `:unsubscribe`'s policy needs the owning
+        # member or an admin — and the grant is the token `lookup/1` verified.
         {:ok, _} =
           Newsletter.unsubscribe_subscriber(subscriber,
             authorize?: false,
@@ -158,6 +160,10 @@ defmodule KilnCMSWeb.NewsletterController do
     end
   end
 
+  # `authorize?: false` + no tenant: `:by_unsubscribe_token` is a
+  # `multitenancy :bypass` read whose filter is the opaque per-subscriber token
+  # itself, so it can only ever return the one row that token was minted for.
+  # An anonymous link click has no actor for the admin-only read policy.
   defp lookup(token),
     do:
       Newsletter.subscriber_by_unsubscribe_token!(token,
@@ -167,6 +173,8 @@ defmodule KilnCMSWeb.NewsletterController do
 
   # GET /newsletter/confirm/:token
   def confirm(conn, %{"token" => token}) do
+    # Same `authorize?: false` posture as `lookup/1`: `:by_confirm_token`
+    # filters on the secret token across orgs; no actor exists.
     case Newsletter.subscriber_by_confirm_token!(token,
            authorize?: false,
            not_found_error?: false
@@ -179,6 +187,9 @@ defmodule KilnCMSWeb.NewsletterController do
         )
 
       subscriber ->
+        # No actor (`:confirm` is admin-only by policy); the verified token is
+        # the grant, so the write bypasses authorization and runs under the
+        # found row's own site.
         {:ok, _} =
           Newsletter.confirm_subscriber(subscriber, authorize?: false, tenant: subscriber.org_id)
 

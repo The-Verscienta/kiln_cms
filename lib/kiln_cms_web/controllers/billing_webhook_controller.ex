@@ -77,6 +77,10 @@ defmodule KilnCMSWeb.BillingWebhookController do
   end
 
   defp insert_and_enqueue(conn, event, id, type) do
+    # `authorize?: false` (moduledoc): a webhook has no actor, and
+    # `WebhookEvent`'s policies forbid every create — the grant is the
+    # provider's HMAC over the raw body, already checked by `verify/3` above.
+    # The org is resolved from the event later, never from `conn`.
     case Billing.receive_webhook_event(
            %{provider: :stripe, provider_event_id: id, type: type, payload: event},
            authorize?: false

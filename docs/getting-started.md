@@ -73,6 +73,7 @@ declarative, so the module *is* the specification.
 | Style the admin UI | [Design language](design-language.md), [Design system](design-system.md) |
 | Write a plugin | [Runtime extensibility](plugin-extensibility.md) |
 | Configure an install | [Environment variables](environment-variables.md) |
+| Deploy it | [Deploy](deploy.md) — required environment, image, boot, health endpoints, first admin, backups, optional infrastructure |
 | Operate it in production | [Backups](backups.md), [Observability](observability.md), [Performance](performance.md), [Resilient delivery](resilient-delivery.md) |
 | Cut a release | [Releasing Kiln](releasing.md) |
 | Assess its security posture | [Threat model](threat-model.md), [Data flows & retention](data-flows.md) |

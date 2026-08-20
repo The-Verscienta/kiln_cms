@@ -129,6 +129,10 @@ defmodule KilnCMSWeb.ResolveController do
 
   defp fetch_published(nil, _slug, _locale, _org_id), do: nil
 
+  # Delivery bypass (see `KilnCMSWeb.ContentController`'s moduledoc): the
+  # anonymous resolver has no actor; the `:public_by_slug` action's own filter
+  # limits the read to published, public, unlocked records and `tenant:` pins
+  # it to this site. Only the type/slug/id of a hit leave the endpoint.
   defp fetch_published(ct, slug, locale, org_id) do
     case ContentTypes.get_published_by_slug(ct.type, slug, locale,
            not_found_error?: false,

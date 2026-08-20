@@ -112,6 +112,16 @@ jobs:
         # the PR rather than at a deploy.
         run: mix kiln.toolchain.check
 
+      - name: Check every web-layer policy bypass is explained
+        # `authorize?: false` skips every Ash policy on the resource. Under
+        # lib/kiln_cms_web/ each one must sit next to a comment naming the
+        # bypass and saying why it is safe — a system read of display data,
+        # a tenant-scoped delivery action whose own filter carries the grant,
+        # a pre-auth flow with no actor. #1309: 563 sites in lib/ and no
+        # second reviewer had walked them; this keeps a new one from landing
+        # by copy-paste alone. Non-web code is not gated yet.
+        run: mix kiln.authz.check
+
       # NOTE (#419): the migration/snapshot drift check moved to the
       # strict_tenancy job — snapshots are generated from the STRICT build
       # (the canonical prod schema: org-composite FKs), which this fail-open

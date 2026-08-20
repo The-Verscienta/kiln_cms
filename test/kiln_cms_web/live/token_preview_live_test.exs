@@ -82,6 +82,27 @@ defmodule KilnCMSWeb.TokenPreviewLiveTest do
     refute html =~ "Powered by KilnCMS."
   end
 
+  test "a token minted on another site is a dead link here, never content (#1309)",
+       %{conn: conn} do
+    o = KilnCMS.OrgFixtures.org("tpforeign")
+
+    page =
+      Ash.Seed.seed!(KilnCMS.CMS.Page, %{
+        title: "Their Draft",
+        slug: "tp-#{System.unique_integer([:positive])}",
+        state: :draft,
+        org_id: o.id,
+        blocks: [%{type: :heading, content: "Theirs", data: %{"level" => 1}, order: 0}]
+      })
+
+    # Served on the default site's host: the token's org is not the serving org.
+    {:ok, _lv, html} = live(conn, "/preview/#{PreviewToken.sign(page)}/live")
+
+    assert html =~ "expired"
+    refute html =~ "Their Draft"
+    refute html =~ "Theirs"
+  end
+
   test "an invalid token shows a dead-link notice, never content", %{conn: conn} do
     {:ok, _lv, html} = live(conn, "/preview/garbage-token/live")
 

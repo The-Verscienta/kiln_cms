@@ -148,7 +148,12 @@ for one type, and no single filter value returns the whole set until
    mix kiln.meili.reindex
    ```
 
-   (No-op with a notice when the backend is disabled.)
+   (No-op with a notice when the backend is disabled.) In a production release
+   there is no Mix — run the same thing on the live node:
+
+   ```bash
+   bin/kiln_cms rpc 'KilnCMS.Search.Meilisearch.reindex_all()'
+   ```
 
 ## Querying
 

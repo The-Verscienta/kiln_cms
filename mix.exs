@@ -214,6 +214,7 @@ defmodule KilnCMS.MixProject do
       # Search
       "docs/meilisearch.md": [title: "Meilisearch backend"],
       # Operations & deployment
+      "docs/deploy.md": [],
       "docs/environment-variables.md": [],
       "docs/backups.md": [],
       "docs/observability.md": [],
@@ -327,6 +328,7 @@ defmodule KilnCMS.MixProject do
       ],
       Search: ["docs/meilisearch.md"],
       "Operations & deployment": [
+        "docs/deploy.md",
         "docs/environment-variables.md",
         "docs/backups.md",
         "docs/observability.md",
@@ -650,6 +652,9 @@ defmodule KilnCMS.MixProject do
         # dependency compile to discover: a Dockerfile pin that can't satisfy
         # this file's `elixir:` requirement (#600).
         "kiln.toolchain.check",
+        # An `authorize?: false` on a request path with no comment saying why
+        # it is safe (#1309). Cheap, and the reason belongs next to the bypass.
+        "kiln.authz.check",
         # Catches untranslated/fuzzy msgstrs locally. Read-only, so `precommit`
         # keeps its non-destructive contract — the *drift* half of the gate
         # still lives in CI only, because `gettext.extract --merge` rewrites

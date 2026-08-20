@@ -50,6 +50,35 @@ migration, a rewritten column, a dropped config key).
   database, and only for the default `admin@kiln.test` / `editor@kiln.test`
   addresses, never an operator's own `ADMIN_EMAIL`), since a nameless user has
   no `@handle` and cannot be mentioned.
+- **A canonical deploy guide, `docs/deploy.md`** (#1312). Until now the only
+  deploy material was four per-release rehearsal checklists and a
+  four-sentence README section, so a new operator reconstructed "how do I
+  deploy this at all" from release-specific notes. The guide covers the
+  required environment (`DATABASE_URL`, `SECRET_KEY_BASE`,
+  `TOKEN_SIGNING_SECRET` raise on boot; `PHX_HOST`/`PHX_SERVER`), building
+  the image, what the boot `CMD` does (migrate, then serve), `/live` vs `/up`
+  and why a restart-triggering check must use the former, the first-admin
+  bootstrap, the backup/restore pointer, the optional Dragonfly/Meilisearch/
+  MinIO profiles (and that no shipped cache adapter uses Dragonfly), and where
+  `environment-variables.md`, `backups.md` and `releasing.md` fit. A reference
+  `docker-compose.prod.yml` (app + pgvector Postgres, optional profiles) sits
+  at the repository root, namespaced `kiln-prod` so it never shares volumes
+  with the dev compose file; it fails fast naming any missing required
+  secret, passes optional variables through an `env_file` rather than listing
+  them with empty defaults (several are presence-checked and an empty string
+  counts as set), accepts an external `DATABASE_URL`, and wires both backup
+  paths onto one host directory (Postgres on the host loopback for the cron,
+  that directory bind-mounted at `BACKUP_DIR` for the in-app page; the image
+  now owns the default `/var/backups/kiln`, so a named volume there works
+  too). The `deploy-*.md` checklists stay under *Audits & release
+  checklists*, each now opening with a banner that points at the guide — the
+  P2/P3 ones as history, the staging and write-API ones as the still-current
+  feature-enablement checklists.
+- **`KilnCMS.Search.Meilisearch.reindex_all/0`** — the full Meilisearch
+  backfill as a release-callable function (`bin/kiln_cms rpc
+  'KilnCMS.Search.Meilisearch.reindex_all()'`), so a production release, which
+  has no Mix, can do what `mix kiln.meili.reindex` does from a checkout; the
+  Mix task now wraps it.
 
 ### Fixed
 
@@ -60,8 +89,75 @@ migration, a rewritten column, a dropped config key).
   drawer kept rendering the pre-measurement row until closed and reopened. It
   now re-reads its item when the broadcast is about that item.
 
+- **A collab room closed by periodic re-authorization now recovers when the
+  grant comes back.** `KilnCMSWeb.CollabChannel`'s #775 re-check refused by
+  stopping the channel with `{:shutdown, :unauthorized}`, and its docs said
+  Phoenix would send `phx_error` and `phoenix.js` would retry the join. It
+  does not: a `{:shutdown, _}` stop is a `phx_close` frame, which `phoenix.js`
+  treats as a finished leave — channel marked closed, removed from the socket,
+  no rejoin timer — so a room closed that way stayed dead in the tab until a
+  reload, buffering edits into a channel that would never send them, even
+  after the grant was restored. The refusal now closes the **connection** first
+  (`KilnCMSWeb.SocketReauth.close_connection/1`, the same `"disconnect"`
+  broadcast `SessionEviction` uses), then stops: the client sees a socket
+  closed with 1001, reconnects on its backoff and rejoins, and every rejoin
+  runs the full `join/3` — refused while the grant is narrowed, admitted once
+  it comes back. Both refusal sites (the timer and the update floor) take the
+  path; the moduledoc, `docs/threat-model.md` and the channel tests now state
+  the real mechanism and assert on the broadcast.
+
+- **Calendar reschedule: padding days, same-day drops, and hand-pushed lanes.**
+  The month grid pads out to full Mon–Sun weeks and every padding cell is a
+  drop target, but the month *query* covered only the calendar month — so a
+  chip dragged onto a trailing 2 September cell while viewing August was
+  written and then vanished from the grid, and anything already scheduled on
+  a padding day never drew a chip. The month window is now the rendered grid.
+  `refuse_past` judges the full timestamp a move would write rather than the
+  day: a drop onto today keeps the chip's time of day, so a 09:00 chip dropped
+  at 15:00 was a publish six hours in the past. And a `reschedule` payload
+  naming a lane with no drag handle (`published`, `review_due`, …) is refused
+  with a message instead of crashing the LiveView on a `case` with no clause
+  for it.
+
 ### Security
 
+- **`/ws/gql`, `/ws/bridge` and `/ws/collab` connects are now budgeted per
+  client address**, closing the `/ws/*` half of `docs/threat-model.md` item
+  10's residual gap (the `/live` half was closed earlier by #1183). A new
+  `KilnCMSWeb.SocketJoinBudget`, mirroring `KilnCMSWeb.LiveJoinBudget`'s
+  shape, charges each socket's own `connect/1,2,3` first — ahead of
+  tenant/token/auth resolution — against its own `KilnCMSWeb.RateLimit`
+  bucket (`:gql_join`, `:bridge_join`, `:collab_join`; 300/minute per
+  address by default, each independent so a flood against the one of the
+  three anonymous by default cannot spend a budget a signed-in editor's
+  session then pays for). Frames on an established `/ws/collab` connection
+  are budgeted per account below (#1305); events on `/live` and subscription
+  documents on `/ws/gql` remain uncounted.
+- **Every policy bypass on a request path now says why it is safe, and a
+  gate keeps it that way** (#1309). `authorize?: false` skips every Ash policy
+  on a resource, and it appeared 563 times across `lib/` with no second
+  reviewer having walked the sites. This pass audits the 47 in
+  `lib/kiln_cms_web/` (public delivery, previews, webhooks, socket auth,
+  tenant resolution, tracking, the content editor) plus the four worst
+  offenders elsewhere (`Firing.References`, `Billing`, `Newsletter.TierSync`,
+  `Automation.RuleWorker`): two `RedirectLive` reads now run as the acting
+  admin instead of bypassing; every other site keeps the bypass with a comment
+  naming the reason (a delivery action whose own filter carries the
+  published/audience/unlock grant, a tenant already scoped, a pre-auth flow
+  with no actor, a system read of display data on a self-only-read resource).
+  New `mix kiln.authz.check` — in `mix precommit` and CI — fails on a new
+  `authorize?: false` under `lib/kiln_cms_web/` without such a comment within
+  12 lines of the call — one comment per call, so a second bypass pasted under
+  a justified one is red (AST-based, so the phrase in a string or doc is not a
+  site). The
+  audit also found three tenant-less reads on org-scoped resources that would
+  be refused under the strict (production) tenancy build: content preview
+  tokens now carry the record's `org_id` (`KilnCMS.CMS.PreviewToken`; a token
+  minted without one is `:invalid`, and one presented on another site's host
+  is refused, as release previews already were), and the dynamic-type name lookups in
+  `Firing.References` and `BustContentCache` pass the record's tenant.
+  Non-web code is not gated yet; a system actor (#946) is the way to move
+  worker code under the policies rather than around them.
 - **Frames on an established `/ws/collab` connection are budgeted per
   account** (#1305). #1183 charged `/live` root joins, but once a socket was
   up nothing counted what a client sent over it: an authenticated editor

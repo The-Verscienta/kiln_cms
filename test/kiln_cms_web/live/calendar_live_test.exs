@@ -55,6 +55,17 @@ defmodule KilnCMSWeb.CalendarLiveTest do
 
   defp slug, do: "cal-#{System.unique_integer([:positive])}"
 
+  # A fixture date that is always in the future and always mid-month: the 15th
+  # of next month. Anchoring on `today + n` instead put the fixture in a
+  # different month from the one the calendar rendered on any day within `n`
+  # of month end. Callers mount at `calendar_at(soon())` so the rendered month
+  # is the anchor's, whatever today is; `+1`/`+2` stay inside it.
+  defp soon do
+    Date.utc_today() |> Date.beginning_of_month() |> Date.shift(month: 1) |> Date.add(14)
+  end
+
+  defp calendar_at(%Date{} = at), do: ~p"/editor/calendar?at=#{Date.to_iso8601(at)}"
+
   test "plots publish, unpublish, and went-live events with editor links", %{conn: conn} do
     admin = authed_admin()
     # Keep every fixture inside the *current* month regardless of today's date.
@@ -188,8 +199,7 @@ defmodule KilnCMSWeb.CalendarLiveTest do
           actor: admin
         )
 
-      {:ok, lv, _html} =
-        conn |> log_in(admin) |> live(~p"/editor/calendar?at=#{Date.to_iso8601(at)}")
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(calendar_at(at))
 
       week = lv |> element("a", "Week") |> render_click()
       assert week =~ page.title
@@ -461,22 +471,25 @@ defmodule KilnCMSWeb.CalendarLiveTest do
       )
     end
 
-    # Anchor everything on the 10th of NEXT month, and mount the calendar at
-    # that month (`calendar_at/0`): always well in the future, and "two days
-    # later" never crosses out of the rendered month — a fortnight-from-today
-    # anchor did, from the 16th of every month onwards, and the four moves
-    # below failed with the event outside the loaded window (#1314).
-    defp soon, do: Date.utc_today() |> Date.end_of_month() |> Date.add(10)
-    defp calendar_at, do: ~p"/editor/calendar?at=#{Date.to_iso8601(soon())}"
+    # Mount the calendar on `at`'s month and prove the fixture is actually on
+    # it: every reschedule below depends on that, and the "leaves the record
+    # alone" assertions would pass vacuously otherwise.
+    defp open_calendar_on(conn, user, %Date{} = at, %{title: title}) do
+      {:ok, lv, html} = conn |> log_in(user) |> live(calendar_at(at))
+
+      assert html =~ title
+      {:ok, lv, html}
+    end
 
     test "moves a scheduled publish to the dropped day, keeping its time", %{conn: conn} do
       admin = authed_admin()
-      at = DateTime.new!(soon(), ~T[09:30:00])
+      day = soon()
+      at = DateTime.new!(day, ~T[09:30:00])
       page = scheduled_page(admin, at)
 
-      {:ok, lv, _html} = conn |> log_in(admin) |> live(calendar_at())
+      {:ok, lv, _html} = open_calendar_on(conn, admin, day, page)
 
-      target = Date.add(soon(), 1)
+      target = Date.add(day, 1)
 
       render_hook(lv, "reschedule", %{
         "id" => page.id,
@@ -495,6 +508,7 @@ defmodule KilnCMSWeb.CalendarLiveTest do
 
     test "moves an embargo end, whatever its expiry action", %{conn: conn} do
       admin = authed_admin()
+      day = soon()
 
       page =
         CMS.create_page!(
@@ -509,11 +523,11 @@ defmodule KilnCMSWeb.CalendarLiveTest do
       page = CMS.publish_page!(page, %{}, actor: admin)
 
       page =
-        CMS.update_page!(page, %{unpublish_at: DateTime.new!(soon(), ~T[17:00:00])}, actor: admin)
+        CMS.update_page!(page, %{unpublish_at: DateTime.new!(day, ~T[17:00:00])}, actor: admin)
 
-      {:ok, lv, _html} = conn |> log_in(admin) |> live(calendar_at())
+      {:ok, lv, _html} = open_calendar_on(conn, admin, day, page)
 
-      target = Date.add(soon(), 2)
+      target = Date.add(day, 2)
 
       render_hook(lv, "reschedule", %{
         "id" => page.id,
@@ -527,10 +541,14 @@ defmodule KilnCMSWeb.CalendarLiveTest do
 
     test "refuses a move into the past and leaves the record alone", %{conn: conn} do
       admin = authed_admin()
-      at = DateTime.new!(soon(), ~T[09:00:00])
+      # The one drag a real editor can make backwards: a chip in the month the
+      # calendar opens on by default, dropped onto yesterday's cell. So this
+      # test keeps the default mount and a fixture in *today's* month.
+      at = DateTime.new!(Date.utc_today(), ~T[23:59:59])
       page = scheduled_page(admin, at)
 
-      {:ok, lv, _html} = conn |> log_in(admin) |> live(calendar_at())
+      {:ok, lv, html} = conn |> log_in(admin) |> live(~p"/editor/calendar")
+      assert html =~ page.title
 
       html =
         render_hook(lv, "reschedule", %{
@@ -546,20 +564,75 @@ defmodule KilnCMSWeb.CalendarLiveTest do
       assert DateTime.compare(CMS.get_page!(page.id, actor: admin).scheduled_at, at) == :eq
     end
 
-    test "refuses an event that is not in the rendered window", %{conn: conn} do
+    test "refuses a drop onto today once the chip's time of day has passed", %{conn: conn} do
       admin = authed_admin()
-      # Scheduled far outside the default month, so the calendar never loaded it.
-      far = DateTime.new!(Date.shift(Date.utc_today(), year: 2), ~T[09:00:00])
-      page = scheduled_page(admin, far)
+      # A drop keeps the chip's time of day, so "today" is only in the future
+      # until that time comes round. Midnight is always behind us.
+      at = DateTime.new!(Date.end_of_month(Date.utc_today()), ~T[00:00:00])
+      page = scheduled_page(admin, at)
 
-      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/calendar")
+      {:ok, lv, html} = conn |> log_in(admin) |> live(~p"/editor/calendar")
+      assert html =~ page.title
 
       html =
         render_hook(lv, "reschedule", %{
           "id" => page.id,
           "type" => "page",
           "kind" => "publish",
+          "date" => Date.to_iso8601(Date.utc_today())
+        })
+
+      assert html =~ "Can&#39;t reschedule into the past" or
+               html =~ "Can't reschedule into the past"
+
+      assert DateTime.compare(CMS.get_page!(page.id, actor: admin).scheduled_at, at) == :eq
+    end
+
+    test "refuses to drag a lane that offers no handle, without crashing", %{conn: conn} do
+      admin = authed_admin()
+      # `published` is on the calendar but is history, not a plan — the chip
+      # has no drag handle. The payload names its own kind, so a hand-pushed
+      # event must be refused server-side rather than reach a `case` with no
+      # clause for it.
+      page = CMS.create_page!(%{title: "Live #{slug()}", slug: slug()}, actor: admin)
+      page = CMS.publish_page!(page, %{}, actor: admin)
+
+      {:ok, lv, html} = conn |> log_in(admin) |> live(~p"/editor/calendar")
+      assert html =~ page.title
+
+      html =
+        render_hook(lv, "reschedule", %{
+          "id" => page.id,
+          "type" => "page",
+          "kind" => "published",
           "date" => Date.to_iso8601(soon())
+        })
+
+      assert html =~ "can&#39;t be moved by dragging" or html =~ "can't be moved by dragging"
+
+      assert DateTime.compare(
+               CMS.get_page!(page.id, actor: admin).published_at,
+               page.published_at
+             ) ==
+               :eq
+    end
+
+    test "refuses an event that is not in the rendered window", %{conn: conn} do
+      admin = authed_admin()
+      day = soon()
+      # Scheduled far outside the rendered month, so the calendar never loaded it.
+      far = DateTime.new!(Date.shift(day, year: 2), ~T[09:00:00])
+      page = scheduled_page(admin, far)
+
+      {:ok, lv, html} = conn |> log_in(admin) |> live(calendar_at(day))
+      refute html =~ page.title
+
+      html =
+        render_hook(lv, "reschedule", %{
+          "id" => page.id,
+          "type" => "page",
+          "kind" => "publish",
+          "date" => Date.to_iso8601(day)
         })
 
       assert html =~ "no longer on the calendar"
@@ -567,17 +640,54 @@ defmodule KilnCMSWeb.CalendarLiveTest do
       assert DateTime.compare(CMS.get_page!(page.id, actor: admin).scheduled_at, far) == :eq
     end
 
+    test "the month grid's padding days are part of the window", %{conn: conn} do
+      admin = authed_admin()
+      # The month view pads out to full weeks, and every padding cell is a drop
+      # target. Anchor on a month whose grid runs past its own last day.
+      day = month_with_trailing_padding()
+      padding = day |> Date.end_of_month() |> Date.end_of_week()
+      assert padding.month != day.month
+
+      already_there = scheduled_page(admin, DateTime.new!(padding, ~T[09:00:00]))
+      movable = scheduled_page(admin, DateTime.new!(day, ~T[09:00:00]))
+
+      {:ok, lv, html} = conn |> log_in(admin) |> live(calendar_at(day))
+      # Something scheduled on a padding day draws a chip like any other day.
+      assert html =~ already_there.title
+
+      moved =
+        render_hook(lv, "reschedule", %{
+          "id" => movable.id,
+          "type" => "page",
+          "kind" => "publish",
+          "date" => Date.to_iso8601(padding)
+        })
+
+      assert DateTime.to_date(CMS.get_page!(movable.id, actor: admin).scheduled_at) == padding
+      # And a chip dropped there does not vanish from the grid it was dropped on.
+      assert moved =~ movable.title
+    end
+
+    # Some months fill their weeks exactly (February 2027 starts on a Monday
+    # and ends on a Sunday); walk forward from the anchor until one does not.
+    defp month_with_trailing_padding do
+      Stream.iterate(soon(), &Date.shift(&1, month: 1))
+      |> Enum.find(fn day -> Date.end_of_week(Date.end_of_month(day)).month != day.month end)
+    end
+
     test "a viewer never reaches the calendar at all", %{conn: conn} do
       # The route lives in the `:editor_routes` live session, so the boundary
       # for a viewer is the mount, not the event handler — there is no forged
-      # payload to test, because there is no socket to send one on.
+      # payload to test, because there is no socket to send one on. Mounted at
+      # the bare URL every nav link uses: the hook halts before any param is read.
       assert {:error, {:redirect, _}} =
                conn |> log_in(authed_viewer()) |> live(~p"/editor/calendar")
     end
 
     test "an editor scoped to other types cannot move what they cannot edit", %{conn: conn} do
       admin = authed_admin()
-      at = DateTime.new!(soon(), ~T[09:00:00])
+      day = soon()
+      at = DateTime.new!(day, ~T[09:00:00])
       page = scheduled_page(admin, at)
 
       # Granular RBAC (#332): this editor may author posts, not pages. The page
@@ -586,13 +696,13 @@ defmodule KilnCMSWeb.CalendarLiveTest do
       scoped =
         authed_user(:editor, %{editable_types: ["post"]})
 
-      {:ok, lv, _html} = conn |> log_in(scoped) |> live(calendar_at())
+      {:ok, lv, _html} = open_calendar_on(conn, scoped, day, page)
 
       render_hook(lv, "reschedule", %{
         "id" => page.id,
         "type" => "page",
         "kind" => "publish",
-        "date" => Date.to_iso8601(Date.add(soon(), 1))
+        "date" => Date.to_iso8601(Date.add(day, 1))
       })
 
       assert DateTime.compare(CMS.get_page!(page.id, actor: admin).scheduled_at, at) == :eq
@@ -600,9 +710,10 @@ defmodule KilnCMSWeb.CalendarLiveTest do
 
     test "announces the move for a screen reader", %{conn: conn} do
       admin = authed_admin()
-      page = scheduled_page(admin, DateTime.new!(soon(), ~T[09:00:00]))
+      day = soon()
+      page = scheduled_page(admin, DateTime.new!(day, ~T[09:00:00]))
 
-      {:ok, lv, html} = conn |> log_in(admin) |> live(calendar_at())
+      {:ok, lv, html} = open_calendar_on(conn, admin, day, page)
       # The live region exists before anything happens — one inserted later is
       # not reliably announced.
       assert html =~ ~s(aria-live="polite")
@@ -612,7 +723,7 @@ defmodule KilnCMSWeb.CalendarLiveTest do
           "id" => page.id,
           "type" => "page",
           "kind" => "publish",
-          "date" => Date.to_iso8601(Date.add(soon(), 1))
+          "date" => Date.to_iso8601(Date.add(day, 1))
         })
 
       assert moved =~ "Moved"

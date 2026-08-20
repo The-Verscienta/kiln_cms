@@ -1,5 +1,9 @@
 # Deploying / operating the staging-environment tooling
 
+> **Feature-enablement checklist** for the staging-environment tooling — still the
+> operator checklist for turning it on. It assumes a deployed Kiln: how to
+> deploy at all is [`deploy.md`](deploy.md), the canonical deploy guide.
+
 Deploy + operator checklist for ephemeral staging / preview environments (#382,
 the actionable slice of #334). Shipped in #381. Feature guide:
 [`staging-environments.md`](staging-environments.md).

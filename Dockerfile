@@ -205,7 +205,10 @@ RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
 ENV LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8
 
 WORKDIR /app
-RUN chown nobody /app
+# /var/backups/kiln is the default BACKUP_DIR (config/runtime.exs); owning it
+# here means a fresh named volume mounted there inherits `nobody` and the
+# in-app Backups page can write without a manual chown.
+RUN mkdir -p /var/backups/kiln && chown nobody /app /var/backups/kiln
 
 ENV MIX_ENV="prod"
 
@@ -238,7 +241,10 @@ USER nobody
 # hole).
 #
 # It probes `/live` (KilnCMSWeb.HealthController :live), NOT `/up`: this
-# healthcheck TRIGGERS RESTARTS, and `/up` returns 503 when the database is
+# healthcheck is the RESTART signal wherever something acts on it (Swarm or an
+# autoheal sidecar; plain Docker/Compose only mark the container unhealthy,
+# and Kubernetes ignores it in favour of its own probes — point those at the
+# same path), and `/up` returns 503 when the database is
 # unreachable — restarting the app on a database outage it can't fix only
 # restart-storms the replicas (#816). `/live` returns 200 iff the endpoint is
 # serving, no database check; with the endpoint down the connection is refused.

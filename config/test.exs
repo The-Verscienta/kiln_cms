@@ -175,7 +175,13 @@ config :kiln_cms, KilnCMSWeb.RateLimit,
     # (#1305), and one test's actor may push many; raised out of the way, and
     # `CollabChannelTest`/`SocketEventBudgetTest` lower it back for their own
     # budget tests.
-    collab_event: {1_000_000, :timer.minutes(1)}
+    collab_event: {1_000_000, :timer.minutes(1)},
+    # Same reason as `live_join` above, for the `/ws/*` sockets
+    # (`KilnCMSWeb.SocketJoinBudget`); `SocketJoinBudgetTest` lowers these back
+    # for its own tests.
+    gql_join: {1_000_000, :timer.minutes(1)},
+    bridge_join: {1_000_000, :timer.minutes(1)},
+    collab_join: {1_000_000, :timer.minutes(1)}
   }
 
 # Per-account auth budgets (#478). The whole suite signs in as seeded users and
