@@ -364,8 +364,16 @@ defmodule KilnCMSWeb.CollabChannelTest do
       # `subscribe_and_join/3` LINKS the channel to the test process, so a room
       # that closes itself takes the test with it — which is the whole behaviour
       # under test here. Trapping turns that into the `{:EXIT, …}` message these
-      # tests assert on, and is also how a real client learns: Phoenix pushes
-      # `phx_error` on the channel exiting, and `phoenix.js` retries the join.
+      # tests assert on.
+      #
+      # The exit is NOT how a real client learns, though. A `{:shutdown, _}`
+      # stop is a `phx_close` frame, which `phoenix.js` treats as a finished
+      # leave and never rejoins. What the client recovers from is the
+      # `"disconnect"` broadcast the channel sends its transport first (the
+      # test process, under `Phoenix.ChannelTest`): the socket closes with 1001,
+      # the client reconnects and rejoins, and the rejoin runs `join/3`. So each
+      # closing test asserts on that broadcast too — without it the room stays
+      # dead in the tab even after the grant comes back.
       Process.flag(:trap_exit, true)
 
       :ok
@@ -402,6 +410,7 @@ defmodule KilnCMSWeb.CollabChannelTest do
       Ash.Seed.update!(editor, %{editable_types: ["post"]})
 
       assert_receive {:EXIT, ^channel, {:shutdown, :unauthorized}}, 2_000
+      assert_receive %Phoenix.Socket.Broadcast{event: "disconnect"}
     end
 
     test "a room whose authorization still holds survives its checks and keeps relaying",
@@ -414,6 +423,7 @@ defmodule KilnCMSWeb.CollabChannelTest do
       channel = socket.channel_pid
 
       refute_receive {:EXIT, ^channel, _reason}, 400
+      refute_received %Phoenix.Socket.Broadcast{event: "disconnect"}
 
       ref = push(socket, "update", %{"update" => yjs_update("still here")})
       assert_reply ref, :ok
@@ -440,6 +450,7 @@ defmodule KilnCMSWeb.CollabChannelTest do
       Ash.Seed.update!(published, %{audience: :member})
 
       assert_receive {:EXIT, ^channel, {:shutdown, :unauthorized}}, 2_000
+      assert_receive %Phoenix.Socket.Broadcast{event: "disconnect"}
     end
 
     test "a document whose state changes under an open room is caught", %{actor: admin} do
@@ -457,6 +468,7 @@ defmodule KilnCMSWeb.CollabChannelTest do
       Ash.Seed.update!(published, %{state: :draft})
 
       assert_receive {:EXIT, ^channel, {:shutdown, :unauthorized}}, 2_000
+      assert_receive %Phoenix.Socket.Broadcast{event: "disconnect"}
     end
 
     test "the update floor refuses a busy room without waiting for the timer", %{page: page} do
@@ -484,6 +496,8 @@ defmodule KilnCMSWeb.CollabChannelTest do
       push(socket, "update", %{"update" => yjs_update("three")})
 
       assert_receive {:EXIT, ^channel, {:shutdown, :unauthorized}}, 2_000
+      # The floor path closes the connection too, not only the timer path.
+      assert_receive %Phoenix.Socket.Broadcast{event: "disconnect"}
     end
   end
 

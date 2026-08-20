@@ -59,6 +59,25 @@ migration, a rewritten column, a dropped config key).
   has no Mix, can do what `mix kiln.meili.reindex` does from a checkout; the
   Mix task now wraps it.
 
+### Fixed
+
+- **A collab room closed by periodic re-authorization now recovers when the
+  grant comes back.** `KilnCMSWeb.CollabChannel`'s #775 re-check refused by
+  stopping the channel with `{:shutdown, :unauthorized}`, and its docs said
+  Phoenix would send `phx_error` and `phoenix.js` would retry the join. It
+  does not: a `{:shutdown, _}` stop is a `phx_close` frame, which `phoenix.js`
+  treats as a finished leave — channel marked closed, removed from the socket,
+  no rejoin timer — so a room closed that way stayed dead in the tab until a
+  reload, buffering edits into a channel that would never send them, even
+  after the grant was restored. The refusal now closes the **connection** first
+  (`KilnCMSWeb.SocketReauth.close_connection/1`, the same `"disconnect"`
+  broadcast `SessionEviction` uses), then stops: the client sees a socket
+  closed with 1001, reconnects on its backoff and rejoins, and every rejoin
+  runs the full `join/3` — refused while the grant is narrowed, admitted once
+  it comes back. Both refusal sites (the timer and the update floor) take the
+  path; the moduledoc, `docs/threat-model.md` and the channel tests now state
+  the real mechanism and assert on the broadcast.
+
 ### Security
 
 - **`/ws/gql`, `/ws/bridge` and `/ws/collab` connects are now budgeted per

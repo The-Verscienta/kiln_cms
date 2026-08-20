@@ -1022,11 +1022,21 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
     change to the *document* rather than to the user. `CollabChannel` now
     re-runs `authorize/3` — the same function `join/3` runs, not a second
     spelling of it — against a **reloaded actor**, on a timer and after every
-    200 inbound updates, and closes the channel when it no longer passes.
-    `BridgeSocket` does the same for its read on the same timer (no update
-    count: it accepts no writes). The reload is the mechanism: re-running the
-    policies against the actor struct the socket connected with would answer
-    from the same stale role, scopes and audiences forever.
+    200 inbound updates, and closes the **connection** when it no longer passes
+    (`KilnCMSWeb.SocketReauth.close_connection/1`, the same `"disconnect"`
+    broadcast eviction uses), then stops the channel. The order matters and is
+    not a detail: a channel that merely stops with `{:shutdown, _}` is a
+    `phx_close` frame, which `phoenix.js` treats as a finished leave and never
+    rejoins — the room would stay dead in that tab until a reload, buffering
+    edits into a channel that would never send them, even after the grant came
+    back. A closed socket is what the client recovers from: it reconnects on a
+    backoff and rejoins, and every rejoin runs the full `join/3`, refused while
+    the grant is narrowed and admitted once it is restored. `BridgeSocket` does
+    the same for its read on the same timer (no update count: it accepts no
+    writes; and as a raw transport its stop *is* the socket closing). The
+    reload is the mechanism: re-running the policies against the actor struct
+    the socket connected with would answer from the same stale role, scopes and
+    audiences forever.
 
     **The exposure window an operator can rely on is 30 seconds** — the
     interval in `KilnCMSWeb.SocketReauth` — plus the in-flight message. Both
