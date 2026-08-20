@@ -50,7 +50,19 @@ defmodule Mix.Tasks.Kiln.Coverage.Summary do
     files =
       case File.read(report) do
         {:ok, json} ->
-          json |> Jason.decode!() |> Map.fetch!("source_files")
+          case Jason.decode(json) do
+            {:ok, %{"source_files" => files}} ->
+              files
+
+            _ ->
+              # A `cover/` left over from another tool, or a half-written file
+              # from a killed run. `Map.fetch!/2`'s KeyError named neither the
+              # path nor the fix, right next to a sibling error that does both.
+              Mix.raise(
+                "#{report} is not an excoveralls JSON report (no \"source_files\"). " <>
+                  "Delete it and re-run `mix coveralls.multiple --type json …`."
+              )
+          end
 
         {:error, reason} ->
           Mix.raise(
@@ -126,11 +138,27 @@ defmodule Mix.Tasks.Kiln.Coverage.Summary do
   line the gate compares against `minimum_coverage` never disagree by a
   rounding step. The order matters: `covered / relevant * 100` and
   `covered * 100 / relevant` floor differently for thousands of pairs (29/100
-  is 28.9 one way and 29.0 the other). 0.0 when nothing is relevant.
+  is 28.9 one way and 29.0 the other).
+
+  Undefined when nothing is relevant — see `format_pct/2`.
   """
-  @spec percent(non_neg_integer(), non_neg_integer()) :: float()
-  def percent(_covered, 0), do: 0.0
-  def percent(covered, relevant), do: Float.floor(covered / relevant * 100, 1)
+  @spec percent(non_neg_integer(), pos_integer()) :: float()
+  def percent(covered, relevant) when relevant > 0,
+    do: Float.floor(covered / relevant * 100, 1)
+
+  # A directory with no relevant lines has no percentage, so this prints an em
+  # dash rather than inventing a number. excoveralls substitutes its
+  # `treat_no_relevant_lines_as_covered` setting at exactly this point (0.0,
+  # or 100.0 when that is on) — matching it would mean re-reading its config
+  # here, and `ExCoveralls.Settings` is a `only: :test` dependency this module
+  # cannot call without breaking the dev build. Declining to guess is the one
+  # answer that cannot disagree with the gate whatever that setting says, and
+  # "no measurable lines" is what a reader should see anyway, not "0% covered".
+  @doc false
+  def format_pct(_covered, 0), do: "—"
+
+  def format_pct(covered, relevant),
+    do: :erlang.float_to_binary(percent(covered, relevant), decimals: 1)
 
   @doc false
   def format_table(rows) do
@@ -146,7 +174,7 @@ defmodule Mix.Tasks.Kiln.Coverage.Summary do
           String.pad_leading(Integer.to_string(files), 7) <>
           String.pad_leading(Integer.to_string(relevant), 10) <>
           String.pad_leading(Integer.to_string(covered), 10) <>
-          String.pad_leading(format_pct(percent(covered, relevant)), 8)
+          String.pad_leading(format_pct(covered, relevant), 8)
       end)
 
     Enum.join(["Coverage by directory:", header | lines], "\n")
@@ -159,7 +187,7 @@ defmodule Mix.Tasks.Kiln.Coverage.Summary do
         name = if dir == "TOTAL", do: "**TOTAL**", else: "`#{dir}`"
 
         "| #{name} | #{files} | #{relevant} | #{covered} | " <>
-          "#{format_pct(percent(covered, relevant))} |"
+          "#{format_pct(covered, relevant)} |"
       end)
 
     """
@@ -171,6 +199,4 @@ defmodule Mix.Tasks.Kiln.Coverage.Summary do
 
     """
   end
-
-  defp format_pct(pct), do: :erlang.float_to_binary(pct, decimals: 1)
 end

@@ -106,6 +106,12 @@ test.describe("content list bulk actions", () => {
 
     // Delete (admin-only) is a soft-delete: the rows leave the list, and the
     // flash says "trash", not "gone" — restorable for 30 days.
+    //
+    // Wait for the unpublish to have cleared the selection before re-selecting:
+    // Playwright's `check()` is a no-op on a box that is already ticked, so
+    // acting while the previous tick is still rendered would leave nothing
+    // selected and hang the next click on a permanently disabled button.
+    await expect(page.getByText("None selected")).toBeVisible();
     await page.getByLabel("Select all").check();
     await del.click();
     await expect(page.getByText(/2 selected item\(s\)/)).toBeVisible();
@@ -114,8 +120,10 @@ test.describe("content list bulk actions", () => {
     for (const id of ids) await expect(page.locator(`li[id="page-${id}"]`)).toHaveCount(0);
 
     // Trash still holds them, which is what makes the delete recoverable.
+    // `ids` is left as it is: `deleteContentById` is already a no-op on a row
+    // that has left /editor, so afterEach costs nothing and still covers the
+    // case where an assertion above failed before the delete ran.
     await page.goto("/editor/trash");
     for (const n of [1, 2]) await expect(page.getByText(`${prefix} ${n}`)).toBeVisible();
-    ids = [];
   });
 });

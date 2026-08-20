@@ -433,11 +433,19 @@ defmodule KilnCMS.MixProject do
     [
       preferred_envs: [
         precommit: :test,
+        # Every reporter excoveralls ships, not just the two CI uses: the dep is
+        # `only: :test`, so any one of them started in :dev fails on a missing
+        # module rather than on anything a reader could act on.
         coveralls: :test,
+        "coveralls.cobertura": :test,
         "coveralls.detail": :test,
+        "coveralls.github": :test,
         "coveralls.html": :test,
         "coveralls.json": :test,
+        "coveralls.lcov": :test,
         "coveralls.multiple": :test,
+        "coveralls.post": :test,
+        "coveralls.xml": :test,
         "kiln.coverage.summary": :test,
         "e2e.setup": :e2e,
         "e2e.reset": :e2e

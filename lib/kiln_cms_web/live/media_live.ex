@@ -47,13 +47,12 @@ defmodule KilnCMSWeb.MediaLive do
      |> assign(:page_title, gettext("Media library"))
      |> assign(:is_admin, KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin)
      |> assign(:query, nil)
-     |> assign(:selected, nil)
+     |> put_selected(nil)
      |> assign(:usages, empty_usages())
      |> assign(:usage_counts, %{})
      |> assign(:view, :library)
      |> assign(:trashed, [])
      |> assign(:refresh_timer, nil)
-     |> assign(:selected_stale?, false)
      |> assign(:media, [])
      |> assign(:more?, false)
      |> assign(:total, 0)
@@ -149,7 +148,7 @@ defmodule KilnCMSWeb.MediaLive do
         _ -> put_flash(socket, :error, gettext("That item no longer exists."))
       end
 
-    {:noreply, socket |> assign(:selected, nil) |> reload_media()}
+    {:noreply, socket |> put_selected(nil) |> reload_media()}
   end
 
   # --- trash -----------------------------------------------------------------
@@ -322,7 +321,7 @@ defmodule KilnCMSWeb.MediaLive do
     case KilnCMS.Media.Transform.set_focal_point(socket.assigns.selected, x, y,
            actor: socket.assigns.actor
          ) do
-      {:ok, item} -> {:noreply, socket |> assign(:selected, item) |> reload_media()}
+      {:ok, item} -> {:noreply, socket |> put_selected(item) |> reload_media()}
       _error -> {:noreply, put_flash(socket, :error, gettext("Couldn't set the focal point."))}
     end
   end
@@ -339,7 +338,7 @@ defmodule KilnCMSWeb.MediaLive do
       {:ok, item} ->
         {:noreply,
          socket
-         |> assign(:selected, item)
+         |> put_selected(item)
          |> reload_media()
          |> put_flash(:info, gettext("Image updated — variants are regenerating."))}
 
@@ -446,7 +445,7 @@ defmodule KilnCMSWeb.MediaLive do
 
     case socket.assigns do
       %{selected_stale?: true, selected: %{id: id}} ->
-        {:noreply, socket |> assign(:selected_stale?, false) |> assign_selected(id)}
+        {:noreply, assign_selected(socket, id)}
 
       _ ->
         {:noreply, socket}
@@ -543,7 +542,7 @@ defmodule KilnCMSWeb.MediaLive do
            ) do
         {:ok, item} ->
           socket
-          |> assign(:selected, item)
+          |> put_selected(item)
           |> reload_media()
           |> put_flash(:info, gettext("Saved details."))
 
@@ -676,19 +675,28 @@ defmodule KilnCMSWeb.MediaLive do
     ~p"/media?#{params}"
   end
 
+  # The ONLY way to change what the drawer holds. `selected_stale?` is a claim
+  # about the item currently in `:selected`, so it has to be re-established
+  # wherever that item is swapped — including the close path
+  # (`assign_selected(socket, nil)`), where a flag set for the item being
+  # closed used to survive and then be spent re-reading whichever item the
+  # editor opened next.
+  defp put_selected(socket, item),
+    do: socket |> assign(:selected, item) |> assign(:selected_stale?, false)
+
   defp assign_selected(socket, nil),
-    do: socket |> assign(:selected, nil) |> assign(:usages, empty_usages())
+    do: socket |> put_selected(nil) |> assign(:usages, empty_usages())
 
   defp assign_selected(socket, id) do
     case CMS.get_media_item(id, actor: socket.assigns.actor, tenant: socket.assigns.current_org) do
       {:ok, item} ->
         socket
-        |> assign(:selected, item)
+        |> put_selected(item)
         |> assign(:usages, usages(item, socket.assigns.current_org))
 
       _ ->
         socket
-        |> assign(:selected, nil)
+        |> put_selected(nil)
         |> assign(:usages, empty_usages())
         |> put_flash(:error, gettext("That item no longer exists."))
     end

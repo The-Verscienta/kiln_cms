@@ -23,10 +23,16 @@ const PNG_PATH = path.join(__dirname, "../../priv/static/images/logo-mark.png");
 // confirm's message so a caller can assert on it after the fact — asserting
 // inside the dialog handler would leave the confirm open on a mismatch and
 // hang the click until the test timeout.
-async function deleteMedia(page, id) {
+//
+// `optional: true` is for cleanup, where the item may never have been created.
+// The journey itself passes nothing and gets an assertion: returning null there
+// pushed the failure two steps downstream, into an `expect(null).toContain(…)`
+// that named neither the missing card nor the delete that never happened.
+async function deleteMedia(page, id, { optional = false } = {}) {
   await page.goto("/media");
   const card = page.locator(`li[id="media-${id}"]`);
-  if ((await card.count()) === 0) return null;
+  if (optional && (await card.count()) === 0) return null;
+  await expect(card).toBeVisible();
   let message = null;
   page.once("dialog", dialog => {
     message = dialog.message();
@@ -51,7 +57,7 @@ test.describe("media library", () => {
 
   test.afterEach(async ({ page }) => {
     // Best-effort cleanup if the journey failed before its own delete step.
-    if (mediaId) await deleteMedia(page, mediaId);
+    if (mediaId) await deleteMedia(page, mediaId, { optional: true });
     mediaId = null;
   });
 

@@ -141,9 +141,25 @@ async function saveDraft(page, { title, slug }) {
 }
 
 // Press Save on the open draft and wait for the "Saved." flash (see above).
+//
+// Dismiss whatever flash is already showing first. A "Saved." left over from an
+// EARLIER save in the same LiveView session satisfies the assertion below the
+// instant it runs, so a second `save()` with no navigation between the two
+// would pass without the new `phx-submit` having reached the server — the exact
+// silent-no-op this helper exists to rule out. The flash is click-to-dismiss
+// (`JS.push("lv:clear-flash")`), so clicking it and waiting for it to go makes
+// the next one unambiguously the new one.
 async function save(page) {
+  const flash = page.locator("#flash-info");
+  // `isVisible()` rather than `count()`: `hide()` leaves the node in the DOM
+  // until the server patch drops it, and clicking an already-hidden one would
+  // block on actionability until the action timeout.
+  if (await flash.isVisible()) {
+    await flash.click();
+    await base.expect(flash).toBeHidden();
+  }
   await page.getByRole("button", { name: /^save$/i }).click();
-  await base.expect(page.locator("#flash-info")).toContainText("Saved.");
+  await base.expect(flash).toContainText("Saved.");
 }
 
 // A tag group scoped to specific content types, from the taxonomy page.

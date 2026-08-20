@@ -15,15 +15,31 @@ const {
   deleteContentById,
 } = require("./fixtures");
 
+// What `acceptNextDialog` resolves to when no confirm arrives. A recognisable
+// string rather than null, so the caller's `toContain` fails with a readable
+// diff instead of "expected null to contain …".
+const NO_DIALOG = "<no confirm dialog appeared>";
+
 // Accept the next native confirm and hand back its message, so the caller
 // asserts on the text AFTER the click. Asserting inside the handler would leave
 // the confirm open on a mismatch and hang the click until the test timeout.
-function acceptNextDialog(page) {
+//
+// Settles either way. If `data-confirm` is ever dropped from the button no
+// dialog event fires at all — which is precisely what this journey should
+// catch — and a promise that never resolves reports it as a whole-test
+// timeout pointing at nothing.
+function acceptNextDialog(page, timeout = 10_000) {
   return new Promise(resolve => {
-    page.once("dialog", dialog => {
+    const onDialog = dialog => {
+      clearTimeout(timer);
       resolve(dialog.message());
       return dialog.accept();
-    });
+    };
+    const timer = setTimeout(() => {
+      page.off("dialog", onDialog);
+      resolve(NO_DIALOG);
+    }, timeout);
+    page.once("dialog", onDialog);
   });
 }
 
@@ -117,7 +133,11 @@ test.describe("content releases", () => {
     const itemRow = page.locator("tr").filter({ hasText: title });
     await expect(itemRow).toContainText("Pending");
     await expect(itemRow).toContainText("Publish");
-    await expect(page.getByText("1 of", { exact: false })).toBeVisible();
+    // "1 of <cap> slots used" — the whole phrase, so this pins that the release
+    // holds exactly the one item just added. A bare "1 of" also passes on
+    // "1 of 47" and can match a second element, which is a strict-mode error
+    // rather than a failed assertion.
+    await expect(page.getByText(/1 of \d+ slots used/)).toBeVisible();
 
     let confirm = acceptNextDialog(page);
     await page.locator('button[phx-click="publish_now"]').click();
