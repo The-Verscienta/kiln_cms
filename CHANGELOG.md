@@ -82,6 +82,14 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **`mix kiln.plugins.list` now counts every route kind a plugin
+  contributes** (#333). Its one-line contribution summary counted domains,
+  blocks, field types, nav items, admin routes, Oban queues and supervision
+  children, but not `editor_routes/0` or `public_routes/0` — so a plugin whose
+  entire surface is an editor-gated panel or a public booking page read as
+  contributing `nothing (metadata only)` in the discovery listing. Both kinds
+  are counted now (`Kiln.Plugins.manifests/0` already carried them).
+
 - **A media drawer opened straight after an upload now picks up the
   dimensions the variant worker writes** (#1314). `width`/`height` (and so the
   focal-point editor, which is gated on `width`) are measured in the
