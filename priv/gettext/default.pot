@@ -9529,6 +9529,11 @@ msgstr ""
 msgid "That is not a date this calendar can move something to."
 msgstr ""
 
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "That item can't be moved by dragging."
+msgstr ""
+
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "That item is no longer available — pick again."

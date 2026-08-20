@@ -78,6 +78,19 @@ migration, a rewritten column, a dropped config key).
   path; the moduledoc, `docs/threat-model.md` and the channel tests now state
   the real mechanism and assert on the broadcast.
 
+- **Calendar reschedule: padding days, same-day drops, and hand-pushed lanes.**
+  The month grid pads out to full Mon–Sun weeks and every padding cell is a
+  drop target, but the month *query* covered only the calendar month — so a
+  chip dragged onto a trailing 2 September cell while viewing August was
+  written and then vanished from the grid, and anything already scheduled on
+  a padding day never drew a chip. The month window is now the rendered grid.
+  `refuse_past` judges the full timestamp a move would write rather than the
+  day: a drop onto today keeps the chip's time of day, so a 09:00 chip dropped
+  at 15:00 was a publish six hours in the past. And a `reschedule` payload
+  naming a lane with no drag handle (`published`, `review_due`, …) is refused
+  with a message instead of crashing the LiveView on a `case` with no clause
+  for it.
+
 ### Security
 
 - **`/ws/gql`, `/ws/bridge` and `/ws/collab` connects are now budgeted per

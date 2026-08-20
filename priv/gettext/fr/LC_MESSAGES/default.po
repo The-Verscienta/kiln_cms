@@ -9529,6 +9529,11 @@ msgstr "Cet entonnoir n'existe pas."
 msgid "That is not a date this calendar can move something to."
 msgstr "Ce n'est pas une date vers laquelle ce calendrier peut déplacer un élément."
 
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "That item can't be moved by dragging."
+msgstr "Cet élément ne peut pas être déplacé par glisser-déposer."
+
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "That item is no longer available — pick again."
