@@ -81,6 +81,32 @@ defmodule Kiln.PluginsTest do
       # Contribution summary is pluralized and omits zero-count kinds.
       assert output =~ "3 blocks, 3 field types, 1 nav item, 1 admin route"
     end
+
+    test "the contribution summary counts every route kind" do
+      # The fixture declares only an admin route, so the editor- and
+      # public-route seams are covered here instead: a plugin whose whole
+      # surface is a public booking page must not read as contributing nothing.
+      line =
+        Mix.Tasks.Kiln.Plugins.List.format(%{
+          module: Booking.Plugin,
+          name: "booking",
+          version: nil,
+          summary: nil,
+          homepage: nil,
+          domains: [],
+          blocks: [],
+          field_types: [],
+          nav_items: 0,
+          admin_routes: 0,
+          editor_routes: 1,
+          public_routes: 2,
+          oban_queues: [],
+          children: 0
+        })
+
+      assert line ==
+               "* booking — Booking.Plugin\n    contributes: 1 editor route, 2 public routes"
+    end
   end
 
   test "a plugin block is a first-class member of the block system" do
