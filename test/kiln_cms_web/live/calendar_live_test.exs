@@ -428,9 +428,24 @@ defmodule KilnCMSWeb.CalendarLiveTest do
 
       on_exit(fn -> :telemetry.detach(handler_id) end)
 
+      # `:sys.suspend/1` pauses lv.pid's message loop without blocking `send/2`
+      # (delivery to a mailbox is independent of whether the owner is running),
+      # so every one of the 20 sends below is guaranteed to land before the
+      # process handles the first of them — a real, atomic burst regardless of
+      # scheduler contention. Without this, the burst's atomicity depended on
+      # this loop finishing before lv.pid was next scheduled, which a busy
+      # test suite cannot promise: kiln_cms#1336 caught CalendarLive draining
+      # (and re-querying for) several partial bursts instead of one whole one
+      # under load, which this suspend/resume closes off at the test level —
+      # `handle_info/2`'s own coalescing under real contention is #1336's, not
+      # this test's, to fix.
+      :sys.suspend(lv.pid)
+
       # Give the mailbox a real burst to drain — comfortably more messages
       # than any single `load_events/1` run could plausibly issue queries for.
       for _ <- 1..20, do: send(lv.pid, {:calendar_changed, Ash.UUID.generate()})
+
+      :sys.resume(lv.pid)
 
       # Forces the LiveView to actually process its mailbox before we count:
       # `render/1` is itself a message, so it cannot return before every
