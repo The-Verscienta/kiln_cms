@@ -79,6 +79,20 @@ migration, a rewritten column, a dropped config key).
   'KilnCMS.Search.Meilisearch.reindex_all()'`), so a production release, which
   has no Mix, can do what `mix kiln.meili.reindex` does from a checkout; the
   Mix task now wraps it.
+- **The form mail workers and the Bluesky provider are actually exercised, and
+  `docs/test-coverage-plan.md` says what is next.** `KilnCMS.Forms`'
+  notification and autoresponder jobs were asserted only to be *enqueued*, so
+  `perform/1` had never run: the escaping the notification applies to every
+  visitor-supplied key and value in its table, and the re-fetch gates that make
+  a form deleted or switched off between enqueue and run send nothing, were
+  both unproven (now 100%). `KilnCMS.Social.Providers.Bluesky` was covered only
+  through `link_facets/2` (now 97%), which left its failure classification
+  untested — and unlike Mastodon, `createRecord` has no idempotency key, so a
+  5xx there must answer `:unknown` rather than `:failed` or a retry puts a
+  second post on the operator's timeline. The plan document records the
+  remaining gaps in priority order, along with the three that only *look* like
+  gaps (compile-time macro bodies, dev-only modules, deliberately excluded
+  tags).
 
 ### Fixed
 
