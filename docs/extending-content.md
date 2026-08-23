@@ -26,8 +26,20 @@ UI" workflow, scoped to fields.
 - **Store**: values live in the `custom_fields` map on each content record.
 - **Validate**: `KilnCMS.CMS.Changes.ApplyCustomFields` runs on every write — it
   coerces values to the declared type, enforces `required`, checks `:select`
-  membership, applies defaults, and drops keys with no definition. Values are
-  stored JSON-native (dates as ISO-8601 strings) so the jsonb column round-trips.
+  membership, and applies defaults. Values are stored JSON-native (dates as
+  ISO-8601 strings) so the jsonb column round-trips. A key **no definition
+  declares is an error**, not a silent omission: the write fails naming the key
+  and listing the fields the type defines. (Copy machinery — restore,
+  duplicate, translate, import — passes `context: %{custom_fields: :drop}` and
+  drops such keys with a warning instead, since its payload comes from
+  elsewhere.)
+- **Rename / retire**: renaming a definition moves the stored values to the new
+  key; destroying one purges them. Either way no record is left holding a key
+  no definition declares — such a key is dropped by whatever writes that record
+  next, which is how an unrelated title edit came to be what destroyed an
+  editor's prose. (A destroy really does mean the values go: `custom_fields` is
+  public, and a deleted definition must stop publishing what was under it. It
+  just happens where the admin asked for it.)
 - **Edit**: the content editor renders one input per definition automatically.
 - **Deliver**: `custom_fields` is public, so headless clients get the values.
 - **Query**: list/search reads accept `custom_filter`/`custom_sort` (JSON:API)
@@ -242,10 +254,18 @@ webhooks, delivery and workers follow automatically.
 
 **Full-text search needs one migration per type.** The `:search` action
 filters on a trigger-maintained `search_vector` column that is not an Ash
-attribute, so `mix ash.codegen` never creates it — and until it exists the
-type's `/search` route raises `undefined_column`. After the migration that
+attribute, so `mix ash.codegen` never creates it. After the migration that
 creates the table, add one calling `KilnCMS.Migrations.add_search_vector/1`
 (see its moduledoc for the template; `mix kiln.gen.content` prints it too).
+
+Run `mix kiln.search.check` against a migrated database — it is a CI gate, and
+it names every content table missing the column, trigger or index along with
+the migration that closes the gap. Skipping it is not confined to the new type:
+a global search sweeps every registered type, so one missing column used to
+take the search page, the editor palette and the search API down for *every*
+query (#295). That leg is now contained — the misconfigured type answers from
+its fuzzy/semantic legs and logs an error naming the migration — but the gate
+is what keeps it from shipping at all.
 
 `mix kiln.plugins.doctor` (also part of precommit) verifies an install:
 domains registered, no block/field-type/queue collisions, well-formed paths.

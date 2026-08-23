@@ -136,6 +136,23 @@ jobs:
         # on the migrations the `test` alias applies.
         run: mix test test/kiln/core_agnostic_test.exs
 
+      - name: Check every content table can answer a search
+        # `search_vector` is maintained by a database trigger, not by Ash, so
+        # `mix ash.codegen` never generates it and a new content type's table
+        # silently ships without one. The type then works right up until
+        # somebody searches — and a global search sweeps every registered type,
+        # so the whole site's search fails, not just that type's (#295). Runs
+        # after the step above so the test database is already migrated.
+        run: mix kiln.search.check
+
+      - name: Search containment tests (they lock a shared table)
+        # `:table_lock` is excluded from the main run: proving a half-migrated
+        # type no longer takes the whole sweep down means dropping
+        # `pages.search_vector`, and a pending ACCESS EXCLUSIVE lock queues
+        # every other connection's query on that table behind it. Alone, in its
+        # own pass, it is harmless.
+        run: mix test --only table_lock
+
       - name: Check the gettext catalogs are up to date
         # `--check-up-to-date` only guards default.pot, so it happily passes
         # while the per-locale .po files rot — which is exactly how fr/es drifted

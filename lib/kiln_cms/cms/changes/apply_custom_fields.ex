@@ -6,10 +6,9 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   Runs on create and whenever `custom_fields` changes. For each defined field it
   coerces the supplied value (or the field's default) to the declared type,
   enforces `required`, and checks `:select` membership — then writes back a
-  cleaned map containing only defined keys with JSON-native values (dates as
-  ISO-8601 strings), so unknown/stale keys are dropped and the jsonb column
-  round-trips cleanly. Types beyond the built-ins dispatch to their registered
-  `Kiln.FieldType`'s `cast/2` (see `KilnCMS.CMS.FieldTypes`). Definitions are
+  cleaned map of JSON-native values (dates as ISO-8601 strings) so the jsonb
+  column round-trips cleanly. Types beyond the built-ins dispatch to their
+  registered `Kiln.FieldType`'s `cast/2` (see `KilnCMS.CMS.FieldTypes`). Definitions are
   read with `authorize?: false` (registry metadata, not user data).
 
   ## Partial updates merge; the payload is not the whole record
@@ -29,6 +28,51 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   submits the complete map (blank for empties), so every key is "present" and
   clearing a field by emptying it still works exactly as before.
 
+  ## A key with no definition is refused, not quietly dropped
+
+  The cleaned map is folded out of the *definitions*, so a key no
+  `FieldDefinition` declares cannot be stored. What it used to do was vanish
+  into a **successful** write: prose an editor typed came back `200 OK` and was
+  simply not there, with nothing on any surface — response, log, editor — that
+  said a key had been discarded.
+
+  So a supplied key the registry does not know is now an **error** naming the
+  key and listing the fields the type does define. Two shapes stay accepted,
+  because neither is a value being lost: re-sending an undefined key with
+  **exactly its stored value** (a client that reads a record, edits one field
+  and writes the whole map back — its payload carries whatever the record
+  already carries), and sending it **blank**, which asks for it to go.
+
+  Machinery that copies a stored map wholesale — a version restore, a
+  duplicate or translation, a content import — passes
+  `context: %{custom_fields: :drop}`. Its payload is a whole map from
+  *somewhere else*, which may legitimately hold keys this site never declared,
+  and failing the copy over one would be a worse answer than dropping it. Those
+  writes drop as before, but say so in the log rather than in silence.
+
+  ## Nothing else should be left holding one
+
+  Dropping is fold-shaped, not payload-shaped. A write that mentions *one*
+  custom field rewrites the whole map down to the currently-defined keys, so it
+  takes the stale ones with it — and on a type with a computed field, so does
+  the refresh pass on a write that never mentions `custom_fields` at all. Prose
+  disappears on an edit that had nothing to do with it, hours or months after
+  the definition it belonged to was deleted.
+
+  Preserving those keys instead is not open to us — `custom_fields` is
+  `public? true`, and #710 settled that deleting a definition must stop
+  publishing its values, not leave them readable forever under a key nothing
+  governs.
+
+  What is fixed is the *window*: `KilnCMS.CMS.Changes.SyncFieldValues` keeps
+  the stored keys in step with the registry, so destroying a `FieldDefinition`
+  scrubs its key in the same breath (and renaming one *moves* the values, since
+  a rename never asked for anything to be lost). The loss happens where an
+  admin asked for it, instead of lying in wait for whoever next edits a title.
+  A key that survives that — a row written by an older release — is dropped by
+  the next write as it always was, now with a warning naming it, so the scrub
+  is at least visible once.
+
   ## Computed fields are outside all of that
 
   A `:computed` definition (#429) has no editor-supplied value at all. Those
@@ -38,13 +82,15 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   """
   use Ash.Resource.Change
 
+  require Logger
+
   alias Ash.Error.Changes.InvalidAttribute
 
   @impl true
   def change(changeset, _opts, _context) do
     if changeset.action_type == :create or
          Ash.Changeset.changing_attribute?(changeset, :custom_fields) do
-      apply_definitions(changeset, merge_base(changeset))
+      apply_definitions(changeset, merge_base(changeset), mode(changeset))
     else
       # An update that never mentions `custom_fields` still has to refresh
       # computed fields: their inputs are the *document* — a retitled page
@@ -66,13 +112,29 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
   It runs against an EMPTY base, not the record's current map: a restore is a
   wholesale replacement (the compare view reports a key added since the target
-  as *added*), so a key absent from the restored map falls to its default and an
-  undefined key is dropped — the record lands in a shape an ordinary save could
-  also produce. Errors it raises (a now-dangling media id) fail the restore, the
-  same stance `featured_image_id` already takes.
+  as *added*), so a key absent from the restored map falls to its default — the
+  record lands in a shape an ordinary save could also produce. Errors it raises
+  (a now-dangling media id) fail the restore, the same stance
+  `featured_image_id` already takes.
+
+  It restores in `:drop` mode: a snapshot predates whatever definition was
+  deleted since, and a restore must not fail over a key that was perfectly
+  valid when it was written — nor reinstate one, which is the whole point of
+  #710.
   """
   @spec apply_restored(Ash.Changeset.t()) :: Ash.Changeset.t()
-  def apply_restored(changeset), do: apply_definitions(changeset, %{})
+  def apply_restored(changeset), do: apply_definitions(changeset, %{}, :drop)
+
+  # How this write treats a supplied `custom_fields` key no `FieldDefinition`
+  # declares: `:strict` (the default) refuses it; `:drop` discards it with a
+  # warning. Machinery that copies a stored map wholesale opts in via
+  # `context: %{custom_fields: :drop}` — see the module doc.
+  defp mode(changeset) do
+    case changeset.context do
+      %{custom_fields: :drop} -> :drop
+      _other -> :strict
+    end
+  end
 
   # The base to merge the payload over. On create there is no record yet, so
   # absent fields fall to their defaults (empty base). On update we carry the
@@ -82,7 +144,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   defp merge_base(%{action_type: :create}), do: %{}
   defp merge_base(changeset), do: stringify_keys(changeset.data.custom_fields || %{})
 
-  defp apply_definitions(changeset, existing) do
+  defp apply_definitions(changeset, existing, mode) do
     defs = definitions_for(changeset)
 
     # The writing org (epic #336). `:media`/`:reference` fields resolve a snapshot
@@ -103,9 +165,61 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
     {cleaned, errors} = apply_computed(computed, changeset, cleaned, errors)
 
+    {refused, dropped} = undefined(defs, supplied, existing, mode)
+    errors = Enum.map(refused, &undefined_error(&1, defs)) ++ errors
+
     changeset
     |> Ash.Changeset.force_change_attribute(:custom_fields, cleaned)
+    |> note_dropped(dropped)
     |> then(fn cs -> Enum.reduce(errors, cs, &Ash.Changeset.add_error(&2, &1)) end)
+  end
+
+  # Split the keys no definition declares into the ones this write refuses and
+  # the ones it drops. Neither is ever stored — the cleaned map is folded out of
+  # the definitions — so the only question is whether the caller hears about it
+  # as an error or as a log line.
+  #
+  # `:strict` refuses a supplied key, except when it merely re-states the value
+  # already stored (a whole-map round-trip over a record that predates the
+  # scrub) or is blank (asking for it to go). `:drop` refuses nothing. Stored
+  # keys are always dropped: this write is rewriting the map either way, and
+  # #710 forbids carrying a deleted definition's value forward.
+  defp undefined(defs, supplied, existing, mode) do
+    names = MapSet.new(defs, & &1.name)
+    undefined? = &(not MapSet.member?(names, &1))
+
+    stored = existing |> Map.keys() |> Enum.filter(undefined?)
+    sent = supplied |> Map.keys() |> Enum.filter(undefined?)
+
+    refused =
+      if mode == :strict do
+        Enum.reject(sent, fn key ->
+          value = Map.get(supplied, key)
+          blank?(value) or Map.get(existing, key) == value
+        end)
+      else
+        []
+      end
+
+    {refused, Enum.uniq(stored ++ sent) -- refused}
+  end
+
+  # Say that a key was discarded — once, when the write actually runs.
+  #
+  # In a `before_action` rather than here, because `change/3` also runs on every
+  # `AshPhoenix.Form.validate/2`: logging inline would put a line per keystroke
+  # in the log for one record holding one stale key.
+  defp note_dropped(changeset, []), do: changeset
+
+  defp note_dropped(changeset, keys) do
+    Ash.Changeset.before_action(changeset, fn changeset ->
+      Logger.warning(
+        "custom_fields: dropped #{Enum.map_join(Enum.sort(keys), ", ", &inspect/1)} on " <>
+          "#{inspect(changeset.resource)} — no FieldDefinition declares them"
+      )
+
+      changeset
+    end)
   end
 
   # The computed-only path, for an update that changes the document but not
@@ -127,18 +241,24 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   end
 
   defp recompute(changeset, defs, computed) do
-    # Project onto the current definitions, as `apply_definitions/1` and
-    # `Firing.CustomFields.resolve/2` both do. Carrying `stored` whole here
-    # would let this path resurrect a key whose definition was deleted, and
-    # would feed formulas a sibling value the other two paths no longer see —
-    # three write paths giving three answers for one document.
     stored =
       changeset.data.custom_fields
       |> Kernel.||(%{})
       |> stringify_keys()
-      |> Map.take(Enum.map(defs, & &1.name))
 
-    editable = Map.drop(stored, Enum.map(computed, & &1.name))
+    # Project onto the current definitions, as `apply_definitions/3` and
+    # `Firing.CustomFields.resolve/2` both do. Carrying `stored` whole here
+    # would let this path resurrect a key whose definition was deleted, and
+    # would feed formulas a sibling value the other two paths no longer see —
+    # three write paths giving three answers for one document.
+    #
+    # This is the path that made a *title edit* destroy a stale key, so it says
+    # so. A record should not be in this state at all: `Changes.SyncFieldValues`
+    # scrubs the key when the definition is destroyed and moves the values when
+    # it is renamed, so what is left is a row written before that existed.
+    {defined, undefined} = Map.split(stored, Enum.map(defs, & &1.name))
+
+    editable = Map.drop(defined, Enum.map(computed, & &1.name))
     {cleaned, errors} = apply_computed(computed, changeset, editable, [])
 
     if cleaned == stored and errors == [] do
@@ -146,6 +266,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     else
       changeset
       |> Ash.Changeset.force_change_attribute(:custom_fields, cleaned)
+      |> note_dropped(Map.keys(undefined))
       |> then(fn cs -> Enum.reduce(errors, cs, &Ash.Changeset.add_error(&2, &1)) end)
     end
   end
@@ -413,6 +534,23 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
   defp stringify_keys(map) do
     Map.new(map, fn {k, v} -> {to_string(k), v} end)
+  end
+
+  # A key the registry does not declare. The message lists what the type DOES
+  # define: the mistake is nearly always a typo or a name that drifted from the
+  # definition, and the answer is right there in the list.
+  defp undefined_error(key, defs) do
+    defined =
+      case Enum.map(defs, & &1.name) |> Enum.sort() do
+        [] -> "this content type defines no custom fields"
+        names -> "defined fields: " <> Enum.join(names, ", ")
+      end
+
+    InvalidAttribute.exception(
+      field: :custom_fields,
+      message: "\"#{key}\" is not a defined custom field (#{defined})",
+      value: key
+    )
   end
 
   defp error(def, message) do

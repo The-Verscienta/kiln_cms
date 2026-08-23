@@ -7,6 +7,7 @@ defmodule KilnCMS.Search do
   embedding model never loads and content writes skip embedding work, so the
   default install pays nothing.
   """
+  require Logger
 
   @doc "Whether semantic search is enabled."
   @spec semantic?() :: boolean()
@@ -362,7 +363,9 @@ defmodule KilnCMS.Search do
     # here would compute them for up to `@hybrid_candidates` rows *per leg*
     # to keep `limit` of them. `highlight` is a `ts_headline` over the whole
     # document, so that is most of the query's cost thrown away.
-    keyword = run_leg(resource, :search, args, read_opts)
+    keyword =
+      without_search_vector(resource, fn -> run_leg(resource, :search, args, read_opts) end)
+
     semantic = run_leg(resource, :search_semantic, args, read_opts, semantic_context(opts))
 
     fuzzy =
@@ -460,12 +463,81 @@ defmodule KilnCMS.Search do
     end
   end
 
-  # Every content resource cross-content search sweeps: the compiled types
-  # from the registry (core and project domains alike — never a hardcoded
-  # module list) plus Entry, the shared tier backing dynamic types, which
-  # deliberately isn't in `ContentTypes.all/0`.
-  defp content_search_resources do
+  @doc """
+  Every content resource a cross-content search sweeps: the compiled types from
+  the registry (core and project domains alike — never a hardcoded module list)
+  plus `Entry`, the shared tier backing dynamic types, which deliberately isn't
+  in `ContentTypes.all/0`.
+
+  Public because it is also the set `KilnCMS.Search.SchemaCheck` holds the
+  database to: a resource in here whose table has no `search_vector` column is
+  a resource whose keyword leg cannot run.
+  """
+  @spec content_resources() :: [module()]
+  def content_resources do
     Enum.map(KilnCMS.CMS.ContentTypes.all(), & &1.resource) ++ [KilnCMS.CMS.Entry]
+  end
+
+  # Run a keyword leg, containing the one failure that is a *deployment* fact
+  # rather than a fault in the query.
+  #
+  # `search_vector` is trigger-maintained in the database, not an Ash attribute
+  # (`KilnCMS.Migrations.add_search_vector/1`), so a content type whose table
+  # never got its own migration has no such column and the leg raises
+  # `undefined_column` — for every query, on every surface. `global/2` sweeps
+  # every registered type, so ONE half-migrated type used to take the entire
+  # site search down with it: the other types' hits, the media and taxonomy
+  # sections, the facets, all of it (#295).
+  #
+  # Contained, that type still answers from its semantic and fuzzy legs and
+  # every other section is untouched. The failure stays loud where loudness
+  # buys something — an error in the log per query, and `mix kiln.search.check`
+  # failing the build *before* the deploy — instead of only where it costs
+  # visitors. Every other error still raises: an empty result set must never be
+  # how a caller learns their query was broken.
+  defp without_search_vector(resource, fun) do
+    fun.()
+  rescue
+    error ->
+      if missing_search_vector?(error) do
+        Logger.error("""
+        Search: #{inspect(resource)} has no `search_vector` column, so its keyword \
+        leg cannot run and this query answered without it. Add the migration:
+
+            defmodule KilnCMS.Repo.Migrations.AddSearchVector do
+              use Ecto.Migration
+              import KilnCMS.Migrations
+
+              def up, do: add_search_vector("#{table_name(resource)}")
+              def down, do: drop_search_vector("#{table_name(resource)}")
+            end
+
+        `mix kiln.search.check` reports every table in this state.\
+        """)
+
+        []
+      else
+        reraise error, __STACKTRACE__
+      end
+  end
+
+  defp table_name(resource) do
+    AshPostgres.DataLayer.Info.table(resource) || "<table>"
+  rescue
+    _ -> "<table>"
+  end
+
+  # Ash wraps the Postgrex error, and how deeply depends on the action, so this
+  # reads the rendered message rather than pattern-matching a nesting that
+  # varies. Both markers are required: the column is only *this* problem when
+  # the database says it does not exist.
+  defp missing_search_vector?(error) do
+    message = Exception.message(error)
+
+    message =~ "search_vector" and
+      (message =~ "undefined_column" or message =~ "does not exist")
+  rescue
+    _ -> false
   end
 
   # Rerank fused results by a stronger (query, doc) relevance model, falling back
@@ -661,15 +733,42 @@ defmodule KilnCMS.Search do
   #
   # A failing section still takes the whole call down, matching the previous
   # `Ash.read!` behaviour — a search that silently omits a section would be
-  # worse than one that errors.
+  # worse than one that errors. (The one exception is a section whose table has
+  # no `search_vector` column, contained in `without_search_vector/2`, because
+  # that failure is permanent and belongs to one type.)
+  #
+  # What it must not do is take the call down *anonymously*. A raise inside a
+  # linked task exits the caller with a bare `{exception, stacktrace}`, and the
+  # `{:ok, pair}` clause this used to have then met a `{:exit, _}` with a
+  # `FunctionClauseError` — burying the real error under a clause failure in
+  # the search module. Each section is caught inside its own task instead, so
+  # the caller re-raises the actual exception with its original stacktrace; a
+  # section that times out is reported by name rather than as a bare exit.
   defp run_sections(sections) do
     sections
-    |> Task.async_stream(fn {key, run} -> {key, run.()} end,
+    |> Task.async_stream(&run_section/1,
       max_concurrency: section_concurrency(),
       timeout: @section_timeout,
-      ordered: false
+      ordered: false,
+      on_timeout: :kill_task,
+      zip_input_on_exit: true
     )
-    |> Enum.into(%{}, fn {:ok, pair} -> pair end)
+    |> Enum.into(%{}, &unwrap_section/1)
+  end
+
+  defp run_section({key, run}) do
+    {key, run.()}
+  rescue
+    error -> {key, {:section_failed, error, __STACKTRACE__}}
+  end
+
+  defp unwrap_section({:ok, {_key, {:section_failed, error, stacktrace}}}),
+    do: reraise(error, stacktrace)
+
+  defp unwrap_section({:ok, pair}), do: pair
+
+  defp unwrap_section({:exit, {{key, _run}, reason}}) do
+    raise "search section #{inspect(key)} exited: #{inspect(reason)}"
   end
 
   @doc """
@@ -692,15 +791,19 @@ defmodule KilnCMS.Search do
     locale = Keyword.get(opts, :locale) || KilnCMS.I18n.default_locale()
 
     matches =
-      content_search_resources()
+      content_resources()
       |> Enum.flat_map(fn resource ->
-        resource
-        |> Ash.Query.new()
-        |> Ash.Query.limit(@facet_scan_cap)
-        |> Ash.Query.for_read(:search, %{query: query, locale: locale})
-        |> Ash.Query.select([:id, :category_id])
-        |> Ash.Query.load(tags: [:id, :name, :slug])
-        |> Ash.read!(read_opts)
+        # Same containment as the keyword leg: one type missing its
+        # `search_vector` migration must not empty every facet on the page.
+        without_search_vector(resource, fn ->
+          resource
+          |> Ash.Query.new()
+          |> Ash.Query.limit(@facet_scan_cap)
+          |> Ash.Query.for_read(:search, %{query: query, locale: locale})
+          |> Ash.Query.select([:id, :category_id])
+          |> Ash.Query.load(tags: [:id, :name, :slug])
+          |> Ash.read!(read_opts)
+        end)
       end)
 
     %{categories: category_facets(matches, read_opts), tags: tag_facets(matches)}
@@ -756,7 +859,7 @@ defmodule KilnCMS.Search do
     locale = Keyword.get(opts, :locale) || KilnCMS.I18n.default_locale()
     down = String.downcase(query)
 
-    content_search_resources()
+    content_resources()
     |> Enum.flat_map(fn resource ->
       resource
       |> Ash.Query.for_read(:autocomplete, %{prefix: query, locale: locale})

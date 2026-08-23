@@ -60,6 +60,26 @@ defmodule KilnCMS.CMS.ContentCopy do
   def content_attrs, do: @content_attrs
 
   @doc """
+  The caller's `opts`, plus the context a clone's create needs.
+
+  `custom_fields: :drop` — what is being copied is a whole *stored* map, which
+  may still hold a key whose `FieldDefinition` was deleted before
+  `CMS.Changes.SyncFieldValues` existed to scrub it. A clone is not where that
+  gets litigated: refusing the key would fail the entire copy over a value the
+  source is sitting on, so the copy drops it (with a warning) exactly as an
+  ordinary save of the source would.
+  """
+  @spec create_opts(keyword()) :: keyword()
+  def create_opts(opts) do
+    Keyword.update(
+      opts,
+      :context,
+      %{custom_fields: :drop},
+      &Map.put(&1, :custom_fields, :drop)
+    )
+  end
+
+  @doc """
   The acting editor's per-field write grant for `source`'s type — `nil` when no
   restriction applies, otherwise the attribute names they may write.
 

@@ -130,6 +130,14 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # `datetime_range` field, so the cached answer has to drop on a field write,
     # not only on a type write.
     change KilnCMS.CMS.Changes.BustTypeRegistry, on: [:create, :update, :destroy]
+
+    # Stored `custom_fields` keys follow their definition: a destroy purges the
+    # key, a rename moves the values to the new one. Left alone, both strand a
+    # key no definition declares, and `ApplyCustomFields` folds those out of
+    # whatever write touches each record next — which is how an unrelated title
+    # edit came to destroy three paragraphs of prose. A rename never asked for
+    # that at all; a destroy did, but here, not months later.
+    change KilnCMS.CMS.Changes.SyncFieldValues, on: [:update, :destroy]
   end
 
   validations do

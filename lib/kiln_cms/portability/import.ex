@@ -983,8 +983,15 @@ defmodule KilnCMS.Portability.Import do
   # `ContentTypes` exposes only the raising create. An import must survive one
   # bad record without abandoning the other 3,999, so the raise is converted
   # here rather than left to blow up the run.
+  #
+  # `custom_fields: :drop`: an import carries the SOURCE site's stored map,
+  # whose keys are declared by *its* `FieldDefinition` rows — which this site
+  # may not have. Refusing them would fail the whole record over a field it
+  # merely doesn't know; dropping them keeps the document and logs the keys
+  # (see `CMS.Changes.ApplyCustomFields`). Define the fields first and re-run to
+  # bring their values in.
   defp create_via_action(kind, attrs, opts) do
-    {:ok, ContentTypes.create!(kind, attrs, scope(opts))}
+    {:ok, ContentTypes.create!(kind, attrs, scope(opts) ++ [context: %{custom_fields: :drop}])}
   rescue
     error -> {:error, error}
   end
