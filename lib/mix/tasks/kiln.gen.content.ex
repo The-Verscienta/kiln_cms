@@ -44,7 +44,8 @@ if Code.ensure_loaded?(Igniter) do
 
     …then add a `search_vector` migration for the new table (the printed notice
     includes a copy-paste template) — `KilnCMS.Migrations.add_search_vector/1`
-    explains why codegen can't do this one.
+    explains why codegen can't do this one, and `mix kiln.search.check` fails
+    until it exists.
     """
     @shortdoc "Generate a KilnCMS content type"
     use Igniter.Mix.Task
@@ -263,6 +264,10 @@ if Code.ensure_loaded?(Igniter) do
                def up, do: add_search_vector("#{table}")
                def down, do: drop_search_vector("#{table}")
              end
+
+           `mix kiln.search.check` fails while that migration is missing — run it
+           after `mix ash.migrate`, and keep it in CI so the next content type
+           cannot ship without one.
 
       Then it just works, no further wiring:
         * Editable in the admin (auto-discovered — appears as "New #{plural}").

@@ -27,6 +27,15 @@ defmodule KilnCMS.Migrations do
   which is **not** always the `:plural` used in routes and interfaces (e.g. a
   resource with `plural: "clinical_evidence"` still lives in table
   `clinical_evidences` unless `:table` was overridden).
+
+  ## The one that gets forgotten
+
+  Nothing in the resource, the domain or `mix ash.codegen` knows this migration
+  is owed, and the type works without it right up until somebody searches — at
+  which point *every* type's search fails, since a global search sweeps them
+  all (#295). `mix kiln.search.check` holds a migrated database to this, table
+  by table, and `KilnCMS.Search.SchemaCheck.report/0` is the same answer as
+  data for a test to assert on.
   """
 
   import Ecto.Migration

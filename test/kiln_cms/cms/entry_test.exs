@@ -201,12 +201,22 @@ defmodule KilnCMS.CMS.EntryTest do
           %{
             title: "Pancakes",
             slug: slug(),
-            custom_fields: %{"servings" => "4", "difficulty" => "easy", "unknown" => "dropped"}
+            custom_fields: %{"servings" => "4", "difficulty" => "easy"}
           },
           actor: admin
         )
 
       assert entry.custom_fields == %{"servings" => 4, "difficulty" => "easy"}
+
+      # A key the dynamic type's registry doesn't declare is refused, not
+      # quietly dropped out of a successful write.
+      assert_raise Ash.Error.Invalid, ~r/not a defined custom field/, fn ->
+        ContentTypes.create!(
+          recipes.name,
+          %{title: "Stray", slug: slug(), custom_fields: %{"difficulty" => "easy", "u" => "x"}},
+          actor: admin
+        )
+      end
 
       # A required field can't be blank; select membership is enforced.
       assert_raise Ash.Error.Invalid, fn ->

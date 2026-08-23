@@ -29,6 +29,14 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **`mix kiln.search.check` — a CI gate for the search-vector migration every
+  new content type owes** (#295). Run against a migrated database, it names
+  each content table missing its `search_vector` column, trigger or GIN index
+  and prints the migration that closes the gap; CI runs it on every PR, so the
+  omission fails a build instead of a visitor's search.
+  `KilnCMS.Search.SchemaCheck.report/0` is the same answer as data for a test
+  to assert on.
+
 - **Coverage is measured, reported and floored; the Playwright suite grows
   from 14 journeys to 19** (#1314). CI's main test job now runs the suite under
   line coverage (`mix coveralls.multiple --type json --type html`), uploads the
@@ -81,6 +89,51 @@ migration, a rewritten column, a dropped config key).
   Mix task now wraps it.
 
 ### Fixed
+
+- **A `custom_fields` key with no `FieldDefinition` is refused instead of
+  vanishing out of a successful write** (#295 family). `ApplyCustomFields`
+  folds the stored map out of the *definitions*, so any key the registry did
+  not declare was dropped — and the write still returned `200 OK`, with
+  nothing on any surface saying a key had been discarded. Prose typed into an
+  undefined field simply ceased to exist. A supplied key the registry does not
+  know is now a validation error naming the key and listing the fields the type
+  does define. Two shapes stay accepted, since neither loses a value:
+  re-sending an undefined key with exactly its stored value (a whole-map
+  round-trip), and sending it blank (which asks for it to go). Copy machinery —
+  version restore, duplicate, translation, content import — passes
+  `context: %{custom_fields: :drop}`: its payload comes from elsewhere and may
+  legitimately hold keys this site never declared, so it drops them **with a
+  warning** rather than failing the whole copy.
+
+- **Renaming a `FieldDefinition` now moves its stored values, and destroying
+  one purges them at once instead of leaving them to be destroyed by an
+  unrelated later edit** (#710 follow-up). Either action left a key in every
+  record's jsonb that no definition declared, governed by nothing, until
+  whatever wrote that record next rewrote the map and dropped it — so an
+  editor's title change was what finally destroyed three paragraphs of prose,
+  with no connection between the two events. A **rename** never asked for
+  anything to be lost: its values now move to the new key
+  (`KilnCMS.CMS.Changes.SyncFieldValues`). A **destroy** did — the values
+  cannot be kept, since `custom_fields` is `public? true` and #710 settled that
+  a deleted definition must stop publishing what was under it — so it now
+  scrubs the key from that type's records in one statement, scoped to the
+  definition's org, rather than months later on somebody else's edit. Both are
+  schema maintenance: no version rows, no re-fire, no `updated_at` bump. A key
+  surviving from an older release is still dropped by the next write — now with
+  a log line naming it.
+
+- **One content type missing its `search_vector` migration no longer 500s the
+  whole site's search** (#295). The column is trigger-maintained rather than an
+  Ash attribute, so `mix ash.codegen` never generates it and a new type's table
+  ships without one; the type then works until somebody searches. Because a
+  global search sweeps *every* registered type, that raised `undefined_column`
+  for every query on every surface — the search page, the editor palette, the
+  search API — not just for the half-migrated type. The keyword leg for such a
+  table is now contained: the type answers from its fuzzy and semantic legs,
+  every other section is untouched, and each query logs an error naming the
+  migration to add. A section that fails for any other reason still takes the
+  call down, and now names itself when it does, instead of surfacing as a
+  clause error inside the search module.
 
 - **`mix kiln.plugins.list` now counts every route kind a plugin
   contributes** (#333). Its one-line contribution summary counted domains,

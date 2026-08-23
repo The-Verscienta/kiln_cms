@@ -96,6 +96,21 @@ no_ffmpeg_exclusion =
 #     mix test --include calibration test/kiln_cms/search/tag_suggestion_calibration_test.exs
 calibration_exclusion = [:calibration]
 
+# Tests that take an ACCESS EXCLUSIVE lock on a table the whole suite shares —
+# today, the one that drops `pages.search_vector` to prove a half-migrated
+# content type can no longer take the site's whole search down (#295).
+#
+# The lock is held until the sandbox transaction rolls back, and while it is
+# pending EVERY other connection's query on that table queues behind it: one
+# such test overlapping anything else touching `pages` stalls the pool and
+# hangs the run. `async: false` is not enough, because processes outliving an
+# earlier async test still hold connections of their own.
+#
+# So they run in their own pass, alone, and CI runs that pass explicitly:
+#
+#     mix test --only table_lock
+table_lock_exclusion = [:table_lock]
+
 if KilnCMS.Config.StrictTestFlag.strict?(System.get_env("KILN_STRICT_TEST")) do
   ExUnit.start(include: [strict_tenancy: true], exclude: [:test])
 else
@@ -103,7 +118,9 @@ else
     exclude:
       [strict_tenancy: true] ++
         pg_tools_exclusion ++
-        qpdf_exclusion ++ ffmpeg_exclusion ++ no_ffmpeg_exclusion ++ calibration_exclusion
+        qpdf_exclusion ++
+        ffmpeg_exclusion ++
+        no_ffmpeg_exclusion ++ calibration_exclusion ++ table_lock_exclusion
   )
 end
 

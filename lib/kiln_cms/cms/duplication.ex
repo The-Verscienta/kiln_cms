@@ -123,7 +123,7 @@ defmodule KilnCMS.CMS.Duplication do
           )
         ],
         fn ->
-          copy = ContentTypes.create!(kind, attrs, opts)
+          copy = ContentTypes.create!(kind, attrs, ContentCopy.create_opts(opts))
           clone_links(source, copy, opts)
           copy
         end

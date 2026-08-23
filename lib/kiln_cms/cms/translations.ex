@@ -177,7 +177,7 @@ defmodule KilnCMS.CMS.Translations do
       |> Map.put(:blocks, blocks)
       |> Map.put(:tag_ids, ContentCopy.tag_ids(record))
 
-    {ContentTypes.create!(kind, attrs, opts), dropped ++ reset}
+    {ContentTypes.create!(kind, attrs, ContentCopy.create_opts(opts)), dropped ++ reset}
   end
 
   defp translated_blocks(record, grant, opts) do
