@@ -87,9 +87,15 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   end
 
   # `$1` is the key being retired, `$2` the key it becomes (rename only), so the
-  # org/type params start after it. The table name comes from the resource's own
-  # `postgres do table` — never from user input — and every other value is a
-  # bound parameter.
+  # org/type params start after it.
+  #
+  # `sobelow_skip`: the only interpolations are the table name and the `$n`
+  # placeholder tail. The table comes from the resource's own `postgres do
+  # table` — a compile-time DSL setting, never a request value — and the
+  # placeholders are digits this module generates. Every actual *value* (the
+  # field names, the org, the type id) is a bound parameter, which is what
+  # Sobelow cannot see from a `Repo.query/2` handed a variable.
+  # sobelow_skip ["SQL.Query"]
   defp execute({:purge, name}, table, filter, params) do
     """
     UPDATE #{table}
@@ -99,6 +105,7 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
     |> query([name | params], "purged #{inspect(name)} from")
   end
 
+  # sobelow_skip ["SQL.Query"]
   defp execute({:rename, from, to}, table, filter, params) do
     """
     UPDATE #{table}
@@ -108,6 +115,7 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
     |> query([from, to | params], "moved #{inspect(from)} to #{inspect(to)} on")
   end
 
+  # sobelow_skip ["SQL.Query"]
   defp query(sql, params, what) do
     case KilnCMS.Repo.query(sql, params) do
       {:ok, %{num_rows: 0}} ->

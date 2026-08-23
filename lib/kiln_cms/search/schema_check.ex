@@ -112,6 +112,11 @@ defmodule KilnCMS.Search.SchemaCheck do
     _ -> nil
   end
 
+  # `sobelow_skip`: every statement above is a literal in this module — the
+  # table name is bound as `$1`, including for the two derived object names
+  # (`$1 || '_search_vector_trg'`). Sobelow flags the shape (`Repo.query!` with
+  # a variable) rather than the strings, which carry nothing from a request.
+  # sobelow_skip ["SQL.Query"]
   defp exists?(sql, params) do
     # `to_regclass(...) IS NOT NULL` answers with a boolean row; the catalog
     # probes answer with a row or no rows at all. A `[[false]]` is the one shape
