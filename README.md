@@ -252,3 +252,7 @@ delivery. Remaining cleanup: replace the temporary DaisyUI auth-override scaffol
 > **Note:** keep this project at a path **without spaces** (it lives at
 > `~/Github/kiln_cms`). Native deps (`bcrypt_elixir`, `libvips`) build via `make`, which
 > fails on spaced paths such as iCloud Drive's `Mobile Documents`.
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for vulnerability reporting.
