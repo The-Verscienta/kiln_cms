@@ -123,9 +123,12 @@ migration, a rewritten column, a dropped config key).
   one purges them at once instead of leaving them to be destroyed by an
   unrelated later edit** (#710 follow-up). Either action left a key in every
   record's jsonb that no definition declared, governed by nothing, until
-  whatever wrote that record next rewrote the map and dropped it — so an
-  editor's title change was what finally destroyed three paragraphs of prose,
-  with no connection between the two events. A **rename** never asked for
+  whatever wrote that record next re-folded the map out of the definitions and
+  dropped it. (A partial payload merges per key since #329, so a *defined*
+  field a write omits is re-read from the record and written back; an
+  undeclared key has no definition to be re-read from.) So an editor's title
+  change was what finally destroyed three paragraphs of prose, with no
+  connection between the two events. A **rename** never asked for
   anything to be lost: its values now move to the new key
   (`KilnCMS.CMS.Changes.SyncFieldValues`). A **destroy** did — the values
   cannot be kept, since `custom_fields` is `public? true` and #710 settled that

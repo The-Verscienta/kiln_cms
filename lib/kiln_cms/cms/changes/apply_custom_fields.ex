@@ -52,12 +52,19 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
   ## Nothing else should be left holding one
 
-  Dropping is fold-shaped, not payload-shaped. A write that mentions *one*
-  custom field rewrites the whole map down to the currently-defined keys, so it
-  takes the stale ones with it — and on a type with a computed field, so does
-  the refresh pass on a write that never mentions `custom_fields` at all. Prose
-  disappears on an edit that had nothing to do with it, hours or months after
-  the definition it belonged to was deleted.
+  Dropping is fold-shaped, not payload-shaped — and note what that does *not*
+  mean. Since #329 a partial payload merges per key, so a **defined** key the
+  caller left out is re-read from the record and written straight back; nothing
+  about a one-field write endangers the other fields. The fold is over the
+  *definitions*, so the only keys with nowhere to be re-read from are the ones
+  the registry no longer declares.
+
+  Which is enough to lose prose on an edit that had nothing to do with it. Any
+  write touching `custom_fields` takes the stale keys with it, whether or not it
+  mentions them — and on a type with a computed field, so does the refresh pass
+  on a write that never mentions `custom_fields` at all. That lands hours or
+  months after the definition it belonged to was deleted, on whoever happens to
+  save next.
 
   Preserving those keys instead is not open to us — `custom_fields` is
   `public? true`, and #710 settled that deleting a definition must stop
