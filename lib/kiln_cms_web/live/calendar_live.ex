@@ -95,23 +95,38 @@ defmodule KilnCMSWeb.CalendarLive do
   # and reconciling one event against three views' worth of grouping is more
   # code than the query costs.
   #
-  # `drain_calendar_changed/0` first, so a burst already queued behind this
+  # `drain_calendar_changed/1` first, so a burst already queued behind this
   # message collapses into the one re-query it actually needs (see the
   # moduledoc's "Live" section) instead of running once per message.
+  #
+  # The telemetry event is the coalescing made observable: one event per
+  # re-query, carrying how many `:calendar_changed` messages it answered. A
+  # busy org shows up as a high `messages` summary, a broken drain as the
+  # event firing once per message with `messages: 1` — and the burst test
+  # counts these events rather than repo query telemetry, because one
+  # re-query is one *logical* query but several physical ones (one per
+  # content type, plus the dynamic-type registry, tasks and releases).
   @impl true
   def handle_info({:calendar_changed, _id}, socket) do
-    drain_calendar_changed()
+    drained = drain_calendar_changed(0)
+
+    :telemetry.execute(
+      [:kiln_cms, :calendar, :requery],
+      %{messages: drained + 1},
+      %{org_id: socket.assigns.current_org.id}
+    )
+
     {:noreply, load_events(socket)}
   end
 
   # Non-blocking: `after 0` returns immediately once the mailbox holds no more
   # `:calendar_changed` messages, so this costs nothing beyond a mailbox scan
-  # when writes are not currently bursting.
-  defp drain_calendar_changed do
+  # when writes are not currently bursting. Returns how many messages it ate.
+  defp drain_calendar_changed(count) do
     receive do
-      {:calendar_changed, _id} -> drain_calendar_changed()
+      {:calendar_changed, _id} -> drain_calendar_changed(count + 1)
     after
-      0 -> :ok
+      0 -> count
     end
   end
 

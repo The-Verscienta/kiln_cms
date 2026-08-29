@@ -112,6 +112,11 @@ defmodule KilnCMSWeb.Telemetry do
         tags: [:kind, :action, :result],
         description: "Number of non-publish workflow transitions"
       ),
+      summary("kiln_cms.calendar.requery.messages",
+        description:
+          "How many :calendar_changed messages each calendar re-query coalesced " <>
+            "(1 = a lone change; consistently 1 under bursty writes = the drain is broken)"
+      ),
 
       # Delivery / cache / firing Metrics (#206)
       counter("kiln_cms.cache.content.count",
