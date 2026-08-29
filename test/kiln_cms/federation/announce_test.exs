@@ -106,9 +106,33 @@ defmodule KilnCMS.Federation.AnnounceTest do
       assert :ok = announce(post, "Create", org_id)
       assert :ok = announce(post, "Update", org_id)
 
-      [create, update] = Enum.sort_by(deliveries(org_id), & &1.inserted_at)
+      # Picked by activity type, not by position after sorting on
+      # `inserted_at`. The two deliveries are written back-to-back and can land
+      # on the same timestamp; `Enum.sort_by/2` is stable, so a tie falls back
+      # to the order `deliveries/1` returned, and that is an unordered
+      # `Ash.read!` — Postgres's incidental row order. Under full-suite load it
+      # comes back reversed and this failed as `left: "Create"` (2026-08-12 on
+      # #1237/#1238, again 2026-08-29 on #1343 — every one a PR touching no
+      # federation code).
+      #
+      # Note an explicit `sort: [inserted_at: :asc]` would NOT fix it: the
+      # collision is on `inserted_at` itself, so sorting by it has nothing to
+      # break the tie with. Ordering was never the claim here anyway — that an
+      # edit reuses the object id is.
+      deliveries = deliveries(org_id)
 
-      assert update.activity["type"] == "Update"
+      assert length(deliveries) == 2,
+             "expected one Create and one Update delivery, got #{length(deliveries)}"
+
+      create = Enum.find(deliveries, &(&1.activity["type"] == "Create"))
+      update = Enum.find(deliveries, &(&1.activity["type"] == "Update"))
+
+      assert create, "the initial announce did not record a Create delivery"
+
+      assert update,
+             "announcing an edit recorded no Update delivery — a second Create " <>
+               "would mean the edit is federating as a new object"
+
       # The object id is what every remote server deduplicates on, so an edit
       # must reuse it rather than minting a new one.
       assert update.activity["object"]["id"] == create.activity["object"]["id"]
