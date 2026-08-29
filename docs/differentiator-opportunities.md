@@ -17,7 +17,12 @@ Priority reflects value × cheapness-to-build. P1 = strongest / cheapest wins.
 - [x] Subscriber segments (reuse the `audiences` read-axis) — shipped in #358
 - [x] "Send this post as a newsletter to segment X" via the built-in MTA —
       shipped in #358; auto-send-on-publish via automation rules in #376
-- [ ] Optional paid-membership gating on content — Phase 2, specced in #337
+- [x] Optional paid-membership gating on content — shipped as #337 phase 2:
+      subscription tiers, member-facing checkout, `/account` and join pages, and
+      the paywall. Content carries one `audience`; `:public` is world-readable
+      and anything else is gated, unlocked by an active subscription whose tier
+      grants that audience. Gating is **per-site** — a membership bought on one
+      site never unlocks another's content. See [memberships.md](memberships.md).
 
 **The asymmetry:** Kiln already ships a **DKIM-signing, direct-to-MX MTA** — no
 other headless CMS has native outbound email. Content → audience → inbox in one
@@ -41,8 +46,16 @@ render live from a mutable DB and can't do this without heavy custom work.
 - [x] `/api/ask` — RAG over *published* content, policy-scoped (never leaks
       drafts) — Phase 1 shipped in #361: retrieval + cited sources, with a
       config-gated generation seam ([rag.md](rag.md))
-- [ ] Auto "related content", near-duplicate detection, AI auto-tagging — Phase 2
-- [ ] Content-gap analysis ("users search for X; you have nothing about it") — Phase 2
+- [x] Auto "related content", near-duplicate detection, AI auto-tagging — shipped
+      as #339 phase 2 in `KilnCMS.Search.Related`, built entirely on the block
+      embeddings that already index every document (D16): no new model, no
+      external calls. `related_documents/2` (published only),
+      `near_duplicates/2` (any state — editors want to catch draft duplicates),
+      and `suggest_tags/2` (existing tags ranked by semantic similarity, minus
+      those already applied).
+- [x] Content-gap analysis ("users search for X; you have nothing about it") —
+      `Related.content_gaps/2` over the zero-result half of the search-analytics
+      log, surfaced as a **Content gaps** panel on `/editor/analytics`.
 
 **The asymmetry:** Block-level embeddings (pgvector + Bumblebee) and ash_ai are
 already in-house. Exposing them is almost free. Most CMSs bolt this on via
@@ -173,13 +186,19 @@ Structural add/delete of blocks stays in the block editor / page-building (#335)
 
 Extends the governance story (#340 signing, #352 dashboard) with two parts:
 
-- [ ] **Tamper-evident audit** — hash-chain/Merkle the AshPaperTrail entries and
-      sign *every version* (not just published artifacts), giving an append-only,
-      verifiable log. Today's paper-trail rows are mutable.
-- [ ] **Editorial/authorization consent linking** — a Consent resource tied to
-      content (reviewer sign-off, source/patient release, licensing); surfaced in
-      the dashboard, optionally gating publish. Scope is *cleared-to-publish*
-      consent, NOT GDPR data-subject consent.
+- [x] **Tamper-evident audit** — shipped. A document's version chain is hashed
+      and anchored with a signed anchor at publish; `mix kiln.audit.checkpoint`
+      writes anchors and `mix kiln.audit.verify` recomputes every anchored
+      chain, exiting non-zero if anchored history was altered, deleted or
+      reordered, or if an anchor signature no longer verifies. Edits newer than
+      a document's latest anchor are covered at its next publish.
+      **Operational note:** re-keying invalidates existing anchor signatures —
+      each anchor records the `key_id` that made it.
+- [x] **Editorial/authorization consent linking** — shipped: a Consent resource
+      tied to content (medical-reviewer sign-off, patient/source release, source
+      licensing), surfaced in the governance dashboard and able to gate publish.
+      Scope is *cleared-to-publish* consent, **not** GDPR data-subject or cookie
+      consent. See [editorial-consent.md](editorial-consent.md).
 
 **Caution:** link to consent *references/metadata*, never store the sensitive
 consent documents themselves (PHI-adjacent exposure).

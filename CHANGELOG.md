@@ -104,6 +104,32 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **The three roadmap documents no longer contradict the issue tracker**
+  (#1313, partial). `KilnCMS_Project_Plan.md`,
+  `docs/competitive-gaps-todo.md` and `docs/differentiator-opportunities.md`
+  carried 20 unchecked boxes between them, of which exactly **one** was
+  still real. Sixteen pointed at work that had shipped and whose issue was
+  closed — media CDN headers (#42), per-org white-label branding (#48), the
+  backup runbook (#57), the block-level AI assistant (#60), the
+  dependency-audit gate (#51), the `/ready` probe and alert rules (#56),
+  SSO/2FA/passkeys (#331), granular RBAC through per-field grants and custom
+  roles (#332), multi-tenancy (#336), membership gating (#337),
+  related-content/near-duplicate/auto-tagging and content-gap analysis
+  (#339), and the tamper-evident audit plus editorial consent linking
+  (#356). Every box was re-checked against the code, not just against issue
+  state, so the entries now say what shipped rather than merely that
+  something did. Of the remaining four: one was answered **no, by design**
+  (installing plugins into a running instance, #333) and now says so, with
+  the reasoning; two were never built *and* are tracked by no issue (palette
+  drag-to-place, live-preview polish) and are labelled as such instead of
+  reading as planned work; and one — a hosted control plane (#334) — is
+  genuinely open and stays the only unchecked box in the three documents.
+  Corrected in the other direction too: the plan claimed real-time
+  co-editing had "shipped for real" when it sits behind `:collab_prototype`,
+  on in dev and test and **off in prod** (#1324), and claimed the six
+  advanced-analytics phases were "designed but unbuilt" when five shipped
+  and the sixth (#623) was closed as a deliberate non-build.
+
 - **A `custom_fields` key with no `FieldDefinition` is refused instead of
   vanishing out of a successful write** (#295 family). `ApplyCustomFields`
   folds the stored map out of the *definitions*, so any key the registry did
