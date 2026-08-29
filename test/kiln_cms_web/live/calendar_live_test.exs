@@ -504,12 +504,65 @@ defmodule KilnCMSWeb.CalendarLiveTest do
 
       burst = count_lv_queries(lv)
 
-      # The whole point: 20 messages cost exactly what 1 costs. Before #1336's
-      # fix this ran 20 (one per message) or, under contention, 33-34 — the
-      # drain firing repeatedly on partial bursts, worse than not coalescing.
+      # 20 messages cost exactly what 1 costs.
       assert burst == one_requery,
              "20 :calendar_changed messages ran #{burst} queries, but one re-query " <>
                "costs #{one_requery} — the burst is not being coalesced into a single window"
+    end
+
+    # The regression #1336 actually describes, and the one the test above
+    # CANNOT catch: `:sys.suspend/1` hands the receiver a burst that is already
+    # complete, which the old `receive ... after 0` drain coalesces perfectly
+    # well. The drain only broke when the *sender* was preempted mid-burst —
+    # then it saw a partial mailbox, re-queried, and did it again for the next
+    # fragment, turning one burst into many re-queries.
+    #
+    # So this sends the burst with a real gap between messages, which is what a
+    # bulk import looks like from the LiveView's side. `Process.sleep/1` yields
+    # the scheduler, so the LiveView is guaranteed to run between sends — the
+    # preemption, made deterministic instead of waited for. The whole burst
+    # still fits inside one flush window, so it must cost one re-query.
+    #
+    # Against the old drain this runs ~20 re-queries and fails; that is the
+    # point of the test.
+    test "a burst spread across scheduler turns is still one re-query", %{conn: conn} do
+      admin = authed_admin()
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/calendar")
+
+      test_pid = self()
+      handler_id = "calendar-spread-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach(
+        handler_id,
+        [:kiln_cms, :repo, :query],
+        fn _event, _measurements, _metadata, %{lv_pid: lv_pid, test_pid: test_pid} ->
+          if self() == lv_pid, do: send(test_pid, :repo_query)
+        end,
+        %{lv_pid: lv.pid, test_pid: test_pid}
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      send(lv.pid, {:calendar_changed, Ash.UUID.generate()})
+      one_requery = count_lv_queries(lv)
+
+      # 10 messages, ~2ms apart: ~20ms of wall clock, comfortably inside the
+      # 100ms window, but every one of them on a separate scheduler turn.
+      for _ <- 1..10 do
+        send(lv.pid, {:calendar_changed, Ash.UUID.generate()})
+        Process.sleep(2)
+      end
+
+      spread = count_lv_queries(lv)
+
+      # Deliberately loose: on a loaded machine the sends can overrun the
+      # window and spill into a second one, which is correct behaviour and
+      # still bounded. The failure this guards against is one re-query PER
+      # MESSAGE — 10x, not 2x — so the margin costs nothing.
+      assert spread <= one_requery * 3,
+             "a burst spread over ~20ms ran #{spread} queries against a #{one_requery}-query " <>
+               "re-query — messages are being handled one at a time instead of coalescing " <>
+               "into the armed window"
     end
   end
 

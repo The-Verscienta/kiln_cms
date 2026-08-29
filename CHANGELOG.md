@@ -104,6 +104,26 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **A burst of calendar writes is coalesced by a timed window instead of a
+  mailbox drain, so a bulk import no longer multiplies the calendar's query
+  load** (#1336). `CalendarLive` collapsed a burst of `:calendar_changed`
+  broadcasts with `receive ... after 0`, which inspects the mailbox at this
+  instant and cannot know about messages a concurrently-running sender has not
+  sent yet. It was correct only while the sender finished its whole burst
+  before the LiveView was next scheduled — true on an idle machine, false
+  under contention, which is exactly when a busy org bursts. Preempted
+  mid-burst, the drain fired repeatedly on partial bursts: 33-34 queries for a
+  20-write burst, measurably worse than no coalescing at all, from the
+  mechanism whose whole purpose was protecting a busy org's LiveView from
+  falling behind. The first `:calendar_changed` now schedules a re-query 100ms
+  out and later messages are absorbed by the armed window, so a burst costs one
+  re-query per window it spans rather than one per write — bounded work
+  regardless of write rate. The window is a fixed delay from the *first*
+  message and deliberately not reset by later ones: resetting would be a true
+  debounce and would let a sustained write stream, which is what a bulk import
+  is, starve the re-query for as long as the import ran. Calendar staleness
+  after a write is now bounded at 100ms rather than immediate.
+
 - **A `custom_fields` key with no `FieldDefinition` is refused instead of
   vanishing out of a successful write** (#295 family). `ApplyCustomFields`
   folds the stored map out of the *definitions*, so any key the registry did
