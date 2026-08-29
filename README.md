@@ -227,6 +227,24 @@ the front-end integration guide.
 - **Invite-only mode:** set `config :kiln_cms, :registration_enabled, false` to disable
   open `/register` self-signup (the registration action is gated, not just the UI link).
 
+## Security
+
+**Found a vulnerability? Do not open a public issue.** Report it privately
+through this repository's [Security tab](https://github.com/The-Verscienta/kiln_cms/security)
+→ **Report a vulnerability**. The full policy — what is in scope, which
+versions are supported while the project is pre-1.0, and what to expect after
+you report — is [`.github/SECURITY.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/.github/SECURITY.md).
+
+<!-- That link is deliberately a full URL, not a relative path: `.github/` is
+     outside ExDoc's `extras`, so `[...](.github/SECURITY.md)` fails the
+     `mix docs --warnings-as-errors` CI job. Same reason as the Dockerfile
+     link above. -->
+
+Hardening a deployment is a different question, answered by the
+[production hardening checklist](#production-hardening-checklist) above.
+Background on the trust boundaries and the attacks the design assumes:
+[`docs/threat-model.md`](docs/threat-model.md).
+
 ## Status & next steps
 
 Bootstrapped & verified (compiling, migrating, serving):
