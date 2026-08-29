@@ -1,4 +1,11 @@
 defmodule KilnCMSWeb.CalendarLive do
+  # Defined above @moduledoc so the doc can interpolate it and the two cannot
+  # drift. How long a burst of `:calendar_changed` is allowed to accumulate
+  # before the window is re-queried; also the upper bound on how stale the
+  # calendar can be after a write. Small enough to read as instant, long
+  # enough to outlast a sender preempted mid-burst (#1336).
+  @calendar_flush_ms 100
+
   @moduledoc """
   The **editorial calendar** (`/editor/calendar`): one time-ordered view of
   everything an editorial team plans around — scheduled publishes, embargo ends
@@ -36,16 +43,33 @@ defmodule KilnCMSWeb.CalendarLive do
   A burst of writes (a bulk import, a release going out, a scheduler sweep —
   or simply many things saving at once) queues one `:calendar_changed` per
   write, and each one asks for exactly the same thing: re-run the window
-  query. `handle_info/2` drains every additional `:calendar_changed` already
-  waiting in the mailbox before it re-queries, so a burst of N writes costs
-  one re-query rather than N run back to back. Without that, this process's
-  own mailbox — not the database — becomes the bottleneck: every message is
-  handled strictly in arrival order, so a `render_click`/`render` call queued
-  behind a long run of stale, superseded re-queries waits for all of them
-  first. That is what a heavily-loaded shared org (the test suite's default
-  org, or in principle a very busy production one) turns into an apparent
-  hang: not a slow query and not a deadlock, just a mailbox that fell behind
-  its own reactivity and had no way to catch up.
+  query. Without coalescing, this process's own mailbox — not the database —
+  becomes the bottleneck: every message is handled strictly in arrival order,
+  so a `render_click`/`render` call queued behind a long run of stale,
+  superseded re-queries waits for all of them first. That is what a
+  heavily-loaded shared org turns into an apparent hang: not a slow query and
+  not a deadlock, just a mailbox that fell behind its own reactivity and had
+  no way to catch up.
+
+  So the first `:calendar_changed` **schedules** a re-query
+  `#{@calendar_flush_ms}ms` out rather than running one; every message
+  arriving inside that window is dropped on the floor, because the scheduled
+  re-query already covers it. A burst costs one query per window it spans, not
+  one per write.
+
+  The window is a **fixed delay from the first message, deliberately not reset
+  by later ones** (#1336). Resetting it would be a true debounce and would let
+  a sustained write stream — exactly what a bulk import is — starve the
+  re-query for as long as the import ran. As written, staleness is bounded at
+  `#{@calendar_flush_ms}ms` no matter how long the burst lasts.
+
+  This replaces an earlier `receive ... after 0` mailbox drain, which raced the
+  sender instead of waiting for it: `after 0` inspects the mailbox *at this
+  instant* and cannot know about messages a concurrently-running sender has
+  not sent yet. Under scheduler contention the sender was preempted mid-burst
+  and the drain fired repeatedly on partial bursts — measured at 33-34 queries
+  for a 20-write burst, worse than no coalescing at all. A timer waits in wall
+  time, so a preempted sender is exactly what it handles.
   """
   use KilnCMSWeb, :live_view
 
@@ -73,7 +97,10 @@ defmodule KilnCMSWeb.CalendarLive do
      |> assign(:page_title, gettext("Calendar"))
      # Present from the first render: an aria-live region inserted later is not
      # announced by every screen reader, so it has to exist (empty) up front.
-     |> assign(:announcement, nil)}
+     |> assign(:announcement, nil)
+     # Whether a re-query window is already armed. Never rendered; it exists so
+     # a burst arms exactly one `:flush_calendar_changed` timer.
+     |> assign(:calendar_flush_pending?, false)}
   end
 
   @impl true
@@ -95,18 +122,42 @@ defmodule KilnCMSWeb.CalendarLive do
   # and reconciling one event against three views' worth of grouping is more
   # code than the query costs.
   #
-  # `drain_calendar_changed/0` first, so a burst already queued behind this
-  # message collapses into the one re-query it actually needs (see the
-  # moduledoc's "Live" section) instead of running once per message.
+  # Schedules the re-query rather than running it, so a burst collapses into
+  # one query per window instead of one per write (see the moduledoc's "Live"
+  # section). Nothing is loaded here: the id is not used, and the scheduled
+  # flush re-runs the whole window anyway.
   @impl true
   def handle_info({:calendar_changed, _id}, socket) do
-    drain_calendar_changed()
-    {:noreply, load_events(socket)}
+    {:noreply, schedule_calendar_flush(socket)}
   end
 
-  # Non-blocking: `after 0` returns immediately once the mailbox holds no more
-  # `:calendar_changed` messages, so this costs nothing beyond a mailbox scan
-  # when writes are not currently bursting.
+  @impl true
+  def handle_info(:flush_calendar_changed, socket) do
+    # Any `:calendar_changed` that landed *behind* this flush in the mailbox is
+    # already covered by the `load_events/1` below, so drop it here rather than
+    # let it arm a second, redundant window. Unlike the `after 0` drain this
+    # replaced, correctness does not depend on this: the timer is what waits
+    # out the burst, and this is only a saved query.
+    drain_calendar_changed()
+
+    {:noreply,
+     socket
+     |> assign(:calendar_flush_pending?, false)
+     |> load_events()}
+  end
+
+  # Already-armed windows are left alone — see the moduledoc on why this is a
+  # fixed delay from the *first* message rather than a reset-on-each debounce.
+  defp schedule_calendar_flush(%{assigns: %{calendar_flush_pending?: true}} = socket),
+    do: socket
+
+  defp schedule_calendar_flush(socket) do
+    Process.send_after(self(), :flush_calendar_changed, @calendar_flush_ms)
+    assign(socket, :calendar_flush_pending?, true)
+  end
+
+  # Non-blocking: `after 0` returns as soon as the mailbox holds no more
+  # `:calendar_changed`, so this costs nothing beyond a mailbox scan.
   defp drain_calendar_changed do
     receive do
       {:calendar_changed, _id} -> drain_calendar_changed()
