@@ -109,18 +109,11 @@ defmodule KilnCMS.Collab.CrdtMaterializationTest do
     fn -> send(pid, :leave) end
   end
 
-  defp await(fun, tries \\ 40) do
-    cond do
-      fun.() ->
-        :ok
-
-      tries == 0 ->
-        flunk("condition never held")
-
-      true ->
-        Process.sleep(25)
-        await(fun, tries - 1)
-    end
+  # Deadline-based (#1349): the previous `tries \\ 40` at `sleep(25)` was the
+  # literal one-second budget ConnCase.eventually/4's docstring post-mortems.
+  defp await(fun) do
+    KilnCMS.Test.Eventually.eventually(fun, message: "condition never held")
+    :ok
   end
 
   test "the last client's departure materializes converged text into the draft" do

@@ -93,21 +93,21 @@ defmodule KilnCMSWeb.ContentEditorBlockPresenceTest do
   # "a peer leaving takes their avatar with them" failed on its FIRST assertion
   # under a full-suite run — the one that sets the scene, not the one the test
   # is named for. Waiting for the condition rather than assuming it costs
-  # nothing when it has already landed, and a state that never resolves still
-  # fails, through the caller's own assertion with its HTML attached, one
-  # second later.
-  defp settle(condition, attempts \\ 100) do
-    cond do
-      condition.() ->
-        :ok
+  # nothing when it has already landed.
+  #
+  # This used to return `:ok` on exhaustion — a poller that could not fail —
+  # leaning on every caller pairing it with the same assertion so the failure
+  # would carry the rendered HTML. That contract lived only in convention: a
+  # settle without its twin assertion would silently soft-pass. It now flunks
+  # itself on `KilnCMS.Test.Eventually`'s deadline (#1349), with the last
+  # render attached, so the pairing is belt-and-braces rather than
+  # load-bearing.
+  defp settle(lv, condition) do
+    KilnCMS.Test.Eventually.eventually(condition,
+      message: fn -> "presence never settled; last render:\n#{render(lv)}" end
+    )
 
-      attempts <= 1 ->
-        :ok
-
-      true ->
-        Process.sleep(10)
-        settle(condition, attempts - 1)
-    end
+    :ok
   end
 
   setup %{conn: conn} do
@@ -157,7 +157,7 @@ defmodule KilnCMSWeb.ContentEditorBlockPresenceTest do
       render_hook(ctx.peer_lv, "presence_focus", %{"bid" => block_id(ctx.page)})
 
       # The diff reaches the first editor's LiveView, which re-reads the roster.
-      settle(fn -> render(ctx.lv) =~ @peer_on_block end)
+      settle(ctx.lv, fn -> render(ctx.lv) =~ @peer_on_block end)
       html = render(ctx.lv)
 
       assert html =~ @peer_on_block
@@ -172,7 +172,7 @@ defmodule KilnCMSWeb.ContentEditorBlockPresenceTest do
       assert where_is(ctx.page, ctx.peer) == block_id(ctx.page, 1)
 
       # Still exactly one avatar on the page, not one left behind on block 0.
-      settle(fn -> length(String.split(render(ctx.lv), @peer_on_block)) == 2 end)
+      settle(ctx.lv, fn -> length(String.split(render(ctx.lv), @peer_on_block)) == 2 end)
       html = render(ctx.lv)
       assert length(String.split(html, @peer_on_block)) == 2
     end
@@ -180,7 +180,7 @@ defmodule KilnCMSWeb.ContentEditorBlockPresenceTest do
     test "a peer leaving takes their avatar with them", ctx do
       render_hook(ctx.peer_lv, "presence_focus", %{"bid" => block_id(ctx.page)})
 
-      settle(fn -> render(ctx.lv) =~ @peer_on_block end)
+      settle(ctx.lv, fn -> render(ctx.lv) =~ @peer_on_block end)
       assert render(ctx.lv) =~ @peer_on_block
 
       GenServer.stop(ctx.peer_lv.pid)
@@ -188,10 +188,10 @@ defmodule KilnCMSWeb.ContentEditorBlockPresenceTest do
       # The entry goes when the tracker sees the peer's process die, which is
       # its own hop after `stop/1` returns — so this waits too, rather than
       # spending a render as a sleep and hoping (the previous shape).
-      settle(fn -> where_is(ctx.page, ctx.peer) == :absent end)
+      settle(ctx.lv, fn -> where_is(ctx.page, ctx.peer) == :absent end)
       assert where_is(ctx.page, ctx.peer) == :absent
 
-      settle(fn -> not (render(ctx.lv) =~ @peer_on_block) end)
+      settle(ctx.lv, fn -> not (render(ctx.lv) =~ @peer_on_block) end)
       refute render(ctx.lv) =~ @peer_on_block
     end
   end
