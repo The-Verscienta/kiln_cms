@@ -74,7 +74,8 @@ defensive `web_url/2` clause unreachable through `post/2`.
 The only test naming `/editor/code-injection` was `KilnCMSWeb.SurfaceTest`,
 which classifies routes and mounts nothing, so the console screen that writes
 stored XSS into a site had no mount, authorization or save test at all. 18
-tests; **0% → 98.6% (69/70)**.
+tests; **0 of 70 lines → 100%** (66 relevant lines once the dead helper below
+went with it).
 
 The auth matrix is the half worth reading. An editor who is a *member* of the
 site and a signed-in stranger reach `Scoping.effective_tier/2` down different
@@ -83,11 +84,11 @@ the default org — so a test using only the stranger passes with the gate
 widened to admit editors. Both are pinned separately; the mutation that admits
 `:editor` fails only because of the member case.
 
-What the tests do **not** cover, and the file says so: the LiveView's
-`blank_to_nil/1`. Ash's `:string` cast already trims and empties to nil, so
-deleting the helper changes nothing observable — it is the one uncovered line
-left in the file, and the honest reading is that it is dead rather than
-untested.
+Writing the tests turned up dead code rather than a gap: the LiveView's own
+`blank_to_nil/1` was the one line left uncovered, and removing it left all 18
+tests green — Ash's `:string` cast already trims and refuses the empty string.
+It is gone, and the file measures 100%. A helper no test can distinguish from
+its own absence is worth deleting rather than covering.
 
 ## Next
 

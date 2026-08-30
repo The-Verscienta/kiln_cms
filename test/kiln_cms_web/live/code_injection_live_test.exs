@@ -19,9 +19,7 @@ defmodule KilnCMSWeb.CodeInjectionLiveTest do
     * **`attrs/1`.** The form's strings become the row's values here:
       newline-separated origins become lists and an unchecked box becomes
       `false`. Nothing downstream can restore what this function gets wrong —
-      each is mutation-checked. (Its `blank_to_nil/1` is *not* pinned by these
-      tests: Ash's `:string` cast already trims to nil, so deleting the helper
-      changes nothing observable.)
+      each is mutation-checked.
   """
   use KilnCMSWeb.ConnCase, async: false
 
@@ -159,11 +157,11 @@ defmodule KilnCMSWeb.CodeInjectionLiveTest do
 
       row = row!(ctx.org)
       assert row.head_html == "<!-- keep -->"
-      # Behaviour, not attribution: Ash's `:string` cast already trims and
-      # empties to nil, so this still holds with the LiveView's own
-      # `blank_to_nil/1` deleted. Kept because "an admin who cleared a box gets
-      # no empty element on their site" is worth a regression guard wherever it
-      # is implemented — but do not read it as covering `attrs/1`.
+      # Behaviour, not attribution: what nils this is Ash's `:string` cast,
+      # which trims and refuses the empty string. The LiveView carries no
+      # blank-handling of its own — it used to, and the helper was dead. Read
+      # this as "an admin who cleared a box gets no empty element on their
+      # site", not as covering a line in `attrs/1`.
       assert row.footer_html == nil
     end
 
