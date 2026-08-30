@@ -79,7 +79,12 @@ defmodule KilnCMSWeb.CodeInjectionLive do
   end
 
   defp attrs(params) do
-    text = Map.new(@text_fields, fn field -> {field, blank_to_nil(params[field])} end)
+    # No blank-to-nil pass here: `head_html`/`footer_html` are plain Ash
+    # `:string` attributes, whose cast already trims and refuses the empty
+    # string, so a cleared textarea stores `nil` either way. Re-adding one
+    # would be dead code — `KilnCMSWeb.CodeInjectionLiveTest` asserts the
+    # behaviour, not the helper.
+    text = Map.new(@text_fields, fn field -> {field, params[field]} end)
     origins = Map.new(@origin_fields, fn field -> {field, parse_origins(params[field])} end)
 
     text
@@ -123,15 +128,6 @@ defmodule KilnCMSWeb.CodeInjectionLive do
       _ -> nil
     end
   end
-
-  defp blank_to_nil(value) when is_binary(value) do
-    case String.trim(value) do
-      "" -> nil
-      _trimmed -> value
-    end
-  end
-
-  defp blank_to_nil(value), do: value
 
   # Shared with the other settings pages (#1080).
   defp error_message(error) do

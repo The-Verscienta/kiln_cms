@@ -116,6 +116,15 @@ migration, a rewritten column, a dropped config key).
   gaps (compile-time macro bodies, dev-only modules, deliberately excluded
   tags).
 
+### Removed
+
+- **A dead `blank_to_nil/1` in `KilnCMSWeb.CodeInjectionLive`.** It trimmed a
+  cleared Head/Footer HTML textarea to `nil` before saving — which the `:string`
+  attribute's own cast already does, so the helper could be deleted without any
+  test being able to tell. No behaviour change: a cleared box still stores
+  nothing rather than an empty element, and `KilnCMSWeb.CodeInjectionLiveTest`
+  asserts that directly.
+
 ### Fixed
 
 - **The three roadmap documents no longer contradict the issue tracker**
