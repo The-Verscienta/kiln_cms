@@ -584,22 +584,53 @@ defmodule KilnCMSWeb.Tenant do
   # request. The host is the only input, and only a resolved org id/struct
   # leaves here.
   defp lookup(:slug, value) do
-    case Accounts.get_organization_by_slug(value, authorize?: false) do
-      {:ok, %Accounts.Organization{} = org} -> org
-      {:ok, nil} -> nil
-      {:error, error} -> if not_found?(error), do: nil, else: :error
-      _ -> :error
-    end
+    read_degrading_exit(fn ->
+      case Accounts.get_organization_by_slug(value, authorize?: false) do
+        {:ok, %Accounts.Organization{} = org} -> org
+        {:ok, nil} -> nil
+        {:error, error} -> if not_found?(error), do: nil, else: :error
+        _ -> :error
+      end
+    end)
   end
 
   defp lookup(:custom_domain, value) do
     # `authorize?: false`: pre-auth host→tenant resolution, see `lookup(:slug, _)`.
-    case Accounts.get_organization_by_domain(value, authorize?: false) do
-      {:ok, %Accounts.Organization{} = org} -> org
-      {:ok, nil} -> nil
-      {:error, error} -> if not_found?(error), do: nil, else: :error
-      _ -> :error
-    end
+    read_degrading_exit(fn ->
+      case Accounts.get_organization_by_domain(value, authorize?: false) do
+        {:ok, %Accounts.Organization{} = org} -> org
+        {:ok, nil} -> nil
+        {:error, error} -> if not_found?(error), do: nil, else: :error
+        _ -> :error
+      end
+    end)
+  end
+
+  # The exit half of "a failed read is not a miss" (#1335, the shape #1288
+  # named): a refused connection or a queue timeout RAISES, which Ash wraps
+  # into the `{:error, _}` the clauses above already judge — but a read into a
+  # pool process that is not alive (crashed, or restarting under its
+  # supervisor) EXITS, and an exit sails past every branch to crash whatever
+  # asked for the tenant: `SetTenant` for a request, `on_mount` for a LiveView.
+  #
+  # `:error` is not a shrug here — it is `fetch_org/1`'s designed answer for
+  # "the lookup could not be performed" (#341/#1124): strict hosts get a
+  # retryable `:unavailable`, lenient installs degrade to the default org.
+  # That considered fail-direction is why this does NOT reach for
+  # `Config.Report.probe/2`, whose own docstring scopes it to advisory-only
+  # reads. `:exit` only, no `rescue` or `:throw`: a raise this deep is either
+  # already `{:error, _}` by the time Ash returns it or a bug that should
+  # fail loudly, and a throw out of a database read is always the latter.
+  #
+  # Public (`@doc false`) for the same reason `probe/2`'s guard is tested
+  # where it lives: the exit clause can only be forced deterministically by
+  # calling this directly.
+  @doc false
+  @spec read_degrading_exit((-> result)) :: result | :error when result: term()
+  def read_degrading_exit(fun) do
+    fun.()
+  catch
+    :exit, _reason -> :error
   end
 
   # Ash wraps a get_by miss in an `Invalid`/`Query` envelope whose `errors`
