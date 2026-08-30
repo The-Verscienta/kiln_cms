@@ -1200,10 +1200,20 @@ msgstr "Dirección eliminada: puede volver a recibir correo."
 msgid "Adds detail drawn from this block and the rest of the page."
 msgstr "Añade detalles extraídos de este bloque y del resto de la página."
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Admin routes"
+msgstr "Rutas de administración"
+
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Advice only (warning)"
 msgstr "Solo un aviso (advertencia)"
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Advisories"
+msgstr "Avisos"
 
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
@@ -1701,6 +1711,11 @@ msgstr "Hacer copia ahora"
 msgid "Backed up %{ago} ago"
 msgstr "Copia creada hace %{ago}"
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Background queues"
+msgstr "Colas en segundo plano"
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Backing up…"
@@ -1781,6 +1796,7 @@ msgstr "Bloqueado. Se eliminaron los seguidores coincidentes."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/experiment_live.ex
+#: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Blocks"
 msgstr "Bloques"
@@ -1983,6 +1999,11 @@ msgstr "Carrusel"
 #, elixir-autogen, elixir-format
 msgid "Carries on from where this block stops, in the same voice."
 msgstr "Continúa donde termina este bloque, con el mismo tono."
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Catalog metadata only — contributes nothing to this instance."
+msgstr "Solo metadatos de catálogo: no aporta nada a esta instancia."
 
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
@@ -3700,6 +3721,11 @@ msgstr "Campos del documento"
 msgid "Document notes"
 msgstr "Notas del documento"
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Documentation"
+msgstr "Documentación"
+
 #: lib/kiln_cms_web/live/release_preview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Documents in this release"
@@ -3709,6 +3735,11 @@ msgstr "Documentos de este lanzamiento"
 #, elixir-autogen, elixir-format
 msgid "Documents: PDF, Word, Excel, PowerPoint, ZIP up to 25 MB"
 msgstr "Documentos: PDF, Word, Excel, PowerPoint, ZIP hasta 25 MB"
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Domains"
+msgstr "Dominios"
 
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
@@ -3933,6 +3964,11 @@ msgstr "Edición en contexto"
 #, elixir-autogen, elixir-format
 msgid "Editor"
 msgstr "Editor"
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Editor routes"
+msgstr "Rutas del editor"
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
@@ -4402,6 +4438,11 @@ msgstr "Configuración del campo"
 #, elixir-autogen, elixir-format
 msgid "Field type"
 msgstr "Tipo de campo"
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Field types"
+msgstr "Tipos de campo"
 
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/components/version_diff_components.ex
@@ -5858,6 +5899,11 @@ msgstr "Nombre (p. ej. «Touch ID del MacBook»)"
 msgid "Name (optional)"
 msgstr "Nombre (opcional)"
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nav items"
+msgstr "Elementos de navegación"
+
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
 msgid "Navigation your front end reads from the API. Items link to content by reference, so renaming a slug never breaks the menu. One menu per key and locale."
@@ -6269,6 +6315,11 @@ msgstr "Ninguna foto coincide con «%{query}»."
 #, elixir-autogen, elixir-format
 msgid "No plans available yet"
 msgstr "Aún no hay planes disponibles"
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "No plugins are installed on this instance."
+msgstr "No hay complementos instalados en esta instancia."
 
 #: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex
 #, elixir-autogen, elixir-format
@@ -7178,6 +7229,16 @@ msgstr "Planificados"
 msgid "Please fix the errors below."
 msgstr "Corrija los errores a continuación."
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Plugins"
+msgstr "Complementos"
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Plugins are compiled into the image this instance runs, so this list changes only with the next build. Installing one means adding the dependency and a config line to your project, then rebuilding and redeploying."
+msgstr "Los complementos se compilan en la imagen que ejecuta esta instancia, así que esta lista solo cambia con la próxima compilación. Instalar uno consiste en añadir la dependencia y una línea de configuración a tu proyecto, y luego reconstruir y volver a desplegar."
+
 #: lib/kiln_cms_web/live/type_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Plural name"
@@ -7345,6 +7406,11 @@ msgstr "Identificador de precio del proveedor"
 #, elixir-autogen, elixir-format
 msgid "Provisioning URI"
 msgstr "URI de aprovisionamiento"
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Public routes"
+msgstr "Rutas públicas"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
@@ -9102,6 +9168,11 @@ msgstr "Afirmación respaldada con metadatos de la fuente"
 msgid "Spam"
 msgstr "Spam"
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Spam checks"
+msgstr "Comprobaciones de spam"
+
 #: lib/kiln_cms_web/live/form_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Spam keywords"
@@ -9318,6 +9389,11 @@ msgstr "Resumen"
 #, elixir-autogen, elixir-format
 msgid "Sun"
 msgstr "dom"
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Supervised children"
+msgstr "Procesos supervisados"
 
 #: lib/kiln_cms_web/live/membership_live.ex
 #, elixir-autogen, elixir-format
@@ -9852,6 +9928,11 @@ msgstr "El bloqueo de publicación solo actúa sobre las reglas marcadas como bl
 #, elixir-autogen, elixir-format
 msgid "The required disclaimer is missing. Add it verbatim: “%{disclaimer}”"
 msgstr "Falta el aviso legal obligatorio. Añádalo literalmente: «%{disclaimer}»"
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "The same list is available on the server as %{list}, and %{doctor} verifies an install."
+msgstr "La misma lista está disponible en el servidor con %{list}, y %{doctor} verifica una instalación."
 
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
