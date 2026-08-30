@@ -548,6 +548,7 @@ defmodule KilnCMS.CMS do
 
     resource KilnCMS.CMS.ReleaseItem do
       define :add_release_item, action: :add
+      define :set_release_item_action, action: :set_action
       define :cancel_release_item, action: :cancel
       define :get_release_item, action: :read, get_by: [:id]
       define :list_release_items_for, action: :for_release, args: [:release_id]

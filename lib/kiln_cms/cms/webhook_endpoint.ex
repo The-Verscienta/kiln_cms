@@ -26,7 +26,11 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   # `KilnCMS.Webhooks.dispatch/3` funnel with a literal type segment, so they are
   # selectable here exactly like `page.published`.
   @task_events ~w(task.assigned task.overdue)
-  @release_events ~w(release.published release.rolled_back)
+  # `release.failed` is the abort. It is deliberately a first-class event rather
+  # than a log line: a scheduled release that aborts unattended changes nothing
+  # on the site, so nothing else about the system tells anybody it was supposed
+  # to. It carries `mode` (`"publish"` / `"rollback"`) and the failure reason.
+  @release_events ~w(release.published release.rolled_back release.failed)
   # Content experiments (#499). One event, on conclusion — an experiment that is
   # merely running has nothing a subscriber could act on.
   @experiment_events ~w(experiment.concluded)
@@ -39,8 +43,9 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   admin-defined dynamic (D17) — crossed with each lifecycle verb (e.g.
   `"page.published"`, `"recipe.updated"`), plus `form.submitted` for
   admin-defined public forms, `task.assigned`/`task.overdue` for editorial
-  tasks (#501), `release.published`/`release.rolled_back` for content releases
-  (#500), and `experiment.concluded` for A/B experiments (#499). Derived at
+  tasks (#501), `release.published`/`release.rolled_back`/`release.failed` for
+  content releases (#500), and `experiment.concluded` for A/B experiments
+  (#499). Derived at
   runtime so generated and admin-defined types get events for free.
 
   Dynamic types are per-org (epic #336), so the console passes the request's

@@ -123,7 +123,21 @@ defmodule KilnCMSWeb.ReleaseLive do
     |> assign(:schedule_form, to_form(schedule_params(release), as: :schedule))
     |> assign(:max_items, Releases.max_items())
     |> assign(:pending_count, Enum.count(items, &(&1.status == :pending)))
+    |> assign_readiness_counts()
     |> subscribe_to(release)
+  end
+
+  # The readiness verdicts already exist per item; this is the number an editor
+  # actually needs before shipping. A release is all-or-nothing, so ONE blocking
+  # item is the whole release failing — and on a two-hundred-item release that
+  # fact was a single red badge somewhere in a scroll list. Counted here so the
+  # ship controls can refuse rather than merely inform.
+  defp assign_readiness_counts(socket) do
+    verdicts = Map.values(socket.assigns.readiness)
+
+    socket
+    |> assign(:blocked_count, Enum.count(verdicts, &match?({:error, _}, &1)))
+    |> assign(:skip_count, Enum.count(verdicts, &match?({:skip, _}, &1)))
   end
 
   # A go-live runs off-request, so without this the page that started it renders
@@ -225,10 +239,28 @@ defmodule KilnCMSWeb.ReleaseLive do
     |> respond(socket, gettext("Go-live date removed; the release is manual again."))
   end
 
+  # The button is hidden when the release can't ship, but the guard lives here
+  # too — and it re-reads before deciding rather than trusting the assigns it
+  # was rendered with. That is the whole point: the case worth guarding is a tab
+  # held open while somebody archives one of the release's records, and those
+  # assigns still say the release was fine when the page was drawn. Checking
+  # them would pass the click straight through to a go-live that aborts on item
+  # N for something this page could have known a moment earlier.
+  #
+  # The cost is one readiness pass per click, against a go-live that is about to
+  # run N publishes in a transaction. Worth it.
   def handle_event("publish_now", _params, socket) do
-    socket.assigns.release
-    |> CMS.start_release(%{}, act(socket))
-    |> respond(socket, gettext("Publishing the release…"))
+    socket = reload(socket)
+
+    case ship_blocker(socket.assigns.pending_count, socket.assigns.blocked_count) do
+      nil ->
+        socket.assigns.release
+        |> CMS.start_release(%{}, act(socket))
+        |> respond(socket, gettext("Publishing the release…"))
+
+      message ->
+        {:noreply, put_flash(socket, :error, message)}
+    end
   end
 
   def handle_event("roll_back", _params, socket) do
@@ -267,6 +299,25 @@ defmodule KilnCMSWeb.ReleaseLive do
         {:noreply, put_flash(socket, :error, gettext("That release can't be deleted."))}
     end
   end
+
+  def handle_event("set_item_action", %{"id" => id, "action" => action}, socket)
+      when is_binary(id) and action in ~w(publish unpublish) do
+    opts = act(socket)
+
+    with {:ok, item} <- CMS.get_release_item(id, opts),
+         {:ok, _} <-
+           CMS.set_release_item_action(item, %{action: String.to_existing_atom(action)}, opts) do
+      {:noreply,
+       socket
+       |> reload()
+       |> put_flash(:info, gettext("Change updated."))}
+    else
+      _ -> {:noreply, put_flash(socket, :error, gettext("Couldn't change that item."))}
+    end
+  end
+
+  def handle_event("set_item_action", _params, socket),
+    do: {:noreply, put_flash(socket, :error, gettext("Couldn't change that item."))}
 
   def handle_event("remove_item", %{"id" => id}, socket) when is_binary(id) do
     opts = act(socket)
@@ -365,6 +416,21 @@ defmodule KilnCMSWeb.ReleaseLive do
   defp stamp(nil), do: "—"
   defp stamp(datetime), do: Calendar.strftime(datetime, "%Y-%m-%d %H:%M")
 
+  # Why this release cannot go live *right now*, or nil. Scheduling deliberately
+  # does not consult it — see the schedule form's confirm.
+  defp ship_blocker(0, _blocked), do: gettext("This release has nothing to publish.")
+
+  defp ship_blocker(_pending, blocked) when blocked > 0 do
+    ngettext(
+      "One item can't ship as it stands, so the whole release would fail. Fix or remove it first.",
+      "%{count} items can't ship as they stand, so the whole release would fail. Fix or remove them first.",
+      blocked,
+      count: blocked
+    )
+  end
+
+  defp ship_blocker(_pending, _blocked), do: nil
+
   defp admin?(tier), do: tier == :admin
 
   # Mid-flight is never archivable (a worker owns those rows), and once a
@@ -416,6 +482,16 @@ defmodule KilnCMSWeb.ReleaseLive do
 
   defp action_label(:publish), do: gettext("Publish")
   defp action_label(:unpublish), do: gettext("Unpublish")
+
+  defp opposite_action(:publish), do: :unpublish
+  defp opposite_action(:unpublish), do: :publish
+
+  # An item is still a plan — and so still editable — only while it is `:pending`
+  # AND its release is composing. Both halves matter: a cancelled item sits in a
+  # release that is still open, and a pending item sits in a release that is
+  # mid-go-live.
+  defp editable_item?(item, release),
+    do: item.status == :pending and release.state in ContentRelease.editable_states()
 
   defp view_label("planned"), do: gettext("Planned")
   defp view_label("published"), do: gettext("Published")
@@ -628,13 +704,33 @@ defmodule KilnCMSWeb.ReleaseLive do
                       <.badge variant={elem(note, 0)}>{elem(note, 1)}</.badge>
                     </p>
                   </td>
-                  <td class="text-sm">{action_label(item.action)}</td>
+                  <td class="text-sm">
+                    <%= if editable_item?(item, @release) do %>
+                      <button
+                        type="button"
+                        phx-click="set_item_action"
+                        phx-value-id={item.id}
+                        phx-value-action={opposite_action(item.action)}
+                        title={
+                          gettext("Switch to %{action}",
+                            action: action_label(opposite_action(item.action))
+                          )
+                        }
+                        class="btn btn-xs btn-ghost gap-1 font-normal"
+                      >
+                        {action_label(item.action)}
+                        <.icon name="hero-arrows-right-left" class="size-3 opacity-50" />
+                      </button>
+                    <% else %>
+                      {action_label(item.action)}
+                    <% end %>
+                  </td>
                   <td>
                     <span class="text-xs text-base-content/70">{item_status_label(item.status)}</span>
                   </td>
                   <td class="text-right">
                     <button
-                      :if={item.status == :pending and @release.state in [:open, :scheduled, :failed]}
+                      :if={editable_item?(item, @release)}
                       type="button"
                       phx-click="remove_item"
                       phx-value-id={item.id}
@@ -681,7 +777,26 @@ defmodule KilnCMSWeb.ReleaseLive do
               :if={admin?(@tier) and @release.state in [:open, :scheduled]}
               class="mt-3 space-y-3"
             >
-              <.form for={@schedule_form} id="schedule-form" phx-submit="schedule">
+              <%!-- Scheduling deliberately WARNS where Publish now refuses. A
+                    readiness verdict is about right now; the whole point of a
+                    go-live date is that the blocking record gets fixed before it
+                    arrives. Refusing here would forbid the normal way of
+                    working — but scheduling over a known blocker silently is how
+                    you get a 09:00 launch that was never going to ship. --%>
+              <.form
+                for={@schedule_form}
+                id="schedule-form"
+                phx-submit="schedule"
+                data-confirm={
+                  @blocked_count > 0 &&
+                    ngettext(
+                      "1 item can't ship as it stands. Schedule anyway? Unless it is fixed first, the release will fail and nothing will go live.",
+                      "%{count} items can't ship as they stand. Schedule anyway? Unless they are fixed first, the release will fail and nothing will go live.",
+                      @blocked_count,
+                      count: @blocked_count
+                    )
+                }
+              >
                 <div id="release-scheduled-at" phx-hook="UtcDatetimeInput" phx-update="ignore">
                   <label for="release-scheduled-at-local" class="field-label">
                     {gettext("Go live at")}
@@ -716,7 +831,29 @@ defmodule KilnCMSWeb.ReleaseLive do
                 {gettext("Remove schedule")}
               </button>
 
+              <%!-- The readiness verdicts, totalled. One blocked item means the
+                    ENTIRE release fails, so this is not a nicety: without it the
+                    only warning was a per-item badge somewhere in a scroll list,
+                    and the way you found out was a failed go-live. --%>
+              <p :if={@blocked_count > 0} class="text-xs text-error">
+                {ngettext(
+                  "1 item can't ship as it stands. A release is all-or-nothing, so nothing would go live.",
+                  "%{count} items can't ship as they stand. A release is all-or-nothing, so nothing would go live.",
+                  @blocked_count,
+                  count: @blocked_count
+                )}
+              </p>
+              <p :if={@blocked_count == 0 and @skip_count > 0} class="text-xs text-base-content/60">
+                {ngettext(
+                  "1 item is already in its target state and will be skipped.",
+                  "%{count} items are already in their target state and will be skipped.",
+                  @skip_count,
+                  count: @skip_count
+                )}
+              </p>
+
               <button
+                :if={is_nil(ship_blocker(@pending_count, @blocked_count))}
                 type="button"
                 phx-click="publish_now"
                 data-confirm={
@@ -728,6 +865,12 @@ defmodule KilnCMSWeb.ReleaseLive do
               >
                 {gettext("Publish now")}
               </button>
+              <p
+                :if={blocker = ship_blocker(@pending_count, @blocked_count)}
+                class="text-xs text-base-content/60"
+              >
+                {blocker}
+              </p>
             </div>
 
             <button

@@ -212,7 +212,12 @@ defmodule KilnCMSWeb.ReleaseLiveTest do
       )
 
     {:ok, view, _html} = conn |> log_in(admin) |> live(~p"/editor/releases/#{rel.id}")
-    render_click(view, "publish_now", %{})
+
+    # Claimed directly rather than through the console: "Publish now" now
+    # refuses a release it can see will abort, so the way to reach `:failed`
+    # with a known-bad item is the way production does — the minute cron, which
+    # claims a scheduled release without consulting readiness.
+    {:ok, _} = CMS.start_release(rel, %{}, actor: admin)
     KilnCMS.DataCase.drain_oban()
 
     html = render(view)
@@ -246,6 +251,120 @@ defmodule KilnCMSWeb.ReleaseLiveTest do
              CMS.list_release_items_for!(rel.id, authorize?: false)
 
     assert content_id == page.id
+  end
+
+  test "the ship controls total the blockers instead of only badging them", %{conn: conn} do
+    admin = authed_user(:admin)
+    rel = release(admin)
+    ok = CMS.create_page!(%{title: "Fine", slug: slug()}, actor: admin)
+    doomed = CMS.create_page!(%{title: "Archived thing", slug: slug()}, actor: admin)
+    {:ok, archived} = CMS.archive_page(doomed, %{}, actor: admin)
+
+    for record <- [ok, archived] do
+      {:ok, _} =
+        CMS.add_release_item(
+          %{release_id: rel.id, content_type: "page", content_id: record.id},
+          actor: admin
+        )
+    end
+
+    {:ok, _view, html} = conn |> log_in(admin) |> live(~p"/editor/releases/#{rel.id}")
+
+    # The aggregate, not just the per-item badge: one blocked item means the
+    # whole release fails, which a badge in a long list does not convey.
+    assert html =~ "1 item can&#39;t ship as it stands"
+    # And the button that could only ever abort is not offered.
+    refute html =~ "Publish now"
+    # Scheduling still is — the blocker may well be fixed before it fires — but
+    # it warns rather than going through in silence.
+    assert html =~ "Go live at"
+    assert html =~ "Schedule anyway?"
+  end
+
+  test "publish_now is refused server-side even from a stale page", %{conn: conn} do
+    admin = authed_user(:admin)
+    rel = release(admin)
+    page = CMS.create_page!(%{title: "Fine for now", slug: slug()}, actor: admin)
+
+    {:ok, _} =
+      CMS.add_release_item(
+        %{release_id: rel.id, content_type: "page", content_id: page.id},
+        actor: admin
+      )
+
+    {:ok, view, html} = conn |> log_in(admin) |> live(~p"/editor/releases/#{rel.id}")
+    assert html =~ "Publish now"
+
+    # The page was rendered when the release could ship; the record is archived
+    # out from under it afterwards. The button is still on screen.
+    {:ok, _} = CMS.archive_page(page, %{}, actor: admin)
+
+    assert render_click(view, "publish_now", %{}) =~ "can&#39;t ship as it stands"
+    KilnCMS.DataCase.drain_oban()
+
+    # Never claimed, so no go-live ran and the release is still composing.
+    assert CMS.get_release!(rel.id, authorize?: false).state == :open
+  end
+
+  test "an empty release is not offered a go-live that would ship nothing", %{conn: conn} do
+    admin = authed_user(:admin)
+    rel = release(admin)
+
+    {:ok, view, html} = conn |> log_in(admin) |> live(~p"/editor/releases/#{rel.id}")
+
+    refute html =~ "Publish now"
+    assert html =~ "nothing to publish"
+
+    assert render_click(view, "publish_now", %{}) =~ "nothing to publish"
+    assert CMS.get_release!(rel.id, authorize?: false).state == :open
+  end
+
+  test "an item's change can be flipped from the release page", %{conn: conn} do
+    editor = authed_user(:editor)
+    rel = release(editor)
+    page = CMS.create_page!(%{title: "Flip me", slug: slug()}, actor: editor)
+
+    {:ok, item} =
+      CMS.add_release_item(
+        %{release_id: rel.id, content_type: "page", content_id: page.id, action: :publish},
+        actor: editor
+      )
+
+    {:ok, view, _html} = conn |> log_in(editor) |> live(~p"/editor/releases/#{rel.id}")
+
+    render_click(view, "set_item_action", %{"id" => item.id, "action" => "unpublish"})
+
+    assert CMS.get_release_item!(item.id, authorize?: false).action == :unpublish
+    # In place: the reservation was never dropped and re-taken.
+    assert CMS.get_release_item!(item.id, authorize?: false).status == :pending
+  end
+
+  test "a failed release stays on the calendar it was planned on", %{conn: conn} do
+    admin = authed_user(:admin)
+    rel = release(admin, "Doomed launch")
+    page = CMS.create_page!(%{title: "Archived thing", slug: slug()}, actor: admin)
+    {:ok, archived} = CMS.archive_page(page, %{}, actor: admin)
+
+    {:ok, _} =
+      CMS.add_release_item(
+        %{release_id: rel.id, content_type: "page", content_id: archived.id},
+        actor: admin
+      )
+
+    at = DateTime.add(DateTime.utc_now(), 60 * 60)
+    {:ok, scheduled} = CMS.schedule_release(rel, %{scheduled_at: at}, actor: admin)
+    {:ok, _} = CMS.start_release(scheduled, %{}, actor: admin)
+    KilnCMS.DataCase.drain_oban()
+
+    assert CMS.get_release!(rel.id, authorize?: false).state == :failed
+
+    month = Calendar.strftime(at, "%Y-%m")
+    {:ok, _view, html} = conn |> log_in(admin) |> live(~p"/editor/calendar?month=#{month}")
+
+    # It keeps the day it was planned for, rather than vanishing from the one
+    # grid an editor checks the next morning.
+    assert html =~ "Doomed launch"
+    assert html =~ "Release failed"
   end
 
   test "a scheduled release shows up on the editorial calendar", %{conn: conn} do

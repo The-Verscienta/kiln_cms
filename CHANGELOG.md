@@ -130,6 +130,47 @@ migration, a rewritten column, a dropped config key).
   advanced-analytics phases were "designed but unbuilt" when five shipped
   and the sixth (#623) was closed as a deliberate non-build.
 
+- **A content release that aborts is no longer silent** (#500). Go-live and
+  rollback failures wrote a log line and a PubSub hop that only reached a
+  console page somebody still had open — so a release scheduled for 03:00 could
+  fail, change nothing on the site, and leave no signal at all until someone
+  noticed the campaign had not gone out. It also dropped off `/editor/calendar`,
+  the one grid an editor checks the next morning, because the window read
+  matched only `scheduled` and published releases. Failures now dispatch
+  **`release.failed`** through the standard webhook/automation funnel, carrying
+  `mode` (`"publish"` / `"rollback"`), `failure_reason` and `failed_item_id`;
+  a failed release keeps its chip on the day it was planned for, in its own
+  *Release failed* lane.
+
+- **A release's `transaction_timeout_ms` now bounds what it claimed to bound**
+  (#500). The documented two-minute cap on a go-live was never enforced: the
+  option was passed to `Repo.transaction/2`, and `DBConnection` applies that
+  only to `BEGIN`/`COMMIT`/`ROLLBACK` — the callback runs untimed, and the
+  queries inside carry the repo's own default. A large release could hold row
+  locks on every one of its items indefinitely. It is now a wall-clock budget
+  checked between items, so an overrun aborts like any other failure with
+  nothing shipped and the item it stopped at named. Commit and rollback get
+  their own allowance beyond the budget, rather than being bounded by an
+  allowance the release has by definition just spent.
+
+- **The release console totals its readiness verdicts and withholds a go-live
+  that could only abort** (#500). A release is all-or-nothing, so one blocked
+  item means the whole bundle fails — but the only warning was a per-item badge,
+  which on a large release is a single red mark in a long scroll list.
+  **Publish now** is now withheld while any item is blocked or the release is
+  empty, and re-checks on click rather than trusting the assigns the page was
+  drawn with (the case worth guarding is exactly a tab held open while somebody
+  archives one of the records). Scheduling deliberately still warns rather than
+  refuses: a readiness verdict is about right now, and the point of a go-live
+  date is that the blocker gets fixed before it arrives.
+
+- **A release item's publish/unpublish choice can be corrected in place**
+  (#500). Fixing a mis-picked action meant removing the item and adding it
+  back, which drops the content's `pending` reservation in between — long
+  enough for another release to claim the record and the re-add to fail, so
+  correcting a typo could silently cost you the item. The release page now
+  flips it with one write that never releases the reservation.
+
 - **A `custom_fields` key with no `FieldDefinition` is refused instead of
   vanishing out of a successful write** (#295 family). `ApplyCustomFields`
   folds the stored map out of the *definitions*, so any key the registry did

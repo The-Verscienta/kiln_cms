@@ -354,8 +354,14 @@ defmodule KilnCMS.CMS.ContentRelease do
       argument :from, :utc_datetime_usec, allow_nil?: false
       argument :to, :utc_datetime_usec, allow_nil?: false
 
+      # `:failed` belongs on the go-live axis alongside `:scheduled`. A release
+      # that aborts keeps its `scheduled_at`, and dropping it from the window
+      # would erase the launch from the one grid an editor checks the next
+      # morning — the calendar would simply show nothing where a campaign was
+      # planned, which reads as "nothing was scheduled" rather than "it failed".
       filter expr(
-               (state == :scheduled and scheduled_at >= ^arg(:from) and scheduled_at < ^arg(:to)) or
+               (state in [:scheduled, :failed] and scheduled_at >= ^arg(:from) and
+                  scheduled_at < ^arg(:to)) or
                  (not is_nil(published_at) and published_at >= ^arg(:from) and
                     published_at < ^arg(:to))
              )

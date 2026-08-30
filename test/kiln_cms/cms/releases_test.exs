@@ -740,6 +740,63 @@ defmodule KilnCMS.CMS.ReleasesTest do
       assert [_] = CMS.list_release_items_with_status!(rel.id, :applied, authorize?: false)
     end
 
+    test "a failed rollback dispatches release.failed with mode rollback" do
+      admin = user(:admin)
+
+      {:ok, _endpoint} =
+        CMS.create_webhook_endpoint(
+          %{
+            url: "https://example.com/rollback-fail-hook",
+            events: ["release.failed"],
+            active: true
+          },
+          actor: admin
+        )
+
+      img =
+        Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+          filename: "rf-#{n()}.png",
+          url: "/uploads/rf-#{n()}.png",
+          content_type: "image/png"
+        })
+
+      {:ok, live} =
+        CMS.create_page(
+          %{
+            title: "Alt-less rollback",
+            slug: "alt-less-rb-#{n()}",
+            blocks: [%{"_type" => "image", "url" => img.url, "media_id" => img.id, "alt" => nil}]
+          },
+          authorize?: false
+        )
+
+      {:ok, live} = CMS.publish_page(live, %{}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      rel = release(admin)
+      {:ok, _} = add(rel, live, admin, :unpublish)
+      {:ok, published} = go_live(rel, admin)
+      assert published.state == :published
+
+      Application.put_env(:kiln_cms, :media, require_alt_text: true)
+      on_exit(fn -> Application.put_env(:kiln_cms, :media, []) end)
+
+      {:ok, _} = CMS.start_release_rollback(published, %{}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      assert reload(rel).state == :published
+
+      delivery =
+        CMS.recent_webhook_deliveries!(authorize?: false)
+        |> Enum.find(&(&1.event == "release.failed"))
+
+      assert delivery, "a rollback that aborts is as silent as a go-live that does"
+      assert delivery.payload["mode"] == "rollback"
+      assert delivery.payload["failure_reason"] =~ "alt"
+      # It stays PUBLISHED — that is still what is true of the site.
+      assert delivery.payload["state"] == "published"
+    end
+
     test "only admins may roll a release back" do
       admin = user(:admin)
       editor = user(:editor)
@@ -749,6 +806,220 @@ defmodule KilnCMS.CMS.ReleasesTest do
 
       assert {:error, %Ash.Error.Forbidden{}} =
                CMS.start_release_rollback(published, %{}, actor: editor)
+    end
+  end
+
+  describe "release.failed event" do
+    test "a go-live that aborts is not silent" do
+      admin = user(:admin)
+
+      assert "release.failed" in CMS.WebhookEndpoint.events()
+
+      {:ok, endpoint} =
+        CMS.create_webhook_endpoint(
+          %{
+            url: "https://example.com/release-failure-hook",
+            events: ["release.failed"],
+            active: true
+          },
+          actor: admin
+        )
+
+      rel = release(admin)
+      good = page()
+      bad = page(%{state: :archived})
+      {:ok, _} = add(rel, good, admin)
+      {:ok, bad_item} = add(rel, bad, admin)
+
+      {:ok, failed} = go_live(rel, admin)
+      assert failed.state == :failed
+
+      delivery =
+        CMS.recent_webhook_deliveries!(authorize?: false)
+        |> Enum.find(&(&1.event == "release.failed"))
+
+      assert delivery, "an unattended release that aborts must tell somebody"
+      assert delivery.endpoint_id == endpoint.id
+      assert delivery.payload["mode"] == "publish"
+      assert delivery.payload["name"] == rel.name
+      assert delivery.payload["failed_item_id"] == bad_item.id
+      assert delivery.payload["failure_reason"] =~ "archived"
+    end
+
+    test "the abort's own dispatch survives the go-live rollback" do
+      admin = user(:admin)
+
+      {:ok, _endpoint} =
+        CMS.create_webhook_endpoint(
+          %{
+            url: "https://example.com/release-failure-survives",
+            events: ["release.published", "release.failed"],
+            active: true
+          },
+          actor: admin
+        )
+
+      rel = release(admin)
+      {:ok, _} = add(rel, page(), admin)
+      {:ok, _} = add(rel, page(%{state: :archived}), admin)
+      {:ok, failed} = go_live(rel, admin)
+      assert failed.state == :failed
+
+      events = CMS.recent_webhook_deliveries!(authorize?: false) |> Enum.map(& &1.event)
+
+      # The success event was queued INSIDE the transaction and died with it;
+      # the failure event is dispatched after it and must not have.
+      refute "release.published" in events
+      assert "release.failed" in events
+    end
+  end
+
+  describe "the go-live time budget" do
+    setup do
+      previous = Application.get_env(:kiln_cms, Releases, [])
+      on_exit(fn -> Application.put_env(:kiln_cms, Releases, previous) end)
+      %{previous: previous}
+    end
+
+    test "deadline_left counts down from the configured budget", %{previous: previous} do
+      Application.put_env(:kiln_cms, Releases, Keyword.put(previous, :transaction_timeout_ms, 50))
+
+      deadline = Releases.deadline()
+      assert Releases.deadline_left(deadline) <= 50
+      Process.sleep(60)
+      assert Releases.deadline_left(deadline) <= 0
+    end
+
+    test "an exhausted budget aborts the release and publishes NOTHING", %{previous: previous} do
+      admin = user(:admin)
+      rel = release(admin)
+      a = page()
+      b = page()
+      {:ok, one} = add(rel, a, admin)
+      {:ok, two} = add(rel, b, admin)
+
+      # A 1ms budget is spent while the first item is being applied, so the
+      # check before the second one trips — the same code path a 500-item
+      # release exceeding two minutes takes. Which item it stops at is timing,
+      # so this asserts that it names one of them, not which.
+      Application.put_env(:kiln_cms, Releases, Keyword.put(previous, :transaction_timeout_ms, 1))
+
+      {:ok, failed} = go_live(rel, admin)
+
+      assert failed.state == :failed
+      assert failed.failed_item_id in [one.id, two.id]
+      assert failed.failure_reason =~ "budget"
+
+      # The bound is real, not decorative: nothing went live.
+      assert reload_page(a).state == :draft
+      assert reload_page(b).state == :draft
+      assert [_, _] = CMS.list_release_items_with_status!(rel.id, :pending, authorize?: false)
+    end
+
+    test "a rollback is bounded the same way, and undoes nothing when it trips",
+         %{previous: previous} do
+      admin = user(:admin)
+      rel = release(admin)
+      # Two items, so the budget is spent undoing the first and the check before
+      # the second one trips — with one item the whole rollback finishes inside
+      # the budget no matter how small it is.
+      a = page()
+      b = page()
+      {:ok, _} = add(rel, a, admin)
+      {:ok, _} = add(rel, b, admin)
+      {:ok, published} = go_live(rel, admin)
+      assert published.state == :published
+      assert reload_page(a).state == :published
+      assert reload_page(b).state == :published
+
+      Application.put_env(:kiln_cms, Releases, Keyword.put(previous, :transaction_timeout_ms, 1))
+
+      {:ok, _} = CMS.start_release_rollback(published, %{}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      after_attempt = reload(rel)
+      assert after_attempt.state == :published
+      assert after_attempt.failure_reason =~ "budget"
+
+      # All-or-nothing applies to rollback too: the item that WAS undone before
+      # the budget ran out went back up with everything else.
+      assert reload_page(a).state == :published
+      assert reload_page(b).state == :published
+      assert [_, _] = CMS.list_release_items_with_status!(rel.id, :applied, authorize?: false)
+    end
+
+    test "a generous budget is not tripped by a normal release", %{previous: previous} do
+      admin = user(:admin)
+      rel = release(admin)
+      p = page()
+      {:ok, _} = add(rel, p, admin)
+
+      Application.put_env(
+        :kiln_cms,
+        Releases,
+        Keyword.put(previous, :transaction_timeout_ms, :timer.minutes(2))
+      )
+
+      {:ok, published} = go_live(rel, admin)
+      assert published.state == :published
+      assert reload_page(p).state == :published
+    end
+  end
+
+  describe "changing an item's action in place" do
+    test "an editor can flip publish to unpublish without freeing the reservation" do
+      admin = user(:admin)
+      editor = user(:editor)
+      rel = release(admin)
+      p = page(%{state: :published})
+      {:ok, item} = add(rel, p, admin, :publish)
+
+      {:ok, flipped} = CMS.set_release_item_action(item, %{action: :unpublish}, actor: editor)
+
+      assert flipped.action == :unpublish
+      assert flipped.status == :pending
+      # The reservation never lapsed, so no other release could have taken it.
+      assert [_] =
+               CMS.list_pending_release_items_for_content!("page", p.id, authorize?: false)
+
+      {:ok, published} = go_live(rel, admin)
+      assert published.state == :published
+      assert reload_page(p).state == :draft
+    end
+
+    test "a release that is no longer composing refuses the flip" do
+      admin = user(:admin)
+      rel = release(admin)
+      p = page()
+      {:ok, item} = add(rel, p, admin)
+      {:ok, published} = go_live(rel, admin)
+      assert published.state == :published
+
+      assert {:error, _} = CMS.set_release_item_action(item, %{action: :unpublish}, actor: admin)
+      assert CMS.get_release_item!(item.id, authorize?: false).action == :publish
+    end
+
+    test "an applied item's action is history and cannot be rewritten" do
+      admin = user(:admin)
+      rel = release(admin)
+      {:ok, item} = add(rel, page(), admin)
+      {:ok, _} = go_live(rel, admin)
+
+      applied = CMS.get_release_item!(item.id, authorize?: false)
+      assert applied.status == :applied
+
+      assert {:error, _} =
+               CMS.set_release_item_action(applied, %{action: :unpublish}, authorize?: false)
+    end
+
+    test "a viewer may not flip an item" do
+      admin = user(:admin)
+      viewer = user(:viewer)
+      rel = release(admin)
+      {:ok, item} = add(rel, page(), admin)
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               CMS.set_release_item_action(item, %{action: :unpublish}, actor: viewer)
     end
   end
 end

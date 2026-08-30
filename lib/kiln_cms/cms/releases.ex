@@ -27,7 +27,10 @@ defmodule KilnCMS.CMS.Releases do
   The cost is honest and worth stating: one long-running transaction holding row
   locks on every item for the duration. Two things bound it — `max_items/0` caps
   how large a release can get, and `transaction_timeout_ms/0` caps how long the
-  go-live may run. Both are configurable per install:
+  go-live may run, checked between items by `check_deadline!/2`. (The bound is
+  ours, not the database's: the `:timeout` option on `Repo.transaction/2` only
+  covers BEGIN/COMMIT/ROLLBACK, never the callback — see
+  `transaction_timeout_ms/0`.) Both are configurable per install:
 
       config :kiln_cms, KilnCMS.CMS.Releases,
         max_items: 500,
@@ -101,14 +104,35 @@ defmodule KilnCMS.CMS.Releases do
   def max_items, do: config(:max_items, @default_max_items)
 
   @doc """
-  How long a go-live or rollback transaction may run before Postgres aborts it.
-  Configure with
+  How long a go-live or rollback may hold its transaction open. Configure with
 
       config :kiln_cms, KilnCMS.CMS.Releases, transaction_timeout_ms: 120_000
+
+  Enforced by `deadline/0` and checked between items — **not** by the `:timeout`
+  passed to `Repo.transaction/2`, which does not do what its name suggests here.
+  `DBConnection` applies that option to the `BEGIN`, `COMMIT` and `ROLLBACK`
+  statements only; the callback itself is invoked as a bare `fun.(conn)` with no
+  timer, and the queries inside it carry the repo's own default rather than
+  inheriting this one. So the option alone would let a release hold row locks on
+  every one of its items indefinitely while the moduledoc promised a two-minute
+  bound.
   """
   @spec transaction_timeout_ms() :: pos_integer()
   def transaction_timeout_ms,
     do: config(:transaction_timeout_ms, @default_transaction_timeout_ms)
+
+  @doc """
+  A monotonic instant `transaction_timeout_ms/0` from now, for `deadline_left/1`.
+
+  Monotonic on purpose: a release must not run longer (or shorter) because NTP
+  stepped the wall clock mid-launch.
+  """
+  @spec deadline() :: integer()
+  def deadline, do: System.monotonic_time(:millisecond) + transaction_timeout_ms()
+
+  @doc "Milliseconds left before `deadline`, negative once it has passed."
+  @spec deadline_left(integer()) :: integer()
+  def deadline_left(deadline), do: deadline - System.monotonic_time(:millisecond)
 
   defp config(key, default),
     do: :kiln_cms |> Application.get_env(__MODULE__, []) |> Keyword.get(key, default)
@@ -192,11 +216,14 @@ defmodule KilnCMS.CMS.Releases do
       {:error, reason} ->
         {item_id, message} = describe_failure(reason, items)
 
-        CMS.mark_release_rollback_failed(
-          release,
+        Logger.error("Release #{release.id} rollback aborted: #{message}")
+
+        release
+        |> CMS.mark_release_rollback_failed(
           %{failure_reason: message, failed_item_id: item_id},
           opts
         )
+        |> announce_failure(release, items, "rollback")
 
         announce(release)
         {:error, reason}
@@ -264,8 +291,12 @@ defmodule KilnCMS.CMS.Releases do
   # --- go-live ---------------------------------------------------------------
 
   defp apply_all(release, items, actor, opts) do
+    deadline = deadline()
+
     item_notes =
       Enum.reduce(items, [], fn item, acc ->
+        check_deadline!(deadline, item)
+
         case apply_item(item, actor, opts) do
           {:ok, notes} -> notes ++ acc
           {:error, reason} -> Repo.rollback({item.id, reason})
@@ -320,20 +351,60 @@ defmodule KilnCMS.CMS.Releases do
 
     Logger.error("Release #{release.id} go-live aborted: #{message}")
 
-    CMS.mark_release_failed(
-      release,
-      %{failure_reason: message, failed_item_id: item_id},
-      opts
-    )
+    release
+    |> CMS.mark_release_failed(%{failure_reason: message, failed_item_id: item_id}, opts)
+    |> announce_failure(release, items, "publish")
 
     {:error, reason}
+  end
+
+  # OUTSIDE the go-live transaction, necessarily: that transaction has already
+  # rolled back, so a dispatch inside it would have vanished with the release it
+  # was reporting on. This one commits on its own, like any other write here.
+  #
+  # A release that aborts unattended used to be silent — a `Logger.error` line
+  # and a PubSub hop that only reaches a console page someone still has open.
+  # An overnight launch could fail at 03:00 and the first anyone knew was
+  # noticing the campaign wasn't live. `release.failed` puts the abort on the
+  # same webhook/automation funnel as `release.published`, so an operator can
+  # route it wherever they already route alerts.
+  defp announce_failure({:ok, failed}, _release, items, mode),
+    do: dispatch_failure(failed, items, mode)
+
+  # The state write itself failed, so there is no `:failed` row to report. The
+  # release is still in its claim state and only `:abandon` gets it out — which
+  # is precisely the case worth being loud about, so report on the release as we
+  # last knew it rather than staying silent.
+  defp announce_failure({:error, reason}, release, items, mode) do
+    Logger.error(
+      "Release #{release.id}: could not record the #{mode} failure: #{describe(reason)}"
+    )
+
+    dispatch_failure(release, items, mode)
+  end
+
+  defp dispatch_failure(release, items, mode) do
+    payload =
+      release
+      |> event_payload(items)
+      |> Map.merge(%{
+        "mode" => mode,
+        "failure_reason" => release.failure_reason,
+        "failed_item_id" => release.failed_item_id
+      })
+
+    Webhooks.dispatch("release.failed", payload, release.org_id)
   end
 
   # --- rollback --------------------------------------------------------------
 
   defp undo_all(release, items, actor, opts) do
+    deadline = deadline()
+
     item_notes =
       Enum.reduce(items, [], fn item, acc ->
+        check_deadline!(deadline, item)
+
         case undo_item(item, actor, opts) do
           {:ok, notes} -> notes ++ acc
           {:error, reason} -> Repo.rollback({item.id, reason})
@@ -553,8 +624,41 @@ defmodule KilnCMS.CMS.Releases do
     end
   end
 
+  # Checked BETWEEN items, which is the only safe place to stop: an item is a
+  # publish plus its version, audit and webhook writes, and cutting it in half
+  # would leave the very inconsistency the transaction exists to prevent. So the
+  # budget is a bound on how long the release may keep *starting* work, and the
+  # worst case is one item's overrun beyond it.
+  #
+  # `Repo.rollback/1` in the same `{item_id, message}` shape every other abort
+  # uses, so a release that runs out of budget lands in `:failed` naming the item
+  # it stopped at — an operator can raise `max_items`, raise the budget, or split
+  # the release, and the reason on the console says which.
+  defp check_deadline!(deadline, item) do
+    left = deadline_left(deadline)
+
+    if left <= 0 do
+      Repo.rollback(
+        {item.id,
+         "release exceeded its #{transaction_timeout_ms()}ms budget before this item; " <>
+           "nothing was changed. Split the release or raise :transaction_timeout_ms."}
+      )
+    end
+  end
+
+  # Room for the COMMIT (or ROLLBACK) *after* the budget is spent. The `:timeout`
+  # below reaches BEGIN/COMMIT/ROLLBACK and nothing else — see
+  # `transaction_timeout_ms/0` — so handing it the budget itself would bound the
+  # commit by an allowance the release has by definition just exhausted, and a
+  # release that used its full budget would fail while flushing work that had
+  # already succeeded. The budget governs when we stop *starting* items;
+  # finishing what was started gets its own room.
+  @commit_grace_ms :timer.seconds(30)
+
+  # `check_deadline!/2` is the bound that actually holds; this one only keeps a
+  # wedged connection from hanging the worker forever.
   defp run_transaction(fun) do
-    Repo.transaction(fun, timeout: transaction_timeout_ms())
+    Repo.transaction(fun, timeout: transaction_timeout_ms() + @commit_grace_ms)
   end
 
   defp event_payload(release, items) do
