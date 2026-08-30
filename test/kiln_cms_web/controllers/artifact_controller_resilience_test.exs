@@ -82,12 +82,32 @@ defmodule KilnCMSWeb.ArtifactControllerResilienceTest do
   # traffic when Postgres went away would have it primed. It used to be primed
   # only incidentally, by whichever test happened to issue the first request, so
   # the cold-content test below failed whenever it ran first.
+  # The primed entry can also be wiped in the instant between priming and
+  # reading it back — the same wholesale clears the dispatch-time retry below
+  # exists for — so priming re-runs until the read-back sees it, on a deadline
+  # rather than a try-count (see ConnCase.eventually/4's docstring for why).
+  # `fetch_org/1` must still succeed on every attempt: an `:error` there is not
+  # the wipe race, and retrying it away would hide #1124.
   defp warm_tenant_resolution do
     host = build_conn().host
+    prime_host_resolution(host, System.monotonic_time(:millisecond) + 5_000)
+  end
 
+  defp prime_host_resolution(host, deadline) do
     assert {:ok, _org} = KilnCMSWeb.Tenant.fetch_org(host)
-    assert {:ok, cached} = Cachex.get(KilnCMS.Cache.Hosts.cache_name(), host)
-    refute is_nil(cached), "host resolution for #{host} was not cached, so the outage will 404"
+
+    case Cachex.get(KilnCMS.Cache.Hosts.cache_name(), host) do
+      {:ok, nil} ->
+        if System.monotonic_time(:millisecond) >= deadline do
+          flunk("host resolution for #{host} would not stay cached, so the outage will 404")
+        else
+          Process.sleep(25)
+          prime_host_resolution(host, deadline)
+        end
+
+      {:ok, _cached} ->
+        :ok
+    end
   end
 
   # The host cache is global and other suites clear it wholesale

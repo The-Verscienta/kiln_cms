@@ -511,6 +511,17 @@ defmodule KilnCMSWeb.CalendarLiveTest do
       {:ok, lv, html}
     end
 
+    # A move that fails server-side — including a DB checkout dropped under
+    # full-suite contention (#1348) — leaves the record unmoved, and the bare
+    # `==` mismatch on the reloaded row says nothing about why. The hook's own
+    # response carries the reason as an error flash, so fail with that first.
+    defp assert_move_accepted(html) do
+      case html |> Floki.parse_document!() |> Floki.find("#flash-error") do
+        [] -> :ok
+        nodes -> flunk("reschedule was refused: #{nodes |> Floki.text() |> String.trim()}")
+      end
+    end
+
     test "moves a scheduled publish to the dropped day, keeping its time", %{conn: conn} do
       admin = authed_admin()
       day = soon()
@@ -527,6 +538,7 @@ defmodule KilnCMSWeb.CalendarLiveTest do
         "kind" => "publish",
         "date" => Date.to_iso8601(target)
       })
+      |> assert_move_accepted()
 
       reloaded = CMS.get_page!(page.id, actor: admin)
       assert DateTime.to_date(reloaded.scheduled_at) == target
@@ -565,6 +577,7 @@ defmodule KilnCMSWeb.CalendarLiveTest do
         "kind" => "archive",
         "date" => Date.to_iso8601(target)
       })
+      |> assert_move_accepted()
 
       assert DateTime.to_date(CMS.get_page!(page.id, actor: admin).unpublish_at) == target
     end
@@ -756,6 +769,7 @@ defmodule KilnCMSWeb.CalendarLiveTest do
           "date" => Date.to_iso8601(Date.add(day, 1))
         })
 
+      assert_move_accepted(moved)
       assert moved =~ "Moved"
     end
   end

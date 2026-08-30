@@ -352,7 +352,7 @@ defmodule KilnCMSWeb.FederationControllerTest do
         "object" => follow_activity()
       }
 
-      assert build_conn() |> post_signed(undo, remote_pem) |> response(202)
+      assert build_conn() |> unique_ip() |> post_signed(undo, remote_pem) |> response(202)
       assert [] = Ash.read!(Follower, authorize?: false, tenant: org_id)
     end
 
@@ -621,7 +621,7 @@ defmodule KilnCMSWeb.FederationControllerTest do
         "object" => Map.put(follow_activity(), "object", "https://elsewhere.test/actor")
       }
 
-      assert build_conn() |> post_signed(undo, remote_pem) |> response(202)
+      assert build_conn() |> unique_ip() |> post_signed(undo, remote_pem) |> response(202)
       assert [_still_following] = Ash.read!(Follower, authorize?: false, tenant: org_id)
     end
 
@@ -641,7 +641,7 @@ defmodule KilnCMSWeb.FederationControllerTest do
         "object" => "https://remote.example/likes/1"
       }
 
-      assert build_conn() |> post_signed(undo, remote_pem) |> response(202)
+      assert build_conn() |> unique_ip() |> post_signed(undo, remote_pem) |> response(202)
       assert [_still_following] = Ash.read!(Follower, authorize?: false, tenant: org_id)
     end
 
