@@ -219,6 +219,14 @@ migration, a rewritten column, a dropped config key).
   call down, and now names itself when it does, instead of surfacing as a
   clause error inside the search module.
 
+- **The plugin catalog now counts advisories and spam checks too** (#333).
+  `Kiln.Plugins.manifests/0` carried no `advisories/0` or `spam_checks/0` entry
+  at all, so a plugin contributing only an advisory check or only a spam check
+  still read as `nothing (metadata only)` in `mix kiln.plugins.list` — the same
+  defect the route counts had, one layer down in the manifest rather than in
+  the rendering. Both are manifest keys now and both are counted (with
+  "advisories" spelled as the irregular plural it is).
+
 - **`mix kiln.plugins.list` now counts every route kind a plugin
   contributes** (#333). Its one-line contribution summary counted domains,
   blocks, field types, nav items, admin routes, Oban queues and supervision

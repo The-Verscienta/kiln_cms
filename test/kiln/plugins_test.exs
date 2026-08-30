@@ -53,6 +53,11 @@ defmodule Kiln.PluginsTest do
              FixturePlugin.FieldTypes.Exploding
            ]
 
+    # The fixture declares neither, but both keys must be in the manifest: a
+    # plugin contributing only a check is invisible to the catalog otherwise.
+    assert manifest.advisories == []
+    assert manifest.spam_checks == []
+
     assert manifest.nav_items == 1
     assert manifest.admin_routes == 1
     assert manifest.oban_queues == [fixture: 1]
@@ -86,8 +91,35 @@ defmodule Kiln.PluginsTest do
       # The fixture declares only an admin route, so the editor- and
       # public-route seams are covered here instead: a plugin whose whole
       # surface is a public booking page must not read as contributing nothing.
-      line =
-        Mix.Tasks.Kiln.Plugins.List.format(%{
+      assert contributions(editor_routes: 1, public_routes: 2) ==
+               "1 editor route, 2 public routes"
+    end
+
+    test "the contribution summary counts advisories and spam checks" do
+      # The other two kinds no in-tree plugin declares. `advisories` is also the
+      # one irregular plural in the summary — the generic rule would render it
+      # "2 advisorys".
+      assert contributions(advisories: [MissingSummary], spam_checks: [TooManyEmoji]) ==
+               "1 advisory, 1 spam check"
+
+      assert contributions(
+               advisories: [MissingSummary, StaleLink],
+               spam_checks: [TooManyEmoji, LinkFarm, Gibberish]
+             ) == "2 advisories, 3 spam checks"
+    end
+
+    test "a plugin that contributes nothing says so" do
+      assert contributions([]) == "nothing (metadata only)"
+    end
+  end
+
+  # The rendered contribution summary for a plugin contributing exactly
+  # `overrides` — the leading header is matched, not returned, so each case
+  # reads as the one list of kinds it is about.
+  defp contributions(overrides) do
+    manifest =
+      Map.merge(
+        %{
           module: Booking.Plugin,
           name: "booking",
           version: nil,
@@ -96,17 +128,22 @@ defmodule Kiln.PluginsTest do
           domains: [],
           blocks: [],
           field_types: [],
+          advisories: [],
+          spam_checks: [],
           nav_items: 0,
           admin_routes: 0,
-          editor_routes: 1,
-          public_routes: 2,
+          editor_routes: 0,
+          public_routes: 0,
           oban_queues: [],
           children: 0
-        })
+        },
+        Map.new(overrides)
+      )
 
-      assert line ==
-               "* booking — Booking.Plugin\n    contributes: 1 editor route, 2 public routes"
-    end
+    "* booking — Booking.Plugin\n    contributes: " <> summary =
+      Mix.Tasks.Kiln.Plugins.List.format(manifest)
+
+    summary
   end
 
   test "a plugin block is a first-class member of the block system" do

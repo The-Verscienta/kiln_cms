@@ -4,8 +4,8 @@ defmodule Mix.Tasks.Kiln.Plugins.List do
   @moduledoc """
   Prints every plugin in `config :kiln_cms, :plugins` (decision D18) with its
   declared **catalog metadata** (`version`/`summary`/`homepage`) and its
-  contribution surface (domains, blocks, field types, nav items, admin/editor/
-  public routes, Oban queues, supervision children).
+  contribution surface (domains, blocks, field types, advisories, spam checks,
+  nav items, admin/editor/public routes, Oban queues, supervision children).
 
   This is the local "discovery" half of the vetted-plugin marketplace — the
   data a catalog UI would render, straight from `Kiln.Plugins.manifests/0`
@@ -61,6 +61,8 @@ defmodule Mix.Tasks.Kiln.Plugins.List do
         count("domain", length(m.domains)),
         count("block", length(m.blocks)),
         count("field type", length(m.field_types)),
+        count("advisory", length(m.advisories)),
+        count("spam check", length(m.spam_checks)),
         count("nav item", m.nav_items),
         count("admin route", m.admin_routes),
         # Every route kind is its own seam (admin-gated, editor-gated, public);
@@ -82,5 +84,6 @@ defmodule Mix.Tasks.Kiln.Plugins.List do
   defp count(_label, 0), do: nil
   defp count(label, 1), do: "1 #{label}"
   defp count("child", n), do: "#{n} children"
+  defp count("advisory", n), do: "#{n} advisories"
   defp count(label, n), do: "#{n} #{label}s"
 end
