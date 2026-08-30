@@ -307,6 +307,14 @@ defmodule KilnCMS.AVProcessorTest do
       :ok = :file.pwrite(fd, @sparse_size, <<0>>)
       :ok = :file.close(fd)
 
+      # Deleted eagerly (as `IngestTest`'s twin of this fixture already does)
+      # because ExUnit only clears a `:tmp_dir` at the START of that test's
+      # next run — without this, the hole outlives the suite as a file whose
+      # stat size is 8 TB, and anything that later walks the tree without
+      # minding sparseness (rsync, a backup, `du --apparent-size`) reads it
+      # as 8 TB of real zeros.
+      on_exit(fn -> File.rm(path) end)
+
       # If the filesystem did not give us a sparse file of the size we asked
       # for, every assertion below would be measuring the wrong thing.
       assert File.stat!(path).size == @sparse_size + 1
