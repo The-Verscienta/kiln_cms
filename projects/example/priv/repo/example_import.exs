@@ -105,6 +105,33 @@ upsert_publish = fn type, attrs ->
   if row.state in [:draft, :in_review], do: publish.(row, %{}, opts), else: row
 end
 
+# Every `custom_fields` value below is coerced and validated against the
+# `FieldDefinition` rows for its type, and since #1340 a key with no definition
+# is a hard error rather than a value that quietly disappears. So running this
+# before `example_field_definitions.exs` no longer half-works: it fails on the
+# first product with `"category" is not a defined custom field` — accurate, but
+# it names the key rather than the script that was skipped. This is the
+# compiled types' half of the guard the "event" type already gets below.
+#
+# Literal atoms, mirroring the `~w(...)` behind `interfaces` above, rather than
+# resolved through the type registry — that lookup raises its own "unknown
+# content type" when the *overlay* is inactive, which is a different problem
+# with a different answer, and this guard should only speak about its own.
+#
+# Per type, not per key: a key added below without its definition still raises
+# from the write itself, and #1340 made that error list what the type *does*
+# define — the more useful message for that case anyway.
+case Enum.reject([:product, :team_member, :testimonial, :faq], fn type ->
+       CMS.field_definitions_for!(type, opts) != []
+     end) do
+  [] ->
+    :ok
+
+  missing ->
+    raise "No custom-field definitions for #{Enum.map_join(missing, ", ", &inspect/1)} — " <>
+            "run example_field_definitions.exs first."
+end
+
 # --- Products ----------------------------------------------------------------
 
 money = fn amount, currency -> %{"amount" => amount, "currency" => currency} end
