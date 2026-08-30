@@ -105,6 +105,49 @@ upsert_publish = fn type, attrs ->
   if row.state in [:draft, :in_review], do: publish.(row, %{}, opts), else: row
 end
 
+# Every `custom_fields` value below is coerced and validated against the
+# `FieldDefinition` rows for its type, and since #1340 a key with no definition
+# is a hard error rather than a value that quietly disappears. So running this
+# before `example_field_definitions.exs` no longer half-works: it fails on the
+# first product with `"category" is not a defined custom field` — accurate, but
+# it names the key rather than the script that was skipped. This is the
+# compiled types' half of the guard the "event" type already gets below.
+#
+# The types come from `interfaces` rather than being restated here, and the
+# atom comes from the registry rather than from a literal — `ContentTypes.get/2`
+# resolves a string through `String.to_existing_atom` guarded (so it mints no
+# atoms) and answers `nil` rather than raising, which is what lets the two ways
+# this can fail keep their own messages instead of borrowing each other's:
+# nothing resolves when the *overlay* is inactive, and a resolved type with no
+# definitions means `example_field_definitions.exs` has not run.
+#
+# Per type, not per key: a key added below without its definition still raises
+# from the write itself, and #1340 made that error list what the type *does*
+# define — the more useful message for that case anyway.
+seeded_types =
+  interfaces
+  |> Map.keys()
+  |> Enum.sort()
+  |> Enum.map(&{&1, CMS.ContentTypes.get(&1, tenant)})
+
+case for({type, nil} <- seeded_types, do: type) do
+  [] ->
+    :ok
+
+  unregistered ->
+    raise "Content types #{Enum.join(unregistered, ", ")} are not registered — " <>
+            "activate the example overlay first (see projects/example/README.md)."
+end
+
+case for({type, ct} <- seeded_types, CMS.field_definitions_for!(ct.type, opts) == [], do: type) do
+  [] ->
+    :ok
+
+  undefined ->
+    raise "No custom-field definitions for #{Enum.join(undefined, ", ")} — " <>
+            "run example_field_definitions.exs first."
+end
+
 # --- Products ----------------------------------------------------------------
 
 money = fn amount, currency -> %{"amount" => amount, "currency" => currency} end
