@@ -77,6 +77,25 @@ LiveDashboard keeps the series in memory only while the page is open — fine fo
 spot-profiling a slow save, but not for historical trends. For that, export to
 Prometheus.
 
+> **A `Telemetry.Metrics` entry is not instrumentation.** Until you attach a
+> reporter, `metrics/0` has **no consumer in production**: the `live_dashboard`
+> route is compiled out with `dev_routes`, the reporter child in
+> `KilnCMSWeb.Telemetry.init/1` is commented out, and no
+> `telemetry_metrics_prometheus`/`_statsd` dependency is declared — so
+> `:telemetry.execute/3` dispatches to an empty handler list. Adding a
+> `counter(...)` or `summary(...)` to that list documents an *intent* to
+> measure; on its own nothing records it and nothing can alert on it. This is
+> not hypothetical: it is why #678 was withdrawn, after its threat-model note
+> claimed a refusal counter "can be alerted on" while it was visible nowhere.
+>
+> Signals that must reach an operator on a stock deployment therefore go
+> through `Logger` (stdout, and so the deployment's log viewer) or
+> `Sentry.capture_message/2` — see
+> [`KilnCMSWeb.TenantRefusalAlert`](../lib/kiln_cms_web/tenant_refusal_alert.ex)
+> and [calendar re-query coalescing](#calendar-re-query-coalescing-1336) for the
+> two shapes that does take. Note plain `Logger.warning` does **not** reach
+> Sentry.
+
 ## Prometheus / Grafana path
 
 For persistent dashboards and alerting, attach a Prometheus reporter and point
@@ -105,6 +124,50 @@ Grafana at it:
 
 The same metric definitions feed both LiveDashboard and Prometheus, so adding the
 reporter needs no change to the event-emitting code.
+
+## Calendar re-query coalescing (#1336)
+
+`KilnCMSWeb.CalendarLive` collapses a burst of `:calendar_changed` broadcasts
+into one window re-query, and emits `[:kiln_cms, :calendar, :requery]` carrying
+how many messages each re-query answered. Whether that coalescing actually
+holds under production write bursts is [#1336][], and it is a question about a
+live deployment rather than about a test.
+
+[`KilnCMS.CMS.CalendarRequeryMonitor`](../lib/kiln_cms/cms/calendar_requery_monitor.ex)
+is what makes it readable without a metrics stack: it attaches a real handler
+and logs one aggregated line per org per minute, **only when a calendar
+actually re-queried** — an idle deployment stays silent.
+
+```
+calendar re-query coalescing, last 60s (#1336 — a high re-queries count with
+mean near 1 is the drain failing to coalesce):
+  org=0000…0001 re-queries=412 messages=498 mean=1.21 max=4
+```
+
+Reading it, during a bulk import or a release go-live with a calendar open:
+
+| What you see | What it means |
+|---|---|
+| `mean` comfortably above 1 | The drain is working — each re-query answered several writes. |
+| `mean` near 1 **with a high `re-queries`** | The coalescing is being defeated: it re-queries for one message, and the next write lands immediately after. #1336's failure mode. |
+| `mean` 1.0 with `re-queries` of 1–2 | Nothing. A lone editorial change looks exactly like this. |
+
+The pairing matters: the mean alone is not evidence, because a quiet
+deployment and a defeated drain both sit at 1.0. It is the *volume* alongside
+it that separates them.
+
+Deliberately **no threshold alert**. Choosing "mean below X over Y re-queries
+is broken" would bake in a constant picked from argument rather than
+measurement — the objection that closed the first attempt at #1336. Read a real
+burst first; a threshold belongs in a follow-up informed by those numbers.
+
+Disable with:
+
+```elixir
+config :kiln_cms, KilnCMS.CMS.CalendarRequeryMonitor, enabled: false
+```
+
+[#1336]: https://github.com/The-Verscienta/kiln_cms/issues/1336
 
 ## Health & readiness probes (issue #56)
 

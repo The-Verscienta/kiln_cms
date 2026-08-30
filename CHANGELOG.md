@@ -29,6 +29,26 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **Calendar burst coalescing is readable on a running deployment** (#1336).
+  `KilnCMSWeb.CalendarLive` emits `[:kiln_cms, :calendar, :requery]`
+  carrying how many `:calendar_changed` messages each re-query answered, and
+  `KilnCMS.CMS.CalendarRequeryMonitor` now logs one aggregated line per org
+  per minute — only when a calendar actually re-queried, so an idle
+  deployment stays silent. A high re-query count with a mean near 1 is the
+  drain failing to coalesce; the mean alone means nothing, since a lone
+  editorial change also sits at 1.0. **This is a Logger aggregator rather
+  than a metric on purpose:** `summary("kiln_cms.calendar.requery.messages",
+  …)` was already declared in `KilnCMSWeb.Telemetry.metrics/0` and recorded
+  nothing in production — LiveDashboard is compiled out with `dev_routes`,
+  the reporter child is commented out, and no Prometheus/StatsD dependency
+  exists, so `:telemetry.execute/3` dispatches to an empty handler list. A
+  `Telemetry.Metrics` entry documents an intent to measure; it is not
+  instrumentation. `docs/observability.md` now says so where a reader would
+  otherwise assume the opposite, and #1362 tracks settling the reporter
+  question for the other ~28 metrics in the same position. No threshold
+  alert ships with this: picking one before seeing a real burst would bake
+  in a constant chosen from argument rather than measurement.
+
 - **`mix kiln.search.check` — a CI gate for the search-vector migration every
   new content type owes** (#295). Run against a migrated database, it names
   each content table missing its `search_vector` column, trigger or GIN index

@@ -29,6 +29,12 @@ defmodule KilnCMS.Application do
 
     children = [
       KilnCMSWeb.Telemetry,
+      # Aggregated log of CalendarLive's burst coalescing (#1336). The
+      # `kiln_cms.calendar.requery` telemetry event has no production consumer
+      # — `metrics/0` feeds LiveDashboard, which is compiled out with
+      # `dev_routes` — so this is what actually reaches an operator. Silent
+      # unless a calendar re-queried in the window.
+      KilnCMS.CMS.CalendarRequeryMonitor,
       # Reclaim stale rate-limit buckets so an IP-rotating flood can't grow the
       # ETS table without bound (one row per `bucket:IP` otherwise lives forever).
       {KilnCMSWeb.RateLimit, clean_period: :timer.minutes(1), key_older_than: :timer.minutes(5)},
