@@ -3,8 +3,8 @@
 Where the suite's remaining blind spots are, in the order they are worth
 closing, and why each one is on the list. Written against a full measured run
 on 2026-08-22: **7,344 tests, 0 failures, 83.1% line coverage**, floor 82.5
-(`coveralls.json`). Batches 1 and 2 below have since landed, taking the suite
-to 7,375 tests and 83.3%.
+(`coveralls.json`). Batches 1-3 below have since landed; the suite now measures
+**83.4% locally over 7,411 tests**, and the floor has moved to **82.7**.
 
 Reproduce the numbers with:
 
@@ -14,8 +14,8 @@ Reproduce the numbers with:
 This is not a plan to reach a percentage. The floor exists so coverage cannot
 silently fall (see CONTRIBUTING.md), and every item below earns its place by
 naming a *behaviour nothing currently proves* — not by the size of its
-uncovered block. Two items are listed as already done so the pattern they set
-is reusable; the rest are ordered by what a defect there would cost.
+uncovered block. Three items are listed as already done so the patterns they
+set are reusable; the rest are ordered by what a defect there would cost.
 
 ## Ground rule for anything added here
 
@@ -69,23 +69,27 @@ timeout becomes two posts on an operator's timeline.
 asserted rather than assumed). 97% (39/40); the one remaining line is a
 defensive `web_url/2` clause unreachable through `post/2`.
 
+### 3. `KilnCMSWeb.CodeInjectionLive` — `test/kiln_cms_web/live/code_injection_live_test.exs`
+
+The only test naming `/editor/code-injection` was `KilnCMSWeb.SurfaceTest`,
+which classifies routes and mounts nothing, so the console screen that writes
+stored XSS into a site had no mount, authorization or save test at all. 18
+tests; **0% → 98.6% (69/70)**.
+
+The auth matrix is the half worth reading. An editor who is a *member* of the
+site and a signed-in stranger reach `Scoping.effective_tier/2` down different
+branches — membership role versus `legacy_tier/2`, which answers `:none` off
+the default org — so a test using only the stranger passes with the gate
+widened to admit editors. Both are pinned separately; the mutation that admits
+`:editor` fails only because of the member case.
+
+What the tests do **not** cover, and the file says so: the LiveView's
+`blank_to_nil/1`. Ash's `:string` cast already trims and empties to nil, so
+deleting the helper changes nothing observable — it is the one uncovered line
+left in the file, and the honest reading is that it is dead rather than
+untested.
+
 ## Next
-
-### 3. `KilnCMSWeb.CodeInjectionLive` — 0% of 70 lines
-
-The only test naming `/editor/code-injection` is `KilnCMSWeb.SurfaceTest`,
-which classifies routes and mounts nothing. So a console screen whose whole
-purpose is putting operator-authored script into delivered pages has no mount
-test, no authorization test, and no save test.
-
-Write, in `test/kiln_cms_web/live/code_injection_live_test.exs`:
-
-* mount renders the current head/body snippets for the request org;
-* a non-admin role is refused (the axis matters more than the screen — pick it
-  by blast radius, per `docs/policy-matrix.md`);
-* saving persists per-org and does not leak another org's snippet;
-* whatever escaping or CSP interaction `docs/code-injection.md` promises is
-  asserted against rendered output, not against the changeset.
 
 ### 4. Calendar drag-reschedule e2e — the last open journey from #1314
 
@@ -129,12 +133,12 @@ machine, so re-measure locally before deciding what is missing.)
 What is left is the failure branches, and they need no ffmpeg: unreadable
 input, an output that exceeds the cap, a strip that finds nothing to strip, a
 job whose media row vanished between enqueue and run — the same
-deleted-since-enqueue gate batch 1 covered for the mail workers.
+deleted-since-enqueue gate the mail workers now cover.
 
 ### 7. `KilnCMS.Storage.S3` — 56% (25 uncovered)
 
-`config/test.exs` already points it at `Req.Test`, so the stub pattern from
-batch 2 transfers directly. Cover the error branches: a 403 from a wrong
+`config/test.exs` already points it at `Req.Test`, so the Bluesky stub
+pattern transfers directly. Cover the error branches: a 403 from a wrong
 credential, a 404 on delete, a truncated multipart. Storage failures surface
 to editors as lost uploads, and none of these paths has ever run.
 
@@ -186,7 +190,9 @@ Three things report low and should be left alone:
 `minimum_coverage` in `coveralls.json` sits just under the last measured
 total. After a batch lands, re-measure and raise it to just under the new
 number — the floor's job is to stop regression, so leaving it behind a batch
-that moved the total gives back exactly what the batch bought.
+that moved the total gives back exactly what the batch bought. It moved to
+**82.7** with batch 3; `coveralls.json`'s own comment carries the measurement
+it was set against, and that comment is the thing to update next time.
 
 Raise it against **CI's** measured number, not a local one. Which tests run is
 host-dependent (`:pg_tools`, `:ffmpeg`/`:no_ffmpeg`, `:qpdf` are excluded where

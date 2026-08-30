@@ -61,6 +61,20 @@ migration, a rewritten column, a dropped config key).
   (D18), so there is nothing to install from a browser and an install button
   would be a lie.
 
+- **The code-injection console screen is tested, and the coverage floor moves
+  to 82.7.** `/editor/code-injection` writes stored XSS into a site by design,
+  and nothing mounted it: the only test naming the route classifies routes
+  without rendering them, so the screen had no auth, save or reset test (0 of
+  70 lines, now 69). The auth matrix is pinned on both branches an editor can
+  arrive down — a member of the site carrying the editor tier, and a signed-in
+  account with no membership at all, which `Scoping.effective_tier/2` answers
+  `:none` for off the default org. A test using only the second one passes with
+  the gate widened to admit editors, which is why both are there. Also covered:
+  the newline-separated origin lists, an unchecked "serve these snippets" box
+  (which must not discard the snippet with it), the derived `sha256-` hashes
+  the page shows so an admin can see the CSP will permit what they pasted, and
+  a Remove clicked after another admin already removed the row. The floor in
+  `coveralls.json` moves 82.5 → 82.7 against CI's 83.2 (83.4 locally).
 - **`mix kiln.search.check` — a CI gate for the search-vector migration every
   new content type owes** (#295). Run against a migrated database, it names
   each content table missing its `search_vector` column, trigger or GIN index
