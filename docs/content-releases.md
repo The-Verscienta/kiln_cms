@@ -119,7 +119,7 @@ one item's overrun past it.
 Worth stating plainly, because the name invites the wrong assumption: this bound
 is Kiln's, not Postgres's. The `:timeout` option on `Repo.transaction/2` reaches
 only the `BEGIN`, `COMMIT` and `ROLLBACK` statements —
-`DBConnection.run_transaction/5` invokes the callback as a bare `fun.(conn)`
+`DBConnection` invokes the callback as a bare `fun.(conn)`
 with no timer, and queries inside carry the repo's own default rather than
 inheriting it. Relying on that option alone, as this page previously described,
 would have let a release hold row locks on every one of its items indefinitely.

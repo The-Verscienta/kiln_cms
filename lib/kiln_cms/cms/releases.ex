@@ -110,12 +110,12 @@ defmodule KilnCMS.CMS.Releases do
 
   Enforced by `deadline/0` and checked between items — **not** by the `:timeout`
   passed to `Repo.transaction/2`, which does not do what its name suggests here.
-  `DBConnection.run_transaction/5` applies that option to the `BEGIN`, `COMMIT`
-  and `ROLLBACK` statements only; the callback itself is invoked as a bare
-  `fun.(conn)` with no timer, and the queries inside it carry the repo's own
-  default rather than inheriting this one. So the option alone would let a
-  release hold row locks on every one of its items indefinitely while the
-  moduledoc promised a two-minute bound.
+  `DBConnection` applies that option to the `BEGIN`, `COMMIT` and `ROLLBACK`
+  statements only; the callback itself is invoked as a bare `fun.(conn)` with no
+  timer, and the queries inside it carry the repo's own default rather than
+  inheriting this one. So the option alone would let a release hold row locks on
+  every one of its items indefinitely while the moduledoc promised a two-minute
+  bound.
   """
   @spec transaction_timeout_ms() :: pos_integer()
   def transaction_timeout_ms,
