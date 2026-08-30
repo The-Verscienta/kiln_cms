@@ -613,6 +613,27 @@ msgid_plural "%{count} images have no alt text — screen readers can't describe
 msgstr[0] "1 imagen no tiene texto alternativo — los lectores de pantalla no pueden describirla."
 msgstr[1] "%{count} imágenes no tienen texto alternativo — los lectores de pantalla no pueden describirlas."
 
+#: lib/kiln_cms_web/live/release_live.ex
+#, elixir-autogen, elixir-format
+msgid "1 item can't ship as it stands. A release is all-or-nothing, so nothing would go live."
+msgid_plural "%{count} items can't ship as they stand. A release is all-or-nothing, so nothing would go live."
+msgstr[0] "1 elemento no puede publicarse tal como está. Un lanzamiento es todo o nada, así que no se publicaría nada."
+msgstr[1] "%{count} elementos no pueden publicarse tal como están. Un lanzamiento es todo o nada, así que no se publicaría nada."
+
+#: lib/kiln_cms_web/live/release_live.ex
+#, elixir-autogen, elixir-format
+msgid "1 item can't ship as it stands. Schedule anyway? Unless it is fixed first, the release will fail and nothing will go live."
+msgid_plural "%{count} items can't ship as they stand. Schedule anyway? Unless they are fixed first, the release will fail and nothing will go live."
+msgstr[0] "1 elemento no puede publicarse tal como está. ¿Programar de todos modos? Si no se corrige antes, el lanzamiento fallará y no se publicará nada."
+msgstr[1] "%{count} elementos no pueden publicarse tal como están. ¿Programar de todos modos? Si no se corrigen antes, el lanzamiento fallará y no se publicará nada."
+
+#: lib/kiln_cms_web/live/release_live.ex
+#, elixir-autogen, elixir-format
+msgid "1 item is already in its target state and will be skipped."
+msgid_plural "%{count} items are already in their target state and will be skipped."
+msgstr[0] "1 elemento ya está en su estado de destino y se omitirá."
+msgstr[1] "%{count} elementos ya están en su estado de destino y se omitirán."
+
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
 msgid "1 link has no text at all — there is no anchor text to read."
@@ -2000,6 +2021,11 @@ msgstr "Cambiar contraseña"
 msgid "Change poster"
 msgstr "Cambiar la imagen de portada"
 
+#: lib/kiln_cms_web/live/release_live.ex
+#, elixir-autogen, elixir-format
+msgid "Change updated."
+msgstr "Cambio actualizado."
+
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -2647,6 +2673,11 @@ msgstr "No se pudo asignar esa tarea."
 #, elixir-autogen, elixir-format
 msgid "Couldn't autosave — check for errors"
 msgstr "No se pudo guardar automáticamente — compruebe si hay errores"
+
+#: lib/kiln_cms_web/live/release_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't change that item."
+msgstr "No se pudo cambiar ese elemento."
 
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
@@ -6643,6 +6674,13 @@ msgstr "Al publicar: dejarla abierta (ajuste del sitio)"
 msgid "On-site searches that returned nothing. Each is a reader who looked for something this site doesn't cover."
 msgstr "Búsquedas en el sitio que no devolvieron nada. Cada una es un lector que buscó algo que este sitio no cubre."
 
+#: lib/kiln_cms_web/live/release_live.ex
+#, elixir-autogen, elixir-format
+msgid "One item can't ship as it stands, so the whole release would fail. Fix or remove it first."
+msgid_plural "%{count} items can't ship as they stand, so the whole release would fail. Fix or remove them first."
+msgstr[0] "Un elemento no puede publicarse tal como está, por lo que fallaría todo el lanzamiento. Corríjalo o elimínelo primero."
+msgstr[1] "%{count} elementos no pueden publicarse tal como están, por lo que fallaría todo el lanzamiento. Corríjalos o elimínelos primero."
+
 #: lib/kiln_cms_web/live/form_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "One per line. %{count} keyword saved."
@@ -7652,6 +7690,11 @@ msgstr "Lanzamiento archivado."
 #, elixir-autogen, elixir-format
 msgid "Release deleted."
 msgstr "Lanzamiento eliminado."
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Release failed"
+msgstr "Lanzamiento fallido"
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
@@ -9286,6 +9329,11 @@ msgstr "Apoya este sitio y accede a los textos exclusivos para miembros."
 msgid "Suppressed addresses"
 msgstr "Direcciones bloqueadas"
 
+#: lib/kiln_cms_web/live/release_live.ex
+#, elixir-autogen, elixir-format
+msgid "Switch to %{action}"
+msgstr "Cambiar a %{action}"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Synced live — co-editor saves"
@@ -10032,6 +10080,11 @@ msgstr "Este enlace de vista previa ha caducado"
 #, elixir-autogen, elixir-format
 msgid "This release did not ship. Nothing went live."
 msgstr "Este lanzamiento no se publicó. No se publicó nada."
+
+#: lib/kiln_cms_web/live/release_live.ex
+#, elixir-autogen, elixir-format
+msgid "This release has nothing to publish."
+msgstr "Este lanzamiento no tiene nada que publicar."
 
 #: lib/kiln_cms_web/live/release_preview_live.ex
 #, elixir-autogen, elixir-format
@@ -11816,6 +11869,11 @@ msgstr "lectura"
 #, elixir-autogen, elixir-format
 msgid "recorded content views"
 msgstr "visualizaciones de contenido registradas"
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "release failed to ship"
+msgstr "el lanzamiento no se pudo publicar"
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format

@@ -34,8 +34,8 @@ defmodule KilnCMS.CMS.Calendar do
       badge on a publish chip, because a re-read is separate work from a
       release.
     * `:task_due` — an open `Task`'s due date (#501).
-    * `:release_scheduled` / `:release_published` — a `ContentRelease`'s
-      go-live and its actual ship.
+    * `:release_scheduled` / `:release_published` / `:release_failed` — a
+      `ContentRelease`'s go-live, its actual ship, and a go-live that aborted.
 
   ## Scoping and authorization
 
@@ -79,6 +79,7 @@ defmodule KilnCMS.CMS.Calendar do
           | :task_due
           | :release_scheduled
           | :release_published
+          | :release_failed
 
   @typedoc """
   Filters, all optional and all "nil means everything".
@@ -114,7 +115,8 @@ defmodule KilnCMS.CMS.Calendar do
       :review_due,
       :task_due,
       :release_scheduled,
-      :release_published
+      :release_published,
+      :release_failed
     ]
 
   @doc """
@@ -273,6 +275,7 @@ defmodule KilnCMS.CMS.Calendar do
     |> Enum.flat_map(fn release ->
       for {kind, at} <- [
             {:release_scheduled, release_go_live(release)},
+            {:release_failed, release_abort(release)},
             {:release_published, release.published_at}
           ],
           in_window?(at, from, to) do
@@ -299,6 +302,14 @@ defmodule KilnCMS.CMS.Calendar do
   # published chip on the same day.
   defp release_go_live(%{state: :scheduled, scheduled_at: at}), do: at
   defp release_go_live(_release), do: nil
+
+  # A failed release keeps the `scheduled_at` it was supposed to fire at, so its
+  # chip stays on the day the launch was planned for rather than on the day
+  # somebody eventually noticed. Its own kind, not `:release_scheduled`: that
+  # lane is draggable, and there is no `:schedule` transition out of `:failed`
+  # to drag it with — reopening is the first step.
+  defp release_abort(%{state: :failed, scheduled_at: at}), do: at
+  defp release_abort(_release), do: nil
 
   # --- filters ---------------------------------------------------------------
 

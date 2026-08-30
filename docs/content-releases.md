@@ -31,17 +31,32 @@ groups: **Planned** (open, scheduled, publishing, failed), **Published**, and
      without leaving the editor.
 
    Either way you choose the release and whether it should **Publish** or
-   **Unpublish** that record when the release goes live.
+   **Unpublish** that record when the release goes live. You can flip that
+   choice later from the release page — click the value in the **Change**
+   column. It is an edit in place rather than a remove-and-re-add, which
+   matters: removing frees the content's reservation, so between the two steps
+   another release can legitimately claim the record and the re-add fails.
 3. **Review it.** The release page lists everything in the bundle with its title
    resolved, and badges any item that couldn't ship as it stands (e.g. *"cannot
    be published from archived"*) or that would be a no-op (*"already in that
-   state — will be skipped"*).
+   state — will be skipped"*). Those verdicts are also **totalled next to the
+   ship controls**, because one blocked item means the whole release fails —
+   on a large release, a single red badge in a long list is not a warning
+   anybody reliably sees.
 4. **Preview it.** **Create preview link** mints a short-lived, shareable URL
    showing every document as the release would publish it, plus everything the
    release takes down. No editor account needed to open it — useful for
    sign-off with people outside the CMS.
 5. **Ship it.** Either set a **Go live at** datetime (a minute-resolution cron
    fires it, same cadence as per-item scheduling) or hit **Publish now**.
+
+   **Publish now is withheld** while any item is blocked, or while the release
+   is empty — the go-live could only abort, and the page already knows it.
+   **Scheduling only warns.** The difference is deliberate: a readiness verdict
+   is about *right now*, and the entire point of a go-live date is that the
+   blocking record gets fixed before it arrives. Refusing to schedule would
+   forbid the normal way of working; scheduling over a known blocker in silence
+   is how you get a 09:00 launch that was never going to ship.
 6. **Undo it.** A published release offers **Roll back**: every item it changed
    returns to the state it was in before.
 
@@ -87,6 +102,27 @@ and the console recomputes readiness across every item on each render. Both
 scale with item count. The default is deliberately generous (a site-wide
 migration release is a real use); it is there to stop unbounded *accidental*
 growth from a bulk "select all", not to impose an editorial style.
+
+### How long a release may run
+
+`transaction_timeout_ms` (two minutes by default) is a **wall-clock budget**,
+checked between items. A go-live that runs out of it rolls back like any other
+failure — nothing ships, and the release lands in **Failed** naming the item it
+stopped at, with a reason telling you to split the release or raise the budget.
+
+Between items is the only safe place to stop. One item is a publish plus its
+version, audit-chain and webhook writes; interrupting it halfway would produce
+exactly the inconsistency the transaction exists to prevent. So the budget
+bounds how long the release may keep *starting* work, and the true worst case is
+one item's overrun past it.
+
+Worth stating plainly, because the name invites the wrong assumption: this bound
+is Kiln's, not Postgres's. The `:timeout` option on `Repo.transaction/2` reaches
+only the `BEGIN`, `COMMIT` and `ROLLBACK` statements —
+`DBConnection.run_transaction/5` invokes the callback as a bare `fun.(conn)`
+with no timer, and queries inside carry the repo's own default rather than
+inheriting it. Relying on that option alone, as this page previously described,
+would have let a release hold row locks on every one of its items indefinitely.
 
 Both bounds are configurable:
 
@@ -218,20 +254,39 @@ nothing moves.
 
 ## Calendar and events
 
-Scheduled and shipped releases appear on the editorial calendar
-(`/editor/calendar`) alongside per-item schedules, with their own chip colour.
+Scheduled, shipped and **failed** releases appear on the editorial calendar
+(`/editor/calendar`) alongside per-item schedules, with their own chip colours.
 
-Two events dispatch through the standard [webhook](webhooks.md) and
+A failed release keeps the `scheduled_at` it was meant to fire at, so its chip
+stays on the day the launch was planned for rather than the day somebody
+noticed. It is its own lane (*Release failed*, in the error colour) and is not
+draggable — there is no `schedule` transition out of `failed`, so reopening the
+release is the first step and rescheduling comes after.
+
+Three events dispatch through the standard [webhook](webhooks.md) and
 [automation](automation.md) funnel:
 
 - `release.published`
 - `release.rolled_back`
+- `release.failed`
 
-Both carry the release's id, name and item list, and are subscribable on any
+All three carry the release's id, name and item list, and are subscribable on any
 webhook endpoint exactly like `page.published`. Because they go through the same
 funnel, an automation rule scoped to content type `release` with trigger
-`published` fires on them too. They are dispatched **inside** the go-live
+`published` fires on them too.
+
+`release.published` and `release.rolled_back` are dispatched **inside** their
 transaction, so a release that aborts never emits one.
+
+`release.failed` is necessarily the other way round — the transaction it would
+report on has already rolled back, so the dispatch happens after it, on its own.
+It additionally carries `mode` (`"publish"` or `"rollback"`), `failure_reason`
+and `failed_item_id`.
+
+Subscribe to it. A release that aborts changes nothing on the site, which means
+nothing else about the system tells anybody it was supposed to: an unattended
+09:00 launch that fails leaves the site exactly as it was, and without this
+event the first sign is somebody noticing the campaign never went out.
 
 ## Under the hood
 

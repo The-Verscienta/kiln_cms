@@ -613,6 +613,27 @@ msgid_plural "%{count} images have no alt text — screen readers can't describe
 msgstr[0] ""
 msgstr[1] ""
 
+#: lib/kiln_cms_web/live/release_live.ex
+#, elixir-autogen, elixir-format
+msgid "1 item can't ship as it stands. A release is all-or-nothing, so nothing would go live."
+msgid_plural "%{count} items can't ship as they stand. A release is all-or-nothing, so nothing would go live."
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms_web/live/release_live.ex
+#, elixir-autogen, elixir-format
+msgid "1 item can't ship as it stands. Schedule anyway? Unless it is fixed first, the release will fail and nothing will go live."
+msgid_plural "%{count} items can't ship as they stand. Schedule anyway? Unless they are fixed first, the release will fail and nothing will go live."
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms_web/live/release_live.ex
+#, elixir-autogen, elixir-format
+msgid "1 item is already in its target state and will be skipped."
+msgid_plural "%{count} items are already in their target state and will be skipped."
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
 msgid "1 link has no text at all — there is no anchor text to read."
@@ -2000,6 +2021,11 @@ msgstr ""
 msgid "Change poster"
 msgstr ""
 
+#: lib/kiln_cms_web/live/release_live.ex
+#, elixir-autogen, elixir-format
+msgid "Change updated."
+msgstr ""
+
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -2646,6 +2672,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't autosave — check for errors"
+msgstr ""
+
+#: lib/kiln_cms_web/live/release_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't change that item."
 msgstr ""
 
 #: lib/kiln_cms_web/live/task_live.ex
@@ -6643,6 +6674,13 @@ msgstr ""
 msgid "On-site searches that returned nothing. Each is a reader who looked for something this site doesn't cover."
 msgstr ""
 
+#: lib/kiln_cms_web/live/release_live.ex
+#, elixir-autogen, elixir-format
+msgid "One item can't ship as it stands, so the whole release would fail. Fix or remove it first."
+msgid_plural "%{count} items can't ship as they stand, so the whole release would fail. Fix or remove them first."
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/kiln_cms_web/live/form_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "One per line. %{count} keyword saved."
@@ -7651,6 +7689,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Release deleted."
+msgstr ""
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Release failed"
 msgstr ""
 
 #: lib/kiln_cms_web/live/calendar_live.ex
@@ -9286,6 +9329,11 @@ msgstr ""
 msgid "Suppressed addresses"
 msgstr ""
 
+#: lib/kiln_cms_web/live/release_live.ex
+#, elixir-autogen, elixir-format
+msgid "Switch to %{action}"
+msgstr ""
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Synced live — co-editor saves"
@@ -10031,6 +10079,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "This release did not ship. Nothing went live."
+msgstr ""
+
+#: lib/kiln_cms_web/live/release_live.ex
+#, elixir-autogen, elixir-format
+msgid "This release has nothing to publish."
 msgstr ""
 
 #: lib/kiln_cms_web/live/release_preview_live.ex
@@ -11815,6 +11868,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "recorded content views"
+msgstr ""
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "release failed to ship"
 msgstr ""
 
 #: lib/kiln_cms_web/live/calendar_live.ex

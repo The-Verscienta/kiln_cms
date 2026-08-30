@@ -105,6 +105,32 @@ defmodule KilnCMS.CMS.ReleaseItem do
       change KilnCMS.CMS.Changes.StampReleaseItemAdder
     end
 
+    update :set_action do
+      description "Flip what the release will do to this record: publish or unpublish."
+      accept [:action]
+      require_atomic? false
+
+      # Editing in place rather than cancel-and-re-add, which is what correcting
+      # a mis-picked action used to cost. That round trip is not merely tedious:
+      # cancelling frees the content's `:pending` reservation, so between the two
+      # writes another release can legitimately claim the record and the re-add
+      # fails — leaving the item out of the release an editor was only trying to
+      # correct. One update never drops the reservation.
+      validate KilnCMS.CMS.Validations.ReleaseOpenForEdit
+
+      # Only while the item is still a plan. An `:applied` item's action is the
+      # historical record of what the release DID, and rollback reads its
+      # captured `prior_state` against it. Both guards, doing different jobs:
+      # the validation gives the console a readable refusal, and the `filter`
+      # puts the same condition in the UPDATE's own WHERE clause so a flip that
+      # races the go-live worker onto an item it just applied matches no row
+      # (a `StaleRecord` error) instead of rewriting history — the same
+      # compare-and-swap shape `ContentRelease`'s `:start` uses, and for the
+      # same reason.
+      validate attribute_equals(:status, :pending)
+      change filter(expr(status == :pending))
+    end
+
     update :cancel do
       description "Remove the item from its release; the content is free again."
       accept []
@@ -213,7 +239,7 @@ defmodule KilnCMS.CMS.ReleaseItem do
     # Editors compose a release's contents. The `mark_*` writes carry no policy
     # on purpose: they are only ever reached from the release worker, which runs
     # `authorize?: false` after an admin claimed the release.
-    policy action([:add, :cancel]) do
+    policy action([:add, :set_action, :cancel]) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
   end

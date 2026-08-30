@@ -194,7 +194,10 @@ defmodule KilnCMSWeb.CalendarLive do
   # Which lanes can be dragged, and what each one actually writes.
   #
   # `:published` and `:release_published` are absent because they are history —
-  # you cannot reschedule something that already happened.
+  # you cannot reschedule something that already happened. `:release_failed` is
+  # absent for the neighbouring reason: there is no `:schedule` transition out
+  # of `:failed`, so a drag could only ever error. Reopening the release in the
+  # console is the first step, and scheduling comes after that.
   #
   # `:review_due` is absent for a subtler reason, and it is a deliberate
   # departure from the plan, which asked for it. `due_at` is *derived* from
@@ -487,6 +490,7 @@ defmodule KilnCMSWeb.CalendarLive do
   defp lane_label(:task_due), do: gettext("Task due")
   defp lane_label(:release_scheduled), do: gettext("Release go-live")
   defp lane_label(:release_published), do: gettext("Release shipped")
+  defp lane_label(:release_failed), do: gettext("Release failed")
 
   defp kind_label(:publish), do: gettext("publishes")
   defp kind_label(:unpublish), do: gettext("unpublishes")
@@ -497,6 +501,7 @@ defmodule KilnCMSWeb.CalendarLive do
   defp kind_label(:task_due), do: gettext("task due")
   defp kind_label(:release_scheduled), do: gettext("release goes live")
   defp kind_label(:release_published), do: gettext("release shipped")
+  defp kind_label(:release_failed), do: gettext("release failed to ship")
 
   # Nine lanes over five accent tones, so two pairs need more than hue to tell
   # them apart — and both pairs were, briefly, indistinguishable on screen while
@@ -520,6 +525,7 @@ defmodule KilnCMSWeb.CalendarLive do
   defp kind_class(:task_due), do: "border-info/40 bg-info/10"
   defp kind_class(:release_scheduled), do: "border-primary/50 bg-primary/10 font-medium"
   defp kind_class(:release_published), do: "border-primary/30 bg-primary/5"
+  defp kind_class(:release_failed), do: "border-error/50 bg-error/10 font-medium"
 
   # A release chip goes to the release, not to a content editor — it isn't a
   # content record and has no `{type, id}` editor route.
