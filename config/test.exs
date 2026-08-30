@@ -218,7 +218,21 @@ config :kiln_cms, KilnCMS.Repo,
   hostname: System.get_env("POSTGRES_HOST", "localhost"),
   database: "kiln_cms_test#{System.get_env("MIX_TEST_PARTITION")}",
   pool: Ecto.Adapters.SQL.Sandbox,
-  pool_size: System.schedulers_online() * 2
+  # ExUnit's default max_cases is ALSO schedulers * 2, so a pool of exactly
+  # that size hands every concurrently-running test case one connection with
+  # zero headroom. But a LiveView test needs several checkouts at once — the
+  # test process, the LiveView, the per-request settings lookups, any spawned
+  # task — and at saturation a new owner's checkout queues behind a full pool
+  # and dies, which is the "owner exited" crash on rotating unrelated files
+  # (#1348). The `+ 8` is that headroom.
+  #
+  # Deliberately NOT raised here: `queue_target`/`queue_interval`. The other
+  # #1348 signature ("dropped from queue after ~995ms") comes from waiters on
+  # a single sandbox owner's connection while a long transaction holds it.
+  # Measured on a full local run, a 5s ceiling changed nothing — the same 80
+  # waiters (all degrade-by-design settings lookups) still timed out, having
+  # held >5s — while adding ~4s of wall time to each, +290s on the suite.
+  pool_size: System.schedulers_online() * 2 + 8
 
 # We don't run a server during test. If one is required,
 # you can enable the server option below.
