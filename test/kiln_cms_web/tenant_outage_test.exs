@@ -92,6 +92,42 @@ defmodule KilnCMSWeb.TenantOutageTest do
     assert :error = Accounts.default_org()
   end
 
+  # #1335, the request-path twin of #1288: this module's no-checkout reads
+  # RAISE, which Ash wraps into the `{:error, _}` that `lookup/2` judges — so
+  # every `fetch_org/1` test below exercises only the raise half. A read into a
+  # pool process that is not alive EXITS instead (seen on CI as
+  # `DBConnection.Holder.checkout ... (EXIT) no process` out of this very
+  # file), and an uncaught exit skips `fetch_org/1`'s `:error` branch entirely
+  # to crash the caller. The guard is tested here directly, where the exit can
+  # be forced deterministically — same approach as `Config.Report.probe/2`'s
+  # tests (#1288).
+  describe "read_degrading_exit/1" do
+    test "passes a successful read's answer through untouched" do
+      assert Tenant.read_degrading_exit(fn -> {:ok, :answer} end) == {:ok, :answer}
+      assert Tenant.read_degrading_exit(fn -> nil end) == nil
+    end
+
+    test "degrades an exit to :error, fetch_org/1's could-not-ask answer" do
+      assert Tenant.read_degrading_exit(fn -> exit(:noproc) end) == :error
+    end
+
+    test "an exit from a real dead-process call is caught, not just exit/1" do
+      # `exit/1` above proves the clause; this proves the shape it exists for:
+      # a `:gen_server.call` into a pid that has already stopped — what a pool
+      # crashed or still restarting looks like from the calling process.
+      {:ok, pid} = Agent.start(fn -> :ok end)
+      :ok = Agent.stop(pid)
+
+      assert Tenant.read_degrading_exit(fn -> GenServer.call(pid, :anything) end) == :error
+    end
+
+    test "a raise is not caught — Ash wraps those, and anything else is a bug" do
+      assert_raise RuntimeError, fn ->
+        Tenant.read_degrading_exit(fn -> raise "not an outage shape" end)
+      end
+    end
+  end
+
   describe "fetch_org/1 with strict host matching off (the default)" do
     setup do: strict!(false)
 
