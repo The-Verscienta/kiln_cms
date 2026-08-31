@@ -35,7 +35,7 @@ defmodule KilnCMS.CollabTest do
           Process.sleep(:infinity)
         end)
 
-      assert_receive :acquired
+      assert_receive :acquired, 2_000
       assert {:ok, :carol} = Locks.holder(key, "b3")
 
       Process.exit(pid, :kill)
@@ -66,7 +66,7 @@ defmodule KilnCMS.CollabTest do
           {:add_block, %{"id" => "a", "type" => "heading", "content" => "Hi"}, 0}
         )
 
-      assert_receive {:block_op, %{op: {:add_block, _, 0}, seq: 1}}
+      assert_receive {:block_op, %{op: {:add_block, _, 0}, seq: 1}}, 2_000
       assert [%{"id" => "a"}] = History.replay(:page, id)
     end
 

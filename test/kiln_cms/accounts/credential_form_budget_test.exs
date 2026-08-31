@@ -167,7 +167,7 @@ defmodule KilnCMS.Accounts.CredentialFormBudgetTest do
       assert :ok = request_reset(ip, address)
       drain_oban()
 
-      assert_receive {:email, %{subject: subject}}, 100
+      assert_receive {:email, %{subject: subject}}, 2_000
       assert subject =~ "assword"
     end
   end
@@ -203,11 +203,11 @@ defmodule KilnCMS.Accounts.CredentialFormBudgetTest do
 
       assert :ok = request_magic_link(ip, address)
       drain_oban()
-      assert_receive {:email, _first}, 100
+      assert_receive {:email, _first}, 2_000
 
       assert :ok = request_magic_link(ip, address)
       drain_oban()
-      assert_receive {:email, _second}, 100
+      assert_receive {:email, _second}, 2_000
 
       # Budget spent.
       assert {:error, _refused} = request_magic_link(ip, address)

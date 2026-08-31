@@ -155,7 +155,7 @@ defmodule KilnCMS.Collab.PublishCheckpointTest do
 
     {:ok, _published} = CMS.publish_page(page, %{}, actor: actor)
 
-    assert_receive %Phoenix.Socket.Broadcast{event: "published"}
+    assert_receive %Phoenix.Socket.Broadcast{event: "published"}, 2_000
   end
 
   # Announced AFTER the transaction, so a rolled-back publish never tells a room

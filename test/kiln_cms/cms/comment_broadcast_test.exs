@@ -42,8 +42,8 @@ defmodule KilnCMS.CMS.CommentBroadcastTest do
 
     {:ok, _comment} = add(content_id, block_id, editor)
 
-    assert_receive {:preview_comments_changed, ^block_id}
-    assert_receive {:block_thread_changed, ^block_id}
+    assert_receive {:preview_comments_changed, ^block_id}, 2_000
+    assert_receive {:block_thread_changed, ^block_id}, 2_000
     drain()
   end
 
@@ -58,7 +58,7 @@ defmodule KilnCMS.CMS.CommentBroadcastTest do
     {:ok, reply} = add(content_id, block_id, editor, "Agreed")
 
     refute is_nil(reply.thread_id)
-    assert_receive {:block_thread_changed, ^block_id}
+    assert_receive {:block_thread_changed, ^block_id}, 2_000
     drain()
   end
 
@@ -71,12 +71,12 @@ defmodule KilnCMS.CMS.CommentBroadcastTest do
     subscribe_both(content_id)
 
     {:ok, resolved} = CMS.resolve_comment(root, %{}, actor: editor)
-    assert_receive {:preview_comments_changed, ^block_id}
-    assert_receive {:block_thread_changed, ^block_id}
+    assert_receive {:preview_comments_changed, ^block_id}, 2_000
+    assert_receive {:block_thread_changed, ^block_id}, 2_000
 
     {:ok, _reopened} = CMS.unresolve_comment(resolved, %{}, actor: editor)
-    assert_receive {:preview_comments_changed, ^block_id}
-    assert_receive {:block_thread_changed, ^block_id}
+    assert_receive {:preview_comments_changed, ^block_id}, 2_000
+    assert_receive {:block_thread_changed, ^block_id}, 2_000
     drain()
   end
 

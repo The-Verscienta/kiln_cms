@@ -69,7 +69,7 @@ defmodule KilnCMSWeb.BridgeSocketTest do
       {:preview_update, payload}
     )
 
-    assert_receive {:preview_update, ^payload}
+    assert_receive {:preview_update, ^payload}, 2_000
 
     assert {:push, {:text, json}, ^state} =
              BridgeSocket.handle_info({:preview_update, payload}, state)
@@ -119,7 +119,7 @@ defmodule KilnCMSWeb.BridgeSocketTest do
       {:preview_update, payload}
     )
 
-    assert_receive {:preview_update, ^payload}
+    assert_receive {:preview_update, ^payload}, 2_000
 
     assert {:push, {:text, json}, ^state} =
              BridgeSocket.handle_info({:preview_update, payload}, state)

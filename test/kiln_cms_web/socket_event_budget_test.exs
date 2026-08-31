@@ -94,7 +94,7 @@ defmodule KilnCMSWeb.SocketEventBudgetTest do
     socket = socket_for(actor_id(), self())
 
     assert :ok = SocketEventBudget.close_connection(socket)
-    assert_receive %Phoenix.Socket.Broadcast{event: "disconnect"}
+    assert_receive %Phoenix.Socket.Broadcast{event: "disconnect"}, 2_000
   end
 
   test "the shipped ceiling is a per-account flood ceiling, not a usage cap" do

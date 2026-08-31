@@ -10,7 +10,7 @@ defmodule KilnCMS.SMTPSink do
 
       {name, port} = KilnCMS.SMTPSink.start(self())
       # deliver to 127.0.0.1:port ...
-      assert_receive {:smtp_sink, from, to, data}
+      assert_receive {:smtp_sink, from, to, data}, 2_000
   """
   @behaviour :gen_smtp_server_session
 

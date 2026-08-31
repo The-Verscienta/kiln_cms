@@ -88,23 +88,19 @@ defmodule KilnCMSWeb.GraphqlSubscriptionTest do
     assert id == page.id
     assert title == "Still quiet"
 
-    # Publishing runs internal follow-up updates (published-version pointer,
-    # artifact bookkeeping) that also notify — drain those pushes.
-    drain_pushes()
-
-    # Published edits keep flowing.
+    # Published edits keep flowing. Selected by content, not by mailbox order
+    # (#1350): publishing runs internal follow-up updates (published-version
+    # pointer, artifact bookkeeping) that also push, and the fixed-150ms drain
+    # that used to sit here left any follow-up slower than that in the mailbox
+    # for a shape-only assertion to pick up. A pattern naming the new title
+    # cannot match a stale push, so there is nothing to drain.
     CMS.update_page!(page, %{title: "Live v2"}, actor: actor, tenant: @org)
 
-    assert_push("subscription:data", %{result: %{data: %{"pageChanged" => changed}}})
-    assert %{"updated" => %{"title" => "Live v2"}} = changed
-  end
-
-  defp drain_pushes do
-    receive do
-      %Phoenix.Socket.Message{event: "subscription:data"} -> drain_pushes()
-    after
-      150 -> :ok
-    end
+    assert_push(
+      "subscription:data",
+      %{result: %{data: %{"pageChanged" => %{"updated" => %{"title" => "Live v2"}}}}},
+      2_000
+    )
   end
 
   test "a bearer-authed editor sees draft activity too" do

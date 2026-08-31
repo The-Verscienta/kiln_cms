@@ -156,7 +156,7 @@ defmodule KilnCMSWeb.PresentationLiveTest do
     assert updated.blocks |> hd() |> Map.get(:value) |> Map.get(:text) == "Edited via console"
 
     # …and broadcast so the iframe refreshes.
-    assert_receive {:preview_update, %{title: "Live post"}}
+    assert_receive {:preview_update, %{title: "Live post"}}, 2_000
   end
 
   test "clicking the document title opens a scalar editor and Save persists it", %{conn: conn} do

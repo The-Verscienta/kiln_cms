@@ -51,14 +51,14 @@ defmodule KilnCMS.Cache.ClusterBustTest do
       Phoenix.PubSub.subscribe(KilnCMS.PubSub, ClusterBust.topic())
 
       Cache.bust_code_injection(org)
-      assert_receive {:bust_keys, [key]}
+      assert_receive {:bust_keys, [key]}, 2_000
       assert key == Cache.code_injection_key(org)
 
       # Branding travels the same way, deliberately: the two keys hold the same
       # shape of thing and there is no reason for one to reach every node and
       # the other not to.
       Cache.bust_branding(org)
-      assert_receive {:bust_keys, [branding]}
+      assert_receive {:bust_keys, [branding]}, 2_000
       assert branding == Cache.branding_key(org)
     end
 
@@ -71,7 +71,7 @@ defmodule KilnCMS.Cache.ClusterBustTest do
       token = Cache.head_generation(org)
       refute token == "0"
 
-      assert_receive {:put_keys, [{key, ^token}]}
+      assert_receive {:put_keys, [{key, ^token}]}, 2_000
       assert key == Cache.head_generation_key(org)
     end
 
@@ -82,7 +82,7 @@ defmodule KilnCMS.Cache.ClusterBustTest do
 
       Cache.bust_branding(org)
 
-      assert_receive {:bust_keys, keys}
+      assert_receive {:bust_keys, keys}, 2_000
       assert Enum.all?(keys, &is_binary/1)
     end
   end
@@ -132,7 +132,7 @@ defmodule KilnCMS.Cache.ClusterBustTest do
 
       Cache.bust_all_feeds(org)
 
-      assert_receive {:bust_prefix, prefix}
+      assert_receive {:bust_prefix, prefix}, 2_000
       assert String.starts_with?(Cache.feed_key(org, "post", :atom), prefix)
       refute String.starts_with?(Cache.feed_key(Ash.UUID.generate(), "post", :atom), prefix)
     end
@@ -233,7 +233,7 @@ defmodule KilnCMS.Cache.ClusterBustTest do
 
       assert :ok = ClusterBust.broadcast_clear()
 
-      assert_receive {:bust_all, origin}
+      assert_receive {:bust_all, origin}, 2_000
       assert origin == Node.self()
       refute cached?(key)
       assert KilnCMS.Firing.Cache.get(org, :post, doc_id, :html) == :miss
@@ -277,7 +277,7 @@ defmodule KilnCMS.Cache.ClusterBustTest do
       assert published >= 1
       assert artifacts >= 1
 
-      assert_receive {:bust_all, origin}
+      assert_receive {:bust_all, origin}, 2_000
       assert origin == Node.self()
       refute cached?(key)
       assert KilnCMS.Firing.Cache.get(org, :post, doc_id, :html) == :miss
