@@ -26,14 +26,20 @@ defmodule KilnCMS.Billing.WebhooksTest do
       at the call site. The log line is the only place that distinction survives,
       so the ambiguity tests assert on it there.
 
-  One branch is deliberately left uncovered: `verify/3`'s **org** mismatch. The
-  read above it is tenant-filtered by the very `org_id` being compared, so a row
-  found under org A can never carry org B and the comparison cannot be reached
-  through `resolve/1`. It is not dead code to delete — the two rungs below it
-  are `multitenancy :bypass`, and this one would become live the moment that
-  read followed — but no honest test reaches it, and the test below pins what an
-  event claiming the wrong org actually does (it is refused one step earlier, as
-  not-found).
+  Two branches are deliberately left uncovered, both for the same reason — no
+  honest test reaches them, and faking one would be worse than the gap:
+
+    * `verify/3`'s **org** mismatch. The read above it is tenant-filtered by the
+      very `org_id` being compared, so a row found under org A can never carry
+      org B. Not dead code — the two rungs below it are `multitenancy :bypass`,
+      and this one goes live the moment that read follows — and the test below
+      pins what an event claiming the wrong org actually does (refused one step
+      earlier, as not-found).
+    * `by_subscription/1`'s `{:error, _}` arm. Now that every
+      `subscription_id/1` clause guards on `is_binary`, the read only ever
+      receives a string, so that arm answers a database fault and nothing else.
+      (It was briefly reachable through the unguarded nested clause, which is
+      how it came to be covered at all.)
   """
   use KilnCMS.DataCase, async: true
 
@@ -344,12 +350,28 @@ defmodule KilnCMS.Billing.WebhooksTest do
     end
 
     test "a non-string subscription id is ignored rather than raising" do
-      # `subscription_id/1`'s nested-object clause has no `is_binary` guard, so
-      # a payload carrying `{"subscription": {"id": 123}}` reaches the read with
-      # an integer and Ash answers `{:error, _}`. Same reasoning as the
-      # malformed metadata below: it has to become an ignore, not a 500.
       assert {:ignored, :unresolvable} =
                Webhooks.resolve(event(%{"subscription" => %{"id" => 123}}))
+    end
+
+    test "a malformed subscription id does not cost the customer rung its turn" do
+      # A junk subscription id must not consume the event: the customer rung
+      # below still resolves, so a payload with one bad field still grants
+      # access.
+      #
+      # This does *not* test `subscription_id/1`'s `is_binary` guard, and no
+      # test can: without it Ash rejects the non-id at cast time — no query, no
+      # exception — and `resolve/1` flattens both reasons to `:unresolvable`.
+      # The guard buys a truthful reason code and clause symmetry; this test
+      # pins the behaviour, which holds either way and is what actually matters
+      # to a paying member.
+      cus = "cus_#{uniq()}"
+      m = membership(%{provider_customer_id: cus})
+
+      assert {:ok, resolved} =
+               Webhooks.resolve(event(%{"subscription" => %{"id" => 123}, "customer" => cus}))
+
+      assert resolved.id == m.id
     end
 
     test "metadata that is not a map is ignored rather than raising" do

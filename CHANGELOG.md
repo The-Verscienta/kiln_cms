@@ -42,9 +42,12 @@ migration, a rewritten column, a dropped config key).
   `org_id/1` preferring the membership row over the payload's claim. Malformed
   ids — a non-UUID `membership_id` or `org_id`, a non-string subscription id —
   are pinned as *ignores* rather than exceptions, since a 500 makes the provider
-  retry for days and then disable the endpoint. 26 new tests, 54% → 96%; the
+  retry for days and then disable the endpoint. 27 new tests, 54% → 94%; the
   receiver itself goes 77% → 82% with two more rejection cases (an empty body,
-  and a correctly signed payload that names no event).
+  and a correctly signed payload that names no event). `subscription_id/1`'s
+  nested-object clause also gains the `is_binary` guard its two siblings
+  already had, so a non-string id answers "this event names no subscription"
+  rather than being handed to the read.
 - **Calendar burst coalescing is readable on a running deployment** (#1336).
   `KilnCMSWeb.CalendarLive` emits `[:kiln_cms, :calendar, :requery]`
   carrying how many `:calendar_changed` messages each re-query answered, and

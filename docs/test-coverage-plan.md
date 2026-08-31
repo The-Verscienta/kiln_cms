@@ -132,7 +132,7 @@ under `items`, `lines` or `plan` depending on the event. A fallback that never
 runs in a test is the failure mode itself, and the blast radius is somebody's
 paid access silently not being granted.
 
-26 tests; **54% → 96%**, and the controller 77% → 82%. Each shape is pinned
+27 tests; **54% → 94%**, and the controller 77% → 82%. Each shape is pinned
 separately — dropping any one clause turns the file red — along with the
 ladder's *order* (metadata wins over an identifier naming a different
 membership), the refusal to guess between two tiers for one customer, and
@@ -150,12 +150,21 @@ Two things worth carrying forward:
   `{:error, _}`; each has to become an ignore, because a 500 makes the provider
   retry for days and then disable the endpoint.
 
-One branch is left uncovered on purpose: `verify/3`'s **org** mismatch. The read
-above it is tenant-filtered by the very `org_id` being compared, so a row
-found under org A can never carry org B. It is not dead code — the rungs below
-it are `multitenancy :bypass` and this one goes live the moment that read
-follows — but no honest test reaches it, and the test file says so rather than
-faking one.
+Two branches are left uncovered on purpose, and the test file says why rather
+than faking a test for either. `verify/3`'s **org** mismatch: the read above it
+is tenant-filtered by the very `org_id` being compared, so a row found under org
+A can never carry org B. Not dead code — the rungs below it are `multitenancy
+:bypass` and it goes live the moment that read follows. And
+`by_subscription/1`'s `{:error, _}` arm, which only answers a database fault now
+that every `subscription_id/1` clause guards on `is_binary`.
+
+That guard went on in review, and it is worth recording what it is *not*:
+nothing downstream can tell the difference. Ash rejects a non-string at cast
+time — no query, no exception — and `resolve/1` flattens both reasons to
+`:unresolvable`, so no test distinguishes the guarded clause from the unguarded
+one. It buys a truthful reason code and three clauses that agree. The behaviour
+that matters — a junk subscription id not consuming an event the customer rung
+could still resolve — holds either way and is tested for its own sake.
 
 The controller's remaining 18% is its three "could not record / could not
 enqueue → 500" paths, which need fault injection to reach.

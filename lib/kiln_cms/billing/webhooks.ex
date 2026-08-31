@@ -182,8 +182,21 @@ defmodule KilnCMS.Billing.Webhooks do
   defp metadata(%{"metadata" => metadata}) when is_map(metadata), do: metadata
   defp metadata(_object), do: %{}
 
+  # Every clause guards on `is_binary`, including the nested one. A provider id
+  # is always a string, so a non-string here is a malformed or hostile payload
+  # and the honest answer is "this event names no subscription" — `nil` — rather
+  # than handing a non-id to the read and reporting whatever comes back.
+  #
+  # Nothing downstream can tell the difference, and that is worth stating rather
+  # than implying: without the guard Ash rejects the argument at CAST time, so
+  # there is no wasted query either, and `resolve/1` flattens the two reasons
+  # (`:no_subscription_id` vs `:no_membership_for_subscription`) to the same
+  # `:unresolvable`. What the guard buys is a truthful reason code and three
+  # clauses that agree with each other; the behaviour it protects — a junk
+  # subscription id not consuming an event the customer rung could still
+  # resolve — holds either way, and is tested for its own sake.
   defp subscription_id(%{"object" => "subscription", "id" => id}) when is_binary(id), do: id
-  defp subscription_id(%{"subscription" => %{"id" => id}}), do: id
+  defp subscription_id(%{"subscription" => %{"id" => id}}) when is_binary(id), do: id
   defp subscription_id(%{"subscription" => id}) when is_binary(id), do: id
   defp subscription_id(_object), do: nil
 
