@@ -20,13 +20,25 @@ defmodule KilnCMSWeb.SystemLive do
 
   The check runs via `start_async` so a slow or blocked network never delays
   the render — the version panel is useful on its own.
+
+  ## The plugins panel
+
+  Same contract, same reason. A plugin is compile-time OTP code activated by a
+  config line (D18, `docs/plugin-extensibility.md`), so what is installed is
+  fixed for the life of the image: there is nothing to install from a browser,
+  and an "install" button would be the same lie an "update" button would be.
+  The panel reports `Kiln.Plugins.manifests/0` and names the commands. It
+  completes the answer this page exists to give — the version stamp says which
+  Kiln is running, and this says what was built into it.
   """
   use KilnCMSWeb, :live_view
 
   require Logger
 
+  alias Kiln.Plugins
   alias Kiln.Updates
   alias Kiln.Version, as: Build
+  alias KilnCMS.HTMLSanitizer
 
   @impl true
   def mount(_params, _session, socket) do
@@ -36,6 +48,7 @@ defmodule KilnCMSWeb.SystemLive do
        |> assign(:page_title, gettext("System"))
        |> assign(:build, Build.current())
        |> assign(:strict_host_gap, KilnCMSWeb.Tenant.strict_host_gap?())
+       |> assign(:plugins, Plugins.manifests())
        |> assign(:update, :loading)
        |> assign(:flushed, nil)
        |> check_for_updates()}
@@ -186,6 +199,32 @@ defmodule KilnCMSWeb.SystemLive do
           </p>
         </section>
 
+        <section id="plugins" class="card card-pad max-w-2xl">
+          <h2 class="text-lg font-semibold">{gettext("Plugins")}</h2>
+
+          <p class="mt-2 text-sm text-base-content/70">
+            {gettext(
+              "Plugins are compiled into the image this instance runs, so this list changes only with the next build. Installing one means adding the dependency and a config line to your project, then rebuilding and redeploying."
+            )}
+          </p>
+
+          <ul :if={@plugins != []} class="mt-4 divide-y divide-base-content/10">
+            <.plugin_row :for={plugin <- @plugins} plugin={plugin} />
+          </ul>
+
+          <p :if={@plugins == []} class="mt-4 text-sm text-base-content/70">
+            {gettext("No plugins are installed on this instance.")}
+          </p>
+
+          <p class="mt-4 text-xs text-base-content/60">
+            {gettext(
+              "The same list is available on the server as %{list}, and %{doctor} verifies an install.",
+              list: "mix kiln.plugins.list",
+              doctor: "mix kiln.plugins.doctor"
+            )}
+          </p>
+        </section>
+
         <section class="card card-pad max-w-2xl">
           <div class="flex items-start justify-between gap-4">
             <h2 class="text-lg font-semibold">{gettext("Updates")}</h2>
@@ -248,6 +287,72 @@ defmodule KilnCMSWeb.SystemLive do
       </div>
     </Layouts.console>
     """
+  end
+
+  attr :plugin, :map, required: true
+
+  defp plugin_row(assigns) do
+    assigns =
+      assigns
+      |> assign(:contributions, contributions(assigns.plugin))
+      # A plugin's `homepage/0` is compile-time code, as trusted as core — but
+      # it is still an href, and this project keeps one policy for those.
+      |> assign(:homepage, HTMLSanitizer.safe_href(assigns.plugin.homepage))
+
+    ~H"""
+    <li class="py-3 first:pt-0 last:pb-0">
+      <div class="flex flex-wrap items-baseline gap-x-2">
+        <span class="font-mono text-sm">{@plugin.name}</span>
+        <span :if={@plugin.version} class="font-mono text-xs text-base-content/60">
+          v{@plugin.version}
+        </span>
+        <span class="text-xs text-base-content/50">{inspect(@plugin.module)}</span>
+      </div>
+
+      <p :if={@plugin.summary} class="mt-1 text-sm text-base-content/70">{@plugin.summary}</p>
+
+      <.link
+        :if={@homepage}
+        href={@homepage}
+        target="_blank"
+        rel="noopener noreferrer"
+        class="mt-1 inline-block text-xs text-base-content/60 hover:underline"
+      >
+        {gettext("Documentation")}
+      </.link>
+
+      <dl :if={@contributions != []} class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+        <div :for={{label, count} <- @contributions} class="flex items-baseline gap-1">
+          <dt class="text-base-content/60">{label}</dt>
+          <dd class="font-mono">{count}</dd>
+        </div>
+      </dl>
+
+      <p :if={@contributions == []} class="mt-2 text-xs text-base-content/60">
+        {gettext("Catalog metadata only — contributes nothing to this instance.")}
+      </p>
+    </li>
+    """
+  end
+
+  # The kinds a plugin actually contributes, as {label, count} pairs. The same
+  # data `mix kiln.plugins.list` prints as a sentence; laid out as label/count
+  # here so the labels translate without a plural rule per kind.
+  defp contributions(manifest) do
+    [
+      {gettext("Domains"), length(manifest.domains)},
+      {gettext("Blocks"), length(manifest.blocks)},
+      {gettext("Field types"), length(manifest.field_types)},
+      {gettext("Advisories"), length(manifest.advisories)},
+      {gettext("Spam checks"), length(manifest.spam_checks)},
+      {gettext("Nav items"), manifest.nav_items},
+      {gettext("Admin routes"), manifest.admin_routes},
+      {gettext("Editor routes"), manifest.editor_routes},
+      {gettext("Public routes"), manifest.public_routes},
+      {gettext("Background queues"), length(manifest.oban_queues)},
+      {gettext("Supervised children"), manifest.children}
+    ]
+    |> Enum.reject(fn {_label, count} -> count == 0 end)
   end
 
   # Kept out of the template: the <pre> has to hold its own newlines, which a

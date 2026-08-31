@@ -340,6 +340,75 @@ defmodule KilnCMSWeb.SystemLiveTest do
     end
   end
 
+  # What the panel reports is compile-time data (`config :kiln_cms, :plugins`),
+  # so in this suite it is always the fixture plugin — the same manifest
+  # `mix kiln.plugins.list` prints, rendered as label/count pairs.
+  describe "the plugins panel" do
+    setup %{conn: conn} do
+      # No release stub: the update check fails, and the panel must render
+      # anyway — it reads compile-time data and never touches the network.
+      Req.Test.stub(Updates, fn conn -> Req.Test.transport_error(conn, :econnrefused) end)
+
+      %{conn: log_in(conn, authed_user(:admin))}
+    end
+
+    test "lists what is compiled into this instance", %{conn: conn} do
+      {:ok, _lv, html} = live(conn, ~p"/editor/system")
+
+      panel = plugins_panel(html)
+
+      assert panel =~ "fixture_plugin"
+      assert panel =~ "1.2.3"
+      assert panel =~ "Test fixture exercising every plugin seam."
+      assert panel =~ "KilnCMS.FixturePlugin"
+
+      # The homepage is where a plugin's docs and screenshots live: the node
+      # carries the pointer, never the media.
+      assert panel =~ "https://example.com/fixture-plugin"
+    end
+
+    # Exact map, not membership: a kind the plugin doesn't contribute must be
+    # absent rather than rendered as a zero, which is the whole reason the
+    # summary is worth reading.
+    test "counts the kinds contributed and omits the rest", %{conn: conn} do
+      {:ok, _lv, html} = live(conn, ~p"/editor/system")
+
+      assert contribution_counts(html) == %{
+               "Blocks" => "3",
+               "Field types" => "3",
+               "Nav items" => "1",
+               "Admin routes" => "1",
+               "Background queues" => "1",
+               "Supervised children" => "1"
+             }
+    end
+
+    test "reports rather than offers to install", %{conn: conn} do
+      {:ok, _lv, html} = live(conn, ~p"/editor/system")
+
+      panel = plugins_panel(html)
+
+      assert panel =~ "mix kiln.plugins.list"
+      assert panel =~ "mix kiln.plugins.doctor"
+      # An install button would be the same lie an update button would be.
+      refute panel =~ "phx-click"
+    end
+  end
+
+  defp plugins_panel(html) do
+    html |> Floki.parse_document!() |> Floki.find("#plugins") |> Floki.raw_html()
+  end
+
+  defp contribution_counts(html) do
+    html
+    |> Floki.parse_document!()
+    |> Floki.find("#plugins dl > div")
+    |> Map.new(fn pair ->
+      {pair |> Floki.find("dt") |> Floki.text() |> String.trim(),
+       pair |> Floki.find("dd") |> Floki.text() |> String.trim()}
+    end)
+  end
+
   describe "KilnCMS.Cache.flush_delivery/0" do
     test "reports counts from both caches and is safe to repeat" do
       org = KilnCMS.Accounts.default_org_id()

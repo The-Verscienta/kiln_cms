@@ -49,6 +49,34 @@ migration, a rewritten column, a dropped config key).
   alert ships with this: picking one before seeing a real burst would bake
   in a constant chosen from argument rather than measurement.
 
+- **The System page lists the plugins compiled into this instance** (#333).
+  `/editor/system` reported which Kiln core is running but nothing about what
+  was built on top of it — the one part of "what am I running" an operator
+  could previously get only from a shell. The new panel renders
+  `Kiln.Plugins.manifests/0`: each plugin's name, version, summary, docs link
+  and the kinds it contributes, with the kinds it contributes nothing to
+  omitted rather than shown as zeroes. It reports and hands over the commands
+  (`mix kiln.plugins.list`, `mix kiln.plugins.doctor`) exactly as the update
+  panel above it does, and for the same reason — a plugin is compile-time code
+  (D18), so there is nothing to install from a browser and an install button
+  would be a lie.
+
+- **The code-injection console screen is tested, and the coverage floor moves
+  to 82.7.** `/editor/code-injection` writes stored XSS into a site by design,
+  and nothing mounted it: the only test naming the route classifies routes
+  without rendering them, so the screen had no auth, save or reset test (0 of
+  70 lines, now 100% — see the dead helper under Removed for the four that
+  went away rather than getting covered). The auth matrix is pinned on both
+  branches an editor can arrive down: a member of the site carrying the
+  editor tier, and a signed-in account with no membership at all, which
+  `Scoping.effective_tier/2` answers `:none` for off the default org. A test
+  using only the second one passes with the gate widened to admit editors,
+  which is why both are there. Also covered:
+  the newline-separated origin lists, an unchecked "serve these snippets" box
+  (which must not discard the snippet with it), the derived `sha256-` hashes
+  the page shows so an admin can see the CSP will permit what they pasted, and
+  a Remove clicked after another admin already removed the row. The floor in
+  `coveralls.json` moves 82.5 → 82.7 against CI's 83.2 (83.4 locally).
 - **`mix kiln.search.check` — a CI gate for the search-vector migration every
   new content type owes** (#295). Run against a migrated database, it names
   each content table missing its `search_vector` column, trigger or GIN index
@@ -121,6 +149,15 @@ migration, a rewritten column, a dropped config key).
   remaining gaps in priority order, along with the three that only *look* like
   gaps (compile-time macro bodies, dev-only modules, deliberately excluded
   tags).
+
+### Removed
+
+- **A dead `blank_to_nil/1` in `KilnCMSWeb.CodeInjectionLive`.** It trimmed a
+  cleared Head/Footer HTML textarea to `nil` before saving — which the `:string`
+  attribute's own cast already does, so the helper could be deleted without any
+  test being able to tell. No behaviour change: a cleared box still stores
+  nothing rather than an empty element, and `KilnCMSWeb.CodeInjectionLiveTest`
+  asserts that directly.
 
 ### Fixed
 
