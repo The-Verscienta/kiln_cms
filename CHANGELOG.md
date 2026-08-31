@@ -49,6 +49,18 @@ migration, a rewritten column, a dropped config key).
   alert ships with this: picking one before seeing a real burst would bake
   in a constant chosen from argument rather than measurement.
 
+- **The System page lists the plugins compiled into this instance** (#333).
+  `/editor/system` reported which Kiln core is running but nothing about what
+  was built on top of it — the one part of "what am I running" an operator
+  could previously get only from a shell. The new panel renders
+  `Kiln.Plugins.manifests/0`: each plugin's name, version, summary, docs link
+  and the kinds it contributes, with the kinds it contributes nothing to
+  omitted rather than shown as zeroes. It reports and hands over the commands
+  (`mix kiln.plugins.list`, `mix kiln.plugins.doctor`) exactly as the update
+  panel above it does, and for the same reason — a plugin is compile-time code
+  (D18), so there is nothing to install from a browser and an install button
+  would be a lie.
+
 - **`mix kiln.search.check` — a CI gate for the search-vector migration every
   new content type owes** (#295). Run against a migrated database, it names
   each content table missing its `search_vector` column, trigger or GIN index
