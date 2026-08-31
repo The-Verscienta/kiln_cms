@@ -3,8 +3,8 @@
 Where the suite's remaining blind spots are, in the order they are worth
 closing, and why each one is on the list. Written against a full measured run
 on 2026-08-22: **7,344 tests, 0 failures, 83.1% line coverage**, floor 82.5
-(`coveralls.json`). Batches 1-3 below have since landed; the suite now measures
-**83.4% locally over 7,411 tests**, and the floor has moved to **82.7**. The
+(`coveralls.json`). Batches 1-5 below have since landed; the suite now measures
+**83.5% locally over 7,471 tests**, the floor has moved to **82.7**, and the
 Playwright suite is at 25 journeys.
 
 Reproduce the numbers with:
@@ -15,7 +15,7 @@ Reproduce the numbers with:
 This is not a plan to reach a percentage. The floor exists so coverage cannot
 silently fall (see CONTRIBUTING.md), and every item below earns its place by
 naming a *behaviour nothing currently proves* — not by the size of its
-uncovered block. Four items are listed as already done so the patterns they
+uncovered block. Five items are listed as already done so the patterns they
 set are reusable; the rest are ordered by what a defect there would cost.
 
 ## Ground rule for anything added here
@@ -120,22 +120,47 @@ sets up Chromium's drag interception and is the API that works — and the
 scheduling field that produces a draggable chip lives in the editor's
 **Settings** inspector tab, which is not the tab that opens.
 
+### 5. Billing webhook resolution — `test/kiln_cms/billing/webhooks_test.exs`
+
+`KilnCMS.Billing.Webhooks` was 54%. The controller test drives the receiver end
+to end and, in doing so, covered the ladder's top rung — metadata — leaving
+the two below it untested. Those exist precisely
+because **Stripe sends the same identifier in several shapes**: a subscription
+id is the object's own `id` on `customer.subscription.*`, a nested object on an
+expanded checkout session, and a bare string on an invoice; a price id lives
+under `items`, `lines` or `plan` depending on the event. A fallback that never
+runs in a test is the failure mode itself, and the blast radius is somebody's
+paid access silently not being granted.
+
+26 tests; **54% → 96%**, and the controller 77% → 82%. Each shape is pinned
+separately — dropping any one clause turns the file red — along with the
+ladder's *order* (metadata wins over an identifier naming a different
+membership), the refusal to guess between two tiers for one customer, and
+`org_id/1` preferring the row over the payload's claim.
+
+Two things worth carrying forward:
+
+* **`resolve/1` flattens every failure to `:unresolvable`.** Its `with` only
+  matches `{:ignored, _}`, so `:ambiguous_customer` — the deliberate refusal
+  to guess — is indistinguishable from "nothing matched" at the call site.
+  The log line is where that distinction survives, so the ambiguity tests
+  assert there.
+* **Malformed ids must ignore, not raise.** A non-UUID `membership_id`, a
+  non-UUID `org_id` and a non-string subscription id all make Ash answer
+  `{:error, _}`; each has to become an ignore, because a 500 makes the provider
+  retry for days and then disable the endpoint.
+
+One branch is left uncovered on purpose: `verify/3`'s **org** mismatch. The read
+above it is tenant-filtered by the very `org_id` being compared, so a row
+found under org A can never carry org B. It is not dead code — the rungs below
+it are `multitenancy :bypass` and this one goes live the moment that read
+follows — but no honest test reaches it, and the test file says so rather than
+faking one.
+
+The controller's remaining 18% is its three "could not record / could not
+enqueue → 500" paths, which need fault injection to reach.
+
 ## Next
-
-### 5. `KilnCMS.Billing.Webhooks` — 54% (26 uncovered)
-
-The happy path resolves a membership; the fallbacks do not. `by_customer/1`,
-the multi-membership `disambiguate/2` branch, and every
-`subscription_id`/`customer_id`/`price_id` shape fallback are uncovered. Those
-clauses exist *because* Stripe sends several payload shapes for the same
-event, so an untested fallback is the failure mode itself — and the blast
-radius is somebody's paid access.
-
-One table-driven test per payload shape, plus the ambiguous case (two
-memberships for one customer) asserting which one wins and that an
-unresolvable event is `{:ignored, _}` rather than an exception.
-`KilnCMSWeb.BillingWebhookController` at 77% wants the same treatment for its
-signature-rejection branch.
 
 ### 6. Media pipeline workers — `av_worker` 51%, `av_strip_worker` 55%, `ingest` 64%
 
