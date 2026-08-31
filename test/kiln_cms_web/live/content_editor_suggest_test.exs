@@ -430,8 +430,17 @@ defmodule KilnCMSWeb.ContentEditorSuggestTest do
       {lv, _html} = open_editor(conn, editor, page(editor))
 
       render_click(lv, "seo_suggest", %{})
-      # Still in flight (the Counting stub sleeps), so this one must be ignored.
+
+      # The stub holds the run open until released (#1351), so the second
+      # click provably lands while the guard is active — not inside a 150ms
+      # sleep raced against two LiveView round-trips. Wait for run one to
+      # announce itself in flight first, so the count below can tell a
+      # deduplicated second click apart from a second run that just hasn't
+      # started yet.
+      assert_receive {:counting_draft_started, 1}, 2_000
       render_click(lv, "seo_suggest", %{})
+
+      KilnCMS.StubSeoGenerator.Counting.release_all()
       render_async(lv, 5_000)
 
       assert KilnCMS.StubSeoGenerator.Counting.count() == 1
@@ -580,9 +589,10 @@ defmodule KilnCMSWeb.ContentEditorSuggestTest do
       # Hand-edit what was just accepted.
       change(lv, "seo_title", %{"seo_title" => "My own headline"})
 
-      # Swap in the slow stub so the second run is genuinely in flight while we
-      # look: with an instant stub the new proposal lands before we can observe
-      # the window this regression lived in.
+      # Swap in the held-open stub so the second run is genuinely in flight
+      # while we look: with an instant stub the new proposal lands before we
+      # can observe the window this regression lived in. It stays in flight
+      # until the release below (#1351).
       put_seo(generator: KilnCMS.StubSeoGenerator.Counting, model: "stub:stub")
       {:ok, _} = KilnCMS.StubSeoGenerator.Counting.start_link()
       KilnCMS.StubSeoGenerator.Counting.reset()
@@ -595,6 +605,10 @@ defmodule KilnCMSWeb.ContentEditorSuggestTest do
       render_click(lv, "seo_accept_all", %{})
       assert field_value(lv, "seo_title") == "My own headline"
 
+      # The run only completes once released (#1351) — until here, "mid-
+      # generation" was a property of the stub's 150ms sleep outlasting the
+      # two assertions above.
+      KilnCMS.StubSeoGenerator.Counting.release_all()
       render_async(lv, 5_000)
       assert field_value(lv, "seo_title") == "My own headline"
     end

@@ -67,25 +67,63 @@ defmodule KilnCMS.StubSeoGenerator.Counting do
   @moduledoc """
   Counts calls in an Agent so a test can prove re-entrancy guarding — two rapid
   clicks must produce exactly one generation.
+
+  A run stays **in flight until the test releases it** with `release_all/0`
+  (#1351). The guard can only be exercised while a run is genuinely in flight,
+  and this stub used to hold that window open with a 150ms sleep — the whole
+  budget in which the test's second click had to land, raced against two
+  LiveView round-trips on a loaded CI box. A latch makes the window the test's
+  to close: an instant completion can't slip in before the second click, and a
+  forgotten release resolves itself after 3s (inside every caller's
+  `render_async` budget) so a mistake reads as that test's own assertion
+  failing, never as a hung suite.
   """
   @behaviour KilnCMS.Seo.Generator
 
   alias KilnCMS.Seo.Draft
 
-  def start_link, do: Agent.start_link(fn -> 0 end, name: __MODULE__)
+  def start_link, do: Agent.start_link(fn -> {0, [], false, nil} end, name: __MODULE__)
 
-  def count, do: Agent.get(__MODULE__, & &1)
+  def count, do: Agent.get(__MODULE__, fn {n, _pids, _released?, _listener} -> n end)
 
-  def reset, do: Agent.update(__MODULE__, fn _ -> 0 end)
+  # Called from the test process, which thereby becomes the listener: every
+  # run announces itself to it as `{:counting_draft_started, n}`, so a test
+  # can await "run one is in flight" with `assert_receive` instead of polling.
+  def reset do
+    listener = self()
+    Agent.update(__MODULE__, fn _ -> {0, [], false, listener} end)
+  end
 
-  # Deliberately slow: the re-entrancy guard can only be exercised while a run
-  # is genuinely in flight. An instant stub completes before a test's second
-  # click is processed, so the guard would never be reached and the test would
-  # pass for the wrong reason.
+  @doc """
+  Let every in-flight run complete. Sticky: a run that only *starts* after
+  this call (a second run a broken guard let through) is released on arrival
+  rather than waiting out the fallback, so the caller's count assertion sees
+  it promptly.
+  """
+  def release_all do
+    Agent.get_and_update(__MODULE__, fn {n, pids, _released?, listener} ->
+      {pids, {n, [], true, listener}}
+    end)
+    |> Enum.each(&send(&1, :release))
+  end
+
   @impl KilnCMS.Seo.Generator
   def draft(document, _opts \\ []) do
-    Agent.update(__MODULE__, &(&1 + 1))
-    Process.sleep(150)
+    {released?, n, listener} =
+      Agent.get_and_update(__MODULE__, fn {n, pids, released?, listener} ->
+        {{released?, n + 1, listener}, {n + 1, [self() | pids], released?, listener}}
+      end)
+
+    if listener, do: send(listener, {:counting_draft_started, n})
+
+    unless released? do
+      receive do
+        :release -> :ok
+      after
+        3_000 -> :ok
+      end
+    end
+
     {:ok, %Draft{seo_title: "Draft #{count()} for #{document.title}"}}
   end
 end

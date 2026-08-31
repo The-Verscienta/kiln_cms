@@ -38,22 +38,49 @@ defmodule KilnCMS.CacheTest do
 
   # Audit P-M4: concurrent misses for the same key must compute once, not
   # stampede the DB (Cachex.fetch's Courier deduplicates fallbacks).
+  #
+  # The overlap is a latch, not a sleep (#1351): the one compute announces
+  # itself and then HOLDS until the test releases it, after every fetcher has
+  # declared itself in flight. The previous 50ms sleep was the whole window in
+  # which all eight tasks had to collide — a slow scheduler could serialize
+  # them into cache hits and pass without ever exercising the Courier. With
+  # the hold, a second compute starting at any point before the release is a
+  # deterministic failure, not a lost coin flip; the bounded fallback below
+  # only exists so a broken-dedup world reads as "ran N times", not as eight
+  # deadlocked tasks.
   test "concurrent misses for one key run the fallback only once", %{org: org} do
     s = slug()
+    test_pid = self()
     counter = :counters.new(1, [:atomics])
 
-    slow_compute = fn ->
+    held_compute = fn ->
       :counters.add(counter, 1, 1)
-      Process.sleep(50)
+      send(test_pid, {:computing, self()})
+
+      receive do
+        :go -> :ok
+      after
+        2_000 -> :ok
+      end
+
       :computed
     end
 
-    results =
-      1..8
-      |> Enum.map(fn _ ->
-        Task.async(fn -> Cache.fetch_published(org, "page", s, "en", slow_compute) end)
-      end)
-      |> Task.await_many()
+    tasks =
+      for _ <- 1..8 do
+        Task.async(fn ->
+          send(test_pid, :fetching)
+          Cache.fetch_published(org, "page", s, "en", held_compute)
+        end)
+      end
+
+    # Every fetcher is at (or microseconds from) its fetch, and the single
+    # compute is in flight, before anything is allowed to finish.
+    for _ <- 1..8, do: assert_receive(:fetching, 2_000)
+    assert_receive {:computing, worker}, 2_000
+    send(worker, :go)
+
+    results = Task.await_many(tasks, 5_000)
 
     assert Enum.all?(results, &(&1 == :computed))
     assert :counters.get(counter, 1) == 1
