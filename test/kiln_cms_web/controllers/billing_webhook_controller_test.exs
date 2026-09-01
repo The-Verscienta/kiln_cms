@@ -276,6 +276,39 @@ defmodule KilnCMSWeb.BillingWebhookControllerTest do
       assert event_rows() == []
     end
 
+    test "an empty body is rejected before verification, not treated as signed" do
+      # The signature is over the raw bytes, so an empty body can be signed
+      # perfectly well — `raw_body/1` is what refuses it. 400 rather than 500:
+      # a 5xx here makes the provider retry for days and then disable the
+      # endpoint, and there is nothing to retry.
+      timestamp = System.system_time(:second)
+
+      conn =
+        KilnCMS.RateLimitHelpers.client_conn(Phoenix.ConnTest.build_conn())
+        |> elem(0)
+        |> put_req_header("content-type", "application/json")
+        |> put_req_header(
+          "stripe-signature",
+          "t=#{timestamp},v1=#{Signature.sign(timestamp, "", @secret)}"
+        )
+        |> post(@path, "")
+
+      assert conn.status == 400
+      assert event_rows() == []
+    end
+
+    test "a correctly signed body that is not an event is rejected", %{conn: conn} do
+      # Verification passes — the bytes really are signed with our secret — and
+      # the payload still names no event. `identify/1` is the guard, and its
+      # answer has to be a 400 rather than a match error further in.
+      assert post_event(conn, %{"not" => "an event"}).status == 400
+
+      assert post_event(conn, %{"id" => 123, "type" => "checkout.session.completed"}).status ==
+               400
+
+      assert event_rows() == []
+    end
+
     test "a body with unusual key order and non-ASCII metadata still verifies", %{conn: conn} do
       # The regression guard: this fails the moment anyone re-encodes the parsed
       # body instead of using the preserved raw bytes.

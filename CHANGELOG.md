@@ -29,6 +29,25 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **The billing webhook's resolution ladder is tested below its top rung**
+  (#1314's coverage plan). `KilnCMS.Billing.Webhooks` was 54% covered: the
+  receiver's end-to-end tests exercise self-describing metadata thoroughly and
+  never reached the two fallbacks under it, which exist because Stripe sends the
+  same identifier in several shapes — a subscription id is the object's own `id`
+  on `customer.subscription.*`, a nested object on an expanded checkout session
+  and a bare string on an invoice, and a price id lives under `items`, `lines`
+  or `plan` depending on the event. Each shape is now pinned separately, along
+  with the ladder's order (metadata wins over an identifier naming a different
+  membership), the refusal to guess when one customer holds two tiers, and
+  `org_id/1` preferring the membership row over the payload's claim. Malformed
+  ids — a non-UUID `membership_id` or `org_id`, a non-string subscription id —
+  are pinned as *ignores* rather than exceptions, since a 500 makes the provider
+  retry for days and then disable the endpoint. 27 new tests, 54% → 94%; the
+  receiver itself goes 77% → 82% with two more rejection cases (an empty body,
+  and a correctly signed payload that names no event). `subscription_id/1`'s
+  nested-object clause also gains the `is_binary` guard its two siblings
+  already had, so a non-string id answers "this event names no subscription"
+  rather than being handed to the read.
 - **Calendar burst coalescing is readable on a running deployment** (#1336).
   `KilnCMSWeb.CalendarLive` emits `[:kiln_cms, :calendar, :requery]`
   carrying how many `:calendar_changed` messages each re-query answered, and
