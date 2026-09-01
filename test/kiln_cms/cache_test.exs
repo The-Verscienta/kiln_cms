@@ -38,25 +38,56 @@ defmodule KilnCMS.CacheTest do
 
   # Audit P-M4: concurrent misses for the same key must compute once, not
   # stampede the DB (Cachex.fetch's Courier deduplicates fallbacks).
+  #
+  # The overlap is a latch, not a sleep (#1351, via KilnCMS.Test.Latch): the
+  # one compute HOLDS until the test releases it, so the previous 50ms sleep —
+  # the whole window in which all eight tasks had to collide — is gone. What
+  # the hold guarantees, stated honestly: no task can finish before the
+  # release (checked below), and a second compute starting at any point
+  # before it is a deterministic failure. What it cannot guarantee: a task
+  # descheduled between its `:fetching` send and its fetch may arrive after
+  # the release and take a plain cache hit — Cachex exposes no waiter count
+  # to close that, so full eight-way contention stays scheduler-dependent
+  # even though the dedup property itself no longer is.
   test "concurrent misses for one key run the fallback only once", %{org: org} do
     s = slug()
+    test_pid = self()
     counter = :counters.new(1, [:atomics])
+    {:ok, _} = KilnCMS.Test.Latch.start_link(name: __MODULE__.ComputeLatch, listener: self())
 
-    slow_compute = fn ->
+    held_compute = fn ->
       :counters.add(counter, 1, 1)
-      Process.sleep(50)
+      KilnCMS.Test.Latch.enter(__MODULE__.ComputeLatch)
       :computed
     end
 
-    results =
-      1..8
-      |> Enum.map(fn _ ->
-        Task.async(fn -> Cache.fetch_published(org, "page", s, "en", slow_compute) end)
-      end)
-      |> Task.await_many()
+    tasks =
+      for _ <- 1..8 do
+        Task.async(fn ->
+          send(test_pid, :fetching)
+          Cache.fetch_published(org, "page", s, "en", held_compute)
+        end)
+      end
+
+    # All eight tasks are running (each sends exactly once, just before its
+    # fetch), and the single compute is in flight...
+    for _ <- 1..8, do: assert_receive(:fetching, 2_000)
+    assert_receive {:latch_started, __MODULE__.ComputeLatch, 1}, 2_000
+    # ...and none has completed while the compute is held — a completion here
+    # would be a task that never contended for the key at all.
+    for %Task{ref: ref} <- tasks, do: refute_received({^ref, _})
+
+    # Exactly one held compute, woken by the test: a match failure here shows
+    # every compute that started — the broken-dedup world, by name.
+    assert [_worker] = KilnCMS.Test.Latch.release_all(__MODULE__.ComputeLatch)
+
+    results = Task.await_many(tasks, 5_000)
 
     assert Enum.all?(results, &(&1 == :computed))
     assert :counters.get(counter, 1) == 1
+    # Released by the test, not by the latch's bounded fallback — a timeout
+    # here means the latch silently degraded back into a sleep.
+    refute_received {:latch_timeout, _, _}
   end
 
   test "keys are namespaced by type and locale", %{org: org} do

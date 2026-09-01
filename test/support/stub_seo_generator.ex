@@ -65,27 +65,36 @@ end
 
 defmodule KilnCMS.StubSeoGenerator.Counting do
   @moduledoc """
-  Counts calls in an Agent so a test can prove re-entrancy guarding — two rapid
-  clicks must produce exactly one generation.
+  Counts calls so a test can prove re-entrancy guarding — two rapid clicks
+  must produce exactly one generation.
+
+  A run stays in flight until the test releases it: the hold, the
+  announcements, and their guarantees live in `KilnCMS.Test.Latch` (#1351) —
+  see its moduledoc for the protocol. Assert on `release_all/0`'s return
+  (`assert [_] = release_all()`): it is the proof the latch, not the bounded
+  fallback, let the run finish.
   """
   @behaviour KilnCMS.Seo.Generator
 
   alias KilnCMS.Seo.Draft
+  alias KilnCMS.Test.Latch
 
-  def start_link, do: Agent.start_link(fn -> 0 end, name: __MODULE__)
+  def start_link, do: Latch.start_link(name: __MODULE__, listener: self())
 
-  def count, do: Agent.get(__MODULE__, & &1)
+  def count, do: Latch.entered(__MODULE__)
 
-  def reset, do: Agent.update(__MODULE__, fn _ -> 0 end)
+  # `listener` receives `{:latch_started, __MODULE__, n}` per run — explicit
+  # (defaulted, not silently captured) so a caller resetting from a helper
+  # process can point announcements at the asserting process.
+  def reset(listener \\ self()), do: Latch.reset(__MODULE__, listener)
 
-  # Deliberately slow: the re-entrancy guard can only be exercised while a run
-  # is genuinely in flight. An instant stub completes before a test's second
-  # click is processed, so the guard would never be reached and the test would
-  # pass for the wrong reason.
+  def release_all, do: Latch.release_all(__MODULE__)
+
   @impl KilnCMS.Seo.Generator
   def draft(document, _opts \\ []) do
-    Agent.update(__MODULE__, &(&1 + 1))
-    Process.sleep(150)
-    {:ok, %Draft{seo_title: "Draft #{count()} for #{document.title}"}}
+    n = Latch.enter(__MODULE__)
+    # `n` is this run's own ordinal — a shared-count re-read here would label
+    # every concurrently-held run with the same final number.
+    {:ok, %Draft{seo_title: "Draft #{n} for #{document.title}"}}
   end
 end
