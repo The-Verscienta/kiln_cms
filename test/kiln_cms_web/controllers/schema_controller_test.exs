@@ -116,7 +116,10 @@ defmodule KilnCMSWeb.SchemaControllerTest do
       actor: admin()
     )
 
-    body = build_conn() |> get(~p"/api/schema") |> json_response(200)
+    # A fresh conn so the read cannot ride this test's warmed plug state — but
+    # with its own address: a bare `build_conn/0` peers from 127.0.0.1, the one
+    # rate-limit bucket every other bare conn in the suite charges (#1356).
+    body = build_conn() |> unique_ip() |> get(~p"/api/schema") |> json_response(200)
 
     assert Map.has_key?(
              body["$defs"]["content_page"]["properties"]["custom_fields"]["properties"],

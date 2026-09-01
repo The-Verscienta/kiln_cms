@@ -410,7 +410,7 @@ defmodule KilnCMSWeb.CollabChannelTest do
       Ash.Seed.update!(editor, %{editable_types: ["post"]})
 
       assert_receive {:EXIT, ^channel, {:shutdown, :unauthorized}}, 2_000
-      assert_receive %Phoenix.Socket.Broadcast{event: "disconnect"}
+      assert_receive %Phoenix.Socket.Broadcast{event: "disconnect"}, 2_000
     end
 
     test "a room whose authorization still holds survives its checks and keeps relaying",
@@ -450,7 +450,7 @@ defmodule KilnCMSWeb.CollabChannelTest do
       Ash.Seed.update!(published, %{audience: :member})
 
       assert_receive {:EXIT, ^channel, {:shutdown, :unauthorized}}, 2_000
-      assert_receive %Phoenix.Socket.Broadcast{event: "disconnect"}
+      assert_receive %Phoenix.Socket.Broadcast{event: "disconnect"}, 2_000
     end
 
     test "a document whose state changes under an open room is caught", %{actor: admin} do
@@ -468,7 +468,7 @@ defmodule KilnCMSWeb.CollabChannelTest do
       Ash.Seed.update!(published, %{state: :draft})
 
       assert_receive {:EXIT, ^channel, {:shutdown, :unauthorized}}, 2_000
-      assert_receive %Phoenix.Socket.Broadcast{event: "disconnect"}
+      assert_receive %Phoenix.Socket.Broadcast{event: "disconnect"}, 2_000
     end
 
     test "the update floor refuses a busy room without waiting for the timer", %{page: page} do
@@ -497,7 +497,7 @@ defmodule KilnCMSWeb.CollabChannelTest do
 
       assert_receive {:EXIT, ^channel, {:shutdown, :unauthorized}}, 2_000
       # The floor path closes the connection too, not only the timer path.
-      assert_receive %Phoenix.Socket.Broadcast{event: "disconnect"}
+      assert_receive %Phoenix.Socket.Broadcast{event: "disconnect"}, 2_000
     end
   end
 

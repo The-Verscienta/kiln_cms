@@ -1383,10 +1383,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
       lv |> element(~s(input[name="form[title]"])) |> render_focus()
-      assert_receive {:cursor, %{field: "title"}}
+      assert_receive {:cursor, %{field: "title"}}, 2_000
 
       lv |> element(~s(input[name="form[title]"])) |> render_blur()
-      assert_receive {:cursor, %{field: nil}}
+      assert_receive {:cursor, %{field: nil}}, 2_000
     end
 
     test "renders a badge for another editor's focused field, and clears it", %{conn: conn} do
@@ -1530,7 +1530,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       lv |> form("#page-editor", form: %{title: "Broadcasted"}) |> render_change()
 
-      assert_receive {:preview_update, %{title: "Broadcasted"}}
+      assert_receive {:preview_update, %{title: "Broadcasted"}}, 2_000
     end
 
     # Audit P-M2: without an open preview window there's nobody to receive the
@@ -1565,7 +1565,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       lv |> form("#page-editor", form: %{title: "RTPage edited"}) |> render_change()
 
-      assert_receive {:preview_update, %{blocks: blocks}}
+      assert_receive {:preview_update, %{blocks: blocks}}, 2_000
       assert Enum.any?(blocks, &(&1.type == "rich_text" and &1.content =~ "Pop-out RichText"))
     end
 

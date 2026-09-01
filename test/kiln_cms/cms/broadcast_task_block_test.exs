@@ -44,7 +44,7 @@ defmodule KilnCMS.CMS.BroadcastTaskBlockTest do
         actor: editor
       )
 
-    assert_receive {:block_task_changed, ^block_id}
+    assert_receive {:block_task_changed, ^block_id}, 2_000
     drain()
   end
 
@@ -59,7 +59,7 @@ defmodule KilnCMS.CMS.BroadcastTaskBlockTest do
         actor: editor
       )
 
-    assert_receive {:block_task_changed, nil}
+    assert_receive {:block_task_changed, nil}, 2_000
     drain()
   end
 
@@ -80,7 +80,7 @@ defmodule KilnCMS.CMS.BroadcastTaskBlockTest do
         actor: editor
       )
 
-    assert_receive {:block_task_changed, ^block_id}
+    assert_receive {:block_task_changed, ^block_id}, 2_000
     refute_receive {:block_task_changed, nil}
     drain()
   end
@@ -106,8 +106,8 @@ defmodule KilnCMS.CMS.BroadcastTaskBlockTest do
 
     {:ok, _moved} = CMS.update_task(task, %{block_id: to_block}, actor: editor)
 
-    assert_receive {:block_task_changed, ^to_block}
-    assert_receive {:block_task_changed, ^from_block}
+    assert_receive {:block_task_changed, ^to_block}, 2_000
+    assert_receive {:block_task_changed, ^from_block}, 2_000
     drain()
   end
 
@@ -131,7 +131,7 @@ defmodule KilnCMS.CMS.BroadcastTaskBlockTest do
 
     {:ok, _renoted} = CMS.update_task(task, %{note: "Same block"}, actor: editor)
 
-    assert_receive {:block_task_changed, ^block_id}
+    assert_receive {:block_task_changed, ^block_id}, 2_000
     refute_receive {:block_task_changed, ^block_id}
     drain()
   end
@@ -155,10 +155,10 @@ defmodule KilnCMS.CMS.BroadcastTaskBlockTest do
     :ok = subscribe(content_id)
 
     {:ok, done} = CMS.complete_task(task, %{}, actor: editor)
-    assert_receive {:block_task_changed, ^block_id}
+    assert_receive {:block_task_changed, ^block_id}, 2_000
 
     {:ok, _reopened} = CMS.reopen_task(done, %{}, actor: editor)
-    assert_receive {:block_task_changed, ^block_id}
+    assert_receive {:block_task_changed, ^block_id}, 2_000
     drain()
   end
 

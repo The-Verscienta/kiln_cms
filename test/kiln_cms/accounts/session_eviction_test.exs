@@ -42,14 +42,19 @@ defmodule KilnCMS.Accounts.SessionEvictionTest do
     KilnCMSWeb.Endpoint.subscribe(SessionEviction.topic(user_id))
   end
 
-  defp evicted?(user_id) do
+  # The two directions need different shapes (#1350). The broadcast crosses
+  # PubSub, and 200ms used to be the whole budget for the POSITIVE claim — a
+  # slow delivery read as "not evicted" and failed the test. Presence is now
+  # awaited generously; absence keeps its short observation window, which can
+  # only false-pass, never flake.
+  defp assert_evicted(user_id) do
     topic = SessionEviction.topic(user_id)
+    assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "disconnect"}, 2_000
+  end
 
-    receive do
-      %Phoenix.Socket.Broadcast{topic: ^topic, event: "disconnect"} -> true
-    after
-      200 -> false
-    end
+  defp refute_evicted(user_id) do
+    topic = SessionEviction.topic(user_id)
+    refute_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "disconnect"}, 200
   end
 
   describe "the actions that narrow a grant" do
@@ -59,7 +64,7 @@ defmodule KilnCMS.Accounts.SessionEvictionTest do
 
       {:ok, _demoted} = Accounts.manage_user_access(user, %{role: :viewer}, actor: admin!())
 
-      assert evicted?(user.id)
+      assert_evicted(user.id)
     end
 
     test "narrowing editable_types evicts them" do
@@ -71,7 +76,7 @@ defmodule KilnCMS.Accounts.SessionEvictionTest do
       {:ok, _narrowed} =
         Accounts.manage_user_access(user, %{editable_types: ["page"]}, actor: admin!())
 
-      assert evicted?(user.id)
+      assert_evicted(user.id)
     end
 
     test "erasing a user evicts them" do
@@ -80,7 +85,7 @@ defmodule KilnCMS.Accounts.SessionEvictionTest do
 
       {:ok, _anonymized} = Accounts.anonymize_user(user, actor: admin!())
 
-      assert evicted?(user.id)
+      assert_evicted(user.id)
     end
 
     test "an ordinary preference change does not" do
@@ -92,7 +97,7 @@ defmodule KilnCMS.Accounts.SessionEvictionTest do
       {:ok, _updated} =
         Accounts.update_notification_prefs(user, %{notify_on_publish: false}, actor: user)
 
-      refute evicted?(user.id)
+      refute_evicted(user.id)
     end
   end
 
@@ -177,7 +182,7 @@ defmodule KilnCMS.Accounts.SessionEvictionTest do
       {:ok, _narrowed} =
         Accounts.update_role(role, %{editable_types: ["page"]}, authorize?: false)
 
-      assert evicted?(member.id)
+      assert_evicted(member.id)
     end
 
     test "revoking an API key evicts its owner" do
@@ -195,7 +200,7 @@ defmodule KilnCMS.Accounts.SessionEvictionTest do
 
       {:ok, _revoked} = Accounts.revoke_api_key(key, authorize?: false)
 
-      assert evicted?(owner.id)
+      assert_evicted(owner.id)
     end
 
     test "removing an org membership evicts its holder" do
@@ -219,7 +224,7 @@ defmodule KilnCMS.Accounts.SessionEvictionTest do
 
       # Keyed on `user_id`, not the membership's own `id` — evicting that would
       # broadcast on a topic no socket listens on.
-      assert evicted?(member.id)
+      assert_evicted(member.id)
     end
   end
 

@@ -70,7 +70,7 @@ defmodule KilnCMS.Media.VariantWorkerTest do
     assert File.exists?(Path.join(root, thumb["key"]))
     assert File.exists?(Path.join(root, medium["key"]))
 
-    assert_receive {:media_processed, processed_id}
+    assert_receive {:media_processed, processed_id}, 2_000
     assert processed_id == item.id
   end
 

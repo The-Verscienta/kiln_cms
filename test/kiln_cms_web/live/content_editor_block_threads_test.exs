@@ -311,7 +311,7 @@ defmodule KilnCMSWeb.ContentEditorBlockThreadsTest do
 
       actor_id = ctx.editor.id
       block = block_id(ctx.page)
-      assert_receive {:typing, ^actor_id, _name, ^block}
+      assert_receive {:typing, ^actor_id, _name, ^block}, 2_000
     end
 
     test "a typing event with no block is ignored, not fatal", ctx do

@@ -523,8 +523,13 @@ defmodule KilnCMS.Search.RelatedTest do
     anchor = indexed_post(actor, "shared endpoint passage", title: "Anchor")
     twin = indexed_post(actor, "shared endpoint passage", title: "Twin")
 
+    # Peer from a per-test address, not the shared 127.0.0.1 bucket every bare
+    # `build_conn/0` in the suite charges (#1356) — under full-suite load the
+    # shared delivery bucket fills and this public GET comes back 429.
+    {conn, _ip} = KilnCMS.RateLimitHelpers.client_conn(Phoenix.ConnTest.build_conn())
+
     conn =
-      Phoenix.ConnTest.build_conn()
+      conn
       |> Phoenix.ConnTest.dispatch(
         KilnCMSWeb.Endpoint,
         :get,

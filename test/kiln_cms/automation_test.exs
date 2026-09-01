@@ -101,7 +101,7 @@ defmodule KilnCMS.AutomationTest do
       r = rule(%{trigger_event: :published, action: :broadcast, config: %{"topic" => name}})
 
       run(r, "post.published", payload())
-      assert_receive {:automation_event, "post.published", %{"slug" => "hello"}}
+      assert_receive {:automation_event, "post.published", %{"slug" => "hello"}}, 2_000
     end
 
     test "send_email delivers an email with interpolated subject/body" do
@@ -179,7 +179,7 @@ defmodule KilnCMS.AutomationTest do
       # The event → rule → worker chain runs on Oban; drain to execute it.
       drain_oban()
 
-      assert_receive {:automation_event, "page.published", %{"title" => "Auto"}}
+      assert_receive {:automation_event, "page.published", %{"title" => "Auto"}}, 2_000
     end
 
     test "a broadcast carries the access fields through the Oban JSON round trip (#1014)" do
@@ -214,7 +214,8 @@ defmodule KilnCMS.AutomationTest do
       drain_oban()
 
       assert_receive {:automation_event, "page.published",
-                      %{"title" => "Gated auto", "audience" => "member", "locked" => false}}
+                      %{"title" => "Gated auto", "audience" => "member", "locked" => false}},
+                     2_000
     end
 
     test "the review-workflow transitions fire in_review / returned_to_draft rules (#375)" do
@@ -245,11 +246,11 @@ defmodule KilnCMS.AutomationTest do
 
       page = CMS.submit_page_for_review!(page, %{}, actor: actor)
       drain_oban()
-      assert_receive {:automation_event, "page.in_review", %{"title" => "Review"}}
+      assert_receive {:automation_event, "page.in_review", %{"title" => "Review"}}, 2_000
 
       CMS.return_page_to_draft!(page, %{}, actor: actor)
       drain_oban()
-      assert_receive {:automation_event, "page.returned_to_draft", %{"title" => "Review"}}
+      assert_receive {:automation_event, "page.returned_to_draft", %{"title" => "Review"}}, 2_000
     end
   end
 end
