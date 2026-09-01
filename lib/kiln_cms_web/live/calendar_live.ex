@@ -788,7 +788,21 @@ defmodule KilnCMSWeb.CalendarLive do
     <%!-- Every day is a drop target, including empty ones — a day with nothing
           in it is exactly where you want to drop something. --%>
     <ul class="min-h-6 space-y-1" data-calendar-drop={Date.to_iso8601(@day)}>
-      <li :for={ev <- @shown}>
+      <%!-- The event's identity sits on the <li>, not on the link inside it,
+            and that is load-bearing rather than tidiness: SortableJS resolves
+            its `draggable` selector against the DIRECT CHILDREN of the list it
+            was created on. With these attributes on the <a> — a grandchild —
+            the selector matched nothing, no chip was ever "chosen", and
+            dragging silently did nothing at all (the keyboard path, which walks
+            up with `closest`, kept working and hid it). --%>
+      <li
+        :for={ev <- @shown}
+        data-reschedulable={reschedulable?(ev) && "true"}
+        data-event-id={ev.id}
+        data-event-type={ev.type}
+        data-event-kind={ev.kind}
+        data-event-date={Date.to_iso8601(DateTime.to_date(ev.at))}
+      >
         <.link
           navigate={event_path(ev)}
           class={[
@@ -797,11 +811,6 @@ defmodule KilnCMSWeb.CalendarLive do
             reschedulable?(ev) && "cursor-grab active:cursor-grabbing"
           ]}
           title={chip_title(ev)}
-          data-reschedulable={reschedulable?(ev) && "true"}
-          data-event-id={ev.id}
-          data-event-type={ev.type}
-          data-event-kind={ev.kind}
-          data-event-date={Date.to_iso8601(DateTime.to_date(ev.at))}
         >
           <span :if={@view == "week"} class="mr-1 tabular-nums opacity-70">
             {Calendar.strftime(ev.at, "%H:%M")}

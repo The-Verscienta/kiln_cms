@@ -161,6 +161,19 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **Dragging a chip on the editorial calendar did nothing** (#1314). Rescheduling
+  by drag has never worked: SortableJS resolves its `draggable` selector against
+  the **direct children** of the list it was created on, and
+  `data-reschedulable` sat on the chip's `<a>` — a grandchild of the day's
+  `<ul>`. The selector matched nothing, so no chip was ever picked up and no
+  drop ever fired, silently, since "nothing here is draggable" is a legitimate
+  state with no error to raise. The event's identity attributes now sit on the
+  `<li>` the list actually owns. Nothing caught this because the two halves of
+  the feature fail differently: the arrow-key nudge walks *up* the tree with
+  `closest` and kept working, and `CalendarLiveTest` pushes the `reschedule`
+  event directly, exercising the server rather than the hook that produces it.
+  The new browser journey (`e2e/tests/calendar_drag.spec.js`) covers both
+  producers and the absence of a handle on lanes the server refuses.
 - **The three roadmap documents no longer contradict the issue tracker**
   (#1313, partial). `KilnCMS_Project_Plan.md`,
   `docs/competitive-gaps-todo.md` and `docs/differentiator-opportunities.md`

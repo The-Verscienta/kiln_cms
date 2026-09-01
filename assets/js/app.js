@@ -776,6 +776,12 @@ const Hooks = {
   // happened is history, and a review-due date is derived from an attestation
   // and a cadence — there is no honest way to drag it without falsifying one of
   // them, so it stays put and offers "Mark reviewed" instead.
+  //
+  // That attribute lives on the cell's <li>, and `draggable` below depends on
+  // it staying there: Sortable matches the selector against the list's DIRECT
+  // CHILDREN, so moving it back down onto the <a> stops every drag from
+  // starting — with no error, because "nothing is draggable" is a legitimate
+  // state. `e2e/tests/calendar_drag.spec.js` is what notices.
   CalendarDrag: {
     mounted() {
       this.sorters = []

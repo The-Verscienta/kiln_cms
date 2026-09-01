@@ -4,7 +4,8 @@ Where the suite's remaining blind spots are, in the order they are worth
 closing, and why each one is on the list. Written against a full measured run
 on 2026-08-22: **7,344 tests, 0 failures, 83.1% line coverage**, floor 82.5
 (`coveralls.json`). Batches 1-3 below have since landed; the suite now measures
-**83.4% locally over 7,411 tests**, and the floor has moved to **82.7**.
+**83.4% locally over 7,411 tests**, and the floor has moved to **82.7**. The
+Playwright suite is at 25 journeys.
 
 Reproduce the numbers with:
 
@@ -14,7 +15,7 @@ Reproduce the numbers with:
 This is not a plan to reach a percentage. The floor exists so coverage cannot
 silently fall (see CONTRIBUTING.md), and every item below earns its place by
 naming a *behaviour nothing currently proves* — not by the size of its
-uncovered block. Three items are listed as already done so the patterns they
+uncovered block. Four items are listed as already done so the patterns they
 set are reusable; the rest are ordered by what a defect there would cost.
 
 ## Ground rule for anything added here
@@ -90,22 +91,36 @@ tests green — Ash's `:string` cast already trims and refuses the empty string.
 It is gone, and the file measures 100%. A helper no test can distinguish from
 its own absence is worth deleting rather than covering.
 
+### 4. Calendar drag-reschedule e2e — `e2e/tests/calendar_drag.spec.js`
+
+Five of the six journeys from #1314 landed in #1331; this was the sixth, and
+writing it found the feature **broken in production**.
+
+SortableJS resolves its `draggable` selector against the **direct children** of
+the list it was created on. `data-reschedulable` was on the chip's `<a>`, a
+grandchild of the `<ul>`, so the selector matched nothing, no chip was ever
+"chosen", and dragging did nothing at all — silently, because "nothing here is
+draggable" is a legitimate state with no error to raise. The identity
+attributes moved up to the `<li>` and drag works.
+
+Nothing caught it because the two halves fail differently: the keyboard nudge
+walks *up* with `closest`, so it kept working from the `<a>`, and
+`calendar_live_test.exs` pushes `reschedule` directly, which exercises the
+server and never the hook. The editor's own SortableJS list (block reordering,
+covered since #1331) satisfies the direct-child rule, so the working example
+sat right next to the broken one.
+
+3 tests: a drag, an arrow-key nudge in both directions, and the absence of a
+handle on a lane the server would refuse. All three fail against the old
+markup.
+
+Two things this cost, worth knowing before writing the next hook spec:
+`page.mouse` sequences do not drive a native HTML5 drag — `locator.dragTo()`
+sets up Chromium's drag interception and is the API that works — and the
+scheduling field that produces a draggable chip lives in the editor's
+**Settings** inspector tab, which is not the tab that opens.
+
 ## Next
-
-### 4. Calendar drag-reschedule e2e — the last open journey from #1314
-
-Five of the six journeys landed in #1331. This one did not, and both paths in
-the `CalendarDrag` hook are client-only: the SortableJS drop, and the
-arrow-key nudge with its UTC-noon DST guard. `calendar_live_test.exs` reaches
-neither — it pushes `reschedule` directly. #1332 shipped the server twin
-`refuse_undraggable/1`, but nothing proves the markup withholds a handle from
-a lane that cannot be rescheduled.
-
-In `e2e/`, one spec that drags an entry to a new day and asserts the persisted
-date, one that keyboard-nudges and asserts the same, and one that asserts no
-drag handle renders on an undraggable lane. Wait for `.phx-connected` before
-interacting, and give the spec a date corpus it owns — the calendar tests were
-date-flaky from the 16th precisely because they read "today".
 
 ### 5. `KilnCMS.Billing.Webhooks` — 54% (26 uncovered)
 
