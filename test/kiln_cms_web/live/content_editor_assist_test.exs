@@ -473,10 +473,17 @@ defmodule KilnCMSWeb.ContentEditorAssistTest do
       {lv, _html} = open_editor(ctx.conn, ctx.editor, ctx.page)
       open_panel(lv, ctx.page)
       render_click(lv, "assist_run", %{"bid" => block_id(ctx.page)})
+      # Held in flight until released (#1351), so the second click cannot land
+      # after run one already completed and cleared the guard — the race the
+      # old 150ms sleep left open. Same shape as the SEO twin's test.
+      assert_receive {:latch_started, KilnCMS.StubAssistGenerator.Counting, 1}, 2_000
       render_click(lv, "assist_run", %{"bid" => block_id(ctx.page)})
-      render_async(lv, 2000)
+
+      assert [_run] = KilnCMS.StubAssistGenerator.Counting.release_all()
+      render_async(lv, 2_000)
 
       assert KilnCMS.StubAssistGenerator.Counting.count() == 1
+      refute_received {:latch_timeout, _, _}
     end
   end
 end
