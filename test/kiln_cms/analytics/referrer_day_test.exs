@@ -68,7 +68,10 @@ defmodule KilnCMS.Analytics.ReferrerDayTest do
     seed_bucket(%{content_id: id, source: :direct, day: yesterday, hits: 5})
     Analytics.record_referrer!("page", id, :direct, authorize?: false)
 
-    rows = stored_rows() |> Enum.sort_by(& &1.day)
+    # `Date` as the comparator: bare term ordering compares the struct's
+    # :day field first, so on the 1st of a month ~D[2026-09-01] sorts BEFORE
+    # ~D[2026-08-31] and this failed exactly one day a month.
+    rows = stored_rows() |> Enum.sort_by(& &1.day, Date)
 
     assert [%{day: ^yesterday, hits: 5}, %{day: _today, hits: 1}] = rows
   end

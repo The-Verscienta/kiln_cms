@@ -430,11 +430,22 @@ defmodule KilnCMSWeb.ContentEditorSuggestTest do
       {lv, _html} = open_editor(conn, editor, page(editor))
 
       render_click(lv, "seo_suggest", %{})
-      # Still in flight (the Counting stub sleeps), so this one must be ignored.
+
+      # What actually prevents the flake here is the HOLD: the guard is armed
+      # synchronously in handle_event, but under the old 150ms sleep run one
+      # could *complete* (clearing the guard) before the second click landed.
+      # The latch keeps it in flight until released below. Awaiting the
+      # announcement first is what lets the release assert it woke a held run.
+      assert_receive {:latch_started, KilnCMS.StubSeoGenerator.Counting, 1}, 2_000
       render_click(lv, "seo_suggest", %{})
+
+      # `[_run]`, positively: an empty return would mean the run was never
+      # held and the in-flight window this test needs never existed.
+      assert [_run] = KilnCMS.StubSeoGenerator.Counting.release_all()
       render_async(lv, 5_000)
 
       assert KilnCMS.StubSeoGenerator.Counting.count() == 1
+      refute_received {:latch_timeout, _, _}
     end
 
     test "a page with too little content is refused before reaching the provider",
@@ -580,14 +591,19 @@ defmodule KilnCMSWeb.ContentEditorSuggestTest do
       # Hand-edit what was just accepted.
       change(lv, "seo_title", %{"seo_title" => "My own headline"})
 
-      # Swap in the slow stub so the second run is genuinely in flight while we
-      # look: with an instant stub the new proposal lands before we can observe
-      # the window this regression lived in.
+      # Swap in the held-open stub so the second run is genuinely in flight
+      # while we look: with an instant stub the new proposal lands before we
+      # can observe the window this regression lived in. It stays in flight
+      # until the release below (#1351).
       put_seo(generator: KilnCMS.StubSeoGenerator.Counting, model: "stub:stub")
       {:ok, _} = KilnCMS.StubSeoGenerator.Counting.start_link()
       KilnCMS.StubSeoGenerator.Counting.reset()
 
       render_click(lv, "seo_suggest", %{})
+      # Without this, the release below could fire before the run registers —
+      # the sticky release then lets it skip the hold, and "mid-generation"
+      # would be an empty claim (a refused suggestion would pass here too).
+      assert_receive {:latch_started, KilnCMS.StubSeoGenerator.Counting, 1}, 2_000
 
       # Mid-generation there is nothing to apply — previously the *old* cards
       # were still rendered here, so this click clobbered the hand edit.
@@ -595,7 +611,13 @@ defmodule KilnCMSWeb.ContentEditorSuggestTest do
       render_click(lv, "seo_accept_all", %{})
       assert field_value(lv, "seo_title") == "My own headline"
 
-      render_async(lv, 5_000)
+      # The run completes only now — `[_run]` proves the window above was
+      # genuinely held open, not a race the assertions won by luck.
+      assert [_run] = KilnCMS.StubSeoGenerator.Counting.release_all()
+
+      # And positively: the run *finished* and its proposal rendered, so the
+      # surviving hand edit below is the guard's doing, not a dropped result.
+      assert render_async(lv, 5_000) =~ "Draft 1 for"
       assert field_value(lv, "seo_title") == "My own headline"
     end
   end
