@@ -93,28 +93,22 @@ defmodule KilnCMSWeb.ConnCase do
   interval later cannot silently shrink the budget — which is how a `tries`
   count decays into a flake. A generous timeout costs nothing when the condition
   is met: the loop returns on the first successful render.
+
+  The deadline loop itself lives in `KilnCMS.Test.Eventually` (#1349) — reach
+  for it directly when the condition is not a substring of a LiveView render.
   """
   @spec eventually(term(), String.t(), boolean(), pos_integer()) :: String.t()
   def eventually(view, substring, present? \\ true, timeout_ms \\ 5_000) do
-    poll(view, substring, present?, System.monotonic_time(:millisecond) + timeout_ms, timeout_ms)
-  end
-
-  defp poll(view, substring, present?, deadline, timeout_ms) do
-    html = Phoenix.LiveViewTest.render(view)
-
-    cond do
-      String.contains?(html, substring) == present? ->
-        html
-
-      System.monotonic_time(:millisecond) >= deadline ->
-        ExUnit.Assertions.flunk(
-          "expected #{inspect(substring)} #{if present?, do: "in", else: "gone from"} " <>
-            "the render within #{timeout_ms}ms"
-        )
-
-      true ->
-        Process.sleep(25)
-        poll(view, substring, present?, deadline, timeout_ms)
-    end
+    KilnCMS.Test.Eventually.eventually(
+      fn ->
+        html = Phoenix.LiveViewTest.render(view)
+        String.contains?(html, substring) == present? && html
+      end,
+      timeout_ms: timeout_ms,
+      message: fn ->
+        "expected #{inspect(substring)} #{if present?, do: "in", else: "gone from"} " <>
+          "the render within #{timeout_ms}ms"
+      end
+    )
   end
 end

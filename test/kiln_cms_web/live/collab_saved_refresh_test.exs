@@ -70,21 +70,16 @@ defmodule KilnCMSWeb.CollabSavedRefreshTest do
   defp slug, do: "csr-#{System.unique_integer([:positive])}"
 
   # Presence diffs and the saved broadcast both arrive asynchronously; never
-  # assert on a fixed sleep.
-  defp await(lv, fun, tries \\ 60) do
-    html = render(lv)
-
-    cond do
-      fun.(html) ->
-        html
-
-      tries == 0 ->
-        flunk("condition never held; last render:\n#{html}")
-
-      true ->
-        Process.sleep(25)
-        await(lv, fun, tries - 1)
-    end
+  # assert on a fixed sleep. Deadline-based (#1349): the previous `tries` count
+  # was exactly the budget shape ConnCase.eventually/4's docstring post-mortems.
+  defp await(lv, fun) do
+    KilnCMS.Test.Eventually.eventually(
+      fn ->
+        html = render(lv)
+        fun.(html) && html
+      end,
+      message: fn -> "condition never held; last render:\n#{render(lv)}" end
+    )
   end
 
   # The persister is the lowest user id among those present — the same

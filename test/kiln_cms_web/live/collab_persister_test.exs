@@ -77,32 +77,19 @@ defmodule KilnCMSWeb.CollabPersisterTest do
   # Poll a LiveView's render until `fun.(html)` holds (presence diffs arrive
   # asynchronously; never assert on a fixed sleep).
   #
-  # 60, not the original 40 (#1095): a full-suite CI run showed one failure of
-  # this file's first test, never reproduced since — not locally, and not
-  # under 60 repeats of this file racing the rest of the suite for the same DB
-  # connection pool. `KilnCMSWeb.CollabSavedRefreshTest`, the sibling test in
-  # the same presence/autosave problem space, already budgets 60 tries here;
-  # this file's tighter 40 (1s vs 1.5s of real wall-clock polling) was the one
-  # asymmetry between two tests waiting on the same kind of eventually-
-  # consistent state, and a saturated CI runner is exactly the condition under
-  # which BEAM scheduling and Postgres round-trips both slow down. Matching
-  # the sibling's budget is the boring, well-precedented fix for "eventually
-  # consistent, occasionally slower than expected" — not a cover for a logic
-  # bug, which the investigation below ruled out as this test's actual race.
-  defp await(lv, fun, tries \\ 60) do
-    html = render(lv)
-
-    cond do
-      fun.(html) ->
-        html
-
-      tries == 0 ->
-        flunk("condition never held; last render:\n#{html}")
-
-      true ->
-        Process.sleep(25)
-        await(lv, fun, tries - 1)
-    end
+  # Deadline-based (#1349). This helper's budget was already raised once
+  # chasing a flake (#1095: 40 tries → 60, matching the sibling
+  # `CollabSavedRefreshTest`) — the exact way a `tries` count decays that
+  # ConnCase.eventually/4's docstring post-mortems. A deadline ends the
+  # ratchet: generous when saturated, free when the condition already holds.
+  defp await(lv, fun) do
+    KilnCMS.Test.Eventually.eventually(
+      fn ->
+        html = render(lv)
+        fun.(html) && html
+      end,
+      message: fn -> "condition never held; last render:\n#{render(lv)}" end
+    )
   end
 
   defp two_editors do

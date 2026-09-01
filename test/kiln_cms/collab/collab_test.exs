@@ -39,18 +39,18 @@ defmodule KilnCMS.CollabTest do
       assert {:ok, :carol} = Locks.holder(key, "b3")
 
       Process.exit(pid, :kill)
-      assert eventually_free?(key, "b3")
+      # The monitor :DOWN that releases the lock is async to the kill, so poll
+      # on a deadline (#1349) — the previous 500ms `attempts` budget was tight
+      # for a :DOWN under CI load.
+      KilnCMS.Test.Eventually.eventually(
+        fn -> Locks.holder(key, "b3") == :free end,
+        message: fn ->
+          "the killed holder's lock never freed; holder: #{inspect(Locks.holder(key, "b3"))}"
+        end
+      )
+
       # The freed block can be re-acquired.
       assert :ok = Locks.acquire(key, "b3", :dave)
-    end
-  end
-
-  # Poll briefly: the monitor :DOWN that releases the lock is async to the kill.
-  defp eventually_free?(key, block, attempts \\ 50) do
-    cond do
-      Locks.holder(key, block) == :free -> true
-      attempts == 0 -> false
-      true -> Process.sleep(10) && eventually_free?(key, block, attempts - 1)
     end
   end
 
