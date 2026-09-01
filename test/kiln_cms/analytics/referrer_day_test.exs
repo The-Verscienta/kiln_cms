@@ -68,7 +68,14 @@ defmodule KilnCMS.Analytics.ReferrerDayTest do
     seed_bucket(%{content_id: id, source: :direct, day: yesterday, hits: 5})
     Analytics.record_referrer!("page", id, :direct, authorize?: false)
 
-    rows = stored_rows() |> Enum.sort_by(& &1.day)
+    # `Enum.sort_by(& &1.day)` with no comparator sorts %Date{} structs by
+    # Erlang TERM order, which compares the struct's keys alphabetically —
+    # `day` before `month` before `year`. Chronological and term order agree
+    # inside one month and disagree across a boundary, so that spelling passes
+    # for ~30 days and then fails on the 1st, when yesterday is the 31st. Every
+    # other date sort in this repo already passes a comparator; this was the one
+    # that did not.
+    rows = stored_rows() |> Enum.sort_by(& &1.day, Date)
 
     assert [%{day: ^yesterday, hits: 5}, %{day: _today, hits: 1}] = rows
   end
