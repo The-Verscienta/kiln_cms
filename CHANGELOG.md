@@ -192,6 +192,15 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **The rich-text toolbar didn't show Bold (or any mark) as pressed until you
+  typed.** Toggling a mark with nothing selected sets a ProseMirror *stored
+  mark* — the next keystroke gets it — but changes neither the document nor the
+  selection, so TipTap's `onUpdate`/`onSelectionUpdate` never fired and the
+  button kept `aria-pressed="false"` until the first character landed. Both the
+  block editor and the inline editor now re-sync their toolbars on the one
+  transaction kind those callbacks can't see (`storedMarksSet`), so the button
+  reflects the pending mark immediately. Covered by an e2e assertion that clicks
+  Bold on an empty paragraph and expects it pressed before anything is typed.
 - **Dragging a chip on the editorial calendar did nothing** (#1314). Rescheduling
   by drag has never worked: SortableJS resolves its `draggable` selector against
   the **direct children** of the list it was created on, and

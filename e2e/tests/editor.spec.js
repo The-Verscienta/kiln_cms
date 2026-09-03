@@ -75,6 +75,46 @@ test.describe("editor journey", () => {
     await expect(editor.locator("blockquote")).toContainText("Pearl of wisdom");
   });
 
+  // Toggling a mark on an EMPTY selection sets a ProseMirror *stored mark* —
+  // the next keystroke will be bold — without changing the document or the
+  // selection, so TipTap's onUpdate/onSelectionUpdate never fire and the
+  // toolbar kept saying Bold was off until the author typed something. The
+  // button must reflect the stored mark before any text exists.
+  test("the Bold button reports pressed on an empty selection before anything is typed", async ({
+    page,
+  }) => {
+    await newDraftPage(page);
+    await page.fill('input[name$="[title]"]', "E2E Stored Mark");
+    await page.fill('input[name$="[slug]"]', `e2e-stored-mark-${Date.now()}`);
+
+    await addBlock(page, "rich_text");
+    const block = page.locator('[phx-hook="RichText"]').first();
+    const editor = block.locator("[data-editor] .ProseMirror");
+    await expect(editor).toBeVisible();
+    // Click into the empty paragraph: a collapsed cursor, nothing selected.
+    await editor.click();
+    await expect(editor).toBeFocused();
+
+    const bold = block.locator('[data-toolbar] button[aria-label^="Bold"]');
+    await expect(bold).toHaveAttribute("aria-pressed", "false");
+
+    await bold.click();
+    // Nothing has been typed: the document is still empty, only the stored
+    // mark changed — and the button must already show it.
+    await expect(bold).toHaveAttribute("aria-pressed", "true");
+    await expect(bold).toHaveClass(/bg-base-300/);
+    await expect(editor).toHaveText("");
+
+    // The stored mark then applies to what gets typed, and stays reported.
+    await page.keyboard.type("heavy");
+    await expect(editor.locator("strong")).toHaveText("heavy");
+    await expect(bold).toHaveAttribute("aria-pressed", "true");
+
+    // Toggling it back off on the (still collapsed) cursor is reported too.
+    await bold.click();
+    await expect(bold).toHaveAttribute("aria-pressed", "false");
+  });
+
   // #823. A rich-text link only exists if it survives being *parsed back* into
   // TipTap: the stored Portable Text is rendered to HTML to seed the editor, and
   // an extension list without a Link mark drops the anchor there and then
