@@ -4,15 +4,11 @@ defmodule KilnCMSWeb.PasskeyControllerTest do
 
   import KilnCMS.PasskeyFixtures
 
-  # A unique client IP per test keeps this suite out of the shared 127.0.0.1
-  # `:auth` window (the documented rate-limit test flake). Still worth doing
-  # even though `config/test.exs` now raises the `:auth` limit (#715): the
-  # headroom is what stops the suite tripping the limit, not a licence for one
-  # file to spend it.
-  setup %{conn: conn} do
-    octet = rem(System.unique_integer([:positive]), 254) + 1
-    %{conn: %{conn | remote_ip: {127, 0, octet, 1}}}
-  end
+  # No per-file IP juggling: ConnCase's setup conn already peers from an
+  # address unique to this test (#936/#1356). The `rem(unique_integer, 254)`
+  # octet scheme that used to live here was the collision shape
+  # conn_case_test.exs exists to prove flaky — and it OVERWROTE the good
+  # address with a worse one.
 
   test "options parks a nonce and returns WebAuthn get() options", %{conn: conn} do
     conn = post(conn, ~p"/auth/passkey/options")

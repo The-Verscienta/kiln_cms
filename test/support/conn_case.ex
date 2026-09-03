@@ -24,9 +24,12 @@ defmodule KilnCMSWeb.ConnCase do
 
       use KilnCMSWeb, :verified_routes
 
-      # Import conveniences for testing with connections
+      # Import conveniences for testing with connections. `build_conn/0` is
+      # deliberately NOT Phoenix's: this module shadows it so a second conn
+      # built mid-test peers from its own address too (#1356) — see
+      # `build_conn/0` below. The path/method arities stay Phoenix's.
       import Plug.Conn
-      import Phoenix.ConnTest
+      import Phoenix.ConnTest, except: [build_conn: 0]
       import KilnCMSWeb.ConnCase
     end
   end
@@ -34,12 +37,29 @@ defmodule KilnCMSWeb.ConnCase do
   setup tags do
     KilnCMS.DataCase.setup_sandbox(tags)
     # Every ConnCase test gets its own peer + `remote_ip` by default (#936).
-    # Without this, `build_conn/0`'s loopback address makes every file charge
-    # the same rate-limit buckets, and any test that *reads* a counter is
-    # coupled to the rest of the suite. Opt back into the shared bucket with
+    # Without this, a loopback address makes every file charge the same
+    # rate-limit buckets, and any test that *reads* a counter is coupled to
+    # the rest of the suite. Opt back into the shared bucket with
     # `loopback_conn/0`.
+    {:ok, conn: build_conn()}
+  end
+
+  @doc """
+  `Phoenix.ConnTest.build_conn/0`, peering from an address no other request
+  in the run will reuse.
+
+  Shadowed at the case level (#1356) because the bare Phoenix version was the
+  suite's steadiest flake seed: the setup conn got a unique address (#936),
+  but every SECOND conn built mid-test — a signed federation delivery, a
+  fresh-session GET — silently peered from 127.0.0.1, the one bucket every
+  other bare conn in every other file charges. Four CI 429s in two weeks
+  came from exactly that shape. A test that *means* the shared address says
+  so with `loopback_conn/0`.
+  """
+  @spec build_conn() :: Plug.Conn.t()
+  def build_conn do
     {conn, _ip} = KilnCMS.RateLimitHelpers.client_conn(Phoenix.ConnTest.build_conn())
-    {:ok, conn: conn}
+    conn
   end
 
   @doc """

@@ -15,7 +15,7 @@ defmodule KilnCMSWeb.ConnCaseTest do
   """
   use ExUnit.Case, async: true
 
-  import KilnCMSWeb.ConnCase, only: [unique_ip: 1, loopback_conn: 0]
+  import KilnCMSWeb.ConnCase, only: [unique_ip: 1, loopback_conn: 0, build_conn: 0]
 
   defp ip(conn), do: conn.remote_ip
 
@@ -61,6 +61,23 @@ defmodule KilnCMSWeb.ConnCaseTest do
     test "is the shared bucket a test has to opt into" do
       conn = loopback_conn()
       assert conn.remote_ip == {127, 0, 0, 1}
+    end
+  end
+
+  describe "build_conn/0 (the ConnCase shadow, #1356)" do
+    # The suite's steadiest flake seed was a SECOND conn built mid-test: the
+    # setup conn peered uniquely (#936), but a bare Phoenix build_conn/0 for a
+    # fresh session peered from 127.0.0.1 — the one bucket every other bare
+    # conn in every other file charges. Four CI 429s in two weeks (federation
+    # Undo x3, /api/schema, the related endpoint) were exactly that shape.
+    test "every conn peers from its own address, never loopback" do
+      first = build_conn()
+      second = build_conn()
+
+      assert first.remote_ip != {127, 0, 0, 1}
+      assert second.remote_ip != {127, 0, 0, 1}
+      assert first.remote_ip != second.remote_ip
+      assert Plug.Conn.get_peer_data(second).address == second.remote_ip
     end
   end
 end
