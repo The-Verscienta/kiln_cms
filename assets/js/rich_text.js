@@ -788,6 +788,11 @@ export function mountInline(hook) {
       hook.slash.update()
       syncInlineToolbar(hook)
     },
+    // Stored marks (a toggle on an empty selection) change neither the doc nor
+    // the selection — see the same hook in buildEditor.
+    onTransaction: ({transaction}) => {
+      if (transaction.storedMarksSet) syncInlineToolbar(hook)
+    },
     onFocus: () => showInlineToolbar(hook),
     onBlur: () => {
       // Delay so a mousedown on a toolbar button (which momentarily blurs the
@@ -933,6 +938,15 @@ function buildEditor(hook, extensions, content = null) {
     onSelectionUpdate: () => {
       hook.slash.update()
       syncToolbar()
+    },
+    // Toggling a mark on an EMPTY selection only sets a stored mark (the next
+    // keystroke will be bold) — the document and selection are untouched, so
+    // neither callback above fires and the button stays un-pressed until the
+    // author types. `isActive` already reads stored marks; this just re-syncs
+    // on the one transaction kind the other two callbacks can't see. Gated on
+    // `storedMarksSet` so the per-transaction cost is a boolean check.
+    onTransaction: ({transaction}) => {
+      if (transaction.storedMarksSet) syncToolbar()
     },
     // Collaborative locking (#140): broadcast focus/blur on this block's field
     // so other editors get the same lock ring + "who's editing" badge that the
