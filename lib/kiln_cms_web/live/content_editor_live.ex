@@ -8869,7 +8869,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                           data-toolbar
                           role="toolbar"
                           aria-label={gettext("Text formatting")}
-                          class="mb-1 flex flex-wrap gap-1"
+                          class="rt-block-toolbar mb-1 flex flex-wrap gap-1"
                         >
                         </div>
                         <div data-editor></div>
@@ -9854,6 +9854,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Sticky editor action bar (Theme A). Sits just under the console shell header
   # (`sticky top-14`, below the shell's `top-0` z-20 bar) so Save, workflow, and
   # the live save state are always reachable no matter how long the content runs.
+  # The `EditorActionBar` hook publishes the bar's stuck bottom edge as a CSS
+  # variable so each rich-text block's formatting toolbar (`.rt-block-toolbar`)
+  # can stick just beneath it while a long block scrolls past.
   attr :kind, :atom, required: true
   attr :record, :any, required: true
   attr :save_state, :atom, required: true
@@ -9876,7 +9879,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> assign(:reading_minutes, reading_minutes(assigns.word_count, wpm))
 
     ~H"""
-    <div class="sticky top-14 z-10 rounded-lg border border-base-content/10 bg-base-100/90 px-3 py-2.5 shadow-sm backdrop-blur">
+    <div
+      id="editor-action-bar"
+      phx-hook="EditorActionBar"
+      class="sticky top-14 z-10 rounded-lg border border-base-content/10 bg-base-100/90 px-3 py-2.5 shadow-sm backdrop-blur"
+    >
       <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
         <div class="flex flex-wrap items-center gap-2">
           <span class={[
