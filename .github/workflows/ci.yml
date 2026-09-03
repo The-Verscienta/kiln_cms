@@ -505,13 +505,37 @@ jobs:
         working-directory: e2e
         run: npx playwright test
 
-      - name: Upload report on failure
-        if: failure()
+      # `retries: 1` keeps a single flake from failing the job — but a spec
+      # that passes only on retry must be COUNTED, not silently absorbed, or
+      # it rots unnoticed until it fails twice in a row (#1353). Playwright's
+      # JSON report marks those tests "flaky"; surface the count and names in
+      # the job summary on every run, red or green.
+      - name: Surface tests that passed only on retry
+        if: always()
+        working-directory: e2e
+        run: |
+          report=playwright-report/results.json
+          if [ -f "$report" ]; then
+            flaky=$(jq '[.. | objects | select(.status? == "flaky")] | length' "$report")
+            {
+              echo "### Playwright retry report"
+              echo "${flaky} test(s) passed only on retry."
+              if [ "$flaky" != "0" ]; then
+                jq -r '.. | objects | select(.tests? and ([.tests[].status] | index("flaky"))) | "- \(.title)"' "$report"
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No Playwright JSON report found (run likely failed before reporting)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload report
+        if: always()
         uses: actions/upload-artifact@v5
         with:
           name: playwright-report
           path: e2e/playwright-report/
           retention-days: 7
+          if-no-files-found: ignore
 
   # Strict-tenancy smoke (#419): compile fail-closed (KILN_STRICT_TEST=1 is a
   # COMPILE-TIME config in config/test.exs) in its own build dir and run only
