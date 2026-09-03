@@ -152,20 +152,11 @@ defmodule KilnCMSWeb.SocketEventBudget do
   Closes the connection this socket rides, so the client reconnects and
   rejoins — the only refusal `phoenix.js` recovers from (see the moduledoc).
 
-  The transport process handles a `"disconnect"` broadcast by closing with
-  code 1001, exactly as it does when `KilnCMS.Accounts.SessionEviction`
-  broadcasts one on the socket's id topic; this delivers the same message
-  to this one transport directly rather than to every socket of the account.
+  Delegates to `KilnCMSWeb.SocketReauth.close_connection/1`, the one
+  implementation of the eviction-shaped disconnect (#775 grew the same need
+  and the same function): what a stop alone does to the client, why the
+  disconnect fixes it, and why it must run before the stop are documented
+  there, once.
   """
-  @spec close_connection(Phoenix.Socket.t()) :: :ok
-  def close_connection(%Phoenix.Socket{transport_pid: transport_pid})
-      when is_pid(transport_pid) do
-    send(transport_pid, %Phoenix.Socket.Broadcast{
-      topic: "socket_event_budget",
-      event: "disconnect",
-      payload: %{}
-    })
-
-    :ok
-  end
+  defdelegate close_connection(socket), to: KilnCMSWeb.SocketReauth
 end
