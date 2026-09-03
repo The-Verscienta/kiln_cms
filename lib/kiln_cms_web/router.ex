@@ -963,6 +963,12 @@ defmodule KilnCMSWeb.Router do
       pipe_through :browser_dev_tools
 
       forward "/mailbox", Plug.Swoosh.MailboxPreview
+
+      # Which checkout and database this server is actually running (#1353):
+      # the Playwright harness refuses a reused server whose root is a
+      # different worktree's — the orphan-server trap where every spec fails
+      # at sign-in. Same compile-time gating and :prod refusal as the mailbox.
+      forward "/e2e-identity", KilnCMSWeb.Plugs.E2EIdentity
     end
   end
 
