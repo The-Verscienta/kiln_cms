@@ -11,6 +11,7 @@ const {
   createTagGroup,
   createTag,
   deleteTagByName,
+  holdsAcross,
 } = require("./fixtures");
 
 test.describe("editor journey", () => {
@@ -35,8 +36,11 @@ test.describe("editor journey", () => {
     await expect(editor).toBeVisible();
     await editor.click();
     await page.keyboard.type(body);
-    // Let the TipTap → hidden-input sync (300ms debounce) flush before saving.
-    await page.waitForTimeout(700);
+    // The TipTap → hidden-input sync pushes on a 300ms debounce, and the
+    // preview pane re-renders from the pushed document — so the prose showing
+    // up there IS the push landing (channel messages apply in order). #1352:
+    // this was a fixed 700ms sleep.
+    await expect(page.locator("article:visible")).toContainText(body);
 
     // Explicit save, then publish (admin).
     await page.getByRole("button", { name: /^save$/i }).click();
@@ -164,8 +168,9 @@ test.describe("editor journey", () => {
     await expect(page.locator(".rt-link-prompt")).toBeHidden();
     await expect(editor.locator('a[href="/refunds"]')).toHaveText(linkText);
 
-    // Let the 300ms rich_text_body push flush, then save.
-    await page.waitForTimeout(700);
+    // The 300ms rich_text_body push has landed once the preview pane renders
+    // the linked prose (#1352: was a fixed 700ms sleep). Then save.
+    await expect(page.locator("article:visible")).toContainText(linkText);
     await page.getByRole("button", { name: /^save$/i }).click();
 
     // The regression: reloading re-seeds the editor from the *stored* Portable
@@ -201,8 +206,10 @@ test.describe("editor journey", () => {
       await page.keyboard.type(`Paragraph ${i}`);
       await page.keyboard.press("Enter");
     }
-    // Let the 300ms rich_text_body push flush before the geometry is read.
-    await page.waitForTimeout(700);
+    // The 300ms rich_text_body push (and the patch it triggers) has settled
+    // once the preview shows the last paragraph — read geometry only after
+    // that, so a late patch can't shift the layout mid-measurement (#1352).
+    await expect(page.locator("article:visible")).toContainText("Paragraph 50");
 
     const toolbar = host.locator("[data-toolbar]");
     const bar = page.locator("#editor-action-bar");
@@ -267,7 +274,6 @@ test.describe("editor journey", () => {
     await expect(areas).toHaveCount(2);
     await areas.nth(0).fill("First");
     await areas.nth(1).fill("Second");
-    await page.waitForTimeout(400);
 
     // Preview (right pane) renders heading blocks as <h2>, in block order.
     // preview_article/1 renders the title as its own `<h2 class="text-2xl
@@ -318,8 +324,9 @@ test.describe("editor journey", () => {
     await editor.click();
     await page.keyboard.type("keep-dropme");
     await expect(editor).toHaveText("keep-dropme");
-    // Let the 300ms rich_text_body push flush so the server holds the document.
-    await page.waitForTimeout(500);
+    // The server holds the document once the preview renders it — the 300ms
+    // rich_text_body push and its patch have round-tripped (#1352).
+    await expect(page.locator("article:visible")).toContainText("keep-dropme");
 
     // Tag the live editor node with a marker no re-render would reproduce; a
     // remount would tear this node down and replace it, dropping the tag. The
@@ -374,22 +381,33 @@ test.describe("editor journey", () => {
 
     await seoTitle.click();
     await seoTitle.pressSequentially("E2E SEO title", { delay: 30 });
-    // Let the 300ms validate debounce fire and the patch come back.
-    await page.waitForTimeout(700);
 
-    // The validate patch must keep us on Settings with the fields still shown
-    // and the typed value intact.
-    await expect(settingsTab).toHaveAttribute("aria-selected", "true");
+    // The validate patch must keep us on Settings with the typed value
+    // intact. That is a MUST-NOT-change claim, so it is sampled across the
+    // debounce+patch window (see holdsAcross) rather than slept past: a flip
+    // at any sample fails, naming which probe moved (#1352).
+    await holdsAcross(
+      page,
+      async () => ({
+        tab: await settingsTab.getAttribute("aria-selected"),
+        value: await seoTitle.inputValue(),
+      }),
+      { tab: "true", value: "E2E SEO title" },
+    );
     await expect(seoTitle).toBeVisible();
     await expect(category).toBeVisible();
-    await expect(seoTitle).toHaveValue("E2E SEO title");
 
     // A second edit keeps the tab put too (mirror of the old both-directions
     // assertion — the panel never flips back to Preview mid-typing).
     await seoTitle.pressSequentially(" more", { delay: 30 });
-    await page.waitForTimeout(700);
-    await expect(settingsTab).toHaveAttribute("aria-selected", "true");
-    await expect(seoTitle).toHaveValue("E2E SEO title more");
+    await holdsAcross(
+      page,
+      async () => ({
+        tab: await settingsTab.getAttribute("aria-selected"),
+        value: await seoTitle.inputValue(),
+      }),
+      { tab: "true", value: "E2E SEO title more" },
+    );
   });
 
   // #523. Whether a tag-picker section is expanded is client state with three
@@ -443,8 +461,10 @@ test.describe("editor journey", () => {
       await section.locator("summary").click();
       await expect(section).toHaveJSProperty("open", true);
       await title.fill("E2E Tag Picker");
-      await page.waitForTimeout(700);
-      await expect(section).toHaveJSProperty("open", true);
+      // Sampled across the validate debounce+patch window (#1352): the old
+      // sleep-then-assert missed a flap that self-corrected, and a bare
+      // assert would pass before the patch even arrived.
+      await holdsAcross(page, () => section.evaluate((el) => el.open), true);
 
       // Closed by hand, it stays closed across the next patch too. This is the
       // direction the old code broke: the server re-rendered `open` from the tick
@@ -452,8 +472,7 @@ test.describe("editor journey", () => {
       await section.locator("summary").click();
       await expect(section).toHaveJSProperty("open", false);
       await title.fill("E2E Tag Picker 2");
-      await page.waitForTimeout(700);
-      await expect(section).toHaveJSProperty("open", false);
+      await holdsAcross(page, () => section.evaluate((el) => el.open), false);
 
       // Narrowing force-opens the section holding the hit, and clearing the box
       // undoes exactly that — unless the editor ticked something while it was
@@ -469,7 +488,12 @@ test.describe("editor journey", () => {
       await filter.fill("alpha");
       await expect(section).toHaveJSProperty("open", true);
       await section.getByRole("checkbox", { name: alpha }).check();
-      await page.waitForTimeout(700);
+      // The tick's own patch has landed once the summary's server-rendered
+      // count says so (#1352: was a fixed 700ms sleep) — only then is
+      // clearing the box a test of the ticked-section rule, not a race.
+      // "of 1", not "of 2": the total counts the FILTERED list, and only
+      // alpha matches the box right now.
+      await expect(section.locator("summary")).toContainText("(1 of 1)");
       await filter.fill("");
       await expect(section).toHaveJSProperty("open", true);
       await expect(section.getByRole("checkbox", { name: alpha })).toBeChecked();
@@ -481,13 +505,21 @@ test.describe("editor journey", () => {
       // `onBeforeElUpdated` stops preserving the editor's own toggle, so the
       // section vanished under the cursor with `beta` still unticked inside it.
       await section.getByRole("checkbox", { name: alpha }).uncheck();
-      await page.waitForTimeout(700);
+      // The untick's patch — the exact true→false ticks transition the old
+      // server-rendered `open` folded the section on — has applied once the
+      // count reads zero. THEN the section must still be open.
+      await expect(section.locator("summary")).toContainText("(0 of 2)");
       await expect(section).toHaveJSProperty("open", true);
       await expect(section.getByRole("checkbox", { name: beta })).toBeVisible();
 
-      // Let the debounced autosave land: persisting the (now empty) tag set
-      // reloads the record, and that reload must not re-judge the section either.
-      await page.waitForTimeout(2500);
+      // The debounced autosave persists the (now empty) tag set and reloads
+      // the record — and adopting the saved record re-titles the browser tab
+      // (adopt_saved/2 assigns page_title). A fresh probe title makes that
+      // adoption observable: the tab can only carry it after a save whose
+      // snapshot includes the untick above. That reload must not re-judge
+      // the section. (#1352: was a fixed 2500ms sleep against a 2s debounce.)
+      await title.fill("E2E Tag Picker autosaved");
+      await expect(page).toHaveTitle(/E2E Tag Picker autosaved/, { timeout: 10_000 });
       await expect(section).toHaveJSProperty("open", true);
     } finally {
       // Tags first — deleting the group nilifies rather than cascades (see
