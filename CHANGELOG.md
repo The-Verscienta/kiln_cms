@@ -192,6 +192,22 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **A keystroke that raced "Add block" no longer deletes the block — or
+  crashes the editor** (#1334). A `phx-change`/`phx-submit`'s `blocks` params
+  are a snapshot of the DOM the browser had rendered when the event fired,
+  but `AshPhoenix.Form.validate/2` treated them as authoritative: a validate
+  processed between `add_block` and the patch that renders the new block
+  carried no entry for it, so the block the user just chose was silently
+  removed ("No blocks yet"), and a Save clicked in the same window persisted
+  the loss; in the opposite direction, a keystroke racing `remove_block`
+  still carried the removed block's entry, which AshPhoenix tried to build a
+  fresh form from and crashed the whole editor session (the DOM entries carry
+  no `_union_type`). The editor now reconciles instead of trusting the
+  snapshot: client entries are kept verbatim (they carry the newest
+  keystrokes), a server-side block the client never rendered is re-inserted
+  at its position, and an entry whose id the server no longer knows is
+  dropped rather than resurrected — blocks are only ever added, removed, or
+  reordered by their own events.
 - **The rich-text toolbar didn't show Bold (or any mark) as pressed until you
   typed.** Toggling a mark with nothing selected sets a ProseMirror *stored
   mark* — the next keystroke gets it — but changes neither the document nor the
