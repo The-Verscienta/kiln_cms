@@ -7,11 +7,28 @@ import Config
 # Its own database — kept separate from dev/test so the persistent E2E data
 # (no SQL sandbox here; the browser hits the server out-of-process) never
 # collides with `mix test` or local dev.
+#
+# The default name is partitioned PER CHECKOUT (#1353), the way
+# MIX_TEST_PARTITION partitions the test database: this suite runs against
+# persistent, never-reset-between-specs data, and one shared `kiln_cms_e2e`
+# meant two worktrees' suites accumulated pollution into each other's runs.
+# The suffix is the checkout directory's basename, so it is stable across
+# runs of one checkout and different across worktrees. `POSTGRES_DB` still
+# overrides outright (CI sets nothing and simply gets the partitioned
+# default; `mix e2e.reset` drops and rebuilds whichever name is in effect).
+e2e_db_suffix =
+  File.cwd!()
+  |> Path.basename()
+  |> String.downcase()
+  |> String.replace(~r/[^a-z0-9_]/, "_")
+  # Postgres identifiers cap at 63 bytes; leave room for the prefix.
+  |> String.slice(0, 40)
+
 config :kiln_cms, KilnCMS.Repo,
   username: System.get_env("POSTGRES_USER", "postgres"),
   password: System.get_env("POSTGRES_PASSWORD", "postgres"),
   hostname: System.get_env("POSTGRES_HOST", "localhost"),
-  database: System.get_env("POSTGRES_DB", "kiln_cms_e2e"),
+  database: System.get_env("POSTGRES_DB", "kiln_cms_e2e_#{e2e_db_suffix}"),
   pool_size: 10
 
 # Endpoint serving the compiled assets. Serving is turned on at runtime by

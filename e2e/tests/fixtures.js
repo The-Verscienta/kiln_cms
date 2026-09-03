@@ -81,6 +81,44 @@ const test = base.test.extend({
   page: async ({ page }, use) => {
     await use(guardNavigation(page));
   },
+
+  // Refuse a wrong server before a single spec runs (#1353). Locally the
+  // config reuses any server already answering on the port — including an
+  // orphaned BEAM from a *sibling worktree*, running different code against a
+  // different database, which fails every spec at sign-in with nothing naming
+  // the cause. The server says which checkout it is (/dev/e2e-identity, an
+  // e2e/dev-only route); one fetch per worker compares it to this one.
+  _serverIdentity: [
+    async ({}, use) => {
+      const expectedRoot = require("path").resolve(__dirname, "..", "..");
+      let identity;
+      try {
+        const res = await fetch(`${BASE_URL}/dev/e2e-identity`);
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        identity = await res.json();
+      } catch (err) {
+        throw new Error(
+          `The server at ${BASE_URL} did not answer /dev/e2e-identity (${err.message}). ` +
+            `It is likely an older or foreign server this run would silently reuse — stop it ` +
+            `(lsof -i :${new URL(BASE_URL).port}), or point this run elsewhere with ` +
+            `PORT=<free port> (the e2e database is already partitioned per checkout).`,
+        );
+      }
+      if (identity.root !== expectedRoot) {
+        throw new Error(
+          `The server at ${BASE_URL} is running a DIFFERENT checkout:
+` +
+            `  server: ${identity.root} (database ${identity.database})
+` +
+            `  specs:  ${expectedRoot}
+` +
+            `Stop that server (lsof -i :${new URL(BASE_URL).port}) or run with PORT=<free port>.`,
+        );
+      }
+      await use(identity);
+    },
+    { scope: "worker", auto: true },
+  ],
 });
 
 // A second, independent browser session (its own cookies/storage) — for

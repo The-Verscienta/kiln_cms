@@ -701,7 +701,7 @@ production.
 |----------|---------|---------|-----------------|
 | `MIX_TEST_PARTITION` | unset | Suffix appended to the test database name for partitioned test runs — also what keeps two concurrent worktrees off the same database. | [`config/test.exs:219`](../config/test.exs#L219) |
 | `KILN_STRICT_TEST` | unset | Set to an on-spelling (`true`/`1`/`yes`/`on`) to select the strict-tenancy CI leg: `:strict_tenancy` is flipped on so tenancy scoping compiles fail-closed, and the suite runs **only** the `strict_tenancy`-tagged tests. Uses the same spellings as every other flag in this document, via the standalone [`config/strict_test_flag.exs`](../config/strict_test_flag.exs) (#646) — it can't call `KilnCMS.Config.Env` directly because it's read in `config/test.exs`, which cannot call project modules. An unrecognized value stays non-strict **and warns on stderr**, like every other flag: without that the strict leg runs zero tests and exits 0, which is indistinguishable from never having invoked it. | [`config/test.exs:323`](../config/test.exs#L323) |
-| `POSTGRES_USER` | `postgres` | E2E database user. | [`config/e2e.exs:11`](../config/e2e.exs#L11) |
-| `POSTGRES_PASSWORD` | `postgres` | E2E database password. | [`config/e2e.exs:12`](../config/e2e.exs#L12) |
-| `POSTGRES_HOST` | `localhost` | E2E database host. | [`config/e2e.exs:13`](../config/e2e.exs#L13) |
-| `POSTGRES_DB` | `kiln_cms_e2e` | E2E database name. | [`config/e2e.exs:14`](../config/e2e.exs#L14) |
+| `POSTGRES_USER` | `postgres` | E2E database user. | [`config/e2e.exs:28`](../config/e2e.exs#L28) |
+| `POSTGRES_PASSWORD` | `postgres` | E2E database password. | [`config/e2e.exs:29`](../config/e2e.exs#L29) |
+| `POSTGRES_HOST` | `localhost` | E2E database host. | [`config/e2e.exs:30`](../config/e2e.exs#L30) |
+| `POSTGRES_DB` | `kiln_cms_e2e_<checkout dirname>` | E2E database name — partitioned per checkout by default (#1353) so sibling worktrees never share persistent E2E data. | [`config/e2e.exs:31`](../config/e2e.exs#L31) |

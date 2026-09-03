@@ -2,7 +2,9 @@
 const { defineConfig } = require("@playwright/test");
 
 // The Phoenix endpoint reads its port from PORT (config/runtime.exs), so the
-// server and the baseURL stay in sync via this one value.
+// server and the baseURL stay in sync via this one value. fixtures.js reads
+// the resolved address back off this config, so its server-identity check
+// (#1353) always interrogates the same server the specs hit.
 const PORT = process.env.PORT || "4002";
 const BASE_URL = process.env.E2E_BASE_URL || `http://localhost:${PORT}`;
 
@@ -36,7 +38,14 @@ module.exports = defineConfig({
   retries: process.env.CI ? 1 : 0,
   timeout: 30_000,
   expect: { timeout: 10_000 },
-  reporter: process.env.CI ? [["github"], ["list"]] : "list",
+  // CI adds the JSON report so retried-then-passed ("flaky") tests are
+  // COUNTED, not silently absorbed by `retries: 1` (#1353): the workflow
+  // reads it into the job summary and uploads it as an artifact on every
+  // run, so flake frequency is measurable instead of invisible until a
+  // spec fails twice in a row.
+  reporter: process.env.CI
+    ? [["github"], ["list"], ["json", { outputFile: "playwright-report/results.json" }]]
+    : "list",
   use: {
     baseURL: BASE_URL,
     headless: true,
