@@ -99,6 +99,30 @@ defmodule KilnCMS.Media.AVQuarantineTest do
     item
   end
 
+  # A REAL clip, which the fixture above deliberately is not. `testsrc` at
+  # 64x48 for one second is ~3 KB and takes milliseconds; ffmpeg can actually
+  # remux it, which is the only way to reach the promote-the-stripped-copy
+  # path — every existing test here goes down the "could not remux" branch.
+  defp real_mp4_path do
+    path = Path.join(System.tmp_dir!(), "q-real-#{System.unique_integer([:positive])}.mp4")
+
+    {_out, 0} =
+      System.cmd(
+        "ffmpeg",
+        ~w(-hide_banner -loglevel error -y -f lavfi -i testsrc=size=64x48:rate=10:duration=1
+           -pix_fmt yuv420p) ++ [path],
+        stderr_to_stdout: true
+      )
+
+    on_exit(fn -> File.rm(path) end)
+    path
+  end
+
+  defp real_quarantined_upload!(actor) do
+    {:ok, item} = Ingest.store_file(real_mp4_path(), "real.mp4", actor: actor)
+    item
+  end
+
   defp strip_job_args(item),
     do: %{"media_item_id" => item.id, "org_id" => item.org_id, "ext" => ".mp4"}
 
@@ -121,6 +145,101 @@ defmodule KilnCMS.Media.AVQuarantineTest do
                all_enqueued(worker: AVStripWorker)
 
       assert args["media_item_id"] == item.id
+      assert all_enqueued(worker: KilnCMS.Media.AVWorker) == []
+    end
+
+    @tag :ffmpeg
+    test "a remuxable upload is promoted as its STRIPPED copy, and released" do
+      # The other tests here upload a file ffmpeg cannot remux, so they all
+      # land on "stored with its metadata intact". This is the path that
+      # actually strips: the promoted public blob is the remuxed file, not the
+      # bytes that arrived.
+      editor = user(%{role: :editor})
+      item = real_quarantined_upload!(editor)
+      {:ok, original} = Storage.fetch_private(item.storage_key)
+
+      assert :ok = AVStripWorker.perform(%Oban.Job{args: strip_job_args(item)})
+
+      released = CMS.get_media_item!(item.id, actor: editor)
+      refute released.quarantined
+
+      # Promoted, private copy gone, and readable anonymously.
+      assert {:ok, promoted} = Storage.fetch(item.storage_key)
+      assert {:error, _} = Storage.fetch_private(item.storage_key)
+      assert {:ok, _} = CMS.get_media_item(item.id, actor: nil)
+
+      # The bytes changed: what is public is the remux, not the upload.
+      refute promoted == original
+      # And the row's size was re-measured from the stripped file rather than
+      # left describing the upload.
+      assert released.byte_size == byte_size(promoted)
+
+      assert [_] = all_enqueued(worker: KilnCMS.Media.AVWorker)
+    end
+
+    test "the job declares a finite ceiling" do
+      # Bounds the job around ffmpeg's own `-timelimit` plus two storage copies
+      # of a file up to the 500 MB video cap. Pinned exactly: changing it is a
+      # decision about how long one upload may hold a `:media` slot.
+      assert AVStripWorker.timeout(%Oban.Job{}) == :timer.minutes(10)
+    end
+
+    @tag :ffmpeg
+    test "a remux inside the cap passes the check and is promoted" do
+      # The companion to the refusal below: with a generous ceiling the size
+      # check has to *pass* rather than be skipped, which is a different clause
+      # from the `nil` (no cap) the other tests exercise.
+      editor = user(%{role: :editor})
+      item = real_quarantined_upload!(editor)
+      args = item |> strip_job_args() |> Map.put("max_bytes", 50_000_000)
+
+      assert :ok = AVStripWorker.perform(%Oban.Job{args: args})
+
+      refute CMS.get_media_item!(item.id, actor: editor).quarantined
+      assert {:ok, _} = Storage.fetch(item.storage_key)
+    end
+
+    @tag :ffmpeg
+    test "a remux that outgrows the size cap is refused, not quietly published" do
+      # `max_bytes` is the ceiling `max_upload_size/0` advertises, re-checked
+      # here because a remux can come out LARGER than what arrived. One byte
+      # makes the point without needing a large fixture.
+      editor = user(%{role: :editor})
+      item = real_quarantined_upload!(editor)
+      args = item |> strip_job_args() |> Map.put("max_bytes", 1)
+
+      log =
+        capture_log(fn ->
+          assert :ok = AVStripWorker.perform(%Oban.Job{args: args})
+        end)
+
+      assert log =~ "exceeds the size cap"
+
+      # Refused means gone now — row and both blobs — not left quarantined for
+      # the reaper.
+      assert {:error, _} = CMS.get_media_item(item.id, actor: editor)
+      assert {:error, _} = Storage.fetch_private(item.storage_key)
+      assert {:error, _} = Storage.fetch(item.storage_key)
+      assert all_enqueued(worker: KilnCMS.Media.AVWorker) == []
+    end
+
+    test "a private blob that vanished before the job ran is logged, not retried forever" do
+      # The reaper owns the row in this case. The job must not raise (three
+      # attempts of a crash, then a dead job) and must not promote nothing.
+      editor = user(%{role: :editor})
+      item = quarantined_upload!(editor)
+      Storage.delete_private(item.storage_key)
+
+      log =
+        capture_log(fn ->
+          assert :ok = AVStripWorker.perform(%Oban.Job{args: strip_job_args(item)})
+        end)
+
+      assert log =~ "private blob unreadable"
+
+      # Still quarantined, nothing published, nothing queued.
+      assert CMS.get_media_item!(item.id, actor: editor).quarantined
+      assert {:error, _} = Storage.fetch(item.storage_key)
       assert all_enqueued(worker: KilnCMS.Media.AVWorker) == []
     end
 
