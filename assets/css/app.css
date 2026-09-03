@@ -803,6 +803,24 @@ pre.highlight .gs {
   color: var(--color-error-ink);
 }
 
+/* The block editor's formatting toolbar sticks to the top of the viewport while
+   a long rich-text block scrolls past, so bold/link/heading stay in reach
+   without scrolling back up. It pins just under the editor's sticky action bar,
+   whose stuck bottom edge the `EditorActionBar` hook publishes as
+   `--kiln-action-bar-bottom` (the fallback is that bar's own `top-14`, for a
+   toolbar painted before the hook has measured). Sticky is scoped to the
+   block's host element, so a toolbar rides along only while its own block is on
+   screen and hands over to the next block's as that one scrolls in. Sits below
+   the action bar (z-10) and the shell header (z-20), above the prose it slides
+   over; the padding keeps that prose from showing through the gap. */
+.rt-block-toolbar {
+  position: sticky;
+  top: var(--kiln-action-bar-bottom, 3.5rem);
+  z-index: 5;
+  padding: 0.25rem 0;
+  background: var(--color-base-100);
+}
+
 /* Floating formatting toolbar for in-context rich-text editing (#354). Rendered
    into document.body and positioned above the focused region, so it escapes the
    article's flow like the slash menu does. */
