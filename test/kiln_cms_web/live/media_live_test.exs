@@ -821,8 +821,6 @@ defmodule KilnCMSWeb.MediaLiveTest do
       assert render_upload(input, "captions.vtt")
       lv |> element("#upload-form") |> render_submit()
 
-
-
       # "No job" means no MEDIA job (#1354) — global emptiness is a claim
       # about every other test's leftovers, not about this upload.
       assert [] = media_jobs()
