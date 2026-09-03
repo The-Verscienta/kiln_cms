@@ -504,6 +504,22 @@
   border-radius: 0.375rem;
 }
 
+/* Advisory click-to-locate (assets/js/advisory_jump.js): the exact element a
+   finding is about — an alt input, a "click here" link inside ProseMirror, an
+   over-long paragraph — while the block around it pulses. Cleared after a few
+   seconds or on the next jump. The ::highlight rule is for a phrase inside a
+   rich-text block (a run of capitals), painted through the CSS Custom
+   Highlight API rather than by wrapping ProseMirror's text in a span. */
+.kiln-issue-mark {
+  outline: 2px solid var(--color-warning, oklch(0.8 0.15 85));
+  outline-offset: 2px;
+  border-radius: 0.25rem;
+  background-color: color-mix(in oklch, var(--color-warning, oklch(0.8 0.15 85)) 18%, transparent);
+}
+::highlight(kiln-issue) {
+  background-color: color-mix(in oklch, var(--color-warning, oklch(0.8 0.15 85)) 40%, transparent);
+}
+
 /* The media drawer (Theme D) slides in from the right when it opens. */
 @keyframes drawer-in {
   from {

@@ -28,6 +28,7 @@ import Sortable from "../vendor/sortable"
 import {FocusTrap} from "./focus_trap"
 import {PasskeyEnroll, initPasskeySignIn} from "./passkeys"
 import {PushToggle} from "./push"
+import {initAdvisoryJump} from "./advisory_jump"
 
 const clamp01 = (n) => Math.min(Math.max(n, 0), 1)
 
@@ -898,6 +899,10 @@ document.addEventListener(
   },
   true
 )
+
+// Clicking a finding in the editor's advisory panels scrolls to and
+// highlights what it is about — see assets/js/advisory_jump.js.
+initAdvisoryJump()
 
 // ⌘K / Ctrl-K opens the editor search palette from anywhere (no-op if already
 // there). Skipped while typing in an input so it doesn't hijack the field.

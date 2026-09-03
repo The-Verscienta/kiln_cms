@@ -29,6 +29,19 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **Click a finding in the SEO or accessibility panel to be taken to it.**
+  Every row in the editor's advisory panels is now a button: clicking it
+  scrolls the editor to whatever the finding is about and highlights it for a
+  few seconds — the alt-text input of the image without one (focused, ready to
+  type), the "click here" link inside a rich-text block, the empty heading, the
+  paragraph that runs long, the run of capitals, the SEO description field.
+  Findings that name several blocks light up all of them. The panel row
+  carries `data-jump-*` attributes (`KilnCMSWeb.AdvisoryComponents.jump_attrs/2`)
+  and a delegated handler in `assets/js/advisory_jump.js` resolves them from
+  the most to the least specific target; the "block n" links still work as
+  plain fragment links without JavaScript. A skipped heading level now reports
+  the block of the heading that skipped (`Kiln.Advisory.Body` headings carry
+  their top-level `index`), so that finding is locatable too.
 - **The billing webhook's resolution ladder is tested below its top rung**
   (#1314's coverage plan). `KilnCMS.Billing.Webhooks` was 54% covered: the
   receiver's end-to-end tests exercise self-describing metadata thoroughly and

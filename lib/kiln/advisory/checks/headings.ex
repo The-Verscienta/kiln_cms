@@ -28,10 +28,21 @@ defmodule Kiln.Advisory.Checks.Headings do
 
   defp heading_order(%{headings: []}), do: :n_a
 
+  # The finding lands on the heading that *did* the skipping (the `to` one):
+  # that is the one the author edits to fix it, and `indexes` is what the
+  # editor's click-to-locate reads. A heading built without an index (a test
+  # fixture, or a plugin's own body) just has nowhere to jump.
   defp heading_order(%{headings: headings}) do
-    case headings |> Enum.map(& &1.level) |> skipped_level() do
-      nil -> :ok
-      {from, to} -> finding(:warning, :heading_levels_skipped, :body, %{from: from, to: to})
+    case skipped_level(headings) do
+      nil ->
+        :ok
+
+      {from, to} ->
+        finding(:warning, :heading_levels_skipped, :body, %{
+          from: from.level,
+          to: to.level,
+          indexes: to |> Map.get(:index) |> List.wrap()
+        })
     end
   end
 
@@ -52,9 +63,9 @@ defmodule Kiln.Advisory.Checks.Headings do
     })
   end
 
-  defp skipped_level(levels) do
-    levels
+  defp skipped_level(headings) do
+    headings
     |> Enum.chunk_every(2, 1, :discard)
-    |> Enum.find_value(fn [a, b] -> if b - a > 1, do: {a, b} end)
+    |> Enum.find_value(fn [a, b] -> if b.level - a.level > 1, do: {a, b} end)
   end
 end
