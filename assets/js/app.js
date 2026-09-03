@@ -381,6 +381,31 @@ const Hooks = {
       this.collab && this.collab.release()
     },
   },
+  // The content editor's sticky action bar. Each rich-text block's formatting
+  // toolbar sticks just under it while a long block scrolls past, so the bar
+  // publishes its stuck bottom edge as `--kiln-action-bar-bottom` for the
+  // toolbars' `top` (`.rt-block-toolbar`). Measured, not hard-coded: the bar
+  // wraps onto a second line on narrow screens and as the editor roster grows,
+  // and a toolbar pinned to a stale height would either float over the bar or
+  // leave a strip of prose showing between them.
+  EditorActionBar: {
+    mounted() {
+      this.publish = () => {
+        const stuckTop = parseFloat(getComputedStyle(this.el).top) || 0
+        document.documentElement.style.setProperty(
+          "--kiln-action-bar-bottom",
+          `${stuckTop + this.el.offsetHeight}px`,
+        )
+      }
+      this.publish()
+      this.observer = new ResizeObserver(this.publish)
+      this.observer.observe(this.el)
+    },
+    destroyed() {
+      this.observer && this.observer.disconnect()
+      document.documentElement.style.removeProperty("--kiln-action-bar-bottom")
+    },
+  },
   // In-context editing (#354): a plain-text `contenteditable` region (heading /
   // quote block on the rendered page). Debounced input and blur push the region's
   // text back to the LiveView, which writes it through the block's Ash update.

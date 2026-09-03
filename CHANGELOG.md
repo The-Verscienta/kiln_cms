@@ -29,6 +29,18 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **A long rich-text block's formatting toolbar stays in reach.** The block
+  editor rendered Bold/Italic/Link/heading once, at the top of each rich-text
+  block, so on a block taller than the screen every link or emphasis meant
+  scrolling back up to the toolbar and losing sight of the paragraph being
+  formatted. The toolbar is now `position: sticky`: it pins to the top of the
+  viewport just under the editor's sticky action bar while its block scrolls
+  past, and hands over to the next block's toolbar as that one scrolls in. The
+  action bar publishes its own stuck height for the toolbars to pin to (it
+  wraps onto a second line on narrow screens and as the editor roster grows,
+  so a hard-coded offset would drift). An e2e test scrolls a forty-paragraph
+  block and checks the toolbar lands flush under the action bar with Bold still
+  working from there.
 - **The billing webhook's resolution ladder is tested below its top rung**
   (#1314's coverage plan). `KilnCMS.Billing.Webhooks` was 54% covered: the
   receiver's end-to-end tests exercise self-describing metadata thoroughly and

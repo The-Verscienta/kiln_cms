@@ -143,6 +143,74 @@ test.describe("editor journey", () => {
     await expect(page.locator('article a[href="/refunds"]')).toHaveText(linkText);
   });
 
+  test("a long rich-text block's toolbar sticks under the action bar as the block scrolls", async ({
+    page,
+  }) => {
+    // A block taller than the viewport used to put its toolbar out of reach:
+    // bolding or linking the paragraph in front of you meant scrolling back up
+    // to the top of the block, and losing sight of the paragraph. The toolbar
+    // is `position: sticky` now, pinned to the bottom edge of the editor's
+    // sticky action bar — an edge the bar's hook measures rather than a
+    // hard-coded offset, because the bar wraps onto a second line.
+    await newDraftPage(page);
+    await addBlock(page, "rich_text");
+    const host = page.locator('[phx-hook="RichText"]').first();
+    const editor = host.locator("[data-editor] .ProseMirror");
+    await editor.click();
+    for (let i = 1; i <= 50; i++) {
+      await page.keyboard.type(`Paragraph ${i}`);
+      await page.keyboard.press("Enter");
+    }
+    // Let the 300ms rich_text_body push flush before the geometry is read.
+    await page.waitForTimeout(700);
+
+    const toolbar = host.locator("[data-toolbar]");
+    const bar = page.locator("#editor-action-bar");
+    const geometry = async () => {
+      const [b, t, h, e] = await Promise.all(
+        [bar, toolbar, host, editor].map((l) => l.boundingBox()),
+      );
+      return {
+        barBottom: b.y + b.height,
+        toolbarTop: t.y,
+        hostTop: h.y,
+        editorBottom: e.y + e.height,
+      };
+    };
+
+    // Scroll the block's top well past the action bar while its prose is still
+    // on screen — where an in-flow toolbar would already be out of sight.
+    await host.evaluate((el) => window.scrollBy(0, el.getBoundingClientRect().top + 300));
+    await expect.poll(async () => (await geometry()).hostTop).toBeLessThan(0);
+
+    const g = await geometry();
+    expect(g.hostTop).toBeLessThan(g.barBottom);
+    expect(g.editorBottom).toBeGreaterThan(g.toolbarTop);
+    // Flush under the action bar: not floating over it, no strip of prose
+    // showing between the two.
+    expect(Math.abs(g.toolbarTop - g.barBottom)).toBeLessThanOrEqual(1);
+
+    // And usable from there: select a word of the on-screen prose (a
+    // double-click on the text itself — a whole-line click lands in the
+    // paragraph's empty tail) and bold it from the pinned toolbar, without any
+    // scrolling. A real selection, not a bare caret: toggling a mark on an
+    // empty selection only stores it for the next keystroke, and nothing
+    // re-syncs the button until the document actually changes.
+    const bold = toolbar.getByRole("button", { name: /bold/i });
+    await expect(bold).toBeInViewport();
+    await editor
+      .locator("p", { hasText: "Paragraph 20" })
+      .dblclick({ position: { x: 20, y: 10 } });
+    await bold.click();
+    await expect(editor.locator("strong")).toHaveCount(1);
+    await expect(editor.locator("strong")).toContainText("Paragraph");
+    await expect(bold).toHaveAttribute("aria-pressed", "true");
+    // Still pinned after the round-trip: bolding didn't scroll the page.
+    const after = await geometry();
+    expect(after.hostTop).toBeLessThan(0);
+    expect(Math.abs(after.toolbarTop - after.barBottom)).toBeLessThanOrEqual(1);
+  });
+
   test("reorder blocks via drag-and-drop (SortableJS)", async ({ page }) => {
     await newDraftPage(page);
     await page.fill('input[name$="[title]"]', "E2E Reorder");
