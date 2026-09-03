@@ -36,10 +36,12 @@ defmodule Kiln.Advisory.BodyTest do
         %{"_type" => "heading", "text" => "Second", "level" => 2}
       ]
 
+      # Each carries the top-level index it lives in — what the editor's
+      # click-to-locate scrolls to when a check names the heading.
       assert Body.compute(blocks).headings == [
-               %{level: 1, text: "Top"},
-               %{level: 3, text: "Nested"},
-               %{level: 2, text: "Second"}
+               %{level: 1, text: "Top", index: 0},
+               %{level: 3, text: "Nested", index: 1},
+               %{level: 2, text: "Second", index: 2}
              ]
     end
   end
@@ -76,7 +78,7 @@ defmodule Kiln.Advisory.BodyTest do
 
       stats = Body.compute(blocks)
 
-      assert stats.headings == [%{level: 2, text: "In a column"}]
+      assert stats.headings == [%{level: 2, text: "In a column", index: 1}]
       assert stats.image_count == 1
       # Attributed to the columns block's own slot, which is what the editor
       # can actually scroll to.

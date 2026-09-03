@@ -3,8 +3,8 @@
 Where the suite's remaining blind spots are, in the order they are worth
 closing, and why each one is on the list. Written against a full measured run
 on 2026-08-22: **7,344 tests, 0 failures, 83.1% line coverage**, floor 82.5
-(`coveralls.json`). Batches 1-5 below have since landed; the suite now measures
-**83.5% locally over 7,471 tests**, the floor has moved to **82.7**, and the
+(`coveralls.json`). Batches 1-6 below have since landed; the suite now measures
+**83.6% locally over 7,493 tests**, the floor has moved to **82.7**, and the
 Playwright suite is at 25 journeys.
 
 Reproduce the numbers with:
@@ -15,7 +15,7 @@ Reproduce the numbers with:
 This is not a plan to reach a percentage. The floor exists so coverage cannot
 silently fall (see CONTRIBUTING.md), and every item below earns its place by
 naming a *behaviour nothing currently proves* — not by the size of its
-uncovered block. Five items are listed as already done so the patterns they
+uncovered block. Six items are listed as already done so the patterns they
 set are reusable; the rest are ordered by what a defect there would cost.
 
 ## Ground rule for anything added here
@@ -169,30 +169,64 @@ could still resolve — holds either way and is tested for its own sake.
 The controller's remaining 18% is its three "could not record / could not
 enqueue → 500" paths, which need fault injection to reach.
 
+### 6. A/V workers — `av_worker_test.exs`, `av_quarantine_test.exs`
+
+`AVWorker` was 51% and `AVStripWorker` 55%, and the reason was one shared
+cause rather than two gaps: **every A/V fixture in the suite is a file ffmpeg
+cannot read.** It is a hand-written 24-byte ISO-BMFF header — right for the
+"no ffprobe" and "could not remux" branches those files were written for, and
+useless for anything past them. So the whole success path had never executed:
+probe, duration, dimensions, poster extraction, poster storage, and the strip
+worker's promote-the-remuxed-copy path.
+
+The fix is a real fixture — a 64x48 one-second `testsrc` clip from ffmpeg
+itself, ~3 KB and milliseconds to make — behind the repo's existing `:ffmpeg`
+tag, so it skips where the binary is absent exactly like its neighbours.
+**51% → 91%** and **55% → 86%**.
+
+What that buys, beyond the number:
+
+* a gated video is measured but gets **no poster** — a still of a members-only
+  video must not land in public storage, and the existing test could only
+  simulate that by writing the poster by hand;
+* re-running the worker does not erase what the first run measured (it has
+  `max_attempts: 3`, and the `put_*` clauses omit rather than nil);
+* audio gets a duration and no dimensions;
+* the strip worker promotes the **stripped** bytes (asserted by comparing
+  against the uploaded bytes, not just by "a blob exists"), re-measures
+  `byte_size` from the remux, and refuses a remux that outgrew the size cap.
+
+What is left in both is fault injection — storage failing mid-write, a probe
+that succeeds while the poster extraction fails — plus two `Logger.error`
+arms for a promotion that cannot happen with a working store.
+
 ## Next
 
-### 6. Media pipeline workers — `av_worker` 51%, `av_strip_worker` 55%, `ingest` 64%
+### 7. `KilnCMS.Media.Ingest` — 64%, and it needs a seam first
 
-99 uncovered lines across three modules that run against uploaded files. The
-gap is real rather than an artifact of tag exclusion: the measured run was on a
-host *with* ffmpeg, so the `:ffmpeg` tests ran and `:no_ffmpeg` was the half
-excluded. (On a host without it the pair inverts, which is the point of having
-both — but it also means these two modules read differently depending on the
-machine, so re-measure locally before deciding what is missing.)
+Left out of batch 6 deliberately. Its unsafe-URL guard is already well covered
+(`store_url/2` refuses loopback, private ranges, link-local and `file://`), and
+almost everything still uncovered is behind one obstacle: `download/1` calls
+`SafeFetch.get/2` with **no `req_options`**, so there is no way to point it at
+a `Req.Test` stub. Every comparable module in the tree takes one from config —
+`Webhooks`, `OEmbed`, `Federation`, `Links.External`, `Storage.S3`, `Unsplash`,
+`Updates` — so `Ingest` is the anomaly, and the fetch that most deserves a
+test is the one that cannot have one. This is the most content-chosen fetch
+in the system: the URLs come out of a WXR file someone uploaded.
 
-What is left is the failure branches, and they need no ffmpeg: unreadable
-input, an output that exceeds the cap, a strip that finds nothing to strip, a
-job whose media row vanished between enqueue and run — the same
-deleted-since-enqueue gate the mail workers now cover.
+Adding `req_options: KilnCMS.Media.Ingest.req_options()` and a `config/test.exs`
+entry would follow the established convention and unlock the HTTP-status,
+too-large, and filename-derivation branches. That is a small lib change, so it
+wants its own PR rather than riding along with tests.
 
-### 7. `KilnCMS.Storage.S3` — 56% (25 uncovered)
+### 8. `KilnCMS.Storage.S3` — 56% (25 uncovered)
 
 `config/test.exs` already points it at `Req.Test`, so the Bluesky stub
 pattern transfers directly. Cover the error branches: a 403 from a wrong
 credential, a 404 on delete, a truncated multipart. Storage failures surface
 to editors as lost uploads, and none of these paths has ever run.
 
-### 8. `KilnCMS.Portability.CLI` — 6% (62 uncovered)
+### 9. `KilnCMS.Portability.CLI` — 6% (62 uncovered)
 
 The thinnest-covered non-macro module in the tree. `Portability.Export` (80%)
 and `Portability.Import` (79%) carry the logic, so this is argument parsing,
@@ -200,7 +234,7 @@ output formatting, and exit codes — cheap to cover with a captured-IO test per
 subcommand, and worth it because a wrong exit code here breaks somebody's
 migration script silently.
 
-### 9. Console screens at 46–65%
+### 10. Console screens at 46–65%
 
 `newsletter_live` (46%, 86 uncovered), `settings_live` (57%, 88),
 `experiments_live` (60%, 45), `field_definition_live` (64%, 60),
@@ -210,7 +244,7 @@ percentage: for each screen, list the events its template can push, and cover
 the ones with a persistence or authorization consequence. The rest is
 rendering that a snapshot would pin without proving anything.
 
-### 10. Mix tasks — 51.6% as a directory (587 uncovered)
+### 11. Mix tasks — 51.6% as a directory (587 uncovered)
 
 `kiln.federation` (0/40) and `kiln.audit.checkpoint` (0/46) have never run;
 `kiln.update` is 14%, `kiln.toolchain.check` 17%. The number reads worse than

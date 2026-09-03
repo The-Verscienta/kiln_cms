@@ -60,8 +60,34 @@ locale. `field` names the input the advisory is about, which is how the editor
 knows to show a slug advisory next to the slug input rather than only in the
 panel.
 
-Findings that name specific blocks (images missing alt text) carry
-`args.indexes`; the editor turns those into jump links.
+Findings that name specific blocks (images missing alt text, a skipped heading
+level, a "click here" link) carry `args.indexes` — the **top-level** block
+index, since that is what the editor can scroll to. The editor turns those into
+"block n" jump links, and they are what click-to-locate reads first.
+
+### Click to locate
+
+Every rendered finding is a button. Clicking it scrolls the editor to what the
+finding is about and highlights it: the alt-text input of the offending image,
+the `<a>` with the uninformative text, the empty `<h3>`, the sidebar's SEO
+description field. The resolution happens in the browser
+(`assets/js/advisory_jump.js`) from `data-jump-*` attributes the row carries,
+so a check does not need to know anything about the editor's DOM — it only has
+to put the right things in `args`:
+
+| `args` key | Rendered as        | Used for                                          |
+| ---------- | ------------------ | ------------------------------------------------- |
+| `indexes`  | `data-jump-blocks` | the block(s) to scroll to and pulse                |
+| `example`  | `data-jump-text`   | a phrase to find and highlight inside the prose    |
+| `max`      | `data-jump-max`    | a word limit, to pick out the paragraphs over it   |
+| `to`       | `data-jump-level`  | the heading level that skipped                     |
+| `paths`    | `data-jump-hrefs`  | link hrefs that don't resolve                      |
+
+`code` and `field` always ride along. With no `indexes`, a `field` other than
+`:body` points at the sidebar input of that name; `:body` with nothing else
+falls back to the block canvas. A plugin check that names blocks gets the
+jump for free; one with a code the client doesn't know still lands on the
+right block and pulses it, which is the honest minimum.
 
 ### Checks must be pure and fast
 
@@ -82,7 +108,8 @@ appearing, check the logs before assuming the logic is wrong.
 ## Rendering
 
 `KilnCMSWeb.AdvisoryComponents` renders findings — severity tone and icon, the
-grade pill, the "n of m" counter, jump links. It takes a `message_fn`, so a new
+grade pill, the "n of m" counter, jump links and the click-to-locate button
+each row is. It takes a `message_fn`, so a new
 panel supplies only its own code-to-sentence table:
 
 ```heex

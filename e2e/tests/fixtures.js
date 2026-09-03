@@ -41,6 +41,23 @@ async function waitForLiveConnected(page) {
   });
 }
 
+// The refute_receive of the browser world (#1352): assert that `read()` keeps
+// returning `expected` at every sample across a window covering a LiveView
+// debounce + patch. For "a patch must NOT change X", a single expect() can
+// pass before the patch even arrives, and an auto-retrying expect would hide
+// a flap that self-corrects — tag_picker_midsession.spec.js documents that
+// trap. Sampling holds the claim open across the whole window instead; any
+// one bad sample fails, naming what changed. `expected` is compared
+// structurally, so `read` may return an object of probes.
+async function holdsAcross(page, read, expected, { windowMs = 900, stepMs = 100 } = {}) {
+  const deadline = Date.now() + windowMs;
+  for (;;) {
+    base.expect(await read()).toEqual(expected);
+    if (Date.now() >= deadline) return;
+    await page.waitForTimeout(stepMs);
+  }
+}
+
 // Wrap a page's navigation methods so the guard runs after every full page
 // load. In-app live navigation (phx-click → push_navigate) reuses the
 // already-connected socket, so only full loads need it. Shared by the `page`
@@ -321,4 +338,5 @@ module.exports = {
   deleteContentByTitle,
   deleteContentById,
   deleteTagByName,
+  holdsAcross,
 };

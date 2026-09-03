@@ -1721,6 +1721,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # maps — normalize them to the lists their {:array, :map} fields cast.
     params =
       params
+      |> reconcile_blocks(socket.assigns.form)
       |> inject_children(socket.assigns.block_children)
       |> inject_rich_bodies(socket.assigns.rich_bodies)
       |> normalize_item_rows()
@@ -3070,6 +3071,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
     params =
       params
+      |> reconcile_blocks(socket.assigns.form)
       |> inject_children(socket.assigns.block_children)
       |> inject_rich_bodies(socket.assigns.rich_bodies)
       |> normalize_item_rows()
@@ -4239,6 +4241,128 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   defp block_input_map(%AshPhoenix.Form{} = sub), do: block_field_map(sub, "_union_type")
+
+  # ── Stale block params (#1334) ──────────────────────────────────────────────
+  #
+  # A phx-change/phx-submit's `blocks` params are a snapshot of the DOM the
+  # CLIENT had rendered when the event fired — never an instruction to add or
+  # remove a block, which have their own server events (add_block /
+  # duplicate_block / remove_block; order is server-owned too, via
+  # reorder / move_block). `AshPhoenix.Form.validate/2` doesn't know that: once
+  # `blocks` is touched, its params are authoritative — a nested form with no
+  # matching entry is REMOVED, and an entry matching no form has a fresh form
+  # CREATED from it (which raises, since the DOM entries carry no
+  # `_union_type`). So a keystroke that raced `add_block` — fired between the
+  # click and the patch that renders the new block — silently deleted the
+  # block the user just chose, a Save in the same window persisted the loss,
+  # and a keystroke racing `remove_block` crashed the whole editor session.
+  #
+  # Reconcile instead of trusting the snapshot: client entries are kept
+  # verbatim, in their order (they carry the user's newest keystrokes); a
+  # server-side block whose id the client never rendered is re-inserted at its
+  # server position, with the sub-form's own params; and a client entry whose
+  # id the server no longer knows is dropped rather than turned into a new
+  # form. Every rendered block carries its id as a hidden input, so an entry
+  # without one (or any `blocks` shape this doesn't recognize) passes through
+  # untouched, exactly as before.
+  defp reconcile_blocks(params, form) do
+    case block_entry_list(params["blocks"]) do
+      {:ok, client} -> do_reconcile_blocks(params, form, client)
+      :error -> params
+    end
+  end
+
+  defp do_reconcile_blocks(params, form, client) do
+    subforms =
+      form
+      |> ash_form()
+      |> Map.get(:forms, %{})
+      |> Map.get(:blocks, [])
+      |> List.wrap()
+
+    server_ids = subforms |> Enum.map(&block_form_id/1) |> Enum.map(&stable_id/1)
+    known = MapSet.new(server_ids) |> MapSet.delete(nil)
+    client_ids = client |> Enum.map(&entry_id/1) |> MapSet.new() |> MapSet.delete(nil)
+
+    kept =
+      Enum.reject(client, fn entry ->
+        case entry_id(entry) do
+          nil -> false
+          id -> not MapSet.member?(known, id)
+        end
+      end)
+
+    merged =
+      server_ids
+      |> Enum.zip(subforms)
+      |> Enum.with_index()
+      |> Enum.reduce(kept, fn {{id, sub}, index}, acc ->
+        if is_nil(id) or MapSet.member?(client_ids, id) do
+          acc
+        else
+          List.insert_at(acc, min(index, length(acc)), missing_block_entry(form, sub, id))
+        end
+      end)
+
+    if merged == client do
+      params
+    else
+      blocks =
+        merged
+        |> Enum.with_index()
+        |> Map.new(fn {entry, index} -> {Integer.to_string(index), entry} end)
+
+      Map.put(params, "blocks", blocks)
+    end
+  end
+
+  # The params to re-insert for a block the client hasn't rendered yet: the
+  # form's own serialized entry (for a just-added block that is exactly what
+  # `add_block` passed to `add_form` — `_union_type` + id), falling back to the
+  # sub-form's full field map (the same shape `duplicate_block` feeds back in).
+  defp missing_block_entry(form, sub, id) do
+    with {:ok, entries} <- block_entry_list(AshPhoenix.Form.params(form)["blocks"]),
+         %{} = entry <- Enum.find(entries, &(entry_id(&1) == id)) do
+      entry
+    else
+      _ -> block_input_map(sub)
+    end
+  end
+
+  # `blocks` params as an ordered list of map entries: the DOM submits an
+  # index-keyed map, `AshPhoenix.Form.params/1` returns a list. Anything else
+  # (junk keys, non-map entries) is `:error` — the caller then leaves the
+  # params exactly as they arrived.
+  defp block_entry_list(nil), do: {:ok, []}
+
+  defp block_entry_list(blocks) when is_list(blocks) do
+    if Enum.all?(blocks, &is_map/1), do: {:ok, blocks}, else: :error
+  end
+
+  defp block_entry_list(blocks) when is_map(blocks) do
+    blocks
+    |> Enum.reduce_while([], fn {key, entry}, acc ->
+      with true <- is_map(entry),
+           {index, ""} <- Integer.parse(to_string(key)) do
+        {:cont, [{index, entry} | acc]}
+      else
+        _ -> {:halt, :error}
+      end
+    end)
+    |> case do
+      :error -> :error
+      indexed -> {:ok, indexed |> Enum.sort() |> Enum.map(&elem(&1, 1))}
+    end
+  end
+
+  defp block_entry_list(_other), do: :error
+
+  defp entry_id(%{"id" => id}), do: stable_id(id)
+  defp entry_id(_entry), do: nil
+
+  defp stable_id(id) when is_binary(id) and id != "", do: id
+  defp stable_id(nil), do: nil
+  defp stable_id(id), do: to_string(id)
 
   # The declared fields of a block sub-form as a string-keyed map, tagged with its
   # block type under `type_key` and carrying the stable `id`. The only thing that
@@ -8757,6 +8881,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     phx-hook="BlockPresence"
                     data-block-id={bf[:id].value}
                     data-block-threads={discussion_state(@comments, @tasks, bf[:id].value)}
+                    data-block-type={block_type_string(bf)}
                     class="group rounded border border-base-content/15 p-3"
                   >
                     <%!-- Carries the block's stable id into save/validate params so

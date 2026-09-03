@@ -55,11 +55,30 @@ defmodule KilnCMSWeb.AdvisoryComponents do
     """
   end
 
+  # Every index a finding names rides along in `data-jump-blocks`, so the
+  # client can highlight all fifty un-alt'd images at once even though only
+  # five get a link. Capped all the same, so the attribute can't grow without
+  # bound on a pathological document.
+  @max_marked_blocks 50
+
   @doc """
   The findings list. Renders nothing when there are none, so a clean document
   shows no noise at all.
 
   `message_fn` turns a `Kiln.Advisory.Finding` into a translated sentence.
+
+  ## Click to locate
+
+  Each row is a button. Clicking it scrolls the editor to whatever the finding
+  is about and highlights it — the alt-text input of the image with none, the
+  "click here" link inside a rich-text block, the SEO description field — via
+  the delegated handler in `assets/js/advisory_jump.js`. The row carries what
+  that handler needs as `data-jump-*` attributes (see `jump_attrs/2`): the
+  code, the field, the block indexes, and whichever of the finding's args can
+  narrow the target further (an example phrase, a word limit, a heading level,
+  the broken paths). Without JavaScript the "block n" links still work as
+  plain fragment links; the row itself does nothing, which is the honest
+  fallback for a purely visual affordance.
   """
   attr :findings, :list, required: true
   attr :message_fn, :any, required: true
@@ -74,13 +93,23 @@ defmodule KilnCMSWeb.AdvisoryComponents do
       >
         <.icon name={severity_icon(finding.severity)} class="mt-0.5 size-3.5 shrink-0" />
         <span>
-          {@message_fn.(finding)}
+          <%!-- `type="button"`: the panel sits inside the editor's main
+                <.form>, where the default type would submit it. --%>
+          <button
+            type="button"
+            class="text-left underline-offset-2 hover:underline focus-visible:underline"
+            title={gettext("Show this in the editor")}
+            {jump_attrs(finding, Finding.block_indexes(finding, max_marked_blocks()))}
+          >
+            {@message_fn.(finding)}
+          </button>
           <%!-- Findings that name specific blocks link straight to them; the
                 editor gives every top-level block an `id="block-<index>"`. --%>
           <a
             :for={index <- Finding.block_indexes(finding, max_jump_links())}
             href={"#block-#{index}"}
             class="ml-1 underline underline-offset-2"
+            {jump_attrs(finding, [index])}
           >
             {gettext("block %{position}", position: index + 1)}
           </a>
@@ -91,6 +120,34 @@ defmodule KilnCMSWeb.AdvisoryComponents do
   end
 
   defp max_jump_links, do: @max_jump_links
+  defp max_marked_blocks, do: @max_marked_blocks
+
+  @doc """
+  The `data-jump-*` attributes for one finding — the contract with
+  `assets/js/advisory_jump.js`.
+
+  `indexes` is the block list to render, already capped by the caller. Absent
+  values render no attribute at all (Phoenix drops nil attrs), so the client
+  reads "no example phrase" as a missing key rather than an empty string.
+
+  `hrefs` is JSON rather than a delimited list: a path is author-written text
+  and can contain any delimiter we might pick.
+  """
+  @spec jump_attrs(Finding.t(), [non_neg_integer()]) :: map()
+  def jump_attrs(%Finding{} = finding, indexes) do
+    args = finding.args || %{}
+
+    %{
+      "data-advisory-jump" => true,
+      "data-jump-code" => finding.code,
+      "data-jump-field" => finding.field,
+      "data-jump-blocks" => if(indexes != [], do: Enum.join(indexes, ",")),
+      "data-jump-text" => args[:example],
+      "data-jump-max" => args[:max],
+      "data-jump-level" => args[:to],
+      "data-jump-hrefs" => if(is_list(args[:paths]), do: Jason.encode!(args[:paths]))
+    }
+  end
 
   defp grade_label(:good), do: gettext("Good")
   defp grade_label(:ok), do: gettext("Needs work")

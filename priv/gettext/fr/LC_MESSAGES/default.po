@@ -8874,6 +8874,11 @@ msgstr "Afficher la mention « Propulsé par » dans le pied de page public"
 msgid "Show the Compliance panel in the editor"
 msgstr "Afficher le panneau Conformité dans l'éditeur"
 
+#: lib/kiln_cms_web/components/advisory_components.ex
+#, elixir-autogen, elixir-format
+msgid "Show this in the editor"
+msgstr "Afficher ceci dans l’éditeur"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Showing only blocks that need attention."
