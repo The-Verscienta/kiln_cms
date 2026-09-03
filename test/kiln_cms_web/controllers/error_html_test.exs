@@ -1,9 +1,13 @@
 defmodule KilnCMSWeb.ErrorHTMLTest do
   # `async: true` holds because every key this module writes is unique to a test
   # — `org/1` suffixes the slug, org ids are UUIDs — so the process-global
-  # branding cache is never contended. The one globally-observable assertion is
-  # that the DEFAULT org renders the stock attribution, which would flake if any
-  # async test ever seeded a `SiteBranding` row on the default org.
+  # branding cache is never contended. Nothing here asserts the DEFAULT org's
+  # branding CONTENT any more (#1355): a tenantless render resolves the default
+  # org's `SiteBranding` row (`Branding.for_org(nil)` routes there), so any
+  # async test seeding that row — even just `show_attribution: false` — would
+  # have flipped those assertions. Tenantless renders are asserted on
+  # branding-immune structure; the stock-attribution claim runs against an org
+  # this module owns; the nil-routes-to-default seam is pinned directly.
   use KilnCMSWeb.ConnCase, async: true
 
   # Bring render_to_string/4 for testing custom views
@@ -11,11 +15,13 @@ defmodule KilnCMSWeb.ErrorHTMLTest do
   import KilnCMS.OrgFixtures
 
   # #145: 404 is a branded page in the public chrome with recovery links.
+  # Structure only — a tenantless render resolves the DEFAULT org's branding,
+  # which this async module cannot own; the attribution content is asserted
+  # below against an org of this module's own (#1355).
   test "renders a branded 404.html with public chrome and recovery links" do
     html = render_to_string(KilnCMSWeb.ErrorHTML, "404", "html", [])
 
     assert html =~ "Page not found"
-    assert html =~ "Powered by KilnCMS."
     assert html =~ ~s(href="/blog")
   end
 
@@ -62,6 +68,28 @@ defmodule KilnCMSWeb.ErrorHTMLTest do
       end
     end
 
+    # The stock-attribution branch, on an org THIS test owns: a tenant without
+    # its own `SiteBranding` row goes through the same `branded?/1` fallback a
+    # tenantless render does, so the "Powered by KilnCMS." rendering is pinned
+    # here — where no other async test's default-org seed can touch it (#1355).
+    test "an org without its own branding renders the stock attribution" do
+      o = org("unbranded")
+      conn = %{Phoenix.ConnTest.build_conn() | assigns: %{current_org: o}}
+
+      html = render_to_string(KilnCMSWeb.ErrorHTML, "404", "html", conn: conn)
+
+      assert html =~ "Powered by KilnCMS."
+    end
+
+    # The seam the tenantless renders below rely on, pinned without depending
+    # on WHAT the default org's branding currently says: no resolved tenant
+    # resolves as the default org (#1124's fail-open direction), whatever row
+    # some other test may have seeded there.
+    test "no resolved tenant resolves the default org's branding" do
+      assert KilnCMS.Branding.for_org(nil) ==
+               KilnCMS.Branding.for_org(KilnCMS.Accounts.default_org_id())
+    end
+
     test "end to end: a routing 404 on a tenant's host carries that tenant's brand",
          %{conn: conn} do
       o = branded_org("Acme Tenant")
@@ -100,8 +128,11 @@ defmodule KilnCMSWeb.ErrorHTMLTest do
       assert html =~ "/assets/css/app.css"
       assert html =~ "<title"
       # The inner chrome is still there too — root wraps Layouts.public, not
-      # replaces it.
-      assert html =~ "Powered by"
+      # replaces it. Structural evidence (the layout's header nav), not the
+      # attribution line: this conn resolves the DEFAULT org, whose branding —
+      # including `show_attribution: false` — any other test may seed (#1355).
+      assert html =~ ~s(href="/blog")
+      assert html =~ "<header"
     end
 
     test "the two 404 surfaces on one host render with the same chrome", %{conn: conn} do
@@ -131,14 +162,18 @@ defmodule KilnCMSWeb.ErrorHTMLTest do
     # tolerate a half-built conn, because that is precisely the request that
     # raised. A 500 renderer that itself raises is the loop (#558).
     for status <- ["403", "404", "500"] do
-      test "#{status} with no resolved tenant still renders, on the operator defaults" do
-        assert render_to_string(KilnCMSWeb.ErrorHTML, unquote(status), "html", []) =~
-                 "Powered by KilnCMS."
+      test "#{status} with no resolved tenant still renders" do
+        # Branding-immune structure only (#1355): what the default org's
+        # branding SAYS is another test's row to seed. The status copy and a
+        # recovery link prove the render happened and the template is whole.
+        copy = status_copy(unquote(status))
+
+        assert render_to_string(KilnCMSWeb.ErrorHTML, unquote(status), "html", []) =~ copy
 
         bare = %{Phoenix.ConnTest.build_conn() | assigns: %{}}
 
         assert render_to_string(KilnCMSWeb.ErrorHTML, unquote(status), "html", conn: bare) =~
-                 "Powered by KilnCMS."
+                 copy
       end
 
       # ...and the same through the ROOT layout, which is where the real risk
@@ -162,8 +197,12 @@ defmodule KilnCMSWeb.ErrorHTMLTest do
 
         assert html =~ "<!DOCTYPE html"
         assert html =~ "/assets/css/app.css"
-        assert html =~ "Powered by KilnCMS."
+        assert html =~ status_copy(unquote(status))
       end
     end
+
+    defp status_copy("403"), do: "Access denied"
+    defp status_copy("404"), do: "Page not found"
+    defp status_copy("500"), do: "Something went wrong"
   end
 end
