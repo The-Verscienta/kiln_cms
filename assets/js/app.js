@@ -874,6 +874,15 @@ const liveSocket = new LiveSocket("/live", Socket, {
     // `data-server-open` (last seen server value) is seeded by the document
     // "toggle" listener below and kept current here.
     onBeforeElUpdated(from, to) {
+      // The advisory click-to-locate marks (assets/js/advisory_jump.js) are
+      // client-side classes on server-rendered elements — the block card, an
+      // alt input — and the very act of landing on one triggers a patch
+      // (BlockPresence reports the focus; a sidebar field pushes
+      // `field_focus`) that would otherwise strip them the instant they
+      // appeared. Carry them across; the module removes them itself.
+      for (const cls of ["kiln-issue-mark", "kiln-focus-pulse"]) {
+        if (from.classList.contains(cls)) to.classList.add(cls)
+      }
       if (from.tagName === "DETAILS") {
         const serverOpen = to.hasAttribute("open")
         const prevServerOpen = from.dataset.serverOpen

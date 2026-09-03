@@ -122,13 +122,17 @@ defmodule KilnCMSWeb.AdvisoryComponents do
   defp max_jump_links, do: @max_jump_links
   defp max_marked_blocks, do: @max_marked_blocks
 
-  # The `data-jump-*` contract with `assets/js/advisory_jump.js`. Absent
-  # values render no attribute at all (Phoenix drops nil attrs), so the client
-  # reads "no example phrase" as a missing key rather than an empty string.
-  #
-  # `hrefs` is JSON rather than a delimited list: a path is attacker-authored
-  # text and can contain any delimiter we might pick.
-  @doc false
+  @doc """
+  The `data-jump-*` attributes for one finding — the contract with
+  `assets/js/advisory_jump.js`.
+
+  `indexes` is the block list to render, already capped by the caller. Absent
+  values render no attribute at all (Phoenix drops nil attrs), so the client
+  reads "no example phrase" as a missing key rather than an empty string.
+
+  `hrefs` is JSON rather than a delimited list: a path is author-written text
+  and can contain any delimiter we might pick.
+  """
   @spec jump_attrs(Finding.t(), [non_neg_integer()]) :: map()
   def jump_attrs(%Finding{} = finding, indexes) do
     args = finding.args || %{}

@@ -8756,8 +8756,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     data-sort-id={bf.index}
                     phx-hook="BlockPresence"
                     data-block-id={bf[:id].value}
-                    data-block-type={block_type_string(bf)}
                     data-block-threads={discussion_state(@comments, @tasks, bf[:id].value)}
+                    data-block-type={block_type_string(bf)}
                     class="group rounded border border-base-content/15 p-3"
                   >
                     <%!-- Carries the block's stable id into save/validate params so
