@@ -71,6 +71,6 @@ defmodule KilnCMSWeb.StrictEditorMountTest do
     conn = log_in(conn, authed_admin())
     {:ok, view, _html} = live(conn, ~p"/editor/overview")
 
-    assert has_element?(view, "#bagua-gen")
+    assert has_element?(view, "#overview-structure")
   end
 end

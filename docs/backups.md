@@ -84,7 +84,7 @@ Rules that make this a strategy rather than a script:
 
 The console has a **Backups** page (`/editor/backups`, admin only) showing when
 the last backup ran, how big it was, which files it produced and whether each
-verified — plus a **Back up now** button. The bagua overview grows a red strip
+verified — plus a **Back up now** button. The overview grid grows a red strip
 when the newest backup is older than `BACKUP_STALE_AFTER_HOURS` (default 36),
 or when there has never been one.
 
