@@ -137,12 +137,19 @@ defmodule KilnCMSWeb.SocketReauth do
   one closed socket, not a closed channel followed by a closed socket that then
   rejoins nothing. (`socket.transport_pid` is the test process under
   `Phoenix.ChannelTest`, so a test asserts on the broadcast directly.)
+
+  The one implementation for every refusal that needs it —
+  `KilnCMSWeb.SocketEventBudget.close_connection/1` delegates here — so the
+  mechanism cannot drift between the re-authorization and budget paths. The
+  transport matches on the `"disconnect"` event alone; the topic is
+  informational (visible only in server-side tracing) and deliberately
+  neutral, since it labels both kinds of refusal.
   """
   @spec close_connection(Phoenix.Socket.t()) :: :ok
   def close_connection(%Phoenix.Socket{transport_pid: transport_pid})
       when is_pid(transport_pid) do
     send(transport_pid, %Phoenix.Socket.Broadcast{
-      topic: "socket_reauth",
+      topic: "socket_disconnect",
       event: "disconnect",
       payload: %{}
     })
