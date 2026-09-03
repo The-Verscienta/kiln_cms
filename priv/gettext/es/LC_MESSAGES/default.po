@@ -8874,6 +8874,11 @@ msgstr "Mostrar la línea «Con tecnología de» en el pie de página público"
 msgid "Show the Compliance panel in the editor"
 msgstr "Mostrar el panel Cumplimiento en el editor"
 
+#: lib/kiln_cms_web/components/advisory_components.ex
+#, elixir-autogen, elixir-format
+msgid "Show this in the editor"
+msgstr "Mostrar esto en el editor"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Showing only blocks that need attention."

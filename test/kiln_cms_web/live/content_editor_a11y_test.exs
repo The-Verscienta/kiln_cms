@@ -242,8 +242,12 @@ defmodule KilnCMSWeb.ContentEditorA11yTest do
 
     {_lv, html} = open_editor(conn, user, page)
 
-    refute html =~ "link_text_uninformative"
-    refute html =~ "headings_empty"
+    # The visible prose, not the raw markup: every row legitimately carries
+    # its code in a `data-jump-code` attribute for click-to-locate, so the
+    # thing that must not appear is the atom rendered AS the sentence.
+    text = html |> Floki.parse_document!() |> Floki.text()
+    refute text =~ "link_text_uninformative"
+    refute text =~ "headings_empty"
 
     [_a11y, seo_section] = String.split(html, "SEO &amp; scheduling", parts: 2)
     assert seo_section =~ "anchor text tells search engines"

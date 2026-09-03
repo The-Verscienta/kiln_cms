@@ -30,7 +30,14 @@ defmodule Kiln.Advisory.Body do
   alias KilnCMS.CMS.BlockText
   alias KilnCMS.CMS.TypedBlocks
 
-  @type heading :: %{level: pos_integer(), text: String.t()}
+  @typedoc """
+  One heading, with the top-level block it lives in.
+
+  `index` is what lets the editor jump to a heading a check names — a skipped
+  level is reported *at* the heading that skipped, not just as a pair of
+  numbers — and, like a link's, it is the index of the top-level ancestor.
+  """
+  @type heading :: %{level: pos_integer(), text: String.t(), index: non_neg_integer()}
 
   @typedoc """
   One link, with the text a reader actually sees.
@@ -470,7 +477,10 @@ defmodule Kiln.Advisory.Body do
   defp add_heading(acc, level, text, index) do
     if blank?(text),
       do: %{acc | empty_headings: [index | acc.empty_headings]},
-      else: %{acc | headings: [%{level: level, text: String.trim(text)} | acc.headings]}
+      else: %{
+        acc
+        | headings: [%{level: level, text: String.trim(text), index: index} | acc.headings]
+      }
   end
 
   defp add_paragraph(acc, text) do

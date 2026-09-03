@@ -494,6 +494,88 @@ defmodule KilnCMSWeb.ContentEditorSeoTest do
       assert html =~ ~s(href="#block-2")
       assert html =~ "block 3"
     end
+
+    # The row itself is a click-to-locate button: the client reads the
+    # `data-jump-*` attributes to scroll to the block and highlight the alt
+    # input (assets/js/advisory_jump.js). The block card carries its type so
+    # the client can tell a heading block's text input from a quote's.
+    test "a finding row carries what the client needs to locate it", %{conn: conn} do
+      editor = authed_user(:editor)
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Gallery",
+            slug: "jump-data",
+            blocks: prose_blocks() ++ [%{"_type" => "image", "url" => "/a.jpg", "alt" => ""}]
+          },
+          actor: editor
+        )
+
+      {_lv, html} = open_editor(conn, editor, page)
+
+      # Alt text is a shared check, so the row appears once per panel —
+      # accessibility first, then SEO — each with the same location data.
+      rows =
+        html
+        |> Floki.parse_document!()
+        |> Floki.find(~s(button[data-advisory-jump][data-jump-code="images_missing_alt"]))
+
+      assert length(rows) == 2
+      row = hd(rows)
+
+      assert Floki.attribute(row, "type") == ["button"]
+      assert Floki.attribute(row, "data-jump-field") == ["images"]
+      assert Floki.attribute(row, "data-jump-blocks") == ["2"]
+      assert Floki.text(row) =~ "no alt text"
+
+      # The "block n" link is enhanced by the same handler, one block at a time.
+      assert html =~ ~s(href="#block-2")
+
+      assert [_a11y_link, _seo_link] =
+               html
+               |> Floki.parse_document!()
+               |> Floki.find(~s(a[data-advisory-jump][data-jump-blocks="2"][href="#block-2"]))
+
+      assert html =~ ~s(id="block-2" data-sort-id="2")
+      assert html =~ ~s(data-block-type="image")
+    end
+
+    test "a field-level finding names its field, and an example phrase rides along", %{
+      conn: conn
+    } do
+      editor = authed_user(:editor)
+
+      shout = %{
+        "_type" => "rich_text",
+        "body" => [
+          %{
+            "_type" => "block",
+            "style" => "normal",
+            "children" => [%{"text" => "THIS IS ALL SHOUTED AT THE READER for no reason."}]
+          }
+        ]
+      }
+
+      page =
+        CMS.create_page!(
+          %{title: "Loud", slug: "jump-field", seo_description: nil, blocks: [shout]},
+          actor: editor
+        )
+
+      {_lv, html} = open_editor(conn, editor, page)
+      doc = Floki.parse_document!(html)
+
+      # No block index, no field: the client searches the prose for the phrase.
+      [caps] = Floki.find(doc, ~s(button[data-jump-code="all_caps_run"]))
+      assert Floki.attribute(caps, "data-jump-field") == ["body"]
+      assert Floki.attribute(caps, "data-jump-blocks") == []
+      assert Floki.attribute(caps, "data-jump-text") == ["THIS IS ALL SHOUTED AT THE READER"]
+
+      # A field finding points at the sidebar input by name.
+      [desc] = Floki.find(doc, ~s(button[data-jump-code="seo_description_missing"]))
+      assert Floki.attribute(desc, "data-jump-field") == ["seo_description"]
+    end
   end
 
   describe "internal links panel" do

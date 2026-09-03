@@ -360,7 +360,23 @@ defmodule KilnCMS.Seo.AnalyzerTest do
       report = analyze(%{}, blocks)
       finding = Enum.find(report.findings, &(&1.code == :heading_levels_skipped))
 
-      assert finding.args == %{from: 2, to: 5}
+      # `indexes` names the heading that skipped — the last block — so the
+      # editor can jump to the one the author has to change.
+      assert finding.args == %{from: 2, to: 5, indexes: [length(long_body())]}
+    end
+
+    test "a skipped level inside a rich-text block is located by its top-level index" do
+      deep = %{
+        "_type" => "rich_text",
+        "body" => [%{"_type" => "block", "style" => "h4", "children" => [%{"text" => "Deep"}]}]
+      }
+
+      blocks = long_body() ++ [%{"_type" => "heading", "text" => "Fine", "level" => 2}, deep]
+
+      report = analyze(%{}, blocks)
+      finding = Enum.find(report.findings, &(&1.code == :heading_levels_skipped))
+
+      assert finding.args == %{from: 2, to: 4, indexes: [length(long_body()) + 1]}
     end
 
     test "long content with no headings at all is reported" do
