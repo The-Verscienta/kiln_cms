@@ -10,6 +10,14 @@ defmodule KilnCMS.Media.AVWorkerTest do
   The exception is `revoke_poster_if_gated/2`, which is a security property
   rather than a nice-to-have and is reachable without ffmpeg by writing the
   poster the worker would have written.
+
+  The `:ffmpeg` block at the end is the other half, and it needs a **real**
+  file: the fixture above is a plausible-looking byte string that ffprobe
+  refuses, which is exactly right for the degraded cases and useless for the
+  successful one. It generates a 1-second 64x48 clip with ffmpeg itself
+  (~3 KB), so everything the worker writes on a good probe — duration,
+  dimensions, and a poster stored under a real key — is asserted against a
+  file ffprobe genuinely measured.
   """
   use KilnCMS.DataCase, async: false
 
@@ -165,6 +173,144 @@ defmodule KilnCMS.Media.AVWorkerTest do
 
       assert :ok = AVWorker.revoke_poster_if_gated(gated, gated.org_id)
       assert CMS.get_media_item!(item.id, authorize?: false).variants == %{}
+    end
+  end
+
+  test "the job declares a finite ceiling" do
+    # Not decoration: closing an Erlang port does not signal the OS child, so
+    # an ffmpeg spinning on CPU is bounded by its own `-timelimit` and this is
+    # what stops the *job* holding a `:media` queue slot behind it. A change
+    # here is a decision, so it is pinned exactly.
+    assert AVWorker.timeout(%Oban.Job{}) == :timer.minutes(5)
+  end
+
+  describe "with ffmpeg present" do
+    # A real, tiny clip: `testsrc` at 64x48 for one second is ~3 KB and takes
+    # milliseconds to produce. The dimensions are deliberately not a common
+    # default, so an assertion on 64x48 cannot pass by coincidence.
+    defp real_video!(attrs \\ %{}) do
+      src = Path.join(System.tmp_dir!(), "avw-real-#{System.unique_integer([:positive])}.mp4")
+
+      {_out, 0} =
+        System.cmd(
+          "ffmpeg",
+          ~w(-hide_banner -loglevel error -y -f lavfi -i testsrc=size=64x48:rate=10:duration=1
+             -pix_fmt yuv420p) ++ [src],
+          stderr_to_stdout: true
+        )
+
+      on_exit(fn -> File.rm(src) end)
+
+      key = Storage.generate_key("clip.mp4")
+      {:ok, ^key} = Storage.store(key, src)
+
+      CMS.create_media_item!(
+        Map.merge(
+          %{
+            filename: "clip.mp4",
+            content_type: "video/mp4",
+            storage_key: key,
+            url: Storage.url(key)
+          },
+          attrs
+        ),
+        authorize?: false
+      )
+    end
+
+    @tag :ffmpeg
+    test "a good probe writes duration, dimensions and a poster" do
+      item = real_video!()
+
+      assert :ok = perform(item)
+
+      written = CMS.get_media_item!(item.id, authorize?: false)
+      # ffprobe reports the container's duration, which for a generated clip
+      # is a shade over the requested second — assert the neighbourhood, not
+      # an exact float.
+      assert_in_delta written.duration_seconds, 1.0, 0.5
+      assert written.width == 64
+      assert written.height == 48
+
+      assert %{"poster" => %{"key" => key, "url" => url, "width" => 64, "height" => 48}} =
+               written.variants
+
+      # The poster is a real stored blob, not just a row that claims one.
+      assert {:ok, bytes} = Storage.fetch(key)
+      assert byte_size(bytes) > 0
+      assert url =~ key
+    end
+
+    @tag :ffmpeg
+    test "a gated video is measured but gets no poster" do
+      # A poster renders as a plain <img> from public storage, so extracting
+      # one for a members-only video would publish a still of it. The
+      # measurements are not secret and are still written.
+      # `audience` is not a create input — gating is an update, and it moves
+      # the blob to private storage on the way (`MigrateMediaStorage`), so this
+      # also exercises the worker's private download.
+      {:ok, item} = CMS.update_media_item(real_video!(), %{audience: :member}, authorize?: false)
+
+      assert :ok = perform(item)
+
+      written = CMS.get_media_item!(item.id, authorize?: false)
+      assert written.width == 64
+      assert (written.variants || %{}) == %{}
+    end
+
+    @tag :ffmpeg
+    test "a second run does not erase what the first measured" do
+      # `max_attempts: 3`, so a retry re-probes. The put_* clauses omit rather
+      # than nil a measurement they could not take, and this is the property
+      # that protects: running twice must not downgrade the row.
+      item = real_video!()
+      assert :ok = perform(item)
+      first = CMS.get_media_item!(item.id, authorize?: false)
+
+      assert :ok = perform(CMS.get_media_item!(item.id, authorize?: false))
+      second = CMS.get_media_item!(item.id, authorize?: false)
+
+      assert second.width == first.width
+      assert second.height == first.height
+      assert second.duration_seconds == first.duration_seconds
+      assert map_size(second.variants) == 1
+    end
+
+    @tag :ffmpeg
+    test "audio gets a duration and no dimensions" do
+      src = Path.join(System.tmp_dir!(), "avw-tone-#{System.unique_integer([:positive])}.m4a")
+
+      {_out, 0} =
+        System.cmd(
+          "ffmpeg",
+          ~w(-hide_banner -loglevel error -y -f lavfi -i sine=frequency=440:duration=1) ++ [src],
+          stderr_to_stdout: true
+        )
+
+      on_exit(fn -> File.rm(src) end)
+
+      key = Storage.generate_key("tone.m4a")
+      {:ok, ^key} = Storage.store(key, src)
+
+      item =
+        CMS.create_media_item!(
+          %{
+            filename: "tone.m4a",
+            content_type: "audio/mp4",
+            storage_key: key,
+            url: Storage.url(key)
+          },
+          authorize?: false
+        )
+
+      assert :ok = perform(item)
+
+      written = CMS.get_media_item!(item.id, authorize?: false)
+      assert_in_delta written.duration_seconds, 1.0, 0.5
+      # Audio has no dimensions, and a poster frame is meaningless for it.
+      assert is_nil(written.width)
+      assert is_nil(written.height)
+      assert (written.variants || %{}) == %{}
     end
   end
 end
