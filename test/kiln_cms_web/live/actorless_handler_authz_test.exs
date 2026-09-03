@@ -163,7 +163,12 @@ defmodule KilnCMSWeb.ActorlessHandlerAuthzTest do
 
       KilnCMSWeb.LinkReportLive.handle_event("check_now", %{}, socket)
 
-      assert KilnCMS.Repo.all(Oban.Job) == []
+      # Scoped to the worker this handler would have enqueued (#1354): global
+      # emptiness is a claim about every other suite's leftovers.
+      refute Enum.any?(
+               KilnCMS.Repo.all(Oban.Job),
+               &String.starts_with?(&1.worker, "KilnCMS.Links.SweepWorker")
+             )
     end
   end
 

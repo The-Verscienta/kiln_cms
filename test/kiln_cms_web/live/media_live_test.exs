@@ -65,6 +65,15 @@ defmodule KilnCMSWeb.MediaLiveTest do
   end
 
   describe "library filter" do
+    # Only this suite's own dispatch targets (#1354): both media workers share
+    # the KilnCMS.Media. prefix, so the AV-vs-Variant claims stay exact while
+    # jobs from other suites sharing the sandbox stay out of the assertion.
+    defp media_jobs do
+      Oban.Job
+      |> KilnCMS.Repo.all()
+      |> Enum.filter(&String.starts_with?(&1.worker, "KilnCMS.Media."))
+    end
+
     defp seed_media(filename) do
       Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
         filename: filename,
@@ -776,9 +785,11 @@ defmodule KilnCMSWeb.MediaLiveTest do
       assert File.exists?(Path.join(root, item.storage_key))
 
       # A/V goes to AVWorker, NOT the image VariantWorker — the whole point of
-      # `enqueue_processing/1`'s dispatch, and invisible without this.
-      assert [%Oban.Job{worker: "KilnCMS.Media.AVWorker", args: args}] =
-               KilnCMS.Repo.all(Oban.Job)
+      # `enqueue_processing/1`'s dispatch, and invisible without this. Scoped
+      # to the media workers (#1354): this module is async: false, so the
+      # shared sandbox can carry another suite's unrelated jobs, and a
+      # whole-table match would break on them rather than on this claim.
+      assert [%Oban.Job{worker: "KilnCMS.Media.AVWorker", args: args}] = media_jobs()
 
       assert args["media_item_id"] == item.id
     end
@@ -795,7 +806,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
       assert render_upload(input, "pixel.png")
       lv |> element("#upload-form") |> render_submit()
 
-      assert [%Oban.Job{worker: "KilnCMS.Media.VariantWorker"}] = KilnCMS.Repo.all(Oban.Job)
+      assert [%Oban.Job{worker: "KilnCMS.Media.VariantWorker"}] = media_jobs()
     end
 
     test "a caption track enqueues no job at all — there is nothing to derive", %{conn: conn} do
@@ -810,7 +821,11 @@ defmodule KilnCMSWeb.MediaLiveTest do
       assert render_upload(input, "captions.vtt")
       lv |> element("#upload-form") |> render_submit()
 
-      assert KilnCMS.Repo.all(Oban.Job) == []
+
+
+      # "No job" means no MEDIA job (#1354) — global emptiness is a claim
+      # about every other test's leftovers, not about this upload.
+      assert [] = media_jobs()
     end
 
     test "byte_size records the STORED file, not the client's declared size", %{
