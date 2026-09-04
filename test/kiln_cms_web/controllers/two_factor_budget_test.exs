@@ -30,8 +30,9 @@ defmodule KilnCMSWeb.TwoFactorBudgetTest do
         second_factor_budget: @budget,
         # Widened, not tightened. These are fixed windows, so a rollover between
         # spending the budget and asserting the refusal would turn a 429 into a
-        # 401 — the shape of the already-open flake #697. A long window makes
-        # that vanishingly unlikely; nothing here waits for one to roll.
+        # 401 — the shape of flake #697 (closed by exactly this hour-wide-window
+        # convention). A long window makes that vanishingly unlikely; nothing
+        # here waits for one to roll.
         second_factor_window: :timer.hours(1)
       )
     )
