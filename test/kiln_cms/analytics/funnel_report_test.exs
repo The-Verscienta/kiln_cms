@@ -19,7 +19,7 @@ defmodule KilnCMS.Analytics.FunnelReportTest do
     })
   end
 
-  defp today, do: Date.utc_today()
+  # today/0: one memoized clock read per test — see KilnCMS.Test.StableDay (#1358).
 
   defp org, do: KilnCMS.Accounts.default_org()
 

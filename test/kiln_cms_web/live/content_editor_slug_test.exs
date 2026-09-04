@@ -165,29 +165,34 @@ defmodule KilnCMSWeb.ContentEditorSlugTest do
   test "a dynamic type's slug pattern drives the editor's live derivation", %{conn: conn} do
     admin = authed_user(:admin)
 
-    type =
-      CMS.create_type_definition!(
-        %{
-          name: "dyn#{System.unique_integer([:positive])}",
-          label: "Dynamic",
-          slug_pattern: "[yyyy]-[title]"
-        },
-        actor: admin
-      )
+    # The editor expands `[yyyy]` on the app's clock; the assertion's year is
+    # the test's. A New-Year's-Eve roll between them re-runs once on a fresh
+    # type + entry so the retry is fully scoped (#1358).
+    stable_day(fn day ->
+      type =
+        CMS.create_type_definition!(
+          %{
+            name: "dyn#{System.unique_integer([:positive])}",
+            label: "Dynamic",
+            slug_pattern: "[yyyy]-[title]"
+          },
+          actor: admin
+        )
 
-    n = System.unique_integer([:positive])
+      n = System.unique_integer([:positive])
 
-    entry =
-      KilnCMS.CMS.ContentTypes.create!(
-        type.name,
-        %{title: "Untitled entry", slug: "untitled-#{n}"},
-        actor: admin
-      )
+      entry =
+        KilnCMS.CMS.ContentTypes.create!(
+          type.name,
+          %{title: "Untitled entry", slug: "untitled-#{n}"},
+          actor: admin
+        )
 
-    lv = open_editor(conn, admin, entry, type.name)
+      lv = open_editor(conn, admin, entry, type.name)
 
-    change(lv, "title", %{"title" => "A Guide to the Kiln", "slug" => "untitled-#{n}"})
-    assert slug_value(lv) == "#{Date.utc_today().year}-guide-kiln"
+      change(lv, "title", %{"title" => "A Guide to the Kiln", "slug" => "untitled-#{n}"})
+      assert slug_value(lv) == "#{day.year}-guide-kiln"
+    end)
   end
 
   test "date tokens anchor to the record's creation date, not today", %{conn: conn} do

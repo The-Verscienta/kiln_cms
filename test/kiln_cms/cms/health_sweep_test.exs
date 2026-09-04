@@ -260,19 +260,24 @@ defmodule KilnCMS.CMS.HealthSweepTest do
 
     test "honours the rule's due window and note template" do
       admin = user(:admin)
-      stale = overdue_page(admin)
       task_rule!(admin, %{"due_in_days" => 3, "note" => "Re-read {{title}} please"})
 
-      sweep_and_drain!()
+      # The sweep computes `due_on` on the app's clock; the assertion's day is
+      # the test's. A midnight roll between them re-runs once on a fresh stale
+      # page, which scopes the task listing to the retry's run (#1358).
+      stable_day(fn day ->
+        stale = overdue_page(admin)
 
-      assert [task] = lifecycle_tasks(stale.id, admin)
-      assert task.due_on == Date.add(Date.utc_today(), 3)
-      assert task.note =~ stale.title
+        sweep_and_drain!()
+
+        assert [task] = lifecycle_tasks(stale.id, admin)
+        assert task.due_on == Date.add(day, 3)
+        assert task.note =~ stale.title
+      end)
     end
 
     test "clamps an out-of-range due window rather than trusting it" do
       admin = user(:admin)
-      stale = overdue_page(admin)
 
       # Seeded past the config validation, which refuses this at the form. The
       # worker must not trust stored config regardless: a rule can predate a
@@ -287,10 +292,15 @@ defmodule KilnCMS.CMS.HealthSweepTest do
         org_id: org_id()
       })
 
-      sweep_and_drain!()
+      # Same clock split as the due-window test above (#1358).
+      stable_day(fn day ->
+        stale = overdue_page(admin)
 
-      assert [task] = lifecycle_tasks(stale.id, admin)
-      assert task.due_on == Date.add(Date.utc_today(), 7)
+        sweep_and_drain!()
+
+        assert [task] = lifecycle_tasks(stale.id, admin)
+        assert task.due_on == Date.add(day, 7)
+      end)
     end
 
     test "a disabled rule does nothing" do

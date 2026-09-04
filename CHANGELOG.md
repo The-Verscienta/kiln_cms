@@ -247,6 +247,43 @@ migration, a rewritten column, a dropped config key).
   gaps (compile-time macro bodies, dev-only modules, deliberately excluded
   tags).
 
+### Changed
+
+- **CI's main gate is four parallel jobs instead of one serial one.** The
+  `Compile, lint, scan & test` job ran the compile, every lint, the suite
+  under coverage and then dialyzer back to back on one runner, and the last
+  green run before this change measured it at 17m57s while nothing else in
+  the workflow took more than five minutes: the coverage run alone was 8m51s,
+  dialyzer 2m02s. It is now `Compile, lint & scan` (the compile and the
+  static checks), `Test (shard n)` — the suite, plain, over four
+  `mix test --partitions` shards, each on its own Postgres with
+  `MIX_TEST_PARTITION` naming its database the way `config/test.exs` has
+  always allowed — `Coverage (full suite)`, unchanged in substance (the
+  `mix coveralls.multiple` run, the floor, the per-directory rollup and the
+  `coverage-report` artifact now live there), and `Dialyzer`. A fifth job
+  keeps the old name and waits on all four, so the "Require CI on main"
+  ruleset still gates on the one context it names — and now on everything
+  that context used to mean, not only what fit in one job. A failing test
+  surfaces at about four minutes rather than twelve. That first cut kept a
+  whole-suite coverage run beside the shards, which measured 12m05s alone;
+  the shards now run *under* coverage instead — six of them, each exporting
+  its raw `:cover` data (`mix coveralls.json --export-coverage`, the one
+  reporter that does not check the floor) — and `Coverage (full suite)`
+  imports the lot (`--import-cover`), runs no tests of its own, and enforces
+  the floor on the union. excoveralls has no partition mode, but those two
+  flags are all a merge needs, verified locally before wiring them.
+- **Every CI job stopped recompiling the whole app against a warm cache.**
+  The deps/_build cache hit its exact key on every run and every job still
+  printed `Compiling 847 files` — 70 to 108 seconds apiece — because a fresh
+  checkout stamps `mix.exs` and `config/*.exs` with the checkout time and Mix
+  reads a config file newer than its manifest as a config change (sources
+  are digest-checked; config is not). `.github/actions/mix-build-cache` now
+  owns the cache for the four main jobs: the key includes a digest of
+  `mix.exs` and `config/**`, and on an exact hit — which then proves the
+  restored build was compiled from byte-identical config — it backdates
+  those files so Mix trusts the build. A PR that touches config misses the
+  exact key and recompiles in full, as before.
+
 ### Removed
 
 - **A dead `blank_to_nil/1` in `KilnCMSWeb.CodeInjectionLive`.** It trimmed a

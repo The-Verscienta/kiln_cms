@@ -65,7 +65,7 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
     )
   end
 
-  defp today, do: Date.utc_today()
+  # today/0: one memoized clock read per test — see KilnCMS.Test.StableDay (#1358).
 
   describe "tier gate" do
     test "anonymous requests are forbidden", %{conn: conn} do

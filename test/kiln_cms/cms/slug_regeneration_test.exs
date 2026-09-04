@@ -79,26 +79,30 @@ defmodule KilnCMS.CMS.SlugRegenerationTest do
   test "a new slug pattern migrates existing entries with include_pinned" do
     admin = user(:admin)
 
-    type =
-      CMS.create_type_definition!(
-        %{name: "regen#{System.unique_integer([:positive])}", label: "Regen"},
-        actor: admin
-      )
+    # `run` expands `[yyyy]` on the app's clock; the assertion's year is the
+    # test's. A New-Year's-Eve roll between them re-runs once on a fresh,
+    # uniquely named type so the retry is fully scoped (#1358).
+    stable_day(fn day ->
+      type =
+        CMS.create_type_definition!(
+          %{name: "regen#{System.unique_integer([:positive])}", label: "Regen"},
+          actor: admin
+        )
 
-    entry = ContentTypes.create!(type.name, %{title: "Old Convention Post"}, actor: admin)
-    assert entry.slug == "old-convention-post"
+      entry = ContentTypes.create!(type.name, %{title: "Old Convention Post"}, actor: admin)
+      assert entry.slug == "old-convention-post"
 
-    CMS.update_type_definition!(type, %{slug_pattern: "[yyyy]-[title]"}, actor: admin)
+      CMS.update_type_definition!(type, %{slug_pattern: "[yyyy]-[title]"}, actor: admin)
 
-    # Under the new pattern every old slug looks hand-picked.
-    assert SlugRegeneration.preview(type.name, org()).changes == []
+      # Under the new pattern every old slug looks hand-picked.
+      assert SlugRegeneration.preview(type.name, org()).changes == []
 
-    summary = SlugRegeneration.run(type.name, org(), include_pinned: true, actor: admin)
-    year = Date.utc_today().year
-    assert [%{new: new}] = summary.changes
-    assert new == "#{year}-old-convention-post"
+      summary = SlugRegeneration.run(type.name, org(), include_pinned: true, actor: admin)
+      assert [%{new: new}] = summary.changes
+      assert new == "#{day.year}-old-convention-post"
 
-    assert ContentTypes.get_record!(type.name, entry.id, actor: admin).slug == new
+      assert ContentTypes.get_record!(type.name, entry.id, actor: admin).slug == new
+    end)
   end
 
   test "author-pinned slugs survive even a full include_pinned run only by explicit choice" do

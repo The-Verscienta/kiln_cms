@@ -67,6 +67,11 @@ defmodule KilnCMSWeb.AnalyticsLiveTest do
   end
 
   test "visiting a published page records both a total and a daily bucket", %{conn: conn} do
+    # `day` read BEFORE the tracked GET: the bucket lands on this day or the
+    # next, and `views_since` has no upper bound, so either way it is in the
+    # window — read-after-write is the ordering a midnight roll can exclude
+    # (#1358). No retry wrapper needed.
+    day = Date.utc_today()
     slug = "ana-#{System.unique_integer([:positive])}"
 
     page =
@@ -80,7 +85,7 @@ defmodule KilnCMSWeb.AnalyticsLiveTest do
     assert Enum.any?(Analytics.list_views!(authorize?: false), &(&1.content_id == page.id))
 
     assert Enum.any?(
-             Analytics.views_since!(Date.utc_today(), authorize?: false),
+             Analytics.views_since!(day, authorize?: false),
              &(&1.content_id == page.id and &1.views == 1)
            )
   end
@@ -128,7 +133,12 @@ defmodule KilnCMSWeb.AnalyticsLiveTest do
     test "days with no views are zero-filled rather than dropped", %{conn: conn} do
       {:ok, _lv, html} = live(conn, ~p"/editor/analytics?range=7")
 
-      # Only today has a view, so the other six days must still appear as rows.
+      # Only today has a view, so the other six days must still appear as
+      # rows. Read AFTER the mount, deliberately: the series is anchored on
+      # the app's clock at mount (day A, rows A-6..A) and a read taken after
+      # it returns A or A+1, so `six_days_ago` is A-6 or A-5 — both rendered
+      # whatever a midnight roll does. Reading *before* the mount is the
+      # ordering that can fall off the window (#1358 review).
       six_days_ago = Date.add(Date.utc_today(), -6)
       assert html =~ Date.to_iso8601(six_days_ago)
     end

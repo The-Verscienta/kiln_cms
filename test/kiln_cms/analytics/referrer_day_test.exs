@@ -20,7 +20,7 @@ defmodule KilnCMS.Analytics.ReferrerDayTest do
     })
   end
 
-  defp today, do: Date.utc_today()
+  # today/0: one memoized clock read per test — see KilnCMS.Test.StableDay (#1358).
 
   defp seed_bucket(attrs) do
     Ash.Seed.seed!(
@@ -36,44 +36,60 @@ defmodule KilnCMS.Analytics.ReferrerDayTest do
     ReferrerDay |> Ash.read!(authorize?: false)
   end
 
+  # Scoped to one content id — the default read inside a `stable_day` body,
+  # so a retry never trips over the first attempt's rows. Reach for the
+  # 0-arity whole-table form only outside a wrap (the retention test).
+  defp stored_rows(content_id) do
+    stored_rows() |> Enum.filter(&(&1.content_id == content_id))
+  end
+
   test "repeated arrivals from the same source on the same day increment one bucket" do
-    id = Ash.UUID.generate()
+    # `:record` buckets on the app's own clock read — a mid-body roll splits
+    # the three calls across two buckets, which only a re-run can absorb.
+    stable_day(fn day ->
+      id = Ash.UUID.generate()
 
-    Analytics.record_referrer!("page", id, :search, authorize?: false)
-    Analytics.record_referrer!("page", id, :search, authorize?: false)
-    Analytics.record_referrer!("page", id, :search, authorize?: false)
+      Analytics.record_referrer!("page", id, :search, authorize?: false)
+      Analytics.record_referrer!("page", id, :search, authorize?: false)
+      Analytics.record_referrer!("page", id, :search, authorize?: false)
 
-    day = today()
-
-    assert [%{content_type: "page", content_id: ^id, source: :search, hits: 3, day: ^day}] =
-             stored_rows()
+      assert [%{content_type: "page", content_id: ^id, source: :search, hits: 3, day: ^day}] =
+               stored_rows(id)
+    end)
   end
 
   test "different sources on the same content and day get separate buckets" do
-    id = Ash.UUID.generate()
+    # A roll between the :search and :social records would put the buckets on
+    # different days — same wrap as above.
+    stable_day(fn _day ->
+      id = Ash.UUID.generate()
 
-    Analytics.record_referrer!("page", id, :search, authorize?: false)
-    Analytics.record_referrer!("page", id, :social, authorize?: false)
-    Analytics.record_referrer!("page", id, :search, authorize?: false)
+      Analytics.record_referrer!("page", id, :search, authorize?: false)
+      Analytics.record_referrer!("page", id, :social, authorize?: false)
+      Analytics.record_referrer!("page", id, :search, authorize?: false)
 
-    rows = stored_rows() |> Enum.sort_by(& &1.source)
+      rows =
+        stored_rows(id) |> Enum.sort_by(& &1.source)
 
-    assert [%{source: :search, hits: 2}, %{source: :social, hits: 1}] = rows
+      assert [%{source: :search, hits: 2}, %{source: :social, hits: 1}] = rows
+    end)
   end
 
   test "the same source on a different day gets a separate bucket" do
-    id = Ash.UUID.generate()
-    yesterday = Date.add(today(), -1)
+    stable_day(fn day ->
+      id = Ash.UUID.generate()
+      yesterday = Date.add(day, -1)
 
-    seed_bucket(%{content_id: id, source: :direct, day: yesterday, hits: 5})
-    Analytics.record_referrer!("page", id, :direct, authorize?: false)
+      seed_bucket(%{content_id: id, source: :direct, day: yesterday, hits: 5})
+      Analytics.record_referrer!("page", id, :direct, authorize?: false)
 
-    # `Date` as the comparator: bare term ordering compares the struct's
-    # :day field first, so on the 1st of a month ~D[2026-09-01] sorts BEFORE
-    # ~D[2026-08-31] and this failed exactly one day a month.
-    rows = stored_rows() |> Enum.sort_by(& &1.day, Date)
+      # `Date` as the comparator: bare term ordering compares the struct's
+      # :day field first, so on the 1st of a month ~D[2026-09-01] sorts BEFORE
+      # ~D[2026-08-31] and this failed exactly one day a month.
+      rows = stored_rows(id) |> Enum.sort_by(& &1.day, Date)
 
-    assert [%{day: ^yesterday, hits: 5}, %{day: _today, hits: 1}] = rows
+      assert [%{day: ^yesterday, hits: 5}, %{day: ^day, hits: 1}] = rows
+    end)
   end
 
   test "source is bounded to the five known categories" do

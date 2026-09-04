@@ -18,7 +18,7 @@ defmodule KilnCMS.Analytics.ContentViewDayTest do
     })
   end
 
-  defp today, do: Date.utc_today()
+  # today/0: one memoized clock read per test — see KilnCMS.Test.StableDay (#1358).
 
   # Buckets for `day` are keyed by the identity, so a backdated one has to be
   # seeded directly — `:record` always writes today (the attribute is not
@@ -30,30 +30,42 @@ defmodule KilnCMS.Analytics.ContentViewDayTest do
     )
   end
 
+  # `views_since!` scoped to one content id — the default read inside a
+  # `stable_day` body, so a retry never trips over the first attempt's rows.
+  defp views_for(since, content_id) do
+    Analytics.views_since!(since, authorize?: false)
+    |> Enum.filter(&(&1.content_id == content_id))
+  end
+
   test "repeated views of the same content on the same day increment one bucket" do
-    id = Ash.UUID.generate()
+    # `:record` buckets on the app's own clock read — a mid-body roll splits
+    # the three calls across two buckets, which only a re-run can absorb.
+    stable_day(fn day ->
+      id = Ash.UUID.generate()
 
-    Analytics.record_view_day!("page", id, authorize?: false)
-    Analytics.record_view_day!("page", id, authorize?: false)
-    Analytics.record_view_day!("page", id, authorize?: false)
+      Analytics.record_view_day!("page", id, authorize?: false)
+      Analytics.record_view_day!("page", id, authorize?: false)
+      Analytics.record_view_day!("page", id, authorize?: false)
 
-    day = today()
-
-    assert [%{content_type: "page", content_id: ^id, views: 3, day: ^day}] =
-             Analytics.views_since!(day, authorize?: false)
+      assert [%{content_type: "page", content_id: ^id, views: 3, day: ^day}] =
+               views_for(day, id)
+    end)
   end
 
   test "the same content on different days gets separate buckets" do
-    id = Ash.UUID.generate()
-    yesterday = Date.add(today(), -1)
+    # Wrapped for the same reason as above: the `:record` half of the pair
+    # writes on the app's clock while `yesterday` is the test's.
+    stable_day(fn day ->
+      id = Ash.UUID.generate()
+      yesterday = Date.add(day, -1)
 
-    seed_bucket(%{content_id: id, day: yesterday, views: 5})
-    Analytics.record_view_day!("page", id, authorize?: false)
+      seed_bucket(%{content_id: id, day: yesterday, views: 5})
+      Analytics.record_view_day!("page", id, authorize?: false)
 
-    buckets = Analytics.views_since!(yesterday, authorize?: false)
-
-    # Sorted oldest first by the `:in_window` action.
-    assert [%{day: ^yesterday, views: 5}, %{views: 1}] = buckets
+      # Sorted oldest first by the `:in_window` action.
+      assert [%{day: ^yesterday, views: 5}, %{day: ^day, views: 1}] =
+               views_for(yesterday, id)
+    end)
   end
 
   test "views_since excludes buckets before the window" do
@@ -70,13 +82,18 @@ defmodule KilnCMS.Analytics.ContentViewDayTest do
   end
 
   test "buckets are visible to editors/admins but not viewers" do
+    # `day` read BEFORE the record: the bucket lands on this day or the
+    # next, and `views_since` has no upper bound, so either way it is in
+    # the window. Read-after-write is the ordering a midnight roll can
+    # exclude (#1358 review).
+    day = today()
     Analytics.record_view_day!("page", Ash.UUID.generate(), authorize?: false)
 
-    assert [_] = Analytics.views_since!(today(), actor: user(:editor))
-    assert [_] = Analytics.views_since!(today(), actor: user(:admin))
+    assert [_] = Analytics.views_since!(day, actor: user(:editor))
+    assert [_] = Analytics.views_since!(day, actor: user(:admin))
 
     # The read policy filters non-editors to nothing.
-    assert [] = Analytics.views_since!(today(), actor: user(:viewer))
+    assert [] = Analytics.views_since!(day, actor: user(:viewer))
   end
 
   # Mirrors the ContentView case in analytics_policies_test: the OrgAdmin bypass
