@@ -251,25 +251,32 @@ defmodule KilnCMS.Experiments.LifecycleTest do
   end
 
   describe "counters" do
-    setup ctx do
-      experiment = experiment!(ctx)
-      variant = ExperimentFixtures.variant!(experiment, "Control", %{}, ctx.org_id, control: true)
-      %{variant: variant}
-    end
-
     test "impressions and conversions accumulate on one row per day", ctx do
-      for _ <- 1..3 do
-        Experiments.record_impression!(ctx.variant.id, authorize?: false, tenant: ctx.org_id)
-      end
+      # `record_*` buckets on the app's own clock read, so a midnight roll
+      # under the four calls would split them across two day rows. Re-run
+      # once on the new day, on a fresh experiment, reading back only its
+      # variant's rows so the retry never sees the first attempt's (#1358).
+      stable_day(fn day ->
+        experiment = experiment!(ctx)
 
-      Experiments.record_conversion!(ctx.variant.id, authorize?: false, tenant: ctx.org_id)
+        variant =
+          ExperimentFixtures.variant!(experiment, "Control", %{}, ctx.org_id, control: true)
 
-      assert [day] =
-               Ash.read!(KilnCMS.Experiments.VariantDay, authorize?: false, tenant: ctx.org_id)
+        for _ <- 1..3 do
+          Experiments.record_impression!(variant.id, authorize?: false, tenant: ctx.org_id)
+        end
 
-      assert day.impressions == 3
-      assert day.conversions == 1
-      assert day.day == Date.utc_today()
+        Experiments.record_conversion!(variant.id, authorize?: false, tenant: ctx.org_id)
+
+        assert [row] =
+                 KilnCMS.Experiments.VariantDay
+                 |> Ash.read!(authorize?: false, tenant: ctx.org_id)
+                 |> Enum.filter(&(&1.variant_id == variant.id))
+
+        assert row.impressions == 3
+        assert row.conversions == 1
+        assert row.day == day
+      end)
     end
   end
 

@@ -18,7 +18,9 @@ defmodule KilnCMS.Analytics.ContentViewDayTest do
     })
   end
 
-  defp today, do: Date.utc_today()
+  # `today/0` is KilnCMS.Test.StableDay's: ONE clock read per test, so every
+  # seeded bucket and window bound in a test derives from the same day and a
+  # run straddling UTC midnight can't disagree with itself (#1358).
 
   # Buckets for `day` are keyed by the identity, so a backdated one has to be
   # seeded directly — `:record` always writes today (the attribute is not
@@ -31,29 +33,40 @@ defmodule KilnCMS.Analytics.ContentViewDayTest do
   end
 
   test "repeated views of the same content on the same day increment one bucket" do
-    id = Ash.UUID.generate()
+    # `:record` buckets on the app's own clock read, so a midnight roll under
+    # the three calls would split them across two buckets. `stable_day`
+    # re-runs once on the new day; the fresh id + filter keep the retry from
+    # tripping over the first attempt's rows (#1358).
+    stable_day(fn day ->
+      id = Ash.UUID.generate()
 
-    Analytics.record_view_day!("page", id, authorize?: false)
-    Analytics.record_view_day!("page", id, authorize?: false)
-    Analytics.record_view_day!("page", id, authorize?: false)
+      Analytics.record_view_day!("page", id, authorize?: false)
+      Analytics.record_view_day!("page", id, authorize?: false)
+      Analytics.record_view_day!("page", id, authorize?: false)
 
-    day = today()
-
-    assert [%{content_type: "page", content_id: ^id, views: 3, day: ^day}] =
-             Analytics.views_since!(day, authorize?: false)
+      assert [%{content_type: "page", content_id: ^id, views: 3, day: ^day}] =
+               Analytics.views_since!(day, authorize?: false)
+               |> Enum.filter(&(&1.content_id == id))
+    end)
   end
 
   test "the same content on different days gets separate buckets" do
-    id = Ash.UUID.generate()
-    yesterday = Date.add(today(), -1)
+    # Wrapped for the same reason as above: the `:record` half of the pair
+    # writes on the app's clock while `yesterday` is the test's.
+    stable_day(fn day ->
+      id = Ash.UUID.generate()
+      yesterday = Date.add(day, -1)
 
-    seed_bucket(%{content_id: id, day: yesterday, views: 5})
-    Analytics.record_view_day!("page", id, authorize?: false)
+      seed_bucket(%{content_id: id, day: yesterday, views: 5})
+      Analytics.record_view_day!("page", id, authorize?: false)
 
-    buckets = Analytics.views_since!(yesterday, authorize?: false)
+      buckets =
+        Analytics.views_since!(yesterday, authorize?: false)
+        |> Enum.filter(&(&1.content_id == id))
 
-    # Sorted oldest first by the `:in_window` action.
-    assert [%{day: ^yesterday, views: 5}, %{views: 1}] = buckets
+      # Sorted oldest first by the `:in_window` action.
+      assert [%{day: ^yesterday, views: 5}, %{day: ^day, views: 1}] = buckets
+    end)
   end
 
   test "views_since excludes buckets before the window" do

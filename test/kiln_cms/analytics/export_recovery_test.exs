@@ -68,7 +68,9 @@ defmodule KilnCMS.Analytics.ExportRecoveryTest do
     user
   end
 
-  defp today, do: Date.utc_today()
+  # `today/0` is KilnCMS.Test.StableDay's: ONE clock read per test, so every
+  # seeded bucket and window bound in a test derives from the same day and a
+  # run straddling UTC midnight can't disagree with itself (#1358).
 
   # One content item on one day: the exact view total the export prints, and the
   # referrer breakdown that sums to it. Every classified arrival writes one hit

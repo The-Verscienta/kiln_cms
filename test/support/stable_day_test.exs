@@ -64,6 +64,52 @@ defmodule KilnCMS.Test.StableDayTest do
       refute_received {:ran, _}
     end
 
+    test "an assertion failure with the day rolled is the flake itself: retried once" do
+      # The realistic shape: the app wrote the new day mid-body, so the first
+      # attempt's assertion raises before stable_day's own clock check runs.
+      clock = clock_returning([~D[2026-01-15], ~D[2026-01-16]])
+
+      result =
+        StableDay.stable_day(
+          fn day ->
+            send(self(), {:ran, day})
+            assert day == ~D[2026-01-16], "first attempt fails like a mid-body roll"
+            :survived
+          end,
+          clock
+        )
+
+      assert result == :survived
+      assert_received {:ran, ~D[2026-01-15]}
+      assert_received {:ran, ~D[2026-01-16]}
+      refute_received {:ran, _}
+    end
+
+    test "an assertion failure with the day unchanged is a real failure: reraised" do
+      clock = clock_returning([~D[2026-01-15]])
+
+      assert_raise ExUnit.AssertionError, ~r/genuinely broken/, fn ->
+        StableDay.stable_day(
+          fn day ->
+            send(self(), {:ran, day})
+            flunk("genuinely broken")
+          end,
+          clock
+        )
+      end
+
+      assert_received {:ran, ~D[2026-01-15]}
+      refute_received {:ran, _}
+    end
+
+    test "non-assertion errors are never absorbed, rolled day or not" do
+      clock = clock_returning([~D[2026-01-15], ~D[2026-01-16]])
+
+      assert_raise RuntimeError, "boom", fn ->
+        StableDay.stable_day(fn _day -> raise "boom" end, clock)
+      end
+    end
+
     test "each attempt re-primes today/0 to its own day" do
       clock = clock_returning([~D[2026-01-15], ~D[2026-01-16]])
 

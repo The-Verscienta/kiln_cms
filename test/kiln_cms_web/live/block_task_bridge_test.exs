@@ -83,15 +83,20 @@ defmodule KilnCMSWeb.BlockTaskBridgeTest do
     end
 
     test "seeds the note from the root comment and a due date a week out", ctx do
-      target = page(ctx.editor)
-      comment(target, block_id(target), ctx.editor, "This paragraph contradicts the intro")
+      # The seeded due date is computed on the app's clock at the click; the
+      # assertion's day is the test's. A midnight roll between them re-runs
+      # once on a fresh page + editor session (#1358).
+      stable_day(fn day ->
+        target = page(ctx.editor)
+        comment(target, block_id(target), ctx.editor, "This paragraph contradicts the intro")
 
-      lv = open_editor(ctx.conn, ctx.editor, target)
-      render_click(lv, "comment_open", %{"bid" => block_id(target)})
-      html = render_click(lv, "block_task_open", %{"bid" => block_id(target)})
+        lv = open_editor(ctx.conn, ctx.editor, target)
+        render_click(lv, "comment_open", %{"bid" => block_id(target)})
+        html = render_click(lv, "block_task_open", %{"bid" => block_id(target)})
 
-      assert html =~ "This paragraph contradicts the intro"
-      assert html =~ Date.to_iso8601(Date.add(Date.utc_today(), 7))
+        assert html =~ "This paragraph contradicts the intro"
+        assert html =~ Date.to_iso8601(Date.add(day, 7))
+      end)
     end
 
     # The seed comes from `Mentions.resolve/2` — the same call that decides who
@@ -141,24 +146,29 @@ defmodule KilnCMSWeb.BlockTaskBridgeTest do
     end
 
     test "assigning persists the block and shows up on that block's pin", ctx do
-      target = page(ctx.editor)
-      comment(target, block_id(target), ctx.editor, "Needs a source")
+      # `due_on` is written on the app's clock at submit; the assertion's day
+      # is the test's. A midnight roll between them re-runs once on a fresh
+      # page, which scopes `tasks_for` to the retry's run (#1358).
+      stable_day(fn day ->
+        target = page(ctx.editor)
+        comment(target, block_id(target), ctx.editor, "Needs a source")
 
-      lv = open_editor(ctx.conn, ctx.editor, target)
-      render_click(lv, "comment_open", %{"bid" => block_id(target)})
-      render_click(lv, "block_task_open", %{"bid" => block_id(target)})
-      render_change(lv, "block_task_draft", %{"task_assignee_id" => ctx.editor.id})
-      html = render_click(lv, "block_task_submit", %{"bid" => block_id(target)})
+        lv = open_editor(ctx.conn, ctx.editor, target)
+        render_click(lv, "comment_open", %{"bid" => block_id(target)})
+        render_click(lv, "block_task_open", %{"bid" => block_id(target)})
+        render_change(lv, "block_task_draft", %{"task_assignee_id" => ctx.editor.id})
+        html = render_click(lv, "block_task_submit", %{"bid" => block_id(target)})
 
-      assert [task] = tasks_for(target, ctx.editor)
-      assert task.block_id == block_id(target)
-      assert task.assignee_id == ctx.editor.id
-      assert task.due_on == Date.add(Date.utc_today(), 7)
-      assert task.note == "Needs a source"
-      # `nil` = follow the site setting, which is the blank option's meaning.
-      assert is_nil(task.auto_complete_on_publish)
+        assert [task] = tasks_for(target, ctx.editor)
+        assert task.block_id == block_id(target)
+        assert task.assignee_id == ctx.editor.id
+        assert task.due_on == Date.add(day, 7)
+        assert task.note == "Needs a source"
+        # `nil` = follow the site setting, which is the blank option's meaning.
+        assert is_nil(task.auto_complete_on_publish)
 
-      assert html =~ "Task created on this block."
+        assert html =~ "Task created on this block."
+      end)
     end
 
     test "the per-task publish override survives the form", ctx do

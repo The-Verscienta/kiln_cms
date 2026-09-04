@@ -43,20 +43,31 @@ defmodule KilnCMS.Test.StableDay do
   Run `fun` with today's date; re-run it exactly once iff UTC midnight
   passed while it ran. Returns the surviving attempt's result.
 
+  The roll usually surfaces as a *failed assertion* in the first attempt
+  (the app wrote the new day, the body compared against the captured one),
+  so an `ExUnit.AssertionError` is caught and, **only if the day actually
+  rolled**, retried; with the day unchanged it reraises untouched — a real
+  failure is never absorbed, and nothing but assertion errors is caught.
+
   The `clock` argument exists for this module's own test.
   """
   @spec stable_day((Date.t() -> result), (-> Date.t())) :: result when result: var
   def stable_day(fun, clock \\ &Date.utc_today/0) do
     day = clock.()
     Process.put(@key, day)
-    result = fun.(day)
 
-    if clock.() == day do
-      result
-    else
-      day = clock.()
-      Process.put(@key, day)
-      fun.(day)
+    try do
+      result = fun.(day)
+      if clock.() == day, do: result, else: rerun(fun, clock)
+    rescue
+      error in [ExUnit.AssertionError] ->
+        if clock.() == day, do: reraise(error, __STACKTRACE__), else: rerun(fun, clock)
     end
+  end
+
+  defp rerun(fun, clock) do
+    day = clock.()
+    Process.put(@key, day)
+    fun.(day)
   end
 end

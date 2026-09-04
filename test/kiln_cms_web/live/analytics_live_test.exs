@@ -67,22 +67,27 @@ defmodule KilnCMSWeb.AnalyticsLiveTest do
   end
 
   test "visiting a published page records both a total and a daily bucket", %{conn: conn} do
-    slug = "ana-#{System.unique_integer([:positive])}"
+    # The inline track buckets on the app's clock while `views_since` gets the
+    # test's day; a midnight roll between them re-runs once on a fresh page,
+    # whose unique slug keeps the retry's assertions scoped (#1358).
+    stable_day(fn day ->
+      slug = "ana-#{System.unique_integer([:positive])}"
 
-    page =
-      Ash.Seed.seed!(CMS.Page, %{title: "Viewed", slug: slug, state: :published})
+      page =
+        Ash.Seed.seed!(CMS.Page, %{title: "Viewed", slug: slug, state: :published})
 
-    # `config/test.exs` sets `:async_analytics, false`, so `track_view/3` takes
-    # the *inline* branch and the delivery GET really does record on this test's
-    # sandbox connection — no explicit record_view! is needed to make this pass.
-    conn |> get(~p"/#{page.slug}") |> html_response(200)
+      # `config/test.exs` sets `:async_analytics, false`, so `track_view/3` takes
+      # the *inline* branch and the delivery GET really does record on this test's
+      # sandbox connection — no explicit record_view! is needed to make this pass.
+      conn |> get(~p"/#{page.slug}") |> html_response(200)
 
-    assert Enum.any?(Analytics.list_views!(authorize?: false), &(&1.content_id == page.id))
+      assert Enum.any?(Analytics.list_views!(authorize?: false), &(&1.content_id == page.id))
 
-    assert Enum.any?(
-             Analytics.views_since!(Date.utc_today(), authorize?: false),
-             &(&1.content_id == page.id and &1.views == 1)
-           )
+      assert Enum.any?(
+               Analytics.views_since!(day, authorize?: false),
+               &(&1.content_id == page.id and &1.views == 1)
+             )
+    end)
   end
 
   describe "trend range" do
@@ -126,11 +131,16 @@ defmodule KilnCMSWeb.AnalyticsLiveTest do
     end
 
     test "days with no views are zero-filled rather than dropped", %{conn: conn} do
-      {:ok, _lv, html} = live(conn, ~p"/editor/analytics?range=7")
+      # The series is anchored on the app's clock at mount; `six_days_ago` is
+      # the test's. A roll between the two reads drops the boundary row out of
+      # the 7-day window entirely, so re-run the (read-only) mount once (#1358).
+      stable_day(fn day ->
+        {:ok, _lv, html} = live(conn, ~p"/editor/analytics?range=7")
 
-      # Only today has a view, so the other six days must still appear as rows.
-      six_days_ago = Date.add(Date.utc_today(), -6)
-      assert html =~ Date.to_iso8601(six_days_ago)
+        # Only today has a view, so the other six days must still appear as rows.
+        six_days_ago = Date.add(day, -6)
+        assert html =~ Date.to_iso8601(six_days_ago)
+      end)
     end
   end
 
