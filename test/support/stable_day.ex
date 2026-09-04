@@ -23,10 +23,18 @@ defmodule KilnCMS.Test.StableDay do
 
   A `stable_day/1` body must be safe to run twice: create its fixtures
   inside the function (unique ids/slugs) and scope its assertions to them,
-  so a retry never trips over the first attempt's leftovers. Inside the
-  body, derive every date from the `day` the function is given — a bare
-  `Date.utc_today()` in there re-introduces the second read (`today/0` is
-  safe: each attempt re-primes it).
+  so a retry never trips over the first attempt's leftovers. The retry runs
+  *on top of* the first attempt's committed side effects — DB rows, emails
+  already in the Swoosh test mailbox, messages already in the test process
+  inbox — none of which is rewound, so unscoped *negative* reads
+  (`refute_email_sent/0`, a bare `refute_received`) inside a body need the
+  same care as positive ones. Inside the body, derive every date from the
+  `day` the function is given — a bare `Date.utc_today()` in there
+  re-introduces the second read (`today/0` is safe: each attempt re-primes
+  it). And do not seed fixtures from `today/0` *before* the wrap and
+  compare them inside it: `stable_day` re-primes the memo from the clock at
+  entry, so after a roll the wrap's `day` is already a different day than
+  those fixtures.
   """
 
   @key {__MODULE__, :today}
@@ -56,18 +64,35 @@ defmodule KilnCMS.Test.StableDay do
     day = clock.()
     Process.put(@key, day)
 
-    try do
-      result = fun.(day)
-      if clock.() == day, do: result, else: rerun(fun, clock)
-    rescue
-      error in [ExUnit.AssertionError] ->
-        if clock.() == day, do: reraise(error, __STACKTRACE__), else: rerun(fun, clock)
+    # The retry is dispatched OUTSIDE the try: a rerun that fails must
+    # propagate, never be re-caught by this same rescue (which would run the
+    # body a THIRD time and could absorb a real failure — the clock no
+    # longer matches `day` once a roll has happened, so the reraise guard
+    # alone cannot tell a retry's genuine failure from the original roll).
+    attempt =
+      try do
+        result = fun.(day)
+        if clock.() == day, do: {:done, result}, else: :rolled
+      rescue
+        error in [ExUnit.AssertionError] ->
+          if clock.() == day, do: reraise(error, __STACKTRACE__), else: :rolled
+      end
+
+    case attempt do
+      {:done, result} -> result
+      :rolled -> rerun(fun, clock)
     end
   end
 
   defp rerun(fun, clock) do
     day = clock.()
     Process.put(@key, day)
+
+    # Say so: a swallowed first attempt must be visible in CI output, or a
+    # genuinely intermittent failure that happens to straddle midnight gets
+    # a silent free pass and that night's signal is eaten.
+    IO.warn("stable_day: UTC midnight rolled under the test body — re-running once on #{day}", [])
+
     fun.(day)
   end
 end

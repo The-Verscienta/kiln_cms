@@ -2,6 +2,8 @@ defmodule KilnCMS.Test.StableDayTest do
   # The helpers are pure process-local state + an injected clock; no DB.
   use ExUnit.Case, async: true
 
+  import ExUnit.CaptureIO
+
   alias KilnCMS.Test.StableDay
 
   # A clock that returns `days` in order, then repeats the last one forever.
@@ -56,9 +58,40 @@ defmodule KilnCMS.Test.StableDayTest do
     test "re-runs exactly once, on the new day, when midnight passes under the body" do
       clock = clock_returning([~D[2026-01-15], ~D[2026-01-16]])
 
-      result = StableDay.stable_day(fn day -> send(self(), {:ran, day}) && day end, clock)
+      warning =
+        capture_io(:stderr, fn ->
+          result = StableDay.stable_day(fn day -> send(self(), {:ran, day}) && day end, clock)
+          send(self(), {:result, result})
+        end)
 
-      assert result == ~D[2026-01-16]
+      assert_received {:result, ~D[2026-01-16]}
+      assert_received {:ran, ~D[2026-01-15]}
+      assert_received {:ran, ~D[2026-01-16]}
+      refute_received {:ran, _}
+      # The absorbed first attempt must be visible in CI output — a silent
+      # retry could eat the signal of a genuinely intermittent failure.
+      assert warning =~ "re-running once"
+    end
+
+    test "a retry that itself fails propagates; the body never runs a third time" do
+      clock = clock_returning([~D[2026-01-15], ~D[2026-01-16]])
+
+      assert_raise ExUnit.AssertionError, ~r/broken on the retry/, fn ->
+        capture_io(:stderr, fn ->
+          StableDay.stable_day(
+            fn day ->
+              send(self(), {:ran, day})
+              # Attempt 1 (the 15th) passes; the post-body clock check sees
+              # the roll and retries; the retry hits a genuine failure. It
+              # must surface — not be re-caught as if it were another roll.
+              if day == ~D[2026-01-16], do: flunk("broken on the retry")
+              :ok
+            end,
+            clock
+          )
+        end)
+      end
+
       assert_received {:ran, ~D[2026-01-15]}
       assert_received {:ran, ~D[2026-01-16]}
       refute_received {:ran, _}
@@ -69,17 +102,21 @@ defmodule KilnCMS.Test.StableDayTest do
       # attempt's assertion raises before stable_day's own clock check runs.
       clock = clock_returning([~D[2026-01-15], ~D[2026-01-16]])
 
-      result =
-        StableDay.stable_day(
-          fn day ->
-            send(self(), {:ran, day})
-            assert day == ~D[2026-01-16], "first attempt fails like a mid-body roll"
-            :survived
-          end,
-          clock
-        )
+      capture_io(:stderr, fn ->
+        result =
+          StableDay.stable_day(
+            fn day ->
+              send(self(), {:ran, day})
+              assert day == ~D[2026-01-16], "first attempt fails like a mid-body roll"
+              :survived
+            end,
+            clock
+          )
 
-      assert result == :survived
+        send(self(), {:result, result})
+      end)
+
+      assert_received {:result, :survived}
       assert_received {:ran, ~D[2026-01-15]}
       assert_received {:ran, ~D[2026-01-16]}
       refute_received {:ran, _}
@@ -113,7 +150,9 @@ defmodule KilnCMS.Test.StableDayTest do
     test "each attempt re-primes today/0 to its own day" do
       clock = clock_returning([~D[2026-01-15], ~D[2026-01-16]])
 
-      StableDay.stable_day(fn _day -> send(self(), {:memo, StableDay.today()}) end, clock)
+      capture_io(:stderr, fn ->
+        StableDay.stable_day(fn _day -> send(self(), {:memo, StableDay.today()}) end, clock)
+      end)
 
       # The retry's body must not see the stale pre-roll memo (or a body
       # calling `today/0` would fail the retry the same way it failed live).

@@ -20,9 +20,7 @@ defmodule KilnCMS.Analytics.ReferrerDayTest do
     })
   end
 
-  # `today/0` is KilnCMS.Test.StableDay's: ONE clock read per test, so every
-  # seeded bucket and window bound in a test derives from the same day and a
-  # run straddling UTC midnight can't disagree with itself (#1358).
+  # today/0: one memoized clock read per test — see KilnCMS.Test.StableDay (#1358).
 
   defp seed_bucket(attrs) do
     Ash.Seed.seed!(
@@ -38,11 +36,16 @@ defmodule KilnCMS.Analytics.ReferrerDayTest do
     ReferrerDay |> Ash.read!(authorize?: false)
   end
 
+  # Scoped to one content id — the default read inside a `stable_day` body,
+  # so a retry never trips over the first attempt's rows. Reach for the
+  # 0-arity whole-table form only outside a wrap (the retention test).
+  defp stored_rows(content_id) do
+    stored_rows() |> Enum.filter(&(&1.content_id == content_id))
+  end
+
   test "repeated arrivals from the same source on the same day increment one bucket" do
-    # `:record` buckets on the app's own clock read, so a midnight roll under
-    # the three calls would split them across two buckets. `stable_day`
-    # re-runs once on the new day; the fresh id + filter keep the retry from
-    # tripping over the first attempt's rows (#1358).
+    # `:record` buckets on the app's own clock read — a mid-body roll splits
+    # the three calls across two buckets, which only a re-run can absorb.
     stable_day(fn day ->
       id = Ash.UUID.generate()
 
@@ -51,7 +54,7 @@ defmodule KilnCMS.Analytics.ReferrerDayTest do
       Analytics.record_referrer!("page", id, :search, authorize?: false)
 
       assert [%{content_type: "page", content_id: ^id, source: :search, hits: 3, day: ^day}] =
-               stored_rows() |> Enum.filter(&(&1.content_id == id))
+               stored_rows(id)
     end)
   end
 
@@ -66,7 +69,7 @@ defmodule KilnCMS.Analytics.ReferrerDayTest do
       Analytics.record_referrer!("page", id, :search, authorize?: false)
 
       rows =
-        stored_rows() |> Enum.filter(&(&1.content_id == id)) |> Enum.sort_by(& &1.source)
+        stored_rows(id) |> Enum.sort_by(& &1.source)
 
       assert [%{source: :search, hits: 2}, %{source: :social, hits: 1}] = rows
     end)
@@ -83,10 +86,7 @@ defmodule KilnCMS.Analytics.ReferrerDayTest do
       # `Date` as the comparator: bare term ordering compares the struct's
       # :day field first, so on the 1st of a month ~D[2026-09-01] sorts BEFORE
       # ~D[2026-08-31] and this failed exactly one day a month.
-      rows =
-        stored_rows()
-        |> Enum.filter(&(&1.content_id == id))
-        |> Enum.sort_by(& &1.day, Date)
+      rows = stored_rows(id) |> Enum.sort_by(& &1.day, Date)
 
       assert [%{day: ^yesterday, hits: 5}, %{day: ^day, hits: 1}] = rows
     end)

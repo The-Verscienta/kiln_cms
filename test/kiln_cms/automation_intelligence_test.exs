@@ -192,6 +192,14 @@ defmodule KilnCMS.AutomationIntelligenceTest do
       # The rule computes `due_on` on the app's clock; the assertion's day is
       # the test's. A midnight roll between them re-runs once on a fresh
       # anchor, which scopes the task listing to the retry's run (#1358).
+      #
+      # A retry's index still holds the first attempt's posts with this SAME
+      # passage (the stub embedder gives identical text distance 0, and any
+      # *different* text an arbitrary distance — so unique-per-attempt text
+      # would trade determinism for a similarity lottery). The finder then
+      # sees three duplicates instead of one: assertions in this body must
+      # stay tolerant of extra entries — the anchor-scoped task listing and
+      # substring note checks, never an exact match count.
       stable_day(fn day ->
         anchor = indexed_post(actor, "another shared passage right here", "Same B")
         _dup = indexed_post(actor, "another shared passage right here", "Same B")
@@ -224,7 +232,8 @@ defmodule KilnCMS.AutomationIntelligenceTest do
           config: %{"deliver_as" => "task", "assignee" => assignee.id}
         })
 
-      # Same clock split as the 5-day case above (#1358).
+      # Same clock split — and same retry-sees-extra-duplicates tolerance
+      # rule — as the 5-day case above (#1358).
       stable_day(fn day ->
         anchor = indexed_post(actor, "yet another shared passage here too", "Same C")
         _dup = indexed_post(actor, "yet another shared passage here too", "Same C")

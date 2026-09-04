@@ -39,9 +39,7 @@ defmodule Mix.Tasks.Kiln.Analytics.ExportTest do
     on_exit(fn -> Application.put_env(:kiln_cms, :analytics_referrers, original) end)
   end
 
-  # `today/0` is KilnCMS.Test.StableDay's: ONE clock read per test, so every
-  # seeded bucket and window bound in a test derives from the same day and a
-  # run straddling UTC midnight can't disagree with itself (#1358).
+  # today/0: one memoized clock read per test — see KilnCMS.Test.StableDay (#1358).
 
   test "writes a CSV export to stdout by default, with nothing else on stdout" do
     seed_bucket(%{day: today(), views: 5})

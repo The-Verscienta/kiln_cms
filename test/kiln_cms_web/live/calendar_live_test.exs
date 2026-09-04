@@ -65,6 +65,14 @@ defmodule KilnCMSWeb.CalendarLiveTest do
     Date.utc_today() |> Date.beginning_of_month() |> Date.shift(month: 1) |> Date.add(14)
   end
 
+  # `soon/0`'s mirror: the 15th of LAST month — always fully in the past and
+  # always mid-month, for fixtures that must sit on a grid where every cell
+  # is behind us on every real-clock day (#1357). Kept next to `soon/0` so
+  # the mid-month rationale above covers both directions.
+  defp recently do
+    Date.utc_today() |> Date.beginning_of_month() |> Date.shift(month: -1) |> Date.add(14)
+  end
+
   defp calendar_at(%Date{} = at), do: ~p"/editor/calendar?at=#{Date.to_iso8601(at)}"
 
   test "plots publish, unpublish, and went-live events with editor links", %{conn: conn} do
@@ -590,7 +598,7 @@ defmodule KilnCMSWeb.CalendarLiveTest do
       # a cell of the mounted month at all (#1357). Here every day of the
       # mounted month is behind us on every real-clock day, and the arrow-key
       # reschedule path makes a backwards move off any cell a real input.
-      day = Date.utc_today() |> Date.beginning_of_month() |> Date.shift(month: -1) |> Date.add(14)
+      day = recently()
       at = DateTime.new!(day, ~T[23:59:59])
       page = scheduled_page(admin, at)
 
@@ -638,6 +646,21 @@ defmodule KilnCMSWeb.CalendarLiveTest do
                html =~ "Can't reschedule into the past"
 
       assert DateTime.compare(CMS.get_page!(page.id, actor: admin).scheduled_at, at) == :eq
+    end
+
+    test "a chip dated today — even 23:59:59 tonight — is on the grid", %{conn: conn} do
+      admin = authed_admin()
+      # The #1357 rewrites moved every other fixture off today's cell, so
+      # this is the one assertion that the remainder of *today* is never
+      # excluded from the window (say, by a now-anchored clamp). `day` is
+      # captured once and anchors both the fixture and the `?at=` mount, so
+      # a midnight roll between them cannot split chip and grid.
+      day = Date.utc_today()
+      at = DateTime.new!(day, ~T[23:59:59])
+      page = scheduled_page(admin, at)
+
+      # `open_calendar_on` asserts the chip's title rendered on that month.
+      {:ok, _lv, _html} = open_calendar_on(conn, admin, day, page)
     end
 
     test "refuses to drag a lane that offers no handle, without crashing", %{conn: conn} do

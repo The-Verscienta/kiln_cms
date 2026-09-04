@@ -19,9 +19,7 @@ defmodule KilnCMS.Analytics.FunnelReportTest do
     })
   end
 
-  # `today/0` is KilnCMS.Test.StableDay's: ONE clock read per test, so every
-  # seeded bucket and window bound in a test derives from the same day and a
-  # run straddling UTC midnight can't disagree with itself (#1358).
+  # today/0: one memoized clock read per test — see KilnCMS.Test.StableDay (#1358).
 
   defp org, do: KilnCMS.Accounts.default_org()
 
