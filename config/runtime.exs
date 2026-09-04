@@ -1436,3 +1436,29 @@ end
 # so skipping the empty case would leave a previous evaluation's list in place
 # on the config-provider path.
 config :kiln_cms, :config_warnings, Env.take_collected()
+# Below the `Env.take_collected()` flush on purpose: nothing here goes through
+# `Env` (these are plain strings, not flags), so there is no warning to
+# collect, and sitting last means the block shifts no `config/runtime.exs:N`
+# anchor in docs/environment-variables.md — which the docs gate checks.
+# The test database's host and name — runtime config on purpose (#1392).
+#
+# Both come from environment variables that differ between the CI test
+# shards (MIX_TEST_PARTITION is 1..N) and between local worktrees. Mix records
+# the evaluated compile-time config in its build manifest and, when a config
+# file is newer than that record, recompiles the whole app if the project's
+# own values changed — so while these lived in config/test.exs, every shard
+# that restored a `_build` another shard had saved found a different
+# `database:` and recompiled all of it. Here they are read at boot instead:
+# `mix test` and `mix ash.setup` both run `app.config` before touching the
+# repo, so nothing that creates, migrates or connects to the database sees a
+# difference. The rest of the Repo config stays in config/test.exs.
+#
+# "localhost" reaches a `services:` postgres from a job running directly on
+# the runner. A job running inside a `container:` (the qpdf CI leg, #907) is
+# on a separate Docker network where the service is only reachable by its
+# service name instead, hence the override.
+if config_env() == :test do
+  config :kiln_cms, KilnCMS.Repo,
+    hostname: System.get_env("POSTGRES_HOST", "localhost"),
+    database: "kiln_cms_test#{System.get_env("MIX_TEST_PARTITION")}"
+end
