@@ -65,9 +65,14 @@ defmodule KilnCMSWeb.ArtifactViewTrackingTest do
   test "the per-day bucket is recorded alongside the all-time counter", %{conn: conn} do
     page = published_page()
 
+    # `today` read BEFORE the tracked GET: the bucket lands on this day or
+    # the next, and `views_since` has no upper bound, so either way it is
+    # in the window. Reading after the GET is the ordering a midnight roll
+    # can exclude (#1358 review).
+    today = Date.utc_today()
+
     assert conn |> get(~p"/api/content/page/#{page.slug}") |> json_response(200)
 
-    today = Date.utc_today()
     buckets = Analytics.views_since!(today, authorize?: false)
 
     assert Enum.any?(buckets, &(&1.content_id == page.id and &1.views == 1))

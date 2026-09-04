@@ -68,7 +68,7 @@ defmodule KilnCMS.Analytics.ExportRecoveryTest do
     user
   end
 
-  defp today, do: Date.utc_today()
+  # today/0: one memoized clock read per test — see KilnCMS.Test.StableDay (#1358).
 
   # One content item on one day: the exact view total the export prints, and the
   # referrer breakdown that sums to it. Every classified arrival writes one hit

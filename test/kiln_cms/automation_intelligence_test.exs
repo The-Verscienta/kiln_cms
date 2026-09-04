@@ -189,23 +189,36 @@ defmodule KilnCMS.AutomationIntelligenceTest do
           config: %{"deliver_as" => "task", "assignee" => assignee.id, "due_in_days" => 5}
         })
 
-      anchor = indexed_post(actor, "another shared passage right here", "Same B")
-      _dup = indexed_post(actor, "another shared passage right here", "Same B")
+      # The rule computes `due_on` on the app's clock; the assertion's day is
+      # the test's. A midnight roll between them re-runs once on a fresh
+      # anchor, which scopes the task listing to the retry's run (#1358).
+      #
+      # A retry's index still holds the first attempt's posts with this SAME
+      # passage (the stub embedder gives identical text distance 0, and any
+      # *different* text an arbitrary distance — so unique-per-attempt text
+      # would trade determinism for a similarity lottery). The finder then
+      # sees three duplicates instead of one: assertions in this body must
+      # stay tolerant of extra entries — the anchor-scoped task listing and
+      # substring note checks, never an exact match count.
+      stable_day(fn day ->
+        anchor = indexed_post(actor, "another shared passage right here", "Same B")
+        _dup = indexed_post(actor, "another shared passage right here", "Same B")
 
-      assert :ok = run_rule(r, anchor, "post.published")
-      refute_email_sent()
+        assert :ok = run_rule(r, anchor, "post.published")
+        refute_email_sent()
 
-      assert [task] = CMS.list_tasks_for!("post", anchor.id, authorize?: false)
-      assert is_nil(task.creator_id)
-      assert task.created_by_rule_id == r.id
-      assert task.assignee_id == assignee.id
-      assert task.due_on == Date.add(Date.utc_today(), 5)
-      assert task.note =~ "possible duplicates"
-      assert task.note =~ "Same B"
-      # Distinct from :manual (#1252 review): this task wasn't personally
-      # handed to the assignee, and a "my assigned work" filter keyed on
-      # kind shouldn't read it as if it were.
-      assert task.kind == :intelligence_finding
+        assert [task] = CMS.list_tasks_for!("post", anchor.id, authorize?: false)
+        assert is_nil(task.creator_id)
+        assert task.created_by_rule_id == r.id
+        assert task.assignee_id == assignee.id
+        assert task.due_on == Date.add(day, 5)
+        assert task.note =~ "possible duplicates"
+        assert task.note =~ "Same B"
+        # Distinct from :manual (#1252 review): this task wasn't personally
+        # handed to the assignee, and a "my assigned work" filter keyed on
+        # kind shouldn't read it as if it were.
+        assert task.kind == :intelligence_finding
+      end)
     end
 
     test "task: due_in_days defaults to 3 when not given" do
@@ -219,13 +232,17 @@ defmodule KilnCMS.AutomationIntelligenceTest do
           config: %{"deliver_as" => "task", "assignee" => assignee.id}
         })
 
-      anchor = indexed_post(actor, "yet another shared passage here too", "Same C")
-      _dup = indexed_post(actor, "yet another shared passage here too", "Same C")
+      # Same clock split — and same retry-sees-extra-duplicates tolerance
+      # rule — as the 5-day case above (#1358).
+      stable_day(fn day ->
+        anchor = indexed_post(actor, "yet another shared passage here too", "Same C")
+        _dup = indexed_post(actor, "yet another shared passage here too", "Same C")
 
-      assert :ok = run_rule(r, anchor, "post.published")
+        assert :ok = run_rule(r, anchor, "post.published")
 
-      assert [task] = CMS.list_tasks_for!("post", anchor.id, authorize?: false)
-      assert task.due_on == Date.add(Date.utc_today(), 3)
+        assert [task] = CMS.list_tasks_for!("post", anchor.id, authorize?: false)
+        assert task.due_on == Date.add(day, 3)
+      end)
     end
 
     test "task: an assignee who is no longer an editor is a logged no-op, not a crash" do

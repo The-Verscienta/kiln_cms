@@ -31,6 +31,9 @@ defmodule KilnCMSWeb.ConnCase do
       import Plug.Conn
       import Phoenix.ConnTest, except: [build_conn: 0]
       import KilnCMSWeb.ConnCase
+      # `today/0` (one clock read per test) and `stable_day/1` (re-run once
+      # if UTC midnight passed under the body) — the #1358 clock-edge tools.
+      import KilnCMS.Test.StableDay
     end
   end
 

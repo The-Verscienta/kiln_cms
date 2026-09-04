@@ -53,7 +53,7 @@ defmodule KilnCMS.CMS.TaskTest do
           content_type: "page",
           content_id: Ecto.UUID.generate(),
           assignee_id: assignee.id,
-          due_on: Date.add(Date.utc_today(), 3),
+          due_on: Date.add(today(), 3),
           note: "Suggested by automation",
           created_by_rule_id: rule_id
         },
@@ -189,6 +189,9 @@ defmodule KilnCMS.CMS.TaskTest do
     drain()
   end
 
+  # Clock edges (#1358): every date below derives from the one memoized
+  # `today()` read, and both listing actions take their bounds as arguments,
+  # so the test can no longer disagree with itself across UTC midnight.
   test "open_due_between is a window over open tasks; due_within has no lower bound" do
     editor = user(:editor)
     assignee = user(:editor)
@@ -200,7 +203,7 @@ defmodule KilnCMS.CMS.TaskTest do
           content_type: "page",
           content_id: content_id.(),
           assignee_id: assignee.id,
-          due_on: Date.add(Date.utc_today(), -10)
+          due_on: Date.add(today(), -10)
         },
         actor: editor
       )
@@ -211,7 +214,7 @@ defmodule KilnCMS.CMS.TaskTest do
           content_type: "page",
           content_id: content_id.(),
           assignee_id: assignee.id,
-          due_on: Date.add(Date.utc_today(), 2)
+          due_on: Date.add(today(), 2)
         },
         actor: editor
       )
@@ -222,13 +225,13 @@ defmodule KilnCMS.CMS.TaskTest do
           content_type: "page",
           content_id: content_id.(),
           assignee_id: assignee.id,
-          due_on: Date.add(Date.utc_today(), 60)
+          due_on: Date.add(today(), 60)
         },
         actor: editor
       )
 
     within =
-      CMS.list_tasks_due_within!(Date.add(Date.utc_today(), 3), actor: editor)
+      CMS.list_tasks_due_within!(Date.add(today(), 3), actor: editor)
       |> Enum.map(& &1.id)
 
     assert overdue.id in within
@@ -236,9 +239,7 @@ defmodule KilnCMS.CMS.TaskTest do
     refute far.id in within
 
     window =
-      CMS.list_tasks_open_due_between!(Date.utc_today(), Date.add(Date.utc_today(), 3),
-        actor: editor
-      )
+      CMS.list_tasks_open_due_between!(today(), Date.add(today(), 3), actor: editor)
       |> Enum.map(& &1.id)
 
     refute overdue.id in window
@@ -298,7 +299,7 @@ defmodule KilnCMS.CMS.TaskTest do
           content_type: "page",
           content_id: Ecto.UUID.generate(),
           assignee_id: assignee.id,
-          due_on: Date.add(Date.utc_today(), -1)
+          due_on: Date.add(today(), -1)
         },
         actor: editor
       )
@@ -309,7 +310,7 @@ defmodule KilnCMS.CMS.TaskTest do
           content_type: "page",
           content_id: Ecto.UUID.generate(),
           assignee_id: assignee.id,
-          due_on: Date.add(Date.utc_today(), 1)
+          due_on: Date.add(today(), 1)
         },
         actor: editor
       )
@@ -336,7 +337,7 @@ defmodule KilnCMS.CMS.TaskTest do
           content_type: "page",
           content_id: Ecto.UUID.generate(),
           assignee_id: assignee.id,
-          due_on: Date.add(Date.utc_today(), -1)
+          due_on: Date.add(today(), -1)
         },
         actor: editor
       )
