@@ -1,0 +1,98 @@
+name: Set up Mix
+description: >-
+  Elixir/OTP from .tool-versions, deps/ and _build/ from the shared cache,
+  `mix deps.get`, and optionally a compile — the preamble every MIX_ENV=test
+  job on the main gate shares.
+
+# One definition for the four jobs behind the required check (build, the
+# test shards, coverage, dialyzer). Before this action each of them carried
+# the same four steps by hand, and the first thing to drift was the cache
+# key.
+#
+# The cache. `_build` is worth caching only if Mix trusts what it restores.
+# Mix records the EVALUATED compile-time config in its manifest and, when a
+# config file is newer than that record, compares the old and new values and
+# recompiles the whole app only if the project's own values changed. So the
+# key has to fingerprint everything those values are derived from — the
+# toolchain, the lock, mix.exs and the config files the :test env actually
+# loads (config.exs, test.exs and the flag file test.exs requires) — and
+# nothing else: hashing config/runtime.exs or prod.exs here would miss the
+# key for changes that cannot alter a compiled beam, and hashing every
+# mix.lock in the tree (the old key did) would miss it for a bump in the
+# client library the app does not depend on. What the key cannot see is the
+# environment: a value read from an env var inside config/test.exs would
+# differ between jobs with identical files. That is why the test database's
+# name and host, which come from MIX_TEST_PARTITION and POSTGRES_HOST, live in
+# config/runtime.exs — runtime config is not part of the compile-time record,
+# so a shard restoring a build another shard saved has nothing to recompile.
+# (PR #1392's first cut backdated mix.exs and config/*.exs on an exact hit to
+# get the same effect; that switched Mix's value comparison off instead of
+# giving it nothing to find. Its review caught it.)
+#
+# Saving. Only one job should save: actions/cache tars the whole archive
+# (~1 GB here) BEFORE it learns another job already claimed the key, so nine
+# jobs racing to save after a miss would each pay that for nothing. `build`
+# saves; everything else restores.
+#
+# Not used by the strict leg (its own MIX_BUILD_ROOT and key), the docs job
+# (dev profile), the client, or the container jobs — different builds.
+inputs:
+  save-cache:
+    description: Save deps/ and _build/ under the primary key on a miss. Exactly one job per run should.
+    default: "false"
+  compile:
+    description: "`none`, `plain`, or `warnings-as-errors`."
+    default: plain
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Elixir/OTP
+      uses: erlef/setup-beam@v1
+      with:
+        # Reads .tool-versions — the single source of truth (#600). Do not
+        # restate the versions here; `mix kiln.toolchain.check` guards the
+        # two places that genuinely cannot read it (mix.exs, Dockerfile).
+        # Required by setup-beam whenever version-file is used: it refuses
+        # to guess. Suits us — .tool-versions carries exact versions precisely
+        # so the Dockerfile can mirror them.
+        version-file: .tool-versions
+        version-type: strict
+
+    - name: Restore deps and _build (and save on a miss)
+      if: inputs.save-cache == 'true'
+      uses: actions/cache@v5
+      with:
+        path: |
+          deps
+          _build
+        key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}-${{ hashFiles('mix.exs', 'config/config.exs', 'config/test.exs', 'config/strict_test_flag.exs') }}
+        restore-keys: |
+          ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}-
+          ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-
+
+    - name: Restore deps and _build
+      if: inputs.save-cache != 'true'
+      uses: actions/cache/restore@v5
+      with:
+        path: |
+          deps
+          _build
+        key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}-${{ hashFiles('mix.exs', 'config/config.exs', 'config/test.exs', 'config/strict_test_flag.exs') }}
+        restore-keys: |
+          ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}-
+          ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-
+
+    - name: Install dependencies
+      shell: bash
+      run: mix deps.get
+
+    - name: Compile
+      if: inputs.compile == 'plain'
+      shell: bash
+      run: mix compile
+
+    - name: Compile (warnings as errors)
+      if: inputs.compile == 'warnings-as-errors'
+      shell: bash
+      run: mix compile --warnings-as-errors

@@ -183,11 +183,11 @@ migration, a rewritten column, a dropped config key).
   to assert on.
 
 - **Coverage is measured, reported and floored; the Playwright suite grows
-  from 14 journeys to 19** (#1314). CI's main test job now runs the suite under
-  line coverage (`mix coveralls.multiple --type json --type html`), uploads the
-  HTML/JSON report as the `coverage-report` artifact, prints a per-directory
-  rollup (`mix kiln.coverage.summary`, also written to the job summary) so the
-  editor / delivery / governance split is visible, and enforces
+  from 14 journeys to 19** (#1314). CI now runs the suite under line coverage
+  (excoveralls; see the CI entry under *Changed* for how the run is split),
+  uploads the HTML/JSON report as the `coverage-report` artifact, prints a
+  per-directory rollup (`mix kiln.coverage.summary`, also written to the job
+  summary) so the editor / delivery / governance split is visible, and enforces
   `minimum_coverage` in `coveralls.json` — a floor set just under the measured
   number, so coverage cannot regress silently, not a target. Five new browser
   journeys under `e2e/tests/`: content-list bulk actions (publish, unpublish,
@@ -249,40 +249,35 @@ migration, a rewritten column, a dropped config key).
 
 ### Changed
 
-- **CI's main gate is four parallel jobs instead of one serial one.** The
+- **CI's main gate is five parallel jobs instead of one serial one.** The
   `Compile, lint, scan & test` job ran the compile, every lint, the suite
-  under coverage and then dialyzer back to back on one runner, and the last
-  green run before this change measured it at 17m57s while nothing else in
-  the workflow took more than five minutes: the coverage run alone was 8m51s,
-  dialyzer 2m02s. It is now `Compile, lint & scan` (the compile and the
-  static checks), `Test (shard n)` — the suite, plain, over four
-  `mix test --partitions` shards, each on its own Postgres with
-  `MIX_TEST_PARTITION` naming its database the way `config/test.exs` has
-  always allowed — `Coverage (full suite)`, unchanged in substance (the
-  `mix coveralls.multiple` run, the floor, the per-directory rollup and the
-  `coverage-report` artifact now live there), and `Dialyzer`. A fifth job
-  keeps the old name and waits on all four, so the "Require CI on main"
-  ruleset still gates on the one context it names — and now on everything
-  that context used to mean, not only what fit in one job. A failing test
-  surfaces at about four minutes rather than twelve. That first cut kept a
-  whole-suite coverage run beside the shards, which measured 12m05s alone;
-  the shards now run *under* coverage instead — six of them, each exporting
-  its raw `:cover` data (`mix coveralls.json --export-coverage`, the one
-  reporter that does not check the floor) — and `Coverage (full suite)`
-  imports the lot (`--import-cover`), runs no tests of its own, and enforces
-  the floor on the union. excoveralls has no partition mode, but those two
-  flags are all a merge needs, verified locally before wiring them.
-- **Every CI job stopped recompiling the whole app against a warm cache.**
-  The deps/_build cache hit its exact key on every run and every job still
-  printed `Compiling 847 files` — 70 to 108 seconds apiece — because a fresh
-  checkout stamps `mix.exs` and `config/*.exs` with the checkout time and Mix
-  reads a config file newer than its manifest as a config change (sources
-  are digest-checked; config is not). `.github/actions/mix-build-cache` now
-  owns the cache for the four main jobs: the key includes a digest of
-  `mix.exs` and `config/**`, and on an exact hit — which then proves the
-  restored build was compiled from byte-identical config — it backdates
-  those files so Mix trusts the build. A PR that touches config misses the
-  exact key and recompiles in full, as before.
+  under coverage and then dialyzer back to back on one runner (17m57s on its
+  last green run, with nothing else in the workflow over five minutes). Now:
+  `Compile, lint & scan`; six `Test (shard n)` jobs that run the suite under
+  coverage (`mix coveralls.json --partitions`, each shard exporting its raw
+  `:cover` data); `Coverage (full suite)`, which runs the new
+  `mix kiln.coverage.merge` to import that data, refuse a merge over fewer
+  shards than expected, enforce `minimum_coverage` on the union and write the
+  `coverage-report` artifact and per-directory rollup — no tests, no
+  database; and `Dialyzer`. A fifth job keeps the old name and waits on all
+  of them, so the "Require CI on main" ruleset still gates on the one context
+  it names — and now on everything that context used to mean. The required
+  check completes in about seven minutes; a failing test surfaces in about
+  four.
+- **The CI build cache is trusted again.** Every job hit the deps/_build cache
+  on its exact key and still recompiled the whole app, 70–108 seconds apiece.
+  Mix records the evaluated compile-time config in its build manifest and
+  recompiles everything when the project's own values change, and two things
+  made them change: the cache key ignored `mix.exs` and `config/`, so an
+  exact hit could restore a build compiled under older settings; and the test
+  database's name came from `MIX_TEST_PARTITION` inside `config/test.exs`, so
+  it differed for every partition. The key now includes the toolchain, the
+  lock and the config files the `:test` build actually loads, and the test
+  Repo's `hostname:`/`database:` moved to `config/runtime.exs` (read at boot,
+  outside the compile-time record). `.github/actions/setup-mix` owns the
+  toolchain, cache, `deps.get` and compile for the four main jobs; only
+  `build` saves the cache. No change to how `MIX_TEST_PARTITION` is used
+  locally.
 
 ### Removed
 

@@ -205,18 +205,17 @@ config :kiln_cms, KilnCMS.Accounts.AccountThrottle,
 
 # Configure your database
 #
-# The MIX_TEST_PARTITION environment variable can be used
-# to provide built-in test partitioning in CI environment.
-# Run `mix help test` for more information.
+# `hostname:` and `database:` are NOT here — they are in config/runtime.exs,
+# under `config_env() == :test`, because both come from environment variables
+# (POSTGRES_HOST, MIX_TEST_PARTITION) that differ between the CI shards and
+# between local worktrees. Mix records the evaluated compile-time config in
+# its build manifest and recompiles the whole app when the project's own
+# values change, so a `database:` that varied per shard made every shard that
+# restored another shard's cached `_build` recompile all of it (#1392).
+# Runtime config is read at boot and never enters that record.
 config :kiln_cms, KilnCMS.Repo,
   username: "postgres",
   password: "postgres",
-  # "localhost" reaches a `services:` postgres from a job running directly on
-  # the runner. A job running inside a `container:` (the qpdf CI leg, #907) is
-  # on a separate Docker network where the service is only reachable by its
-  # service name instead, hence the override.
-  hostname: System.get_env("POSTGRES_HOST", "localhost"),
-  database: "kiln_cms_test#{System.get_env("MIX_TEST_PARTITION")}",
   pool: Ecto.Adapters.SQL.Sandbox,
   # ExUnit's default max_cases is ALSO schedulers * 2, so a pool of exactly
   # that size hands every concurrently-running test case one connection with

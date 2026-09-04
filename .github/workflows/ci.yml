@@ -29,6 +29,13 @@ permissions:
 
 env:
   MIX_ENV: test
+  # How many `test` shards there are. The matrix list in the `test` job has
+  # to be a literal, so this is the SECOND place the number lives; a step in
+  # every shard checks the two agree — which also catches an `include:` row
+  # added to that matrix, which `strategy.job-total` would count as a shard
+  # without giving it a partition, leaving a slice of the suite silently
+  # unrun. `coverage` refuses to merge fewer files than this.
+  SHARD_COUNT: "6"
   # The toolchain is NOT declared here. It lives in .tool-versions, which every
   # setup-beam step reads via `version-file:`. These used to be ELIXIR_VERSION
   # "1.19" / OTP_VERSION "27" — loose, so setup-beam resolved them to whatever
@@ -36,47 +43,41 @@ env:
   # anything the Dockerfile's exact tags could match (#600).
 
 jobs:
-  # The main gate is four jobs, not one. It used to be one — compile, every
+  # The main gate is five jobs, not one. It used to be one — compile, every
   # lint, the suite under coverage, then dialyzer, in series — and the last
   # green run before the split measured that job at 17m57s while nothing else
-  # in this file took more than five minutes: the coverage run alone was 8m51s
-  # (49% of the job), dialyzer 2m02s, `gettext.extract --merge` 1m51s. Every
-  # one of those waited on the ones before it for no reason but sharing a
-  # runner. So:
+  # in this file took more than five minutes. Nothing in that chain needed
+  # the step before it. So:
   #
-  #   build     compile + every lint and static check          (~7 min)
-  #   test      the suite UNDER COVERAGE, split across N shards,
-  #             each exporting its :cover data                 (~5 min each)
-  #   coverage  imports every shard's data, enforces the floor,
-  #             writes the report — runs no tests of its own   (~3 min)
-  #   dialyzer  its own job, on the cached PLT                 (~4 min)
+  #   build     compile (warnings as errors) + every lint and static check
+  #   test      the suite UNDER COVERAGE across SHARD_COUNT shards, each
+  #             exporting its raw :cover data
+  #   coverage  merges that data, enforces the floor, writes the report —
+  #             runs no tests and needs no database
+  #   dialyzer  its own job, on the cached PLT
   #   ci        `Compile, lint, scan & test` — waits on all of them
   #
   # `ci` carries the OLD job's name on purpose: the "Require CI on main"
   # ruleset names exactly that context, so the gate keeps working with no
-  # change to repository settings, and it now fails if any of the four does.
+  # change to repository settings, and it now fails if any of the others does.
   #
-  # The first cut of this split ran the shards plain and kept a whole-suite
-  # coverage run beside them; that run measured 12m05s alone and was the
-  # critical path. Sharding it is wiring rather than code: excoveralls has no
+  # Sharding a coverage run is wiring rather than code: excoveralls has no
   # partition mode, but it honours `mix test --export-coverage NAME` (writes
-  # cover/NAME.coverdata) and `--import-cover DIR` (feeds every *.coverdata in
-  # DIR to `:cover` before reporting), and only the local/html/cobertura
-  # reporters check the floor. So each shard runs `coveralls.json` — the one
-  # reporter that does NOT check the floor, which a shard's partial number
-  # would fail — exports, and uploads; `coverage` downloads the lot, imports
-  # it under `--exclude test` (zero tests, exit 0) and runs the html reporter,
-  # which is the gate, on the union. Verified locally before it landed: an
-  # export from test/kiln/ imported into a zero-test run reports 4.5% against
-  # the 0.5% the app's boot alone covers.
+  # cover/NAME.coverdata), `:cover` merges imported data, and only the
+  # local/html/cobertura reporters check the floor. Each shard therefore runs
+  # `coveralls.json` — the reporter that does NOT check it, which a shard's
+  # partial number would fail — and `coverage` runs `mix kiln.coverage.merge`,
+  # which imports every file, refuses to proceed on fewer than SHARD_COUNT of
+  # them, and runs the html reporter, which is the gate, on the union.
   #
   # The technique is the one in
   # https://zarar.dev/speeding-up-elixir-test-suites/ — `--partitions` with
-  # MIX_TEST_PARTITION naming the database — which config/test.exs has
-  # supported since the generator wrote it; every shard gets its own Postgres
-  # service besides, so no template-database trick is needed here. The other
-  # half of every job's time was a full recompile against a warm cache; see
-  # .github/actions/mix-build-cache for that one.
+  # MIX_TEST_PARTITION naming the database — which this project supported
+  # from the start; every shard gets its own Postgres service besides, so no
+  # template-database trick is needed. The other half of every job's time
+  # was a full recompile against a warm cache; .github/actions/setup-mix
+  # explains that one, and config/runtime.exs says why the database name
+  # moved there.
   build:
     name: Compile, lint & scan
     runs-on: ubuntu-latest
@@ -103,29 +104,17 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Set up Elixir/OTP
-        uses: erlef/setup-beam@v1
+      - name: Set up Mix (toolchain, cache, deps, compile)
+        # The one job that SAVES the cache; every other restores. Warnings as
+        # errors here and nowhere else — the shards, coverage and dialyzer
+        # compile the same sources plainly and share this build.
+        uses: ./.github/actions/setup-mix
         with:
-          # Reads .tool-versions — the single source of truth (#600). Do not
-          # restate the versions here; `mix kiln.toolchain.check` guards the
-          # two places that genuinely cannot read it (mix.exs, Dockerfile).
-          version-file: .tool-versions
-          # Required by setup-beam whenever version-file is used: it refuses to
-          # guess. Suits us — .tool-versions carries exact versions precisely so
-          # the Dockerfile can mirror them.
-          version-type: strict
-
-      - name: Restore deps and _build
-        uses: ./.github/actions/mix-build-cache
-
-      - name: Install dependencies
-        run: mix deps.get
+          save-cache: "true"
+          compile: warnings-as-errors
 
       - name: Check unused deps are unlocked
         run: mix deps.unlock --check-unused
-
-      - name: Compile (warnings as errors)
-        run: mix compile --warnings-as-errors
 
       - name: Check the toolchain declarations agree
         # .tool-versions is the source of truth, and this job already reads it
@@ -232,9 +221,9 @@ jobs:
       # and a second failure is found only after fixing the first.
       fail-fast: false
       matrix:
-        # The shard count is this list's length and nothing else: the
-        # `--partitions` flag below reads it from `strategy.job-total`. To
-        # re-shard, add or remove an entry here.
+        # This list and SHARD_COUNT (top of the file) must agree; the first
+        # step below fails the shard if they do not. No `include:`/`exclude:`
+        # rows here: `--partitions` wants exactly 1..N, one job each.
         #
         # Six, not four: `--partitions` deals files out by count, not by
         # duration, and at four the fattest shard's test step ran 215s
@@ -244,32 +233,26 @@ jobs:
 
     env:
       # `mix test --partitions N` runs the slice this names (1-based), and
-      # config/test.exs suffixes the database with it (kiln_cms_test1, …) —
-      # the same variable the strict and overlay legs use to stay out of the
-      # main database's way. Each shard has its own Postgres service anyway;
-      # the suffix is what makes `--partitions` accept the run at all.
+      # config/runtime.exs suffixes the database with it (kiln_cms_test1, …)
+      # — the same variable the strict and overlay legs use to stay out of
+      # the main database's way. Each shard has its own Postgres service
+      # anyway; the suffix is what makes `--partitions` accept the run at all.
       MIX_TEST_PARTITION: ${{ matrix.partition }}
 
     steps:
       - uses: actions/checkout@v5
 
-      - name: Set up Elixir/OTP
-        uses: erlef/setup-beam@v1
-        with:
-          # Reads .tool-versions — the single source of truth (#600); see
-          # `build` for why it is strict.
-          version-file: .tool-versions
-          version-type: strict
+      - name: Check the matrix agrees with SHARD_COUNT
+        # `strategy.job-total` is the matrix's real size, `include:` rows and
+        # all — the number `--partitions` would silently be wrong about.
+        run: |
+          if [ "${{ strategy.job-total }}" != "$SHARD_COUNT" ] || [ "$MIX_TEST_PARTITION" -gt "$SHARD_COUNT" ]; then
+            echo "::error::SHARD_COUNT is $SHARD_COUNT but the test matrix has ${{ strategy.job-total }} jobs (this one is partition $MIX_TEST_PARTITION). Fix the list or the count; they must agree."
+            exit 1
+          fi
 
-      - name: Restore deps and _build
-        uses: ./.github/actions/mix-build-cache
-
-      - name: Install dependencies
-        run: mix deps.get
-
-      - name: Compile
-        # Plain: `build` is the job that treats warnings as errors.
-        run: mix compile
+      - name: Set up Mix (toolchain, cache, deps, compile)
+        uses: ./.github/actions/setup-mix
 
       # PDF metadata stripping (#807) shells out to qpdf, and the tests that
       # prove an uploaded PDF really loses its /Info and XMP need a real one.
@@ -312,101 +295,77 @@ jobs:
       # `coveralls.json` is `mix test --cover` plus the one reporter that does
       # NOT check `minimum_coverage` — a shard's partial number would fail the
       # floor every time. Everything after the task name goes to `mix test`:
-      # `--partitions` picks this shard's slice (`strategy.job-total` is the
-      # matrix's size, so the flag and MIX_TEST_PARTITION cannot drift apart),
-      # and `--export-coverage` makes excoveralls write the raw :cover data to
-      # cover/shard-N.coverdata after the run. That file, not the JSON beside
-      # it, is what the `coverage` job merges. Cover-compiled modules run
-      # ~30% slower than plain; that is the price of measuring.
+      # `--partitions` picks this shard's slice, and `--export-coverage` makes
+      # excoveralls write the raw :cover data to cover/shard-N.coverdata after
+      # the run. That file, not the JSON beside it, is what `coverage` merges.
+      # Cover-compiled modules run ~30% slower than plain; that is the price
+      # of measuring.
       - name: Run this shard of the suite (under coverage)
-        run: mix coveralls.json --partitions ${{ strategy.job-total }} --export-coverage shard-${{ matrix.partition }}
+        run: mix coveralls.json --partitions "$SHARD_COUNT" --export-coverage "shard-$MIX_TEST_PARTITION"
 
       - name: Upload this shard's coverage data
-        # One artifact per shard: upload-artifact refuses a duplicate name.
-        # ~5 MB each, and only the `coverage` job in this run ever reads it.
+        # On a red shard too: a failing test still executed, and its coverage
+        # belongs in the union — the old single job reported coverage on a
+        # red suite, and `coverage` keeps that. The file is absent only when
+        # the run died before ExUnit (a database that never came up); then
+        # there is nothing to upload, the shard is already red, and
+        # `coverage` refuses to merge N-1 files.
+        if: ${{ !cancelled() && hashFiles('cover/shard-*.coverdata') != '' }}
         uses: actions/upload-artifact@v5
         with:
           name: coverdata-${{ matrix.partition }}
           path: cover/shard-${{ matrix.partition }}.coverdata
           if-no-files-found: error
-          retention-days: 1
+          # A partial re-run ("re-run failed jobs", or one shard by hand)
+          # keeps the earlier attempt's artifacts; without this, a job that
+          # had already uploaded fails on the duplicate name.
+          overwrite: true
+          # Long enough that re-running `coverage` later in the week still
+          # finds every sibling. ~5 MB each.
+          retention-days: 7
 
   coverage:
     name: Coverage (full suite)
     runs-on: ubuntu-latest
-    # The union of the shards is the full suite; this job never runs a test
-    # itself. `needs` makes a red shard skip it — and `ci` lists both, so
-    # the gate goes red either way.
+    # The union of the shards is the full suite; this job runs no test. It
+    # waits for every shard and runs even when one is red — a failing test
+    # still executed, and a report on a red suite is what the old single job
+    # produced too. The gate is `ci`, which lists `test` itself.
     needs: test
+    if: ${{ !cancelled() }}
 
-    services:
-      postgres:
-        # Still needed for a run of zero tests: the `test` alias runs
-        # `ash.setup` before ExUnit starts, and coveralls goes through the
-        # alias. pgvector rather than plain postgres — see `build`.
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+    # No Postgres. `mix kiln.coverage.merge` cover-compiles the beams, imports
+    # the shards' data and runs the reporters; nothing here boots the app.
 
     steps:
       - uses: actions/checkout@v5
 
-      - name: Set up Elixir/OTP
-        uses: erlef/setup-beam@v1
-        with:
-          # Reads .tool-versions — the single source of truth (#600); see
-          # `build` for why it is strict.
-          version-file: .tool-versions
-          version-type: strict
-
-      - name: Restore deps and _build
+      - name: Set up Mix (toolchain, cache, deps, compile)
         # The same cache the shards compiled from. That matters here more
         # than anywhere: `:cover.import` lines data up by module and line, so
         # this job must cover-compile the same beams the shards ran.
-        uses: ./.github/actions/mix-build-cache
-
-      - name: Install dependencies
-        run: mix deps.get
-
-      - name: Compile
-        # Plain: `build` is the job that treats warnings as errors.
-        run: mix compile
+        uses: ./.github/actions/setup-mix
 
       - name: Download every shard's coverage data
         uses: actions/download-artifact@v5
         with:
           pattern: coverdata-*
-          path: cover
-          # Flatten: cover/shard-1.coverdata, not cover/coverdata-1/shard-1…
+          # A sibling of cover/, not cover/ itself: cover/ is what the report
+          # artifact below uploads, and it should carry the report, not six
+          # binaries.
+          path: coverdata
+          # Flatten: coverdata/shard-1.coverdata, not coverdata/coverdata-1/…
           merge-multiple: true
 
-      # `--import-cover cover` feeds every cover/*.coverdata to `:cover` before
-      # excoveralls reports, so what the reporters see is the union of the
-      # shards. `--exclude test` excludes every test: ExUnit prints "All tests
-      # have been excluded" and exits 0, and the app is still cover-compiled
-      # and booted — which is all the import needs.
-      #
-      # Then, as before (#1314): the JSON reporter feeds the per-directory
-      # rollup below and the HTML one is uploaded as an artifact. The
-      # `minimum_coverage` FLOOR in coveralls.json (its comment says what it
-      # is and how to move it) is checked by the HTML reporter — the JSON one
-      # never checks it — so `--type html` is the gate, not a nicety, and it
-      # is listed AFTER `--type json` on purpose: a floor failure exits inside
-      # the html step, and the JSON must already be on disk for the two steps
-      # below to run.
+      # `--shards` is the completeness check: download-artifact does not fail
+      # when a pattern matches fewer artifacts than expected, and a merge over
+      # five of six shards would report a plausible number against the floor.
+      # The task refuses instead, naming the files it found. Then, as before
+      # (#1314): json feeds the rollup below and the artifact, html is the
+      # report — and the html reporter is the one that checks
+      # `minimum_coverage`, so it is the gate and it runs last.
       - name: Merge the shards' coverage and enforce the floor
-        run: |
-          ls -l cover/
-          mix coveralls.multiple --type json --type html --import-cover cover --exclude test
+        run: mix kiln.coverage.merge --dir coverdata --shards "$SHARD_COUNT" --type json --type html
 
       # One row per source directory (lib/kiln_cms_web/live, lib/kiln_cms/
       # firing, …/governance, …) so the editor / delivery / governance split is
@@ -423,6 +382,9 @@ jobs:
         with:
           name: coverage-report
           path: cover/
+          # Same reason as the shards' upload: a re-run of this job alone
+          # after a floor failure must not die on its own earlier upload.
+          overwrite: true
           retention-days: 14
 
   dialyzer:
@@ -437,27 +399,19 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Set up Elixir/OTP
-        uses: erlef/setup-beam@v1
+      - name: Set up Mix (toolchain, cache, deps)
+        # No compile step: `mix dialyzer` compiles the project itself.
+        uses: ./.github/actions/setup-mix
         with:
-          # Reads .tool-versions — the single source of truth (#600); see
-          # `build` for why it is strict.
-          version-file: .tool-versions
-          version-type: strict
-
-      - name: Restore deps and _build
-        uses: ./.github/actions/mix-build-cache
+          compile: none
 
       - name: Cache Dialyzer PLTs
         uses: actions/cache@v5
         with:
           path: priv/plts
-          key: ${{ runner.os }}-plt-${{ hashFiles('.tool-versions') }}-${{ hashFiles('**/mix.lock') }}
+          key: ${{ runner.os }}-plt-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
           restore-keys: |
             ${{ runner.os }}-plt-${{ hashFiles('.tool-versions') }}-
-
-      - name: Install dependencies
-        run: mix deps.get
 
       - name: Dialyzer
         run: mix dialyzer
@@ -470,11 +424,13 @@ jobs:
     name: Compile, lint, scan & test
     runs-on: ubuntu-latest
     needs: [build, test, coverage, dialyzer]
-    # `always()` is load-bearing. Without it a failed dependency SKIPS this
-    # job, and a skipped required check is not a failed one: the ruleset
-    # would sit waiting on a check that will never report, and the merge
-    # queue would time the entry out instead of failing it.
-    if: ${{ always() }}
+    # `!cancelled()` is load-bearing. The default (`success()`) SKIPS this job
+    # when a dependency failed, and a skipped required check is not a failed
+    # one: the ruleset would sit waiting on a check that never reports, and
+    # the merge queue would time the entry out instead of failing it. Not
+    # `always()`: that also runs after a cancel-in-progress cancellation and
+    # would report the superseded run as failed rather than cancelled.
+    if: ${{ !cancelled() }}
 
     steps:
       - name: Show every job's result
@@ -1028,14 +984,14 @@ jobs:
           # tree alone is most of a gigabyte — into a scope that is then dead
           # weight against the repository's shared cache budget, evicting the
           # entries other jobs live on. `priv/plts` is the one that hurts: lose
-          # it and `mix dialyzer` rebuilds the PLT from scratch in the `build`
+          # it and `mix dialyzer` rebuilds the PLT from scratch in the `dialyzer`
           # job, which reads as an unexplained slow run on an unrelated PR.
           cache-from: type=gha
           cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max' || '' }}
 
   # #907: `:qpdf` tests — the ones that prove an uploaded PDF actually loses
   # its `/Info` dictionary and XMP packet (#807) — are excluded from the
-  # `build` job above whenever the runner's qpdf predates 11.10 (see the
+  # `test` shards above whenever the runner's qpdf predates 11.10 (see the
   # "Install qpdf" step's comment there). `ubuntu-latest` currently packages
   # 11.9.0 — one minor short — so this privacy control has had no CI coverage
   # at all. Rather than move the WHOLE suite onto a newer/untested runner for

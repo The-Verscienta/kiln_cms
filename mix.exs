@@ -449,6 +449,9 @@ defmodule KilnCMS.MixProject do
         "coveralls.post": :test,
         "coveralls.xml": :test,
         "kiln.coverage.summary": :test,
+        # Lives in test/support (it calls excoveralls, an `only: :test` dep),
+        # so it exists only in this env — see its moduledoc.
+        "kiln.coverage.merge": :test,
         "e2e.setup": :e2e,
         "e2e.reset": :e2e
       ]
