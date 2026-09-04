@@ -239,9 +239,7 @@ defmodule KilnCMS.CMS.TaskTest do
     refute far.id in within
 
     window =
-      CMS.list_tasks_open_due_between!(today(), Date.add(today(), 3),
-        actor: editor
-      )
+      CMS.list_tasks_open_due_between!(today(), Date.add(today(), 3), actor: editor)
       |> Enum.map(& &1.id)
 
     refute overdue.id in window
