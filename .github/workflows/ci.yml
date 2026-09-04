@@ -56,15 +56,20 @@ jobs:
   #
   # The `test` shards exist for the fast signal — a red test surfaces at ~4
   # minutes instead of ~12 — not for the total: `coverage` still runs the whole
-  # suite, serially, and is now the critical path. It stays whole because
-  # excoveralls has no notion of partitions (nothing in its source merges
-  # per-shard results), so sharding it means a merge step of our own; that is
-  # the next cut, and when it lands the coverage shards replace these. The
-  # technique is the one in https://zarar.dev/speeding-up-elixir-test-suites/
-  # — `--partitions` with MIX_TEST_PARTITION naming the database — which
-  # config/test.exs has supported since the generator wrote it; every shard
-  # gets its own Postgres service besides, so no template-database trick is
-  # needed here.
+  # suite, serially, and is now the critical path. Sharding it is the next
+  # cut, and it is wiring rather than code: excoveralls has no partition mode,
+  # but it honours `mix test --export-coverage NAME` (writes
+  # cover/NAME.coverdata) and `--import-cover DIR` (feeds every *.coverdata in
+  # DIR to `:cover` before reporting), and only the local/html/cobertura
+  # reporters check the floor — so shards can `coveralls.json --export-coverage`
+  # without tripping it on partial coverage, and one small job can import the
+  # lot under `--exclude test` (zero tests, exit 0) and run the html gate on
+  # the union. Verified locally before this landed. When that job exists the
+  # coverage shards replace these plain ones. The technique is the one in
+  # https://zarar.dev/speeding-up-elixir-test-suites/ — `--partitions` with
+  # MIX_TEST_PARTITION naming the database — which config/test.exs has
+  # supported since the generator wrote it; every shard gets its own Postgres
+  # service besides, so no template-database trick is needed here.
   build:
     name: Compile, lint & scan
     runs-on: ubuntu-latest

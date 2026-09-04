@@ -227,9 +227,10 @@ migration, a rewritten column, a dropped config key).
   ruleset still gates on the one context it names — and now on everything
   that context used to mean, not only what fit in one job. A failing test
   surfaces at about four minutes rather than twelve. The whole-suite coverage
-  run is the new critical path; it stays unsharded because excoveralls has no
-  way to merge per-shard results, so sharding it needs a merge step of this
-  project's own, which is the next cut.
+  run is the new critical path and the next cut: excoveralls has no partition
+  mode, but it exports and imports `:cover` data (`--export-coverage` on a
+  shard, `--import-cover` in a merge job — verified locally), so the coverage
+  shards can replace the plain ones with no merge code of this project's own.
 
 ### Removed
 
