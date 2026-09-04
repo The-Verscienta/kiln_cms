@@ -226,11 +226,25 @@ migration, a rewritten column, a dropped config key).
   keeps the old name and waits on all four, so the "Require CI on main"
   ruleset still gates on the one context it names — and now on everything
   that context used to mean, not only what fit in one job. A failing test
-  surfaces at about four minutes rather than twelve. The whole-suite coverage
-  run is the new critical path and the next cut: excoveralls has no partition
-  mode, but it exports and imports `:cover` data (`--export-coverage` on a
-  shard, `--import-cover` in a merge job — verified locally), so the coverage
-  shards can replace the plain ones with no merge code of this project's own.
+  surfaces at about four minutes rather than twelve. That first cut kept a
+  whole-suite coverage run beside the shards, which measured 12m05s alone;
+  the shards now run *under* coverage instead — six of them, each exporting
+  its raw `:cover` data (`mix coveralls.json --export-coverage`, the one
+  reporter that does not check the floor) — and `Coverage (full suite)`
+  imports the lot (`--import-cover`), runs no tests of its own, and enforces
+  the floor on the union. excoveralls has no partition mode, but those two
+  flags are all a merge needs, verified locally before wiring them.
+- **Every CI job stopped recompiling the whole app against a warm cache.**
+  The deps/_build cache hit its exact key on every run and every job still
+  printed `Compiling 847 files` — 70 to 108 seconds apiece — because a fresh
+  checkout stamps `mix.exs` and `config/*.exs` with the checkout time and Mix
+  reads a config file newer than its manifest as a config change (sources
+  are digest-checked; config is not). `.github/actions/mix-build-cache` now
+  owns the cache for the four main jobs: the key includes a digest of
+  `mix.exs` and `config/**`, and on an exact hit — which then proves the
+  restored build was compiled from byte-identical config — it backdates
+  those files so Mix trusts the build. A PR that touches config misses the
+  exact key and recompiles in full, as before.
 
 ### Removed
 

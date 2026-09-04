@@ -1,0 +1,58 @@
+name: Mix build cache
+description: >-
+  Restore deps/ and _build/ for MIX_ENV=test, and stop a fresh checkout from
+  throwing the restored build away.
+
+# Every job that compiles the app restores deps/ and _build/ from the same
+# cache. Before this action existed the cache hit its exact key on every run
+# and every job STILL printed "Compiling 847 files (.ex)" — 70 to 108 seconds
+# of the ~2.5 minutes each job spends before its real work (PR #1392's run
+# 33823187979). Deps were fine; it was the app, all of it.
+#
+# The cause is mtimes, not the key. actions/checkout stamps every file with
+# the time of the checkout, and Mix decides whether the project config
+# changed by comparing the mtime of mix.exs and config/*.exs with the mtime of
+# its compile manifest — which tar restored from the cache, older. Sources
+# are digest-checked (touch every file under lib/ and nothing recompiles),
+# but a config file that merely LOOKS newer forces a full recompile: measured
+# locally, `touch config/test.exs` recompiles all 847 files, `touch mix.exs`
+# 95, and setting either back to an old date recompiles nothing. Nothing
+# under priv/ (the .po files are @external_resources) needs the same care —
+# with every tracked file touched and only mix.exs + config/*.exs backdated,
+# `mix compile` has nothing to do.
+#
+# So the second step backdates exactly those files — but ONLY on an exact
+# cache hit, and the key now includes a digest of mix.exs and config/**. Put
+# together: an exact hit means the restored build was compiled from
+# byte-identical project config, so the mtime it carries is a lie and
+# backdating it is safe. A PR that changes any config file misses the exact
+# key, falls through restore-keys to an older build, recompiles in full
+# exactly as before, and saves under its own new key. Backdating without the
+# digest in the key would be the bug this comment exists to prevent: a
+# changed `compile_env` value silently not recompiling the modules that read
+# it.
+#
+# Not used by the strict leg (its own MIX_BUILD_ROOT and key), the docs job
+# (dev profile), the client, or the container jobs — different builds.
+runs:
+  using: composite
+  steps:
+    - id: cache
+      uses: actions/cache@v5
+      with:
+        path: |
+          deps
+          _build
+        key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-${{ hashFiles('**/mix.lock') }}-${{ hashFiles('mix.exs', 'config/**') }}
+        restore-keys: |
+          ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-${{ hashFiles('**/mix.lock') }}-
+          ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-
+
+    - name: Backdate the project config so Mix trusts the restored build
+      # Exact hit only — see above. `cache-hit` is "true" for the primary key
+      # and empty for a restore-keys match.
+      if: steps.cache.outputs.cache-hit == 'true'
+      shell: bash
+      run: |
+        touch -d '2000-01-01T00:00:00Z' mix.exs config/*.exs
+        echo "Exact cache hit: backdated mix.exs and config/*.exs; expect '(nothing to compile)' next."

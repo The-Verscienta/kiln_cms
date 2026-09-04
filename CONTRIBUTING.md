@@ -181,10 +181,13 @@ sits just under the number the full suite last measured, so coverage cannot
 regress silently. When a PR raises the measured total by a whole point or more,
 raise the floor to just under the new number in the same PR; never lower it to
 turn a red build green — a build red on the floor is the regression it exists
-to surface. The HTML/JSON report is uploaded as the `coverage-report` artifact
-of the `Coverage (full suite)` job — the whole suite, unsharded; CI's `Test
-(shard n)` jobs run the same tests plain, for the faster red/green — and that
-job's summary carries the per-directory rollup. Locally:
+to surface. In CI the suite runs under coverage across the `Test (shard n)`
+jobs, each of which exports its raw `:cover` data; the `Coverage (full suite)`
+job imports the lot, checks the floor on the union, uploads the HTML/JSON
+report as the `coverage-report` artifact, and carries the per-directory
+rollup in its job summary. A shard's own percentage is partial and means
+nothing on its own — only the merged number is compared to the floor.
+Locally:
 
 ```bash
 mix coveralls.multiple --type json --type html   # full suite under cover; writes cover/

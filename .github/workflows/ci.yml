@@ -45,31 +45,38 @@ jobs:
   # runner. So:
   #
   #   build     compile + every lint and static check          (~7 min)
-  #   test      the suite, plain, split across N shards        (~4 min each)
-  #   coverage  the suite under `mix coveralls.multiple`       (~12 min)
+  #   test      the suite UNDER COVERAGE, split across N shards,
+  #             each exporting its :cover data                 (~5 min each)
+  #   coverage  imports every shard's data, enforces the floor,
+  #             writes the report — runs no tests of its own   (~3 min)
   #   dialyzer  its own job, on the cached PLT                 (~4 min)
-  #   ci        `Compile, lint, scan & test` — waits on all four
+  #   ci        `Compile, lint, scan & test` — waits on all of them
   #
   # `ci` carries the OLD job's name on purpose: the "Require CI on main"
   # ruleset names exactly that context, so the gate keeps working with no
   # change to repository settings, and it now fails if any of the four does.
   #
-  # The `test` shards exist for the fast signal — a red test surfaces at ~4
-  # minutes instead of ~12 — not for the total: `coverage` still runs the whole
-  # suite, serially, and is now the critical path. Sharding it is the next
-  # cut, and it is wiring rather than code: excoveralls has no partition mode,
-  # but it honours `mix test --export-coverage NAME` (writes
+  # The first cut of this split ran the shards plain and kept a whole-suite
+  # coverage run beside them; that run measured 12m05s alone and was the
+  # critical path. Sharding it is wiring rather than code: excoveralls has no
+  # partition mode, but it honours `mix test --export-coverage NAME` (writes
   # cover/NAME.coverdata) and `--import-cover DIR` (feeds every *.coverdata in
   # DIR to `:cover` before reporting), and only the local/html/cobertura
-  # reporters check the floor — so shards can `coveralls.json --export-coverage`
-  # without tripping it on partial coverage, and one small job can import the
-  # lot under `--exclude test` (zero tests, exit 0) and run the html gate on
-  # the union. Verified locally before this landed. When that job exists the
-  # coverage shards replace these plain ones. The technique is the one in
+  # reporters check the floor. So each shard runs `coveralls.json` — the one
+  # reporter that does NOT check the floor, which a shard's partial number
+  # would fail — exports, and uploads; `coverage` downloads the lot, imports
+  # it under `--exclude test` (zero tests, exit 0) and runs the html reporter,
+  # which is the gate, on the union. Verified locally before it landed: an
+  # export from test/kiln/ imported into a zero-test run reports 4.5% against
+  # the 0.5% the app's boot alone covers.
+  #
+  # The technique is the one in
   # https://zarar.dev/speeding-up-elixir-test-suites/ — `--partitions` with
   # MIX_TEST_PARTITION naming the database — which config/test.exs has
   # supported since the generator wrote it; every shard gets its own Postgres
-  # service besides, so no template-database trick is needed here.
+  # service besides, so no template-database trick is needed here. The other
+  # half of every job's time was a full recompile against a warm cache; see
+  # .github/actions/mix-build-cache for that one.
   build:
     name: Compile, lint & scan
     runs-on: ubuntu-latest
@@ -108,15 +115,8 @@ jobs:
           # the Dockerfile can mirror them.
           version-type: strict
 
-      - name: Cache deps and _build
-        uses: actions/cache@v5
-        with:
-          path: |
-            deps
-            _build
-          key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-${{ hashFiles('**/mix.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-
+      - name: Restore deps and _build
+        uses: ./.github/actions/mix-build-cache
 
       - name: Install dependencies
         run: mix deps.get
@@ -235,7 +235,12 @@ jobs:
         # The shard count is this list's length and nothing else: the
         # `--partitions` flag below reads it from `strategy.job-total`. To
         # re-shard, add or remove an entry here.
-        partition: [1, 2, 3, 4]
+        #
+        # Six, not four: `--partitions` deals files out by count, not by
+        # duration, and at four the fattest shard's test step ran 215s
+        # against the leanest's 93s. Every shard also pays ~2 minutes of
+        # setup before its first test, which is why this is not sixteen.
+        partition: [1, 2, 3, 4, 5, 6]
 
     env:
       # `mix test --partitions N` runs the slice this names (1-based), and
@@ -256,81 +261,8 @@ jobs:
           version-file: .tool-versions
           version-type: strict
 
-      - name: Cache deps and _build
-        # Same key as `build`: same MIX_ENV, same profile, so the jobs share
-        # one warm cache rather than each warming its own.
-        uses: actions/cache@v5
-        with:
-          path: |
-            deps
-            _build
-          key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-${{ hashFiles('**/mix.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-
-
-      - name: Install dependencies
-        run: mix deps.get
-
-      - name: Compile
-        # Plain: `build` is the job that treats warnings as errors.
-        run: mix compile
-
-      # The shards install what `coverage` installs (the reasoning is with
-      # the steps there) so a shard runs the same test set the coverage run
-      # does. Without these, test_helper.exs would exclude :qpdf and :ffmpeg
-      # here and run the :no_ffmpeg pair instead, and the two legs would
-      # disagree about which tests exist.
-      - name: Install qpdf and ffmpeg (metadata stripping tests)
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends qpdf ffmpeg
-
-      - name: Run this shard of the suite
-        # `strategy.job-total` is the matrix's size, so this flag and the
-        # MIX_TEST_PARTITION values above cannot drift apart.
-        run: mix test --partitions ${{ strategy.job-total }}
-
-  coverage:
-    name: Coverage (full suite)
-    runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        # pgvector rather than plain postgres — see `build`.
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Set up Elixir/OTP
-        uses: erlef/setup-beam@v1
-        with:
-          # Reads .tool-versions — the single source of truth (#600); see
-          # `build` for why it is strict.
-          version-file: .tool-versions
-          version-type: strict
-
-      - name: Cache deps and _build
-        # Same key as `build` — see the `test` job.
-        uses: actions/cache@v5
-        with:
-          path: |
-            deps
-            _build
-          key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-${{ hashFiles('**/mix.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-
+      - name: Restore deps and _build
+        uses: ./.github/actions/mix-build-cache
 
       - name: Install dependencies
         run: mix deps.get
@@ -377,18 +309,104 @@ jobs:
           ffmpeg -version | head -1
           ffprobe -version | head -1
 
-      # `mix coveralls.multiple` is `mix test --cover` plus reports (#1314):
-      # the JSON one feeds the per-directory rollup below, the HTML one is
-      # uploaded as an artifact. The `minimum_coverage` FLOOR in coveralls.json
-      # (its comment says what it is and how to move it) is checked by the
-      # HTML reporter — excoveralls' JSON reporter never checks it — so
-      # `--type html` is the gate, not a nicety, and it is listed AFTER
-      # `--type json` on purpose: a floor failure exits inside the html step,
-      # and the JSON must already be on disk for the two steps below to run.
-      # Cover-compiled modules run slower, so this step takes longer than a
-      # bare `mix test` does; that is the price of measuring, paid once per run.
-      - name: Run tests (with coverage)
-        run: mix coveralls.multiple --type json --type html
+      # `coveralls.json` is `mix test --cover` plus the one reporter that does
+      # NOT check `minimum_coverage` — a shard's partial number would fail the
+      # floor every time. Everything after the task name goes to `mix test`:
+      # `--partitions` picks this shard's slice (`strategy.job-total` is the
+      # matrix's size, so the flag and MIX_TEST_PARTITION cannot drift apart),
+      # and `--export-coverage` makes excoveralls write the raw :cover data to
+      # cover/shard-N.coverdata after the run. That file, not the JSON beside
+      # it, is what the `coverage` job merges. Cover-compiled modules run
+      # ~30% slower than plain; that is the price of measuring.
+      - name: Run this shard of the suite (under coverage)
+        run: mix coveralls.json --partitions ${{ strategy.job-total }} --export-coverage shard-${{ matrix.partition }}
+
+      - name: Upload this shard's coverage data
+        # One artifact per shard: upload-artifact refuses a duplicate name.
+        # ~5 MB each, and only the `coverage` job in this run ever reads it.
+        uses: actions/upload-artifact@v5
+        with:
+          name: coverdata-${{ matrix.partition }}
+          path: cover/shard-${{ matrix.partition }}.coverdata
+          if-no-files-found: error
+          retention-days: 1
+
+  coverage:
+    name: Coverage (full suite)
+    runs-on: ubuntu-latest
+    # The union of the shards is the full suite; this job never runs a test
+    # itself. `needs` makes a red shard skip it — and `ci` lists both, so
+    # the gate goes red either way.
+    needs: test
+
+    services:
+      postgres:
+        # Still needed for a run of zero tests: the `test` alias runs
+        # `ash.setup` before ExUnit starts, and coveralls goes through the
+        # alias. pgvector rather than plain postgres — see `build`.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Elixir/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          # Reads .tool-versions — the single source of truth (#600); see
+          # `build` for why it is strict.
+          version-file: .tool-versions
+          version-type: strict
+
+      - name: Restore deps and _build
+        # The same cache the shards compiled from. That matters here more
+        # than anywhere: `:cover.import` lines data up by module and line, so
+        # this job must cover-compile the same beams the shards ran.
+        uses: ./.github/actions/mix-build-cache
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Compile
+        # Plain: `build` is the job that treats warnings as errors.
+        run: mix compile
+
+      - name: Download every shard's coverage data
+        uses: actions/download-artifact@v5
+        with:
+          pattern: coverdata-*
+          path: cover
+          # Flatten: cover/shard-1.coverdata, not cover/coverdata-1/shard-1…
+          merge-multiple: true
+
+      # `--import-cover cover` feeds every cover/*.coverdata to `:cover` before
+      # excoveralls reports, so what the reporters see is the union of the
+      # shards. `--exclude test` excludes every test: ExUnit prints "All tests
+      # have been excluded" and exits 0, and the app is still cover-compiled
+      # and booted — which is all the import needs.
+      #
+      # Then, as before (#1314): the JSON reporter feeds the per-directory
+      # rollup below and the HTML one is uploaded as an artifact. The
+      # `minimum_coverage` FLOOR in coveralls.json (its comment says what it
+      # is and how to move it) is checked by the HTML reporter — the JSON one
+      # never checks it — so `--type html` is the gate, not a nicety, and it
+      # is listed AFTER `--type json` on purpose: a floor failure exits inside
+      # the html step, and the JSON must already be on disk for the two steps
+      # below to run.
+      - name: Merge the shards' coverage and enforce the floor
+        run: |
+          ls -l cover/
+          mix coveralls.multiple --type json --type html --import-cover cover --exclude test
 
       # One row per source directory (lib/kiln_cms_web/live, lib/kiln_cms/
       # firing, …/governance, …) so the editor / delivery / governance split is
@@ -427,16 +445,8 @@ jobs:
           version-file: .tool-versions
           version-type: strict
 
-      - name: Cache deps and _build
-        # Same key as `build` — see the `test` job.
-        uses: actions/cache@v5
-        with:
-          path: |
-            deps
-            _build
-          key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-${{ hashFiles('**/mix.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-
+      - name: Restore deps and _build
+        uses: ./.github/actions/mix-build-cache
 
       - name: Cache Dialyzer PLTs
         uses: actions/cache@v5
