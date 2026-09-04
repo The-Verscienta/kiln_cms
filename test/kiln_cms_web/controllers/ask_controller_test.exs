@@ -168,4 +168,18 @@ defmodule KilnCMSWeb.AskControllerTest do
       refute Enum.any?(titles, &String.contains?(&1, "Members"))
     end
   end
+
+  test "each source carries its fused score and the legs that matched", %{conn: conn} do
+    actor = admin()
+    term = "zorptastic#{System.unique_integer([:positive])}"
+    post = CMS.create_post!(%{title: "The #{term} handbook", slug: slug()}, actor: actor)
+    CMS.publish_post!(post, %{}, actor: actor)
+
+    body = conn |> get(~p"/api/ask?q=#{term}") |> json_response(200)
+
+    assert [source] = body["sources"]
+    assert is_float(source["score"]) and source["score"] > 0
+    # The title word is found by the keyword leg and the fuzzy title leg.
+    assert source["legs"] == ["keyword", "fuzzy"]
+  end
 end

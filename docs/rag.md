@@ -17,15 +17,36 @@ grounded in those sources.
   "retry_after": null,
   "sources": [
     { "type": "page", "title": "Welcome to KilnCMS", "url": "/welcome",
-      "excerpt": "Welcome to KilnCMS … A world-class, Elixir-native headless CMS. …" },
+      "excerpt": "Welcome to KilnCMS. A world-class, Elixir-native headless CMS built on Phoenix and Ash …",
+      "score": 0.0328, "legs": ["keyword", "semantic"] },
     { "type": "post", "title": "Hello, World", "url": "/blog/hello-world",
-      "excerpt": "The first post on a KilnCMS-powered site. …" }
+      "excerpt": "The first post on a KilnCMS-powered site. Posts live under /blog and …",
+      "score": 0.0164, "legs": ["keyword"] }
   ]
 }
 ```
 
 Parameters: `q` (the question), optional `locale` and `limit` (max sources,
 clamped to 12).
+
+`sources` are in **relevance order across every content type**: each hit's
+`score` is the fused Reciprocal Rank Fusion score it was ranked by (the
+reranker's score instead, when reranking is enabled), and the scores are
+comparable across types because every section of the sweep shares the same
+`k` and leg weights. `legs` names which of `keyword`, `semantic` and `fuzzy`
+returned the hit — a keyword-and-semantic hit is a stronger claim than a
+fuzzy-only one. Both are additive; a client reading only `title`/`url`/`excerpt`
+needs no update. They exist so a client can threshold, debug a ranking, or
+build an evaluation set against the public API rather than the internals.
+
+`excerpt` is a **grounding passage**, not the search page's snippet: up to
+three fragments of 40 words around the matches, with no `<mark>` tags, and —
+when the matches are only in the title and headings, which is exactly what a
+question naming the record produces — the document's opening ~300 characters
+instead. The search page's 18-word `highlight` stripped of its tags used to be
+cited here, and on a question about two herbs it grounded the generator on
+"Huang Qi Botanical Description Astragalus"; a well-behaved generator then
+truthfully answers that its sources say nothing.
 
 ### Why there is no generated answer
 
@@ -80,6 +101,13 @@ which is worse than the disclosure.
   when semantic search is disabled, so `/api/ask` works with no model stack;
   turning on semantic search (`config :kiln_cms, KilnCMS.Search, semantic: true`)
   improves retrieval quality automatically.
+- **Selection is by score, across types.** Every section comes back ranked
+  within its type and every hit carries its fused score
+  (`KilnCMS.Search.hit_score/1`); the sources are the top `limit` of all
+  sections sorted together. They used to be the sections flattened in registry
+  order — sorted by type *label* — so every hit of an alphabetically earlier
+  type outranked every hit of a later one, however weak. Ties keep the registry
+  order.
 - **Policy-scoped:** an anonymous request only ever sees published,
   world-readable content (the same read policies as every headless surface), so
   **drafts and gated content can never leak** into an answer or a citation. A

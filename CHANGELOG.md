@@ -29,6 +29,44 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **Search hits carry their score and provenance.** Every record out of
+  `KilnCMS.Search.hybrid/3` (and so every content section of `global/2`)
+  now carries the fused Reciprocal Rank Fusion score it was ranked by — or
+  the reranker's score, when reranking ran — and the legs that returned it
+  (`keyword`, `semantic`, `fuzzy`), read with `Search.hit_score/1` and
+  `Search.hit_legs/1`. `GET /api/search` content hits and `GET /api/ask`
+  sources expose them as additive `score` and `legs` fields. Until now a
+  client's only relevance signal was whether a `<mark>` appeared in the
+  highlight: nothing to threshold on, debug a ranking with, or build an
+  evaluation set from. The scores are comparable across content types (one
+  `k` and one set of leg weights per sweep), which is what the fix below
+  stands on.
+- **A `passage` calc for grounding.** Where `highlight` is 18 words around the
+  match with `<mark>` tags — right for a results page — `passage` is up to
+  three fragments of 40 words with no tags, and when the headline still comes
+  back under 120 characters (the matches sit in the title-and-headings prefix
+  of `search_text`, which is exactly what a question naming the record
+  produces) the document's opening 300 characters instead. Loaded with
+  `Search.global(…, passage: true)`; `/api/ask` cites it.
+
+### Fixed
+
+- **`/api/ask` cited sources in alphabetical order of content type, not by
+  relevance.** `KilnCMS.Ask`'s retrieval flattened the sections in registry
+  order — sorted by type label — and took the first `limit`, under a comment
+  claiming to "interleave by taking the strongest across types". On a
+  deployment with Concept, Formula and Herb types, a question comparing two
+  herbs cited a weak concept page first, four formulas next, and the two herbs
+  seventh and eighth. Sources are now the top `limit` of every section sorted
+  together by fused score (ties keep the registry order). Reported, with live
+  probes, in the "Why Shen Beat Huang Qi" analysis of a production deployment.
+- **`/api/ask` excerpts could be five words long.** The search page's
+  `highlight` snippet, stripped of its marks, was what a generator (and any RAG
+  client) was grounded on; on a query naming the record it degenerated to the
+  title and a heading — "Huang Qi Botanical Description Astragalus" — and a
+  well-behaved grounded generator truthfully answered that its sources said
+  nothing. `excerpt` is now the `passage` calc above.
+
 - **Click a finding in the SEO or accessibility panel to be taken to it.**
   Every row in the editor's advisory panels is now a button: clicking it
   scrolls the editor to whatever the finding is about and highlights it for a

@@ -9,7 +9,11 @@ phasing is at the end.
 > every `Search.global/2` content section (public `/search`, the ⌘K palette)
 > with the rerank pass applied when enabled, works over any content type
 > (dynamic entries included), and is exposed headlessly at `GET /api/search`
-> (sectioned hits + public paths + safe highlights + "did you mean").
+> (sectioned hits + public paths + safe highlights + "did you mean"). Since
+> 2026-09-04 every hybrid hit also carries the fused `score` it was ranked by
+> and the `legs` that returned it (`Search.hit_score/1`, `hit_legs/1`; on the
+> API as `score`/`legs`), and `/api/ask` ranks its sources by that score across
+> types rather than flattening sections in registry order.
 >
 > **Project types (2026-07-10, #296):** `Search.global/2`, `facets/2` and
 > `suggest/2` derive their content sweep from the `ContentTypes` registry
