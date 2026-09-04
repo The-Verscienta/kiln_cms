@@ -97,17 +97,47 @@ Default `nil` (no floor). There is no safe default to ship — pgvector's `<=>`
 runs `0` (identical) to `2` (opposed), but where *related* stops is a property
 of the model and the corpus, and instruction-tuned embedders like bge cluster
 in a narrow high-similarity band. A value tuned for one setup can silently
-empty another.
+empty another, and a value measured on a sample of the corpus drifts as the
+corpus grows around it.
 
-To pick one, measure both directions:
+**Where it applies.** `hybrid/3` — the search page, `/api/search`, `/api/ask`
+— applies the floor *after* fusion, to hits only the semantic leg returned. A
+record the keyword or fuzzy (title) leg also found is kept whatever its
+distance: a lexical match needs no distance alibi. The per-type
+`semantic-search` API routes have no other leg, so they filter the leg itself.
+
+The placement matters. Filtering the leg before fusion made the floor the
+judge of every row, and a short query naming a record embeds far from that
+record's long prose — on an entity-heavy corpus with a floor of 0.35, "huang
+qi dang shen" kept two marginal neighbours and dropped both named records, so
+the semantic leg fed fusion noise and withheld the answers (the "Why Shen Beat
+Huang Qi" report, D2/P3). Junk still returns nothing: with no lexical hit every
+fused hit is semantic-only, and every one is over the floor.
+
+**Measuring it.** Write a sheet of queries — one per line, `query<TAB>slug`
+for a query that should find a record, a bare line for one that should find
+nothing — covering the classes the floor has to serve (single names, name
+lists, paraphrases, question forms, junk), then:
+
+```bash
+mix kiln.search.measure_floor queries.tsv          # every content type
+mix kiln.search.measure_floor queries.tsv --type herb --limit 50
+```
+
+It reports each expected record's raw distance against its nearest competitor
+and each junk query's nearest neighbour, ignoring any floor already
+configured, and proposes the cutoff between the two bands. When they overlap
+it says which queries overlap and what each edge would keep and admit — that
+is a choice about which error to make, or a sign the corpus wants
+`rerank: true` rather than a floor. Since corroborated hits are never floored,
+set the value by where the junk band starts, not by the hardest expected
+record. The numbers behind the task are `KilnCMS.Search.semantic_neighbours/3`
+(`semantic_distances/3` for titles only):
 
 ```elixir
 KilnCMS.Search.semantic_distances(:page, "a query that should match")
 KilnCMS.Search.semantic_distances(:page, "asdfghjkl")
 ```
-
-Set the cutoff between the two. If the ranges overlap, distance alone can't
-separate your corpus — reach for `rerank: true` instead.
 
 ## Phase 3 — Hybrid fusion (+ optional rerank)
 - `KilnCMS.Search.hybrid(type, query, opts)` runs both legs (top-N each), fuses
