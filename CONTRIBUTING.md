@@ -182,8 +182,9 @@ regress silently. When a PR raises the measured total by a whole point or more,
 raise the floor to just under the new number in the same PR; never lower it to
 turn a red build green — a build red on the floor is the regression it exists
 to surface. The HTML/JSON report is uploaded as the `coverage-report` artifact
-of the `Compile, lint, scan & test` job, and the job summary carries the
-per-directory rollup. Locally:
+of the `Coverage (full suite)` job — the whole suite, unsharded; CI's `Test
+(shard n)` jobs run the same tests plain, for the faster red/green — and that
+job's summary carries the per-directory rollup. Locally:
 
 ```bash
 mix coveralls.multiple --type json --type html   # full suite under cover; writes cover/

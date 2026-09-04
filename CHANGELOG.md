@@ -209,6 +209,28 @@ migration, a rewritten column, a dropped config key).
   gaps (compile-time macro bodies, dev-only modules, deliberately excluded
   tags).
 
+### Changed
+
+- **CI's main gate is four parallel jobs instead of one serial one.** The
+  `Compile, lint, scan & test` job ran the compile, every lint, the suite
+  under coverage and then dialyzer back to back on one runner, and the last
+  green run before this change measured it at 17m57s while nothing else in
+  the workflow took more than five minutes: the coverage run alone was 8m51s,
+  dialyzer 2m02s. It is now `Compile, lint & scan` (the compile and the
+  static checks), `Test (shard n)` — the suite, plain, over four
+  `mix test --partitions` shards, each on its own Postgres with
+  `MIX_TEST_PARTITION` naming its database the way `config/test.exs` has
+  always allowed — `Coverage (full suite)`, unchanged in substance (the
+  `mix coveralls.multiple` run, the floor, the per-directory rollup and the
+  `coverage-report` artifact now live there), and `Dialyzer`. A fifth job
+  keeps the old name and waits on all four, so the "Require CI on main"
+  ruleset still gates on the one context it names — and now on everything
+  that context used to mean, not only what fit in one job. A failing test
+  surfaces at about four minutes rather than twelve. The whole-suite coverage
+  run is the new critical path; it stays unsharded because excoveralls has no
+  way to merge per-shard results, so sharding it needs a merge step of this
+  project's own, which is the next cut.
+
 ### Removed
 
 - **A dead `blank_to_nil/1` in `KilnCMSWeb.CodeInjectionLive`.** It trimmed a

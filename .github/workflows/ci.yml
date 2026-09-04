@@ -36,8 +36,37 @@ env:
   # anything the Dockerfile's exact tags could match (#600).
 
 jobs:
+  # The main gate is four jobs, not one. It used to be one — compile, every
+  # lint, the suite under coverage, then dialyzer, in series — and the last
+  # green run before the split measured that job at 17m57s while nothing else
+  # in this file took more than five minutes: the coverage run alone was 8m51s
+  # (49% of the job), dialyzer 2m02s, `gettext.extract --merge` 1m51s. Every
+  # one of those waited on the ones before it for no reason but sharing a
+  # runner. So:
+  #
+  #   build     compile + every lint and static check          (~7 min)
+  #   test      the suite, plain, split across N shards        (~4 min each)
+  #   coverage  the suite under `mix coveralls.multiple`       (~12 min)
+  #   dialyzer  its own job, on the cached PLT                 (~4 min)
+  #   ci        `Compile, lint, scan & test` — waits on all four
+  #
+  # `ci` carries the OLD job's name on purpose: the "Require CI on main"
+  # ruleset names exactly that context, so the gate keeps working with no
+  # change to repository settings, and it now fails if any of the four does.
+  #
+  # The `test` shards exist for the fast signal — a red test surfaces at ~4
+  # minutes instead of ~12 — not for the total: `coverage` still runs the whole
+  # suite, serially, and is now the critical path. It stays whole because
+  # excoveralls has no notion of partitions (nothing in its source merges
+  # per-shard results), so sharding it means a merge step of our own; that is
+  # the next cut, and when it lands the coverage shards replace these. The
+  # technique is the one in https://zarar.dev/speeding-up-elixir-test-suites/
+  # — `--partitions` with MIX_TEST_PARTITION naming the database — which
+  # config/test.exs has supported since the generator wrote it; every shard
+  # gets its own Postgres service besides, so no template-database trick is
+  # needed here.
   build:
-    name: Compile, lint, scan & test
+    name: Compile, lint & scan
     runs-on: ubuntu-latest
 
     services:
@@ -83,14 +112,6 @@ jobs:
           key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-${{ hashFiles('**/mix.lock') }}
           restore-keys: |
             ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-
-
-      - name: Cache Dialyzer PLTs
-        uses: actions/cache@v5
-        with:
-          path: priv/plts
-          key: ${{ runner.os }}-plt-${{ hashFiles('.tool-versions') }}-${{ hashFiles('**/mix.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-plt-${{ hashFiles('.tool-versions') }}-
 
       - name: Install dependencies
         run: mix deps.get
@@ -181,6 +202,138 @@ jobs:
       - name: Sobelow (security scan)
         run: mix sobelow --config
 
+  test:
+    name: Test (shard ${{ matrix.partition }})
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        # pgvector rather than plain postgres — see `build`.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    strategy:
+      # Every shard reports. With fail-fast, one red shard cancels the rest
+      # and a second failure is found only after fixing the first.
+      fail-fast: false
+      matrix:
+        # The shard count is this list's length and nothing else: the
+        # `--partitions` flag below reads it from `strategy.job-total`. To
+        # re-shard, add or remove an entry here.
+        partition: [1, 2, 3, 4]
+
+    env:
+      # `mix test --partitions N` runs the slice this names (1-based), and
+      # config/test.exs suffixes the database with it (kiln_cms_test1, …) —
+      # the same variable the strict and overlay legs use to stay out of the
+      # main database's way. Each shard has its own Postgres service anyway;
+      # the suffix is what makes `--partitions` accept the run at all.
+      MIX_TEST_PARTITION: ${{ matrix.partition }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Elixir/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          # Reads .tool-versions — the single source of truth (#600); see
+          # `build` for why it is strict.
+          version-file: .tool-versions
+          version-type: strict
+
+      - name: Cache deps and _build
+        # Same key as `build`: same MIX_ENV, same profile, so the jobs share
+        # one warm cache rather than each warming its own.
+        uses: actions/cache@v5
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Compile
+        # Plain: `build` is the job that treats warnings as errors.
+        run: mix compile
+
+      # The shards install what `coverage` installs (the reasoning is with
+      # the steps there) so a shard runs the same test set the coverage run
+      # does. Without these, test_helper.exs would exclude :qpdf and :ffmpeg
+      # here and run the :no_ffmpeg pair instead, and the two legs would
+      # disagree about which tests exist.
+      - name: Install qpdf and ffmpeg (metadata stripping tests)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends qpdf ffmpeg
+
+      - name: Run this shard of the suite
+        # `strategy.job-total` is the matrix's size, so this flag and the
+        # MIX_TEST_PARTITION values above cannot drift apart.
+        run: mix test --partitions ${{ strategy.job-total }}
+
+  coverage:
+    name: Coverage (full suite)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        # pgvector rather than plain postgres — see `build`.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Elixir/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          # Reads .tool-versions — the single source of truth (#600); see
+          # `build` for why it is strict.
+          version-file: .tool-versions
+          version-type: strict
+
+      - name: Cache deps and _build
+        # Same key as `build` — see the `test` job.
+        uses: actions/cache@v5
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Compile
+        # Plain: `build` is the job that treats warnings as errors.
+        run: mix compile
+
       # PDF metadata stripping (#807) shells out to qpdf, and the tests that
       # prove an uploaded PDF really loses its /Info and XMP need a real one.
       #
@@ -228,7 +381,7 @@ jobs:
       # `--type json` on purpose: a floor failure exits inside the html step,
       # and the JSON must already be on disk for the two steps below to run.
       # Cover-compiled modules run slower, so this step takes longer than a
-      # bare `mix test` did; that is the price of measuring, paid once per run.
+      # bare `mix test` does; that is the price of measuring, paid once per run.
       - name: Run tests (with coverage)
         run: mix coveralls.multiple --type json --type html
 
@@ -249,8 +402,79 @@ jobs:
           path: cover/
           retention-days: 14
 
+  dialyzer:
+    name: Dialyzer
+    runs-on: ubuntu-latest
+
+    # No database: dialyzer reads beam files. `mix dialyzer` compiles the
+    # project first (plainly — `build` is the warnings-as-errors leg) and then
+    # checks it against the cached PLT, so with a warm cache this is the two
+    # minutes the check itself takes plus a compile, in parallel with
+    # everything else instead of after it.
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Elixir/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          # Reads .tool-versions — the single source of truth (#600); see
+          # `build` for why it is strict.
+          version-file: .tool-versions
+          version-type: strict
+
+      - name: Cache deps and _build
+        # Same key as `build` — see the `test` job.
+        uses: actions/cache@v5
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-
+
+      - name: Cache Dialyzer PLTs
+        uses: actions/cache@v5
+        with:
+          path: priv/plts
+          key: ${{ runner.os }}-plt-${{ hashFiles('.tool-versions') }}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-plt-${{ hashFiles('.tool-versions') }}-
+
+      - name: Install dependencies
+        run: mix deps.get
+
       - name: Dialyzer
         run: mix dialyzer
+
+  # The required check. Its name is the one the "Require CI on main" ruleset
+  # lists, so splitting the job above into four changed nothing in repository
+  # settings — and where the old job could only fail on its own steps, this
+  # one fails if ANY of the four does.
+  ci:
+    name: Compile, lint, scan & test
+    runs-on: ubuntu-latest
+    needs: [build, test, coverage, dialyzer]
+    # `always()` is load-bearing. Without it a failed dependency SKIPS this
+    # job, and a skipped required check is not a failed one: the ruleset
+    # would sit waiting on a check that will never report, and the merge
+    # queue would time the entry out instead of failing it.
+    if: ${{ always() }}
+
+    steps:
+      - name: Show every job's result
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: echo "$RESULTS"
+
+      # `needs.test.result` is the matrix's combined result, so one red shard
+      # is enough. `skipped` is listed although nothing above is conditional
+      # today: a future `if:` on one of them must not turn into a silent pass.
+      - name: Fail unless every job succeeded
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}
+        run: |
+          echo "::error::A required job did not succeed — see the jobs above."
+          exit 1
 
   # Deliberately its own job rather than a step in `build` (#51). The advisory
   # database moves on its own schedule, so this gate can fail on a PR that
