@@ -196,25 +196,28 @@ defmodule KilnCMS.Search.Eval do
   # score 0 forever and quietly drag the class average down.
   defp expected_field(raw, class, index) do
     case Map.get(raw, "expected") do
-      list when is_list(list) ->
-        cond do
-          not Enum.all?(list, &(is_binary(&1) and &1 != "")) ->
-            {:error, "row #{index}: \"expected\" must be a list of non-empty slugs"}
-
-          class == "junk" and list != [] ->
-            {:error, "row #{index}: a junk row must expect nothing (\"expected\": [])"}
-
-          class != "junk" and list == [] ->
-            {:error, "row #{index}: a #{class} row must expect at least one slug"}
-
-          true ->
-            {:ok, Enum.uniq(list)}
-        end
-
-      _other ->
-        {:error, "row #{index}: \"expected\" must be a list of slugs"}
+      list when is_list(list) -> check_expected(list, class, index)
+      _other -> {:error, "row #{index}: \"expected\" must be a list of slugs"}
     end
   end
+
+  defp check_expected(list, class, index) do
+    cond do
+      not Enum.all?(list, &slug?/1) ->
+        {:error, "row #{index}: \"expected\" must be a list of non-empty slugs"}
+
+      class == "junk" and list != [] ->
+        {:error, "row #{index}: a junk row must expect nothing (\"expected\": [])"}
+
+      class != "junk" and list == [] ->
+        {:error, "row #{index}: a #{class} row must expect at least one slug"}
+
+      true ->
+        {:ok, Enum.uniq(list)}
+    end
+  end
+
+  defp slug?(value), do: is_binary(value) and value != ""
 
   # --- judging ---------------------------------------------------------------
 

@@ -148,9 +148,22 @@ defmodule KilnCMS.Search.EvalTest do
     end
 
     test "a slug returned twice occupies one rank, the first" do
-      judged = Eval.judge(row("q", ["a", "b"], "multi_entity"), [hit("a"), hit("a"), hit("b")])
-      assert Enum.map(judged.expected, & &1.rank) == [1, 2]
+      # Two records sharing a slug across types come back as DIFFERENT hits
+      # (score, legs, section) — the dedupe is by slug, not by hit.
+      judged =
+        Eval.judge(row("q", ["a", "b"], "multi_entity"), [
+          hit("a", score: 0.02, legs: ["keyword"]),
+          hit("a", score: 0.01, legs: ["fuzzy"], section: "posts", type: "post"),
+          hit("b")
+        ])
+
+      assert judged.expected == [
+               %{slug: "a", rank: 1, legs: ["keyword"]},
+               %{slug: "b", rank: 2, legs: ["keyword"]}
+             ]
+
       assert judged.returned == 2
+      assert judged.returned_slugs == ["a", "b"]
     end
   end
 
