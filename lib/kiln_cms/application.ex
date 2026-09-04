@@ -483,10 +483,13 @@ defmodule KilnCMS.Application do
     end
   end
 
-  # The reranker serving is only started when reranking is enabled with the
-  # local Bumblebee adapter (same gating as the embedder).
+  # The reranker serving is only started when some scope reranks — every
+  # surface (`KilnCMS.Search.rerank?/0`) or the ask path alone
+  # (`KilnCMS.Ask.rerank?/0`, which already folds the global switch in) — with
+  # the local Bumblebee adapter (same gating as the embedder). A default
+  # install enables neither and loads nothing.
   defp reranker_children do
-    if KilnCMS.Search.rerank?() and
+    if KilnCMS.Ask.rerank?() and
          KilnCMS.Search.reranker() == KilnCMS.Search.Reranker.Bumblebee do
       [
         {Nx.Serving,

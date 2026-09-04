@@ -1,8 +1,10 @@
 defmodule KilnCMS.Search.RerankerServing do
   @moduledoc """
   Bumblebee text-classification `Nx.Serving` used as a cross-encoder reranker.
-  `KilnCMS.Application` starts it only when `rerank: true` with the Bumblebee
-  reranker — loading the model is expensive.
+  `KilnCMS.Application` starts it only when some scope reranks — every
+  surface (`KilnCMS.Search.rerank?/0`) or `/api/ask` alone
+  (`KilnCMS.Ask.rerank?/0`) — with the Bumblebee reranker; loading the model
+  is expensive.
   """
   @name __MODULE__
 

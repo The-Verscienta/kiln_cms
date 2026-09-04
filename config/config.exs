@@ -171,9 +171,12 @@ config :kiln_cms, KilnCMS.Search,
   embedder: KilnCMS.Search.Embedder.Bumblebee,
   model: "BAAI/bge-small-en-v1.5",
   dim: 384,
-  # Optional reranking of `hybrid/3` results by a local cross-encoder. Off by
-  # default — the model only loads when `rerank: true`, and even then only the
-  # `hybrid(..., rerank: true)` calls use it.
+  # Optional reranking of every search surface's fused results by a local
+  # cross-encoder — the public search page, the editor palette, /api/search
+  # and /api/ask alike. Off by default: it is CPU inference over every
+  # candidate on every query. To rerank only /api/ask's bounded, per-question
+  # candidate set, leave this off and set `KilnCMS.Ask`'s `rerank` below; the
+  # model loads at boot when either is on.
   rerank: false,
   reranker: KilnCMS.Search.Reranker.Bumblebee,
   rerank_model: "BAAI/bge-reranker-base",
@@ -221,6 +224,18 @@ config :kiln_cms, KilnCMS.Search,
   # same #943 reserve `KilnCMS.Seo`'s `unattended_share` implements. The
   # remainder stays available to an editor's own duplicates/tags panel.
   embedding_unattended_share: 0.5
+
+# "Ask your content" — `/api/ask` (docs/rag.md). Generation is a runtime.exs
+# switch (ASK_MODEL); this one reranks the question's retrieved candidates
+# with the `KilnCMS.Search` reranker above WITHOUT turning it on for every
+# search surface — a bounded, per-question cost (at most `limit` candidates
+# per content type) rather than inference on every keystroke of the editor
+# palette. Off by default for the two reasons the report that asked for it
+# gives: reranking fixes the ORDER of what the fused legs returned, not what
+# they missed, and the cross-encoder runs on the CPU — the report's own host
+# has no AVX2. The model loads at boot when this or `Search`'s `rerank` is on.
+# `ASK_RERANK` overrides it in runtime.exs.
+config :kiln_cms, KilnCMS.Ask, rerank: false
 
 # AI-assisted SEO drafting (#60). The deterministic analysis and score in the
 # editor are ALWAYS on and need none of this — the block below gates the
