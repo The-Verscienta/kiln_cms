@@ -37,6 +37,13 @@ defmodule KilnCMS.Notifications.TaskDigestWorkerTest do
   # so a test's own assertions only see what the digest run produced.
   defp settle, do: drain()
 
+  # Clock edges (#1358): fixtures sit at -1/+2/+30 around the memoized
+  # `today()` while the worker reads its own clock (`due_on < today` for
+  # overdue, a 3-day due-soon horizon). A UTC-midnight roll between seeding
+  # and `perform_job` only *shrinks* each distance by one day, which flips
+  # none of the memberships asserted below: overdue stays overdue, +2 stays
+  # inside the horizon, +30 stays far outside it. No re-run wrapper needed.
+
   test "one digest email per assignee, listing every due-soon/overdue task" do
     editor = user(:editor)
     assignee = user(:editor)
@@ -47,7 +54,7 @@ defmodule KilnCMS.Notifications.TaskDigestWorkerTest do
           content_type: "page",
           content_id: Ecto.UUID.generate(),
           assignee_id: assignee.id,
-          due_on: Date.add(Date.utc_today(), -1)
+          due_on: Date.add(today(), -1)
         },
         actor: editor
       )
@@ -58,7 +65,7 @@ defmodule KilnCMS.Notifications.TaskDigestWorkerTest do
           content_type: "page",
           content_id: Ecto.UUID.generate(),
           assignee_id: assignee.id,
-          due_on: Date.add(Date.utc_today(), 2)
+          due_on: Date.add(today(), 2)
         },
         actor: editor
       )
@@ -82,7 +89,7 @@ defmodule KilnCMS.Notifications.TaskDigestWorkerTest do
           content_type: "page",
           content_id: Ecto.UUID.generate(),
           assignee_id: assignee.id,
-          due_on: Date.add(Date.utc_today(), 30)
+          due_on: Date.add(today(), 30)
         },
         actor: editor
       )
@@ -109,7 +116,7 @@ defmodule KilnCMS.Notifications.TaskDigestWorkerTest do
           content_type: "page",
           content_id: Ecto.UUID.generate(),
           assignee_id: assignee.id,
-          due_on: Date.add(Date.utc_today(), -1)
+          due_on: Date.add(today(), -1)
         },
         actor: editor
       )
