@@ -1,9 +1,9 @@
 defmodule KilnCMSWeb.SearchApiController do
   @moduledoc """
   Headless **hybrid search** (`GET /api/search?q=…`) — the query surface the
-  search roadmap (#4) left open: keyword + semantic legs fused by RRF (and
-  reranked when enabled), which no single Ash action can express, so it ships
-  as a thin controller over `KilnCMS.Search.global/2`.
+  search roadmap (#4) left open: keyword + semantic + title legs fused by RRF
+  (and reranked when enabled), which no single Ash action can express, so it
+  ships as a thin controller over `KilnCMS.Search.global/2`.
 
   **Actorless, deliberately** (#1013). This is a delivery surface, and it used
   to pass `conn.assigns[:current_user]` so "a bearer token widens visibility
@@ -27,7 +27,9 @@ defmodule KilnCMSWeb.SearchApiController do
   (media is an authoring concern, not a content-search result). Content hits carry their
   public `path`, an escape-safe `highlight` snippet (only `<mark>`
   survives), the fused `score` they were ranked by (comparable across
-  sections) and the `legs` that matched (`keyword`/`semantic`/`fuzzy`);
+  sections) and the `legs` that matched (`keyword`/`semantic`/`title`/`fuzzy`
+  — `title` is a record the query names outright, see
+  `KilnCMS.Search.hit_legs/1`);
   taxonomy hits carry `name`/`slug` (KilnCMS has no public
   taxonomy browse pages — headless frontends build their own listing URLs). A
   sparse content result set carries a `suggestion` ("did you mean") when the

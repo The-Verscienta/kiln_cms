@@ -173,9 +173,10 @@ defmodule KilnCMS.Search.HybridTest do
       both_hit = Enum.find(results, &(&1.id == both.id))
       semantic_hit = Enum.find(results, &(&1.id == semantic_only.id))
 
-      # "alpha" is a title word, so the fuzzy leg (which joins when the
-      # keyword leg finds fewer than three) returns it as well: three legs.
-      assert Search.hit_legs(both_hit) == [:keyword, :semantic, :fuzzy]
+      # "alpha" is the whole title, so the title leg names it, and the fuzzy
+      # leg (which joins when the keyword leg finds fewer than three) returns
+      # it as well: all four legs.
+      assert Search.hit_legs(both_hit) == [:keyword, :semantic, :title, :fuzzy]
       assert Search.hit_legs(semantic_hit) == [:semantic]
       assert Search.hit_score(both_hit) > Search.hit_score(semantic_hit)
 
@@ -225,6 +226,133 @@ defmodule KilnCMS.Search.HybridTest do
       first = Search.hybrid(:page, "alpha", actor: admin) |> ids()
       assert length(first) == 4
       assert first == Search.hybrid(:page, "alpha", actor: admin) |> ids()
+    end
+  end
+
+  describe "the title leg: a record the query names enters fusion" do
+    # `plainto_tsquery` ANDs every query lexeme, so "huang qi dang shen"
+    # matched neither "Huang Qi" nor "Dang Shen" — only a decoy that happened
+    # to mention all four words — and the fuzzy leg, which would have found
+    # the titles, stayed out because the decoy counted as a keyword hit
+    # ("Why Shen Beat Huang Qi", P2). The title leg runs on every query and
+    # outweighs keyword + semantic together, so each named record ranks above
+    # the decoy; a single-entity query is untouched, because the record it
+    # names collects the title leg on top of the legs it already led.
+
+    defp materia_medica(admin) do
+      huang_qi =
+        CMS.create_page!(
+          %{title: "Huang Qi", slug: slug(), seo_description: "Astragalus root, a tonic"},
+          actor: admin
+        )
+
+      dang_shen =
+        CMS.create_page!(
+          %{title: "Dang Shen", slug: slug(), seo_description: "Codonopsis root"},
+          actor: admin
+        )
+
+      # Every query word, in its body — the only thing the AND-only keyword
+      # leg finds for the pair, and what stood alone at rank 1 before.
+      decoy =
+        CMS.create_page!(
+          %{
+            title: "Materia medica index",
+            slug: slug(),
+            seo_description: "Huang Qi and Dang Shen compared with Ren Shen"
+          },
+          actor: admin
+        )
+
+      KilnCMS.DataCase.drain_oban()
+      {huang_qi, dang_shen, decoy}
+    end
+
+    defp rank_of(results, record), do: Enum.find_index(results, &(&1.id == record.id))
+
+    test "two titled records outrank a decoy that contains every query word" do
+      admin = admin()
+      {huang_qi, dang_shen, decoy} = materia_medica(admin)
+
+      results = Search.hybrid(:page, "huang qi dang shen", actor: admin)
+
+      decoy_rank = rank_of(results, decoy)
+      assert decoy_rank, "the decoy is a keyword hit and must still be returned"
+      assert :keyword in Search.hit_legs(Enum.at(results, decoy_rank))
+      refute :title in Search.hit_legs(Enum.at(results, decoy_rank))
+
+      for named <- [huang_qi, dang_shen] do
+        rank = rank_of(results, named)
+        assert rank, "#{named.title} must enter fusion"
+        assert rank < decoy_rank, "#{named.title} ranked below the decoy"
+        assert :title in Search.hit_legs(Enum.at(results, rank))
+      end
+    end
+
+    test "a single-entity query keeps its rank 1 and gains the leg on top" do
+      admin = admin()
+      {huang_qi, dang_shen, _decoy} = materia_medica(admin)
+
+      [first | _] = results = Search.hybrid(:page, "huang qi", actor: admin)
+
+      assert first.id == huang_qi.id
+      assert :keyword in Search.hit_legs(first)
+      assert :title in Search.hit_legs(first)
+
+      # Not named by "huang qi": whatever else found it, the title leg didn't.
+      case rank_of(results, dang_shen) do
+        nil -> :ok
+        rank -> refute :title in Search.hit_legs(Enum.at(results, rank))
+      end
+    end
+
+    test "matches whole words through the locale's stemmer, never inside a word" do
+      admin = admin()
+      put_search_env(semantic: false)
+      # "databases" stems to the same lexeme as the title, so it is named.
+      stemmed = CMS.create_page!(%{title: "Database", slug: slug()}, actor: admin)
+      # "data" is only a prefix of "database" — no word boundary, no match.
+      prefix = CMS.create_page!(%{title: "Data", slug: slug()}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      results = Search.hybrid(:page, "our databases guide", actor: admin)
+
+      assert :title in Search.hit_legs(Enum.at(results, rank_of(results, stemmed)))
+      refute prefix.id in ids(results)
+    end
+
+    test "a title of nothing but stop words names nothing" do
+      admin = admin()
+      put_search_env(semantic: false)
+      page = CMS.create_page!(%{title: "About", slug: slug()}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      # "about" is in the query, but it is a stop word under the locale's
+      # config, so the title has no lexemes to find — and nothing else finds
+      # the page either.
+      refute page.id in (Search.hybrid(:page, "about databases", actor: admin) |> ids())
+    end
+
+    test "respects :filters like the other legs" do
+      admin = admin()
+      put_search_env(semantic: false)
+      cat = CMS.create_category!(%{name: "Tonics #{slug()}", slug: slug()}, actor: admin)
+
+      inside =
+        CMS.create_page!(%{title: "Huang Qi", slug: slug(), category_id: cat.id}, actor: admin)
+
+      outside = CMS.create_page!(%{title: "Dang Shen", slug: slug()}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      results =
+        Search.hybrid(:page, "huang qi dang shen",
+          actor: admin,
+          filters: %{category_id: cat.id}
+        )
+
+      assert ids(results) == [inside.id]
+      assert :title in Search.hit_legs(hd(results))
+      refute outside.id in ids(results)
     end
   end
 end

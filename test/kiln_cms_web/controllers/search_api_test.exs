@@ -270,6 +270,49 @@ defmodule KilnCMSWeb.SearchApiTest do
 
     assert [hit] = body["results"]["pages"]
     assert is_float(hit["score"]) and hit["score"] > 0
-    assert hit["legs"] == ["keyword", "fuzzy"]
+    # "About" is a stop word, so the title's only lexeme is the query — the
+    # title leg names it — and the fuzzy leg joins on a sparse keyword leg.
+    assert hit["legs"] == ["keyword", "title", "fuzzy"]
+  end
+
+  test "a query naming two records returns both above a page that merely mentions them",
+       %{conn: conn} do
+    # "huang qi dang shen" ANDs four lexemes under `plainto_tsquery`: neither
+    # monograph contains all four, so the keyword leg found only the decoy and
+    # the API answered with neither named record ("Why Shen Beat Huang Qi",
+    # probe P2). The title leg names each of them.
+    actor = admin()
+    huang_qi = CMS.create_page!(%{title: "Huang Qi", slug: slug()}, actor: actor)
+    dang_shen = CMS.create_page!(%{title: "Dang Shen", slug: slug()}, actor: actor)
+
+    decoy =
+      CMS.create_page!(
+        %{
+          title: "Materia medica index",
+          slug: slug(),
+          seo_description: "Huang Qi and Dang Shen compared"
+        },
+        actor: actor
+      )
+
+    for page <- [huang_qi, dang_shen, decoy], do: CMS.publish_page!(page, %{}, actor: actor)
+
+    body = conn |> get("/api/search?q=huang%20qi%20dang%20shen") |> json_response(200)
+
+    hits = body["results"]["pages"]
+    slugs = Enum.map(hits, & &1["slug"])
+    decoy_rank = Enum.find_index(slugs, &(&1 == decoy.slug))
+    assert decoy_rank
+
+    for named <- [huang_qi, dang_shen] do
+      rank = Enum.find_index(slugs, &(&1 == named.slug))
+
+      assert rank && rank < decoy_rank,
+             "#{named.title} did not outrank the decoy: #{inspect(slugs)}"
+
+      assert "title" in Enum.at(hits, rank)["legs"]
+    end
+
+    refute "title" in Enum.at(hits, decoy_rank)["legs"]
   end
 end

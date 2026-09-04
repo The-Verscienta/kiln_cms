@@ -48,9 +48,30 @@ migration, a rewritten column, a dropped config key).
   of `search_text`, which is exactly what a question naming the record
   produces) the document's opening 300 characters instead. Loaded with
   `Search.global(…, passage: true)`; `/api/ask` cites it.
+- **A title leg in hybrid search: a query that names a record finds it.**
+  `KilnCMS.Search.hybrid/3` fuses a fourth leg, `:title` (the `:search_title`
+  read action on every content type): records whose title appears in the
+  query — stemmed and at word boundaries under the locale's text-search
+  config, so "huang qi dang shen" names both "Huang Qi" and "Dang Shen", and a
+  title of nothing but stop words names nothing. It runs on every query and
+  is weighted above the keyword and semantic legs together, so a record the
+  query names outranks one that merely led both other legs. It respects
+  `:filters`, `:locale`, `:tenant` and the read policies like every other
+  leg, and reports as `title` in `Search.hit_legs/1` and the API's `legs`.
+  Single-entity queries keep their rank 1 — the named record collects the
+  new leg on top of the legs it already led — and the typo-tolerant fuzzy
+  fallback is unchanged.
 
 ### Fixed
 
+- **A query naming two records returned neither.** The keyword leg's
+  `plainto_tsquery` ANDs every lexeme, so `?q=huang qi dang shen` matched
+  neither monograph — each contains only its own name — and answered with
+  whichever page happened to mention all four words; the trigram fallback
+  that would have found the titles stayed out because that page counted as a
+  keyword hit. Users who typed *more* precisely got worse results than a
+  vague question. The title leg above is the fix: each named record enters
+  fusion. Reported as probe P2 of the "Why Shen Beat Huang Qi" analysis.
 - **`/api/ask` cited sources in alphabetical order of content type, not by
   relevance.** `KilnCMS.Ask`'s retrieval flattened the sections in registry
   order — sorted by type label — and took the first `limit`, under a comment
