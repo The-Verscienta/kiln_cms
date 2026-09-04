@@ -14,7 +14,7 @@ defmodule KilnCMS.CMS.MenuItem do
       navigation and never leaves a stale link behind. This is the whole reason
       the reference is stored rather than a frozen path.
     * `:url` — an external or hand-written destination. Passed through
-      `KilnCMS.HtmlSanitizer.safe_href/1` on write, so a `javascript:` label
+      `KilnCMS.HTMLSanitizer.safe_href/1` on write, so a `javascript:` label
       trap can't be stored, let alone rendered by a front end that trusts the
       API.
     * `:none` — a heading with no link (a section label in a mega-menu).
