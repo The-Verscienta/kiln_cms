@@ -33,11 +33,14 @@ clamped to 12).
 `score` is the fused Reciprocal Rank Fusion score it was ranked by (the
 reranker's score instead, when reranking is enabled), and the scores are
 comparable across types because every section of the sweep shares the same
-`k` and leg weights. `legs` names which of `keyword`, `semantic`, `title` and
-`fuzzy` returned the hit — a keyword-and-semantic hit is a stronger claim than
-a fuzzy-only one, and a `title` hit is a record the question names outright
-(its title appears in the question, stemmed and at word boundaries). Both are
-additive; a client reading only `title`/`url`/`excerpt`
+`k` and leg weights. `legs` names which of `keyword`, `keyword_any`, `semantic`,
+`title` and `fuzzy` returned the hit — a keyword-and-semantic hit is a stronger
+claim than a fuzzy-only one; a `title` hit is a record the question names
+outright (its title appears in the question, stemmed and at word boundaries);
+`keyword` (every query term matched) is a stronger claim than `keyword_any`
+(the relaxed leg that joins when the every-term match comes up short on a
+multi-word query: some of the terms matched). Both are additive; a client
+reading only `title`/`url`/`excerpt`
 needs no update. They exist so a client can threshold, debug a ranking, or
 build an evaluation set against the public API rather than the internals.
 

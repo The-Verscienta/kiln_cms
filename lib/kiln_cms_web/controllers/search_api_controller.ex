@@ -27,9 +27,11 @@ defmodule KilnCMSWeb.SearchApiController do
   (media is an authoring concern, not a content-search result). Content hits carry their
   public `path`, an escape-safe `highlight` snippet (only `<mark>`
   survives), the fused `score` they were ranked by (comparable across
-  sections) and the `legs` that matched (`keyword`/`semantic`/`title`/`fuzzy`
-  — `title` is a record the query names outright, see
-  `KilnCMS.Search.hit_legs/1`);
+  sections) and the `legs` that matched (`keyword`/`keyword_any`/`semantic`/
+  `title`/`fuzzy` — `title` is a record the query names outright, and
+  `keyword_any` the any-term relaxation that joins when the every-term match
+  comes up short on a multi-word query, so a hit carrying only it matched
+  some of the words, not all; see `KilnCMS.Search.hit_legs/1`);
   taxonomy hits carry `name`/`slug` (KilnCMS has no public
   taxonomy browse pages — headless frontends build their own listing URLs). A
   sparse content result set carries a `suggestion` ("did you mean") when the
