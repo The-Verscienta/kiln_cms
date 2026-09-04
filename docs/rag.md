@@ -116,6 +116,17 @@ which is worse than the disclosure.
   retrieval-only (`answer: null`, `generated: false`, `generation: "disabled"`)
   and nothing leaves the deployment.
 
+## Measuring retrieval
+
+`mix kiln.search.eval golden.json --ask` scores the order `sources` come in
+against a golden set of questions and the slugs that should answer them —
+recall@k and MRR per query class, and the rank every expected record landed
+at. Run it before and after any change to the search stack (a floor, a leg, a
+reranker, a model), and with `--url https://your-site --ask` against the
+deployment itself, where it reads the `score`/`legs` fields above. The
+format, the classes and how to write a set for your own corpus are in
+[`search-roadmap.md` §11](./search-roadmap.md#11-ranking-eval-harness).
+
 ## Turning on generated answers
 
 Set one environment variable to a `req_llm` model spec:
