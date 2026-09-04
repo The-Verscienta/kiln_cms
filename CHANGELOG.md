@@ -44,6 +44,28 @@ migration, a rewritten column, a dropped config key).
   demo seeds) as a report artifact, not a gate. The pure metrics live in
   `KilnCMS.Search.Eval`. See `docs/search-roadmap.md` §11 for the format and
   how to write a golden set for your own corpus.
+- **An any-term fallback for the keyword search leg.** The keyword leg of
+  `KilnCMS.Search.hybrid/3` is `plainto_tsquery` — an AND of every lexeme —
+  which is right for most queries and fails closed on two kinds: a query that
+  names two records at once ("huang qi dang shen" matched neither Huang Qi nor
+  Dang Shen, because no document contains all four words, and the survivors
+  were whatever happened to mention everything) and a question form, whose
+  eight ANDed lexemes matched nothing — at which point the empty keyword leg
+  un-suppressed the fuzzy title leg, so the vaguer question beat the precise
+  name list by accident. Every `KilnCMS.CMS.Content` resource now has
+  `:search_any` / `:search_any_published` (the same lexemes ORed, built in
+  SQL from `plainto_tsquery`'s own tokenisation so user text never reaches
+  `to_tsquery`, ranked by `ts_rank` so a row matching more of the terms rises;
+  same arguments, filters, locale scoping and read policies as `:search`),
+  and `hybrid/3` runs it at half weight when the AND leg finds fewer than
+  three hits on a multi-word query, fused as a `keyword_any` leg that
+  `Search.hit_legs/1`, `/api/search` and `/api/ask` report. AND stays the
+  primary semantics: a precise query with enough hits, and any one-word
+  query, never runs the relaxation. The safety net beneath the title leg
+  below, not a replacement for it: a record the query names by its whole
+  title enters through that leg, one it names by a word of its title, or a
+  question form, through this one. From the "Why Shen Beat Huang Qi"
+  analysis (findings D3 and D4).
 - **Search hits carry their score and provenance.** Every record out of
   `KilnCMS.Search.hybrid/3` (and so every content section of `global/2`)
   now carries the fused Reciprocal Rank Fusion score it was ranked by — or

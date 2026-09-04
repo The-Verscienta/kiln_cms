@@ -1085,20 +1085,55 @@ defmodule KilnCMS.CMS.Content do
     # degrades to the tiebreaker. That contract is pinned by test ("explicit
     # sort= overrides relevance", JsonApiTest) — don't switch to
     # prepend/unsort without meaning to.
-    search_read = fn name, published? ->
+    #
+    # `terms` picks the query's semantics. `:all` is `plainto_tsquery` — an
+    # implicit AND of every lexeme, right for most queries and the primary
+    # `:search`. `:any` ORs the same lexemes instead (`:search_any`): the
+    # fallback `KilnCMS.Search.hybrid/3` runs when the AND comes up short,
+    # because AND fails closed on a query that names two records ("huang qi
+    # dang shen" matches neither Huang Qi nor Dang Shen — no document
+    # contains all four words) and on a question form, which ANDs eight
+    # lexemes and matches nothing. The OR query is built IN SQL from
+    # `plainto_tsquery`'s own tokenisation — its text form is `'a' & 'b'`,
+    # and rewriting the operator hands `to_tsquery` an expression it
+    # produced itself — so user text never reaches `to_tsquery`, which
+    # raises on syntax (`a & | b`) where `plainto_tsquery` only strips it.
+    # Ranked by `ts_rank` over the OR query, so a record matching more of
+    # the terms rises above one matching a single term.
+    search_read = fn name, published?, terms ->
+      match_ast =
+        case terms do
+          :all ->
+            quote do
+              fragment(
+                "search_vector @@ plainto_tsquery(kiln_regconfig(?), ?)",
+                ^arg(:locale),
+                ^arg(:query)
+              )
+            end
+
+          :any ->
+            quote do
+              fragment(
+                "search_vector @@ to_tsquery(kiln_regconfig(?), replace(plainto_tsquery(kiln_regconfig(?), ?)::text, ' & ', ' | '))",
+                ^arg(:locale),
+                ^arg(:locale),
+                ^arg(:query)
+              )
+            end
+        end
+
+      rank_calc =
+        case terms do
+          :all -> :search_rank
+          :any -> :search_rank_any
+        end
+
       filter_ast =
         join_and.(
           List.wrap(if(published?, do: pinned_state)) ++
-            [
-              quote(do: ^ref(:locale) == ^arg(:locale)),
-              quote do
-                fragment(
-                  "search_vector @@ plainto_tsquery(kiln_regconfig(?), ?)",
-                  ^arg(:locale),
-                  ^arg(:query)
-                )
-              end
-            ] ++ facet_clauses.(published?)
+            [quote(do: ^ref(:locale) == ^arg(:locale)), match_ast] ++
+            facet_clauses.(published?)
         )
 
       quote do
@@ -1119,7 +1154,7 @@ defmodule KilnCMS.CMS.Content do
             query
             |> Ash.Query.set_argument(:locale, locale)
             |> Ash.Query.sort([
-              {:search_rank, {%{locale: locale, query: q}, :desc}},
+              {unquote(rank_calc), {%{locale: locale, query: q}, :desc}},
               {:inserted_at, :desc}
             ])
             |> KilnCMS.CMS.Content.cap_unbounded()
@@ -1258,8 +1293,10 @@ defmodule KilnCMS.CMS.Content do
     search_actions =
       quote do
         (unquote_splicing([
-           search_read.(:search, false),
-           search_read.(:search_published, true),
+           search_read.(:search, false, :all),
+           search_read.(:search_published, true, :all),
+           search_read.(:search_any, false, :any),
+           search_read.(:search_any_published, true, :any),
            semantic_read.(:search_semantic, false),
            semantic_read.(:search_semantic_published, true),
            autocomplete_read.(:autocomplete, false),
@@ -2026,7 +2063,8 @@ defmodule KilnCMS.CMS.Content do
           validate KilnCMS.CMS.Validations.ScheduleOrder
         end
 
-        # Keyword search, semantic search, and autocomplete — each paired with
+        # Keyword search (all terms, and the any-term relaxation the hybrid
+        # falls back to), semantic search, and autocomplete — each paired with
         # its `*_published` delivery twin (state pinned server-side, #297) —
         # plus the fusion-internal title leg (`:search_title`, no twin).
         # Generated from one template each above (`search_read`/
@@ -2034,7 +2072,10 @@ defmodule KilnCMS.CMS.Content do
         # is documented. All go through the read policy, so anonymous callers
         # only ever match published content — the twins exist for *keyed*
         # delivery callers, whose editor/admin identity would otherwise widen
-        # the base actions to drafts.
+        # the base actions to drafts. `:search_any`/`:search_any_published`
+        # are not routed either: they are `KilnCMS.Search.hybrid/3`'s fallback
+        # leg, defined with the twin so a delivery surface that pins state has
+        # the same choice the other three pairs give it.
         unquote(search_actions)
 
         update :submit_for_review do
@@ -3156,6 +3197,26 @@ defmodule KilnCMS.CMS.Content do
                   expr(
                     fragment(
                       "ts_rank(search_vector, plainto_tsquery(kiln_regconfig(?), ?))",
+                      ^arg(:locale),
+                      ^arg(:query)
+                    )
+                  ) do
+          argument :locale, :string, allow_nil?: false
+          argument :query, :string, allow_nil?: false
+        end
+
+        # `search_rank` against the any-term (OR) form of the same query —
+        # orders the `:search_any` action. `ts_rank` over an OR query grows
+        # with every term the row matches, so a record naming two of the
+        # query's four words outranks one naming a single word. The query is
+        # rewritten from `plainto_tsquery`'s own text form, exactly as the
+        # action's filter does it. Internal.
+        calculate :search_rank_any,
+                  :float,
+                  expr(
+                    fragment(
+                      "ts_rank(search_vector, to_tsquery(kiln_regconfig(?), replace(plainto_tsquery(kiln_regconfig(?), ?)::text, ' & ', ' | ')))",
+                      ^arg(:locale),
                       ^arg(:locale),
                       ^arg(:query)
                     )

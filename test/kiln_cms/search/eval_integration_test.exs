@@ -372,23 +372,27 @@ defmodule KilnCMS.Search.EvalIntegrationTest do
       assert report.summary.classes["junk"].recall[1] == 1.0
 
       # The multi-entity row is the report's D3 and D4 in miniature: AND
-      # semantics over "welcome hello world" match neither record, which
-      # starves the keyword leg below the fuzzy threshold, and the trigram
-      # leg then rescues the one title the query contains verbatim — so one
-      # of the two surfaces, by accident, and the eval says exactly that
-      # (a fuzzy-only hit, a missing one) rather than hiding it. This is the
-      # baseline P2/P4 move.
+      # semantics over "welcome hello world" match neither record. Two legs
+      # now close that: the title leg (P2) names "Hello, World" — the whole
+      # title is in the query — and the any-term leg (P4), which joins once
+      # the AND leg comes up short on a multi-word query, finds both records
+      # by the words they do carry. The named record leads (its title leg
+      # outweighs everything else); the welcome page, named by one word of
+      # its title, follows on the relaxed leg alone.
       assert expected_ranks(report, "welcome hello world") == %{
-               "welcome" => nil,
-               "hello-world" => 1
+               "hello-world" => 1,
+               "welcome" => 2
              }
 
       multi = Enum.find(report.queries, &(&1.query == "welcome hello world"))
 
-      assert %{slug: "hello-world", legs: ["fuzzy"]} =
+      assert %{slug: "hello-world", legs: ["keyword_any", "title", "fuzzy"]} =
                Enum.find(multi.expected, &(&1.slug == "hello-world"))
 
-      assert report.summary.classes["multi_entity"].recall[10] == 0.5
+      assert %{slug: "welcome", legs: ["keyword_any"]} =
+               Enum.find(multi.expected, &(&1.slug == "welcome"))
+
+      assert report.summary.classes["multi_entity"].recall[10] == 1.0
 
       # And the draft never scores, whatever the query.
       refute Enum.any?(report.queries, &("about" in &1.returned_slugs))
@@ -406,7 +410,7 @@ defmodule KilnCMS.Search.EvalIntegrationTest do
         |> Jason.decode!()
 
       assert json["summary"]["classes"]["single_entity"]["recall"]["1"] == 1.0
-      assert json["summary"]["classes"]["multi_entity"]["recall"]["10"] == 0.5
+      assert json["summary"]["classes"]["multi_entity"]["recall"]["10"] == 1.0
     end
 
     test "the ask path scores the same corpus in its own source order" do
