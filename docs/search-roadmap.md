@@ -15,6 +15,19 @@ phasing is at the end.
 > API as `score`/`legs`), and `/api/ask` ranks its sources by that score across
 > types rather than flattening sections in registry order.
 >
+> **Entity leg (2026-09-04, "Why Shen Beat Huang Qi" P2):** `hybrid/3` fuses a
+> fourth, unconditional `:title` leg (`:search_title`) — records whose title
+> the query contains, stemmed and at word boundaries under the locale's
+> text-search config — at a weight above keyword + semantic together. The
+> keyword leg's `plainto_tsquery` ANDs every lexeme, so a query naming two
+> records ("huang qi dang shen") matched neither and returned whatever
+> mentioned all four words; each named record now enters fusion at the top.
+> Single-entity queries keep their rank 1 (the named record collects the leg
+> on top of the legs it already led). The `<3`-hits fuzzy fallback is
+> unchanged. Still open from that report: P3 (re-measure the semantic floor,
+> apply it to semantic-only hits), P4 (OR-relaxation keyword fallback), P7
+> (ask-only rerank knob), P8 (`mix kiln.search.eval` golden-set harness).
+>
 > **Project types (2026-07-10, #296):** `Search.global/2`, `facets/2` and
 > `suggest/2` derive their content sweep from the `ContentTypes` registry
 > rather than a hardcoded Page/Post/Entry list — a content type a
@@ -141,7 +154,9 @@ yields few hits) or a low-weight third leg in `hybrid/3`. Suggestions via
 `similarity()` ranking.
 
 **Touches.** `Repo.installed_extensions`, migration, `hybrid/3` (optional leg),
-an `:fuzzy`/suggestion action.
+an `:fuzzy`/suggestion action. The typo leg stays a `<3`-hits fallback at 0.5;
+the exact-name case it was accidentally covering (a long question form starving
+the keyword leg) is the unconditional `:title` leg's job now (status note above).
 
 ## 7. Broaden coverage  ·  Effort M–L · Risk L–M · *shipped (media + entries + taxonomy sections in `Search.global`)*
 
