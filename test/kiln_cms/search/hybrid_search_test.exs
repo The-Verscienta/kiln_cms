@@ -227,4 +227,103 @@ defmodule KilnCMS.Search.HybridTest do
       assert first == Search.hybrid(:page, "alpha", actor: admin) |> ids()
     end
   end
+
+  describe "the relevance floor judges semantic-only hits, after fusion" do
+    # `semantic_max_distance` used to be a WHERE on the semantic leg, so it
+    # judged every row by distance alone — including rows the keyword leg was
+    # about to vouch for. Now the leg runs unfloored and fusion drops only the
+    # hits nobody else returned. Distances come from the stub embedder, so each
+    # test measures the corpus and places the floor relative to what it found.
+
+    defp distance_of(page, query, admin) do
+      {:ok, rows} = Search.semantic_neighbours(:page, query, actor: admin, limit: 50)
+      %{distance: distance} = Enum.find(rows, &(&1.id == page.id))
+      distance
+    end
+
+    test "a record the keyword leg also found survives a floor its distance fails" do
+      admin = admin()
+      # "alpha" is a title word (keyword hit) but the page's text is not the
+      # query, so its embedding sits at a real distance from the query's.
+      page = CMS.create_page!(%{title: "alpha beta", slug: slug()}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      distance = distance_of(page, "alpha", admin)
+      assert distance > 0.0
+      put_search_env(semantic_max_distance: distance / 2)
+
+      [hit] = Search.hybrid(:page, "alpha", actor: admin)
+
+      assert hit.id == page.id
+      # The floor was not applied to the leg: the semantic leg still returned
+      # the record, so it kept its semantic contribution to the fused score.
+      assert :semantic in Search.hit_legs(hit)
+      assert :keyword in Search.hit_legs(hit)
+    end
+
+    test "a semantic-only hit beyond the floor is dropped; one within it is kept" do
+      admin = admin()
+      keyword = CMS.create_page!(%{title: "alpha beta", slug: slug()}, actor: admin)
+      # No "alpha" anywhere: only the semantic leg can return it.
+      semantic_only = CMS.create_page!(%{title: "gamma", slug: slug()}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      distance = distance_of(semantic_only, "alpha", admin)
+
+      put_search_env(semantic_max_distance: distance * 0.99)
+      result_ids = Search.hybrid(:page, "alpha", actor: admin) |> ids()
+      assert keyword.id in result_ids
+      refute semantic_only.id in result_ids
+
+      put_search_env(semantic_max_distance: distance * 1.01)
+      results = Search.hybrid(:page, "alpha", actor: admin)
+      assert semantic_only.id in ids(results)
+      assert Search.hit_legs(Enum.find(results, &(&1.id == semantic_only.id))) == [:semantic]
+    end
+
+    test "a floored hit does not hold a slot against the limit" do
+      admin = admin()
+      semantic_only = CMS.create_page!(%{title: "gamma", slug: slug()}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+      # Created after the drain, so it has no embedding: the semantic leg
+      # cannot return it, and a typo query reaches it through the fuzzy leg
+      # alone. Fuzzy-only at half weight scores below semantic-only at rank
+      # one, so the fused list is led by the hit the floor is about to drop.
+      fuzzy_only = CMS.create_page!(%{title: "Database Guide", slug: slug()}, actor: admin)
+
+      put_search_env(semantic_max_distance: 0.0)
+      results = Search.hybrid(:page, "databse", actor: admin, limit: 1)
+
+      # Were the floor applied after `limit`, the one slot would go to the
+      # semantic-only hit and come back empty once floored.
+      assert ids(results) == [fuzzy_only.id]
+      assert Search.hit_legs(hd(results)) == [:fuzzy]
+      refute semantic_only.id in ids(results)
+    end
+
+    test "a query unlike anything indexed still returns nothing (#871)" do
+      admin = admin()
+      CMS.create_page!(%{title: "alpha beta", slug: slug()}, actor: admin)
+      CMS.create_page!(%{title: "gamma", slug: slug()}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      put_search_env(semantic_max_distance: 0.0)
+
+      assert Search.hybrid(:page, "nothing like this exists", actor: admin) == []
+    end
+
+    test "the per-type semantic action still floors the leg itself" do
+      # The `semantic-search` API routes have no other leg to corroborate a
+      # hit, so a record beyond the floor stays out of them even though hybrid
+      # search — where the keyword leg vouches for it — returns it.
+      admin = admin()
+      page = CMS.create_page!(%{title: "alpha beta", slug: slug()}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      put_search_env(semantic_max_distance: distance_of(page, "alpha", admin) / 2)
+
+      assert CMS.semantic_search_pages!("alpha", actor: admin) == []
+      assert Search.hybrid(:page, "alpha", actor: admin) |> ids() == [page.id]
+    end
+  end
 end
