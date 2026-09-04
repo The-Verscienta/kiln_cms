@@ -213,6 +213,7 @@ config :kiln_cms, KilnCMS.Accounts.AccountThrottle,
 # values change, so a `database:` that varied per shard made every shard that
 # restored another shard's cached `_build` recompile all of it (#1392).
 # Runtime config is read at boot and never enters that record.
+# The MIX_TEST_PARTITION row in docs/environment-variables.md anchors it.
 config :kiln_cms, KilnCMS.Repo,
   username: "postgres",
   password: "postgres",
