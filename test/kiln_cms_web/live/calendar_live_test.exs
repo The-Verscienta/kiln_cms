@@ -584,21 +584,24 @@ defmodule KilnCMSWeb.CalendarLiveTest do
 
     test "refuses a move into the past and leaves the record alone", %{conn: conn} do
       admin = authed_admin()
-      # The one drag a real editor can make backwards: a chip in the month the
-      # calendar opens on by default, dropped onto yesterday's cell. So this
-      # test keeps the default mount and a fixture in *today's* month.
-      at = DateTime.new!(Date.utc_today(), ~T[23:59:59])
+      # An overdue chip on last month's grid, dragged one day further back.
+      # Anchoring on the real clock instead (a chip today, dropped onto
+      # yesterday) had a month-boundary edge: on the 1st, "yesterday" is not
+      # a cell of the mounted month at all (#1357). Here every day of the
+      # mounted month is behind us on every real-clock day, and the arrow-key
+      # reschedule path makes a backwards move off any cell a real input.
+      day = Date.utc_today() |> Date.beginning_of_month() |> Date.shift(month: -1) |> Date.add(14)
+      at = DateTime.new!(day, ~T[23:59:59])
       page = scheduled_page(admin, at)
 
-      {:ok, lv, html} = conn |> log_in(admin) |> live(~p"/editor/calendar")
-      assert html =~ page.title
+      {:ok, lv, _html} = open_calendar_on(conn, admin, day, page)
 
       html =
         render_hook(lv, "reschedule", %{
           "id" => page.id,
           "type" => "page",
           "kind" => "publish",
-          "date" => Date.to_iso8601(Date.add(Date.utc_today(), -1))
+          "date" => Date.to_iso8601(Date.add(day, -1))
         })
 
       assert html =~ "Can&#39;t reschedule into the past" or
@@ -610,12 +613,18 @@ defmodule KilnCMSWeb.CalendarLiveTest do
     test "refuses a drop onto today once the chip's time of day has passed", %{conn: conn} do
       admin = authed_admin()
       # A drop keeps the chip's time of day, so "today" is only in the future
-      # until that time comes round. Midnight is always behind us.
-      at = DateTime.new!(Date.end_of_month(Date.utc_today()), ~T[00:00:00])
+      # until that time comes round. Midnight is always behind us — and a
+      # midnight chip on the 15th of *next* month is always itself in the
+      # future, unlike the old end-of-current-month fixture, which was born
+      # already-past on the last day of a month and proved the refusal for
+      # the wrong reason (#1357). The target day is off the mounted month,
+      # which the handler must tolerate anyway: arrow keys can walk a chip
+      # onto any date.
+      day = soon()
+      at = DateTime.new!(day, ~T[00:00:00])
       page = scheduled_page(admin, at)
 
-      {:ok, lv, html} = conn |> log_in(admin) |> live(~p"/editor/calendar")
-      assert html =~ page.title
+      {:ok, lv, _html} = open_calendar_on(conn, admin, day, page)
 
       html =
         render_hook(lv, "reschedule", %{
