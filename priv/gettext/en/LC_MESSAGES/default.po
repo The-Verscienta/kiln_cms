@@ -11498,11 +11498,6 @@ msgstr ""
 msgid "category"
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex
-#, elixir-autogen, elixir-format
-msgid "centre"
-msgstr ""
-
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "check"
@@ -12055,11 +12050,6 @@ msgstr ""
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "tag group"
-msgstr ""
-
-#: lib/kiln_cms_web/live/overview_live.ex
-#, elixir-autogen, elixir-format
-msgid "taiji · centre"
 msgstr ""
 
 #: lib/kiln_cms_web/live/redirect_live.ex

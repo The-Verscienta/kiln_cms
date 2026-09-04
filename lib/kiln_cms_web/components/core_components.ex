@@ -301,9 +301,8 @@ defmodule KilnCMSWeb.CoreComponents do
 
   @doc """
   Renders a bagua trigram: three stacked lines, each solid (yang) or broken
-  (yin), given bottom line first. The console uses trigrams two ways — fixed
-  marks on the overview's bagua tiles, and per-item status glyphs derived from
-  workflow bits (see `content_trigram/1`).
+  (yin), given bottom line first. Used for the per-item status glyph derived
+  from workflow bits (see `content_trigram/1`).
 
   ## Examples
 

@@ -11498,11 +11498,6 @@ msgstr "ne peut pas être stocké : la suppression des métadonnées vidéo et a
 msgid "category"
 msgstr "catégorie"
 
-#: lib/kiln_cms_web/live/overview_live.ex
-#, elixir-autogen, elixir-format
-msgid "centre"
-msgstr "centre"
-
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "check"
@@ -12056,11 +12051,6 @@ msgstr "étiquette"
 #, elixir-autogen, elixir-format
 msgid "tag group"
 msgstr "groupe d'étiquettes"
-
-#: lib/kiln_cms_web/live/overview_live.ex
-#, elixir-autogen, elixir-format
-msgid "taiji · centre"
-msgstr "taiji · centre"
 
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format

@@ -1,8 +1,8 @@
 defmodule KilnCMSWeb.OverviewLiveTest do
   @moduledoc """
-  The console home (`/editor/overview`): the bagua grid — content counts in
-  the centre tile, one headline number per surrounding domain tile, and
-  admin-only numbers rendered as “—” for editors.
+  The console home (`/editor/overview`): the fixed 3×3 overview grid — content
+  counts in the centre tile, one headline number per surrounding domain tile,
+  and admin-only numbers rendered as “—” for editors.
   """
   use KilnCMSWeb.ConnCase, async: true
   @moduletag :capture_log
@@ -91,7 +91,7 @@ defmodule KilnCMSWeb.OverviewLiveTest do
     refute html =~ "All quiet."
   end
 
-  test "the kan tile counts scheduled transitions in the next week", %{conn: conn} do
+  test "the calendar tile counts scheduled transitions in the next week", %{conn: conn} do
     seed_page(%{state: :draft, scheduled_at: DateTime.add(DateTime.utc_now(), 2, :day)})
     seed_page(%{state: :published, unpublish_at: DateTime.add(DateTime.utc_now(), 3, :day)})
     # Outside the window — must not count.
@@ -99,17 +99,19 @@ defmodule KilnCMSWeb.OverviewLiveTest do
 
     {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/overview")
 
-    assert lv |> element("#bagua-kan") |> render() =~ ">2<"
+    assert lv |> element("#overview-calendar") |> render() =~ ">2<"
   end
 
-  test "the xun tile reports translation coverage across locale variants", %{conn: conn} do
+  test "the translations tile reports translation coverage across locale variants", %{
+    conn: conn
+  } do
     covered = "ov-covered-#{System.unique_integer([:positive])}"
     for locale <- ["en", "fr", "es"], do: seed_page(%{slug: covered, locale: locale})
     seed_page(%{slug: "ov-gap-#{System.unique_integer([:positive])}", locale: "en"})
 
     {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/overview")
 
-    rendered = lv |> element("#bagua-xun") |> render()
+    rendered = lv |> element("#overview-translations") |> render()
     assert rendered =~ "50%"
     assert rendered =~ "1 of 2 fully translated"
   end
@@ -117,33 +119,32 @@ defmodule KilnCMSWeb.OverviewLiveTest do
   test "admin-only tiles render as — for editors", %{conn: conn} do
     {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/overview")
 
-    assert lv |> element("#bagua-zhen") |> render() =~ "—"
-    assert lv |> element("#bagua-dui") |> render() =~ "—"
-    assert lv |> element("#bagua-qian") |> render() =~ "—"
+    assert lv |> element("#overview-webhooks") |> render() =~ "—"
+    assert lv |> element("#overview-forms") |> render() =~ "—"
+    assert lv |> element("#overview-settings") |> render() =~ "—"
   end
 
   test "admins get webhook, form and key numbers", %{conn: conn} do
     {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
 
-    assert lv |> element("#bagua-zhen") |> render() =~ ">0<"
-    assert lv |> element("#bagua-dui") |> render() =~ "0 submissions this week"
-    refute lv |> element("#bagua-qian") |> render() =~ "—"
+    assert lv |> element("#overview-webhooks") |> render() =~ ">0<"
+    assert lv |> element("#overview-forms") |> render() =~ "0 submissions this week"
+    refute lv |> element("#overview-settings") |> render() =~ "—"
   end
 
-  test "every tile carries its trigram mark", %{conn: conn} do
+  test "every tile renders", %{conn: conn} do
     {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/overview")
 
-    for name <- ~w(xun li kun zhen dui gen kan qian) do
-      assert html =~ ~s(id="bagua-#{name}")
+    for key <-
+          ~w(translations analytics media webhooks forms structure calendar settings) do
+      assert html =~ ~s(id="overview-#{key}")
     end
 
-    assert html =~ "qian · heaven"
-    assert html =~ "kun · earth"
-    assert html =~ "taiji · centre"
+    assert html =~ ~s(id="overview-center")
   end
 
   describe "tenant scoping (#336)" do
-    test "the gen tile counts THIS site's dynamic content types", %{conn: conn} do
+    test "the structure tile counts THIS site's dynamic content types", %{conn: conn} do
       admin = authed_user(:admin)
 
       org =
@@ -174,7 +175,8 @@ defmodule KilnCMSWeb.OverviewLiveTest do
       {:ok, lv, _html} = org_conn |> log_in(admin) |> live(~p"/editor/overview")
 
       # Compiled types are install-wide; only the one dynamic type is ours.
-      assert lv |> element("#bagua-gen") |> render() =~ ">#{length(ContentTypes.all()) + 1}<"
+      assert lv |> element("#overview-structure") |> render() =~
+               ">#{length(ContentTypes.all()) + 1}<"
     end
   end
 end

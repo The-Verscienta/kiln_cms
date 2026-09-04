@@ -1,15 +1,12 @@
 defmodule KilnCMSWeb.OverviewLive do
   @moduledoc """
-  Console home (`/editor/overview`) — the site at a glance, laid out as the
-  bagua's later-heaven square: content in the centre (the taiji; in feng shui
-  the centre is health, so the tile carries the content-health nudges), and
-  the eight supporting domains around it, each tile marked with its trigram
-  and carrying one headline number plus a link into its surface.
+  Console home (`/editor/overview`) — the site at a glance, laid out as a
+  fixed 3×3 grid: content in the centre tile (carrying the content-health
+  nudges), and eight supporting domain tiles around it, each with one
+  headline number plus a link into its surface.
 
-  The arrangement is also the product's name read in trigrams: kun ☷ (earth,
-  the receptive store of raw material) worked by li ☲ (fire, illumination) —
-  clay and firing, a kiln. Editor/admin only; numbers that only admin
-  policies can read render as “—” for editors.
+  Editor/admin only; numbers that only admin policies can read render as “—”
+  for editors.
   """
   use KilnCMSWeb, :live_view
 
@@ -219,7 +216,7 @@ defmodule KilnCMSWeb.OverviewLive do
         </div>
 
         <%!-- Stale-backup warning (#484). A strip above the grid rather than a
-              ninth tile: the bagua is a fixed 3×3 with the centre taken, so
+              ninth tile: the grid is a fixed 3×3 with the centre taken, so
               there is no ninth position — and this is an alert, which wants to
               be read before the eight steady-state numbers rather than
               alongside them.
@@ -291,15 +288,11 @@ defmodule KilnCMSWeb.OverviewLive do
 
         <div class="grid gap-4 lg:grid-cols-3">
           <div
-            id="bagua-center"
+            id="overview-center"
             class="card card-pad flex flex-col gap-2 border-primary/30 bg-primary/5 lg:col-start-2 lg:row-start-2"
           >
-            <div class="flex items-center justify-between text-base-content/50">
-              <svg viewBox="0 0 14 14" class="h-3.5 w-3.5" role="img" aria-label={gettext("centre")}>
-                <title>{gettext("centre")}</title>
-                <circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" stroke-width="2" />
-              </svg>
-              <span class="text-xs">{gettext("taiji · centre")}</span>
+            <div class="text-base-content/50">
+              <.icon name="hero-document-text" class="h-3.5 w-3.5" />
             </div>
             <p class="text-xs font-medium uppercase tracking-wide text-base-content/70">
               {gettext("Content")}
@@ -400,10 +393,9 @@ defmodule KilnCMSWeb.OverviewLive do
 
   defp tile(assigns) do
     ~H"""
-    <div id={"bagua-#{@tile.key}"} class={["card card-pad flex flex-col gap-2", @tile.pos]}>
-      <div class="flex items-center justify-between text-base-content/50">
-        <.trigram lines={@tile.lines} label={@tile.name} />
-        <span class="text-xs">{@tile.name}</span>
+    <div id={"overview-#{@tile.key}"} class={["card card-pad flex flex-col gap-2", @tile.pos]}>
+      <div class="text-base-content/50">
+        <.icon name={@tile.icon} class="h-3.5 w-3.5" />
       </div>
       <p class="text-xs font-medium uppercase tracking-wide text-base-content/70">{@tile.title}</p>
       <p class="text-3xl font-semibold tabular-nums">{@tile.value || "—"}</p>
@@ -420,11 +412,19 @@ defmodule KilnCMSWeb.OverviewLive do
     """
   end
 
-  # The eight outer tiles in the later-heaven arrangement (south at the top,
-  # as on a classical bagua): grid positions are fixed per trigram, values
-  # come from the metrics. `value: nil` renders as “—” (admin-only numbers
-  # seen by an editor, or coverage on a single-locale site).
-  @tile_order [:xun, :li, :kun, :zhen, :dui, :gen, :kan, :qian]
+  # The eight outer tiles: grid positions are fixed per domain, values come
+  # from the metrics. `value: nil` renders as “—” (admin-only numbers seen by
+  # an editor, or coverage on a single-locale site).
+  @tile_order [
+    :translations,
+    :analytics,
+    :media,
+    :webhooks,
+    :forms,
+    :structure,
+    :calendar,
+    :settings
+  ]
 
   # Only the name and the reason atom reach the socket — never the experiment
   # structs, which carry every variant's patch. The English sentence
@@ -491,7 +491,7 @@ defmodule KilnCMSWeb.OverviewLive do
   attr :navigate, :string, default: nil
   slot :inner_block, required: true
 
-  # An alert strip above the bagua grid.
+  # An alert strip above the overview grid.
   #
   # A strip rather than a ninth tile: the grid is a fixed 3×3 with the centre
   # taken, and an alert wants to be read before the eight steady-state numbers
@@ -583,11 +583,10 @@ defmodule KilnCMSWeb.OverviewLive do
 
   defp tiles(assigns), do: Enum.map(@tile_order, &tile_spec(&1, assigns))
 
-  defp tile_spec(:xun, assigns) do
+  defp tile_spec(:translations, assigns) do
     %{
-      key: :xun,
-      name: "xun · wind",
-      lines: [false, true, true],
+      key: :translations,
+      icon: "hero-language",
       pos: "lg:col-start-1 lg:row-start-1",
       title: gettext("Translations"),
       value: assigns.coverage && "#{assigns.coverage.pct}%",
@@ -604,11 +603,10 @@ defmodule KilnCMSWeb.OverviewLive do
     }
   end
 
-  defp tile_spec(:li, assigns) do
+  defp tile_spec(:analytics, assigns) do
     %{
-      key: :li,
-      name: "li · fire",
-      lines: [true, false, true],
+      key: :analytics,
+      icon: "hero-chart-bar",
       pos: "lg:col-start-2 lg:row-start-1",
       title: gettext("Analytics & search"),
       value: assigns.views,
@@ -617,11 +615,10 @@ defmodule KilnCMSWeb.OverviewLive do
     }
   end
 
-  defp tile_spec(:kun, assigns) do
+  defp tile_spec(:media, assigns) do
     %{
-      key: :kun,
-      name: "kun · earth",
-      lines: [false, false, false],
+      key: :media,
+      icon: "hero-photo",
       pos: "lg:col-start-3 lg:row-start-1",
       title: gettext("Media"),
       value: assigns.media_count,
@@ -630,11 +627,10 @@ defmodule KilnCMSWeb.OverviewLive do
     }
   end
 
-  defp tile_spec(:zhen, assigns) do
+  defp tile_spec(:webhooks, assigns) do
     %{
-      key: :zhen,
-      name: "zhen · thunder",
-      lines: [true, false, false],
+      key: :webhooks,
+      icon: "hero-bolt",
       pos: "lg:col-start-1 lg:row-start-2",
       title: gettext("Webhooks"),
       value: assigns.webhooks && assigns.webhooks.active,
@@ -648,11 +644,10 @@ defmodule KilnCMSWeb.OverviewLive do
     }
   end
 
-  defp tile_spec(:dui, assigns) do
+  defp tile_spec(:forms, assigns) do
     %{
-      key: :dui,
-      name: "dui · lake",
-      lines: [true, true, false],
+      key: :forms,
+      icon: "hero-clipboard-document-list",
       pos: "lg:col-start-3 lg:row-start-2",
       title: gettext("Forms"),
       value: assigns.forms && assigns.forms.forms,
@@ -662,11 +657,10 @@ defmodule KilnCMSWeb.OverviewLive do
     }
   end
 
-  defp tile_spec(:gen, assigns) do
+  defp tile_spec(:structure, assigns) do
     %{
-      key: :gen,
-      name: "gen · mountain",
-      lines: [false, false, true],
+      key: :structure,
+      icon: "hero-cube",
       pos: "lg:col-start-1 lg:row-start-3",
       title: gettext("Structure"),
       value: assigns.types_count,
@@ -683,11 +677,10 @@ defmodule KilnCMSWeb.OverviewLive do
     }
   end
 
-  defp tile_spec(:kan, assigns) do
+  defp tile_spec(:calendar, assigns) do
     %{
-      key: :kan,
-      name: "kan · water",
-      lines: [false, true, false],
+      key: :calendar,
+      icon: "hero-calendar-days",
       pos: "lg:col-start-2 lg:row-start-3",
       title: gettext("Calendar"),
       value: assigns.upcoming,
@@ -696,11 +689,10 @@ defmodule KilnCMSWeb.OverviewLive do
     }
   end
 
-  defp tile_spec(:qian, assigns) do
+  defp tile_spec(:settings, assigns) do
     %{
-      key: :qian,
-      name: "qian · heaven",
-      lines: [true, true, true],
+      key: :settings,
+      icon: "hero-cog-6-tooth",
       pos: "lg:col-start-3 lg:row-start-3",
       title: gettext("Settings & keys"),
       value: assigns.keys_count,
