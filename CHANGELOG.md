@@ -29,6 +29,19 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **Reranking can be scoped to `/api/ask`.** `config :kiln_cms, KilnCMS.Ask,
+  rerank: true` (or `ASK_RERANK=true`) reranks a question's retrieved
+  candidates with the configured `KilnCMS.Search.Reranker` — the wired
+  `bge-reranker-base` cross-encoder, which no deployment had ever switched on
+  — while every other search surface keeps `KilnCMS.Search`'s global `rerank`
+  setting, the one that reranks all of them on every query. `Search.global/2`
+  gained an explicit `rerank:` option to carry that verdict, `hybrid/3`'s
+  `rerank: true` is now the whole gate rather than a request the global switch
+  could veto, and the model loads at boot when either switch is on.
+  `KilnCMS.Ask.rerank?/0` reports the effective setting. Default-off, for the
+  two reasons the *Why Shen Beat Huang Qi* report gives: reranking fixes the
+  order of what the fused legs returned, not recall, and the cross-encoder is
+  CPU inference a modest host may not afford. See docs/rag.md.
 - **Search hits carry their score and provenance.** Every record out of
   `KilnCMS.Search.hybrid/3` (and so every content section of `global/2`)
   now carries the fused Reciprocal Rank Fusion score it was ranked by — or

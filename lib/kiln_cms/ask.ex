@@ -5,10 +5,11 @@ defmodule KilnCMS.Ask do
   generation seam.
 
   `answer/2` retrieves the most relevant published passages via
-  `KilnCMS.Search.global/2` (keyword + semantic RRF, reranked — degrading to
-  keyword when semantic search is disabled, so it works with no model stack),
-  assembles them into cited `sources`, and — if a generator is configured (see
-  `KilnCMS.Ask.Generator`) — synthesizes an answer grounded in those sources.
+  `KilnCMS.Search.global/2` (keyword + semantic RRF, reranked when `rerank?/0`
+  says so — degrading to keyword when semantic search is disabled, so it works
+  with no model stack), assembles them into cited `sources`, and — if a
+  generator is configured (see `KilnCMS.Ask.Generator`) — synthesizes an
+  answer grounded in those sources.
 
   Retrieval is **anonymous, always** — it runs the read policies with no actor,
   so only published, `:public` content is ever retrieved, for every caller. That
@@ -168,6 +169,30 @@ defmodule KilnCMS.Ask do
   @spec model() :: String.t() | nil
   def model, do: cfg(:model, nil)
 
+  @doc """
+  Whether the retrieved candidates are reranked by the configured
+  `KilnCMS.Search.Reranker` before the sources are picked.
+
+  True under either switch: this module's own `rerank: true` (or
+  `ASK_RERANK=true`), which reranks the ask path **alone**, or the global
+  `KilnCMS.Search.rerank?/0`, which reranks every search surface and so this
+  one too. The ask-only switch exists because the cost is so different: a
+  cross-encoder is CPU inference over every candidate on every query, which a
+  public search box or the editor palette cannot afford on a modest host, but
+  a `/api/ask` question is a bounded call over at most `limit` candidates per
+  registered content type. Either switch loads the model at boot
+  (`KilnCMS.Application`); a default install loads nothing.
+
+  Reranking fixes *ordering*, not recall: the cross-encoder can only promote
+  a record the fused legs already returned. On the deployment that asked for
+  this, the keyword leg's implicit AND and the semantic floor were dropping
+  the right records before fusion, and no reranker can reorder a record that
+  never arrived — so this stays default-off, and the recall defects come
+  first. See docs/rag.md.
+  """
+  @spec rerank?() :: boolean()
+  def rerank?, do: cfg(:rerank, false) or Search.rerank?()
+
   @doc "The configured provider name, from the `\"provider:model\"` spec."
   @spec provider() :: String.t() | nil
   def provider, do: LLM.provider(model())
@@ -303,10 +328,17 @@ defmodule KilnCMS.Ask do
     # Only the sections this reads. `/api/ask` is public and anonymous, so the
     # sweep it triggers is the one most worth not paying for twice over — it
     # used to run media and every taxonomy resource and discard them (#960).
+    #
+    # `rerank:` is this path's own verdict (`rerank?/0`), not the global
+    # switch's, which is what lets a deployment rerank here and nowhere else.
+    # Each section reranks its own candidates, and that is enough: every
+    # section's scores come from the same cross-encoder for the same question,
+    # so the flat sort below is a rerank of the whole union — `limit`
+    # candidates per registered content type through the model, per question.
     sections =
       Search.global(
         question,
-        read_opts ++ [passage: true, sections: Search.content_sections()]
+        read_opts ++ [rerank: rerank?(), passage: true, sections: Search.content_sections()]
       )
 
     compiled =
@@ -326,17 +358,17 @@ defmodule KilnCMS.Ask do
       end)
 
     # Each section comes back ranked within its type, and every hit carries
-    # the fused score it was ranked by. Those scores are comparable across
-    # sections — one `k` and one set of leg weights for the whole sweep — so
-    # the strongest sources *overall* are a flat sort over all of them. This
-    # used to be `(compiled ++ dynamic) |> Enum.take(limit)` under a comment
-    # claiming to interleave by strength; what it did was flatten in registry
-    # order, and the registry sorts by label, so every "Concept" hit outranked
-    # every "Herb" hit however weak, and a question about two herbs cited a
-    # concept page first and the herbs seventh and eighth. Ties (two
-    # keyword-only rank-1 hits score the same) keep the registry order — the
-    # sort is stable — so nothing about the old order survives except as the
-    # tiebreak.
+    # the score it was ranked by. Those scores are comparable across sections
+    # — one `k` and one set of leg weights for the whole sweep, or one
+    # reranker for the whole sweep — so the strongest sources *overall* are a
+    # flat sort over all of them. This used to be `(compiled ++ dynamic) |>
+    # Enum.take(limit)` under a comment claiming to interleave by strength;
+    # what it did was flatten in registry order, and the registry sorts by
+    # label, so every "Concept" hit outranked every "Herb" hit however weak,
+    # and a question about two herbs cited a concept page first and the herbs
+    # seventh and eighth. Ties (two keyword-only rank-1 hits score the same)
+    # keep the registry order — the sort is stable — so nothing about the old
+    # order survives except as the tiebreak.
     (compiled ++ dynamic)
     |> Enum.sort_by(&(&1.score || 0.0), :desc)
     |> Enum.take(limit)

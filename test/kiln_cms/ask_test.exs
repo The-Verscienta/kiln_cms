@@ -185,6 +185,17 @@ defmodule KilnCMS.AskTest do
       assert second.legs == [:keyword]
     end
 
+    test "a default install reranks nothing: the ask switch is off, and so is the global one" do
+      # The report's P7 turns the wired cross-encoder on for the ask path
+      # alone, and insists it stay default-off: it is CPU inference the
+      # report's own host (no AVX2) cannot afford, and it reorders what
+      # retrieval returned rather than recovering what it missed. The
+      # switched-on behaviour lives in `KilnCMS.Search.RerankTest`, which
+      # toggles the env and so cannot run async with this file.
+      refute Ask.rerank?()
+      refute KilnCMS.Search.rerank?()
+    end
+
     test "an excerpt is a grounding-sized passage, not a five-word title fragment" do
       actor = admin()
       term = "zorptastic#{System.unique_integer([:positive])}"

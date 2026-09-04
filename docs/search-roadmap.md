@@ -162,7 +162,9 @@ name+description), not just Page/Post.
 **Approach.** `KilnCMS.Search.Reranker` behaviour, optional `rerank: true` stage
 in `hybrid/3` over the top ~20. Adapters: local cross-encoder via Bumblebee
 (`bge-reranker-base`, another `Nx.Serving`), an LLM judge (Claude), or a hosted
-rerank API. Gated like semantic search; off by default.
+rerank API. Gated like semantic search; off by default. Scoped 2026-09-04:
+`KilnCMS.Ask`'s own `rerank` (`ASK_RERANK`) turns it on for `/api/ask` alone,
+a bounded per-question cost — see `docs/rag.md`, "Reranking ask's sources".
 
 **Touches.** new `Search.Reranker` + adapter, `hybrid/3`, config, supervision.
 
