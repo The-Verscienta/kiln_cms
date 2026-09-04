@@ -156,4 +156,75 @@ defmodule KilnCMS.Search.HybridTest do
     assert keyword_hit.id in page_ids
     assert semantic_only.id in page_ids
   end
+
+  describe "score and leg provenance on every hit" do
+    # The fused score used to be computed inside RRF and thrown away, leaving
+    # `global/2`'s callers nothing to interleave sections on but registry
+    # order. It now rides on the record's metadata, with the legs that found
+    # it, and the list itself is still plain records.
+
+    test "each hit carries the score it was ranked by and the legs that found it" do
+      admin = admin()
+      both = CMS.create_page!(%{title: "alpha", slug: slug()}, actor: admin)
+      semantic_only = CMS.create_page!(%{title: "gamma", slug: slug()}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      results = Search.hybrid(:page, "alpha", actor: admin)
+      both_hit = Enum.find(results, &(&1.id == both.id))
+      semantic_hit = Enum.find(results, &(&1.id == semantic_only.id))
+
+      # "alpha" is a title word, so the fuzzy leg (which joins when the
+      # keyword leg finds fewer than three) returns it as well: three legs.
+      assert Search.hit_legs(both_hit) == [:keyword, :semantic, :fuzzy]
+      assert Search.hit_legs(semantic_hit) == [:semantic]
+      assert Search.hit_score(both_hit) > Search.hit_score(semantic_hit)
+
+      # The order IS the score order — nothing else decides it.
+      scores = Enum.map(results, &Search.hit_score/1)
+      assert Enum.all?(scores, &is_float/1)
+      assert scores == Enum.sort(scores, :desc)
+
+      # A record that never went through fusion has neither.
+      assert Search.hit_score(both) == nil
+      assert Search.hit_legs(both) == []
+    end
+
+    test "the score survives loading calculations onto the hits" do
+      admin = admin()
+      page = CMS.create_page!(%{title: "alpha", slug: slug()}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      locale = KilnCMS.I18n.default_locale()
+
+      [hit | _] =
+        Search.hybrid(:page, "alpha",
+          actor: admin,
+          load: [highlight: %{query: "alpha", locale: locale}]
+        )
+
+      assert hit.id == page.id
+      assert hit.highlight =~ "<mark>alpha</mark>"
+      assert is_float(Search.hit_score(hit))
+      assert Search.hit_legs(hit) != []
+    end
+
+    test "ties keep a deterministic order: the legs' order, then the leg's own" do
+      admin = admin()
+      put_search_env(semantic: false)
+
+      for n <- 1..4 do
+        CMS.create_page!(%{title: "alpha #{n}", slug: slug()}, actor: admin)
+      end
+
+      KilnCMS.DataCase.drain_oban()
+
+      # Keyword-only (four hits, so the fuzzy leg sits out): every hit was
+      # found by one leg, and the fused scores fall off with rank, so this is
+      # a fixed order — asserting the run twice pins that it is not a
+      # `Map.values/1` accident.
+      first = Search.hybrid(:page, "alpha", actor: admin) |> ids()
+      assert length(first) == 4
+      assert first == Search.hybrid(:page, "alpha", actor: admin) |> ids()
+    end
+  end
 end

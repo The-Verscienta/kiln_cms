@@ -259,4 +259,17 @@ defmodule KilnCMSWeb.SearchApiTest do
     # No facets key unless asked for.
     refute Map.has_key?(filtered, "facets")
   end
+
+  test "content hits carry the fused score and the legs that matched", %{conn: conn} do
+    actor = admin()
+    word = token()
+    page = CMS.create_page!(%{title: "About #{word}", slug: slug()}, actor: actor)
+    CMS.publish_page!(page, %{}, actor: actor)
+
+    body = conn |> get("/api/search?q=#{word}") |> json_response(200)
+
+    assert [hit] = body["results"]["pages"]
+    assert is_float(hit["score"]) and hit["score"] > 0
+    assert hit["legs"] == ["keyword", "fuzzy"]
+  end
 end

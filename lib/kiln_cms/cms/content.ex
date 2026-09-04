@@ -3129,6 +3129,38 @@ defmodule KilnCMS.CMS.Content do
           public? true
         end
 
+        # A grounding excerpt: what a reader who has to answer FROM the text
+        # gets, where `highlight` is what a reader deciding whether to click
+        # gets. The same `ts_headline`, tuned up (three fragments of up to 40
+        # words, no `<mark>` tags) and with a floor: a headline under 120
+        # characters is replaced by the document's opening 300. The short
+        # headline happens precisely when the match cluster is the
+        # title-and-headings prefix of `search_text` — a query that names the
+        # record — where `MaxFragments` hands back the matched words and
+        # nothing around them: "Huang Qi Botanical Description Astragalus"
+        # grounds no answer, and a well-behaved generator truthfully reports
+        # that its sources say nothing. The headline is computed once, in the
+        # subselect, rather than once to measure and once to return; the
+        # `<mark>` selectors are stripped there too (an empty selector has to
+        # be written `StartSel=""`, and Postgres rejects it unquoted). Plain
+        # text — not HTML-safe, like `highlight`. Loaded on demand by
+        # `KilnCMS.Ask` (`Search.global(..., passage: true)`). Internal.
+        calculate :passage,
+                  :string,
+                  expr(
+                    fragment(
+                      "(SELECT CASE WHEN length(h.text) >= 120 THEN h.text ELSE left(coalesce(?, ''), 300) END FROM (SELECT regexp_replace(ts_headline(kiln_regconfig(?), coalesce(?, ''), plainto_tsquery(kiln_regconfig(?), ?), 'StartSel=<mark>, StopSel=</mark>, MaxFragments=3, MaxWords=40, MinWords=15'), '<mark>|</mark>', '', 'g') AS text) AS h)",
+                      ^ref(:search_text),
+                      ^arg(:locale),
+                      ^ref(:search_text),
+                      ^arg(:locale),
+                      ^arg(:query)
+                    )
+                  ) do
+          argument :locale, :string, allow_nil?: false
+          argument :query, :string, allow_nil?: false
+        end
+
         # Word-level trigram similarity of the autocomplete prefix to the title
         # (0–1, higher is closer) — matches a short query against any word in the
         # title. Orders the `:autocomplete` action. Internal.

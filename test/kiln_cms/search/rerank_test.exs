@@ -96,4 +96,20 @@ defmodule KilnCMS.Search.RerankTest do
     fused = Search.hybrid(:page, term, actor: admin) |> Enum.map(& &1.id)
     assert reranked == fused
   end
+
+  test "a reranked hit carries the reranker's score, not its fused one" do
+    # `hit_score/1` promises "the number this order came from". A caller
+    # sorting reranked sections against each other by their RRF scores would
+    # otherwise quietly undo the reranking.
+    admin = admin()
+    term = "common#{System.unique_integer([:positive])}"
+    {plain, boosted} = seed_pair(admin, term)
+
+    results = Search.hybrid(:page, term, actor: admin, rerank: true)
+
+    assert Search.hit_score(Enum.find(results, &(&1.id == boosted.id))) == 1.0
+    assert Search.hit_score(Enum.find(results, &(&1.id == plain.id))) == 0.0
+    # Provenance is fusion's, and reranking leaves it alone.
+    assert Search.hit_legs(Enum.find(results, &(&1.id == boosted.id))) != []
+  end
 end

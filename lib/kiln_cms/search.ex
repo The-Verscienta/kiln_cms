@@ -344,6 +344,10 @@ defmodule KilnCMS.Search do
   this repeatedly for one query — `global/2` does, across every content type —
   since embedding dominates the cost of a semantic search. Pass `:unavailable`
   to declare the query unembeddable and skip the semantic leg outright.
+
+  Every record comes back carrying the score it was ranked by and the legs
+  that returned it — read them with `hit_score/1` and `hit_legs/1`. The list
+  itself is plain records, so nothing that reads one changes.
   """
   @spec hybrid(atom() | String.t() | module(), String.t(), keyword()) :: [struct()]
   def hybrid(type, query, opts \\ []) when is_binary(query) do
@@ -375,26 +379,90 @@ defmodule KilnCMS.Search do
         []
       end
 
-    [{keyword, 1.0}, {semantic, 1.0}, {fuzzy, @fuzzy_weight}]
+    [{:keyword, keyword, 1.0}, {:semantic, semantic, 1.0}, {:fuzzy, fuzzy, @fuzzy_weight}]
     |> reciprocal_rank_fusion(k)
     |> Enum.take(limit)
     |> maybe_rerank(query, opts)
     |> load_results(load, read_opts)
+    |> Enum.map(&attach_hit/1)
   end
 
-  defp maybe_rerank(records, query, opts) do
+  @doc """
+  The relevance score `hybrid/3` ranked this record by, or `nil` for a record
+  that did not come out of `hybrid/3` (a taxonomy or media hit, a plain read).
+
+  It is the record's fused RRF score — `weight / (k + rank)` summed over every
+  leg that returned it — or, when the fused list was reranked, the reranker's
+  score, so that the number always agrees with the order it came in. The
+  fused scores are **comparable across content types**: every `hybrid/3` call
+  in a `global/2` sweep shares `k` and the leg weights, so a page scored
+  `0.031` and a post scored `0.016` can be sorted against each other, which is
+  how `KilnCMS.Ask` picks its sources. They used to be computed and thrown
+  away inside fusion, which left the sections' callers nothing to interleave
+  on but the order of the registry — so `/api/ask` cited every "Concept"
+  before any "Herb", however weak the concept match.
+  """
+  @spec hit_score(struct()) :: float() | nil
+  def hit_score(%{__metadata__: %{search: %{score: score}}}), do: score
+  def hit_score(_record), do: nil
+
+  @doc """
+  Which legs of `hybrid/3` returned this record — a subset of
+  `[:keyword, :semantic, :fuzzy]`, in that order — or `[]` for a record that
+  did not come out of `hybrid/3`.
+
+  Provenance, for two readers: a client deciding how much to trust a hit (a
+  keyword-and-semantic hit is a stronger claim than a fuzzy-only one), and
+  anyone debugging why a result ranked where it did.
+  """
+  @spec hit_legs(struct()) :: [leg()]
+  def hit_legs(%{__metadata__: %{search: %{legs: legs}}}), do: legs
+  def hit_legs(_record), do: []
+
+  @typedoc "A leg of `hybrid/3` — see `hit_legs/1`."
+  @type leg :: :keyword | :semantic | :fuzzy
+
+  # A fused hit on its way out of `hybrid/3`: the record, the score it is
+  # ordered by, and the legs that returned it.
+  @typep hit :: {struct(), float(), [leg()]}
+
+  # The score and legs ride on the record's metadata rather than in a tuple,
+  # so `hybrid/3` and `global/2` keep returning plain record lists — every
+  # existing caller reads them as such — and a caller that wants the number
+  # asks `hit_score/1`.
+  @spec attach_hit(hit()) :: struct()
+  defp attach_hit({record, score, legs}) do
+    Ash.Resource.put_metadata(record, :search, %{score: score, legs: legs})
+  end
+
+  @spec maybe_rerank([hit()], String.t(), keyword()) :: [hit()]
+  defp maybe_rerank(hits, query, opts) do
     if Keyword.get(opts, :rerank, false) and rerank?() do
-      rerank(query, records)
+      rerank(query, hits)
     else
-      records
+      hits
     end
   end
 
   # Calculations are loaded once fusion has settled on the records actually
-  # being returned — see the note in `hybrid/3`.
+  # being returned — see the note in `hybrid/3`. Loaded by id rather than
+  # trusting `Ash.load!` to hand the list back in order, and re-paired with
+  # the hit's score and legs, which a load does not carry.
+  @spec load_results([hit()], list(), keyword()) :: [hit()]
   defp load_results([], _load, _read_opts), do: []
-  defp load_results(records, [], _read_opts), do: records
-  defp load_results(records, load, read_opts), do: Ash.load!(records, load, read_opts)
+  defp load_results(hits, [], _read_opts), do: hits
+
+  defp load_results(hits, load, read_opts) do
+    loaded =
+      hits
+      |> Enum.map(fn {record, _score, _legs} -> record end)
+      |> Ash.load!(load, read_opts)
+      |> Map.new(&{&1.id, &1})
+
+    Enum.map(hits, fn {record, score, legs} ->
+      {Map.get(loaded, record.id, record), score, legs}
+    end)
+  end
 
   # The one embedding a global sweep pays. `:unavailable` (disabled, or the
   # embedder failed) tells each section's prepare to skip its semantic leg
@@ -541,17 +609,24 @@ defmodule KilnCMS.Search do
   end
 
   # Rerank fused results by a stronger (query, doc) relevance model, falling back
-  # to the fused order if the reranker errors.
-  defp rerank(query, records) do
-    case reranker().scores(query, Enum.map(records, &rerank_text/1)) do
-      {:ok, scores} when length(scores) == length(records) ->
-        records
+  # to the fused order if the reranker errors. A reranked hit carries the
+  # reranker's score in place of its fused one: the score's contract
+  # (`hit_score/1`) is "the number this order came from", and a caller
+  # sorting reranked sections against each other by their RRF scores would
+  # quietly undo the reranking.
+  @spec rerank(String.t(), [hit()]) :: [hit()]
+  defp rerank(query, hits) do
+    docs = Enum.map(hits, fn {record, _score, _legs} -> rerank_text(record) end)
+
+    case reranker().scores(query, docs) do
+      {:ok, scores} when length(scores) == length(hits) ->
+        hits
         |> Enum.zip(scores)
-        |> Enum.sort_by(&elem(&1, 1), :desc)
-        |> Enum.map(&elem(&1, 0))
+        |> Enum.map(fn {{record, _fused, legs}, score} -> {record, score, legs} end)
+        |> Enum.sort_by(fn {_record, score, _legs} -> score end, :desc)
 
       _ ->
-        records
+        hits
     end
   end
 
@@ -587,8 +662,16 @@ defmodule KilnCMS.Search do
   options (`:actor`, `:authorize?`) pass through; `:limit` caps each section
   (default 10). Pass `highlight: true` to load the `highlight` snippet calc on
   the content sections (rendered escape-safely via
-  `KilnCMS.Search.Highlight.to_safe_html/1`). `:filters` (see `hybrid/3`)
-  narrows the content sections — media and taxonomy don't carry facets.
+  `KilnCMS.Search.Highlight.to_safe_html/1`), and/or `passage: true` to load
+  the `passage` calc — the longer, mark-free excerpt a reader answers *from*
+  rather than clicks on, which is what `KilnCMS.Ask` cites. `:filters` (see
+  `hybrid/3`) narrows the content sections — media and taxonomy don't carry
+  facets.
+
+  Every content hit carries its fused score and legs (`hit_score/1`,
+  `hit_legs/1`), and the scores are comparable across sections — one `k` and
+  one set of leg weights for the whole sweep — so a caller that wants the
+  strongest hits *overall* can sort the sections' records together.
 
   The taxonomy sections come from `KilnCMS.CMS.Taxonomy.searchable/0` — one per
   taxonomy resource, so adding one joins global search with no edit here. They
@@ -619,10 +702,12 @@ defmodule KilnCMS.Search do
     locale = Keyword.get(opts, :locale) || KilnCMS.I18n.default_locale()
     limit = Keyword.get(opts, :limit, 10)
 
+    snippet_args = %{query: query, locale: locale}
+
     content_load =
-      if Keyword.get(opts, :highlight, false),
-        do: [highlight: %{query: query, locale: locale}],
-        else: []
+      Enum.flat_map([:highlight, :passage], fn calc ->
+        if Keyword.get(opts, calc, false), do: [{calc, snippet_args}], else: []
+      end)
 
     hybrid_opts =
       read_opts ++
@@ -938,24 +1023,30 @@ defmodule KilnCMS.Search do
     |> Ash.read!(read_opts)
   end
 
-  # Weighted RRF: each `{list, weight}` contributes `weight / (k + rank)` to a
-  # record's score; records are deduplicated by id and returned sorted by
-  # summed score, highest first.
+  # Weighted RRF: each `{leg, list, weight}` contributes `weight / (k + rank)`
+  # to a record's score; records are deduplicated by id and returned as
+  # `{record, score, legs}` sorted by summed score, highest first. Ties (two
+  # records each found by one leg at the same rank — every keyword-only
+  # rank-1, for instance) keep the order the legs were given in and then the
+  # order within the leg, so the fused list is deterministic rather than
+  # whatever `Map.values/1` felt like.
+  @spec reciprocal_rank_fusion([{leg(), [struct()], float()}], pos_integer()) :: [hit()]
   defp reciprocal_rank_fusion(weighted_lists, k) do
     weighted_lists
-    |> Enum.flat_map(fn {list, weight} ->
+    |> Enum.flat_map(fn {leg, list, weight} ->
       list
       |> Enum.with_index(1)
-      |> Enum.map(fn {record, rank} -> {record, weight / (k + rank)} end)
+      |> Enum.map(fn {record, rank} -> {leg, record, weight / (k + rank)} end)
     end)
-    |> Enum.reduce(%{}, fn {record, score}, acc ->
-      Map.update(acc, record.id, {record, score}, fn {existing, total} ->
-        {existing, total + score}
+    |> Enum.with_index()
+    |> Enum.reduce(%{}, fn {{leg, record, score}, seen}, acc ->
+      Map.update(acc, record.id, {record, score, [leg], seen}, fn {existing, total, legs, first} ->
+        {existing, total + score, legs ++ [leg], first}
       end)
     end)
     |> Map.values()
-    |> Enum.sort_by(fn {_record, score} -> score end, :desc)
-    |> Enum.map(fn {record, _score} -> record end)
+    |> Enum.sort_by(fn {_record, score, _legs, first} -> {-score, first} end)
+    |> Enum.map(fn {record, score, legs, _first} -> {record, score, legs} end)
   end
 
   defp cfg(key, default) do

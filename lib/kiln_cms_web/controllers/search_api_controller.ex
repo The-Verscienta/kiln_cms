@@ -25,8 +25,10 @@ defmodule KilnCMSWeb.SearchApiController do
   (`pages`/`posts`/… for the core, plus any project-registered types), and
   `entries` plus one per taxonomy resource — `categories`/`tags`/`tag_groups`
   (media is an authoring concern, not a content-search result). Content hits carry their
-  public `path` and an escape-safe `highlight` snippet (only `<mark>`
-  survives); taxonomy hits carry `name`/`slug` (KilnCMS has no public
+  public `path`, an escape-safe `highlight` snippet (only `<mark>`
+  survives), the fused `score` they were ranked by (comparable across
+  sections) and the `legs` that matched (`keyword`/`semantic`/`fuzzy`);
+  taxonomy hits carry `name`/`slug` (KilnCMS has no public
   taxonomy browse pages — headless frontends build their own listing URLs). A
   sparse content result set carries a `suggestion` ("did you mean") when the
   query is trigram-close to a published title without matching a word exactly
@@ -156,7 +158,14 @@ defmodule KilnCMSWeb.SearchApiController do
       title: record.title,
       slug: record.slug,
       path: I18n.localized_path(locale, "#{ContentTypes.public_prefix(ct)}/#{record.slug}"),
-      highlight: highlight(record)
+      highlight: highlight(record),
+      # Additive: the score the hit was ranked by and the legs that returned
+      # it (`KilnCMS.Search.hit_score/1`, `hit_legs/1`). Until these existed a
+      # client's only relevance signal was whether a `<mark>` appeared in the
+      # highlight — nothing to threshold on, debug with, or build an
+      # evaluation set from.
+      score: Search.hit_score(record),
+      legs: Search.hit_legs(record)
     }
   end
 

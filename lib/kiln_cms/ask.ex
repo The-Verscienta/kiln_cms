@@ -104,7 +104,6 @@ defmodule KilnCMS.Ask do
   alias KilnCMS.LLM
   alias KilnCMS.LLM.Budget
   alias KilnCMS.Search
-  alias KilnCMS.Search.Highlight
 
   @default_limit 6
   @max_limit 12
@@ -307,7 +306,7 @@ defmodule KilnCMS.Ask do
     sections =
       Search.global(
         question,
-        read_opts ++ [highlight: true, sections: Search.content_sections()]
+        read_opts ++ [passage: true, sections: Search.content_sections()]
       )
 
     compiled =
@@ -326,9 +325,21 @@ defmodule KilnCMS.Ask do
         end
       end)
 
-    # Sections come back already ranked within a type; interleave by taking the
-    # strongest across types up to the limit (compiled first, then dynamic).
-    (compiled ++ dynamic) |> Enum.take(limit)
+    # Each section comes back ranked within its type, and every hit carries
+    # the fused score it was ranked by. Those scores are comparable across
+    # sections — one `k` and one set of leg weights for the whole sweep — so
+    # the strongest sources *overall* are a flat sort over all of them. This
+    # used to be `(compiled ++ dynamic) |> Enum.take(limit)` under a comment
+    # claiming to interleave by strength; what it did was flatten in registry
+    # order, and the registry sorts by label, so every "Concept" hit outranked
+    # every "Herb" hit however weak, and a question about two herbs cited a
+    # concept page first and the herbs seventh and eighth. Ties (two
+    # keyword-only rank-1 hits score the same) keep the registry order — the
+    # sort is stable — so nothing about the old order survives except as the
+    # tiebreak.
+    (compiled ++ dynamic)
+    |> Enum.sort_by(&(&1.score || 0.0), :desc)
+    |> Enum.take(limit)
   end
 
   defp source(record, type, ct, locale) do
@@ -336,22 +347,25 @@ defmodule KilnCMS.Ask do
       type: type,
       title: record.title,
       url: I18n.localized_path(locale, "#{ContentTypes.public_prefix(ct)}/#{record.slug}"),
-      excerpt: excerpt(record)
+      excerpt: excerpt(record),
+      # Additive (the proposal's P6): the fused score and the legs that
+      # matched, so a client can threshold, debug a ranking, or build an
+      # evaluation set against the public API instead of the internals.
+      score: Search.hit_score(record),
+      legs: Search.hit_legs(record)
     }
   end
 
-  # The ts_headline snippet, flattened to plain text (drop the <mark> tags) so it
-  # can ground a generator or show as a citation preview.
+  # The `passage` calc: a grounding-sized, mark-free excerpt (see the calc in
+  # `KilnCMS.CMS.Content`), already plain text. It replaced the search page's
+  # `highlight` snippet here — 18 words with the `<mark>` tags stripped —
+  # which on a query naming the record degenerated to its title and a heading
+  # or two, and a generator grounded on "Huang Qi Botanical Description
+  # Astragalus" correctly answered that its sources said nothing.
   defp excerpt(record) do
-    case Map.get(record, :highlight) do
-      snippet when is_binary(snippet) and snippet != "" ->
-        snippet
-        |> Highlight.to_safe_html()
-        |> Phoenix.HTML.safe_to_string()
-        |> String.replace(~r/<[^>]+>/, "")
-
-      _none ->
-        nil
+    case Map.get(record, :passage) do
+      text when is_binary(text) and text != "" -> text
+      _none -> nil
     end
   end
 

@@ -148,4 +148,74 @@ defmodule KilnCMS.AskTest do
       assert result.generated == false
     end
   end
+
+  describe "source ranking and excerpts (the Shen-beat-Huang-Qi report)" do
+    # A deployment asked how two herbs differ and was cited a concept page
+    # first and the two herbs seventh and eighth: `retrieve/2` flattened the
+    # sections in registry order — sorted by label, so "Concept" before
+    # "Herb" — under a comment claiming to interleave by strength, and cited
+    # excerpts of five words. These pin the fixes.
+
+    test "sources are ranked by fused score across content types, not by type label" do
+      actor = admin()
+      term = "zorptastic#{System.unique_integer([:positive])}"
+
+      # "Page" sorts before "Post" in the registry. The page matches the term
+      # in its SEO description only — one leg, the keyword one. The post
+      # carries it in its title, so the fuzzy title leg returns it too and
+      # its fused score is the higher of the two. Registry order would cite
+      # the page first.
+      page =
+        CMS.create_page!(
+          %{title: "Unrelated page", slug: slug(), seo_description: "About #{term}"},
+          actor: actor
+        )
+
+      CMS.publish_page!(page, %{}, actor: actor)
+      published(actor, "The #{term} handbook")
+
+      result = Ask.answer(term)
+
+      assert [first, second | _] = result.sources
+      assert first.type == "post"
+      assert first.title == "The #{term} handbook"
+      assert second.type == "page"
+      assert first.score > second.score
+      assert first.legs == [:keyword, :fuzzy]
+      assert second.legs == [:keyword]
+    end
+
+    test "an excerpt is a grounding-sized passage, not a five-word title fragment" do
+      actor = admin()
+      term = "zorptastic#{System.unique_integer([:positive])}"
+
+      body =
+        "Astragalus membranaceus is a perennial herb of the legume family native to " <>
+          "northern China. The root is harvested in the fourth year and used as a qi " <>
+          "tonic that strengthens the defensive energy of the body and supports the " <>
+          "spleen and the lungs."
+
+      post =
+        CMS.create_post!(
+          %{
+            title: "The #{term} monograph",
+            slug: slug(),
+            blocks: [%{type: :rich_text, content: "<p>#{body}</p>", order: 0}]
+          },
+          actor: actor
+        )
+
+      CMS.publish_post!(post, %{}, actor: actor)
+
+      result = Ask.answer(term)
+      source = Enum.find(result.sources, &(&1.title == "The #{term} monograph"))
+      assert source, "expected the monograph among the sources"
+
+      # The query matches only the title; the old 18-word highlight, stripped
+      # of its marks, handed a generator the title and little else.
+      assert String.length(source.excerpt) >= 120
+      assert source.excerpt =~ "legume family"
+      refute source.excerpt =~ "<mark>"
+    end
+  end
 end
