@@ -513,12 +513,20 @@ defmodule KilnCMSWeb.FederationControllerTest do
         |> post("/actor/inbox", body)
       end
 
+      # SeenSignature is global (no tenancy to scope by), so the exactly-one
+      # claim is a before/after delta (#1354) rather than an absolute count a
+      # row from any other test would break.
+      before_count = Ash.count!(KilnCMS.Federation.SeenSignature, authorize?: false)
+
       assert send_it.() |> response(202)
       # Same bytes, same signature, still inside the date window: replayed.
       assert send_it.() |> response(401)
 
-      # And exactly one row was recorded, keyed by the signature.
-      assert 1 == Ash.count!(KilnCMS.Federation.SeenSignature, authorize?: false)
+      # And exactly one row was recorded, keyed by the signature — the replay
+      # deduplicated into the accepted delivery's row.
+      assert Ash.count!(KilnCMS.Federation.SeenSignature, authorize?: false) ==
+               before_count + 1
+
       _ = org_id
     end
 

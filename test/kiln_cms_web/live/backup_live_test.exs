@@ -141,7 +141,11 @@ defmodule KilnCMSWeb.BackupLiveTest do
       assert {:noreply, ^socket} =
                KilnCMSWeb.BackupLive.handle_event("backup_now", %{}, socket)
 
-      assert KilnCMS.Repo.all(Oban.Job) == []
+      # Scoped to the worker this handler would have enqueued (#1354).
+      refute Enum.any?(
+               KilnCMS.Repo.all(Oban.Job),
+               &String.starts_with?(&1.worker, "KilnCMS.Backups.Worker")
+             )
     end
   end
 
@@ -256,8 +260,13 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
         assert html =~ "Backup started"
 
+        # Scoped to the backups queue (#1354): the single-element claim is
+        # about THIS button's enqueue, not the whole shared table.
         assert [%Oban.Job{worker: "KilnCMS.Backups.Worker", args: args, queue: "backups"}] =
-                 KilnCMS.Repo.all(Oban.Job)
+                 Enum.filter(
+                   KilnCMS.Repo.all(Oban.Job),
+                   &String.starts_with?(&1.worker, "KilnCMS.Backups.")
+                 )
 
         assert args["trigger"] == "manual"
       end

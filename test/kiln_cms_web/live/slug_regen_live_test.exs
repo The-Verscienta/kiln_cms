@@ -88,6 +88,10 @@ defmodule KilnCMSWeb.SlugRegenLiveTest do
 
     assert {:noreply, ^socket} = KilnCMSWeb.SlugRegenLive.handle_event("apply", %{}, socket)
 
-    assert KilnCMS.Repo.all(Oban.Job) == []
+    # Scoped to the worker this handler would have enqueued (#1354).
+    refute Enum.any?(
+             KilnCMS.Repo.all(Oban.Job),
+             &String.starts_with?(&1.worker, "KilnCMS.CMS.Workers.SlugRegenerationWorker")
+           )
   end
 end
