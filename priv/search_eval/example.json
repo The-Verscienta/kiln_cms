@@ -1,0 +1,13 @@
+[
+  {"query": "welcome", "expected": ["welcome"], "class": "single_entity", "type": "page"},
+  {"query": "hello world", "expected": ["hello-world"], "class": "single_entity"},
+  {"query": "welcome hello world", "expected": ["welcome", "hello-world"], "class": "multi_entity"},
+  {"query": "elixir native headless cms", "expected": ["welcome"], "class": "paraphrase"},
+  {"query": "declarative modeling with liveview", "expected": ["hello-world"], "class": "paraphrase"},
+  {"query": "what is the first post on this site?", "expected": ["hello-world"], "class": "question_form"},
+  {"query": "how was the welcome page published?", "expected": ["welcome"], "class": "question_form"},
+  {"query": "wellcome", "expected": ["welcome"], "class": "typo"},
+  {"query": "helo world", "expected": ["hello-world"], "class": "typo"},
+  {"query": "asdfghjkl zzqqxx", "expected": [], "class": "junk"},
+  {"query": "xylophone quasar", "expected": [], "class": "junk"}
+]

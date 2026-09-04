@@ -1202,6 +1202,59 @@ defmodule KilnCMS.CMS.Content do
       end
     end
 
+    # The entity leg of `KilnCMS.Search.hybrid/3`: rows whose *title* the
+    # query contains — keyword search turned around. The title's lexemes, as
+    # a phrase (`phraseto_tsquery`), must occur in that order in the query's
+    # tsvector, both under the locale's text-search config, so the match is
+    # case-insensitive, stemmed and stop-word aware exactly as the keyword leg
+    # is: "Huang Qi" is named by "huang qi dang shen", and a title of nothing
+    # but stop words never matches anything. It exists because
+    # `plainto_tsquery` ANDs every query lexeme, so a query naming two records
+    # matches neither of them — the surviving hits are whatever happens to
+    # mention everything (the "Why Shen Beat Huang Qi" report, P2). Longest
+    # title first: the most specific name the query contains outranks a
+    # one-word title it also happens to contain. A sequential scan over the
+    # type's titles (the reversed direction has no index shape), bounded by
+    # the caller's limit. Facets narrow it like the other legs. No published
+    # twin: this is internal to fusion, not an API action.
+    title_read = fn name ->
+      filter_ast =
+        join_and.(
+          [
+            quote(do: ^ref(:locale) == ^arg(:locale)),
+            quote do
+              fragment(
+                "to_tsvector(kiln_regconfig(?), ?) @@ phraseto_tsquery(kiln_regconfig(?), ?)",
+                ^arg(:locale),
+                ^arg(:query),
+                ^arg(:locale),
+                ^ref(:title)
+              )
+            end
+          ] ++ facet_clauses.(false)
+        )
+
+      quote do
+        read unquote(name) do
+          argument :query, :string, allow_nil?: false
+          argument :locale, :string
+
+          unquote_splicing(facet_args.(false))
+
+          filter expr(unquote(filter_ast))
+
+          prepare fn query, _context ->
+            locale = Ash.Query.get_argument(query, :locale) || KilnCMS.I18n.default_locale()
+
+            query
+            |> Ash.Query.set_argument(:locale, locale)
+            |> Ash.Query.sort([{:title_length, :desc}, {:inserted_at, :desc}])
+            |> KilnCMS.CMS.Content.cap_unbounded()
+          end
+        end
+      end
+    end
+
     search_actions =
       quote do
         (unquote_splicing([
@@ -1210,7 +1263,8 @@ defmodule KilnCMS.CMS.Content do
            semantic_read.(:search_semantic, false),
            semantic_read.(:search_semantic_published, true),
            autocomplete_read.(:autocomplete, false),
-           autocomplete_read.(:autocomplete_published, true)
+           autocomplete_read.(:autocomplete_published, true),
+           title_read.(:search_title)
          ]))
       end
 
@@ -1973,13 +2027,14 @@ defmodule KilnCMS.CMS.Content do
         end
 
         # Keyword search, semantic search, and autocomplete — each paired with
-        # its `*_published` delivery twin (state pinned server-side, #297).
-        # Generated from one template above (`search_read`/`semantic_read`/
-        # `autocomplete_read`), where the behavior is documented. All go
-        # through the read policy, so anonymous callers only ever match
-        # published content — the twins exist for *keyed* delivery callers,
-        # whose editor/admin identity would otherwise widen the base actions
-        # to drafts.
+        # its `*_published` delivery twin (state pinned server-side, #297) —
+        # plus the fusion-internal title leg (`:search_title`, no twin).
+        # Generated from one template each above (`search_read`/
+        # `semantic_read`/`autocomplete_read`/`title_read`), where the behavior
+        # is documented. All go through the read policy, so anonymous callers
+        # only ever match published content — the twins exist for *keyed*
+        # delivery callers, whose editor/admin identity would otherwise widen
+        # the base actions to drafts.
         unquote(search_actions)
 
         update :submit_for_review do
@@ -3169,6 +3224,11 @@ defmodule KilnCMS.CMS.Content do
                   expr(fragment("word_similarity(?, ?)", ^arg(:prefix), ^ref(:title))) do
           argument :prefix, :string, allow_nil?: false
         end
+
+        # The title's length in characters. Orders the `:search_title` leg so
+        # the longest — most specific — title the query contains ranks first.
+        # Internal.
+        calculate :title_length, :integer, expr(string_length(^ref(:title)))
 
         # Cosine distance (pgvector `<=>`) between a row's embedding and the
         # query vector — smaller is more similar. Used to order the

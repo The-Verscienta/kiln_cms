@@ -308,6 +308,19 @@ defmodule KilnCMS.Search do
   @fuzzy_fallback_threshold 3
   @fuzzy_weight 0.5
 
+  # The entity leg: records whose title the query contains — stemmed, at word
+  # boundaries (`:search_title`). It runs on every query, and it outweighs the
+  # keyword and semantic legs *together* (1.0 + 1.0), so a record the query
+  # names by title outranks one that merely led both other legs — the
+  # "Why Shen Beat Huang Qi" report's P2: "a query that contains a record's
+  # title verbatim should surface that record, full stop". At k = 60 the
+  # margin holds down to title rank ~30, which no query reaches (a query
+  # names a handful of titles at most). The named record still collects its
+  # keyword and semantic contributions on top, so a single-entity query's
+  # rank 1 is untouched — this leg changes which records *enter* fusion, and
+  # only for the multi-entity queries `plainto_tsquery`'s AND fails closed on.
+  @title_weight 3.0
+
   # The facet arguments shared by `:search` and `:search_semantic`.
   @facet_filters [:category_id, :author_id, :state, :tag_ids]
 
@@ -317,27 +330,34 @@ defmodule KilnCMS.Search do
   @facet_scan_cap 500
 
   @doc """
-  Hybrid search over any content type: fuse the keyword (`:search`, ts_rank)
-  and semantic (`:search_semantic`, cosine) result lists by Reciprocal Rank
-  Fusion and return the merged records, best first.
+  Hybrid search over any content type: fuse the keyword (`:search`, ts_rank),
+  semantic (`:search_semantic`, cosine) and title (`:search_title`, records
+  the query names) result lists by Reciprocal Rank Fusion and return the
+  merged records, best first.
 
   `type` is anything the content registry resolves — `:page`, `:post`, a
   generated type's atom, a dynamic type's name string (searched on the shared
   entry tier) — or a content resource module directly.
 
   Degrades to keyword-only when semantic search is disabled — the semantic leg
-  then returns nothing. When the keyword leg finds almost nothing, a trigram
-  fuzzy leg (the `:autocomplete` machinery — word similarity on titles) joins
-  the fusion at reduced weight, so typos like "databse" still surface
-  "Database Guide". Read options (`:actor`, `:authorize?`) pass through to
-  every leg, so visibility is respected. `:limit` caps the result count
+  then returns nothing. The title leg returns every record whose title
+  appears in the query (case-insensitive, stemmed, at word boundaries —
+  "huang qi dang shen" names both "Huang Qi" and "Dang Shen"), at a weight
+  above the other two legs combined: the keyword leg ANDs every query
+  lexeme, so a query naming two records matches neither, and this leg is
+  how each of them enters fusion. When the keyword leg finds almost nothing,
+  a trigram fuzzy leg (the `:autocomplete` machinery — word similarity on
+  titles) joins the fusion at reduced weight, so typos like "databse" still
+  surface "Database Guide". Read options (`:actor`, `:authorize?`) pass
+  through to every leg, so visibility is respected. `:limit` caps the result count
   (default 20); `:k` overrides the RRF constant; `:load` applies to all legs
   (e.g. the `highlight` snippet calc); `rerank: true` reorders the fused
   results with the configured reranker (still gated by `rerank?()`).
 
   `:filters` (a map of the search actions' facet arguments — `:category_id`,
-  `:author_id`, `:state`, `:tag_ids`) narrows both legs; the fuzzy leg sits
-  out under filters since `:autocomplete` can't apply them.
+  `:author_id`, `:state`, `:tag_ids`) narrows the keyword, semantic and title
+  legs; the fuzzy leg sits out under filters since `:autocomplete` can't
+  apply them.
 
   `:query_vector` supplies an already-embedded query, skipping the embedding
   the semantic leg would otherwise do. Only worth passing when you are calling
@@ -371,6 +391,7 @@ defmodule KilnCMS.Search do
       without_search_vector(resource, fn -> run_leg(resource, :search, args, read_opts) end)
 
     semantic = run_leg(resource, :search_semantic, args, read_opts, semantic_context(opts))
+    title = run_leg(resource, :search_title, args, read_opts)
 
     fuzzy =
       if filters == %{} and length(keyword) < @fuzzy_fallback_threshold do
@@ -379,7 +400,12 @@ defmodule KilnCMS.Search do
         []
       end
 
-    [{:keyword, keyword, 1.0}, {:semantic, semantic, 1.0}, {:fuzzy, fuzzy, @fuzzy_weight}]
+    [
+      {:keyword, keyword, 1.0},
+      {:semantic, semantic, 1.0},
+      {:title, title, @title_weight},
+      {:fuzzy, fuzzy, @fuzzy_weight}
+    ]
     |> reciprocal_rank_fusion(k)
     |> Enum.take(limit)
     |> maybe_rerank(query, opts)
@@ -408,19 +434,20 @@ defmodule KilnCMS.Search do
 
   @doc """
   Which legs of `hybrid/3` returned this record — a subset of
-  `[:keyword, :semantic, :fuzzy]`, in that order — or `[]` for a record that
-  did not come out of `hybrid/3`.
+  `[:keyword, :semantic, :title, :fuzzy]`, in that order — or `[]` for a
+  record that did not come out of `hybrid/3`.
 
   Provenance, for two readers: a client deciding how much to trust a hit (a
-  keyword-and-semantic hit is a stronger claim than a fuzzy-only one), and
-  anyone debugging why a result ranked where it did.
+  keyword-and-semantic hit is a stronger claim than a fuzzy-only one; a
+  `:title` hit is a record the query names outright), and anyone debugging
+  why a result ranked where it did.
   """
   @spec hit_legs(struct()) :: [leg()]
   def hit_legs(%{__metadata__: %{search: %{legs: legs}}}), do: legs
   def hit_legs(_record), do: []
 
   @typedoc "A leg of `hybrid/3` — see `hit_legs/1`."
-  @type leg :: :keyword | :semantic | :fuzzy
+  @type leg :: :keyword | :semantic | :title | :fuzzy
 
   # A fused hit on its way out of `hybrid/3`: the record, the score it is
   # ordered by, and the legs that returned it.

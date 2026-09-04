@@ -33,9 +33,11 @@ clamped to 12).
 `score` is the fused Reciprocal Rank Fusion score it was ranked by (the
 reranker's score instead, when reranking is enabled), and the scores are
 comparable across types because every section of the sweep shares the same
-`k` and leg weights. `legs` names which of `keyword`, `semantic` and `fuzzy`
-returned the hit — a keyword-and-semantic hit is a stronger claim than a
-fuzzy-only one. Both are additive; a client reading only `title`/`url`/`excerpt`
+`k` and leg weights. `legs` names which of `keyword`, `semantic`, `title` and
+`fuzzy` returned the hit — a keyword-and-semantic hit is a stronger claim than
+a fuzzy-only one, and a `title` hit is a record the question names outright
+(its title appears in the question, stemmed and at word boundaries). Both are
+additive; a client reading only `title`/`url`/`excerpt`
 needs no update. They exist so a client can threshold, debug a ranking, or
 build an evaluation set against the public API rather than the internals.
 
@@ -115,6 +117,17 @@ which is worse than the disclosure.
 - **Generation is off by default.** With no model configured `/api/ask` returns
   retrieval-only (`answer: null`, `generated: false`, `generation: "disabled"`)
   and nothing leaves the deployment.
+
+## Measuring retrieval
+
+`mix kiln.search.eval golden.json --ask` scores the order `sources` come in
+against a golden set of questions and the slugs that should answer them —
+recall@k and MRR per query class, and the rank every expected record landed
+at. Run it before and after any change to the search stack (a floor, a leg, a
+reranker, a model), and with `--url https://your-site --ask` against the
+deployment itself, where it reads the `score`/`legs` fields above. The
+format, the classes and how to write a set for your own corpus are in
+[`search-roadmap.md` §11](./search-roadmap.md#11-ranking-eval-harness).
 
 ## Turning on generated answers
 
