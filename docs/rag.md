@@ -97,7 +97,8 @@ which is worse than the disclosure.
 ## How it works
 
 - **Retrieval** reuses `KilnCMS.Search.global/2` — the same keyword + semantic
-  RRF (reranked) hybrid search behind `/api/search`. It **degrades to keyword**
+  RRF hybrid search behind `/api/search`, reranked when a switch says so (see
+  [Reranking ask's sources](#reranking-asks-sources)). It **degrades to keyword**
   when semantic search is disabled, so `/api/ask` works with no model stack;
   turning on semantic search (`config :kiln_cms, KilnCMS.Search, semantic: true`)
   improves retrieval quality automatically.
@@ -116,6 +117,59 @@ which is worse than the disclosure.
   retrieval-only (`answer: null`, `generated: false`, `generation: "disabled"`)
   and nothing leaves the deployment.
 
+## Reranking ask's sources
+
+Kiln ships a cross-encoder reranker — `BAAI/bge-reranker-base` behind a
+Bumblebee `Nx.Serving`, see
+[semantic-search-plan.md](semantic-search-plan.md#phase-3--hybrid-fusion--optional-rerank)
+— that rescores every fused candidate against the query and reorders each
+section by that score. It is **off by default**, and until now it had a single
+switch, `config :kiln_cms, KilnCMS.Search, rerank: true`, which reranks *every*
+search surface on *every* query: the public `/search` page, the editor palette
+on each keystroke, `/api/search`, and `/api/ask`. That is CPU inference a modest
+host cannot afford, which is how a deployment came to have the reranker wired
+and never running.
+
+`/api/ask` is different. A question is one bounded call, and since the sources
+are [already sorted by score across types](#how-it-works), reranking each
+section's candidates with the same model for the same question makes that sort
+a rerank of the whole union — at most `limit` candidates per registered content
+type through the model, per question. So the ask path has its own switch:
+
+```
+ASK_RERANK=true
+```
+
+or
+
+```elixir
+config :kiln_cms, KilnCMS.Ask, rerank: true
+```
+
+`KilnCMS.Ask.rerank?()` reports the effective setting — it is also true under
+the global switch, which covers this surface with the rest. Either switch
+loads the model at boot; a default install loads nothing. With it on, each
+source's `score` is the reranker's rather than the fused one, so the number
+still agrees with the order it came in.
+
+Two caveats before setting it, both from the report that asked for this
+(*Why Shen Beat Huang Qi*, 2026-09-04), quoted as written:
+
+> Two honest caveats: reranking fixes ordering, not the recall defects (D2/D3
+> must be fixed first or there is nothing right to reorder), and CPU inference
+> cost needs documenting for modest hosts — ours currently runs on hardware
+> without AVX2, so this stays default-off with a clear knob.
+
+In Kiln's terms: a reranker can only promote a record the fused legs returned.
+If the keyword leg's implicit AND or the semantic distance floor dropped the
+right record before fusion, no reranker will see it — fix recall first (the
+exact-title leg, the re-measured floor and the OR-relaxation fallback proposed
+alongside this), then turn this on. And the cost is yours to measure: the
+cross-encoder runs on the CPU through EXLA, whose kernels assume AVX2, and the
+per-question price on a host without it is what kept the report's deployment
+from enabling reranking at all. Try a question against a staging copy with the
+switch on before exposing it on a public endpoint.
+
 ## Turning on generated answers
 
 Set one environment variable to a `req_llm` model spec:
@@ -132,7 +186,8 @@ config :kiln_cms, KilnCMS.Ask,
   model: "ollama:llama3.1"
 ```
 
-`KilnCMS.Ask.enabled?()` tells you whether it is on.
+`KilnCMS.Ask.enabled?()` tells you whether it is on (`KilnCMS.Ask.rerank?()`
+is the same question for the reranker above).
 
 ### On-prem (strongly recommended here)
 

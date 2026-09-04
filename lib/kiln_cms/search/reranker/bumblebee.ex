@@ -2,7 +2,8 @@ defmodule KilnCMS.Search.Reranker.Bumblebee do
   @moduledoc """
   Local cross-encoder reranker (e.g. `BAAI/bge-reranker-base`) via a Bumblebee
   text-classification `Nx.Serving` (`KilnCMS.Search.RerankerServing`), started
-  only when `rerank: true`.
+  only when some scope reranks — `KilnCMS.Search.rerank?/0` for every surface,
+  `KilnCMS.Ask.rerank?/0` for the ask path alone.
 
   **Experimental.** Cross-encoder scoring depends on the exact model's output
   head; validate the scores against your chosen reranker before relying on the

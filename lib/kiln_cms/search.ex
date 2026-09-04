@@ -109,7 +109,17 @@ defmodule KilnCMS.Search do
   @spec embed(String.t()) :: {:ok, [float()]} | {:error, term()}
   def embed(text) when is_binary(text), do: embedder().embed(text)
 
-  @doc "Whether reranking is enabled (a reranker model is loaded)."
+  @doc """
+  Whether reranking is enabled on **every** search surface — the public
+  `/search` page, the editor palette, `GET /api/search` and `/api/ask` alike.
+
+  This is `global/2`'s default for its `:rerank` option, and one of the two
+  switches that load the reranker model at boot. The other is
+  `KilnCMS.Ask.rerank?/0`, which turns the same reranker on for the ask path
+  alone: reranking is CPU inference over every candidate of every section on
+  every query, which a modest host cannot afford on its search box but can on
+  a bounded, per-question `/api/ask` call.
+  """
   @spec rerank?() :: boolean()
   def rerank?, do: cfg(:rerank, false)
 
@@ -333,7 +343,11 @@ defmodule KilnCMS.Search do
   every leg, so visibility is respected. `:limit` caps the result count
   (default 20); `:k` overrides the RRF constant; `:load` applies to all legs
   (e.g. the `highlight` snippet calc); `rerank: true` reorders the fused
-  results with the configured reranker (still gated by `rerank?()`).
+  results with the configured reranker. That option is the whole gate: the
+  *scope* decision — every surface, ask alone, nowhere — is made by
+  `global/2` from `rerank?/0` and `KilnCMS.Ask.rerank?/0`, and a direct
+  caller passing `rerank: true` is asking for inference it has checked it can
+  afford.
 
   `:filters` (a map of the search actions' facet arguments — `:category_id`,
   `:author_id`, `:state`, `:tag_ids`) narrows both legs; the fuzzy leg sits
@@ -435,13 +449,14 @@ defmodule KilnCMS.Search do
     Ash.Resource.put_metadata(record, :search, %{score: score, legs: legs})
   end
 
+  # The option alone decides. This used to also require `rerank?()`, which was
+  # right while `global/2` hardcoded `rerank: true` for every section and the
+  # config switch was the only scope there was; now `global/2` resolves the
+  # scope and passes the verdict down, and a second gate here would silently
+  # veto the ask-only scope (`KilnCMS.Ask.rerank?/0`) on every call.
   @spec maybe_rerank([hit()], String.t(), keyword()) :: [hit()]
   defp maybe_rerank(hits, query, opts) do
-    if Keyword.get(opts, :rerank, false) and rerank?() do
-      rerank(query, hits)
-    else
-      hits
-    end
+    if Keyword.get(opts, :rerank, false), do: rerank(query, hits), else: hits
   end
 
   # Calculations are loaded once fusion has settled on the records actually
@@ -614,7 +629,14 @@ defmodule KilnCMS.Search do
   # (`hit_score/1`) is "the number this order came from", and a caller
   # sorting reranked sections against each other by their RRF scores would
   # quietly undo the reranking.
+  #
+  # An empty section never reaches the model: with the ask scope on, a sweep
+  # runs one `hybrid/3` per registered content type and most of them match
+  # nothing, and the Bumblebee adapter's batched run of zero documents is an
+  # error it would rescue and pay for anyway.
   @spec rerank(String.t(), [hit()]) :: [hit()]
+  defp rerank(_query, []), do: []
+
   defp rerank(query, hits) do
     docs = Enum.map(hits, fn {record, _score, _legs} -> rerank_text(record) end)
 
@@ -647,8 +669,21 @@ defmodule KilnCMS.Search do
   Every content section fuses the keyword and semantic legs (RRF via
   `hybrid/3`), so meaning-based matches surface everywhere search is offered —
   the public `/search` page, the editor palette, the search API — and degrade
-  to keyword-only when semantic search is disabled. With reranking enabled
-  (`rerank?()`), each section's fused results are reordered by the reranker.
+  to keyword-only when semantic search is disabled. With reranking on, each
+  section's fused results are reordered by the reranker and carry its score.
+
+  ## `:rerank`
+
+  Whether the content sections are reranked. Omitted, the global switch
+  decides (`rerank?/0`) — every surface reranks or none does. `rerank: true`
+  reranks this sweep whatever the switch says, and `rerank: false` never
+  does. The override exists for one caller: `KilnCMS.Ask` passes its own
+  verdict (`KilnCMS.Ask.rerank?/0`), so a deployment can rerank the bounded
+  candidate set behind a `/api/ask` question without paying cross-encoder
+  inference on every keystroke of the editor palette and every public search.
+  Nothing here checks that a reranker is loaded: the switches that enable a
+  scope are the switches that start the model (`KilnCMS.Application`), and a
+  reranker that fails degrades the sweep to fused order.
 
   Content sections are locale-scoped (via `:locale`, default configured);
   media and taxonomy are keyword/trigram-only and locale-agnostic (no
@@ -714,7 +749,9 @@ defmodule KilnCMS.Search do
         [
           locale: locale,
           limit: limit,
-          rerank: true,
+          # The scope verdict — see `:rerank` in the doc. This was a literal
+          # `true`, and the config switch lived inside `hybrid/3` instead.
+          rerank: Keyword.get(opts, :rerank, rerank?()),
           filters: Keyword.get(opts, :filters, %{}),
           # Embed the query ONCE for the whole sweep. Every section below runs
           # a semantic leg, and each would otherwise embed this same string

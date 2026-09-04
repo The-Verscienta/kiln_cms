@@ -1176,6 +1176,24 @@ if config_env() == :prod do
     config :kiln_cms, KilnCMS.Ask, model: ask_model, generator: ask_generator
   end
 
+  # Rerank /api/ask's retrieved candidates with the `KilnCMS.Search` reranker
+  # (bge-reranker-base by default) — and only /api/ask's. `KilnCMS.Search`'s
+  # own `rerank` switch reranks every search surface on every query, which is
+  # CPU inference a modest host cannot afford; this one is a bounded call per
+  # question (at most `limit` candidates per content type). Two things to know
+  # before setting it, both from the report that asked for it: it fixes the
+  # ORDER of the candidates and cannot recover a record the fused legs never
+  # returned, and the cross-encoder runs on the CPU — the deployment that
+  # asked for this runs on hardware without AVX2 and could not afford it on
+  # every query; measure a question's cost on your host before exposing it.
+  # See docs/rag.md, "Reranking ask's sources".
+  #
+  # `fetch/1`, not `flag/2`: an unset variable must not rewrite a project
+  # overlay's `config :kiln_cms, KilnCMS.Ask, rerank: true` back to false.
+  with {:ok, ask_rerank?} <- Env.fetch("ASK_RERANK") do
+    config :kiln_cms, KilnCMS.Ask, rerank: ask_rerank?
+  end
+
   # ### Rich embed cards (#489)
   #
   # `OEMBED_ENABLED=true` lets Kiln fetch oEmbed metadata — title, author,

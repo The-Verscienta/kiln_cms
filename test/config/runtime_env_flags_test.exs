@@ -57,7 +57,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             BACKUP_ENABLED OEMBED_ENABLED
             KILN_READING_TIME_WPM BACKUP_KEEP_DAYS BACKUP_STALE_AFTER_HOURS
             KILN_EXPERIMENTS_STICKY_DAYS REQUIRE_AV_METADATA_STRIP
-            BRAND_PRIMARY_COLOR
+            BRAND_PRIMARY_COLOR ASK_RERANK
           ) ++ Map.keys(@prod_env)
 
   setup do
@@ -377,6 +377,52 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
       referrers = get_in(config, [:kiln_cms, :analytics_referrers])
       assert referrers[:enabled] == true
       assert referrers[:low_count_threshold] == 3
+    end
+  end
+
+  describe "ASK_RERANK (the Shen-beat-Huang-Qi report, P7)" do
+    # The ask-only reranking switch. Read with `fetch/1` so that an unset
+    # variable writes nothing — a project overlay's `config :kiln_cms,
+    # KilnCMS.Ask, rerank: true` must survive a deploy that never mentions
+    # the variable, and an explicit `false` must be able to switch it off.
+    defp ask_rerank(value, env \\ :prod) do
+      {config, stderr} = eval_io(%{"ASK_RERANK" => value}, env)
+
+      written =
+        case get_in(config, [:kiln_cms, KilnCMS.Ask, :rerank]) do
+          nil -> :not_written
+          bool -> bool
+        end
+
+      {written, stderr}
+    end
+
+    test "on-spellings enable it, in any case and with surrounding space" do
+      for value <- ["true", "TRUE", " true ", "1", "yes", "on"] do
+        assert {true, _} = ask_rerank(value), "expected #{inspect(value)} to enable it"
+      end
+    end
+
+    test "off-spellings write an explicit false, so an overlay's true can be overridden" do
+      for value <- ["false", "False", " off ", "0", "no"] do
+        assert {false, _} = ask_rerank(value), "expected #{inspect(value)} to disable it"
+      end
+    end
+
+    test "unset writes nothing, leaving a project overlay's setting in force" do
+      assert {:not_written, _} = ask_rerank(nil)
+    end
+
+    test "an unrecognized value writes nothing and warns, instead of reading as on" do
+      for value <- ["enabled", "y", "maybe"] do
+        {written, stderr} = ask_rerank(value)
+        assert written == :not_written, "#{inspect(value)} must keep the default"
+        assert stderr =~ "ASK_RERANK is set to an unrecognized value"
+      end
+    end
+
+    test "the block is skipped under :test so the suite is deterministic" do
+      assert {:not_written, _} = ask_rerank("true", :test)
     end
   end
 
