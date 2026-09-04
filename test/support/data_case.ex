@@ -24,6 +24,9 @@ defmodule KilnCMS.DataCase do
       import Ecto.Changeset
       import Ecto.Query
       import KilnCMS.DataCase
+      # `today/0` (one clock read per test) and `stable_day/1` (re-run once
+      # if UTC midnight passed under the body) — the #1358 clock-edge tools.
+      import KilnCMS.Test.StableDay
     end
   end
 
