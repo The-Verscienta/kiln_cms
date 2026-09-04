@@ -11498,11 +11498,6 @@ msgstr "no se puede almacenar: la eliminación de metadatos de vídeo y audio no
 msgid "category"
 msgstr "categoría"
 
-#: lib/kiln_cms_web/live/overview_live.ex
-#, elixir-autogen, elixir-format
-msgid "centre"
-msgstr "centro"
-
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "check"
@@ -12056,11 +12051,6 @@ msgstr "etiqueta"
 #, elixir-autogen, elixir-format
 msgid "tag group"
 msgstr "grupo de etiquetas"
-
-#: lib/kiln_cms_web/live/overview_live.ex
-#, elixir-autogen, elixir-format
-msgid "taiji · centre"
-msgstr "taiji · centro"
 
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
