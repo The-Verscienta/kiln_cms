@@ -188,6 +188,108 @@ search facade, a dashboard panel.
 
 **Touches.** an admin LiveComponent + hook, admin layout. Depends on #4, #7.
 
+## 11. Ranking eval harness  ·  Effort M · Risk L · *shipped (`mix kiln.search.eval`)*
+
+**Problem.** Every item above changed the ranking, and nothing measured it.
+A deployment's report ("Why Shen Beat Huang Qi", 2026-09-04) traced a wrong
+top citation to five mechanisms in this stack, each of which had passed a
+green suite: the tests pin behaviours, not relevance. Its P8 asked for a
+golden set and a task reporting recall@k and MRR per query class, run before
+and after each change and wired into CI **as a report, not a gate**, until
+baselines settle.
+
+**What shipped.**
+
+```bash
+mix kiln.search.eval priv/search_eval/example.json          # this database, as /api/search reads
+mix kiln.search.eval golden.json --ask                      # the order /api/ask cites sources in
+mix kiln.search.eval golden.json --url https://example.com  # a live deployment, over HTTP
+mix kiln.search.eval golden.json --json > after.json        # for diffing against before.json
+mix kiln.search.eval golden.json --fail-below single_entity=0.9@5 --fail-below junk=1.0
+```
+
+The golden set is a JSON array of rows:
+
+```json
+[
+  {"query": "huang qi", "expected": ["huang-qi"], "class": "single_entity", "type": "herb"},
+  {"query": "huang qi dang shen", "expected": ["huang-qi", "dang-shen"], "class": "multi_entity"},
+  {"query": "herb that strengthens defensive energy", "expected": ["huang-qi"], "class": "paraphrase"},
+  {"query": "How is Huang Qi different from Dang Shen?", "expected": ["huang-qi", "dang-shen"], "class": "question_form"},
+  {"query": "huang chi", "expected": ["huang-qi"], "class": "typo"},
+  {"query": "asdfghjkl zzqqxx", "expected": [], "class": "junk"}
+]
+```
+
+- `query` — what a user typed. `expected` — the slugs that should come back,
+  in no particular order. `class` — one of `single_entity`, `multi_entity`,
+  `paraphrase`, `question_form`, `typo`, `junk`. Optional `type` (a content
+  type name or its section plural — ranks are then taken within that type)
+  and `locale`.
+- A **junk** row expects nothing and passes only when *nothing* is returned —
+  the guarantee the semantic floor (#871) exists for.
+- An object wrapping the array under `"rows"` or `"queries"` is accepted too,
+  so a set exported from elsewhere needs no reshaping.
+
+**What is measured.** Each query runs through `KilnCMS.Search.global/2` over
+the content sections, read exactly as `GET /api/search` reads — `authorize?:
+true`, no actor, so only published, world-readable content can score — and
+the sections are sorted together by fused score, the cross-type order
+`KilnCMS.Ask` selects sources in (and the only one the scores support: they
+are comparable across sections because a sweep shares one `k` and one set of
+leg weights). `--ask` judges `KilnCMS.Ask.answer/2`'s `sources` instead;
+`--url` leaves the local database out of it and reads a deployment's
+`/api/search` (or `/api/ask`) over HTTP, scoring the additive `score`/`legs`
+fields those endpoints carry — which is what makes the eval possible against
+the public API rather than the internals.
+
+- **recall@k** (k = 1, 3, 5, 10; `--k 1,5,20` to change) — the share of a
+  row's expected slugs ranked at or above k.
+- **MRR** — the mean of 1 / (best rank any expected slug reached), 0 when
+  none did.
+- Class and overall figures are macro-averages over rows; junk rows count as
+  1.0 / 0.0 in both.
+
+The per-query block is the debugging value: each expected slug's rank (or
+`missing`) and the **legs** that found it. "`dang-shen` missing" next to
+"`da-ding-huang` #1 keyword" is D3 (AND semantics) on one line; a hit found
+by `fuzzy` alone on a query that named the title verbatim is D4.
+
+**Exit status.** 0 whatever the numbers. `--fail-below CLASS=MIN[@K]`
+(repeatable; `overall` allowed; K defaults to the largest `--k`) turns a
+class's recall@K into a floor once a deployment has a baseline it wants to
+hold. A threshold on a class with no rows, or a K not reported, fails rather
+than passing silently.
+
+**CI.** The main job runs the shipped example set after the suite —
+`mix run priv/repo/seeds.exs` first, since the set is written against the
+demo seeds — with `continue-on-error`, appends the table to the job summary
+and uploads `search-eval.json` as an artifact. It never fails the build.
+
+**Writing a golden set for your corpus.**
+
+1. Take real queries: the search analytics (`KilnCMS.Analytics.SearchQuery`,
+   the governance dashboard's zero-result list) already hold what people
+   typed, and the zero-result ones are the rows most worth having.
+2. For each, name the records that *should* answer it by slug — the last
+   segment of their public URL — and classify it. Aim for a handful per
+   class; five per class is thirty rows and enough to move a number when a
+   ranking changes. Keep two or three junk rows: they are what stops a
+   "fix" that widens recall by returning everything.
+3. Put `type` on rows where only one content type is a fair answer (an herb
+   query on a site whose formulas mention every herb), and `locale` on rows
+   in a non-default locale.
+4. Commit the file next to the deployment (a `projects/<name>/priv/` overlay
+   is a fine home), run it with `--json` before touching the search config,
+   again after, and diff. Run it with `--url` against production to measure
+   what users actually get, not what the dev database ranks.
+5. Only when the numbers have been stable across a few changes, add
+   `--fail-below` for the classes you would want a PR to fail on.
+
+**Touches.** `KilnCMS.Search.Eval` (the pure metrics, unit-tested),
+`KilnCMS.Search.Eval.Retriever` (the three sources), `Mix.Tasks.Kiln.Search.Eval`,
+`priv/search_eval/example.json`, the CI step.
+
 ---
 
 ## Suggested phasing

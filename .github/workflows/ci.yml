@@ -179,6 +179,30 @@ jobs:
         # own pass, it is harmless.
         run: mix test --only table_lock
 
+      # The search ranking eval (docs/search-roadmap.md §11) over the shipped
+      # example golden set: recall@k and MRR per query class, the table in
+      # the job summary, the JSON as an artifact for diffing against another
+      # run. A REPORT, not a gate — `continue-on-error` and no `--fail-below`
+      # — until a deployment's own golden set has a baseline worth holding.
+      # Here rather than in a test shard because it wants the database this
+      # job has just checked and nothing else: the example set is written
+      # against the demo seeds, so the (idempotent) seed script runs first to
+      # give it its corpus, and no test runs in this job after it.
+      - name: Search ranking eval (report only)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          mix run priv/repo/seeds.exs
+          mix kiln.search.eval priv/search_eval/example.json --json > search-eval.json
+
+      - name: Upload search eval report
+        if: ${{ !cancelled() && hashFiles('search-eval.json') != '' }}
+        uses: actions/upload-artifact@v5
+        with:
+          name: search-eval-report
+          path: search-eval.json
+          retention-days: 14
+
       - name: Check the gettext catalogs are up to date
         # `--check-up-to-date` only guards default.pot, so it happily passes
         # while the per-locale .po files rot — which is exactly how fr/es drifted

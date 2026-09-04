@@ -29,6 +29,21 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **`mix kiln.search.eval` — a ranking evaluation harness.** A golden set of
+  `{query, expected, class}` rows (JSON; classes `single_entity`,
+  `multi_entity`, `paraphrase`, `question_form`, `typo`, `junk`) is scored
+  for recall@k and MRR per class and overall, with a line per query naming
+  the rank each expected slug landed at — or `missing` — and the legs that
+  found it. It runs in-process the way `GET /api/search` reads (anonymous,
+  published-only, the sections sorted together by fused score), through
+  `/api/ask`'s source order with `--ask`, or against a live deployment over
+  HTTP with `--url`, where it reads the `score`/`legs` fields the APIs now
+  carry. `--json` for diffing before and after a change; exit 0 whatever the
+  numbers unless `--fail-below CLASS=MIN[@K]` sets a threshold. CI runs the
+  shipped example set (`priv/search_eval/example.json`, written against the
+  demo seeds) as a report artifact, not a gate. The pure metrics live in
+  `KilnCMS.Search.Eval`. See `docs/search-roadmap.md` §11 for the format and
+  how to write a golden set for your own corpus.
 - **Search hits carry their score and provenance.** Every record out of
   `KilnCMS.Search.hybrid/3` (and so every content section of `global/2`)
   now carries the fused Reciprocal Rank Fusion score it was ranked by — or
