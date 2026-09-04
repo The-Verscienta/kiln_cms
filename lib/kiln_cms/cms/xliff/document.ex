@@ -55,7 +55,7 @@ defmodule KilnCMS.CMS.Xliff.Document do
   standalone codes (`<ph>`, `<sc>`, `<ec>`) are skipped, and a `<unit>` with no
   `<target>` is simply not translated yet. `xmerl` is invoked with
   `dtd: :none`, and the input is size-capped, for the same reasons
-  `KilnCMS.Portability.Wxr` does both.
+  `KilnCMS.Portability.WXR` does both.
   """
 
   require Record
