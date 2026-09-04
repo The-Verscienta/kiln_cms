@@ -312,8 +312,12 @@ migration, a rewritten column, a dropped config key).
   Repo's `hostname:`/`database:` moved to `config/runtime.exs` (read at boot,
   outside the compile-time record). `.github/actions/setup-mix` owns the
   toolchain, cache, `deps.get` and compile for the four main jobs; only
-  `build` saves the cache. No change to how `MIX_TEST_PARTITION` is used
-  locally.
+  `build` saves the cache. One file is still backdated on an exact hit:
+  `mix.exs`, whose staleness check in Mix is mtime alone (no value
+  comparison exists to hide), and whose digest the key already carries — a
+  checkout-stamped `mix.exs` otherwise recompiles the ~95 modules that
+  depend on `Mix.Project` on every job. No change to how `MIX_TEST_PARTITION`
+  is used locally.
 
 ### Removed
 

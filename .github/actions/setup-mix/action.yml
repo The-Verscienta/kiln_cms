@@ -29,6 +29,17 @@ description: >-
 # get the same effect; that switched Mix's value comparison off instead of
 # giving it nothing to find. Its review caught it.)
 #
+# mix.exs is the one file that still gets a backdate, and only on an exact
+# hit. Mix has no value comparison for it: `project_mtime > old_project_mtime`
+# is the whole check, and a checkout-stamped mix.exs recompiles every module
+# with a compile-time dependency on `Mix.Project` — 95 files, ~45 s, on every
+# job of every run, for bytes the key has already proven identical. mix.exs
+# reads nothing from the environment but `Mix.env()`, which this workflow
+# pins to `test` for every job that uses this action, so identical bytes mean
+# an identical evaluated project. This is narrower than the first cut in
+# exactly the way that matters: no config file is touched, so nothing Mix
+# would have compared is hidden from it.
+#
 # Saving. Only one job should save: actions/cache tars the whole archive
 # (~1 GB here) BEFORE it learns another job already claimed the key, so nine
 # jobs racing to save after a miss would each pay that for nothing. `build`
@@ -60,6 +71,7 @@ runs:
         version-type: strict
 
     - name: Restore deps and _build (and save on a miss)
+      id: cache
       if: inputs.save-cache == 'true'
       uses: actions/cache@v5
       with:
@@ -72,6 +84,7 @@ runs:
           ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-
 
     - name: Restore deps and _build
+      id: restore
       if: inputs.save-cache != 'true'
       uses: actions/cache/restore@v5
       with:
@@ -82,6 +95,16 @@ runs:
         restore-keys: |
           ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}-
           ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-
+
+    - name: Backdate mix.exs so Mix trusts the restored build
+      # Exact primary-key hit only (`cache-hit` is "true" then, "false" on a
+      # restore-keys match, empty on a miss), from whichever cache step ran.
+      # mix.exs ONLY — see the header for why that is safe and config is not.
+      if: steps.cache.outputs.cache-hit == 'true' || steps.restore.outputs.cache-hit == 'true'
+      shell: bash
+      run: |
+        touch -d '2000-01-01T00:00:00Z' mix.exs
+        echo "Exact cache hit: backdated mix.exs (its digest is in the key)."
 
     - name: Install dependencies
       shell: bash
