@@ -77,6 +77,37 @@ defmodule KilnCMSWeb.BrandingLiveTest do
       assert KilnCMS.Branding.for_org(other).site_name == "KilnCMS"
     end
 
+    test "persists the public theme and nav slots (#1318)", %{conn: conn, org: org} do
+      menu =
+        CMS.create_menu!(%{key: "main", name: "Main", locale: KilnCMS.I18n.default_locale()},
+          actor: authed_user(:admin),
+          tenant: org
+        )
+
+      on_exit(fn -> KilnCMS.Cache.bump_menus_generation(org.id) end)
+
+      {:ok, lv, html} =
+        conn |> org_conn(org) |> log_in(authed_user(:admin)) |> live(~p"/editor/branding")
+
+      # The configured menu is offered as a slot option.
+      assert html =~ "Main (main)"
+
+      lv
+      |> form("#branding-form",
+        branding: %{theme: "editorial", header_menu_key: menu.key}
+      )
+      |> render_submit()
+
+      assert {:ok, [row]} = CMS.list_site_branding(tenant: org, authorize?: false)
+      assert row.theme == :editorial
+      assert row.header_menu_key == "main"
+      assert row.footer_menu_key == nil
+
+      brand = KilnCMS.Branding.for_org(org)
+      assert brand.theme == :editorial
+      assert brand.header_menu_key == "main"
+    end
+
     test "surfaces a validation error instead of writing", %{conn: conn, org: org} do
       {:ok, lv, _html} =
         conn |> org_conn(org) |> log_in(authed_user(:admin)) |> live(~p"/editor/branding")

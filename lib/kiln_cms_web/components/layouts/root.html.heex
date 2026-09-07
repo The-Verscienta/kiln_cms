@@ -201,6 +201,12 @@
           trail on every change, and a CSP that only allows the origins and
           script hashes recorded alongside the snippet. --%>
     {raw(assigns[:code_injection] && assigns[:code_injection].head_html)}
+    <%!-- Custom stylesheet (#1318) — the CSS-only half of code injection.
+          After head_html so a site whose snippet also injects styles sees the
+          dedicated field win, and under the same delivery-only contract: the
+          assign exists only in the :delivery pipeline, so an org admin's CSS
+          never restyles the console. --%>
+    <Layouts.custom_css injection={assigns[:code_injection]} />
   </head>
   <body>
     <%!-- Skip link (#175): first focusable element, visually hidden until

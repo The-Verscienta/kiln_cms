@@ -289,6 +289,60 @@ defmodule KilnCMS.Cache do
   end
 
   @doc """
+  Cache key for one resolved public navigation tree (#1318): a menu `key` in one
+  `locale`, as `KilnCMS.CMS.Menus.public_tree/3` serves it to the delivery
+  header/footer.
+
+  A **tuple**, not a joined string, because `key` is admin-typed free text —
+  the feed-merge bug (`cache_keys_must_not_join_untrusted_segments`) is exactly
+  what a `"menus:\#{org}:\#{key}:\#{locale}"` string would reintroduce. The
+  generation token is folded into the key (the `head_generation` move) so one
+  bump invalidates every menu/locale variant for the org at once: menu writes
+  happen through drag-heavy editors that touch many rows, and per-key busting
+  would need the menu key at hand in a `MenuItem` change, which only knows its
+  `menu_id`.
+  """
+  @spec public_menu_key(Ash.UUID.t(), String.t(), String.t()) :: term()
+  def public_menu_key(org_id, key, locale),
+    do: {:public_menu, org_id, menus_generation(org_id), key, locale}
+
+  @doc """
+  The current public-menus generation token for `org_id`, `"0"` until a menu
+  write bumps it. Folded into `public_menu_key/3`.
+  """
+  @spec menus_generation(Ash.UUID.t()) :: String.t()
+  def menus_generation(org_id) do
+    if enabled?() do
+      case Cachex.get(@cache, menus_generation_key(org_id)) do
+        {:ok, value} when is_binary(value) and value != "" -> value
+        _ -> "0"
+      end
+    else
+      "0"
+    end
+  end
+
+  @doc "Storage key for the public-menus generation token (#1318)."
+  @spec menus_generation_key(Ash.UUID.t()) :: String.t()
+  def menus_generation_key(org_id), do: "menus_generation:#{org_id}"
+
+  @doc """
+  Mint a new public-menus generation token for `org_id` on every node, orphaning
+  every cached `public_menu_key/3` entry at once. A put, not a delete, for the
+  reason `bump_head_generation/1` gives: a delete would fall back to `"0"`,
+  which is a token old keys were already built under.
+  """
+  @spec bump_menus_generation(Ash.UUID.t()) :: :ok
+  def bump_menus_generation(org_id) do
+    if enabled?() do
+      token = :crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower)
+      ClusterBust.broadcast_put([{menus_generation_key(org_id), token}])
+    end
+
+    :ok
+  end
+
+  @doc """
   Cache key for a site's resolved code injection (#490) — the snippet **and**
   the CSP sources that let it run, which is why the two are one cached struct.
   """

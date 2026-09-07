@@ -887,3 +887,67 @@ pre.highlight .gs {
 [data-thread-filter="unresolved"] > [data-block-threads]:not([data-block-threads="unresolved"]) {
   display: none;
 }
+
+/* ===========================================================================
+   Public theme presets (#1318)
+   ===========================================================================
+   The delivery site's selectable look. `KilnCMSWeb.Layouts.public/1` wraps the
+   public chrome in `.public-shell` and stamps `data-public-theme` from the
+   closed `KilnCMS.Branding.themes/0` list — presets are compiled here, never
+   authored per-site, so no org-typed byte reaches this stylesheet (that rule
+   and its reasoning live on `KilnCMS.CMS.Validations.BrandTokens`; arbitrary
+   per-site CSS is `SiteCodeInjection.custom_css`, emitted by the root layout
+   on delivery only).
+
+   Each preset only moves tokens; the structural rules below consume them.
+   `standard` is the pre-#1318 look and must stay byte-equivalent for an
+   unconfigured site: 48rem measure (the old `max-w-3xl`), UI-font headings.
+   Colour is untouched — presets compose with the solved brand colour and with
+   dark mode, which is why nothing here mentions `--color-*` or
+   `[data-theme]`. */
+.public-shell {
+  --public-measure: 48rem;
+  --public-body-font: inherit;
+  --public-heading-font: inherit;
+  --public-heading-weight: 700;
+  --public-heading-tracking: -0.01em;
+
+  font-family: var(--public-body-font);
+}
+
+/* Editorial: a reading look — serif set in a slightly narrower measure.
+   System serif stack; webfonts would need CSP and asset work no preset is
+   worth. */
+[data-public-theme="editorial"] {
+  --public-measure: 44rem;
+  --public-body-font: Charter, Georgia, Cambria, "Times New Roman", serif;
+  --public-heading-font: Charter, Georgia, Cambria, "Times New Roman", serif;
+  --public-heading-weight: 700;
+  --public-heading-tracking: 0;
+}
+
+/* Studio: a display look — wide measure, heavy tight-tracked headings. */
+[data-public-theme="studio"] {
+  --public-measure: 64rem;
+  --public-heading-weight: 800;
+  --public-heading-tracking: -0.025em;
+}
+
+/* The centered content column, replacing the hardcoded `max-w-3xl mx-auto`
+   pairs in the public layout so the measure is the preset's to set. */
+.public-measure {
+  margin-inline: auto;
+  max-width: var(--public-measure);
+}
+
+/* Headings across the shell — the chrome's own and the fired content's
+   (`.kiln-block` sets size/weight per level; the preset supplies family and
+   tracking, and its weight only where the block styles don't). */
+.public-shell :is(h1, h2, h3, h4) {
+  font-family: var(--public-heading-font);
+  letter-spacing: var(--public-heading-tracking);
+}
+
+.public-shell h1 {
+  font-weight: var(--public-heading-weight);
+}

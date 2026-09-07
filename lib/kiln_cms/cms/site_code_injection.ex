@@ -89,10 +89,11 @@ defmodule KilnCMS.CMS.SiteCodeInjection do
   # `Changes.HashInlineScripts`, so it is upsertable without being accepted.
   use KilnCMS.CMS.OrgSettings,
     table: "site_code_injection",
-    accept: [:head_html, :footer_html, :script_src, :connect_src, :img_src, :enabled],
+    accept: [:head_html, :footer_html, :custom_css, :script_src, :connect_src, :img_src, :enabled],
     upsert_fields: [
       :head_html,
       :footer_html,
+      :custom_css,
       :script_src,
       :connect_src,
       :img_src,
@@ -143,6 +144,7 @@ defmodule KilnCMS.CMS.SiteCodeInjection do
 
   validations do
     validate KilnCMS.CMS.Validations.CspOrigins
+    validate KilnCMS.CMS.Validations.CustomCssStaysCss
   end
 
   attributes do
@@ -156,6 +158,18 @@ defmodule KilnCMS.CMS.SiteCodeInjection do
     # small enough that neither is a lever.
     attribute :head_html, :string, public?: true, constraints: [max_length: 65_536]
     attribute :footer_html, :string, public?: true, constraints: [max_length: 65_536]
+
+    # Custom stylesheet for the delivery site (#1318) — the CSS-only companion
+    # to `head_html`, emitted inside a `<style>` element the layout owns rather
+    # than pasted with its own tags. Same trust model as the HTML fields (this
+    # resource is stored XSS on purpose, org-admin write, delivery-only
+    # render), so the value is NOT sanitized as CSS — the one thing validated
+    # is that it cannot close the element it is emitted into:
+    # `Validations.CustomCssStaysCss` rejects `</style`, because breaking out
+    # of the style element would turn a "CSS" field into an HTML field with a
+    # misleading label. Same 64 KB bound as the HTML, for the same shared-cache
+    # reason.
+    attribute :custom_css, :string, public?: true, constraints: [max_length: 65_536]
 
     # A master switch separate from clearing the fields, so an operator
     # debugging a broken third-party script can turn it off and back on without

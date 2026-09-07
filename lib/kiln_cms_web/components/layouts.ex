@@ -66,6 +66,32 @@ defmodule KilnCMSWeb.Layouts do
   end
 
   @doc """
+  The site's code-injection custom stylesheet (#1318), in a `<style>` element
+  this component owns — the CSS-only half of #490's snippet fields.
+
+  `raw/1`, like `brand_tokens/1` above and for the same raw-text-element
+  reason; what makes it safe against element breakout is a two-sided contract:
+  `KilnCMS.CMS.Validations.CustomCssStaysCss` refuses `</style` at write time
+  and the read-time guard in `KilnCMS.CodeInjection` drops it when resolving the row. The
+  value is otherwise verbatim on purpose — this field carries code injection's
+  trust model (org-admin write, paper trail, delivery-only render), not
+  branding's.
+  """
+  attr :injection, :any,
+    default: nil,
+    doc: "the resolved `%KilnCMS.CodeInjection{}`, set only by the :delivery pipeline"
+
+  def custom_css(assigns) do
+    assigns = assign(assigns, :css, assigns.injection && assigns.injection.custom_css)
+
+    ~H"""
+    <style :if={@css} data-custom-css>
+      <%= Phoenix.HTML.raw(@css) %>
+    </style>
+    """
+  end
+
+  @doc """
   Inner layout for the AshAuthentication pages, rendering the white-label banner
   the compile-time `Components.Banner` overrides can't express (#48).
 
@@ -850,66 +876,155 @@ defmodule KilnCMSWeb.Layouts do
   slot :inner_block, required: true
 
   def public(assigns) do
-    assigns = assign(assigns, :brand, Branding.for_org(assigns.current_org))
+    brand = Branding.for_org(assigns.current_org)
+
+    assigns =
+      assigns
+      |> assign(:brand, brand)
+      |> assign(
+        :header_items,
+        brand.header_menu_key |> public_menu_items(assigns) |> Enum.filter(& &1.url)
+      )
+      |> assign(:footer_items, public_menu_items(brand.footer_menu_key, assigns))
 
     ~H"""
-    <header class="border-b border-base-content/10 px-4 py-4 sm:px-6 lg:px-8">
-      <div class="mx-auto flex max-w-3xl items-center justify-between gap-4">
-        <a href="/" class="flex items-center gap-3">
-          <img src={@brand.logo_url} class="h-7 w-auto" alt="" referrerpolicy="no-referrer" />
-          <span class="text-sm font-semibold tracking-tight">{@brand.site_name}</span>
-        </a>
-        <nav class="flex items-center gap-4 text-sm text-base-content/70">
-          <a href={KilnCMS.I18n.localized_path(@locale, "/blog")} class="hover:text-base-content">
-            {gettext("Blog")}
+    <div class="public-shell" data-public-theme={@brand.theme}>
+      <header class="border-b border-base-content/10 px-4 py-4 sm:px-6 lg:px-8">
+        <div class="public-measure flex items-center justify-between gap-4">
+          <a href="/" class="flex items-center gap-3">
+            <img src={@brand.logo_url} class="h-7 w-auto" alt="" referrerpolicy="no-referrer" />
+            <span class="text-sm font-semibold tracking-tight">{@brand.site_name}</span>
           </a>
-          <a href={KilnCMS.I18n.localized_path(@locale, "/search")} class="hover:text-base-content">
-            {gettext("Search")}
-          </a>
-          <span
-            :if={length(@locale_links) > 1}
-            class="flex items-center gap-1"
-            aria-label={gettext("Language")}
-          >
-            <a
-              :for={link <- @locale_links}
-              href={link.href}
-              hreflang={link.locale}
-              aria-current={link.current && "true"}
-              class={[
-                "inline-flex items-center rounded px-2 py-1.5 uppercase",
-                if(link.current,
-                  do: "font-semibold text-base-content",
-                  else: "text-base-content/70 hover:bg-base-200 hover:text-base-content"
-                )
-              ]}
+          <nav class="flex flex-wrap items-center gap-4 text-sm text-base-content/70">
+            <%!-- A configured header menu replaces the stock links (#1318); top
+                  level only — the header has no room for a tree, and the footer
+                  menu is the place a deep structure belongs. An empty tree
+                  (menu deleted, or missing this locale) falls back to the stock
+                  links rather than stripping the site of navigation. --%>
+            <%= if @header_items == [] do %>
+              <a href={KilnCMS.I18n.localized_path(@locale, "/blog")} class="hover:text-base-content">
+                {gettext("Blog")}
+              </a>
+              <a
+                href={KilnCMS.I18n.localized_path(@locale, "/search")}
+                class="hover:text-base-content"
+              >
+                {gettext("Search")}
+              </a>
+            <% else %>
+              <a
+                :for={item <- @header_items}
+                href={item.url}
+                target={item.open_in_new_tab && "_blank"}
+                rel={item.open_in_new_tab && "noopener"}
+                class="hover:text-base-content"
+              >
+                {item.label}
+              </a>
+            <% end %>
+            <span
+              :if={length(@locale_links) > 1}
+              class="flex items-center gap-1"
+              aria-label={gettext("Language")}
             >
-              {link.locale}
-            </a>
-          </span>
-        </nav>
-      </div>
-    </header>
+              <a
+                :for={link <- @locale_links}
+                href={link.href}
+                hreflang={link.locale}
+                aria-current={link.current && "true"}
+                class={[
+                  "inline-flex items-center rounded px-2 py-1.5 uppercase",
+                  if(link.current,
+                    do: "font-semibold text-base-content",
+                    else: "text-base-content/70 hover:bg-base-200 hover:text-base-content"
+                  )
+                ]}
+              >
+                {link.locale}
+              </a>
+            </span>
+          </nav>
+        </div>
+      </header>
 
-    <main id="main" class="mx-auto max-w-3xl px-4 py-10 sm:px-6 lg:px-8">
-      {render_slot(@inner_block)}
-    </main>
+      <main id="main" class="public-measure px-4 py-10 sm:px-6 lg:px-8">
+        {render_slot(@inner_block)}
+      </main>
 
-    <%!-- Attribution (#48). The stock msgid is kept verbatim for an unbranded
+      <%!-- Footer nav (#1318): the full tree, two levels — top-level items are
+            section headings (linked when they have a URL), children are the
+            link list beneath. Deeper nesting flattens into its section rather
+            than disappearing. --%>
+      <nav
+        :if={@footer_items != []}
+        aria-label={gettext("Footer")}
+        class="border-t border-base-content/10 px-4 py-10 sm:px-6 lg:px-8"
+      >
+        <div class="public-measure grid grid-cols-2 gap-8 sm:grid-cols-3">
+          <div :for={section <- @footer_items} class="space-y-2 text-sm">
+            <%= if section.url do %>
+              <a href={section.url} class="font-semibold hover:text-base-content">
+                {section.label}
+              </a>
+            <% else %>
+              <p class="font-semibold">{section.label}</p>
+            <% end %>
+            <ul class="space-y-1.5">
+              <li :for={item <- flatten_menu_children(section)}>
+                <a
+                  :if={item.url}
+                  href={item.url}
+                  target={item.open_in_new_tab && "_blank"}
+                  rel={item.open_in_new_tab && "noopener"}
+                  class="text-base-content/70 hover:text-base-content"
+                >
+                  {item.label}
+                </a>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </nav>
+
+      <%!-- Attribution (#48). The stock msgid is kept verbatim for an unbranded
           site — it's asserted by several tests and lives in four catalogs — and a
           white-labelled site gets its own interpolated msgid instead. An org can
           also hide the line entirely. --%>
-    <footer
-      :if={@brand.show_attribution}
-      class="mx-auto max-w-3xl px-4 py-10 text-xs text-base-content/70 sm:px-6 lg:px-8"
-    >
-      <%= if Branding.branded?(@brand) do %>
-        {gettext("Powered by %{name}.", name: @brand.site_name)}
-      <% else %>
-        {gettext("Powered by KilnCMS.")}
-      <% end %>
-    </footer>
+      <footer
+        :if={@brand.show_attribution}
+        class="public-measure px-4 py-10 text-xs text-base-content/70 sm:px-6 lg:px-8"
+      >
+        <%= if Branding.branded?(@brand) do %>
+          {gettext("Powered by %{name}.", name: @brand.site_name)}
+        <% else %>
+          {gettext("Powered by KilnCMS.")}
+        <% end %>
+      </footer>
+    </div>
     """
+  end
+
+  # The resolved anonymous nav tree for a configured menu key, or `[]` for an
+  # unconfigured slot. In the header case only items with a URL survive — a
+  # `:none` heading has nothing to click and no children row to explain it
+  # there. Locale falls back to the default so the pages rendered without one
+  # (the lock screen, in-context editing) still get the site's own nav.
+  defp public_menu_items(nil, _assigns), do: []
+
+  defp public_menu_items(key, assigns) do
+    locale = assigns[:locale] || KilnCMS.I18n.default_locale()
+
+    KilnCMS.CMS.Menus.public_tree(key, locale, public_org_id(assigns[:current_org]))
+  end
+
+  defp public_org_id(%KilnCMS.Accounts.Organization{id: id}), do: id
+  defp public_org_id(id) when is_binary(id), do: id
+  defp public_org_id(_none), do: KilnCMS.Accounts.default_org_id()
+
+  # Depth beyond the footer's two rendered levels folds into its section in
+  # document order — a grandchild link is still reachable, just not indented.
+  defp flatten_menu_children(%{children: children}) do
+    Enum.flat_map(children, fn child -> [child | flatten_menu_children(child)] end)
   end
 
   @doc """

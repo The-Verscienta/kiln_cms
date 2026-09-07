@@ -2288,6 +2288,7 @@ msgid "Closed"
 msgstr "Cerrados"
 
 #: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #, elixir-autogen, elixir-format
 msgid "Code injection"
@@ -3179,6 +3180,11 @@ msgstr "Personalizado"
 
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #, elixir-autogen, elixir-format
+msgid "Custom CSS"
+msgstr "CSS personalizado"
+
+#: lib/kiln_cms_web/live/code_injection_live.ex
+#, elixir-autogen, elixir-format
 msgid "Custom HTML added to every page of this site's public pages. Not the editor."
 msgstr "HTML personalizado que se añade a todas las páginas públicas de este sitio. No al editor."
 
@@ -3975,6 +3981,11 @@ msgstr "Rutas del editor"
 msgid "Editorial calendar"
 msgstr "Calendario editorial"
 
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "Editorial — serif, narrower reading column"
+msgstr "Editorial — serif, columna de lectura más estrecha"
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Edits keep the previous file for already-published content."
@@ -4583,10 +4594,20 @@ msgstr "Seguidor eliminado."
 msgid "Followers"
 msgstr "Seguidores"
 
+#: lib/kiln_cms_web/components/layouts.ex
+#, elixir-autogen, elixir-format
+msgid "Footer"
+msgstr "Pie de página"
+
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #, elixir-autogen, elixir-format
 msgid "Footer HTML"
 msgstr "HTML del pie de página"
+
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "Footer menu"
+msgstr "Menú de pie de página"
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -4919,6 +4940,11 @@ msgstr "Todavía no ha publicado"
 #, elixir-autogen, elixir-format
 msgid "Head HTML"
 msgstr "HTML de la cabecera"
+
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "Header menu"
+msgstr "Menú de cabecera"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -5914,6 +5940,11 @@ msgstr "La navegación que tu front end lee de la API. Los elementos enlazan al 
 msgid "Near-duplicates of this page, and tags its content suggests."
 msgstr "Casi duplicados de esta página y etiquetas que sugiere su contenido."
 
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "Need more than a preset? Custom CSS for the public site lives in"
+msgstr "¿Necesitas más que un preajuste? El CSS personalizado del sitio público está en"
+
 #: lib/kiln_cms_web/components/advisory_components.ex
 #, elixir-autogen, elixir-format
 msgid "Needs work"
@@ -6485,6 +6516,11 @@ msgstr "Aún no hay webhooks."
 #, elixir-autogen, elixir-format
 msgid "Nobody follows this site yet."
 msgstr "Nadie sigue este sitio todavía."
+
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "None"
+msgstr "Ninguno"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
@@ -7219,6 +7255,11 @@ msgstr "Probar"
 msgid "Placeholder"
 msgstr "Marcador de posición"
 
+#: lib/kiln_cms_web/live/code_injection_live.ex
+#, elixir-autogen, elixir-format
+msgid "Plain CSS, served inside a <style> element on every public page — no <style> tags here, and no HTML. Use it to go beyond the theme presets in Branding."
+msgstr "CSS puro, servido dentro de un elemento <style> en cada página pública: aquí no van etiquetas <style> ni HTML. Úsalo para ir más allá de los preajustes de tema de Marca."
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Planned"
@@ -7411,6 +7452,11 @@ msgstr "URI de aprovisionamiento"
 #, elixir-autogen, elixir-format
 msgid "Public routes"
 msgstr "Rutas públicas"
+
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "Public site"
+msgstr "Sitio público"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
@@ -7989,6 +8035,11 @@ msgstr "¿Renombrar estos slugs? Las URL publicadas redirigirán con un 301 a su
 #, elixir-autogen, elixir-format
 msgid "Renaming a published slug records one automatically."
 msgstr "Renombrar un slug publicado registra una automáticamente."
+
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "Rendered as link sections above the attribution line."
+msgstr "Se muestran como secciones de enlaces encima de la línea de atribución."
 
 #: lib/kiln_cms_web/live/account_live.ex
 #, elixir-autogen, elixir-format
@@ -9203,6 +9254,11 @@ msgstr "Palabras clave de spam, una por línea"
 msgid "Spring campaign"
 msgstr "Campaña de primavera"
 
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "Standard — the stock look"
+msgstr "Estándar — el aspecto de serie"
+
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
 msgid "Start"
@@ -9272,6 +9328,11 @@ msgstr "Pasos"
 msgid "Steps are counted independently — this is not a per-visitor conversion rate. A later step's count includes traffic that never saw an earlier one, so a ratio can read above 100%."
 msgstr "Los pasos se cuentan de forma independiente — esto no es una tasa de conversión por visitante. El recuento de un paso posterior incluye tráfico que nunca vio uno anterior, por lo que un ratio puede superar el 100%."
 
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "Stock links (Blog, Search)"
+msgstr "Enlaces de serie (Blog, Buscar)"
+
 #: lib/kiln_cms_web/live/link_report_live.ex
 #, elixir-autogen, elixir-format
 msgid "Stop checking outbound links for this site?"
@@ -9286,6 +9347,11 @@ msgstr "¿Dejar de enviar boletines a %{email}?"
 #, elixir-autogen, elixir-format
 msgid "Structure"
 msgstr "Estructura"
+
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "Studio — wide, bold display headings"
+msgstr "Studio — ancho, con titulares grandes y contundentes"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/newsletter_live.ex
@@ -10001,6 +10067,7 @@ msgid "The winning variant no longer exists."
 msgstr "La variante ganadora ya no existe."
 
 #: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
 msgid "Theme"
 msgstr "Tema"
@@ -10341,6 +10408,11 @@ msgstr "Demasiadas solicitudes. Inténtalo de nuevo en %{seconds} s."
 msgid "Too many suggestions requested. Try again in %{seconds}s."
 msgstr "Demasiadas sugerencias solicitadas. Inténtelo de nuevo en %{seconds} s."
 
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "Top-level items replace the stock header links."
+msgstr "Los elementos de primer nivel sustituyen a los enlaces de serie de la cabecera."
+
 #: lib/kiln_cms_web/live/analytics_live.ex
 #, elixir-autogen, elixir-format
 msgid "Total views"
@@ -10483,6 +10555,11 @@ msgstr "Consultas tipadas sobre el contenido publicado: búsqueda por slug, taxo
 #, elixir-autogen, elixir-format
 msgid "Types"
 msgstr "Tipos"
+
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "Typography and page width for the public pages."
+msgstr "Tipografía y ancho de página de las páginas públicas."
 
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/menu_live.ex
@@ -12041,6 +12118,11 @@ msgstr "omitido"
 #, elixir-autogen, elixir-format
 msgid "source format only"
 msgstr "solo el formato de origen"
+
+#: lib/kiln_cms_web/live/code_injection_live.ex
+#, elixir-autogen, elixir-format
+msgid "styles for the public site"
+msgstr "estilos para el sitio público"
 
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format

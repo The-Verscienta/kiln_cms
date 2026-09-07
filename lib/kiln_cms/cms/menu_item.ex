@@ -71,7 +71,13 @@ defmodule KilnCMS.CMS.MenuItem do
   end
 
   actions do
-    defaults [:destroy]
+    # `require_atomic? false` for the same reason as the updates below gained
+    # it: `BustPublicMenus` runs in `after_transaction`, which has no atomic
+    # form.
+    destroy :destroy do
+      primary? true
+      require_atomic? false
+    end
 
     default_accept [
       :menu_id,
@@ -158,6 +164,13 @@ defmodule KilnCMS.CMS.MenuItem do
     policy action_type(:destroy) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
+  end
+
+  changes do
+    # Any write invalidates the delivery header/footer nav cache (#1318) —
+    # item edits are the common case (a drag-reorder is many `:update`s), and
+    # the change is a generation bump precisely so that costs no reads here.
+    change KilnCMS.CMS.Changes.BustPublicMenus, on: [:create, :update, :destroy]
   end
 
   multitenancy do
