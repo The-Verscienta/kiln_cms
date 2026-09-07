@@ -35,12 +35,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.Mentions
-  alias KilnCMS.Collab
-  alias KilnCMS.Unsplash
   alias KilnCMS.CMS.VersionDiff
   alias KilnCMS.CMS.VersionSnapshot
+  alias KilnCMS.Collab
   alias KilnCMS.Search.Related
   alias KilnCMS.Slug
+  alias KilnCMS.Unsplash
   alias KilnCMSWeb.EditorTelemetry
   alias KilnCMSWeb.Presence
   alias KilnCMSWeb.VersionDiffComponents
