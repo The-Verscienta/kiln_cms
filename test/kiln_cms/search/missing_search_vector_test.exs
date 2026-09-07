@@ -99,6 +99,25 @@ defmodule KilnCMS.Search.MissingSearchVectorTest do
     end)
   end
 
+  test "a multi-word query loses both keyword legs, and the column is logged once", %{
+    admin: admin,
+    term: term,
+    page: page
+  } do
+    log =
+      capture_log(fn ->
+        # The any-term fallback reads `search_vector` too, and an empty AND
+        # leg is exactly what admits it. Both legs sit inside one
+        # containment, so the fallback neither raises past it nor reports
+        # the same missing column a second time; the fuzzy title leg still
+        # answers.
+        results = Search.hybrid(KilnCMS.CMS.Page, "#{term} page", actor: admin)
+        assert Enum.map(results, & &1.id) == [page.id]
+      end)
+
+    assert length(String.split(log, "no `search_vector` column")) == 2
+  end
+
   test "a query fault is still a raise, not an empty result set", %{admin: admin} do
     # The containment is keyed to the missing column, not to "errors in the
     # keyword leg" — an empty list must never be how a caller learns their

@@ -25,8 +25,21 @@ phasing is at the end.
 > Single-entity queries keep their rank 1 (the named record collects the leg
 > on top of the legs it already led). The `<3`-hits fuzzy fallback is
 > unchanged. Still open from that report: P3 (re-measure the semantic floor,
-> apply it to semantic-only hits), P4 (OR-relaxation keyword fallback), P7
-> (ask-only rerank knob), P8 (`mix kiln.search.eval` golden-set harness).
+> apply it to semantic-only hits) and P7 (ask-only rerank knob).
+>
+> **Any-term fallback (2026-09-04, "Why Shen Beat Huang Qi" P4):** the
+> keyword leg is `plainto_tsquery` — an AND of every lexeme — which fails
+> closed on a query naming two records at once ("huang qi dang shen" matched
+> neither) and on a question form (eight ANDed lexemes matched nothing, and
+> the *vaguer* query then beat the precise one because the empty keyword leg
+> un-suppressed the fuzzy title leg). `hybrid/3` now runs `:search_any` (the
+> same lexemes ORed, built in SQL from `plainto_tsquery`'s own text form and
+> ranked by how many terms a row matches) at weight 0.5 when the AND leg
+> finds fewer than three hits on a multi-word query, fused as the
+> `keyword_any` leg. AND stays primary; precise queries and one-word queries
+> never run it. The safety net beneath the entity leg above: a record the
+> query names by its whole title enters through that leg; one it names by a
+> word of its title, or a question form, through this one.
 >
 > **Project types (2026-07-10, #296):** `Search.global/2`, `facets/2` and
 > `suggest/2` derive their content sweep from the `ContentTypes` registry

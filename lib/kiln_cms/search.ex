@@ -321,7 +321,21 @@ defmodule KilnCMS.Search do
   # only for the multi-entity queries `plainto_tsquery`'s AND fails closed on.
   @title_weight 3.0
 
-  # The facet arguments shared by `:search` and `:search_semantic`.
+  # The any-term fallback, the same shape: the keyword leg is an AND of every
+  # lexeme (`plainto_tsquery`), which fails CLOSED on a query that names two
+  # records — "huang qi dang shen" matches neither Huang Qi nor Dang Shen,
+  # since no document contains all four words — and on a question form,
+  # which ANDs eight lexemes and matches nothing at all. When the AND leg
+  # finds fewer hits than this, `:search_any` (the same lexemes ORed, ranked
+  # by how many of them a row matches) joins the fusion at reduced weight,
+  # so a partial match never outranks a full one. A one-word query is never
+  # relaxed: OR and AND are the same query there, and the leg would only
+  # re-count the AND hits.
+  @relaxed_fallback_threshold 3
+  @relaxed_weight 0.5
+
+  # The facet arguments shared by `:search`, `:search_any`, `:search_title`
+  # and `:search_semantic`.
   @facet_filters [:category_id, :author_id, :state, :tag_ids]
 
   # Facet counts scan at most this many top keyword matches per content type —
@@ -346,18 +360,24 @@ defmodule KilnCMS.Search do
   above the other two legs combined: the keyword leg ANDs every query
   lexeme, so a query naming two records matches neither, and this leg is
   how each of them enters fusion. When the keyword leg finds almost nothing,
-  a trigram fuzzy leg (the `:autocomplete` machinery — word similarity on
-  titles) joins the fusion at reduced weight, so typos like "databse" still
-  surface "Database Guide". Read options (`:actor`, `:authorize?`) pass
-  through to every leg, so visibility is respected. `:limit` caps the result count
-  (default 20); `:k` overrides the RRF constant; `:load` applies to all legs
-  (e.g. the `highlight` snippet calc); `rerank: true` reorders the fused
-  results with the configured reranker (still gated by `rerank?()`).
+  two fallback legs join the fusion at reduced weight, so that a partial
+  match never outranks a full one. A trigram fuzzy leg (the `:autocomplete`
+  machinery — word similarity on titles) rescues typos: "databse" still
+  surfaces "Database Guide". An any-term keyword leg (`:search_any` — the
+  query's lexemes ORed instead of ANDed, ranked by how many a row matches)
+  rescues what the AND fails closed on and no title names: a question form
+  whose eight lexemes no document contains together, or a record the query
+  names by a word of its title rather than the whole of it. A one-word
+  query is never relaxed. Read options (`:actor`, `:authorize?`) pass
+  through to every leg, so visibility is respected. `:limit` caps the result
+  count (default 20); `:k` overrides the RRF constant; `:load` applies to
+  all legs (e.g. the `highlight` snippet calc); `rerank: true` reorders the
+  fused results with the configured reranker (still gated by `rerank?()`).
 
   `:filters` (a map of the search actions' facet arguments — `:category_id`,
-  `:author_id`, `:state`, `:tag_ids`) narrows the keyword, semantic and title
-  legs; the fuzzy leg sits out under filters since `:autocomplete` can't
-  apply them.
+  `:author_id`, `:state`, `:tag_ids`) narrows the keyword, any-term,
+  semantic and title legs; the fuzzy leg sits out under filters since
+  `:autocomplete` can't apply them.
 
   `:query_vector` supplies an already-embedded query, skipping the embedding
   the semantic leg would otherwise do. Only worth passing when you are calling
@@ -387,8 +407,11 @@ defmodule KilnCMS.Search do
     # here would compute them for up to `@hybrid_candidates` rows *per leg*
     # to keep `limit` of them. `highlight` is a `ts_headline` over the whole
     # document, so that is most of the query's cost thrown away.
-    keyword =
-      without_search_vector(resource, fn -> run_leg(resource, :search, args, read_opts) end)
+    #
+    # Both keyword legs read `search_vector`, so they share one containment:
+    # a type without the column loses both, and logs it once.
+    {keyword, relaxed} =
+      without_search_vector(resource, fn -> keyword_legs(resource, query, args, read_opts) end)
 
     semantic = run_leg(resource, :search_semantic, args, read_opts, semantic_context(opts))
     title = run_leg(resource, :search_title, args, read_opts)
@@ -400,8 +423,11 @@ defmodule KilnCMS.Search do
         []
       end
 
+    # Order matters only for exact ties (`reciprocal_rank_fusion/2`): a
+    # partial keyword match at rank n outranks a trigram guess at rank n.
     [
       {:keyword, keyword, 1.0},
+      {:keyword_any, relaxed, @relaxed_weight},
       {:semantic, semantic, 1.0},
       {:title, title, @title_weight},
       {:fuzzy, fuzzy, @fuzzy_weight}
@@ -434,12 +460,20 @@ defmodule KilnCMS.Search do
 
   @doc """
   Which legs of `hybrid/3` returned this record — a subset of
-  `[:keyword, :semantic, :title, :fuzzy]`, in that order — or `[]` for a
-  record that did not come out of `hybrid/3`.
+  `[:keyword, :keyword_any, :semantic, :title, :fuzzy]`, in that order — or
+  `[]` for a record that did not come out of `hybrid/3`.
+
+  `:keyword` is the full-text leg, every query term matched; `:keyword_any`
+  is its any-term relaxation, which runs only when the full match came up
+  short on a multi-word query, so its presence on a hit means "matched some
+  of the terms"; `:semantic` is the embedding leg; `:title` a record the
+  query names outright (its whole title appears in the query); `:fuzzy` the
+  trigram title leg that runs only when the full match came up short.
 
   Provenance, for two readers: a client deciding how much to trust a hit (a
-  keyword-and-semantic hit is a stronger claim than a fuzzy-only one; a
-  `:title` hit is a record the query names outright), and anyone debugging
+  keyword-and-semantic hit is a stronger claim than a fuzzy-only one, a
+  `:keyword` hit a stronger one than a `:keyword_any`, and a `:title` hit
+  is a record the query names outright), and anyone debugging
   why a result ranked where it did.
   """
   @spec hit_legs(struct()) :: [leg()]
@@ -447,7 +481,7 @@ defmodule KilnCMS.Search do
   def hit_legs(_record), do: []
 
   @typedoc "A leg of `hybrid/3` — see `hit_legs/1`."
-  @type leg :: :keyword | :semantic | :title | :fuzzy
+  @type leg :: :keyword | :keyword_any | :semantic | :title | :fuzzy
 
   # A fused hit on its way out of `hybrid/3`: the record, the score it is
   # ordered by, and the legs that returned it.
@@ -590,6 +624,9 @@ defmodule KilnCMS.Search do
   # failing the build *before* the deploy — instead of only where it costs
   # visitors. Every other error still raises: an empty result set must never be
   # how a caller learns their query was broken.
+  #
+  # Both keyword legs run inside one call (`keyword_legs/4`), so the column's
+  # absence empties both and is logged once, not once per leg.
   defp without_search_vector(resource, fun) do
     fun.()
   rescue
@@ -610,11 +647,33 @@ defmodule KilnCMS.Search do
         `mix kiln.search.check` reports every table in this state.\
         """)
 
-        []
+        {[], []}
       else
         reraise error, __STACKTRACE__
       end
   end
+
+  # The keyword leg, and its any-term relaxation when the full match is
+  # sparse: `{all_terms, any_term}`. AND is the primary semantics and stays
+  # untouched — a precise query with enough hits never runs the OR, and a
+  # one-word query has nothing to relax (its OR *is* its AND, so the leg
+  # would re-count the same hits). `:search_any` takes the same arguments
+  # as `:search`, filters included, so the relaxation narrows exactly as the
+  # full match does.
+  defp keyword_legs(resource, query, args, read_opts) do
+    keyword = run_leg(resource, :search, args, read_opts)
+
+    relaxed =
+      if multi_word?(query) and length(keyword) < @relaxed_fallback_threshold do
+        run_leg(resource, :search_any, args, read_opts)
+      else
+        []
+      end
+
+    {keyword, relaxed}
+  end
+
+  defp multi_word?(query), do: query |> String.split() |> length() > 1
 
   defp table_name(resource) do
     AshPostgres.DataLayer.Info.table(resource) || "<table>"
