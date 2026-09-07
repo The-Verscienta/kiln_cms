@@ -244,4 +244,9 @@ defmodule KilnCMSWeb.ContentEditor.Shared do
     </div>
     """
   end
+
+  # Safe `src` for the image-block preview: a pasted URL is untrusted, so it must
+  # clear the same scheme allowlist as delivery before we echo it back. Returns
+  # nil (image hidden) for rejected schemes like `javascript:`/`data:`.
+  def safe_preview_src(url), do: KilnCMS.HTMLSanitizer.safe_image_src(url)
 end
