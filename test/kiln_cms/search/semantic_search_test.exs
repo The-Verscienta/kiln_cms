@@ -165,6 +165,47 @@ defmodule KilnCMS.Search.SemanticSearchTest do
              "return it."
   end
 
+  describe "semantic_neighbours/3" do
+    test "reports id, slug, title and raw distance, nearest first, skipping unembedded rows" do
+      admin = admin()
+      alpha = CMS.create_page!(%{title: "Alpha", slug: slug()}, actor: admin)
+      beta = CMS.create_page!(%{title: "Beta", slug: slug()}, actor: admin)
+      embed_all()
+      # Created after the drain, so its embedding job has not run: no
+      # embedding, no distance, not a neighbour.
+      CMS.create_page!(%{title: "Gamma", slug: slug()}, actor: admin)
+
+      assert {:ok, [first, second]} =
+               KilnCMS.Search.semantic_neighbours(:page, "Alpha", actor: admin)
+
+      assert %{id: id, slug: slug, title: "Alpha", distance: nearest} = first
+      assert id == alpha.id
+      assert slug == alpha.slug
+      assert_in_delta nearest, 0.0, 1.0e-6
+      assert second.id == beta.id
+      assert second.distance > nearest
+    end
+
+    test "reuses a caller-supplied query vector instead of embedding" do
+      admin = admin()
+      alpha = CMS.create_page!(%{title: "Alpha", slug: slug()}, actor: admin)
+      CMS.create_page!(%{title: "Beta", slug: slug()}, actor: admin)
+      embed_all()
+
+      {:ok, vector} = KilnCMS.Search.embed_query("Alpha")
+
+      # The query text is not what is measured — the vector is.
+      assert {:ok, [%{id: id, distance: nearest} | _]} =
+               KilnCMS.Search.semantic_neighbours(:page, "Beta",
+                 query_vector: vector,
+                 actor: admin
+               )
+
+      assert id == alpha.id
+      assert_in_delta nearest, 0.0, 1.0e-6
+    end
+  end
+
   describe "semantic_distances/3" do
     test "reports each neighbour's raw cosine distance, nearest first" do
       admin = admin()
@@ -257,7 +298,9 @@ defmodule KilnCMS.Search.SemanticSearchTest do
     test "the floor reaches the hybrid search's semantic leg" do
       # hybrid/3 fuses keyword + semantic; with the floor on, a query matching
       # no keyword and nothing semantically near must come back empty rather
-      # than fused-from-noise.
+      # than fused-from-noise. (Hybrid applies the floor after fusion, to hits
+      # only the semantic leg returned — `KilnCMS.Search.HybridTest` covers
+      # the corroborated case; this one is #871's guarantee.)
       admin = admin()
       two_pages(admin)
 

@@ -79,6 +79,17 @@ migration, a rewritten column, a dropped config key).
   title enters through that leg, one it names by a word of its title, or a
   question form, through this one. From the "Why Shen Beat Huang Qi"
   analysis (findings D3 and D4).
+- **`mix kiln.search.measure_floor` measures the semantic relevance floor on
+  your corpus.** `semantic_max_distance` ships as `nil` and its config comment
+  has always said to measure; this is the measurement. Give it a sheet of
+  queries — `query<TAB>expected-slug` for one that should find a record, a bare
+  line for junk that should find nothing — and it reports, per query and
+  content type, the expected record's raw cosine distance against its nearest
+  competitor and each junk query's nearest neighbour, then proposes the
+  cutoff between the two bands (or says where they overlap). Built on the new
+  `KilnCMS.Search.semantic_neighbours/3`, which `semantic_distances/3` now
+  wraps; both now leave out rows with no embedding.
+
 - **Search hits carry their score and provenance.** Every record out of
   `KilnCMS.Search.hybrid/3` (and so every content section of `global/2`)
   now carries the fused Reciprocal Rank Fusion score it was ranked by — or
@@ -122,6 +133,20 @@ migration, a rewritten column, a dropped config key).
   keyword hit. Users who typed *more* precisely got worse results than a
   vague question. The title leg above is the fix: each named record enters
   fusion. Reported as probe P2 of the "Why Shen Beat Huang Qi" analysis.
+- **The semantic relevance floor deleted the right answers and kept the noise
+  for queries that name records.** `semantic_max_distance` was a `WHERE` on
+  the semantic leg before fusion, so it judged every row by distance alone —
+  including rows the keyword leg was about to vouch for. A short query naming
+  two records embeds far from either record's long prose, so on an
+  entity-heavy corpus with a floor of 0.35, "huang qi dang shen" kept two
+  marginal neighbours and dropped both named records. `Search.hybrid/3` now
+  runs the leg unfloored and applies the floor after fusion, to hits only the
+  semantic leg returned: a record any other leg (keyword, title, fuzzy) also found needs
+  no distance alibi. Junk still returns nothing (#871's guarantee) — with no
+  lexical hit every fused hit is semantic-only and over the floor. The
+  per-type `semantic-search` API routes, which have no other leg, filter as
+  before. Reported as finding D2 / proposal P3 of the "Why Shen Beat Huang
+  Qi" analysis.
 - **`/api/ask` cited sources in alphabetical order of content type, not by
   relevance.** `KilnCMS.Ask`'s retrieval flattened the sections in registry
   order — sorted by type label — and took the first `limit`, under a comment
