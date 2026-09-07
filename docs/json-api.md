@@ -36,7 +36,7 @@ Authorization: Bearer <token>
 |-----------|-----------------------------|-----------------------------|-------------|
 | Page      | `GET /api/json/pages`       | `GET /api/json/pages/:id`   | `/pages/search`, `/pages/semantic-search`, `/pages/autocomplete`, `/pages/published` |
 | Post      | `GET /api/json/posts`       | `GET /api/json/posts/:id`   | `/posts/search`, `/posts/semantic-search`, `/posts/autocomplete`, `/posts/published` |
-| MediaItem | `GET /api/json/media-items` | `GET /api/json/media-items/:id` | `/media-items/search` |
+| MediaItem | `GET /api/json/media-items` | `GET /api/json/media-items/:id` | `/media-items/search`, `/media-items/library` |
 | Category  | `GET /api/json/categories`  | `GET /api/json/categories/:id` | `/categories/by-slug/:slug` |
 | Tag       | `GET /api/json/tags`        | `GET /api/json/tags/:id`    | `/tags/by-slug/:slug` |
 | TagGroup  | `GET /api/json/tag-groups`  | `GET /api/json/tag-groups/:id` | `/tag-groups/by-slug/:slug` |
@@ -262,6 +262,32 @@ GET /api/json/media-items/search?query=logo
 
 `search` also accepts the optional facets `category_id`, `author_id`, `state`
 and `tag_ids[]`.
+
+### Media library browse (`/media-items/library`)
+
+The media library's faceted browse. Every argument is optional; absent means
+"don't filter on that axis", and they compose:
+
+```
+GET /api/json/media-items/library?kind=image
+GET /api/json/media-items/library?tag_ids[]=<uuid>&unused=true
+GET /api/json/media-items/library?uploaded_by_id=<uuid>&uploaded_after=2026-01-01&uploaded_before=2026-06-30
+```
+
+- `kind` — one of `image`, `video`, `audio`, `captions`, `document` (the
+  `MediaKind` bucket, derived from `content_type`; also exposed as the
+  filterable calculated field `kind` on the base route).
+- `tag_ids[]` — items carrying **any** of the listed tags. Media shares the
+  content taxonomy, so these are the same tags `/api/json/tags` lists; the
+  `tags` relationship is includable (`?include=tags`) on every media read.
+- `uploaded_by_id` — the uploading user's id. Also readable per item via the
+  includable `uploaded_by` relationship (safe byline fields only).
+- `uploaded_after` / `uploaded_before` — ISO dates bounding `inserted_at`,
+  both inclusive of the named day.
+- `unused=true` — only items **no published document references**
+  (`unused=false` inverts). "Used" is the reference-edge graph the fire path
+  maintains, so an item referenced only by never-published drafts counts as
+  unused.
 
 ### Published-only search (`…/published`)
 

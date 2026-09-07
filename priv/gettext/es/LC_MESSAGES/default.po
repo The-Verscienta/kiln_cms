@@ -155,6 +155,13 @@ msgid_plural "%{count} images selected"
 msgstr[0] "%{count} imagen seleccionada"
 msgstr[1] "%{count} imágenes seleccionadas"
 
+#: lib/kiln_cms_web/live/taxonomy_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} media item"
+msgid_plural "%{count} media items"
+msgstr[0] "%{count} elemento multimedia"
+msgstr[1] "%{count} elementos multimedia"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} min read"
@@ -259,6 +266,7 @@ msgstr "%{count} programados esta semana"
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
+#: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} selected"
 msgid_plural "%{count} selected"
@@ -1017,6 +1025,16 @@ msgstr "Añadir una clave de acceso"
 msgid "Add a rule"
 msgstr "Añadir una regla"
 
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Add a tag"
+msgstr "Añadir una etiqueta"
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Add a tag…"
+msgstr "Añadir una etiqueta…"
+
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Add a webhook"
@@ -1128,6 +1146,11 @@ msgstr "Añadir paso"
 #, elixir-autogen, elixir-format
 msgid "Add subscriber"
 msgstr "Añadir suscriptor"
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Add tag"
+msgstr "Añadir etiqueta"
 
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
@@ -1453,6 +1476,16 @@ msgstr "Cualquier tipo de contenido"
 msgid "Any health"
 msgstr "Cualquier estado"
 
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Any tag"
+msgstr "Cualquier etiqueta"
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Any uploader"
+msgstr "Subido por cualquiera"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Anyone with this passphrase can read the published page. Weak protection, meant for convenience — use Audience for real access control."
@@ -1623,6 +1656,11 @@ msgstr "Audiencia"
 #, elixir-autogen, elixir-format
 msgid "Audience granted"
 msgstr "Audiencia concedida"
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Audio"
+msgstr "Audio"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -1980,6 +2018,11 @@ msgstr "Leyenda"
 msgid "Caption (optional)"
 msgstr "Pie de foto (opcional)"
 
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Captions"
+msgstr "Subtítulos"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Captions label"
@@ -2150,6 +2193,16 @@ msgstr "Elija una entrada publicada para enviar."
 msgid "Choose a social image"
 msgstr "Elegir una imagen social"
 
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Choose a tag first."
+msgstr "Elige una etiqueta primero."
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Choose a tag…"
+msgstr "Elige una etiqueta…"
+
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "Choose a task…"
@@ -2254,10 +2307,16 @@ msgid "Claim released; the release can be retried."
 msgstr "Reserva liberada; el lanzamiento se puede reintentar."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
+#: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "Clear"
 msgstr "Borrar"
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Clear filters"
+msgstr "Limpiar filtros"
 
 #: lib/kiln_cms_web/live/presentation_live.ex
 #, elixir-autogen, elixir-format
@@ -2996,6 +3055,11 @@ msgstr "No se pudo actualizar ese webhook."
 msgid "Couldn't update the 404 list."
 msgstr "No se pudo actualizar la lista de 404."
 
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't update the tags."
+msgstr "No se pudieron actualizar las etiquetas."
+
 #: lib/kiln_cms_web/live/account_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't update your newsletter preference."
@@ -3125,6 +3189,11 @@ msgstr "Crear redirección"
 #, elixir-autogen, elixir-format
 msgid "Create release"
 msgstr "Crear lanzamiento"
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Create tags under Taxonomy to tag media."
+msgstr "Crea etiquetas en Taxonomía para etiquetar los archivos multimedia."
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
@@ -3411,6 +3480,11 @@ msgstr "Eliminar rol"
 #, elixir-autogen, elixir-format
 msgid "Delete rule"
 msgstr "Eliminar regla"
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Delete selected"
+msgstr "Eliminar seleccionados"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -3732,6 +3806,11 @@ msgstr "Notas del documento"
 msgid "Documentation"
 msgstr "Documentación"
 
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Documents"
+msgstr "Documentos"
+
 #: lib/kiln_cms_web/live/release_preview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Documents in this release"
@@ -3746,6 +3825,11 @@ msgstr "Documentos: PDF, Word, Excel, PowerPoint, ZIP hasta 25 MB"
 #, elixir-autogen, elixir-format
 msgid "Domains"
 msgstr "Dominios"
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Done selecting"
+msgstr "Terminar selección"
 
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
@@ -4493,6 +4577,11 @@ msgstr "Filtrar por nombre de archivo, texto alternativo o leyenda"
 msgid "Filter by filename, alt text or caption"
 msgstr "Filtrar por nombre de archivo, texto alternativo o leyenda"
 
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Filter by kind"
+msgstr "Filtrar por tipo"
+
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "Filter by path…"
@@ -4504,10 +4593,20 @@ msgstr "Filtrar por ruta…"
 msgid "Filter by status"
 msgstr "Filtrar por estado"
 
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Filter by tag"
+msgstr "Filtrar por etiqueta"
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Filter by type"
 msgstr "Filtrar por tipo"
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Filter by uploader"
+msgstr "Filtrar por quién lo subió"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -5074,6 +5173,7 @@ msgid "Image updated — variants are regenerating."
 msgstr "Imagen actualizada: las variantes se están regenerando."
 
 #: lib/kiln_cms_web/live/code_injection_live.ex
+#: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Images"
 msgstr "Imágenes"
@@ -5262,6 +5362,11 @@ msgstr "Enlaces internos"
 #, elixir-autogen, elixir-format
 msgid "Items"
 msgstr "Elementos"
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Items no published document references. Drafts don't count as uses, and neither do documents published before reference tracking."
+msgstr "Elementos a los que ningún documento publicado hace referencia. Los borradores no cuentan como usos, ni tampoco los documentos publicados antes del seguimiento de referencias."
 
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex
@@ -5829,6 +5934,13 @@ msgstr "Más superficies"
 msgid "Most viewed"
 msgstr "Más vistos"
 
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Move %{count} selected item to trash?"
+msgid_plural "Move %{count} selected items to trash?"
+msgstr[0] "¿Mover %{count} elemento seleccionado a la papelera?"
+msgstr[1] "¿Mover %{count} elementos seleccionados a la papelera?"
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Move %{count} selected item(s) to trash? Admins can restore them from Trash for 30 days."
@@ -5861,6 +5973,13 @@ msgstr "Subir la imagen"
 msgid "Move to top level"
 msgstr "Mover al primer nivel"
 
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Moved %{count} item to trash."
+msgid_plural "Moved %{count} items to trash."
+msgstr[0] "Se movió %{count} elemento a la papelera."
+msgstr[1] "Se movieron %{count} elementos a la papelera."
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Moved %{count} item(s) to trash"
@@ -5880,6 +5999,11 @@ msgstr "Movido %{from} → %{to}"
 #, elixir-autogen, elixir-format
 msgid "Moved %{name} to trash."
 msgstr "%{name} se movió a la papelera."
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Moved %{ok} to trash; %{failed} couldn't be deleted."
+msgstr "Se movieron %{ok} a la papelera; %{failed} no se pudieron eliminar."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
@@ -6289,6 +6413,11 @@ msgstr "Todavía no hay imágenes."
 msgid "No items yet"
 msgstr "Aún no hay elementos"
 
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "No media matches the current filters."
+msgstr "Ningún archivo multimedia coincide con los filtros actuales."
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -6470,6 +6599,7 @@ msgid "No tags match that filter."
 msgstr "Ninguna etiqueta coincide con ese filtro."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "No tags yet."
@@ -7949,6 +8079,16 @@ msgstr "Quitar programación"
 msgid "Remove step %{title}"
 msgstr "Eliminar paso %{title}"
 
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Remove tag"
+msgstr "Quitar etiqueta"
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Remove tag %{name}"
+msgstr "Quitar la etiqueta %{name}"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Remove the passphrase"
@@ -8025,6 +8165,13 @@ msgstr "Quitada de la lista de 404."
 #, elixir-autogen, elixir-format
 msgid "Removed from the release."
 msgstr "Se quitó del lanzamiento."
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Removed the tag from %{count} item."
+msgid_plural "Removed the tag from %{count} items."
+msgstr[0] "Se quitó la etiqueta de %{count} elemento."
+msgstr[1] "Se quitó la etiqueta de %{count} elementos."
 
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
@@ -8752,6 +8899,16 @@ msgstr "Segmento eliminado."
 msgid "Segments"
 msgstr "Segmentos"
 
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Select"
+msgstr "Seleccionar"
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Select %{name}"
+msgstr "Seleccionar %{name}"
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Select %{title}"
@@ -8766,6 +8923,11 @@ msgstr "Seleccione un campo en el lienzo para editarlo, o añada uno desde la pa
 #, elixir-autogen, elixir-format
 msgid "Select all"
 msgstr "Seleccionar todo"
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Select all loaded"
+msgstr "Seleccionar todo lo cargado"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -9522,7 +9684,25 @@ msgstr "Grupo de etiquetas añadido."
 msgid "Tag groups"
 msgstr "Grupos de etiquetas"
 
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Tag to apply"
+msgstr "Etiqueta a aplicar"
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Tagged %{count} item."
+msgid_plural "Tagged %{count} items."
+msgstr[0] "Se etiquetó %{count} elemento."
+msgstr[1] "Se etiquetaron %{count} elementos."
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Tagged %{ok}; %{failed} couldn't be updated."
+msgstr "Se etiquetaron %{ok}; %{failed} no se pudieron actualizar."
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Tags"
@@ -10702,6 +10882,11 @@ msgstr "Darse de baja"
 msgid "Untitled"
 msgstr "Sin título"
 
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Unused"
+msgstr "Sin usar"
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Up to date"
@@ -10780,6 +10965,21 @@ msgstr[1] "Se subieron %{count} archivos."
 #, elixir-autogen, elixir-format
 msgid "Uploaded %{ok}. Failed: %{detail}"
 msgstr "Se subieron %{ok}. Fallaron: %{detail}"
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Uploaded by"
+msgstr "Subido por"
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Uploaded from"
+msgstr "Subido desde"
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Uploaded until"
+msgstr "Subido hasta"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -10926,6 +11126,11 @@ msgstr "Historial de versiones (%{count})"
 #, elixir-autogen, elixir-format
 msgid "Version timeline"
 msgstr "Cronología de versiones"
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Video"
+msgstr "Vídeo"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format

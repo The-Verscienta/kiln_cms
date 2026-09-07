@@ -50,6 +50,19 @@ migration, a rewritten column, a dropped config key).
   in a `<style>` element on delivery pages only. One additive migration; an
   unconfigured site renders as before. See `docs/public-theming.md`.
 
+- **The media library is organisable** (#1316). Media items can carry tags —
+  the same `Tag` taxonomy content uses, through the shared polymorphic
+  `Tagging` join, so there is no second tag system to curate — and record who
+  uploaded them (`uploaded_by`, stamped from the actor on create). The library
+  gained server-side filter chips (kind, tag, uploader, date range, and
+  "unused" — items no published document references) and a selection mode
+  with bulk delete and bulk add/remove-tag; each item's drawer edits its tags
+  directly. The JSON:API exposes the same facets at
+  `GET /api/json/media-items/library`, a filterable calculated `kind` on
+  every media read, and includable `tags` / `uploaded_by` relationships;
+  tags report a `media_count` alongside `page_count`/`post_count`. Adds a
+  migration (`media_items.uploaded_by_id`).
+
 - **Reranking can be scoped to `/api/ask`.** `config :kiln_cms, KilnCMS.Ask,
   rerank: true` (or `ASK_RERANK=true`) reranks a question's retrieved
   candidates with the configured `KilnCMS.Search.Reranker` — the wired

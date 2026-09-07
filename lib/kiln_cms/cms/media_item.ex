@@ -48,7 +48,11 @@ defmodule KilnCMS.CMS.MediaItem do
       # action and public fields — documented in `docs/json-api.md`.
       index :read
       index :search, route: "/search"
-      # `/:id` last so it can't shadow the static `/search` sub-path.
+      # Faceted library browse (#1316): kind / tag / uploader / date range /
+      # unused, the same filters the admin media library offers. Arguments are
+      # plain query params, like `/search`.
+      index :library, route: "/library"
+      # `/:id` last so it can't shadow the static `/search`/`/library` sub-paths.
       get :read
     end
   end
@@ -161,12 +165,48 @@ defmodule KilnCMS.CMS.MediaItem do
     # skip both checks and the storage relocation entirely — the row would
     # claim to be gated while its blob sits wherever the caller's
     # `storage_key`/`url` point, public bucket included.
-    create :create, primary?: true, accept: @create_accept
+    create :create do
+      primary? true
+      accept @create_accept
 
-    # Not atomic: the `BustMediaCache` after-action runs an in-BEAM side effect.
+      # Who uploaded it (#1316) — the library's uploader filter. Same posture
+      # as content's `relate_actor(:author)`: nullable, so system ingests
+      # (seeds, imports) and rows predating the column are valid without one.
+      change relate_actor(:uploaded_by, allow_nil?: true)
+    end
+
+    # Not atomic: the `BustMediaCache` after-action runs an in-BEAM side effect
+    # (and `manage_relationship` can't run atomically either).
     update :update do
       primary? true
       require_atomic? false
+
+      # Tagging (#1316), reusing the shared polymorphic `Tagging` join — the
+      # same argument trio content's `:update` carries (#521/#639): the
+      # complete-set `tag_ids` replaces, the verbs merge, and combining them
+      # is refused rather than resolved by declaration order.
+      argument :tag_ids, {:array, :uuid}
+      argument :add_tag_ids, {:array, :uuid}
+      argument :remove_tag_ids, {:array, :uuid}
+
+      validate {KilnCMS.CMS.Validations.MergeArguments,
+                complete: :tag_ids, add: :add_tag_ids, remove: :remove_tag_ids}
+
+      # Must precede the manages: they snapshot the argument at change-time.
+      change {KilnCMS.CMS.Changes.NormalizeManagedArguments,
+              arguments: [:tag_ids, :add_tag_ids, :remove_tag_ids]}
+
+      change manage_relationship(:tag_ids, :tags, type: :append_and_remove)
+      change manage_relationship(:add_tag_ids, :tags, type: :append)
+
+      # Not `type: :remove` — removing an already-detached tag must stay an
+      # idempotent no-op (mirrors content's remove verb).
+      change manage_relationship(:remove_tag_ids, :tags,
+               on_lookup: :ignore,
+               on_match: :unrelate,
+               on_no_match: :ignore,
+               on_missing: :ignore
+             )
     end
 
     # Soft-deleted ("trashed") media — the only read that bypasses AshArchival's
@@ -224,6 +264,65 @@ defmodule KilnCMS.CMS.MediaItem do
     destroy :purge do
       # Not atomic: the `BustMediaCache` after-action runs an in-BEAM side effect.
       require_atomic? false
+    end
+
+    # Faceted library browse (#1316): every argument is optional and absent
+    # means "don't filter on that axis" — the same `is_nil(^arg(…)) or …`
+    # shape content's search facets use. Goes through the same read policy as
+    # `:read`, and backs both the admin media library's filter chips and the
+    # JSON:API `/media-items/library` route.
+    read :library do
+      argument :kind, :atom, constraints: [one_of: [:image, :video, :audio, :captions, :document]]
+
+      argument :tag_ids, {:array, :uuid}
+      argument :uploaded_by_id, :uuid
+      # Dates, not datetimes: the filter chips (and any sane API caller) think
+      # in days. Both bounds are inclusive of the named day.
+      argument :uploaded_after, :date
+      argument :uploaded_before, :date
+      # Three-state: `true` → only items no published document references,
+      # `false` → only referenced items, absent → both. "Used" is defined by
+      # the reference-edge graph the fire path maintains (see
+      # `KilnCMS.Firing.References`), so — like the drawer's "Used by" list —
+      # an item referenced only by never-published drafts counts as unused.
+      argument :unused, :boolean
+
+      # Exposed on the public API — bound the response like `:search`.
+      pagination offset?: true,
+                 keyset?: true,
+                 countable: true,
+                 required?: false,
+                 max_page_size: 100,
+                 default_limit: 25
+
+      filter expr(
+               # A raw subquery rather than an `exists(...)` over a
+               # relationship to `Firing.ReferenceEdge`: that resource's
+               # read policy is editors-only (it maps the draft link graph),
+               # and a relationship referenced in a filter is authorized —
+               # which would break this world-readable action for anonymous
+               # API callers. The subquery leaks only "something published
+               # references this", which the published page itself shows.
+               (is_nil(^arg(:kind)) or kind == ^arg(:kind)) and
+                 (is_nil(^arg(:tag_ids)) or exists(tags, ^ref(:id) in ^arg(:tag_ids))) and
+                 (is_nil(^arg(:uploaded_by_id)) or
+                    ^ref(:uploaded_by_id) == ^arg(:uploaded_by_id)) and
+                 (is_nil(^arg(:uploaded_after)) or
+                    fragment("? >= ?::date", ^ref(:inserted_at), ^arg(:uploaded_after))) and
+                 (is_nil(^arg(:uploaded_before)) or
+                    fragment(
+                      "? < (?::date + interval '1 day')",
+                      ^ref(:inserted_at),
+                      ^arg(:uploaded_before)
+                    )) and
+                 (is_nil(^arg(:unused)) or
+                    ^arg(:unused) !=
+                      fragment(
+                        "EXISTS (SELECT 1 FROM reference_edges re WHERE re.to_type = 'media' AND re.to_id = ? AND re.org_id = ?)",
+                        ^ref(:id),
+                        ^ref(:org_id)
+                      ))
+             )
     end
 
     # Full-text search over filename + alt + caption. World-readable like the
@@ -532,6 +631,25 @@ defmodule KilnCMS.CMS.MediaItem do
       public? false
     end
 
+    # Who uploaded it (#1316). Nullable — system ingests and rows predating
+    # the column have none. Public like content's `author`: only User's safe
+    # byline fields (`id`, `name`) are `public?`, so `?include=uploaded_by`
+    # can never return uploader PII.
+    belongs_to :uploaded_by, KilnCMS.Accounts.User do
+      allow_nil? true
+      public? true
+    end
+
+    # Many-to-many: free-form tags via the shared polymorphic `Tagging` join
+    # (#1316) — the same table and `Tag` resource content uses, so the media
+    # library's tag filter and the content tag picker share one taxonomy.
+    many_to_many :tags, KilnCMS.CMS.Tag do
+      through KilnCMS.CMS.Tagging
+      source_attribute_on_join_resource :subject_id
+      destination_attribute_on_join_resource :tag_id
+      public? true
+    end
+
     # One-to-many inverse of `belongs_to :featured_image` — the content items
     # using this media item as their lead image.
     has_many :featured_pages, KilnCMS.CMS.Page do
@@ -546,6 +664,28 @@ defmodule KilnCMS.CMS.MediaItem do
   end
 
   calculations do
+    # The `KilnCMS.MediaKind.of/1` bucket, as SQL (#1316) — the CASE mirrors
+    # that function clause-for-clause (NULL is an image; a blank string falls
+    # through to document; case-insensitive like its `ilike` twins in
+    # `ContentEditorLive`). Public so the JSON:API can filter/select it
+    # (`filter[kind]=image`), and what the `:library` action's kind facet
+    # runs on.
+    calculate :kind,
+              :atom,
+              expr(
+                fragment(
+                  "CASE WHEN ? IS NULL OR ? ILIKE 'image/%' THEN 'image' WHEN lower(?) = 'text/vtt' THEN 'captions' WHEN ? ILIKE 'video/%' THEN 'video' WHEN ? ILIKE 'audio/%' THEN 'audio' ELSE 'document' END",
+                  ^ref(:content_type),
+                  ^ref(:content_type),
+                  ^ref(:content_type),
+                  ^ref(:content_type),
+                  ^ref(:content_type)
+                )
+              ) do
+      public? true
+      constraints one_of: [:image, :video, :audio, :captions, :document]
+    end
+
     # Full-text relevance for the `:search` action — ts_rank over the same
     # filename/alt/caption tsvector the action filters on. Internal.
     calculate :search_rank,

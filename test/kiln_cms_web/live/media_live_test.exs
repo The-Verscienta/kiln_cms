@@ -139,6 +139,196 @@ defmodule KilnCMSWeb.MediaLiveTest do
     end
   end
 
+  describe "filter chips (#1316)" do
+    defp typed_media(filename, content_type) do
+      Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+        filename: filename,
+        content_type: content_type,
+        url: "/uploads/#{System.unique_integer([:positive])}"
+      })
+    end
+
+    defp make_tag(actor, name) do
+      CMS.create_tag!(%{name: name, slug: "#{name}-#{System.unique_integer([:positive])}"},
+        actor: actor
+      )
+    end
+
+    test "the kind chip narrows the grid, clicking it again clears", %{conn: conn} do
+      typed_media("photo.png", "image/png")
+      typed_media("report.pdf", "application/pdf")
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
+
+      html =
+        lv
+        |> element(~s(button[phx-click="set_kind"][phx-value-kind="image"]))
+        |> render_click()
+
+      assert html =~ ">photo.png<"
+      refute html =~ ">report.pdf<"
+
+      html =
+        lv
+        |> element(~s(button[phx-click="set_kind"][phx-value-kind="image"]))
+        |> render_click()
+
+      assert html =~ ">photo.png<"
+      assert html =~ ">report.pdf<"
+    end
+
+    test "the tag select filters to items carrying the tag", %{conn: conn} do
+      editor = authed_user(:editor)
+      tag = make_tag(editor, "banner")
+
+      tagged = typed_media("tagged.png", "image/png")
+      CMS.update_media_item!(tagged, %{tag_ids: [tag.id]}, actor: editor)
+      typed_media("plain.png", "image/png")
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")
+
+      html = lv |> form("#media-filter", %{tag: tag.id}) |> render_change()
+      assert html =~ ">tagged.png<"
+      refute html =~ ">plain.png<"
+    end
+
+    test "the uploader select filters to one uploader's items", %{conn: conn} do
+      editor = authed_user(:editor)
+      other = authed_user(:editor)
+
+      CMS.create_media_item!(%{filename: "mine.png", url: "/uploads/mine-up"}, actor: editor)
+      CMS.create_media_item!(%{filename: "theirs.png", url: "/uploads/theirs-up"}, actor: other)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")
+
+      html = lv |> form("#media-filter", %{uploader: editor.id}) |> render_change()
+      assert html =~ ">mine.png<"
+      refute html =~ ">theirs.png<"
+    end
+
+    test "the unused chip hides items a published document references", %{conn: conn} do
+      used = typed_media("used.png", "image/png")
+      typed_media("idle.png", "image/png")
+
+      Ash.Seed.seed!(KilnCMS.Firing.ReferenceEdge, %{
+        from_type: :page,
+        from_id: Ash.UUID.generate(),
+        to_type: :media,
+        to_id: used.id
+      })
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
+
+      html = lv |> element(~s(button[phx-click="toggle_unused"])) |> render_click()
+      assert html =~ ">idle.png<"
+      refute html =~ ">used.png<"
+    end
+
+    test "filters land in the URL, so the view is bookmarkable", %{conn: conn} do
+      typed_media("photo.png", "image/png")
+      typed_media("report.pdf", "application/pdf")
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/media?kind=document")
+
+      assert html =~ ">report.pdf<"
+      refute html =~ ">photo.png<"
+    end
+  end
+
+  describe "bulk operations (#1316)" do
+    test "bulk tagging applies one tag across the selection", %{conn: conn} do
+      editor = authed_user(:editor)
+      tag = make_tag(editor, "bulk")
+      a = typed_media("bulk-a.png", "image/png")
+      b = typed_media("bulk-b.png", "image/png")
+      untouched = typed_media("bulk-c.png", "image/png")
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")
+
+      lv |> element(~s(button[phx-click="toggle_selecting"])) |> render_click()
+
+      for id <- [a.id, b.id] do
+        lv
+        |> element(~s(#media-#{id} button[phx-click="toggle_selected"]))
+        |> render_click()
+      end
+
+      html =
+        lv
+        |> form("#bulk-tag-form", %{tag_id: tag.id})
+        |> render_submit(%{op: "add"})
+
+      assert html =~ "Tagged 2 items."
+
+      for item <- [a, b] do
+        loaded = CMS.get_media_item!(item.id, actor: editor, load: [:tags])
+        assert Enum.map(loaded.tags, & &1.id) == [tag.id]
+      end
+
+      loaded = CMS.get_media_item!(untouched.id, actor: editor, load: [:tags])
+      assert loaded.tags == []
+    end
+
+    test "bulk delete trashes the selection (admin)", %{conn: conn} do
+      admin = authed_user(:admin)
+      a = typed_media("trash-a.png", "image/png")
+      keep = typed_media("keep.png", "image/png")
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/media")
+
+      lv |> element(~s(button[phx-click="toggle_selecting"])) |> render_click()
+
+      lv
+      |> element(~s(#media-#{a.id} button[phx-click="toggle_selected"]))
+      |> render_click()
+
+      html = lv |> element(~s(button[phx-click="bulk_delete"])) |> render_click()
+
+      assert html =~ "Moved 1 item to trash."
+      assert {:error, _} = CMS.get_media_item(a.id, actor: admin)
+      assert {:ok, _} = CMS.get_media_item(keep.id, actor: admin)
+    end
+
+    test "editors don't get the bulk delete button", %{conn: conn} do
+      typed_media("nodelete.png", "image/png")
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
+
+      html = lv |> element(~s(button[phx-click="toggle_selecting"])) |> render_click()
+      refute html =~ ~s(phx-click="bulk_delete")
+    end
+  end
+
+  describe "detail panel tags (#1316)" do
+    test "adds and removes a tag from the drawer", %{conn: conn} do
+      editor = authed_user(:editor)
+      tag = make_tag(editor, "drawer")
+      item = typed_media("drawer.png", "image/png")
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media?id=#{item.id}")
+
+      html =
+        lv
+        |> form("#media-detail-tag-form", %{tag_id: tag.id})
+        |> render_change()
+
+      assert html =~ "drawer"
+
+      loaded = CMS.get_media_item!(item.id, actor: editor, load: [:tags])
+      assert Enum.map(loaded.tags, & &1.id) == [tag.id]
+
+      lv
+      |> element(
+        ~s(button[phx-click="item_tag"][phx-value-op="remove"][phx-value-tag_id="#{tag.id}"])
+      )
+      |> render_click()
+
+      loaded = CMS.get_media_item!(item.id, actor: editor, load: [:tags])
+      assert loaded.tags == []
+    end
+  end
+
   describe "detail panel" do
     test "opens a panel with metadata and saves alt text + caption", %{conn: conn} do
       item =

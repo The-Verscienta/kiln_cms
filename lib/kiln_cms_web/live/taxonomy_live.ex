@@ -80,7 +80,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
       destroy: :destroy_tag,
       form: :tag_form,
       records: :tags,
-      loads: [:page_count, :post_count],
+      loads: [:page_count, :post_count, :media_count],
       sort: [name: :asc],
       description?: false,
       extra_fields?: true,
@@ -796,6 +796,9 @@ defmodule KilnCMSWeb.TaxonomyLive do
   defp count_phrase(:page_count, n), do: ngettext("%{count} page", "%{count} pages", n, count: n)
   defp count_phrase(:post_count, n), do: ngettext("%{count} post", "%{count} posts", n, count: n)
   defp count_phrase(:tag_count, n), do: ngettext("%{count} tag", "%{count} tags", n, count: n)
+
+  defp count_phrase(:media_count, n),
+    do: ngettext("%{count} media item", "%{count} media items", n, count: n)
 
   # How many things a record is holding onto, for the delete confirmation —
   # same source as the usage line.

@@ -788,6 +788,65 @@ defmodule KilnCMSWeb.JsonApiTest do
       assert {200, %{"data" => data}} = api_get("/api/json/media-items/#{item.id}")
       assert data["id"] == item.id
     end
+
+    # The faceted browse (#1316): `/library` takes the `:library` action's
+    # arguments as plain query params, like `/search` does.
+    test "the library route filters by kind, tag, uploader and unused" do
+      admin = user(:admin)
+      editor = user(:editor)
+
+      tag =
+        CMS.create_tag!(
+          %{name: "lib-tag", slug: "lib-tag-#{System.unique_integer([:positive])}"},
+          actor: admin
+        )
+
+      png =
+        CMS.create_media_item!(
+          %{filename: "lib-#{System.unique_integer([:positive])}.png", content_type: "image/png"},
+          actor: admin
+        )
+
+      pdf =
+        CMS.create_media_item!(
+          %{
+            filename: "lib-#{System.unique_integer([:positive])}.pdf",
+            content_type: "application/pdf"
+          },
+          actor: editor
+        )
+
+      CMS.update_media_item!(png, %{tag_ids: [tag.id]}, actor: admin)
+
+      Ash.Seed.seed!(KilnCMS.Firing.ReferenceEdge, %{
+        from_type: :page,
+        from_id: Ash.UUID.generate(),
+        to_type: :media,
+        to_id: png.id
+      })
+
+      assert {200, images} = api_get("/api/json/media-items/library?kind=image")
+      assert png.id in ids(images)
+      refute pdf.id in ids(images)
+
+      assert {200, tagged} = api_get("/api/json/media-items/library?tag_ids[]=#{tag.id}")
+      assert ids(tagged) == [png.id]
+
+      assert {200, by_editor} =
+               api_get("/api/json/media-items/library?uploaded_by_id=#{editor.id}")
+
+      assert pdf.id in ids(by_editor)
+      refute png.id in ids(by_editor)
+
+      assert {200, unused} = api_get("/api/json/media-items/library?unused=true")
+      assert pdf.id in ids(unused)
+      refute png.id in ids(unused)
+
+      # And the derived `kind` calculation filters on the base route too.
+      assert {200, docs} = api_get("/api/json/media-items?filter[kind]=document")
+      assert pdf.id in ids(docs)
+      refute png.id in ids(docs)
+    end
   end
 
   describe "custom-field filtering and sorting (custom_filter / custom_sort)" do
