@@ -1,21 +1,27 @@
 ---
+import { isKilnHttpError } from "@kiln-cms/client";
 import Base from "../../layouts/Base.astro";
-import { discoverContent, fetchArtifact, type Document } from "../../lib/kiln";
+import { discoverContent, kiln, LOCALE, type Document } from "../../lib/kiln";
 import { renderBlocks } from "../../lib/render";
 
-// Static generation: one page per published document discovered in the sitemap.
-// The artifact is fetched here so each route ships as plain pre-rendered HTML.
+// Static generation: one page per published document from the JSON:API feeds.
+// Each document's fired artifact (`?surface=json`) is fetched here so every
+// route ships as plain pre-rendered HTML. A cold artifact cache answers 503;
+// the client retries that once on its own.
 export async function getStaticPaths() {
   const refs = await discoverContent();
 
   const pages = await Promise.all(
     refs.map(async (ref) => {
-      const doc = await fetchArtifact(ref);
-      if (!doc) return null;
-      return {
-        params: { type: ref.type, slug: ref.slug },
-        props: { doc },
-      };
+      try {
+        const doc = await kiln.artifact<Document>(ref.type, ref.slug, { locale: LOCALE });
+        return { params: { type: ref.type, slug: ref.slug }, props: { doc } };
+      } catch (error) {
+        // Listed but not servable (e.g. unpublished mid-build): skip the page
+        // rather than failing the whole build.
+        if (isKilnHttpError(error) && error.status === 404) return null;
+        throw error;
+      }
     }),
   );
 

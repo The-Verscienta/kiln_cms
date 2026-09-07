@@ -1,0 +1,55 @@
+{
+  "name": "@kiln-cms/client",
+  "version": "0.1.0",
+  "description": "Official JS/TS client for the Kiln CMS delivery APIs — typed JSON:API reads, search, fired artifacts, preview tokens, point-in-time reads, and the kiln-types generator.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "kiln-types": "./dist/bin/kiln-types.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . && prettier --check .",
+    "format": "prettier --write .",
+    "test": "vitest run"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/The-Verscienta/kiln_cms.git",
+    "directory": "clients/js"
+  },
+  "keywords": [
+    "kiln",
+    "cms",
+    "headless",
+    "jsonapi",
+    "client",
+    "typescript"
+  ],
+  "devDependencies": {
+    "@eslint/js": "^9.14.0",
+    "@types/node": "^22.20.0",
+    "eslint": "^9.14.0",
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.0",
+    "typescript-eslint": "^8.14.0",
+    "vitest": "^2.1.4"
+  }
+}
