@@ -423,7 +423,7 @@ defmodule KilnCMSWeb.MediaLive do
   # editor — and stayed that way until closed and reopened, while the grid
   # behind it had already refreshed. Only when the broadcast is about the OPEN
   # item, though: re-reading it costs the reference-graph fan-out
-  # (`assign_selected/2` → `References.usages/2`), which a bulk regeneration
+  # (`assign_selected/2` → `References.usages/3`), which a bulk regeneration
   # of a large library would otherwise charge every open drawer every 200 ms.
   @impl true
   def handle_info({:media_processed, id}, socket) do
@@ -596,15 +596,18 @@ defmodule KilnCMSWeb.MediaLive do
     socket
     |> assign(:media, items)
     |> assign(:more?, more?)
-    |> assign(:usage_counts, usage_counts(items, socket.assigns.current_org))
+    |> assign(
+      :usage_counts,
+      usage_counts(items, socket.assigns.current_org, socket.assigns.actor)
+    )
     |> assign(:total, count_media(socket))
   end
 
   # One query for the whole grid, so the delete confirmation can say what a
   # delete affects. Best-effort: the count is context, and an unreadable
   # reference graph must not stop the library from rendering.
-  defp usage_counts(items, org_id) do
-    KilnCMS.Firing.References.usage_counts(tenant_id(org_id), Enum.map(items, & &1.id))
+  defp usage_counts(items, org_id, actor) do
+    KilnCMS.Firing.References.usage_counts(tenant_id(org_id), Enum.map(items, & &1.id), actor)
   rescue
     _error -> %{}
   end
@@ -692,7 +695,7 @@ defmodule KilnCMSWeb.MediaLive do
       {:ok, item} ->
         socket
         |> put_selected(item)
-        |> assign(:usages, usages(item, socket.assigns.current_org))
+        |> assign(:usages, usages(item, socket.assigns.current_org, socket.assigns.actor))
 
       _ ->
         socket
@@ -704,8 +707,8 @@ defmodule KilnCMSWeb.MediaLive do
 
   # Best-effort: the "used by" list is context, and an editor must still be able
   # to open a media item when the reference graph can't be read.
-  defp usages(item, org_id) do
-    KilnCMS.Firing.References.usages(tenant_id(org_id) || item.org_id, item.id)
+  defp usages(item, org_id, actor) do
+    KilnCMS.Firing.References.usages(tenant_id(org_id) || item.org_id, item.id, actor)
   rescue
     _error -> empty_usages()
   end

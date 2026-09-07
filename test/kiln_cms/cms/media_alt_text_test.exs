@@ -20,12 +20,14 @@ defmodule KilnCMS.CMS.MediaAltTextTest do
 
   defp require_alt!, do: Application.put_env(:kiln_cms, :media, require_alt_text: true)
 
-  defp admin do
+  defp admin, do: user(:admin)
+
+  defp user(role) do
     Ash.Seed.seed!(KilnCMS.Accounts.User, %{
       email: "alt-#{System.unique_integer([:positive])}@example.com",
       hashed_password: Bcrypt.hash_pwd_salt("password123456"),
       confirmed_at: DateTime.utc_now(),
-      role: :admin
+      role: role
     })
   end
 
@@ -318,7 +320,7 @@ defmodule KilnCMS.CMS.MediaAltTextTest do
       published = CMS.publish_page!(p, actor: actor)
       drain_oban()
 
-      usages = References.usages(published.org_id, img.id)
+      usages = References.usages(published.org_id, img.id, actor)
 
       assert %{total: 1, items: [%{type: :page, id: id, title: title, kind: "page"}]} = usages
       assert id == published.id
@@ -333,7 +335,7 @@ defmodule KilnCMS.CMS.MediaAltTextTest do
       published = CMS.publish_page!(p, actor: actor)
       drain_oban()
 
-      assert %{items: [%{id: id}]} = References.usages(published.org_id, img.id)
+      assert %{items: [%{id: id}]} = References.usages(published.org_id, img.id, actor)
       assert id == published.id
     end
 
@@ -359,13 +361,49 @@ defmodule KilnCMS.CMS.MediaAltTextTest do
       refute {:media, other} in refs
     end
 
+    # The edge reads run under the actor's own authorization now (#1309):
+    # `ReferenceEdge`'s read policy admits editors-and-up, so an editor gets
+    # the full answer without any bypass.
+    test "an editor sees the same usages under their own authorization" do
+      actor = admin()
+      img = image(%{alt: "Hero"})
+      p = page(%{featured_image_id: img.id}, actor)
+      published = CMS.publish_page!(p, actor: actor)
+      drain_oban()
+
+      editor = user(:editor)
+
+      assert %{total: 1, items: [%{id: id, title: title}]} =
+               References.usages(published.org_id, img.id, editor)
+
+      assert id == published.id
+      assert title == published.title
+
+      assert References.usage_counts(published.org_id, [img.id], editor) == %{img.id => 1}
+    end
+
+    # With the bypass gone the policy actually gets to answer: a non-editor's
+    # edge read filters to nothing, so the graph never leaks below editor tier.
+    test "a viewer's usage reads come back empty, not bypassed" do
+      actor = admin()
+      img = image(%{alt: "Hero"})
+      p = page(%{featured_image_id: img.id}, actor)
+      published = CMS.publish_page!(p, actor: actor)
+      drain_oban()
+
+      viewer = user(:viewer)
+
+      assert References.usages(published.org_id, img.id, viewer) == %{total: 0, items: []}
+      assert References.usage_counts(published.org_id, [img.id], viewer) == %{}
+    end
+
     test "removing the reference removes the usage" do
       actor = admin()
       img = image(%{alt: "Hero"})
       p = page(%{featured_image_id: img.id}, actor)
       published = CMS.publish_page!(p, actor: actor)
       drain_oban()
-      assert References.usages(published.org_id, img.id).total == 1
+      assert References.usages(published.org_id, img.id, actor).total == 1
 
       _updated = CMS.update_page!(published, %{featured_image_id: nil}, actor: actor)
       drain_oban()
@@ -373,7 +411,7 @@ defmodule KilnCMS.CMS.MediaAltTextTest do
       # The edge set is rebuilt from scratch on every fire, so a dropped
       # reference must not linger and warn about a document that no longer
       # shows the image.
-      assert References.usages(published.org_id, img.id).total == 0
+      assert References.usages(published.org_id, img.id, actor).total == 0
     end
   end
 

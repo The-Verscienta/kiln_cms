@@ -246,17 +246,22 @@ defmodule KilnCMS.Firing.References do
   as a broken row: an edge outlives a hard delete (`reference_source?: false` is
   the same trade the version tables make), and an editor asking what uses an
   image does not want to be told about documents that no longer exist.
+
+  The edge read runs as `actor` under `Firing.ReferenceEdge`'s read policy
+  (editors-and-up), so the caller's authorization decides whether the graph is
+  visible at all (#1309). The per-referrer record loads keep a deliberate
+  bypass — see `load_any/3`.
   """
-  @spec usages(Ash.UUID.t(), term()) :: %{total: non_neg_integer(), items: [map()]}
-  def usages(org_id, media_id) do
-    # `authorize?: false` here and in `usage_counts/2` / `load_any/3` /
-    # `editor_kind/1`: this module takes no actor (the fire path has none), and
-    # the only callers are `MediaLive`, mounted behind `:live_editor_required` —
-    # the same editors-and-up audience `Firing.ReferenceEdge`'s read policy
-    # names. Every read is tenant-scoped to the caller's org, and only
-    # `title`/`state`/`kind` of each referrer is surfaced. Threading the
-    # LiveView's actor through would let the policy do this instead (#1309).
-    {:ok, edges} = Firing.edges_to(:media, media_id, authorize?: false, tenant: org_id)
+  @spec usages(Ash.UUID.t(), term(), map() | nil) :: %{
+          total: non_neg_integer(),
+          items: [map()]
+        }
+  def usages(org_id, media_id, actor) do
+    # Actor-authorized (#1309): `Firing.ReferenceEdge`'s read policy admits
+    # editors-and-up (`OrgEditor`) — exactly `MediaLive`'s
+    # `:live_editor_required` audience, so the `authorize?: false` this held is
+    # gone. The referrer loads below (`load_any/3`) deliberately keep theirs.
+    {:ok, edges} = Firing.edges_to(:media, media_id, actor: actor, tenant: org_id)
 
     referrers =
       edges
@@ -278,16 +283,19 @@ defmodule KilnCMS.Firing.References do
   One query for a whole grid, so the media library can warn *at the point of
   deletion* rather than only inside a drawer the editor may never open — which
   is what the issue asked for. Ids with no referrers are absent from the map.
+  Reads as `actor` under `Firing.ReferenceEdge`'s read policy, like `usages/3`.
   """
-  @spec usage_counts(Ash.UUID.t(), [term()]) :: %{optional(term()) => pos_integer()}
-  def usage_counts(_org_id, []), do: %{}
+  @spec usage_counts(Ash.UUID.t(), [term()], map() | nil) :: %{
+          optional(term()) => pos_integer()
+        }
+  def usage_counts(_org_id, [], _actor), do: %{}
 
-  def usage_counts(org_id, media_ids) do
+  def usage_counts(org_id, media_ids, actor) do
     Firing.ReferenceEdge
     |> Ash.Query.filter(to_type == :media and to_id in ^media_ids)
     |> Ash.Query.select([:to_id, :from_type, :from_id])
-    # Editor-gated caller, tenant-scoped — see `usages/2` on the bypass.
-    |> Ash.read!(authorize?: false, tenant: org_id)
+    # Actor-authorized (no more bypass), tenant-scoped — see `usages/3`.
+    |> Ash.read!(actor: actor, tenant: org_id)
     |> Enum.uniq_by(&{&1.to_id, &1.from_type, &1.from_id})
     |> Enum.frequencies_by(& &1.to_id)
   end
@@ -317,8 +325,8 @@ defmodule KilnCMS.Firing.References do
   defp editor_kind(%KilnCMS.CMS.Entry{} = record) do
     # A dynamic entry's editor segment is its own type's NAME, which lives on
     # its definition — `:entry` is only the storage tier. `authorize?: false`:
-    # editor-gated caller (see `usages/2`), and `TypeDefinition` reads are open
-    # to `OrgEditor` anyway; only `name` is used. `tenant: record.org_id`
+    # editor-gated caller (see `load_any/3`), and `TypeDefinition` reads are
+    # open to `OrgEditor` anyway; only `name` is used. `tenant: record.org_id`
     # because `TypeDefinition` is org-scoped: the id comes off a same-org row,
     # and under strict tenancy a tenant-less read would error and leave `kind`
     # nil (#1309).
@@ -336,10 +344,14 @@ defmodule KilnCMS.Firing.References do
   # `load_published/3` deliberately answers only for published documents — the
   # re-fire wave has no business with drafts. This one loads whatever is there,
   # so a document unpublished since it last fired still shows as a usage.
-  # `authorize?: false` (all four heads): editor-gated caller and tenant-scoped
-  # — see `usages/2`. Under the content read policy a type-scoped editor (#332)
-  # would not see draft referrers of an out-of-scope type; the fetch is by an
-  # id the edge table already holds, and only `title`/`state` are surfaced.
+  # `authorize?: false` (all four heads) — kept DELIBERATELY when the edge
+  # reads gained an actor (#1309): the referrer list is context for a delete
+  # decision and must be complete. Under the content read policy a type-scoped
+  # editor (#332 `readable_types`) would not see draft referrers of an
+  # out-of-scope type, and a referrer hidden here reads as "unused" — the exact
+  # mistake the list exists to prevent. The fetch is by an id the (actor-
+  # authorized) edge read already surfaced, tenant-scoped, and only
+  # `title`/`state`/`kind` leave this module.
   defp load_any(org_id, :page, id), do: any(CMS.get_page(id, authorize?: false, tenant: org_id))
   # (bypass: as above)
   defp load_any(org_id, :post, id), do: any(CMS.get_post(id, authorize?: false, tenant: org_id))
@@ -349,7 +361,7 @@ defmodule KilnCMS.Firing.References do
   defp load_any(org_id, type, id) do
     case CMS.ContentTypes.get(type) do
       %{source: :compiled, resource: resource} ->
-        # Same bypass rationale as the heads above (`usages/2`); tenant-scoped.
+        # Same bypass rationale as the heads above; tenant-scoped.
         any(Ash.get(resource, id, authorize?: false, tenant: org_id))
 
       _ ->
