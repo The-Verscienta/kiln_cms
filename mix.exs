@@ -59,7 +59,9 @@ defmodule KilnCMS.MixProject do
       source_url: @source_url,
       docs: docs(),
       dialyzer: [
-        plt_add_apps: [:mix, :ex_unit],
+        # :excoveralls is `runtime: false`, so it is not in the PLT by default —
+        # and `mix kiln.coverage.merge` (test/support) calls it directly.
+        plt_add_apps: [:mix, :ex_unit, :excoveralls],
         plt_local_path: "priv/plts",
         plt_core_path: "priv/plts",
         ignore_warnings: ".dialyzer_ignore.exs",
@@ -449,6 +451,9 @@ defmodule KilnCMS.MixProject do
         "coveralls.post": :test,
         "coveralls.xml": :test,
         "kiln.coverage.summary": :test,
+        # Lives in test/support (it calls excoveralls, an `only: :test` dep),
+        # so it exists only in this env — see its moduledoc.
+        "kiln.coverage.merge": :test,
         "e2e.setup": :e2e,
         "e2e.reset": :e2e
       ]
