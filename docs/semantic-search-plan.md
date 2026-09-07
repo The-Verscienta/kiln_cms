@@ -115,6 +115,16 @@ separate your corpus — reach for `rerank: true` instead.
   keyword-only when semantic is disabled.
 - Optional `Reranker` behaviour (cross-encoder via Bumblebee, hosted rerank, or
   LLM) over the top-k. Deferred until hybrid quality is proven insufficient.
+- **Two scopes (2026-09-04).** `config :kiln_cms, KilnCMS.Search, rerank: true`
+  reranks every surface on every query; `config :kiln_cms, KilnCMS.Ask, rerank:
+  true` (`ASK_RERANK=true`) reranks only `/api/ask`'s bounded, per-question
+  candidate set — at most `limit` per content type — and its cross-type sort
+  then *is* a rerank of the union, every section scored by the same model for
+  the same question. `Search.global/2` takes `rerank: true | false` to carry a
+  caller's verdict down, and `hybrid/3`'s `rerank: true` is the whole gate; the
+  model loads at boot when either switch is on. Reranking fixes ordering, not
+  recall, and is CPU inference — see [rag.md](rag.md#reranking-asks-sources)
+  for the report's two caveats before turning either on.
 
 ## Recall is approximate, and filters make it worse (#998)
 
