@@ -115,17 +115,19 @@ defmodule KilnCMSWeb.BillingLive do
     # Ignore a re-click while a run is already in flight: the disabled button
     # attribute is client-side only, so a fast double-click (or a replayed
     # event) would otherwise start a second concurrent provider call. That flag
-    # is a concurrency guard, not an authorization one — hence the tier, which
-    # `Billing.verify_credentials/0` cannot check for itself: it takes no actor,
-    # reads the stored provider credentials, calls the provider and writes a
-    # verification record back (#1166).
+    # is a concurrency guard, not an authorization one — hence the tier check,
+    # which refuses before the provider is dialed at all; the actor threaded
+    # into `Billing.verify_credentials/1` has `Settings`' policy re-check it at
+    # write time (#1166, #1309).
     if socket.assigns.verifying? or not KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
       {:noreply, socket}
     else
+      actor = socket.assigns.actor
+
       {:noreply,
        socket
        |> assign(:verifying?, true)
-       |> start_async(:verify, fn -> Billing.verify_credentials() end)}
+       |> start_async(:verify, fn -> Billing.verify_credentials(actor) end)}
     end
   end
 

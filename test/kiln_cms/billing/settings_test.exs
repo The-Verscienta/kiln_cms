@@ -338,4 +338,58 @@ defmodule KilnCMS.Billing.SettingsTest do
       assert {:ok, []} = Billing.list_settings(actor: nil)
     end
   end
+
+  describe "verify_credentials/1" do
+    # The `record_verification` write goes through `Settings`' policy with the
+    # caller's actor (#1309) rather than `authorize?: false`, so these cases
+    # assert both halves: an admin's probe stamps the row, and a non-admin's
+    # stamps nothing even though the provider round-trip itself succeeded.
+    setup do
+      Application.put_env(:kiln_cms, KilnCMS.Billing, provider: KilnCMS.StubBillingProvider)
+
+      on_exit(fn -> Application.delete_env(:kiln_cms, :stub_billing_provider) end)
+
+      settings = Billing.ensure_settings!()
+
+      {:ok, settings} =
+        Billing.store_billing_secret(settings, :secret_key, "sk_test_abc", authorize?: false)
+
+      {:ok, settings} =
+        Billing.store_billing_secret(settings, :webhook_secret, "whsec_xyz", authorize?: false)
+
+      %{settings: settings}
+    end
+
+    test "a platform admin's probe stamps account, mode and timestamp" do
+      admin = user(:admin)
+
+      assert {:ok, verified} = Billing.verify_credentials(admin)
+
+      assert verified.provider_account_id == "acct_stub"
+      # From the `sk_test_` key prefix, not the stubbed account object.
+      assert verified.livemode == false
+      assert verified.last_verified_at
+      refute verified.verification_error
+    end
+
+    test "a provider failure is recorded as an operator-facing error" do
+      admin = user(:admin)
+      KilnCMS.StubBillingProvider.put(:account, {:error, {:http_status, 401, ""}})
+
+      assert {:error, {:http_status, 401, ""}} = Billing.verify_credentials(admin)
+
+      settings = Billing.ensure_settings!()
+      assert settings.verification_error =~ "rejected these credentials"
+    end
+
+    test "an editor's probe is refused by the policy and stamps nothing" do
+      editor = user(:editor)
+
+      assert {:error, %Ash.Error.Forbidden{}} = Billing.verify_credentials(editor)
+
+      settings = Billing.ensure_settings!()
+      refute settings.provider_account_id
+      refute settings.last_verified_at
+    end
+  end
 end

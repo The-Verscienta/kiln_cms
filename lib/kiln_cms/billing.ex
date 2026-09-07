@@ -176,15 +176,13 @@ defmodule KilnCMS.Billing do
 
   Backs the console's "Test connection" so a mistyped key fails at save time
   rather than at a member's first checkout.
+
+  Takes the requesting actor and records the result through `Settings`'
+  platform-admin policy (#1309), so a caller the policy refuses stamps nothing —
+  the provider round-trip alone leaves no trace.
   """
-  @spec verify_credentials() :: {:ok, Settings.t()} | {:error, term()}
-  def verify_credentials do
-    # Both `record_billing_verification` writes below bypass authorization:
-    # this takes no actor (it runs in `BillingLive`'s `start_async`, which has
-    # already checked `platform_admin?` — the same tier `Settings`' policy
-    # requires), and the values written come from the provider's response and
-    # the resolved key prefix, never from user input. Threading the LiveView's
-    # actor through would let the policy do this instead (#1309).
+  @spec verify_credentials(KilnCMS.Accounts.User.t()) :: {:ok, Settings.t()} | {:error, term()}
+  def verify_credentials(actor) do
     settings = ensure_settings!()
 
     with {:ok, config} <- credentials(),
@@ -198,16 +196,14 @@ defmodule KilnCMS.Billing do
           livemode: live_key?(config.secret_key),
           verification_error: nil
         },
-        # System write — bypass rationale at the top of the function.
-        authorize?: false
+        actor: actor
       )
     else
       {:error, reason} ->
         record_billing_verification(
           settings,
           %{verification_error: describe_error(reason)},
-          # Same system write as above (bypass rationale at the top).
-          authorize?: false
+          actor: actor
         )
 
         {:error, reason}

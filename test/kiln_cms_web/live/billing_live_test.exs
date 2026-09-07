@@ -143,6 +143,29 @@ defmodule KilnCMSWeb.BillingLiveTest do
       assert render(view) =~ "Configured"
     end
 
+    test "Test connection verifies via the provider and stamps the row", %{conn: conn} do
+      # The stub provider, node-global so the `start_async` task sees it too.
+      Application.put_env(:kiln_cms, KilnCMS.Billing, provider: KilnCMS.StubBillingProvider)
+      on_exit(fn -> Application.delete_env(:kiln_cms, KilnCMS.Billing) end)
+
+      configure_billing!()
+      conn = log_in(conn, authed_user(:admin))
+      {:ok, view, _html} = live(conn, ~p"/editor/billing")
+
+      view |> element(~s{button[phx-click="verify"]}) |> render_click()
+      html = render_async(view, 2_000)
+
+      # The stamp went through `Settings`' policy carrying the LiveView's actor
+      # (#1309): with the actor thread broken (a nil actor) the write is
+      # Forbidden and neither the render nor the row shows the account.
+      assert html =~ "acct_stub"
+
+      settings = Billing.get_settings()
+      assert settings.provider_account_id == "acct_stub"
+      assert %DateTime{} = settings.last_verified_at
+      refute settings.verification_error
+    end
+
     test "disconnect clears the credentials", %{conn: conn} do
       configure_billing!()
       conn = log_in(conn, authed_user(:admin))

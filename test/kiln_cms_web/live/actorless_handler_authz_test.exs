@@ -4,13 +4,17 @@ defmodule KilnCMSWeb.ActorlessHandlerAuthzTest do
 
   Every other privileged `handle_event/3` in the console funnels into an Ash
   action carrying the actor, so a mistake in the mount guard is still caught by
-  a policy. These six do not: `Newsletter.send_as_newsletter/2` writes with
+  a policy. These five do not: `Newsletter.send_as_newsletter/2` writes with
   `authorize?: false`, `Mail.deliver_now/1` is a bare `Mailer.deliver/1`,
   `DnsCheck.run/1` and `check_port25/0` take no arguments about who is asking,
-  `Links.SweepWorker.enqueue/1` takes an org id, `Billing.verify_credentials/0`
-  takes nothing, and `ReleasePreview.sign/1` takes a struct. For them the guard
-  *is* the authorization — and a mount guard is evaluated once, so a role
-  revoked mid-session would otherwise hold for the life of the socket.
+  `Links.SweepWorker.enqueue/1` takes an org id, and `ReleasePreview.sign/1`
+  takes a struct. For them the guard *is* the authorization — and a mount guard
+  is evaluated once, so a role revoked mid-session would otherwise hold for the
+  life of the socket.
+
+  `Billing.verify_credentials/1` now threads the actor (#1309), so `Settings`'
+  policy backstops a stamped result — but the guard is still what stops the
+  provider being dialed at all, which is what its case below asserts.
 
   Called directly rather than through `live/2`: where the mount refuses there is
   no socket to push an event down, and the question here is what each handler
