@@ -68,6 +68,15 @@ defmodule KilnCMS.CMS.Tag do
       destination_attribute_on_join_resource :subject_id
       public? true
     end
+
+    # Media items carrying this tag (#1316) — same polymorphic join, so a
+    # media tag and a content tag are the one taxonomy.
+    many_to_many :media_items, KilnCMS.CMS.MediaItem do
+      through KilnCMS.CMS.Tagging
+      source_attribute_on_join_resource :tag_id
+      destination_attribute_on_join_resource :subject_id
+      public? true
+    end
   end
 
   aggregates do
@@ -78,6 +87,15 @@ defmodule KilnCMS.CMS.Tag do
 
     count :post_count, :posts do
       public? true
+    end
+
+    # Trashed media keeps its taggings (a restore brings them back), but a
+    # count that includes items the library can't show reads as a lie —
+    # aggregates don't run the destination's read actions, so AshArchival's
+    # automatic `is_nil(archived_at)` has to be restated here.
+    count :media_count, :media_items do
+      public? true
+      filter expr(is_nil(archived_at))
     end
   end
 end

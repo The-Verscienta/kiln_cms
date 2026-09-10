@@ -324,6 +324,9 @@ defmodule KilnCMS.CMS do
     resource KilnCMS.CMS.MediaItem do
       define :list_media_items, action: :read
       define :search_media, action: :search, args: [:query]
+      # Faceted browse (#1316); every argument optional, passed as the params
+      # map: `CMS.library_media_items!(%{kind: :image, unused: true}, opts)`.
+      define :library_media_items, action: :library
       define :get_media_item, action: :read, get_by: [:id]
       define :create_media_item, action: :create
       define :update_media_item, action: :update
