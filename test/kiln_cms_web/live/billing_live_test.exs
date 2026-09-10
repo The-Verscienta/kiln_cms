@@ -143,6 +143,41 @@ defmodule KilnCMSWeb.BillingLiveTest do
       assert render(view) =~ "Configured"
     end
 
+    test "Test connection verifies via the provider and stamps the row", %{conn: conn} do
+      # The stub provider, node-global so the `start_async` task sees it too.
+      # Merged into (and restored over) the existing key rather than replacing
+      # it: the key also carries config/test.exs's `req_options` Req.Test plug.
+      previous = Application.get_env(:kiln_cms, KilnCMS.Billing, [])
+
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Billing,
+        Keyword.put(previous, :provider, KilnCMS.StubBillingProvider)
+      )
+
+      on_exit(fn ->
+        Application.put_env(:kiln_cms, KilnCMS.Billing, previous)
+        Application.delete_env(:kiln_cms, :stub_billing_provider)
+      end)
+
+      configure_billing!()
+      conn = log_in(conn, authed_user(:admin))
+      {:ok, view, _html} = live(conn, ~p"/editor/billing")
+
+      view |> element(~s{button[phx-click="verify"]}) |> render_click()
+      html = render_async(view, 2_000)
+
+      # The stamp went through `Settings`' policy carrying the LiveView's actor
+      # (#1309): with the actor thread broken (a nil actor) `verify_credentials/1`
+      # refuses up front and neither the render nor the row shows the account.
+      assert html =~ "acct_stub"
+
+      settings = Billing.get_settings()
+      assert settings.provider_account_id == "acct_stub"
+      assert %DateTime{} = settings.last_verified_at
+      refute settings.verification_error
+    end
+
     test "disconnect clears the credentials", %{conn: conn} do
       configure_billing!()
       conn = log_in(conn, authed_user(:admin))

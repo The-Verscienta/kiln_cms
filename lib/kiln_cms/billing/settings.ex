@@ -106,12 +106,21 @@ defmodule KilnCMS.Billing.Settings do
       change KilnCMS.Billing.Settings.Changes.ConfigureKeySource
     end
 
-    # Stamped after a successful credential probe, so the console can show
-    # which account is wired up and whether it is live or test mode.
+    # Stamped after a credential probe, so the console can show which account
+    # is wired up and whether it is live or test mode.
     update :record_verification do
       accept [:provider_account_id, :livemode, :verification_error]
       require_atomic? false
-      change set_attribute(:last_verified_at, &DateTime.utc_now/0)
+
+      # `last_verified_at` means "last SUCCESSFUL probe": a failed probe records
+      # its error but must not advance the timestamp, or the console would pair
+      # the previous account id with a recency the provider never confirmed.
+      change fn changeset, _context ->
+        case Ash.Changeset.get_attribute(changeset, :verification_error) do
+          nil -> Ash.Changeset.change_attribute(changeset, :last_verified_at, DateTime.utc_now())
+          _error -> changeset
+        end
+      end
     end
 
     # The operator's "disconnect": nulls both secrets and resets the providers.
