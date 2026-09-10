@@ -91,7 +91,13 @@ ADMIN_EMAIL=you@example.com ADMIN_PASSWORD='a-strong-password' \
 | `EDITOR_EMAIL` | `editor@kiln.test` | Email for the seeded editor account. |
 | `EDITOR_PASSWORD` | `kilneditor123` | Password for the seeded editor account. |
 
-**Production — bootstrap the first admin.** A production OTP release has no
+**Production — bootstrap the first admin.** Visit **`/setup`** on a fresh
+instance: a three-step wizard creates the first admin (and, optionally, names
+the site and picks its theme), then disappears permanently once any admin
+exists. No shell required.
+
+The release-shell path below still works — for headless bootstrap, or an
+instance whose `/setup` was raced shut. A production OTP release has no
 `iex`/`mix` — drive it through the generated `bin/kiln_cms` scripts (in Docker
 they live at `/app/bin/kiln_cms`). With no existing admin to authorize the
 promotion, run the admin-only `:manage_access` action with `authorize?: false`.

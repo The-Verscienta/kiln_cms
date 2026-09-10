@@ -43,7 +43,12 @@ defmodule KilnCMS.Accounts.User do
         auto_confirm_actions [
           :sign_in_with_magic_link,
           :reset_password_with_token,
-          :register_with_sso
+          :register_with_sso,
+          # First-run bootstrap (#1317): the operator creating the instance's
+          # first admin cannot receive a confirmation mail — SMTP is one of the
+          # things they have not configured yet — and the account is created
+          # from credentials they just typed at the console they control.
+          :bootstrap_admin
         ]
 
         sender KilnCMS.Accounts.User.Senders.SendNewUserConfirmationEmail
@@ -436,6 +441,45 @@ defmodule KilnCMS.Accounts.User do
       end
     end
 
+    # First-run bootstrap (#1317): the ONE create that lands on `:admin`, so
+    # the rule "self-registration always lands :viewer" stays true of
+    # `register_with_password` unqualified. Policy-gated on
+    # `Checks.NoAdminExists` — callable by anyone exactly while there is nobody
+    # who could authorize it, and by no one afterwards — and serialized against
+    # the racing twin by `KilnCMS.Accounts.Bootstrap` (advisory lock +
+    # re-check), which is the only intended caller. Deliberately NOT throttled
+    # (`ThrottleRegistration` guards the open registration surface; this one
+    # succeeds at most once per install) and deliberately mints no token — the
+    # operator signs in through the normal password flow afterwards.
+    create :bootstrap_admin do
+      description "First-run: create the instance's first admin account."
+      accept [:name]
+
+      argument :email, :ci_string do
+        allow_nil? false
+      end
+
+      argument :password, :string do
+        allow_nil? false
+        constraints min_length: 8
+        sensitive? true
+      end
+
+      argument :password_confirmation, :string do
+        allow_nil? false
+        sensitive? true
+      end
+
+      change set_attribute(:email, arg(:email))
+      change set_attribute(:role, :admin)
+      # `strategy_name:` explicitly — the strategy is normally inferred from
+      # the action name, and this action isn't the strategy's own.
+      change {AshAuthentication.Strategy.Password.HashPasswordChange, strategy_name: :password}
+
+      validate {AshAuthentication.Strategy.Password.PasswordConfirmationValidation,
+                strategy_name: :password}
+    end
+
     # Written out rather than generated, so a per-address budget can go in front
     # of it (#724). `MagicLink.Transformer` builds this action only when the
     # resource does not already define it, and what it builds is exactly the two
@@ -696,6 +740,14 @@ defmodule KilnCMS.Accounts.User do
     # above; this makes the intent explicit and forbids everyone else).
     policy action(:anonymize) do
       authorize_if actor_attribute_equals(:role, :admin)
+    end
+
+    # First-run bootstrap (#1317): anyone may create the first admin while no
+    # admin exists — after that this check forbids every caller, actor or not.
+    # The race between two "no admin yet" readers is closed by the advisory
+    # lock in `KilnCMS.Accounts.Bootstrap`, not here.
+    policy action(:bootstrap_admin) do
+      authorize_if KilnCMS.Accounts.Checks.NoAdminExists
     end
 
     # The passkey sign-in completion mints a session token — system-only

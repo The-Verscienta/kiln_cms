@@ -542,6 +542,11 @@ msgstr "%{who}%{note}"
 msgid "(content unavailable)"
 msgstr "(contenido no disponible)"
 
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "(default)"
+msgstr "(predeterminado)"
+
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "(dropped from delivery)"
@@ -724,6 +729,11 @@ msgstr "Un destino en borrador empieza a redirigir en cuanto se publica."
 #, elixir-autogen, elixir-format
 msgid "A feed is fetched by anonymous readers, aggregators and scrapers. With full content on, each of them receives the complete rendered body of every published entry of that type, not a summary. Turn it on for a type you are happy to have republished elsewhere — a newsletter built from the feed body is the usual reason."
 msgstr "Un feed lo descargan lectores anónimos, agregadores y rastreadores. Con el contenido completo activado, cada uno de ellos recibe el cuerpo completo ya renderizado de todas las entradas publicadas de ese tipo, no un resumen. Actívalo para un tipo que no te importe que se republique en otro sitio: el motivo habitual es un boletín construido a partir del cuerpo del feed."
+
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "A few things stay with the operator"
+msgstr "Algunas cosas quedan en manos del operador"
 
 #: lib/kiln_cms_web/components/compliance_components.ex
 #, elixir-autogen, elixir-format
@@ -911,6 +921,7 @@ msgid "Accessible"
 msgstr "Accesible"
 
 #: lib/kiln_cms_web/live/billing_live.ex
+#: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Account"
 msgstr "Cuenta"
@@ -1200,6 +1211,11 @@ msgstr "Dirección eliminada: puede volver a recibir correo."
 msgid "Adds detail drawn from this block and the rest of the page."
 msgstr "Añade detalles extraídos de este bloque y del resto de la página."
 
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Admin"
+msgstr "Administración"
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Admin routes"
@@ -1286,6 +1302,11 @@ msgstr "Todos los menús"
 #, elixir-autogen, elixir-format
 msgid "All notifications are on by default. Uncheck any you'd rather not receive."
 msgstr "Todas las notificaciones están activadas por defecto. Desmarque las que prefiera no recibir."
+
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "All of this is optional and can be changed later under Branding."
+msgstr "Todo esto es opcional y puede cambiarse después en Marca."
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -1596,6 +1617,11 @@ msgstr "Responsable"
 msgid "Assignment"
 msgstr "Asignación"
 
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "At least 8 characters."
+msgstr "Al menos 8 caracteres."
+
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
 msgid "Attempting to reconnect"
@@ -1692,6 +1718,7 @@ msgid "Awaiting admin approval"
 msgstr "En espera de aprobación del administrador"
 
 #: lib/kiln_cms_web/controllers/form_controller.ex
+#: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Back"
 msgstr "Volver"
@@ -2599,6 +2626,7 @@ msgid "Contents"
 msgstr "Contenido"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Continue"
 msgstr "Continuar"
@@ -3046,6 +3074,11 @@ msgstr "Cubre"
 msgid "Create a key"
 msgstr "Crear una clave"
 
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Create account and finish"
+msgstr "Crear la cuenta y finalizar"
+
 #: lib/kiln_cms_web/live/auth_page_title.ex
 #, elixir-autogen, elixir-format
 msgid "Create an account"
@@ -3135,6 +3168,11 @@ msgstr "Crear tarea"
 #, elixir-autogen, elixir-format
 msgid "Create translation"
 msgstr "Crear traducción"
+
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Create your admin account"
+msgstr "Crea tu cuenta de administración"
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
@@ -3256,6 +3294,7 @@ msgid "Daily buckets use UTC calendar days; today's bar is still filling. Histor
 msgstr "Los intervalos diarios usan días naturales UTC; la barra de hoy aún se está llenando. El historial comienza cuando se implementó esta función."
 
 #: lib/kiln_cms_web/live/branding_live.ex
+#: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Dark"
 msgstr "Oscuro"
@@ -3707,6 +3746,11 @@ msgstr "Descartar"
 msgid "Display name"
 msgstr "Nombre para mostrar"
 
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Display name (optional)"
+msgstr "Nombre para mostrar (opcional)"
+
 #: lib/kiln_cms_web/live/automation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Do"
@@ -3982,6 +4026,7 @@ msgid "Editorial calendar"
 msgstr "Calendario editorial"
 
 #: lib/kiln_cms_web/live/branding_live.ex
+#: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Editorial — serif, narrower reading column"
 msgstr "Editorial — serif, columna de lectura más estrecha"
@@ -3993,6 +4038,7 @@ msgstr "Las ediciones conservan el archivo anterior para el contenido ya publica
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/newsletter_live.ex
+#: lib/kiln_cms_web/live/setup_live.ex
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "Email"
@@ -4135,6 +4181,11 @@ msgstr "Introduzca una dirección a la que enviar la prueba."
 #, elixir-autogen, elixir-format
 msgid "Enter the 6-digit code from your authenticator app, or one of your recovery codes."
 msgstr "Introduzca el código de 6 dígitos de su aplicación de autenticación o uno de sus códigos de recuperación."
+
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Enter the email address you will sign in with."
+msgstr "Introduce la dirección de correo con la que iniciarás sesión."
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -4538,6 +4589,11 @@ msgstr "Encuentre páginas, entradas y medios — pulse ⌘K / Ctrl-K desde cual
 #, elixir-autogen, elixir-format
 msgid "Find related pages"
 msgstr "Buscar páginas relacionadas"
+
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Finish"
+msgstr "Finalizar"
 
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
@@ -5513,6 +5569,7 @@ msgid "Library (%{count})"
 msgstr "Biblioteca (%{count})"
 
 #: lib/kiln_cms_web/live/branding_live.ex
+#: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Light"
 msgstr "Claro"
@@ -5924,6 +5981,11 @@ msgstr "Nombre (p. ej. «Touch ID del MacBook»)"
 #, elixir-autogen, elixir-format
 msgid "Name (optional)"
 msgstr "Nombre (opcional)"
+
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Name your site"
+msgstr "Pon nombre a tu sitio"
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
@@ -6700,6 +6762,11 @@ msgstr "noviembre"
 msgid "Number"
 msgstr "Número"
 
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Object storage, outgoing email, and search are configured with environment variables, not in the console — see the environment variables guide in the docs when you need them."
+msgstr "El almacenamiento de objetos, el correo saliente y la búsqueda se configuran con variables de entorno, no en la consola; consulta la guía de variables de entorno en la documentación cuando las necesites."
+
 #: lib/kiln_cms_web/controllers/content_html.ex
 #, elixir-autogen, elixir-format
 msgid "October"
@@ -7098,9 +7165,15 @@ msgid "Passphrase"
 msgstr "Frase de contraseña"
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Password"
 msgstr "Contraseña"
+
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Password (again)"
+msgstr "Contraseña (otra vez)"
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -7388,6 +7461,7 @@ msgid "Primary"
 msgstr "Navegación principal"
 
 #: lib/kiln_cms_web/live/branding_live.ex
+#: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Primary colour"
 msgstr "Color primario"
@@ -7627,6 +7701,11 @@ msgstr "La legibilidad es de %{score}/100 — ayudarían palabras y frases más 
 #, elixir-autogen, elixir-format
 msgid "Reading time is an estimate at %{wpm} words per minute."
 msgstr "El tiempo de lectura es una estimación a %{wpm} palabras por minuto."
+
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Ready to finish"
+msgstr "Listo para finalizar"
 
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
@@ -8872,6 +8951,11 @@ msgstr "Los define el operador en la configuración y los usa cualquier sitio qu
 msgid "Set name"
 msgstr "Establecer nombre"
 
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Set up your site"
+msgstr "Configura tu sitio"
+
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
@@ -8970,6 +9054,11 @@ msgstr "Mostrando las primeras %{limit} etiquetas. Filtra para encontrar otras."
 msgid "Shown"
 msgstr "Visible"
 
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Shown as the author byline on what you publish."
+msgstr "Se muestra como firma de autoría en lo que publicas."
+
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
 msgid "Shown in the header, the page title, and sign-in emails."
@@ -9049,6 +9138,11 @@ msgstr "Texto de una línea"
 msgid "Single sign-on failed — the identity couldn't be verified or linked. Try again, or contact an administrator."
 msgstr "Falló el inicio de sesión único: no se pudo verificar o vincular la identidad. Inténtelo de nuevo o contacte con un administrador."
 
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Site"
+msgstr "Sitio"
+
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "Site default (completes it)"
@@ -9060,6 +9154,7 @@ msgid "Site default (leaves it open)"
 msgstr "Valor por defecto del sitio (la deja abierta)"
 
 #: lib/kiln_cms_web/live/branding_live.ex
+#: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Site name"
 msgstr "Nombre del sitio"
@@ -9255,6 +9350,7 @@ msgid "Spring campaign"
 msgstr "Campaña de primavera"
 
 #: lib/kiln_cms_web/live/branding_live.ex
+#: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Standard — the stock look"
 msgstr "Estándar — el aspecto de serie"
@@ -9319,6 +9415,7 @@ msgid "Step-by-step guide, fired as HowTo structured data"
 msgstr "Guía paso a paso, emitida como datos estructurados HowTo"
 
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
+#: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Steps"
 msgstr "Pasos"
@@ -9349,6 +9446,7 @@ msgid "Structure"
 msgstr "Estructura"
 
 #: lib/kiln_cms_web/live/branding_live.ex
+#: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Studio — wide, bold display headings"
 msgstr "Studio — ancho, con titulares grandes y contundentes"
@@ -9819,6 +9917,11 @@ msgstr "El núcleo de Kiln con el que se construyó esta instancia, y cómo actu
 msgid "The SEO title just repeats the page title — a distinct one usually reads better."
 msgstr "El título SEO solo repite el título de la página — uno distinto suele leerse mejor."
 
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "The account could not be created."
+msgstr "No se pudo crear la cuenta."
+
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "The account must already exist — invite people via sign-up or SSO first."
@@ -9955,6 +10058,7 @@ msgstr[0] "La última copia de seguridad fue hace %{count} hora."
 msgstr[1] "La última copia de seguridad fue hace %{count} horas."
 
 #: lib/kiln_cms_web/live/branding_live.ex
+#: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "The light and dark variants, and the text colour on buttons, are derived from this so they always meet WCAG AA."
 msgstr "Las variantes clara y oscura, y el color del texto de los botones, se derivan de este para cumplir siempre con WCAG AA."
@@ -9974,6 +10078,16 @@ msgstr "El más antiguo cubre el historial hasta %{at}."
 #, elixir-autogen, elixir-format
 msgid "The operator of this deployment has capped which sites may embed forms. You can narrow that list here but not add to it — ask them to allow a site that is refused."
 msgstr "El operador de este despliegue ha limitado qué sitios pueden incrustar formularios. Aquí puede restringir esa lista, pero no ampliarla: pídale que autorice un sitio que sea rechazado."
+
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "The password needs at least 8 characters."
+msgstr "La contraseña necesita al menos 8 caracteres."
+
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "The passwords don't match."
+msgstr "Las contraseñas no coinciden."
 
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
@@ -10068,6 +10182,7 @@ msgstr "La variante ganadora ya no existe."
 
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/branding_live.ex
+#: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Theme"
 msgstr "Tema"
@@ -10326,6 +10441,11 @@ msgstr "Los metadatos de esta subida se están eliminando en segundo plano. No s
 msgid "This was published. Your collaborative edits were saved with it."
 msgstr "Esto se publicó. Tus ediciones colaborativas se guardaron con ello."
 
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Three quick steps: your admin account, your site's look, and you're in."
+msgstr "Tres pasos rápidos: tu cuenta de administración, el aspecto de tu sitio, y listo."
+
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "Thu"
@@ -10557,6 +10677,7 @@ msgid "Types"
 msgstr "Tipos"
 
 #: lib/kiln_cms_web/live/branding_live.ex
+#: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Typography and page width for the public pages."
 msgstr "Tipografía y ancho de página de las páginas públicas."
@@ -11469,6 +11590,11 @@ msgstr "Sus códigos de recuperación: guárdelos ahora, no se volverán a mostr
 #, elixir-autogen, elixir-format
 msgid "Your role cannot copy this content's blocks, so it cannot be translated."
 msgstr "Tu rol no puede copiar los bloques de este contenido, así que no se puede traducir."
+
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Your site is ready — sign in with the account you just created."
+msgstr "Tu sitio está listo: inicia sesión con la cuenta que acabas de crear."
 
 #: lib/kiln_cms_web/controllers/form_controller.ex
 #, elixir-autogen, elixir-format

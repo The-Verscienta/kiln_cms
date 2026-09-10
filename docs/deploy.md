@@ -243,9 +243,16 @@ period of at least a minute there.
 ## First admin — bootstrap
 
 Self-registration always lands on the `:viewer` role, so sign-up can never
-escalate privileges, and there is no seed script in a production release. The
-first admin is made by promoting a registered user from a release shell with
-authorization bypassed — once, and only for the first one.
+escalate privileges, and there is no seed script in a production release.
+
+**The easy path (#1317): visit `https://<PHX_HOST>/setup`.** While the
+instance has no admin, a three-step wizard creates one — email + password,
+an optional site name/colour/theme — and then sends you to sign-in. The page
+gates itself on "no admin exists" (policy-enforced and race-safe, not just
+hidden) and redirects home forever after, so it is safe to leave deployed.
+
+The release-shell path below remains for headless bootstrap: promote a
+registered user with authorization bypassed — once, and only for the first one.
 
 1. Register your own account at `https://<PHX_HOST>/register`. (Want
    invite-only sign-up afterwards? `config :kiln_cms, :registration_enabled,
