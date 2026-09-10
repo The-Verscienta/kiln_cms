@@ -15,14 +15,23 @@ defmodule KilnCMS.StubBillingProvider do
   It is also the seam the browser suite needs, since `config/e2e.exs` notes the
   e2e run cannot use a `Req.Test` stub.
 
-  Use it via:
+  Use it via (merge into and restore over the existing key rather than
+  replacing it — the key also carries config/test.exs's `req_options`
+  Req.Test plug, which a delete would strip for the rest of the run):
 
       setup do
-        Application.put_env(:kiln_cms, KilnCMS.Billing,
-          provider: KilnCMS.StubBillingProvider
+        previous = Application.get_env(:kiln_cms, KilnCMS.Billing, [])
+
+        Application.put_env(
+          :kiln_cms,
+          KilnCMS.Billing,
+          Keyword.put(previous, :provider, KilnCMS.StubBillingProvider)
         )
 
-        on_exit(fn -> Application.delete_env(:kiln_cms, KilnCMS.Billing) end)
+        on_exit(fn ->
+          Application.put_env(:kiln_cms, KilnCMS.Billing, previous)
+          Application.delete_env(:kiln_cms, :stub_billing_provider)
+        end)
       end
 
   Responses are configurable per-test by putting values under
