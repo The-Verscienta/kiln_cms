@@ -45,7 +45,10 @@ defmodule KilnCMS.Branding do
             social_image_url: nil,
             brand_color: nil,
             show_attribution: true,
-            css: nil
+            css: nil,
+            theme: :standard,
+            header_menu_key: nil,
+            footer_menu_key: nil
 
   @type t :: %__MODULE__{
           site_name: String.t(),
@@ -56,8 +59,19 @@ defmodule KilnCMS.Branding do
           social_image_url: String.t() | nil,
           brand_color: String.t() | nil,
           show_attribution: boolean(),
-          css: String.t() | nil
+          css: String.t() | nil,
+          theme: atom(),
+          header_menu_key: String.t() | nil,
+          footer_menu_key: String.t() | nil
         }
+
+  # The public theme presets (#1318), in the order the settings form offers
+  # them. `:standard` is the pre-#1318 look and the fallback for `nil`, so an
+  # unconfigured site renders byte-identically. A closed list on purpose — the
+  # value is emitted as a `data-public-theme` attribute, and the attribute must
+  # never carry a byte an org admin typed (`Validations.BrandTokens` explains
+  # why an org admin's CSS-shaped input is untrusted).
+  @themes [:standard, :editorial, :studio]
 
   @default_site_name "KilnCMS"
   @default_logo_url "/images/logo-mark.png"
@@ -124,6 +138,14 @@ defmodule KilnCMS.Branding do
   def defaults, do: build(nil)
 
   @doc """
+  The public theme presets (#1318), `:standard` first. The single source for
+  the resource constraint, the settings form's options, and the CSS the
+  layout may emit — one list so they cannot drift.
+  """
+  @spec themes() :: [atom()]
+  def themes, do: @themes
+
+  @doc """
   Whether this site has any branding of its own, i.e. whether the public footer
   should say "Powered by <name>" instead of the stock attribution.
   """
@@ -131,13 +153,13 @@ defmodule KilnCMS.Branding do
   def branded?(%__MODULE__{} = brand), do: brand.site_name != @default_site_name
 
   defp build(row) do
-    color = pick(row && row.brand_color, config(:primary_color), nil)
+    color = pick(field(row, :brand_color), config(:primary_color), nil)
 
     %__MODULE__{
-      site_name: pick(row && row.site_name, config(:site_name), @default_site_name),
-      logo_url: pick(row && row.logo_url, config(:logo_url), @default_logo_url),
-      favicon_url: pick(row && row.favicon_url, config(:favicon_url), @default_favicon_url),
-      social_image_url: pick(row && row.social_image_url, config(:social_image_url), nil),
+      site_name: pick(field(row, :site_name), config(:site_name), @default_site_name),
+      logo_url: pick(field(row, :logo_url), config(:logo_url), @default_logo_url),
+      favicon_url: pick(field(row, :favicon_url), config(:favicon_url), @default_favicon_url),
+      social_image_url: pick(field(row, :social_image_url), config(:social_image_url), nil),
       # No config fallback and no default: an app icon is only ever one this
       # deployment has measured (#629). `app_icon_size` is what the manifest
       # gates on, so an unverified URL is the same as no icon at all.
@@ -146,13 +168,28 @@ defmodule KilnCMS.Branding do
       # is `is_binary/1`, so without it a `""` paired with a size would emit
       # `<link rel="apple-touch-icon" href="">` — which resolves to the current
       # document, i.e. the phone tries to use the HTML page as the icon.
-      app_icon_url: present(row && row.app_icon_url),
-      app_icon_size: row && row.app_icon_size,
-      show_attribution: if(row, do: row.show_attribution, else: true),
+      app_icon_url: present(field(row, :app_icon_url)),
+      app_icon_size: field(row, :app_icon_size),
+      show_attribution: if(is_nil(row), do: true, else: row.show_attribution),
       brand_color: color,
-      css: css_variables(color)
+      css: css_variables(color),
+      theme: resolve_theme(field(row, :theme)),
+      header_menu_key: present(field(row, :header_menu_key)),
+      footer_menu_key: present(field(row, :footer_menu_key))
     }
   end
+
+  # `build/1` reads ten columns off a row that may be nil; folding the nil
+  # check in here keeps its cyclomatic complexity out of credo's ceiling.
+  defp field(nil, _key), do: nil
+  defp field(row, key), do: Map.get(row, key)
+
+  # `in @themes` rather than a bare `||`: the column is a closed enum today,
+  # but this struct is also built from cached values — the layout emits the
+  # atom into markup, so the allowlist is enforced where the emission is
+  # decided.
+  defp resolve_theme(theme) when theme in @themes, do: theme
+  defp resolve_theme(_other), do: :standard
 
   @doc """
   The `<style>` body overriding the primary theme tokens for a brand colour, or

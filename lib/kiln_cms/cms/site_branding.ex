@@ -50,7 +50,10 @@ defmodule KilnCMS.CMS.SiteBranding do
       :social_image_url,
       :app_icon_url,
       :brand_color,
-      :show_attribution
+      :show_attribution,
+      :theme,
+      :header_menu_key,
+      :footer_menu_key
     ],
     upsert_fields: [
       :site_name,
@@ -61,7 +64,10 @@ defmodule KilnCMS.CMS.SiteBranding do
       :app_icon_size,
       :app_icon_verify_failures,
       :brand_color,
-      :show_attribution
+      :show_attribution,
+      :theme,
+      :header_menu_key,
+      :footer_menu_key
     ],
     read: :public,
     save_arguments: [{:app_icon_size, :integer}],
@@ -192,5 +198,31 @@ defmodule KilnCMS.CMS.SiteBranding do
       allow_nil? false
       public? true
     end
+
+    # The public theme preset (#1318). A closed enum, NOT free text: the value
+    # becomes a `data-public-theme` attribute whose styles are compiled into
+    # `app.css`, so — like `brand_color` — no user-supplied byte reaches the
+    # page. Arbitrary CSS stays on `SiteCodeInjection`, where the "stored XSS
+    # on purpose" policy and paper trail already govern it; widening branding
+    # to carry stylesheet text would undo the separation both moduledocs argue
+    # for. `nil` means "not chosen at this layer" and resolves to `:standard`.
+    attribute :theme, :atom,
+      public?: true,
+      constraints: [one_of: KilnCMS.Branding.themes()]
+
+    # Keys of `KilnCMS.CMS.Menu` rows to render as the public header nav and
+    # footer nav (#1318). Stored as keys, not ids: a menu is one key with a row
+    # per locale, and the layout must pick the request-locale variant — the
+    # same reason `Menus.resolve/4` addresses menus by key. A key that resolves
+    # to no menu (deleted later, or missing this locale) falls back to the
+    # stock header links rather than an empty nav, so a rename can't strip a
+    # site of navigation.
+    attribute :header_menu_key, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.identifier()]
+
+    attribute :footer_menu_key, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.identifier()]
   end
 end

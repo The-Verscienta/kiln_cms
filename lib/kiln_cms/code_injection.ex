@@ -43,6 +43,7 @@ defmodule KilnCMS.CodeInjection do
 
   defstruct head_html: nil,
             footer_html: nil,
+            custom_css: nil,
             script_src: [],
             connect_src: [],
             img_src: [],
@@ -51,6 +52,7 @@ defmodule KilnCMS.CodeInjection do
   @type t :: %__MODULE__{
           head_html: String.t() | nil,
           footer_html: String.t() | nil,
+          custom_css: String.t() | nil,
           script_src: [String.t()],
           connect_src: [String.t()],
           img_src: [String.t()],
@@ -238,6 +240,12 @@ defmodule KilnCMS.CodeInjection do
     %__MODULE__{
       head_html: blank_to_nil(row.head_html),
       footer_html: blank_to_nil(row.footer_html),
+      # Belt on the validation's braces: the emission site wraps this in a
+      # `<style>` element it owns, and a historical row that predates
+      # `Validations.CustomCssStaysCss` must not be able to close it. Dropping
+      # the value (not "fixing" it) matches how every other malformed stored
+      # setting degrades here — to the unconfigured behaviour, visibly.
+      custom_css: safe_custom_css(row.custom_css),
       script_src: row.script_src || [],
       connect_src: row.connect_src || [],
       img_src: row.img_src || [],
@@ -249,5 +257,15 @@ defmodule KilnCMS.CodeInjection do
 
   defp blank_to_nil(value) do
     if String.trim(value) == "", do: nil, else: value
+  end
+
+  defp safe_custom_css(value) do
+    case blank_to_nil(value) do
+      nil ->
+        nil
+
+      css ->
+        if String.contains?(String.downcase(css), "</style"), do: nil, else: css
+    end
   end
 end

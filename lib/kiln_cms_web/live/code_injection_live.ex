@@ -25,7 +25,7 @@ defmodule KilnCMSWeb.CodeInjectionLive do
 
   alias KilnCMS.CMS
 
-  @text_fields ~w(head_html footer_html)
+  @text_fields ~w(head_html footer_html custom_css)
   @origin_fields ~w(script_src connect_src img_src)
 
   @impl true
@@ -105,6 +105,7 @@ defmodule KilnCMSWeb.CodeInjectionLive do
     params = %{
       "head_html" => row && row.head_html,
       "footer_html" => row && row.footer_html,
+      "custom_css" => row && row.custom_css,
       "script_src" => origins_text(row, :script_src),
       "connect_src" => origins_text(row, :connect_src),
       "img_src" => origins_text(row, :img_src),
@@ -190,6 +191,19 @@ defmodule KilnCMSWeb.CodeInjectionLive do
           rows="8"
           label={gettext("Footer HTML")}
           placeholder={"<!-- " <> gettext("added just before </body>") <> " -->"}
+        />
+
+        <.input
+          field={@form[:custom_css]}
+          type="textarea"
+          rows="8"
+          label={gettext("Custom CSS")}
+          placeholder={"/* " <> gettext("styles for the public site") <> " */"}
+          hint={
+            gettext(
+              "Plain CSS, served inside a <style> element on every public page — no <style> tags here, and no HTML. Use it to go beyond the theme presets in Branding."
+            )
+          }
         />
 
         <div class="rounded-lg border border-base-300 p-4">

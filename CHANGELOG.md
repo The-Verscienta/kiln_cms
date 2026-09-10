@@ -40,6 +40,16 @@ migration, a rewritten column, a dropped config key).
   `examples/astro-blog` now consumes the client end to end, and a `client-js`
   CI job lints, builds, and tests the package (not yet published to npm).
 
+- **A small public theme layer (#1318).** Branding gains a *Public site* card:
+  a theme preset (`standard` / `editorial` / `studio` — closed list, tokens
+  compiled into `app.css`, so no admin-typed byte reaches a stylesheet) and
+  header/footer menu slots that render an editor-managed `Menu` as the
+  delivery nav, cached per org and busted on any menu write. Arbitrary CSS
+  gets a dedicated `custom_css` field on **code injection** (same trust model
+  as the HTML fields; `</style` refused at save and dropped at read), served
+  in a `<style>` element on delivery pages only. One additive migration; an
+  unconfigured site renders as before. See `docs/public-theming.md`.
+
 - **Reranking can be scoped to `/api/ask`.** `config :kiln_cms, KilnCMS.Ask,
   rerank: true` (or `ASK_RERANK=true`) reranks a question's retrieved
   candidates with the configured `KilnCMS.Search.Reranker` — the wired

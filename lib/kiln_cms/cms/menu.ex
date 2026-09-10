@@ -59,11 +59,21 @@ defmodule KilnCMS.CMS.Menu do
   end
 
   actions do
-    defaults [:destroy]
     default_accept [:key, :name, :locale, :description]
 
     create :create, primary?: true
-    update :update, primary?: true
+
+    # `require_atomic? false` on update/destroy: `BustPublicMenus` runs in
+    # `after_transaction`, which has no atomic form.
+    update :update do
+      primary? true
+      require_atomic? false
+    end
+
+    destroy :destroy do
+      primary? true
+      require_atomic? false
+    end
 
     read :read do
       primary? true
@@ -115,6 +125,11 @@ defmodule KilnCMS.CMS.Menu do
     policy action_type(:destroy) do
       forbid_if always()
     end
+  end
+
+  changes do
+    # Any write invalidates the delivery header/footer nav cache (#1318).
+    change KilnCMS.CMS.Changes.BustPublicMenus, on: [:create, :update, :destroy]
   end
 
   # Multi-tenancy (epic #336): a menu belongs to one site. `global?: true` keeps

@@ -52,6 +52,37 @@ defmodule KilnCMS.CMS.Menus do
           children: [node_map()]
         }
 
+  # Matches the branding/code-injection TTL; the writing node is invalidated
+  # precisely by `Changes.BustPublicMenus`, so the TTL only bounds staleness
+  # for writes the change modules cannot see (a restore, direct SQL).
+  @public_ttl :timer.minutes(5)
+
+  @doc """
+  The cached anonymous-audience tree for the menu `key` in `locale` (#1318) —
+  what the delivery header/footer render. `[]` both when the menu is empty and
+  when no such menu exists, and the empty answer is cached too: a branding row
+  naming a since-deleted key must not turn every page view into a fresh read.
+
+  Cached because the delivery chrome renders per request while the content
+  cache's hit path does zero queries — an uncached tree would put `resolve/4`'s
+  reads back on every hit. Anonymous audience only, deliberately: this feeds a
+  shared cache, and a tree widened by one signed-in reader's audiences must
+  never be served to the next anonymous one.
+  """
+  @spec public_tree(String.t(), String.t(), Ash.UUID.t()) :: [node_map()]
+  def public_tree(key, locale, org_id) do
+    KilnCMS.Cache.fetch(
+      KilnCMS.Cache.public_menu_key(org_id, key, locale),
+      @public_ttl,
+      fn ->
+        case resolve(key, locale, org_id) do
+          {:ok, _menu, tree} -> tree
+          :not_found -> []
+        end
+      end
+    )
+  end
+
   @doc """
   The menu `key` in `locale`, resolved for `org_id` — `{:ok, menu, tree}`, or
   `:not_found` when no such menu exists for that locale.

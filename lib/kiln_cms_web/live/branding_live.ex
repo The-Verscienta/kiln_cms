@@ -21,13 +21,14 @@ defmodule KilnCMSWeb.BrandingLive do
   alias KilnCMS.Branding.AppIcon
   alias KilnCMS.CMS
 
-  @fields ~w(site_name logo_url favicon_url social_image_url app_icon_url brand_color show_attribution)
+  @fields ~w(site_name logo_url favicon_url social_image_url app_icon_url brand_color show_attribution theme header_menu_key footer_menu_key)
 
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
      socket
      |> assign(:page_title, gettext("Branding"))
+     |> assign(:menu_options, menu_options(socket))
      |> load_branding()}
   end
 
@@ -192,6 +193,39 @@ defmodule KilnCMSWeb.BrandingLive do
   # see what a blank field will inherit.
   defp inherited(socket_org), do: Branding.for_org(socket_org)
 
+  # One entry per menu KEY (menus are one key with a row per locale — the
+  # layout picks the request-locale variant), labelled by the first row's name.
+  # The empty option is the unconfigured slot: stock links in the header,
+  # nothing in the footer.
+  defp menu_options(socket) do
+    case CMS.list_menus(
+           actor: socket.assigns.current_user,
+           tenant: socket.assigns.current_org
+         ) do
+      {:ok, menus} ->
+        menus
+        |> Enum.uniq_by(& &1.key)
+        |> Enum.map(fn menu -> {"#{menu.name} (#{menu.key})", menu.key} end)
+
+      _ ->
+        []
+    end
+  end
+
+  # Select options for the theme presets, first (:standard) as the fallback the
+  # resolver applies to a blank column.
+  defp theme_options do
+    labels = %{
+      standard: gettext("Standard — the stock look"),
+      editorial: gettext("Editorial — serif, narrower reading column"),
+      studio: gettext("Studio — wide, bold display headings")
+    }
+
+    Enum.map(Branding.themes(), fn theme ->
+      {Map.get(labels, theme, Phoenix.Naming.humanize(theme)), Atom.to_string(theme)}
+    end)
+  end
+
   @impl true
   def render(assigns) do
     assigns = assign(assigns, :inherited, inherited(assigns.current_org))
@@ -309,6 +343,45 @@ defmodule KilnCMSWeb.BrandingLive do
 
           <p :if={@form[:brand_color].value not in [nil, ""] and !@preview} class="text-xs text-error">
             {gettext("That colour has no readable button text — pick a different one.")}
+          </p>
+        </div>
+
+        <div class="card card-pad lg:col-span-3 space-y-4">
+          <h2 class="text-sm font-medium">{gettext("Public site")}</h2>
+
+          <div class="grid gap-4 sm:grid-cols-3">
+            <.input
+              field={@form[:theme]}
+              type="select"
+              label={gettext("Theme")}
+              options={theme_options()}
+              hint={gettext("Typography and page width for the public pages.")}
+            />
+
+            <.input
+              field={@form[:header_menu_key]}
+              type="select"
+              label={gettext("Header menu")}
+              prompt={gettext("Stock links (Blog, Search)")}
+              options={@menu_options}
+              hint={gettext("Top-level items replace the stock header links.")}
+            />
+
+            <.input
+              field={@form[:footer_menu_key]}
+              type="select"
+              label={gettext("Footer menu")}
+              prompt={gettext("None")}
+              options={@menu_options}
+              hint={gettext("Rendered as link sections above the attribution line.")}
+            />
+          </div>
+
+          <p class="text-xs text-base-content/70">
+            {gettext("Need more than a preset? Custom CSS for the public site lives in")}
+            <.link navigate={~p"/editor/code-injection"} class="underline">
+              {gettext("Code injection")}
+            </.link>.
           </p>
         </div>
 
