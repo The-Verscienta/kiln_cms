@@ -284,6 +284,17 @@ defmodule KilnCMSWeb.Router do
   scope "/", KilnCMSWeb do
     pipe_through :browser
 
+    # First-run setup wizard (#1317). Anonymous by necessity — it exists to
+    # create the account everything else authenticates as. The route-level gate
+    # is UX only (SetupLive redirects home once an admin exists); the real gate
+    # is the `:bootstrap_admin` policy + advisory lock in
+    # `KilnCMS.Accounts.Bootstrap`, which hold for url-less joins and every
+    # other path the router never sees.
+    live_session :first_run,
+      on_mount: [{KilnCMSWeb.LiveUserAuth, :assign_current_org}] do
+      live "/setup", SetupLive, :index
+    end
+
     # Signed in, but NOT necessarily an editor — the reader-facing surface (#337
     # Phase 2). Gated at the router rather than per-LiveView, like the editor and
     # admin sessions below.

@@ -29,6 +29,17 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **A first-run setup wizard at `/setup` (#1317).** While an instance has no
+  admin account, a three-step wizard creates one — email + password, an
+  optional site name/colour/theme — and then sends the operator to sign-in,
+  replacing the release-shell `authorize?: false` bootstrap as the documented
+  path (the shell path remains for headless installs). The gate is enforced,
+  not hidden: the new `User.:bootstrap_admin` action authorizes only while no
+  admin exists (`Checks.NoAdminExists`) and `Accounts.Bootstrap` serializes
+  racing callers behind an advisory lock, so the page is inert the moment the
+  first admin commits. Dev/CI are unchanged — seeds still create the demo
+  accounts, which closes the gate.
+
 - **Official JS/TS client: `@kiln-cms/client`** (`clients/js`, #1310). Typed
   fetch wrappers over the delivery surfaces — JSON:API lists/filters/sorts/
   includes with the published-only-by-default safe defaults of the Elixir

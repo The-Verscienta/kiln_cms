@@ -32,6 +32,10 @@ profiles for cache, search and object storage, plus the environment quirks that
 bite people (PATH, spaced/iCloud paths, the `igniter` dependency) — is in
 [Overview](../README.md) and [Contributing](../CONTRIBUTING.md).
 
+On a **production** instance nothing is seeded: visit `/setup` while the site
+has no admin and a short wizard creates the first one (see
+[Deploy](deploy.md)).
+
 Once it boots, the surfaces worth opening:
 
 | URL | What it is |
