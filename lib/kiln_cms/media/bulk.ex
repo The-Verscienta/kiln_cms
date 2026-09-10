@@ -54,8 +54,7 @@ defmodule KilnCMS.Media.Bulk do
           |> Enum.map(&%{subject_id: &1, tag_id: tag_id})
           |> Ash.bulk_create(Tagging, :create, bulk_opts(opts))
 
-        failed = result.error_count || 0
-        {length(items) - failed, failed}
+        {length(items) - result.error_count, result.error_count}
     end
   end
 
@@ -76,7 +75,7 @@ defmodule KilnCMS.Media.Bulk do
       |> Ash.Query.filter(tag_id == ^tag_id and subject_id in ^ids)
       |> Ash.bulk_destroy(:destroy, %{}, bulk_opts(opts))
 
-    failed = result.error_count || 0
+    failed = result.error_count
     {max(length(items) - failed, 0), failed}
   end
 
