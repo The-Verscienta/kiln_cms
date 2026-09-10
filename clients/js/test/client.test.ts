@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createClient,
+  flattenDocument,
   isKilnHttpError,
   refKey,
   resolve,
@@ -139,6 +140,24 @@ describe("byIds", () => {
     expect(params.get("page[limit]")).toBe("3");
     expect(items.map((item) => item.id)).toEqual(["a", "b"]);
   });
+
+  it("chunks id lists past the server's 100-row page cap", async () => {
+    // 150 ids in one request would be clamped to 100 rows server-side, making
+    // the last 50 records indistinguishable from misses.
+    const ids = Array.from({ length: 150 }, (_, index) => `id-${index}`);
+    const stub = stubFetch({
+      body: { data: [{ id: "id-149", type: "post", attributes: {} }] },
+    });
+
+    const items = await client(stub).byIds("posts", ids);
+
+    expect(stub.calls).toHaveLength(2);
+    expect(stub.calls[0]!.url.searchParams.getAll("filter[id][in][]")).toHaveLength(100);
+    expect(stub.calls[1]!.url.searchParams.getAll("filter[id][in][]")).toHaveLength(50);
+    expect(stub.calls[1]!.url.searchParams.get("page[limit]")).toBe("50");
+    // Ordering still follows `ids`, across chunk boundaries.
+    expect(items.map((item) => item.id)).toEqual(["id-149"]);
+  });
 });
 
 describe("per-type search", () => {
@@ -258,6 +277,23 @@ describe("artifact", () => {
     await expect(client(stub).artifact("post", "gone")).rejects.toMatchObject({ status: 404 });
     expect(stub.calls).toHaveLength(1);
   });
+
+  it("a signal aborting during the retry wait surfaces the 503 without retrying", async () => {
+    // A caller-bounded call must not overrun its bound sleeping out the retry
+    // delay, and the error it sees should be the server's 503, not the
+    // AbortError of a doomed second request.
+    const stub = stubFetch({ status: 503, body: { error: "cold" } });
+    const controller = new AbortController();
+
+    const pending = client(stub).artifact("post", "hi", {
+      signal: controller.signal,
+      retryDelayMs: 60_000,
+    });
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({ status: 503 });
+    expect(stub.calls).toHaveLength(1);
+  });
 });
 
 describe("contentAsOf", () => {
@@ -277,13 +313,51 @@ describe("contentAsOf", () => {
 });
 
 describe("preview", () => {
-  it("redeems the token at /preview/:token", async () => {
-    const stub = stubFetch({ body: { title: "Draft", blocks: [] } });
+  it("redeems the token at /preview/:token and unwraps the {data} envelope", async () => {
+    // The server responds `{"data": {…draft…}}` (preview_controller.ex), not
+    // the bare draft — the stub must model that or the test proves nothing.
+    const stub = stubFetch({ body: { data: { title: "Draft", blocks: [] } } });
 
     const draft = await client(stub).preview<{ title: string }>("tok/en+1");
 
     expect(stub.calls[0]!.url.pathname).toBe("/preview/tok%2Fen%2B1");
     expect(draft.title).toBe("Draft");
+  });
+});
+
+describe("schema", () => {
+  it("fetches /api/schema with type and blocks filters as plain JSON", async () => {
+    const stub = stubFetch({ body: { $defs: {} } });
+
+    const doc = await client(stub, "secret-key").schema({
+      types: ["post", "page"],
+      blocksOnly: true,
+    });
+
+    const call = stub.calls[0]!;
+    expect(call.url.pathname).toBe("/api/schema");
+    expect(call.url.searchParams.get("type")).toBe("post,page");
+    expect(call.url.searchParams.get("blocks")).toBe("only");
+    expect(call.headers.accept).toBe("application/json");
+    expect(call.headers.authorization).toBe("Bearer secret-key");
+    expect(doc.$defs).toEqual({});
+  });
+
+  it("sends no params by default", async () => {
+    const stub = stubFetch({ body: {} });
+    await client(stub).schema();
+    expect(stub.calls[0]!.url.search).toBe("");
+  });
+});
+
+describe("flattenDocument", () => {
+  it("flattens data: null (empty to-one primary data) to no items", () => {
+    // Valid JSON:API for a to-one read with nothing there — must not throw.
+    expect(flattenDocument({ data: null })).toEqual({
+      items: [],
+      included: new Map(),
+      total: null,
+    });
   });
 });
 

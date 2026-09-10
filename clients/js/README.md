@@ -76,11 +76,18 @@ const post = await kiln.artifact<PostDocument>("post", "hello-world");
 
 Options: `--url <base>` (default `$KILN_API_URL` or `http://localhost:4000`),
 `--from <file>` (offline, from a saved `mix kiln.export.schema` document),
-`--out <file>` (default stdout), `--type post,page`, `--blocks-only`. The
-emitter is a faithful port of the server-side one
+`--out <file>` (default stdout), `--type post,page`, `--blocks-only`,
+`--api-key <key>` (default `$KILN_API_KEY`). The CLI fetches through the
+client's `schema()` method, so it shares the transport: 15s timeout, bearer
+auth, `KilnHttpError` bodies.
+
+The emitter is a faithful port of the server-side one
 (`KilnCMS.SchemaExport.TypeScript`), so `kiln-types` and
 `mix kiln.export.schema --format ts` produce the same declarations for the
-same document.
+same document — a promise both test suites enforce against the shared golden
+in `test/fixtures/` (see `test/parity.test.ts` and the ExUnit twin
+`test/kiln_cms/schema_export/type_script_parity_test.exs` in the Kiln repo),
+so the two emitters cannot drift silently.
 
 ## Published-only by default
 
@@ -134,18 +141,19 @@ throwing.
 
 ## API surface
 
-| Method                               | Endpoint                                            | Notes                                                  |
-| ------------------------------------ | --------------------------------------------------- | ------------------------------------------------------ |
-| `list(plural, opts)`                 | `GET /api/json/:plural[/published]`                 | filters, sorts, includes, sparse fieldsets, pagination |
-| `one(plural, filter, opts)`          | 〃                                                  | first match or `null`, `included` merged in            |
-| `byIds(plural, ids, opts)`           | 〃                                                  | one request, results in `ids` order                    |
-| `textSearch(plural, q, opts)`        | `GET /api/json/:plural/search[/published]`          | relevance-ranked                                       |
-| `semanticSearch(plural, q, opts)`    | `GET /api/json/:plural/semantic-search[/published]` | cosine distance; empty without embeddings              |
-| `autocomplete(plural, prefix, opts)` | `GET /api/json/:plural/autocomplete[/published]`    | typo-tolerant, ≤ 10 suggestions                        |
-| `search(q, opts)`                    | `GET /api/search`                                   | hybrid; visibility follows the credential              |
-| `artifact(type, slug, opts)`         | `GET /api/content/:type/:slug`                      | `surface`, `locale`, `asOf`; 503 retried once          |
-| `contentAsOf(type, asOf, opts)`      | `GET /api/content/:type?as_of=`                     | what was published then                                |
-| `preview(token)`                     | `GET /preview/:token`                               | one draft, signed 15-minute token                      |
+| Method                               | Endpoint                                            | Notes                                                   |
+| ------------------------------------ | --------------------------------------------------- | ------------------------------------------------------- |
+| `list(plural, opts)`                 | `GET /api/json/:plural[/published]`                 | filters, sorts, includes, sparse fieldsets, pagination  |
+| `one(plural, filter, opts)`          | 〃                                                  | first match or `null`, `included` merged in             |
+| `byIds(plural, ids, opts)`           | 〃                                                  | chunked at the 100-row page cap, results in `ids` order |
+| `textSearch(plural, q, opts)`        | `GET /api/json/:plural/search[/published]`          | relevance-ranked                                        |
+| `semanticSearch(plural, q, opts)`    | `GET /api/json/:plural/semantic-search[/published]` | cosine distance; empty without embeddings               |
+| `autocomplete(plural, prefix, opts)` | `GET /api/json/:plural/autocomplete[/published]`    | typo-tolerant, ≤ 10 suggestions                         |
+| `search(q, opts)`                    | `GET /api/search`                                   | hybrid; visibility follows the credential               |
+| `artifact(type, slug, opts)`         | `GET /api/content/:type/:slug`                      | `surface`, `locale`, `asOf`; 503 retried once           |
+| `contentAsOf(type, asOf, opts)`      | `GET /api/content/:type?as_of=`                     | what was published then                                 |
+| `preview(token)`                     | `GET /preview/:token`                               | one draft, signed 15-minute token                       |
+| `schema(opts)`                       | `GET /api/schema`                                   | the live delivery schema; feed it to `emitTypes`        |
 
 Dynamic (admin-created) types go through the shared `entries` surface:
 `kiln.list("entries", { filter: { type_name: "product" } })`; their artifacts

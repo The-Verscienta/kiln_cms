@@ -118,6 +118,13 @@ export interface AutocompleteOptions extends RequestOptions {
   published?: boolean;
 }
 
+export interface SchemaOptions extends RequestOptions {
+  /** Restrict the document to these content types (`?type=post,page`). */
+  types?: string[];
+  /** The block union alone, no content types and no database read. */
+  blocksOnly?: boolean;
+}
+
 export interface HybridSearchOptions extends RequestOptions {
   /** Server caps at 25. */
   limit?: number;

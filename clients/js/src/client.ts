@@ -24,6 +24,7 @@
  */
 
 import { KilnHttpError } from "./errors.js";
+import type { SchemaDocument } from "./generator.js";
 import {
   appendArray,
   appendFilter,
@@ -45,8 +46,13 @@ import type {
   ListOptions,
   ListResult,
   RequestOptions,
+  SchemaOptions,
   SearchOptions,
 } from "./types.js";
+
+// The server accepts a larger `page[limit]` but returns only the first 100
+// rows, so batched reads must chunk at this bound to stay lossless.
+const MAX_PAGE_SIZE = 100;
 
 export interface KilnClientOptions {
   /** Base URL of the Kiln instance, e.g. `https://cms.example.com`. */
@@ -135,8 +141,11 @@ export class KilnClient {
   }
 
   /**
-   * Fetch records by id list (one request, `filter[id][in]=`). Returns the
-   * items in `ids` order; ids that resolve to nothing are dropped.
+   * Fetch records by id list (`filter[id][in]=`). Returns the items in `ids`
+   * order; ids that resolve to nothing are dropped. The server clamps
+   * `page[limit]` at 100, so longer id lists are fetched in parallel
+   * 100-id chunks — without that, records past the clamp would be silently
+   * indistinguishable from misses.
    */
   async byIds<T extends Item = Item>(
     plural: string,
@@ -144,13 +153,26 @@ export class KilnClient {
     options: ListOptions = {},
   ): Promise<T[]> {
     if (ids.length === 0) return [];
-    const { items } = await this.list<T>(plural, {
-      ...options,
-      filter: { ...options.filter, id: { in: ids } },
-      limit: ids.length,
-      count: false,
-    });
-    const byId = new Map(items.map((item) => [item.id, item]));
+
+    const chunks: string[][] = [];
+    for (let start = 0; start < ids.length; start += MAX_PAGE_SIZE) {
+      chunks.push(ids.slice(start, start + MAX_PAGE_SIZE));
+    }
+
+    const results = await Promise.all(
+      chunks.map((chunk) =>
+        this.list<T>(plural, {
+          ...options,
+          filter: { ...options.filter, id: { in: chunk } },
+          limit: chunk.length,
+          count: false,
+        }),
+      ),
+    );
+
+    const byId = new Map(
+      results.flatMap((result) => result.items).map((item) => [item.id, item]),
+    );
     return ids.map((id) => byId.get(id)).filter((item): item is T => item !== undefined);
   }
 
@@ -271,7 +293,15 @@ export class KilnClient {
       const retriable =
         error instanceof KilnHttpError && error.status === 503 && options.retry !== false;
       if (!retriable) throw error;
-      await sleep(options.retryDelayMs ?? 2_000);
+      // The wait races the caller's signal: a bounded call must not overrun
+      // its bound sleeping, and once it has aborted, the 503 we already hold
+      // is the informative error — not the AbortError a doomed retry would
+      // surface.
+      try {
+        await sleep(options.retryDelayMs ?? 2_000, options.signal);
+      } catch {
+        throw error;
+      }
       return (await this.request(path, params, options.signal, "application/json")) as T;
     }
   }
@@ -310,12 +340,37 @@ export class KilnClient {
     options: RequestOptions = {},
   ): Promise<T> {
     const path = `/preview/${encodeURIComponent(token)}`;
-    return (await this.request(
+    const body = await this.request(
       path,
       new URLSearchParams(),
       options.signal,
       "application/json",
-    )) as T;
+    );
+    // The server wraps the draft in a `{data: …}` envelope; unwrap it so the
+    // caller's type parameter describes the draft itself.
+    if (body !== null && typeof body === "object" && "data" in body) {
+      return (body as { data: T }).data;
+    }
+    return body as T;
+  }
+
+  /**
+   * The site's live delivery schema: `GET /api/schema` — a JSON Schema of the
+   * `:json` fired-artifact shape, dynamic content types and custom fields
+   * included. Feed it to `emitTypes` (or the `kiln-types` CLI) for per-site
+   * TypeScript declarations. `types` restricts to those content types;
+   * `blocksOnly` returns the block union alone (no database read).
+   */
+  async schema(options: SchemaOptions = {}): Promise<SchemaDocument> {
+    const params = new URLSearchParams();
+    appendIfPresent(params, "type", options.types?.join(","));
+    if (options.blocksOnly) params.append("blocks", "only");
+    return (await this.request(
+      "/api/schema",
+      params,
+      options.signal,
+      "application/json",
+    )) as SchemaDocument;
   }
 
   // ── transport ─────────────────────────────────────────────────────────────
@@ -365,6 +420,27 @@ async function errorBody(response: Response): Promise<unknown> {
   }
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+// Resolves after `ms`, or rejects as soon as `signal` aborts (immediately if
+// it already has) — so a wait between retries can never outlive the bound the
+// caller put on the whole call.
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(abortReason(signal));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(abortReason(signal!));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException("The operation was aborted.", "AbortError");
 }

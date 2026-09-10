@@ -41,7 +41,10 @@ interface RawDocument {
 /** Flatten a raw JSON:API document into `{items, included, total}`. */
 export function flattenDocument<T extends Item = Item>(doc: unknown): ListResult<T> {
   const raw = (doc ?? {}) as RawDocument;
-  if (raw.data === undefined) return { items: [], included: new Map(), total: null };
+  // `data: null` is the valid document for empty to-one primary data, so it
+  // must flatten to no items, exactly like a missing key.
+  if (raw.data === undefined || raw.data === null)
+    return { items: [], included: new Map(), total: null };
 
   const included: IncludedMap = new Map();
   for (const resource of raw.included ?? []) {

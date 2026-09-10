@@ -24,6 +24,7 @@ export type {
   PortableTextSpan,
   RequestOptions,
   ResourceRef,
+  SchemaOptions,
   SearchOptions,
   Surface,
   WebArtifact,

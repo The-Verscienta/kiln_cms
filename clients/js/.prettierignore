@@ -1,3 +1,6 @@
 dist/
 node_modules/
 package-lock.json
+# The parity golden must stay byte-identical to what both emitters produce —
+# reformatting it would break the golden test on both sides.
+test/fixtures/golden.d.ts

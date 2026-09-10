@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Kiln CMS delivery schema (parity fixture)",
+  "description": "Hand-written fixture exercising every construct the emitters map. `KilnCMS.SchemaExport.TypeScript` (ExUnit) and `emitTypes` (vitest) must both reproduce fixtures/golden.d.ts from it, byte-for-byte below the header line — the tripwire that keeps the two emitters in lockstep.",
+  "x-kiln": {
+    "surface": "json",
+    "artifact_format_version": 2,
+    "content_types": ["post", "landing_page"],
+    "blocks": ["rich_text", "columns", "call_to_action"]
+  },
+  "$defs": {
+    "block": {
+      "description": "Any block in a fired `:json` artifact, tagged by `_type`.",
+      "discriminator": { "propertyName": "_type" },
+      "oneOf": [
+        { "$ref": "#/$defs/block_rich_text" },
+        { "$ref": "#/$defs/block_columns" },
+        { "$ref": "#/$defs/block_call_to_action" }
+      ]
+    },
+    "block_rich_text": {
+      "type": "object",
+      "description": "Portable Text body. Watch the */ escape.",
+      "properties": {
+        "_id": { "type": "string" },
+        "_type": { "const": "rich_text" },
+        "body": { "type": "array", "items": { "$ref": "#/$defs/portable_text_block" } }
+      },
+      "required": ["_type", "body"],
+      "additionalProperties": false
+    },
+    "block_columns": {
+      "type": "object",
+      "description": "A container block: recurses into the block union.",
+      "properties": {
+        "_type": { "const": "columns" },
+        "columns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "blocks": { "type": "array", "items": { "$ref": "#/$defs/block" } },
+              "span": { "type": "integer" }
+            },
+            "required": ["blocks"]
+          }
+        }
+      },
+      "required": ["_type", "columns"],
+      "additionalProperties": false
+    },
+    "block_call_to_action": {
+      "type": "object",
+      "properties": {
+        "_type": { "const": "call_to_action" },
+        "label": { "type": "string" },
+        "priority": { "type": "number" },
+        "style": { "enum": ["primary", "ghost"] },
+        "url": { "type": ["string", "null"] }
+      },
+      "required": ["_type", "label"],
+      "additionalProperties": false
+    },
+    "portable_text_block": {
+      "type": "object",
+      "description": "One Portable Text node. Open by design.",
+      "properties": {
+        "_key": { "type": "string" },
+        "_type": { "type": "string" }
+      }
+    },
+    "geo_point": {
+      "type": "object",
+      "properties": {
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "zoom": { "type": ["integer", "null"] }
+      },
+      "required": ["lat", "lng"],
+      "additionalProperties": false
+    },
+    "opaque_marker": { "const": "fixed" },
+    "content_post": {
+      "type": "object",
+      "description": "A published post's fired `:json` artifact.",
+      "properties": {
+        "type": { "const": "post" },
+        "title": { "type": "string" },
+        "slug": { "type": "string" },
+        "blocks": { "type": "array", "items": { "$ref": "#/$defs/block" } },
+        "word_count": { "type": "integer" },
+        "featured": { "type": "boolean" },
+        "tier": { "type": ["string", "null"], "enum": ["free", "pro"] },
+        "location": { "oneOf": [{ "$ref": "#/$defs/geo_point" }] },
+        "custom_fields": {
+          "type": "object",
+          "properties": {
+            "weird key!": { "type": "string" },
+            "badge": { "enum": ["say \"hi\"", "C:\\reports", "line\nbreak\tand tab"] },
+            "rating": { "type": ["number", "null"] }
+          },
+          "required": []
+        }
+      },
+      "required": ["type", "title", "slug", "blocks"]
+    },
+    "content_landing_page": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "landing_page" },
+        "title": { "type": "string" },
+        "hero": { "type": "object" }
+      },
+      "required": ["type", "title"],
+      "additionalProperties": false
+    }
+  }
+}

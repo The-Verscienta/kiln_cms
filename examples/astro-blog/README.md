@@ -27,12 +27,16 @@ a mistakenly configured staff API key could not leak drafts into the build.
 
 ## What it does
 
-1. **Discovers** content from the JSON:API `/published` feeds — one metadata
-   request per content type (`src/lib/kiln.ts` → `discoverContent`).
+1. **Discovers** content from the JSON:API `/published` feeds
+   (`src/lib/kiln.ts` → `discoverContent`) — paginated past the server's
+   25-row default so large sites build completely, and filtered to the
+   build's locale so a translation's row can't turn into a dead link.
 2. **Fetches** each document's `?surface=json` artifact — the immutable,
    pre-serialized output a document compiles to on publish (the live editable
    block tree is *not* exposed). A cold artifact cache answers 503; the client
-   retries that once on its own.
+   retries that once on its own. The refs and artifacts live in one memoized
+   set (`publishedDocuments`) that both the index page and `getStaticPaths`
+   render from, so the index can never link a page that wasn't generated.
 3. **Renders** the typed blocks to HTML on the consumer side
    (`src/lib/render.ts`) — a faithful port of KilnCMS's own block + Portable Text
    renderers, so you can see exactly what a headless consumer does with the JSON.
@@ -132,10 +136,12 @@ document is fetched and pre-rendered at build time.
   `npx kiln-types --url http://localhost:4000 --out src/kiln-types.d.ts`, then
   `kiln.artifact<PostDocument>("post", slug)`.
 - **Custom content types.** Compiled types get their own JSON:API routes —
-  add a `kiln.list("<plural>")` call to `discoverContent`. Types created in
-  the admin UI share the generic `entries` surface:
-  `kiln.list("entries", { filter: { type_name: "product" } })`; their
-  artifacts are addressed by type name (`kiln.artifact("product", slug)`).
+  add a `listAll("<plural>", …)` call to `discoverContent` (the fields key is
+  the singular resource type). Types created in the admin UI share the
+  generic `entries` surface: call `discoverEntries("<type name>")`, which
+  scopes by `type_name` and — importantly — keys the delivery refs by the
+  dynamic type's *name* (their JSON:API resource type is the literal
+  `"entry"`, which the artifact route does not resolve).
 - **Live search.** `search.astro` runs a sample query at *build time* so the
   page stays static and CORS-free. For type-as-you-go search, move the
   `searchPosts` call into a client `<script>` and enable CORS on KilnCMS for

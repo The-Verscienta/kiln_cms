@@ -1,31 +1,20 @@
 ---
-import { isKilnHttpError } from "@kiln-cms/client";
 import Base from "../../layouts/Base.astro";
-import { discoverContent, kiln, LOCALE, type Document } from "../../lib/kiln";
+import { publishedDocuments, type Document } from "../../lib/kiln";
 import { renderBlocks } from "../../lib/render";
 
-// Static generation: one page per published document from the JSON:API feeds.
-// Each document's fired artifact (`?surface=json`) is fetched here so every
-// route ships as plain pre-rendered HTML. A cold artifact cache answers 503;
-// the client retries that once on its own.
+// Static generation: one page per published document. The refs and their
+// fired artifacts come from the same memoized set the index renders from
+// (discovery is paginated and locale-filtered there; a cold artifact cache's
+// 503 is retried once by the client), so index links and generated routes
+// cannot disagree.
 export async function getStaticPaths() {
-  const refs = await discoverContent();
+  const entries = await publishedDocuments();
 
-  const pages = await Promise.all(
-    refs.map(async (ref) => {
-      try {
-        const doc = await kiln.artifact<Document>(ref.type, ref.slug, { locale: LOCALE });
-        return { params: { type: ref.type, slug: ref.slug }, props: { doc } };
-      } catch (error) {
-        // Listed but not servable (e.g. unpublished mid-build): skip the page
-        // rather than failing the whole build.
-        if (isKilnHttpError(error) && error.status === 404) return null;
-        throw error;
-      }
-    }),
-  );
-
-  return pages.filter((page): page is NonNullable<typeof page> => page !== null);
+  return entries.map(({ ref, doc }) => ({
+    params: { type: ref.type, slug: ref.slug },
+    props: { doc },
+  }));
 }
 
 interface Props {

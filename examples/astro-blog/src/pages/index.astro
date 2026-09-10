@@ -1,24 +1,24 @@
 ---
 import Base from "../layouts/Base.astro";
-import { discoverContent } from "../lib/kiln";
+import { publishedDocuments } from "../lib/kiln";
 
-// Enumerate every published document from the JSON:API published feeds —
-// metadata only (slug + title), one request per content type. No artifact
-// fetches needed here: the block bodies are only pulled for the detail pages.
-const refs = await discoverContent();
+// The index renders from the same memoized document set `getStaticPaths`
+// builds routes from, so every link here points at a page that was actually
+// generated — a ref whose artifact fetch missed is absent from both.
+const entries = await publishedDocuments();
 
 // Posts first, then pages, alphabetical within each.
 const order: Record<string, number> = { post: 0, page: 1 };
-const entries = refs.slice().sort((a, b) => {
-  const byType = (order[a.type] ?? 9) - (order[b.type] ?? 9);
-  return byType !== 0 ? byType : a.title.localeCompare(b.title);
+const sorted = entries.slice().sort((a, b) => {
+  const byType = (order[a.ref.type] ?? 9) - (order[b.ref.type] ?? 9);
+  return byType !== 0 ? byType : a.ref.title.localeCompare(b.ref.title);
 });
 ---
 
 <Base title="Kiln Blog">
   <h1>Latest content</h1>
 
-  {entries.length === 0 && (
+  {sorted.length === 0 && (
     <p>
       No published content found. Start KilnCMS, seed it
       (<code>mix run priv/repo/seeds.exs</code>), then rebuild.
@@ -26,7 +26,7 @@ const entries = refs.slice().sort((a, b) => {
   )}
 
   <ul class="post-list">
-    {entries.map((ref) => (
+    {sorted.map(({ ref }) => (
       <li>
         <span class="type">{ref.type}</span>
         <div>

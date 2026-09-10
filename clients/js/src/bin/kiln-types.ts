@@ -16,6 +16,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import process from "node:process";
 
+import { createClient } from "../client.js";
 import { emitTypes, type SchemaDocument } from "../generator.js";
 
 interface CliOptions {
@@ -23,6 +24,7 @@ interface CliOptions {
   from?: string;
   out?: string;
   types?: string;
+  apiKey?: string;
   blocksOnly: boolean;
 }
 
@@ -35,6 +37,7 @@ function usage(): string {
     "  --out <file>     write declarations here (default: stdout)",
     "  --type <a,b>     restrict to these content types (?type=)",
     "  --blocks-only    the block union alone, no content types (?blocks=only)",
+    "  --api-key <key>  bearer API key (default: $KILN_API_KEY)",
     "  --help           show this help",
   ].join("\n");
 }
@@ -63,6 +66,9 @@ function parseArgs(argv: string[]): CliOptions {
       case "--type":
         options.types = value();
         break;
+      case "--api-key":
+        options.apiKey = value();
+        break;
       case "--blocks-only":
         options.blocksOnly = true;
         break;
@@ -79,27 +85,24 @@ function parseArgs(argv: string[]): CliOptions {
   return options;
 }
 
+// Fetches through the client rather than a bare `fetch`, so the CLI inherits
+// its transport whole: the 15s timeout (a degraded server stalls rather than
+// fails — the trap the client exists to bound), bearer auth, and
+// KilnHttpError bodies.
 async function loadDocument(options: CliOptions): Promise<SchemaDocument> {
   if (options.from !== undefined) {
     return JSON.parse(await readFile(options.from, "utf8")) as SchemaDocument;
   }
 
-  const base = (options.url ?? process.env.KILN_API_URL ?? "http://localhost:4000").replace(
-    /\/+$/,
-    "",
-  );
-  const params = new URLSearchParams();
-  if (options.types !== undefined) params.append("type", options.types);
-  if (options.blocksOnly) params.append("blocks", "only");
-  const query = params.toString();
-  const url = `${base}/api/schema${query === "" ? "" : `?${query}`}`;
+  const kiln = createClient({
+    baseUrl: options.url ?? process.env.KILN_API_URL ?? "http://localhost:4000",
+    apiKey: options.apiKey ?? process.env.KILN_API_KEY,
+  });
 
-  const response = await fetch(url, { headers: { accept: "application/json" } });
-  if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    throw new Error(`GET ${url} answered ${response.status}${body === "" ? "" : `: ${body}`}`);
-  }
-  return (await response.json()) as SchemaDocument;
+  return kiln.schema({
+    types: options.types?.split(",").filter((name) => name !== ""),
+    blocksOnly: options.blocksOnly,
+  });
 }
 
 async function main(): Promise<void> {
