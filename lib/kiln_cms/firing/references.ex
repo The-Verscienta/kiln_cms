@@ -20,6 +20,7 @@ defmodule KilnCMS.Firing.References do
   alias KilnCMS.Firing.{Engine, RefireWorker}
 
   require Ash.Query
+  require Logger
 
   # `"entry"` is the generic tier holding every admin-defined dynamic type
   # (D17) — one storage key, the dynamic name is recoverable from the row.
@@ -227,6 +228,11 @@ defmodule KilnCMS.Firing.References do
   # worth more than a thousand-row list that blocks the LiveView to build.
   @usage_limit 25
 
+  # What a usage row actually surfaces (`usage/3`'s map literal) — the select
+  # pinned on every `load_any/3` read so the kept authorization bypass there
+  # is structurally incapable of pulling more.
+  @usage_select [:id, :title, :state]
+
   @doc """
   The documents that reference a media item (#403).
 
@@ -246,50 +252,149 @@ defmodule KilnCMS.Firing.References do
   as a broken row: an edge outlives a hard delete (`reference_source?: false` is
   the same trade the version tables make), and an editor asking what uses an
   image does not want to be told about documents that no longer exist.
+
+  The edge read runs as `actor` under `Firing.ReferenceEdge`'s read policy
+  (editors-and-up), so the caller's authorization decides whether the graph is
+  visible at all (#1309). `actor` must be an actual actor — a system caller
+  with no actor would silently get the same empty answer a denied one gets,
+  and "confidently unused" is the one wrong answer this function must never
+  give, so `nil` is rejected at the head. The per-referrer record loads keep
+  a deliberate bypass — see `load_any/3`.
+
+  `total` and `items` agree about referrers that no longer resolve (trashed or
+  purged since their edge was written): both count only live referrers, so the
+  drawer never claims "and 1 more" above rows it cannot show. A failed edge
+  read logs a warning and reports zero usages — the caller surface is
+  best-effort context, but the failure must not be silent.
   """
-  @spec usages(Ash.UUID.t(), term()) :: %{total: non_neg_integer(), items: [map()]}
-  def usages(org_id, media_id) do
-    # `authorize?: false` here and in `usage_counts/2` / `load_any/3` /
-    # `editor_kind/1`: this module takes no actor (the fire path has none), and
-    # the only callers are `MediaLive`, mounted behind `:live_editor_required` —
-    # the same editors-and-up audience `Firing.ReferenceEdge`'s read policy
-    # names. Every read is tenant-scoped to the caller's org, and only
-    # `title`/`state`/`kind` of each referrer is surfaced. Threading the
-    # LiveView's actor through would let the policy do this instead (#1309).
-    {:ok, edges} = Firing.edges_to(:media, media_id, authorize?: false, tenant: org_id)
+  @spec usages(Ash.UUID.t(), term(), map()) :: %{
+          total: non_neg_integer(),
+          items: [map()]
+        }
+  def usages(org_id, media_id, actor) when is_map(actor) do
+    # Actor-authorized (#1309): `Firing.ReferenceEdge`'s read policy admits
+    # editors-and-up (`OrgEditor`) — exactly `MediaLive`'s
+    # `:live_editor_required` audience, so the `authorize?: false` this held is
+    # gone. A denied read comes back `{:ok, []}` rather than `{:error,
+    # Forbidden}` only because config.exs sets
+    # `no_filter_static_forbidden_reads?: false` (Ash's own default errors), so
+    # the error branch below is reachable — and must stay loud, because a
+    # silent empty here reads as "safe to delete".
+    case Firing.edges_to(:media, media_id, actor: actor, tenant: org_id) do
+      {:ok, edges} ->
+        referrers =
+          edges
+          |> Enum.map(&{&1.from_type, &1.from_id})
+          |> Enum.uniq()
+          |> live_referrers(org_id)
 
-    referrers =
-      edges
-      |> Enum.map(&{&1.from_type, &1.from_id})
-      |> Enum.uniq()
+        items =
+          referrers
+          |> Enum.take(@usage_limit)
+          |> Enum.flat_map(fn {type, id} -> usage(org_id, type, id) end)
+          |> Enum.sort_by(& &1.title)
 
-    items =
-      referrers
-      |> Enum.take(@usage_limit)
-      |> Enum.flat_map(fn {type, id} -> usage(org_id, type, id) end)
-      |> Enum.sort_by(& &1.title)
+        %{total: length(referrers), items: items}
 
-    %{total: length(referrers), items: items}
+      {:error, error} ->
+        Logger.warning("media usage lookup failed for #{media_id}: #{inspect(error)}")
+        %{total: 0, items: []}
+    end
   end
 
   @doc """
   How many published documents reference each of `media_ids` (#403).
 
-  One query for a whole grid, so the media library can warn *at the point of
-  deletion* rather than only inside a drawer the editor may never open — which
-  is what the issue asked for. Ids with no referrers are absent from the map.
+  One query for a whole grid (plus one existence probe per referrer type), so
+  the media library can warn *at the point of deletion* rather than only inside
+  a drawer the editor may never open — which is what the issue asked for. Ids
+  with no referrers are absent from the map. Reads as `actor` under
+  `Firing.ReferenceEdge`'s read policy, like `usages/3`, and — also like
+  `usages/3` — counts only referrers that still resolve, so this count and the
+  drawer's list agree about referrers trashed or purged since their edge was
+  written. A failed read logs and reports no counts; `nil` actors are rejected
+  (see `usages/3`).
   """
-  @spec usage_counts(Ash.UUID.t(), [term()]) :: %{optional(term()) => pos_integer()}
-  def usage_counts(_org_id, []), do: %{}
+  @spec usage_counts(Ash.UUID.t(), [term()], map()) :: %{
+          optional(term()) => pos_integer()
+        }
+  def usage_counts(_org_id, [], actor) when is_map(actor), do: %{}
 
-  def usage_counts(org_id, media_ids) do
+  def usage_counts(org_id, media_ids, actor) when is_map(actor) do
     Firing.ReferenceEdge
     |> Ash.Query.filter(to_type == :media and to_id in ^media_ids)
     |> Ash.Query.select([:to_id, :from_type, :from_id])
-    # Editor-gated caller, tenant-scoped — see `usages/2` on the bypass.
-    |> Ash.read!(authorize?: false, tenant: org_id)
-    |> Enum.uniq_by(&{&1.to_id, &1.from_type, &1.from_id})
-    |> Enum.frequencies_by(& &1.to_id)
+    # Actor-authorized (no more bypass), tenant-scoped — see `usages/3`, which
+    # also explains why a denied read is `{:ok, []}` here (config-dependent)
+    # and why the error branch logs instead of raising.
+    |> Ash.read(actor: actor, tenant: org_id)
+    |> case do
+      {:ok, edges} ->
+        edges = Enum.uniq_by(edges, &{&1.to_id, &1.from_type, &1.from_id})
+
+        live =
+          edges
+          |> Enum.map(&{&1.from_type, &1.from_id})
+          |> Enum.uniq()
+          |> live_referrers(org_id)
+          |> MapSet.new()
+
+        edges
+        |> Enum.filter(&MapSet.member?(live, {&1.from_type, &1.from_id}))
+        |> Enum.frequencies_by(& &1.to_id)
+
+      {:error, error} ->
+        Logger.warning("media usage counts failed: #{inspect(error)}")
+        %{}
+    end
+  end
+
+  # Which of `referrers` still resolve to a live (unarchived) row — one
+  # existence probe per distinct referrer type, ids only. Edges outlive both
+  # trash and purge by design (see the moduledoc), so without this the grid's
+  # count warns about referrers the drawer's list cannot show. On a failed
+  # probe the referrers are kept: over-warning beats silently under-warning
+  # at a delete decision.
+  defp live_referrers(referrers, org_id) do
+    referrers
+    |> Enum.group_by(fn {type, _id} -> type end, fn {_type, id} -> id end)
+    |> Enum.flat_map(fn {type, ids} ->
+      ids |> live_ids(org_id, type) |> Enum.map(&{type, &1})
+    end)
+  end
+
+  defp live_ids(ids, org_id, type) do
+    case referrer_resource(type) do
+      nil ->
+        []
+
+      resource ->
+        resource
+        |> Ash.Query.filter(id in ^ids)
+        |> Ash.Query.select([:id])
+        # Same deliberate bypass as `load_any/3` below (`authorize?: false`):
+        # the completeness argument is identical — a type-scoped editor must
+        # still be warned about out-of-scope referrers — and only the id
+        # comes back. Tenant-scoped like every read in this module.
+        |> Ash.read(authorize?: false, tenant: org_id)
+        |> case do
+          {:ok, rows} -> Enum.map(rows, & &1.id)
+          _error -> ids
+        end
+    end
+  end
+
+  # The storage-tier resource for a referrer type — the same mapping
+  # `load_any/3` expresses through `CMS.get_*`.
+  defp referrer_resource(:page), do: KilnCMS.CMS.Page
+  defp referrer_resource(:post), do: KilnCMS.CMS.Post
+  defp referrer_resource(:entry), do: KilnCMS.CMS.Entry
+
+  defp referrer_resource(type) do
+    case CMS.ContentTypes.get(type) do
+      %{source: :compiled, resource: resource} -> resource
+      _ -> nil
+    end
   end
 
   defp usage(org_id, type, id) do
@@ -317,8 +422,8 @@ defmodule KilnCMS.Firing.References do
   defp editor_kind(%KilnCMS.CMS.Entry{} = record) do
     # A dynamic entry's editor segment is its own type's NAME, which lives on
     # its definition — `:entry` is only the storage tier. `authorize?: false`:
-    # editor-gated caller (see `usages/2`), and `TypeDefinition` reads are open
-    # to `OrgEditor` anyway; only `name` is used. `tenant: record.org_id`
+    # editor-gated caller (see `load_any/3`), and `TypeDefinition` reads are
+    # open to `OrgEditor` anyway; only `name` is used. `tenant: record.org_id`
     # because `TypeDefinition` is org-scoped: the id comes off a same-org row,
     # and under strict tenancy a tenant-less read would error and leave `kind`
     # nil (#1309).
@@ -336,21 +441,45 @@ defmodule KilnCMS.Firing.References do
   # `load_published/3` deliberately answers only for published documents — the
   # re-fire wave has no business with drafts. This one loads whatever is there,
   # so a document unpublished since it last fired still shows as a usage.
-  # `authorize?: false` (all four heads): editor-gated caller and tenant-scoped
-  # — see `usages/2`. Under the content read policy a type-scoped editor (#332)
-  # would not see draft referrers of an out-of-scope type; the fetch is by an
-  # id the edge table already holds, and only `title`/`state` are surfaced.
-  defp load_any(org_id, :page, id), do: any(CMS.get_page(id, authorize?: false, tenant: org_id))
+  # `authorize?: false` (all four heads) — kept DELIBERATELY when the edge
+  # reads gained an actor (#1309): the referrer list is context for a delete
+  # decision and must be complete. Under the content read policy a type-scoped
+  # editor (#332 `readable_types`) would not see draft referrers of an
+  # out-of-scope type, and a referrer hidden here reads as "unused" — the exact
+  # mistake the list exists to prevent. The fetch is by an id the (actor-
+  # authorized) edge read already surfaced, tenant-scoped, and the select
+  # below makes "only `title`/`state`/`kind` leave this module" structural
+  # rather than comment-enforced: a bypassed read of a full row (block tree,
+  # access hashes) would hand a future field addition a leak for free, and it
+  # also loads up to @usage_limit whole documents to read one string each.
+  defp load_any(org_id, :page, id),
+    do: any(CMS.get_page(id, authorize?: false, tenant: org_id, query: [select: @usage_select]))
+
   # (bypass: as above)
-  defp load_any(org_id, :post, id), do: any(CMS.get_post(id, authorize?: false, tenant: org_id))
-  # (bypass: as above)
-  defp load_any(org_id, :entry, id), do: any(CMS.get_entry(id, authorize?: false, tenant: org_id))
+  defp load_any(org_id, :post, id),
+    do: any(CMS.get_post(id, authorize?: false, tenant: org_id, query: [select: @usage_select]))
+
+  # (bypass: as above.) An entry additionally carries its dynamic type's
+  # definition id, which `editor_kind/1` resolves the editor segment from.
+  defp load_any(org_id, :entry, id) do
+    any(
+      CMS.get_entry(id,
+        authorize?: false,
+        tenant: org_id,
+        query: [select: @usage_select ++ [:type_definition_id, :org_id]]
+      )
+    )
+  end
 
   defp load_any(org_id, type, id) do
     case CMS.ContentTypes.get(type) do
       %{source: :compiled, resource: resource} ->
-        # Same bypass rationale as the heads above (`usages/2`); tenant-scoped.
-        any(Ash.get(resource, id, authorize?: false, tenant: org_id))
+        # Same bypass rationale (and select) as the heads above; tenant-scoped.
+        resource
+        |> Ash.Query.filter(id == ^id)
+        |> Ash.Query.select(@usage_select)
+        |> Ash.read_one(authorize?: false, tenant: org_id)
+        |> any()
 
       _ ->
         :error

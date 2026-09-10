@@ -182,6 +182,40 @@ defmodule KilnCMSWeb.MediaLiveTest do
       assert saved.caption == "At dusk"
     end
 
+    # The usage reads run as the signed-in editor (#1309) rather than bypassing
+    # authorization — `ReferenceEdge`'s read policy admits editors-and-up, so
+    # the "used by" answer an editor gets before deleting must be unchanged.
+    test "an editor sees where an item is used", %{conn: conn} do
+      editor = authed_user(:editor)
+      item = seed_media("hero-#{System.unique_integer([:positive])}.png")
+
+      page =
+        CMS.create_page!(
+          %{title: "Landing hero page", slug: "hero-#{System.unique_integer([:positive])}"},
+          actor: editor
+        )
+
+      # Edges are system bookkeeping written by the fire path; seed one directly
+      # rather than running a whole publish + fire through Oban.
+      Ash.Seed.seed!(KilnCMS.Firing.ReferenceEdge, %{
+        from_type: :page,
+        from_id: page.id,
+        to_type: :media,
+        to_id: item.id
+      })
+
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/media")
+
+      # The grid's delete confirmation carries the usage count.
+      assert html =~ "used by 1 published document"
+
+      panel =
+        lv |> element(~s(button[phx-click="select"][phx-value-id="#{item.id}"])) |> render_click()
+
+      assert panel =~ "Used by"
+      assert panel =~ "Landing hero page"
+    end
+
     # #822 hid the alt field on non-images. The first cut hid it without
     # touching the handler, whose only clause required an "alt" key — so the
     # form for a PDF or an MP4 submitted caption alone, matched nothing, and
