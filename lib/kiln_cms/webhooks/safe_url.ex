@@ -219,7 +219,7 @@ defmodule KilnCMS.Webhooks.SafeUrl do
   defp blocked_ip?(address), do: blocked_address?(address)
 
   # IPv4
-  defp blocked_address?({a, b, _, _}), do: ipv4_blocked?(a, b)
+  defp blocked_address?({a, b, c, _}), do: ipv4_blocked?(a, b, c)
 
   # IPv6 loopback (::1) and unspecified (::) — match before the generic mapped clauses
   defp blocked_address?({0, 0, 0, 0, 0, 0, 0, 1}), do: true
@@ -245,13 +245,28 @@ defmodule KilnCMS.Webhooks.SafeUrl do
 
   defp blocked_address?(_), do: false
 
-  defp ipv4_blocked?(a, b) do
-    a in [0, 10, 127, 255] or
-      (a == 100 and b in 64..127) or
-      (a == 169 and b == 254) or
-      (a == 172 and b in 16..31) or
-      (a == 192 and b == 168)
-  end
+  # The RFC 6890 special-purpose registry, as one clause per range rather than
+  # one boolean expression: the expression form crossed credo's complexity
+  # ceiling, and a table of heads reads like the registry it mirrors.
+  # 0/8 · 10/8 · 127/8 · 255/8 (broadcast-ish)
+  defp ipv4_blocked?(a, _b, _c) when a in [0, 10, 127, 255], do: true
+  # 100.64/10 shared CGN
+  defp ipv4_blocked?(100, b, _c) when b in 64..127, do: true
+  # 169.254/16 link-local
+  defp ipv4_blocked?(169, 254, _c), do: true
+  # 172.16/12 private
+  defp ipv4_blocked?(172, b, _c) when b in 16..31, do: true
+  # 192.168/16 private
+  defp ipv4_blocked?(192, 168, _c), do: true
+  # 192.0.0/24 IETF protocol assignments · 192.0.2/24 TEST-NET-1
+  defp ipv4_blocked?(192, 0, c) when c in [0, 2], do: true
+  # 198.18/15 benchmarking
+  defp ipv4_blocked?(198, b, _c) when b in 18..19, do: true
+  # 198.51.100/24 TEST-NET-2
+  defp ipv4_blocked?(198, 51, 100), do: true
+  # 203.0.113/24 TEST-NET-3
+  defp ipv4_blocked?(203, 0, 113), do: true
+  defp ipv4_blocked?(_a, _b, _c), do: false
 
   # Split two 16-bit IPv6 groups into the embedded IPv4 4-tuple.
   defp v4_from_groups(g7, g8) do

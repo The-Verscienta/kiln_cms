@@ -47,6 +47,25 @@ defmodule KilnCMS.Webhooks.SafeUrlTest do
       end)
     end
 
+    test "rejects RFC 6890 special-purpose IPv4 literals" do
+      with_config([require_https: false, resolve_dns: false], fn ->
+        # 192.0.0.0/24 (IETF protocol assignments)
+        assert {:error, _} = SafeUrl.validate("http://192.0.0.8/hook")
+        # 198.18.0.0/15 (benchmarking)
+        assert {:error, _} = SafeUrl.validate("http://198.18.0.1/hook")
+        assert {:error, _} = SafeUrl.validate("http://198.19.255.255/hook")
+        # TEST-NET-1/2/3
+        assert {:error, _} = SafeUrl.validate("http://192.0.2.1/hook")
+        assert {:error, _} = SafeUrl.validate("http://198.51.100.1/hook")
+        assert {:error, _} = SafeUrl.validate("http://203.0.113.1/hook")
+        # neighbouring public /24s stay allowed
+        assert :ok = SafeUrl.validate("http://192.0.1.1/hook")
+        assert :ok = SafeUrl.validate("http://198.17.0.1/hook")
+        assert :ok = SafeUrl.validate("http://198.20.0.1/hook")
+        assert :ok = SafeUrl.validate("http://203.0.114.1/hook")
+      end)
+    end
+
     test "rejects internal IPv6 literals" do
       with_config([require_https: false, resolve_dns: false], fn ->
         assert {:error, _} = SafeUrl.validate("https://[fd00::1]/hook")
