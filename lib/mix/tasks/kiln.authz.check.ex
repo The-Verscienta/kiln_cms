@@ -44,7 +44,7 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
 
   `lib/kiln_cms_web/` by default; pass paths (files or directories) to scan
   something else. Non-web code is not gated yet: the worker/system sites in
-  `lib/kiln_cms/` are the "consider a system actor" half of #1309.
+  `lib/kiln_cms/` are the system-actor follow-up, tracked in #1402.
 
       mix kiln.authz.check
       mix kiln.authz.check lib/kiln_cms/billing.ex

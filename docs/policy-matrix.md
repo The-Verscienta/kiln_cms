@@ -57,7 +57,7 @@ Two non-role actors also appear below:
   self-only-read resource. One comment covers one call: a second bypass pasted
   under a justified one needs its own. `mix kiln.authz.check` (part of
   `mix precommit` and CI) fails on a new one without that comment (#1309).
-  Non-web code is not gated yet — a system actor (#946) is the way to move
+  Non-web code is not gated yet — a system actor (#1402) is the way to move
   worker code *under* the policies instead of around them.
 
 Legend: ✅ allowed · ❌ forbidden · 🔎 allowed but row-filtered (reads return only the rows the policy permits, never an error) · ⚙️ system-only (`authorize?: false`).

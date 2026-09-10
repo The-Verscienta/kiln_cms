@@ -633,7 +633,7 @@ migration, a rewritten column, a dropped config key).
   minted without one is `:invalid`, and one presented on another site's host
   is refused, as release previews already were), and the dynamic-type name lookups in
   `Firing.References` and `BustContentCache` pass the record's tenant.
-  Non-web code is not gated yet; a system actor (#946) is the way to move
+  Non-web code is not gated yet; a system actor (#1402) is the way to move
   worker code under the policies rather than around them.
 - **Frames on an established `/ws/collab` connection are budgeted per
   account** (#1305). #1183 charged `/live` root joins, but once a socket was
