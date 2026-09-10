@@ -11,6 +11,7 @@
     "check": "astro check"
   },
   "dependencies": {
+    "@kiln-cms/client": "file:../../clients/js",
     "astro": "^4.15.0"
   },
   "devDependencies": {

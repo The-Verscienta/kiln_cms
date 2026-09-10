@@ -131,9 +131,16 @@ defmodule KilnClient do
     end
   end
 
+  # The server accepts a larger `page[limit]` but returns only the first 100
+  # rows, so batched reads must chunk at this bound to stay lossless.
+  @max_page_size 100
+
   @doc """
-  Fetch records by id list (one request, `filter[id][in]=`). Returns the
-  items in `ids` order; ids that resolve to nothing are dropped.
+  Fetch records by id list (`filter[id][in]=`). Returns the items in `ids`
+  order; ids that resolve to nothing are dropped. The server clamps
+  `page[limit]` at 100, so longer id lists are fetched in 100-id chunks —
+  without that, records past the clamp would be silently indistinguishable
+  from misses.
   """
   @spec by_ids(String.t(), [String.t()], keyword()) :: {:ok, [item()]} | {:error, term()}
   def by_ids(plural, ids, opts \\ [])
@@ -141,14 +148,25 @@ defmodule KilnClient do
   def by_ids(_plural, [], _opts), do: {:ok, []}
 
   def by_ids(plural, ids, opts) do
-    opts =
-      opts
-      |> Keyword.put(:filter, %{id: {:in, ids}})
-      |> Keyword.merge(limit: length(ids), count: false)
+    ids
+    |> Enum.chunk_every(@max_page_size)
+    |> Enum.reduce_while({:ok, %{}}, fn chunk, {:ok, by_id} ->
+      chunk_opts =
+        opts
+        |> Keyword.put(:filter, %{id: {:in, chunk}})
+        |> Keyword.merge(limit: length(chunk), count: false)
 
-    with {:ok, %{items: items}} <- list(plural, opts) do
-      by_id = Map.new(items, &{&1["id"], &1})
-      {:ok, ids |> Enum.map(&by_id[&1]) |> Enum.reject(&is_nil/1)}
+      case list(plural, chunk_opts) do
+        {:ok, %{items: items}} ->
+          {:cont, {:ok, Map.merge(by_id, Map.new(items, &{&1["id"], &1}))}}
+
+        {:error, reason} ->
+          {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, by_id} -> {:ok, ids |> Enum.map(&by_id[&1]) |> Enum.reject(&is_nil/1)}
+      {:error, reason} -> {:error, reason}
     end
   end
 

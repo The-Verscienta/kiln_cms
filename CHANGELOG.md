@@ -29,6 +29,17 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **Official JS/TS client: `@kiln-cms/client`** (`clients/js`, #1310). Typed
+  fetch wrappers over the delivery surfaces — JSON:API lists/filters/sorts/
+  includes with the published-only-by-default safe defaults of the Elixir
+  client, per-type and hybrid search, fired artifacts, `?as_of=` point-in-time
+  reads (single document and collection index), and preview tokens — plus a
+  bundled `kiln-types` CLI that turns `GET /api/schema` into per-site
+  TypeScript declarations (dynamic content types and custom fields included),
+  emitting the same output as `mix kiln.export.schema --format ts`.
+  `examples/astro-blog` now consumes the client end to end, and a `client-js`
+  CI job lints, builds, and tests the package (not yet published to npm).
+
 - **Reranking can be scoped to `/api/ask`.** `config :kiln_cms, KilnCMS.Ask,
   rerank: true` (or `ASK_RERANK=true`) reranks a question's retrieved
   candidates with the configured `KilnCMS.Search.Reranker` — the wired

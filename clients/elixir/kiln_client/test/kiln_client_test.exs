@@ -134,6 +134,26 @@ defmodule KilnClientTest do
       # No stub installed — a request would raise.
       assert {:ok, []} = KilnClient.by_ids("posts", [])
     end
+
+    test "chunks id lists past the server's 100-row page cap" do
+      # 150 ids in one request would be clamped to 100 rows server-side,
+      # making the last 50 records indistinguishable from misses.
+      stub_doc(%{"data" => [%{"id" => "id-149", "type" => "post", "attributes" => %{}}]})
+
+      ids = Enum.map(0..149, &"id-#{&1}")
+
+      assert {:ok, items} = KilnClient.by_ids("posts", ids)
+      # Ordering still follows `ids`, across chunk boundaries.
+      assert Enum.map(items, & &1["id"]) == ["id-149"]
+
+      assert_received {:request, "/api/json/posts/published", first}
+      assert_received {:request, "/api/json/posts/published", second}
+      refute_received {:request, _path, _params}
+
+      assert length(first["filter"]["id"]["in"]) == 100
+      assert length(second["filter"]["id"]["in"]) == 50
+      assert second["page"]["limit"] == "50"
+    end
   end
 
   describe "per-type search" do

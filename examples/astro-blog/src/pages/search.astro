@@ -2,8 +2,9 @@
 import Base from "../layouts/Base.astro";
 import { searchPosts, type PostSummary } from "../lib/kiln";
 
-// Demonstrates the *other* headless surface: the AshGraphql `searchPosts` query
-// at POST /gql. This runs at build time with a sample query (so the page stays
+// Demonstrates per-type search through the client: the JSON:API
+// `/api/json/posts/search/published` twin (relevance-ranked, published-only
+// server-side). This runs at build time with a sample query (so the page stays
 // fully static and needs no CORS). For a live, type-as-you-go search, move this
 // fetch into a client `<script>` and enable CORS on KilnCMS — see the README.
 const DEMO_QUERY = "hello";
@@ -20,8 +21,8 @@ try {
 <Base title="Search">
   <h1>Search</h1>
   <p>
-    Results for <strong>{DEMO_QUERY}</strong>, fetched from the GraphQL
-    <code>searchPosts</code> query at build time.
+    Results for <strong>{DEMO_QUERY}</strong>, fetched from the published-only
+    JSON:API search twin at build time.
   </p>
 
   {error && <p>Search failed: {error}</p>}
