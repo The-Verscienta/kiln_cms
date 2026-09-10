@@ -104,6 +104,9 @@ defmodule KilnCMS.MixProject do
       # link them to. Listing them here keeps `--warnings-as-errors` meaningful
       # instead of blanket-suppressing warnings for whole files.
       skip_code_autolink_to: [
+        # Hidden (LiveView renders carry @doc false) — the inspector components'
+        # moduledocs cite it as the code's provenance (#1311).
+        "KilnCMSWeb.ContentEditorLive.render/1",
         "KilnCMS.Application",
         "KilnCMS.Application.start/2",
         "KilnCMS.Governance.Chain.any_history_anchors?/0",
