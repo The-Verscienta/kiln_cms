@@ -12,9 +12,12 @@ defmodule KilnCMSWeb.ActorlessHandlerAuthzTest do
   is evaluated once, so a role revoked mid-session would otherwise hold for the
   life of the socket.
 
-  `Billing.verify_credentials/1` now threads the actor (#1309), so `Settings`'
-  policy backstops a stamped result — but the guard is still what stops the
-  provider being dialed at all, which is what its case below asserts.
+  `Billing.verify_credentials/1` now takes the actor and refuses a non-admin
+  before the provider is dialed (#1309) — but the struct it checks is the same
+  one the mount guard read, so a role revoked mid-session is caught by
+  neither; the policy backstops a missing or wrong-tier actor, not a stale
+  one. Its case below asserts the forged-event half: the guard stops the
+  event before the domain call is even made.
 
   Called directly rather than through `live/2`: where the mount refuses there is
   no socket to push an event down, and the question here is what each handler

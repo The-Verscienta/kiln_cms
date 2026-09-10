@@ -15,8 +15,12 @@ defmodule KilnCMS.Billing.SettingsTest do
   alias KilnCMS.Billing
 
   setup do
-    # `Application.put_env` for the provider double, so not async.
-    on_exit(fn -> Application.delete_env(:kiln_cms, KilnCMS.Billing) end)
+    # `Application.put_env` for the provider double, so not async. Restore the
+    # key rather than deleting it: config/test.exs also wires `req_options`
+    # (the `Req.Test` plug) under it, which a delete would strip for the rest
+    # of the run.
+    previous = Application.get_env(:kiln_cms, KilnCMS.Billing, [])
+    on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Billing, previous) end)
     :ok
   end
 
@@ -252,25 +256,13 @@ defmodule KilnCMS.Billing.SettingsTest do
     end
 
     test "true once both secrets resolve" do
-      settings = Billing.ensure_settings!()
-
-      {:ok, settings} =
-        Billing.store_billing_secret(settings, :secret_key, "sk_test_abc", authorize?: false)
-
-      {:ok, _settings} =
-        Billing.store_billing_secret(settings, :webhook_secret, "whsec_xyz", authorize?: false)
+      configure_billing!()
 
       assert Billing.configured?()
     end
 
     test "false again after clear_credentials" do
-      settings = Billing.ensure_settings!()
-
-      {:ok, settings} =
-        Billing.store_billing_secret(settings, :secret_key, "sk_test_abc", authorize?: false)
-
-      {:ok, settings} =
-        Billing.store_billing_secret(settings, :webhook_secret, "whsec_xyz", authorize?: false)
+      settings = configure_billing!()
 
       assert Billing.configured?()
 
@@ -340,24 +332,26 @@ defmodule KilnCMS.Billing.SettingsTest do
   end
 
   describe "verify_credentials/1" do
-    # The `record_verification` write goes through `Settings`' policy with the
-    # caller's actor (#1309) rather than `authorize?: false`, so these cases
-    # assert both halves: an admin's probe stamps the row, and a non-admin's
-    # stamps nothing even though the provider round-trip itself succeeded.
+    # The actor is checked against `Settings`' policy up front and the
+    # `record_verification` writes carry it too (#1309), so these cases assert
+    # both halves: an admin's probe stamps the row, and a non-admin is turned
+    # away before the provider is even dialed.
     setup do
-      Application.put_env(:kiln_cms, KilnCMS.Billing, provider: KilnCMS.StubBillingProvider)
+      # Merged into the existing key (which also carries `req_options`) rather
+      # than replacing it; the module-level setup restores the key afterwards.
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Billing,
+        :kiln_cms
+        |> Application.get_env(KilnCMS.Billing, [])
+        |> Keyword.put(:provider, KilnCMS.StubBillingProvider)
+      )
 
       on_exit(fn -> Application.delete_env(:kiln_cms, :stub_billing_provider) end)
 
-      settings = Billing.ensure_settings!()
+      configure_billing!()
 
-      {:ok, settings} =
-        Billing.store_billing_secret(settings, :secret_key, "sk_test_abc", authorize?: false)
-
-      {:ok, settings} =
-        Billing.store_billing_secret(settings, :webhook_secret, "whsec_xyz", authorize?: false)
-
-      %{settings: settings}
+      :ok
     end
 
     test "a platform admin's probe stamps account, mode and timestamp" do
@@ -372,24 +366,50 @@ defmodule KilnCMS.Billing.SettingsTest do
       refute verified.verification_error
     end
 
-    test "a provider failure is recorded as an operator-facing error" do
+    test "a provider failure is recorded, without claiming a fresh verification" do
       admin = user(:admin)
       KilnCMS.StubBillingProvider.put(:account, {:error, {:http_status, 401, ""}})
 
       assert {:error, {:http_status, 401, ""}} = Billing.verify_credentials(admin)
 
-      settings = Billing.ensure_settings!()
+      settings = Billing.get_settings()
       assert settings.verification_error =~ "rejected these credentials"
+      # The error is stamped; a verification is NOT — `last_verified_at` means
+      # the last successful probe, and this row has never had one.
+      refute settings.last_verified_at
+      refute settings.provider_account_id
     end
 
-    test "an editor's probe is refused by the policy and stamps nothing" do
+    test "an editor is refused before the provider is dialed, and stamps nothing" do
       editor = user(:editor)
+      KilnCMS.StubBillingProvider.spy_on(:retrieve_account, self())
 
-      assert {:error, %Ash.Error.Forbidden{}} = Billing.verify_credentials(editor)
+      assert {:error, :forbidden} = Billing.verify_credentials(editor)
 
-      settings = Billing.ensure_settings!()
+      # Refused up front: no provider round-trip happened at all.
+      refute_received {:stub_billing, :retrieve_account, _params}
+
+      settings = Billing.get_settings()
       refute settings.provider_account_id
       refute settings.last_verified_at
+      refute settings.verification_error
     end
+
+    test "the verify-specific reasons render operator-facing messages" do
+      assert Billing.describe_error(:forbidden) =~ "platform admin"
+      assert Billing.describe_error({:stamp_failed, :boom}) =~ "could not be saved"
+    end
+  end
+
+  defp configure_billing! do
+    settings = Billing.ensure_settings!()
+
+    {:ok, settings} =
+      Billing.store_billing_secret(settings, :secret_key, "sk_test_abc", authorize?: false)
+
+    {:ok, settings} =
+      Billing.store_billing_secret(settings, :webhook_secret, "whsec_xyz", authorize?: false)
+
+    settings
   end
 end

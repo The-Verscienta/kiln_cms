@@ -30,6 +30,7 @@ defmodule KilnCMS.Billing do
   use Ash.Domain
 
   require Ash.Query
+  require Logger
 
   alias KilnCMS.Billing.Settings
 
@@ -135,10 +136,12 @@ defmodule KilnCMS.Billing do
   end
 
   defp create_settings! do
-    # `authorize?: false` on the create: `ensure_settings!/0` takes no actor
-    # (`BillingLive` mounts behind `platform_admin?` and is the only caller), and
-    # `:init` accepts no attributes — it inserts the empty singleton row, which
-    # the identity makes a no-op on a race. Nothing caller-supplied reaches it.
+    # `authorize?: false` on the create: `ensure_settings!/0` takes no actor.
+    # Its callers are `BillingLive` (which mounts behind `platform_admin?`) and
+    # `verify_credentials/1` (which pre-checks its actor against `Settings`'
+    # policy before calling), and `:init` accepts no attributes — it inserts the
+    # empty singleton row, which the identity makes a no-op on a race. Nothing
+    # caller-supplied reaches it.
     init_settings!(%{}, authorize?: false)
   rescue
     # Lost a concurrent-creation race on the singleton identity: the row exists
@@ -177,34 +180,59 @@ defmodule KilnCMS.Billing do
   Backs the console's "Test connection" so a mistyped key fails at save time
   rather than at a member's first checkout.
 
-  Takes the requesting actor and records the result through `Settings`'
-  platform-admin policy (#1309), so a caller the policy refuses stamps nothing —
-  the provider round-trip alone leaves no trace.
+  Takes the requesting actor. A caller `Settings`' policy refuses is turned
+  away up front, before any side effect — no singleton row is created, no key
+  decrypted, no provider dialed — as `{:error, :forbidden}` (#1309). The stamps
+  themselves are still written through the policy with the same actor, so the
+  policy stays the authority; a stamp that fails anyway (a DB error) comes back
+  as `{:error, {:stamp_failed, error}}` on the success path and is logged on
+  the failure path, where the provider's reason is the one the caller needs.
   """
   @spec verify_credentials(KilnCMS.Accounts.User.t()) :: {:ok, Settings.t()} | {:error, term()}
   def verify_credentials(actor) do
+    if Ash.can?({Settings, :record_verification}, actor) do
+      do_verify_credentials(actor)
+    else
+      {:error, :forbidden}
+    end
+  end
+
+  defp do_verify_credentials(actor) do
     settings = ensure_settings!()
 
     with {:ok, config} <- credentials(),
          {:ok, account} <- provider().retrieve_account(config) do
-      record_billing_verification(
-        settings,
-        %{
-          provider_account_id: account["id"],
-          # Derived from the key prefix, not the response: the account object has
-          # no reliable live/test flag, whereas the key itself is unambiguous.
-          livemode: live_key?(config.secret_key),
-          verification_error: nil
-        },
-        actor: actor
-      )
+      attrs = %{
+        provider_account_id: account["id"],
+        # Derived from the key prefix, not the response: the account object has
+        # no reliable live/test flag, whereas the key itself is unambiguous.
+        livemode: live_key?(config.secret_key),
+        verification_error: nil
+      }
+
+      case record_billing_verification(settings, attrs, actor: actor) do
+        {:ok, verified} -> {:ok, verified}
+        {:error, error} -> {:error, {:stamp_failed, error}}
+      end
     else
       {:error, reason} ->
-        record_billing_verification(
-          settings,
-          %{verification_error: describe_error(reason)},
-          actor: actor
-        )
+        # The provider's reason is what the operator must see; a stamp that
+        # fails on top of it (a DB error — authz was pre-checked above) would
+        # otherwise vanish, so it goes to the log.
+        case record_billing_verification(
+               settings,
+               %{verification_error: describe_error(reason)},
+               actor: actor
+             ) do
+          {:ok, _stamped} ->
+            :ok
+
+          {:error, error} ->
+            Logger.warning(
+              "Billing verification failed AND the failure stamp was not saved: " <>
+                inspect(error)
+            )
+        end
 
         {:error, reason}
     end
@@ -226,6 +254,13 @@ defmodule KilnCMS.Billing do
 
   def describe_error(reason) when reason in [:timeout, :closed],
     do: "The payment provider did not respond in time."
+
+  def describe_error(:forbidden),
+    do: "Your account may not record verification results. Sign in as a platform admin."
+
+  def describe_error({:stamp_failed, _error}),
+    do:
+      "Connected to the payment provider, but the result could not be saved. Check the server logs."
 
   def describe_error(%{__exception__: true} = error),
     do: "Could not reach the payment provider: #{Exception.message(error)}"

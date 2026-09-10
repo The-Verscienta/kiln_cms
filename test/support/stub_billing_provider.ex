@@ -80,6 +80,10 @@ defmodule KilnCMS.StubBillingProvider do
 
   @impl true
   def retrieve_account(_config) do
+    # No params worth forwarding — the spy's point is proving whether the
+    # provider was dialed at all (e.g. that an authz refusal precedes the dial).
+    spy(:retrieve_account, %{})
+
     case setting(:account) do
       {:error, reason} -> {:error, reason}
       nil -> {:ok, %{"id" => "acct_stub", "charges_enabled" => true}}

@@ -153,6 +153,21 @@ delivery pipeline resolves the DKIM key as the **system**
 (`authorize?: false` via `KilnCMS.Mail.dkim_config/0`), as does the lazy
 singleton creation (`ensure_settings!/0`, reached only from the admin page).
 
+## Billing settings — `Billing.Settings`
+
+| Action | admin | editor | viewer | anonymous |
+|--------|:-----:|:------:|:------:|:---------:|
+| read, `init`, `store_secret`, `configure_key_source`, `record_verification`, `clear_credentials` | ✅ | ❌ | ❌ | ❌ |
+
+Instance-wide payment-provider credentials (`/editor/billing`) are
+platform-admin-only — deliberately **not** per-org, for the same reason as
+`Mail.Settings`: the row is tenant-less, so an org-admin check would resolve
+against the default org. The checkout path and webhook receiver read the row as
+the **system** (`authorize?: false` via `KilnCMS.Billing.get_settings/0`), as
+does the lazy singleton creation (`ensure_settings!/0`, reached from the admin
+page and from `verify_credentials/1`, which pre-checks its actor against this
+policy before doing anything).
+
 ## Bounce suppression — `Mail.SuppressedRecipient`
 
 | Action | admin | editor | viewer | anonymous |
