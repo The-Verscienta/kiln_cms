@@ -66,7 +66,8 @@ defmodule KilnCMS.Media.Ingest do
           tenant: term(),
           alt: String.t() | nil,
           caption: String.t() | nil,
-          max_bytes: pos_integer()
+          max_bytes: pos_integer(),
+          context: map()
         ]
 
   @doc """
@@ -559,7 +560,11 @@ defmodule KilnCMS.Media.Ingest do
       |> put_present(:caption, opts[:caption])
       |> put_quarantined(Keyword.get(opts, :quarantined?, false))
 
-    case CMS.create_media_item(attrs, Keyword.take(opts, [:actor, :tenant])) do
+    # `:context` rides through for callers that need to steer resource-level
+    # changes — the portability importer passes `%{skip_uploader_stamp: true}`
+    # so `relate_actor(:uploaded_by)` doesn't credit a migrated archive to
+    # whoever ran the import.
+    case CMS.create_media_item(attrs, Keyword.take(opts, [:actor, :tenant, :context])) do
       {:ok, %{quarantined: true} = item} ->
         # Derivation is the strip worker's to enqueue, after promotion (#1122).
         {:ok, item}

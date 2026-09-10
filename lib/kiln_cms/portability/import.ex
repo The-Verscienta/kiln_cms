@@ -641,8 +641,16 @@ defmodule KilnCMS.Portability.Import do
   end
 
   defp fetch_one(asset, opts, progress) do
+    # `skip_uploader_stamp`: the operator's actor authorizes the create, but a
+    # migrated asset was not uploaded by them — same principle as the byline
+    # handling above, which reassigns `author` to the mapped original writer
+    # rather than crediting whoever ran the import. Media has no per-asset
+    # uploader in any export format, so the honest value is none at all.
     result =
-      case Ingest.store_url(asset.url, scope(opts) ++ [alt: asset.alt]) do
+      case Ingest.store_url(
+             asset.url,
+             scope(opts) ++ [alt: asset.alt, context: %{skip_uploader_stamp: true}]
+           ) do
         {:ok, item} ->
           {:ok, asset, item}
 

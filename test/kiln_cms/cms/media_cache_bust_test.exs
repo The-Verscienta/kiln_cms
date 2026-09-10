@@ -105,4 +105,22 @@ defmodule KilnCMS.CMS.MediaCacheBustTest do
 
     assert busted?(s)
   end
+
+  # The bulk-delete opt-out (#1316 review): a caller deleting N items clears
+  # once after its loop instead of N times, so the per-record change must
+  # stand down when told to. The flag's contract is "the caller owns the
+  # single post-loop bust".
+  test "a destroy with skip_media_cache_bust does not bust the cache" do
+    media = media!()
+    s = prime()
+
+    # Through the code interface, as the library's bulk delete calls it.
+    :ok =
+      KilnCMS.CMS.destroy_media_item!(media,
+        authorize?: false,
+        context: %{skip_media_cache_bust: true}
+      )
+
+    refute busted?(s)
+  end
 end

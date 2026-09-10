@@ -108,6 +108,20 @@ defmodule KilnCMS.CMS.MediaLibraryTest do
       assert ids(item.tags) == MapSet.new([a.id, c.id])
     end
 
+    test "create accepts the complete set too — no create/update asymmetry" do
+      editor = user(:editor)
+      a = tag!(editor, "on-create")
+
+      item =
+        CMS.create_media_item!(
+          %{filename: "tagged.png", url: "/uploads/tagged-create", tag_ids: [a.id]},
+          actor: editor,
+          load: [:tags]
+        )
+
+      assert ids(item.tags) == MapSet.new([a.id])
+    end
+
     test "combining the complete set with a merge verb is refused" do
       editor = user(:editor)
       item = media()
@@ -147,6 +161,66 @@ defmodule KilnCMS.CMS.MediaLibraryTest do
         CMS.create_media_item!(%{filename: "sys.png", url: "/uploads/sys"}, authorize?: false)
 
       assert nobody.uploaded_by_id == nil
+    end
+
+    test "skip_uploader_stamp suppresses the stamp for an actor-bearing create" do
+      editor = user(:editor)
+
+      # The portability importer's posture: the operator's actor authorizes
+      # the create, but a migrated asset was not uploaded by them.
+      imported =
+        CMS.create_media_item!(%{filename: "import.png", url: "/uploads/import"},
+          actor: editor,
+          context: %{skip_uploader_stamp: true}
+        )
+
+      assert imported.uploaded_by_id == nil
+    end
+  end
+
+  describe "Media.Bulk" do
+    alias KilnCMS.Media.Bulk
+
+    test "add_tag tags the batch, skipping already-tagged items" do
+      editor = user(:editor)
+      tag = tag!(editor, "bulk-add")
+      already = CMS.update_media_item!(media(), %{tag_ids: [tag.id]}, actor: editor)
+      fresh_a = media()
+      fresh_b = media()
+
+      assert {3, 0} = Bulk.add_tag([already, fresh_a, fresh_b], tag.id, actor: editor)
+
+      for item <- [already, fresh_a, fresh_b] do
+        loaded = CMS.get_media_item!(item.id, actor: editor, load: [:tags])
+        assert Enum.map(loaded.tags, & &1.id) == [tag.id]
+      end
+    end
+
+    test "remove_tag strips the batch and is idempotent for untagged items" do
+      editor = user(:editor)
+      tag = tag!(editor, "bulk-remove")
+      keep = tag!(editor, "bulk-keep")
+
+      tagged = CMS.update_media_item!(media(), %{tag_ids: [tag.id, keep.id]}, actor: editor)
+      untagged = media()
+
+      assert {2, 0} = Bulk.remove_tag([tagged, untagged], tag.id, actor: editor)
+
+      loaded = CMS.get_media_item!(tagged.id, actor: editor, load: [:tags])
+      assert Enum.map(loaded.tags, & &1.id) == [keep.id]
+    end
+
+    test "a viewer's bulk tag write is refused by the Tagging policy" do
+      editor = user(:editor)
+      viewer = user(:viewer)
+      tag = tag!(editor, "bulk-authz")
+      item = media()
+
+      {ok, failed} = KilnCMS.Media.Bulk.add_tag([item], tag.id, actor: viewer)
+      assert {ok, failed} == {0, 1}
+
+      loaded = CMS.get_media_item!(item.id, actor: editor, load: [:tags])
+      assert loaded.tags == []
     end
   end
 

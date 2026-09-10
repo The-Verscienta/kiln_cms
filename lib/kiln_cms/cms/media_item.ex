@@ -40,6 +40,12 @@ defmodule KilnCMS.CMS.MediaItem do
   json_api do
     type "media_item"
 
+    # AshJsonApi rejects anything not declared here (mirrors content.ex).
+    # `uploaded_by` stays excluded: User is deliberately not a JSON:API
+    # resource (PII redaction, #183) — the uploader surfaces as the
+    # `uploaded_by_id` attribute only.
+    includes [:tags]
+
     routes do
       base "/media-items"
 
@@ -105,6 +111,13 @@ defmodule KilnCMS.CMS.MediaItem do
             name: "media_items_search_gin_index",
             using: "gin",
             all_tenants?: true
+
+      # Backs the `:library` uploader facet and the library UI's distinct-
+      # uploaders read (#1316). Postgres doesn't index FK columns for you
+      # (same rationale as 20260702000129's author_id/category_id indexes);
+      # without `all_tenants?` the derived index is `(org_id, uploaded_by_id)`,
+      # which is exactly the shape both org-scoped queries seek.
+      index [:uploaded_by_id], name: "media_items_uploaded_by_index"
     end
   end
 
@@ -169,10 +182,30 @@ defmodule KilnCMS.CMS.MediaItem do
       primary? true
       accept @create_accept
 
+      # The complete-set half of the tag arguments (no merge verbs — a create
+      # has no existing links to merge against), mirroring content's `:create`
+      # exactly: omitting it here is the create/update asymmetry content.ex's
+      # generator comment documents (#639) — a caller passing `tag_ids` to the
+      # create would get `NoSuchInput` while the equivalent update succeeded.
+      argument :tag_ids, {:array, :uuid}
+
+      change {KilnCMS.CMS.Changes.NormalizeManagedArguments, arguments: [:tag_ids]}
+      change manage_relationship(:tag_ids, :tags, type: :append_and_remove)
+
       # Who uploaded it (#1316) — the library's uploader filter. Same posture
-      # as content's `relate_actor(:author)`: nullable, so system ingests
-      # (seeds, imports) and rows predating the column are valid without one.
-      change relate_actor(:uploaded_by, allow_nil?: true)
+      # as content's `relate_actor(:author)`: nullable, so actorless system
+      # ingests (seeds, workers) and rows predating the column are valid
+      # without one. The `where:` opt-out exists for callers that DO carry an
+      # actor who nonetheless isn't the uploader — the portability importer
+      # runs as the operating admin but must not claim a migrated archive
+      # (same principle as its `:reassign_author` byline handling). The
+      # function is a validation: `{:error, _}` skips the change.
+      change relate_actor(:uploaded_by, allow_nil?: true),
+        where: fn changeset, _context ->
+          if changeset.context[:skip_uploader_stamp],
+            do: {:error, "uploader stamp suppressed"},
+            else: :ok
+        end
     end
 
     # Not atomic: the `BustMediaCache` after-action runs an in-BEAM side effect
@@ -280,11 +313,20 @@ defmodule KilnCMS.CMS.MediaItem do
       # in days. Both bounds are inclusive of the named day.
       argument :uploaded_after, :date
       argument :uploaded_before, :date
-      # Three-state: `true` → only items no published document references,
-      # `false` → only referenced items, absent → both. "Used" is defined by
-      # the reference-edge graph the fire path maintains (see
-      # `KilnCMS.Firing.References`), so — like the drawer's "Used by" list —
-      # an item referenced only by never-published drafts counts as unused.
+      # Three-state: `true` → only items with no recorded reference, `false` →
+      # only referenced items, absent → both. "Used" is defined by the
+      # reference-edge graph the fire path maintains (see
+      # `KilnCMS.Firing.References`), with that graph's exact lifecycle: edges
+      # are written when a document FIRES and replaced only on its next fire —
+      # so an item referenced only by never-published drafts counts as unused,
+      # while an edge from a document since unpublished or even hard-purged
+      # keeps counting as a use (nothing deletes edges on unpublish/purge;
+      # references.ex documents that trade). One divergence from the drawer:
+      # `References.usages/3` additionally drops edges whose referring RECORD
+      # no longer exists (`live_referrers/2`), which this WHERE clause cannot
+      # — that check fans out per referrer type, dynamic types included. So
+      # for the narrow purged-referrer case the facet counts a use the drawer
+      # no longer lists, until any document fires again and rebuilds edges.
       argument :unused, :boolean
 
       # Exposed on the public API — bound the response like `:search`.
@@ -632,9 +674,10 @@ defmodule KilnCMS.CMS.MediaItem do
     end
 
     # Who uploaded it (#1316). Nullable — system ingests and rows predating
-    # the column have none. Public like content's `author`: only User's safe
-    # byline fields (`id`, `name`) are `public?`, so `?include=uploaded_by`
-    # can never return uploader PII.
+    # the column have none. Public, but NOT in the json_api `includes` list
+    # (User is deliberately not a JSON:API resource — PII redaction, #183, the
+    # same reason content's `author` isn't includable): headless consumers see
+    # only the `uploaded_by_id` attribute.
     belongs_to :uploaded_by, KilnCMS.Accounts.User do
       allow_nil? true
       public? true
