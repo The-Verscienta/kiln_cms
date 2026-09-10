@@ -30,10 +30,18 @@ defmodule KilnCMSWeb.BillingWebhookControllerTest do
     # `Req.Test` stub is process-scoped and the Oban worker runs in a different
     # process, so it falls through to the real network — which made an earlier
     # version of this file issue a live request to the payment provider.
-    Application.put_env(:kiln_cms, KilnCMS.Billing, provider: KilnCMS.StubBillingProvider)
+    # Merged into (and restored over) the existing key rather than replacing
+    # it: the key also carries config/test.exs's `req_options` Req.Test plug.
+    previous = Application.get_env(:kiln_cms, KilnCMS.Billing, [])
+
+    Application.put_env(
+      :kiln_cms,
+      KilnCMS.Billing,
+      Keyword.put(previous, :provider, KilnCMS.StubBillingProvider)
+    )
 
     on_exit(fn ->
-      Application.delete_env(:kiln_cms, KilnCMS.Billing)
+      Application.put_env(:kiln_cms, KilnCMS.Billing, previous)
       Application.delete_env(:kiln_cms, :stub_billing_provider)
     end)
 
