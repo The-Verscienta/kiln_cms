@@ -58,6 +58,25 @@ defmodule KilnCMS.CMS.MediaAltTextTest do
     CMS.create_page!(Map.merge(%{title: "Page #{n}", slug: "alt-#{n}"}, attrs), actor: actor)
   end
 
+  # Policy-focused fixture: a page plus a hand-seeded reference edge — no
+  # publish and no Oban drain, because these tests are about who may READ the
+  # graph; the fire-path tests in "usage tracking" already cover how edges get
+  # written. (`Ash.Seed` writes directly, so `ReferenceEdge`'s forbidden
+  # create action is not in the way.)
+  defp seeded_usage(actor) do
+    img = image(%{alt: "Hero"})
+    page = page(%{}, actor)
+
+    Ash.Seed.seed!(KilnCMS.Firing.ReferenceEdge, %{
+      from_type: :page,
+      from_id: page.id,
+      to_type: :media,
+      to_id: img.id
+    })
+
+    {img, page}
+  end
+
   describe "the publish gate" do
     test "is off unless configured, so an existing library keeps publishing" do
       actor = admin()
@@ -363,38 +382,66 @@ defmodule KilnCMS.CMS.MediaAltTextTest do
 
     # The edge reads run under the actor's own authorization now (#1309):
     # `ReferenceEdge`'s read policy admits editors-and-up, so an editor gets
-    # the full answer without any bypass.
+    # the full answer without any bypass — whether their tier comes from the
+    # legacy user-column role or (the multi-tenant shape #336 actually uses)
+    # an `OrgMembership` on the request's org.
     test "an editor sees the same usages under their own authorization" do
-      actor = admin()
-      img = image(%{alt: "Hero"})
-      p = page(%{featured_image_id: img.id}, actor)
-      published = CMS.publish_page!(p, actor: actor)
-      drain_oban()
+      {img, page} = seeded_usage(admin())
 
-      editor = user(:editor)
+      legacy_editor = user(:editor)
 
-      assert %{total: 1, items: [%{id: id, title: title}]} =
-               References.usages(published.org_id, img.id, editor)
+      member = user(:viewer)
 
-      assert id == published.id
-      assert title == published.title
+      Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+        user_id: member.id,
+        organization_id: page.org_id,
+        role: :editor
+      })
 
-      assert References.usage_counts(published.org_id, [img.id], editor) == %{img.id => 1}
+      for editor <- [legacy_editor, member] do
+        assert %{total: 1, items: [%{id: id, title: title}]} =
+                 References.usages(page.org_id, img.id, editor)
+
+        assert id == page.id
+        assert title == page.title
+
+        assert References.usage_counts(page.org_id, [img.id], editor) == %{img.id => 1}
+      end
     end
 
-    # With the bypass gone the policy actually gets to answer: a non-editor's
-    # edge read filters to nothing, so the graph never leaks below editor tier.
+    # With the bypass gone the policy actually gets to answer. The denied read
+    # comes back `{:ok, []}` — NOT `{:error, Forbidden}` — only because
+    # config.exs sets `no_filter_static_forbidden_reads?: false` (Ash's own
+    # default errors); `usages/3` handles the error shape too, so flipping
+    # that flag would log-and-empty rather than crash.
     test "a viewer's usage reads come back empty, not bypassed" do
-      actor = admin()
-      img = image(%{alt: "Hero"})
-      p = page(%{featured_image_id: img.id}, actor)
-      published = CMS.publish_page!(p, actor: actor)
-      drain_oban()
-
+      {img, page} = seeded_usage(admin())
       viewer = user(:viewer)
 
-      assert References.usages(published.org_id, img.id, viewer) == %{total: 0, items: []}
-      assert References.usage_counts(published.org_id, [img.id], viewer) == %{}
+      assert References.usages(page.org_id, img.id, viewer) == %{total: 0, items: []}
+      assert References.usage_counts(page.org_id, [img.id], viewer) == %{}
+
+      # A MISSING actor must crash, not answer: a well-formed `total: 0` for
+      # an actorless system caller would read as "safe to delete".
+      assert_raise FunctionClauseError, fn ->
+        References.usages(page.org_id, img.id, nil)
+      end
+    end
+
+    # Edges outlive both trash and purge by design; the grid's count and the
+    # drawer's list must still agree, or the confirmation warns about
+    # referrers the "Used by" list cannot show.
+    test "a trashed referrer stops counting as a usage" do
+      actor = admin()
+      {img, page} = seeded_usage(actor)
+
+      assert References.usage_counts(page.org_id, [img.id], actor) == %{img.id => 1}
+      assert References.usages(page.org_id, img.id, actor).total == 1
+
+      CMS.destroy_page!(page, actor: actor)
+
+      assert References.usage_counts(page.org_id, [img.id], actor) == %{}
+      assert References.usages(page.org_id, img.id, actor) == %{total: 0, items: []}
     end
 
     test "removing the reference removes the usage" do

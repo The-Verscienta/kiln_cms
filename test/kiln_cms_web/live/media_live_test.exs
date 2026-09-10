@@ -187,13 +187,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
     # the "used by" answer an editor gets before deleting must be unchanged.
     test "an editor sees where an item is used", %{conn: conn} do
       editor = authed_user(:editor)
-
-      item =
-        Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
-          filename: "hero-#{System.unique_integer([:positive])}.png",
-          url: "/uploads/hero",
-          content_type: "image/png"
-        })
+      item = seed_media("hero-#{System.unique_integer([:positive])}.png")
 
       page =
         CMS.create_page!(

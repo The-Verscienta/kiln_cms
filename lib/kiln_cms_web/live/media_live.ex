@@ -7,6 +7,8 @@ defmodule KilnCMSWeb.MediaLive do
 
   import Ash.Expr, only: [expr: 1]
 
+  require Logger
+
   alias KilnCMS.CMS
   alias KilnCMS.Media.Ingest
   alias KilnCMS.MediaKind
@@ -108,9 +110,20 @@ defmodule KilnCMSWeb.MediaLive do
       last ->
         {page, more?} = fetch_media(socket, last.inserted_at, @page_size)
 
+        # Extend the usage-count map for the new page, or every item past the
+        # first page renders the bare "Delete X?" confirmation with no
+        # used-by warning — the exact #403 failure the count exists to
+        # prevent.
+        counts =
+          Map.merge(
+            socket.assigns.usage_counts,
+            usage_counts(page, socket.assigns.current_org, socket.assigns.actor)
+          )
+
         {:noreply,
          socket
          |> assign(:media, socket.assigns.media ++ page)
+         |> assign(:usage_counts, counts)
          |> assign(:more?, more?)}
     end
   end
@@ -605,15 +618,22 @@ defmodule KilnCMSWeb.MediaLive do
 
   # One query for the whole grid, so the delete confirmation can say what a
   # delete affects. Best-effort: the count is context, and an unreadable
-  # reference graph must not stop the library from rendering.
+  # reference graph must not stop the library from rendering — but the failure
+  # is logged, because an empty map renders exactly like "nothing is used" and
+  # a silent one would hide that the check never ran.
   defp usage_counts(items, org_id, actor) do
     KilnCMS.Firing.References.usage_counts(tenant_id(org_id), Enum.map(items, & &1.id), actor)
   rescue
-    _error -> %{}
+    error ->
+      Logger.warning("media usage counts unavailable: #{inspect(error)}")
+      %{}
   end
 
   # Refresh the loaded items in place (after uploads, deletes, metadata edits,
-  # variant completions) without collapsing Load more depth.
+  # variant completions) without collapsing Load more depth. The usage counts
+  # are re-read too: they describe the items on screen, and a map frozen at
+  # the last filter change would keep warning about a reference another tab
+  # removed — or miss one it added — for as long as the socket lives.
   defp reload_media(socket) do
     depth = max(@page_size, length(socket.assigns.media))
     {items, more?} = fetch_media(socket, nil, depth)
@@ -621,6 +641,10 @@ defmodule KilnCMSWeb.MediaLive do
     socket
     |> assign(:media, items)
     |> assign(:more?, more?)
+    |> assign(
+      :usage_counts,
+      usage_counts(items, socket.assigns.current_org, socket.assigns.actor)
+    )
     |> assign(:total, count_media(socket))
   end
 
@@ -705,12 +729,20 @@ defmodule KilnCMSWeb.MediaLive do
     end
   end
 
-  # Best-effort: the "used by" list is context, and an editor must still be able
-  # to open a media item when the reference graph can't be read.
+  # Best-effort: the "used by" list is context, and an editor must still be
+  # able to open a media item when the reference graph can't be read — logged,
+  # because the empty fallback renders as an affirmative "not used by any
+  # published document". The tenant is `tenant_id(org_id)` with no fallback,
+  # matching `usage_counts/3` above: since #1309 the tenant also selects which
+  # org the read POLICY authorizes against, and a per-call-site fallback would
+  # let the drawer and the grid judge different orgs (`current_org` is always
+  # assigned on this LiveView — `:assign_current_org` raises otherwise).
   defp usages(item, org_id, actor) do
-    KilnCMS.Firing.References.usages(tenant_id(org_id) || item.org_id, item.id, actor)
+    KilnCMS.Firing.References.usages(tenant_id(org_id), item.id, actor)
   rescue
-    _error -> empty_usages()
+    error ->
+      Logger.warning("media usage list unavailable for #{item.id}: #{inspect(error)}")
+      empty_usages()
   end
 
   # Deleting a hero image without being told what it appears on is how a page
