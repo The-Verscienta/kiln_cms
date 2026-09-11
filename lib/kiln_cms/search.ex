@@ -149,10 +149,12 @@ defmodule KilnCMS.Search do
   only the semantic leg returned is dropped when its distance exceeds the
   floor, while a record any other leg (keyword, its any-term relaxation,
   title or fuzzy) also found is kept whatever its distance. A lexical match
-  needs no distance alibi. The per-type
-  semantic actions (`:search_semantic` / `:search_semantic_published`, the
-  `semantic-search` JSON:API routes) have no other leg, so they filter the leg
-  itself, as before.
+  needs no distance alibi. The per-type semantic actions
+  (`:search_semantic` / `:search_semantic_published`, the `semantic-search`
+  JSON:API routes) have no fusion to leave it to, so they filter the leg
+  themselves — with the title leg's exemption: a row whose title the query
+  names is kept whatever its distance (`KilnCMS.CMS.Content`). A row vouched
+  only by the keyword, any-term or fuzzy legs is still floored there.
 
   The distinction matters because a short query naming a record embeds far
   from that record's long prose. Filtering the leg *before* fusion made the
@@ -187,11 +189,12 @@ defmodule KilnCMS.Search do
 
       config :kiln_cms, KilnCMS.Search, semantic_max_distance: 0.55
 
-  The two surfaces want different edges. Hybrid search never floors a
-  corroborated hit, so for it the number to set is where the junk band
-  starts; the per-type semantic actions floor the whole leg, so they return
-  an expected record only if the floor sits at or beyond its distance. The
-  task prints both edges, labelled.
+  The two surfaces want slightly different edges. Hybrid search never floors
+  a corroborated hit, so for it the number to set is where the junk band
+  starts; the per-type semantic actions exempt only a title match, so a
+  record the query reaches by its prose alone is returned there only if the
+  floor sits at or beyond its distance. The task prints both edges,
+  labelled.
 
   A non-numeric value **raises** on first use rather than being ignored.
   Erlang orders `number < atom < bitstring`, so a string or atom here — a

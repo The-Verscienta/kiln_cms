@@ -1,0 +1,67 @@
+defmodule KilnCMSWeb.JsonApiSemanticFloorTest do
+  @moduledoc """
+  The per-type `semantic-search` JSON:API routes apply `semantic_max_distance`
+  themselves (no fusion to leave it to) and exempt a row whose title the
+  query names, as the title leg does in hybrid search — so a floor set for
+  the search page no longer drops named records from the route delivery
+  sites use (the "Why Shen Beat Huang Qi" report, D2).
+  """
+  # async: false — toggles the global `KilnCMS.Search` app env.
+  use KilnCMSWeb.ConnCase, async: false
+
+  alias KilnCMS.CMS
+
+  setup do
+    original = Application.get_env(:kiln_cms, KilnCMS.Search, [])
+    on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Search, original) end)
+
+    Application.put_env(
+      :kiln_cms,
+      KilnCMS.Search,
+      Keyword.merge(original, KilnCMS.StubEmbedder.search_env() ++ [semantic_max_distance: 0.0])
+    )
+
+    :ok
+  end
+
+  defp admin do
+    Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+      email: "jsf-#{System.unique_integer([:positive])}@example.com",
+      hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+      confirmed_at: DateTime.utc_now(),
+      role: :admin
+    })
+  end
+
+  defp published_post(admin, title) do
+    post =
+      CMS.create_post!(%{title: title, slug: "jsf-#{System.unique_integer([:positive])}"},
+        actor: admin
+      )
+
+    CMS.publish_post!(post, %{}, actor: admin)
+  end
+
+  test "the published route keeps a record the query names past the floor", %{conn: conn} do
+    admin = admin()
+    named = published_post(admin, "Huang Qi")
+    _other = published_post(admin, "Dang Shen")
+    KilnCMS.DataCase.drain_oban()
+
+    body =
+      conn
+      |> get("/api/json/posts/semantic-search/published?query=huang%20qi%20dang&locale=en")
+      |> json_response(200)
+
+    # A floor of 0 admits nothing by distance; "Huang Qi" is named, "Dang
+    # Shen" is not ("dang" alone is not its title as a phrase).
+    assert Enum.map(body["data"], & &1["id"]) == [named.id]
+
+    body =
+      conn
+      |> get("/api/json/posts/semantic-search/published?query=nothing%20like%20this&locale=en")
+      |> json_response(200)
+
+    assert body["data"] == []
+  end
+end

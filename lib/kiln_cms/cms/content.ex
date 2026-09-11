@@ -103,6 +103,21 @@ defmodule KilnCMS.CMS.Content do
   # to it — `semantic_floor: :caller` in the query context — and gets every
   # row with its distance loaded instead. Why the floor belongs after fusion
   # is on `KilnCMS.Search.semantic_max_distance/0`.
+  #
+  # The per-type semantic actions — the `semantic-search` JSON:API routes,
+  # the GraphQL lists, `CMS.semantic_search_*` — have no fusion to leave it
+  # to, so they apply the floor here, with the one exemption the title leg
+  # gives hybrid search: a row whose title the query names is kept whatever
+  # its distance. The title leg (`:search_title`) is asked which rows it
+  # vouches for and those ids are OR-ed into the floor, in the same query,
+  # so the action stays a plain paginated, countable read — a fused list
+  # would have neither a keyset nor a count — and a vouched row still sorts
+  # at its distance rank. A row vouched only by the keyword, any-term or fuzzy
+  # legs is still floored here; those legs are fusion's, not this action's.
+  #
+  # It happens in a `before_action`, not in the prepare: preparations run
+  # when the query is *built*, and the title read is a database round trip
+  # that belongs to the read, not to constructing it.
   defp semantic_floor(%{context: %{semantic_floor: :caller}} = query, vector) do
     Ash.Query.load(query, semantic_distance: %{query_vector: vector})
   end
@@ -113,11 +128,35 @@ defmodule KilnCMS.CMS.Content do
         query
 
       max_distance ->
-        Ash.Query.filter(
-          query,
-          semantic_distance(query_vector: ^vector) <= ^max_distance
-        )
+        Ash.Query.before_action(query, fn query ->
+          vouched = title_vouched_ids(query)
+
+          Ash.Query.filter(
+            query,
+            semantic_distance(query_vector: ^vector) <= ^max_distance or id in ^vouched
+          )
+        end)
     end
+  end
+
+  # The ids the title leg returns for this query, under this tenant and these
+  # facets — the same arguments the semantic action was given, restricted to
+  # the ones `:search_title` takes. Read as the system: the ids only widen an
+  # exemption, and every row the semantic action returns still passes its own
+  # read policy, so nothing an actor may not see is reachable through them.
+  # The title leg is bounded (`cap_unbounded/2`), so this is at most 50 ids.
+  defp title_vouched_ids(%{resource: resource} = query) do
+    arg_names =
+      resource
+      |> Ash.Resource.Info.action(:search_title)
+      |> Map.fetch!(:arguments)
+      |> Enum.map(& &1.name)
+
+    resource
+    |> Ash.Query.for_read(:search_title, Map.take(query.arguments, arg_names))
+    |> Ash.Query.select([:id])
+    |> Ash.read!(tenant: query.tenant, authorize?: false)
+    |> Enum.map(& &1.id)
   end
 
   # A caller running this leg across many resources can embed the query once

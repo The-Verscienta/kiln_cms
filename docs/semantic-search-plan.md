@@ -104,9 +104,11 @@ corpus grows around it.
 — applies the floor *after* fusion, to hits only the semantic leg returned. A
 record any other leg (keyword, its any-term relaxation, title or fuzzy)
 also found is kept whatever its distance: a lexical match needs no distance
-alibi. The per-type `semantic-search` API routes have no other leg, so they
-filter the leg itself — one value, two edges, and the measurement below
-labels both. A non-numeric value raises on first use rather than comparing
+alibi. The per-type `semantic-search` API routes have no fusion to leave it
+to, so they filter the leg themselves — exempting a row whose title the query
+names, the way the title leg does in hybrid search, but not a row only the
+keyword, any-term or fuzzy legs vouch for. One value, two (close) edges, and
+the measurement below labels both. A non-numeric value raises on first use rather than comparing
 as "greater than every distance" and flooring nothing.
 
 The placement matters. Filtering the leg before fusion made the floor the
@@ -139,8 +141,8 @@ overlap and what each edge would keep and admit — that is a choice about
 which error to make, or a sign the corpus wants `rerank: true` rather than a
 floor. The two surfaces want different edges: hybrid search never floors a
 corroborated hit, so set it at the junk edge for the search page and the
-APIs; the per-type routes floor the whole leg, so they return every expected
-record only from the expected edge up. The numbers behind the task are
+APIs; the per-type routes exempt only a title match, so they return a record
+reached by its prose alone only from the expected edge up. The numbers behind the task are
 `KilnCMS.Search.semantic_neighbours/3` (`semantic_distances/3` for titles
 only):
 

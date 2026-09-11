@@ -608,18 +608,53 @@ defmodule KilnCMS.Search.HybridTest do
       assert is_list(Search.hybrid(:page, "alpha", actor: admin))
     end
 
-    test "the per-type semantic action still floors the leg itself" do
-      # The `semantic-search` API routes have no other leg to corroborate a
-      # hit, so a record beyond the floor stays out of them even though hybrid
-      # search — where the keyword leg vouches for it — returns it.
+    test "the per-type semantic action floors the leg, exempting rows the title leg vouches for" do
+      # The `semantic-search` API routes have no fusion to leave the floor
+      # to, so they apply it themselves — with the one exemption the title
+      # leg gives hybrid search: a row whose title the query names is kept
+      # whatever its distance. A row vouched only by the keyword legs is not:
+      # those legs are fusion's, not this action's.
       admin = admin()
-      page = CMS.create_page!(%{title: "alpha beta", slug: slug()}, actor: admin)
+      query = "tell me about alpha beta"
+      named = CMS.create_page!(%{title: "alpha beta", slug: slug()}, actor: admin)
+      # "alpha beta" only in the SEO description: the keyword legs' find, not
+      # the title leg's.
+      keyword_only =
+        CMS.create_page!(
+          %{title: "unrelated words", slug: slug(), seo_description: "alpha beta"},
+          actor: admin
+        )
+
+      semantic_only = CMS.create_page!(%{title: "gamma", slug: slug()}, actor: admin)
       KilnCMS.DataCase.drain_oban()
 
-      put_search_env(semantic_max_distance: distance_of(page, "alpha", admin) / 2)
+      records = [named, keyword_only, semantic_only]
+      by_distance = records |> Enum.sort_by(&distance_of(&1, query, admin)) |> ids()
 
-      assert CMS.semantic_search_pages!("alpha", actor: admin) == []
-      assert Search.hybrid(:page, "alpha", actor: admin) |> ids() == [page.id]
+      put_search_env(semantic_max_distance: 0.0)
+
+      assert CMS.semantic_search_pages!(query, actor: admin) |> ids() == [named.id]
+      # Junk still returns nothing: nothing names it, and nothing is within 0.
+      assert CMS.semantic_search_pages!("nothing like this exists", actor: admin) == []
+      # Hybrid keeps the keyword-vouched record too, as before.
+      hybrid_ids = Search.hybrid(:page, query, actor: admin) |> ids()
+      assert named.id in hybrid_ids and keyword_only.id in hybrid_ids
+      refute semantic_only.id in hybrid_ids
+
+      # Sorted by distance still, and paginated and countable still: the
+      # exemption is part of the same query, not a list fused afterwards.
+      put_search_env(
+        semantic_max_distance: Enum.max(Enum.map(records, &distance_of(&1, query, admin)))
+      )
+
+      page =
+        KilnCMS.CMS.Page
+        |> Ash.Query.for_read(:search_semantic, %{query: query})
+        |> Ash.Query.page(limit: 2, count: true)
+        |> Ash.read!(actor: admin)
+
+      assert page.count == 3
+      assert ids(page.results) == Enum.take(by_distance, 2)
     end
   end
 end
