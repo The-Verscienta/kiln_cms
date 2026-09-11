@@ -35,6 +35,19 @@ defmodule KilnCMSWeb.ContentEditorTaskAssignmentTest do
     user
   end
 
+  # A global viewer whose tier on `org` comes from the membership alone.
+  defp member(org, role) do
+    user = authed_user(:viewer)
+
+    Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+      user_id: user.id,
+      organization_id: org.id,
+      role: role
+    })
+
+    user
+  end
+
   defp log_in(conn, user) do
     conn
     |> Phoenix.ConnTest.init_test_session(%{})
@@ -84,6 +97,45 @@ defmodule KilnCMSWeb.ContentEditorTaskAssignmentTest do
 
     html = lv |> element("button", "Mark done") |> render_click()
     assert html =~ "No open tasks."
+  end
+
+  # #419: on a non-default org the roster is that org's editors/admins by
+  # EFFECTIVE tier — members whose tier comes from their membership (all
+  # global viewers here) — not global editors, and the write accepts exactly
+  # who the picker offers.
+  test "on a second org the picker lists that org's editors and admins", %{conn: conn} do
+    site = KilnCMS.OrgFixtures.org("assign")
+    other = KilnCMS.OrgFixtures.org("assign-other")
+    editor = member(site, :editor)
+    site_admin = member(site, :admin)
+    site_viewer = member(site, :viewer)
+    other_admin = member(other, :admin)
+    # Membership-less: keeps its global role on the default org only.
+    legacy_editor = authed_user(:editor)
+
+    page =
+      CMS.create_page!(
+        %{title: "Org assign", slug: "assign-#{System.unique_integer([:positive])}"},
+        actor: editor,
+        tenant: site
+      )
+
+    {:ok, lv, _html} =
+      conn |> org_conn(site) |> log_in(editor) |> live(~p"/editor/content/page/#{page.id}")
+
+    render_click(lv, "task_assign_open")
+
+    assert has_element?(lv, ~s(option[value="#{editor.id}"]))
+    assert has_element?(lv, ~s(option[value="#{site_admin.id}"]))
+    refute has_element?(lv, ~s(option[value="#{site_viewer.id}"]))
+    refute has_element?(lv, ~s(option[value="#{other_admin.id}"]))
+    refute has_element?(lv, ~s(option[value="#{legacy_editor.id}"]))
+
+    render_change(lv, "task_draft_change", %{"task_assignee_id" => site_admin.id})
+    render_click(lv, "task_assign_submit")
+
+    assert [task] = CMS.list_tasks_for!("page", page.id, actor: editor, tenant: site)
+    assert task.assignee_id == site_admin.id
   end
 
   test "the ?assign=1 deep link from the content list opens the assign form", %{conn: conn} do

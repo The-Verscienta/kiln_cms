@@ -11,9 +11,13 @@ defmodule KilnCMS.Notifications do
 
   Events:
 
-    * `:submitted_for_review` — an editor moved content into review; every admin
-      (except the submitter, if they are themselves an admin) is notified so
-      someone can approve it.
+    * `:submitted_for_review` — an editor moved content into review; the admins
+      *of the content's org* are notified so someone can approve it: members
+      whose tier there is `:admin`, plus platform admins, plus (on the default
+      org) membership-less accounts whose global role is `:admin` —
+      `KilnCMS.Accounts.Scoping.users_with_tier/2`, the inverse of the
+      `effective_tier/2` the approve action itself authorizes against. The
+      submitter is skipped if they are themselves one of them.
     * `:published` — content went live; the author is notified. This also covers
       scheduled publishing, where there is no acting user.
     * `:returned_to_draft` — an admin sent reviewed content back to the author.
@@ -41,10 +45,9 @@ defmodule KilnCMS.Notifications do
   Push is off unless the deployment has VAPID keys, and carries no draft
   content — see `KilnCMS.Push`.
   """
-  require Ash.Query
-
   use Gettext, backend: KilnCMSWeb.Gettext
 
+  alias KilnCMS.Accounts.Scoping
   alias KilnCMS.Accounts.User
   alias KilnCMS.Notifications.WorkflowMailWorker
   alias KilnCMS.Push
@@ -58,9 +61,14 @@ defmodule KilnCMS.Notifications do
 
   @spec dispatch(event(), struct(), map() | nil) :: :ok
   def dispatch(:submitted_for_review, record, actor) do
-    User
-    |> Ash.Query.filter(role == :admin)
-    |> Ash.read!(authorize?: false)
+    # The admins OF THE CONTENT'S ORG (#419): the people whose effective tier
+    # lets them approve it. Not `User.role == :admin` — on a multi-site install
+    # an org's admins are members whose tier comes from their membership, and
+    # a global-role query mails platform operators while the site's own
+    # approvers never hear about it.
+    record
+    |> Map.get(:org_id)
+    |> Scoping.users_with_tier([:admin])
     |> Enum.reject(&same_user?(&1, actor))
     |> Enum.filter(&wants?(&1, :submitted_for_review))
     |> notify(:submitted_for_review, record, actor)

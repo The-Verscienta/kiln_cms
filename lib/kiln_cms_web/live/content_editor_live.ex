@@ -416,7 +416,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # after assign/complete; the assignee list is loaded once (an org's
          # editor roster doesn't change mid-session).
          |> assign(:tasks, load_tasks(kind, record.id, actor, org))
-         |> assign(:assignable_users, assignable_users())
+         |> assign(:assignable_users, assignable_users(org))
          |> assign(:task_assign_open?, assign_deep_link?)
          |> assign(:task_draft, %{})
          # What the site does with an open task on publish (#818) — the assign
@@ -2953,7 +2953,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # find is the one failure worth spending a query to avoid, and reusing the
   # same source is how that is guaranteed rather than hoped for.
   #
-  # `authorize?: false` for the same reason `assignable_users/0` needs it:
+  # `authorize?: false` for the same reason `assignable_users/1` needs it:
   # `User`'s read policy is self-only, so listing anyone else's name for a
   # dropdown takes a system read.
   defp mention_roster do
@@ -3195,14 +3195,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp generic_release_error, do: gettext("Couldn't add it to that release.")
 
-  # Org editors/admins — the roster a task can be assigned to (viewers can't
-  # act on content, so they're excluded). `authorize?: false`: OrgMembership's
-  # read policy is self-only (same reasoning as `load_comments/4`'s author
-  # load), so listing the roster for a dropdown needs a system read.
-  defp assignable_users do
-    Accounts.User
-    |> Ash.Query.filter(role in [:editor, :admin])
-    |> Ash.read!(authorize?: false)
+  # This org's editors/admins — the roster a task can be assigned to (viewers
+  # can't act on content, so they're excluded). By EFFECTIVE tier on the org
+  # the task will be written under (#419), not global `User.role`: that is what
+  # `AssigneeIsEditor` checks at the write, so the picker offers exactly the
+  # people the submit accepts. `users_with_tier/2` is a system read —
+  # `User`'s and `OrgMembership`'s read policies are self-only.
+  defp assignable_users(org) do
+    org
+    |> Accounts.Scoping.users_with_tier([:editor, :admin])
     |> Enum.sort_by(&user_label/1)
     |> Enum.map(&{user_label(&1), &1.id})
   end
@@ -3314,7 +3315,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # same CMS.assign_task/2 path `task_assign_submit` already calls — rather
   # than a new component, mirroring how a `?assign=1` deep link opens it
   # (`open_settings_if_deep_linked/2`). Optional/dismissable: the panel's own
-  # Cancel button is "no thanks", and the "notify all admins" email
+  # Cancel button is "no thanks", and the "notify the org's admins" email
   # (`Notifications.dispatch(:submitted_for_review, ...)`) already covers the
   # general case of nobody being named. A blank due date is a real choice
   # (`assign_task`'s own `nil`), so this only ever SUGGESTS one — the

@@ -153,4 +153,107 @@ defmodule KilnCMS.CMS.OrgTiersTest do
       assert is_list(KilnCMS.Newsletter.list_subscribers!(actor: admin, tenant: site))
     end
   end
+
+  # The roster query behind review-request recipients and the task assignee
+  # picker. It re-states `effective_tier/2`'s branches as SQL, so the one
+  # thing it must never do is disagree with it.
+  describe "users_with_tier/2" do
+    setup do
+      default = %{id: KilnCMS.Accounts.default_org_id()}
+      site = org()
+      elsewhere = org()
+
+      users = %{
+        platform: user(:admin),
+        platform_member: user(:admin) |> tap(&membership(&1, site, :viewer)),
+        legacy_editor: user(:editor),
+        legacy_viewer: user(:viewer),
+        site_admin: user(:viewer) |> tap(&membership(&1, site, :admin)),
+        site_editor: user(:viewer) |> tap(&membership(&1, site, :editor)),
+        demoted: user(:editor) |> tap(&membership(&1, site, :viewer)),
+        foreign_editor: user(:editor) |> tap(&membership(&1, elsewhere, :editor)),
+        default_admin: user(:viewer) |> tap(&membership(&1, default, :admin))
+      }
+
+      %{default: default, site: site, users: users}
+    end
+
+    test "agrees with effective_tier/2 for every user, tier set and org", ctx do
+      all = Map.values(ctx.users)
+
+      for org_id <- [ctx.default.id, ctx.site.id],
+          tiers <- [[:admin], [:editor, :admin], [:editor], [:viewer]] do
+        expected = all |> Enum.filter(&(Scoping.effective_tier(&1, org_id) in tiers)) |> ids()
+        roster = roster(org_id, tiers, all)
+
+        assert roster == expected, "#{inspect(tiers)} on #{org_id}"
+        assert roster == Enum.uniq(roster)
+      end
+    end
+
+    # Pinned, so the agreement above is not two wrong answers agreeing.
+    test "names the expected people", %{default: default, site: site, users: u} do
+      all = Map.values(u)
+
+      assert roster(site.id, [:admin], all) == ids([u.platform, u.platform_member, u.site_admin])
+
+      assert roster(site.id, [:editor, :admin], all) ==
+               ids([u.platform, u.platform_member, u.site_admin, u.site_editor])
+
+      # Off the default org a membership-less global editor has no standing, and
+      # neither does an editor whose memberships are all elsewhere.
+      refute u.legacy_editor.id in roster(site.id, [:editor, :admin], all)
+      refute u.foreign_editor.id in roster(site.id, [:editor, :admin], all)
+
+      # On the default org the legacy branch keeps membership-less accounts'
+      # global role; an affiliated user (demoted, foreign_editor) gets none.
+      assert roster(default.id, [:editor, :admin], all) ==
+               ids([u.platform, u.platform_member, u.legacy_editor, u.default_admin])
+    end
+
+    defp roster(org_id, tiers, users) do
+      mine = MapSet.new(users, & &1.id)
+
+      org_id
+      |> Scoping.users_with_tier(tiers)
+      |> Enum.map(& &1.id)
+      |> Enum.filter(&MapSet.member?(mine, &1))
+      |> Enum.sort()
+    end
+
+    defp ids(users), do: users |> Enum.map(& &1.id) |> Enum.sort()
+  end
+
+  # `AssigneeIsEditor` reads the same tier the picker lists by, on the org the
+  # task is written under — not the global `User.role`.
+  describe "task assignees are vetted by their tier on the task's org" do
+    test "an org-granted editor (global viewer) can be assigned a task there" do
+      site = org()
+      assigner = user(:viewer) |> tap(&membership(&1, site, :editor))
+      assignee = user(:viewer) |> tap(&membership(&1, site, :editor))
+
+      assert {:ok, task} = assign(assignee, assigner, site)
+      assert task.assignee_id == assignee.id
+    end
+
+    test "a global editor with no standing on the org is refused" do
+      site = org()
+      elsewhere = org()
+      assigner = user(:viewer) |> tap(&membership(&1, site, :editor))
+      legacy = user(:editor)
+      foreign = user(:editor) |> tap(&membership(&1, elsewhere, :editor))
+
+      for outsider <- [legacy, foreign] do
+        assert {:error, %Ash.Error.Invalid{}} = assign(outsider, assigner, site)
+      end
+    end
+
+    defp assign(assignee, actor, site) do
+      CMS.assign_task(
+        %{content_type: "page", content_id: Ecto.UUID.generate(), assignee_id: assignee.id},
+        actor: actor,
+        tenant: site
+      )
+    end
+  end
 end

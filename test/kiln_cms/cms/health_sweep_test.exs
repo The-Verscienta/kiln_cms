@@ -221,6 +221,33 @@ defmodule KilnCMS.CMS.HealthSweepTest do
       assert task.assignee_id == author.id
     end
 
+    # #419: "still an editor" is the author's tier on the rule's org — an
+    # org-granted editor who is only a global viewer still qualifies, and is not
+    # passed over for the fallback.
+    test "an author whose editor tier comes from an org membership keeps the task" do
+      admin = user(:admin)
+      author = user(:viewer)
+      fallback = user(:editor)
+
+      Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+        user_id: author.id,
+        organization_id: org_id(),
+        role: :editor
+      })
+
+      stale = overdue_page(admin)
+
+      stale
+      |> Ash.Changeset.for_update(:reassign_author, %{author_id: author.id})
+      |> Ash.update!(authorize?: false)
+
+      task_rule!(admin, %{"assignee_id" => fallback.id})
+      sweep_and_drain!()
+
+      assert [task] = lifecycle_tasks(stale.id, admin)
+      assert task.assignee_id == author.id
+    end
+
     test "falls back to the rule's assignee when the author cannot hold a task" do
       admin = user(:admin)
       viewer = user(:viewer)

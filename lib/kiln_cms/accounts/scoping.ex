@@ -40,6 +40,8 @@ defmodule KilnCMS.Accounts.Scoping do
   — the anonymous delivery hot path never pays it.
   """
 
+  require Ash.Query
+
   alias KilnCMS.Accounts
 
   @axes [:editable_types, :readable_types]
@@ -215,6 +217,41 @@ defmodule KilnCMS.Accounts.Scoping do
   end
 
   def effective_tier(_actor, _subject), do: :none
+
+  @doc """
+  The users whose `effective_tier/2` on `org` is one of `tiers` — its inverse,
+  for "who on this site can …" rosters: the review-request recipients
+  (`KilnCMS.Notifications`) and the task assignee picker, which must offer
+  exactly the people `KilnCMS.CMS.Validations.AssigneeIsEditor` then accepts.
+
+  The same three branches, as one query (so one row per user however many
+  match):
+
+    * **platform admins** (`User.role == :admin`), when `:admin` is asked for
+      — a membership never demotes them, so the member branch leaves them out;
+    * **members** whose membership `role` on `org` is one of `tiers`;
+    * on the **default org** only, accounts with **no memberships at all**
+      whose global `role` is one of `tiers` (pre-#336 single-org data).
+
+  A system read: `User`'s and `OrgMembership`'s read policies are self-only,
+  and a roster is by definition about other people. `org` takes the shapes
+  `KilnCMS.Accounts.org_id/1` does — nil is the default org.
+  """
+  @spec users_with_tier(struct() | String.t() | nil, [:admin | :editor | :viewer]) :: [struct()]
+  def users_with_tier(org, tiers) when is_list(tiers) do
+    org_id = Accounts.org_id(org)
+    platform? = :admin in tiers
+    legacy? = org_id == Accounts.default_org_id()
+
+    Accounts.User
+    |> Ash.Query.filter(
+      (^platform? and role == :admin) or
+        (role != :admin and
+           exists(org_memberships, organization_id == ^org_id and role in ^tiers)) or
+        (^legacy? and role in ^tiers and not exists(org_memberships, true))
+    )
+    |> Ash.read!(authorize?: false)
+  end
 
   # A membership-less account's global role applies only on the default org.
   defp legacy_tier(actor, org) do
