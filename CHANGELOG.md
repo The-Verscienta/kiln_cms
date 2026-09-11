@@ -29,6 +29,23 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **`/api/json/type-definitions` — headless discovery of dynamic content
+  types.** `POST /api/json/entries` needs a `type_definition_id`, and until
+  now the only place a client could find one was `/mcp`'s
+  `read_type_definitions`. The type registry is now a read-only JSON:API
+  collection: `GET /api/json/type-definitions` (filter by `name`, sort,
+  paginate), `GET /api/json/type-definitions/by-name/:name` to resolve a
+  machine name to its id in one call (`404` on a miss), and
+  `GET /api/json/type-definitions/:id`. `?include=field_definitions` returns
+  the type's custom-field schema alongside it, so a client can build an
+  entry's `custom_fields` from the same response (`FieldDefinition` gains a
+  JSON:API type for this, with no routes of its own). Same read and policies as
+  the MCP tool — an editor or admin of the request's org, a read-only key is
+  enough; viewers and anonymous callers get an empty list — scoped to the
+  host's org, archived types excluded. There are no write routes: types are
+  still defined in `/editor/types`. See `docs/json-api.md` → "Discovering
+  dynamic types".
+
 - **The content editor lists the redirects standing under a record's
   address.** Directly beneath the slug / path-alias fields, every retired path
   that still 301s to the record being edited is listed — old path, the
@@ -42,7 +59,24 @@ migration, a rewritten column, a dropped config key).
   policy as the actor — a type-scoped editor cannot prune a redirect at a type
   they may not author, and rows whose target is gone remain an admin job on
   `/editor/redirects`. Creating redirects stays admin-only.
-
+- **A working copy for live content (docs/working-copy.md).** A published
+  page, post or entry now keeps two texts: the working copy the editor types
+  into and the version readers get. Typing into a live document autosaves the
+  title and body into the working copy alone; once it runs ahead the state
+  pill reads **Live · draft**, the primary button turns into **Publish
+  changes** (same URL, same `published_at`, no workflow email) and a menu
+  offers **Discard the changes**, which puts the published text back and keeps
+  the discarded text as a version. Tags, slug and every other setting stay
+  single-state and go live on Save. The signed-in preview shows the working
+  copy with a strip saying so; the content list marks such records *edited
+  since publishing*; a release whose publish item points at a live document
+  with pending changes publishes them on go-live instead of skipping the item.
+  Three columns on the published row (`working_title`, `working_blocks`,
+  `working_copy_at`) plus the `save_working_copy` / `publish_changes` /
+  `discard_changes` actions; `published_version_id` now names the version
+  whose fold is the live text, whichever of the three publishes wrote it.
+  Migration `add_working_copy`, no data migration — existing rows read as
+  nothing pending.
 - **A first-run setup wizard at `/setup` (#1317).** While an instance has no
   admin account, a three-step wizard creates one — email + password, an
   optional site name/colour/theme — and then sends the operator to sign-in,
@@ -149,7 +183,7 @@ migration, a rewritten column, a dropped config key).
   neighbour, then proposes the cutoff between the two bands, overall and per
   class (or says where they overlap, and what each edge costs on each
   surface: hybrid search never floors a corroborated hit, the per-type
-  `semantic-search` routes floor the whole leg). It measures through the
+  `semantic-search` routes exempt only a title match). It measures through the
   semantic leg hybrid search runs — the query's locale, embedded and
   published rows only, a dynamic type within its own definition — rather
   than reading the table directly. Built on the new
@@ -207,6 +241,17 @@ migration, a rewritten column, a dropped config key).
   `row_click` is reachable by keyboard (first cell focusable, Enter fires it),
   and removing a funnel step, a release item or a push device now asks first.
 
+- **The per-type `semantic-search` routes keep a record the query names.**
+  They apply `semantic_max_distance` themselves (there is no fusion to leave
+  it to), and used to floor every row by distance alone, so a floor set for
+  the search page dropped named records from the route the headless guide
+  tells delivery sites to use — the report's D2 on one more surface. The
+  `:search_semantic` / `:search_semantic_published` actions now ask the
+  title leg (`:search_title`) which rows it vouches for and exempt those
+  ids from the floor inside the same query, so the action stays a plain
+  paginated, countable read and a vouched row still sorts at its distance.
+  A row vouched only by the keyword, any-term or fuzzy legs is still floored
+  there; those legs are fusion's.
 - **A non-numeric `semantic_max_distance` now raises instead of flooring
   nothing.** Erlang orders `number < atom < bitstring`, so a string or atom
   in that key (an env var wired in without `String.to_float/1`, or `:none`
@@ -235,8 +280,8 @@ migration, a rewritten column, a dropped config key).
   semantic leg returned: a record any other leg (keyword, its any-term
   relaxation, title, fuzzy) also found needs no distance alibi. Junk still returns nothing (#871's guarantee) — with no
   lexical hit every fused hit is semantic-only and over the floor. The
-  per-type `semantic-search` API routes, which have no other leg, filter as
-  before. Reported as finding D2 / proposal P3 of the "Why Shen Beat Huang
+  per-type `semantic-search` API routes, which have no fusion to leave it
+  to, filter the leg themselves — exempting a row the query names by title. Reported as finding D2 / proposal P3 of the "Why Shen Beat Huang
   Qi" analysis.
 - **`/api/ask` cited sources in alphabetical order of content type, not by
   relevance.** `KilnCMS.Ask`'s retrieval flattened the sections in registry

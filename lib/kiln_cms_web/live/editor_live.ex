@@ -50,7 +50,18 @@ defmodule KilnCMSWeb.EditorLive do
   # Only what the list renders — without a select, every row drags its whole
   # blocks JSONB tree (plus search_text and embedding) into the LiveView heap.
   # Workflow/destroy actions re-fetch the full record by id before acting.
-  @list_fields [:id, :title, :slug, :state, :updated_at, :scheduled_at, :unpublish_at]
+  # `working_copy_at` is the *edited since publishing* marker
+  # (docs/working-copy.md) — a timestamp column, not the working text.
+  @list_fields [
+    :id,
+    :title,
+    :slug,
+    :state,
+    :updated_at,
+    :scheduled_at,
+    :unpublish_at,
+    :working_copy_at
+  ]
 
   # Only pulled for `in_review` (see `page_query/3`): the fields the compliance
   # badge scans (#856). `search_text` is the denormalized plain-text body — a
@@ -961,6 +972,15 @@ defmodule KilnCMSWeb.EditorLive do
               <p class="truncate text-xs text-base-content/70">/{record.slug}</p>
             </div>
             <.state_badge state={record.state} />
+            <%!-- A live record whose working copy has run ahead of its
+                  published text (docs/working-copy.md). --%>
+            <span
+              :if={record.state == :published and record.working_copy_at}
+              class="text-xs italic text-base-content/60"
+              title={gettext("The working copy has run ahead of the published text.")}
+            >
+              {gettext("edited since publishing")}
+            </span>
             <%!-- The approving admin sees the publish gate but never the
                   claim panel — it lives in the editor, and the approver acts
                   from this list (#856). A click-through to the editor rather

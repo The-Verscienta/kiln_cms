@@ -52,6 +52,13 @@ defmodule KilnCMS.CMS.Changes.CoalesceAutosaveVersions do
   require Ash.Query
   require Logger
 
+  # Both debounced saves: `:autosave` on a draft and `:save_working_copy` on a
+  # live document (docs/working-copy.md). A run is cut by any OTHER action —
+  # the two never interleave, since each is refused in the other's state, so a
+  # working-copy run and a draft run are each collapsed against the same
+  # manual boundary.
+  @autosave_actions [:autosave, :save_working_copy]
+
   @impl true
   def change(changeset, _opts, _context) do
     Ash.Changeset.after_transaction(changeset, fn _changeset, result ->
@@ -124,7 +131,9 @@ defmodule KilnCMS.CMS.Changes.CoalesceAutosaveVersions do
 
       boundary ->
         version_module
-        |> Ash.Query.filter(version_source_id == ^record.id and version_action_name == :autosave)
+        |> Ash.Query.filter(
+          version_source_id == ^record.id and version_action_name in ^@autosave_actions
+        )
         |> Ash.Query.sort(version_inserted_at: :asc, id: :asc)
         |> after_latest_manual(version_module, record)
         |> Chain.after_anchored(boundary)
@@ -141,7 +150,9 @@ defmodule KilnCMS.CMS.Changes.CoalesceAutosaveVersions do
 
   defp latest_manual_version_timestamp(version_module, source_id, org_id) do
     version_module
-    |> Ash.Query.filter(version_source_id == ^source_id and version_action_name != :autosave)
+    |> Ash.Query.filter(
+      version_source_id == ^source_id and version_action_name not in ^@autosave_actions
+    )
     |> Ash.Query.sort(version_inserted_at: :desc)
     |> Ash.Query.limit(1)
     |> Ash.read_one!(authorize?: false, tenant: org_id)

@@ -158,7 +158,10 @@ throwing.
 Dynamic (admin-created) types go through the shared `entries` surface:
 `kiln.list("entries", { filter: { type_name: "product" } })`; their artifacts
 are addressed by type name like compiled types
-(`kiln.artifact("product", slug)`).
+(`kiln.artifact("product", slug)`). The type registry itself is
+`kiln.list("type-definitions", { filter: { name: "product" } })` — it needs an
+editor-or-above key, and `include: ["field_definitions"]` adds each type's
+custom-field schema.
 
 ## Development
 

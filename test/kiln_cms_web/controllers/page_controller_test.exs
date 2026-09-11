@@ -36,6 +36,38 @@ defmodule KilnCMSWeb.PageControllerTest do
     assert html_response(conn, 200) =~ "KilnCMS"
   end
 
+  # The stock front page was a headline and three one-line cards — a first
+  # visitor learned almost nothing about what Kiln is. It now carries a tour,
+  # the feature set, a developer section and how it is hosted.
+  test "the signed-out home page explains the product", %{conn: conn} do
+    html = conn |> get(~p"/") |> html_response(200)
+
+    for heading <- [
+          "See it in action",
+          "Everything a content team needs",
+          "Built for developers",
+          "Run it on your own servers"
+        ] do
+      assert html =~ heading
+    end
+
+    assert html =~ "postBySlug"
+    assert html =~ ~s(href="https://github.com/The-Verscienta/kiln_cms")
+  end
+
+  # The screenshots are static files captured by e2e/screenshots/home.spec.js;
+  # a renamed capture would otherwise ship as a row of broken images.
+  test "every screenshot the home page shows exists", %{conn: conn} do
+    html = conn |> get(~p"/") |> html_response(200)
+    srcs = Regex.scan(~r{src="(/images/home/[^"]+)"}, html, capture: :all_but_first)
+
+    assert length(srcs) == 4
+
+    for [src] <- srcs do
+      assert File.exists?(Path.join(:code.priv_dir(:kiln_cms), "static" <> src)), src
+    end
+  end
+
   # #319: the header/footer API links land on a served docs page, not on the
   # raw endpoints (which 404/400 in a browser).
   test "GET /developers serves the API docs page", %{conn: conn} do

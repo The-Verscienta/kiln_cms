@@ -199,8 +199,14 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
 
       # The drift guard the issue asks for: a new restorable attribute has to
       # fail here rather than quietly ship a restore that skips it. The two
-      # reference fields have their own test — they need real records.
-      covered = Map.keys(original) ++ [:blocks, :category_id, :featured_image_id]
+      # reference fields have their own test — they need real records. So does
+      # the working copy of a live document (docs/working-copy.md): it only
+      # restores onto a PUBLISHED record, and `KilnCMS.CMS.WorkingCopyTest`
+      # round-trips it there by restoring a discarded copy.
+      covered =
+        Map.keys(original) ++
+          [:blocks, :category_id, :featured_image_id] ++
+          [:working_title, :working_blocks, :working_copy_at]
 
       assert Enum.sort(VersionFields.restorable_fields(KilnCMS.CMS.Page)) == Enum.sort(covered)
     end
@@ -211,16 +217,17 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
       # `@not_restorable` — including one that silently drops `audience` back
       # out of the restore, which is what #691 was filed about.
       assert VersionDiff.diffable_fields(KilnCMS.CMS.Post) ==
-               ~w(title slug path_alias excerpt state audience locale
+               ~w(title working_title slug path_alias excerpt state audience locale
                   seo_title seo_description seo_keywords seo_image canonical_url
                   published_at scheduled_at unpublish_at expiry_action
                   review_after_days last_reviewed_at
                   author_id category_id featured_image_id custom_fields)a
 
       assert VersionFields.restorable_fields(KilnCMS.CMS.Post) ==
-               ~w(title slug path_alias excerpt audience locale
+               ~w(title working_title slug path_alias excerpt audience locale
                   seo_title seo_description seo_keywords seo_image canonical_url
-                  category_id featured_image_id custom_fields blocks)a
+                  category_id featured_image_id custom_fields blocks
+                  working_blocks working_copy_at)a
     end
 
     test "restorable? answers about the resource, not about a name in the abstract" do

@@ -78,6 +78,7 @@ defmodule KilnCMS.CMS.Releases do
 
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.WorkingCopy
   alias KilnCMS.Repo
   alias KilnCMS.Webhooks
 
@@ -331,7 +332,8 @@ defmodule KilnCMS.CMS.Releases do
   end
 
   defp transition(item, record, prior, actor, opts) do
-    with {:ok, notes} <- run_transition(item.content_type, verb(item.action), record, actor, opts),
+    with {:ok, notes} <-
+           run_transition(item.content_type, verb(item.action, record), record, actor, opts),
          {:ok, mark_notes} <- mark_applied(item, prior, opts) do
       {:ok, notes ++ mark_notes}
     end
@@ -520,6 +522,12 @@ defmodule KilnCMS.CMS.Releases do
   # reads as drifted, i.e. restore rather than assume.
   defp drifted?(%{applied_at: nil}, _record), do: true
 
+  # A `:publish` applied to a record that was ALREADY live published its
+  # working copy (docs/working-copy.md): the release moved the text, not the
+  # state, so "republish as it stands" would leave the release's words up and
+  # the prior body can only come back from its version.
+  defp drifted?(%{action: :publish, prior_state: :published}, _record), do: true
+
   defp drifted?(%{applied_at: applied_at}, %{updated_at: updated_at}),
     do: DateTime.compare(updated_at, applied_at) == :gt
 
@@ -542,9 +550,12 @@ defmodule KilnCMS.CMS.Releases do
   end
 
   # Publishing something already live, or taking down something already down, is
-  # a no-op — the release's desired end state holds either way.
-  defp classify_record(%{action: :publish}, %{state: :published}),
-    do: {:skip, :already_in_state}
+  # a no-op — the release's desired end state holds either way. Unless the live
+  # record carries a working copy (docs/working-copy.md): then "publish" means
+  # publish the changes, and the release is how those go live on the day.
+  defp classify_record(%{action: :publish}, %{state: :published} = record) do
+    if WorkingCopy.pending?(record), do: :apply, else: {:skip, :already_in_state}
+  end
 
   defp classify_record(%{action: :unpublish}, %{state: state}) when state != :published,
     do: {:skip, :already_in_state}
@@ -577,8 +588,14 @@ defmodule KilnCMS.CMS.Releases do
     _error -> {:error, "unknown content type #{item.content_type}"}
   end
 
-  defp verb(:publish), do: "publish"
-  defp verb(:unpublish), do: "unpublish"
+  # On a record that is already live the only thing left to publish is its
+  # working copy (`classify_record/2` lets exactly that case through). Rollback
+  # needs nothing new: `prior_version_id` is the pre-release
+  # `published_version_id`, and `maybe_restore_version/4` restores it and finds
+  # the record still published.
+  defp verb(:publish, %{state: :published}), do: "publish_changes"
+  defp verb(:publish, _record), do: "publish"
+  defp verb(:unpublish, _record), do: "unpublish"
 
   # Ash DROPS a resource's notifications (PubSub, GraphQL subscriptions, the
   # console's live updates) when the action runs inside a transaction it did not

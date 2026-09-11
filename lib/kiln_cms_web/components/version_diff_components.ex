@@ -284,6 +284,7 @@ defmodule KilnCMSWeb.VersionDiffComponents do
   # independently maintained, with nothing to notice when they stopped agreeing.
   @labels %{
     title: "Title",
+    working_title: "Working title",
     slug: "Slug",
     path_alias: "Path alias",
     excerpt: "Excerpt",
