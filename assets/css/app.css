@@ -994,6 +994,35 @@ pre.highlight .gs {
   --public-heading-tracking: -0.025em;
 }
 
+/* Monograph: an architectural-monograph look. Condensed uppercase display
+   type in a wide frame, hard edges throughout, and top-level images bled to
+   the viewport edges. A page that opens on an image gets it as a cinematic
+   hero, with the title set over it. The structural rules are at the end of
+   this section.
+
+   The condensed faces are system fonts. `font-src` names no webfont host and
+   none is bundled. That means Helvetica Neue's condensed cuts or Avenir Next
+   Condensed on Apple platforms, Bahnschrift on Windows, Roboto Condensed on
+   Android, and the Liberation/Nimbus narrows on Linux. A system with none of
+   them falls back to a heavy uppercase sans. */
+[data-public-theme="monograph"] {
+  --public-measure: 80rem;
+  --public-heading-font:
+    "Helvetica Neue", "Avenir Next Condensed", Bahnschrift, "Roboto Condensed",
+    "Arial Narrow", "Liberation Sans Narrow", "Nimbus Sans Narrow", sans-serif-condensed,
+    sans-serif;
+  --public-heading-weight: 800;
+  --public-heading-tracking: 0;
+  /* The reading column text blocks keep inside the wide frame. */
+  --monograph-text: 40rem;
+  --monograph-rule: color-mix(in oklch, var(--color-base-content) 18%, transparent);
+
+  /* A `100vw` bleed is wider than the page by the scrollbar's width; `clip`
+     trims that without making the shell a scroll container, which would break
+     `position: sticky` below it. */
+  overflow-x: clip;
+}
+
 /* The centered content column, replacing the hardcoded `max-w-3xl mx-auto`
    pairs in the public layout so the measure is the preset's to set. */
 .public-measure {
@@ -1011,4 +1040,247 @@ pre.highlight .gs {
 
 .public-shell h1 {
   font-weight: var(--public-heading-weight);
+}
+
+/* ---------------------------------------------------------------------------
+   Monograph structure. Every rule is scoped to the preset and hangs off the
+   `public-*` hook classes in the layout and the delivery templates, so the
+   other presets never see it. Colour still comes only from the tokens (so a
+   brand colour supplies the accent), with one exception: the hero title is
+   white because it sits on a photograph under a dark scrim, whatever the
+   theme. */
+
+/* Display type: condensed, uppercase, tight leading. */
+[data-public-theme="monograph"] :is(h1, h2, h3, h4) {
+  font-stretch: condensed;
+  font-weight: var(--public-heading-weight);
+  line-height: 0.92;
+  overflow-wrap: break-word;
+  text-transform: uppercase;
+  text-wrap: balance;
+}
+[data-public-theme="monograph"] .kiln-block h2 {
+  font-size: clamp(1.75rem, 3vw, 2.5rem);
+}
+[data-public-theme="monograph"] .kiln-block h3 {
+  font-size: clamp(1.25rem, 2vw, 1.625rem);
+}
+[data-public-theme="monograph"] .public-title {
+  font-size: clamp(3rem, 9vw, 9rem);
+  letter-spacing: -0.01em;
+  line-height: 0.86;
+}
+
+/* Small tracked capitals: the chrome, the byline, captions. */
+[data-public-theme="monograph"]
+  :is(.public-header nav, .public-footer-nav, .public-attribution, .public-meta, figcaption) {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+[data-public-theme="monograph"] .public-site-name {
+  font-family: var(--public-heading-font);
+  font-size: 1.375rem;
+  font-stretch: condensed;
+  font-weight: var(--public-heading-weight);
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+[data-public-theme="monograph"] :is(.public-header, .public-footer-nav) {
+  border-color: var(--color-base-content);
+}
+[data-public-theme="monograph"] .public-header nav a:hover {
+  color: var(--color-primary-ink);
+}
+
+/* Hard edges everywhere. The second selector outranks the base
+   `.kiln-block pre` and `.kiln-block code` rules. */
+[data-public-theme="monograph"] *,
+[data-public-theme="monograph"] .kiln-block :is(pre, code) {
+  border-radius: 0;
+}
+
+/* The article is a one-column grid. Its blocks become grid items
+   (`display: contents` on the body wrapper), so a block can bleed, overlay
+   the title, or step into the reading column. */
+[data-public-theme="monograph"] .public-article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: clamp(2rem, 4vw, 3.5rem);
+}
+[data-public-theme="monograph"] .public-body {
+  display: contents;
+}
+[data-public-theme="monograph"] :is(.public-masthead, .public-body > .kiln-block) {
+  margin-block: 0;
+}
+[data-public-theme="monograph"] .public-meta {
+  margin-top: 1.25rem;
+}
+[data-public-theme="monograph"] .public-lede {
+  color: var(--color-base-content);
+  font-size: clamp(1.25rem, 2vw, 1.625rem);
+  line-height: 1.35;
+  margin-top: 1.25rem;
+  max-width: var(--monograph-text);
+}
+
+/* On wide screens, running text keeps to a reading column on the right of the
+   frame. Headings, pull quotes, images, galleries and column layouts keep the
+   full width. */
+@media (min-width: 64rem) {
+  [data-public-theme="monograph"]
+    .public-body
+    > .kiln-block:not(:has(> picture, > h2, > blockquote, > .kiln-gallery, > .kiln-columns)) {
+    justify-self: end;
+    width: min(100%, var(--monograph-text));
+  }
+}
+
+/* A heading block opens a section: a hairline, then the heading at display
+   size. */
+[data-public-theme="monograph"] .public-body > .kiln-block:has(> h2) {
+  border-top: 1px solid var(--monograph-rule);
+  padding-top: 1rem;
+}
+[data-public-theme="monograph"] .public-body > .kiln-block > h2 {
+  font-size: clamp(2.25rem, 5.5vw, 4.5rem);
+}
+
+/* A top-level image bleeds to the viewport edges, capped in height so a tall
+   image crops to a cinematic band rather than scrolling on. The crop honours
+   the focal point: `object-position` rides on the `img` as an inline style. */
+[data-public-theme="monograph"] .public-body > .kiln-block:has(> picture) {
+  margin-inline: calc(50% - 50vw);
+}
+[data-public-theme="monograph"] .public-body > .kiln-block > picture {
+  display: block;
+}
+[data-public-theme="monograph"] .public-body > .kiln-block > picture img {
+  display: block;
+  height: auto;
+  max-height: 90svh;
+  object-fit: cover;
+  width: 100%;
+}
+
+/* The hero: when the first block is an image, the title (or the whole
+   masthead) shares its grid cell, sits at the bottom edge, and reads over a
+   scrim. Nothing moves in the DOM, so the heading order and the reading order
+   stay as authored. */
+[data-public-theme="monograph"]
+  .public-article:has(> .public-body > .kiln-block:first-child > picture)
+  > :is(.public-masthead, .public-title),
+[data-public-theme="monograph"] .public-body > .kiln-block:first-child:has(> picture) {
+  grid-area: 1 / 1;
+}
+[data-public-theme="monograph"]
+  .public-article:has(> .public-body > .kiln-block:first-child > picture)
+  > :is(.public-masthead, .public-title) {
+  align-self: end;
+  color: #fff;
+  padding-bottom: clamp(1.5rem, 5vw, 4rem);
+  z-index: 1;
+}
+[data-public-theme="monograph"]
+  .public-article:has(> .public-body > .kiln-block:first-child > picture)
+  :is(.public-meta, .public-lede) {
+  color: rgb(255 255 255 / 0.88);
+}
+[data-public-theme="monograph"] .public-body > .kiln-block:first-child:has(> picture) {
+  position: relative;
+}
+[data-public-theme="monograph"] .public-body > .kiln-block:first-child:has(> picture)::after {
+  background: linear-gradient(to top, rgb(0 0 0 / 0.65), rgb(0 0 0 / 0) 60%);
+  content: "";
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+}
+[data-public-theme="monograph"] .public-body > .kiln-block:first-child > picture img {
+  height: min(88svh, 60rem);
+  max-height: none;
+}
+/* The hero sits flush under the header rule. */
+[data-public-theme="monograph"]
+  .public-main:has(> .public-article > .public-body > .kiln-block:first-child > picture) {
+  padding-top: 0;
+}
+
+/* Galleries bleed too, inside a page gutter, and crop to one portrait
+   ratio so a mixed set reads as a contact sheet. */
+[data-public-theme="monograph"] .public-body > .kiln-block:has(> .kiln-gallery) {
+  margin-inline: calc(50% - 50vw);
+  padding-inline: clamp(1rem, 3vw, 2rem);
+}
+/* The stock "grid" layout is `auto-fill`, which at bleed width leaves empty
+   tracks after a short set. `auto-fit` collapses them, so the images fill the
+   row. It has to be `!important` because the layout is an inline style, and
+   the attribute match limits the override to that one layout. */
+[data-public-theme="monograph"] .kiln-gallery-items[style*="auto-fill"] {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)) !important;
+}
+[data-public-theme="monograph"] .kiln-gallery-item img {
+  aspect-ratio: 4 / 5;
+  object-fit: cover;
+}
+[data-public-theme="monograph"] figcaption {
+  margin-top: 0.625rem;
+}
+
+/* Pull quotes: display type under a heavy rule in the brand colour. */
+[data-public-theme="monograph"] .kiln-block blockquote {
+  border-left: 0;
+  border-top: 4px solid var(--color-primary);
+  color: var(--color-base-content);
+  font-family: var(--public-heading-font);
+  font-size: clamp(1.75rem, 4vw, 3.25rem);
+  font-stretch: condensed;
+  font-style: normal;
+  font-weight: var(--public-heading-weight);
+  line-height: 1;
+  max-width: 56rem;
+  padding: 1.25rem 0 0;
+  text-transform: uppercase;
+}
+
+/* The post index reads as a numbered project list: hairline rows, the title
+   at display size, a counter in the margin. */
+[data-public-theme="monograph"] .public-index {
+  border-top: 1px solid var(--color-base-content);
+  counter-reset: public-index;
+  margin-top: clamp(2rem, 5vw, 4rem);
+}
+[data-public-theme="monograph"] .public-index > li {
+  border-bottom: 1px solid var(--monograph-rule);
+  counter-increment: public-index;
+  margin-block: 0;
+  padding-block: clamp(1.25rem, 3vw, 2rem);
+}
+[data-public-theme="monograph"] .public-index > li > a {
+  column-gap: clamp(1rem, 3vw, 2.5rem);
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr);
+}
+[data-public-theme="monograph"] .public-index > li > a::before {
+  /* The second declaration hides the counter from assistive tech. A browser
+     that can't parse the alt-text syntax keeps the first. */
+  content: counter(public-index, decimal-leading-zero);
+  content: counter(public-index, decimal-leading-zero) / "";
+  font-size: 0.75rem;
+  font-weight: 600;
+  grid-row: 1 / span 3;
+  letter-spacing: 0.14em;
+  padding-top: 0.5em;
+}
+[data-public-theme="monograph"] .public-index > li > a > * {
+  grid-column: 2;
+}
+[data-public-theme="monograph"] .public-index h2 {
+  font-size: clamp(2rem, 6vw, 5rem);
+}
+[data-public-theme="monograph"] .public-index a:hover h2 {
+  color: var(--color-primary-ink);
+  text-decoration: none;
 }

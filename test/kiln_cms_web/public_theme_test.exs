@@ -39,6 +39,27 @@ defmodule KilnCMSWeb.PublicThemeTest do
       assert html =~ ~s(data-public-theme="editorial")
     end
 
+    test "monograph declares full-viewport image sizes; other presets keep the column", ctx do
+      # Monograph bleeds a top-level image to the viewport, so `sizes` must
+      # say so, or the browser fetches a column-sized candidate and upscales
+      # it. Rendered through the template helper, not asserted on a page,
+      # because a published image block needs a stored media item.
+      assert KilnCMSWeb.ContentHTML.image_sizes(ctx.org) ==
+               KilnCMSWeb.BlockComponents.column_image_sizes()
+
+      brand(ctx, %{theme: :monograph})
+
+      assert KilnCMSWeb.ContentHTML.image_sizes(ctx.org) == "100vw"
+
+      html = ctx.conn |> org_conn(ctx.org) |> get(~p"/blog") |> html_response(200)
+
+      assert html =~ ~s(data-public-theme="monograph")
+      # The hooks the preset's structural rules hang off.
+      assert html =~ "public-header"
+      assert html =~ "public-title"
+      assert html =~ "public-index"
+    end
+
     test "a preset outside the closed list is refused at save", ctx do
       assert_raise Ash.Error.Invalid, fn ->
         CMS.save_site_branding!(%{theme: :neon}, actor: ctx.admin, tenant: ctx.org)

@@ -1,19 +1,20 @@
 <Layouts.public locale_links={@locale_links} locale={@locale} current_org={@current_org}>
-  <article class="prose max-w-none">
-    <header class="mb-6">
-      <h1 class="text-3xl font-bold tracking-tight">{@record.title}</h1>
+  <article class="public-article prose max-w-none">
+    <header class="public-masthead mb-6">
+      <h1 class="public-title text-3xl font-bold tracking-tight">{@record.title}</h1>
       <p
         :if={Map.get(@record, :excerpt)}
-        class="mt-3 text-lg text-base-content/70"
+        class="public-lede mt-3 text-lg text-base-content/70"
       >
         {@record.excerpt}
       </p>
     </header>
-    <div class="space-y-4">
+    <div class="public-body space-y-4">
       <BlockComponents.render_block
         :for={block <- @blocks}
         block={block}
         variant={assigns[:experiment_variant]}
+        image_sizes={image_sizes(@current_org)}
       />
     </div>
   </article>

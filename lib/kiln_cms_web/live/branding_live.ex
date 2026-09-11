@@ -218,7 +218,8 @@ defmodule KilnCMSWeb.BrandingLive do
     labels = %{
       standard: gettext("Standard — the stock look"),
       editorial: gettext("Editorial — serif, narrower reading column"),
-      studio: gettext("Studio — wide, bold display headings")
+      studio: gettext("Studio — wide, bold display headings"),
+      monograph: gettext("Monograph — condensed display type, full-bleed images")
     }
 
     Enum.map(Branding.themes(), fn theme ->

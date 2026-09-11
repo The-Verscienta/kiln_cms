@@ -9,6 +9,22 @@ defmodule KilnCMSWeb.ContentHTML do
   embed_templates "content_html/*"
 
   @doc """
+  The `sizes` a top-level image block renders with on this site.
+
+  The `:monograph` theme bleeds a top-level image to the viewport edges, so
+  its images declare `100vw`; left at the reading-column default, the browser
+  would fetch a candidate for a 768px slot and upscale it across the screen.
+  Every other preset keeps images inside the column. `Branding.for_org/1` is
+  cached, and the layout has already resolved it for this request.
+  """
+  def image_sizes(org) do
+    case KilnCMS.Branding.for_org(org).theme do
+      :monograph -> "100vw"
+      _column -> BlockComponents.column_image_sizes()
+    end
+  end
+
+  @doc """
   Long-form published date, localized: the format string and month names both
   flow through gettext (`Calendar.strftime`'s `%B` is English-only), so
   `/fr/blog/…` can render "2 juillet 2026" instead of "July 2, 2026".

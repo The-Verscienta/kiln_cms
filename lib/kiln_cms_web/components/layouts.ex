@@ -889,11 +889,15 @@ defmodule KilnCMSWeb.Layouts do
 
     ~H"""
     <div class="public-shell" data-public-theme={@brand.theme}>
-      <header class="border-b border-base-content/10 px-4 py-4 sm:px-6 lg:px-8">
+      <%!-- The `public-*` classes are style hooks for the theme presets in
+            app.css. They carry no styles of their own. --%>
+      <header class="public-header border-b border-base-content/10 px-4 py-4 sm:px-6 lg:px-8">
         <div class="public-measure flex items-center justify-between gap-4">
           <a href="/" class="flex items-center gap-3">
             <img src={@brand.logo_url} class="h-7 w-auto" alt="" referrerpolicy="no-referrer" />
-            <span class="text-sm font-semibold tracking-tight">{@brand.site_name}</span>
+            <span class="public-site-name text-sm font-semibold tracking-tight">
+              {@brand.site_name}
+            </span>
           </a>
           <nav class="flex flex-wrap items-center gap-4 text-sm text-base-content/70">
             <%!-- A configured header menu replaces the stock links (#1318); top
@@ -947,7 +951,7 @@ defmodule KilnCMSWeb.Layouts do
         </div>
       </header>
 
-      <main id="main" class="public-measure px-4 py-10 sm:px-6 lg:px-8">
+      <main id="main" class="public-main public-measure px-4 py-10 sm:px-6 lg:px-8">
         {render_slot(@inner_block)}
       </main>
 
@@ -958,7 +962,7 @@ defmodule KilnCMSWeb.Layouts do
       <nav
         :if={@footer_items != []}
         aria-label={gettext("Footer")}
-        class="border-t border-base-content/10 px-4 py-10 sm:px-6 lg:px-8"
+        class="public-footer-nav border-t border-base-content/10 px-4 py-10 sm:px-6 lg:px-8"
       >
         <div class="public-measure grid grid-cols-2 gap-8 sm:grid-cols-3">
           <div :for={section <- @footer_items} class="space-y-2 text-sm">
@@ -992,7 +996,7 @@ defmodule KilnCMSWeb.Layouts do
           also hide the line entirely. --%>
       <footer
         :if={@brand.show_attribution}
-        class="public-measure px-4 py-10 text-xs text-base-content/70 sm:px-6 lg:px-8"
+        class="public-attribution public-measure px-4 py-10 text-xs text-base-content/70 sm:px-6 lg:px-8"
       >
         <%= if Branding.branded?(@brand) do %>
           {gettext("Powered by %{name}.", name: @brand.site_name)}

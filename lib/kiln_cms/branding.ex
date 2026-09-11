@@ -71,7 +71,7 @@ defmodule KilnCMS.Branding do
   # value is emitted as a `data-public-theme` attribute, and the attribute must
   # never carry a byte an org admin typed (`Validations.BrandTokens` explains
   # why an org admin's CSS-shaped input is untrusted).
-  @themes [:standard, :editorial, :studio]
+  @themes [:standard, :editorial, :studio, :monograph]
 
   @default_site_name "KilnCMS"
   @default_logo_url "/images/logo-mark.png"

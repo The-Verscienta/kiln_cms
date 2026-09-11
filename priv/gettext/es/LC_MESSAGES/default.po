@@ -6154,6 +6154,12 @@ msgstr "Modele el contenido una vez. Publíquelo en todas partes."
 msgid "Mon"
 msgstr "lun"
 
+#: lib/kiln_cms_web/live/branding_live.ex
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Monograph — condensed display type, full-bleed images"
+msgstr "Monograph — tipografía condensada, imágenes a sangre"
+
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "Month"

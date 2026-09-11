@@ -12,7 +12,19 @@ defmodule KilnCMSWeb.BlockComponents do
 
   alias KilnCMS.HTMLSanitizer
 
+  # The rendered width of an image block in the stock reading column.
+  @column_image_sizes "(max-width: 768px) 100vw, 768px"
+
+  @doc "The image `sizes` for a block laid out in the reading column."
+  @spec column_image_sizes() :: String.t()
+  def column_image_sizes, do: @column_image_sizes
+
   attr :block, :map, required: true
+  # An image block's `sizes`. Delivery passes `100vw` for a theme that bleeds
+  # images past the column (`KilnCMSWeb.ContentHTML.image_sizes/1`). Not
+  # threaded into `columns` children, because a cell is never wider than the
+  # column.
+  attr :image_sizes, :string, default: @column_image_sizes
   # The experiment variant this page was rendered with (#499), threaded down so
   # a form block can carry it back on submission. `nil` on every ordinary page.
   attr :variant, :string, default: nil
@@ -59,12 +71,12 @@ defmodule KilnCMSWeb.BlockComponents do
               :for={source <- @block[:sources] || []}
               type={source.type}
               srcset={source.srcset}
-              sizes="(max-width: 768px) 100vw, 768px"
+              sizes={@image_sizes}
             />
             <img
               src={src}
               srcset={@block[:srcset]}
-              sizes={@block[:srcset] && "(max-width: 768px) 100vw, 768px"}
+              sizes={@block[:srcset] && @image_sizes}
               alt={@block[:alt] || ""}
               width={@block[:width]}
               height={@block[:height]}
