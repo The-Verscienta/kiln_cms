@@ -682,6 +682,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> load_versions()
     |> load_translations()
     |> load_fragment_options()
+    |> load_redirects()
   end
 
   # Whether the actor may WRITE this record — the authorization both AI-assist
@@ -987,6 +988,40 @@ defmodule KilnCMSWeb.ContentEditorLive do
       )
     )
   end
+
+  # The redirects standing under this record's address: every retired path
+  # that 301s to it (`Changes.RecordSlugRedirect`), newest first. Reloaded from
+  # `assign_record/2` rather than once at mount because the set moves with the
+  # record — a published slug or alias save leaves one behind, and so does a
+  # restore (the change re-fires from a `before_action` write, #691) — and the
+  # list has to be right the moment the save that created a row lands.
+  #
+  # Read as the actor: `Redirect`'s read policy is world-readable (delivery
+  # serves the same map to anyone), so nothing is hidden and no bypass is
+  # needed. Keyed on the type descriptor's name the way the recording change
+  # keys it, so a dynamic entry finds its rows too.
+  defp load_redirects(socket) do
+    redirects =
+      CMS.list_redirects!(
+        actor: socket.assigns.actor,
+        tenant: socket.assigns.current_org,
+        query: [
+          filter: [
+            target_type: to_string(socket.assigns.content_type.type),
+            target_id: socket.assigns.record.id
+          ],
+          sort: [inserted_at: :desc]
+        ]
+      )
+
+    assign(socket, :redirects, redirects)
+  end
+
+  # The day a redirect was recorded — its `inserted_at`, not `updated_at`: the
+  # `[:path, :locale]` upsert refreshes the latter whenever another record
+  # vacates the same path, and "since" is what the editor is asking.
+  defp redirect_since(%{inserted_at: %DateTime{} = at}), do: Calendar.strftime(at, "%Y-%m-%d")
+  defp redirect_since(_redirect), do: "—"
 
   defp load_versions(socket) do
     opts = [
@@ -2260,6 +2295,33 @@ defmodule KilnCMSWeb.ContentEditorLive do
       {:noreply, mark_dirty(socket)}
     else
       _ -> {:noreply, reset_picker(socket)}
+    end
+  end
+
+  # Retire one of the redirects listed under the address field. Only a row the
+  # panel rendered — one standing under THIS record — is reachable from here:
+  # the id is matched against `@redirects`, never fetched, so a crafted event
+  # cannot name a redirect at some other record. The destroy then runs as the
+  # actor, and `Redirect`'s policy re-proves that they may write the target
+  # (`Checks.WritesRedirectTarget`) — the same gate `@may_write?` shows the
+  # button behind, asked again by the layer that owns it.
+  def handle_event("delete_redirect", %{"id" => id}, socket) when is_binary(id) do
+    actor = socket.assigns.actor
+    org = socket.assigns.current_org
+
+    with %{} = redirect <- Enum.find(socket.assigns.redirects, &(&1.id == id)),
+         :ok <- CMS.destroy_redirect(redirect, actor: actor, tenant: org) do
+      {:noreply,
+       socket |> load_redirects() |> put_flash(:info, gettext("Redirect deleted."))}
+    else
+      # Already gone (deleted from `/editor/redirects`, or by the record moving
+      # back onto that path) or refused — either way the list is stale, so
+      # reload it alongside the message.
+      _ ->
+        {:noreply,
+         socket
+         |> load_redirects()
+         |> put_flash(:error, gettext("Couldn't delete that redirect."))}
     end
   end
 
@@ -4420,6 +4482,44 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   )}
                 </p>
                 <.field_cursors field="path_alias" cursors={@cursors} />
+              </div>
+              <%!-- The old addresses that still reach this record: a published
+                    slug or alias change leaves a 301 behind, and this is where
+                    the author sees it standing — and retires it, for the day
+                    the old URL should stop answering. Empty for a record that
+                    has never moved (most drafts), so the block is absent rather
+                    than an empty heading. Delete is a write on the target's
+                    behalf, hence `@may_write?` like every other write
+                    affordance here; the policy re-checks it. --%>
+              <div :if={@redirects != []} id="slug-redirects" class="text-xs sm:col-span-2">
+                <p class="text-base-content/60">{gettext("Redirects to this address")}</p>
+                <ul class="mt-1 space-y-1">
+                  <li
+                    :for={redirect <- @redirects}
+                    id={"slug-redirect-#{redirect.id}"}
+                    class="flex flex-wrap items-center gap-x-2 gap-y-1"
+                  >
+                    <span class="font-mono">{redirect.path}</span>
+                    <span aria-hidden="true" class="text-base-content/40">&rarr;</span>
+                    <span class="font-mono text-base-content/70">
+                      {KilnCMS.CMS.Slugs.public_path_for(@content_type, @record)}
+                    </span>
+                    <span class="text-base-content/50">
+                      {gettext("since %{date}", date: redirect_since(redirect))}
+                    </span>
+                    <button
+                      :if={@may_write?}
+                      type="button"
+                      phx-click="delete_redirect"
+                      phx-value-id={redirect.id}
+                      data-confirm={gettext("Delete this redirect? The old URL will 404.")}
+                      aria-label={gettext("Delete redirect")}
+                      class="btn btn-xs btn-ghost text-base-content/60 hover:text-error"
+                    >
+                      {gettext("Delete")}
+                    </button>
+                  </li>
+                </ul>
               </div>
             </div>
 

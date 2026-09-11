@@ -2857,6 +2857,7 @@ msgstr "Suppression de cet élément impossible."
 msgid "Couldn't delete that menu."
 msgstr "Impossible de supprimer ce menu."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't delete that redirect."
@@ -3449,6 +3450,7 @@ msgid "Defined types"
 msgstr "Types définis"
 
 #: lib/kiln_cms_web/live/billing_live.ex
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/experiment_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
@@ -3513,6 +3515,7 @@ msgstr "Supprimer le menu"
 msgid "Delete permanently"
 msgstr "Supprimer définitivement"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "Delete redirect"
@@ -3578,6 +3581,7 @@ msgstr "Supprimer cet élément et tout ce qui est imbriqué dessous ?"
 msgid "Delete this menu and all of its items?"
 msgstr "Supprimer ce menu et tous ses éléments ?"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "Delete this redirect? The old URL will 404."
@@ -7919,6 +7923,7 @@ msgstr "Renvoyer"
 msgid "Redelivery queued."
 msgstr "Renvoi mis en file d'attente."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "Redirect deleted."
@@ -7934,6 +7939,11 @@ msgstr "Redirection depuis %{path} créée."
 #, elixir-autogen, elixir-format
 msgid "Redirects"
 msgstr "Redirections"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Redirects to this address"
+msgstr "Redirections vers cette adresse"
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -12452,6 +12462,11 @@ msgstr "signé avec une clé que nous ne détenons plus"
 #, elixir-autogen, elixir-format
 msgid "since"
 msgstr "depuis le"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "since %{date}"
+msgstr "depuis le %{date}"
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format

@@ -344,13 +344,21 @@ The public submit path validates and then writes as the **system**.
 
 | Resource | read | writes |
 |---|---|---|
-| `Redirect` (`read`) | ✅ everyone incl. anonymous | admin only (`create`, `destroy`) |
+| `Redirect` (`read`) | ✅ everyone incl. anonymous | `create`: admin only · `destroy`: admin, **or** whoever may write the target record |
 | `SiteBranding` (`read`) | ✅ everyone incl. anonymous | admin only (`save`, `update`, `destroy`) |
 
 Both are public information by design — delivery serves the same redirect map to
 anyone who hits an old URL, and branding tokens render on every public page.
 Both reads are tenant-scoped, so a request sees only its own site's rows. The
 slug-change hook that writes redirects runs as the **system**.
+
+The `destroy` widening is for the content editor, which lists the redirects
+standing under the record being edited with a Delete on each:
+`Checks.WritesRedirectTarget` matches only a `destroy` on a loaded row, and
+decides it by re-asking the target's own `:update` policy as the actor — so a
+type-scoped editor cannot prune a redirect at a type they may not author, and a
+row whose target is gone or unregistered matches nobody (pruning dead rows stays
+an admin job on `/editor/redirects`).
 
 ## Code injection — `SiteCodeInjection` (#490)
 
