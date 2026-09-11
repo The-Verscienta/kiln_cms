@@ -177,6 +177,11 @@
         if (!document.documentElement.hasAttribute("data-theme")) {
           setTheme(localStorage.getItem("phx:theme") || "system");
         }
+        // The console sidebar's icon rail (layouts.ex `console/1`), restored
+        // here rather than in app.js so a collapsed rail never paints expanded.
+        if (localStorage.getItem("kiln:sidebar") === "collapsed") {
+          document.documentElement.setAttribute("data-sidebar", "collapsed");
+        }
         window.addEventListener("storage", (e) => e.key === "phx:theme" && setTheme(e.newValue || "system"));
         
         window.addEventListener("phx:set-theme", (e) => setTheme(e.target.dataset.phxTheme));

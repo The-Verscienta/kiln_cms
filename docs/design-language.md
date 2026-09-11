@@ -98,8 +98,13 @@ written as a function component or a raw `class="…"` in a template.
   styling (+ `.table-zebra` for stripes). Cells keep their own alignment / width
   / colour utilities; `.table` owns padding, borders and the header treatment.
   Wrap wide tables in `overflow-x-auto`. Also styles the `<.table>` component.
-- **Shell nav** — `.side-link` (+ `aria-current="page"` for the active item),
-  `.side-section` (group label).
+- **Shell nav** — `.side-link` (+ `aria-current="page"` for the active item:
+  a bordered, raised row with the icon in ember ink), `.side-icon` (its
+  outlined icon), `.side-section` (sentence-case group label),
+  `.side-icon-btn` (the bordered square button), `.side-theme` (segmented
+  System / Light / Dark switch), `.side-account` + `.side-menu` (account row
+  and its menu). Panel colours are the `sidebar`, `sidebar-raised` and
+  `sidebar-line` tokens.
 - **Misc** — `.kbd` (keyboard hint, used by the ⌘K search affordance).
 
 ### Do / Don't
@@ -158,15 +163,24 @@ per-component conventions (nav collapse, header stacking, two-column forms).
 
 The authoring app frame (`lib/kiln_cms_web/components/layouts.ex`):
 
-- **Left sidebar** (persistent on `lg+`, slide-in drawer on mobile via a CSS-only
-  peer checkbox — works before the LiveView socket connects): brand, two
+- **Left sidebar** (persistent and full-height on `lg+`, slide-in drawer on
+  mobile via a CSS-only peer checkbox — works before the LiveView socket
+  connects), drawn after Untitled UI's dark sidebar: in dark mode the panel
+  sits a step *below* the workspace. Brand row with a collapse button, two
   role-gated nav groups (**author**: Content, Media, Taxonomy, Calendar,
   Translations, Analytics — **configure**: Content types, Fields, Forms,
-  Webhooks, Mail, Trash, Settings), plugin-contributed items, and an account
-  footer (avatar, email, sign-out) plus GraphQL / JSON:API links.
+  Webhooks, Mail, Trash, Settings), plugin-contributed items, then a foot with
+  the segmented theme switch and the account row (avatar, name over email)
+  whose menu holds Account, GraphQL / JSON:API and Sign out.
+- **Icon rail** (`lg+`): the collapse button folds the sidebar to icons. The
+  state lives on `<html data-sidebar="collapsed">` + `localStorage`
+  (`kiln:sidebar`), restored before first paint by `root.html.heex` and
+  flipped by `app.js` — LiveView never patches `<html>`, so it survives every
+  live navigation. Labels go visually hidden (links keep their accessible
+  names) and `app.js` shows the hovered or focused item's `data-side-tip` as
+  a tooltip.
 - **Top bar** (sticky): page title, a search affordance with a `⌘K` `.kbd`,
-  an `:actions` slot for page-level primary buttons, locale switcher, theme
-  toggle.
+  an `:actions` slot for page-level primary buttons, locale switcher.
 - **Workspace**: `max-w-6xl` content column.
 
 ```heex
