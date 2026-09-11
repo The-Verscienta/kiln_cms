@@ -38,6 +38,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMS.CMS.VersionDiff
   alias KilnCMS.CMS.VersionSnapshot
   alias KilnCMS.Collab
+  alias KilnCMS.Notifications
   alias KilnCMS.Search.Related
   alias KilnCMS.Slug
   alias KilnCMS.Unsplash
@@ -220,9 +221,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:comment_draft, nil)
          # Mention autocomplete: the candidates for the `@…` currently being
          # typed in the open composer. Filtered in memory from `mention_roster`
-         # (loaded once — an org's editor roster doesn't change mid-session),
-         # so a keystroke costs no query.
-         |> assign(:mention_roster, mention_roster())
+         # (loaded once — an org's roster doesn't change mid-session), so a
+         # keystroke costs no query. `Notifications.mention_roster/1` is the
+         # list `NotifyComment` resolves against after the write, so what the
+         # dropdown offers is exactly who a mention reaches.
+         |> assign(:mention_roster, Notifications.mention_roster(org))
          |> assign(:mention_suggestions, [])
          # Who is typing into which block's composer, as `block_id => %{name =>
          # timer_ref}`. Transient and never persisted; each entry cancels
@@ -2835,21 +2838,6 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp complete_mention(_body, handle), do: "@#{handle} "
 
-  # The roster mentions resolve against: this org's members, the same set
-  # `NotifyComment` passes to `Mentions.resolve/2` after the write. Loaded once
-  # at mount — a dropdown that suggested someone the notifier would then not
-  # find is the one failure worth spending a query to avoid, and reusing the
-  # same source is how that is guaranteed rather than hoped for.
-  #
-  # `authorize?: false` for the same reason `assignable_users/1` needs it:
-  # `User`'s read policy is self-only, so listing anyone else's name for a
-  # dropdown takes a system read.
-  defp mention_roster do
-    Accounts.User
-    |> Ash.Query.filter(role in [:editor, :admin])
-    |> Ash.read!(authorize?: false)
-  end
-
   # ── The unresolved-discussion filter ────────────────────────────────────────
 
   # `nil` rather than `:all` for "no filter": it is also the `data-thread-filter`
@@ -2890,7 +2878,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   # The first person the root comment unambiguously mentions. `resolve/2` is
-  # the same call `NotifyComment` makes, so whoever was emailed about the
+  # the same call `NotifyComment` makes, against the same roster
+  # (`Notifications.mention_roster/1`), so whoever was emailed about the
   # comment is whoever the task is offered to — and an ambiguous `@alice`
   # seeds nobody here for the same reason it notifies nobody there.
   #
