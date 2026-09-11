@@ -625,6 +625,11 @@ defmodule KilnCMS.Portability.Import do
 
     by_url = for {:ok, asset, item} <- results, into: %{}, do: {asset.url, item}
 
+    # Each create deferred its published-cache clear (`cache_bust: :defer`
+    # below) — a 300-asset archive must not full-clear the cache 300 times on
+    # a live site. One compensating clear for the whole sideload phase.
+    if map_size(by_url) > 0, do: KilnCMS.CMS.Changes.BustMediaCache.bust()
+
     by_source_id =
       Enum.reduce(results, %{}, fn
         {:ok, asset, item}, acc -> maybe_put(acc, asset.source_id, item)
@@ -641,15 +646,16 @@ defmodule KilnCMS.Portability.Import do
   end
 
   defp fetch_one(asset, opts, progress) do
-    # `skip_uploader_stamp`: the operator's actor authorizes the create, but a
+    # `uploaded_by: :none`: the operator's actor authorizes the create, but a
     # migrated asset was not uploaded by them — same principle as the byline
     # handling above, which reassigns `author` to the mapped original writer
     # rather than crediting whoever ran the import. Media has no per-asset
     # uploader in any export format, so the honest value is none at all.
+    # `cache_bust: :defer`: `sideload/2` issues one clear for the whole run.
     result =
       case Ingest.store_url(
              asset.url,
-             scope(opts) ++ [alt: asset.alt, context: %{skip_uploader_stamp: true}]
+             scope(opts) ++ [alt: asset.alt, uploaded_by: :none, cache_bust: :defer]
            ) do
         {:ok, item} ->
           {:ok, asset, item}

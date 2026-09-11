@@ -261,6 +261,68 @@ defmodule KilnCMSWeb.MediaLiveTest do
       path = assert_patch(lv)
       assert path =~ "uploader=#{editor.id}"
     end
+
+    # The representability guard must track LIVE PATCHES, not just the first
+    # load: options are computed once per mount, so a back-button/bookmark
+    # patch to a filter absent from them must still render an option the
+    # select can round-trip (review of #1316, second pass).
+    test "a live-patched uploader filter stays representable", %{conn: conn} do
+      editor = authed_user(:editor)
+      admin = authed_user(:admin)
+
+      mine = CMS.create_media_item!(%{filename: "late.png", url: "/uploads/late"}, actor: editor)
+      CMS.destroy_media_item!(mine, actor: admin)
+      typed_media("other-late.png", "image/png")
+
+      # Mount unfiltered: options are computed without the trashed-out editor.
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/media")
+
+      render_patch(lv, "/media?uploader=#{editor.id}")
+
+      assert lv |> element("#media-filter-uploader") |> render() =~ editor.id
+
+      lv |> form("#media-filter", %{q: "l"}) |> render_change()
+      assert assert_patch(lv) =~ "uploader=#{editor.id}"
+    end
+
+    # The same guard covers the tag axis: a filter naming a since-deleted tag
+    # renders a placeholder option instead of "Any tag", so a keystroke can't
+    # silently widen the grid.
+    test "a tag filter for a deleted tag stays representable", %{conn: conn} do
+      editor = authed_user(:editor)
+      admin = authed_user(:admin)
+      tag = make_tag(editor, "doomed")
+      typed_media("survivor.png", "image/png")
+      CMS.destroy_tag!(tag, actor: admin)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media?tag=#{tag.id}")
+
+      assert lv |> element("#media-filter-tag") |> render() =~ tag.id
+
+      lv |> form("#media-filter", %{q: "s"}) |> render_change()
+      assert assert_patch(lv) =~ "tag=#{tag.id}"
+    end
+
+    # #764's crash class, third surface: a crafted hook can push a non-map
+    # payload (crash risk) or a map-shaped value (must read as absent, like
+    # `q` does — never as "clear the filter").
+    test "malformed filter_change payloads neither crash nor clear filters", %{conn: conn} do
+      editor = authed_user(:editor)
+      tag = make_tag(editor, "sturdy")
+      item = typed_media("sturdy.png", "image/png")
+      CMS.update_media_item!(item, %{tag_ids: [tag.id]}, actor: editor)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media?tag=#{tag.id}")
+
+      # Map-shaped value: absent, not cleared.
+      render_hook(lv, "filter_change", %{"tag" => %{"a" => "1"}})
+      assert assert_patch(lv) =~ "tag=#{tag.id}"
+
+      # Non-map top-level payload: tolerated, filter kept.
+      render_hook(lv, "filter_change", [])
+      assert assert_patch(lv) =~ "tag=#{tag.id}"
+      assert lv |> render() =~ ">sturdy.png<"
+    end
   end
 
   describe "bulk operations (#1316)" do

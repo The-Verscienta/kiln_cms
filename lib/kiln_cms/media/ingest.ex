@@ -67,7 +67,14 @@ defmodule KilnCMS.Media.Ingest do
           alt: String.t() | nil,
           caption: String.t() | nil,
           max_bytes: pos_integer(),
-          context: map()
+          # `:none` skips the uploaded_by stamp — for callers whose actor
+          # authorizes the create but didn't upload the asset (the
+          # portability importer). Default: stamp the actor.
+          uploaded_by: :actor | :none,
+          # `:defer` suppresses the per-item published-cache clear; the
+          # caller owns ONE `BustMediaCache.bust/0` after its loop. Default:
+          # bust per create.
+          cache_bust: :immediate | :defer
         ]
 
   @doc """
@@ -560,11 +567,13 @@ defmodule KilnCMS.Media.Ingest do
       |> put_present(:caption, opts[:caption])
       |> put_quarantined(Keyword.get(opts, :quarantined?, false))
 
-    # `:context` rides through for callers that need to steer resource-level
-    # changes — the portability importer passes `%{skip_uploader_stamp: true}`
-    # so `relate_actor(:uploaded_by)` doesn't credit a migrated archive to
-    # whoever ran the import.
-    case CMS.create_media_item(attrs, Keyword.take(opts, [:actor, :tenant, :context])) do
+    # Named options, not a raw `:context` passthrough: the facade translates
+    # them into the resource-internal context flags itself, so a caller can
+    # steer exactly the two changes meant to be steerable (the uploader
+    # stamp, the per-item cache bust) and nothing else.
+    create_opts = Keyword.take(opts, [:actor, :tenant]) ++ [context: change_context(opts)]
+
+    case CMS.create_media_item(attrs, create_opts) do
       {:ok, %{quarantined: true} = item} ->
         # Derivation is the strip worker's to enqueue, after promotion (#1122).
         {:ok, item}
@@ -592,6 +601,17 @@ defmodule KilnCMS.Media.Ingest do
 
   defp put_quarantined(attrs, true), do: Map.put(attrs, :quarantined, true)
   defp put_quarantined(attrs, false), do: attrs
+
+  # The changeset-context flags derived from the named options above.
+  defp change_context(opts) do
+    %{}
+    |> then(
+      &if(opts[:uploaded_by] == :none, do: Map.put(&1, :skip_uploader_stamp, true), else: &1)
+    )
+    |> then(
+      &if(opts[:cache_bust] == :defer, do: Map.put(&1, :skip_media_cache_bust, true), else: &1)
+    )
+  end
 
   # The stored blob's real size, for `MediaItem.byte_size` — which for an image
   # is the *stripped* copy rather than what arrived.

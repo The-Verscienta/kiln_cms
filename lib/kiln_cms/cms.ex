@@ -685,8 +685,11 @@ defmodule KilnCMS.CMS do
     # `Tagging` table for tags across all content types, one `ContentLink` table
     # for content-to-content links.
     #
-    # `Tagging` is managed entirely through `manage_relationship` on the parent
-    # content resources, so it needs no code interface. `ContentLink` also backs
+    # `Tagging` is managed through `manage_relationship` on the parent
+    # resources, plus `KilnCMS.Media.Bulk`'s batched writes (#1316) — the one
+    # sanctioned direct writer, which re-establishes the tenant-scoped tag
+    # guard `manage_relationship` provides. No code interface: nothing else
+    # should write join rows directly. `ContentLink` also backs
     # the per-type `related_*` relationships that way, but gets interfaces too so
     # app code can create arbitrary *cross-type*, named (`kind`) links between
     # any two content records without a new join table.

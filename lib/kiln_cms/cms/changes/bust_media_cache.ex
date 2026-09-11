@@ -25,18 +25,31 @@ defmodule KilnCMS.CMS.Changes.BustMediaCache do
 
   @impl true
   def change(changeset, _opts, _context) do
-    # A bulk caller (the library's bulk delete) sets this to suppress the
-    # per-record clear and issue ONE `Cache.bust_published/0` after its loop —
-    # without it, deleting N items clears (and lets delivery re-warm) the
-    # whole published cache N times for one logical operation. Anything
-    # setting this flag owns the single post-loop bust.
+    # A bulk caller (`KilnCMS.Media.Bulk.delete/2`, the upload loop, the
+    # portability importer) sets this to suppress the per-record clear and
+    # issue ONE `bust/0` after its loop — without it, creating or deleting N
+    # items clears (and lets delivery re-warm) the whole published cache N
+    # times for one logical operation. Anything setting this flag owns the
+    # single post-loop `bust/0`.
     if changeset.context[:skip_media_cache_bust] do
       changeset
     else
       Ash.Changeset.after_action(changeset, fn _changeset, record ->
-        Cache.bust_published()
+        bust()
         {:ok, record}
       end)
     end
+  end
+
+  @doc """
+  What a media write must bust — the single home for that knowledge, called
+  by the after_action above and by every `skip_media_cache_bust` caller's
+  compensating post-loop clear (so a future change to the invalidation
+  strategy lands in one place).
+  """
+  @spec bust() :: :ok
+  def bust do
+    Cache.bust_published()
+    :ok
   end
 end

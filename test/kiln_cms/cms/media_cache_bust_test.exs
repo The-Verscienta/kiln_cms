@@ -123,4 +123,58 @@ defmodule KilnCMS.CMS.MediaCacheBustTest do
 
     refute busted?(s)
   end
+
+  # …and the compensating half of that contract: `Media.Bulk.delete/2` (the
+  # library's bulk-delete owner) must actually issue the single clear —
+  # without this, dropping its post-loop bust would leave every bulk-deleted
+  # item serving from the published cache with the suite green.
+  test "Media.Bulk.delete busts the cache once for the whole batch" do
+    admin =
+      Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+        email: "bulk-bust-#{System.unique_integer([:positive])}@example.com",
+        hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+        confirmed_at: DateTime.utc_now(),
+        role: :admin
+      })
+
+    a = media!()
+    b = media!()
+    s = prime()
+
+    assert {2, 0} = KilnCMS.Media.Bulk.delete([a, b], actor: admin)
+
+    assert busted?(s)
+  end
+
+  # …and a fully-failed batch must NOT clear a cache nothing changed.
+  test "Media.Bulk.delete leaves the cache warm when nothing was destroyed" do
+    viewer =
+      Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+        email: "bulk-nobust-#{System.unique_integer([:positive])}@example.com",
+        hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+        confirmed_at: DateTime.utc_now(),
+        role: :viewer
+      })
+
+    a = media!()
+    s = prime()
+
+    assert {0, 1} = KilnCMS.Media.Bulk.delete([a], actor: viewer)
+
+    refute busted?(s)
+  end
+
+  # The create-side twin (#1316 review): a batch upload/import defers its
+  # per-item clears and issues one bust after the loop.
+  test "a create with skip_media_cache_bust does not bust the cache" do
+    s = prime()
+
+    KilnCMS.CMS.create_media_item!(
+      %{filename: "defer.png", url: "/uploads/defer-#{System.unique_integer([:positive])}"},
+      authorize?: false,
+      context: %{skip_media_cache_bust: true}
+    )
+
+    refute busted?(s)
+  end
 end

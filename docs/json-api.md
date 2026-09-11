@@ -290,8 +290,10 @@ GET /api/json/media-items/library?uploaded_by_id=<uuid>&uploaded_after=2026-01-0
   fire path maintains, with that graph's lifecycle: references are recorded
   when a document publishes and replaced on its next publish — so an item
   referenced only by never-published drafts counts as unused, while a
-  reference from a document that was later unpublished or deleted keeps
-  counting as a use until that document publishes again without it.
+  reference from a document that was later **unpublished** keeps counting as
+  a use until that document publishes again without it — and a reference
+  from a document that was **deleted** keeps counting indefinitely (nothing
+  removes a deleted document's recorded references).
 
 ### Published-only search (`…/published`)
 

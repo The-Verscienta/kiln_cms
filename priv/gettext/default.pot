@@ -557,6 +557,16 @@ msgstr ""
 msgid "(content unavailable)"
 msgstr ""
 
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "(current tag filter)"
+msgstr ""
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "(current uploader filter)"
+msgstr ""
+
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "(default)"

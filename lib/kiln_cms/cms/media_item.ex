@@ -326,7 +326,9 @@ defmodule KilnCMS.CMS.MediaItem do
       # no longer exists (`live_referrers/2`), which this WHERE clause cannot
       # — that check fans out per referrer type, dynamic types included. So
       # for the narrow purged-referrer case the facet counts a use the drawer
-      # no longer lists, until any document fires again and rebuilds edges.
+      # no longer lists — INDEFINITELY: rebuild-on-fire replaces only the
+      # firing document's own edges, so nothing ever removes a purged
+      # document's, and no later fire of anything else clears them.
       argument :unused, :boolean
 
       # Exposed on the public API — bound the response like `:search`.
