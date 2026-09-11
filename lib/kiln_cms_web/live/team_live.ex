@@ -35,6 +35,10 @@ defmodule KilnCMSWeb.TeamLive do
        |> assign(:member_edit, nil)
        |> assign(:role_edit, nil)
        |> assign(:role_form, role_form(actor))
+       |> assign(
+         :editors_can_publish,
+         KilnCMS.CMS.EditorialSettings.editors_can_publish?(socket.assigns.current_org)
+       )
        |> load_data()}
     else
       {:ok,
@@ -77,6 +81,37 @@ defmodule KilnCMSWeb.TeamLive do
          )}
     end
   end
+
+  # Who can publish on this site (`SiteEditorialSettings.editors_can_publish`).
+  # Here because it is a statement about what a tier may do, beside the tiers
+  # themselves. The write is the settings resource's OrgAdmin policy; this page
+  # only offers it.
+  def handle_event("set_editors_can_publish", %{"enabled" => enabled}, socket)
+      when enabled in ["true", "false"] do
+    %{current_user: actor, current_org: org} = socket.assigns
+
+    case KilnCMS.CMS.EditorialSettings.save(%{editors_can_publish: enabled == "true"},
+           actor: actor,
+           tenant: org
+         ) do
+      {:ok, settings} ->
+        message =
+          if settings.editors_can_publish,
+            do: gettext("Editors can now publish their own work."),
+            else: gettext("Editors now submit for review; an admin publishes.")
+
+        {:noreply,
+         socket
+         |> assign(:editors_can_publish, settings.editors_can_publish)
+         |> put_flash(:info, message)}
+
+      {:error, error} ->
+        {:noreply, put_flash(socket, :error, ash_error_message(error))}
+    end
+  end
+
+  # A pushed payload is client-chosen; give the guard above somewhere to fall.
+  def handle_event("set_editors_can_publish", _params, socket), do: {:noreply, socket}
 
   def handle_event("remove_member", %{"id" => id}, socket) when is_binary(id) do
     %{actor: actor} = socket.assigns
@@ -366,6 +401,29 @@ defmodule KilnCMSWeb.TeamLive do
             )}
           </p>
         </div>
+
+        <section id="team-publishing" class="card card-pad space-y-3">
+          <h2 class="text-lg font-medium">{gettext("Publishing")}</h2>
+          <p class="text-sm text-base-content/70">
+            {if @editors_can_publish,
+              do:
+                gettext(
+                  "Editors publish their own work. Submitting for review stays available, and admins can always publish."
+                ),
+              else: gettext("Editors submit their work for review, and an admin publishes it.")}
+          </p>
+          <button
+            id="team-toggle-publishing"
+            type="button"
+            phx-click="set_editors_can_publish"
+            phx-value-enabled={to_string(not @editors_can_publish)}
+            class="btn btn-sm btn-default"
+          >
+            {if @editors_can_publish,
+              do: gettext("Require admin approval"),
+              else: gettext("Let editors publish")}
+          </button>
+        </section>
 
         <section class="space-y-4">
           <h2 class="text-lg font-medium">{gettext("Members")} ({length(@members)})</h2>

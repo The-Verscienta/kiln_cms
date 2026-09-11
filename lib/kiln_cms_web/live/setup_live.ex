@@ -24,6 +24,7 @@ defmodule KilnCMSWeb.SetupLive do
   alias KilnCMS.Accounts.Bootstrap
   alias KilnCMS.Branding
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.EditorialSettings
   alias KilnCMS.CMS.StarterContent
   alias KilnCMS.CMS.Validations.BrandTokens
 
@@ -42,7 +43,12 @@ defmodule KilnCMSWeb.SetupLive do
          "password" => "",
          "password_confirmation" => ""
        })
-       |> assign(:site, %{"site_name" => "", "brand_color" => "", "theme" => "standard"})
+       |> assign(:site, %{
+         "site_name" => "",
+         "brand_color" => "",
+         "theme" => "standard",
+         "editors_publish" => "true"
+       })
        |> assign(:admin_error, nil)
        |> assign(:preview, nil)}
     end
@@ -86,6 +92,7 @@ defmodule KilnCMSWeb.SetupLive do
          }) do
       {:ok, user} ->
         save_branding(socket, user)
+        save_publishing(socket, user)
         create_starter_home(socket, user)
 
         {:noreply,
@@ -163,6 +170,29 @@ defmodule KilnCMSWeb.SetupLive do
     end
 
     :ok
+  end
+
+  # "Who can publish?" — the one site that is ASKED (an upgraded install keeps
+  # admin review; see `KilnCMS.CMS.EditorialSettings`). Written as the new admin
+  # through the ordinary settings save. A failure leaves the safe answer —
+  # editors submit for review — which Team can change, so it is logged, not
+  # fatal.
+  defp save_publishing(socket, user) do
+    editors_publish? = socket.assigns.site["editors_publish"] != "false"
+
+    case EditorialSettings.save(%{editors_can_publish: editors_publish?},
+           actor: user,
+           tenant: socket.assigns.current_org
+         ) do
+      {:ok, _settings} ->
+        :ok
+
+      {:error, error} ->
+        Logger.warning(
+          "first-run publishing setting save failed, editors submit for review " <>
+            "until it is set under Team: #{Exception.message(error)}"
+        )
+    end
   end
 
   # Something to write on first sign-in (see `KilnCMS.CMS.StarterContent`): a
@@ -338,6 +368,45 @@ defmodule KilnCMSWeb.SetupLive do
               hint={gettext("Typography and page width for the public pages.")}
             />
 
+            <fieldset id="setup-publishing" class="space-y-2">
+              <legend class="text-sm font-medium">{gettext("Who can publish?")}</legend>
+              <label class="flex items-start gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="site[editors_publish]"
+                  value="true"
+                  checked={@site["editors_publish"] != "false"}
+                  class="mt-1"
+                />
+                <span>
+                  <span class="font-medium">{gettext("Editors publish their own work")}</span>
+                  <span class="block text-xs text-base-content/60">
+                    {gettext(
+                      "Anyone with editor access can publish. Submitting for review stays available."
+                    )}
+                  </span>
+                </span>
+              </label>
+              <label class="flex items-start gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="site[editors_publish]"
+                  value="false"
+                  checked={@site["editors_publish"] == "false"}
+                  class="mt-1"
+                />
+                <span>
+                  <span class="font-medium">{gettext("An admin approves everything")}</span>
+                  <span class="block text-xs text-base-content/60">
+                    {gettext("Editors submit for review, and an admin publishes.")}
+                  </span>
+                </span>
+              </label>
+              <p class="text-xs text-base-content/60">
+                {gettext("Admins can always publish. You can change this later under Team.")}
+              </p>
+            </fieldset>
+
             <div class="flex items-center gap-3">
               <.button type="button" phx-click="back" phx-value-to="1">{gettext("Back")}</.button>
               <.button type="submit" variant="primary">{gettext("Continue")}</.button>
@@ -361,6 +430,14 @@ defmodule KilnCMSWeb.SetupLive do
           <div class="flex justify-between gap-4">
             <dt class="text-base-content/70">{gettext("Theme")}</dt>
             <dd class="font-medium">{@site["theme"]}</dd>
+          </div>
+          <div class="flex justify-between gap-4">
+            <dt class="text-base-content/70">{gettext("Publishing")}</dt>
+            <dd class="font-medium">
+              {if @site["editors_publish"] == "false",
+                do: gettext("An admin approves everything"),
+                else: gettext("Editors publish their own work")}
+            </dd>
           </div>
         </dl>
 

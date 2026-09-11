@@ -381,7 +381,15 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
             id={"scheduled-at-local-#{@editor_version}"}
             data-local-input
             class="field-input"
+            disabled={not @may_schedule?}
           />
+          <%!-- A publish date is a publish (the content policy gates
+                `scheduled_at` like Publish). The hidden input below still
+                carries the current value, so a save from here leaves it
+                untouched rather than tripping that policy. --%>
+          <p :if={not @may_schedule?} class="mt-1 text-xs text-base-content/60">
+            {gettext("Publishing needs an admin on this site, so an admin sets the publish date.")}
+          </p>
           <input
             type="hidden"
             name={@form[:scheduled_at].name}

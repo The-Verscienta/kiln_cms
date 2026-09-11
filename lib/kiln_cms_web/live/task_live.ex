@@ -83,7 +83,10 @@ defmodule KilnCMSWeb.TaskLive do
       when is_binary(enabled) do
     attrs = %{auto_complete_tasks_on_publish: enabled == "true"}
 
-    case CMS.save_site_editorial_settings(attrs,
+    # Through `EditorialSettings.save/2`, not the bare upsert: the row also
+    # carries the publishing switch, and a save naming only this column would
+    # write that one's default over the site's answer.
+    case KilnCMS.CMS.EditorialSettings.save(attrs,
            actor: socket.assigns.current_user,
            tenant: socket.assigns.current_org
          ) do

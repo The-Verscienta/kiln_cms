@@ -177,6 +177,27 @@ migration, a rewritten column, a dropped config key).
   it for review…"), a transition the record's state no longer allows says to
   reload, and a validation failure shows the validation's own message
   (`KilnCMSWeb.WorkflowErrors`).
+- **Editors can publish, if the site allows it.** A new per-site switch,
+  `SiteEditorialSettings.editors_can_publish` (checked by
+  `Checks.EditorMayPublish`), lets an org's editors publish directly.
+  - `/setup` asks "Who can publish?", defaulting to editors publishing their
+    own work. Admins can change it later under **Team → Publishing**.
+  - Where it's on, editors get Publish in the editor, in the content list
+    rows, and in bulk actions. Submit for review stays available.
+  - The content-type scope still applies: an editor limited to some types
+    can publish only those.
+  - Adds one column, `site_editorial_settings.editors_can_publish`,
+    defaulting to `false`.
+  - **Upgrading:** existing sites keep admin approval until an admin turns
+    this on.
+- **A scheduled publish date now needs publish permission.** Setting, moving
+  or clearing a document's `scheduled_at` takes the same permission as
+  Publish. Before this, an editor could set a date and the scheduler would
+  publish it, with no admin involved, even on a site that required approval.
+  - On a site where editors can't publish, the editor's date field is locked
+    with an explanation.
+  - Dragging an item's publish time on the calendar is refused for those
+    editors.
 
 - **A first-run setup wizard at `/setup` (#1317).** While an instance has no
   admin account, a three-step wizard creates one — email + password, an

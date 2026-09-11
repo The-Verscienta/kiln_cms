@@ -2,11 +2,16 @@ defmodule KilnCMS.CMS.SiteEditorialSettings do
   @moduledoc """
   Per-site editorial workflow settings (#818).
 
-  Today that is one question: whether publishing a piece of content completes
-  the open editorial tasks on it. The resource is named for the category rather
-  than the setting because this is where the next such switch belongs — a
-  `site_auto_complete_tasks` table would have to be replaced the first time
-  editorial workflow grows a second option.
+  Two questions: whether publishing a piece of content completes the open
+  editorial tasks on it, and whether editors may publish on this site at all
+  (`editors_can_publish`, resolved by `KilnCMS.CMS.EditorialSettings`). The
+  resource is named for the category rather than a setting so the second switch
+  had somewhere to go.
+
+  **Write it through `KilnCMS.CMS.EditorialSettings.save/2`.** `:save` is an
+  upsert and every column has a default, so a save that omits a column writes
+  that column's default over what the site chose — saving the task default
+  alone would quietly take publishing away from editors.
 
   ## Absence is the default, and the default is "on"
 
@@ -38,7 +43,7 @@ defmodule KilnCMS.CMS.SiteEditorialSettings do
   # wrong if they cannot see the setting. Changing it is an admin act.
   use KilnCMS.CMS.OrgSettings,
     table: "site_editorial_settings",
-    accept: [:auto_complete_tasks_on_publish],
+    accept: [:auto_complete_tasks_on_publish, :editors_can_publish],
     read: :editor,
     update?: false
 
@@ -47,6 +52,18 @@ defmodule KilnCMS.CMS.SiteEditorialSettings do
     # default is the opposite of `SiteLinkCheck`'s.
     attribute :auto_complete_tasks_on_publish, :boolean do
       default true
+      allow_nil? false
+      public? true
+    end
+
+    # Whether an editor may publish (and schedule a publish) directly, rather
+    # than submitting for an admin's review. Defaults to `false` — the rule
+    # every install had before this existed — so an upgrade never widens who
+    # can put content in front of visitors; `/setup` asks a new site instead.
+    # Read through `KilnCMS.CMS.EditorialSettings.editors_can_publish?/1`, which
+    # fails closed.
+    attribute :editors_can_publish, :boolean do
+      default false
       allow_nil? false
       public? true
     end

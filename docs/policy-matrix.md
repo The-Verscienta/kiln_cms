@@ -76,13 +76,26 @@ three, and to any content type a downstream project defines.
 | `unpublish` | ✅ | ✅ | ❌ | ❌ |
 | `archive` | ✅ | ✅ | ❌ | ❌ |
 | `restore_version` | ✅ | ✅ | ❌ | ❌ |
-| `publish`, `publish_scheduled` | ✅ | ❌ | ❌ | ❌ |
+| `publish`, `publish_scheduled` | ✅ | ⚙️ when the site lets editors publish | ❌ | ❌ |
+| any action changing `scheduled_at` | ✅ | ⚙️ when the site lets editors publish | ❌ | ❌ |
 | `return_to_draft` | ✅ | ❌ | ❌ | ❌ |
 | `destroy` (soft-delete), `purge` (hard) | ✅ | ❌ | ❌ | ❌ |
 | `trashed` (read), `restore` (untrash) | ✅ | ❌ | ❌ | ❌ |
 
 `publish_scheduled` is additionally allowed for the **system** AshOban scheduler
 via `bypass AshOban.Checks.AshObanInteraction`.
+
+⚙️ **Editors can publish, per site.** `SiteEditorialSettings.editors_can_publish`
+(`Checks.EditorMayPublish`) lets an org's editors publish directly. `/setup`
+asks a new site, and admins change it under **Team → Publishing**. It defaults
+to off, so an upgraded site keeps admin approval until an admin turns it on. A
+read failure also answers "off" (`KilnCMS.CMS.EditorialSettings`). The
+content-type scope still applies: an editor limited to some types can publish
+only those.
+
+Setting, moving or clearing `scheduled_at` takes the same permission as
+`publish`, because the scheduler publishes that date through its bypass with
+nobody checked at go-live.
 
 ## Version history — `Page.Version`, `Post.Version`, `Entry.Version` (`KilnCMS.CMS.VersionPolicies`)
 

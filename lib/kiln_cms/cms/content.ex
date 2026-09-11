@@ -2927,9 +2927,25 @@ defmodule KilnCMS.CMS.Content do
           authorize_if KilnCMS.CMS.Checks.EditableContentType
         end
 
-        # Publishing is an admin approval step — editors submit for review instead.
+        # Publishing is an admin approval step — editors submit for review
+        # instead — unless the site lets editors publish
+        # (`SiteEditorialSettings.editors_can_publish`, asked at `/setup`). The
+        # `action_type([:create, :update])` policy above still applies, so an
+        # editor scoped to some content types can publish only those.
         policy action([:publish, :publish_scheduled]) do
           authorize_if KilnCMS.CMS.Checks.OrgAdmin
+          authorize_if KilnCMS.CMS.Checks.EditorMayPublish
+        end
+
+        # A publish date IS a publish: the AshOban scheduler publishes whatever
+        # `scheduled_at` names through the bypass above, with nobody checked
+        # at go-live. So setting, moving or clearing it takes the same
+        # permission as Publish — otherwise "an admin approves everything"
+        # would be one date field away from meaning nothing. (Releases close
+        # the same hole on `ContentRelease.:schedule`.)
+        policy changing_attributes([:scheduled_at]) do
+          authorize_if KilnCMS.CMS.Checks.OrgAdmin
+          authorize_if KilnCMS.CMS.Checks.EditorMayPublish
         end
 
         # Sending reviewed content back to the author is admin-only.

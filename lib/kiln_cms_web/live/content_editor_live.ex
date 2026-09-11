@@ -160,6 +160,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:has_excerpt, content_type.excerpt?)
          |> assign(:actor, actor)
          |> assign(:tier, KilnCMSWeb.LiveUserAuth.effective_tier(socket))
+         # Whether this site lets editors publish — only which workflow button
+         # is OFFERED; the content policy (`Checks.EditorMayPublish`) decides.
+         |> assign(
+           :editors_can_publish,
+           KilnCMS.CMS.EditorialSettings.editors_can_publish?(socket.assigns.current_org)
+         )
          |> assign(:block_types, block_types())
          |> assign(:nested_child_types, nested_child_types())
          |> assign(:editors, Presence.editors(kind, id))
@@ -5021,6 +5027,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
           settings_dirty?={@settings_dirty?}
           saved_at={@saved_at}
           tier={@tier}
+          editors_can_publish={@editors_can_publish}
           conflict={@conflict}
           editors={@editors}
           actor={@actor}
@@ -5662,6 +5669,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
               record={@record}
               kind={@kind}
               current_org={@current_org}
+              may_schedule?={@tier == :admin or (@tier == :editor and @editors_can_publish)}
               tasks={@tasks}
               task_assign_open?={@task_assign_open?}
               task_draft={@task_draft}
