@@ -173,23 +173,50 @@ defmodule KilnCMS.Search do
   as the corpus grows around it. That is why this defaults to `nil` rather
   than a guess. Measure your own:
 
-      mix kiln.search.measure_floor queries.tsv
+      mix kiln.search.measure_floor golden.json
 
-  takes a sheet of queries — one per line, `query<TAB>expected-slug` for a
-  query that should find a record and a bare line for one that should find
-  nothing — and reports each expected record's distance against its nearest
-  competitor, each junk query's nearest neighbour, and the cutoff between the
-  two bands (`Mix.Tasks.Kiln.Search.MeasureFloor`; the numbers behind it are
-  `semantic_neighbours/3`). Re-run it when the corpus has grown or the
-  embedder changes, then set the value between the bands:
+  takes the same golden set `mix kiln.search.eval` scores (`KilnCMS.Search.Eval`
+  — rows of `query`, `expected` slugs, `class`, and optionally `type` and
+  `locale`; a `junk` row expects nothing) and reports each expected record's
+  distance against its nearest competitor, each junk query's nearest
+  neighbour, and the cutoff between the two bands, per class
+  (`Mix.Tasks.Kiln.Search.MeasureFloor`; the numbers behind it are
+  `semantic_neighbours/3`, which runs the same leg hybrid search does).
+  Re-run it when the corpus has grown or the embedder changes, then set the
+  value between the bands:
 
       config :kiln_cms, KilnCMS.Search, semantic_max_distance: 0.55
 
-  Since a corroborated hit is never floored, the number to set it by is where
-  the junk band starts, not where the hardest expected record sits.
+  The two surfaces want different edges. Hybrid search never floors a
+  corroborated hit, so for it the number to set is where the junk band
+  starts; the per-type semantic actions floor the whole leg, so they return
+  an expected record only if the floor sits at or beyond its distance. The
+  task prints both edges, labelled.
+
+  A non-numeric value **raises** on first use rather than being ignored.
+  Erlang orders `number < atom < bitstring`, so a string or atom here — a
+  `System.get_env/1` wired in without `String.to_float/1`, or `:none` for
+  "off" — would compare as greater than every distance and quietly admit
+  everything, reopening #871 on every hybrid surface while the per-type
+  actions, which cast the value in SQL, kept working. `nil` is the one
+  spelling of "no floor".
   """
   @spec semantic_max_distance() :: float() | nil
-  def semantic_max_distance, do: cfg(:semantic_max_distance, nil)
+  def semantic_max_distance do
+    case cfg(:semantic_max_distance, nil) do
+      nil ->
+        nil
+
+      value when is_number(value) ->
+        value
+
+      other ->
+        raise ArgumentError,
+              "config :kiln_cms, KilnCMS.Search, semantic_max_distance: must be a number " <>
+                "or nil, got #{inspect(other)}. A non-number would compare as greater than " <>
+                "every cosine distance and quietly floor nothing."
+    end
+  end
 
   @doc """
   Cosine-distance ceiling on a tag suggestion — see
@@ -461,7 +488,9 @@ defmodule KilnCMS.Search do
     # reranking reads title/excerpt, which are attributes — so loading calcs
     # here would compute them for up to `@hybrid_candidates` rows *per leg*
     # to keep `limit` of them. `highlight` is a `ts_headline` over the whole
-    # document, so that is most of the query's cost thrown away.
+    # document, so that is most of the query's cost thrown away. The one calc
+    # a leg does load is the semantic leg's `semantic_distance`, which its
+    # ORDER BY computes anyway (see `semantic_context/1`).
     #
     # Both keyword legs read `search_vector`, so they share one containment:
     # a type without the column loses both, and logs it once.
@@ -595,12 +624,11 @@ defmodule KilnCMS.Search do
   end
 
   # The semantic leg's query context. `semantic_floor: :caller` tells the
-  # leg's prepare (`KilnCMS.CMS.Content.semantic_sort/1`) to skip the
-  # `semantic_max_distance/0` filter and load each row's distance instead —
-  # `floor_semantic_only/2` applies the floor after fusion, where it can see
-  # which hits another leg corroborated. `:query_vector` passes a
-  # caller-supplied embedding down (see `hybrid/3`); absent, the prepare
-  # embeds for itself.
+  # leg's prepare (`KilnCMS.CMS.Content.semantic_sort/1`) to leave the
+  # `semantic_max_distance/0` filter to us and load each row's distance
+  # instead — `floor_semantic_only/2` applies it after fusion. `:query_vector`
+  # passes a caller-supplied embedding down (see `hybrid/3`); absent, the
+  # prepare embeds for itself.
   defp semantic_context(opts) do
     case Keyword.fetch(opts, :query_vector) do
       {:ok, vector} -> %{semantic_floor: :caller, query_vector: vector}
@@ -608,27 +636,20 @@ defmodule KilnCMS.Search do
     end
   end
 
-  # The relevance floor, applied where it can tell a semantic-only hit from a
-  # corroborated one. A fused hit that only the semantic leg returned is
-  # dropped when its cosine distance exceeds the floor; a hit any other leg
-  # (keyword, any-term, title, fuzzy) also found needs no distance alibi — a
-  # lexical match is its own evidence. Runs before `limit` is taken, so a floored hit does not
-  # hold a slot.
+  # The relevance floor, applied after fusion to hits only the semantic leg
+  # returned — the why is on `semantic_max_distance/0`. Runs before `limit`
+  # is taken, so a floored hit does not hold a slot, and the leg is sorted by
+  # distance, so the rows this drops sit at its tail and dropping them moves
+  # no other row's rank.
   #
-  # Filtering the leg itself (`WHERE distance <= t`, the previous shape) made
-  # the floor the judge of every row, including rows the keyword leg was about
-  # to vouch for. Short queries naming records embed far from those records'
-  # long prose, so on an entity-heavy corpus the leg kept marginal neighbours
-  # and dropped the named records themselves (the "Why Shen Beat Huang Qi"
-  # report, D2). What #871 needs — a query unlike anything indexed returns
-  # nothing — survives: with no lexical hit, every fused hit is semantic-only,
-  # and every one of them is over the floor.
-  #
-  # The leg is sorted by distance, so the rows this drops sit at its tail and
-  # dropping them moves no other row's rank. The distance is the semantic
-  # leg's loaded `semantic_distance` calc, and a hit only that leg returned is
-  # that leg's record — but `Ash.NotLoaded` is truthy, so anything that is not
-  # a number fails closed rather than passing the floor by accident.
+  # The distance is the semantic leg's loaded `semantic_distance` calc, and a
+  # hit only that leg returned is that leg's record — but `Ash.NotLoaded` is
+  # truthy, so anything that is not a number fails closed rather than passing
+  # the floor by accident. That is worth a line in the log: it is also what a
+  # resource whose semantic prepare does not see the `:caller` context looks
+  # like, and the symptom otherwise is a type whose semantic-only hits simply
+  # never appear. The floor itself is a number or nil by the time it gets
+  # here — `semantic_max_distance/0` raises on anything else.
   @spec floor_semantic_only([hit()], float() | nil) :: [hit()]
   defp floor_semantic_only(hits, nil), do: hits
 
@@ -637,7 +658,13 @@ defmodule KilnCMS.Search do
       {%{semantic_distance: distance}, _score, [:semantic]} when is_number(distance) ->
         distance > max_distance
 
-      {_record, _score, [:semantic]} ->
+      {record, _score, [:semantic]} ->
+        Logger.warning(
+          "semantic-only hit #{inspect(record.__struct__)} #{record.id} carries no " <>
+            "distance; floored. Does its :search_semantic prepare honour the " <>
+            "semantic_floor: :caller context?"
+        )
+
         true
 
       _hit ->
@@ -647,22 +674,15 @@ defmodule KilnCMS.Search do
 
   @doc """
   The nearest rows of `type` to `query` with their raw cosine distances —
-  the measurement behind `semantic_max_distance/0`.
+  `semantic_neighbours/3` reduced to titles, for a quick look in `iex`.
 
       iex> KilnCMS.Search.semantic_distances(:page, "reishi mushroom")
       {:ok, [{"Ling Zhi", 0.31}, {"Medicinal Mushrooms", 0.42}, {"Sitemap", 0.83}]}
 
-  Run it for a query that *should* match and one that should not: the cutoff
-  goes between the two, and if they overlap your corpus isn't separable by
-  distance alone and wants reranking instead. Deliberately ignores any
-  configured floor — you cannot tune a threshold that has already been
-  applied. `mix kiln.search.measure_floor` runs this over a whole query sheet
-  and derives the cutoff; `semantic_neighbours/3` is the same list with the
-  records' ids and slugs.
-
-  Options: `:limit` (default 20), plus `:actor` / `:authorize?` / `:tenant`.
+  Same options and same caveats as `semantic_neighbours/3`; the measurement
+  proper is `mix kiln.search.measure_floor`.
   """
-  @spec semantic_distances(module() | atom(), String.t(), keyword()) ::
+  @spec semantic_distances(module() | atom() | Ash.Query.t(), String.t(), keyword()) ::
           {:ok, [{String.t(), float()}]} | {:error, term()}
   def semantic_distances(type, query, opts \\ []) when is_binary(query) do
     with {:ok, rows} <- semantic_neighbours(type, query, opts) do
@@ -677,56 +697,73 @@ defmodule KilnCMS.Search do
   @type neighbour :: %{
           id: Ash.UUID.t(),
           slug: String.t(),
+          locale: String.t(),
           title: String.t() | nil,
           distance: float()
         }
 
   @doc """
   The nearest embedded rows of `type` to `query`, nearest first, each with its
-  `id`, `slug`, `title` and raw cosine `distance` — what `semantic_distances/3`
-  reduces to titles, and what `Mix.Tasks.Kiln.Search.MeasureFloor` matches a
-  query sheet's expected slugs against.
+  `id`, `slug`, `locale`, `title` and raw cosine `distance` — the measurement
+  behind `semantic_max_distance/0`, and what `Mix.Tasks.Kiln.Search.MeasureFloor`
+  matches a golden set's expected slugs against.
 
-  Ignores any configured `semantic_max_distance/0`, for the same reason
-  `semantic_distances/3` does. Rows with no embedding are left out: they have
-  no distance, and the semantic leg never returns them either.
+  This runs **the semantic leg hybrid search runs** — the `:search_semantic`
+  action, under the same `semantic_floor: :caller` context `hybrid/3` uses —
+  so it sees exactly the rows that leg would: the query's locale only,
+  embedded rows only, and (with `published: true`) published rows only. A
+  measurement that read the table directly ranked a record's other-locale
+  translations and drafts against the query, and could propose a floor from a
+  distance the leg never computes. Any configured `semantic_max_distance/0`
+  is ignored: you cannot tune a threshold that has already been applied.
 
-  Options: `:limit` (default 20); `:query_vector` to reuse one embedding
-  across several types (as `hybrid/3` accepts) instead of embedding the query
-  here; plus `:actor` / `:authorize?` / `:tenant`.
+  `type` is anything `hybrid/3` accepts, or an `Ash.Query` already scoped to
+  the rows to measure — how the task narrows `Entry` to one dynamic type.
+
+  Options: `:limit` (default 20); `:locale` (default the configured default,
+  as the leg's); `:published` to run `:search_semantic_published` instead;
+  `:slug` to measure one record's distance whatever its rank; `:query_vector`
+  to reuse one embedding across several types (as `hybrid/3` accepts) instead
+  of embedding the query here; plus `:actor` / `:authorize?` / `:tenant`.
   """
-  @spec semantic_neighbours(module() | atom(), String.t(), keyword()) ::
+  @spec semantic_neighbours(module() | atom() | Ash.Query.t(), String.t(), keyword()) ::
           {:ok, [neighbour()]} | {:error, term()}
   def semantic_neighbours(type, query, opts \\ []) when is_binary(query) do
-    resource = search_resource(type)
     read_opts = Keyword.take(opts, [:actor, :authorize?, :tenant])
+    locale = Keyword.get(opts, :locale) || KilnCMS.I18n.default_locale()
 
-    with {:ok, vector} <- neighbour_vector(query, opts) do
-      resource
-      |> Ash.Query.new()
-      |> Ash.Query.filter(not is_nil(embedding))
-      |> Ash.Query.load(semantic_distance: %{query_vector: vector})
-      |> Ash.Query.sort([{:semantic_distance, {%{query_vector: vector}, :asc}}])
-      |> Ash.Query.limit(Keyword.get(opts, :limit, 20))
-      |> Ash.read(read_opts)
-      |> case do
-        {:ok, rows} ->
-          {:ok,
-           Enum.map(rows, fn row ->
-             %{id: row.id, slug: row.slug, title: row.title, distance: row.semantic_distance}
-           end)}
+    action =
+      if Keyword.get(opts, :published, false),
+        do: :search_semantic_published,
+        else: :search_semantic
 
-        error ->
-          error
-      end
+    type
+    |> neighbour_base()
+    |> neighbour_slug(Keyword.get(opts, :slug))
+    |> Ash.Query.limit(Keyword.get(opts, :limit, 20))
+    |> Ash.Query.set_context(semantic_context(opts))
+    |> Ash.Query.for_read(action, %{query: query, locale: locale})
+    |> Ash.read(read_opts)
+    |> case do
+      {:ok, rows} -> {:ok, Enum.map(rows, &neighbour_row/1)}
+      error -> error
     end
   end
 
-  defp neighbour_vector(query, opts) do
-    case Keyword.fetch(opts, :query_vector) do
-      {:ok, vector} when is_list(vector) -> {:ok, vector}
-      _ -> embed_query(query)
-    end
+  defp neighbour_base(%Ash.Query{} = query), do: query
+  defp neighbour_base(type), do: type |> search_resource() |> Ash.Query.new()
+
+  defp neighbour_slug(query, nil), do: query
+  defp neighbour_slug(query, slug), do: Ash.Query.filter(query, slug == ^slug)
+
+  defp neighbour_row(row) do
+    %{
+      id: row.id,
+      slug: row.slug,
+      locale: row.locale,
+      title: row.title,
+      distance: row.semantic_distance
+    }
   end
 
   # Resolve what to search: a registered content type (compiled → its

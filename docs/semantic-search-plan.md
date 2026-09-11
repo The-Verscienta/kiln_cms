@@ -103,9 +103,11 @@ corpus grows around it.
 **Where it applies.** `hybrid/3` — the search page, `/api/search`, `/api/ask`
 — applies the floor *after* fusion, to hits only the semantic leg returned. A
 record any other leg (keyword, its any-term relaxation, title or fuzzy)
-also found is kept whatever its
-distance: a lexical match needs no distance alibi. The per-type
-`semantic-search` API routes have no other leg, so they filter the leg itself.
+also found is kept whatever its distance: a lexical match needs no distance
+alibi. The per-type `semantic-search` API routes have no other leg, so they
+filter the leg itself — one value, two edges, and the measurement below
+labels both. A non-numeric value raises on first use rather than comparing
+as "greater than every distance" and flooring nothing.
 
 The placement matters. Filtering the leg before fusion made the floor the
 judge of every row, and a short query naming a record embeds far from that
@@ -115,25 +117,32 @@ the semantic leg fed fusion noise and withheld the answers (the "Why Shen Beat
 Huang Qi" report, D2/P3). Junk still returns nothing: with no lexical hit every
 fused hit is semantic-only, and every one is over the floor.
 
-**Measuring it.** Write a sheet of queries — one per line, `query<TAB>slug`
-for a query that should find a record, a bare line for one that should find
-nothing — covering the classes the floor has to serve (single names, name
-lists, paraphrases, question forms, junk), then:
+**Measuring it.** Use the golden set `mix kiln.search.eval` scores
+([search-roadmap.md §11](search-roadmap.md#11-ranking-eval-harness)) — rows of
+`query`, `expected` slugs, `class`, and optionally `type` (give one when the
+slug exists in more than one type) and `locale`; a `junk` row expects nothing
+— covering the classes the floor has to serve, then:
 
 ```bash
-mix kiln.search.measure_floor queries.tsv          # every content type
-mix kiln.search.measure_floor queries.tsv --type herb --limit 50
+mix kiln.search.measure_floor golden.json          # every content type
+mix kiln.search.measure_floor golden.json --type herb --limit 50
+mix kiln.search.measure_floor golden.json --org acme --locale fr
 ```
 
-It reports each expected record's raw distance against its nearest competitor
-and each junk query's nearest neighbour, ignoring any floor already
-configured, and proposes the cutoff between the two bands. When they overlap
-it says which queries overlap and what each edge would keep and admit — that
-is a choice about which error to make, or a sign the corpus wants
-`rerank: true` rather than a floor. Since corroborated hits are never floored,
-set the value by where the junk band starts, not by the hardest expected
-record. The numbers behind the task are `KilnCMS.Search.semantic_neighbours/3`
-(`semantic_distances/3` for titles only):
+It measures each query through **the semantic leg hybrid search runs** — the
+query's locale, embedded and published rows only, a dynamic type within its
+own definition — and reports each expected record's raw distance against its
+nearest competitor and each junk query's nearest neighbour, ignoring any
+floor already configured, with the bands overall and per class. When they
+separate it proposes the midpoint; when they overlap it says which queries
+overlap and what each edge would keep and admit — that is a choice about
+which error to make, or a sign the corpus wants `rerank: true` rather than a
+floor. The two surfaces want different edges: hybrid search never floors a
+corroborated hit, so set it at the junk edge for the search page and the
+APIs; the per-type routes floor the whole leg, so they return every expected
+record only from the expected edge up. The numbers behind the task are
+`KilnCMS.Search.semantic_neighbours/3` (`semantic_distances/3` for titles
+only):
 
 ```elixir
 KilnCMS.Search.semantic_distances(:page, "a query that should match")

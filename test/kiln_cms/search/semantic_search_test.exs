@@ -9,6 +9,8 @@ defmodule KilnCMS.Search.SemanticSearchTest do
   # async: false — toggles the global `KilnCMS.Search` app env.
   use KilnCMS.DataCase, async: false
 
+  require Ash.Query
+
   alias KilnCMS.CMS
 
   defmodule StubEmbedder do
@@ -203,6 +205,76 @@ defmodule KilnCMS.Search.SemanticSearchTest do
 
       assert id == alpha.id
       assert_in_delta nearest, 0.0, 1.0e-6
+    end
+  end
+
+  describe "semantic_neighbours/3 runs the leg hybrid search runs" do
+    # The measurement behind the floor must see the rows the semantic leg
+    # sees — the query's locale, published rows when asked — or it proposes
+    # a floor from a distance the leg never computes.
+
+    test "is scoped to the query's locale, like the leg" do
+      admin = admin()
+      shared = "nb-#{System.unique_integer([:positive])}"
+      en = CMS.create_page!(%{title: "English text", slug: shared}, actor: admin)
+      fr = CMS.create_page!(%{title: "Bonjour", slug: shared, locale: "fr"}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      {:ok, default} = KilnCMS.Search.semantic_neighbours(:page, "Bonjour", actor: admin)
+      assert Enum.map(default, & &1.id) |> Enum.member?(en.id)
+      refute Enum.map(default, & &1.id) |> Enum.member?(fr.id)
+      assert %{locale: "en"} = Enum.find(default, &(&1.id == en.id))
+
+      {:ok, french} =
+        KilnCMS.Search.semantic_neighbours(:page, "Bonjour", actor: admin, locale: "fr")
+
+      assert [%{id: fr_id, distance: distance}] = french
+      assert fr_id == fr.id
+      assert_in_delta distance, 0.0, 1.0e-6
+    end
+
+    test "published: true sees published rows only; :slug measures one record" do
+      admin = admin()
+
+      draft =
+        CMS.create_page!(%{title: "Bonjour", slug: "nb-#{System.unique_integer([:positive])}"},
+          actor: admin
+        )
+
+      live_slug = "nb-#{System.unique_integer([:positive])}"
+      live = CMS.create_page!(%{title: "Other words", slug: live_slug}, actor: admin)
+
+      live = CMS.publish_page!(live, %{}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      {:ok, rows} = KilnCMS.Search.semantic_neighbours(:page, "Bonjour", published: true)
+      assert Enum.map(rows, & &1.id) == [live.id]
+
+      {:ok, rows} =
+        KilnCMS.Search.semantic_neighbours(:page, "Bonjour", actor: admin, slug: draft.slug)
+
+      assert [%{id: draft_id, distance: distance}] = rows
+      assert draft_id == draft.id
+      assert_in_delta distance, 0.0, 1.0e-6
+    end
+
+    test "accepts a pre-scoped Ash.Query as the base" do
+      admin = admin()
+
+      alpha =
+        CMS.create_page!(%{title: "Alpha", slug: "nb-#{System.unique_integer([:positive])}"},
+          actor: admin
+        )
+
+      CMS.create_page!(%{title: "Beta", slug: "nb-#{System.unique_integer([:positive])}"},
+        actor: admin
+      )
+
+      KilnCMS.DataCase.drain_oban()
+
+      base = Ash.Query.filter(KilnCMS.CMS.Page, id == ^alpha.id)
+      {:ok, rows} = KilnCMS.Search.semantic_neighbours(base, "Beta", actor: admin)
+      assert Enum.map(rows, & &1.id) == [alpha.id]
     end
   end
 

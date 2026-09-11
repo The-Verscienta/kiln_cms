@@ -587,6 +587,27 @@ defmodule KilnCMS.Search.HybridTest do
       assert Search.hybrid(:page, "nothing like this exists", actor: admin) == []
     end
 
+    test "a non-numeric floor raises rather than flooring nothing" do
+      # Erlang orders `number < atom < bitstring`: a string here compared as
+      # greater than every distance, so hybrid search admitted every
+      # semantic-only hit — junk included — while the per-type action cast
+      # the value in SQL and kept working. Loud beats that.
+      admin = admin()
+      CMS.create_page!(%{title: "alpha beta", slug: slug()}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      for bad <- ["0.35", :none, false] do
+        put_search_env(semantic_max_distance: bad)
+
+        assert_raise ArgumentError, ~r/semantic_max_distance: must be a number or nil/, fn ->
+          Search.hybrid(:page, "nothing like this exists", actor: admin)
+        end
+      end
+
+      put_search_env(semantic_max_distance: nil)
+      assert is_list(Search.hybrid(:page, "alpha", actor: admin))
+    end
+
     test "the per-type semantic action still floors the leg itself" do
       # The `semantic-search` API routes have no other leg to corroborate a
       # hit, so a record beyond the floor stays out of them even though hybrid
