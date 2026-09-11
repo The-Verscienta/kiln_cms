@@ -32,6 +32,7 @@ Content create/update
 Query "how do I reset my password"
   ├─ keyword leg:  :search          → ts_rank                  (exists today)
   ├─ semantic leg: :search_semantic → embedding <=> q_vec      (new)
+  ├─ block leg:    BlockEmbedding :nearest_to_vector → nearest block per document (D16)
   └─ KilnCMS.Search.hybrid/3 → Reciprocal Rank Fusion → (optional rerank top-k)
 ```
 `Embedder` is a behaviour (like `KilnCMS.Storage`): `Bumblebee` adapter is the
@@ -150,6 +151,20 @@ only):
 KilnCMS.Search.semantic_distances(:page, "a query that should match")
 KilnCMS.Search.semantic_distances(:page, "asdfghjkl")
 ```
+
+## Block leg (2026-09-11)
+
+A document's embedding covers the first ~512 tokens of its `search_text`, so a
+long monograph's vector describes its opening and nothing after it. The
+per-block embeddings the fire pipeline writes (`KilnCMS.Search.BlockIndexer`,
+D16) describe each section; `hybrid/3` now fuses a **block leg** — documents
+ranked by their nearest block, one entry per document — at the semantic leg's
+weight, reported as `block` in `legs`. The relevance floor judges a hit only
+the semantic legs returned by the nearer of its document and block distances,
+so a section within the floor keeps a document whose opening is not. On
+wherever semantic search is on (`block_leg: false` switches it off); block
+rows exist for fired documents only, so a draft is reached by the other legs.
+It sits out under facet filters, like the fuzzy leg.
 
 ## Phase 3 — Hybrid fusion (+ optional rerank)
 - `KilnCMS.Search.hybrid(type, query, opts)` runs both legs (top-N each), fuses

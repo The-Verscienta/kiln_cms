@@ -171,6 +171,12 @@ config :kiln_cms, KilnCMS.Search,
   embedder: KilnCMS.Search.Embedder.Bumblebee,
   model: "BAAI/bge-small-en-v1.5",
   dim: 384,
+  # The block leg of hybrid search: documents ranked by their nearest
+  # per-block embedding (the rows the fire pipeline already writes), so a
+  # section deep in a long document can vouch for it. On wherever semantic
+  # search is on; costs one indexed nearest-neighbour query per content type
+  # per search. See `KilnCMS.Search.block_leg?/0`.
+  block_leg: true,
   # Optional reranking of every search surface's fused results by a local
   # cross-encoder — the public search page, the editor palette, /api/search
   # and /api/ask alike. Off by default: it is CPU inference over every

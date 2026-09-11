@@ -240,6 +240,24 @@ defmodule KilnCMS.CMS.ContentTypes do
   end
 
   @doc """
+  The type atom a content resource's rows are filed under in the per-type
+  indexes (`:page`, `:post`, a project type's atom — and `:entry` for the
+  shared dynamic tier, which declares itself with `__kiln_dynamic_entry__/0`
+  rather than a content type), or `nil` for a module that is no content
+  resource. What `KilnCMS.Search.BlockEmbedding` rows and
+  `KilnCMS.CMS.FieldDefinition.content_type` key on.
+  """
+  @spec type_atom(module()) :: atom() | nil
+  def type_atom(resource) when is_atom(resource) do
+    cond do
+      not Code.ensure_loaded?(resource) -> nil
+      function_exported?(resource, :__kiln_content_type__, 0) -> resource.__kiln_content_type__()
+      function_exported?(resource, :__kiln_dynamic_entry__, 0) -> :entry
+      true -> nil
+    end
+  end
+
+  @doc """
   The public content-type name for a resource module, or `nil` for resources
   outside the content macro. The single authority the RBAC scope checks
   compare against (granular RBAC #332) — one place to change when the
