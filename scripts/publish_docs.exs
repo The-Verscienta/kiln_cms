@@ -1,7 +1,8 @@
 # Publish the user-facing guides in docs/ to a running Kiln site, as entries of
-# a dynamic "Doc" content type (served at /docs/<slug>) plus a `docs` page that
-# indexes them by section. kilncms.dev runs this from
-# .github/workflows/publish-docs.yml on every push to main that touches docs.
+# a dynamic "Doc" content type (served at /docs/<slug>) plus a page that
+# indexes them by section (slug `documentation`, served at /docs by its alias).
+# kilncms.dev runs this from .github/workflows/publish-docs.yml on every push
+# to main that touches docs.
 #
 #     elixir scripts/publish_docs.exs --all
 #     elixir scripts/publish_docs.exs docs/deploy.md docs/seo.md
@@ -42,7 +43,11 @@ defmodule PublishDocs do
     "Audits & release checklists",
     "Project history"
   ]
-  @index_slug "docs"
+  # The index can't be a page with slug `docs`: a page slug may not shadow a
+  # content type's section URL (`SlugAvailable`). A `path_alias` may, and an
+  # alias answers at `/docs` before the 404 does.
+  @index_slug "documentation"
+  @index_alias "/docs"
   @jsonapi "application/vnd.api+json"
 
   # ── Catalogue (from mix.exs) ──────────────────────────────────────────────
@@ -353,7 +358,7 @@ defmodule PublishDocs do
               @index_slug,
               "Documentation",
               index_html(rendered),
-              &%{"slug" => &1}
+              &%{"slug" => &1, "path_alias" => @index_alias}
             )
           )
         ]
