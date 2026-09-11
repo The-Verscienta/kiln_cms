@@ -921,4 +921,98 @@ defmodule KilnCMS.Search.HybridTest do
       assert :alias in Search.hit_legs(hit)
     end
   end
+
+  describe "the tag leg: a record carrying a tag the query names" do
+    # Tag-name vectors are written on tag create (`EnqueueTagEmbedding` →
+    # `TagEmbeddingWorker`); the leg finds tags within the threshold of the
+    # query and every document carrying one joins fusion at half weight.
+    # Under the stub embedder a tag whose name IS the query sits at distance
+    # 0, within any threshold.
+
+    defp tagged_page(admin, title, tag) do
+      CMS.create_page!(%{title: title, slug: slug(), tag_ids: [tag.id]}, actor: admin)
+    end
+
+    test "a tag named by the query brings its documents in as :tag, at half weight" do
+      admin = admin()
+      tag = CMS.create_tag!(%{name: "immunity", slug: slug()}, actor: admin)
+      tagged = tagged_page(admin, "Some remedy", tag)
+      untagged = CMS.create_page!(%{title: "Another remedy", slug: slug()}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      # The tag's vector was written by the worker, not by a panel.
+      assert [%{name: "immunity"}] =
+               KilnCMS.SearchIndex.tag_embeddings_for!([tag.id], authorize?: false)
+
+      results = Search.hybrid(:page, "immunity", actor: admin)
+      hit = Enum.find(results, &(&1.id == tagged.id))
+      assert hit, "expected the tagged page"
+      assert :tag in Search.hit_legs(hit)
+      refute :tag in Search.hit_legs(Enum.find(results, &(&1.id == untagged.id)) || %{})
+
+      put_search_env(tag_leg: false)
+
+      refute Enum.any?(
+               Search.hybrid(:page, "immunity", actor: admin),
+               &(:tag in Search.hit_legs(&1))
+             )
+    end
+
+    test "a tag beyond the threshold names nothing; the floor judges a tag-only hit by its tag" do
+      admin = admin()
+      tag = CMS.create_tag!(%{name: "the and of", slug: slug()}, actor: admin)
+      # No lexical leg can return this page for the stop-word query; only the
+      # semantic legs and the tag can.
+      page = tagged_page(admin, "gamma", tag)
+      KilnCMS.DataCase.drain_oban()
+
+      query = "the and of"
+      document = distance_of(page, query, admin)
+      assert document > 0.0
+
+      # Tag at distance 0 (its name is the query): a floor the document fails
+      # keeps the page, through the tag.
+      put_search_env(semantic_max_distance: document / 2)
+      [hit] = Search.hybrid(:page, query, actor: admin)
+      assert hit.id == page.id
+      assert :tag in Search.hit_legs(hit)
+
+      # A threshold below the tag's distance (0) is impossible; a threshold
+      # of 0 still admits it (`<=`), so tighten by renaming the tag away from
+      # the query: the leg then has no tag within the threshold, and the
+      # floor drops the page on its document distance alone.
+      CMS.update_tag!(tag, %{name: "something else entirely"}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+      put_search_env(tag_leg_threshold: 0.0)
+      assert Search.hybrid(:page, query, actor: admin) == []
+
+      # A tag within the threshold but beyond the floor is no alibi either:
+      # the tag leg is semantic, and a tag-only hit is judged by the nearer
+      # of its distances, not waved through as a lexical match. Admit every
+      # tag (threshold 2.0) and lift the floor: the page is back, through the
+      # tag. Then set the floor below both distances: gone again.
+      put_search_env(tag_leg_threshold: 2.0, semantic_max_distance: 2.0)
+      assert [hit] = Search.hybrid(:page, query, actor: admin)
+      assert :tag in Search.hit_legs(hit)
+      put_search_env(semantic_max_distance: 0.0)
+      assert Search.hybrid(:page, query, actor: admin) == []
+    end
+
+    test "sits out under facet filters" do
+      admin = admin()
+      tag = CMS.create_tag!(%{name: "immunity", slug: slug()}, actor: admin)
+      # The title carries the query too, so the keyword leg returns the page
+      # under the facet; the tag (its name IS the query, distance 0) would as
+      # well, and must not.
+      tagged = tagged_page(admin, "immunity remedy", tag)
+      KilnCMS.DataCase.drain_oban()
+
+      unfiltered = Search.hybrid(:page, "immunity", actor: admin)
+      assert :tag in Search.hit_legs(Enum.find(unfiltered, &(&1.id == tagged.id)))
+
+      filtered = Search.hybrid(:page, "immunity", actor: admin, filters: %{author_id: admin.id})
+      assert tagged.id in ids(filtered)
+      refute Enum.any?(filtered, &(:tag in Search.hit_legs(&1)))
+    end
+  end
 end

@@ -24,6 +24,7 @@ defmodule KilnCMS.SearchIndex do
       define :upsert_tag_embedding, action: :upsert
       define :tag_embeddings_for, action: :for_tags, args: [:tag_ids]
       define :nearest_tag_embeddings, action: :nearest_to_vector
+      define :nearest_tag_embeddings_any, action: :nearest_any
     end
   end
 end

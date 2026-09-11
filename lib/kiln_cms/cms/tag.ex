@@ -43,6 +43,12 @@ defmodule KilnCMS.CMS.Tag do
     validate {KilnCMS.CMS.Validations.TagGroupInTenant, []}, on: [:create, :update]
   end
 
+  changes do
+    # The tag leg of hybrid search ranks tags by their name's embedding; write
+    # it when the name is written rather than the first time a panel asks.
+    change KilnCMS.CMS.Changes.EnqueueTagEmbedding, on: [:create, :update]
+  end
+
   relationships do
     # The bucket this tag is filed under in the editor's tag picker (see
     # `KilnCMS.CMS.TagGroup`). Optional — a tag without one shows as "Ungrouped".

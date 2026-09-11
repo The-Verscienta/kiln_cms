@@ -151,6 +151,35 @@ defmodule KilnCMS.Search do
   def block_leg?, do: semantic?() and cfg(:block_leg, true)
 
   @doc """
+  Whether `hybrid/3` runs the tag leg: documents carrying a tag whose name
+  embeds within `tag_leg_threshold/0` of the query.
+
+  A tag is an editor's statement of what a document is *about*, so a query
+  near a tag's name — "immune support" near a tag named "immunity" — is
+  corroborated by every document carrying it, whatever their prose. The
+  tag-name vectors are the ones `KilnCMS.Search.TagEmbedding` holds (written
+  on tag create and rename, and by `mix kiln.embed_all`); at most
+  `tag_leg_limit/0` tags per query, each contributing its documents, at half
+  the semantic weight — a topic match, not an entity match. On wherever
+  semantic search is on; `tag_leg: false` switches it off.
+  """
+  @spec tag_leg?() :: boolean()
+  def tag_leg?, do: semantic?() and cfg(:tag_leg, true)
+
+  @doc """
+  Cosine-distance ceiling for a tag to count as named by the query — the tag
+  leg's floor. Defaults to `suggest_tags_threshold/0`: the same model, the
+  same tag-name vectors, and the same measured band between "a tag a human
+  would tick" and one they would not.
+  """
+  @spec tag_leg_threshold() :: float()
+  def tag_leg_threshold, do: cfg(:tag_leg_threshold, suggest_tags_threshold())
+
+  @doc "At most this many tags feed the tag leg per query (nearest first). Default 5."
+  @spec tag_leg_limit() :: pos_integer()
+  def tag_leg_limit, do: cfg(:tag_leg_limit, 5)
+
+  @doc """
   Maximum cosine distance a semantic hit may have and still count as a match,
   or `nil` (the default) for no floor.
 
@@ -438,6 +467,13 @@ defmodule KilnCMS.Search do
   @block_weight 1.0
   @block_candidates 4 * @hybrid_candidates
 
+  # The tag leg says "this document is about the query's topic", which is
+  # weaker evidence than "this document's text is near the query" — a tag
+  # named "herbs" is near many queries — so it carries the fuzzy leg's
+  # weight: enough to lift a tagged document among near-ties, never enough
+  # to outrank a lexical or semantic hit on its own.
+  @tag_weight 0.5
+
   # The facet arguments shared by `:search`, `:search_any`, `:search_title`
   # and `:search_semantic`.
   @facet_filters [:category_id, :author_id, :state, :tag_ids]
@@ -452,8 +488,9 @@ defmodule KilnCMS.Search do
   semantic (`:search_semantic`, cosine), block (the nearest per-block
   embedding per document — see `block_leg?/0`), title (`:search_title`,
   records the query names) and alias (`:search_alias`, records the query
-  names by a field flagged as a name — `KilnCMS.CMS.NameFields`) result
-  lists by Reciprocal Rank Fusion and return the merged records, best first.
+  names by a field flagged as a name — `KilnCMS.CMS.NameFields`) and tag
+  (documents carrying a tag the query names — see `tag_leg?/0`) result lists
+  by Reciprocal Rank Fusion and return the merged records, best first.
 
   `type` is anything the content registry resolves — `:page`, `:post`, a
   generated type's atom, a dynamic type's name string (searched on the shared
@@ -538,6 +575,7 @@ defmodule KilnCMS.Search do
 
     semantic = run_leg(resource, :search_semantic, args, read_opts, semantic_context(opts))
     {blocks, block_distances} = block_leg(resource, query, locale, filters, read_opts, opts)
+    {tagged, tag_distances} = tag_leg(resource, locale, filters, read_opts, opts)
     title = run_leg(resource, :search_title, args, read_opts)
     aliases = run_leg(resource, :search_alias, args, read_opts)
 
@@ -557,10 +595,14 @@ defmodule KilnCMS.Search do
       {:block, blocks, @block_weight},
       {:title, title, @title_weight},
       {:alias, aliases, @title_weight},
-      {:fuzzy, fuzzy, @fuzzy_weight}
+      {:fuzzy, fuzzy, @fuzzy_weight},
+      {:tag, tagged, @tag_weight}
     ]
     |> reciprocal_rank_fusion(k)
-    |> floor_semantic_only(semantic_max_distance(), block_distances)
+    |> floor_semantic_only(
+      semantic_max_distance(),
+      Map.merge(block_distances, tag_distances, fn _id, a, b -> min(a, b) end)
+    )
     |> Enum.take(limit)
     |> maybe_rerank(query, opts)
     |> load_results(load, read_opts)
@@ -588,8 +630,8 @@ defmodule KilnCMS.Search do
 
   @doc """
   Which legs of `hybrid/3` returned this record — a subset of
-  `[:keyword, :keyword_any, :semantic, :block, :title, :alias, :fuzzy]`, in
-  that order — or `[]` for a record that did not come out of `hybrid/3`.
+  `[:keyword, :keyword_any, :semantic, :block, :title, :alias, :fuzzy, :tag]`,
+  in that order — or `[]` for a record that did not come out of `hybrid/3`.
 
   `:keyword` is the full-text leg, every query term matched; `:keyword_any`
   is its any-term relaxation, which runs only when the full match came up
@@ -601,7 +643,8 @@ defmodule KilnCMS.Search do
   query names by one of its other names — a custom field an admin flagged
   `names_record` (`KilnCMS.CMS.NameFields`), matched the way the title is
   and weighted the same; `:fuzzy` the trigram title leg that runs only when
-  the full match came up short.
+  the full match came up short; `:tag` a record carrying a tag whose name
+  the query is near (`tag_leg?/0`) — a topic match, the weakest claim here.
 
   Provenance, for two readers: a client deciding how much to trust a hit (a
   keyword-and-semantic hit is a stronger claim than a fuzzy-only one, a
@@ -614,7 +657,7 @@ defmodule KilnCMS.Search do
   def hit_legs(_record), do: []
 
   @typedoc "A leg of `hybrid/3` — see `hit_legs/1`."
-  @type leg :: :keyword | :keyword_any | :semantic | :block | :title | :alias | :fuzzy
+  @type leg :: :keyword | :keyword_any | :semantic | :block | :title | :alias | :fuzzy | :tag
 
   # A fused hit on its way out of `hybrid/3`: the record, the score it is
   # ordered by, and the legs that returned it.
@@ -707,20 +750,22 @@ defmodule KilnCMS.Search do
   # number or nil by the time it gets here — `semantic_max_distance/0` raises
   # on anything else.
   @spec floor_semantic_only([hit()], float() | nil, %{Ash.UUID.t() => float()}) :: [hit()]
-  defp floor_semantic_only(hits, nil, _block_distances), do: hits
+  defp floor_semantic_only(hits, nil, _distances), do: hits
 
-  defp floor_semantic_only(hits, max_distance, block_distances) do
-    Enum.reject(hits, &floored?(&1, max_distance, block_distances))
+  defp floor_semantic_only(hits, max_distance, distances) do
+    Enum.reject(hits, &floored?(&1, max_distance, distances))
   end
 
-  # A hit some lexical leg returned needs no distance alibi.
-  defp floored?({_record, _score, legs} = hit, max_distance, block_distances) do
-    Enum.all?(legs, &(&1 in [:semantic, :block])) and
-      beyond?(hit, max_distance, block_distances)
+  # A hit some lexical leg returned needs no distance alibi. The tag leg is
+  # semantic too — a tag's name near the query — so a tag-only hit is judged
+  # like the rest, by the nearest distance it has (its tag's).
+  defp floored?({_record, _score, legs} = hit, max_distance, distances) do
+    Enum.all?(legs, &(&1 in [:semantic, :block, :tag])) and
+      beyond?(hit, max_distance, distances)
   end
 
-  defp beyond?({record, _score, _legs}, max_distance, block_distances) do
-    case nearest_distance(record, Map.get(block_distances, record.id)) do
+  defp beyond?({record, _score, _legs}, max_distance, distances) do
+    case nearest_distance(record, Map.get(distances, record.id)) do
       nil ->
         Logger.warning(
           "semantic-only hit #{inspect(record.__struct__)} #{record.id} carries no " <>
@@ -802,6 +847,61 @@ defmodule KilnCMS.Search do
     |> elem(0)
     |> Enum.reverse()
     |> Enum.take(@hybrid_candidates)
+  end
+
+  # The tag leg: the site's tags whose names embed within the threshold of
+  # the query, nearest first, then — per tag, nearest first — the documents
+  # of this type carrying it, read under the caller's own read options and
+  # kept once each at the nearest tag. The tag rows are read as the system:
+  # a tag's name is world-readable and the rows yield only ids and
+  # distances. Sits out under facet filters like the block and fuzzy legs.
+  @spec tag_leg(module(), String.t(), map(), keyword(), keyword()) ::
+          {[struct()], %{Ash.UUID.t() => float()}}
+  defp tag_leg(resource, locale, filters, read_opts, opts) do
+    with true <- tag_leg?(),
+         true <- filters == %{},
+         true <- Ash.Resource.Info.relationship(resource, :tags) != nil,
+         {:ok, vector} <- leg_vector(nil, opts),
+         [_ | _] = tags <- nearest_tags(vector, read_opts[:tenant]) do
+      tags
+      |> Enum.reduce({[], %{}}, fn tag, acc ->
+        resource
+        |> tagged_documents(locale, tag.tag_id, read_opts)
+        |> Enum.reduce(acc, &keep_nearest(&1, tag.semantic_distance, &2))
+      end)
+      |> then(fn {records, distances} ->
+        {records |> Enum.reverse() |> Enum.take(@hybrid_candidates), distances}
+      end)
+    else
+      _ -> {[], %{}}
+    end
+  end
+
+  # The documents of `resource` carrying one tag, newest first, under the
+  # caller's own read options.
+  defp tagged_documents(resource, locale, tag_id, read_opts) do
+    resource
+    |> Ash.Query.new()
+    |> Ash.Query.filter(locale == ^locale and exists(tags, id == ^tag_id))
+    |> Ash.Query.sort(inserted_at: :desc)
+    |> Ash.Query.limit(@hybrid_candidates)
+    |> Ash.read!(read_opts)
+  end
+
+  # Tags arrive nearest first, so the first tag to bring a document in is
+  # its nearest — keep that one, and that distance, for the floor.
+  defp keep_nearest(record, distance, {records, distances}) do
+    if Map.has_key?(distances, record.id),
+      do: {records, distances},
+      else: {[record | records], Map.put(distances, record.id, distance)}
+  end
+
+  defp nearest_tags(vector, tenant) do
+    KilnCMS.SearchIndex.nearest_tag_embeddings_any!(
+      %{vector: vector, threshold: tag_leg_threshold(), limit: tag_leg_limit()},
+      authorize?: false,
+      tenant: tenant
+    )
   end
 
   # The query vector the block leg ranks by — the one embedding `hybrid/3`

@@ -34,8 +34,10 @@ clamped to 12).
 reranker's score instead, when reranking is enabled), and the scores are
 comparable across types because every section of the sweep shares the same
 `k` and leg weights. `legs` names which of `keyword`, `keyword_any`, `semantic`,
-`block`, `title`, `alias` and `fuzzy` returned the hit — a keyword-and-semantic
-hit is a stronger claim than a fuzzy-only one; `block` is the embedding leg at
+`block`, `title`, `alias`, `fuzzy` and `tag` returned the hit — a
+keyword-and-semantic hit is a stronger claim than a fuzzy-only one, and a
+`tag` hit (a record carrying a tag whose name the question is near) is a topic
+match, the weakest claim of all; `block` is the embedding leg at
 block grain, a record reached through its nearest section rather than its
 opening (what a question about a section deep in a long monograph needs); an
 `alias` hit is a record the question names by one of its other names — a
