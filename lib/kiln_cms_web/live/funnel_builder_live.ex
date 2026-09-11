@@ -277,7 +277,7 @@ defmodule KilnCMSWeb.FunnelBuilderLive do
                   aria-label={
                     gettext("Reorder step %{title}", title: step_title(step, @titles, @current_org))
                   }
-                  class="cursor-grab p-1 text-base-content/60 hover:text-base-content"
+                  class="cursor-grab active:cursor-grabbing p-1 text-base-content/60 hover:text-base-content"
                 >
                   <.icon name="hero-arrows-up-down" class="size-4" />
                 </button>
@@ -287,6 +287,7 @@ defmodule KilnCMSWeb.FunnelBuilderLive do
               <button
                 type="button"
                 phx-click="remove_step"
+                data-confirm={gettext("Remove this step from the funnel?")}
                 phx-value-id={step.id}
                 aria-label={
                   gettext("Remove step %{title}", title: step_title(step, @titles, @current_org))

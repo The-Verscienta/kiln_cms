@@ -664,7 +664,7 @@ defmodule KilnCMSWeb.CalendarLive do
 
       <label class="flex flex-col gap-1 text-xs text-base-content/70">
         {gettext("Type")}
-        <select name="type" class="select select-sm select-bordered">
+        <select name="type" class="field-select w-auto py-1">
           <option value="all" selected={is_nil(@filters.types)}>{gettext("All types")}</option>
           <option
             :for={ct <- @content_types}
@@ -678,7 +678,7 @@ defmodule KilnCMSWeb.CalendarLive do
 
       <label class="flex flex-col gap-1 text-xs text-base-content/70">
         {gettext("Lane")}
-        <select name="kind" class="select select-sm select-bordered">
+        <select name="kind" class="field-select w-auto py-1">
           <option value="all" selected={is_nil(@filters.kinds)}>{gettext("All lanes")}</option>
           <option
             :for={kind <- KilnCMS.CMS.Calendar.kinds()}
@@ -692,7 +692,7 @@ defmodule KilnCMSWeb.CalendarLive do
 
       <label class="flex flex-col gap-1 text-xs text-base-content/70">
         {gettext("Health")}
-        <select name="health" class="select select-sm select-bordered">
+        <select name="health" class="field-select w-auto py-1">
           <option value="all" selected={is_nil(@filters.health)}>{gettext("Any health")}</option>
           <option
             :for={health <- [:due_soon, :due, :overdue, :expired, :fresh]}

@@ -153,7 +153,7 @@ defmodule KilnCMSWeb.VersionDiffComponents do
         phx-click="restore"
         phx-value-version_id={@side.version_id}
         data-confirm={gettext("Restore content to this version?")}
-        class="text-xs text-primary hover:underline"
+        class="btn-link text-xs text-primary hover:underline"
       >
         {gettext("Restore")}
       </button>

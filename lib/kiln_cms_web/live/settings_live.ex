@@ -754,6 +754,7 @@ defmodule KilnCMSWeb.SettingsLive do
                 <button
                   type="button"
                   phx-click="remove_push_device"
+                  data-confirm={gettext("Stop sending notifications to this device?")}
                   phx-value-id={device.id}
                   class="btn btn-sm btn-ghost"
                 >

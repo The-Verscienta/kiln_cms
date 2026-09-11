@@ -57,13 +57,13 @@ defmodule KilnCMSWeb.ContentEditor.AdvisoryPanelComponents do
           {gettext("Suggestions")}
         </span>
         <div class="flex items-center gap-2">
-          <button type="button" phx-click="seo_accept_all" class="text-xs underline">
+          <button type="button" phx-click="seo_accept_all" class="btn-link text-xs underline">
             {gettext("Use all")}
           </button>
           <button
             type="button"
             phx-click="seo_dismiss_all"
-            class="text-xs text-base-content/60 underline"
+            class="btn-link text-xs text-base-content/60 underline"
           >
             {gettext("Dismiss")}
           </button>
@@ -227,7 +227,7 @@ defmodule KilnCMSWeb.ContentEditor.AdvisoryPanelComponents do
           <button
             type="button"
             phx-click="assist_close"
-            class="text-xs text-base-content/60 underline hover:text-base-content"
+            class="btn-link text-xs text-base-content/60 underline hover:text-base-content"
           >
             {gettext("Close")}
           </button>
@@ -272,14 +272,14 @@ defmodule KilnCMSWeb.ContentEditor.AdvisoryPanelComponents do
               data-confirm={
                 gettext("Replace everything in this block? You can undo it in the editor.")
               }
-              class="rounded border border-base-content/20 px-2 py-0.5 text-xs hover:bg-base-200"
+              class="btn btn-default px-2 py-0.5 text-xs"
             >
               {gettext("Replace block")}
             </button>
             <button
               type="button"
               phx-click="assist_dismiss"
-              class="text-xs text-base-content/60 underline hover:text-base-content"
+              class="btn-link text-xs text-base-content/60 underline hover:text-base-content"
             >
               {gettext("Dismiss")}
             </button>

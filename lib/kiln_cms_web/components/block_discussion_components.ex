@@ -172,7 +172,7 @@ defmodule KilnCMSWeb.BlockDiscussionComponents do
       type="button"
       phx-click={if @comment.resolved_at, do: "comment_unresolve", else: "comment_resolve"}
       phx-value-id={@comment.id}
-      class="mt-1 text-base-content/60 underline hover:text-base-content"
+      class="btn-link mt-1 text-base-content/60 underline hover:text-base-content"
     >
       {if @comment.resolved_at, do: gettext("Reopen thread"), else: gettext("Resolve thread")}
     </button>
@@ -320,7 +320,7 @@ defmodule KilnCMSWeb.BlockDiscussionComponents do
           <button
             type="button"
             phx-click="block_task_close"
-            class="text-xs text-base-content/60 underline hover:text-base-content"
+            class="btn-link text-xs text-base-content/60 underline hover:text-base-content"
           >
             {gettext("Cancel")}
           </button>
@@ -463,7 +463,7 @@ defmodule KilnCMSWeb.BlockDiscussionComponents do
         <button
           type="button"
           phx-click="comment_close"
-          class="text-xs text-base-content/60 underline hover:text-base-content"
+          class="btn-link text-xs text-base-content/60 underline hover:text-base-content"
         >
           {gettext("Close")}
         </button>

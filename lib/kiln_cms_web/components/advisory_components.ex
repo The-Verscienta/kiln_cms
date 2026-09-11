@@ -97,7 +97,7 @@ defmodule KilnCMSWeb.AdvisoryComponents do
                 <.form>, where the default type would submit it. --%>
           <button
             type="button"
-            class="text-left underline-offset-2 hover:underline focus-visible:underline"
+            class="btn-link text-left underline-offset-2 hover:underline focus-visible:underline"
             title={gettext("Show this in the editor")}
             {jump_attrs(finding, Finding.block_indexes(finding, max_marked_blocks()))}
           >

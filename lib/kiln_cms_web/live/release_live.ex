@@ -733,6 +733,7 @@ defmodule KilnCMSWeb.ReleaseLive do
                       :if={editable_item?(item, @release)}
                       type="button"
                       phx-click="remove_item"
+                      data-confirm={gettext("Remove this item from the release?")}
                       phx-value-id={item.id}
                       aria-label={gettext("Remove from release")}
                       class="btn btn-sm btn-ghost text-base-content/60 hover:text-error"

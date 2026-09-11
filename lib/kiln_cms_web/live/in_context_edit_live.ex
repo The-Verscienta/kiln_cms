@@ -456,7 +456,7 @@ defmodule KilnCMSWeb.InContextEditLive do
               <span
                 data-drag-handle
                 aria-label={gettext("Drag to reorder")}
-                class="cursor-grab text-base-content/40 hover:text-base-content/70"
+                class="cursor-grab active:cursor-grabbing text-base-content/40 hover:text-base-content/70"
               >
                 <.icon name="hero-bars-3" class="size-5" />
               </span>
@@ -558,7 +558,7 @@ defmodule KilnCMSWeb.InContextEditLive do
         class="w-full rounded border border-warning/50 bg-warning/10 px-3 py-2 text-sm"
       >
         {gettext("Someone else saved changes to this content.")}
-        <button type="button" phx-click="reload" class="ml-2 font-medium underline">
+        <button type="button" phx-click="reload" class="btn-link ml-2 font-medium underline">
           {gettext("Reload latest")}
         </button>
       </div>

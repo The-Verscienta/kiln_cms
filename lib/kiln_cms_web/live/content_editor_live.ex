@@ -4524,7 +4524,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         <span
                           data-drag-handle
                           aria-label={gettext("Drag to reorder")}
-                          class="cursor-grab rounded p-1 hover:bg-base-200 hover:text-base-content"
+                          class="cursor-grab active:cursor-grabbing rounded p-1 hover:bg-base-200 hover:text-base-content"
                         >
                           <.icon name="hero-bars-3" class="size-4" />
                         </span>
@@ -4669,7 +4669,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                           type="button"
                           phx-click="open_picker"
                           phx-value-bid={bf[:id].value}
-                          class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+                          class="btn btn-sm btn-default"
                         >
                           <.icon name="hero-photo" class="mr-1 size-4" />{gettext(
                             "Choose from library"
@@ -4706,7 +4706,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                           type="button"
                           phx-click="open_file_picker"
                           phx-value-bid={bf[:id].value}
-                          class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+                          class="btn btn-sm btn-default"
                         >
                           <.icon name="hero-document-arrow-down" class="mr-1 size-4" />{gettext(
                             "Choose from library"

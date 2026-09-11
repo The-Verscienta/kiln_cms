@@ -406,7 +406,7 @@ defmodule KilnCMSWeb.PresentationLive do
               <span class="text-xs font-medium uppercase tracking-wide text-base-content/60">
                 {@kind} · {field}
               </span>
-              <button type="button" phx-click="close_panel" class="text-xs underline">
+              <button type="button" phx-click="close_panel" class="btn-link text-xs underline">
                 {gettext("Close")}
               </button>
             </div>
@@ -434,7 +434,7 @@ defmodule KilnCMSWeb.PresentationLive do
               <button
                 type="button"
                 phx-click="close_panel"
-                class="text-xs underline"
+                class="btn-link text-xs underline"
                 aria-label={gettext("Close")}
               >
                 {gettext("Close")}

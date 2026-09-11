@@ -586,7 +586,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
               type="button"
               phx-click="task_complete"
               phx-value-id={task.id}
-              class="text-primary hover:underline"
+              class="btn-link text-primary hover:underline"
             >
               {gettext("Mark done")}
             </button>
@@ -622,7 +622,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
       </button>
 
       <div :if={@open?} class="space-y-2 rounded border border-base-content/15 p-2">
-        <select name="task_assignee_id" phx-change="task_draft_change" class="select select-sm w-full">
+        <select name="task_assignee_id" phx-change="task_draft_change" class="field-select py-1">
           <option value="">{gettext("Assign to…")}</option>
           <option
             :for={{label, id} <- @assignable_users}
@@ -653,7 +653,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
         <select
           name="task_auto_complete"
           phx-change="task_draft_change"
-          class="select select-sm w-full"
+          class="field-select py-1"
         >
           <option value="" selected={@draft["auto_complete"] in [nil, ""]}>
             {if @auto_complete_default,
@@ -712,7 +712,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
           <button
             type="button"
             phx-click="release_remove"
-            class="mt-2 text-primary hover:underline"
+            class="btn-link mt-2 text-primary hover:underline"
           >
             {gettext("Remove from release")}
           </button>
@@ -728,7 +728,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
             name="release_target"
             phx-change="release_draft_change"
             aria-label={gettext("Release")}
-            class="select select-sm w-full"
+            class="field-select py-1"
           >
             <option
               :for={release <- @releases}
@@ -742,7 +742,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
             name="release_action"
             phx-change="release_draft_change"
             aria-label={gettext("On go-live")}
-            class="select select-sm w-full"
+            class="field-select py-1"
           >
             <option value="publish" selected={@draft["action"] != "unpublish"}>
               {gettext("Publish on go-live")}

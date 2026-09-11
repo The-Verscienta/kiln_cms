@@ -252,7 +252,7 @@ function tableControls(editor) {
     b.textContent = item.label
     b.title = item.title
     b.setAttribute("aria-label", item.title)
-    b.className = "rounded border border-base-content/20 px-2 py-0.5 text-xs hover:bg-base-200"
+    b.className = "btn btn-default px-2 py-0.5 text-xs"
     b.addEventListener("click", e => {
       e.preventDefault()
       item.run(editor.chain().focus()).run()
@@ -288,7 +288,7 @@ const toolbarButton = (hook, item) => {
   // The visible label is a terse glyph ("B", "</>", "↺"), so give the button an
   // explicit accessible name — `title` alone is not reliably announced (#170).
   b.setAttribute("aria-label", item.title)
-  b.className = "rounded border border-base-content/20 px-2 py-0.5 text-xs hover:bg-base-200"
+  b.className = "btn btn-default px-2 py-0.5 text-xs"
   b.addEventListener("click", e => {
     e.preventDefault()
     if (item.prompt) {

@@ -654,7 +654,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
                     type="button"
                     data-drag-handle
                     aria-label={gettext("Reorder field %{label}", label: field.label)}
-                    class="cursor-grab p-1 text-base-content/60 hover:text-base-content"
+                    class="cursor-grab active:cursor-grabbing p-1 text-base-content/60 hover:text-base-content"
                   >
                     <.icon name="hero-arrows-up-down" class="size-3.5" />
                   </button>
@@ -1117,9 +1117,9 @@ defmodule KilnCMSWeb.FormBuilderLive do
 
             <a
               href={~p"/editor/forms/#{@form.id}/entries/export.csv?#{export_query(@status_filter)}"}
-              class="rounded border border-base-content/20 px-2 py-1 text-xs hover:bg-base-200"
+              class="btn btn-default px-2 py-1 text-xs"
             >
-              <.icon name="hero-arrow-down-tray" class="mr-1 size-3.5" />{gettext("Export CSV")}
+              <.icon name="hero-arrow-down-tray" class="size-3.5" />{gettext("Export CSV")}
             </a>
           </div>
 
@@ -1135,21 +1135,21 @@ defmodule KilnCMSWeb.FormBuilderLive do
             <button
               type="button"
               phx-click="bulk_mark_spam"
-              class="rounded border border-base-content/20 px-2 py-0.5 hover:bg-base-200"
+              class="btn btn-default px-2 py-0.5 text-xs"
             >
               {gettext("Mark as spam")}
             </button>
             <button
               type="button"
               phx-click="bulk_mark_reviewed"
-              class="rounded border border-base-content/20 px-2 py-0.5 hover:bg-base-200"
+              class="btn btn-default px-2 py-0.5 text-xs"
             >
               {gettext("Mark as reviewed")}
             </button>
             <button
               type="button"
               phx-click="clear_selection"
-              class="text-base-content/60 underline hover:text-base-content"
+              class="btn-link text-base-content/60 underline hover:text-base-content"
             >
               {gettext("Clear")}
             </button>
@@ -1163,7 +1163,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
             :if={@submissions != []}
             type="button"
             phx-click="select_all_visible"
-            class="text-xs text-base-content/60 underline hover:text-base-content"
+            class="btn-link text-xs text-base-content/60 underline hover:text-base-content"
           >
             {gettext("Select all visible")}
           </button>
@@ -1214,7 +1214,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
                   type="button"
                   phx-click="mark_submission_spam"
                   phx-value-id={submission.id}
-                  class="rounded border border-base-content/20 px-2 py-0.5 hover:bg-base-200"
+                  class="btn btn-default px-2 py-0.5 text-xs"
                 >
                   {gettext("Mark as spam")}
                 </button>
@@ -1223,7 +1223,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
                   type="button"
                   phx-click="mark_submission_reviewed"
                   phx-value-id={submission.id}
-                  class="rounded border border-base-content/20 px-2 py-0.5 hover:bg-base-200"
+                  class="btn btn-default px-2 py-0.5 text-xs"
                 >
                   {gettext("Mark as reviewed")}
                 </button>

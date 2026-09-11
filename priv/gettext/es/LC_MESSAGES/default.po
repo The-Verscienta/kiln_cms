@@ -8219,6 +8219,11 @@ msgstr "¿Eliminar esta columna y sus bloques?"
 msgid "Remove this follower? It can follow again unless you block it."
 msgstr "¿Eliminar este seguidor? Puede volver a seguir a menos que lo bloquee."
 
+#: lib/kiln_cms_web/live/release_live.ex
+#, elixir-autogen, elixir-format
+msgid "Remove this item from the release?"
+msgstr "¿Quitar este elemento del lanzamiento?"
+
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "Remove this member from the site?"
@@ -8248,6 +8253,11 @@ msgstr "¿Eliminar por completo el código personalizado de este sitio?"
 #, elixir-autogen, elixir-format
 msgid "Remove this site's feed settings and follow the deployment defaults again?"
 msgstr "¿Eliminar la configuración de feeds de este sitio y volver a seguir los valores del despliegue?"
+
+#: lib/kiln_cms_web/live/funnel_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Remove this step from the funnel?"
+msgstr "¿Quitar este paso del embudo?"
 
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #, elixir-autogen, elixir-format
@@ -9635,6 +9645,11 @@ msgstr "¿Dejar de comprobar los enlaces externos de este sitio?"
 #, elixir-autogen, elixir-format
 msgid "Stop sending newsletters to %{email}?"
 msgstr "¿Dejar de enviar boletines a %{email}?"
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Stop sending notifications to this device?"
+msgstr "¿Dejar de enviar notificaciones a este dispositivo?"
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
