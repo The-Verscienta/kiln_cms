@@ -2872,6 +2872,21 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ ~s(aria-label="Use light theme")
     end
 
+    # The sidebar redesign: the theme switch and the account menu moved into the
+    # sidebar, and both rail toggles render (CSS shows one, app.js flips them).
+    test "the sidebar carries the rail toggles, theme switch and account menu", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+
+      assert has_element?(lv, ~s(aside [data-sidebar-toggle][aria-label="Collapse sidebar"]))
+      assert has_element?(lv, ~s(aside [data-sidebar-toggle][aria-label="Expand sidebar"]))
+      assert has_element?(lv, ~s(aside .side-theme button[data-phx-theme="dark"]))
+      refute has_element?(lv, ~s(header [data-phx-theme]))
+      assert has_element?(lv, ~s(#side-account a[href="/account"]), "Account")
+      assert has_element?(lv, ~s(#side-account a[href="/sign-out"]), "Sign out")
+      # Each nav link names itself for the rail's tooltip.
+      assert has_element?(lv, ~s(aside a.side-link[data-side-tip="Media"]))
+    end
+
     # #139: ⌘K targets a LiveView `navigate` link (data-phx-link="redirect"), so
     # the jump to search is a client-side navigation, not a full page reload.
     test "renders a client-side navigate target for the search shortcut", %{conn: conn} do

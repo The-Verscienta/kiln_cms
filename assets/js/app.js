@@ -1056,6 +1056,60 @@ window.liveSocket = liveSocket
 //     1. stream server logs to the browser console
 //     2. click on elements to jump to their definitions in your code editor
 //
+// Console sidebar (Layouts.console/1). Plain document listeners rather than a
+// hook: they work before the socket connects, and the rail state they flip
+// lives on <html data-sidebar>, which LiveView never patches, so it outlives
+// every live navigation. root.html.heex restores it before first paint.
+const railMode = () =>
+  document.documentElement.dataset.sidebar === "collapsed" &&
+  matchMedia("(min-width: 64rem)").matches
+
+// The rail shows icons alone, so name the one under the pointer or keyboard
+// focus. One fixed element on <body>: the nav scrolls, and a tooltip placed
+// inside it would be clipped by its own overflow.
+let sideTip = null
+const hideSideTip = () => sideTip?.remove()
+const showSideTip = el => {
+  if (!railMode()) return hideSideTip()
+  sideTip ||= Object.assign(document.createElement("div"), {className: "side-tip"})
+  sideTip.setAttribute("aria-hidden", "true")
+  sideTip.textContent = el.dataset.sideTip
+  const r = el.getBoundingClientRect()
+  sideTip.style.top = `${r.top + r.height / 2}px`
+  sideTip.style.left = `${r.right + 10}px`
+  document.body.append(sideTip)
+}
+const onSideTipTarget = e => {
+  const el = e.target.closest?.(".side-shell [data-side-tip]")
+  el ? showSideTip(el) : hideSideTip()
+}
+document.addEventListener("pointerover", onSideTipTarget)
+document.addEventListener("focusin", onSideTipTarget)
+document.addEventListener("scroll", hideSideTip, true)
+window.addEventListener("phx:page-loading-start", hideSideTip)
+
+document.addEventListener("click", e => {
+  if (e.target.closest("[data-sidebar-toggle]")) {
+    const collapse = document.documentElement.dataset.sidebar !== "collapsed"
+    if (collapse) document.documentElement.dataset.sidebar = "collapsed"
+    else delete document.documentElement.dataset.sidebar
+    localStorage.setItem("kiln:sidebar", collapse ? "collapsed" : "expanded")
+    hideSideTip()
+    // The clicked toggle just hid itself; hand focus to its twin.
+    document.querySelector(collapse ? ".side-expand" : ".side-collapse")?.focus()
+  }
+  // The account menu is a <details>: a click anywhere outside closes it.
+  document.querySelectorAll(".side-account[open]").forEach(d => {
+    if (!d.contains(e.target)) d.removeAttribute("open")
+  })
+})
+document.addEventListener("keydown", e => {
+  const open = e.key === "Escape" && document.querySelector(".side-account[open]")
+  if (!open) return
+  open.removeAttribute("open")
+  open.querySelector("summary").focus()
+})
+
 if (process.env.NODE_ENV === "development") {
   window.addEventListener("phx:live_reload:attached", ({detail: reloader}) => {
     // Enable server log streaming to client.

@@ -999,6 +999,7 @@ msgstr ""
 msgid "Accessible"
 msgstr ""
 
+#: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
@@ -1008,6 +1009,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
 msgid "Account connected."
+msgstr ""
+
+#: lib/kiln_cms_web/components/layouts.ex
+#, elixir-autogen, elixir-format
+msgid "Account menu"
 msgstr ""
 
 #: lib/kiln_cms_web/live/social_live.ex
@@ -2505,6 +2511,11 @@ msgstr ""
 msgid "Code injection saved."
 msgstr ""
 
+#: lib/kiln_cms_web/components/layouts.ex
+#, elixir-autogen, elixir-format
+msgid "Collapse sidebar"
+msgstr ""
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Collapsible panels with no structured data — use FAQ for questions and answers"
@@ -3494,6 +3505,7 @@ msgstr ""
 msgid "Daily buckets use UTC calendar days; today's bar is still filling. History starts when this feature was deployed."
 msgstr ""
 
+#: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
@@ -4549,6 +4561,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/content_editor/advisory_panel_components.ex
 #, elixir-autogen, elixir-format
 msgid "Expand"
+msgstr ""
+
+#: lib/kiln_cms_web/components/layouts.ex
+#, elixir-autogen, elixir-format
+msgid "Expand sidebar"
 msgstr ""
 
 #: lib/kiln_cms_web/live/experiment_live.ex
@@ -5868,6 +5885,7 @@ msgstr ""
 msgid "Library (%{count})"
 msgstr ""
 
+#: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format

@@ -414,7 +414,7 @@ defmodule KilnCMSWeb.Layouts do
       {gettext("Search")}
     </.link>
 
-    <div class="min-h-screen bg-base-100 lg:grid lg:grid-cols-[15rem_1fr]">
+    <div class="min-h-screen bg-base-100 lg:grid lg:grid-cols-[var(--side-w)_1fr]">
       <%!-- CSS-only mobile drawer: the peer checkbox drives the sidebar + backdrop
             with no socket round-trip, so the menu works before LiveView connects. --%>
       <input id="kiln-nav-toggle" type="checkbox" class="peer sr-only" aria-hidden="true" />
@@ -424,49 +424,52 @@ defmodule KilnCMSWeb.Layouts do
         aria-hidden="true"
       ></label>
 
+      <%!-- After Untitled UI's sidebar (docs/design-language.md): a panel a step
+            darker than the workspace in dark mode, and on lg+ a collapse to an
+            icon rail. The rail state lives on <html data-sidebar> — restored
+            before first paint by root.html.heex, flipped by app.js — because
+            LiveView never patches <html>, so it outlives every live navigation
+            with no server round-trip. --%>
       <aside class={[
-        "fixed inset-y-0 left-0 z-40 flex w-60 -translate-x-full flex-col border-r shadow-xl",
-        "border-base-content/10 bg-base-100 transition-transform peer-checked:translate-x-0",
-        "lg:static lg:z-auto lg:w-auto lg:translate-x-0 lg:bg-base-200/40 lg:shadow-none"
+        "side-shell fixed inset-y-0 left-0 z-40 flex w-64 -translate-x-full flex-col border-r shadow-xl",
+        "border-sidebar-line bg-sidebar transition-transform peer-checked:translate-x-0",
+        "lg:sticky lg:bottom-auto lg:z-auto lg:h-screen lg:w-auto lg:translate-x-0 lg:shadow-none"
       ]}>
-        <div class="flex h-14 items-center gap-2.5 border-b border-base-content/10 px-4">
+        <div class="side-head flex h-16 shrink-0 items-center gap-2.5 px-4">
           <img
             src={brand_logo(@current_org)}
-            class="h-7 w-auto"
+            class="side-brand h-7 w-auto"
             alt=""
             referrerpolicy="no-referrer"
           />
-          <span class="text-sm font-semibold tracking-tight">{brand_name(@current_org)}</span>
+          <span class="side-text min-w-0 flex-1 truncate font-semibold tracking-tight">
+            {brand_name(@current_org)}
+          </span>
+          <button
+            type="button"
+            class="side-icon-btn side-collapse"
+            data-sidebar-toggle
+            aria-label={gettext("Collapse sidebar")}
+            title={gettext("Collapse sidebar")}
+          >
+            <.icon name="hero-chevron-double-left" class="size-4" />
+          </button>
+          <button
+            type="button"
+            class="side-icon-btn side-expand"
+            data-sidebar-toggle
+            data-side-tip={gettext("Expand sidebar")}
+            aria-label={gettext("Expand sidebar")}
+          >
+            <.icon name="hero-chevron-double-right" class="size-4" />
+          </button>
         </div>
-        <nav class="flex-1 overflow-y-auto px-2 py-2" aria-label={gettext("Primary")}>
+        <nav class="side-nav flex-1 overflow-y-auto px-3 pb-3" aria-label={gettext("Primary")}>
           <.console_nav current_user={@current_user} current_org={@current_org} active={@active} />
         </nav>
-        <div class="border-t border-base-content/10 p-2">
-          <div class="flex gap-1 px-1 pb-2 text-xs text-base-content/50">
-            <a href="/developers#graphql" class="side-link !py-1 !text-xs">
-              {gettext("GraphQL")}
-            </a>
-            <a href="/developers#json-api" class="side-link !py-1 !text-xs">
-              {gettext("JSON:API")}
-            </a>
-          </div>
-          <div
-            :if={@current_user}
-            class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm"
-          >
-            <span class="grid size-8 shrink-0 place-items-center rounded-full bg-primary/15 text-xs font-semibold text-primary uppercase">
-              {user_initial(@current_user)}
-            </span>
-            <span class="min-w-0 flex-1 truncate text-base-content/80">{@current_user.email}</span>
-            <a
-              href={~p"/sign-out"}
-              class="rounded-md p-1.5 text-base-content/60 hover:bg-base-200 hover:text-base-content"
-              aria-label={gettext("Sign out")}
-              title={gettext("Sign out")}
-            >
-              <.icon name="hero-arrow-right-start-on-rectangle" class="size-4" />
-            </a>
-          </div>
+        <div class="shrink-0 space-y-3 border-t border-sidebar-line px-3 pt-3 pb-4">
+          <.sidebar_theme_toggle />
+          <.sidebar_account :if={@current_user} current_user={@current_user} />
         </div>
       </aside>
 
@@ -502,7 +505,6 @@ defmodule KilnCMSWeb.Layouts do
               </.link>
               {render_slot(@actions)}
               <.locale_switcher />
-              <.theme_toggle />
             </div>
           </header>
         </div>
@@ -848,12 +850,114 @@ defmodule KilnCMSWeb.Layouts do
 
   defp side_link(assigns) do
     ~H"""
-    <.link navigate={@item.path} class="side-link" aria-current={@item.key == @active && "page"}>
-      <.icon name={@item.icon} class="size-5 shrink-0 opacity-80" />
-      <span class="truncate">{@item.label}</span>
+    <.link
+      navigate={@item.path}
+      class="side-link"
+      aria-current={@item.key == @active && "page"}
+      data-side-tip={@item.label}
+    >
+      <.icon name={@item.icon} class="side-icon size-5 shrink-0" />
+      <span class="side-text truncate">{@item.label}</span>
     </.link>
     """
   end
+
+  # The sidebar's theme switch: the same `phx:set-theme` dispatch and labels as
+  # `theme_toggle/1` (the root layout's inline script does the work), drawn as
+  # a segmented System / Light / Dark control. Which segment is lit is decided
+  # in app.css from <html data-theme/-source>, not from an assign — the choice
+  # lives in localStorage, which the server never sees.
+  defp sidebar_theme_toggle(assigns) do
+    ~H"""
+    <div class="side-theme" role="group" aria-label={gettext("Theme")}>
+      <button
+        type="button"
+        phx-click={JS.dispatch("phx:set-theme")}
+        data-phx-theme="system"
+        data-side-tip={gettext("System")}
+        aria-label={gettext("Use system theme")}
+      >
+        <.icon name="hero-computer-desktop" class="size-4 shrink-0" />
+      </button>
+      <button
+        type="button"
+        phx-click={JS.dispatch("phx:set-theme")}
+        data-phx-theme="light"
+        data-side-tip={gettext("Light")}
+        aria-label={gettext("Use light theme")}
+      >
+        <.icon name="hero-sun" class="size-4 shrink-0" />
+        <span class="side-text">{gettext("Light")}</span>
+      </button>
+      <button
+        type="button"
+        phx-click={JS.dispatch("phx:set-theme")}
+        data-phx-theme="dark"
+        data-side-tip={gettext("Dark")}
+        aria-label={gettext("Use dark theme")}
+      >
+        <.icon name="hero-moon" class="size-4 shrink-0" />
+        <span class="side-text">{gettext("Dark")}</span>
+      </button>
+    </div>
+    """
+  end
+
+  attr :current_user, :map, required: true
+
+  # The account row — avatar, name over email — opening a menu of what used to
+  # sit loose in the footer. A <details> so it opens before the socket
+  # connects; `ignore_attributes` keeps LiveView's next patch from stripping the
+  # client-set `open`, and app.js closes it on an outside click or Escape.
+  defp sidebar_account(assigns) do
+    assigns = assign(assigns, :name, display_name(assigns.current_user))
+
+    ~H"""
+    <details id="side-account" class="side-account" phx-mounted={JS.ignore_attributes(["open"])}>
+      <summary class="side-account-row" data-side-tip={@name || @current_user.email}>
+        <span class="grid size-9 shrink-0 place-items-center rounded-full bg-primary/15 text-sm font-semibold text-primary-ink uppercase">
+          {user_initial(@current_user)}
+        </span>
+        <span class="side-text min-w-0 flex-1 leading-tight">
+          <span :if={@name} class="block truncate text-sm font-semibold">{@name}</span>
+          <span class="block truncate text-xs text-base-content/65">{@current_user.email}</span>
+        </span>
+        <.icon
+          name="hero-ellipsis-vertical"
+          class="side-text size-5 shrink-0 text-base-content/60"
+        />
+        <span class="sr-only">{gettext("Account menu")}</span>
+      </summary>
+      <div class="side-menu">
+        <.link navigate={~p"/account"}>
+          <.icon name="hero-user-circle" class="size-4 shrink-0" />{gettext("Account")}
+        </.link>
+        <a href="/developers#graphql">
+          <.icon name="hero-code-bracket-square" class="size-4 shrink-0" />{gettext("GraphQL")}
+        </a>
+        <a href="/developers#json-api">
+          <.icon name="hero-code-bracket" class="size-4 shrink-0" />{gettext("JSON:API")}
+        </a>
+        <hr />
+        <a href={~p"/sign-out"}>
+          <.icon name="hero-arrow-right-start-on-rectangle" class="size-4 shrink-0" />{gettext(
+            "Sign out"
+          )}
+        </a>
+      </div>
+    </details>
+    """
+  end
+
+  # The account row's headline: the user's display name, when they set one.
+  defp display_name(%{name: name}) when is_binary(name) do
+    case String.trim(name) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp display_name(_), do: nil
 
   @doc """
   Minimal chrome for the public delivery frontend (published Pages/Posts and the

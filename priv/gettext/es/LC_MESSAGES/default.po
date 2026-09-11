@@ -999,6 +999,7 @@ msgstr "Accesibilidad"
 msgid "Accessible"
 msgstr "Accesible"
 
+#: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
@@ -1009,6 +1010,11 @@ msgstr "Cuenta"
 #, elixir-autogen, elixir-format
 msgid "Account connected."
 msgstr "Cuenta conectada."
+
+#: lib/kiln_cms_web/components/layouts.ex
+#, elixir-autogen, elixir-format
+msgid "Account menu"
+msgstr "Menú de la cuenta"
 
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
@@ -2505,6 +2511,11 @@ msgstr "Inyección de código eliminada."
 msgid "Code injection saved."
 msgstr "Inyección de código guardada."
 
+#: lib/kiln_cms_web/components/layouts.ex
+#, elixir-autogen, elixir-format
+msgid "Collapse sidebar"
+msgstr "Contraer la barra lateral"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Collapsible panels with no structured data — use FAQ for questions and answers"
@@ -3494,6 +3505,7 @@ msgstr "Registros DNS"
 msgid "Daily buckets use UTC calendar days; today's bar is still filling. History starts when this feature was deployed."
 msgstr "Los intervalos diarios usan días naturales UTC; la barra de hoy aún se está llenando. El historial comienza cuando se implementó esta función."
 
+#: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
@@ -4550,6 +4562,11 @@ msgstr "Extracto"
 #, elixir-autogen, elixir-format
 msgid "Expand"
 msgstr "Ampliar"
+
+#: lib/kiln_cms_web/components/layouts.ex
+#, elixir-autogen, elixir-format
+msgid "Expand sidebar"
+msgstr "Expandir la barra lateral"
 
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
@@ -5868,6 +5885,7 @@ msgstr "Biblioteca (%{count} de %{total})"
 msgid "Library (%{count})"
 msgstr "Biblioteca (%{count})"
 
+#: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
