@@ -378,6 +378,17 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
               />
               {gettext("Required")}
             </label>
+            <label class="flex items-center gap-2 self-end text-sm">
+              <input type="hidden" name="field_definition[names_record]" value="false" />
+              <input
+                type="checkbox"
+                name="field_definition[names_record]"
+                value="true"
+                checked={@form[:names_record].value in [true, "true"]}
+                class="size-4 rounded border border-base-content/30 accent-primary"
+              />
+              {gettext("Names the record (search finds it by this value)")}
+            </label>
             <div class="sm:col-span-2">
               <.button type="submit" variant="primary">{gettext("Add field")}</.button>
             </div>

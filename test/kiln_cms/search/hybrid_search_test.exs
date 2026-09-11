@@ -800,4 +800,125 @@ defmodule KilnCMS.Search.HybridTest do
       refute Enum.any?(filtered, &(:block in Search.hit_legs(&1)))
     end
   end
+
+  describe "the alias leg: a record the query names by a flagged field" do
+    # A title is not the only name a record answers to. A custom field
+    # flagged `names_record` is phrase-matched against the query the way
+    # the title is (`KilnCMS.CMS.NameFields`, `:search_alias`), at the title
+    # leg's weight.
+
+    defp name_field(admin, content_type, name) do
+      CMS.create_field_definition!(
+        %{
+          content_type: content_type,
+          name: name,
+          label: name,
+          field_type: :string,
+          names_record: true
+        },
+        actor: admin
+      )
+    end
+
+    test "a query containing a flagged field's value finds the record, as :alias" do
+      admin = admin()
+      name_field(admin, :page, "latin_name")
+
+      huang_qi =
+        CMS.create_page!(
+          %{
+            title: "Huang Qi",
+            slug: slug(),
+            custom_fields: %{"latin_name" => "Astragalus membranaceus"}
+          },
+          actor: admin
+        )
+
+      dang_shen =
+        CMS.create_page!(
+          %{
+            title: "Dang Shen",
+            slug: slug(),
+            custom_fields: %{"latin_name" => "Codonopsis pilosula"}
+          },
+          actor: admin
+        )
+
+      KilnCMS.DataCase.drain_oban()
+
+      # The query names neither title; it names Huang Qi's Latin binomial.
+      results = Search.hybrid(:page, "what is astragalus membranaceus used for", actor: admin)
+      assert hd(results).id == huang_qi.id
+      assert :alias in Search.hit_legs(hd(results))
+      refute :title in Search.hit_legs(hd(results))
+
+      case Enum.find(results, &(&1.id == dang_shen.id)) do
+        nil -> :ok
+        other -> refute :alias in Search.hit_legs(other)
+      end
+    end
+
+    test "a field that is not flagged names nothing, and a flag takes effect at once" do
+      admin = admin()
+
+      definition =
+        CMS.create_field_definition!(
+          %{content_type: :page, name: "trade_name", label: "Trade name", field_type: :string},
+          actor: admin
+        )
+
+      page =
+        CMS.create_page!(
+          %{title: "Widget", slug: slug(), custom_fields: %{"trade_name" => "Zorptastic"}},
+          actor: admin
+        )
+
+      KilnCMS.DataCase.drain_oban()
+
+      refute Enum.any?(
+               Search.hybrid(:page, "zorptastic", actor: admin),
+               &(:alias in Search.hit_legs(&1))
+             )
+
+      CMS.update_field_definition!(definition, %{names_record: true}, actor: admin)
+
+      [hit] = Search.hybrid(:page, "zorptastic", actor: admin) |> Enum.filter(&(&1.id == page.id))
+      assert :alias in Search.hit_legs(hit)
+    end
+
+    test "a dynamic type's flagged field names its entries" do
+      admin = admin()
+
+      herb =
+        CMS.create_type_definition!(
+          %{name: "herb#{System.unique_integer([:positive])}", label: "Herb"},
+          actor: admin
+        )
+
+      CMS.create_field_definition!(
+        %{
+          type_definition_id: herb.id,
+          name: "pinyin",
+          label: "Pinyin",
+          field_type: :string,
+          names_record: true
+        },
+        actor: admin
+      )
+
+      entry =
+        KilnCMS.CMS.ContentTypes.create!(
+          herb.name,
+          %{title: "Astragalus", slug: slug(), custom_fields: %{"pinyin" => "huang qi"}},
+          actor: admin
+        )
+
+      KilnCMS.DataCase.drain_oban()
+
+      results = Search.hybrid(herb.name, "huang qi dang shen", actor: admin)
+      hit = Enum.find(results, &(&1.id == entry.id))
+      assert hit, "expected the entry named by its pinyin"
+      assert :alias in Search.hit_legs(hit)
+    end
+  end
 end

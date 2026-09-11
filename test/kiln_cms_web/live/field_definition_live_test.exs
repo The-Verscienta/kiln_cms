@@ -65,6 +65,31 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
            |> Enum.any?(&(&1.name == "toxicity_level"))
   end
 
+  test "an admin flags a field as naming the record", %{conn: conn} do
+    admin = authed_user(:admin)
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+    lv
+    |> form("#new-field-form",
+      field_definition: %{
+        scope: "page",
+        name: "latin_name",
+        label: "Latin name",
+        field_type: "string",
+        names_record: "true"
+      }
+    )
+    |> render_submit()
+
+    definition =
+      :page
+      |> CMS.field_definitions_for!(authorize?: false)
+      |> Enum.find(&(&1.name == "latin_name"))
+
+    assert definition.names_record == true
+    assert KilnCMS.CMS.NameFields.for_resource(KilnCMS.CMS.Page, nil) == ["latin_name"]
+  end
+
   test "non-admins are redirected away", %{conn: conn} do
     editor = authed_user(:editor)
     assert {:error, {:redirect, %{to: "/"}}} = conn |> log_in(editor) |> live(~p"/editor/fields")

@@ -45,6 +45,7 @@ defmodule KilnCMS.CMS.Content do
   """
   # For `semantic_floor/2` below — `Ash.Query.filter/2` is a macro. Scoped to
   # this module; the injected resource `quote` brings its own imports.
+  require Ash.Expr
   require Ash.Query
 
   # Days trashed content is retained before the nightly auto-purge.
@@ -69,6 +70,42 @@ defmodule KilnCMS.CMS.Content do
   # distance sort keeps a LIMIT the HNSW index can serve.
   def cap_unbounded(query, default \\ 50) do
     if query.limit || query.page, do: query, else: Ash.Query.limit(query, default)
+  end
+
+  @doc false
+  # The `:search_alias` prepare: the title leg's phrase match — the field's
+  # value, as a phrase, occurs in the query's tsvector under the locale's
+  # text-search config — OR-ed over every field `KilnCMS.CMS.NameFields`
+  # says names this type's records on this site. Nothing flagged, nothing
+  # read. Newest first among the named, the way the title leg is longest
+  # first: there is no length to prefer across fields.
+  def alias_filter(query) do
+    case KilnCMS.CMS.NameFields.for_resource(query.resource, query.tenant) do
+      [] ->
+        Ash.Query.limit(query, 0)
+
+      names ->
+        locale = Ash.Query.get_argument(query, :locale)
+        text = Ash.Query.get_argument(query, :query)
+
+        names
+        |> Enum.map(fn name ->
+          Ash.Expr.expr(
+            fragment(
+              "to_tsvector(kiln_regconfig(?), ?) @@ phraseto_tsquery(kiln_regconfig(?), coalesce(? ->> ?, ''))",
+              ^locale,
+              ^text,
+              ^locale,
+              custom_fields,
+              ^name
+            )
+          )
+        end)
+        |> Enum.reduce(&Ash.Expr.expr(^&2 or ^&1))
+        |> then(&Ash.Query.do_filter(query, &1))
+        |> Ash.Query.sort([{:inserted_at, :desc}])
+        |> cap_unbounded()
+    end
   end
 
   @doc false
@@ -106,10 +143,11 @@ defmodule KilnCMS.CMS.Content do
   #
   # The per-type semantic actions — the `semantic-search` JSON:API routes,
   # the GraphQL lists, `CMS.semantic_search_*` — have no fusion to leave it
-  # to, so they apply the floor here, with the one exemption the title leg
-  # gives hybrid search: a row whose title the query names is kept whatever
-  # its distance. The title leg (`:search_title`) is asked which rows it
-  # vouches for and those ids are OR-ed into the floor, in the same query,
+  # to, so they apply the floor here, with the exemption the title and alias
+  # legs give hybrid search: a row the query names — by title, or by a field
+  # flagged as a name — is kept whatever its distance. Those legs
+  # (`:search_title`, `:search_alias`) are asked which rows they vouch for
+  # and the ids are OR-ed into the floor, in the same query,
   # so the action stays a plain paginated, countable read — a fused list
   # would have neither a keyset nor a count — and a vouched row still sorts
   # at its distance rank. A row vouched only by the keyword, any-term or fuzzy
@@ -129,7 +167,7 @@ defmodule KilnCMS.CMS.Content do
 
       max_distance ->
         Ash.Query.before_action(query, fn query ->
-          vouched = title_vouched_ids(query)
+          vouched = named_ids(query)
 
           Ash.Query.filter(
             query,
@@ -139,24 +177,28 @@ defmodule KilnCMS.CMS.Content do
     end
   end
 
-  # The ids the title leg returns for this query, under this tenant and these
-  # facets — the same arguments the semantic action was given, restricted to
-  # the ones `:search_title` takes. Read as the system: the ids only widen an
-  # exemption, and every row the semantic action returns still passes its own
-  # read policy, so nothing an actor may not see is reachable through them.
-  # The title leg is bounded (`cap_unbounded/2`), so this is at most 50 ids.
-  defp title_vouched_ids(%{resource: resource} = query) do
-    arg_names =
-      resource
-      |> Ash.Resource.Info.action(:search_title)
-      |> Map.fetch!(:arguments)
-      |> Enum.map(& &1.name)
+  # The ids the title leg and the alias leg return for this query — the
+  # records the query names, by title or by a flagged name field — under this
+  # tenant and these facets: the same arguments the semantic action was
+  # given, restricted to the ones each leg takes. Read as the system: the ids
+  # only widen an exemption, and every row the semantic action returns still
+  # passes its own read policy, so nothing an actor may not see is reachable
+  # through them. Both legs are bounded (`cap_unbounded/2`), so this is at
+  # most 100 ids.
+  defp named_ids(%{resource: resource} = query) do
+    Enum.flat_map([:search_title, :search_alias], fn action ->
+      arg_names =
+        resource
+        |> Ash.Resource.Info.action(action)
+        |> Map.fetch!(:arguments)
+        |> Enum.map(& &1.name)
 
-    resource
-    |> Ash.Query.for_read(:search_title, Map.take(query.arguments, arg_names))
-    |> Ash.Query.select([:id])
-    |> Ash.read!(tenant: query.tenant, authorize?: false)
-    |> Enum.map(& &1.id)
+      resource
+      |> Ash.Query.for_read(action, Map.take(query.arguments, arg_names))
+      |> Ash.Query.select([:id])
+      |> Ash.read!(tenant: query.tenant, authorize?: false)
+      |> Enum.map(& &1.id)
+    end)
   end
 
   # A caller running this leg across many resources can embed the query once
@@ -1340,6 +1382,39 @@ defmodule KilnCMS.CMS.Content do
       end
     end
 
+    # The title leg over the record's other names: every custom field an
+    # admin flagged `names_record` (`KilnCMS.CMS.NameFields`) is phrase-
+    # matched against the query the way the title is, so a query that
+    # contains a record's Latin name, pinyin spelling or trade name finds the
+    # record as surely as one that contains its title. The flagged fields are
+    # a per-site fact read at query time, so the match is built in the
+    # prepare (`KilnCMS.CMS.Content.alias_filter/1`) rather than declared
+    # here; with none flagged the leg returns nothing at no cost. Facets and
+    # locale narrow it like the title leg; internal to fusion, no published
+    # twin, same as `:search_title`.
+    alias_read = fn name ->
+      filter_ast = join_and.([quote(do: ^ref(:locale) == ^arg(:locale))] ++ facet_clauses.(false))
+
+      quote do
+        read unquote(name) do
+          argument :query, :string, allow_nil?: false
+          argument :locale, :string
+
+          unquote_splicing(facet_args.(false))
+
+          filter expr(unquote(filter_ast))
+
+          prepare fn query, _context ->
+            locale = Ash.Query.get_argument(query, :locale) || KilnCMS.I18n.default_locale()
+
+            query
+            |> Ash.Query.set_argument(:locale, locale)
+            |> KilnCMS.CMS.Content.alias_filter()
+          end
+        end
+      end
+    end
+
     search_actions =
       quote do
         (unquote_splicing([
@@ -1351,7 +1426,8 @@ defmodule KilnCMS.CMS.Content do
            semantic_read.(:search_semantic_published, true),
            autocomplete_read.(:autocomplete, false),
            autocomplete_read.(:autocomplete_published, true),
-           title_read.(:search_title)
+           title_read.(:search_title),
+           alias_read.(:search_alias)
          ]))
       end
 

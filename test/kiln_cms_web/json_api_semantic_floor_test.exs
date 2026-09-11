@@ -42,6 +42,45 @@ defmodule KilnCMSWeb.JsonApiSemanticFloorTest do
     CMS.publish_post!(post, %{}, actor: admin)
   end
 
+  test "the published route keeps a record the query names by a flagged field past the floor",
+       %{conn: conn} do
+    admin = admin()
+
+    CMS.create_field_definition!(
+      %{
+        content_type: :post,
+        name: "latin_name",
+        label: "Latin",
+        field_type: :string,
+        names_record: true
+      },
+      actor: admin
+    )
+
+    post =
+      CMS.create_post!(
+        %{
+          title: "Huang Qi",
+          slug: "jsf-#{System.unique_integer([:positive])}",
+          custom_fields: %{"latin_name" => "Astragalus membranaceus"}
+        },
+        actor: admin
+      )
+
+    named = CMS.publish_post!(post, %{}, actor: admin)
+    _other = published_post(admin, "Dang Shen")
+    KilnCMS.DataCase.drain_oban()
+
+    body =
+      conn
+      |> get(
+        "/api/json/posts/semantic-search/published?query=astragalus%20membranaceus%20root&locale=en"
+      )
+      |> json_response(200)
+
+    assert Enum.map(body["data"], & &1["id"]) == [named.id]
+  end
+
   test "the published route keeps a record the query names past the floor", %{conn: conn} do
     admin = admin()
     named = published_post(admin, "Huang Qi")

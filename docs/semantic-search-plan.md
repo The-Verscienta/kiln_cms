@@ -166,6 +166,20 @@ wherever semantic search is on (`block_leg: false` switches it off); block
 rows exist for fired documents only, so a draft is reached by the other legs.
 It sits out under facet filters, like the fuzzy leg.
 
+## Alias leg (2026-09-11)
+
+A title is not always the only name a record answers to: an herb has a Latin
+binomial and a pinyin spelling, a product a trade name. Those live in custom
+fields, which the keyword leg indexes as prose but nothing treated as a
+*name*. Flag a field **Names the record** in the field editor
+(`names_record` on `KilnCMS.CMS.FieldDefinition`) and the **alias leg** runs
+the title leg's phrase match over it — a query containing the value finds the
+record, at the title leg's weight, reported as `alias` in `legs` — and the
+per-type `semantic-search` routes exempt a record so named from the relevance
+floor, as they do for its title. Per-site, cached with the type registry
+(`KilnCMS.CMS.NameFields`), and free for every type with nothing flagged.
+Text fields only in practice: the value is matched as text.
+
 ## Phase 3 — Hybrid fusion (+ optional rerank)
 - `KilnCMS.Search.hybrid(type, query, opts)` runs both legs (top-N each), fuses
   by **Reciprocal Rank Fusion** in Elixir, returns merged records; falls back to

@@ -94,6 +94,17 @@ migration, a rewritten column, a dropped config key).
   whether their text was saved. Rich-text blocks now honour the lock too: a
   block held by someone else is read-only in TipTap, not just ringed.
   Modelled on texttile's `Texttile.Articles.Lock`.
+- **Search finds a record by its other names.** A custom field can now be
+  flagged **Names the record** (`names_record` on
+  `KilnCMS.CMS.FieldDefinition`; a checkbox in the field editor) — a Latin
+  binomial, a pinyin spelling, a trade name. `KilnCMS.Search.hybrid/3` runs
+  the title leg's phrase match over every flagged field as an **alias leg**,
+  at the title leg's weight, reported as `alias` in `legs`; and the per-type
+  `semantic-search` routes exempt a record so named from the relevance
+  floor, as they do for its title. The flagged fields are read per site and
+  cached with the dynamic-type registry (`KilnCMS.CMS.NameFields`), so a
+  flag takes effect on the next search; a type with nothing flagged pays
+  nothing. Migration: one boolean column on `field_definitions`.
 - **Hybrid search fuses a block leg.** A document's embedding covers the
   first ~512 tokens of its text, so a long monograph's vector describes its
   opening and a question about a section deep in the body embedded far from

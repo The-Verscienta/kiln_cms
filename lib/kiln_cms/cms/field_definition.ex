@@ -83,7 +83,8 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :help_text,
       :position,
       :default,
-      :compute
+      :compute,
+      :names_record
     ]
 
     create :create, primary?: true
@@ -242,6 +243,16 @@ defmodule KilnCMS.CMS.FieldDefinition do
 
     # Display order within a content type's custom-field section.
     attribute :position, :integer, allow_nil?: false, default: 0, public?: true
+    # Whether this field's value is another *name* for the record — a Latin
+    # name, a pinyin spelling, a trade name — so that a query containing it
+    # finds the record the way a query containing the title does. Search's
+    # alias leg (`KilnCMS.Search.hybrid/3`, `:search_alias`) phrase-matches
+    # the query against every flagged field, and the per-type semantic
+    # routes exempt a record so named from the relevance floor, exactly as
+    # they do for its title. Text fields only in practice: the value is
+    # matched as text, so a flag on a number or a media snapshot names
+    # nothing.
+    attribute :names_record, :boolean, allow_nil?: false, default: false, public?: true
 
     # Optional default value (stored as a string, coerced to the field type when
     # an editor leaves the input blank).
