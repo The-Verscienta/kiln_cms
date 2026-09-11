@@ -1631,7 +1631,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert Ash.get!(Page, page.id, authorize?: false).title == "Flushed by takeover"
 
       assert_receive {:field_locks, ^topic, %{"title" => %{pid: ^taker_pid}}}, 2_000
-      assert_push_event(taker, "lock_granted", %{field: "title"})
+      assert_push_event(taker, "lock_granted", %{field: "title"}, 1_000)
 
       # Bob had nothing in flight, so he edits the flushed text, unlocked.
       taken = render(taker)
