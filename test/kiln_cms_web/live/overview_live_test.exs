@@ -52,6 +52,58 @@ defmodule KilnCMSWeb.OverviewLiveTest do
     )
   end
 
+  # First-run checklist (usability review, B4): the path from `/setup` to a
+  # published Home page, shown to admins until anything is published.
+  describe "the getting-started checklist" do
+    test "an admin on a site with nothing published is walked to the home page", %{conn: conn} do
+      home = seed_page(%{slug: "home", state: :draft})
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      assert has_element?(lv, "#overview-getting-started", "Get your site live")
+
+      assert has_element?(
+               lv,
+               ~s(#overview-open-home[href="/editor/content/page/#{home.id}"]),
+               "Write your home page"
+             )
+
+      refute has_element?(lv, "#overview-create-home")
+    end
+
+    test "a site with no home page is offered one, created as a draft", %{conn: conn} do
+      admin = authed_user(:admin)
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/overview")
+
+      assert {:error, {:live_redirect, %{to: "/editor/content/page/" <> id}}} =
+               lv |> element("#overview-create-home") |> render_click()
+
+      page = CMS.get_page!(id, actor: admin)
+      assert page.slug == "home"
+      assert page.state == :draft
+    end
+
+    test "it leaves once anything is published", %{conn: conn} do
+      seed_page(%{state: :published})
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      refute has_element?(lv, "#overview-getting-started")
+    end
+
+    test "editors don't get it — publishing is an admin step", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/overview")
+
+      refute has_element?(lv, "#overview-getting-started")
+    end
+  end
+
+  test "the console top bar links to the public site", %{conn: conn} do
+    {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/overview")
+
+    assert has_element?(lv, ~s(#console-view-site[href="/"][target="_blank"]), "View site")
+  end
+
   test "viewers are redirected away", %{conn: conn} do
     assert {:error, {:redirect, %{to: "/"}}} =
              conn |> log_in(authed_user(:viewer)) |> live(~p"/editor/overview")

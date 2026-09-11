@@ -23,6 +23,7 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
   attr :record, :any, required: true
   attr :save_state, :atom, required: true
   attr :tier, :atom, required: true
+  attr :editors_can_publish, :boolean, default: false
   attr :conflict, :boolean, required: true
   attr :editors, :list, required: true
   attr :actor, :any, required: true
@@ -171,7 +172,12 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
             pending?={@pending?}
             saved_at={@saved_at}
           />
-          <.workflow_buttons state={@record.state} tier={@tier} pending?={@pending?} />
+          <.workflow_buttons
+            state={@record.state}
+            tier={@tier}
+            pending?={@pending?}
+            editors_can_publish={@editors_can_publish}
+          />
           <%!-- `data-flush-body`: every rich-text block settles its debounced
                 body push on this button's mousedown, before the click's
                 round trip, so a Save can never miss the last keystrokes
@@ -340,8 +346,22 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
   attr :tier, :atom, required: true
   attr :pending?, :boolean, default: false
 
+  attr :editors_can_publish, :boolean,
+    default: false,
+    doc:
+      "the site lets editors publish (`KilnCMS.CMS.EditorialSettings`) — the policy decides; this only offers the button"
+
   def workflow_buttons(assigns) do
+    assigns =
+      assign(
+        assigns,
+        :may_publish?,
+        assigns.tier == :admin or (assigns.tier == :editor and assigns.editors_can_publish)
+      )
+
     ~H"""
+    <%!-- Offered to an editor even where they may publish: review stays
+          available to anyone who wants a second pair of eyes. --%>
     <button
       :if={@state == :draft and @tier == :editor}
       type="button"
@@ -354,7 +374,7 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
       {gettext("Submit for review")}
     </button>
     <button
-      :if={@state in [:draft, :in_review] and @tier == :admin}
+      :if={@state in [:draft, :in_review] and @may_publish?}
       type="button"
       phx-click="workflow"
       data-flush-body
@@ -362,7 +382,9 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
       phx-disable-with={gettext("Publishing…")}
       class="btn btn-sm btn-default"
     >
-      {if @state == :in_review, do: gettext("Approve & publish"), else: gettext("Publish")}
+      {if @state == :in_review and @tier == :admin,
+        do: gettext("Approve & publish"),
+        else: gettext("Publish")}
     </button>
     <button
       :if={@state == :in_review and @tier == :admin}
@@ -376,7 +398,7 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
       {gettext("Request changes")}
     </button>
     <span
-      :if={@state == :in_review and @tier == :editor}
+      :if={@state == :in_review and @tier == :editor and not @may_publish?}
       class="text-xs text-base-content/70"
     >
       {gettext("Awaiting admin approval")}

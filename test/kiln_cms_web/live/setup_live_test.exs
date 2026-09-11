@@ -106,6 +106,25 @@ defmodule KilnCMSWeb.SetupLiveTest do
       assert row.brand_color == "#1d4ed8"
       assert row.theme == :editorial
 
+      # Something to write on first sign-in: a DRAFT Home page — never
+      # published on the operator's behalf — headed with the new site's name.
+      assert [home] =
+               CMS.list_pages!(
+                 query: [filter: [slug: "home"]],
+                 authorize?: false,
+                 tenant: Accounts.default_org_id()
+               )
+
+      assert home.state == :draft
+      assert home.title == "Home"
+      assert [heading, rich_text] = home.blocks
+      assert heading.type == :heading
+      assert heading.value.text == "Owner's Site"
+      assert rich_text.type == :rich_text
+
+      # "Who can publish?" was left on its default: editors publish.
+      assert KilnCMS.CMS.EditorialSettings.editors_can_publish?(Accounts.default_org_id())
+
       on_exit(fn -> KilnCMS.Cache.bust_branding(Accounts.default_org_id()) end)
     end
 
@@ -134,6 +153,28 @@ defmodule KilnCMSWeb.SetupLiveTest do
                authorize?: false,
                not_found_error?: false
              )
+    end
+
+    test "choosing admin approval keeps publishing an admin step", %{conn: conn} do
+      {:ok, lv, _html} = live(conn, ~p"/setup")
+
+      lv
+      |> form("#setup-admin-form",
+        admin: %{
+          email: "reviewed@example.com",
+          password: "a-strong-password",
+          password_confirmation: "a-strong-password"
+        }
+      )
+      |> render_submit()
+
+      html = lv |> form("#setup-site-form", site: %{editors_publish: "false"}) |> render_submit()
+      assert html =~ "An admin approves everything"
+
+      lv |> element("button[phx-click=finish]") |> render_click()
+      assert_redirect(lv, ~p"/sign-in")
+
+      refute KilnCMS.CMS.EditorialSettings.editors_can_publish?(Accounts.default_org_id())
     end
 
     test "a password mismatch stays on step 1 with the problem named", %{conn: conn} do

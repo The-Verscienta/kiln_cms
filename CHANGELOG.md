@@ -159,6 +159,46 @@ migration, a rewritten column, a dropped config key).
   rich-text block re-sends the words it still holds — unless the record was
   saved by someone else meanwhile, in which case their save wins, the block
   reloads it, and a flash says so once.
+- **A path from `/setup` to a published home page.** The wizard now also
+  creates a draft **Home** page (slug `home`, headed with the site name), and
+  the site root `/` serves that page once it is published — until then, and
+  on any site without one, `/` keeps the stock template. `/` moved into the
+  delivery pipeline to do it, so a served Home page gets the site's code
+  injection like every other page. Admins see a four-step **Get your site
+  live** checklist on the Overview (name the site → write the home page →
+  publish → view the site) until anything is published; a site with no home
+  page gets a "Create one" button there. Every console page gains a **View
+  site** link in the top bar. Nothing is published on the operator's behalf,
+  and no schema changes.
+- **Workflow refusals say why.** Submit / Publish / Archive / Mark reviewed,
+  in the editor and the content list, used to answer every failure with
+  "That action isn't allowed right now." They now name the reason: a
+  permission refusal says who can do it ("Publishing needs an admin. Submit
+  it for review…"), a transition the record's state no longer allows says to
+  reload, and a validation failure shows the validation's own message
+  (`KilnCMSWeb.WorkflowErrors`).
+- **Editors can publish, if the site allows it.** A new per-site switch,
+  `SiteEditorialSettings.editors_can_publish` (checked by
+  `Checks.EditorMayPublish`), lets an org's editors publish directly.
+  - `/setup` asks "Who can publish?", defaulting to editors publishing their
+    own work. Admins can change it later under **Team → Publishing**.
+  - Where it's on, editors get Publish in the editor, in the content list
+    rows, and in bulk actions. Submit for review stays available.
+  - The content-type scope still applies: an editor limited to some types
+    can publish only those.
+  - Adds one column, `site_editorial_settings.editors_can_publish`,
+    defaulting to `false`.
+  - **Upgrading:** existing sites keep admin approval until an admin turns
+    this on.
+- **A scheduled publish date now needs publish permission.** Setting, moving
+  or clearing a document's `scheduled_at` takes the same permission as
+  Publish. Before this, an editor could set a date and the scheduler would
+  publish it, with no admin involved, even on a site that required approval.
+  - On a site where editors can't publish, the editor's date field is locked
+    with an explanation.
+  - Dragging an item's publish time on the calendar is refused for those
+    editors.
+
 - **A first-run setup wizard at `/setup` (#1317).** While an instance has no
   admin account, a three-step wizard creates one — email + password, an
   optional site name/colour/theme — and then sends the operator to sign-in,

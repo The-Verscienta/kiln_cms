@@ -13,8 +13,10 @@ defmodule KilnCMSWeb.OverviewLive do
   require Ash.Query
 
   alias KilnCMS.Accounts.ApiKey
+  alias KilnCMS.Branding
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.StarterContent
 
   alias KilnCMS.CMS.{
     Category,
@@ -53,8 +55,57 @@ defmodule KilnCMSWeb.OverviewLive do
      |> assign_backup_warning()
      |> assign_blocked_experiments()
      |> assign(:page_title, gettext("Home"))
-     |> load_metrics()}
+     |> load_metrics()
+     |> assign_getting_started()}
   end
+
+  # The checklist's "Create one" (step 2), for a site with no Home page — one
+  # that skipped `/setup` (seeded, or upgraded from before it made one), or
+  # whose starter page was deleted.
+  @impl true
+  def handle_event("create_home", _params, socket) do
+    %{actor: actor, current_org: org} = socket.assigns
+    brand = Branding.for_org(org)
+    site_name = if Branding.branded?(brand), do: brand.site_name
+
+    case StarterContent.ensure_home_page(actor, org, site_name: site_name) do
+      {:ok, page} ->
+        {:noreply, push_navigate(socket, to: ~p"/editor/content/page/#{page.id}")}
+
+      {:error, error} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           ash_error_message(error, fallback: gettext("The home page could not be created."))
+         )}
+    end
+  end
+
+  # First-run checklist. Admins only — step 3 is Publish, which only an admin
+  # can do — and only until the site has published anything. Derived from
+  # state rather than stored: there is no "dismissed" flag to persist, and it
+  # leaves on its own the moment the first thing goes live.
+  defp assign_getting_started(socket) do
+    %{admin?: admin?, by_state: by_state, actor: actor, current_org: org} = socket.assigns
+
+    if admin? and Map.get(by_state, :published, 0) == 0 do
+      home = StarterContent.home_page(actor, org)
+
+      assign(socket, :getting_started, %{
+        named?: Branding.branded?(Branding.for_org(org)),
+        home: home,
+        written?: written?(home)
+      })
+    else
+      assign(socket, :getting_started, nil)
+    end
+  end
+
+  # "Written" = edited since it was created. Create stamps the two timestamps
+  # separately, so a sub-second gap is not an edit.
+  defp written?(nil), do: false
+  defp written?(page), do: DateTime.diff(page.updated_at, page.inserted_at, :second) >= 2
 
   defp load_metrics(socket) do
     actor = socket.assigns.actor
@@ -197,6 +248,33 @@ defmodule KilnCMSWeb.OverviewLive do
     end
   end
 
+  attr :number, :integer, required: true
+  attr :done, :boolean, default: false
+  slot :title, required: true
+  slot :inner_block, required: true
+
+  defp getting_started_step(assigns) do
+    ~H"""
+    <li class="flex gap-3">
+      <span :if={@done} class="mt-0.5 shrink-0 text-success">
+        <.icon name="hero-check-circle-solid" class="size-5" />
+        <span class="sr-only">{gettext("Done:")}</span>
+      </span>
+      <span
+        :if={!@done}
+        class="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full border border-base-content/25 text-xs tabular-nums text-base-content/70"
+        aria-hidden="true"
+      >
+        {@number}
+      </span>
+      <div class="min-w-0">
+        <p>{render_slot(@title)}</p>
+        <p class="text-xs text-base-content/60">{render_slot(@inner_block)}</p>
+      </div>
+    </li>
+    """
+  end
+
   @impl true
   def render(assigns) do
     assigns = assign(assigns, :tiles, tiles(assigns))
@@ -287,6 +365,90 @@ defmodule KilnCMSWeb.OverviewLive do
             </li>
           </ul>
         </.overview_strip>
+
+        <%!-- First-run checklist — see `assign_getting_started/1`. Above the
+              grid because until something is published it is the only thing
+              on this page that matters. --%>
+        <section
+          :if={@getting_started}
+          id="overview-getting-started"
+          class="card card-pad space-y-3"
+          aria-labelledby="overview-getting-started-heading"
+        >
+          <div>
+            <h2 id="overview-getting-started-heading" class="text-sm font-semibold">
+              {gettext("Get your site live")}
+            </h2>
+            <p class="text-xs text-base-content/60">
+              {gettext("Nothing is published yet. Four steps put your home page on the web.")}
+            </p>
+          </div>
+          <ol class="space-y-3 text-sm">
+            <.getting_started_step number={1} done={@getting_started.named?}>
+              <:title>
+                <.link
+                  navigate={~p"/editor/branding"}
+                  class="font-medium text-primary hover:underline"
+                >
+                  {gettext("Name your site")}
+                </.link>
+              </:title>
+              {gettext("The name and colour visitors see in your site's header.")}
+            </.getting_started_step>
+            <.getting_started_step number={2} done={@getting_started.written?}>
+              <:title>
+                <.link
+                  :if={@getting_started.home}
+                  id="overview-open-home"
+                  navigate={~p"/editor/content/page/#{@getting_started.home.id}"}
+                  class="font-medium text-primary hover:underline"
+                >
+                  {gettext("Write your home page")}
+                </.link>
+                <span :if={is_nil(@getting_started.home)} class="font-medium">
+                  {gettext("Write your home page")}
+                </span>
+              </:title>
+              <span :if={@getting_started.home}>
+                {gettext("A draft is waiting — replace the starter text with your own.")}
+              </span>
+              <span :if={is_nil(@getting_started.home)}>
+                {gettext("Your site has no home page yet.")}
+                <button
+                  type="button"
+                  id="overview-create-home"
+                  phx-click="create_home"
+                  class="font-medium text-primary hover:underline"
+                >
+                  {gettext("Create one")}
+                </button>
+              </span>
+            </.getting_started_step>
+            <.getting_started_step number={3}>
+              <:title>
+                <span class="font-medium">{gettext("Publish it")}</span>
+              </:title>
+              {gettext(
+                "Press Publish in the editor. Until then, only people signed in to the console can see it."
+              )}
+            </.getting_started_step>
+            <.getting_started_step number={4}>
+              <:title>
+                <a
+                  href={~p"/"}
+                  target="_blank"
+                  rel="noopener"
+                  class="font-medium text-primary hover:underline"
+                >
+                  {gettext("View your site")}
+                </a>
+              </:title>
+              {gettext(
+                "Once it's published, your home page is what visitors see at your site's address."
+              )}
+            </.getting_started_step>
+          </ol>
+        </section>
 
         <div class="grid gap-4 lg:grid-cols-3">
           <div

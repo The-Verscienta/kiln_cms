@@ -498,6 +498,20 @@ defmodule KilnCMSWeb.Layouts do
               {@page_title}
             </div>
             <div class="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
+              <%!-- The public site, one click from every console page: where an
+                    editor checks that what they published is what visitors get.
+                    `/` is this host's root, so a tenant's console opens that
+                    tenant's site. --%>
+              <a
+                id="console-view-site"
+                href={~p"/"}
+                target="_blank"
+                rel="noopener"
+                class="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-base-content/70 hover:bg-base-200 hover:text-base-content"
+              >
+                <.icon name="hero-arrow-top-right-on-square" class="size-4" />
+                <span class="sr-only sm:not-sr-only">{gettext("View site")}</span>
+              </a>
               <.link
                 navigate={~p"/editor/search"}
                 class="hidden items-center gap-2 rounded-md border border-base-content/15 px-2.5 py-1.5 text-sm text-base-content/60 hover:bg-base-200 sm:flex"

@@ -786,6 +786,11 @@ msgstr "Un élément de contenu enregistre une référence, donc son URL suit l'
 msgid "A custom role bundles granular scope — define \"Blog editor\" once, assign it to any member. A member's own scope overrides their role per axis."
 msgstr "Un rôle personnalisé regroupe une portée granulaire — définissez « Éditeur de blogue » une fois, puis attribuez-le à n'importe quel membre. La portée propre d'un membre prime sur son rôle, axe par axe."
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "A draft is waiting — replace the starter text with your own."
+msgstr "Un brouillon vous attend — remplacez le texte de départ par le vôtre."
+
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "A draft target starts redirecting once it's published."
@@ -1348,6 +1353,11 @@ msgstr "Administrateur"
 msgid "Admin routes"
 msgstr "Routes d'administration"
 
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Admins can always publish. You can change this later under Team."
+msgstr "Les administrateurs peuvent toujours publier. Vous pourrez changer cela plus tard dans Équipe."
+
 #: lib/kiln_cms_web/controllers/page_html.ex
 #, elixir-autogen, elixir-format
 msgid "Admins, editors and viewers, enforced by policies on every read and write — in the editor and the APIs alike."
@@ -1523,6 +1533,11 @@ msgstr "Une spécification OpenAPI et un explorateur d'API navigable"
 msgid "An account with this email already exists. We've sent a link to that address - confirm it to finish linking this provider to your account."
 msgstr "Un compte associé à cette adresse e-mail existe déjà. Nous avons envoyé un lien à cette adresse — confirmez-le pour terminer la liaison de ce fournisseur à votre compte."
 
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "An admin approves everything"
+msgstr "Un administrateur approuve tout"
+
 #: lib/kiln_cms_web/live/link_report_live.ex
 #, elixir-autogen, elixir-format
 msgid "An administrator can switch it on."
@@ -1632,6 +1647,11 @@ msgstr "N'importe quelle étiquette"
 #, elixir-autogen, elixir-format
 msgid "Any uploader"
 msgstr "Téléversé par n'importe qui"
+
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Anyone with editor access can publish. Submitting for review stays available."
+msgstr "Toute personne ayant un accès éditeur peut publier. L'envoi en relecture reste disponible."
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
@@ -3393,6 +3413,7 @@ msgid "Create menu"
 msgstr "Créer le menu"
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Create one"
 msgstr "En créer un"
@@ -4105,6 +4126,11 @@ msgstr "Domaines"
 msgid "Done selecting"
 msgstr "Terminer la sélection"
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Done:"
+msgstr "Terminé :"
+
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
 msgid "Done: %{changed} renamed, %{pinned} hand-picked skipped, %{scanned} scanned."
@@ -4364,6 +4390,36 @@ msgstr "Espace de travail éditorial"
 #, elixir-autogen, elixir-format
 msgid "Editorial — serif, narrower reading column"
 msgstr "Éditorial — serif, colonne de lecture plus étroite"
+
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "Editors can now publish their own work."
+msgstr "Les éditeurs peuvent désormais publier leur propre travail."
+
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "Editors now submit for review; an admin publishes."
+msgstr "Les éditeurs envoient désormais en relecture ; un administrateur publie."
+
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Editors publish their own work"
+msgstr "Les éditeurs publient leur propre travail"
+
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "Editors publish their own work. Submitting for review stays available, and admins can always publish."
+msgstr "Les éditeurs publient leur propre travail. L'envoi en relecture reste disponible, et les administrateurs peuvent toujours publier."
+
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Editors submit for review, and an admin publishes."
+msgstr "Les éditeurs envoient en relecture, et un administrateur publie."
+
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "Editors submit their work for review, and an admin publishes it."
+msgstr "Les éditeurs envoient leur travail en relecture, et un administrateur le publie."
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -5195,6 +5251,11 @@ msgstr "Générer une clé"
 msgid "Get a notification on this device when something needs your review. Install KilnCMS to your home screen first — on iPhone and iPad, notifications only work for the installed app."
 msgstr "Recevez une notification sur cet appareil quand quelque chose attend votre relecture. Installez d'abord KilnCMS sur votre écran d'accueil : sur iPhone et iPad, les notifications ne fonctionnent qu'avec l'application installée."
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Get your site live"
+msgstr "Mettez votre site en ligne"
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Go live at"
@@ -5957,6 +6018,11 @@ msgstr "La laisser ouverte"
 msgid "Leave this field empty"
 msgstr "Laissez ce champ vide"
 
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "Let editors publish"
+msgstr "Autoriser les éditeurs à publier"
+
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -6448,6 +6514,7 @@ msgstr "Nom (par ex. « Touch ID du MacBook »)"
 msgid "Name (optional)"
 msgstr "Nom (facultatif)"
 
+#: lib/kiln_cms_web/live/overview_live.ex
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Name your site"
@@ -7184,6 +7251,11 @@ msgstr "Rien n'est bloqué."
 msgid "Nothing is lost — what they had typed is saved first."
 msgstr "Rien n'est perdu : ce qu'ils avaient tapé est enregistré d'abord."
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nothing is published yet. Four steps put your home page on the web."
+msgstr "Rien n'est encore publié. Quatre étapes pour mettre votre page d'accueil en ligne."
+
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Nothing is scanned and no panel appears until you switch it on, and what you switch on applies to this site only."
@@ -7324,6 +7396,11 @@ msgstr "À la publication : la laisser ouverte (réglage du site)"
 #, elixir-autogen, elixir-format
 msgid "On-site searches that returned nothing. Each is a reader who looked for something this site doesn't cover."
 msgstr "Recherches sur le site n'ayant rien renvoyé. Chacune correspond à un lecteur qui a cherché quelque chose que ce site ne couvre pas."
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Once it's published, your home page is what visitors see at your site's address."
+msgstr "Une fois publiée, votre page d'accueil est ce que les visiteurs voient à l'adresse de votre site."
 
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
@@ -7933,6 +8010,11 @@ msgstr "Propulsé par KilnCMS."
 msgid "Presentation: %{title}"
 msgstr "Présentation : %{title}"
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Press Publish in the editor. Until then, only people signed in to the console can see it."
+msgstr "Cliquez sur Publier dans l'éditeur. D'ici là, seules les personnes connectées à la console peuvent la voir."
+
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -8082,6 +8164,11 @@ msgstr "Publier %{count} élément(s) sélectionné(s) ? Ils seront mis en ligne
 msgid "Publish changes"
 msgstr "Publier les modifications"
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Publish it"
+msgstr "Publiez-la"
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Publish now"
@@ -8146,6 +8233,8 @@ msgid "Publishes"
 msgstr "Publication le"
 
 #: lib/kiln_cms_web/live/release_live.ex
+#: lib/kiln_cms_web/live/setup_live.ex
+#: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "Publishing"
 msgstr "Publication en cours"
@@ -8154,6 +8243,11 @@ msgstr "Publication en cours"
 #, elixir-autogen, elixir-format
 msgid "Publishing completes open tasks"
 msgstr "La publication termine les tâches ouvertes"
+
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#, elixir-autogen, elixir-format
+msgid "Publishing needs an admin on this site, so an admin sets the publish date."
+msgstr "La publication nécessite un administrateur sur ce site, donc un administrateur fixe la date de publication."
 
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
@@ -8769,6 +8863,11 @@ msgstr "Demander des modifications"
 #, elixir-autogen, elixir-format
 msgid "Require a time-based code from an authenticator app (Google Authenticator, 1Password, …) as a second factor when you sign in."
 msgstr "Exiger un code temporaire issu d'une application d'authentification (Google Authenticator, 1Password, …) comme second facteur lors de la connexion."
+
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "Require admin approval"
+msgstr "Exiger l'approbation d'un administrateur"
 
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
@@ -10752,6 +10851,11 @@ msgstr "L'expression clé cible n'apparaît pas dans le paragraphe d'introductio
 msgid "The focus keyphrase doesn't appear in the title or SEO title."
 msgstr "L'expression clé cible n'apparaît ni dans le titre ni dans le titre SEO."
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "The home page could not be created."
+msgstr "La page d'accueil n'a pas pu être créée."
+
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
 msgid "The icon for the installed editor app on a phone home screen. Must be a square PNG or JPEG of at least %{min}×%{min} pixels — it is checked on save, and the stock mark is used until it passes."
@@ -10801,6 +10905,11 @@ msgstr "Les variantes claire et sombre, ainsi que la couleur du texte des bouton
 #, elixir-autogen, elixir-format
 msgid "The model returned nothing usable. Try again, or rephrase your instruction."
 msgstr "Le modèle n'a rien renvoyé d'exploitable. Réessayez ou reformulez votre consigne."
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "The name and colour visitors see in your site's header."
+msgstr "Le nom et la couleur que les visiteurs voient dans l'en-tête de votre site."
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -11880,6 +11989,16 @@ msgstr "Voir les brouillons"
 msgid "View published"
 msgstr "Voir la version publiée"
 
+#: lib/kiln_cms_web/components/layouts.ex
+#, elixir-autogen, elixir-format
+msgid "View site"
+msgstr "Voir le site"
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "View your site"
+msgstr "Voir votre site"
+
 #: lib/kiln_cms_web/components/chart_components.ex
 #, elixir-autogen, elixir-format
 msgid "Views"
@@ -12069,6 +12188,11 @@ msgstr "Qui"
 msgid "Who can author what on this site: members, their capability tier, and granular scope — assigned directly or through a custom role."
 msgstr "Qui peut créer quoi sur ce site : les membres, leur niveau de capacité et leur portée granulaire — attribuée directement ou via un rôle personnalisé."
 
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Who can publish?"
+msgstr "Qui peut publier ?"
+
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Who may embed this form"
@@ -12138,6 +12262,11 @@ msgstr "Écrire un commentaire…"
 #, elixir-autogen, elixir-format
 msgid "Write the winning variant into the document? This edits the live content like a normal save."
 msgstr "Écrire la variante gagnante dans le document ? Cela modifie le contenu en ligne comme un enregistrement normal."
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Write your home page"
+msgstr "Rédigez votre page d'accueil"
 
 #: lib/kiln_cms_web/components/content_editor/advisory_panel_components.ex
 #, elixir-autogen, elixir-format
@@ -12307,6 +12436,11 @@ msgstr "Vous avez besoin d'un accès éditeur pour voir cette page."
 msgid "You won't receive further newsletters at %{email}."
 msgstr "Vous ne recevrez plus de newsletters à l'adresse %{email}."
 
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "You'll also get a draft home page to write. Once you publish it, it's what visitors see at your site's address."
+msgstr "Vous aurez aussi un brouillon de page d'accueil à rédiger. Une fois publiée, c'est ce que les visiteurs voient à l'adresse de votre site."
+
 #: lib/kiln_cms_web/live/account_live.ex
 #, elixir-autogen, elixir-format
 msgid "You're not receiving the newsletter."
@@ -12424,10 +12558,15 @@ msgstr "Vos codes de récupération — enregistrez-les maintenant, ils ne seron
 msgid "Your role cannot copy this content's blocks, so it cannot be translated."
 msgstr "Votre rôle ne peut pas copier les blocs de ce contenu, il ne peut donc pas être traduit."
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Your site has no home page yet."
+msgstr "Votre site n'a pas encore de page d'accueil."
+
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
-msgid "Your site is ready — sign in with the account you just created."
-msgstr "Votre site est prêt — connectez-vous avec le compte que vous venez de créer."
+msgid "Your site is ready — sign in with the account you just created. A draft home page is waiting for you."
+msgstr "Votre site est prêt — connectez-vous avec le compte que vous venez de créer. Un brouillon de page d'accueil vous attend."
 
 #: lib/kiln_cms_web/controllers/form_controller.ex
 #, elixir-autogen, elixir-format

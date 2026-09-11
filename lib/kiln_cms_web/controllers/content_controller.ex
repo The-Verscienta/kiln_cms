@@ -33,6 +33,7 @@ defmodule KilnCMSWeb.ContentController do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentPassword
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.StarterContent
   alias KilnCMS.Experiments
   alias KilnCMS.Feeds
   alias KilnCMS.I18n
@@ -42,6 +43,21 @@ defmodule KilnCMSWeb.ContentController do
   alias KilnCMSWeb.Params
   alias KilnCMSWeb.StructuredData
   alias KilnCMSWeb.ViewTracking
+
+  # The site root. A site whose Home page (slug `home`, see
+  # `KilnCMS.CMS.StarterContent`) is published serves it here, through the
+  # same funnel as `/home` — audience, passphrase and locale included. A site
+  # without one keeps the stock template. The existence probe is a one-row,
+  # id-only read; delivery proper stays cached in `show_page/2`.
+  def home(conn, params) do
+    if StarterContent.published_home?(current_org_id(conn)) do
+      show_page(conn, Map.put(params, "slug", StarterContent.home_slug()))
+    else
+      conn
+      |> put_view(KilnCMSWeb.PageHTML)
+      |> KilnCMSWeb.PageController.home(params)
+    end
+  end
 
   def show_page(conn, %{"slug" => slug} = params) do
     locale = locale(conn)

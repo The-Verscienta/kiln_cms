@@ -258,9 +258,18 @@ defmodule KilnCMS.Accounts.Scoping do
     if org == Accounts.default_org_id(), do: Map.get(actor, :role) || :none, else: :none
   end
 
-  defp subject_org_id(org_id) when is_binary(org_id), do: org_id
-  defp subject_org_id(%KilnCMS.Accounts.Organization{id: id}), do: id
-  defp subject_org_id(subject), do: org_id(subject)
+  @doc """
+  The org id `subject` runs under — the same resolution `effective_tier/2`
+  uses: a raw id, an `%Organization{}`, or a query/changeset's tenant, falling
+  back to the default org. Public so a policy check that pairs the tier with a
+  per-org setting (`KilnCMS.CMS.Checks.EditorMayPublish`) asks about the SAME
+  org the tier was resolved on.
+  """
+  @spec subject_org_id(Ash.Query.t() | Ash.Changeset.t() | struct() | String.t() | nil) ::
+          String.t()
+  def subject_org_id(org_id) when is_binary(org_id), do: org_id
+  def subject_org_id(%KilnCMS.Accounts.Organization{id: id}), do: id
+  def subject_org_id(subject), do: org_id(subject)
 
   defp scope(actor, subject, axis) do
     case affiliation(actor, org_id(subject)) do

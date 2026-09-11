@@ -37,6 +37,12 @@ defmodule KilnCMSWeb.EditorLive do
      socket
      |> assign(:actor, socket.assigns.current_user)
      |> assign(:tier, KilnCMSWeb.LiveUserAuth.effective_tier(socket))
+     # Offers Publish (row and bulk) to editors on a site that lets them; the
+     # content policy (`Checks.EditorMayPublish`) is what decides.
+     |> assign(
+       :editors_can_publish,
+       KilnCMS.CMS.EditorialSettings.editors_can_publish?(socket.assigns.current_org)
+     )
      |> assign(:page_title, gettext("Content"))
      # `:content_types` is owned by handle_params (which always runs after
      # mount) so the type filter, the "New …" buttons and the listing query all
@@ -304,12 +310,12 @@ defmodule KilnCMSWeb.EditorLive do
   # U-H3/U-M2): "Select all" can hold hundreds of items, and a single stray
   # click could otherwise publish, unpublish or archive all of them instantly.
   #
-  # Only a verb this tier is actually offered (`bulk_verbs/1`, the list the bar
+  # Only a verb this tier is actually offered (`bulk_verbs/2`, the list the bar
   # renders from) opens it: a crafted phx-value naming publish or delete as an
   # editor would otherwise open a confirm bar for an action policy then refuses
   # on every row.
   def handle_event("bulk", %{"action" => verb}, socket) when is_binary(verb) do
-    if verb in bulk_verbs(socket.assigns.tier) do
+    if verb in bulk_verbs(socket.assigns.tier, socket.assigns.editors_can_publish) do
       confirming = if MapSet.size(socket.assigns.selected) > 0, do: verb
       {:noreply, assign(socket, :confirming_bulk, confirming)}
     else
@@ -602,7 +608,8 @@ defmodule KilnCMSWeb.EditorLive do
 
   defp edit_path(type, id), do: ~p"/editor/content/#{type}/#{id}"
 
-  defp bulk_actions(:admin) do
+  defp bulk_actions(tier, editors_can_publish)
+       when tier == :admin or (tier == :editor and editors_can_publish) do
     [
       {"publish", gettext("Publish")},
       {"unpublish", gettext("Unpublish")},
@@ -611,7 +618,7 @@ defmodule KilnCMSWeb.EditorLive do
     ]
   end
 
-  defp bulk_actions(_tier) do
+  defp bulk_actions(_tier, _editors_can_publish) do
     [
       {"submit", gettext("Submit for review")},
       {"unpublish", gettext("Unpublish")},
@@ -622,8 +629,8 @@ defmodule KilnCMSWeb.EditorLive do
 
   # Every verb the bulk bar offers `tier`: the menu above, plus Delete, which
   # the bar renders on its own button for admins only (`:if={@tier == :admin}`).
-  defp bulk_verbs(tier) do
-    verbs = Enum.map(bulk_actions(tier), &elem(&1, 0))
+  defp bulk_verbs(tier, editors_can_publish) do
+    verbs = Enum.map(bulk_actions(tier, editors_can_publish), &elem(&1, 0))
     if tier == :admin, do: verbs ++ ["delete"], else: verbs
   end
 
@@ -871,7 +878,7 @@ defmodule KilnCMSWeb.EditorLive do
           </span>
           <div class="ml-auto flex flex-wrap justify-end gap-2">
             <button
-              :for={{verb, label} <- bulk_actions(@tier)}
+              :for={{verb, label} <- bulk_actions(@tier, @editors_can_publish)}
               type="button"
               phx-click="bulk"
               phx-value-action={verb}
@@ -1073,14 +1080,19 @@ defmodule KilnCMSWeb.EditorLive do
                 {gettext("Awaiting admin approval")}
               </span>
               <button
-                :if={record.state in [:draft, :in_review] and @tier == :admin}
+                :if={
+                  record.state in [:draft, :in_review] and
+                    (@tier == :admin or (@tier == :editor and @editors_can_publish))
+                }
                 type="button"
                 phx-click="publish"
                 phx-value-kind={kind}
                 phx-value-id={record.id}
                 class="btn btn-sm btn-default"
               >
-                {if record.state == :in_review, do: gettext("Approve"), else: gettext("Publish")}
+                {if record.state == :in_review and @tier == :admin,
+                  do: gettext("Approve"),
+                  else: gettext("Publish")}
               </button>
               <button
                 :if={record.state == :in_review and @tier == :admin}
