@@ -177,6 +177,14 @@ defmodule KilnCMS.Media.Ingest do
   @spec max_upload_size() :: pos_integer()
   def max_upload_size, do: @max_video_size
 
+  @doc """
+  The image ceiling on its own, for a surface that takes pictures and nothing
+  else (the content editor's paste/drop upload) and so can refuse an oversized
+  file in the browser at the number `store_file/3` will actually enforce.
+  """
+  @spec max_image_size() :: pos_integer()
+  def max_image_size, do: @max_image_size
+
   # ── Classification ─────────────────────────────────────────────────────────
 
   # Byte-sniffed, in the same order the upload path tries: an image is the

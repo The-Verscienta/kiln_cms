@@ -162,7 +162,10 @@ test.describe("tag picker mid-session growth", () => {
         .getByRole("button", { name: /reload latest/i })
         .evaluate(el => el.click());
       await expect(conflictBanner).toBeHidden();
-      await expect(indicator).toHaveText("Saved");
+      // Several steps have run since the editor's save actually landed, so
+      // by now the SavedTicker's 2.6s flash (saved_ticker.js) may already
+      // have faded "Saved" to "Last saved · just now" — both are settled.
+      await expect(indicator).toHaveText(/^\s*(Saved|Last saved · just now)\s*$/);
       // Best-effort: clear the lingering error flash so it can't go on to
       // intercept a later click the same way. Explicit short timeout — the
       // default `actionTimeout` is unbounded, and with no flash present this
@@ -201,27 +204,34 @@ test.describe("tag picker mid-session growth", () => {
       // regression that flips Unsaved → Saving → Saved again inside its
       // window would read as "passed" — the exact kind of assertion that
       // silently stops testing anything once the bug it was written for
-      // exists (a "moved" indicator settles right back to "Saved"). Sample a
-      // plain string instead, across the client's 300ms filter debounce and
-      // the full 2s server autosave debounce, so a transient "Unsaved
-      // changes"/"Saving…" cannot hide between polls.
+      // exists (a "moved" indicator settles right back to a settled word).
+      // Sample a plain string instead, across the client's 300ms filter
+      // debounce and the full 2s server autosave debounce, so a transient
+      // "Unsaved changes"/"Saving…" cannot hide between polls.
+      //
+      // Settled has two spellings: the `SavedTicker` hook (saved_ticker.js)
+      // flashes "Saved" for 2.6s after `data-at` moves, then fades to "Last
+      // saved · just now" — and by this point in the test (several actions
+      // and round-trips since the reload-latest save above) the flash has
+      // very likely already ended, so either word is a pass.
       //
       // One miss is tolerated rather than failing outright: under real CI
       // load, a legitimately correct but slower round-trip can still be
       // mid-flight at a single sample boundary. A second miss means the
       // indicator is genuinely flapping, not just slow to land — that still
       // fails, preserving the anti-hiding property above.
+      const settled = new Set(["Saved", "Last saved · just now"]);
       let misses = 0;
       for (let waited = 0; waited <= 2600; waited += 250) {
         const text = (await indicator.textContent())?.trim();
-        if (text !== "Saved") {
+        if (!settled.has(text)) {
           misses += 1;
           expect(misses, `indicator read "${text}" more than once`).toBeLessThanOrEqual(1);
         }
         // No point sleeping after the last sample — nothing checks again.
         if (waited < 2600) await page.waitForTimeout(250);
       }
-      await expect(indicator).toHaveText("Saved");
+      await expect(indicator).toHaveText(/^\s*(Saved|Last saved · just now)\s*$/);
 
       await expect(section.getByRole("checkbox", { name: distractor })).toBeHidden();
       await expect(section.getByRole("checkbox", { name: attached })).toBeVisible();

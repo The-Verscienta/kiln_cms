@@ -104,3 +104,15 @@ a tag that isn't already allowed, add that tag to
 and cover it in
 [`test/kiln_cms/html_sanitizer_test.exs`](../test/kiln_cms/html_sanitizer_test.exs) —
 otherwise the server will strip it on save.
+
+## Pictures
+
+Paste an image from the clipboard into a rich-text block, or drop an image
+file on it, and it uploads into the media library and lands as an **image
+block right after that block** (the rich-text schema has no inline image, so
+the block editor's own image block is where a picture belongs). A placeholder
+with the file name and progress stands in the block list while the file
+travels; a file the browser refuses — over the image size cap, or not an
+image — stays there with the reason and a Dismiss. Several files pasted at
+once keep their order. The upload runs through the same pipeline as the media
+library's own uploads (`KilnCMS.Media.Ingest`), under your own permissions.

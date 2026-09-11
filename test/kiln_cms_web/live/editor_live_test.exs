@@ -561,9 +561,11 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
-      # Editing shows a "Saving…" state and schedules the debounced autosave (#136).
+      # Editing queues the debounced autosave (#136) — the save line flips to
+      # `pending` (it keeps the last save's stamp: no request exists yet, so
+      # it does not say "Saving…").
       changed = lv |> form("#page-editor", form: %{title: "Autosaved title"}) |> render_change()
-      assert changed =~ "Saving"
+      assert changed =~ ~s(data-state="pending")
       assert CMS.get_page!(page.id, authorize?: false).title == "Old"
 
       # Fire the debounce timer.

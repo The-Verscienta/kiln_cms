@@ -389,6 +389,11 @@ msgstr ""
 msgid "%{name} (copy)"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} couldn't be uploaded: %{reason}"
+msgstr ""
+
 #: lib/kiln_cms_web/live/content_editor/shared.ex
 #, elixir-autogen, elixir-format
 msgid "%{name} has had this open for %{open_for} but hasn't typed for %{idle}."
@@ -2103,6 +2108,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/content_editor/shared.ex
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/experiment_live.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
@@ -3142,6 +3148,11 @@ msgstr ""
 msgid "Couldn't save those details."
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't save your latest changes — fix the errors below, then try again."
+msgstr ""
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't save your preferences."
@@ -3211,6 +3222,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't update your profile."
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't upload %{name}: %{reason}"
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
@@ -3943,6 +3959,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/advisory_panel_components.ex
 #: lib/kiln_cms_web/live/api_key_live.ex
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "Dismiss"
@@ -5775,6 +5792,16 @@ msgstr ""
 msgid "Last run failed"
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/chrome_components.ex
+#, elixir-autogen, elixir-format
+msgid "Last saved %{time}"
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/chrome_components.ex
+#, elixir-autogen, elixir-format
+msgid "Last saved · just now"
+msgstr ""
+
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "Last seen"
@@ -7118,6 +7145,11 @@ msgstr ""
 #: lib/kiln_cms_web/controllers/offline_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Offline"
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/chrome_components.ex
+#, elixir-autogen, elixir-format
+msgid "Offline — not saving"
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex
@@ -9025,6 +9057,11 @@ msgstr ""
 msgid "Save variant"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Save your changes before changing this content's state."
+msgstr ""
+
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #, elixir-autogen, elixir-format
 msgid "Saved"
@@ -10582,6 +10619,11 @@ msgid_plural "The last backup was %{count} hours ago."
 msgstr[0] ""
 msgstr[1] ""
 
+#: lib/kiln_cms_web/components/content_editor/chrome_components.ex
+#, elixir-autogen, elixir-format
+msgid "The last save was at %{time}."
+msgstr ""
+
 #: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
@@ -10786,6 +10828,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/release_preview_live.ex
 #, elixir-autogen, elixir-format
 msgid "This content no longer exists — the release will not publish as it stands."
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "This content was saved elsewhere while you were offline. A text block reloaded the saved version; the edits you made to it since were not applied."
 msgstr ""
 
 #: lib/kiln_cms_web/live/governance_live.ex
@@ -11455,6 +11502,11 @@ msgstr ""
 msgid "Uploaded until"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Uploading %{name}… %{pct}%"
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/page_html.ex
 #, elixir-autogen, elixir-format
 msgid "Uploads are checked by their contents, stripped of location metadata, and resized into responsive variants."
@@ -11947,6 +11999,11 @@ msgstr ""
 msgid "You don't have a membership to manage yet."
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to add images here."
+msgstr ""
+
 #: lib/kiln_cms_web/live/experiment_live.ex
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
@@ -12350,11 +12407,13 @@ msgstr ""
 msgid "control"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "couldn't be saved"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "couldn't be stored"
@@ -12442,6 +12501,7 @@ msgstr ""
 msgid "field grants: %{types}"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "file is too large for its type"
@@ -12472,6 +12532,7 @@ msgstr ""
 msgid "hybrid keyword + semantic search across all content types."
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "image dimensions are too large"
@@ -12667,6 +12728,11 @@ msgstr ""
 msgid "not an XLIFF 2.0 file"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "not an image type this editor accepts"
+msgstr ""
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "not archived — object storage is backed up by the provider"
@@ -12792,6 +12858,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "review due"
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/chrome_components.ex
+#, elixir-autogen, elixir-format
+msgid "saved %{time}"
 msgstr ""
 
 #: lib/kiln_cms_web/components/core_components.ex
@@ -12939,6 +13010,11 @@ msgstr ""
 msgid "today"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "too large (max %{mb} MB)"
+msgstr ""
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "too large (max 10 MB)"
@@ -12947,6 +13023,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "too many files (max 10)"
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "too many files at once (max %{count})"
 msgstr ""
 
 #: lib/kiln_cms_web/live/overview_live.ex
@@ -12995,6 +13076,7 @@ msgstr ""
 msgid "unreadable"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "unsupported file format"
@@ -13003,6 +13085,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "unsupported type"
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "upload failed"
 msgstr ""
 
 #: lib/kiln_cms_web/live/analytics_live.ex
