@@ -10801,6 +10801,11 @@ msgstr ""
 msgid "The default for every form on this site that has not chosen its own list on its Embed tab. Pages on this site may always frame its forms."
 msgstr ""
 
+#: lib/kiln_cms_web/live_user_auth.ex
+#, elixir-autogen, elixir-format
+msgid "The demo is being reset. Sign in again in a moment."
+msgstr ""
+
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
 msgid "The description is about %{pixels}px wide — over the %{max}px Google shows, so it may be cut off."
@@ -13175,6 +13180,20 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "required"
 msgstr ""
+
+#: lib/kiln_cms_web/components/layouts.ex
+#, elixir-autogen, elixir-format
+msgid "resets in %{count} hour"
+msgid_plural "resets in %{count} hours"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms_web/components/layouts.ex
+#, elixir-autogen, elixir-format
+msgid "resets in %{count} minute"
+msgid_plural "resets in %{count} minutes"
+msgstr[0] ""
+msgstr[1] ""
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format

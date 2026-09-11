@@ -373,6 +373,21 @@ defmodule KilnCMS.Accounts.AccountThrottle do
     Enum.each([:password_reset, :magic_link], &drop(key("mail:#{&1}", identifier), mail_window()))
   end
 
+  @doc """
+  Forget every bucket on this node. Called by a demo reset (`KilnCMS.Demo`),
+  where one shared account means one shared failure budget that any visitor can
+  spend on purpose; the reset is the moment it is allowed to come back.
+
+  `:ok` when the table doesn't exist yet (nothing has been throttled).
+  """
+  @spec forget_all() :: :ok
+  def forget_all do
+    :ets.delete_all_objects(__MODULE__)
+    :ok
+  rescue
+    ArgumentError -> :ok
+  end
+
   # One atomic increment-and-compare per bucket. Shared rather than copied per
   # bucket so that "the gate *is* the counter" — see the moduledoc — holds by
   # construction for every budget here, present and future. The arity-1 public

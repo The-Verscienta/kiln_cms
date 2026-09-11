@@ -37,19 +37,26 @@ defmodule KilnCMS.Environment do
 
   `nil` is the whole production story: no variable, no strip, nothing to
   configure on the deployment where a mislabel would be worst.
+
+  A demo deployment (`KilnCMS.Demo`) is labelled `demo` unless `KILN_ENV_LABEL`
+  says otherwise: its strip is where visitors learn their changes are
+  temporary, so it must not depend on a second variable being set.
   """
   @spec label() :: String.t() | nil
   def label do
-    case config()[:label] do
-      value when is_binary(value) ->
-        case String.trim(value) do
-          "" -> nil
-          trimmed -> trimmed
-        end
+    configured =
+      case config()[:label] do
+        value when is_binary(value) ->
+          case String.trim(value) do
+            "" -> nil
+            trimmed -> trimmed
+          end
 
-      _other ->
-        nil
-    end
+        _other ->
+          nil
+      end
+
+    if is_nil(configured) and KilnCMS.Demo.enabled?(), do: "demo", else: configured
   end
 
   @doc """

@@ -81,9 +81,17 @@ defmodule KilnCMS.Collab.Crdt do
   that path never starts anything. The caller refuses the join and the client
   degrades to solo editing with autosave, which is the same fallback it uses
   when the prototype is switched off entirely.
+
+  Also `{:error, :unavailable}` while a demo reset runs (`KilnCMS.Demo`): a
+  server started then would load the pre-reset document and write it back over
+  the restored one when it stops.
   """
   @spec ensure_server(String.t(), Ash.UUID.t()) :: {:ok, pid()} | {:error, :unavailable}
   def ensure_server(doc_key, org_id) do
+    if KilnCMS.Demo.resetting?(), do: {:error, :unavailable}, else: start_server(doc_key, org_id)
+  end
+
+  defp start_server(doc_key, org_id) do
     child = {DocServer, {doc_key, org_id}}
 
     case DynamicSupervisor.start_child(KilnCMS.Collab.Crdt.DocSupervisor, child) do

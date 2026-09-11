@@ -26,7 +26,7 @@ compilation and before the system starts.
 > `KILN_ENV_LABEL` / `KILN_ENV_COLOR`, `EMBED_ORIGINS` / `EMBED_ORIGINS_LOCKED`,
 > `KILN_AUDIT_ANCHORS_ENABLED`, `KILN_AUDIT_ANCHOR_EVERY_WRITE`, the
 > `KILN_GOVERNANCE_WITNESS*` group (plus `KILN_GOVERNANCE_CHECKPOINT_CRON`), and
-> the `KILN_PROVENANCE_*` group. `MIX_TEST_PARTITION` and `KILN_STRICT_TEST`
+> the `KILN_PROVENANCE_*` group, and the `KILN_DEMO_*` group. `MIX_TEST_PARTITION` and `KILN_STRICT_TEST`
 > are the reverse — test-only.
 
 ## On/off variables
@@ -674,6 +674,24 @@ development are the ones that set these.
 to set this. Neither can set it: the scrub runs as a throwaway process against a
 remote `DATABASE_URL`, not inside the application that will serve the clone.
 
+A demo deployment (below) is labelled `demo` when `KILN_ENV_LABEL` is unset, and
+its strip also says when the next reset is due.
+
+## Optional — demo mode
+
+A public "try the editor" instance that resets to a golden snapshot on a
+schedule. **Hard off by default.** Every reset also refuses unless the database
+name and `PHX_HOST` both contain `demo` and the snapshot was dumped from a demo
+database, and none of those checks can be overridden. Demo mode also makes mail
+inert (logged, not delivered) and switches federation off. See
+[`demo-mode.md`](demo-mode.md).
+
+| Variable | Default | Purpose | Where it's read |
+|----------|---------|---------|-----------------|
+| `KILN_DEMO_RESET` | unset | Enables demo mode. **A sentinel word, not a boolean**: only `confirm` (trimmed, any case) enables it, so `true` deliberately does *not*, and the on/off rules above do not apply. Any other value is refused with a warning, which also appears in the boot-time config warnings. | [`config/runtime.exs:1455`](../config/runtime.exs#L1455) |
+| `KILN_DEMO_GOLDEN_PATH` | `$BACKUP_DIR/demo/golden.dump` | Where the golden snapshot lives. `KilnCMS.Demo.capture_golden!/1` writes it and every reset reads it. The deferred media deletes are logged in the same directory, so it needs a persistent volume writable by `nobody`. | [`config/runtime.exs:1458`](../config/runtime.exs#L1458) |
+| `KILN_DEMO_RESET_CRON` | `0 * * * *` (hourly) | When the reset runs. Blank means the default. `false` keeps demo mode on but drops the schedule, so resets only run by hand. An invalid expression costs the schedule, not the boot. | [`config/runtime.exs:1467`](../config/runtime.exs#L1467) |
+
 ## Optional — seeding and staging
 
 Not read at boot: these are consumed by a seed script and by the staging-scrub
@@ -700,7 +718,7 @@ production.
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `MIX_TEST_PARTITION` | unset | Suffix appended to the test database name for partitioned test runs — also what keeps two concurrent worktrees off the same database. | [`config/runtime.exs:1481`](../config/runtime.exs#L1481) |
+| `MIX_TEST_PARTITION` | unset | Suffix appended to the test database name for partitioned test runs — also what keeps two concurrent worktrees off the same database. | [`config/runtime.exs:1522`](../config/runtime.exs#L1522) |
 | `KILN_STRICT_TEST` | unset | Set to an on-spelling (`true`/`1`/`yes`/`on`) to select the strict-tenancy CI leg: `:strict_tenancy` is flipped on so tenancy scoping compiles fail-closed, and the suite runs **only** the `strict_tenancy`-tagged tests. Uses the same spellings as every other flag in this document, via the standalone [`config/strict_test_flag.exs`](../config/strict_test_flag.exs) (#646) — it can't call `KilnCMS.Config.Env` directly because it's read in `config/test.exs`, which cannot call project modules. An unrecognized value stays non-strict **and warns on stderr**, like every other flag: without that the strict leg runs zero tests and exits 0, which is indistinguishable from never having invoked it. | [`config/test.exs:329`](../config/test.exs#L329) |
 | `POSTGRES_USER` | `postgres` | E2E database user. | [`config/e2e.exs:28`](../config/e2e.exs#L28) |
 | `POSTGRES_PASSWORD` | `postgres` | E2E database password. | [`config/e2e.exs:29`](../config/e2e.exs#L29) |

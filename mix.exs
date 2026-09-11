@@ -128,6 +128,7 @@ defmodule KilnCMS.MixProject do
         "KilnCMSWeb.Telemetry.init/1",
         "KilnCMSWeb.AuthController.success/4",
         "Oban.Worker.timeout/1",
+        "Oban.Cron.Expression",
         # Named by `projects/README.md` as the worked overlay example, and
         # excluded from the reference by `filter_modules` above.
         "Example.Catalog",
@@ -240,6 +241,7 @@ defmodule KilnCMS.MixProject do
       "docs/releasing.md": [],
       "docs/beta-testing.md": [],
       "docs/staging-environments.md": [],
+      "docs/demo-mode.md": [],
       "docs/media-pipeline.md": [],
       "docs/content-portability.md": [],
       "docs/direct-email-delivery.md": [],
@@ -357,6 +359,7 @@ defmodule KilnCMS.MixProject do
         "docs/releasing.md",
         "docs/beta-testing.md",
         "docs/staging-environments.md",
+        "docs/demo-mode.md",
         "docs/media-pipeline.md",
         "docs/content-portability.md",
         "docs/direct-email-delivery.md",

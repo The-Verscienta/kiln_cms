@@ -36,6 +36,24 @@ defmodule KilnCMS.Release do
       end)
   end
 
+  @doc """
+  Reset a demo deployment to its golden snapshot from a release **that is not
+  serving** (`bin/kiln_cms eval`) — first boot, or with the application stopped.
+
+  Against a running node use `bin/kiln_cms rpc 'KilnCMS.Demo.reset!()'` instead:
+  only a reset inside the serving node can close its open documents, evict its
+  sockets and flush its caches. Same guards either way. See `KilnCMS.Demo` and
+  `docs/demo-mode.md`.
+  """
+  def reset_demo do
+    load_app()
+
+    {:ok, _, _} =
+      Ecto.Migrator.with_repo(hd(repos()), fn _repo ->
+        KilnCMS.Demo.reset!(live?: false, shell: &IO.puts/1)
+      end)
+  end
+
   defp repos do
     Application.fetch_env!(@app, :ecto_repos)
   end

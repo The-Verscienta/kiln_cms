@@ -58,6 +58,8 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             KILN_READING_TIME_WPM BACKUP_KEEP_DAYS BACKUP_STALE_AFTER_HOURS
             KILN_EXPERIMENTS_STICKY_DAYS REQUIRE_AV_METADATA_STRIP
             BRAND_PRIMARY_COLOR ASK_RERANK
+            KILN_DEMO_RESET KILN_DEMO_RESET_CRON KILN_DEMO_GOLDEN_PATH
+            KILN_FEDERATION_ENABLED
           ) ++ Map.keys(@prod_env)
 
   setup do
@@ -680,6 +682,68 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
                config
                |> get_in([:kiln_cms, :config_warnings])
                |> Enum.find(&match?({"BRAND_PRIMARY_COLOR", _, _}, &1))
+    end
+  end
+
+  describe "KILN_DEMO_RESET (docs/demo-mode.md)" do
+    defp demo_config(config) do
+      %{
+        demo: get_in(config, [:kiln_cms, KilnCMS.Demo]),
+        cron: get_in(config, [:kiln_cms, :demo_reset_cron]),
+        mailer: get_in(config, [:kiln_cms, KilnCMS.Mailer, :adapter]),
+        federation: get_in(config, [:kiln_cms, KilnCMS.Federation, :enabled])
+      }
+    end
+
+    test "unset leaves demo mode off and everything else alone" do
+      assert demo_config(eval(%{})) == %{demo: nil, cron: nil, mailer: nil, federation: nil}
+    end
+
+    test "`true` is not the sentinel: off, and the rejection is collected" do
+      config = eval(%{"KILN_DEMO_RESET" => "true"})
+
+      assert demo_config(config) == %{demo: nil, cron: nil, mailer: nil, federation: nil}
+
+      assert config
+             |> get_in([:kiln_cms, :config_warnings])
+             |> Enum.filter(&match?({"KILN_DEMO_RESET", _, _}, &1)) ==
+               [{"KILN_DEMO_RESET", "true", {:one_of, ["confirm"]}}]
+    end
+
+    test "`confirm` enables it hourly, with mail and federation inert" do
+      config = eval(%{"KILN_DEMO_RESET" => " Confirm ", "KILN_FEDERATION_ENABLED" => "true"})
+
+      assert demo_config(config) == %{
+               demo: [enabled: true],
+               cron: "0 * * * *",
+               mailer: Swoosh.Adapters.Logger,
+               federation: false
+             }
+    end
+
+    test "a schedule and a snapshot path are taken as given" do
+      config =
+        eval(%{
+          "KILN_DEMO_RESET" => "confirm",
+          "KILN_DEMO_RESET_CRON" => "*/30 * * * *",
+          "KILN_DEMO_GOLDEN_PATH" => " /data/demo/golden.dump "
+        })
+
+      assert demo_config(config).demo == [enabled: true, golden_path: "/data/demo/golden.dump"]
+      assert demo_config(config).cron == "*/30 * * * *"
+    end
+
+    test "a blank schedule is unset — hourly — not off" do
+      config = eval(%{"KILN_DEMO_RESET" => "confirm", "KILN_DEMO_RESET_CRON" => "  "})
+
+      assert demo_config(config).cron == "0 * * * *"
+    end
+
+    test "is never read under :test" do
+      config = eval(%{"KILN_DEMO_RESET" => "confirm"}, :test)
+
+      assert demo_config(config).demo == nil
+      assert demo_config(config).cron == nil
     end
   end
 
