@@ -39,6 +39,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMS.CMS.VersionSnapshot
   alias KilnCMS.CMS.WorkingCopy
   alias KilnCMS.Collab
+  alias KilnCMS.Collab.FieldLock
   alias KilnCMS.Notifications
   alias KilnCMS.Search.Related
   alias KilnCMS.Slug
@@ -111,8 +112,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
         field_definitions = field_definitions(kind, actor, org)
         content_type = ContentTypes.get!(kind, org)
 
+        topic = Presence.topic(kind, id)
+
         if connected?(socket) do
-          topic = Presence.track_editor(self(), kind, id, actor)
+          ^topic = Presence.track_editor(self(), kind, id, actor)
           Phoenix.PubSub.subscribe(KilnCMS.PubSub, topic)
           # Preview-window joins/leaves, so broadcast_preview/1 can no-op
           # while no pop-out is watching.
@@ -151,8 +154,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:nested_child_types, nested_child_types())
          |> assign(:editors, Presence.editors(kind, id))
          |> assign(:preview_open?, Presence.previews_open?(kind, id))
-         |> assign(:cursors, %{})
+         # Advisory field locks (KilnCMS.Collab.FieldLock): the record's lock
+         # map as it stands, the field this session is focused on, the open
+         # takeover dialog, and the fields a takeover is waiting on us to flush.
+         |> assign_locks(if(connected?(socket), do: FieldLock.locks(topic), else: %{}))
          |> assign(:self_field, nil)
+         |> assign(:takeover, nil)
+         |> assign(:flushing, [])
          # Deep-link focus from an external front end (#355): `?focus=<field>`
          # scrolls to and pulses that field's input on load (block ids use the
          # in-context editor's `?focus=`; this is the custom/core-field twin).
@@ -1430,6 +1438,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  # Release the field locks only when the person deliberately leaves the
+  # editor (`{:shutdown, :left}` is live navigation). A transport close — a
+  # reload, a tab close, a network drop — stops the channel with
+  # `{:shutdown, :closed}` instead and must fall through to the lock's
+  # monitor, so the grace period can hand the field back silently.
+  @impl true
+  def terminate({:shutdown, :left}, %{assigns: %{kind: kind, record: record}} = _socket) do
+    FieldLock.release_all(Presence.topic(kind, record.id), self())
+    :ok
+  end
+
+  def terminate(_reason, _socket), do: :ok
+
   @impl true
   def handle_event("validate", %{"form" => params} = event, socket) when is_map(params) do
     # The columns children live in socket state (they aren't bound form inputs);
@@ -2483,21 +2504,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Discard local changes and reload the latest saved version, clearing the
   # conflict. (The simplest safe resolution — a merge UI is future work.)
   def handle_event("reload_conflict", _params, socket) do
-    record =
-      fetch!(
-        socket.assigns.kind,
-        socket.assigns.record.id,
-        socket.assigns.actor,
-        socket.assigns.current_org
-      )
-
     {:noreply,
      socket
-     |> assign_record(record)
-     |> reset_editors()
-     |> assign(:conflict, false)
-     |> assign(:save_state, :saved)
-     |> assign(:settings_dirty?, false)
+     |> reload_latest()
      |> put_flash(:info, gettext("Reloaded the latest version."))}
   end
 
@@ -3446,6 +3455,31 @@ defmodule KilnCMSWeb.ContentEditorLive do
     if stale_conflict?(form),
       do: flag_conflict(socket),
       else: assign(socket, :save_state, :error)
+  end
+
+  # Replace everything this session holds with the persisted record: the
+  # form, the block children, the rich-text bodies (the editor hosts remount
+  # through the `editor_version` bump). The conflict reload
+  # (`reload_conflict`) and a lock takeover that went through (`Session`'s
+  # `{:lock_granted, _, _}`) both come here; both have decided there is
+  # nothing of this session's own worth keeping. Raises if the record cannot be read — a conflict reload with a
+  # record gone from under it should say so, not carry on with the old one.
+  @doc false
+  def reload_latest(socket) do
+    record =
+      fetch!(
+        socket.assigns.kind,
+        socket.assigns.record.id,
+        socket.assigns.actor,
+        socket.assigns.current_org
+      )
+
+    socket
+    |> assign_record(record)
+    |> reset_editors()
+    |> assign(:conflict, false)
+    |> assign(:save_state, :saved)
+    |> assign(:settings_dirty?, false)
   end
 
   # Re-read the persisted record and everything derived from it. See the
@@ -4521,10 +4555,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def render(assigns) do
     assigns =
       assigns
-      |> assign(
-        :locked_fields,
-        locked_fields(assigns.cursors, assigns.self_field, assigns.actor.id)
-      )
+      |> assign(:locked_fields, locked_fields(assigns.field_locks, self()))
       |> assign(:related_field, related_field(assigns.kind))
       |> assign(:related_current, related_current(assigns.kind, assigns.record))
 
@@ -4558,6 +4589,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
           {gettext("Reload latest")}
         </button>
       </div>
+      <.takeover_dialog :if={@takeover} takeover={@takeover} draft?={@record.state == :draft} />
       <.form
         for={@form}
         phx-change="validate"
@@ -4644,7 +4676,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
         <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
           <div class="min-w-0 space-y-6">
             <div class="grid gap-4 sm:grid-cols-2">
-              <div class={["relative", lock_ring(@locked_fields, "title")]}>
+              <div
+                class={["relative", lock_ring(@locked_fields, "title")]}
+                {takeover_attrs(@locked_fields, "title")}
+              >
                 <.input
                   field={@form[:title]}
                   label={gettext("Title")}
@@ -4654,7 +4689,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
                 />
                 <.field_cursors field="title" cursors={@cursors} />
               </div>
-              <div class={["relative", lock_ring(@locked_fields, "slug")]}>
+              <div
+                class={["relative", lock_ring(@locked_fields, "slug")]}
+                {takeover_attrs(@locked_fields, "slug")}
+              >
                 <.input
                   field={@form[:slug]}
                   label={gettext("Slug")}
@@ -4686,7 +4724,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
                 />
                 <.field_cursors field="slug" cursors={@cursors} />
               </div>
-              <div class={["relative sm:col-span-2", lock_ring(@locked_fields, "path_alias")]}>
+              <div
+                class={["relative sm:col-span-2", lock_ring(@locked_fields, "path_alias")]}
+                {takeover_attrs(@locked_fields, "path_alias")}
+              >
                 <.input
                   field={@form[:path_alias]}
                   label={gettext("Path alias (optional)")}
@@ -4741,7 +4782,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
               </div>
             </div>
 
-            <div :if={@has_excerpt} class={["relative", lock_ring(@locked_fields, "excerpt")]}>
+            <div
+              :if={@has_excerpt}
+              class={["relative", lock_ring(@locked_fields, "excerpt")]}
+              {takeover_attrs(@locked_fields, "excerpt")}
+            >
               <.input
                 field={@form[:excerpt]}
                 type="textarea"
@@ -4910,13 +4955,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     <div
                       :if={block_type_string(bf) == "rich_text"}
                       class={["relative", lock_ring(@locked_fields, bf[:body].name)]}
+                      {takeover_attrs(@locked_fields, bf[:body].name)}
                     >
                       <.field_cursors field={bf[:body].name} cursors={@cursors} />
+                      <%!-- `data-locked` is a data-* attribute, so it stays in sync
+                            inside the ignore host; the hook's updated() turns the
+                            TipTap editor read-only from it, the way `readonly`
+                            does for the plain inputs. --%>
                       <div
                         id={"rt-#{rich_host_key(bf)}-v#{@editor_version}"}
                         phx-hook="RichText"
                         phx-update="ignore"
                         data-block-id={bf[:id].value}
+                        data-locked={field_locked?(@locked_fields, bf[:body].name) && "true"}
                         data-content={rich_text_editor_html(bf)}
                         data-editor-label={gettext("Rich text editor")}
                         data-lock-field={bf[:body].name}

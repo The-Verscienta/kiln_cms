@@ -77,6 +77,23 @@ migration, a rewritten column, a dropped config key).
   whose fold is the live text, whichever of the three publishes wrote it.
   Migration `add_working_copy`, no data migration — existing rows read as
   nothing pending.
+- **Field-lock takeover in the content editor.** The advisory field locks
+  (title, slug, SEO fields, block fields, rich-text bodies) now live in a
+  per-record lock process, `KilnCMS.Collab.FieldLock`, rather than in
+  per-session focus broadcasts — first come, first served, with three release
+  paths: blur or leaving the editor, process death with a 45 s grace (a reload
+  or a short network drop does not cost the lock; the same person gets it
+  straight back), and a 15 min idle timeout. A second editor clicking a
+  locked field gets a dialog that says who holds it and how active they are
+  ("Alice is typing right now." / "Alice has had this open for 12 minutes but
+  hasn't typed for 5 minutes.") with a **Take over** button. The takeover asks
+  the holder to flush first — the rich-text hook pushes whatever still sits in
+  its debounce, a pending draft autosave persists it as a version — then
+  transfers; a holder that does not answer within 3 s is not waited for. The
+  displaced holder's field turns read-only with a note saying who took it and
+  whether their text was saved. Rich-text blocks now honour the lock too: a
+  block held by someone else is read-only in TipTap, not just ringed.
+  Modelled on texttile's `Texttile.Articles.Lock`.
 - **A first-run setup wizard at `/setup` (#1317).** While an instance has no
   admin account, a three-step wizard creates one — email + password, an
   optional site name/colour/theme — and then sends the operator to sign-in,

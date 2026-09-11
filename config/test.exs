@@ -273,6 +273,12 @@ config :kiln_cms, :collab_prototype, true
 # process.
 config :kiln_cms, KilnCMS.Collab.Crdt, persist?: false, materialize?: false
 
+# Field-lock takeovers wait this long for the holder's flush before moving on.
+# Short so the "holder does not answer" path is testable without a 3 s wait;
+# grace and idle keep their defaults (a test that needs them starts its own
+# lock process with explicit timings).
+config :kiln_cms, KilnCMS.Collab.FieldLock, flush_ms: 400
+
 # The test-suite plugin (D18): exercises every plugin seam — block union
 # membership, admin nav/route, supervision child, Oban queue merge.
 config :kiln_cms, :plugins, [KilnCMS.FixturePlugin]

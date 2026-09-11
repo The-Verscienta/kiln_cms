@@ -142,6 +142,7 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: lib/kiln_cms_web/components/core_components.ex
+#: lib/kiln_cms_web/live/content_editor/shared.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} hour"
 msgid_plural "%{count} hours"
@@ -170,6 +171,7 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: lib/kiln_cms_web/components/core_components.ex
+#: lib/kiln_cms_web/live/content_editor/shared.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} minute"
 msgid_plural "%{count} minutes"
@@ -389,7 +391,17 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor/shared.ex
 #, elixir-autogen, elixir-format
+msgid "%{name} has had this open for %{open_for} but hasn't typed for %{idle}."
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor/shared.ex
+#, elixir-autogen, elixir-format
 msgid "%{name} is editing this field"
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor/shared.ex
+#, elixir-autogen, elixir-format, fuzzy
+msgid "%{name} is editing this field — take it over"
 msgstr ""
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
@@ -397,9 +409,24 @@ msgstr ""
 msgid "%{name} is on this block"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor/shared.ex
+#, elixir-autogen, elixir-format, fuzzy
+msgid "%{name} is typing right now."
+msgstr ""
+
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "%{name} is typing…"
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor/session.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} took over “%{field}”. Your changes are saved."
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor/session.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} took over “%{field}”. Your unsaved changes are still in this form."
 msgstr ""
 
 #: lib/kiln_cms_web/live/translations_live.ex
@@ -864,6 +891,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/form_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "A submission whose text contains any of these words or phrases is scored as spam and held for review rather than delivered. Matching ignores case and applies to every form on this site."
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor/shared.ex
+#, elixir-autogen, elixir-format
+msgid "A takeover stops that mid-sentence: the field turns read-only on their side, and a note there says who took it."
 msgstr ""
 
 #: lib/kiln_cms_web/live/billing_live.ex
@@ -2070,6 +2102,7 @@ msgstr ""
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/billing_live.ex
+#: lib/kiln_cms_web/live/content_editor/shared.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/experiment_live.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
@@ -2097,6 +2130,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#: lib/kiln_cms_web/live/content_editor/shared.ex
 #, elixir-autogen, elixir-format
 msgid "Canonical URL"
 msgstr ""
@@ -4489,6 +4523,7 @@ msgid "Everything with a cadence is inside it."
 msgstr ""
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
+#: lib/kiln_cms_web/live/content_editor/shared.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Excerpt"
@@ -6985,6 +7020,11 @@ msgstr ""
 msgid "Nothing is blocked."
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor/shared.ex
+#, elixir-autogen, elixir-format
+msgid "Nothing is lost — what they had typed is saved first."
+msgstr ""
+
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Nothing is scanned and no panel appears until you switch it on, and what you switch on applies to this site only."
@@ -7499,6 +7539,7 @@ msgid "Path"
 msgstr ""
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
+#: lib/kiln_cms_web/live/content_editor/shared.ex
 #, elixir-autogen, elixir-format
 msgid "Path alias"
 msgstr ""
@@ -9605,6 +9646,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/billing_live.ex
+#: lib/kiln_cms_web/live/content_editor/shared.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/form_live.ex
@@ -9650,6 +9692,7 @@ msgid "Social accounts"
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#: lib/kiln_cms_web/live/content_editor/shared.ex
 #, elixir-autogen, elixir-format
 msgid "Social image"
 msgstr ""
@@ -10063,6 +10106,16 @@ msgstr ""
 msgid "Tags"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor/shared.ex
+#, elixir-autogen, elixir-format
+msgid "Take over"
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor/shared.ex
+#, elixir-autogen, elixir-format
+msgid "Take over “%{field}” from %{name}?"
+msgstr ""
+
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "Target locale"
@@ -10136,6 +10189,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
 msgid "Testing “%{title}”"
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor/shared.ex
+#, elixir-autogen, elixir-format, fuzzy
+msgid "Text block"
 msgstr ""
 
 #: lib/kiln_cms_web/live/compliance_live.ex
@@ -10945,6 +11003,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #: lib/kiln_cms_web/components/version_diff_components.ex
+#: lib/kiln_cms_web/live/content_editor/shared.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
@@ -11727,6 +11786,11 @@ msgstr ""
 msgid "What should the model do?"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor/shared.ex
+#, elixir-autogen, elixir-format
+msgid "What they had typed stays in their editor, unsaved, until they save it."
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/content_controller.ex
 #, elixir-autogen, elixir-format
 msgid "What's on, soonest first."
@@ -12134,6 +12198,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
 msgid "Zero-ops default: paste the secret here. Encrypted with a key derived from SECRET_KEY_BASE — rotating that secret orphans it."
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor/shared.ex
+#, elixir-autogen, elixir-format
+msgid "a minute"
 msgstr ""
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
@@ -12888,6 +12957,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format
 msgid "translation gaps"
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor/shared.ex
+#, elixir-autogen, elixir-format
+msgid "under a minute"
 msgstr ""
 
 #: lib/kiln_cms_web/live/billing_live.ex

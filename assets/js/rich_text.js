@@ -894,6 +894,8 @@ function buildEditor(hook, extensions, content = null) {
   // know. The server-rendered legacy_html input stays untouched as the no-JS
   // fallback; the server clears it when a pushed body lands.
   const pushBody = () => {
+    clearTimeout(hook._debounce)
+    hook._pendingPush = false
     hook.pushEvent("rich_text_body", {
       id: hook.el.dataset.blockId || null,
       idx: hook.el.dataset.blockIndex,
@@ -928,10 +930,16 @@ function buildEditor(hook, extensions, content = null) {
         role: "textbox",
       },
     },
+    // Advisory field lock (#140): another editor holds this block, so the
+    // text is read-only here — the same `readonly` the plain inputs get.
+    // `data-locked` is kept in sync by LiveView even inside the ignore host;
+    // the hook's updated() follows later changes.
+    editable: hook.el.dataset.locked !== "true",
     onUpdate: () => {
       hook.slash.update()
       syncToolbar()
       // Debounced push so the live preview reflects rich-text edits.
+      hook._pendingPush = true
       clearTimeout(hook._debounce)
       hook._debounce = setTimeout(pushBody, 300)
     },
@@ -979,6 +987,16 @@ function buildEditor(hook, extensions, content = null) {
   // `push_event` reaches EVERY mounted hook that registered a handler, so the
   // block id filter is what stops one block's suggestion landing in all of
   // them. The ref is kept so destroyed() can drop the handler.
+  // A lock takeover asks this block's holder to flush first: whatever still
+  // sits in the debounce goes out as the usual `rich_text_body`, then
+  // `body_flushed` tells the server the answer is complete. Every mounted hook
+  // hears the push; only the block whose field is named answers.
+  hook._flushRef = hook.handleEvent("flush_body", ({field}) => {
+    if (!field || field !== hook.el.dataset.lockField) return
+    if (hook._pendingPush) pushBody()
+    hook.pushEvent("body_flushed", {field})
+  })
+
   hook._assistRef = hook.handleEvent("assist:apply", ({block_id, mode, paragraphs}) => {
     if (!block_id || block_id !== hook.el.dataset.blockId) return
     if (!Array.isArray(paragraphs) || paragraphs.length === 0) return

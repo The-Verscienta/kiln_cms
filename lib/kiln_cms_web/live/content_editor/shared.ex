@@ -182,38 +182,145 @@ defmodule KilnCMSWeb.ContentEditor.Shared do
     }
   end
 
-  # The set of fields soft-locked *for us* right now. A field is contended when
-  # one or more editors are focused on it; the editor with the lowest id owns it
-  # (a deterministic tie-break, so two simultaneous focusers never lock each
-  # other out). We hold the lock only on fields we don't own. The lock is
-  # advisory — the input goes readonly but still submits — and releases the
-  # moment the owner blurs or leaves.
-  def locked_fields(cursors, self_field, self_id) do
-    cursors
-    |> Enum.group_by(fn {_id, c} -> c.field end, fn {id, _c} -> id end)
-    |> Enum.flat_map(fn {field, other_ids} ->
-      # We own `field` only if we're focused there and outrank everyone else.
-      owned? = field == self_field and Enum.all?(other_ids, &(self_id < &1))
-      if owned?, do: [], else: [field]
-    end)
-    |> MapSet.new()
+  # The set of fields soft-locked *for us* right now: every field held by a
+  # session other than this one, straight off the lock map
+  # `KilnCMS.Collab.FieldLock` announces. First come, first served — the
+  # process that owns the record's locks orders the focus events, so there is
+  # no tie to break here. The lock is advisory — the input goes readonly but
+  # still submits — and releases when the holder blurs, leaves, goes idle, or
+  # is taken over.
+  #
+  # Keyed on the holder's PID, not their user id: one person with the record
+  # open in two tabs is two sessions, and the second tab is locked out of a
+  # field the first one holds exactly like anybody else (the takeover dialog
+  # is how it gets it back).
+  def locked_fields(locks, self_pid) do
+    for {field, %{pid: pid}} <- locks, pid != self_pid, into: MapSet.new(), do: field
   end
 
   # Same set, computed straight from the socket — for `handle_event` clauses
   # that write a field on the author's behalf and must re-check the lock
   # server-side (the rendered `readonly` attribute is not a boundary).
-  def locked_fields(socket),
-    do:
-      locked_fields(
-        socket.assigns.cursors,
-        socket.assigns.self_field,
-        socket.assigns.actor.id
-      )
+  def locked_fields(socket), do: locked_fields(socket.assigns.field_locks, self())
 
   def field_locked?(locked, field), do: MapSet.member?(locked, field)
 
   def lock_ring(locked, field) do
     if field_locked?(locked, field), do: "rounded-md ring-2 ring-warning/50", else: ""
+  end
+
+  # Click-to-take-over on a locked field's wrapper: a readonly input still
+  # receives the click, which bubbles here and opens the takeover dialog for
+  # `field`. Nothing on a free field — a click there is just a click.
+  def takeover_attrs(locked, field) do
+    if field_locked?(locked, field),
+      do: %{"phx-click" => "ask_takeover", "phx-value-field" => field},
+      else: %{}
+  end
+
+  # The cursor badges, derived from the lock map: one per field held by
+  # somebody else. Keyed by field (a field has one holder) rather than by user
+  # (a user may hold two fields from two tabs).
+  def cursors_from_locks(locks, self_pid) do
+    for {field, holder} <- locks, holder.pid != self_pid, into: %{} do
+      {field,
+       %{id: holder.user_id, name: holder.name, field: field, color: color_for(holder.user_id)}}
+    end
+  end
+
+  # What the takeover dialog owes the person asking: not a generic "are you
+  # sure", but who holds the field and how active they are. `now` is a
+  # parameter so the two branches can be tested without waiting 30 s.
+  def activity_line(name, holder, now \\ DateTime.utc_now()) do
+    if KilnCMS.Collab.FieldLock.typing?(holder, now) do
+      gettext("%{name} is typing right now.", name: name)
+    else
+      gettext(
+        "%{name} has had this open for %{open_for} but hasn't typed for %{idle}.",
+        name: name,
+        open_for: duration_in_words(DateTime.diff(now, holder.acquired_at, :second)),
+        idle: duration_in_words(DateTime.diff(now, holder.last_keystroke_at, :second))
+      )
+    end
+  end
+
+  defp duration_in_words(seconds) when seconds < 60, do: gettext("under a minute")
+  defp duration_in_words(seconds) when seconds < 120, do: gettext("a minute")
+
+  defp duration_in_words(seconds) when seconds < 3600,
+    do: ngettext("%{count} minute", "%{count} minutes", div(seconds, 60))
+
+  defp duration_in_words(seconds),
+    do: ngettext("%{count} hour", "%{count} hours", div(seconds, 3600))
+
+  # A human name for a lockable field, for the dialog title and the note the
+  # displaced holder gets. Core fields are bare names ("title", "seo_title");
+  # block fields are full form paths ("form[blocks][2][body]"), of which only
+  # the last segment says what the field is.
+  def field_label("title"), do: gettext("Title")
+  def field_label("slug"), do: gettext("Slug")
+  def field_label("path_alias"), do: gettext("Path alias")
+  def field_label("excerpt"), do: gettext("Excerpt")
+  def field_label("seo_title"), do: gettext("SEO title")
+  def field_label("seo_description"), do: gettext("SEO description")
+  def field_label("seo_keywords"), do: gettext("SEO keywords")
+  def field_label("seo_image"), do: gettext("Social image")
+  def field_label("canonical_url"), do: gettext("Canonical URL")
+
+  def field_label(field) do
+    case Regex.run(~r/\[([a-z_]+)\]$/, field) do
+      [_, "body"] -> gettext("Text block")
+      [_, name] -> dsl_label(name)
+      nil -> dsl_label(field)
+    end
+  end
+
+  attr :takeover, :map, required: true, doc: "`%{field, holder}` — the field and who holds it"
+
+  attr :draft?, :boolean,
+    required: true,
+    doc: "whether the holder's flush persists (drafts autosave)"
+
+  # The takeover dialog: who holds the field, how active they are, and what a
+  # takeover does to them — then the one button.
+  def takeover_dialog(assigns) do
+    ~H"""
+    <.modal id="takeover-dialog" on_close="cancel_takeover">
+      <:title>
+        {gettext("Take over “%{field}” from %{name}?",
+          field: field_label(@takeover.field),
+          name: @takeover.holder.name
+        )}
+      </:title>
+      <div class="space-y-3 p-4 text-sm">
+        <p id="takeover-activity">{activity_line(@takeover.holder.name, @takeover.holder)}</p>
+        <p class="text-base-content/70">
+          {gettext(
+            "A takeover stops that mid-sentence: the field turns read-only on their side, and a note there says who took it."
+          )}
+          <span :if={@draft?}>
+            {gettext("Nothing is lost — what they had typed is saved first.")}
+          </span>
+          <span :if={!@draft?}>
+            {gettext("What they had typed stays in their editor, unsaved, until they save it.")}
+          </span>
+        </p>
+      </div>
+      <div class="flex justify-end gap-2 border-t border-base-content/10 p-4">
+        <button type="button" phx-click="cancel_takeover" class="btn btn-ghost btn-sm">
+          {gettext("Cancel")}
+        </button>
+        <button
+          type="button"
+          id="takeover-confirm"
+          phx-click="confirm_takeover"
+          class="btn btn-sm border-transparent bg-warning text-warning-content hover:opacity-90"
+        >
+          {gettext("Take over")}
+        </button>
+      </div>
+    </.modal>
+    """
   end
 
   def dsl_label(name), do: name |> to_string() |> Phoenix.Naming.humanize()
@@ -222,25 +329,28 @@ defmodule KilnCMSWeb.ContentEditor.Shared do
   attr :cursors, :map, required: true
 
   # Floating badges naming the collaborators currently focused on `field`.
+  # Each badge is a button: it opens the takeover dialog for the field, so a
+  # keyboard user has the same way in as a click on the locked input.
   def field_cursors(assigns) do
     others = for {_id, c} <- assigns.cursors, c.field == assigns.field, do: c
     assigns = assign(assigns, :others, others)
 
     ~H"""
-    <div
-      :if={@others != []}
-      class="pointer-events-none absolute right-1 top-0 z-10 flex gap-1"
-    >
-      <span
+    <div :if={@others != []} class="absolute right-1 top-0 z-10 flex gap-1">
+      <button
         :for={c <- @others}
+        type="button"
+        phx-click="ask_takeover"
+        phx-value-field={@field}
         title={gettext("%{name} is editing this field", name: c.name)}
+        aria-label={gettext("%{name} is editing this field — take it over", name: c.name)}
         class={[
           "flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-white shadow",
           c.color
         ]}
       >
         <.icon name="hero-lock-closed-mini" class="size-3" />{c.name}
-      </span>
+      </button>
     </div>
     """
   end
