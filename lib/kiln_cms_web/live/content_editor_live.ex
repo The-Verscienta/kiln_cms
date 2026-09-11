@@ -2649,8 +2649,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
            |> assign_record(fetch!(kind, record.id, actor, record.org_id))
            |> put_flash(:info, gettext("Marked reviewed — the freshness clock is reset."))}
 
-        _ ->
-          {:noreply, put_flash(socket, :error, gettext("That action isn't allowed right now."))}
+        {:error, error} ->
+          {:noreply,
+           put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.error("mark_reviewed", error))}
       end
     else
       {:noreply, socket}

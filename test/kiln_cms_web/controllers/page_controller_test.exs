@@ -68,6 +68,47 @@ defmodule KilnCMSWeb.PageControllerTest do
     end
   end
 
+  # The site root belongs to the site once it has a Home page of its own
+  # (`KilnCMS.CMS.StarterContent`) — but only a PUBLISHED one: the starter
+  # draft `/setup` creates must not reach visitors before the operator says so.
+  describe "a Home page at the site root" do
+    alias KilnCMS.CMS
+
+    setup do
+      on_exit(fn -> KilnCMS.Cache.flush_delivery() end)
+    end
+
+    defp home_page!(admin) do
+      CMS.create_page!(
+        %{
+          title: "Home",
+          slug: "home",
+          blocks: [%{type: :heading, content: "Hours and location", data: %{"level" => 1}}]
+        },
+        actor: admin
+      )
+    end
+
+    test "a published Home page replaces the stock template", %{conn: conn} do
+      admin = user(:admin)
+      admin |> home_page!() |> CMS.publish_page!(%{}, actor: admin)
+
+      html = conn |> get(~p"/") |> html_response(200)
+
+      assert html =~ "Hours and location"
+      refute html =~ "Model content once"
+    end
+
+    test "a draft Home page does not", %{conn: conn} do
+      home_page!(user(:admin))
+
+      html = conn |> get(~p"/") |> html_response(200)
+
+      assert html =~ "Model content once"
+      refute html =~ "Hours and location"
+    end
+  end
+
   # #319: the header/footer API links land on a served docs page, not on the
   # raw endpoints (which 404/400 in a browser).
   test "GET /developers serves the API docs page", %{conn: conn} do

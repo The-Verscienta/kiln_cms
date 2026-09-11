@@ -106,6 +106,22 @@ defmodule KilnCMSWeb.SetupLiveTest do
       assert row.brand_color == "#1d4ed8"
       assert row.theme == :editorial
 
+      # Something to write on first sign-in: a DRAFT Home page — never
+      # published on the operator's behalf — headed with the new site's name.
+      assert [home] =
+               CMS.list_pages!(
+                 query: [filter: [slug: "home"]],
+                 authorize?: false,
+                 tenant: Accounts.default_org_id()
+               )
+
+      assert home.state == :draft
+      assert home.title == "Home"
+      assert [heading, rich_text] = home.blocks
+      assert heading.type == :heading
+      assert heading.value.text == "Owner's Site"
+      assert rich_text.type == :rich_text
+
       on_exit(fn -> KilnCMS.Cache.bust_branding(Accounts.default_org_id()) end)
     end
 

@@ -159,6 +159,25 @@ migration, a rewritten column, a dropped config key).
   rich-text block re-sends the words it still holds — unless the record was
   saved by someone else meanwhile, in which case their save wins, the block
   reloads it, and a flash says so once.
+- **A path from `/setup` to a published home page.** The wizard now also
+  creates a draft **Home** page (slug `home`, headed with the site name), and
+  the site root `/` serves that page once it is published — until then, and
+  on any site without one, `/` keeps the stock template. `/` moved into the
+  delivery pipeline to do it, so a served Home page gets the site's code
+  injection like every other page. Admins see a four-step **Get your site
+  live** checklist on the Overview (name the site → write the home page →
+  publish → view the site) until anything is published; a site with no home
+  page gets a "Create one" button there. Every console page gains a **View
+  site** link in the top bar. Nothing is published on the operator's behalf,
+  and no schema changes.
+- **Workflow refusals say why.** Submit / Publish / Archive / Mark reviewed,
+  in the editor and the content list, used to answer every failure with
+  "That action isn't allowed right now." They now name the reason: a
+  permission refusal says who can do it ("Publishing needs an admin. Submit
+  it for review…"), a transition the record's state no longer allows says to
+  reload, and a validation failure shows the validation's own message
+  (`KilnCMSWeb.WorkflowErrors`).
+
 - **A first-run setup wizard at `/setup` (#1317).** While an instance has no
   admin account, a three-step wizard creates one — email + password, an
   optional site name/colour/theme — and then sends the operator to sign-in,

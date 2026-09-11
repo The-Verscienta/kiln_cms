@@ -823,7 +823,8 @@ defmodule KilnCMSWeb.Router do
   scope "/", KilnCMSWeb do
     pipe_through :browser
 
-    get "/", PageController, :home
+    # `/` itself lives in the delivery scope below (`ContentController.home/2`):
+    # a published Home page is served there, with the site's code injection.
     # Served summary of the headless API surfaces — the header/footer
     # "GraphQL" / "JSON:API" links land here instead of on raw endpoints (#319).
     get "/developers", PageController, :developers
@@ -1062,6 +1063,9 @@ defmodule KilnCMSWeb.Router do
   scope "/", KilnCMSWeb do
     pipe_through [:browser, :delivery]
 
+    # The site root: the published Home page when the site has one, else the
+    # stock template (`PageController.home/2`).
+    get "/", ContentController, :home
     get "/blog", ContentController, :blog_index
     get "/blog/:slug", ContentController, :show_post
     # Public on-site search (#149). Literal path, before the `/:slug` catch-all.

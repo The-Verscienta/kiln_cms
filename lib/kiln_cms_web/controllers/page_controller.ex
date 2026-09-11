@@ -5,6 +5,9 @@ defmodule KilnCMSWeb.PageController do
   # Without it `Layouts.app`'s `default: nil` attr falls through to
   # `Branding.for_org(nil)`, so a tenant host showed the DEFAULT org's identity.
   # The `SetTenant` plug already resolved it; these two actions just dropped it.
+  #
+  # Not routed directly: `/` goes to `ContentController.home/2`, which calls
+  # this for a site that has no published Home page of its own.
   def home(conn, _params) do
     render(conn, :home,
       current_scope: nil,

@@ -24,6 +24,7 @@ defmodule KilnCMSWeb.SetupLive do
   alias KilnCMS.Accounts.Bootstrap
   alias KilnCMS.Branding
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.StarterContent
   alias KilnCMS.CMS.Validations.BrandTokens
 
   @impl true
@@ -85,12 +86,15 @@ defmodule KilnCMSWeb.SetupLive do
          }) do
       {:ok, user} ->
         save_branding(socket, user)
+        create_starter_home(socket, user)
 
         {:noreply,
          socket
          |> put_flash(
            :info,
-           gettext("Your site is ready — sign in with the account you just created.")
+           gettext(
+             "Your site is ready — sign in with the account you just created. A draft home page is waiting for you."
+           )
          )
          |> redirect(to: ~p"/sign-in")}
 
@@ -159,6 +163,22 @@ defmodule KilnCMSWeb.SetupLive do
     end
 
     :ok
+  end
+
+  # Something to write on first sign-in (see `KilnCMS.CMS.StarterContent`): a
+  # draft Home page, which the site root serves once it is published. Same rule
+  # as branding — the admin exists either way and the Overview checklist can
+  # create the page later, so a failure is logged rather than fatal.
+  defp create_starter_home(socket, user) do
+    case StarterContent.ensure_home_page(user, socket.assigns.current_org,
+           site_name: presence(socket.assigns.site["site_name"])
+         ) do
+      {:ok, _page} ->
+        :ok
+
+      {:error, error} ->
+        Logger.warning("first-run home page create failed: #{Exception.message(error)}")
+    end
   end
 
   defp assign_preview(socket, params) do
@@ -343,6 +363,12 @@ defmodule KilnCMSWeb.SetupLive do
             <dd class="font-medium">{@site["theme"]}</dd>
           </div>
         </dl>
+
+        <p class="text-sm text-base-content/70">
+          {gettext(
+            "You'll also get a draft home page to write. Once you publish it, it's what visitors see at your site's address."
+          )}
+        </p>
 
         <div class="rounded-lg border border-base-300 p-4 text-sm text-base-content/70">
           <p class="font-medium text-base-content">
