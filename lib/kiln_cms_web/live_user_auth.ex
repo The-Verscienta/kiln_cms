@@ -85,7 +85,40 @@ defmodule KilnCMSWeb.LiveUserAuth do
     {:cont, socket}
   end
 
-  def on_mount(:live_user_required, _params, _session, socket) do
+  def on_mount(:live_no_user, _params, _session, socket) do
+    socket =
+      if socket.assigns[:current_user] do
+        socket
+      else
+        assign(socket, :current_user, nil)
+      end
+
+    socket = assign_new(socket, :current_scope, fn -> nil end)
+    {:cont, socket}
+  end
+
+  # Every signed-in surface is closed while a demo reset runs (`KilnCMS.Demo`).
+  # The reset evicts every socket just before it restores; without this, the
+  # reconnect would mount a fresh editor on the pre-reset data, and an autosave
+  # blocked on the restore's locks lands in the restored tables once they are
+  # released. Sign-in is where the visitor would end up anyway — the restore
+  # empties the `tokens` table.
+  def on_mount(hook, _params, _session, socket)
+      when hook in [:live_user_required, :live_editor_required, :live_admin_required] do
+    if KilnCMS.Demo.resetting?() do
+      {:halt,
+       socket
+       |> Phoenix.LiveView.put_flash(
+         :info,
+         gettext("The demo is being reset. Sign in again in a moment.")
+       )
+       |> Phoenix.LiveView.redirect(to: ~p"/sign-in")}
+    else
+      require_signed_in(hook, socket)
+    end
+  end
+
+  defp require_signed_in(:live_user_required, socket) do
     if socket.assigns[:current_user] do
       {:cont, socket}
     else
@@ -102,7 +135,7 @@ defmodule KilnCMSWeb.LiveUserAuth do
   # entry on the authoring live_sessions, keeps the install prompt and the
   # service worker attached to the same condition that authorises the editor UI
   # in the first place — a page that fails this check never advertises the app.
-  def on_mount(:live_editor_required, _params, _session, socket) do
+  defp require_signed_in(:live_editor_required, socket) do
     case socket.assigns[:current_user] do
       %{} ->
         if effective_tier(socket) in [:editor, :admin] do
@@ -125,7 +158,7 @@ defmodule KilnCMSWeb.LiveUserAuth do
   # Requires an EFFECTIVE :admin tier on this org (#419) — admin-only
   # authoring UIs (webhooks, trash, team). Router-level guard mirroring the
   # per-LiveView mount checks and the Ash policies.
-  def on_mount(:live_admin_required, _params, _session, socket) do
+  defp require_signed_in(:live_admin_required, socket) do
     case socket.assigns[:current_user] do
       %{} ->
         if effective_tier(socket) == :admin do
@@ -143,18 +176,6 @@ defmodule KilnCMSWeb.LiveUserAuth do
       _ ->
         {:halt, Phoenix.LiveView.redirect(socket, to: ~p"/sign-in")}
     end
-  end
-
-  def on_mount(:live_no_user, _params, _session, socket) do
-    socket =
-      if socket.assigns[:current_user] do
-        socket
-      else
-        assign(socket, :current_user, nil)
-      end
-
-    socket = assign_new(socket, :current_scope, fn -> nil end)
-    {:cont, socket}
   end
 
   @doc """

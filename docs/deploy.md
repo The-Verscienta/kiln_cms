@@ -25,6 +25,7 @@ Everything else in this guide is optional.
 | Which health endpoint feeds which alert? | [`observability.md`](observability.md) |
 | Pool sizing, Oban queues, load testing? | [`performance.md`](performance.md) |
 | A throwaway copy of production for rehearsal? | [`staging-environments.md`](staging-environments.md) |
+| A public "try the editor" instance that resets itself on a schedule? | [`demo-mode.md`](demo-mode.md) — its own app and database; hard off unless `KILN_DEMO_RESET=confirm` |
 | Media on object storage with a CDN? | [`media-pipeline.md`](media-pipeline.md#production-storage--cdn) |
 | Typo-tolerant search? | [`meilisearch.md`](meilisearch.md) |
 

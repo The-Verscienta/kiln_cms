@@ -114,8 +114,16 @@ defmodule KilnCMS.Storage do
   @spec fetch(String.t()) :: {:ok, binary()} | {:error, term()}
   def fetch(key), do: adapter().fetch(key)
 
+  @doc """
+  Remove the blob at `key` — except in demo mode, where the delete is deferred
+  to the next reset and this returns `:ok` (`KilnCMS.Demo.Blobs`): a visitor
+  purging or re-deriving a golden image must not remove a file the golden
+  snapshot still references.
+  """
   @spec delete(String.t()) :: :ok | {:error, term()}
-  def delete(key), do: adapter().delete(key)
+  def delete(key) do
+    if KilnCMS.Demo.enabled?(), do: KilnCMS.Demo.Blobs.defer(key), else: adapter().delete(key)
+  end
 
   @spec url(String.t()) :: String.t()
   def url(key), do: adapter().url(key)
@@ -126,8 +134,13 @@ defmodule KilnCMS.Storage do
   @spec fetch_private(String.t()) :: {:ok, binary()} | {:error, term()}
   def fetch_private(key), do: adapter().fetch_private(key)
 
+  @doc "`delete/1` for private storage — deferred in demo mode the same way."
   @spec delete_private(String.t()) :: :ok | {:error, term()}
-  def delete_private(key), do: adapter().delete_private(key)
+  def delete_private(key) do
+    if KilnCMS.Demo.enabled?(),
+      do: KilnCMS.Demo.Blobs.defer(key),
+      else: adapter().delete_private(key)
+  end
 
   @spec private_available?() :: boolean()
   def private_available?, do: adapter().private_available?()

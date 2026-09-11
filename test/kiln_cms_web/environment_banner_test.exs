@@ -143,6 +143,72 @@ defmodule KilnCMSWeb.EnvironmentBannerTest do
     end
   end
 
+  describe "a demo deployment (docs/demo-mode.md)" do
+    setup do
+      saved = [
+        {KilnCMS.Demo, Application.get_env(:kiln_cms, KilnCMS.Demo)},
+        {:demo_reset_cron, Application.get_env(:kiln_cms, :demo_reset_cron)}
+      ]
+
+      on_exit(fn ->
+        Enum.each(saved, fn
+          {key, nil} -> Application.delete_env(:kiln_cms, key)
+          {key, value} -> Application.put_env(:kiln_cms, key, value)
+        end)
+      end)
+
+      Application.put_env(:kiln_cms, KilnCMS.Demo, enabled: true)
+      :ok
+    end
+
+    test "the sign-in page names it a demo and says when it resets", %{conn: conn} do
+      put_env(label: nil, tone: nil)
+      # Every minute, so the countdown is "1 minute" whenever the test runs.
+      Application.put_env(:kiln_cms, :demo_reset_cron, "* * * * *")
+
+      html = conn |> Phoenix.ConnTest.get(~p"/sign-in") |> Phoenix.ConnTest.html_response(200)
+
+      assert [_, "Environment: demo"] =
+               Regex.run(~r{<span class="min-w-0 truncate">(.*?)</span>}s, html)
+
+      assert [_, "· resets in 1 minute"] = Regex.run(~r{<time[^>]*>\s*(.*?)\s*</time>}s, html)
+    end
+
+    test "without a schedule there is no countdown", %{conn: conn} do
+      put_env(label: nil, tone: nil)
+      Application.put_env(:kiln_cms, :demo_reset_cron, "false")
+
+      html = conn |> Phoenix.ConnTest.get(~p"/sign-in") |> Phoenix.ConnTest.html_response(200)
+
+      assert [_, "Environment: demo"] =
+               Regex.run(~r{<span class="min-w-0 truncate">(.*?)</span>}s, html)
+
+      assert Regex.run(~r{<time[^>]*datetime=}, html) == nil
+    end
+  end
+
+  describe "demo_reset_countdown/2" do
+    alias KilnCMSWeb.Layouts
+
+    @now ~U[2026-09-11 10:00:00Z]
+
+    test "minutes under two hours, rounded up, never zero" do
+      assert Layouts.demo_reset_countdown(~U[2026-09-11 10:00:30Z], @now) == "resets in 1 minute"
+      assert Layouts.demo_reset_countdown(~U[2026-09-11 10:01:01Z], @now) == "resets in 2 minutes"
+
+      assert Layouts.demo_reset_countdown(~U[2026-09-11 11:59:00Z], @now) ==
+               "resets in 119 minutes"
+
+      # Already due (the page rendered as the tick passed): still "1 minute".
+      assert Layouts.demo_reset_countdown(~U[2026-09-11 09:59:00Z], @now) == "resets in 1 minute"
+    end
+
+    test "hours from two hours out" do
+      assert Layouts.demo_reset_countdown(~U[2026-09-11 12:00:00Z], @now) == "resets in 2 hours"
+      assert Layouts.demo_reset_countdown(~U[2026-09-11 23:59:00Z], @now) == "resets in 13 hours"
+    end
+  end
+
   defp admin do
     email = "envban-admin-#{System.unique_integer([:positive])}@example.com"
 

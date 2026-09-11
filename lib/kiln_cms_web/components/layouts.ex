@@ -564,7 +564,10 @@ defmodule KilnCMSWeb.Layouts do
   deployment that shows no strip would warn forever about a value nothing uses.
   """
   def environment_banner(assigns) do
-    assigns = assign(assigns, :label, KilnCMS.Environment.label())
+    assigns =
+      assigns
+      |> assign(:label, KilnCMS.Environment.label())
+      |> assign(:next_reset_at, KilnCMS.Demo.next_reset_at())
 
     ~H"""
     <div
@@ -583,8 +586,35 @@ defmodule KilnCMSWeb.Layouts do
     >
       <.icon name="hero-exclamation-triangle" class="size-3.5 shrink-0" />
       <span class="min-w-0 truncate">{gettext("Environment: %{label}", label: @label)}</span>
+      <%!-- A demo tells visitors their changes are temporary, and when they go.
+            Relative, because "14:00 UTC" makes every visitor do timezone
+            arithmetic; the absolute time rides along in `datetime` for anyone
+            who needs it. --%>
+      <time
+        :if={@next_reset_at}
+        datetime={DateTime.to_iso8601(@next_reset_at)}
+        class="shrink-0"
+      >
+        · {demo_reset_countdown(@next_reset_at, DateTime.utc_now())}
+      </time>
     </div>
     """
+  end
+
+  @doc false
+  # Public for the test that pins the wording at each boundary. Minutes under
+  # two hours, then hours — "in 840 minutes" is not a number anyone reads. Never
+  # "0 minutes": a reset due within the minute is "1 minute".
+  @spec demo_reset_countdown(DateTime.t(), DateTime.t()) :: String.t()
+  def demo_reset_countdown(at, now) do
+    minutes = max(1, ceil(DateTime.diff(at, now, :second) / 60))
+
+    if minutes < 120 do
+      ngettext("resets in %{count} minute", "resets in %{count} minutes", minutes)
+    else
+      hours = div(minutes, 60)
+      ngettext("resets in %{count} hour", "resets in %{count} hours", hours)
+    end
   end
 
   # `bg-<tone>/N` with `text-<tone>-ink` — an accent used as text on its own pale

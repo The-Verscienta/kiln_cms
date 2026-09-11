@@ -194,6 +194,16 @@ defmodule KilnCMS.Application do
       Keyword.merge(Kiln.Plugins.oban_queues(), queues)
     end)
     |> Keyword.update(:plugins, [], &with_cron_entries/1)
+    |> with_demo_queue()
+  end
+
+  # The demo reset's own queue (`KilnCMS.Demo.ResetWorker`), started only in
+  # demo mode so no other deployment runs an idle producer for it. One worker:
+  # two concurrent restores of one database is never what anyone wanted.
+  defp with_demo_queue(config) do
+    if KilnCMS.Demo.enabled?() and is_list(config[:queues]),
+      do: Keyword.update!(config, :queues, &Keyword.put_new(&1, :demo, 1)),
+      else: config
   end
 
   # Scheduled work, assembled here rather than written into `config :kiln_cms,
@@ -223,7 +233,10 @@ defmodule KilnCMS.Application do
      "the federation replay nonce store will grow without bound. See #967."},
     {:health_sweep_cron, KilnCMS.CMS.Workers.HealthSweepWorker, "KILN_HEALTH_SWEEP_CRON",
      "content that has gone past its review cadence will NOT raise automation " <>
-       "events. See docs/content-lifecycles.md."}
+       "events. See docs/content-lifecycles.md."},
+    # Only ever set when KILN_DEMO_RESET=confirm (config/runtime.exs).
+    {:demo_reset_cron, KilnCMS.Demo.ResetWorker, "KILN_DEMO_RESET_CRON",
+     "the demo will NOT reset on a schedule. See docs/demo-mode.md."}
   ]
 
   # `false` (or nil) on any key leaves that entry out, for a deployment driving

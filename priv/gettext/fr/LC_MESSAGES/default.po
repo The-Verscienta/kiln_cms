@@ -10801,6 +10801,11 @@ msgstr "La base de données et, en stockage local, vos fichiers importés."
 msgid "The default for every form on this site that has not chosen its own list on its Embed tab. Pages on this site may always frame its forms."
 msgstr "La valeur par défaut pour tous les formulaires de ce site qui n'ont pas choisi leur propre liste dans l'onglet Intégration. Les pages de ce site peuvent toujours encadrer ses formulaires."
 
+#: lib/kiln_cms_web/live_user_auth.ex
+#, elixir-autogen, elixir-format
+msgid "The demo is being reset. Sign in again in a moment."
+msgstr "La démo est en cours de réinitialisation. Reconnectez-vous dans un instant."
+
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
 msgid "The description is about %{pixels}px wide — over the %{max}px Google shows, so it may be cut off."
@@ -13175,6 +13180,20 @@ msgstr "bloc supprimé"
 #, elixir-autogen, elixir-format
 msgid "required"
 msgstr "obligatoire"
+
+#: lib/kiln_cms_web/components/layouts.ex
+#, elixir-autogen, elixir-format
+msgid "resets in %{count} hour"
+msgid_plural "resets in %{count} hours"
+msgstr[0] "réinitialisation dans %{count} heure"
+msgstr[1] "réinitialisation dans %{count} heures"
+
+#: lib/kiln_cms_web/components/layouts.ex
+#, elixir-autogen, elixir-format
+msgid "resets in %{count} minute"
+msgid_plural "resets in %{count} minutes"
+msgstr[0] "réinitialisation dans %{count} minute"
+msgstr[1] "réinitialisation dans %{count} minutes"
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format

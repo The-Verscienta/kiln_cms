@@ -248,3 +248,6 @@ the gaps the *data* carries — the *config* is already inert:
   holds and the `:anonymize` erasure action the scrub reuses.
 - [`deploy.md`](deploy.md) — the canonical deploy guide; the production posture this
   recipe mirrors.
+- [`demo-mode.md`](demo-mode.md) — the other destructive, guarded operation: a public
+  demo that resets to a golden snapshot on a schedule. Same sentinel convention
+  (`KILN_DEMO_RESET=confirm`), but its name checks have no override.
