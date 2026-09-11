@@ -60,4 +60,15 @@ test("a phx-submit issued right after page load survives a slow LiveView join", 
   await page.getByRole("button", { name: /sign in/i }).click();
 
   await expect(page).toHaveURL("/editor/overview");
+
+  // The redirect can land before every delayed post-join frame (further
+  // mount diffs, Presence) has been relayed — this test's own `onMessage`
+  // hook is still queuing `setTimeout`s against `server`/`ws` when Playwright
+  // tears the page down for the next test. On a loaded CI runner that
+  // teardown can outrace the drain, leaving the underlying Phoenix channel
+  // process mid-flight into whatever spec happens to run next (alphabetical
+  // order, not anything of that spec's own doing) and starving its first
+  // DB-sandbox checkout. Outlasting the fixed 1600ms delay here lets every
+  // still-queued frame flush before the socket closes.
+  await page.waitForTimeout(1600);
 });
