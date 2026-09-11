@@ -108,11 +108,6 @@ test.describe("the save line and the line to the server", () => {
     await expect(status).toHaveClass(/fresh/, {timeout: 5000});
     const writtenAt = await status.getAttribute("data-at");
 
-    // The first autosave moved the block card (AshPhoenix's hidden inputs for
-    // a just-added block appear ahead of it on the rebuilt form), which drops
-    // focus — a pre-existing editor bug, worked around here with a click.
-    await editor.click();
-
     // More words, then the line is cut without a goodbye — inside the 300 ms
     // debounce, so the push has not even left. An abnormal close handed to
     // Phoenix's own handler, because a `conn.close()` arrives back as code

@@ -4838,6 +4838,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # worth preserving) and can't collide with a real id.
   defp rich_host_key(bf), do: bf[:id].value || "idx-#{bf.index}"
 
+  # The hidden inputs `Phoenix.Component.inputs_for` would have emitted for a
+  # block sub-form (it is rendered with `skip_hidden`; see the canvas), minus
+  # the stable `id`, which the card writes itself (columns render their own).
+  # Names follow Phoenix's rule for list values: `[]` appended, one input per
+  # element.
+  defp block_hidden_inputs(bf) do
+    for {field, value_or_values} <- bf.hidden,
+        field != :id,
+        value <- List.wrap(value_or_values) do
+      name = Phoenix.HTML.Form.input_name(bf, field)
+      {if(is_list(value_or_values), do: name <> "[]", else: name), value}
+    end
+  end
+
   @impl true
   def render(assigns) do
     assigns =
@@ -5152,7 +5166,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
                 data-thread-filter={@thread_filter}
                 class="space-y-3"
               >
-                <.inputs_for :let={bf} field={@form[:blocks]}>
+                <%!-- `skip_hidden`: the sub-form's hidden inputs render INSIDE the
+                      card (its last children, below) rather than ahead of it as
+                      the sortable's direct children. Two readers care. `Sortable`
+                      treats the direct children as blocks. morphdom walks them
+                      positionally, and the hidden set differs between a block
+                      just added in memory and the same block on the form rebuilt
+                      after its first autosave (an update sub-form with data adds
+                      `id`); new unkeyed inputs ahead of the keyed card made it
+                      detach and re-append the card to restore order, and a
+                      detached focused element loses focus — the author's next
+                      keystrokes went to <body>. --%>
+                <.inputs_for :let={bf} field={@form[:blocks]} skip_hidden>
                   <%!-- `BlockPresence` reports focus in and out of this card so
                         peers can see which block someone is on. `focusin`/
                         `focusout` rather than `phx-focus`/`phx-blur`: those bind
@@ -5473,6 +5498,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
                       }
                       entry={entry}
                       errors={upload_errors(@uploads.body_images, entry)}
+                    />
+                    <%!-- The sub-form's bookkeeping (`_persistent_id`, `_form_type`,
+                          `_union_type`, `_touched`, …) that `inputs_for` skipped
+                          above. Last in the card on purpose: the set grows on the
+                          rebuilt form, and appended siblings move nothing, while
+                          inputs ahead of the keyed rich-text host would move IT. --%>
+                    <input
+                      :for={{name, value} <- block_hidden_inputs(bf)}
+                      type="hidden"
+                      name={name}
+                      value={value}
                     />
                   </div>
                 </.inputs_for>
