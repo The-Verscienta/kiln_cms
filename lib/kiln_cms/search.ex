@@ -450,9 +450,10 @@ defmodule KilnCMS.Search do
   @doc """
   Hybrid search over any content type: fuse the keyword (`:search`, ts_rank),
   semantic (`:search_semantic`, cosine), block (the nearest per-block
-  embedding per document — see `block_leg?/0`) and title (`:search_title`,
-  records the query names) result lists by Reciprocal Rank Fusion and return
-  the merged records, best first.
+  embedding per document — see `block_leg?/0`), title (`:search_title`,
+  records the query names) and alias (`:search_alias`, records the query
+  names by a field flagged as a name — `KilnCMS.CMS.NameFields`) result
+  lists by Reciprocal Rank Fusion and return the merged records, best first.
 
   `type` is anything the content registry resolves — `:page`, `:post`, a
   generated type's atom, a dynamic type's name string (searched on the shared
@@ -538,6 +539,7 @@ defmodule KilnCMS.Search do
     semantic = run_leg(resource, :search_semantic, args, read_opts, semantic_context(opts))
     {blocks, block_distances} = block_leg(resource, query, locale, filters, read_opts, opts)
     title = run_leg(resource, :search_title, args, read_opts)
+    aliases = run_leg(resource, :search_alias, args, read_opts)
 
     fuzzy =
       if filters == %{} and length(keyword) < @fuzzy_fallback_threshold do
@@ -554,6 +556,7 @@ defmodule KilnCMS.Search do
       {:semantic, semantic, 1.0},
       {:block, blocks, @block_weight},
       {:title, title, @title_weight},
+      {:alias, aliases, @title_weight},
       {:fuzzy, fuzzy, @fuzzy_weight}
     ]
     |> reciprocal_rank_fusion(k)
@@ -585,8 +588,8 @@ defmodule KilnCMS.Search do
 
   @doc """
   Which legs of `hybrid/3` returned this record — a subset of
-  `[:keyword, :keyword_any, :semantic, :block, :title, :fuzzy]`, in that
-  order — or `[]` for a record that did not come out of `hybrid/3`.
+  `[:keyword, :keyword_any, :semantic, :block, :title, :alias, :fuzzy]`, in
+  that order — or `[]` for a record that did not come out of `hybrid/3`.
 
   `:keyword` is the full-text leg, every query term matched; `:keyword_any`
   is its any-term relaxation, which runs only when the full match came up
@@ -594,8 +597,11 @@ defmodule KilnCMS.Search do
   of the terms"; `:semantic` is the embedding leg over the whole document;
   `:block` the same embedding at block grain, a document reached through
   its nearest section (`block_leg?/0`); `:title` a record the query names
-  outright (its whole title appears in the query); `:fuzzy` the trigram
-  title leg that runs only when the full match came up short.
+  outright (its whole title appears in the query); `:alias` a record the
+  query names by one of its other names — a custom field an admin flagged
+  `names_record` (`KilnCMS.CMS.NameFields`), matched the way the title is
+  and weighted the same; `:fuzzy` the trigram title leg that runs only when
+  the full match came up short.
 
   Provenance, for two readers: a client deciding how much to trust a hit (a
   keyword-and-semantic hit is a stronger claim than a fuzzy-only one, a
@@ -608,7 +614,7 @@ defmodule KilnCMS.Search do
   def hit_legs(_record), do: []
 
   @typedoc "A leg of `hybrid/3` — see `hit_legs/1`."
-  @type leg :: :keyword | :keyword_any | :semantic | :block | :title | :fuzzy
+  @type leg :: :keyword | :keyword_any | :semantic | :block | :title | :alias | :fuzzy
 
   # A fused hit on its way out of `hybrid/3`: the record, the score it is
   # ordered by, and the legs that returned it.

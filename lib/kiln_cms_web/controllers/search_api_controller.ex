@@ -28,9 +28,10 @@ defmodule KilnCMSWeb.SearchApiController do
   public `path`, an escape-safe `highlight` snippet (only `<mark>`
   survives), the fused `score` they were ranked by (comparable across
   sections) and the `legs` that matched (`keyword`/`keyword_any`/`semantic`/
-  `block`/`title`/`fuzzy` — `block` is the embedding leg at block grain, a
-  record reached through its nearest section; `title` is a record the query
-  names outright, and
+  `block`/`title`/`alias`/`fuzzy` — `block` is the embedding leg at block
+  grain, a record reached through its nearest section; `title` is a record
+  the query names outright, `alias` one it names by a custom field flagged
+  as a name, and
   `keyword_any` the any-term relaxation that joins when the every-term match
   comes up short on a multi-word query, so a hit carrying only it matched
   some of the words, not all; see `KilnCMS.Search.hit_legs/1`);

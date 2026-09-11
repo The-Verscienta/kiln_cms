@@ -6299,6 +6299,11 @@ msgstr ""
 msgid "Name your site"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Names the record (search finds it by this value)"
+msgstr ""
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Nav items"

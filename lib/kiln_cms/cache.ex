@@ -175,6 +175,10 @@ defmodule KilnCMS.Cache do
   """
   def type_registry_key(org_id), do: "content_types:dynamic:#{org_id}"
 
+  @doc "Cache key for a site's name fields (`KilnCMS.CMS.NameFields`) — busted with the type registry."
+  @spec name_fields_key(Ash.UUID.t()) :: String.t()
+  def name_fields_key(org_id), do: "content_types:name_fields:#{org_id}"
+
   @doc """
   Drop a site's cached dynamic-type registry so a `TypeDefinition` write is
   visible on the next request instead of waiting out the TTL. Like the sitemap
@@ -185,6 +189,7 @@ defmodule KilnCMS.Cache do
   def bust_type_registry(org_id) do
     if enabled?() do
       Cachex.del(@cache, type_registry_key(org_id))
+      Cachex.del(@cache, name_fields_key(org_id))
       Cachex.del(@cache, calendar_types_key(org_id))
       Cachex.del(@cache, delivery_schema_key(org_id))
       # `has_published_feed` is half of `KilnCMS.Feeds.syndicated?/2`, so a type

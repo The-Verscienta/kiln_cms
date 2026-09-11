@@ -6299,6 +6299,11 @@ msgstr "Nombre (opcional)"
 msgid "Name your site"
 msgstr "Pon nombre a tu sitio"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Names the record (search finds it by this value)"
+msgstr "Da nombre al registro (la búsqueda lo encuentra por este valor)"
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Nav items"
