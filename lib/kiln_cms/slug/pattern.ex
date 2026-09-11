@@ -11,8 +11,8 @@ defmodule KilnCMS.Slug.Pattern do
   spaces) normalize to hyphens — one segment.
 
   **Alias patterns** (#485 follow-up) compose a full multi-segment
-  `path_alias`, e.g. `"/acupuncture/needle/size/[field:size]"` →
-  `/acupuncture/needle/size/14mm` — see `expand_path/2`. Each `/`-separated
+  `path_alias`, e.g. `"/products/shoes/size/[field:size]"` →
+  `/products/shoes/size/42` — see `expand_path/2`. Each `/`-separated
   segment expands like a slug pattern; segments that expand empty drop out.
 
   Tokens:
@@ -24,7 +24,7 @@ defmodule KilnCMS.Slug.Pattern do
     * `[yyyy]` / `[mm]` / `[dd]` — the published date when set, else the
       scheduled date, else the record's creation date (a stable anchor — never
       re-read from the wall clock once the record exists)
-    * `[field:<name>]` — a custom field's value, slugified (`14mm`)
+    * `[field:<name>]` — a custom field's value, slugified (`42`)
     * `[slug]` — the record's (derived) slug; **alias patterns only** — it
       would be circular in a slug pattern
 
@@ -106,7 +106,7 @@ defmodule KilnCMS.Slug.Pattern do
 
   @doc ~S"""
   Expand an **alias pattern** into a full multi-segment path
-  (`/acupuncture/needle/size/14mm`), or `nil` when every segment expands
+  (`/products/shoes/size/42`), or `nil` when every segment expands
   empty. Each `/`-separated segment expands like a slug pattern; empty
   segments (e.g. `[category]` on an uncategorized record) drop out.
   """

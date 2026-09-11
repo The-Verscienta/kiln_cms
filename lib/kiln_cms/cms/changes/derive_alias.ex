@@ -1,8 +1,8 @@
 defmodule KilnCMS.CMS.Changes.DeriveAlias do
   @moduledoc """
   Fills a blank/omitted `path_alias` from the type's **alias pattern** (#485
-  follow-up), e.g. `"/acupuncture/needle/size/[field:size]"` →
-  `/acupuncture/needle/size/14mm`. Runs after `DeriveSlug`, so the `[slug]`
+  follow-up), e.g. `"/products/shoes/size/[field:size]"` →
+  `/products/shoes/size/42`. Runs after `DeriveSlug`, so the `[slug]`
   token sees the final (deduped) slug.
 
   An explicit alias always wins; clearing it on update regenerates —

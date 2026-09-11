@@ -1,7 +1,7 @@
 defmodule KilnCMS.CMS.Validations.PathAliasValid do
   @moduledoc """
   Validates a multi-segment `path_alias` (#485): slug-shaped lowercase
-  segments (`/acupuncture/needle/size/14mm`), a first segment the router
+  segments (`/products/shoes/size/42`), a first segment the router
   doesn't own (an `/editor/...` alias could never be served), and no collision
   with another record's alias in the same locale (advisory cross-table check —
   the alias lives on every content table, so this can't be a DB constraint;

@@ -222,7 +222,7 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
               <.input
                 field={@form[:alias_pattern]}
                 label={gettext("Path alias pattern (optional)")}
-                placeholder="/acupuncture/needle/size/[field:size]"
+                placeholder="/products/shoes/size/[field:size]"
               />
               <p class="mt-1 text-xs text-base-content/60">
                 {gettext(
