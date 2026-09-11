@@ -292,7 +292,7 @@ defmodule KilnCMS.CMS.TypeDefinition do
       constraints: [max_length: KilnCMS.Limits.paragraph()]
 
     # The schema.org @type fired onto the :json_ld surface's main node (#357,
-    # GEO) — lets a dynamic type declare itself e.g. a MedicalWebPage. Compiled
+    # GEO) — lets a dynamic type declare itself e.g. an FAQPage. Compiled
     # types declare the same via the Content macro's `schema_org_type:` option.
     attribute :schema_org_type, :string,
       allow_nil?: false,
@@ -301,7 +301,7 @@ defmodule KilnCMS.CMS.TypeDefinition do
       constraints: [max_length: KilnCMS.Limits.identifier()]
 
     # The freshness cadence entries of this type inherit when they set none of
-    # their own (docs/content-lifecycles.md) — "every clinical monograph is
+    # their own (docs/content-lifecycles.md) — "every product guide is
     # re-read yearly" stated
     # once, on the type, instead of on each of four hundred entries.
     #

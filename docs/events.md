@@ -6,7 +6,7 @@ An event is a content type that carries a **`datetime_range`** field. You
 compose one at `/editor/types` and `/editor/fields`; everything downstream —
 occurrence expansion, `.ics` output, `schema.org/Event` structured data — keys
 on the presence of that field rather than on a hardcoded type name. A venue's
-"Gig", a clinic's "Workshop" and a school's "Open Day" are three types with
+"Gig", a studio's "Workshop" and a school's "Open Day" are three types with
 three field sets and one calendar mechanism.
 
 ## Composing an event type

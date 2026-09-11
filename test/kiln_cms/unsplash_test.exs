@@ -39,7 +39,7 @@ defmodule KilnCMS.UnsplashTest do
         assert conn.request_path == "/search/photos"
 
         params = Plug.Conn.fetch_query_params(conn).query_params
-        assert params["query"] == "herbs"
+        assert params["query"] == "shoes"
         assert params["page"] == "1"
 
         assert Plug.Conn.get_req_header(conn, "authorization") == ["Client-ID test-key"]
@@ -51,7 +51,7 @@ defmodule KilnCMS.UnsplashTest do
               "id" => "abc123",
               "width" => 4000,
               "height" => 3000,
-              "alt_description" => "dried herbs on a table",
+              "alt_description" => "running shoes on a table",
               "urls" => %{"small" => "https://images.unsplash.com/photo-abc123?w=400"},
               "links" => %{
                 "html" => "https://unsplash.com/photos/abc123",
@@ -66,10 +66,10 @@ defmodule KilnCMS.UnsplashTest do
         })
       end)
 
-      assert {:ok, %{photos: [photo], more?: true}} = Unsplash.search("herbs")
+      assert {:ok, %{photos: [photo], more?: true}} = Unsplash.search("shoes")
 
       assert photo.id == "abc123"
-      assert photo.alt == "dried herbs on a table"
+      assert photo.alt == "running shoes on a table"
       assert photo.thumb_url == "https://images.unsplash.com/photo-abc123?w=400"
       assert photo.download_location == "https://api.unsplash.com/photos/abc123/download"
       assert photo.photographer == "Jane Lens"
@@ -83,7 +83,7 @@ defmodule KilnCMS.UnsplashTest do
         Req.Test.json(conn, %{"total_pages" => 2, "results" => []})
       end)
 
-      assert {:ok, %{photos: [], more?: false}} = Unsplash.search("herbs", 2)
+      assert {:ok, %{photos: [], more?: false}} = Unsplash.search("shoes", 2)
     end
 
     test "search surfaces HTTP errors" do
@@ -91,7 +91,7 @@ defmodule KilnCMS.UnsplashTest do
         Plug.Conn.send_resp(conn, 401, "unauthorized")
       end)
 
-      assert {:error, {:http_status, 401}} = Unsplash.search("herbs")
+      assert {:error, {:http_status, 401}} = Unsplash.search("shoes")
     end
 
     test "download reports the download, then fetches the returned URL to a temp file" do

@@ -11,7 +11,7 @@ defmodule Mix.Tasks.Kiln.Search.MeasureFloor do
 
   ```bash
   mix kiln.search.measure_floor golden.json
-  mix kiln.search.measure_floor golden.json --type herb --limit 50
+  mix kiln.search.measure_floor golden.json --type recipe --limit 50
   mix kiln.search.measure_floor golden.json --org acme --locale fr
   ```
 
@@ -27,10 +27,10 @@ defmodule Mix.Tasks.Kiln.Search.MeasureFloor do
 
   ```json
   [
-    {"query": "huang qi", "expected": ["huang-qi"], "class": "single_entity", "type": "herb"},
-    {"query": "huang qi dang shen", "expected": ["huang-qi", "dang-shen"],
-     "class": "multi_entity", "type": "herb"},
-    {"query": "herb that strengthens defensive energy", "expected": ["huang-qi"],
+    {"query": "pad thai", "expected": ["pad-thai"], "class": "single_entity", "type": "recipe"},
+    {"query": "pad thai tom yum", "expected": ["pad-thai", "tom-yum"],
+     "class": "multi_entity", "type": "recipe"},
+    {"query": "stir-fried rice noodles with tamarind", "expected": ["pad-thai"],
      "class": "paraphrase"},
     {"query": "asdfghjkl zzqqxx", "expected": [], "class": "junk"}
   ]

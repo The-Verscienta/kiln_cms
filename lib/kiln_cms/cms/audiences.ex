@@ -5,7 +5,7 @@ defmodule KilnCMS.CMS.Audiences do
 
   A `role` (`:admin`/`:editor`/`:viewer`) decides who may author and publish. An
   **audience** decides which signed-in end-users may *read* a published record —
-  the consumer-facing access model (e.g. Directus "Professional"/"Patient"
+  the consumer-facing access model (e.g. Directus "Member"/"Subscriber"
   access). Each content record carries one `audience`; each user carries the set
   of `audiences` they belong to. A reader may see a published record when its
   audience is `:public`, or when its audience is one of the reader's audiences.

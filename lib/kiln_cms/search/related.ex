@@ -154,7 +154,7 @@ defmodule KilnCMS.Search.Related do
   enough here and the reason is structural: the candidate set is the site's
   entire tag list, so taking the top five of five means every tag is suggested
   for every document (#851). The panel then offers "carburetors" for a page
-  about herbal tea, in the same type, at the same size, as a good match — and
+  about green tea, in the same type, at the same size, as a good match — and
   a suggester that always suggests something is one an editor learns to ignore.
 
   The ceiling is a **measured** number, not a derived one (#1086), and the two

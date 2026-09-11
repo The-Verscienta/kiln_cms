@@ -281,7 +281,7 @@ defmodule KilnCMSWeb.ComplianceLive do
         {gettext("Claim checking")}
         <:subtitle>
           {gettext(
-            "Phrases in this site's content that a regulator, a clinic's counsel or a style guide would want a second look at before it goes live — shown to authors in the editor's Compliance panel."
+            "Phrases in this site's content that a regulator, your legal team or a style guide would want a second look at before it goes live — shown to authors in the editor's Compliance panel."
           )}
         </:subtitle>
       </.header>
@@ -290,7 +290,7 @@ defmodule KilnCMSWeb.ComplianceLive do
         <h2 class="text-sm font-medium">{gettext("Claim checking is off for this site")}</h2>
         <p class="mt-2 text-sm text-base-content/70">
           {gettext(
-            "With it on, the editor gains a Compliance panel that quotes back the phrases a document contains from a claims vocabulary — \"FDA approved\", \"no side effects\", \"guaranteed results\". It is advice: a match is a prompt to look, not a verdict, and nothing is blocked unless you separately turn on the publish gate."
+            "With it on, the editor gains a Compliance panel that quotes back the phrases a document contains from a claims vocabulary — \"clinically proven\", \"risk-free\", \"guaranteed results\". It is advice: a match is a prompt to look, not a verdict, and nothing is blocked unless you separately turn on the publish gate."
           )}
         </p>
         <p class="mt-2 text-sm text-base-content/70">
@@ -374,7 +374,7 @@ defmodule KilnCMSWeb.ComplianceLive do
             label={gettext("Phrases to flag")}
             hint={
               gettext(
-                "One per line. Matched case-insensitively on whole words, so \"cures\" does not match \"secures\". Whitespace between words is flexible, so a phrase still matches text the editor wrapped across a line."
+                "One per line. Matched case-insensitively on whole words, so \"free\" does not match \"freedom\". Whitespace between words is flexible, so a phrase still matches text the editor wrapped across a line."
               )
             }
           />
@@ -445,7 +445,7 @@ defmodule KilnCMSWeb.ComplianceLive do
         </ul>
         <p class="mt-4 text-xs text-base-content/60">
           {gettext(
-            "The shipped pack deliberately leaves out bare curative words — \"cures\", \"heals\", \"treats\" — because they have too many legitimate uses to flag without knowing a publication's subject. That is what the phrase list above is for."
+            "The shipped pack deliberately leaves out bare marketing words — \"best\", \"free\", \"proven\" — because they have too many legitimate uses to flag without knowing a publication's subject. That is what the phrase list above is for."
           )}
         </p>
       </section>

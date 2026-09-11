@@ -21,7 +21,7 @@ has three values:
 
 `role` gates **authoring**. A separate, orthogonal **audience** axis gates which
 signed-in end-users may *read* a published record — the consumer-facing access
-model (cf. Directus "Professional"/"Patient" access). Configured via
+model (cf. Directus role-based read access). Configured via
 `config :kiln_cms, :audiences` (`KilnCMS.CMS.Audiences`); `:public` is always
 implied.
 

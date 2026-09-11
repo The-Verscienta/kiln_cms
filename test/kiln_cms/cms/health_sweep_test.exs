@@ -34,7 +34,7 @@ defmodule KilnCMS.CMS.HealthSweepTest do
     page =
       CMS.create_page!(
         %{
-          title: "Monograph #{System.unique_integer([:positive])}",
+          title: "Guide #{System.unique_integer([:positive])}",
           slug: slug(),
           review_after_days: days
         },

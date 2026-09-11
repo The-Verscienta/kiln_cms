@@ -7,13 +7,13 @@ defmodule Kiln.CoreAgnosticTest do
   suite — the core was internally self-consistent, creating the leaked tables
   *and* indexing them, so migrations ran and every test passed:
 
-    * **#288** extracted the Verscienta subproject downstream but left its two
-      migrations and twelve resource-snapshot directories behind, so a clean
-      build for any *other* project still created empty `herbs`/`formulas`/…
-      tables.
+    * **#288** extracted a downstream project's content types out of the core but
+      left their two migrations and twelve resource-snapshot directories
+      behind, so a clean build for any *other* project still created that
+      project's empty content tables.
     * **#290** then found two core hot-path index migrations still naming those
       tables in their `@content_tables` lists. That only surfaced once the
-      creating migration was gone (`relation "herbs" does not exist`) — while
+      creating migration was gone (`relation "…" does not exist`) — while
       the leak was intact, CI stayed green.
 
   A table is *owned* when some resource in a registered `:ash_domains` domain

@@ -44,12 +44,12 @@ defmodule KilnCMS.Search.EvalTest do
 
     test "keeps type and locale, trims the query, dedupes expected" do
       json =
-        ~s([{"query": " huang qi ", "expected": ["huang-qi", "huang-qi"], "class": "single_entity", "type": "herb", "locale": "fr"}])
+        ~s([{"query": " pad thai ", "expected": ["pad-thai", "pad-thai"], "class": "single_entity", "type": "recipe", "locale": "fr"}])
 
       assert {:ok, [row]} = Eval.parse(json)
-      assert row.query == "huang qi"
-      assert row.expected == ["huang-qi"]
-      assert row.type == "herb"
+      assert row.query == "pad thai"
+      assert row.expected == ["pad-thai"]
+      assert row.type == "recipe"
       assert row.locale == "fr"
     end
 
@@ -60,7 +60,9 @@ defmodule KilnCMS.Search.EvalTest do
       assert {:error, msg} = Eval.parse(~s([{"query": "  ", "expected": ["a"], "class": "typo"}]))
       assert msg == ~s(row 0: "query" is blank)
 
-      assert {:error, msg} = Eval.parse(~s([{"query": "a", "expected": ["a"], "class": "herb"}]))
+      assert {:error, msg} =
+               Eval.parse(~s([{"query": "a", "expected": ["a"], "class": "recipe"}]))
+
       assert msg =~ ~s(row 0: "class" must be one of single_entity, multi_entity)
 
       assert {:error, msg} = Eval.parse(~s([{"query": "a", "class": "typo"}]))
@@ -132,15 +134,15 @@ defmodule KilnCMS.Search.EvalTest do
     test "a typed row ranks within that type only — by type name or section plural" do
       hits = [
         hit("a", type: "post", section: "posts"),
-        hit("b", type: "herb", section: "herbs"),
-        hit("c", type: "herb", section: "herbs")
+        hit("b", type: "recipe", section: "recipes"),
+        hit("c", type: "recipe", section: "recipes")
       ]
 
-      by_type = Eval.judge(row("q", ["c"], "single_entity", type: "herb"), hits)
+      by_type = Eval.judge(row("q", ["c"], "single_entity", type: "recipe"), hits)
       assert by_type.expected == [%{slug: "c", rank: 2, legs: ["keyword"]}]
       assert by_type.returned == 2
 
-      by_section = Eval.judge(row("q", ["c"], "single_entity", type: "herbs"), hits)
+      by_section = Eval.judge(row("q", ["c"], "single_entity", type: "recipes"), hits)
       assert by_section.expected == [%{slug: "c", rank: 2, legs: ["keyword"]}]
 
       untyped = Eval.judge(row("q", ["c"], "single_entity"), hits)
@@ -325,7 +327,7 @@ defmodule KilnCMS.Search.EvalTest do
   describe "rendering" do
     setup do
       rows = [
-        row("huang qi dang shen", ["huang-qi", "dang-shen"], "multi_entity", type: "herb"),
+        row("pad thai tom yum", ["pad-thai", "tom-yum"], "multi_entity", type: "recipe"),
         row("asdf", [], "junk"),
         row("zzz", [], "junk")
       ]
@@ -334,10 +336,10 @@ defmodule KilnCMS.Search.EvalTest do
         Eval.report(
           rows,
           fn
-            %{query: "huang qi dang shen"} ->
+            %{query: "pad thai tom yum"} ->
               [
-                hit("da-ding-huang", type: "herb", section: "herbs"),
-                hit("huang-qi", type: "herb", section: "herbs", legs: ["keyword", "fuzzy"])
+                hit("pad-see-ew", type: "recipe", section: "recipes"),
+                hit("pad-thai", type: "recipe", section: "recipes", legs: ["keyword", "fuzzy"])
               ]
 
             %{query: "asdf"} ->
@@ -359,9 +361,9 @@ defmodule KilnCMS.Search.EvalTest do
       assert text =~ ~r/^multi_entity\s+1\s+0\.000\s+0\.500\s+0\.500$/m
       assert text =~ ~r/^junk\s+2\s+0\.500\s+0\.500\s+0\.500$/m
       assert text =~ ~r/^overall\s+3\s+0\.333\s+0\.500\s+0\.500$/m
-      assert text =~ ~s|[multi_entity] "huang qi dang shen" (type: herb)|
-      assert text =~ ~r/^    huang-qi\s+#2  keyword, fuzzy$/m
-      assert text =~ ~r/^    dang-shen\s+missing$/m
+      assert text =~ ~s|[multi_entity] "pad thai tom yum" (type: recipe)|
+      assert text =~ ~r/^    pad-thai\s+#2  keyword, fuzzy$/m
+      assert text =~ ~r/^    tom-yum\s+missing$/m
       assert text =~ ~s|[junk] "asdf"  PASS  (0 returned)|
       assert text =~ ~s|[junk] "zzz"  FAIL  (5 returned: a, b, c, … +2)|
     end
@@ -372,9 +374,9 @@ defmodule KilnCMS.Search.EvalTest do
       assert md =~ "### Search ranking eval (global (in-process), 3 queries)"
       assert md =~ "| `multi_entity` | 1 | 0.000 | 0.500 | 0.500 |"
       assert md =~ "| **overall** | 3 | 0.333 | 0.500 | 0.500 |"
-      assert md =~ "- `huang qi dang shen` → `dang-shen` missing"
+      assert md =~ "- `pad thai tom yum` → `tom-yum` missing"
       assert md =~ "- `zzz` returned 5 (junk should return nothing)"
-      refute md =~ "huang-qi` missing"
+      refute md =~ "pad-thai` missing"
     end
 
     test "the JSON map round-trips through Jason with string keys for k", %{report: report} do
@@ -388,13 +390,13 @@ defmodule KilnCMS.Search.EvalTest do
       [multi, junk_pass, _junk_fail] = json["queries"]
 
       assert multi["expected"] == [
-               %{"slug" => "huang-qi", "rank" => 2, "legs" => ["keyword", "fuzzy"]},
-               %{"slug" => "dang-shen", "rank" => nil, "legs" => []}
+               %{"slug" => "pad-thai", "rank" => 2, "legs" => ["keyword", "fuzzy"]},
+               %{"slug" => "tom-yum", "rank" => nil, "legs" => []}
              ]
 
       assert multi["recall"] == %{"1" => 0.0, "5" => 0.5}
       assert multi["reciprocal_rank"] == 0.5
-      assert multi["type"] == "herb"
+      assert multi["type"] == "recipe"
       assert junk_pass["returned"] == 0
       assert junk_pass["reciprocal_rank"] == 1.0
     end

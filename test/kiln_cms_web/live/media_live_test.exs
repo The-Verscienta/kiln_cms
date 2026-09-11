@@ -1397,7 +1397,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
                   "id" => "abc123",
                   "width" => 4000,
                   "height" => 3000,
-                  "alt_description" => "dried herbs on a table",
+                  "alt_description" => "running shoes on a table",
                   "urls" => %{"small" => "https://images.unsplash.com/photo-abc123?w=400"},
                   "links" => %{
                     "html" => "https://unsplash.com/photos/abc123",
@@ -1437,11 +1437,11 @@ defmodule KilnCMSWeb.MediaLiveTest do
 
       assert html =~ "show_unsplash"
       lv |> element(~s(button[phx-click="show_unsplash"])) |> render_click()
-      lv |> form("#unsplash-search", %{q: "herbs"}) |> render_submit()
+      lv |> form("#unsplash-search", %{q: "shoes"}) |> render_submit()
 
       html = render_async(lv, 2_000)
       assert html =~ "unsplash-abc123"
-      assert html =~ "dried herbs on a table"
+      assert html =~ "running shoes on a table"
       assert html =~ "Jane Lens"
       assert html =~ "utm_source=kiln_cms"
     end
@@ -1452,7 +1452,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
       {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")
 
       lv |> element(~s(button[phx-click="show_unsplash"])) |> render_click()
-      lv |> form("#unsplash-search", %{q: "herbs"}) |> render_submit()
+      lv |> form("#unsplash-search", %{q: "shoes"}) |> render_submit()
       render_async(lv, 2_000)
 
       lv
@@ -1465,7 +1465,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
       assert [item] = CMS.list_media_items!(actor: editor)
       assert item.filename == "unsplash-abc123.png"
       assert item.content_type == "image/png"
-      assert item.alt == "dried herbs on a table"
+      assert item.alt == "running shoes on a table"
       assert item.caption == "Photo by Jane Lens on Unsplash"
       assert File.exists?(Path.join(root, item.storage_key))
     end
@@ -1496,7 +1496,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
       {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
 
       lv |> element(~s(button[phx-click="show_unsplash"])) |> render_click()
-      lv |> form("#unsplash-search", %{q: "herbs"}) |> render_submit()
+      lv |> form("#unsplash-search", %{q: "shoes"}) |> render_submit()
       render_async(lv, 2_000)
 
       lv

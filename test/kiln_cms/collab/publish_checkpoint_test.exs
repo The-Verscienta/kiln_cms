@@ -208,7 +208,7 @@ defmodule KilnCMS.Collab.PublishCheckpointTest do
       page = draft_page!(actor)
       server = open_room(page)
 
-      type_into_room(server, rich_block(page).id, "Our formula is FDA approved.")
+      type_into_room(server, rich_block(page).id, "Our product is government approved.")
 
       assert {:error, error} = CMS.publish_page(page, %{}, actor: actor)
       assert Exception.message(error) =~ "unreviewed claim"
@@ -230,14 +230,14 @@ defmodule KilnCMS.Collab.PublishCheckpointTest do
             title: "Pub",
             slug: "pubchk-#{System.unique_integer([:positive])}",
             blocks: [
-              %{"_type" => "rich_text", "body" => pt("Our formula is FDA approved.")}
+              %{"_type" => "rich_text", "body" => pt("Our product is government approved.")}
             ]
           },
           actor: actor
         )
 
       server = open_room(page)
-      type_into_room(server, rich_block(page).id, "Our formula is gentle.")
+      type_into_room(server, rich_block(page).id, "Our product is gentle.")
 
       assert {:ok, published} = CMS.publish_page(page, %{}, actor: actor)
       assert prose(CMS.get_page!(published.id, actor: actor)) =~ "gentle"

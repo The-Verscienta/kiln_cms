@@ -364,8 +364,8 @@ defmodule KilnCMS.Ask do
     # flat sort over all of them. This used to be `(compiled ++ dynamic) |>
     # Enum.take(limit)` under a comment claiming to interleave by strength;
     # what it did was flatten in registry order, and the registry sorts by
-    # label, so every "Concept" hit outranked every "Herb" hit however weak,
-    # and a question about two herbs cited a concept page first and the herbs
+    # label, so every "Guide" hit outranked every "Recipe" hit however weak,
+    # and a question about two recipes cited a guide page first and the recipes
     # seventh and eighth. Ties (two keyword-only rank-1 hits score the same)
     # keep the registry order — the sort is stable — so nothing about the old
     # order survives except as the tiebreak.
@@ -392,8 +392,8 @@ defmodule KilnCMS.Ask do
   # `KilnCMS.CMS.Content`), already plain text. It replaced the search page's
   # `highlight` snippet here — 18 words with the `<mark>` tags stripped —
   # which on a query naming the record degenerated to its title and a heading
-  # or two, and a generator grounded on "Huang Qi Botanical Description
-  # Astragalus" correctly answered that its sources said nothing.
+  # or two, and a generator grounded on "Pad Thai Ingredients Method Sen
+  # Lek" correctly answered that its sources said nothing.
   defp excerpt(record) do
     case Map.get(record, :passage) do
       text when is_binary(text) and text != "" -> text

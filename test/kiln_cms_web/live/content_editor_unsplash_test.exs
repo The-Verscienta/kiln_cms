@@ -70,7 +70,7 @@ defmodule KilnCMSWeb.ContentEditorUnsplashTest do
       "id" => id,
       "width" => 4000,
       "height" => 3000,
-      "alt_description" => "dried herbs on a table",
+      "alt_description" => "running shoes on a table",
       "urls" => %{"small" => "https://images.unsplash.com/photo-#{id}?w=400"},
       "links" => %{
         "html" => "https://unsplash.com/photos/#{id}",
@@ -163,11 +163,11 @@ defmodule KilnCMSWeb.ContentEditorUnsplashTest do
 
     render_click(lv, "open_featured_picker", %{})
     render_click(lv, "picker_tab", %{"tab" => "unsplash"})
-    lv |> form("#editor-unsplash-search", %{q: "herbs"}) |> render_submit()
+    lv |> form("#editor-unsplash-search", %{q: "shoes"}) |> render_submit()
 
     html = render_async(lv, 2_000)
     assert html =~ "editor-unsplash-abc123"
-    assert html =~ "dried herbs on a table"
+    assert html =~ "running shoes on a table"
     assert html =~ "Jane Lens"
   end
 
@@ -179,7 +179,7 @@ defmodule KilnCMSWeb.ContentEditorUnsplashTest do
 
     render_click(lv, "open_featured_picker", %{})
     render_click(lv, "picker_tab", %{"tab" => "unsplash"})
-    lv |> form("#editor-unsplash-search", %{q: "herbs"}) |> render_submit()
+    lv |> form("#editor-unsplash-search", %{q: "shoes"}) |> render_submit()
     render_async(lv, 2_000)
 
     assert render(lv) =~ "Load more"
@@ -198,7 +198,7 @@ defmodule KilnCMSWeb.ContentEditorUnsplashTest do
 
     render_click(lv, "open_featured_picker", %{})
     render_click(lv, "picker_tab", %{"tab" => "unsplash"})
-    lv |> form("#editor-unsplash-search", %{q: "herbs"}) |> render_submit()
+    lv |> form("#editor-unsplash-search", %{q: "shoes"}) |> render_submit()
     render_async(lv, 2_000)
 
     render_click(lv, "unsplash_import", %{"id" => "abc123"})
@@ -222,7 +222,7 @@ defmodule KilnCMSWeb.ContentEditorUnsplashTest do
 
     render_click(lv, "open_media_browser", %{})
     render_click(lv, "picker_tab", %{"tab" => "unsplash"})
-    lv |> form("#editor-unsplash-search", %{q: "herbs"}) |> render_submit()
+    lv |> form("#editor-unsplash-search", %{q: "shoes"}) |> render_submit()
     render_async(lv, 2_000)
 
     render_click(lv, "unsplash_import", %{"id" => "abc123"})
@@ -253,7 +253,7 @@ defmodule KilnCMSWeb.ContentEditorUnsplashTest do
 
     render_click(lv, "open_gallery_picker", %{"bid" => bid})
     render_click(lv, "picker_tab", %{"tab" => "unsplash"})
-    lv |> form("#editor-unsplash-search", %{q: "herbs"}) |> render_submit()
+    lv |> form("#editor-unsplash-search", %{q: "shoes"}) |> render_submit()
     render_async(lv, 2_000)
 
     render_click(lv, "unsplash_import", %{"id" => "abc123"})
@@ -301,7 +301,7 @@ defmodule KilnCMSWeb.ContentEditorUnsplashTest do
 
     render_click(lv, "open_featured_picker", %{})
     render_click(lv, "picker_tab", %{"tab" => "unsplash"})
-    lv |> form("#editor-unsplash-search", %{q: "herbs"}) |> render_submit()
+    lv |> form("#editor-unsplash-search", %{q: "shoes"}) |> render_submit()
     render_async(lv, 2_000)
 
     render_click(lv, "unsplash_import", %{"id" => "abc123"})

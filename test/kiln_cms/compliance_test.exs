@@ -58,12 +58,13 @@ defmodule KilnCMS.ComplianceTest do
     end
 
     test "matches a multi-word phrase and attributes it to its rule" do
-      assert %{regulatory_claim: ["fda approved"]} =
-               Compliance.scan("Our formula is FDA approved.", rules())
+      assert %{regulatory_claim: ["government approved"]} =
+               Compliance.scan("Our product is government approved.", rules())
     end
 
     test "is case insensitive and matches hyphenated variants listed separately" do
-      assert %{regulatory_claim: ["fda-approved"]} = Compliance.scan("FDA-APPROVED", rules())
+      assert %{regulatory_claim: ["government-approved"]} =
+               Compliance.scan("GOVERNMENT-APPROVED", rules())
     end
 
     test "matches across a line break or doubled spacing" do
@@ -72,45 +73,51 @@ defmodule KilnCMS.ComplianceTest do
     end
 
     # The bug this guards is the whole reason the phrases are word-bounded:
-    # a naive substring scan for "cures" fires on "manicures", "procures" and
-    # "secures", and a panel that flags the word "secures" on a security page
+    # a naive substring scan for "free" fires on "carefree", "freedom" and
+    # "freezer", and a panel that flags the word "freedom" on a civil-liberties page
     # is one an author turns off within a day.
     test "does not match a phrase embedded inside a longer word" do
-      configure(rules: [%{code: :curative, severity: :error, phrases: ["cures"]}])
+      configure(rules: [%{code: :free_offer, severity: :error, phrases: ["free"]}])
 
-      assert %{} == Compliance.scan("He secures manicures and procures things.", rules())
-      assert %{curative: ["cures"]} = Compliance.scan("It cures nothing.", rules())
+      assert %{} == Compliance.scan("Carefree freedom in the freezer.", rules())
+      assert %{free_offer: ["free"]} = Compliance.scan("It is free today.", rules())
     end
 
     test "matches a phrase whose edge is not a word character" do
       assert %{safety_claim: ["100% safe"]} = Compliance.scan("It is 100% safe.", rules())
+
+      # Leading edge a non-word character, trailing edge a digit: no `\b`
+      # before "#", but "#10" must still not match a "#1" phrase.
+      assert %{superlative_claim: ["#1 rated"]} = Compliance.scan("Our #1 rated plan.", rules())
+      refute Map.has_key?(Compliance.scan("It was ranked #10.", rules()), :superlative_claim)
     end
 
     test "collects several rules from one pass, deduped" do
-      matches = Compliance.scan("FDA approved, no side effects, and FDA approved again.", rules())
+      matches =
+        Compliance.scan("Government approved, no risk, and government approved again.", rules())
 
-      assert matches[:regulatory_claim] == ["fda approved"]
-      assert matches[:safety_claim] == ["no side effects"]
+      assert matches[:regulatory_claim] == ["government approved"]
+      assert matches[:safety_claim] == ["no risk"]
     end
 
     test "returns an empty map for clean text" do
-      assert %{} == Compliance.scan("A calm article about herbal tea.", rules())
+      assert %{} == Compliance.scan("A calm article about garden sheds.", rules())
     end
 
     test "returns an empty map when no rule carries a usable phrase" do
       configure(rules: [%{code: :junk, severity: :error, phrases: ["", "  "]}])
 
-      assert %{} == Compliance.scan("fda approved", rules())
+      assert %{} == Compliance.scan("government approved", rules())
     end
 
     test "does not raise on a malformed rule in the list" do
       rules = [
         %{code: :missing_phrases},
         :not_a_map,
-        %{code: :good, severity: :error, phrases: ["fda approved"]}
+        %{code: :good, severity: :error, phrases: ["government approved"]}
       ]
 
-      assert %{good: ["fda approved"]} = Compliance.scan("FDA approved.", rules)
+      assert %{good: ["government approved"]} = Compliance.scan("Government approved.", rules)
     end
   end
 
@@ -125,7 +132,8 @@ defmodule KilnCMS.ComplianceTest do
     # ſ (U+017F) and on Greek final sigma, so attributing a match by looking
     # the downcased text back up in a phrase map dropped it entirely.
     test "a match whose case-folding downcase cannot reproduce is still reported" do
-      matches = Compliance.scan("Our formula has no ſide effects and is FDA approved.", rules())
+      matches =
+        Compliance.scan("Our product carries no riſk and is government approved.", rules())
 
       assert Map.has_key?(matches, :safety_claim)
       assert Map.has_key?(matches, :regulatory_claim)
@@ -188,7 +196,7 @@ defmodule KilnCMS.ComplianceTest do
     test "drops malformed rules rather than raising" do
       configure(
         rules: [
-          %{code: :good, severity: :error, phrases: ["fda approved"]},
+          %{code: :good, severity: :error, phrases: ["government approved"]},
           %{code: :bad_severity, severity: :catastrophic, phrases: ["x"]},
           %{code: :no_phrases, severity: :error, phrases: []},
           :not_a_rule
@@ -202,8 +210,8 @@ defmodule KilnCMS.ComplianceTest do
       configure(disclaimer: "   ")
       assert settings().disclaimer == nil
 
-      configure(disclaimer: "Not medical advice.")
-      assert settings().disclaimer == "Not medical advice."
+      configure(disclaimer: "Not professional advice.")
+      assert settings().disclaimer == "Not professional advice."
     end
 
     test "recompiles when the configured rules change" do
@@ -264,11 +272,11 @@ defmodule KilnCMS.ComplianceTest do
 
   describe "merge/2" do
     test "unions phrases per code without duplicating" do
-      left = %{regulatory_claim: ["fda approved"], safety_claim: ["100% safe"]}
-      right = %{regulatory_claim: ["fda approved", "clinically proven"]}
+      left = %{regulatory_claim: ["government approved"], safety_claim: ["100% safe"]}
+      right = %{regulatory_claim: ["government approved", "clinically proven"]}
 
       assert %{
-               regulatory_claim: ["fda approved", "clinically proven"],
+               regulatory_claim: ["government approved", "clinically proven"],
                safety_claim: ["100% safe"]
              } = Compliance.merge(left, right)
     end
@@ -280,52 +288,62 @@ defmodule KilnCMS.ComplianceTest do
     end
 
     test "reports one finding per matched rule, quoting the phrases" do
-      findings = Claims.check(context(text: "FDA approved and 100% safe."))
+      findings = Claims.check(context(text: "Government approved and 100% safe."))
 
-      assert [%{code: :regulatory_claim, severity: :error, args: %{phrases: ["fda approved"]}}, _] =
+      assert [
+               %{
+                 code: :regulatory_claim,
+                 severity: :error,
+                 args: %{phrases: ["government approved"]}
+               },
+               _
+             ] =
                findings
 
       assert Enum.map(findings, & &1.code) == [:regulatory_claim, :safety_claim]
     end
 
     test "passes on clean text that was actually scanned" do
-      assert :ok == Claims.check(context(text: "Herbal tea is pleasant."))
+      assert :ok == Claims.check(context(text: "Garden sheds are pleasant."))
     end
 
     # The distinction the whole design turns on: nobody scanned it, so it is
     # not clean — it is unknown, and saying `:ok` would be a verdict nobody
     # computed.
     test "is :n_a when the caller computed no scan" do
-      assert :n_a == Claims.check(context(text: "FDA approved.", matches: :absent))
+      assert :n_a == Claims.check(context(text: "Government approved.", matches: :absent))
     end
 
     test "is :n_a while claim checking is off" do
       configure(enabled: false)
-      assert :n_a == Claims.check(context(text: "FDA approved."))
+      assert :n_a == Claims.check(context(text: "Government approved."))
     end
 
     # Which rules apply is a property of the site (#857), so a caller that
     # resolved none has checked nothing — the same answer, for the same reason,
     # as a caller that computed no scan.
     test "is :n_a when the caller resolved no settings" do
-      assert :n_a == Claims.check(context(text: "FDA approved.", settings: :absent))
+      assert :n_a == Claims.check(context(text: "Government approved.", settings: :absent))
     end
 
     test "is :n_a on a non-English document under the shipped English pack" do
-      assert :n_a == Claims.check(context(text: "FDA approved.", locale: "fr"))
+      assert :n_a == Claims.check(context(text: "Government approved.", locale: "fr"))
     end
 
     test "custom rules run in every locale" do
-      configure(rules: [%{code: :custom, severity: :error, phrases: ["approuvé par la fda"]}])
+      configure(
+        rules: [%{code: :custom, severity: :error, phrases: ["approuvé par les autorités"]}]
+      )
 
       assert [%{code: :custom}] =
-               Claims.check(context(text: "Approuvé par la FDA.", locale: "fr"))
+               Claims.check(context(text: "Approuvé par les autorités.", locale: "fr"))
     end
 
     test "takes the severity from the rule, not from the finding's category" do
-      configure(rules: [%{code: :soft, severity: :info, phrases: ["fda approved"]}])
+      configure(rules: [%{code: :soft, severity: :info, phrases: ["government approved"]}])
 
-      assert [%{code: :soft, severity: :info}] = Claims.check(context(text: "FDA approved."))
+      assert [%{code: :soft, severity: :info}] =
+               Claims.check(context(text: "Government approved."))
     end
 
     test "reports into the compliance lens only" do
@@ -341,41 +359,42 @@ defmodule KilnCMS.ComplianceTest do
     end
 
     test "is :n_a on an empty body rather than opening a new draft with an error" do
-      configure(disclaimer: "Not medical advice.")
+      configure(disclaimer: "Not professional advice.")
       assert :n_a == Disclaimer.check(context(text: "   "))
     end
 
     test "passes when the disclaimer appears inside longer prose" do
-      configure(disclaimer: "Not medical advice.")
+      configure(disclaimer: "Not professional advice.")
 
       assert :ok ==
                Disclaimer.check(
-                 context(text: "Some article body. Not medical advice. Consult a clinician.")
+                 context(text: "Some article body. Not professional advice. Consult an expert.")
                )
     end
 
     test "tolerates case and line wrapping, since the editor introduces both" do
-      configure(disclaimer: "Not medical advice.")
+      configure(disclaimer: "Not professional advice.")
 
-      assert :ok == Disclaimer.check(context(text: "Body text. NOT MEDICAL\n  ADVICE. More."))
+      assert :ok ==
+               Disclaimer.check(context(text: "Body text. NOT PROFESSIONAL\n  ADVICE. More."))
     end
 
     test "reports a body that does not carry it" do
-      configure(disclaimer: "Not medical advice.")
+      configure(disclaimer: "Not professional advice.")
 
       assert %{code: :disclaimer_missing, severity: :warning, args: %{disclaimer: text}} =
                Disclaimer.check(context(text: "An article with no disclaimer."))
 
-      assert text == "Not medical advice."
+      assert text == "Not professional advice."
     end
 
     test "is :n_a while claim checking is off, even with a disclaimer configured" do
-      configure(enabled: false, disclaimer: "Not medical advice.")
+      configure(enabled: false, disclaimer: "Not professional advice.")
       assert :n_a == Disclaimer.check(context(text: "An article."))
     end
 
     test "is :n_a when the caller resolved no settings" do
-      configure(disclaimer: "Not medical advice.")
+      configure(disclaimer: "Not professional advice.")
 
       assert :n_a ==
                Disclaimer.check(
@@ -390,7 +409,7 @@ defmodule KilnCMS.ComplianceTest do
     end
 
     test "compliance findings do not leak into the SEO or accessibility panels" do
-      outcomes = Registry.run(context(text: "FDA approved."), [Claims])
+      outcomes = Registry.run(context(text: "Government approved."), [Claims])
 
       assert [_finding] = outcomes |> Registry.by_lens(:compliance) |> Registry.findings()
       assert [] == outcomes |> Registry.by_lens(:seo) |> Registry.findings()

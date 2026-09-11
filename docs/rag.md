@@ -56,8 +56,8 @@ three fragments of 40 words around the matches, with no `<mark>` tags, and —
 when the matches are only in the title and headings, which is exactly what a
 question naming the record produces — the document's opening ~300 characters
 instead. The search page's 18-word `highlight` stripped of its tags used to be
-cited here, and on a question about two herbs it grounded the generator on
-"Huang Qi Botanical Description Astragalus"; a well-behaved generator then
+cited here, and on a question about two ingredients it grounded the generator on
+"Star Anise Flavour Profile Illicium Verum"; a well-behaved generator then
 truthfully answers that its sources say nothing.
 
 ### Why there is no generated answer
@@ -176,7 +176,8 @@ source's `score` is the reranker's rather than the fused one, so the number
 still agrees with the order it came in.
 
 Two caveats before setting it, both from the report that asked for this
-(*Why Shen Beat Huang Qi*, 2026-09-04), quoted as written:
+(a production deployment's search-ranking report, 2026-09-04), quoted as
+written:
 
 > Two honest caveats: reranking fixes ordering, not the recall defects (D2/D3
 > must be fixed first or there is nothing right to reorder), and CPU inference
@@ -331,8 +332,8 @@ is what `Related.centroid/1` computes from stored `BlockEmbedding` rows; each
 tag's is its name embedded as a document. Every document is scored against the
 **whole** vocabulary, because that is the real regime. The vocabulary includes
 near-misses on purpose — `fermentation` beside a cold-brew article, `sql` beside
-a maths one — since "carburetors for herbal tea" is not the failure an editor
-actually meets.
+a maths one — since "carburetors" on a cold-brew article is not the failure an
+editor actually meets.
 
 **Tag suggestions (`:suggest_tags_threshold`).**
 

@@ -71,8 +71,8 @@ The fired `:json_ld` surface goes well beyond the original bare `Article`:
 declares the schema.org `@type` of its document node — compiled types via the
 Content macro (`use KilnCMS.CMS.Content, type: :page, schema_org_type:
 "WebPage"`), dynamic types (D17) via the `schema_org_type` field on the type
-definition (editable at `/editor/types`), so a health-domain type can fire a
-**`MedicalWebPage`**. Values are allowlisted (`SchemaOrg.types/0`: the
+definition (editable at `/editor/types`), so a documentation type can fire a
+**`TechArticle`**. Values are allowlisted (`SchemaOrg.types/0`: the
 `Article` family plus the `WebPage` family); unknown values fall back to
 `Article`. Pages fire `WebPage`, posts `BlogPosting`. The node also carries
 the citation-relevant metadata answer engines key on: `datePublished` /

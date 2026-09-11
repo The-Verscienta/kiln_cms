@@ -14,8 +14,8 @@ defmodule KilnCMS.CMS.ContentLink do
 
   ## Relations with payload
 
-  When a relationship needs per-link attributes (a formula→ingredient link that
-  carries a dosage and role, a jia-jian modification, an ordered "step N of"),
+  When a relationship needs per-link attributes (a recipe→ingredient link that
+  carries a quantity and role, a substitution note, an ordered "step N of"),
   set `kind` to name the relation and put the attributes in `metadata` (a free
   map) and/or `label`. This is the lightweight alternative to hand-writing a
   typed join resource per relation: one `content_links` table backs every
@@ -122,11 +122,11 @@ defmodule KilnCMS.CMS.ContentLink do
     # Ordering of a record's links within a kind.
     attribute :position, :integer, allow_nil?: false, default: 0, public?: true
 
-    # Optional short human label for the link (e.g. "Chief herb", "Step 2").
+    # Optional short human label for the link (e.g. "Main ingredient", "Step 2").
     attribute :label, :string, public?: true, constraints: [max_length: KilnCMS.Limits.line()]
 
     # Free-form per-link payload — the data a relation carries *about itself*
-    # (dosage, role, jia-jian notes, …). Lets a data-carrying relation reuse the
+    # (quantity, role, substitution notes, …). Lets a data-carrying relation reuse the
     # one `content_links` table instead of needing a bespoke typed join resource.
     attribute :metadata, :map, allow_nil?: false, default: %{}, public?: true
   end

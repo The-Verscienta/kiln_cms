@@ -10,7 +10,7 @@ defmodule KilnCMS.CMS.ContentTypes do
   `[KilnCMS.CMS]`). This lets the reusable core stay project-agnostic while a
   project registers its own content types on its own domain, e.g.:
 
-      config :kiln_cms, :content_domains, [KilnCMS.CMS, Verscienta.Catalog]
+      config :kiln_cms, :content_domains, [KilnCMS.CMS, MyApp.Catalog]
 
   It also centralizes dispatch to the per-type code interfaces (whose names
   follow the project's convention) **on each type's own domain**, so the
@@ -502,7 +502,7 @@ defmodule KilnCMS.CMS.ContentTypes do
   #
   # Each helper accepts a type atom or string and calls the
   # convention-named code interface on that type's own domain, e.g.
-  # `KilnCMS.CMS.list_pages!/1` or `Verscienta.Catalog.list_herbs!/1`.
+  # `KilnCMS.CMS.list_pages!/1` or `MyApp.Catalog.list_products!/1`.
   #
   # Dynamic types route to the generic `Entry` interfaces (D17): `atom/1`
   # resolves them to `:entry` and `plural/1` to `"entries"`, so the same

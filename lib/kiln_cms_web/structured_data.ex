@@ -5,7 +5,7 @@ defmodule KilnCMSWeb.StructuredData do
 
   The `@type` is resolved through `KilnCMS.Firing.SchemaOrg.resolve/1` — the
   same authority the fired `:json_ld` artifact uses (#357, #480) — so a type's
-  declared `schema_org_type` (e.g. `MedicalWebPage`, `MusicEvent`) reaches the
+  declared `schema_org_type` (e.g. `FAQPage`, `MusicEvent`) reaches the
   markup crawlers actually read, not just the headless one. A content page
   emits the main entity plus a `BreadcrumbList`; the blog index emits a
   `CollectionPage`. The result is serialized with

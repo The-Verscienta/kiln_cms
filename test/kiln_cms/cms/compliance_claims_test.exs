@@ -50,7 +50,7 @@ defmodule KilnCMS.CMS.ComplianceClaimsTest do
   describe "the publish gate" do
     test "is off unless configured, so existing content keeps publishing" do
       actor = admin()
-      p = page(%{blocks: [text_block("This is FDA approved.")]}, actor)
+      p = page(%{blocks: [text_block("This is government approved.")]}, actor)
 
       assert {:ok, _published} = CMS.publish_page(p, actor: actor)
     end
@@ -58,7 +58,7 @@ defmodule KilnCMS.CMS.ComplianceClaimsTest do
     test "stays off when claim checking is enabled but the gate is not" do
       gate!(require_at_publish: false)
       actor = admin()
-      p = page(%{blocks: [text_block("This is FDA approved.")]}, actor)
+      p = page(%{blocks: [text_block("This is government approved.")]}, actor)
 
       assert {:ok, _published} = CMS.publish_page(p, actor: actor)
     end
@@ -66,10 +66,10 @@ defmodule KilnCMS.CMS.ComplianceClaimsTest do
     test "refuses a publish carrying an error-severity claim, quoting the phrase" do
       gate!()
       actor = admin()
-      p = page(%{blocks: [text_block("Our formula is FDA approved.")]}, actor)
+      p = page(%{blocks: [text_block("Our product is government approved.")]}, actor)
 
       assert {:error, error} = CMS.publish_page(p, actor: actor)
-      assert Exception.message(error) =~ "fda approved"
+      assert Exception.message(error) =~ "government approved"
       assert Exception.message(error) =~ "unreviewed claim"
     end
 
@@ -94,7 +94,7 @@ defmodule KilnCMS.CMS.ComplianceClaimsTest do
         page(
           %{
             blocks: [text_block("A calm article.")],
-            seo_description: "Clinically proven relief."
+            seo_description: "Clinically proven results."
           },
           actor
         )
@@ -106,19 +106,19 @@ defmodule KilnCMS.CMS.ComplianceClaimsTest do
     test "names every offending phrase at once rather than one per retry" do
       gate!()
       actor = admin()
-      p = page(%{blocks: [text_block("FDA approved and 100% safe.")]}, actor)
+      p = page(%{blocks: [text_block("Government approved and 100% safe.")]}, actor)
 
       assert {:error, error} = CMS.publish_page(p, actor: actor)
       message = Exception.message(error)
 
-      assert message =~ "fda approved"
+      assert message =~ "government approved"
       assert message =~ "100% safe"
     end
 
     test "publishes clean content unchanged" do
       gate!()
       actor = admin()
-      p = page(%{blocks: [text_block("Herbal tea is pleasant to drink.")]}, actor)
+      p = page(%{blocks: [text_block("A garden shed is pleasant to sit in.")]}, actor)
 
       assert {:ok, published} = CMS.publish_page(p, actor: actor)
       assert published.state == :published
@@ -130,7 +130,7 @@ defmodule KilnCMS.CMS.ComplianceClaimsTest do
 
       # Shipped phrase, no longer configured — passes.
       assert {:ok, _} =
-               %{blocks: [text_block("FDA approved.")]}
+               %{blocks: [text_block("Government approved.")]}
                |> page(actor)
                |> then(&CMS.publish_page(&1, actor: actor))
 
@@ -176,7 +176,7 @@ defmodule KilnCMS.CMS.ComplianceClaimsTest do
 
       p =
         page(
-          %{blocks: [text_block("Notre formule est FDA approved.")], locale: "fr"},
+          %{blocks: [text_block("Notre produit est government approved.")], locale: "fr"},
           actor
         )
 
@@ -184,17 +184,17 @@ defmodule KilnCMS.CMS.ComplianceClaimsTest do
     end
 
     test "custom rules gate in every locale" do
-      gate!(rules: [%{code: :maison, severity: :error, phrases: ["approuvé par la fda"]}])
+      gate!(rules: [%{code: :maison, severity: :error, phrases: ["approuvé par les autorités"]}])
       actor = admin()
 
       p =
         page(
-          %{blocks: [text_block("Approuvé par la FDA.")], locale: "fr"},
+          %{blocks: [text_block("Approuvé par les autorités.")], locale: "fr"},
           actor
         )
 
       assert {:error, error} = CMS.publish_page(p, actor: actor)
-      assert Exception.message(error) =~ "approuvé par la fda"
+      assert Exception.message(error) =~ "approuvé par les autorités"
     end
 
     # A record whose locale is blank must not silently skip the gate — a gate
@@ -203,7 +203,7 @@ defmodule KilnCMS.CMS.ComplianceClaimsTest do
       gate!()
       actor = admin()
 
-      p = page(%{blocks: [text_block("This is FDA approved.")], locale: ""}, actor)
+      p = page(%{blocks: [text_block("This is government approved.")], locale: ""}, actor)
 
       assert {:error, _error} = CMS.publish_page(p, actor: actor)
     end
@@ -216,7 +216,7 @@ defmodule KilnCMS.CMS.ComplianceClaimsTest do
     test "an already-published claim does not block an unrelated edit" do
       actor = admin()
 
-      p = page(%{blocks: [text_block("Our formula is FDA approved.")]}, actor)
+      p = page(%{blocks: [text_block("Our product is government approved.")]}, actor)
       {:ok, published} = CMS.publish_page(p, actor: actor)
 
       gate!()
@@ -230,7 +230,7 @@ defmodule KilnCMS.CMS.ComplianceClaimsTest do
     test "but adding a NEW claim to a live page is refused" do
       actor = admin()
 
-      p = page(%{blocks: [text_block("Our formula is FDA approved.")]}, actor)
+      p = page(%{blocks: [text_block("Our product is government approved.")]}, actor)
       {:ok, published} = CMS.publish_page(p, actor: actor)
 
       gate!()
@@ -238,7 +238,7 @@ defmodule KilnCMS.CMS.ComplianceClaimsTest do
       assert {:error, error} =
                CMS.update_page(
                  published,
-                 %{blocks: [text_block("Our formula is FDA approved and 100% safe.")]},
+                 %{blocks: [text_block("Our product is government approved and 100% safe.")]},
                  actor: actor
                )
 
@@ -247,7 +247,7 @@ defmodule KilnCMS.CMS.ComplianceClaimsTest do
       assert message =~ "100% safe"
       # The phrase that was already live is not re-reported — it is not what
       # this write introduced.
-      refute message =~ "fda approved"
+      refute message =~ "government approved"
     end
 
     test "a draft is not gated — a draft in progress is not an assertion it is done" do
@@ -257,7 +257,7 @@ defmodule KilnCMS.CMS.ComplianceClaimsTest do
       p = page(%{blocks: [text_block("A calm article.")]}, actor)
 
       assert {:ok, _updated} =
-               CMS.update_page(p, %{blocks: [text_block("FDA approved.")]}, actor: actor)
+               CMS.update_page(p, %{blocks: [text_block("Government approved.")]}, actor: actor)
     end
 
     # The whole justification for dropping `changing(:blocks)` from this gate's
@@ -272,7 +272,7 @@ defmodule KilnCMS.CMS.ComplianceClaimsTest do
       gate!()
 
       assert {:error, error} =
-               CMS.update_page(published, %{seo_description: "Clinically proven relief."},
+               CMS.update_page(published, %{seo_description: "Clinically proven results."},
                  actor: actor
                )
 
@@ -290,11 +290,11 @@ defmodule KilnCMS.CMS.ComplianceClaimsTest do
       actor = admin()
 
       # v1: the claim, legal while a draft.
-      draft = page(%{blocks: [text_block("Our formula is FDA approved.")]}, actor)
+      draft = page(%{blocks: [text_block("Our product is government approved.")]}, actor)
 
       # v2: reworded, then published clean.
       fixed =
-        CMS.update_page!(draft, %{blocks: [text_block("Our formula is well studied.")]},
+        CMS.update_page!(draft, %{blocks: [text_block("Our product is well reviewed.")]},
           actor: actor
         )
 
@@ -310,16 +310,16 @@ defmodule KilnCMS.CMS.ComplianceClaimsTest do
       assert {:error, error} =
                CMS.restore_page_version(published, %{version_id: create_version.id}, actor: actor)
 
-      assert Exception.message(error) =~ "fda approved"
+      assert Exception.message(error) =~ "government approved"
     end
 
     test "restoring a DRAFT is not gated — it makes no public claim" do
       actor = admin()
 
-      draft = page(%{blocks: [text_block("Our formula is FDA approved.")]}, actor)
+      draft = page(%{blocks: [text_block("Our product is government approved.")]}, actor)
 
       fixed =
-        CMS.update_page!(draft, %{blocks: [text_block("Our formula is well studied.")]},
+        CMS.update_page!(draft, %{blocks: [text_block("Our product is well reviewed.")]},
           actor: actor
         )
 
@@ -342,16 +342,16 @@ defmodule KilnCMS.CMS.ComplianceClaimsTest do
     test "refuses a scheduled publish carrying an error-severity claim" do
       gate!()
       actor = admin()
-      p = page(%{blocks: [text_block("Our formula is FDA approved.")]}, actor)
+      p = page(%{blocks: [text_block("Our product is government approved.")]}, actor)
 
       assert {:error, error} = Ash.update(p, %{}, action: :publish_scheduled, actor: actor)
-      assert Exception.message(error) =~ "fda approved"
+      assert Exception.message(error) =~ "government approved"
     end
 
     test "lets a clean scheduled publish through" do
       gate!()
       actor = admin()
-      p = page(%{blocks: [text_block("Herbal tea is pleasant.")]}, actor)
+      p = page(%{blocks: [text_block("Garden sheds are pleasant.")]}, actor)
 
       assert {:ok, published} = Ash.update(p, %{}, action: :publish_scheduled, actor: actor)
       assert published.state == :published

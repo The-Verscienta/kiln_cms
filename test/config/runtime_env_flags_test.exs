@@ -380,7 +380,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
     end
   end
 
-  describe "ASK_RERANK (the Shen-beat-Huang-Qi report, P7)" do
+  describe "ASK_RERANK (the search-ranking report, P7)" do
     # The ask-only reranking switch. Read with `fetch/1` so that an unset
     # variable writes nothing — a project overlay's `config :kiln_cms,
     # KilnCMS.Ask, rerank: true` must survive a deploy that never mentions

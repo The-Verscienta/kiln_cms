@@ -18,7 +18,7 @@ defmodule KilnCMS.CMS.HealthSweep do
   create tasks, and does not touch `health` (which is a calculation and has
   nothing to store). What happens next is an `Automation` rule the team
   configured, or nothing at all — which is the point: "overdue" means different
-  things to a newsroom and to a clinical library, and the one hard-coded
+  things to a newsroom and to a documentation library, and the one hard-coded
   reaction would be wrong for one of them.
 
   That also makes it safe to leave enabled everywhere. A site with no review

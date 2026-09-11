@@ -79,10 +79,10 @@ defmodule KilnCMSWeb.ComplianceComponents do
         phrases: quoted(a)
       )
 
-  def finding_message(%{code: :medical_advice_claim, args: a}, _pinned?),
+  def finding_message(%{code: :superlative_claim, args: a}, _pinned?),
     do:
       gettext(
-        "%{phrases} positions this as a substitute for seeing a clinician.",
+        "%{phrases} ranks this above everything else. Name the ranking and who made it, or reword it.",
         phrases: quoted(a)
       )
 

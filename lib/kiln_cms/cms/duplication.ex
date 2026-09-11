@@ -33,7 +33,7 @@ defmodule KilnCMS.CMS.Duplication do
   through the `related_<type>_ids` argument. That argument is an id set, and
   `manage_relationship` would re-create every link with the resource defaults —
   flattening `kind`, `position`, `label` and the `metadata` payload that
-  data-carrying relations (a formula → ingredient dosage, a "step N of") exist
+  data-carrying relations (a recipe → ingredient quantity, a "step N of") exist
   to hold, and collapsing two links to one target under different kinds into
   one. The rows are cloned after the copy is created, so a link failure leaves
   the copy behind rather than a half-written one; the copy is a draft, so that

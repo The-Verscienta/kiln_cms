@@ -88,7 +88,7 @@ KILN_PROVENANCE_KEY_FILE=/run/secrets/kiln-provenance.pem
 
 ```elixir
 config :kiln_cms, KilnCMS.Provenance,
-  signer: "Verscienta Editorial",
+  signer: "Example Editorial",
   origin: "https://your-domain",
   # Or reuse the DKIM mail key instead of a dedicated content-signing key:
   signing_key: :dkim

@@ -46,7 +46,7 @@ defmodule KilnCMSWeb.ContentEditorHealthTest do
   defp slug, do: "health-#{System.unique_integer([:positive])}"
 
   defp published_page(admin, attrs) do
-    CMS.create_page!(Map.merge(%{title: "Monograph", slug: slug()}, attrs), actor: admin)
+    CMS.create_page!(Map.merge(%{title: "Guide", slug: slug()}, attrs), actor: admin)
     |> CMS.publish_page!(%{}, actor: admin)
   end
 

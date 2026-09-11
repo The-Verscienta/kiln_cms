@@ -4,7 +4,7 @@ defmodule KilnCMSWeb.JsonApiSemanticFloorTest do
   themselves (no fusion to leave it to) and exempt a row whose title the
   query names, as the title leg does in hybrid search — so a floor set for
   the search page no longer drops named records from the route delivery
-  sites use (the "Why Shen Beat Huang Qi" report, D2).
+  sites use (the 2026-09-04 search-ranking report, D2).
   """
   # async: false — toggles the global `KilnCMS.Search` app env.
   use KilnCMSWeb.ConnCase, async: false
@@ -83,17 +83,17 @@ defmodule KilnCMSWeb.JsonApiSemanticFloorTest do
 
   test "the published route keeps a record the query names past the floor", %{conn: conn} do
     admin = admin()
-    named = published_post(admin, "Huang Qi")
-    _other = published_post(admin, "Dang Shen")
+    named = published_post(admin, "Pad Thai")
+    _other = published_post(admin, "Tom Yum")
     KilnCMS.DataCase.drain_oban()
 
     body =
       conn
-      |> get("/api/json/posts/semantic-search/published?query=huang%20qi%20dang&locale=en")
+      |> get("/api/json/posts/semantic-search/published?query=pad%20thai%20tom&locale=en")
       |> json_response(200)
 
-    # A floor of 0 admits nothing by distance; "Huang Qi" is named, "Dang
-    # Shen" is not ("dang" alone is not its title as a phrase).
+    # A floor of 0 admits nothing by distance; "Pad Thai" is named, "Tom
+    # Yum" is not ("tom" alone is not its title as a phrase).
     assert Enum.map(body["data"], & &1["id"]) == [named.id]
 
     body =

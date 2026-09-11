@@ -26,7 +26,7 @@ defmodule KilnCMS.CMS.Content do
     * `:table` — the Postgres table; defaults to `"\#{type}s"`.
     * `:domain` — the Ash domain the resource is registered on. Defaults to
       `KilnCMS.CMS` (the core CMS). Project-specific content types pass their own
-      domain (e.g. `Verscienta.Catalog`) so the reusable core stays
+      domain (e.g. `MyApp.Catalog`) so the reusable core stays
       project-agnostic; list that domain in `:content_domains` (see
       `KilnCMS.CMS.ContentTypes`) so it is discovered everywhere.
     * `:excerpt?` — include an `excerpt` attribute (listings/feeds). Default `false`.
@@ -228,7 +228,7 @@ defmodule KilnCMS.CMS.Content do
     dynamic? = Keyword.get(opts, :dynamic?, false)
 
     # The schema.org @type this type's :json_ld surface fires as its main node
-    # (#357, GEO) — e.g. "BlogPosting", "MedicalWebPage". Must be in
+    # (#357, GEO) — e.g. "BlogPosting", "FAQPage". Must be in
     # `KilnCMS.Firing.SchemaOrg.types/0`; unknown values fall back to Article
     # at fire time. Dynamic entries resolve theirs from the TypeDefinition row.
     schema_org_type = Keyword.get(opts, :schema_org_type, "Article")
@@ -1182,9 +1182,9 @@ defmodule KilnCMS.CMS.Content do
     # implicit AND of every lexeme, right for most queries and the primary
     # `:search`. `:any` ORs the same lexemes instead (`:search_any`): the
     # fallback `KilnCMS.Search.hybrid/3` runs when the AND comes up short,
-    # because AND fails closed on a query that names two records ("huang qi
-    # dang shen" matches neither Huang Qi nor Dang Shen — no document
-    # contains all four words) and on a question form, which ANDs eight
+    # because AND fails closed on a query that names two records ("banana bread
+    # sourdough starter" matches neither Banana Bread nor Sourdough Starter —
+    # no document contains all four words) and on a question form, which ANDs eight
     # lexemes and matches nothing. The OR query is built IN SQL from
     # `plainto_tsquery`'s own tokenisation — its text form is `'a' & 'b'`,
     # and rewriting the operator hands `to_tsquery` an expression it
@@ -1334,11 +1334,11 @@ defmodule KilnCMS.CMS.Content do
     # a phrase (`phraseto_tsquery`), must occur in that order in the query's
     # tsvector, both under the locale's text-search config, so the match is
     # case-insensitive, stemmed and stop-word aware exactly as the keyword leg
-    # is: "Huang Qi" is named by "huang qi dang shen", and a title of nothing
-    # but stop words never matches anything. It exists because
+    # is: "Banana Bread" is named by "banana bread sourdough starter", and a
+    # title of nothing but stop words never matches anything. It exists because
     # `plainto_tsquery` ANDs every query lexeme, so a query naming two records
     # matches neither of them — the surviving hits are whatever happens to
-    # mention everything (the "Why Shen Beat Huang Qi" report, P2). Longest
+    # mention everything (the search-ranking report, P2). Longest
     # title first: the most specific name the query contains outranks a
     # one-word title it also happens to contain. A sequential scan over the
     # type's titles (the reversed direction has no index shape), bounded by
@@ -3159,7 +3159,7 @@ defmodule KilnCMS.CMS.Content do
         #     `unpublish_at` stays in the past, which is precisely what makes
         #     `health` read `:expired` forever: the signal is the calculation,
         #     not a state change. For content that must not silently vanish
-        #     from a live site (a legal notice, a drug monograph) but does need
+        #     from a live site (a legal notice, a product safety sheet) but does need
         #     a human told that its stated shelf life has run out.
         #
         # `:flag` is the reason the two scheduler triggers below both exclude
@@ -3523,7 +3523,7 @@ defmodule KilnCMS.CMS.Content do
         # headline happens precisely when the match cluster is the
         # title-and-headings prefix of `search_text` — a query that names the
         # record — where `MaxFragments` hands back the matched words and
-        # nothing around them: "Huang Qi Botanical Description Astragalus"
+        # nothing around them: "Banana Bread Ingredients Method Ripe Bananas"
         # grounds no answer, and a well-behaved generator truthfully reports
         # that its sources say nothing. The headline is computed once, in the
         # subselect, rather than once to measure and once to return; the

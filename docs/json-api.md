@@ -176,7 +176,7 @@ GET /api/json/posts?filter[locale]=en&custom_filter[price][lte]=20&custom_sort=-
   boolean, and `date`/`datetime` (ISO-8601 strings) chronologically.
 - `in` matches any of a list: `custom_filter[color][in][]=red&custom_filter[color][in][]=blue`.
 - `ilike` (text-like fields only) takes the usual `%` wildcards:
-  `custom_filter[subtitle][ilike]=%herb%`.
+  `custom_filter[subtitle][ilike]=%leather%`.
 - `null` takes `true`/`false` and tests whether the record has the field at
   all.
 - `media`/`reference` fields match on their snapshot's stable `id`
@@ -337,7 +337,7 @@ notably `author`, which stays excluded for PII redaction (#183) — is a 400.
 
 Link edges arrive as `content_link` compound members carrying their payload
 (`kind`, `position`, `label`, `metadata`, `source_id`, `target_id`), so a
-consumer can join outgoing/incoming relations (and e.g. per-link dosage
+consumer can join outgoing/incoming relations (and e.g. per-link quantity
 metadata) without extra requests. The embedded block tree is **not**
 exposed over JSON:API for *reads* — rendered content is served as fired
 artifacts at `GET /api/content/:type/:slug`. For *writes*, send the body via the

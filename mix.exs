@@ -131,6 +131,7 @@ defmodule KilnCMS.MixProject do
         # Named by `projects/README.md` as the worked overlay example, and
         # excluded from the reference by `filter_modules` above.
         "Example.Catalog",
+        "Example.Plugin",
         # A dependency's module, marked `@moduledoc false` upstream. Naming it
         # is correct and useful — `KilnCMS.CMS.Calculations.RelatedLinks`
         # explains a real behaviour of it — but ExDoc has nothing to link a

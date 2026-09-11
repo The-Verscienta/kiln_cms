@@ -314,14 +314,14 @@ defmodule KilnCMS.CMS.ContentLifecycleTest do
         CMS.create_type_definition!(
           %{
             name: "dyn#{System.unique_integer([:positive])}",
-            label: "Monograph",
+            label: "Guide",
             default_review_after_days: 30
           },
           actor: admin
         )
 
       entry =
-        ContentTypes.create!(type.name, %{title: "Aconite", slug: slug()}, actor: admin)
+        ContentTypes.create!(type.name, %{title: "Setup guide", slug: slug()}, actor: admin)
 
       {:ok, entry} = ContentTypes.transition(type.name, "publish", entry, actor: admin)
       entry = backdate!(entry, days_ago(100))
@@ -343,7 +343,7 @@ defmodule KilnCMS.CMS.ContentLifecycleTest do
         CMS.create_type_definition!(
           %{
             name: "dyn#{System.unique_integer([:positive])}",
-            label: "Monograph",
+            label: "Guide",
             default_review_after_days: 30
           },
           actor: admin
@@ -352,7 +352,7 @@ defmodule KilnCMS.CMS.ContentLifecycleTest do
       entry =
         ContentTypes.create!(
           type.name,
-          %{title: "Aconite", slug: slug(), review_after_days: 365},
+          %{title: "Setup guide", slug: slug(), review_after_days: 365},
           actor: admin
         )
 

@@ -78,8 +78,8 @@ defmodule KilnCMS.Seo.LinksTest do
 
     test "suggests the closest published page and never the record itself" do
       actor = admin()
-      anchor = post(actor, "brewing herbal tea slowly", title: @twin_title)
-      twin = post(actor, "brewing herbal tea slowly", title: @twin_title)
+      anchor = post(actor, "brewing green tea slowly", title: @twin_title)
+      twin = post(actor, "brewing green tea slowly", title: @twin_title)
       _far = post(actor, "carburetor maintenance schedules", title: "Far")
 
       suggestions = Links.suggest(anchor)
@@ -95,8 +95,8 @@ defmodule KilnCMS.Seo.LinksTest do
       # is empty, so the keyword leg runs — and it must apply the same
       # published-only rule, or the author gets pointed at a URL that 404s.
       actor = admin()
-      anchor = post(actor, "brewing herbal tea slowly", title: @twin_title)
-      draft = post(actor, "brewing herbal tea slowly", title: @twin_title, publish?: false)
+      anchor = post(actor, "brewing green tea slowly", title: @twin_title)
+      draft = post(actor, "brewing green tea slowly", title: @twin_title, publish?: false)
 
       refute Enum.any?(Links.suggest(anchor), &(&1.id == draft.id))
     end
@@ -105,10 +105,10 @@ defmodule KilnCMS.Seo.LinksTest do
       # Delivery serves published AND public (Slugs.find_published_by_alias/3),
       # so a member-only page is a link a reader cannot follow.
       actor = admin()
-      anchor = post(actor, "brewing herbal tea slowly", title: @twin_title)
+      anchor = post(actor, "brewing green tea slowly", title: @twin_title)
 
       gated =
-        post(actor, "brewing herbal tea slowly",
+        post(actor, "brewing green tea slowly",
           title: @twin_title,
           attrs: %{audience: :member}
         )
@@ -118,8 +118,8 @@ defmodule KilnCMS.Seo.LinksTest do
 
     test "every suggestion carries a usable public path" do
       actor = admin()
-      anchor = post(actor, "brewing herbal tea slowly", title: @twin_title)
-      _twin = post(actor, "brewing herbal tea slowly", title: @twin_title)
+      anchor = post(actor, "brewing green tea slowly", title: @twin_title)
+      _twin = post(actor, "brewing green tea slowly", title: @twin_title)
 
       suggestions = Links.suggest(anchor)
       assert suggestions != []
@@ -134,10 +134,10 @@ defmodule KilnCMS.Seo.LinksTest do
       # The neighbour map used to carry no path at all and callers rebuilt
       # "/type/slug" themselves, which silently ignored multi-segment aliases.
       actor = admin()
-      anchor = post(actor, "brewing herbal tea slowly", title: @twin_title)
+      anchor = post(actor, "brewing green tea slowly", title: @twin_title)
 
       twin =
-        post(actor, "brewing herbal tea slowly",
+        post(actor, "brewing green tea slowly",
           title: @twin_title,
           attrs: %{path_alias: "/guides/deep/twin"}
         )
@@ -149,8 +149,8 @@ defmodule KilnCMS.Seo.LinksTest do
 
     test "excludes paths the body already links to" do
       actor = admin()
-      anchor = post(actor, "brewing herbal tea slowly", title: @twin_title)
-      twin = post(actor, "brewing herbal tea slowly", title: @twin_title)
+      anchor = post(actor, "brewing green tea slowly", title: @twin_title)
+      twin = post(actor, "brewing green tea slowly", title: @twin_title)
 
       linked = Enum.find(Links.suggest(anchor), &(&1.id == twin.id))
       assert linked
@@ -188,15 +188,15 @@ defmodule KilnCMS.Seo.LinksTest do
       # title + body means cosine distance 0, so with the boundary gone this
       # ranks FIRST — the strongest version of the leak, not a marginal one.
       foreign =
-        post(actor, "brewing herbal tea slowly", title: @twin_title, tenant: other)
+        post(actor, "brewing green tea slowly", title: @twin_title, tenant: other)
 
       # A same-org twin, so the semantic leg has something legitimate to return.
       # Without it `suggestions` is `[]`, and an empty list satisfies BOTH the
       # `refute Enum.any?` below and the `Enum.all?` guard under it — the first
       # draft of this test asserted `source == :semantic` on nothing and passed
       # with the predicate changed to a source that does not exist.
-      twin = post(actor, "brewing herbal tea slowly", title: @twin_title)
-      anchor = post(actor, "brewing herbal tea slowly", title: @twin_title)
+      twin = post(actor, "brewing green tea slowly", title: @twin_title)
+      anchor = post(actor, "brewing green tea slowly", title: @twin_title)
 
       suggestions = Links.suggest(anchor)
 
@@ -222,9 +222,9 @@ defmodule KilnCMS.Seo.LinksTest do
       other = other_org()
 
       foreign =
-        post(actor, "brewing herbal tea slowly", title: @twin_title, tenant: other)
+        post(actor, "brewing green tea slowly", title: @twin_title, tenant: other)
 
-      anchor = post(actor, "brewing herbal tea slowly", title: @twin_title)
+      anchor = post(actor, "brewing green tea slowly", title: @twin_title)
 
       suggestions = Links.suggest(anchor)
 
@@ -234,8 +234,8 @@ defmodule KilnCMS.Seo.LinksTest do
 
     test "respects :limit" do
       actor = admin()
-      anchor = post(actor, "brewing herbal tea slowly", title: @twin_title)
-      for _ <- 1..4, do: post(actor, "brewing herbal tea slowly", title: @twin_title)
+      anchor = post(actor, "brewing green tea slowly", title: @twin_title)
+      for _ <- 1..4, do: post(actor, "brewing green tea slowly", title: @twin_title)
 
       assert length(Links.suggest(anchor, limit: 2)) <= 2
     end

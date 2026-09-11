@@ -13,9 +13,9 @@ defmodule KilnCMS.Search.Eval do
   one):
 
       [
-        {"query": "huang qi", "expected": ["huang-qi"], "class": "single_entity"},
-        {"query": "huang qi dang shen", "expected": ["huang-qi", "dang-shen"],
-         "class": "multi_entity", "type": "herb"},
+        {"query": "pad thai", "expected": ["pad-thai"], "class": "single_entity"},
+        {"query": "pad thai tom yum", "expected": ["pad-thai", "tom-yum"],
+         "class": "multi_entity", "type": "recipe"},
         {"query": "asdfghjkl zzqqxx", "expected": [], "class": "junk"}
       ]
 
@@ -26,7 +26,7 @@ defmodule KilnCMS.Search.Eval do
       Kept as strings end to end: a golden set is operator input, and a class
       name never becomes an atom.
     * `type` (optional) — a content type name (`page`, `post`, a dynamic type's
-      name) or a section plural (`pages`, `herbs`); ranks are then taken
+      name) or a section plural (`pages`, `recipes`); ranks are then taken
       within that type only.
     * `locale` (optional) — the content locale to search in.
 
@@ -225,7 +225,7 @@ defmodule KilnCMS.Search.Eval do
   Judges one row against the ranked hits a retriever returned for it.
 
   A row's `type` narrows the hits to that content type (by type name or
-  section plural) before ranks are assigned, so "rank 3 among herbs" is what
+  section plural) before ranks are assigned, so "rank 3 among recipes" is what
   a typed row measures. Hits are deduplicated by slug, first occurrence
   winning — two content types can share a slug, and a sectioned search can
   return the same record twice only by mistake, but a rank must be a
@@ -351,8 +351,8 @@ defmodule KilnCMS.Search.Eval do
       {:ok, %{class: "single_entity", k: 5, min: 0.9}}
       iex> parse_threshold("overall=0.75", 10)
       {:ok, %{class: "overall", k: 10, min: 0.75}}
-      iex> parse_threshold("herbs=0.9", 10)
-      {:error, "unknown class \\"herbs\\" in --fail-below herbs=0.9"}
+      iex> parse_threshold("recipes=0.9", 10)
+      {:error, "unknown class \\"recipes\\" in --fail-below recipes=0.9"}
   """
   @spec parse_threshold(String.t(), pos_integer()) :: {:ok, threshold()} | {:error, String.t()}
   def parse_threshold(spec, default_k) when is_binary(spec) do

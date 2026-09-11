@@ -230,25 +230,25 @@ defmodule KilnCMS.Search.HybridTest do
   end
 
   describe "the title leg: a record the query names enters fusion" do
-    # `plainto_tsquery` ANDs every query lexeme, so "huang qi dang shen"
-    # matched neither "Huang Qi" nor "Dang Shen" — only a decoy that happened
+    # `plainto_tsquery` ANDs every query lexeme, so "pad thai tom yum"
+    # matched neither "Pad Thai" nor "Tom Yum" — only a decoy that happened
     # to mention all four words — and the fuzzy leg, which would have found
     # the titles, stayed out because the decoy counted as a keyword hit
-    # ("Why Shen Beat Huang Qi", P2). The title leg runs on every query and
+    # (the 2026-09-04 search-ranking report, P2). The title leg runs on every query and
     # outweighs keyword + semantic together, so each named record ranks above
     # the decoy; a single-entity query is untouched, because the record it
     # names collects the title leg on top of the legs it already led.
 
-    defp materia_medica(admin) do
-      huang_qi =
+    defp thai_menu(admin) do
+      pad_thai =
         CMS.create_page!(
-          %{title: "Huang Qi", slug: slug(), seo_description: "Astragalus root, a tonic"},
+          %{title: "Pad Thai", slug: slug(), seo_description: "Rice noodles, stir-fried"},
           actor: admin
         )
 
-      dang_shen =
+      tom_yum =
         CMS.create_page!(
-          %{title: "Dang Shen", slug: slug(), seo_description: "Codonopsis root"},
+          %{title: "Tom Yum", slug: slug(), seo_description: "Hot and sour soup"},
           actor: admin
         )
 
@@ -257,31 +257,31 @@ defmodule KilnCMS.Search.HybridTest do
       decoy =
         CMS.create_page!(
           %{
-            title: "Materia medica index",
+            title: "Street food index",
             slug: slug(),
-            seo_description: "Huang Qi and Dang Shen compared with Ren Shen"
+            seo_description: "Pad Thai and Tom Yum compared with Tom Kha"
           },
           actor: admin
         )
 
       KilnCMS.DataCase.drain_oban()
-      {huang_qi, dang_shen, decoy}
+      {pad_thai, tom_yum, decoy}
     end
 
     defp rank_of(results, record), do: Enum.find_index(results, &(&1.id == record.id))
 
     test "two titled records outrank a decoy that contains every query word" do
       admin = admin()
-      {huang_qi, dang_shen, decoy} = materia_medica(admin)
+      {pad_thai, tom_yum, decoy} = thai_menu(admin)
 
-      results = Search.hybrid(:page, "huang qi dang shen", actor: admin)
+      results = Search.hybrid(:page, "pad thai tom yum", actor: admin)
 
       decoy_rank = rank_of(results, decoy)
       assert decoy_rank, "the decoy is a keyword hit and must still be returned"
       assert :keyword in Search.hit_legs(Enum.at(results, decoy_rank))
       refute :title in Search.hit_legs(Enum.at(results, decoy_rank))
 
-      for named <- [huang_qi, dang_shen] do
+      for named <- [pad_thai, tom_yum] do
         rank = rank_of(results, named)
         assert rank, "#{named.title} must enter fusion"
         assert rank < decoy_rank, "#{named.title} ranked below the decoy"
@@ -291,16 +291,16 @@ defmodule KilnCMS.Search.HybridTest do
 
     test "a single-entity query keeps its rank 1 and gains the leg on top" do
       admin = admin()
-      {huang_qi, dang_shen, _decoy} = materia_medica(admin)
+      {pad_thai, tom_yum, _decoy} = thai_menu(admin)
 
-      [first | _] = results = Search.hybrid(:page, "huang qi", actor: admin)
+      [first | _] = results = Search.hybrid(:page, "pad thai", actor: admin)
 
-      assert first.id == huang_qi.id
+      assert first.id == pad_thai.id
       assert :keyword in Search.hit_legs(first)
       assert :title in Search.hit_legs(first)
 
-      # Not named by "huang qi": whatever else found it, the title leg didn't.
-      case rank_of(results, dang_shen) do
+      # Not named by "pad thai": whatever else found it, the title leg didn't.
+      case rank_of(results, tom_yum) do
         nil -> :ok
         rank -> refute :title in Search.hit_legs(Enum.at(results, rank))
       end
@@ -336,16 +336,16 @@ defmodule KilnCMS.Search.HybridTest do
     test "respects :filters like the other legs" do
       admin = admin()
       put_search_env(semantic: false)
-      cat = CMS.create_category!(%{name: "Tonics #{slug()}", slug: slug()}, actor: admin)
+      cat = CMS.create_category!(%{name: "Noodles #{slug()}", slug: slug()}, actor: admin)
 
       inside =
-        CMS.create_page!(%{title: "Huang Qi", slug: slug(), category_id: cat.id}, actor: admin)
+        CMS.create_page!(%{title: "Pad Thai", slug: slug(), category_id: cat.id}, actor: admin)
 
-      outside = CMS.create_page!(%{title: "Dang Shen", slug: slug()}, actor: admin)
+      outside = CMS.create_page!(%{title: "Tom Yum", slug: slug()}, actor: admin)
       KilnCMS.DataCase.drain_oban()
 
       results =
-        Search.hybrid(:page, "huang qi dang shen",
+        Search.hybrid(:page, "pad thai tom yum",
           actor: admin,
           filters: %{category_id: cat.id}
         )
@@ -357,9 +357,9 @@ defmodule KilnCMS.Search.HybridTest do
   end
 
   describe "the any-term fallback (:keyword_any)" do
-    # The keyword leg is `plainto_tsquery` — an AND of every lexeme. The "Why
-    # Shen Beat Huang Qi" report's D3/D4: a query naming two records ("huang
-    # qi dang shen") matched neither, because no document contains all four
+    # The keyword leg is `plainto_tsquery` — an AND of every lexeme. The
+    # 2026-09-04 search-ranking report's D3/D4: a query naming two records ("pad
+    # thai tom yum") matched neither, because no document contains all four
     # words, and a question form ANDed eight lexemes into nothing — at which
     # point the empty keyword leg un-suppressed the fuzzy title leg, so the
     # vaguer question beat the precise name list by accident. When the AND
@@ -373,10 +373,10 @@ defmodule KilnCMS.Search.HybridTest do
     setup do
       put_search_env(semantic: false)
       admin = admin()
-      huang_qi = CMS.create_page!(%{title: "Huang Qi", slug: slug()}, actor: admin)
-      dang_shen = CMS.create_page!(%{title: "Dang Shen", slug: slug()}, actor: admin)
+      pad_thai = CMS.create_page!(%{title: "Pad Thai", slug: slug()}, actor: admin)
+      tom_yum = CMS.create_page!(%{title: "Tom Yum", slug: slug()}, actor: admin)
       KilnCMS.DataCase.drain_oban()
-      %{admin: admin, huang_qi: huang_qi, dang_shen: dang_shen}
+      %{admin: admin, pad_thai: pad_thai, tom_yum: tom_yum}
     end
 
     test "a query naming two records surfaces both, above a record naming one word", ctx do
@@ -386,36 +386,36 @@ defmodule KilnCMS.Search.HybridTest do
       # with the terms matched. Created after them, so a tie would put it
       # FIRST (`inserted_at desc` breaks ties) — the order is the rank's
       # doing.
-      shen = CMS.create_page!(%{title: "Shen notes", slug: slug()}, actor: ctx.admin)
+      yum = CMS.create_page!(%{title: "Yum notes", slug: slug()}, actor: ctx.admin)
 
       # One word again, in the B-weighted description rather than the
       # A-weighted title, and created last. Ranked by the OR query it sits
-      # below `shen`; ranked by the AND query (`search_rank`, which scores
+      # below `yum`; ranked by the AND query (`search_rank`, which scores
       # a lone term at zero however it is weighted) the two would tie and
       # this one would come first. Pins that the action orders by its own
       # rank, not the every-term one.
       described =
-        CMS.create_page!(%{title: "Unrelated", slug: slug(), seo_description: "About dang"},
+        CMS.create_page!(%{title: "Unrelated", slug: slug(), seo_description: "About tom"},
           actor: ctx.admin
         )
 
       KilnCMS.DataCase.drain_oban()
 
-      results = Search.hybrid(:page, "huang qi dang shen", actor: ctx.admin)
+      results = Search.hybrid(:page, "pad thai tom yum", actor: ctx.admin)
       result_ids = ids(results)
       position = fn id -> Enum.find_index(result_ids, &(&1 == id)) end
 
-      assert ctx.huang_qi.id in result_ids
-      assert ctx.dang_shen.id in result_ids
-      assert position.(shen.id) > position.(ctx.huang_qi.id)
-      assert position.(shen.id) > position.(ctx.dang_shen.id)
-      assert position.(described.id) > position.(shen.id)
+      assert ctx.pad_thai.id in result_ids
+      assert ctx.tom_yum.id in result_ids
+      assert position.(yum.id) > position.(ctx.pad_thai.id)
+      assert position.(yum.id) > position.(ctx.tom_yum.id)
+      assert position.(described.id) > position.(yum.id)
 
       # Found by the relaxation and by the title leg (the query names each
       # whole title): the AND leg has no hit to contribute, and the fuzzy
       # leg's word similarity does not reach a two-word title from a
       # four-word prefix.
-      for hit <- results, hit.id in [ctx.huang_qi.id, ctx.dang_shen.id] do
+      for hit <- results, hit.id in [ctx.pad_thai.id, ctx.tom_yum.id] do
         assert Search.hit_legs(hit) == [:keyword_any, :title]
         # Fused at a real (if reduced) weight — a relaxed hit still scores.
         assert Search.hit_score(hit) > 0
@@ -424,11 +424,11 @@ defmodule KilnCMS.Search.HybridTest do
 
     test "a question form no longer returns nothing", ctx do
       result_ids =
-        Search.hybrid(:page, "How is Huang Qi different from Dang Shen?", actor: ctx.admin)
+        Search.hybrid(:page, "How is Pad Thai different from Tom Yum?", actor: ctx.admin)
         |> ids()
 
-      assert ctx.huang_qi.id in result_ids
-      assert ctx.dang_shen.id in result_ids
+      assert ctx.pad_thai.id in result_ids
+      assert ctx.tom_yum.id in result_ids
     end
 
     test "a precise query with enough full matches never runs the relaxation", ctx do
@@ -454,8 +454,8 @@ defmodule KilnCMS.Search.HybridTest do
       # One hit — under the threshold — but OR and AND are the same query
       # for one word, so the relaxation would only re-count this hit. The
       # legs are the full match and the fuzzy title leg, nothing more.
-      assert [hit] = Search.hybrid(:page, "huang", actor: ctx.admin)
-      assert hit.id == ctx.huang_qi.id
+      assert [hit] = Search.hybrid(:page, "pad", actor: ctx.admin)
+      assert hit.id == ctx.pad_thai.id
       assert Search.hit_legs(hit) == [:keyword, :fuzzy]
     end
 
@@ -467,14 +467,14 @@ defmodule KilnCMS.Search.HybridTest do
         )
 
       inside =
-        CMS.create_page!(%{title: "Huang Qi inside", slug: slug(), category_id: cat.id},
+        CMS.create_page!(%{title: "Pad Thai inside", slug: slug(), category_id: cat.id},
           actor: ctx.admin
         )
 
       KilnCMS.DataCase.drain_oban()
 
       results =
-        Search.hybrid(:page, "huang qi dang shen",
+        Search.hybrid(:page, "pad thai tom yum",
           actor: ctx.admin,
           filters: %{category_id: cat.id}
         )
@@ -485,21 +485,21 @@ defmodule KilnCMS.Search.HybridTest do
     end
 
     test "the :search_any_published twin pins state; the base answers the actor", ctx do
-      CMS.publish_page!(ctx.dang_shen, %{}, actor: ctx.admin)
+      CMS.publish_page!(ctx.tom_yum, %{}, actor: ctx.admin)
 
       read = fn action ->
         KilnCMS.CMS.Page
-        |> Ash.Query.for_read(action, %{query: "huang qi dang shen"})
+        |> Ash.Query.for_read(action, %{query: "pad thai tom yum"})
         |> Ash.read!(actor: ctx.admin)
         |> ids()
       end
 
       # An admin reads drafts through the base action …
-      assert ctx.huang_qi.id in read.(:search_any)
-      assert ctx.dang_shen.id in read.(:search_any)
+      assert ctx.pad_thai.id in read.(:search_any)
+      assert ctx.tom_yum.id in read.(:search_any)
       # … and only published content through the delivery twin, like
       # `:search_published`.
-      assert read.(:search_any_published) == [ctx.dang_shen.id]
+      assert read.(:search_any_published) == [ctx.tom_yum.id]
     end
   end
 

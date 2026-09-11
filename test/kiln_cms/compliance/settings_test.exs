@@ -56,13 +56,13 @@ defmodule KilnCMS.Compliance.SettingsTest do
 
   describe "the resolve chain" do
     test "a site with no row inherits the operator config exactly", %{org: org} do
-      put_config(enabled: true, require_at_publish: true, disclaimer: "Not medical advice.")
+      put_config(enabled: true, require_at_publish: true, disclaimer: "Not professional advice.")
 
       settings = Settings.for_org(org)
 
       assert settings.enabled?
       assert settings.require_at_publish?
-      assert settings.disclaimer == "Not medical advice."
+      assert settings.disclaimer == "Not professional advice."
       assert settings.rules == Compliance.default_rules()
     end
 
@@ -85,8 +85,8 @@ defmodule KilnCMS.Compliance.SettingsTest do
     end
 
     # The inversion the issue is about: a deployment-wide gate that a tenant
-    # cannot decline. If this ever regresses, one clinic's decision that
-    # "cures" cannot ship refuses every other site's publishes again.
+    # cannot decline. If this ever regresses, one site's decision that
+    # "guaranteed" cannot ship refuses every other site's publishes again.
     test "a site can decline a publish gate the operator turned on", ctx do
       put_config(enabled: true, require_at_publish: true)
       save(ctx, %{enabled: true, require_at_publish: false})
@@ -134,15 +134,15 @@ defmodule KilnCMS.Compliance.SettingsTest do
   describe "a site's own vocabulary" do
     test "its phrases become a rule of their own, carrying its severity", ctx do
       put_config(enabled: true)
-      save(ctx, %{enabled: true, phrases: ["banishes toxins"], phrase_severity: :error})
+      save(ctx, %{enabled: true, phrases: ["doubles your savings"], phrase_severity: :error})
 
       settings = Settings.for_org(ctx.org)
 
-      assert %{code: :site_claim, severity: :error, phrases: ["banishes toxins"]} =
+      assert %{code: :site_claim, severity: :error, phrases: ["doubles your savings"]} =
                List.last(settings.rules)
 
-      assert %{site_claim: ["banishes toxins"]} =
-               Compliance.scan("This tea banishes toxins.", settings.rules)
+      assert %{site_claim: ["doubles your savings"]} =
+               Compliance.scan("This plan doubles your savings.", settings.rules)
     end
 
     # A blank line in a hand-typed list is not an error. Ash's string type
@@ -150,9 +150,11 @@ defmodule KilnCMS.Compliance.SettingsTest do
     # nil values" — a constraint no admin can see.
     test "blank and duplicate phrases are dropped rather than rejected", ctx do
       put_config(enabled: true)
-      row = save(ctx, %{enabled: true, phrases: ["   ", "detoxes you", "detoxes you", ""]})
 
-      assert row.phrases == ["detoxes you"]
+      row =
+        save(ctx, %{enabled: true, phrases: ["   ", "pays for itself", "pays for itself", ""]})
+
+      assert row.phrases == ["pays for itself"]
     end
 
     test "a list of nothing but blanks leaves the shipped pack alone", ctx do
@@ -164,12 +166,12 @@ defmodule KilnCMS.Compliance.SettingsTest do
 
     test "a site can drop the deployment's rules and keep only its own", ctx do
       put_config(enabled: true)
-      save(ctx, %{enabled: true, use_shared_rules: false, phrases: ["banishes toxins"]})
+      save(ctx, %{enabled: true, use_shared_rules: false, phrases: ["doubles your savings"]})
 
       settings = Settings.for_org(ctx.org)
 
       assert [%{code: :site_claim}] = settings.rules
-      assert %{} == Compliance.scan("This is FDA approved.", settings.rules)
+      assert %{} == Compliance.scan("This is government approved.", settings.rules)
     end
 
     # A site with no rules at all reports every document as unchecked rather
@@ -182,7 +184,7 @@ defmodule KilnCMS.Compliance.SettingsTest do
       settings = Settings.for_org(ctx.org)
 
       assert settings.rules == []
-      assert %{} == Compliance.scan("This is FDA approved.", settings.rules)
+      assert %{} == Compliance.scan("This is government approved.", settings.rules)
     end
 
     # The English-only test is about the *rules*, not the config key: a site
@@ -190,7 +192,7 @@ defmodule KilnCMS.Compliance.SettingsTest do
     # language that is in.
     test "a site's own phrases are judged in every locale", ctx do
       put_config(enabled: true)
-      save(ctx, %{enabled: true, phrases: ["approuvé par la fda"]})
+      save(ctx, %{enabled: true, phrases: ["approuvé par les autorités"]})
 
       settings = Settings.for_org(ctx.org)
 
@@ -215,13 +217,13 @@ defmodule KilnCMS.Compliance.SettingsTest do
       on_exit(fn -> bust(other.id) end)
 
       put_config(enabled: true)
-      save(ctx, %{enabled: true, phrases: ["banishes toxins"], phrase_severity: :error})
+      save(ctx, %{enabled: true, phrases: ["doubles your savings"], phrase_severity: :error})
 
       mine = Settings.for_org(ctx.org)
       theirs = Settings.for_org(other)
 
-      assert %{site_claim: _} = Compliance.scan("It banishes toxins.", mine.rules)
-      assert %{} == Compliance.scan("It banishes toxins.", theirs.rules)
+      assert %{site_claim: _} = Compliance.scan("It doubles your savings.", mine.rules)
+      assert %{} == Compliance.scan("It doubles your savings.", theirs.rules)
     end
 
     test "one site turning the panel off never turns another's off", ctx do
@@ -286,12 +288,12 @@ defmodule KilnCMS.Compliance.SettingsTest do
     # publish at all. Refusing on rules nobody could read is not a stricter
     # gate, it is a wrong one.
     test "keeps the operator's advisory answers but never the publish gate" do
-      put_config(enabled: true, require_at_publish: true, disclaimer: "Not medical advice.")
+      put_config(enabled: true, require_at_publish: true, disclaimer: "Not professional advice.")
 
       unavailable = Settings.unavailable()
 
       assert unavailable.enabled?
-      assert unavailable.disclaimer == "Not medical advice."
+      assert unavailable.disclaimer == "Not professional advice."
       assert unavailable.rules == Compliance.default_rules()
       refute unavailable.require_at_publish?
     end

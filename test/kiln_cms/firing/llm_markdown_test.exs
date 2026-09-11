@@ -20,7 +20,7 @@ defmodule KilnCMS.Firing.LlmMarkdownTest do
     page =
       CMS.create_page!(
         %{
-          title: "Herbal Basics",
+          title: "Tea Basics",
           slug: "llm-#{System.unique_integer([:positive])}",
           blocks: [
             %{type: :heading, content: "Getting started", data: %{"level" => 2}, order: 0},
@@ -38,7 +38,7 @@ defmodule KilnCMS.Firing.LlmMarkdownTest do
     KilnCMS.DataCase.drain_oban()
 
     assert {:ok, %{"markdown" => md}} = Engine.read(page.org_id, :page, page.id, :llm)
-    assert md =~ "# Herbal Basics"
+    assert md =~ "# Tea Basics"
     assert md =~ "## Getting started"
     # Rich text contributes its plain-text projection, not HTML.
     assert md =~ "Steep the leaves gently."

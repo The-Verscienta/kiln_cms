@@ -6,7 +6,7 @@ defmodule KilnCMS.Compliance.Checks.Disclaimer do
   (`/editor/compliance`, #857) over the deployment default:
 
       config :kiln_cms, KilnCMS.Compliance,
-        disclaimer: "This information is not medical advice."
+        disclaimer: "This information is not professional advice."
 
   Both arrive already resolved, as the `:compliance_settings` fact that
   `KilnCMS.Compliance.Checks.Claims` documents. A caller that resolved none

@@ -294,7 +294,7 @@ defmodule KilnCMS.Automation.RuleWorker do
   # The health sweep re-fires every day a record stays overdue — that is what
   # makes it a reminder rather than a one-shot notification. So this asks
   # whether an open task of the same kind already exists on that content before
-  # creating one. Without that, a monograph nobody has got to in a fortnight
+  # creating one. Without that, a guide nobody has got to in a fortnight
   # carries fourteen identical tasks, and the queue that was meant to surface
   # the problem is the problem.
   #

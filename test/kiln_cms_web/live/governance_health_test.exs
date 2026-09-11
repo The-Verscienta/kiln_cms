@@ -86,7 +86,7 @@ defmodule KilnCMSWeb.GovernanceHealthTest do
 
   test "counts unhealthy content and lists the worst of it", %{conn: conn} do
     admin = authed_user(:admin)
-    stale = overdue_page(admin, "Aconite monograph")
+    stale = overdue_page(admin, "Product safety guide")
 
     {:ok, _lv, html} = conn |> log_in(admin) |> live(~p"/editor/governance")
 
@@ -121,7 +121,7 @@ defmodule KilnCMSWeb.GovernanceHealthTest do
   describe "the CSV export" do
     test "carries every unhealthy row", %{conn: conn} do
       admin = authed_user(:admin)
-      stale = overdue_page(admin, "Exportable monograph")
+      stale = overdue_page(admin, "Exportable guide")
 
       conn = conn |> log_in(admin) |> get(~p"/editor/governance/health.csv")
 

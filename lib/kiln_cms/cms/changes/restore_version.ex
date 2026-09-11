@@ -219,7 +219,7 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
   # `blocks`, `title`, `seo_title` and `seo_description` in a `before_action`,
   # so the plain `validate` on `:update` has already run, and `:restore_version`
   # fires artifacts of its own when the record is published. Restoring a live
-  # page to a version that said "FDA approved" would put the claim back on the
+  # page to a version that said "government approved" would put the claim back on the
   # public site having passed no gate at all.
   #
   # `only_new: true` for the same reason as above: restoring a claim that is

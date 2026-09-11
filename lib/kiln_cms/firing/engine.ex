@@ -453,7 +453,7 @@ defmodule KilnCMS.Firing.Engine do
   defp compose(document, typed, custom, :json_ld) do
     # The main node's @type is declared per content type (#357, GEO): the
     # Content macro's `schema_org_type:` option or the dynamic type's
-    # definition — so a health-domain type fires e.g. a MedicalWebPage.
+    # definition — so a help-centre type fires e.g. an FAQPage.
     main =
       document
       |> KilnCMS.Firing.SchemaOrg.main_node(body_text(typed, "\n\n"))

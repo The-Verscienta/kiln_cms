@@ -149,11 +149,11 @@ defmodule KilnCMS.AskTest do
     end
   end
 
-  describe "source ranking and excerpts (the Shen-beat-Huang-Qi report)" do
-    # A deployment asked how two herbs differ and was cited a concept page
-    # first and the two herbs seventh and eighth: `retrieve/2` flattened the
-    # sections in registry order — sorted by label, so "Concept" before
-    # "Herb" — under a comment claiming to interleave by strength, and cited
+  describe "source ranking and excerpts (the 2026-09-04 search-ranking report)" do
+    # A deployment asked how two recipes differ and was cited a guide page
+    # first and the two recipes seventh and eighth: `retrieve/2` flattened the
+    # sections in registry order — sorted by label, so "Guide" before
+    # "Recipe" — under a comment claiming to interleave by strength, and cited
     # excerpts of five words. These pin the fixes.
 
     test "sources are ranked by fused score across content types, not by type label" do
@@ -201,15 +201,15 @@ defmodule KilnCMS.AskTest do
       term = "zorptastic#{System.unique_integer([:positive])}"
 
       body =
-        "Astragalus membranaceus is a perennial herb of the legume family native to " <>
-          "northern China. The root is harvested in the fourth year and used as a qi " <>
-          "tonic that strengthens the defensive energy of the body and supports the " <>
-          "spleen and the lungs."
+        "Sen lek is a flat rice noodle of the kway teow family made across central " <>
+          "Thailand. The noodle is soaked overnight and stir-fried in a hot wok as a " <>
+          "thai street staple, with a tamarind sauce that balances the sour notes of " <>
+          "the dish and the sweet palm sugar."
 
       post =
         CMS.create_post!(
           %{
-            title: "The #{term} monograph",
+            title: "The #{term} recipe card",
             slug: slug(),
             blocks: [%{type: :rich_text, content: "<p>#{body}</p>", order: 0}]
           },
@@ -219,13 +219,13 @@ defmodule KilnCMS.AskTest do
       CMS.publish_post!(post, %{}, actor: actor)
 
       result = Ask.answer(term)
-      source = Enum.find(result.sources, &(&1.title == "The #{term} monograph"))
-      assert source, "expected the monograph among the sources"
+      source = Enum.find(result.sources, &(&1.title == "The #{term} recipe card"))
+      assert source, "expected the recipe card among the sources"
 
       # The query matches only the title; the old 18-word highlight, stripped
       # of its marks, handed a generator the title and little else.
       assert String.length(source.excerpt) >= 120
-      assert source.excerpt =~ "legume family"
+      assert source.excerpt =~ "kway teow family"
       refute source.excerpt =~ "<mark>"
     end
   end

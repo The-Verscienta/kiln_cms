@@ -15,21 +15,21 @@ phasing is at the end.
 > API as `score`/`legs`), and `/api/ask` ranks its sources by that score across
 > types rather than flattening sections in registry order.
 >
-> **Entity leg (2026-09-04, "Why Shen Beat Huang Qi" P2):** `hybrid/3` fuses a
+> **Entity leg (2026-09-04, search-ranking report P2):** `hybrid/3` fuses a
 > fourth, unconditional `:title` leg (`:search_title`) — records whose title
 > the query contains, stemmed and at word boundaries under the locale's
 > text-search config — at a weight above keyword + semantic together. The
 > keyword leg's `plainto_tsquery` ANDs every lexeme, so a query naming two
-> records ("huang qi dang shen") matched neither and returned whatever
+> records ("pad thai tom yum") matched neither and returned whatever
 > mentioned all four words; each named record now enters fusion at the top.
 > Single-entity queries keep their rank 1 (the named record collects the leg
 > on top of the legs it already led). The `<3`-hits fuzzy fallback is
 > unchanged. Still open from that report: P3 (re-measure the semantic floor,
 > apply it to semantic-only hits) and P7 (ask-only rerank knob).
 >
-> **Any-term fallback (2026-09-04, "Why Shen Beat Huang Qi" P4):** the
+> **Any-term fallback (2026-09-04, search-ranking report P4):** the
 > keyword leg is `plainto_tsquery` — an AND of every lexeme — which fails
-> closed on a query naming two records at once ("huang qi dang shen" matched
+> closed on a query naming two records at once ("pad thai tom yum" matched
 > neither) and on a question form (eight ANDed lexemes matched nothing, and
 > the *vaguer* query then beat the precise one because the empty keyword leg
 > un-suppressed the fuzzy title leg). `hybrid/3` now runs `:search_any` (the
@@ -221,7 +221,7 @@ search facade, a dashboard panel.
 ## 11. Ranking eval harness  ·  Effort M · Risk L · *shipped (`mix kiln.search.eval`)*
 
 **Problem.** Every item above changed the ranking, and nothing measured it.
-A deployment's report ("Why Shen Beat Huang Qi", 2026-09-04) traced a wrong
+A deployment's search-ranking report (2026-09-04) traced a wrong
 top citation to five mechanisms in this stack, each of which had passed a
 green suite: the tests pin behaviours, not relevance. Its P8 asked for a
 golden set and a task reporting recall@k and MRR per query class, run before
@@ -242,11 +242,11 @@ The golden set is a JSON array of rows:
 
 ```json
 [
-  {"query": "huang qi", "expected": ["huang-qi"], "class": "single_entity", "type": "herb"},
-  {"query": "huang qi dang shen", "expected": ["huang-qi", "dang-shen"], "class": "multi_entity"},
-  {"query": "herb that strengthens defensive energy", "expected": ["huang-qi"], "class": "paraphrase"},
-  {"query": "How is Huang Qi different from Dang Shen?", "expected": ["huang-qi", "dang-shen"], "class": "question_form"},
-  {"query": "huang chi", "expected": ["huang-qi"], "class": "typo"},
+  {"query": "pad thai", "expected": ["pad-thai"], "class": "single_entity", "type": "recipe"},
+  {"query": "pad thai tom yum", "expected": ["pad-thai", "tom-yum"], "class": "multi_entity"},
+  {"query": "stir-fried rice noodles with tamarind", "expected": ["pad-thai"], "class": "paraphrase"},
+  {"query": "How is Pad Thai different from Tom Yum?", "expected": ["pad-thai", "tom-yum"], "class": "question_form"},
+  {"query": "pad thia", "expected": ["pad-thai"], "class": "typo"},
   {"query": "asdfghjkl zzqqxx", "expected": [], "class": "junk"}
 ]
 ```
@@ -281,8 +281,8 @@ the public API rather than the internals.
   1.0 / 0.0 in both.
 
 The per-query block is the debugging value: each expected slug's rank (or
-`missing`) and the **legs** that found it. "`dang-shen` missing" next to
-"`da-ding-huang` #1 keyword" is D3 (AND semantics) on one line; a hit found
+`missing`) and the **legs** that found it. "`tom-yum` missing" next to
+"`thai-street-food` #1 keyword" is D3 (AND semantics) on one line; a hit found
 by `fuzzy` alone on a query that named the title verbatim is D4.
 
 **Exit status.** 0 whatever the numbers. `--fail-below CLASS=MIN[@K]`
@@ -306,8 +306,9 @@ and uploads `search-eval.json` as an artifact. It never fails the build.
    class; five per class is thirty rows and enough to move a number when a
    ranking changes. Keep two or three junk rows: they are what stops a
    "fix" that widens recall by returning everything.
-3. Put `type` on rows where only one content type is a fair answer (an herb
-   query on a site whose formulas mention every herb), and `locale` on rows
+3. Put `type` on rows where only one content type is a fair answer (an
+   ingredient query on a site whose recipes mention every ingredient), and
+   `locale` on rows
    in a non-default locale.
 4. Commit the file next to the deployment (a `projects/<name>/priv/` overlay
    is a fine home), run it with `--json` before touching the search config,

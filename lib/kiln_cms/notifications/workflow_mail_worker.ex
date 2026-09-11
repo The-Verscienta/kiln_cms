@@ -173,7 +173,7 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
 
   # HTML-escape any editor/importer-controlled value before it lands in the
   # email body. Titles and actor names are author-supplied (and copied verbatim
-  # by the Verscienta importer), so interpolating them raw would inject markup
+  # by a downstream importer), so interpolating them raw would inject markup
   # into a transactional email. `editor_url/2` values are server-generated
   # verified routes and don't need escaping.
   defp h(value) do

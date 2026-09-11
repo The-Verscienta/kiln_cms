@@ -41,7 +41,7 @@ From source, the same knobs plus the claim fields:
 # config/runtime.exs (production)
 config :kiln_cms, KilnCMS.Provenance,
   enabled: true,
-  signer: "Verscienta Editorial",
+  signer: "Example Editorial",
   origin: "https://example.com",
   ai_disclosure: :human,
   # Reuse the DKIM key (:dkim), or point at a dedicated content-signing key:
@@ -79,7 +79,7 @@ GET /api/provenance/post/my-post?surface=json
     "hash": { "alg": "sha-256", "canonicalization": "kiln-jcs-v1", "value": "…base64…" }
   },
   "claim": {
-    "signer": "Verscienta Editorial",
+    "signer": "Example Editorial",
     "origin": "https://example.com",
     "version": "…source version uuid…",
     "ai_disclosure": "human",

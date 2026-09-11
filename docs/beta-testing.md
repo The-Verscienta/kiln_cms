@@ -19,7 +19,7 @@ review workflow, taxonomy, releases, and the admin configuration surfaces.
   features — across the core authoring flows, and convert what we learn into a
   prioritized, deduplicated issue backlog.
 - **Who:** internal team members first, then a small number of *friendly*
-  agency / clinic editors (the people who'll actually run KilnCMS day to day).
+  agency / in-house editors (the people who'll actually run KilnCMS day to day).
   Pick non-technical content authors over engineers — they surface the UX gaps.
 - **What they touch:** the editor under `/editor` (plus `/media`), **not** the
   raw APIs. AshAdmin at `/admin` is out of scope and on a staging or production
@@ -138,7 +138,7 @@ into a comment on the round's roll-up issue.
 
 ## 1. Tester profile
 - Name / handle:
-- Role (agency editor / clinic editor / internal / other):
+- Role (agency editor / in-house editor / internal / other):
 - Tier provisioned (editor / admin):
 - Day-to-day CMS experience (none / some / power user):
 - Other CMSes you've used (WordPress, Sanity, Contentful, …):

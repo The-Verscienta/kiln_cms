@@ -37,9 +37,10 @@ system. This is the single most differentiated product move available.
       implementation replays the last publish ≤ date and re-fires in `:preview`
 
 **The asymmetry:** Full version history *and* immutable artifacts + a dependency
-graph already exist. For regulated/health content (Verscienta), "what did our
-guidance say on this date, provably" is a compliance superpower. Competitors
-render live from a mutable DB and can't do this without heavy custom work.
+graph already exist. For regulated content (finance, legal, public health),
+"what did our guidance say on this date, provably" is a compliance superpower.
+Competitors render live from a mutable DB and can't do this without heavy
+custom work.
 
 ## 3. RAG "ask your content" endpoint + AI content intelligence — [#339](https://github.com/The-Verscienta/kiln_cms/issues/339) `P1`
 
@@ -68,7 +69,7 @@ Algolia/OpenAI.
 - [x] Consumer-verifiable "came from us, unaltered, at version N" — shipped in #368
 
 **The asymmetry:** Artifact immutability *and* a DKIM signing key already exist.
-In the AI-slop era and for medical/regulated content, verifiable provenance is
+In the AI-slop era and for regulated content, verifiable provenance is
 genuinely novel — no CMS ships it natively.
 
 ## 5. "Stays up when the database doesn't" delivery — [#341](https://github.com/The-Verscienta/kiln_cms/issues/341) `P2`
@@ -115,10 +116,10 @@ All four shipped — #352 closed with the final phase in #427
 self-service export already exist — this *packages* them into one governance
 surface. Consolidates #2 + #4 + the existing audit trail.
 
-**Framing note:** NOT "HIPAA" — HIPAA governs *protected health information*
-(patient data), not *content about* GLP-1/TCM. The real value is editorial /
-medical-claim governance (traceable authorship, sourcing, approval), which maps
-to FTC health-claim scrutiny and medical-review workflows.
+**Framing note:** NOT a data-protection regime — laws like GDPR or HIPAA govern
+*personal data*, not *published content about* a subject. The real value is
+editorial / claim governance (traceable authorship, sourcing, approval), which
+maps to advertising-claim scrutiny (e.g. the FTC) and expert-review workflows.
 
 ## 9. First-class static / edge export of fired artifacts — [#353](https://github.com/The-Verscienta/kiln_cms/issues/353) `P2`
 
@@ -195,13 +196,13 @@ Extends the governance story (#340 signing, #352 dashboard) with two parts:
       **Operational note:** re-keying invalidates existing anchor signatures —
       each anchor records the `key_id` that made it.
 - [x] **Editorial/authorization consent linking** — shipped: a Consent resource
-      tied to content (medical-reviewer sign-off, patient/source release, source
+      tied to content (expert-reviewer sign-off, subject/source release, source
       licensing), surfaced in the governance dashboard and able to gate publish.
       Scope is *cleared-to-publish* consent, **not** GDPR data-subject or cookie
       consent. See [editorial-consent.md](editorial-consent.md).
 
 **Caution:** link to consent *references/metadata*, never store the sensitive
-consent documents themselves (PHI-adjacent exposure).
+consent documents themselves (personal-data exposure).
 
 **The asymmetry:** no mainstream CMS ties every item to a verifiable
 authorization record with a tamper-evident trail. Pairs with #2, #4, #8.
@@ -212,7 +213,7 @@ Structure content so LLMs / answer engines cite it accurately.
 
 - [x] `:llm` fired artifact surface (clean, chunked, extractable markdown)
 - [x] `llms.txt` generation from the firing engine
-- [x] Expanded schema.org/JSON-LD (`Article`, `FAQPage`, `HowTo`, `MedicalWebPage`, `ClaimReview`)
+- [x] Expanded schema.org/JSON-LD (`Article`, `FAQPage`, `HowTo`, `WebPage`, `ClaimReview`)
 - [x] Citation/source metadata on claims (ties into #4 provenance)
 
 All four shipped — #357 closed with the schema expansion in #422

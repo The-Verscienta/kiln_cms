@@ -129,7 +129,7 @@ defmodule KilnCMS.TagSuggestionCorpus do
   are plausible-but-wrong for a particular document (`brewing` for cold brew's
   neighbour, `sql` for a maths article), plus unrelated ones.
 
-  The near-misses matter more than the unrelated ones. "carburetors for herbal
+  The near-misses matter more than the unrelated ones. "carburetors for green
   tea" is not the failure an editor sees; "fermentation for cold brew" is.
   """
   @spec vocabulary() :: [String.t()]

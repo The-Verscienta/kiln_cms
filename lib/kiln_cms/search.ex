@@ -207,9 +207,9 @@ defmodule KilnCMS.Search do
   The distinction matters because a short query naming a record embeds far
   from that record's long prose. Filtering the leg *before* fusion made the
   floor the judge of every row, including the rows the keyword leg was about
-  to vouch for: on an entity-heavy corpus, "huang qi dang shen" kept two
+  to vouch for: on an entity-heavy corpus, "pad thai tom yum" kept two
   marginal neighbours and dropped both named records, so the leg fed fusion
-  noise and withheld the answers (the "Why Shen Beat Huang Qi" report, D2).
+  noise and withheld the answers (the 2026-09-04 search-ranking report, D2).
   A junk query still returns nothing — with no lexical hit every fused hit is
   semantic-only, and every one of them is over the floor.
 
@@ -436,7 +436,7 @@ defmodule KilnCMS.Search do
   # boundaries (`:search_title`). It runs on every query, and it outweighs the
   # keyword and semantic legs *together* (1.0 + 1.0), so a record the query
   # names by title outranks one that merely led both other legs — the
-  # "Why Shen Beat Huang Qi" report's P2: "a query that contains a record's
+  # 2026-09-04 search-ranking report's P2: "a query that contains a record's
   # title verbatim should surface that record, full stop". At k = 60 the
   # margin holds down to title rank ~30, which no query reaches (a query
   # names a handful of titles at most). The named record still collects its
@@ -447,7 +447,7 @@ defmodule KilnCMS.Search do
 
   # The any-term fallback, the same shape: the keyword leg is an AND of every
   # lexeme (`plainto_tsquery`), which fails CLOSED on a query that names two
-  # records — "huang qi dang shen" matches neither Huang Qi nor Dang Shen,
+  # records — "pad thai tom yum" matches neither Pad Thai nor Tom Yum,
   # since no document contains all four words — and on a question form,
   # which ANDs eight lexemes and matches nothing at all. When the AND leg
   # finds fewer hits than this, `:search_any` (the same lexemes ORed, ranked
@@ -499,7 +499,7 @@ defmodule KilnCMS.Search do
   Degrades to keyword-only when semantic search is disabled — the semantic leg
   then returns nothing. The title leg returns every record whose title
   appears in the query (case-insensitive, stemmed, at word boundaries —
-  "huang qi dang shen" names both "Huang Qi" and "Dang Shen"), at a weight
+  "pad thai tom yum" names both "Pad Thai" and "Tom Yum"), at a weight
   above the other two legs combined: the keyword leg ANDs every query
   lexeme, so a query naming two records matches neither, and this leg is
   how each of them enters fusion. When the keyword leg finds almost nothing,
@@ -621,8 +621,8 @@ defmodule KilnCMS.Search do
   `0.031` and a post scored `0.016` can be sorted against each other, which is
   how `KilnCMS.Ask` picks its sources. They used to be computed and thrown
   away inside fusion, which left the sections' callers nothing to interleave
-  on but the order of the registry — so `/api/ask` cited every "Concept"
-  before any "Herb", however weak the concept match.
+  on but the order of the registry — so `/api/ask` cited every "Guide"
+  before any "Recipe", however weak the guide match.
   """
   @spec hit_score(struct()) :: float() | nil
   def hit_score(%{__metadata__: %{search: %{score: score}}}), do: score

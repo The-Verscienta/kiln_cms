@@ -66,7 +66,7 @@ defmodule KilnCMS.CMS.ConsentTest do
     on_exit(fn -> Application.delete_env(:kiln_cms, :consent) end)
 
     admin = user(:admin)
-    post = CMS.create_post!(%{title: "Medical guidance", slug: slug()}, actor: admin)
+    post = CMS.create_post!(%{title: "Legal guidance", slug: slug()}, actor: admin)
 
     assert {:error, error} = CMS.publish_post(post, %{}, actor: admin)
     assert Exception.message(error) =~ "consent"

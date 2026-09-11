@@ -29,57 +29,57 @@ defmodule KilnCMS.CMS.ContentLinkPayloadTest do
 
   test "a link carries kind, label and a metadata payload" do
     actor = admin()
-    formula = page("Formula")
+    recipe = page("Recipe")
     ingredient = page("Ingredient")
 
     link =
       CMS.create_content_link!(
         %{
-          source_id: formula.id,
+          source_id: recipe.id,
           target_id: ingredient.id,
           kind: :ingredient,
-          label: "Chief herb",
+          label: "Main ingredient",
           position: 1,
-          metadata: %{"dosage_g" => 9, "role" => "jun"}
+          metadata: %{"quantity_g" => 250, "role" => "main"}
         },
         actor: actor
       )
 
     assert link.kind == :ingredient
-    assert link.label == "Chief herb"
-    assert link.metadata == %{"dosage_g" => 9, "role" => "jun"}
+    assert link.label == "Main ingredient"
+    assert link.metadata == %{"quantity_g" => 250, "role" => "main"}
   end
 
   test "payload is reachable from the source via content_links" do
     actor = admin()
-    formula = page("Formula")
+    recipe = page("Recipe")
     ingredient = page("Ingredient")
 
     CMS.create_content_link!(
       %{
-        source_id: formula.id,
+        source_id: recipe.id,
         target_id: ingredient.id,
         kind: :ingredient,
-        metadata: %{"dosage_g" => 6, "role" => "chen"}
+        metadata: %{"quantity_g" => 120, "role" => "supporting"}
       },
       actor: actor
     )
 
-    loaded = CMS.get_page!(formula.id, load: [:content_links], actor: actor)
+    loaded = CMS.get_page!(recipe.id, load: [:content_links], actor: actor)
     [link] = loaded.content_links
 
     assert link.target_id == ingredient.id
-    assert link.metadata["role"] == "chen"
+    assert link.metadata["role"] == "supporting"
   end
 
   test "payload is reachable from the target via incoming_links" do
     actor = admin()
-    formula = page("Formula")
+    recipe = page("Recipe")
     ingredient = page("Ingredient")
 
     CMS.create_content_link!(
       %{
-        source_id: formula.id,
+        source_id: recipe.id,
         target_id: ingredient.id,
         kind: :ingredient,
         metadata: %{"x" => 1}
@@ -90,7 +90,7 @@ defmodule KilnCMS.CMS.ContentLinkPayloadTest do
     loaded = CMS.get_page!(ingredient.id, load: [:incoming_links], actor: actor)
     [link] = loaded.incoming_links
 
-    assert link.source_id == formula.id
+    assert link.source_id == recipe.id
     assert link.metadata == %{"x" => 1}
   end
 

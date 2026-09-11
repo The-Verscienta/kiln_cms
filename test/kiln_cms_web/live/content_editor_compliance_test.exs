@@ -98,7 +98,7 @@ defmodule KilnCMSWeb.ContentEditorComplianceTest do
 
   test "the panel is absent entirely while claim checking is off", %{conn: conn} do
     user = authed_user(:admin)
-    page = page!(user, %{blocks: [rich([para("Our formula is FDA approved.")])]})
+    page = page!(user, %{blocks: [rich([para("Our product is government approved.")])]})
 
     {_lv, html} = open_editor(conn, user, page)
 
@@ -108,12 +108,12 @@ defmodule KilnCMSWeb.ContentEditorComplianceTest do
   test "a claim in the body reaches the panel, quoted", %{conn: conn} do
     enable!()
     user = authed_user(:admin)
-    page = page!(user, %{blocks: [rich([para("Our formula is FDA approved.")])]})
+    page = page!(user, %{blocks: [rich([para("Our product is government approved.")])]})
 
     {_lv, html} = open_editor(conn, user, page)
 
     assert html =~ "inspector-compliance"
-    assert html =~ "fda approved"
+    assert html =~ "government approved"
     assert html =~ "asserts an approval or endorsement"
   end
 
@@ -126,8 +126,8 @@ defmodule KilnCMSWeb.ContentEditorComplianceTest do
 
     page =
       page!(user, %{
-        blocks: [rich([para("A calm article about tea.")])],
-        seo_description: "Clinically proven relief."
+        blocks: [rich([para("A calm article about gardening.")])],
+        seo_description: "Clinically proven results."
       })
 
     {_lv, html} = open_editor(conn, user, page)
@@ -139,7 +139,7 @@ defmodule KilnCMSWeb.ContentEditorComplianceTest do
   test "a clean document shows the panel with a passing count, not findings", %{conn: conn} do
     enable!()
     user = authed_user(:admin)
-    page = page!(user, %{blocks: [rich([para("Herbal tea is pleasant to drink.")])]})
+    page = page!(user, %{blocks: [rich([para("A garden shed is pleasant to sit in.")])]})
 
     {_lv, html} = open_editor(conn, user, page)
 
@@ -148,7 +148,7 @@ defmodule KilnCMSWeb.ContentEditorComplianceTest do
   end
 
   test "a missing disclaimer is reported when one is configured", %{conn: conn} do
-    enable!(disclaimer: "Not medical advice.")
+    enable!(disclaimer: "Not professional advice.")
     user = authed_user(:admin)
     page = page!(user, %{blocks: [rich([para("An article with no disclaimer at all.")])]})
 
@@ -162,7 +162,7 @@ defmodule KilnCMSWeb.ContentEditorComplianceTest do
   test "compliance findings do not appear in the accessibility panel", %{conn: conn} do
     enable!()
     user = authed_user(:admin)
-    page = page!(user, %{blocks: [rich([para("Our formula is FDA approved.")])]})
+    page = page!(user, %{blocks: [rich([para("Our product is government approved.")])]})
 
     {_lv, html} = open_editor(conn, user, page)
 

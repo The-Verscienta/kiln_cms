@@ -81,7 +81,7 @@ defmodule KilnCMSWeb.EditorLiveComplianceBadgeTest do
   end
 
   test "no badge when compliance is off for the org (default)", %{conn: conn} do
-    in_review_page(%{search_text: "100% safe, no side effects"})
+    in_review_page(%{search_text: "100% safe, no risk"})
 
     {:ok, _lv, html} =
       conn |> log_in(authed_user(:admin)) |> live(~p"/editor?status=in_review")
@@ -95,7 +95,7 @@ defmodule KilnCMSWeb.EditorLiveComplianceBadgeTest do
     conn: conn
   } do
     configure([])
-    in_review_page(%{search_text: "100% safe, no side effects", locale: "fr"})
+    in_review_page(%{search_text: "100% safe, no risk", locale: "fr"})
 
     {:ok, _lv, html} =
       conn |> log_in(authed_user(:admin)) |> live(~p"/editor?status=in_review")
@@ -123,7 +123,7 @@ defmodule KilnCMSWeb.EditorLiveComplianceBadgeTest do
     page =
       in_review_page(%{
         title: "Claimy page",
-        search_text: "This product is 100% safe with no side effects."
+        search_text: "This product is 100% safe with no risk."
       })
 
     {:ok, _lv, html} =
@@ -176,7 +176,7 @@ defmodule KilnCMSWeb.EditorLiveComplianceBadgeTest do
       slug: "compliancebadge-#{System.unique_integer([:positive])}",
       state: :draft,
       locale: "en",
-      search_text: "100% safe with no side effects."
+      search_text: "100% safe with no risk."
     })
 
     {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor?status=draft")

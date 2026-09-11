@@ -204,46 +204,46 @@ defmodule KilnCMS.Search.EvalIntegrationTest do
       send_resp(conn, 404, "not found")
     end
 
-    defp search_body("huang qi dang shen") do
+    defp search_body("pad thai tom yum") do
       %{
-        "query" => "huang qi dang shen",
+        "query" => "pad thai tom yum",
         "results" => %{
-          "herbs" => [
+          "recipes" => [
             %{
               "id" => "1",
-              "type" => "herb",
-              "title" => "Da Ding Huang",
-              "slug" => "da-ding-huang",
-              "path" => "/herbs/da-ding-huang",
+              "type" => "recipe",
+              "title" => "Pad See Ew",
+              "slug" => "pad-see-ew",
+              "path" => "/recipes/pad-see-ew",
               "highlight" => nil,
               "score" => 0.0164,
               "legs" => ["keyword"]
             },
             %{
               "id" => "2",
-              "type" => "herb",
-              "title" => "Huang Qi",
-              "slug" => "huang-qi",
-              "path" => "/herbs/huang-qi",
+              "type" => "recipe",
+              "title" => "Pad Thai",
+              "slug" => "pad-thai",
+              "path" => "/recipes/pad-thai",
               "highlight" => nil,
               "score" => 0.0246,
               "legs" => ["keyword", "fuzzy"]
             }
           ],
-          "concepts" => [
+          "guides" => [
             %{
               "id" => "3",
-              "type" => "concept",
-              "title" => "Shen",
-              "slug" => "shen",
-              "path" => "/concepts/shen",
+              "type" => "guide",
+              "title" => "Wok Basics",
+              "slug" => "wok-basics",
+              "path" => "/guides/wok-basics",
               "highlight" => nil,
               "score" => 0.0161,
               "legs" => ["semantic"]
             }
           ],
           "pages" => [],
-          "tags" => [%{"id" => "9", "type" => "tag", "name" => "Qi", "slug" => "qi"}],
+          "tags" => [%{"id" => "9", "type" => "tag", "name" => "Thai", "slug" => "thai"}],
           "entries" => []
         },
         "suggestion" => nil
@@ -260,17 +260,17 @@ defmodule KilnCMS.Search.EvalIntegrationTest do
         "generated" => false,
         "sources" => [
           %{
-            "type" => "herb",
-            "title" => "Huang Qi",
-            "url" => "/en/herbs/huang-qi",
+            "type" => "recipe",
+            "title" => "Pad Thai",
+            "url" => "/en/recipes/pad-thai",
             "excerpt" => "…",
             "score" => 0.0246,
             "legs" => ["keyword"]
           },
           %{
-            "type" => "concept",
-            "title" => "Shen",
-            "url" => "/concepts/shen/",
+            "type" => "guide",
+            "title" => "Wok Basics",
+            "url" => "/guides/wok-basics/",
             "excerpt" => "…",
             "score" => 0.0161,
             "legs" => ["semantic"]
@@ -293,8 +293,8 @@ defmodule KilnCMS.Search.EvalIntegrationTest do
       base_url: base_url
     } do
       row = %{
-        query: "huang qi dang shen",
-        expected: ["huang-qi", "dang-shen"],
+        query: "pad thai tom yum",
+        expected: ["pad-thai", "tom-yum"],
         class: "multi_entity",
         type: nil,
         locale: nil
@@ -302,8 +302,8 @@ defmodule KilnCMS.Search.EvalIntegrationTest do
 
       hits = Retriever.remote(row, base_url: base_url, limit: 10)
 
-      assert Enum.map(hits, & &1.slug) == ["huang-qi", "da-ding-huang", "shen"]
-      assert Enum.map(hits, & &1.section) == ["herbs", "herbs", "concepts"]
+      assert Enum.map(hits, & &1.slug) == ["pad-thai", "pad-see-ew", "wok-basics"]
+      assert Enum.map(hits, & &1.section) == ["recipes", "recipes", "guides"]
       assert hd(hits).legs == ["keyword", "fuzzy"]
 
       judged = Eval.judge(row, hits)
@@ -315,11 +315,18 @@ defmodule KilnCMS.Search.EvalIntegrationTest do
     end
 
     test "reads /api/ask's sources in order, slugs from their URLs", %{base_url: base_url} do
-      row = %{query: "q", expected: ["shen"], class: "single_entity", type: nil, locale: "en"}
+      row = %{
+        query: "q",
+        expected: ["wok-basics"],
+        class: "single_entity",
+        type: nil,
+        locale: "en"
+      }
+
       hits = Retriever.remote(row, base_url: base_url, ask: true)
 
-      assert Enum.map(hits, & &1.slug) == ["huang-qi", "shen"]
-      assert Enum.map(hits, & &1.type) == ["herb", "concept"]
+      assert Enum.map(hits, & &1.slug) == ["pad-thai", "wok-basics"]
+      assert Enum.map(hits, & &1.type) == ["recipe", "guide"]
       assert Eval.reciprocal_rank(Eval.judge(row, hits)) == 0.5
     end
 
