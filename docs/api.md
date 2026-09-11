@@ -264,6 +264,7 @@ A quick map:
 | Category  | `GET /api/json/categories`  | `GET /api/json/categories/:id`  | `/categories/by-slug/:slug`                   |
 | Tag       | `GET /api/json/tags`        | `GET /api/json/tags/:id`        | `/tags/by-slug/:slug`                         |
 | TagGroup  | `GET /api/json/tag-groups`  | `GET /api/json/tag-groups/:id`  | `/tag-groups/by-slug/:slug`                   |
+| TypeDefinition | `GET /api/json/type-definitions` | `GET /api/json/type-definitions/:id` | `/type-definitions/by-name/:name` (editor+ key; read-only) |
 
 Taxonomy (Category/Tag/TagGroup) is world-readable and now mirrors the GraphQL
 taxonomy surface over JSON:API (#185) — list, fetch by id, or fetch by slug. A

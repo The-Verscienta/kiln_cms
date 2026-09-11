@@ -31,7 +31,15 @@ defmodule KilnCMS.CMS.FieldDefinition do
     domain: KilnCMS.CMS,
     data_layer: AshPostgres.DataLayer,
     authorizers: [Ash.Policy.Authorizer],
-    extensions: [AshAdmin.Resource]
+    extensions: [AshAdmin.Resource, AshJsonApi.Resource]
+
+  # A JSON:API type only — no routes. It exists so
+  # `/api/json/type-definitions?include=field_definitions` can serialize a
+  # dynamic type's field schema; the fields are read through the type, under
+  # this resource's own read policy (editor-or-above).
+  json_api do
+    type "field_definition"
+  end
 
   @doc """
   The value types a custom field may declare: the built-ins plus every

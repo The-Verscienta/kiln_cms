@@ -40,6 +40,8 @@ Authorization: Bearer <token>
 | Category  | `GET /api/json/categories`  | `GET /api/json/categories/:id` | `/categories/by-slug/:slug` |
 | Tag       | `GET /api/json/tags`        | `GET /api/json/tags/:id`    | `/tags/by-slug/:slug` |
 | TagGroup  | `GET /api/json/tag-groups`  | `GET /api/json/tag-groups/:id` | `/tag-groups/by-slug/:slug` |
+| Entry (dynamic types) | `GET /api/json/entries` | `GET /api/json/entries/:id` | same set as Post, filtered by `filter[type_name]=` |
+| TypeDefinition | `GET /api/json/type-definitions` | `GET /api/json/type-definitions/:id` | `/type-definitions/by-name/:name` — **editor-or-above** credential; see [Discovering dynamic types](#discovering-dynamic-types) |
 
 `GET /api/json/<plural>/published` returns published records only, ordered
 newest first (`-published_at`) — the delivery feed. It exists on **every**
@@ -432,8 +434,10 @@ Use the JSON:API media type on both `Accept` and `Content-Type`:
 | `DELETE /api/json/posts/:id` | `:destroy` | `:read_write` key, **admin** | **Reversible** soft-delete (AshArchival) |
 
 Pages expose the identical set; the dynamic tier is `/api/json/entries` (a
-`create` needs a `type_definition_id` — discover types via `/mcp`'s
-`read_type_definitions`).
+`create` needs a `type_definition_id` — look it up with
+`GET /api/json/type-definitions/by-name/:name`, see
+[Discovering dynamic types](#discovering-dynamic-types); `/mcp`'s
+`read_type_definitions` is the same read).
 
 **Authorization** mirrors `/mcp`: a **read-only key** can run none of these; a
 **`:read_write` key on a `:viewer`** account can run none; a **`:read_write` key
@@ -465,6 +469,57 @@ curl -s http://localhost:4000/api/json/posts \
 `tag_ids` / `category_id` / `featured_image_id` and the SEO / `audience` /
 `custom_fields` / scheduling attributes are all writable. Relationship arrays
 (`tag_ids`, `related_post_ids`) are passed as attributes.
+
+### Discovering dynamic types
+
+An entry of an admin-defined type is created on `/api/json/entries` with the
+type's `type_definition_id`. The type registry is read-only over the API:
+
+| Route | Answers |
+|-------|---------|
+| `GET /api/json/type-definitions` | Every live type in the request's org; `filter[name]=`, `sort=`, `page[...]` as usual |
+| `GET /api/json/type-definitions/by-name/:name` | One type by its machine `name` — `404` on a miss |
+| `GET /api/json/type-definitions/:id` | One type by id |
+
+Each row carries `name` (the permanent machine key), `label`, `plural_label`,
+`path_segment`, `description`, `icon`, `schema_org_type`, `has_excerpt`,
+`has_published_feed`, the slug/alias/SEO patterns and
+`default_review_after_days`. Add `?include=field_definitions` to get the type's
+custom-field schema (`name`, `label`, `field_type`, `required`, `options`,
+`default`, `help_text`, `position`, …) — the keys an entry's `custom_fields`
+map takes.
+
+It is the same read as `/mcp`'s `read_type_definitions`, with the same policy:
+the credential must belong to an **editor or admin of the request's org** (a
+read-only key is enough — this is a read). A viewer's key or an anonymous
+caller gets an empty list and a `404` on a single type. The org is the host's,
+as everywhere else, so a key never sees another site's types; archived
+(trashed) types are not listed. There are no write routes — types are defined
+in `/editor/types`.
+
+```bash
+# 1. Resolve the type's machine name to its id
+TYPE_ID=$(curl -s http://localhost:4000/api/json/type-definitions/by-name/doc \
+  -H 'accept: application/vnd.api+json' \
+  -H "authorization: Bearer $KILN_API_KEY" | jq -r '.data.id')
+
+# 2. Create a draft entry of that type (`:read_write` key, editor+)
+curl -s http://localhost:4000/api/json/entries \
+  -H 'accept: application/vnd.api+json' \
+  -H 'content-type: application/vnd.api+json' \
+  -H "authorization: Bearer $KILN_API_KEY" \
+  -d '{
+    "data": {
+      "type": "entry",
+      "attributes": {
+        "title": "Written against a discovered type",
+        "slug": "hello-doc",
+        "type_definition_id": "'"$TYPE_ID"'",
+        "custom_fields": {}
+      }
+    }
+  }'
+```
 
 ### Writing tags — replace vs merge
 

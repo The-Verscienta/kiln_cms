@@ -389,6 +389,12 @@ console. See [code-injection.md](code-injection.md).
 Admins own the schema; editors read definitions so the editor UI can list
 dynamic types. Mirrors `FieldDefinition`.
 
+The same reads are routed read-only over JSON:API (`/api/json/type-definitions`,
+`/by-name/:name`, `/:id`, with `include=field_definitions`) and MCP
+(`read_type_definitions`), so an API key reads as its owner's tier on the
+host's org: editor+ lists, a viewer's key or no key gets an empty list. No
+write route exists on either surface.
+
 ## Compliance — `Consent`, `HistoryAnchor`, `DocumentEvent`
 
 `Consent`:
