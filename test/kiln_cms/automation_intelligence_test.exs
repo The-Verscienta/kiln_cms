@@ -299,7 +299,7 @@ defmodule KilnCMS.AutomationIntelligenceTest do
   test "suggest_tags emails ranked suggestions and skips when there are none" do
     actor = admin()
     uniq = System.unique_integer([:positive])
-    CMS.create_tag!(%{name: "herbal tea", slug: "tag-#{uniq}"}, actor: actor)
+    CMS.create_tag!(%{name: "green tea", slug: "tag-#{uniq}"}, actor: actor)
 
     r =
       rule(%{
@@ -308,13 +308,13 @@ defmodule KilnCMS.AutomationIntelligenceTest do
         config: %{"to" => "eds@example.com"}
       })
 
-    post = indexed_post(actor, "brewing herbal tea slowly", "Teas")
+    post = indexed_post(actor, "brewing green tea slowly", "Teas")
 
     assert :ok = run_rule(r, post, "post.published")
 
     assert_email_sent(fn email ->
       assert email.subject =~ "Tag suggestions"
-      assert email.html_body =~ "herbal tea"
+      assert email.html_body =~ "green tea"
     end)
   end
 

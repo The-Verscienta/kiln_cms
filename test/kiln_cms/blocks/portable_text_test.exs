@@ -314,8 +314,8 @@ defmodule KilnCMS.Blocks.PortableTextTest do
       tiptap =
         doc([
           tt_node("table", [
-            tt_node("tableRow", [tt_cell("tableHeader", "Name"), tt_cell("tableHeader", "Dose")]),
-            tt_node("tableRow", [tt_cell("tableCell", "Ginger"), tt_cell("tableCell", "3g")])
+            tt_node("tableRow", [tt_cell("tableHeader", "Name"), tt_cell("tableHeader", "Amount")]),
+            tt_node("tableRow", [tt_cell("tableCell", "Flour"), tt_cell("tableCell", "250g")])
           ])
         ])
 
@@ -329,24 +329,24 @@ defmodule KilnCMS.Blocks.PortableTextTest do
 
       assert PortableText.to_html([item]) ==
                ~s(<div class="kiln-table-wrap"><table><thead><tr>) <>
-                 ~s(<th scope="col">Name</th><th scope="col">Dose</th>) <>
-                 "</tr></thead><tbody><tr><td>Ginger</td><td>3g</td></tr></tbody></table></div>"
+                 ~s(<th scope="col">Name</th><th scope="col">Amount</th>) <>
+                 "</tr></thead><tbody><tr><td>Flour</td><td>250g</td></tr></tbody></table></div>"
     end
 
     test "row-header cells outside the first row get scope=row; no thead without one" do
       tiptap =
         doc([
           tt_node("table", [
-            tt_node("tableRow", [tt_cell("tableHeader", "Yin"), tt_cell("tableCell", "cool")]),
-            tt_node("tableRow", [tt_cell("tableHeader", "Yang"), tt_cell("tableCell", "warm")])
+            tt_node("tableRow", [tt_cell("tableHeader", "Mon"), tt_cell("tableCell", "open")]),
+            tt_node("tableRow", [tt_cell("tableHeader", "Sun"), tt_cell("tableCell", "shut")])
           ])
         ])
 
       html = tiptap |> PortableText.from_tiptap() |> PortableText.to_html()
 
       refute html =~ "<thead>"
-      assert html =~ ~s(<th scope="row">Yin</th><td>cool</td>)
-      assert html =~ ~s(<th scope="row">Yang</th><td>warm</td>)
+      assert html =~ ~s(<th scope="row">Mon</th><td>open</td>)
+      assert html =~ ~s(<th scope="row">Sun</th><td>shut</td>)
     end
 
     test "colspan/rowspan survive when >1 and cell text is escaped" do
@@ -496,13 +496,13 @@ defmodule KilnCMS.Blocks.PortableTextTest do
       tiptap =
         doc([
           tt_node("table", [
-            tt_node("tableRow", [tt_cell("tableHeader", "Herb"), tt_cell("tableHeader", "Use")]),
-            tt_node("tableRow", [tt_cell("tableCell", "Ginger"), tt_cell("tableCell", "warmth")])
+            tt_node("tableRow", [tt_cell("tableHeader", "Tool"), tt_cell("tableHeader", "Use")]),
+            tt_node("tableRow", [tt_cell("tableCell", "Whisk"), tt_cell("tableCell", "mixing")])
           ])
         ])
 
       assert tiptap |> PortableText.from_tiptap() |> PortableText.to_plain_text() ==
-               "Herb Use\nGinger warmth"
+               "Tool Use\nWhisk mixing"
     end
   end
 

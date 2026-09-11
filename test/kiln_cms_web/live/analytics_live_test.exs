@@ -499,26 +499,26 @@ defmodule KilnCMSWeb.AnalyticsLiveTest do
     end
 
     test "zero-result searches are listed, most-searched first", %{conn: conn} do
-      searched!("moxibustion", 0, 2)
-      searched!("cupping therapy", 0, 5)
+      searched!("sourdough starter", 0, 2)
+      searched!("cast iron care", 0, 5)
 
       {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/analytics")
 
       assert html =~ "Content gaps"
-      assert html =~ "moxibustion"
-      assert html =~ "cupping therapy"
+      assert html =~ "sourdough starter"
+      assert html =~ "cast iron care"
 
       # Ordering is the point of the section: the gap searched most is the one
       # worth writing about first.
-      assert :binary.match(html, "cupping therapy") < :binary.match(html, "moxibustion")
+      assert :binary.match(html, "cast iron care") < :binary.match(html, "sourdough starter")
     end
 
     test "a search that DID find something is not a gap", %{conn: conn} do
-      searched!("acupuncture", 7, 3)
+      searched!("espresso", 7, 3)
 
       {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/analytics")
 
-      refute html =~ "acupuncture"
+      refute html =~ "espresso"
     end
 
     test "the section is absent entirely when nothing came back empty", %{conn: conn} do

@@ -137,7 +137,7 @@ defmodule KilnCMS.Search.RerankTest do
     assert Search.hit_legs(Enum.find(results, &(&1.id == boosted.id))) != []
   end
 
-  describe "scoped to the ask path (the Shen-beat-Huang-Qi report, P7)" do
+  describe "scoped to the ask path (the 2026-09-04 search-ranking report, P7)" do
     # The report's deployment had this reranker wired and never running: the
     # only switch reranked every surface on every query, CPU inference its
     # host could not afford. `KilnCMS.Ask`'s own switch reranks the bounded

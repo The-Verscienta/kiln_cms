@@ -1,9 +1,9 @@
 # Editorial claim checking
 
 The content editor can show a **Compliance** panel: the phrases in a document
-that a regulator, a clinic's counsel, or a house style guide would want a second
-look at before it goes live. "FDA approved". "No side effects". "Guaranteed
-results".
+that a regulator, your legal team, or a house style guide would want a second
+look at before it goes live. "Guaranteed results". "Risk-free". "The best in
+the world".
 
 This is the compliance third of #377, and it is built on the same machinery as
 the SEO and accessibility panels — see [Editorial advisories](advisories.md).
@@ -57,9 +57,9 @@ empty field would be a compliance requirement lost by accident.
 This layering is why the feature is per-site and not per-deployment. A claims
 vocabulary is a statement about one publication's voice and jurisdiction, and
 `require_at_publish` is a hard refusal: while both lived only in config, one
-clinic deciding that "cures" cannot ship refused every other site's publishes on
-the same instance, and a tenant that wanted the panel *off* could not turn it
-off either.
+publication deciding that "best" cannot ship refused every other site's
+publishes on the same instance, and a tenant that wanted the panel *off* could
+not turn it off either.
 
 ### When the settings row cannot be read
 
@@ -76,13 +76,13 @@ site's own rules are exactly what could not be read.
 inspect content and act on it. For claim checking that shape is wrong twice
 over.
 
-A claim is a judgement about **meaning**, and no phrase list can make it. "This
-herb does not cure cancer" contains the phrase *cure cancer* and is a perfectly
-responsible sentence. "Widely regarded as clinically proven" is a claim wearing
-a hedge. Every honest implementation surfaces the phrase and asks a human — and
-the human is already sitting in the editor. Routing that through a background
-reaction adds latency and a notification and removes the one person who can
-answer.
+A claim is a judgement about **meaning**, and no phrase list can make it. "We
+can't promise the lowest price" contains the phrase *lowest price* and is a
+perfectly responsible sentence. "Widely regarded as the best in the world" is a
+claim wearing a hedge. Every honest implementation surfaces the phrase and asks
+a human — and the human is already sitting in the editor. Routing that through
+a background reaction adds latency and a notification and removes the one
+person who can answer.
 
 The second reason is the one already recorded on #377 for metadata generation:
 an automated writer or gate that fires unattended on a state transition removes
@@ -96,39 +96,36 @@ operators who want a claim to be un-shippable rather than merely flagged.
 A rule is a map:
 
 ```elixir
-%{code: :regulatory_claim, severity: :error, phrases: ["fda approved"]}
+%{code: :guarantee_claim, severity: :error, phrases: ["guaranteed results"]}
 ```
 
 Phrases match **case-insensitively, on whole-word boundaries**, and tolerate
 runs of ordinary whitespace between words, line breaks included — so
-`clinically proven` still matches text the editor wrapped across a line. (Like
+`guaranteed results` still matches text the editor wrapped across a line. (Like
 `Kiln.Advisory.Body`'s own folding, "whitespace" here is `\s`, which does not
 include a non-breaking space.)
 
-Word boundaries are not a nicety. As a substring, `cures` matches *manicures*,
-*procures* and *secures*. A compliance panel that flags the word "secures" on a
-page about data security is one an author switches off within a day, at which
+Word boundaries are not a nicety. As a substring, `best` matches *bestow*,
+*bestiary* and *bestseller*. A compliance panel that flags the word "bestseller"
+on a page about books is one an author switches off within a day, at which
 point it catches nothing at all.
 
 ### The shipped pack is deliberately narrow
 
-`KilnCMS.Compliance.default_rules/0` ships only phrases that are a claim in
-*essentially any context*:
+`KilnCMS.Compliance.default_rules/0` ships a starter list of
+unsubstantiated-claim phrases, and only phrases that are a claim in
+*essentially any context*: asserted guarantees, endorsements and absolutes,
+which either cite a fact of record or invent one. Read the function for the
+current list — each rule's code, severity and phrases are there, with a comment
+on why it is in the pack.
 
-| Code | Severity | What it catches |
-|---|---|---|
-| `regulatory_claim` | `:error` | Asserted approval or endorsement — "FDA approved", "clinically proven", "doctor recommended" |
-| `safety_claim` | `:error` | Unqualified safety — "no side effects", "100% safe", "risk-free" |
-| `efficacy_claim` | `:warning` | Guaranteed outcomes — "guaranteed results", "never fails", "miracle cure" |
-| `medical_advice_claim` | `:warning` | Positioning the content as a substitute for care — "no need to see a doctor" |
-
-What it pointedly does **not** ship is curative vocabulary — bare "cures",
-"heals", "treats". Those are the phrases a health CMS most obviously wants, and
-they are also the ones with the most legitimate uses: "this herb cures
-nothing", "traditionally used to treat insomnia", an article *about* cure
-claims. Where that editorial line falls is a question about a specific
-publication's voice and jurisdiction. Shipping a guess would mean every install
-starts by switching the panel off.
+What it pointedly does **not** ship is vocabulary that is a claim only in
+context — a bare "best", "free" or "proven". Those are the words a marketing
+reviewer most obviously wants, and they are also the ones with the most
+legitimate uses: "best practices", "free returns", an article *about*
+advertising claims. Where that editorial line falls is a question about a
+specific publication's voice and jurisdiction. Shipping a guess would mean every
+install starts by switching the panel off.
 
 Add your own — the pack is a starting point, not a standard:
 
@@ -137,7 +134,7 @@ config :kiln_cms, KilnCMS.Compliance,
   enabled: true,
   rules:
     KilnCMS.Compliance.default_rules() ++
-      [%{code: :curative_claim, severity: :error, phrases: ["cures", "heals", "cure for"]}]
+      [%{code: :bare_superlative, severity: :error, phrases: ["best", "number one", "leading"]}]
 ```
 
 A rule code the web layer has no sentence for still renders: the panel quotes
@@ -154,18 +151,18 @@ unbounded atom table.
 
 `:error` is what the publish gate acts on, and it is the only severity that
 does. `:warning` and `:info` stay advice however the gate is configured. Of the
-shipped pack only the regulatory and safety rules are errors, because those are
-the two whose failure mode is a reader harmed or a regulator's line crossed
-rather than loose marketing copy.
+shipped pack only the rules whose failure mode is a reader harmed or a
+regulator's line crossed are errors; the ones more often found in loose
+marketing copy are warnings.
 
 ## Negation is not handled, on purpose
 
-"We do not claim it is clinically proven" matches `clinically proven`, and this
+"We never said it was risk-free" matches a rule listing `risk-free`, and this
 reports it.
 
 A negation window — *skip a match preceded by "not" within three words* — would
-suppress that one, and would just as readily suppress "not only clinically
-proven, but…", which is a claim. Between a false positive an author dismisses
+suppress that one, and would just as readily suppress "not only risk-free,
+but…", which is a claim. Between a false positive an author dismisses
 in a second and a false negative that ships an unreviewed claim, a compliance
 tool should choose the first.
 
@@ -192,7 +189,7 @@ Set on `/editor/compliance`, or deployment-wide:
 ```elixir
 config :kiln_cms, KilnCMS.Compliance,
   enabled: true,
-  disclaimer: "This information is not medical advice."
+  disclaimer: "Prices and availability are subject to change."
 ```
 
 `KilnCMS.Compliance.Checks.Disclaimer` warns when the body doesn't contain that

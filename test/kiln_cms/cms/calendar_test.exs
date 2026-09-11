@@ -87,7 +87,7 @@ defmodule KilnCMS.CMS.CalendarTest do
       admin = user(:admin)
 
       page =
-        CMS.create_page!(%{title: "Monograph", slug: slug(), review_after_days: 10},
+        CMS.create_page!(%{title: "Guide", slug: slug(), review_after_days: 10},
           actor: admin
         )
 

@@ -89,7 +89,7 @@ defmodule KilnCMSWeb.ComplianceLiveTest do
     # configured one and then switched off.
     test "turning it back on keeps the vocabulary the site already had", %{conn: conn, org: org} do
       CMS.save_site_compliance!(
-        %{enabled: false, phrases: ["banishes toxins"], phrase_severity: :error},
+        %{enabled: false, phrases: ["doubles your savings"], phrase_severity: :error},
         authorize?: false,
         tenant: org
       )
@@ -98,7 +98,7 @@ defmodule KilnCMSWeb.ComplianceLiveTest do
       render_click(lv, "enable")
 
       assert {:ok, [row]} = CMS.list_site_compliance(tenant: org, authorize?: false)
-      assert row.phrases == ["banishes toxins"]
+      assert row.phrases == ["doubles your savings"]
       assert row.phrase_severity == :error
     end
   end
@@ -119,17 +119,17 @@ defmodule KilnCMSWeb.ComplianceLiveTest do
       Application.put_env(:kiln_cms, Compliance,
         enabled: true,
         require_at_publish: true,
-        disclaimer: "Not medical advice."
+        disclaimer: "Not professional advice."
       )
 
       {:ok, _lv, html} = admin_live(conn, org)
 
       assert checked?(html, "compliance[require_at_publish]")
-      assert value_of(html, "compliance[disclaimer]") == "Not medical advice."
+      assert value_of(html, "compliance[disclaimer]") == "Not professional advice."
     end
 
     test "lists the rules a document here is actually checked against", %{conn: conn, org: org} do
-      CMS.save_site_compliance!(%{enabled: true, phrases: ["banishes toxins"]},
+      CMS.save_site_compliance!(%{enabled: true, phrases: ["doubles your savings"]},
         authorize?: false,
         tenant: org
       )
@@ -138,7 +138,7 @@ defmodule KilnCMSWeb.ComplianceLiveTest do
 
       assert html =~ "Rules in effect"
       assert html =~ "regulatory claim"
-      assert html =~ "banishes toxins"
+      assert html =~ "doubles your savings"
     end
 
     # A site with no rules reports every document as unchecked rather than
@@ -167,9 +167,9 @@ defmodule KilnCMSWeb.ComplianceLiveTest do
           enabled: "true",
           require_at_publish: "true",
           use_shared_rules: "false",
-          phrases: "banishes toxins\n\n  detoxes you  \nbanishes toxins",
+          phrases: "doubles your savings\n\n  pays for itself  \ndoubles your savings",
           phrase_severity: "error",
-          disclaimer: "Not medical advice."
+          disclaimer: "Not professional advice."
         }
       )
       |> render_submit()
@@ -179,9 +179,9 @@ defmodule KilnCMSWeb.ComplianceLiveTest do
       assert row.require_at_publish
       refute row.use_shared_rules
       # One per line, trimmed, blank lines dropped, deduped.
-      assert row.phrases == ["banishes toxins", "detoxes you"]
+      assert row.phrases == ["doubles your savings", "pays for itself"]
       assert row.phrase_severity == :error
-      assert row.disclaimer == "Not medical advice."
+      assert row.disclaimer == "Not professional advice."
 
       settings = Settings.for_org(org)
       assert settings.require_at_publish?
@@ -272,7 +272,7 @@ defmodule KilnCMSWeb.ComplianceLiveTest do
           enabled: "true",
           require_at_publish: "true",
           use_shared_rules: "true",
-          phrases: "banishes toxins",
+          phrases: "doubles your savings",
           phrase_severity: "error",
           disclaimer: ""
         }

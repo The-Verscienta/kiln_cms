@@ -162,21 +162,21 @@ defmodule KilnCMS.StrictTenancyTest do
 
     definition =
       KilnCMS.CMS.create_type_definition!(
-        %{name: "remedy", label: "Remedy", schema_org_type: "MedicalWebPage"},
+        %{name: "help_article", label: "Help article", schema_org_type: "FAQPage"},
         actor: actor,
         tenant: org_id()
       )
 
     entry =
       KilnCMS.CMS.create_entry!(
-        %{title: "Ginger", slug: slug(), type_definition_id: definition.id},
+        %{title: "Returns policy", slug: slug(), type_definition_id: definition.id},
         actor: actor,
         tenant: org_id()
       )
 
     # Tenant-less this read would fail and silently degrade every declared
     # @type to the default (Article) — exactly the bug #769 was filed for.
-    assert KilnCMS.Firing.SchemaOrg.resolve(entry) == "MedicalWebPage"
+    assert KilnCMS.Firing.SchemaOrg.resolve(entry) == "FAQPage"
   end
 
   test "the version twins remain readable through their tenanted source flow" do

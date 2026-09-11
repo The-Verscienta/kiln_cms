@@ -39,7 +39,7 @@ defmodule KilnCMSWeb.PathAliasTest do
 
   test "a deep alias serves the record and the flat URL 301s to it", %{conn: conn} do
     n = uniq()
-    alias_path = "/acupuncture/needle/size/#{n}mm"
+    alias_path = "/products/shoes/size/#{n}"
     page = published_page(%{path_alias: alias_path})
 
     html = conn |> get(alias_path) |> html_response(200)
@@ -50,7 +50,7 @@ defmodule KilnCMSWeb.PathAliasTest do
 
   test "the flat URL's 301 to the alias keeps the request's locale prefix", %{conn: conn} do
     n = uniq()
-    alias_path = "/acupuncture/aiguille/#{n}mm"
+    alias_path = "/products/chaussure/#{n}"
     page = published_page(%{path_alias: alias_path, locale: "fr"})
 
     assert redirected_to(get(conn, "/fr/#{page.slug}"), 301) == "/fr" <> alias_path
@@ -58,7 +58,7 @@ defmodule KilnCMSWeb.PathAliasTest do
 
   test "a two-segment alias works through the generic route's fallback", %{conn: conn} do
     n = uniq()
-    alias_path = "/kiln/care-#{n}"
+    alias_path = "/shop/sale-#{n}"
     published_page(%{path_alias: alias_path})
 
     assert conn |> get(alias_path) |> html_response(200) =~ "Alias Body Heading"
@@ -114,14 +114,14 @@ defmodule KilnCMSWeb.PathAliasTest do
   end
 
   describe "pattern-generated aliases (#485 follow-up)" do
-    defp needle_type(actor, attrs \\ %{}) do
+    defp shoe_type(actor, attrs \\ %{}) do
       type =
         CMS.create_type_definition!(
           Map.merge(
             %{
-              name: "needle#{uniq()}",
-              label: "Needle",
-              alias_pattern: "/acupuncture/needle/size/[field:size]"
+              name: "shoe#{uniq()}",
+              label: "Shoe",
+              alias_pattern: "/products/shoes/size/[field:size]"
             },
             attrs
           ),
@@ -138,30 +138,30 @@ defmodule KilnCMSWeb.PathAliasTest do
 
     test "a custom-field token auto-fills the alias and serves the deep URL", %{conn: conn} do
       actor = admin()
-      type = needle_type(actor)
+      type = shoe_type(actor)
 
       entry =
         KilnCMS.CMS.ContentTypes.create!(
           type.name,
-          %{title: "Fine Needle #{uniq()}", custom_fields: %{"size" => "14mm"}},
+          %{title: "Trail Shoe #{uniq()}", custom_fields: %{"size" => "42"}},
           actor: actor
         )
 
-      assert entry.path_alias == "/acupuncture/needle/size/14mm"
+      assert entry.path_alias == "/products/shoes/size/42"
 
       {:ok, _published} =
         KilnCMS.CMS.ContentTypes.transition(type.name, "publish", entry, actor: actor)
 
-      assert conn |> get("/acupuncture/needle/size/14mm") |> html_response(200)
+      assert conn |> get("/products/shoes/size/42") |> html_response(200)
 
       assert redirected_to(get(conn, "/#{type.path_segment}/#{entry.slug}"), 301) ==
-               "/acupuncture/needle/size/14mm"
+               "/products/shoes/size/42"
     end
 
     test "duplicate expansions dedupe with a numeric suffix" do
       actor = admin()
-      type = needle_type(actor)
-      fields = %{custom_fields: %{"size" => "20mm"}}
+      type = shoe_type(actor)
+      fields = %{custom_fields: %{"size" => "44"}}
 
       first =
         KilnCMS.CMS.ContentTypes.create!(
@@ -177,19 +177,19 @@ defmodule KilnCMSWeb.PathAliasTest do
           actor: actor
         )
 
-      assert first.path_alias == "/acupuncture/needle/size/20mm"
-      assert second.path_alias == "/acupuncture/needle/size/20mm-2"
+      assert first.path_alias == "/products/shoes/size/44"
+      assert second.path_alias == "/products/shoes/size/44-2"
     end
 
     test "an explicit alias beats the pattern; clearing it regenerates" do
       actor = admin()
-      type = needle_type(actor)
+      type = shoe_type(actor)
       custom = "/hand/picked-#{uniq()}"
 
       entry =
         KilnCMS.CMS.ContentTypes.create!(
           type.name,
-          %{title: "Manual #{uniq()}", path_alias: custom, custom_fields: %{"size" => "9mm"}},
+          %{title: "Manual #{uniq()}", path_alias: custom, custom_fields: %{"size" => "39"}},
           actor: actor
         )
 
@@ -198,7 +198,7 @@ defmodule KilnCMSWeb.PathAliasTest do
       regenerated =
         KilnCMS.CMS.ContentTypes.update(type.name, entry, %{path_alias: ""}, actor: actor)
 
-      assert {:ok, %{path_alias: "/acupuncture/needle/size/9mm"}} = regenerated
+      assert {:ok, %{path_alias: "/products/shoes/size/39"}} = regenerated
     end
 
     test "types without an alias pattern get no alias" do

@@ -50,13 +50,13 @@ UI" workflow, scoped to fields.
 ```elixir
 # Defined once in the UI (or in code/seeds):
 CMS.create_field_definition!(%{
-  content_type: :page, name: "toxicity_level", label: "Toxicity level",
-  field_type: :select, options: ~w(none low moderate high), required: true
+  content_type: :page, name: "spice_level", label: "Spice level",
+  field_type: :select, options: ~w(none mild medium hot), required: true
 }, actor: admin)
 
 # Then editors just fill it; the value is validated on save:
-CMS.create_page!(%{title: "Aconite", slug: "aconite",
-  custom_fields: %{"toxicity_level" => "high"}}, actor: editor)
+CMS.create_page!(%{title: "Habanero salsa", slug: "habanero-salsa",
+  custom_fields: %{"spice_level" => "hot"}}, actor: editor)
 ```
 
 ### Geolocation fields
@@ -66,14 +66,14 @@ an optional map `zoom` and a place `label`:
 
 ```elixir
 CMS.create_field_definition!(%{
-  content_type: :page, name: "clinic", label: "Clinic location",
+  content_type: :page, name: "venue", label: "Venue location",
   field_type: :geolocation
 }, actor: admin)
 
-CMS.create_page!(%{title: "Clinic", slug: "clinic",
-  custom_fields: %{"clinic" => %{"lat" => "51.5074", "lng" => "-0.1278"}}},
+CMS.create_page!(%{title: "Venue", slug: "venue",
+  custom_fields: %{"venue" => %{"lat" => "51.5074", "lng" => "-0.1278"}}},
   actor: editor)
-#=> %{"clinic" => %{"lat" => 51.5074, "lng" => -0.1278}}
+#=> %{"venue" => %{"lat" => 51.5074, "lng" => -0.1278}}
 ```
 
 The editor renders one labelled input per part. Writers may also post a
@@ -147,14 +147,14 @@ queryable via `custom_filter`/`custom_sort`, but never index-backed.
 
 `KilnCMS.CMS.ContentLink` links any two content records by id with a named
 `kind`. Each link can also carry a payload — `metadata` (a free map) and an
-optional `label` — so a relation can describe *itself* (a dosage and role on a
-formula→ingredient link, jia-jian notes, an ordered "step N").
+optional `label` — so a relation can describe *itself* (a quantity and role on a
+recipe→ingredient link, substitution notes, an ordered "step N").
 
 ```elixir
 CMS.create_content_link!(%{
-  source_id: formula.id, target_id: ingredient.id,
-  kind: :ingredient, label: "Chief herb",
-  metadata: %{"dosage_g" => 9, "role" => "jun"}
+  source_id: recipe.id, target_id: ingredient.id,
+  kind: :ingredient, label: "Main ingredient",
+  metadata: %{"quantity_g" => 200, "role" => "main"}
 }, actor: editor)
 ```
 
@@ -162,8 +162,8 @@ Read the payload from either end via the `content_links` (outgoing) and
 `incoming_links` (reverse) relationships on any content record:
 
 ```elixir
-formula = CMS.get_page!(id, load: [:content_links], actor: actor)
-Enum.map(formula.content_links, & &1.metadata)
+recipe = CMS.get_page!(id, load: [:content_links], actor: actor)
+Enum.map(recipe.content_links, & &1.metadata)
 ```
 
 **When to use a dedicated join resource instead.** ContentLink covers the common
@@ -179,7 +179,7 @@ Editorial `role` (`:admin`/`:editor`/`:viewer`) gates **authoring**. A separate
 record — independent of role. See `KilnCMS.CMS.Audiences` and
 [policy-matrix.md](policy-matrix.md).
 
-- Configure the tiers: `config :kiln_cms, :audiences, [:public, :professional, :patient]`
+- Configure the tiers: `config :kiln_cms, :audiences, [:public, :member, :premium]`
   (`:public` is always implied and must stay first). Compile-time, so the Ash
   `one_of` constraints validate statically.
 - Tag content with one `audience` (default `:public`).
@@ -269,10 +269,10 @@ is what keeps it from shipping at all.
 
 `mix kiln.plugins.doctor` (also part of precommit) verifies an install:
 domains registered, no block/field-type/queue collisions, well-formed paths.
-`Verscienta.Plugin` is the reference — the project the plan always called
-"the first plugin/consumer". It lives downstream in the verscienta-base
-repo and is overlaid onto `projects/` at image-build time (see
-projects/README.md for the overlay pattern).
+`Example.Plugin` in `projects/example` is the reference — a small catalog
+domain, a block and a field type declared on the contract. A real deployment's
+plugin lives in its own downstream repo and is overlaid onto `projects/` at
+image-build time (see projects/README.md for the overlay pattern).
 
 ## 6. Nested layout: columns (#335)
 

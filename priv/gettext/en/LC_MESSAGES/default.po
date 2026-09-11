@@ -512,12 +512,12 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/compliance_components.ex
 #, elixir-autogen, elixir-format
-msgid "%{phrases} positions this as a substitute for seeing a clinician."
+msgid "%{phrases} promises safety without qualification — there is no way for a reader to be the exception."
 msgstr ""
 
 #: lib/kiln_cms_web/components/compliance_components.ex
 #, elixir-autogen, elixir-format
-msgid "%{phrases} promises safety without qualification — there is no way for a reader to be the exception."
+msgid "%{phrases} ranks this above everything else. Name the ranking and who made it, or reword it."
 msgstr ""
 
 #: lib/kiln_cms_web/live/overview_live.ex
@@ -7417,8 +7417,8 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: lib/kiln_cms_web/live/compliance_live.ex
-#, elixir-autogen, elixir-format
-msgid "One per line. Matched case-insensitively on whole words, so \"cures\" does not match \"secures\". Whitespace between words is flexible, so a phrase still matches text the editor wrapped across a line."
+#, elixir-autogen, elixir-format, fuzzy
+msgid "One per line. Matched case-insensitively on whole words, so \"free\" does not match \"freedom\". Whitespace between words is flexible, so a phrase still matches text the editor wrapped across a line."
 msgstr ""
 
 #: lib/kiln_cms_web/components/seo_components.ex
@@ -7878,8 +7878,8 @@ msgid "Photos from Unsplash — importing adds a copy to your library."
 msgstr ""
 
 #: lib/kiln_cms_web/live/compliance_live.ex
-#, elixir-autogen, elixir-format
-msgid "Phrases in this site's content that a regulator, a clinic's counsel or a style guide would want a second look at before it goes live — shown to authors in the editor's Compliance panel."
+#, elixir-autogen, elixir-format, fuzzy
+msgid "Phrases in this site's content that a regulator, your legal team or a style guide would want a second look at before it goes live — shown to authors in the editor's Compliance panel."
 msgstr ""
 
 #: lib/kiln_cms_web/live/compliance_live.ex
@@ -10963,8 +10963,8 @@ msgid "The same list is available on the server as %{list}, and %{doctor} verifi
 msgstr ""
 
 #: lib/kiln_cms_web/live/compliance_live.ex
-#, elixir-autogen, elixir-format
-msgid "The shipped pack deliberately leaves out bare curative words — \"cures\", \"heals\", \"treats\" — because they have too many legitimate uses to flag without knowing a publication's subject. That is what the phrase list above is for."
+#, elixir-autogen, elixir-format, fuzzy
+msgid "The shipped pack deliberately leaves out bare marketing words — \"best\", \"free\", \"proven\" — because they have too many legitimate uses to flag without knowing a publication's subject. That is what the phrase list above is for."
 msgstr ""
 
 #: lib/kiln_cms_web/live/team_live.ex
@@ -12229,8 +12229,8 @@ msgid "Winner promoted — the document now carries the winning copy."
 msgstr ""
 
 #: lib/kiln_cms_web/live/compliance_live.ex
-#, elixir-autogen, elixir-format
-msgid "With it on, the editor gains a Compliance panel that quotes back the phrases a document contains from a claims vocabulary — \"FDA approved\", \"no side effects\", \"guaranteed results\". It is advice: a match is a prompt to look, not a verdict, and nothing is blocked unless you separately turn on the publish gate."
+#, elixir-autogen, elixir-format, fuzzy
+msgid "With it on, the editor gains a Compliance panel that quotes back the phrases a document contains from a claims vocabulary — \"clinically proven\", \"risk-free\", \"guaranteed results\". It is advice: a match is a prompt to look, not a verdict, and nothing is blocked unless you separately turn on the publish gate."
 msgstr ""
 
 #: lib/kiln_cms_web/live/governance_live.ex

@@ -762,7 +762,7 @@ if config_env() == :prod do
       You can generate one by calling: mix phx.gen.secret
       """
 
-  # PHX_HOST is meant to be a bare host (e.g. "be.verscienta.com"), but is
+  # PHX_HOST is meant to be a bare host (e.g. "cms.example.com"), but is
   # easy to misconfigure as a full URL. Strip any scheme/trailing slash so a
   # `https://host` value doesn't get baked into the Endpoint's `url: [host:
   # ...]` — Phoenix uses that host as-is (not re-parsed) both for generating

@@ -23,26 +23,26 @@ defmodule KilnCMSWeb.StructuredDataDynamicTypeTest do
     %{admin: admin, org: KilnCMS.Accounts.default_org_id()}
   end
 
-  defp type_name, do: "remedy#{System.unique_integer([:positive])}"
+  defp type_name, do: "help_article#{System.unique_integer([:positive])}"
 
   test "a dynamic type's declared schema.org type reaches the served page's @type", ctx do
     definition =
       CMS.create_type_definition!(
-        %{name: type_name(), label: "Remedy", schema_org_type: "MedicalWebPage"},
+        %{name: type_name(), label: "Help article", schema_org_type: "FAQPage"},
         actor: ctx.admin
       )
 
     entry =
-      CMS.ContentTypes.create!(definition.name, %{title: "Ginger", slug: "ginger-1"},
+      CMS.ContentTypes.create!(definition.name, %{title: "Returns policy", slug: "returns-1"},
         actor: ctx.admin
       )
 
     ct = ContentTypes.get(definition.name, ctx.org)
     data = StructuredData.build(entry, ct)
 
-    assert data["@type"] == "MedicalWebPage"
+    assert data["@type"] == "FAQPage"
     # Not an article-family type, so title carries as `name`, not `headline`.
-    assert data["name"] == "Ginger"
+    assert data["name"] == "Returns policy"
     refute Map.has_key?(data, "headline")
   end
 
@@ -137,12 +137,12 @@ defmodule KilnCMSWeb.StructuredDataDynamicTypeTest do
     test "both producers resolve the same @type for the same document", ctx do
       definition =
         CMS.create_type_definition!(
-          %{name: type_name(), label: "Remedy", schema_org_type: "MedicalWebPage"},
+          %{name: type_name(), label: "Help article", schema_org_type: "FAQPage"},
           actor: ctx.admin
         )
 
       entry =
-        CMS.ContentTypes.create!(definition.name, %{title: "Ginger", slug: "ginger-2"},
+        CMS.ContentTypes.create!(definition.name, %{title: "Returns policy", slug: "returns-2"},
           actor: ctx.admin
         )
 
@@ -158,7 +158,7 @@ defmodule KilnCMSWeb.StructuredDataDynamicTypeTest do
       served = StructuredData.build(entry, ct)
 
       assert fired_main["@type"] == served["@type"]
-      assert served["@type"] == "MedicalWebPage"
+      assert served["@type"] == "FAQPage"
     end
   end
 end

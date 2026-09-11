@@ -27,8 +27,8 @@ defmodule KilnCMS.CMS.GeolocationFieldTest do
       Map.merge(
         %{
           content_type: :page,
-          name: "clinic_#{System.unique_integer([:positive])}",
-          label: "Clinic location",
+          name: "store_#{System.unique_integer([:positive])}",
+          label: "Store location",
           field_type: :geolocation
         },
         attrs
@@ -60,7 +60,7 @@ defmodule KilnCMS.CMS.GeolocationFieldTest do
       page =
         CMS.create_page!(
           %{
-            title: "Clinic",
+            title: "Store",
             slug: slug(),
             custom_fields: %{
               definition.name => %{"lat" => "51.5074", "lng" => "-0.1278", "zoom" => "12"}
@@ -92,7 +92,7 @@ defmodule KilnCMS.CMS.GeolocationFieldTest do
       page =
         CMS.create_page!(
           %{
-            title: "Clinic",
+            title: "Store",
             slug: slug(),
             custom_fields: %{
               definition.name => %{
@@ -284,7 +284,7 @@ defmodule KilnCMS.CMS.GeolocationFieldTest do
       page =
         CMS.create_page!(
           %{
-            title: "Clinic",
+            title: "Store",
             slug: slug(),
             custom_fields: %{
               definition.name => %{"lat" => "51.5074", "lng" => "-0.1278", "label" => "London"}
@@ -314,7 +314,7 @@ defmodule KilnCMS.CMS.GeolocationFieldTest do
 
     test "the place falls back to the field's label when the value has none" do
       actor = admin()
-      definition = define!(actor, %{label: "Trial site"})
+      definition = define!(actor, %{label: "Flagship store"})
 
       page =
         CMS.create_page!(
@@ -329,12 +329,12 @@ defmodule KilnCMS.CMS.GeolocationFieldTest do
       {:ok, %{json_ld: json_ld}} = Firing.Engine.fire(page, mode: :preview)
       [main | _] = json_ld["@graph"]
 
-      assert main["contentLocation"]["name"] == "Trial site"
+      assert main["contentLocation"]["name"] == "Flagship store"
     end
 
     test "two geolocation fields fire as a list; none fires no key at all" do
       actor = admin()
-      first = define!(actor, %{label: "Clinic"})
+      first = define!(actor, %{label: "Store"})
       second = define!(actor, %{label: "Warehouse"})
 
       page =

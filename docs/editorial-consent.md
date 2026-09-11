@@ -1,8 +1,8 @@
 # Editorial consent linking (compliance cluster)
 
 Link content to **editorial / authorization consent** records — proof that a
-piece of content is *cleared to publish*: a medical-reviewer sign-off, a
-patient/source release, source licensing, etc. Part of the compliance cluster
+piece of content is *cleared to publish*: an expert reviewer's sign-off, a
+subject/source release, source licensing, etc. Part of the compliance cluster
 ([#356](https://github.com/The-Verscienta/kiln_cms/issues/356); pairs with #338
 point-in-time and #352 governance dashboard).
 
@@ -16,8 +16,8 @@ point-in-time and #352 governance dashboard).
   `:licensing`, `:other` by default; override with `config :kiln_cms, [:consent,
   :kinds]`).
 - **`reference`** — a pointer to the underlying authorization (ticket id, URL,
-  document ref). **Never the sensitive consent document itself**, so PHI-adjacent
-  material isn't pulled into the CMS.
+  document ref). **Never the sensitive consent document itself**, so personal
+  data isn't pulled into the CMS.
 - **`grantor`** — who granted/approved; **`granted_at`**; **`recorded_by`** — the
   user who logged it.
 

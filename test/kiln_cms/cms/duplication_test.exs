@@ -208,7 +208,7 @@ defmodule KilnCMS.CMS.DuplicationTest do
   test "a link's kind, position, label and metadata survive the copy" do
     actor = user(:admin)
     target = CMS.create_page!(%{title: "Ingredient", slug: slug()}, actor: actor)
-    source = CMS.create_page!(%{title: "Formula", slug: slug()}, actor: actor)
+    source = CMS.create_page!(%{title: "Recipe", slug: slug()}, actor: actor)
 
     CMS.create_content_link!(
       %{
@@ -216,8 +216,8 @@ defmodule KilnCMS.CMS.DuplicationTest do
         target_id: target.id,
         kind: :see_also,
         position: 3,
-        label: "Chief herb",
-        metadata: %{"dosage" => "9g"}
+        label: "Main ingredient",
+        metadata: %{"quantity" => "250g"}
       },
       actor: actor
     )
@@ -228,8 +228,8 @@ defmodule KilnCMS.CMS.DuplicationTest do
     assert link.target_id == target.id
     assert link.kind == :see_also
     assert link.position == 3
-    assert link.label == "Chief herb"
-    assert link.metadata == %{"dosage" => "9g"}
+    assert link.label == "Main ingredient"
+    assert link.metadata == %{"quantity" => "250g"}
   end
 
   test "two links to one target under different kinds both survive" do

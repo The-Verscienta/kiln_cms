@@ -512,13 +512,13 @@ msgstr "%{phrases} correspond à la règle de conformité %{rule}."
 
 #: lib/kiln_cms_web/components/compliance_components.ex
 #, elixir-autogen, elixir-format
-msgid "%{phrases} positions this as a substitute for seeing a clinician."
-msgstr "%{phrases} présente ce contenu comme un substitut à une consultation médicale."
+msgid "%{phrases} promises safety without qualification — there is no way for a reader to be the exception."
+msgstr "%{phrases} promet une sécurité sans réserve — aucun lecteur ne peut être l’exception."
 
 #: lib/kiln_cms_web/components/compliance_components.ex
 #, elixir-autogen, elixir-format
-msgid "%{phrases} promises safety without qualification — there is no way for a reader to be the exception."
-msgstr "%{phrases} promet une sécurité sans réserve — aucun lecteur ne peut être l’exception."
+msgid "%{phrases} ranks this above everything else. Name the ranking and who made it, or reword it."
+msgstr "%{phrases} place ceci au-dessus de tout le reste. Précisez le classement et qui l'a établi, ou reformulez."
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -7418,8 +7418,8 @@ msgstr[1] "Un par ligne. %{count} mots-clés enregistrés."
 
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
-msgid "One per line. Matched case-insensitively on whole words, so \"cures\" does not match \"secures\". Whitespace between words is flexible, so a phrase still matches text the editor wrapped across a line."
-msgstr "Une par ligne. Recherche sans distinction de casse sur des mots entiers : « cures » ne correspond donc pas à « secures ». Les espaces entre les mots sont souples : une expression correspond même si l'éditeur l'a répartie sur deux lignes."
+msgid "One per line. Matched case-insensitively on whole words, so \"free\" does not match \"freedom\". Whitespace between words is flexible, so a phrase still matches text the editor wrapped across a line."
+msgstr "Une par ligne. Recherche sans distinction de casse sur des mots entiers : « free » ne correspond donc pas à « freedom ». Les espaces entre les mots sont souples : une expression correspond même si l'éditeur l'a répartie sur deux lignes."
 
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
@@ -7879,8 +7879,8 @@ msgstr "Photos d'Unsplash — l'import ajoute une copie à votre bibliothèque."
 
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
-msgid "Phrases in this site's content that a regulator, a clinic's counsel or a style guide would want a second look at before it goes live — shown to authors in the editor's Compliance panel."
-msgstr "Les expressions du contenu de ce site qu'un régulateur, le service juridique d'une clinique ou une charte éditoriale voudraient relire avant la mise en ligne — présentées aux auteurs dans le panneau Conformité de l'éditeur."
+msgid "Phrases in this site's content that a regulator, your legal team or a style guide would want a second look at before it goes live — shown to authors in the editor's Compliance panel."
+msgstr "Les expressions du contenu de ce site qu'un régulateur, votre service juridique ou une charte éditoriale voudraient relire avant la mise en ligne — présentées aux auteurs dans le panneau Conformité de l'éditeur."
 
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
@@ -10964,8 +10964,8 @@ msgstr "La même liste est disponible sur le serveur via %{list}, et %{doctor} v
 
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
-msgid "The shipped pack deliberately leaves out bare curative words — \"cures\", \"heals\", \"treats\" — because they have too many legitimate uses to flag without knowing a publication's subject. That is what the phrase list above is for."
-msgstr "Le jeu de règles fourni exclut délibérément les verbes de guérison seuls — « cures », « heals », « treats » — car ils ont trop d'usages légitimes pour être signalés sans connaître le sujet de la publication. C'est à cela que sert la liste d'expressions ci-dessus."
+msgid "The shipped pack deliberately leaves out bare marketing words — \"best\", \"free\", \"proven\" — because they have too many legitimate uses to flag without knowing a publication's subject. That is what the phrase list above is for."
+msgstr "Le jeu de règles fourni exclut délibérément les mots publicitaires seuls — « best », « free », « proven » — car ils ont trop d'usages légitimes pour être signalés sans connaître le sujet de la publication. C'est à cela que sert la liste d'expressions ci-dessus."
 
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
@@ -12230,8 +12230,8 @@ msgstr "Gagnante promue — le document porte désormais le texte gagnant."
 
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
-msgid "With it on, the editor gains a Compliance panel that quotes back the phrases a document contains from a claims vocabulary — \"FDA approved\", \"no side effects\", \"guaranteed results\". It is advice: a match is a prompt to look, not a verdict, and nothing is blocked unless you separately turn on the publish gate."
-msgstr "Une fois activé, l'éditeur affiche un panneau Conformité qui cite les expressions du document issues d'un vocabulaire d'allégations — « FDA approved », « no side effects », « guaranteed results ». C'est un conseil : une correspondance invite à regarder, ce n'est pas un verdict, et rien n'est bloqué tant que vous n'activez pas séparément le verrou de publication."
+msgid "With it on, the editor gains a Compliance panel that quotes back the phrases a document contains from a claims vocabulary — \"clinically proven\", \"risk-free\", \"guaranteed results\". It is advice: a match is a prompt to look, not a verdict, and nothing is blocked unless you separately turn on the publish gate."
+msgstr "Une fois activé, l'éditeur affiche un panneau Conformité qui cite les expressions du document issues d'un vocabulaire d'allégations — « clinically proven », « risk-free », « guaranteed results ». C'est un conseil : une correspondance invite à regarder, ce n'est pas un verdict, et rien n'est bloqué tant que vous n'activez pas séparément le verrou de publication."
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format

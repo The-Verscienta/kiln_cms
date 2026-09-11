@@ -253,9 +253,9 @@ defmodule KilnCMS.Search.MeasureFloorTaskTest do
     admin = admin()
     shared = slug()
 
-    herb =
+    ingredient =
       CMS.create_type_definition!(
-        %{name: "herb#{System.unique_integer([:positive])}", label: "Herb"},
+        %{name: "ingredient#{System.unique_integer([:positive])}", label: "Ingredient"},
         actor: admin
       )
 
@@ -266,32 +266,32 @@ defmodule KilnCMS.Search.MeasureFloorTaskTest do
       )
 
     # Two entries share a slug across two dynamic types; the RECIPE is the
-    # query's title. Measuring the herb must neither find the recipe under the
-    # herb label nor look the slug up in the wrong type.
-    herb_entry =
-      KilnCMS.CMS.ContentTypes.create!(herb.name, %{title: "Ginger root", slug: shared},
+    # query's title. Measuring the ingredient must neither find the recipe under
+    # the ingredient label nor look the slug up in the wrong type.
+    ingredient_entry =
+      KilnCMS.CMS.ContentTypes.create!(ingredient.name, %{title: "Lemon zest", slug: shared},
         actor: admin
       )
 
-    CMS.publish_entry!(herb_entry, %{}, actor: admin)
+    CMS.publish_entry!(ingredient_entry, %{}, actor: admin)
 
     recipe_entry =
-      KilnCMS.CMS.ContentTypes.create!(recipe.name, %{title: "Ginger", slug: shared},
-        actor: admin
-      )
+      KilnCMS.CMS.ContentTypes.create!(recipe.name, %{title: "Lemon", slug: shared}, actor: admin)
 
     CMS.publish_entry!(recipe_entry, %{}, actor: admin)
     KilnCMS.DataCase.drain_oban()
 
-    set = golden(dir, [expects("Ginger", shared, "single_entity")])
-    output = capture_io(fn -> MeasureFloor.run([set, "--type", herb.name, "--limit", "1"]) end)
+    set = golden(dir, [expects("Lemon", shared, "single_entity")])
 
-    assert output =~ ~r/expected\s+#{herb.name}\s+#{shared}\s+\d\.\d{4}/
+    output =
+      capture_io(fn -> MeasureFloor.run([set, "--type", ingredient.name, "--limit", "1"]) end)
+
+    assert output =~ ~r/expected\s+#{ingredient.name}\s+#{shared}\s+\d\.\d{4}/
     refute output =~ ~r/#{shared}\s+0\.0000/
     refute output =~ recipe.name
 
     # Swept without `--type`, both are labelled with their own type.
-    set = golden(dir, [expects("Ginger", shared, "single_entity", %{"type" => recipe.name})])
+    set = golden(dir, [expects("Lemon", shared, "single_entity", %{"type" => recipe.name})])
     output = capture_io(fn -> MeasureFloor.run([set]) end)
     assert output =~ ~r/expected\s+#{String.slice(recipe.name, 0, 8)}\S*\s+#{shared}\s+0\.0000/
   end
@@ -301,18 +301,18 @@ defmodule KilnCMS.Search.MeasureFloorTaskTest do
     tmp_dir: dir
   } do
     admin = admin()
-    huang = published_page(admin, %{title: "Huang Qi", slug: slug()})
-    dang = published_page(admin, %{title: "Dang Shen", slug: slug()})
+    pad_thai = published_page(admin, %{title: "Pad Thai", slug: slug()})
+    tom_yum = published_page(admin, %{title: "Tom Yum", slug: slug()})
     other = published_page(admin, %{title: "Something else", slug: slug()})
     KilnCMS.DataCase.drain_oban()
 
-    set = golden(dir, [expects("Huang Qi", [huang.slug, dang.slug], "multi_entity")])
+    set = golden(dir, [expects("Pad Thai", [pad_thai.slug, tom_yum.slug], "multi_entity")])
     output = capture_io(fn -> MeasureFloor.run([set, "--type", "page"]) end)
 
-    assert output =~ ~r/expected\s+page\s+#{huang.slug}\s+0\.0000/
-    assert output =~ ~r/expected\s+page\s+#{dang.slug}\s+\d\.\d{4}/
+    assert output =~ ~r/expected\s+page\s+#{pad_thai.slug}\s+0\.0000/
+    assert output =~ ~r/expected\s+page\s+#{tom_yum.slug}\s+\d\.\d{4}/
     assert output =~ ~r/nearest ≠\s+page\s+#{other.slug}/
-    refute output =~ ~r/nearest ≠\s+page\s+#{dang.slug}/
+    refute output =~ ~r/nearest ≠\s+page\s+#{tom_yum.slug}/
   end
 
   @tag :tmp_dir

@@ -2,13 +2,13 @@ defmodule KilnCMS.CMS.Consent do
   @moduledoc """
   An **editorial / authorization consent** record linked to a content item
   (compliance cluster, #356) — proof that a piece of content is *cleared to
-  publish*: a medical-reviewer sign-off, a patient/source release, source
+  publish*: an expert-reviewer sign-off, a source release, source
   licensing, and so on.
 
   This is *cleared-to-publish* consent, **not** GDPR data-subject/cookie consent.
   A record stores a **reference** to the underlying authorization (a ticket id,
   URL, or document ref) and who granted it — deliberately **never the sensitive
-  consent document itself**, so PHI-adjacent material isn't pulled into the CMS.
+  consent document itself**, so sensitive personal material isn't pulled into the CMS.
 
   Consents surface in the governance dashboard (#352) and can gate publishing
   (see `KilnCMS.CMS.Validations.RequiredConsent`, config-gated). Recording and

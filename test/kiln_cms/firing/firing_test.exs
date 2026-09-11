@@ -10,12 +10,12 @@ defmodule KilnCMS.Firing.FiringTest do
   # can be checked without seeding — the multi-word case is the regression guard.
   defmodule MultiWordDoc do
     defstruct [:id]
-    def __kiln_content_type__, do: :tcm_ingredient
+    def __kiln_content_type__, do: :recipe_ingredient
   end
 
   defmodule SingleWordDoc do
     defstruct [:id]
-    def __kiln_content_type__, do: :herb
+    def __kiln_content_type__, do: :recipe
   end
 
   defp admin do
@@ -142,21 +142,23 @@ defmodule KilnCMS.Firing.FiringTest do
       definition =
         CMS.create_type_definition!(
           %{
-            name: "remedy#{System.unique_integer([:positive])}",
-            label: "Remedy",
-            schema_org_type: "MedicalWebPage"
+            name: "help_article#{System.unique_integer([:positive])}",
+            label: "Help article",
+            schema_org_type: "FAQPage"
           },
           actor: actor
         )
 
       entry =
-        CMS.ContentTypes.create!(definition.name, %{title: "Ginger", slug: slug()}, actor: actor)
+        CMS.ContentTypes.create!(definition.name, %{title: "Returns policy", slug: slug()},
+          actor: actor
+        )
 
       {:ok, entry} = CMS.ContentTypes.transition(definition.name, "publish", entry, actor: actor)
       KilnCMS.DataCase.drain_oban()
       {:ok, ld} = Engine.read(org, :entry, entry.id, :json_ld)
 
-      assert [%{"@type" => "MedicalWebPage"} | _] = ld["@graph"]
+      assert [%{"@type" => "FAQPage"} | _] = ld["@graph"]
     end
 
     test "archiving a dynamic type does not change what its published entries fire (#938)" do
@@ -383,13 +385,13 @@ defmodule KilnCMS.Firing.FiringTest do
 
   describe "document_type/1" do
     test "trusts a multi-word type's declared atom instead of the module name" do
-      # Regression: downcasing the module suffix ("TcmIngredient" -> "tcmingredient")
+      # Regression: downcasing the module suffix ("RecipeIngredient" -> "recipeingredient")
       # loses the underscores, so String.to_existing_atom/1 used to raise here.
-      assert Engine.document_type(%MultiWordDoc{}) == :tcm_ingredient
+      assert Engine.document_type(%MultiWordDoc{}) == :recipe_ingredient
     end
 
     test "still resolves a single-word type" do
-      assert Engine.document_type(%SingleWordDoc{}) == :herb
+      assert Engine.document_type(%SingleWordDoc{}) == :recipe
     end
   end
 end

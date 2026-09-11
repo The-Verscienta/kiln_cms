@@ -91,8 +91,8 @@ defmodule KilnCMSWeb.ContentEditorIntelligenceTest do
 
   test "the panel loads nothing until it is clicked", %{conn: conn} do
     actor = authed_user(:admin)
-    anchor = indexed_page(actor, "brewing herbal tea slowly", title: "Same")
-    twin = indexed_page(actor, "brewing herbal tea slowly", title: "Same")
+    anchor = indexed_page(actor, "brewing green tea slowly", title: "Same")
+    twin = indexed_page(actor, "brewing green tea slowly", title: "Same")
 
     {:ok, _lv, html} = conn |> log_in(actor) |> live(~p"/editor/content/page/#{anchor.id}")
 
@@ -110,8 +110,8 @@ defmodule KilnCMSWeb.ContentEditorIntelligenceTest do
     # Identical *documents*, not just identical bodies: block embeddings are
     # hierarchical, so a differing title moves the vectors well past the
     # near-duplicate threshold even when the prose is word-for-word the same.
-    anchor = indexed_page(actor, "brewing herbal tea slowly", title: "Same")
-    twin = indexed_page(actor, "brewing herbal tea slowly", title: "Same")
+    anchor = indexed_page(actor, "brewing green tea slowly", title: "Same")
+    twin = indexed_page(actor, "brewing green tea slowly", title: "Same")
     other = indexed_page(actor, "carburetor maintenance schedules", title: "Unrelated")
 
     html = conn |> open(actor, anchor) |> analyze()
@@ -123,14 +123,14 @@ defmodule KilnCMSWeb.ContentEditorIntelligenceTest do
 
   test "tag suggestions apply to the form on one click and leave the list", %{conn: conn} do
     actor = authed_user(:admin)
-    tag = CMS.create_tag!(%{name: "herbal tea", slug: slug()}, actor: actor)
-    page = indexed_page(actor, "brewing herbal tea slowly", title: "Anchor")
+    tag = CMS.create_tag!(%{name: "green tea", slug: slug()}, actor: actor)
+    page = indexed_page(actor, "brewing green tea slowly", title: "Anchor")
 
     lv = open(conn, actor, page)
     html = analyze(lv)
 
     assert html =~ "Suggested tags"
-    assert html =~ "herbal tea"
+    assert html =~ "green tea"
 
     applied =
       lv
@@ -149,7 +149,7 @@ defmodule KilnCMSWeb.ContentEditorIntelligenceTest do
   test "an id we never suggested is ignored rather than attached", %{conn: conn} do
     actor = authed_user(:admin)
     other = CMS.create_tag!(%{name: "unrelated tag", slug: slug()}, actor: actor)
-    page = indexed_page(actor, "brewing herbal tea slowly", title: "Anchor")
+    page = indexed_page(actor, "brewing green tea slowly", title: "Anchor")
 
     # Deliberately no `analyze/1`: nothing has been suggested, so this is a
     # forged or replayed event, and the panel's controls aren't even rendered.
@@ -164,7 +164,7 @@ defmodule KilnCMSWeb.ContentEditorIntelligenceTest do
     conn: conn
   } do
     actor = authed_user(:admin)
-    page = indexed_page(actor, "brewing herbal tea slowly", title: "Anchor")
+    page = indexed_page(actor, "brewing green tea slowly", title: "Anchor")
 
     original = Application.get_env(:kiln_cms, KilnCMS.Search, [])
     Application.put_env(:kiln_cms, KilnCMS.Search, Keyword.put(original, :semantic, false))
@@ -183,14 +183,14 @@ defmodule KilnCMSWeb.ContentEditorIntelligenceTest do
     # had already been published.
     actor = authed_user(:admin)
 
-    twin = indexed_page(actor, "brewing herbal tea slowly", title: "Same")
+    twin = indexed_page(actor, "brewing green tea slowly", title: "Same")
 
     draft =
       CMS.create_page!(
         %{
           title: "Same",
           slug: slug(),
-          blocks: [%{type: :rich_text, content: "<p>brewing herbal tea slowly</p>", order: 0}]
+          blocks: [%{type: :rich_text, content: "<p>brewing green tea slowly</p>", order: 0}]
         },
         actor: actor
       )
@@ -209,7 +209,7 @@ defmodule KilnCMSWeb.ContentEditorIntelligenceTest do
     # no block text to embed, so there is nothing to compare *from* — fixed by
     # writing something, not by publishing or by changing a setting.
     actor = authed_user(:admin)
-    _twin = indexed_page(actor, "brewing herbal tea slowly", title: "Same")
+    _twin = indexed_page(actor, "brewing green tea slowly", title: "Same")
 
     blank = CMS.create_page!(%{title: "Blank", slug: slug(), blocks: []}, actor: actor)
 
@@ -226,7 +226,7 @@ defmodule KilnCMSWeb.ContentEditorIntelligenceTest do
     conn: conn
   } do
     actor = authed_user(:admin)
-    # A body distinct from every other test's ("brewing herbal tea slowly" is
+    # A body distinct from every other test's ("brewing green tea slowly" is
     # reused all over this file, including by an unpublished draft in "a
     # never-published draft finds its duplicate (#852)" above) — since #1076's
     # fix, a cache hit correctly bypasses the budget entirely, so reusing that

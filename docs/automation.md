@@ -141,12 +141,12 @@ Automation complements it with the reactions webhooks can't do.
 ### Examples
 
 ```
-When post.published        → send_email  {"to": "editors@site.com", "subject": "Live: {{title}}"}
+When post.published        → send_email  {"to": "editors@example.com", "subject": "Live: {{title}}"}
 When *.published           → reindex
 When *.updated             → invalidate_cache
 When page.unpublished      → broadcast   {"topic": "site:page"}
-When post.in_review        → suggest_links     {"to": "editors@site.com"}
-When post.in_review        → suggest_metadata  {"to": "editors@site.com"}
+When post.in_review        → suggest_links     {"to": "editors@example.com"}
+When post.in_review        → suggest_metadata  {"to": "editors@example.com"}
 ```
 
 ## How it works

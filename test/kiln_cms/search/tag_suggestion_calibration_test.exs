@@ -58,7 +58,7 @@ defmodule KilnCMS.Search.TagSuggestionCalibrationTest do
     end
 
     # The opposite failure: the panel offers "carburetors" for a page about
-    # herbal tea, beside a real match, at the same size.
+    # green tea, beside a real match, at the same size.
     test "admits few of the tags a human would not" do
       {_good, bad} = bands()
       kept = kept(bad, Search.suggest_tags_threshold())

@@ -7,7 +7,7 @@ defmodule KilnCMS.CMS.SiteCompliance do
   Claim checking shipped as `config :kiln_cms, KilnCMS.Compliance` and nothing
   else, which is the wrong grain for a shared install (#336). A claims
   vocabulary is a statement about one publication's voice and jurisdiction, and
-  `require_at_publish` is a hard refusal — one tenant deciding that "cures"
+  `require_at_publish` is a hard refusal — one tenant deciding that "guaranteed"
   cannot ship applied that to every other site on the instance, and no tenant
   admin could opt out, because the switch lived in a file they cannot edit.
   This row is the per-org layer above that config; `KilnCMS.Compliance.Settings`

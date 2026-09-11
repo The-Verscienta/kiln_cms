@@ -12,13 +12,13 @@ registers **one config line**, and contributes block types, content types,
 admin panels, workers and background queues, with the core none the wiser.
 The project plan has promised this from the start (Architecture →
 Extensibility: *"Plugin / Module System: plug-and-play custom modules via
-Elixir behaviours"*; Risks: *"Verscienta Health as the first plugin/consumer,
-not a coupling"*).
+Elixir behaviours"*; Risks: the first downstream project *"as the first
+plugin/consumer, not a coupling"*).
 
 ## 1. What exploration found: the system half-exists
 
-The Verscienta host-project integration **is** a working plugin mechanism —
-just unnamed and undocumented:
+The downstream host-project integration (`projects/` overlays) **is** a
+working plugin mechanism — just unnamed and undocumented:
 
 | Contribution | Mechanism today | Plugin-ready? |
 |---|---|---|
@@ -34,8 +34,8 @@ just unnamed and undocumented:
 
 So this plan is **not a new subsystem**: it's (a) a small contract that names
 the existing pattern, (b) four seam closures, (c) the scaffold + docs, and
-(d) proving it by retrofitting Verscienta as the first real plugin — exactly
-what the project plan called for.
+(d) proving it by retrofitting a downstream project as the first real plugin —
+exactly what the project plan called for.
 
 ## 2. Decision D18 — the plugin contract
 
@@ -50,24 +50,24 @@ what the project plan called for.
 > future is installers, not runtime code.
 
 ```elixir
-defmodule Verscienta.Plugin do
+defmodule MyApp.Plugin do
   use Kiln.Plugin
 
   @impl true
-  def name, do: "verscienta"
+  def name, do: "my_app"
 
   # Documented + verified against :ash_domains/:content_domains by
   # `mix kiln.plugins.doctor` (they can't be auto-merged: Ash mix tasks read
   # those config keys before any plugin code could run).
-  def domains, do: [Verscienta.Catalog]
+  def domains, do: [MyApp.Catalog]
 
-  def blocks, do: [Verscienta.Blocks.DosageTable]
+  def blocks, do: [MyApp.Blocks.PriceTable]
 
-  def nav_items, do: [%{label: "Import", path: "/editor/verscienta", role: :admin}]
+  def nav_items, do: [%{label: "Import", path: "/editor/my-app", role: :admin}]
 
-  def admin_routes, do: [{"/editor/verscienta", Verscienta.ImportLive, :index}]
+  def admin_routes, do: [{"/editor/my-app", MyApp.ImportLive, :index}]
 
-  def children, do: [Verscienta.SyncWorker]
+  def children, do: [MyApp.SyncWorker]
 
   def oban_queues, do: [imports: 2]
 end
@@ -155,8 +155,10 @@ the block union and the router need the list during compilation.
    callout block round-trips storage and renders escaped HTML, appears in
    the editor palette, its nav item is role-gated, its panel mounts
    admin-only, its Agent child runs.
-3. **Verscienta retrofit + scaffold.** ✅ **Done.** `Verscienta.Plugin`
-   (projects/verscienta) makes the plan's "first plugin/consumer" literal —
+3. **Downstream retrofit + scaffold.** ✅ **Done.** The first downstream
+   project's plugin module (overlaid into `projects/<name>`; `Example.Plugin`
+   in `projects/example` is the in-repo equivalent) makes the plan's "first
+   plugin/consumer" literal —
    domains declared on the contract, doctor-verified against the host
    config. `mix kiln.gen.plugin <Name> [--block <name>]` scaffolds a plugin
    (contract module with stubbed callbacks + optional working sample block +

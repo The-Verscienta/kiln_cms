@@ -81,10 +81,10 @@ defmodule KilnCMS.CMS.CustomFieldQueryTest do
       subtitle = field_name("subtitle")
       define!(%{name: subtitle, field_type: :string}, admin)
 
-      match = page!(%{subtitle => "Sweet Herb Guide"}, admin)
-      _other = page!(%{subtitle => "Bitter Root"}, admin)
+      match = page!(%{subtitle => "Sweet Bread Guide"}, admin)
+      _other = page!(%{subtitle => "Bitter Lemon"}, admin)
 
-      assert list_ids!(%{custom_filter: %{subtitle => %{"ilike" => "%herb%"}}}, admin) ==
+      assert list_ids!(%{custom_filter: %{subtitle => %{"ilike" => "%bread%"}}}, admin) ==
                [match.id]
     end
 

@@ -5,7 +5,7 @@ come after: **when does this stop being live**, and **when does someone need to
 read it again**.
 
 They are one axis — `health` — computed from four columns, and they are
-deliberately *not* part of the state machine. A drug monograph whose annual
+deliberately *not* part of the state machine. A product safety guide whose annual
 review lapsed is still, factually, published; a legal notice past its stated
 shelf life is still being served. Making those a `state` would mean the
 publishing workflow had to model editorial trust, and the two move
@@ -101,8 +101,8 @@ would forge an attestation outright. See `KilnCMS.CMS.VersionFields`.
 
 ## Per-type defaults
 
-`TypeDefinition.default_review_after_days` lets an operator say "every clinical
-monograph is re-read yearly" once, on the type, instead of on each of four
+`TypeDefinition.default_review_after_days` lets an operator say "every buying
+guide is re-read yearly" once, on the type, instead of on each of four
 hundred entries. An entry that sets its own `review_after_days` overrides it;
 `nil` on both means the type has no cadence.
 
@@ -236,7 +236,7 @@ write to hang it off. Something has to come looking.
 content, does not create tasks, and does not write `health` (which is a
 calculation and has nothing to store). What happens next is a rule the team
 configured, or nothing at all — which is the point: "overdue" means different
-things to a newsroom and to a clinical library, and one hard-coded reaction
+things to a newsroom and to a reference library, and one hard-coded reaction
 would be wrong for one of them.
 
 That also makes it safe to leave enabled everywhere. A site with no review
@@ -277,7 +277,7 @@ over a misconfigured rule.
 overdue — that is what makes it a reminder rather than a one-shot notification
 that can be missed — so `:create_task` first asks whether an open
 `:lifecycle_review` task already exists on that content. Without that, a
-monograph nobody has got to in a fortnight carries fourteen identical tasks, and
+guide nobody has got to in a fortnight carries fourteen identical tasks, and
 the queue meant to surface the problem *is* the problem. Complete the task
 without actually re-reading the piece and the next sweep raises a fresh one,
 because the content is still overdue.

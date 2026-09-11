@@ -5,8 +5,8 @@ defmodule KilnCMS.Search.PassageTest do
   three fragments of 40 words with no tags — and when the headline still comes
   back short (the match cluster is the title-and-headings prefix of
   `search_text`, i.e. a query that names the record), the document's opening
-  300 characters instead. "Huang Qi Botanical Description Astragalus" grounds
-  no answer.
+  300 characters instead. "Pad Thai Ingredients Method Sen Lek" grounds no
+  answer.
   """
   use KilnCMS.DataCase, async: true
 
@@ -33,10 +33,10 @@ defmodule KilnCMS.Search.PassageTest do
     )
   end
 
-  @body "Astragalus membranaceus is a perennial herb of the legume family native to " <>
-          "northern China. The root is harvested in the fourth year and used as a qi " <>
-          "tonic that strengthens the defensive energy of the body and supports the " <>
-          "spleen and the lungs. It is combined with Dang Shen in tonics for fatigue."
+  @body "Sen lek is a flat rice noodle of the kway teow family made across central " <>
+          "Thailand. The noodle is soaked overnight and stir-fried in a hot wok as a " <>
+          "thai street staple, with a tamarind sauce that balances the sour notes of " <>
+          "the dish and the sweet palm sugar. It is served with Tom Yum at night markets."
 
   test "a match in the body yields a long, mark-free passage" do
     actor = admin()
@@ -44,20 +44,20 @@ defmodule KilnCMS.Search.PassageTest do
     page =
       CMS.create_page!(
         %{
-          title: "Huang Qi",
+          title: "Pad Thai",
           slug: slug(),
           blocks: [%{type: :rich_text, content: "<p>#{@body}</p>", order: 0}]
         },
         actor: actor
       )
 
-    loaded = load(page, "defensive energy", actor)
+    loaded = load(page, "tamarind sauce", actor)
 
     assert String.length(loaded.passage) >= 120
-    assert loaded.passage =~ "defensive energy"
+    assert loaded.passage =~ "tamarind sauce"
     refute loaded.passage =~ "<mark>"
     # The search-page snippet keeps its own tuning.
-    assert loaded.highlight =~ "<mark>defensive</mark>"
+    assert loaded.highlight =~ "<mark>tamarind</mark>"
   end
 
   test "a title-only match falls back to the document's opening text" do
@@ -66,26 +66,26 @@ defmodule KilnCMS.Search.PassageTest do
     page =
       CMS.create_page!(
         %{
-          title: "Huang Qi",
+          title: "Pad Thai",
           slug: slug(),
           blocks: [%{type: :rich_text, content: "<p>#{@body}</p>", order: 0}]
         },
         actor: actor
       )
 
-    loaded = load(page, "huang qi", actor)
+    loaded = load(page, "pad thai", actor)
 
-    # Not "Huang Qi" and a heading: the passage reaches into the body.
+    # Not "Pad Thai" and a heading: the passage reaches into the body.
     assert String.length(loaded.passage) >= 120
-    assert loaded.passage =~ "legume family"
-    assert String.starts_with?(loaded.passage, "Huang Qi")
+    assert loaded.passage =~ "kway teow family"
+    assert String.starts_with?(loaded.passage, "Pad Thai")
   end
 
   test "a short document's passage is the whole document" do
     actor = admin()
-    page = CMS.create_page!(%{title: "Huang Qi", slug: slug(), blocks: []}, actor: actor)
+    page = CMS.create_page!(%{title: "Pad Thai", slug: slug(), blocks: []}, actor: actor)
 
-    loaded = load(page, "huang qi", actor)
+    loaded = load(page, "pad thai", actor)
 
     assert loaded.passage == String.trim(page.search_text)
   end

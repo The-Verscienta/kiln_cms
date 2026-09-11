@@ -172,8 +172,8 @@ defmodule Mix.Tasks.Kiln.Search.EvalTest do
       Task.run([path, "--k", "1,x"])
     end
 
-    assert_raise Mix.Error, ~r/unknown class "herbs"/, fn ->
-      Task.run([path, "--fail-below", "herbs=0.9"])
+    assert_raise Mix.Error, ~r/unknown class "recipes"/, fn ->
+      Task.run([path, "--fail-below", "recipes=0.9"])
     end
 
     assert_raise Mix.Error, ~r/--url must be an http\(s\) base URL/, fn ->

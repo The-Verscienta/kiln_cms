@@ -250,16 +250,16 @@ defmodule KilnCMS.VisualEditingTest do
 
     test "stega-encodes plain-string custom fields, skipping parsed values" do
       json = %{
-        "type" => "herb",
+        "type" => "recipe",
         "id" => "doc-4",
-        "title" => "Ren Shen",
-        "slug" => "ren-shen",
+        "title" => "Banana Bread",
+        "slug" => "banana-bread",
         "blocks" => [],
         "custom_fields" => %{
-          "scientific_name" => "Panax ginseng",
-          "dosages" => ~s([{"form":"decoction","amount":"3-9g"}]),
+          "subtitle" => "A quick loaf",
+          "servings" => ~s([{"form":"loaf","amount":"8-10"}]),
           "profile" => ~s({"taste":"sweet"}),
-          "monograph_url" => "https://example.com/ren-shen.pdf",
+          "recipe_card_url" => "https://example.com/banana-bread.pdf",
           "empty" => "",
           "rating" => 5
         }
@@ -270,21 +270,21 @@ defmodule KilnCMS.VisualEditingTest do
 
       # A plain string is encoded with the doc address + field name, no block —
       # the bridge deep-links these to the structured editor's ?focus= (#442).
-      assert Stega.decode(cf["scientific_name"]) ==
+      assert Stega.decode(cf["subtitle"]) ==
                %{
-                 "type" => "herb",
+                 "type" => "recipe",
                  "id" => "doc-4",
-                 "slug" => "ren-shen",
-                 "field" => "scientific_name"
+                 "slug" => "banana-bread",
+                 "field" => "subtitle"
                }
 
-      assert Stega.clean(cf["scientific_name"]) == "Panax ginseng"
+      assert Stega.clean(cf["subtitle"]) == "A quick loaf"
 
       # Values consumers parse are untouched: JSON-encoded structures and URLs
       # (an invisible tail would corrupt JSON.parse or an src/href).
-      assert cf["dosages"] == ~s([{"form":"decoction","amount":"3-9g"}])
+      assert cf["servings"] == ~s([{"form":"loaf","amount":"8-10"}])
       assert cf["profile"] == ~s({"taste":"sweet"})
-      assert cf["monograph_url"] == "https://example.com/ren-shen.pdf"
+      assert cf["recipe_card_url"] == "https://example.com/banana-bread.pdf"
       # Blank and non-string values pass through.
       assert cf["empty"] == ""
       assert cf["rating"] == 5

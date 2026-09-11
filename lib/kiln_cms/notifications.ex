@@ -371,7 +371,7 @@ defmodule KilnCMS.Notifications do
   # Resolve the human-facing content-type name from the registry rather than
   # enumerating each resource: every content type generated via
   # `KilnCMS.CMS.Content` exposes `__kiln_content_type__/0` (the same hook
-  # `KilnCMS.CMS.ContentTypes` discovers), so new types (herb, formula, …) work
+  # `KilnCMS.CMS.ContentTypes` discovers), so new types (product, recipe, …) work
   # without touching this module. Falls back to "content" for any non-content struct.
   defp kind(%mod{}) do
     if function_exported?(mod, :__kiln_content_type__, 0) do

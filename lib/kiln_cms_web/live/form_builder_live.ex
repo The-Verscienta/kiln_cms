@@ -1081,7 +1081,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
               name="form[embed_origins]"
               value={@embed_origins_draft || embed_origins_value(@form)}
               aria-label={gettext("Sites allowed to embed this form")}
-              placeholder="https://acme.com, https://blog.acme.com"
+              placeholder="https://example.com, https://blog.example.com"
               class="field-input font-mono text-xs"
             />
             <p class="text-xs text-base-content/60">

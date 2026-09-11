@@ -41,7 +41,7 @@ defmodule KilnCMS.Search.CoverageTest do
 
   test "global/2 returns sectioned results across pages, posts, and media" do
     admin = admin()
-    term = "meridian#{uniq()}"
+    term = "quasar#{uniq()}"
 
     page = CMS.create_page!(%{title: "#{term} page", slug: slug()}, actor: admin)
     post = CMS.create_post!(%{title: "#{term} post", slug: slug()}, actor: admin)

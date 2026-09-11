@@ -93,7 +93,7 @@ config :kiln_cms,
     KilnCMS.Experiments,
     KilnCMS.Social
     # The core stays project-agnostic. A downstream project registers its own
-    # content domain (e.g. `Verscienta.Catalog`) by appending to this list in its
+    # content domain (e.g. `MyApp.Catalog`) by appending to this list in its
     # OWN config — it must NOT be listed here, since it isn't compiled into the
     # reusable core. Ash and AshOban iterate `ash_domains` at compile and boot, so
     # a nonexistent module here crashes the release ("not a Spark DSL module").
@@ -612,7 +612,7 @@ config :kiln_cms, :i18n, default_locale: "en", locales: ["en"]
 # always implied (world-readable) and must stay first. Content carries one
 # `audience`; a user carries the set of `audiences` they belong to, and may read
 # a gated record only if its audience is in that set (editors/admins see all).
-# Override per-deployment, e.g. `[:public, :professional, :patient]`.
+# Override per-deployment, e.g. `[:public, :member, :premium]`.
 config :kiln_cms, :audiences, [:public, :member]
 
 # How many days soft-deleted (trashed) content is retained before the nightly

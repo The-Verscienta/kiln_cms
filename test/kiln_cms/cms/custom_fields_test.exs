@@ -43,8 +43,8 @@ defmodule KilnCMS.CMS.CustomFieldsTest do
 
       define!(
         %{
-          name: "toxicity_level",
-          label: "Toxicity",
+          name: "heel_height",
+          label: "Heel height",
           field_type: :select,
           options: ~w(none low high)
         },
@@ -53,7 +53,7 @@ defmodule KilnCMS.CMS.CustomFieldsTest do
 
       assert {:error, _} =
                CMS.create_field_definition(
-                 %{content_type: :page, name: "toxicity_level", label: "Dup"},
+                 %{content_type: :page, name: "heel_height", label: "Dup"},
                  actor: admin
                )
     end
@@ -111,7 +111,7 @@ defmodule KilnCMS.CMS.CustomFieldsTest do
       page =
         CMS.create_page!(
           %{
-            title: "Herb",
+            title: "Shoe",
             slug: slug(),
             custom_fields: %{
               "storage_temp" => "4",
@@ -199,16 +199,16 @@ defmodule KilnCMS.CMS.CustomFieldsTest do
   describe "custom_fields partial updates merge over the stored map" do
     setup do
       admin = admin()
-      define!(%{name: "genus", label: "Genus", field_type: :string}, admin)
-      define!(%{name: "species", label: "Species", field_type: :string}, admin)
+      define!(%{name: "brand", label: "Brand", field_type: :string}, admin)
+      define!(%{name: "style", label: "Style", field_type: :string}, admin)
       define!(%{name: "notes", label: "Notes", field_type: :text}, admin)
 
       page =
         CMS.create_page!(
           %{
-            title: "Plant",
+            title: "Shoe",
             slug: slug(),
-            custom_fields: %{"genus" => "Panax", "species" => "ginseng", "notes" => "keep me"}
+            custom_fields: %{"brand" => "Acme", "style" => "runner", "notes" => "keep me"}
           },
           actor: admin
         )
@@ -218,13 +218,13 @@ defmodule KilnCMS.CMS.CustomFieldsTest do
 
     test "a field omitted from the payload keeps its stored value", %{admin: admin, page: page} do
       updated =
-        CMS.update_page!(page, %{custom_fields: %{"species" => "quinquefolius"}}, actor: admin)
+        CMS.update_page!(page, %{custom_fields: %{"style" => "trail"}}, actor: admin)
 
       # The one supplied field changes; the two omitted fields are untouched —
       # not wiped by the full-map rewrite.
       assert updated.custom_fields == %{
-               "genus" => "Panax",
-               "species" => "quinquefolius",
+               "brand" => "Acme",
+               "style" => "trail",
                "notes" => "keep me"
              }
     end
@@ -233,7 +233,7 @@ defmodule KilnCMS.CMS.CustomFieldsTest do
       updated = CMS.update_page!(page, %{custom_fields: %{"notes" => ""}}, actor: admin)
 
       refute Map.has_key?(updated.custom_fields, "notes")
-      assert updated.custom_fields == %{"genus" => "Panax", "species" => "ginseng"}
+      assert updated.custom_fields == %{"brand" => "Acme", "style" => "runner"}
     end
 
     test "an empty custom_fields payload changes nothing", %{admin: admin, page: page} do
@@ -247,21 +247,21 @@ defmodule KilnCMS.CMS.CustomFieldsTest do
 
       page =
         CMS.create_page!(
-          %{title: "R", slug: slug(), custom_fields: %{"req" => "present", "genus" => "A"}},
+          %{title: "R", slug: slug(), custom_fields: %{"req" => "present", "brand" => "A"}},
           actor: admin
         )
 
       # Not resending `req` doesn't trip the required validation — the stored
       # value stands.
-      updated = CMS.update_page!(page, %{custom_fields: %{"genus" => "B"}}, actor: admin)
+      updated = CMS.update_page!(page, %{custom_fields: %{"brand" => "B"}}, actor: admin)
 
       assert updated.custom_fields["req"] == "present"
-      assert updated.custom_fields["genus"] == "B"
+      assert updated.custom_fields["brand"] == "B"
     end
 
     test "an unknown key in a partial update fails the write", %{admin: admin, page: page} do
       assert {:error, error} =
-               CMS.update_page(page, %{custom_fields: %{"genus" => "New", "stray" => "x"}},
+               CMS.update_page(page, %{custom_fields: %{"brand" => "New", "stray" => "x"}},
                  actor: admin
                )
 
@@ -269,7 +269,7 @@ defmodule KilnCMS.CMS.CustomFieldsTest do
 
       # And the write it belonged to did not land, so the editor is looking at
       # the same document they tried to save rather than a half-saved one.
-      assert Ash.reload!(page, actor: admin).custom_fields["genus"] == "Panax"
+      assert Ash.reload!(page, actor: admin).custom_fields["brand"] == "Acme"
     end
 
     # The form editor renders an input for *every* definition and submits the
@@ -282,12 +282,12 @@ defmodule KilnCMS.CMS.CustomFieldsTest do
       updated =
         CMS.update_page!(
           page,
-          %{custom_fields: %{"genus" => "Panax", "species" => "ginseng", "notes" => ""}},
+          %{custom_fields: %{"brand" => "Acme", "style" => "runner", "notes" => ""}},
           actor: admin
         )
 
       refute Map.has_key?(updated.custom_fields, "notes")
-      assert updated.custom_fields == %{"genus" => "Panax", "species" => "ginseng"}
+      assert updated.custom_fields == %{"brand" => "Acme", "style" => "runner"}
     end
   end
 

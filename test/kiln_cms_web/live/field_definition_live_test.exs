@@ -49,20 +49,20 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     |> form("#new-field-form",
       field_definition: %{
         scope: "page",
-        name: "toxicity_level",
-        label: "Toxicity",
+        name: "heel_height",
+        label: "Heel",
         field_type: "string"
       }
     )
     |> render_submit()
 
     html = render(lv)
-    assert html =~ "Toxicity"
-    assert html =~ "toxicity_level"
+    assert html =~ "Heel"
+    assert html =~ "heel_height"
 
     assert :page
            |> CMS.field_definitions_for!(authorize?: false)
-           |> Enum.any?(&(&1.name == "toxicity_level"))
+           |> Enum.any?(&(&1.name == "heel_height"))
   end
 
   test "an admin flags a field as naming the record", %{conn: conn} do
@@ -101,23 +101,23 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     CMS.create_field_definition!(
       %{
         content_type: :page,
-        name: "toxicity_level",
-        label: "Toxicity level",
+        name: "heel_height",
+        label: "Heel height",
         field_type: :string
       },
       actor: admin
     )
 
     page =
-      CMS.create_page!(%{title: "Herb", slug: "fd-#{System.unique_integer([:positive])}"},
+      CMS.create_page!(%{title: "Shoe", slug: "fd-#{System.unique_integer([:positive])}"},
         actor: admin
       )
 
     {:ok, _lv, html} = conn |> log_in(admin) |> live(~p"/editor/pages/#{page.id}")
 
     assert html =~ "Custom fields"
-    assert html =~ "Toxicity level"
-    assert html =~ "custom_fields][toxicity_level]"
+    assert html =~ "Heel height"
+    assert html =~ "custom_fields][heel_height]"
   end
 
   test "a broken formula is refused when the computed field is defined", %{conn: conn} do
@@ -155,24 +155,24 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     CMS.create_field_definition!(
       %{
         content_type: :page,
-        name: "clinic",
-        label: "Clinic location",
+        name: "store",
+        label: "Store location",
         field_type: :geolocation
       },
       actor: admin
     )
 
     page =
-      CMS.create_page!(%{title: "Clinic", slug: "fd-#{System.unique_integer([:positive])}"},
+      CMS.create_page!(%{title: "Store", slug: "fd-#{System.unique_integer([:positive])}"},
         actor: admin
       )
 
     {:ok, _lv, html} = conn |> log_in(admin) |> live(~p"/editor/pages/#{page.id}")
 
-    assert html =~ "Clinic location"
-    assert html =~ "custom_fields][clinic][lat]"
-    assert html =~ "custom_fields][clinic][lng]"
-    assert html =~ "custom_fields][clinic][zoom]"
+    assert html =~ "Store location"
+    assert html =~ "custom_fields][store][lat]"
+    assert html =~ "custom_fields][store][lng]"
+    assert html =~ "custom_fields][store][zoom]"
   end
 
   test "the editor renders a computed field read-only and live", %{conn: conn} do

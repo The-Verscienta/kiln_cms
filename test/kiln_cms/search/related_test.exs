@@ -56,12 +56,12 @@ defmodule KilnCMS.Search.RelatedTest do
   test "related_documents ranks the identical-content sibling first, published only" do
     actor = admin()
 
-    anchor = indexed_post(actor, "brewing herbal tea slowly", title: "Same")
-    twin = indexed_post(actor, "brewing herbal tea slowly", title: "Same")
+    anchor = indexed_post(actor, "brewing green tea slowly", title: "Same")
+    twin = indexed_post(actor, "brewing green tea slowly", title: "Same")
     _other = indexed_post(actor, "carburetor maintenance schedules", title: "Other")
 
     draft_twin =
-      indexed_post(actor, "brewing herbal tea slowly", title: "Same", publish?: false)
+      indexed_post(actor, "brewing green tea slowly", title: "Same", publish?: false)
 
     related = Related.related_documents(anchor)
 
@@ -228,10 +228,10 @@ defmodule KilnCMS.Search.RelatedTest do
     actor = admin()
     uniq = System.unique_integer([:positive])
 
-    tea = CMS.create_tag!(%{name: "herbal tea", slug: "tea-#{uniq}"}, actor: actor)
+    tea = CMS.create_tag!(%{name: "green tea", slug: "tea-#{uniq}"}, actor: actor)
     cars = CMS.create_tag!(%{name: "carburetors", slug: "cars-#{uniq}"}, actor: actor)
 
-    post = indexed_post(actor, "brewing herbal tea slowly")
+    post = indexed_post(actor, "brewing green tea slowly")
 
     # `threshold: 2.0` ranks without filtering — cosine distance is `1 - cos θ`,
     # so 2 is its ceiling — which is what this asserted before #851 added one.
@@ -264,7 +264,7 @@ defmodule KilnCMS.Search.RelatedTest do
       uniq = System.unique_integer([:positive])
       tea = CMS.create_tag!(%{name: "persist tea #{uniq}", slug: "pt-#{uniq}"}, actor: actor)
       cars = CMS.create_tag!(%{name: "persist cars #{uniq}", slug: "pc-#{uniq}"}, actor: actor)
-      post = indexed_post(actor, "brewing herbal tea slowly")
+      post = indexed_post(actor, "brewing green tea slowly")
 
       assert stored_rows([tea, cars]) == []
 
@@ -289,7 +289,7 @@ defmodule KilnCMS.Search.RelatedTest do
       actor = admin()
       uniq = System.unique_integer([:positive])
       tag = CMS.create_tag!(%{name: "full row #{uniq}", slug: "fr-#{uniq}"}, actor: actor)
-      post = indexed_post(actor, "brewing herbal tea slowly")
+      post = indexed_post(actor, "brewing green tea slowly")
 
       [%{tag: suggested}] =
         Related.suggest_tags(post, threshold: 2.0, limit: 1)
@@ -303,7 +303,7 @@ defmodule KilnCMS.Search.RelatedTest do
       actor = admin()
       uniq = System.unique_integer([:positive])
       tag = CMS.create_tag!(%{name: "before rename #{uniq}", slug: "rn-#{uniq}"}, actor: actor)
-      post = indexed_post(actor, "brewing herbal tea slowly")
+      post = indexed_post(actor, "brewing green tea slowly")
 
       Related.suggest_tags(post, threshold: 2.0)
       [%{name: stored_name, embedding: before}] = stored_rows([tag])
@@ -322,7 +322,7 @@ defmodule KilnCMS.Search.RelatedTest do
       actor = admin()
       uniq = System.unique_integer([:positive])
       tag = CMS.create_tag!(%{name: "doomed #{uniq}", slug: "dm-#{uniq}"}, actor: actor)
-      post = indexed_post(actor, "brewing herbal tea slowly")
+      post = indexed_post(actor, "brewing green tea slowly")
 
       Related.suggest_tags(post, threshold: 2.0)
       assert [_row] = stored_rows([tag])
@@ -335,7 +335,7 @@ defmodule KilnCMS.Search.RelatedTest do
       actor = admin()
       uniq = System.unique_integer([:positive])
       tag = CMS.create_tag!(%{name: "far away #{uniq}", slug: "fa-#{uniq}"}, actor: actor)
-      post = indexed_post(actor, "brewing herbal tea slowly")
+      post = indexed_post(actor, "brewing green tea slowly")
 
       # Cosine distance is never negative, so a negative ceiling admits nothing —
       # and the fill still happened, so the next call is a pure query.
@@ -348,7 +348,7 @@ defmodule KilnCMS.Search.RelatedTest do
       uniq = System.unique_integer([:positive])
       a = CMS.create_tag!(%{name: "given a #{uniq}", slug: "ga-#{uniq}"}, actor: actor)
       b = CMS.create_tag!(%{name: "not given b #{uniq}", slug: "gb-#{uniq}"}, actor: actor)
-      post = indexed_post(actor, "brewing herbal tea slowly")
+      post = indexed_post(actor, "brewing green tea slowly")
       Related.suggest_tags(post, threshold: 2.0)
 
       {:ok, vector} = KilnCMS.StubEmbedder.embed("anything")
@@ -372,10 +372,10 @@ defmodule KilnCMS.Search.RelatedTest do
       actor = admin()
       uniq = System.unique_integer([:positive])
 
-      CMS.create_tag!(%{name: "herbal tea", slug: "tea-#{uniq}"}, actor: actor)
+      CMS.create_tag!(%{name: "green tea", slug: "tea-#{uniq}"}, actor: actor)
       CMS.create_tag!(%{name: "carburetors", slug: "cars-#{uniq}"}, actor: actor)
 
-      %{post: indexed_post(actor, "brewing herbal tea slowly")}
+      %{post: indexed_post(actor, "brewing green tea slowly")}
     end
 
     # The file `setup` already owns the app-env swap and its restore; this only
@@ -707,7 +707,7 @@ defmodule KilnCMS.Search.RelatedTest do
       refute VectorCache.cached?(tag_a.name)
       refute VectorCache.cached?(tag_b.name)
 
-      post = draft_in(org, actor, "brewing herbal tea slowly", title: "Teas")
+      post = draft_in(org, actor, "brewing green tea slowly", title: "Teas")
 
       # Room for the centroid (1) but only one of the two uncached tags. The
       # batch charge (#1076) is all-or-nothing — checked once against the real

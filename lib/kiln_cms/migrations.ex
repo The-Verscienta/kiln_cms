@@ -25,8 +25,8 @@ defmodule KilnCMS.Migrations do
 
   The table name is the resource's `:table` option — by default `"\#{type}s"`,
   which is **not** always the `:plural` used in routes and interfaces (e.g. a
-  resource with `plural: "clinical_evidence"` still lives in table
-  `clinical_evidences` unless `:table` was overridden).
+  resource with `plural: "feedback"` still lives in table
+  `feedbacks` unless `:table` was overridden).
 
   ## The one that gets forgotten
 

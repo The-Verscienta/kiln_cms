@@ -114,11 +114,11 @@ as "greater than every distance" and flooring nothing.
 
 The placement matters. Filtering the leg before fusion made the floor the
 judge of every row, and a short query naming a record embeds far from that
-record's long prose — on an entity-heavy corpus with a floor of 0.35, "huang
-qi dang shen" kept two marginal neighbours and dropped both named records, so
-the semantic leg fed fusion noise and withheld the answers (the "Why Shen Beat
-Huang Qi" report, D2/P3). Junk still returns nothing: with no lexical hit every
-fused hit is semantic-only, and every one is over the floor.
+record's long prose — on an entity-heavy corpus with a floor of 0.35, "pad
+thai tom yum" kept two marginal neighbours and dropped both named records,
+so the semantic leg fed fusion noise and withheld the answers (the 2026-09-04
+search-ranking report, D2/P3). Junk still returns nothing: with no lexical hit
+every fused hit is semantic-only, and every one is over the floor.
 
 **Measuring it.** Use the golden set `mix kiln.search.eval` scores
 ([search-roadmap.md §11](search-roadmap.md#11-ranking-eval-harness)) — rows of
@@ -128,7 +128,7 @@ slug exists in more than one type) and `locale`; a `junk` row expects nothing
 
 ```bash
 mix kiln.search.measure_floor golden.json          # every content type
-mix kiln.search.measure_floor golden.json --type herb --limit 50
+mix kiln.search.measure_floor golden.json --type recipe --limit 50
 mix kiln.search.measure_floor golden.json --org acme --locale fr
 ```
 

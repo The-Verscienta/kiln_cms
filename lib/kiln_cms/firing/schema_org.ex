@@ -5,8 +5,8 @@ defmodule KilnCMS.Firing.SchemaOrg do
 
   Every content type declares the schema.org `@type` of its main node: compiled
   types via the Content macro's `schema_org_type:` option, dynamic types (D17)
-  via `TypeDefinition.schema_org_type` — so a health-domain type can fire e.g.
-  a **`MedicalWebPage`** while a blog post stays a `BlogPosting`. The node also
+  via `TypeDefinition.schema_org_type` — so a help-centre type can fire e.g.
+  an **`FAQPage`** while a blog post stays a `BlogPosting`. The node also
   carries the citation-relevant document metadata answer engines key on:
   `datePublished` / `dateModified`, `inLanguage`, and the SEO description.
   """

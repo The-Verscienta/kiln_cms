@@ -20,7 +20,7 @@ defmodule KilnCMS.Compliance.Settings do
   Claim checking was config-only, which is the wrong grain on a shared install
   (#336): a claims vocabulary is a statement about one publication's voice and
   jurisdiction, and `require_at_publish` is a hard refusal. One tenant deciding
-  that "cures" cannot ship applied that to every other site on the instance,
+  that "guaranteed" cannot ship applied that to every other site on the instance,
   with no override — and the tenant that wanted the panel *off* could not turn
   it off either.
 

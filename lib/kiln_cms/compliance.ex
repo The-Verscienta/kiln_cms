@@ -2,10 +2,10 @@ defmodule KilnCMS.Compliance do
   @moduledoc """
   Editorial **claim checking** — the compliance third of #377.
 
-  A claim check reads authored text and flags the phrases a regulator, a
-  clinic's counsel, or an editorial style guide would want a second look at
-  before it is published: "FDA approved", "clinically proven", "no side
-  effects". It is the compliance analogue of the SEO and accessibility panels,
+  A claim check reads authored text and flags the phrases a regulator, your
+  legal team, or an editorial style guide would want a second look at before
+  it is published: "government approved", "clinically proven", "risk-free".
+  It is the compliance analogue of the SEO and accessibility panels,
   and it is built on the same machinery — see `Kiln.Advisory`.
 
   ## Why an advisory and not an agent
@@ -15,12 +15,12 @@ defmodule KilnCMS.Compliance do
   that shape is wrong twice over.
 
   A claim is a judgement about *meaning*, and the tool cannot make it. "This
-  herb does not cure cancer" contains the phrase "cure cancer" and is a
-  perfectly responsible sentence; "widely regarded as clinically proven" is a
-  claim wearing a hedge. Every honest implementation of this surfaces the
-  phrase and asks a human, and the human is already in the editor. Routing
-  that through a background reaction adds latency and a notification and
-  removes the one person who can answer.
+  product is not government approved" contains the phrase "government
+  approved" and is a perfectly responsible sentence; "widely regarded as
+  clinically proven" is a claim wearing a hedge. Every honest implementation
+  of this surfaces the phrase and asks a human, and the human is already in
+  the editor. Routing that through a background reaction adds latency and a
+  notification and removes the one person who can answer.
 
   The second reason is the one recorded on #377 for metadata generation, and
   it applies here too: an automated writer or gate that fires on a state
@@ -40,12 +40,12 @@ defmodule KilnCMS.Compliance do
       config :kiln_cms, KilnCMS.Compliance,
         enabled: true,
         require_at_publish: false,
-        disclaimer: "This information is not medical advice.",
+        disclaimer: "This information is not professional advice.",
         rules: :default
 
   * `enabled` — whether the panel and its checks run at all. **Off by
     default**: a general-purpose CMS has no business grading a marketing page
-    against a health-claims vocabulary until someone asks it to.
+    against a claims vocabulary until someone asks it to.
   * `require_at_publish` — whether an `:error`-severity match *blocks* going
     live. See `KilnCMS.CMS.Validations.ComplianceClaims`. Off by default.
   * `disclaimer` — text that must appear in the body, or `nil` for no such
@@ -61,42 +61,45 @@ defmodule KilnCMS.Compliance do
 
   A rule is a map:
 
-      %{code: :regulatory_claim, severity: :error, phrases: ["fda approved"]}
+      %{code: :regulatory_claim, severity: :error, phrases: ["government approved"]}
 
   `code` names it (and is what the web layer translates), `severity` is the
   usual `:error | :warning | :info`, and `phrases` are matched
   **case-insensitively, on whole-word boundaries**.
 
-  Word boundaries are not a nicety. `"cures"` as a substring matches
-  *manicures*, *procures* and *secures*; a compliance panel that flags the
-  word "secures" on a page about data security is one an author switches off
+  Word boundaries are not a nicety. `"free"` as a substring matches
+  *carefree*, *freedom* and *freezer*; a compliance panel that flags the word
+  "freedom" on a page about civil liberties is one an author switches off
   within a day, and it then catches nothing.
 
   ## The default pack is deliberately narrow
 
   `default_rules/0` ships only phrases that are a claim in *essentially any
-  context*: regulatory assertions ("FDA approved", "clinically proven"),
-  safety absolutes ("no side effects", "100% safe") and efficacy absolutes
-  ("guaranteed results", "never fails").
+  context*: endorsement assertions ("government approved", "clinically
+  proven"), safety absolutes ("100% safe", "risk-free"), efficacy absolutes
+  ("guaranteed results", "never fails") and rankings nobody can check ("best
+  in the world", "ranked #1").
 
-  What it pointedly does **not** ship is curative vocabulary — bare "cures",
-  "heals", "treats". Those are the phrases a health CMS most obviously wants,
-  and they are also the ones with the most legitimate uses: "this herb cures
-  nothing", "traditionally used to treat insomnia", an article *about* cure
-  claims. Where the editorial line falls is a question about a specific
-  publication's voice and jurisdiction, and only its operator can answer it.
-  Shipping a guess would mean every install starts by turning the panel off.
+  What it pointedly does **not** ship is the bare vocabulary those phrases are
+  built from — "best", "free", "proven", "guaranteed". Those are the words a
+  claims checker most obviously wants, and they are also the ones with the
+  most legitimate uses: "best practices", "free returns", "a proven track
+  record", an article *about* guarantees. Where the editorial line falls is a
+  question about a specific publication's voice and jurisdiction, and only its
+  operator can answer it. Shipping a guess would mean every install starts by
+  turning the panel off.
 
   Add your own — the whole pack is replaceable:
 
       config :kiln_cms, KilnCMS.Compliance,
         rules: KilnCMS.Compliance.default_rules() ++ [
-          %{code: :curative_claim, severity: :error, phrases: ["cures", "heals"]}
+          %{code: :house_style, severity: :warning, phrases: ["best", "guaranteed"]}
         ]
 
   ## Negation is not handled, on purpose
 
-  "Does not cure cancer" matches a `cure cancer` phrase, and this reports it.
+  "Not government approved" matches a `government approved` phrase, and this
+  reports it.
   A negation window ("skip a match preceded by *not* within three words")
   would suppress that one and just as readily suppress "not only clinically
   proven, but…", which is a claim.
@@ -162,24 +165,24 @@ defmodule KilnCMS.Compliance do
   @spec default_rules() :: [rule()]
   def default_rules do
     [
-      # Assertions about a regulator's or a profession's endorsement. These are
-      # claims about a *fact of record*: either the approval exists and can be
-      # cited, or the sentence is inventing one.
+      # Assertions about an approval, an endorsement or a proof. These are
+      # claims about a *fact of record*: either the approval or the study
+      # exists and can be cited, or the sentence is inventing one.
       %{
         code: :regulatory_claim,
         severity: :error,
         phrases: [
-          "fda approved",
-          "fda-approved",
-          "approved by the fda",
+          "government approved",
+          "government-approved",
+          "approved by regulators",
+          "officially approved",
+          "officially endorsed",
           "clinically proven",
-          "medically proven",
           "scientifically proven",
-          "doctor recommended",
-          "doctor-recommended",
-          "physician recommended",
-          "physician-recommended",
-          "medically endorsed"
+          "proven by science",
+          "expert recommended",
+          "expert-recommended",
+          "independently certified"
         ]
       },
       # Absolutes about safety. Unfalsifiable as written, and the category
@@ -188,8 +191,8 @@ defmodule KilnCMS.Compliance do
         code: :safety_claim,
         severity: :error,
         phrases: [
-          "no side effects",
-          "without side effects",
+          "no risk",
+          "zero risk",
           "completely safe",
           "totally safe",
           "100% safe",
@@ -208,25 +211,29 @@ defmodule KilnCMS.Compliance do
         phrases: [
           "guaranteed results",
           "guaranteed to work",
-          "guaranteed cure",
-          "miracle cure",
+          "guaranteed success",
+          "100% guaranteed",
           "always works",
           "never fails",
           "works for everyone",
           "instant results"
         ]
       },
-      # Text that positions the content as a substitute for care. The failure
-      # mode here is a reader acting on an article instead of seeing someone.
+      # Rankings and superlatives a reader cannot check. A warning rather than
+      # an error: a ranking can be true ("ranked #1 by" a named source), and
+      # the fix is usually a citation rather than a rewrite.
       %{
-        code: :medical_advice_claim,
+        code: :superlative_claim,
         severity: :warning,
         phrases: [
-          "replaces your doctor",
-          "no need to see a doctor",
-          "instead of seeing a doctor",
-          "skip the doctor",
-          "self-diagnose"
+          "best in the world",
+          "best on the market",
+          "best in the industry",
+          "ranked #1",
+          "rated #1",
+          "#1 rated",
+          "second to none",
+          "unbeatable"
         ]
       }
     ]
@@ -396,7 +403,7 @@ defmodule KilnCMS.Compliance do
     end
   end
 
-  # Longest first, so an alternation prefers "fda approved" over a shorter
+  # Longest first, so an alternation prefers "government approved" over a shorter
   # phrase of the SAME rule that happens to be its prefix — PCRE alternation is
   # first-match, not longest-match, so the shorter branch would otherwise win
   # and the panel would quote the truncated phrase back at the author.

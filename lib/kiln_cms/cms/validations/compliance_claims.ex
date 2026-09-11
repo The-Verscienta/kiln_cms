@@ -112,7 +112,7 @@ defmodule KilnCMS.CMS.Validations.ComplianceClaims do
   end
 
   # `{code, phrase}` pairs rather than the map, so the diff is per phrase:
-  # adding "100% safe" to a page that already said "no side effects" is a new
+  # adding "100% safe" to a page that already said "risk-free" is a new
   # claim even though the rule code is unchanged.
   defp diff(new, existing) do
     existing_pairs = pairs(existing)
