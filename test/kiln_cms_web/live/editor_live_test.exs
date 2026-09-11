@@ -1587,7 +1587,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       # `flush_ms` is 400 in test config: the lock stops waiting on its own.
       assert_receive {:field_locks, ^topic, %{"title" => %{pid: ^lv_pid}}}, 2_000
       assert_receive {:holder, ^holder, {:lock_taken, ^topic, "title", _by}}, 1_000
-      assert_push_event(lv, "lock_granted", %{field: "title"})
+      assert_push_event(lv, "lock_granted", %{field: "title"}, 1_000)
 
       unlocked = render(lv)
       refute unlocked =~ "ring-warning"
