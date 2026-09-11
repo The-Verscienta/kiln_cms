@@ -310,12 +310,12 @@ defmodule KilnCMSWeb.EditorLive do
   # U-H3/U-M2): "Select all" can hold hundreds of items, and a single stray
   # click could otherwise publish, unpublish or archive all of them instantly.
   #
-  # Only a verb this tier is actually offered (`bulk_verbs/1`, the list the bar
+  # Only a verb this tier is actually offered (`bulk_verbs/2`, the list the bar
   # renders from) opens it: a crafted phx-value naming publish or delete as an
   # editor would otherwise open a confirm bar for an action policy then refuses
   # on every row.
   def handle_event("bulk", %{"action" => verb}, socket) when is_binary(verb) do
-    if verb in bulk_verbs(socket.assigns.tier) do
+    if verb in bulk_verbs(socket.assigns.tier, socket.assigns.editors_can_publish) do
       confirming = if MapSet.size(socket.assigns.selected) > 0, do: verb
       {:noreply, assign(socket, :confirming_bulk, confirming)}
     else
@@ -629,8 +629,8 @@ defmodule KilnCMSWeb.EditorLive do
 
   # Every verb the bulk bar offers `tier`: the menu above, plus Delete, which
   # the bar renders on its own button for admins only (`:if={@tier == :admin}`).
-  defp bulk_verbs(tier) do
-    verbs = Enum.map(bulk_actions(tier), &elem(&1, 0))
+  defp bulk_verbs(tier, editors_can_publish) do
+    verbs = Enum.map(bulk_actions(tier, editors_can_publish), &elem(&1, 0))
     if tier == :admin, do: verbs ++ ["delete"], else: verbs
   end
 

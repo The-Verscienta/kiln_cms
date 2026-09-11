@@ -28,7 +28,7 @@ defmodule KilnCMS.CMS.StarterContent do
   The site's Home page (any state), or `nil`. Reads as `actor`, so it answers
   only what that actor may see.
   """
-  @spec home_page(Ash.Resource.record(), term()) :: Page.t() | nil
+  @spec home_page(term(), term()) :: Page.t() | nil
   def home_page(actor, tenant) do
     Page
     |> Ash.Query.filter(slug == ^@home_slug)
@@ -57,7 +57,7 @@ defmodule KilnCMS.CMS.StarterContent do
 
   Options: `:site_name` — used for the page's heading when given.
   """
-  @spec ensure_home_page(Ash.Resource.record(), term(), keyword()) ::
+  @spec ensure_home_page(term(), term(), keyword()) ::
           {:ok, Page.t()} | {:error, term()}
   def ensure_home_page(actor, tenant, opts \\ []) do
     case home_page(actor, tenant) do

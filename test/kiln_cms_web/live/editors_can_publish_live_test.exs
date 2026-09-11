@@ -107,6 +107,25 @@ defmodule KilnCMSWeb.EditorsCanPublishLiveTest do
       {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor")
       assert has_element?(lv, bulk_publish)
     end
+
+    test "an editor allowed to publish can actually run bulk Publish", %{conn: conn} do
+      allow_editors!(true)
+      editor = authed_user(:editor)
+      page = page!(editor)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor")
+
+      lv |> element(~s(input[phx-value-key="page:#{page.id}"])) |> render_click()
+
+      confirm =
+        lv |> element("button[phx-click='bulk'][phx-value-action='publish']") |> render_click()
+
+      assert confirm =~ "go live on the site immediately"
+
+      lv |> element("button[phx-click='confirm_bulk']") |> render_click()
+
+      assert CMS.get_page!(page.id, actor: editor).state == :published
+    end
   end
 
   describe "the Team page" do
