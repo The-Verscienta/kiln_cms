@@ -30,12 +30,40 @@ public shell:
 | `standard` | The stock look: UI font, 48rem reading column. What an unconfigured site renders. |
 | `editorial` | System serif for body and headings, slightly narrower column. |
 | `studio` | Wide (64rem) column, heavy tight-tracked display headings. |
+| `monograph` | Architectural-monograph look. Condensed uppercase display type in a wide (80rem) frame, hard edges, and running text in a right-hand reading column on wide screens. Top-level images and galleries bleed to the viewport edges. A page that opens on an image gets it as a full-height hero, with the title set over it. The post index becomes a numbered list. |
 
 Presets compose with the solved brand colour and with dark mode — they don't
 touch `--color-*` tokens at all, so a branded editorial site in dark mode needs
-no extra work. Adding a preset is a code change on purpose: an atom in
+no extra work. `monograph` takes its accents (pull-quote rule, hover colour)
+from the brand colour. Adding a preset is a code change on purpose: an atom in
 `KilnCMS.Branding.themes/0`, a token block in `assets/css/app.css`, and a label
-in `KilnCMSWeb.BrandingLive`.
+in `KilnCMSWeb.BrandingLive` and `KilnCMSWeb.SetupLive`.
+
+### Structural presets
+
+A token can't bleed an image or lay a title over it, so `monograph` also has
+structural rules. They are scoped to `[data-public-theme="monograph"]` and
+target hook classes that the public layout and the delivery templates carry
+for this purpose. The hooks have no styles of their own:
+
+| Hook | On |
+|---|---|
+| `public-header`, `public-site-name`, `public-main`, `public-footer-nav`, `public-attribution` | The public chrome (`Layouts.public/1`) |
+| `public-article`, `public-masthead`, `public-title`, `public-meta`, `public-lede`, `public-body` | The document templates (`show*`) |
+| `public-title` | Every other public page's `<h1>` (blog, events, search, lock, teaser) |
+| `public-index` | The blog index list |
+
+Custom CSS can target the same hooks. Rename one and you break every preset
+and every site stylesheet that uses it.
+
+Full-bleed images need an honest `sizes`, or the browser fetches a candidate
+for the 768px column and upscales it. `KilnCMSWeb.ContentHTML.image_sizes/1`
+passes `100vw` to top-level image blocks under `monograph`. Images inside a
+`columns` block keep the column default.
+
+The condensed faces are system fonts: `font-src` names no webfont host and
+none is bundled. A machine without any of them falls back to a heavy
+uppercase sans.
 
 ## Menu slots
 

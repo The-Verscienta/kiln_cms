@@ -29,6 +29,19 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **`monograph` public theme preset.** Architectural-monograph look.
+  Condensed uppercase display type in an 80rem frame, hard edges, and running
+  text in a right-hand reading column. Top-level images and galleries bleed to
+  the viewport edges. A page that opens on an image gets it as a full-height
+  hero, with the title set over it. The blog index becomes a numbered list.
+  Select it under Branding → *Public site* → Theme, or in the setup wizard.
+  Accents come from the brand colour. It is the first preset with structural
+  rules as well as tokens. Those rules target new `public-*` hook classes on
+  the public layout and delivery templates, which site custom CSS can use too
+  (see `docs/public-theming.md`). Under this preset, top-level image blocks
+  declare `sizes="100vw"`, so the browser fetches a full-width candidate
+  instead of upscaling a column-sized one.
+
 - **`/api/json/type-definitions` — headless discovery of dynamic content
   types.** `POST /api/json/entries` needs a `type_definition_id`, and until
   now the only place a client could find one was `/mcp`'s

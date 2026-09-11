@@ -1,11 +1,12 @@
 <Layouts.public locale_links={@locale_links} locale={@locale} current_org={@current_org}>
-  <article class="prose max-w-none">
-    <h1 class="text-3xl font-bold tracking-tight">{@record.title}</h1>
-    <div class="mt-6 space-y-4">
+  <article class="public-article prose max-w-none">
+    <h1 class="public-title text-3xl font-bold tracking-tight">{@record.title}</h1>
+    <div class="public-body mt-6 space-y-4">
       <BlockComponents.render_block
         :for={block <- @blocks}
         block={block}
         variant={assigns[:experiment_variant]}
+        image_sizes={image_sizes(@current_org)}
       />
     </div>
   </article>

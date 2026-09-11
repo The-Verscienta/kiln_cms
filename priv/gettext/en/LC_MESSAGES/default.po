@@ -6181,6 +6181,12 @@ msgstr ""
 msgid "Mon"
 msgstr ""
 
+#: lib/kiln_cms_web/live/branding_live.ex
+#: lib/kiln_cms_web/live/setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Monograph — condensed display type, full-bleed images"
+msgstr ""
+
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "Month"
