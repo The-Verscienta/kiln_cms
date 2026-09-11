@@ -26,8 +26,19 @@ defmodule KilnCMS.CMS.Checks.WritesRedirectTarget do
   @impl Ash.Policy.Check
   def describe(_opts), do: "an editor who may write the record this redirect targets"
 
+  # Matched on the changeset's `resource` and `action_type`, NOT on a
+  # `%Redirect{}` struct pattern: a struct pattern is a compile-time
+  # dependency on `Redirect`, and `Redirect`'s policy block already depends on
+  # this module at compile time — the cycle deadlocks `mix compile` on CI's
+  # two-scheduler build even when a warm local build sails through.
   @impl Ash.Policy.SimpleCheck
-  def match?(%{} = actor, %{subject: %Ash.Changeset{data: %Redirect{} = redirect}}, _opts) do
+  def match?(
+        %{} = actor,
+        %{
+          subject: %Ash.Changeset{resource: Redirect, action_type: :destroy, data: %{} = redirect}
+        },
+        _opts
+      ) do
     org_id = redirect.org_id
 
     with ct when not is_nil(ct) <- ContentTypes.get(redirect.target_type, org_id),
