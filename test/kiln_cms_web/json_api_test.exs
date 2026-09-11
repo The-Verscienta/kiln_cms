@@ -847,6 +847,33 @@ defmodule KilnCMSWeb.JsonApiTest do
       assert pdf.id in ids(docs)
       refute png.id in ids(docs)
     end
+
+    # The docs promise `?include=tags` on every media read — the resource must
+    # actually declare it (AshJsonApi 400s undeclared includes).
+    test "tags are includable on media reads" do
+      admin = user(:admin)
+
+      tag =
+        CMS.create_tag!(
+          %{name: "inc-tag", slug: "inc-tag-#{System.unique_integer([:positive])}"},
+          actor: admin
+        )
+
+      item =
+        CMS.create_media_item!(
+          %{
+            filename: "inc-#{System.unique_integer([:positive])}.png",
+            content_type: "image/png",
+            tag_ids: [tag.id]
+          },
+          actor: admin
+        )
+
+      assert {200, body} = api_get("/api/json/media-items/#{item.id}?include=tags")
+      assert [included] = body["included"]
+      assert included["type"] == "tag"
+      assert included["id"] == tag.id
+    end
   end
 
   describe "custom-field filtering and sorting (custom_filter / custom_sort)" do

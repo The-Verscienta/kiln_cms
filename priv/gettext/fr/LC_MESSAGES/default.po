@@ -536,6 +536,13 @@ msgstr "%{tasks} sur ce bloc"
 msgid "%{type} (unknown)"
 msgstr "%{type} (inconnu)"
 
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{used} of them is used by published documents."
+msgid_plural "%{used} of them are used by published documents."
+msgstr[0] "%{used} d'entre eux est utilisé par des documents publiés."
+msgstr[1] "%{used} d'entre eux sont utilisés par des documents publiés."
+
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "%{who} — due %{date}%{note}"
@@ -550,6 +557,16 @@ msgstr "%{who}%{note}"
 #, elixir-autogen, elixir-format
 msgid "(content unavailable)"
 msgstr "(contenu indisponible)"
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "(current tag filter)"
+msgstr "(filtre d'étiquette actif)"
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "(current uploader filter)"
+msgstr "(filtre de téléversement actif)"
 
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
@@ -5431,8 +5448,8 @@ msgstr "Éléments"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
-msgid "Items no published document references. Drafts don't count as uses, and neither do documents published before reference tracking."
-msgstr "Éléments qu'aucun document publié ne référence. Les brouillons ne comptent pas comme des utilisations, ni les documents publiés avant le suivi des références."
+msgid "Items with no recorded reference from a published document. Drafts don't count as uses; a document that published a reference keeps counting until it is published again without it."
+msgstr "Éléments sans référence enregistrée depuis un document publié. Les brouillons ne comptent pas comme des utilisations ; un document qui a publié une référence continue de compter jusqu'à ce qu'il soit publié à nouveau sans elle."
 
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex

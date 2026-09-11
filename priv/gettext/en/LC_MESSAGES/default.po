@@ -536,6 +536,13 @@ msgstr ""
 msgid "%{type} (unknown)"
 msgstr ""
 
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{used} of them is used by published documents."
+msgid_plural "%{used} of them are used by published documents."
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "%{who} — due %{date}%{note}"
@@ -549,6 +556,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
 msgid "(content unavailable)"
+msgstr ""
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "(current tag filter)"
+msgstr ""
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "(current uploader filter)"
 msgstr ""
 
 #: lib/kiln_cms_web/live/setup_live.ex
@@ -5431,7 +5448,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
-msgid "Items no published document references. Drafts don't count as uses, and neither do documents published before reference tracking."
+msgid "Items with no recorded reference from a published document. Drafts don't count as uses; a document that published a reference keeps counting until it is published again without it."
 msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex

@@ -108,6 +108,20 @@ defmodule KilnCMS.CMS.MediaLibraryTest do
       assert ids(item.tags) == MapSet.new([a.id, c.id])
     end
 
+    test "create accepts the complete set too — no create/update asymmetry" do
+      editor = user(:editor)
+      a = tag!(editor, "on-create")
+
+      item =
+        CMS.create_media_item!(
+          %{filename: "tagged.png", url: "/uploads/tagged-create", tag_ids: [a.id]},
+          actor: editor,
+          load: [:tags]
+        )
+
+      assert ids(item.tags) == MapSet.new([a.id])
+    end
+
     test "combining the complete set with a merge verb is refused" do
       editor = user(:editor)
       item = media()
@@ -147,6 +161,142 @@ defmodule KilnCMS.CMS.MediaLibraryTest do
         CMS.create_media_item!(%{filename: "sys.png", url: "/uploads/sys"}, authorize?: false)
 
       assert nobody.uploaded_by_id == nil
+    end
+
+    test "skip_uploader_stamp suppresses the stamp for an actor-bearing create" do
+      editor = user(:editor)
+
+      # The portability importer's posture: the operator's actor authorizes
+      # the create, but a migrated asset was not uploaded by them.
+      imported =
+        CMS.create_media_item!(%{filename: "import.png", url: "/uploads/import"},
+          actor: editor,
+          context: %{skip_uploader_stamp: true}
+        )
+
+      assert imported.uploaded_by_id == nil
+    end
+  end
+
+  describe "Media.Bulk" do
+    alias KilnCMS.Media.Bulk
+
+    test "add_tag tags the batch, skipping already-tagged items" do
+      editor = user(:editor)
+      tag = tag!(editor, "bulk-add")
+      already = CMS.update_media_item!(media(), %{tag_ids: [tag.id]}, actor: editor)
+      fresh_a = media()
+      fresh_b = media()
+
+      assert {3, 0} = Bulk.add_tag([already, fresh_a, fresh_b], tag.id, actor: editor)
+
+      for item <- [already, fresh_a, fresh_b] do
+        loaded = CMS.get_media_item!(item.id, actor: editor, load: [:tags])
+        assert Enum.map(loaded.tags, & &1.id) == [tag.id]
+      end
+    end
+
+    test "remove_tag strips the batch and is idempotent for untagged items" do
+      editor = user(:editor)
+      tag = tag!(editor, "bulk-remove")
+      keep = tag!(editor, "bulk-keep")
+
+      tagged = CMS.update_media_item!(media(), %{tag_ids: [tag.id, keep.id]}, actor: editor)
+      untagged = media()
+
+      assert {2, 0} = Bulk.remove_tag([tagged, untagged], tag.id, actor: editor)
+
+      loaded = CMS.get_media_item!(tagged.id, actor: editor, load: [:tags])
+      assert Enum.map(loaded.tags, & &1.id) == [keep.id]
+    end
+
+    test "a viewer's bulk tag write is refused by the Tagging policy" do
+      editor = user(:editor)
+      viewer = user(:viewer)
+      tag = tag!(editor, "bulk-authz")
+      item = media()
+
+      {ok, failed} = KilnCMS.Media.Bulk.add_tag([item], tag.id, actor: viewer)
+      assert {ok, failed} == {0, 1}
+
+      loaded = CMS.get_media_item!(item.id, actor: editor, load: [:tags])
+      assert loaded.tags == []
+    end
+
+    # The write-policy gate runs even when there is nothing to write — the
+    # old per-item path failed a forbidden caller regardless, and a false
+    # "Tagged N items." for one is the review finding this pins.
+    test "a viewer is refused even when every item already carries the tag" do
+      editor = user(:editor)
+      viewer = user(:viewer)
+      tag = tag!(editor, "bulk-noop-authz")
+      item = CMS.update_media_item!(media(), %{tag_ids: [tag.id]}, actor: editor)
+
+      assert {0, 1} = Bulk.add_tag([item], tag.id, actor: viewer)
+      assert {0, 1} = Bulk.remove_tag([item], tag.id, actor: viewer)
+    end
+
+    # The tenant-scoped resolution manage_relationship performed is THE
+    # cross-org guard (tagging.ex documents it): a foreign org's tag id must
+    # fail every item up front, never insert through the join's plain FK.
+    test "a tag from another org does not resolve and fails all items" do
+      editor = user(:editor)
+      item = media()
+
+      other_org =
+        Ash.Seed.seed!(KilnCMS.Accounts.Organization, %{
+          name: "Other org",
+          slug: "other-org-#{System.unique_integer([:positive])}",
+          status: :active
+        })
+
+      foreign_tag =
+        Ash.Seed.seed!(KilnCMS.CMS.Tag, %{
+          name: "foreign",
+          slug: "foreign-#{System.unique_integer([:positive])}",
+          org_id: other_org.id
+        })
+
+      # The tenant matters: a tenant-less read under `global?: true` is not
+      # org-filtered, and the LiveView always passes the current org.
+      assert {0, 1} =
+               Bulk.add_tag([item], foreign_tag.id,
+                 actor: editor,
+                 tenant: KilnCMS.Accounts.default_org_id()
+               )
+
+      loaded = CMS.get_media_item!(item.id, actor: editor, load: [:tags])
+      assert loaded.tags == []
+    end
+
+    # A nonexistent tag id used to hit the raw FK inside the multi-row
+    # INSERT (aborting the whole statement, possibly raising) — now it's a
+    # clean up-front refusal.
+    test "a nonexistent tag id fails cleanly" do
+      editor = user(:editor)
+      items = [media(), media()]
+
+      assert {0, 2} = Bulk.add_tag(items, Ash.UUID.generate(), actor: editor)
+    end
+
+    test "delete soft-deletes the batch with per-item accounting" do
+      admin = user(:admin)
+      a = media()
+      b = media()
+
+      assert {2, 0} = Bulk.delete([a, b], actor: admin)
+
+      for item <- [a, b] do
+        assert {:error, _} = CMS.get_media_item(item.id, actor: admin)
+      end
+    end
+
+    test "delete is refused per item for a non-admin" do
+      editor = user(:editor)
+      item = media()
+
+      assert {0, 1} = Bulk.delete([item], actor: editor)
+      assert {:ok, _} = CMS.get_media_item(item.id, actor: editor)
     end
   end
 

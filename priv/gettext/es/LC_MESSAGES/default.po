@@ -536,6 +536,13 @@ msgstr "%{tasks} en este bloque"
 msgid "%{type} (unknown)"
 msgstr "%{type} (desconocido)"
 
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{used} of them is used by published documents."
+msgid_plural "%{used} of them are used by published documents."
+msgstr[0] "%{used} de ellos se usa en documentos publicados."
+msgstr[1] "%{used} de ellos se usan en documentos publicados."
+
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "%{who} — due %{date}%{note}"
@@ -550,6 +557,16 @@ msgstr "%{who}%{note}"
 #, elixir-autogen, elixir-format
 msgid "(content unavailable)"
 msgstr "(contenido no disponible)"
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "(current tag filter)"
+msgstr "(filtro de etiqueta activo)"
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "(current uploader filter)"
+msgstr "(filtro de subida activo)"
 
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
@@ -5431,8 +5448,8 @@ msgstr "Elementos"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
-msgid "Items no published document references. Drafts don't count as uses, and neither do documents published before reference tracking."
-msgstr "Elementos a los que ningún documento publicado hace referencia. Los borradores no cuentan como usos, ni tampoco los documentos publicados antes del seguimiento de referencias."
+msgid "Items with no recorded reference from a published document. Drafts don't count as uses; a document that published a reference keeps counting until it is published again without it."
+msgstr "Elementos sin ninguna referencia registrada desde un documento publicado. Los borradores no cuentan como usos; un documento que publicó una referencia sigue contando hasta que se publique de nuevo sin ella."
 
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex

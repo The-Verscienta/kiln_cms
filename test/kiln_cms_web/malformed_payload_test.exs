@@ -99,7 +99,9 @@ defmodule KilnCMSWeb.MalformedPayloadTest do
     test "a wrong-shaped search payload is ignored, and the view survives", %{conn: conn} do
       for {path, event} <- [
             {"/editor", "search"},
-            {"/media", "search"},
+            # The media library's filter form event (#1316 renamed it from
+            # "search" when the form grew beyond the one text input).
+            {"/media", "filter_change"},
             {"/editor/search", "search"}
           ],
           shape <- @bad_shapes do

@@ -92,11 +92,18 @@ defmodule KilnCMSWeb.MediaLive do
     # `String.replace/3` and raised (#764), and an unparseable kind/uuid/date
     # reads as "no filter on that axis" — same as the omitted parameter.
     filters = parse_filters(params)
+    first_load? = is_nil(socket.assigns.filters)
 
     socket =
       if filters == socket.assigns.filters,
         do: socket,
         else: socket |> assign(:filters, filters) |> load_media()
+
+    # Filter options (tags, uploaders) depend on org data, not on the
+    # filters, so they load once here rather than on every debounced
+    # keystroke's load_media; the mutation paths that can change them go
+    # through refresh_library/1.
+    socket = if first_load?, do: assign_filter_options(socket), else: socket
 
     # `?id[]=1` is the same bookmarkable shape, and `assign_selected/2`'s only
     # other clause is `nil` — so the list reached `CMS.get_media_item/2` as a
@@ -112,13 +119,15 @@ defmodule KilnCMSWeb.MediaLive do
   # change patches the URL and reloads. Kind and unused are chip buttons with
   # their own events; carry them over from the current filters.
   def handle_event("filter_change", params, socket) do
+    filters = socket.assigns.filters
+
     filters = %{
-      socket.assigns.filters
-      | q: Params.string(params, "q", ""),
-        tag_id: parse_uuid(Params.string(params, "tag", "")),
-        uploader_id: parse_uuid(Params.string(params, "uploader", "")),
-        from: parse_date(Params.string(params, "from", "")),
-        to: parse_date(Params.string(params, "to", ""))
+      filters
+      | q: Params.string(params, "q", filters.q),
+        tag_id: form_value(params, "tag", filters.tag_id, &parse_uuid/1),
+        uploader_id: form_value(params, "uploader", filters.uploader_id, &parse_uuid/1),
+        from: form_value(params, "from", filters.from, &parse_date/1),
+        to: form_value(params, "to", filters.to, &parse_date/1)
     }
 
     {:noreply, push_patch(socket, to: media_path(filters, nil), replace: true)}
@@ -189,9 +198,14 @@ defmodule KilnCMSWeb.MediaLive do
     {ok, failed} = Enum.split_with(results, fn {_name, result} -> result == :ok end)
     failures = for {name, {:error, reason}} <- failed, do: {name, reason}
 
+    # Each ingest deferred its published-cache clear (`cache_bust: :defer` in
+    # `store_entry/4`) — a 10-file drop must not full-clear the cache 10
+    # times. One compensating clear for the batch.
+    if ok != [], do: KilnCMS.CMS.Changes.BustMediaCache.bust()
+
     socket =
       socket
-      |> reload_media()
+      |> refresh_library()
       |> flash_for_upload(length(ok), failures)
 
     {:noreply, socket}
@@ -206,7 +220,7 @@ defmodule KilnCMSWeb.MediaLive do
         _ -> put_flash(socket, :error, gettext("That item no longer exists."))
       end
 
-    {:noreply, socket |> put_selected(nil) |> reload_media()}
+    {:noreply, socket |> put_selected(nil) |> refresh_library()}
   end
 
   # --- bulk selection (#1316) -------------------------------------------------
@@ -241,29 +255,29 @@ defmodule KilnCMSWeb.MediaLive do
 
   # Soft-deletes each selected item, like the per-tile delete. Per-item results
   # rather than all-or-nothing: one item another admin already trashed must not
-  # sink the other nineteen.
+  # sink the other nineteen. `Media.Bulk.delete/2` owns the loop and the
+  # skip-and-compensate cache contract (one published-cache clear for the
+  # whole operation, even if a destroy raises mid-loop).
   def handle_event("bulk_delete", _params, socket) do
-    actor = socket.assigns.actor
-    org = socket.assigns.current_org
-
     {ok, failed} =
       socket
       |> selected_items()
-      |> Enum.split_with(&(CMS.destroy_media_item(&1, actor: actor, tenant: org) == :ok))
+      |> KilnCMS.Media.Bulk.delete(
+        actor: socket.assigns.actor,
+        tenant: socket.assigns.current_org
+      )
 
     socket =
       cond do
-        ok == [] and failed == [] ->
+        ok == 0 and failed == 0 ->
           socket
 
-        failed == [] ->
-          count = length(ok)
-
+        failed == 0 ->
           put_flash(
             socket,
             :info,
-            ngettext("Moved %{count} item to trash.", "Moved %{count} items to trash.", count,
-              count: count
+            ngettext("Moved %{count} item to trash.", "Moved %{count} items to trash.", ok,
+              count: ok
             )
           )
 
@@ -272,8 +286,8 @@ defmodule KilnCMSWeb.MediaLive do
             socket,
             :error,
             gettext("Moved %{ok} to trash; %{failed} couldn't be deleted.",
-              ok: length(ok),
-              failed: length(failed)
+              ok: ok,
+              failed: failed
             )
           )
       end
@@ -282,71 +296,46 @@ defmodule KilnCMSWeb.MediaLive do
      socket
      |> assign(:selected_ids, MapSet.new())
      |> put_selected(nil)
-     |> reload_media()}
+     |> refresh_library()}
   end
 
-  # Add/remove one tag across the selection, through `MediaItem.:update`'s
-  # merge verbs — so each item's other tags are left alone and removing from an
-  # untagged item is an idempotent no-op.
+  # Add/remove one tag across the selection. Batched through
+  # `KilnCMS.Media.Bulk` (one read + one bulk join write, same Tagging
+  # policies) rather than a full per-item update pipeline — the semantics
+  # match the merge verbs: other tags are left alone, and adding a carried
+  # tag / removing an absent one are idempotent no-ops.
   def handle_event("bulk_tag", %{"tag_id" => tag_id, "op" => op}, socket)
       when is_binary(tag_id) and op in ~w(add remove) do
-    case parse_uuid(tag_id) do
-      nil ->
+    items = selected_items(socket)
+
+    case {parse_uuid(tag_id), items} do
+      {nil, _items} ->
         {:noreply, put_flash(socket, :error, gettext("Choose a tag first."))}
 
-      tag_id ->
-        actor = socket.assigns.actor
-        org = socket.assigns.current_org
-        argument = if op == "add", do: :add_tag_ids, else: :remove_tag_ids
+      # Buttons are disabled at zero selected; a crafted event must not
+      # flash "Tagged 0 items." (mirrors bulk_delete's empty branch).
+      {_tag_id, []} ->
+        {:noreply, socket}
+
+      {tag_id, items} ->
+        opts = [actor: socket.assigns.actor, tenant: socket.assigns.current_org]
 
         {ok, failed} =
-          socket
-          |> selected_items()
-          |> Enum.split_with(fn item ->
-            match?(
-              {:ok, _},
-              CMS.update_media_item(item, %{argument => [tag_id]}, actor: actor, tenant: org)
-            )
-          end)
-
-        socket =
-          cond do
-            failed != [] ->
-              put_flash(
-                socket,
-                :error,
-                gettext("Tagged %{ok}; %{failed} couldn't be updated.",
-                  ok: length(ok),
-                  failed: length(failed)
-                )
-              )
-
-            op == "add" ->
-              count = length(ok)
-
-              put_flash(
-                socket,
-                :info,
-                ngettext("Tagged %{count} item.", "Tagged %{count} items.", count, count: count)
-              )
-
-            true ->
-              count = length(ok)
-
-              put_flash(
-                socket,
-                :info,
-                ngettext(
-                  "Removed the tag from %{count} item.",
-                  "Removed the tag from %{count} items.",
-                  count,
-                  count: count
-                )
-              )
+          case op do
+            "add" -> KilnCMS.Media.Bulk.add_tag(items, tag_id, opts)
+            "remove" -> KilnCMS.Media.Bulk.remove_tag(items, tag_id, opts)
           end
 
-        # Selection survives a tag pass so the editor can chain another one.
-        {:noreply, reload_media(socket)}
+        # Selection survives a tag pass so the editor can chain another one —
+        # and if the open drawer's item was in the selection, its tags just
+        # changed, so re-read it rather than rendering the stale struct. The
+        # grid itself can only have changed when a tag filter is active
+        # (membership), so skip the reload otherwise — a tag write touches
+        # only the join table.
+        socket = socket |> bulk_tag_flash(op, ok, failed) |> refresh_open_drawer()
+        socket = if socket.assigns.filters.tag_id, do: reload_media(socket), else: socket
+
+        {:noreply, socket}
     end
   end
 
@@ -491,7 +480,7 @@ defmodule KilnCMSWeb.MediaLive do
     {:noreply,
      socket
      |> assign(:trashed, list_trashed(actor, socket.assigns.current_org))
-     |> reload_media()}
+     |> refresh_library()}
   end
 
   def handle_event("purge", %{"id" => id}, socket) when is_binary(id) do
@@ -623,7 +612,7 @@ defmodule KilnCMSWeb.MediaLive do
       {:ok, {:ok, item}} ->
         {:noreply,
          socket
-         |> reload_media()
+         |> refresh_library()
          |> put_flash(
            :info,
            gettext("Imported %{name} into the library.", name: item.filename)
@@ -687,7 +676,12 @@ defmodule KilnCMSWeb.MediaLive do
   # The returned reason reaches the failure flash so editors learn WHICH file
   # failed and why, not just a count (audit U-M5).
   defp store_entry(path, entry, actor, org) do
-    case Ingest.store_file(path, entry.client_name, actor: actor, tenant: org) do
+    # `cache_bust: :defer`: the save handler issues one clear for the batch.
+    case Ingest.store_file(path, entry.client_name,
+           actor: actor,
+           tenant: org,
+           cache_bust: :defer
+         ) do
       {:ok, _item} -> :ok
       {:error, reason} -> {:error, reason}
     end
@@ -825,12 +819,53 @@ defmodule KilnCMSWeb.MediaLive do
       usage_counts(items, socket.assigns.current_org, socket.assigns.actor)
     )
     |> assign(:total, count_media(socket))
-    |> assign_filter_options()
+    |> prune_selection()
+  end
+
+  # Selection is meaningful only over the loaded grid (`selected_items/1`
+  # intersects with it), so when a filter change or reload drops rows, drop
+  # their ids too — the "N selected" badge and the bulk-delete confirmation
+  # must count exactly what the action would touch, not carry invisible
+  # stale ids that re-arm when the filter clears.
+  defp prune_selection(socket) do
+    selected = socket.assigns.selected_ids
+
+    if MapSet.size(selected) == 0 do
+      socket
+    else
+      loaded = MapSet.new(socket.assigns.media, & &1.id)
+      assign(socket, :selected_ids, MapSet.intersection(selected, loaded))
+    end
+  end
+
+  # Re-read the drawer's item after a write that changed it outside the
+  # drawer's own events (bulk tagging) — the assigned struct is stale. Only
+  # the item is re-read, deliberately NOT `assign_selected/2`: that would
+  # charge the reference-graph fan-out (`References.usages/3` — edges read
+  # plus up to 25 whole-document loads) to every chained tag pass, and a tag
+  # write cannot change usages (same cost this file already dodges on
+  # variant broadcasts, #1314). A miss (item deleted concurrently) leaves
+  # the socket alone rather than flashing over the tag pass's own report.
+  defp refresh_open_drawer(socket) do
+    with %{id: id} <- socket.assigns.selected,
+         true <- MapSet.member?(socket.assigns.selected_ids, id),
+         {:ok, item} <-
+           CMS.get_media_item(id,
+             actor: socket.assigns.actor,
+             tenant: socket.assigns.current_org,
+             load: [tags: [:name]]
+           ) do
+      put_selected(socket, item)
+    else
+      _miss_or_closed -> socket
+    end
   end
 
   # What the tag and uploader controls offer. Tags are the org's whole
   # taxonomy (shared with content); uploaders are only people who actually
   # uploaded something — an empty select is noise, a 200-user roster worse.
+  # Loaded once per mount (first handle_params) and refreshed only by
+  # `refresh_library/1`'s mutation paths, never per filter change.
   defp assign_filter_options(socket) do
     actor = socket.assigns.actor
     org = socket.assigns.current_org
@@ -843,11 +878,25 @@ defmodule KilnCMSWeb.MediaLive do
     |> assign(:uploader_options, uploader_options(actor, org))
   end
 
+  # A library mutation (upload, delete, restore, Unsplash import) can add or
+  # remove an uploader, so those paths refresh the filter options along with
+  # the grid. Everything else (focal point, transforms, tagging, variant
+  # broadcasts) reloads the grid alone — it cannot change the options.
+  defp refresh_library(socket) do
+    socket |> reload_media() |> assign_filter_options()
+  end
+
   # Distinct uploaders across the org's media (read as the editor), then their
   # names. `User`'s read policy is self-only, so — like the content editor's
   # `assignable_users`/`mention_roster` — resolving ids the actor may already
   # see into display names takes a system read (`authorize?: false`); it
   # surfaces only `name` for users whose uploads this org's library shows.
+  #
+  # Deliberately NEVER seeded from the URL: splicing `?uploader=<uuid>` into
+  # this read would let any editor resolve any user uuid on the instance to
+  # a name/email through the policy bypass. An active filter absent from
+  # this list stays representable via the render-time placeholder option
+  # (`ensure_current_option/3`) instead.
   defp uploader_options(actor, org) do
     ids =
       KilnCMS.CMS.MediaItem
@@ -869,13 +918,17 @@ defmodule KilnCMSWeb.MediaLive do
         # surfaces, to editors.
         KilnCMS.Accounts.User
         |> Ash.Query.do_filter(expr(id in ^ids))
+        |> Ash.Query.select([:id, :name, :email])
         |> Ash.read!(authorize?: false)
         |> Enum.map(&{user_label(&1), &1.id})
         |> Enum.sort()
     end
   rescue
-    # Best-effort: a filter dropdown must not stop the library from rendering.
-    _error -> []
+    # Best-effort: a filter dropdown must not stop the library from rendering
+    # — but a silent [] would also hide a real regression forever, so say so.
+    error ->
+      Logger.warning("media library uploader options unavailable: #{Exception.message(error)}")
+      []
   end
 
   # Same label the content editor's assignment dropdown shows (name, else the
@@ -917,9 +970,7 @@ defmodule KilnCMSWeb.MediaLive do
       usage_counts(items, socket.assigns.current_org, socket.assigns.actor)
     )
     |> assign(:total, count_media(socket))
-    # Uploads and deletes can add/remove an uploader (or the first tagged
-    # item), so the filter dropdowns follow the reload.
-    |> assign_filter_options()
+    |> prune_selection()
   end
 
   # Total items under the current filters, so the heading can say
@@ -1000,6 +1051,41 @@ defmodule KilnCMSWeb.MediaLive do
 
   defp parse_kind(kind) when kind in @kinds, do: String.to_existing_atom(kind)
   defp parse_kind(_other), do: nil
+
+  # For `filter_change`: a control the form didn't render (the tag/uploader
+  # selects only exist when there are options) sends no key at all — that
+  # axis must stay as it is, not be read as "cleared": a bookmarked ?tag=/
+  # ?uploader= filter would otherwise be silently erased by the first
+  # keystroke in the search box. A rendered control DOES send "" to clear.
+  #
+  # Built on `Params.string/2`'s nil default rather than `Map.has_key?`, so
+  # both malformed shapes read as ABSENT (keep current), matching the house
+  # doctrine and this handler's own `q:` line: a non-map top-level payload
+  # must not raise (the #764 crash class `Params`' catch-all absorbs), and a
+  # map-shaped value (`?tag[a]=1`) must not clear the filter.
+  defp form_value(params, key, current, parser) do
+    case Params.string(params, key) do
+      nil -> current
+      raw -> parser.(raw)
+    end
+  end
+
+  # The select options for an axis, with the ACTIVE filter id appended as an
+  # opaque placeholder when it isn't otherwise representable — a select whose
+  # current value has no matching <option> submits "" on the next form change
+  # and silently erases the filter (the uploader may have only trashed items
+  # left; the tag may have been deleted; the options may predate a
+  # live-patch, or the options read may have been rescued to []). Computed at
+  # render time so it tracks every filters change, and label-only: the id is
+  # NOT resolved to a name (that resolution runs `authorize?: false`, and a
+  # URL-supplied uuid must never reach it).
+  defp ensure_current_option(options, nil, _label), do: options
+
+  defp ensure_current_option(options, id, label) do
+    if Enum.any?(options, fn {_name, option_id} -> option_id == id end),
+      do: options,
+      else: options ++ [{label, id}]
+  end
 
   defp parse_uuid(value) when is_binary(value) do
     case Ecto.UUID.cast(value) do
@@ -1134,6 +1220,66 @@ defmodule KilnCMSWeb.MediaLive do
     end
   end
 
+  defp bulk_tag_flash(socket, _op, ok, failed) when failed > 0 do
+    put_flash(
+      socket,
+      :error,
+      gettext("Tagged %{ok}; %{failed} couldn't be updated.", ok: ok, failed: failed)
+    )
+  end
+
+  defp bulk_tag_flash(socket, "add", ok, _failed) do
+    put_flash(
+      socket,
+      :info,
+      ngettext("Tagged %{count} item.", "Tagged %{count} items.", ok, count: ok)
+    )
+  end
+
+  defp bulk_tag_flash(socket, "remove", ok, _failed) do
+    put_flash(
+      socket,
+      :info,
+      ngettext(
+        "Removed the tag from %{count} item.",
+        "Removed the tag from %{count} items.",
+        ok,
+        count: ok
+      )
+    )
+  end
+
+  # The bulk twin of `delete_confirm/2`: the per-tile delete button is hidden
+  # in selection mode, so this confirmation is the ONLY place the "used by
+  # published documents" warning can reach an admin bulk-trashing a hero
+  # image — losing it here is how a page loses its hero (#403), at scale.
+  defp bulk_delete_confirm(media, selected_ids, usage_counts) do
+    items = Enum.filter(media, &MapSet.member?(selected_ids, &1.id))
+    count = length(items)
+    used = Enum.count(items, &Map.get(usage_counts, &1.id))
+
+    confirm =
+      ngettext(
+        "Move %{count} selected item to trash?",
+        "Move %{count} selected items to trash?",
+        count,
+        count: count
+      )
+
+    if used > 0 do
+      confirm <>
+        " " <>
+        ngettext(
+          "%{used} of them is used by published documents.",
+          "%{used} of them are used by published documents.",
+          used,
+          used: used
+        )
+    else
+      confirm
+    end
+  end
+
   defp empty_usages, do: %{total: 0, items: []}
 
   # `current_org` is the org STRUCT on this LiveView; the reference read wants
@@ -1227,7 +1373,27 @@ defmodule KilnCMSWeb.MediaLive do
 
   @impl true
   def render(assigns) do
-    assigns = assign(assigns, :filtering?, filtering?(assigns.filters))
+    assigns =
+      assigns
+      |> assign(:filtering?, filtering?(assigns.filters))
+      # Per-axis select options with the active filter kept representable —
+      # see `ensure_current_option/3`. Render-time so it tracks live patches.
+      |> assign(
+        :tag_select_options,
+        ensure_current_option(
+          assigns.tag_options,
+          assigns.filters.tag_id,
+          gettext("(current tag filter)")
+        )
+      )
+      |> assign(
+        :uploader_select_options,
+        ensure_current_option(
+          assigns.uploader_options,
+          assigns.filters.uploader_id,
+          gettext("(current uploader filter)")
+        )
+      )
 
     ~H"""
     <Layouts.console
@@ -1454,7 +1620,7 @@ defmodule KilnCMSWeb.MediaLive do
                 aria-pressed={to_string(@filters.unused)}
                 title={
                   gettext(
-                    "Items no published document references. Drafts don't count as uses, and neither do documents published before reference tracking."
+                    "Items with no recorded reference from a published document. Drafts don't count as uses; a document that published a reference keeps counting until it is published again without it."
                   )
                 }
                 class={["btn btn-sm", (@filters.unused && "btn-primary") || "btn-default"]}
@@ -1491,12 +1657,12 @@ defmodule KilnCMSWeb.MediaLive do
                   class="field-input w-full"
                 />
               </div>
-              <div :if={@tag_options != []}>
+              <div :if={@tag_select_options != []}>
                 <label for="media-filter-tag" class="sr-only">{gettext("Filter by tag")}</label>
                 <select id="media-filter-tag" name="tag" class="field-input">
                   <option value="">{gettext("Any tag")}</option>
                   <option
-                    :for={{name, id} <- @tag_options}
+                    :for={{name, id} <- @tag_select_options}
                     value={id}
                     selected={@filters.tag_id == id}
                   >
@@ -1504,14 +1670,14 @@ defmodule KilnCMSWeb.MediaLive do
                   </option>
                 </select>
               </div>
-              <div :if={@uploader_options != []}>
+              <div :if={@uploader_select_options != []}>
                 <label for="media-filter-uploader" class="sr-only">
                   {gettext("Filter by uploader")}
                 </label>
                 <select id="media-filter-uploader" name="uploader" class="field-input">
                   <option value="">{gettext("Any uploader")}</option>
                   <option
-                    :for={{name, id} <- @uploader_options}
+                    :for={{name, id} <- @uploader_select_options}
                     value={id}
                     selected={@filters.uploader_id == id}
                   >
@@ -1607,14 +1773,7 @@ defmodule KilnCMSWeb.MediaLive do
               type="button"
               phx-click="bulk_delete"
               disabled={MapSet.size(@selected_ids) == 0}
-              data-confirm={
-                ngettext(
-                  "Move %{count} selected item to trash?",
-                  "Move %{count} selected items to trash?",
-                  MapSet.size(@selected_ids),
-                  count: MapSet.size(@selected_ids)
-                )
-              }
+              data-confirm={bulk_delete_confirm(@media, @selected_ids, @usage_counts)}
               class="btn btn-sm btn-danger ml-auto"
             >
               {gettext("Delete selected")}

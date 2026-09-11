@@ -234,6 +234,95 @@ defmodule KilnCMSWeb.MediaLiveTest do
       assert html =~ ">report.pdf<"
       refute html =~ ">photo.png<"
     end
+
+    # A control the form doesn't render can't be allowed to erase a
+    # bookmarked filter (review of #1316): here the uploader select only
+    # exists because the active filter itself is kept in the options — the
+    # uploader's every item is trashed — and a keystroke in the search box
+    # must round-trip the uploader filter, not silently widen the grid.
+    test "a bookmarked uploader filter survives a search keystroke", %{conn: conn} do
+      editor = authed_user(:editor)
+      admin = authed_user(:admin)
+
+      mine = CMS.create_media_item!(%{filename: "gone.png", url: "/uploads/gone"}, actor: editor)
+      CMS.destroy_media_item!(mine, actor: admin)
+      typed_media("other.png", "image/png")
+
+      {:ok, lv, html} = conn |> log_in(admin) |> live(~p"/media?uploader=#{editor.id}")
+
+      # Scoped: the other upload is filtered out even though the uploader has
+      # no live items left — and the select can represent the filter.
+      refute html =~ ">other.png<"
+      assert lv |> element("#media-filter-uploader") |> render() =~ editor.id
+
+      lv |> form("#media-filter", %{q: "g"}) |> render_change()
+
+      # The patched URL still carries the uploader — not silently widened.
+      path = assert_patch(lv)
+      assert path =~ "uploader=#{editor.id}"
+    end
+
+    # The representability guard must track LIVE PATCHES, not just the first
+    # load: options are computed once per mount, so a back-button/bookmark
+    # patch to a filter absent from them must still render an option the
+    # select can round-trip (review of #1316, second pass).
+    test "a live-patched uploader filter stays representable", %{conn: conn} do
+      editor = authed_user(:editor)
+      admin = authed_user(:admin)
+
+      mine = CMS.create_media_item!(%{filename: "late.png", url: "/uploads/late"}, actor: editor)
+      CMS.destroy_media_item!(mine, actor: admin)
+      typed_media("other-late.png", "image/png")
+
+      # Mount unfiltered: options are computed without the trashed-out editor.
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/media")
+
+      render_patch(lv, "/media?uploader=#{editor.id}")
+
+      assert lv |> element("#media-filter-uploader") |> render() =~ editor.id
+
+      lv |> form("#media-filter", %{q: "l"}) |> render_change()
+      assert assert_patch(lv) =~ "uploader=#{editor.id}"
+    end
+
+    # The same guard covers the tag axis: a filter naming a since-deleted tag
+    # renders a placeholder option instead of "Any tag", so a keystroke can't
+    # silently widen the grid.
+    test "a tag filter for a deleted tag stays representable", %{conn: conn} do
+      editor = authed_user(:editor)
+      admin = authed_user(:admin)
+      tag = make_tag(editor, "doomed")
+      typed_media("survivor.png", "image/png")
+      CMS.destroy_tag!(tag, actor: admin)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media?tag=#{tag.id}")
+
+      assert lv |> element("#media-filter-tag") |> render() =~ tag.id
+
+      lv |> form("#media-filter", %{q: "s"}) |> render_change()
+      assert assert_patch(lv) =~ "tag=#{tag.id}"
+    end
+
+    # #764's crash class, third surface: a crafted hook can push a non-map
+    # payload (crash risk) or a map-shaped value (must read as absent, like
+    # `q` does — never as "clear the filter").
+    test "malformed filter_change payloads neither crash nor clear filters", %{conn: conn} do
+      editor = authed_user(:editor)
+      tag = make_tag(editor, "sturdy")
+      item = typed_media("sturdy.png", "image/png")
+      CMS.update_media_item!(item, %{tag_ids: [tag.id]}, actor: editor)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media?tag=#{tag.id}")
+
+      # Map-shaped value: absent, not cleared.
+      render_hook(lv, "filter_change", %{"tag" => %{"a" => "1"}})
+      assert assert_patch(lv) =~ "tag=#{tag.id}"
+
+      # Non-map top-level payload: tolerated, filter kept.
+      render_hook(lv, "filter_change", [])
+      assert assert_patch(lv) =~ "tag=#{tag.id}"
+      assert lv |> render() =~ ">sturdy.png<"
+    end
   end
 
   describe "bulk operations (#1316)" do
@@ -288,6 +377,91 @@ defmodule KilnCMSWeb.MediaLiveTest do
       assert html =~ "Moved 1 item to trash."
       assert {:error, _} = CMS.get_media_item(a.id, actor: admin)
       assert {:ok, _} = CMS.get_media_item(keep.id, actor: admin)
+    end
+
+    # Review of #1316: the badge/confirm must count what the action would
+    # actually touch — ids the current filter no longer shows are pruned.
+    test "changing a filter prunes selected items that leave the grid", %{conn: conn} do
+      a = typed_media("sel-a.png", "image/png")
+      b = typed_media("sel-b.pdf", "application/pdf")
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/media")
+
+      lv |> element(~s(button[phx-click="toggle_selecting"])) |> render_click()
+
+      for id <- [a.id, b.id] do
+        lv
+        |> element(~s(#media-#{id} button[phx-click="toggle_selected"]))
+        |> render_click()
+      end
+
+      html =
+        lv
+        |> element(~s(button[phx-click="set_kind"][phx-value-kind="image"]))
+        |> render_click()
+
+      # The PDF left the grid, so it left the selection: badge and confirm
+      # both say 1, matching what bulk delete would trash.
+      assert html =~ "1 selected"
+      refute html =~ "2 selected"
+      assert html =~ "Move 1 selected item to trash?"
+    end
+
+    test "the bulk delete confirmation warns about published usage", %{conn: conn} do
+      admin = authed_user(:admin)
+      used = typed_media("used-hero.png", "image/png")
+      typed_media("idle-sel.png", "image/png")
+
+      # A real referring page: `usage_counts/3` drops edges whose referrer no
+      # longer exists (#1405's live_referrers), so a random from_id would be
+      # filtered out and the warning would never render.
+      page =
+        CMS.create_page!(
+          %{title: "Uses the hero", slug: "uses-hero-#{System.unique_integer([:positive])}"},
+          actor: admin
+        )
+
+      Ash.Seed.seed!(KilnCMS.Firing.ReferenceEdge, %{
+        from_type: :page,
+        from_id: page.id,
+        to_type: :media,
+        to_id: used.id
+      })
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/media")
+
+      lv |> element(~s(button[phx-click="toggle_selecting"])) |> render_click()
+      html = lv |> element(~s(button[phx-click="select_all"])) |> render_click()
+
+      assert html =~ "1 of them is used by published documents."
+    end
+
+    test "an open drawer refreshes after a bulk tag pass", %{conn: conn} do
+      editor = authed_user(:editor)
+      tag = make_tag(editor, "drawer-bulk")
+      item = typed_media("drawer-bulk.png", "image/png")
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media?id=#{item.id}")
+
+      lv |> element(~s(button[phx-click="toggle_selecting"])) |> render_click()
+
+      lv
+      |> element(~s(#media-#{item.id} button[phx-click="toggle_selected"]))
+      |> render_click()
+
+      html =
+        lv
+        |> form("#bulk-tag-form", %{tag_id: tag.id})
+        |> render_submit(%{op: "add"})
+
+      # The drawer's tag chip (with its remove button) shows the new tag
+      # without close/reopen — the stale pre-bulk struct would render none.
+      assert html =~ "Tagged 1 item."
+
+      assert has_element?(
+               lv,
+               ~s(button[phx-click="item_tag"][phx-value-op="remove"][phx-value-tag_id="#{tag.id}"])
+             )
     end
 
     test "editors don't get the bulk delete button", %{conn: conn} do

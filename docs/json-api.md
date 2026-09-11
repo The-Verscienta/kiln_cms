@@ -280,14 +280,20 @@ GET /api/json/media-items/library?uploaded_by_id=<uuid>&uploaded_after=2026-01-0
 - `tag_ids[]` — items carrying **any** of the listed tags. Media shares the
   content taxonomy, so these are the same tags `/api/json/tags` lists; the
   `tags` relationship is includable (`?include=tags`) on every media read.
-- `uploaded_by_id` — the uploading user's id. Also readable per item via the
-  includable `uploaded_by` relationship (safe byline fields only).
+- `uploaded_by_id` — the uploading user's id. Ids only: like content's
+  `author`, `User` is deliberately not a JSON:API resource (PII redaction),
+  so there is no `?include=uploaded_by`.
 - `uploaded_after` / `uploaded_before` — ISO dates bounding `inserted_at`,
   both inclusive of the named day.
-- `unused=true` — only items **no published document references**
-  (`unused=false` inverts). "Used" is the reference-edge graph the fire path
-  maintains, so an item referenced only by never-published drafts counts as
-  unused.
+- `unused=true` — only items with **no recorded reference from a published
+  document** (`unused=false` inverts). "Used" is the reference-edge graph the
+  fire path maintains, with that graph's lifecycle: references are recorded
+  when a document publishes and replaced on its next publish — so an item
+  referenced only by never-published drafts counts as unused, while a
+  reference from a document that was later **unpublished** keeps counting as
+  a use until that document publishes again without it — and a reference
+  from a document that was **deleted** keeps counting indefinitely (nothing
+  removes a deleted document's recorded references).
 
 ### Published-only search (`…/published`)
 

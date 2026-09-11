@@ -70,9 +70,10 @@ migration, a rewritten column, a dropped config key).
   with bulk delete and bulk add/remove-tag; each item's drawer edits its tags
   directly. The JSON:API exposes the same facets at
   `GET /api/json/media-items/library`, a filterable calculated `kind` on
-  every media read, and includable `tags` / `uploaded_by` relationships;
-  tags report a `media_count` alongside `page_count`/`post_count`. Adds a
-  migration (`media_items.uploaded_by_id`).
+  every media read, an includable `tags` relationship, and the
+  `uploaded_by_id` attribute (ids only — `User` stays out of the JSON:API);
+  tags report a `media_count` alongside `page_count`/`post_count`. Adds
+  migrations (`media_items.uploaded_by_id` and its index).
 
 - **Reranking can be scoped to `/api/ask`.** `config :kiln_cms, KilnCMS.Ask,
   rerank: true` (or `ASK_RERANK=true`) reranks a question's retrieved
