@@ -18,6 +18,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   on_mount KilnCMSWeb.ContentEditor.Session
   on_mount KilnCMSWeb.ContentEditor.BlockOps
+  on_mount KilnCMSWeb.ContentEditor.MarkdownImport
 
   require Ash.Query
   require Logger
@@ -1657,6 +1658,23 @@ defmodule KilnCMSWeb.ContentEditorLive do
     case featured_image_url(socket) do
       nil -> {:noreply, socket}
       url -> {:noreply, put_seo_image(socket, url)}
+    end
+  end
+
+  # Apply a pending `.md` import (`KilnCMSWeb.ContentEditor.MarkdownImport`
+  # parsed the file and holds it until the author confirms). Handled here, not
+  # in that hook, because an imported title or slug has to go through
+  # `sync_slug/3` exactly as a typed one does.
+  def handle_event("markdown_import_apply", %{"mode" => mode}, socket) do
+    case KilnCMSWeb.ContentEditor.MarkdownImport.apply_import(socket, mode) do
+      {:ok, params, target, socket} ->
+        {params, socket} = sync_slug(params, target, socket)
+        socket = revalidate(socket, params)
+        broadcast_preview(socket)
+        {:noreply, socket |> refresh_preview() |> mark_dirty()}
+
+      :error ->
+        {:noreply, socket}
     end
   end
 
@@ -5171,7 +5189,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
             </div>
 
             <div class="space-y-3">
-              <h2 class="text-lg font-medium">{gettext("Blocks")}</h2>
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <h2 class="text-lg font-medium">{gettext("Blocks")}</h2>
+                <KilnCMSWeb.ContentEditor.MarkdownImport.import_button :if={@may_write?} />
+              </div>
 
               <%!-- Announces keyboard reorder moves to screen readers (#171). --%>
               <p class="sr-only" role="status" aria-live="polite">{assigns[:moved_announcement]}</p>
@@ -5732,6 +5753,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
           </div>
         </div>
       </.form>
+
+      <%!-- Outside the form: the `.md` file input would otherwise fire the
+            editor's phx-change, and the dialog's controls are not fields. --%>
+      <KilnCMSWeb.ContentEditor.MarkdownImport.import_dialog
+        pending={@markdown_import}
+        existing={blocks_count(@form)}
+        may_write?={@may_write?}
+      />
 
       <.image_picker
         :if={@picking != nil}

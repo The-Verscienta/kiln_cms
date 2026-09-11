@@ -59,6 +59,26 @@ migration, a rewritten column, a dropped config key).
   still defined in `/editor/types`. See `docs/json-api.md` → "Discovering
   dynamic types".
 
+- **Markdown becomes structured content: paste it, import a `.md` file, or
+  write it through the API.** Pasting Markdown into a rich-text block converts
+  it on the way in — headings, lists, tables, fenced code, links — with a
+  "Pasted as Markdown — Undo · Paste as plain text" notice one click from the
+  literal text; dropping a `.md` file on a block does the same. **Import
+  Markdown** (beside the *Blocks* heading) reads a file into the document
+  after a confirmation dialog: its blocks replace or follow the existing ones,
+  and its title (front matter, else a leading `# H1`), slug and excerpt are
+  offered for the matching fields. The content write actions gain a
+  `body_markdown` argument beside `block_tree` (JSON:API, GraphQL, the MCP
+  authoring tools; one or the other, gated by the same `blocks` field grant).
+  One converter serves all three — `KilnCMS.Markdown`, public for any other
+  publisher — built on the pure-Elixir `earmark_parser` (now a runtime
+  dependency; the retired `earmark` renderer, which carries an XSS advisory,
+  is deliberately not used) and the existing `KilnCMS.Blocks.Html` adapter.
+  Raw HTML in the Markdown goes through the rich-text sanitizer, and link and
+  image URLs through the same allowlists as the editor. See
+  `docs/markdown.md`. `KilnCMS.Blocks.Html` gains a `:shortcodes` option
+  (default `true`) to skip its WordPress passes for HTML from anywhere else.
+
 - **The content editor lists the redirects standing under a record's
   address.** Directly beneath the slug / path-alias fields, every retired path
   that still 301s to the record being edited is listed — old path, the
