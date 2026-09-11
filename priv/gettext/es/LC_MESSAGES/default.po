@@ -2874,6 +2874,7 @@ msgstr "No se pudo eliminar ese elemento."
 msgid "Couldn't delete that menu."
 msgstr "No se pudo eliminar ese menú."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't delete that redirect."
@@ -3466,6 +3467,7 @@ msgid "Defined types"
 msgstr "Tipos definidos"
 
 #: lib/kiln_cms_web/live/billing_live.ex
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/experiment_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
@@ -3530,6 +3532,7 @@ msgstr "Eliminar menú"
 msgid "Delete permanently"
 msgstr "Eliminar permanentemente"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "Delete redirect"
@@ -3595,6 +3598,7 @@ msgstr "¿Eliminar este elemento y todo lo anidado bajo él?"
 msgid "Delete this menu and all of its items?"
 msgstr "¿Eliminar este menú y todos sus elementos?"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "Delete this redirect? The old URL will 404."
@@ -7936,6 +7940,7 @@ msgstr "Reenviar"
 msgid "Redelivery queued."
 msgstr "Reenvío puesto en cola."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "Redirect deleted."
@@ -7951,6 +7956,11 @@ msgstr "Redirección desde %{path} creada."
 #, elixir-autogen, elixir-format
 msgid "Redirects"
 msgstr "Redirecciones"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Redirects to this address"
+msgstr "Redirecciones a esta dirección"
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -12484,6 +12494,11 @@ msgstr "firmado con una clave que ya no conservamos"
 #, elixir-autogen, elixir-format
 msgid "since"
 msgstr "desde el"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "since %{date}"
+msgstr "desde el %{date}"
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format

@@ -11,6 +11,11 @@ defmodule KilnCMS.CMS.Redirect do
   `[:path, :locale]` means a path always redirects to whatever record vacated
   it most recently. Rows are internal (no public API); delivery reads and the
   recording change run system-side.
+
+  Rows are managed from two places: `/editor/redirects` (admin, every row) and
+  the content editor, which lists the redirects standing under the record being
+  edited and lets anyone who may write that record delete one
+  (`Checks.WritesRedirectTarget`).
   """
   use Ash.Resource,
     domain: KilnCMS.CMS,
@@ -58,8 +63,17 @@ defmodule KilnCMS.CMS.Redirect do
 
     # Writes are admin-only (per-org tier, like webhook config); the
     # slug-change hook itself runs system-side (`authorize?: false`).
-    policy action_type([:create, :update, :destroy]) do
+    policy action_type([:create, :update]) do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
+    end
+
+    # Deleting is admin work too — except for the rows the content editor
+    # lists under a record's own address: whoever may write the record may
+    # retire a redirect that points at it (`WritesRedirectTarget` re-asks the
+    # target's `:update` policy), and nothing else.
+    policy action_type(:destroy) do
+      authorize_if KilnCMS.CMS.Checks.OrgAdmin
+      authorize_if KilnCMS.CMS.Checks.WritesRedirectTarget
     end
   end
 

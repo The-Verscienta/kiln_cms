@@ -29,6 +29,20 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **The content editor lists the redirects standing under a record's
+  address.** Directly beneath the slug / path-alias fields, every retired path
+  that still 301s to the record being edited is listed — old path, the
+  record's current address, the day it was recorded — each with a Delete for
+  the day the old URL should stop answering. The list refreshes with the
+  record, so a published rename shows its new row the moment the save lands
+  (and a restore, which re-fires the redirect, does too); a record nothing
+  points at shows no list. Deleting from here is open to whoever may write the
+  record, not only admins: `Redirect`'s `destroy` policy now also admits
+  `Checks.WritesRedirectTarget`, which re-asks the target's own `:update`
+  policy as the actor — a type-scoped editor cannot prune a redirect at a type
+  they may not author, and rows whose target is gone remain an admin job on
+  `/editor/redirects`. Creating redirects stays admin-only.
+
 - **A first-run setup wizard at `/setup` (#1317).** While an instance has no
   admin account, a three-step wizard creates one — email + password, an
   optional site name/colour/theme — and then sends the operator to sign-in,
