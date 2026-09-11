@@ -164,7 +164,8 @@ exists and is merely closed.
 
 ## Optional — multi-tenancy (#336)
 
-One deployment can serve many organizations, each on its own host. The request's
+One deployment can serve many organizations, each on its own host (the isolation
+model as a whole is in [multi-tenancy.md](multi-tenancy.md)). The request's
 `Host` picks the org: a subdomain of `TENANT_BASE_HOST` (`acme.example.com` → org
 `acme`), else an exact `custom_domain` on an org, else the default org. See
 [`KilnCMSWeb.Tenant`](../lib/kiln_cms_web/tenant.ex).

@@ -29,6 +29,10 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **`docs/multi-tenancy.md`** — the isolation model in one place: host → org
+  resolution, the default org, `TENANT_STRICT_HOST`, compile-time strict
+  tenancy, and what is and isn't per-org (#1313).
+
 - **`monograph` public theme preset.** Architectural-monograph look.
   Condensed uppercase display type in an 80rem frame, hard edges, and running
   text in a right-hand reading column. Top-level images and galleries bleed to

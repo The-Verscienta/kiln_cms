@@ -11,7 +11,7 @@ This is a web application written using the Phoenix web framework.
 - **Ash is the modeling layer — never hand-write migrations or Ecto schemas.** Edit the resource, then run `mix ash.codegen <descriptive_name>` to generate the migration + resource snapshot, then `mix ash.migrate` (`mix ash.setup` to bootstrap). Don't hand-edit files under `priv/repo/migrations` or `priv/resource_snapshots`.
 - **Every domain action gets a code interface.** Add `define :name, action: :name` on the domain (`CMS`/`Accounts`) and call `Domain.name!(...)` — never `Ash.create!/read!` in app code, seeds, or tests. Use the generated `can_*?/2` helpers for authorization-driven UI.
 - **Authorization is mandatory on every resource.** Domain/content resources use `Ash.Policy.Authorizer` with the `:admin`/`:editor`/`:viewer` role model: published content is world-readable, unpublished is editor-only, hard-deletes are admin-only, admins bypass. A new resource without policies is a bug.
-- **No DaisyUI** — build custom Tailwind/HEEx components. The `AshAuthentication.Phoenix.Overrides.DaisyUI` overrides in `router.ex` are temporary scaffolding slated for replacement.
+- **No DaisyUI** — build custom Tailwind/HEEx components. DaisyUI itself is gone; what survives is its class *naming* (`btn`, `badge`, …) in a small self-owned kit in `assets/css/app.css` — see `docs/design-language.md`. The sign-in screens use Kiln's own `KilnCMSWeb.AuthOverrides`.
 
 ### Environment / toolchain
 

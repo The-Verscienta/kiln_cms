@@ -1,5 +1,9 @@
 # P3 plan — the remaining backlog after the P0/P1/P2 waves
 
+**Status: historical snapshot (2026-07-19).** Most items below have since
+shipped or closed; the GitHub tracker (`gh issue list`), not this document, is
+the live backlog. Kept for the sequencing reasoning.
+
 *Revised 2026-07-19 against current main (`fdabc52`). Supersedes the 2026-07-18 draft:
 since then #330 (write APIs) and #355 (visual-editing bridge) shipped **and closed**
 (PRs #385, #388/#390/#391), #335's nested-columns block landed (#386), multi-tenancy

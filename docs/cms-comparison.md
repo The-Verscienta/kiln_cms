@@ -2,16 +2,20 @@
 
 How Kiln positions against the platforms teams evaluate it alongside. Grounded
 in Kiln's actual feature surface (Elixir/Phoenix/Ash, headless + self-hosted,
-read-only headless APIs by design, firing-engine delivery). Companion docs:
+read **and write** headless APIs, firing-engine delivery). Companion docs:
 [competitive-gaps-todo.md](competitive-gaps-todo.md) (what we lack) and
 [differentiator-opportunities.md](differentiator-opportunities.md) (what only we
 can do).
+
+*Last reconciled against `main`: 2026-09-11.* Claims about Kiln below are
+checked against the code; claims about the other products are a summary, not a
+benchmark.
 
 ## The field at a glance
 
 | CMS | Stack | Model | Headless writes | Hosting | Closest to Kiln on… |
 |---|---|---|---|---|---|
-| **Kiln** | Elixir/Phoenix/Ash | headless **+** own site | **read-only (by design)** | self-hosted | — |
+| **Kiln** | Elixir/Phoenix/Ash | headless **+** own site | read + write (JSON:API, GraphQL, MCP; API-key scoped) | self-hosted | — |
 | Strapi | Node/JS | admin-UI modeling | read + write | self + Cloud | plugin story |
 | Payload | TypeScript | code-first config | read + write | self + hosted | code-first types |
 | Craft | PHP/Yii | UI modeling, polished CP | read (write via CP) | self + Cloud | editorial workflow |
@@ -19,18 +23,28 @@ can do).
 | **Sanity** | JS + hosted "Content Lake" | structured content | read + write (GROQ) | SaaS | **collab + structured content** |
 | **Ghost** | Node | publishing-focused | read + write | self + Pro | **built-in email / newsletters** |
 
+Kiln's headless APIs were read-only by design (decision D7) until #330 reversed
+that: create / update / workflow verbs (`publish`, `unpublish`, …) and
+soft-delete are exposed over [JSON:API](json-api.md) and
+[GraphQL mutations](headless-graphql-api.md#mutations-writing), gated by the same
+Ash policies as the editor plus the API key's scope.
+
 ## The original four (summary)
 
 Full write-up lives in the gaps doc; in brief:
 
 - **Strapi / Payload / Directus** — the open-source headless cohort. All three
-  expose **write** APIs, have runtime-installable extensions, offer managed
-  cloud, and (Directus especially) ship far more granular RBAC. Kiln beats them
-  on BEAM concurrency/real-time, security posture, built-in semantic search,
-  and batteries-included infra (MTA, MCP authoring).
-- **Craft** — the polished editorial/agency incumbent: multi-site, excellent
-  Live Preview, commercial plugin store. Kiln lacks the visual polish and
-  multi-site; wins on stack and headless breadth.
+  have runtime-installable extensions and offer managed cloud, which Kiln does
+  not. Write APIs and granular RBAC are no longer differentiators against them:
+  Kiln ships both (#330; [granular-rbac.md](granular-rbac.md) — per-type read
+  and write scopes, per-field grants, custom roles). Directus's permission
+  model is still broader (arbitrary filter rules per collection). Kiln beats
+  them on BEAM concurrency/real-time, security posture, built-in semantic
+  search, and batteries-included infra (MTA, MCP authoring).
+- **Craft** — the polished editorial/agency incumbent: excellent Live Preview,
+  commercial plugin store. Kiln now has multi-site too
+  ([multi-tenancy.md](multi-tenancy.md) — one deployment, one org per host),
+  but still lacks Craft's visual polish; it wins on stack and headless breadth.
 
 ## Sanity — the structured-content & collaboration rival
 
@@ -50,16 +64,25 @@ prototypes.
 - Built-in semantic/hybrid search, MTA, and MCP authoring; Sanity leans on
   external services.
 - BEAM real-time needs no third-party infra.
+- **Portable Text is shared ground, not a gap.** Kiln stores rich prose as
+  Portable Text (decision D12, `KilnCMS.Blocks.PortableText`); TipTap is only
+  the editor's interchange format. Embedded typed objects inside prose are not
+  converted yet.
 
 **Where Sanity wins (study these):**
-- **Collaborative editing is GA and excellent** — Kiln's CRDT collab is a
-  documented spike. Sanity is the target quality bar.
-- **Portable Text** — a portable, richly-structured rich-text standard vs.
-  Kiln's TipTap JSON. Worth studying for interoperability.
+- **Collaborative editing is GA and excellent.** Kiln's CRDT co-editing
+  (`y_ex`, `KilnCMS.Collab.Crdt`) is built and tested but **disabled in
+  production** — the `:collab_prototype` flag is on only in dev and test, so a
+  production editor gets presence, soft field locks and a conflict banner, not
+  simultaneous typing. Whether to finish and enable it is
+  [#1324](https://github.com/The-Verscienta/kiln_cms/issues/1324). Sanity is
+  the target quality bar.
 - **GROQ** — a genuinely ergonomic content query language. Kiln's read APIs
   (JSON:API/GraphQL) are more rigid.
-- **Live Content API** — subscribe-and-get-updates delivery. Kiln is
-  *architecturally better positioned* for this (BEAM) but hasn't productized it.
+- **Live Content API** — subscribe-and-get-updates delivery as a finished
+  product. Kiln has the primitive — every content type exposes a GraphQL
+  `<type>Changed` [subscription](headless-graphql-api.md#subscriptions-real-time)
+  in production — but not Sanity's client-side live-query layer on top.
 - Mature Studio customization + a real ecosystem.
 
 ## Ghost — the publishing / newsletter model
@@ -68,10 +91,9 @@ prototypes.
 memberships/subscriptions, with native outbound email at its core.
 
 **Why it matters to Kiln specifically:** Kiln already ships a **DKIM-signing,
-direct-to-MX MTA** — something no headless CMS has. That makes Kiln
-*architecturally one product decision away* from doing what Ghost does. Ghost is
-less a competitor than a **blueprint for a capability Kiln can uniquely unlock**
-(see differentiator #1).
+direct-to-MX MTA** — something no headless CMS has — plus a
+[newsletter](newsletter.md) and [paid memberships](memberships.md). Ghost is the
+benchmark for how finished that product feels.
 
 **Where Kiln wins:**
 - Structured content, multiple content types, headless APIs, semantic search —
@@ -80,9 +102,9 @@ less a competitor than a **blueprint for a capability Kiln can uniquely unlock**
   Ghost's scope.
 
 **Where Ghost wins (today):**
-- **Newsletters + paid memberships as a finished product** — subscriber
-  management, segmentation, billing, member-gated content. Kiln has the *plumbing*
-  (MTA + audiences) but not the *product*.
+- **Newsletters + paid memberships as one polished product** — Ghost's
+  subscriber management, segmentation and member-gated publishing are its whole
+  focus, and years more mature than Kiln's.
 - Turnkey, focused authoring UX for publishers.
 
 ## Also worth a look (context, not head-to-head)
@@ -102,6 +124,8 @@ less a competitor than a **blueprint for a capability Kiln can uniquely unlock**
   (AGENTS.md declines to pull it in).
 - **Adobe AEM / Sitecore / Optimizely** — the enterprise DXP ceiling
   (personalization, experimentation, DAM) — where the market's high end sits.
+  Kiln ships cookie-free [content experiments](content-experiments-plan.md) and
+  [funnels](advanced-analytics-plan.md), a small slice of that ceiling.
 
 ## The core differentiator: the typed, declarative firing model
 
@@ -154,6 +178,7 @@ for Kiln but expensive for others.
 Kiln is an **opinionated, security-first, self-hosted platform** for teams that
 value the BEAM's operational model and batteries-included infra (search, mail,
 real-time, AI authoring) in one deployment that is *both* the site and the API.
-It trades away write-APIs, a marketplace, managed hosting, and granular RBAC to
-get there. Its most defensible ground is **structured content + real-time
-(vs. Sanity)** and **content + native email (vs. everyone)**.
+It trades away a marketplace, managed hosting, and runtime-installable
+extensions to get there — and, until #1324 lands, production co-editing. Its
+most defensible ground is **structured content + real-time (vs. Sanity)** and
+**content + native email (vs. everyone)**.

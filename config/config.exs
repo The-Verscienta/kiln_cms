@@ -459,12 +459,8 @@ config :kiln_cms, :registration_enabled, true
 # passes the tenant (verified by the pre-lift cross-org audit) — so a request on
 # one site's host only ever sees that org's data.
 #
-# Resources remain `global?: true` (non-strict): a tenant-less read fails OPEN
-# (spans orgs) rather than closed. That's safe today because every reachable read
-# is threaded, but a future tenant-less read would silently leak. Flipping the
-# per-site resources to strict `global?: false` (fail-closed) is the recommended
-# next hardening — it requires first reworking the deliberate tenant-less reads
-# (public newsletter-token lookups, AshOban global schedulers, `static_export`).
+# Whether a tenant-less read fails open or closed is `:strict_tenancy` below
+# (#419) — on by default, so it fails closed.
 #
 # Set to `false` to hard-refuse a second org (a kill switch for single-tenant
 # installs). The seeded default org is created by the backfill migration, which

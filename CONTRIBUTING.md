@@ -142,6 +142,17 @@ longer exists, a `` `Module.fun/2` `` that was renamed or changed arity. Adding
 a new guide means adding it to both `extras` and `groups_for_extras` in
 `mix.exs`; an unlisted guide is silently invisible in the generated sidebar.
 
+**Plans and spikes carry a `Status:` line.** Every `docs/*-plan.md` and
+`docs/*-spike.md` states its status in its first lines — `Status: shipped`,
+`Status: design only`, `Status: historical snapshot (date)` — and a test
+(`test/kiln_cms/docs/status_header_test.exs`) fails the build when one is missing. If the
+document also has a phase table, the header summarizes the table and changes in
+the same commit as it. A header that says "design only" above a table of
+"done" rows is the drift this rule exists to stop.
+
+`docs/` is the published guide tree. Agent work-plans and scratch specs don't
+belong in it; the PR description is where a finished plan lives.
+
 ### Dependency audit
 
 `mix deps.audit` ([mix_audit](https://github.com/mirego/mix_audit)) checks

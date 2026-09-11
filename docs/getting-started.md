@@ -72,6 +72,7 @@ declarative, so the module *is* the specification.
 | Use the editor | [Editor shortcuts](editor-shortcuts.md), [Editorial advisories](advisories.md), [Claim checking](compliance.md) |
 | Model new content | [Extending the content model](extending-content.md) |
 | Understand who can do what | [Authorization policy matrix](policy-matrix.md), [Granular RBAC](granular-rbac.md) |
+| Run several sites from one install | [Multi-tenancy](multi-tenancy.md) |
 | Consume the content headlessly | [Headless consumer guide](headless-consumer-guide.md) — it routes you to [JSON:API](json-api.md), [GraphQL](headless-graphql-api.md), [MCP](mcp.md) or [RAG](rag.md) |
 | Wire up an external front end | [Visual-editing bridge](visual-editing-bridge.md), [Static export](static-export.md) |
 | Style the admin UI | [Design language](design-language.md), [Design system](design-system.md) |

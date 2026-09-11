@@ -9,8 +9,10 @@ feature even Sanity gates behind enterprise pricing.
 
 ## The asymmetry
 
-The CRDT collaborative-editing groundwork and a `Phoenix.Presence` tracker
-already exist; shared preview is near-trivial on top. `Phoenix.Presence` handles
+A `Phoenix.Presence` tracker already exists; shared preview is near-trivial on
+top. (This page is about *viewing* together, which is on in production. CRDT
+co-*editing* is a separate, dev-only prototype —
+[production status: disabled](collaborative-editing-spike.md).) `Phoenix.Presence` handles
 join/leave over the cluster, and native `Phoenix.PubSub` carries cursor moves —
 no external realtime service, sub-200ms on a LAN.
 

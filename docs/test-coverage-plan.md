@@ -1,5 +1,9 @@
 # Test coverage plan
 
+**Status: living document** — batches 1–6 landed; the floor in
+`coveralls.json` is the enforced number, the figures below are the last
+measured run.
+
 Where the suite's remaining blind spots are, in the order they are worth
 closing, and why each one is on the list. Written against a full measured run
 on 2026-08-22: **7,344 tests, 0 failures, 83.1% line coverage**, floor 82.5

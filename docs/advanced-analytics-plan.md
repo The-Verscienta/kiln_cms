@@ -1,8 +1,10 @@
 # Advanced Content Analytics — Design
 
-**Status: design only (issue #62, *[Stretch]*).** Per-phase status lives in one
-place — the [phase table](#phased-plan) — so this document does not go stale the
-first time a slice ships.
+**Status: shipped — Phases 1–5 done, Phase 6 closed as a deliberate non-build
+(issue #62).** The [phase table](#phased-plan) is the status of record; this
+line only summarizes it, and must change whenever the table does. Funnels live
+at `/editor/funnels` (`KilnCMSWeb.FunnelLive`, `KilnCMSWeb.FunnelBuilderLive`),
+the referrer breakdown and export on `/editor/analytics`.
 
 It plans the extension of the shipped privacy-first analytics — currently *view
 counts and search queries* — with **referrer attribution**, **content funnels**,

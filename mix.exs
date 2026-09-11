@@ -89,9 +89,11 @@ defmodule KilnCMS.MixProject do
       # HTML only. Nothing consumes the EPUB, and building it doubles both the
       # run time and every warning the docs gate reports.
       formatters: ["html"],
-      # There are no release tags yet, so ExDoc's default `source_ref` of
-      # "v#{version}" would 404 on every "View Source" link. Point at `main`
-      # until `docs/releasing.md` actually cuts a tag.
+      # Docs are built from `main`, which runs ahead of the latest release tag
+      # (`v0.5.0`…). ExDoc's default `source_ref` of "v#{version}" would link
+      # "View Source" to the tagged file, which can lack the function being
+      # documented or sit at a different line. Point at the branch the docs
+      # were built from instead.
       source_ref: "main",
       nest_modules_by_prefix: [KilnCMS, KilnCMSWeb, Kiln],
       # Two exclusions:
@@ -247,6 +249,7 @@ defmodule KilnCMS.MixProject do
       "docs/policy-matrix.md": [],
       "docs/code-injection.md": [],
       "docs/granular-rbac.md": [],
+      "docs/multi-tenancy.md": [],
       "docs/passkeys.md": [],
       "docs/two-factor-auth.md": [],
       "docs/sso.md": [],
@@ -364,6 +367,7 @@ defmodule KilnCMS.MixProject do
       "Security & access": [
         "docs/policy-matrix.md",
         "docs/granular-rbac.md",
+        "docs/multi-tenancy.md",
         "docs/passkeys.md",
         "docs/two-factor-auth.md",
         "docs/sso.md",

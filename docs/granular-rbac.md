@@ -1,11 +1,31 @@
 # Granular RBAC
 
 Kiln's editorial roles are `:admin` / `:editor` / `:viewer`. Granular RBAC
-([issue #332](https://github.com/The-Verscienta/kiln_cms/issues/332)) adds a
-finer authoring axis on top: an editor can be scoped to **specific content
-types**, so a blog editor can't touch marketing pages.
+([issue #332](https://github.com/The-Verscienta/kiln_cms/issues/332)) adds
+finer axes on top, so a blog editor can't touch marketing pages.
 
-## What Phase 1 does
+**Status: shipped — Phase 1 and Phase 2 slices 1–4, plus per-org tiers
+(#419).** The sections below are in the order they landed; read this summary
+for the current model.
+
+## The model today
+
+| Axis | What it scopes | Section |
+|---|---|---|
+| **Tier** (`:admin`/`:editor`/`:viewer`) | the capability level, **per org** — a membership's `role` | Per-org capability tiers |
+| **`editable_types`** | which content types an editor may create and update | Phase 1 |
+| **`readable_types`** | which types' drafts / in-review / archived content an editor sees | Phase 2, slice 2 |
+| **`field_grants`** | which attributes an editor may change, per type | Phase 2, slice 3 |
+| **Custom `Role`** | a named, org-owned bundle of the three scope axes | Phase 2, slice 4 |
+| **`audiences`** | which *published*, audience-gated content a consumer can read — a separate axis from editorial scope | [memberships.md](memberships.md) |
+
+Each scope axis lives on the org membership (`KilnCMS.Accounts.OrgMembership`),
+on its custom role, and on the user; the effective value resolves
+membership → role → user, first non-empty wins. Admins bypass the scope axes.
+Everything is managed per org at **`/editor/team`** (admin-only); the user-level
+columns are the single-org fallback, set through `:manage_access`.
+
+## Phase 1: `editable_types`
 
 Each user has an **`editable_types`** list (on `KilnCMS.Accounts.User`) — the
 content types an editor may **create and update**:
@@ -27,15 +47,14 @@ A single policy check, `KilnCMS.CMS.Checks.EditableContentType`, replaces the
 `KilnCMS.CMS.Content` macro. Because every content type is built from that macro,
 the scope applies uniformly to compiled and project types with no per-type code.
 
-Read access is **not** scoped in Phase 1 — an editor still *sees* all content
-(the read policy is unchanged); only *authoring* is restricted. Publishing stays
-admin-only as before.
+Phase 1 scoped authoring only; read scoping arrived with `readable_types` in
+Phase 2, slice 2 (below).
 
 ## Managing it
 
-`editable_types` is set by an admin via the `:manage_access` action (alongside
-`role` and `audiences`) — today through AshAdmin (`/admin`) or the console,
-exactly like role assignment:
+Per org, use **`/editor/team`** (Phase 2, slice 4, below).
+The user-level columns — the fallback for accounts without a membership — are
+set through the `:manage_access` action (alongside `role` and `audiences`):
 
 ```elixir
 KilnCMS.Accounts.manage_user_access!(user, %{editable_types: ["post"]}, actor: admin)
