@@ -11,7 +11,7 @@ defmodule KilnCMS.CMS.Changes.RecordPublishedVersion do
 
   require Ash.Query
 
-  @publish_actions [:publish, :publish_scheduled]
+  @publish_actions [:publish, :publish_scheduled, :publish_changes]
 
   @impl true
   def change(changeset, _opts, context) do

@@ -93,6 +93,9 @@ defmodule KilnCMS.CMS.ReleasePreview do
 
   defp resolve(item, opts) do
     {record, label} = fetch(item, opts)
+    # A live record's pending working copy is what a `:publish` item ships
+    # (docs/working-copy.md), so that is what the overlay shows.
+    record = record && KilnCMS.CMS.WorkingCopy.view(record)
 
     %{
       item: item,

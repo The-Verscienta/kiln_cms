@@ -33,6 +33,7 @@ defmodule KilnCMS.CMS.Changes.EnforceFieldGrants do
   use Ash.Resource.Change
 
   alias KilnCMS.Accounts.Scoping
+  alias KilnCMS.CMS.WorkingCopy
 
   @impl true
   def change(changeset, _opts, %{actor: %{} = actor}) do
@@ -74,9 +75,36 @@ defmodule KilnCMS.CMS.Changes.EnforceFieldGrants do
 
   defp violation?(changeset, attr, allowed) do
     supplied?(changeset.params, attr) and
-      Ash.Changeset.changing_attribute?(changeset, attr) and
-      to_string(attr) not in allowed
+      changing?(changeset, attr) and
+      grant_name(attr) not in allowed
   end
+
+  # The working copy of a live document (docs/working-copy.md) is the title and
+  # body under another column name: an editor granted `title` and `blocks` may
+  # write them, and one who is not may not smuggle either through the copy.
+  defp grant_name(:working_title), do: "title"
+  defp grant_name(:working_blocks), do: "blocks"
+  defp grant_name(attr), do: to_string(attr)
+
+  # "Changed" for the working copy means changed against the text it runs ahead
+  # of (`KilnCMS.CMS.WorkingCopy.basis/1`), not against the bare column: the
+  # editor posts the whole text on every save, so the first working-copy save
+  # after a publish carries the live body verbatim, and reading that as a
+  # write of `blocks` would refuse a title-only editor their first keystroke.
+  defp changing?(changeset, :working_title),
+    do: Ash.Changeset.get_attribute(changeset, :working_title) != basis(changeset).title
+
+  defp changing?(changeset, :working_blocks) do
+    not WorkingCopy.same_blocks?(
+      changeset.resource,
+      Ash.Changeset.get_attribute(changeset, :working_blocks),
+      basis(changeset).blocks
+    )
+  end
+
+  defp changing?(changeset, attr), do: Ash.Changeset.changing_attribute?(changeset, attr)
+
+  defp basis(changeset), do: WorkingCopy.basis(changeset.data)
 
   # `block_tree` is an argument, not an accepted attribute — it force-changes
   # `blocks` downstream (ApplyBlocksInput), so gate it on the "blocks" grant.

@@ -37,6 +37,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMS.CMS.Mentions
   alias KilnCMS.CMS.VersionDiff
   alias KilnCMS.CMS.VersionSnapshot
+  alias KilnCMS.CMS.WorkingCopy
   alias KilnCMS.Collab
   alias KilnCMS.Search.Related
   alias KilnCMS.Slug
@@ -158,6 +159,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # Debounced draft autosave: pending timer ref + status indicator state.
          |> assign(:autosave_timer, nil)
          |> assign(:save_state, :saved)
+         # A live document's settings edited since the last Save
+         # (docs/working-copy.md) — its text autosaves, its settings do not.
+         |> assign(:settings_dirty?, false)
          # Debounced comments reload (#1252 review) — see @comments_reload_debounce_ms.
          |> assign(:comments_reload_timer, nil)
          # Set when an optimistic-lock conflict blocks saving until reload.
@@ -653,11 +657,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  # `@record` is the row — state, lock version, the published text. The form,
+  # the block children and the rich-text bodies are built from the WORKING
+  # VIEW of it (docs/working-copy.md): a live document with pending changes
+  # edits its working copy, and everything the form is seeded from must agree
+  # on that or the first autosave would write the published text back over
+  # the draft.
   defp assign_record(socket, record) do
     socket = assign(socket, :record, record)
+    view = WorkingCopy.view(record)
 
     socket
-    |> assign(:page_title, record.title)
+    |> assign(:page_title, view.title)
     |> assign(:slug_customized?, slug_customized?(socket))
     |> assign(:may_write?, may_write?(record, socket.assigns.actor, socket.assigns.current_org))
     # Recomputed alongside `may_write?` and for the same reason: a reload that
@@ -675,9 +686,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
       :may_assist_blocks?,
       may_write_fields?(record, socket.assigns.actor, socket.assigns.current_org, ["blocks"])
     )
-    |> assign(:form, build_form(record, socket.assigns.actor))
+    |> assign(:form, build_form(view, socket.assigns.actor))
     |> refresh_tag_index()
-    |> seed_block_children(record)
+    |> seed_block_children(view)
     |> refresh_preview()
     |> load_versions()
     |> load_translations()
@@ -1290,6 +1301,132 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp do_workflow(kind, verb, record, actor),
     do: ContentTypes.transition(kind, verb, record, actor: actor, tenant: record.org_id)
 
+  # Which half of a live document a form change touched (docs/working-copy.md):
+  # the title or the body autosave into the working copy; every other field is
+  # a setting that waits for Save and then goes live. An unknown target counts
+  # as text — the side that autosaves — because a text edit misfiled as a
+  # setting would be the one that could go unsaved.
+  defp dirty_scope(["form", field | _rest]) when field in ["title", "blocks"], do: :text
+  defp dirty_scope(["form", _field | _rest]), do: :settings
+  defp dirty_scope(_target), do: :text
+
+  defp save_draft(socket, params) do
+    result =
+      EditorTelemetry.span(:save, %{kind: socket.assigns.kind}, fn ->
+        AshPhoenix.Form.submit(socket.assigns.form, params: params)
+      end)
+
+    case result do
+      {:ok, record} ->
+        {:noreply, saved(socket, record)}
+
+      {:error, form} ->
+        if stale_conflict?(form) do
+          {:noreply, flag_conflict(socket)}
+        else
+          {:noreply,
+           socket
+           |> assign(:form, form)
+           |> put_flash(:error, gettext("Please fix the errors below."))}
+        end
+    end
+  end
+
+  # Save on a LIVE document (docs/working-copy.md): the text goes to the working
+  # copy, the settings go live. Two writes, in that order — a pending text edit
+  # is flushed through the same path the debounce takes, then everything but
+  # the title and body is submitted through `:update`.
+  #
+  # NOT through `@form`. That form's data is the working view — the title and
+  # body the editor is typing — and `:update`'s pipeline reads the text it does
+  # not receive in params off `changeset.data`: `SetSearchText` would index the
+  # draft's words on the live row, and the fired artifacts would carry them.
+  # A throwaway form on the row itself, without the block sub-forms (nothing
+  # here writes blocks), keeps `:update` reading the published text.
+  defp save_live(socket, params) do
+    case flush_working_copy(socket, params) do
+      {:ok, socket} ->
+        form =
+          AshPhoenix.Form.for_update(socket.assigns.record, :update,
+            actor: socket.assigns.actor,
+            tenant: socket.assigns.record.org_id
+          )
+
+        settings = Map.drop(params, ["title", "blocks"])
+
+        result =
+          EditorTelemetry.span(:save, %{kind: socket.assigns.kind}, fn ->
+            AshPhoenix.Form.submit(form, params: settings)
+          end)
+
+        case result do
+          {:ok, record} -> {:noreply, saved(socket, record)}
+          {:error, form} -> {:noreply, settings_refused(socket, form, params)}
+        end
+
+      {:error, socket} ->
+        {:noreply, socket}
+    end
+  end
+
+  # The errors belong on the form that is showing. Re-validating it with the
+  # full params reproduces every settings error the throwaway just hit — those
+  # fields are the same either way.
+  defp settings_refused(socket, form, params) do
+    if stale_conflict?(form) do
+      flag_conflict(socket)
+    else
+      socket
+      |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params, errors: true))
+      |> put_flash(:error, gettext("Please fix the errors below."))
+    end
+  end
+
+  # Re-fetch so the relationship pickers reflect the saved links (the submit
+  # result doesn't carry loaded relationships).
+  defp saved(socket, record) do
+    reloaded =
+      fetch!(socket.assigns.kind, record.id, socket.assigns.actor, socket.assigns.current_org)
+
+    socket
+    |> assign_record(reloaded)
+    |> broadcast_saved()
+    |> assign(:save_state, :saved)
+    |> assign(:settings_dirty?, false)
+    |> put_flash(:info, gettext("Saved."))
+  end
+
+  # Write whatever text is waiting for the debounce into the working copy now,
+  # so a Save or a "Publish changes" acts on what is on screen. Only when
+  # something IS waiting: a flush with nothing pending would still cut a
+  # version row per Save. `{:error, socket}` carries the conflict banner
+  # `do_autosave/1` raised, or — for a copy that failed validation, where the
+  # indicator alone would leave a click on Save looking like nothing happened
+  # — a flash saying why the rest did not run.
+  defp flush_working_copy(socket, params) do
+    if socket.assigns.save_state in [:saving, :error] do
+      socket = socket |> cancel_autosave_timer() |> autosave_working_copy(params)
+
+      cond do
+        socket.assigns.conflict ->
+          {:error, socket}
+
+        socket.assigns.save_state != :saved ->
+          {:error,
+           put_flash(
+             socket,
+             :error,
+             gettext("Couldn't save the working copy — check the title and body for errors.")
+           )}
+
+        true ->
+          {:ok, socket}
+      end
+    else
+      {:ok, socket}
+    end
+  end
+
   @impl true
   def handle_event("validate", %{"form" => params} = event, socket) when is_map(params) do
     # The columns children live in socket state (they aren't bound form inputs);
@@ -1307,7 +1444,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {params, socket} = sync_slug(params, event["_target"], socket)
     socket = assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
     broadcast_preview(socket)
-    {:noreply, mark_dirty(socket)}
+    {:noreply, mark_dirty(socket, dirty_scope(event["_target"]))}
   end
 
   # The TipTap hook pushes its document (debounced) instead of mirroring into a
@@ -1394,7 +1531,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply,
      socket
      |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
-     |> mark_dirty()}
+     |> mark_dirty(:settings)}
   end
 
   # Open the media browser to choose the social (og:image) card image (#476),
@@ -2335,35 +2472,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> normalize_item_rows()
       |> merge_tag_params(socket)
 
-    result =
-      EditorTelemetry.span(:save, %{kind: socket.assigns.kind}, fn ->
-        AshPhoenix.Form.submit(socket.assigns.form, params: params)
-      end)
-
-    case result do
-      {:ok, record} ->
-        # Re-fetch so the relationship pickers reflect the saved links (the
-        # submit result doesn't carry loaded relationships).
-        reloaded =
-          fetch!(socket.assigns.kind, record.id, socket.assigns.actor, socket.assigns.current_org)
-
-        {:noreply,
-         socket
-         |> assign_record(reloaded)
-         |> broadcast_saved()
-         |> assign(:save_state, :saved)
-         |> put_flash(:info, gettext("Saved."))}
-
-      {:error, form} ->
-        if stale_conflict?(form) do
-          {:noreply, flag_conflict(socket)}
-        else
-          {:noreply,
-           socket
-           |> assign(:form, form)
-           |> put_flash(:error, gettext("Please fix the errors below."))}
-        end
-    end
+    if socket.assigns.record.state == :published,
+      do: save_live(socket, params),
+      else: save_draft(socket, params)
   end
 
   # Discard local changes and reload the latest saved version, clearing the
@@ -2383,6 +2494,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
      |> reset_editors()
      |> assign(:conflict, false)
      |> assign(:save_state, :saved)
+     |> assign(:settings_dirty?, false)
      |> put_flash(:info, gettext("Reloaded the latest version."))}
   end
 
@@ -2626,7 +2738,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
     socket
     |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
-    |> mark_dirty()
+    |> mark_dirty(:settings)
   end
 
   defp apply_pick(socket, :new, media_id, url) do
@@ -3133,7 +3245,64 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  # "Publish changes" (docs/working-copy.md): flush the text still waiting for
+  # the debounce first, so what goes live is what is on screen, then hand the
+  # working copy over. Re-fetched rather than adopting the action's result, as
+  # `mark_reviewed` does: `health`/`due_at` are calculations the result does
+  # not carry.
+  defp run_workflow(socket, "publish_changes") do
+    params =
+      socket.assigns.form
+      |> AshPhoenix.Form.params()
+      |> inject_children(socket.assigns.block_children)
+      |> inject_rich_bodies(socket.assigns.rich_bodies)
+
+    case flush_working_copy(socket, params) do
+      {:ok, socket} ->
+        live_transition(socket, "publish_changes", gettext("Published your changes."))
+
+      {:error, socket} ->
+        socket
+    end
+  end
+
+  # "Discard the changes": the published text is back, and every rich-text
+  # block remounts onto it — `reset_editors/1`, as a version restore does,
+  # since TipTap keeps whatever it was showing across a form replacement.
+  defp run_workflow(socket, "discard_changes") do
+    socket
+    |> cancel_autosave_timer()
+    |> live_transition(
+      "discard_changes",
+      gettext("Discarded the changes — the published text is back.")
+    )
+    |> reset_editors()
+  end
+
   defp run_workflow(socket, _action), do: socket
+
+  defp live_transition(socket, verb, flash) do
+    %{kind: kind, record: record, actor: actor} = socket.assigns
+
+    result =
+      EditorTelemetry.span(:workflow, %{kind: kind, action: verb}, fn ->
+        do_workflow(kind, verb, record, actor)
+      end)
+
+    case result do
+      {:ok, updated} ->
+        socket
+        |> assign_record(fetch!(kind, updated.id, actor, record.org_id))
+        |> broadcast_saved()
+        |> assign(:save_state, :saved)
+        |> put_flash(:info, flash)
+
+      {:error, error} ->
+        if stale_conflict?(error),
+          do: flag_conflict(socket),
+          else: put_flash(socket, :error, gettext("That action isn't allowed right now."))
+    end
+  end
 
   # #817 (follow-up to #501): "Submit for review" only ever reaches here for
   # an editor (workflow_buttons/1 shows that button only when @state == :draft
@@ -3170,6 +3339,65 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def do_autosave(socket) do
     socket = assign(socket, :autosave_timer, nil)
 
+    # A live document's text autosaves into its working copy
+    # (docs/working-copy.md); a draft's into the row.
+    if socket.assigns.record.state == :published do
+      params =
+        socket.assigns.form
+        |> AshPhoenix.Form.params()
+        |> inject_children(socket.assigns.block_children)
+        |> inject_rich_bodies(socket.assigns.rich_bodies)
+
+      autosave_working_copy(socket, params)
+    else
+      autosave_draft(socket)
+    end
+  end
+
+  # The working-copy twin of `autosave_draft/1`: the same params the form
+  # holds, submitted to `:save_working_copy` under the working column names.
+  #
+  # The throwaway form is built on a struct whose `working_title` /
+  # `working_blocks` already carry the text the copy is measured against
+  # (`WorkingCopy.basis/1` — the previous copy, else the published text).
+  # Two reasons. The block sub-forms then bind to existing blocks by index, so
+  # each is an update of a block rather than a create of a new one — exactly
+  # how the draft path's sub-forms bind to `blocks`. And an unchanged text
+  # registers as no change at all: `StampWorkingCopy` compares the copy to the
+  # published text and clears it when they agree.
+  defp autosave_working_copy(socket, params) do
+    record = socket.assigns.record
+    basis = WorkingCopy.basis(record)
+
+    form =
+      AshPhoenix.Form.for_update(
+        %{record | working_title: basis.title, working_blocks: basis.blocks},
+        :save_working_copy,
+        actor: socket.assigns.actor,
+        tenant: record.org_id,
+        forms: [auto?: true]
+      )
+
+    copy = %{"working_title" => params["title"], "working_blocks" => params["blocks"] || []}
+
+    result =
+      EditorTelemetry.span(:autosave, %{kind: socket.assigns.kind}, fn ->
+        AshPhoenix.Form.submit(form, params: copy)
+      end)
+
+    case result do
+      {:ok, saved} ->
+        reloaded =
+          fetch!(socket.assigns.kind, saved.id, socket.assigns.actor, socket.assigns.current_org)
+
+        socket |> assign_record(reloaded) |> broadcast_saved() |> assign(:save_state, :saved)
+
+      {:error, form} ->
+        handle_autosave_error(socket, form)
+    end
+  end
+
+  defp autosave_draft(socket) do
     # Submit the current edits through the dedicated `:autosave` action (kept
     # distinct from the explicit Save's `:update` so its PaperTrail versions
     # are tagged and coalesced). A throwaway form mirrors the live one's
@@ -3527,7 +3755,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         socket
         |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
         |> assign(:intel_tags, Enum.reject(suggestions, &(to_string(&1.tag.id) == tag_id)))
-        |> mark_dirty()
+        |> mark_dirty(:settings)
     end
   end
 
@@ -3581,7 +3809,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
           socket
           |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
           |> assign(:seo_dismissed, MapSet.put(socket.assigns.seo_dismissed, field))
-          |> mark_dirty()
+          |> mark_dirty(:settings)
 
         {socket, outcome}
     end
@@ -3867,7 +4095,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
       socket
       |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
-      |> mark_dirty()
+      |> mark_dirty(:settings)
     end
   end
 
@@ -4346,7 +4574,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         phx-submit="save"
         id={"#{@kind}-editor"}
         phx-hook="UnsavedGuard"
-        data-dirty={to_string(@save_state != :saved)}
+        data-dirty={to_string(@save_state != :saved or @settings_dirty?)}
         data-unsaved-message={gettext("You have unsaved changes. Leave without saving?")}
         class="space-y-6"
       >
@@ -4414,6 +4642,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
           kind={@kind}
           record={@record}
           save_state={@save_state}
+          settings_dirty?={@settings_dirty?}
           tier={@tier}
           conflict={@conflict}
           editors={@editors}

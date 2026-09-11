@@ -33,7 +33,10 @@ defmodule KilnCMSWeb.PreviewLive do
       # Scope the record read to the editor's current site (epic #336) so a
       # preview can only open that site's content.
       org = socket.assigns.current_org
-      record = ContentTypes.get_record!(kind, id, actor: user, tenant: org)
+      row = ContentTypes.get_record!(kind, id, actor: user, tenant: org)
+      # Signed in, the preview shows the working copy of a live document, with
+      # the strip saying so (docs/working-copy.md); readers get the row.
+      record = KilnCMS.CMS.WorkingCopy.view(row)
 
       socket =
         socket
@@ -44,6 +47,7 @@ defmodule KilnCMSWeb.PreviewLive do
         |> assign(:title, record.title)
         |> assign(:excerpt, Map.get(record, :excerpt))
         |> assign(:blocks, content_blocks(record))
+        |> assign(:strip, strip_label(row))
         |> assign(:locale, record.locale)
         |> assign(:variants, locale_variants(kind, record, user))
         |> assign(:viewers, [])
@@ -93,6 +97,17 @@ defmodule KilnCMSWeb.PreviewLive do
   rescue
     _ -> [%{id: record.id, locale: record.locale}]
   end
+
+  # What the ribbon says this preview is of. Three honest answers: a draft
+  # (the page is not live), a live document's working copy (readers still
+  # get the published text), or the published text itself.
+  defp strip_label(%{state: :published} = record) do
+    if KilnCMS.CMS.WorkingCopy.pending?(record),
+      do: gettext("Previewing unpublished changes — readers still get the published text"),
+      else: gettext("Preview of the published text")
+  end
+
+  defp strip_label(_record), do: gettext("Draft preview — not the published page")
 
   defp content_blocks(record) do
     # Blocks are the typed union (Kiln v2); convert to the thin {type, content}
@@ -229,7 +244,7 @@ defmodule KilnCMSWeb.PreviewLive do
     ~H"""
     <div class="sticky top-0 z-20 flex items-center justify-between gap-2 bg-warning/90 px-4 py-1.5 text-xs font-medium text-warning-content">
       <div class="flex items-center gap-2">
-        <span>{gettext("Draft preview — not the published page")}</span>
+        <span>{@strip}</span>
         <%!-- Shared locale switcher (#378): changing it moves every co-viewer,
               so the group always reviews the same language variant. --%>
         <form

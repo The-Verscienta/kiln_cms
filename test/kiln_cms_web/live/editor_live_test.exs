@@ -597,9 +597,11 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert CMS.get_page!(page.id, authorize?: false).title == "Live"
     end
 
-    # Audit U-H1: non-draft content gets no autosave, so unsaved edits must be
-    # tracked — the form flips data-dirty (read by the UnsavedGuard hook) and
-    # shows an "Unsaved changes" indicator until an explicit Save.
+    # Audit U-H1, as it reads with the working copy (docs/working-copy.md): a
+    # live document's TEXT autosaves into its working copy, so a title edit is
+    # dirty only until the debounce lands and never changes what readers get;
+    # its SETTINGS still wait for an explicit Save — the form flips data-dirty
+    # (read by the UnsavedGuard hook) and shows "Unsaved changes" until then.
     test "editing published content marks the form dirty until saved", %{conn: conn} do
       page = draft_page(%{title: "Live", state: :published})
 
@@ -608,14 +610,40 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       assert html =~ ~s(data-dirty="false")
 
-      changed = lv |> form("#page-editor", form: %{title: "Edited live"}) |> render_change()
+      # The text: dirty while the debounce is pending, saved into the copy after.
+      changed =
+        lv
+        |> form("#page-editor")
+        |> render_change(%{"form" => %{"title" => "Edited live"}, "_target" => ["form", "title"]})
+
+      assert changed =~ ~s(data-dirty="true")
+      assert changed =~ "Saving…"
+
+      send(lv.pid, :autosave)
+      autosaved = render(lv)
+      assert autosaved =~ ~s(data-dirty="false")
+      assert autosaved =~ "Live · draft"
+      assert CMS.get_page!(page.id, authorize?: false).title == "Live"
+      assert CMS.get_page!(page.id, authorize?: false).working_title == "Edited live"
+
+      # A setting: dirty until Save, then live.
+      changed =
+        lv
+        |> form("#page-editor")
+        |> render_change(%{
+          "form" => %{"seo_title" => "Edited SEO"},
+          "_target" => ["form", "seo_title"]
+        })
+
       assert changed =~ ~s(data-dirty="true")
       assert changed =~ "Unsaved changes"
 
-      saved = lv |> form("#page-editor", form: %{title: "Edited live"}) |> render_submit()
+      saved = lv |> form("#page-editor") |> render_submit()
       assert saved =~ ~s(data-dirty="false")
       refute saved =~ "Unsaved changes"
-      assert CMS.get_page!(page.id, authorize?: false).title == "Edited live"
+      assert CMS.get_page!(page.id, authorize?: false).seo_title == "Edited SEO"
+      # Save moved the setting, not the text.
+      assert CMS.get_page!(page.id, authorize?: false).title == "Live"
     end
 
     test "repeated autosaves coalesce into a single version (issue #32)", %{conn: conn} do

@@ -173,51 +173,74 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
 
   def change(changeset, _opts, _context), do: changeset
 
+  # Both trees a write can carry: the live one, and the working copy of a live
+  # document (docs/working-copy.md). The working copy is judged against the
+  # tree it will replace when published — the previous working copy if there
+  # is one, else the published tree — so an editor can neither set a restricted
+  # field in the copy nor clear an admin's value by omission there, and
+  # `:publish_changes` (which force-changes `blocks` from it, possibly under an
+  # admin's own actor) never promotes a tree this check has not seen.
   defp enforce(changeset, role) do
-    if Ash.Changeset.changing_attribute?(changeset, :blocks) do
-      stored = index_by_id(changeset.data)
-      raw = raw_input(changeset)
+    changeset
+    |> enforce(role, :blocks, stored_blocks(changeset.data))
+    |> enforce(role, :working_blocks, working_copy_basis(changeset.data))
+  end
+
+  defp enforce(changeset, role, attribute, basis) do
+    if Ash.Changeset.changing_attribute?(changeset, attribute) do
+      stored = index_by_id(basis)
+      raw = raw_input(changeset, attribute)
       # Only a *wholly* id-less tree cannot say which block is which. A tree
       # carrying any id shows the client can round-trip them, so a block without
       # one there is genuinely new — and holding it to the omission rule would
       # refuse an editor simply inserting a block above a featured one.
       identified? = Enum.any?(raw, &has_id?/1)
 
-      blocks = changeset |> Ash.Changeset.get_attribute(:blocks) |> List.wrap()
+      blocks = changeset |> Ash.Changeset.get_attribute(attribute) |> List.wrap()
 
       blocks
       |> Enum.with_index()
       |> Enum.reduce(changeset, fn {block, index}, acc ->
         check_block(acc, block, stored, role, Enum.at(raw, index), identified?)
       end)
-      |> check_nested_tree(blocks, role)
+      |> check_nested_tree(basis, blocks, role)
     else
       changeset
     end
   end
 
+  defp working_copy_basis(%{working_copy_at: %DateTime{}, working_blocks: blocks})
+       when is_list(blocks),
+       do: blocks
+
+  defp working_copy_basis(data), do: stored_blocks(data)
+
   # The `block_tree` argument as the client sent it, index-aligned with the cast
   # tree. Absent when the write set `blocks` directly — which the editor form
   # and the inline-editing bridge both do — and then there is nothing to have
   # omitted, so every field reads as supplied and the rules are unchanged.
-  defp raw_input(changeset) do
+  defp raw_input(changeset, :blocks) do
     case Ash.Changeset.fetch_argument(changeset, :block_tree) do
       {:ok, blocks} when is_list(blocks) -> blocks
       _ -> []
     end
   end
 
+  # The working copy has no `block_tree` argument — it is only ever written by
+  # the editor, which sets the attribute directly.
+  defp raw_input(_changeset, :working_blocks), do: []
+
   # Stored blocks keyed by id, so an in-place edit diffs against its own
   # previous value. `data` is `%Ash.Changeset{}.data` — a struct on update, and
   # a bare struct with no blocks on create.
-  defp index_by_id(%{blocks: blocks}) when is_list(blocks) do
+  defp index_by_id(blocks) when is_list(blocks) do
     Map.new(blocks, fn
       %Ash.Union{value: %{id: id} = value} -> {id, value}
       other -> {nil, other}
     end)
   end
 
-  defp index_by_id(_data), do: %{}
+  defp index_by_id(_blocks), do: %{}
 
   defp check_block(
          changeset,
@@ -289,8 +312,8 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
   # Two checks over the nested tree, run against one walk of each side rather
   # than one walk per check — `collect_maps/1` descends every map value, so on a
   # page with a long `rich_text` body it walks the whole Portable Text document.
-  defp check_nested_tree(changeset, submitted, role) do
-    stored = changeset.data |> stored_blocks() |> nested_child_maps()
+  defp check_nested_tree(changeset, basis, submitted, role) do
+    stored = nested_child_maps(basis)
     now = nested_child_maps(submitted)
 
     changeset

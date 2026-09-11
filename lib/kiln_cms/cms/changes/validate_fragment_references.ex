@@ -42,24 +42,31 @@ defmodule KilnCMS.CMS.Changes.ValidateFragmentReferences do
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.Slugs
 
+  # Both trees a write can carry: the live one and the working copy of a live
+  # document (docs/working-copy.md) — a dangling fragment in the copy would
+  # otherwise be promoted by `:publish_changes` without a check of its own.
+  @trees [:blocks, :working_blocks]
+
   @impl true
   def change(changeset, _opts, %{actor: %{} = actor}) do
-    Ash.Changeset.before_action(changeset, fn changeset ->
-      if Ash.Changeset.changing_attribute?(changeset, :blocks) do
-        validate(changeset, actor)
-      else
-        changeset
-      end
-    end)
+    Ash.Changeset.before_action(changeset, &validate_trees(&1, actor))
   end
 
   def change(changeset, _opts, _context), do: changeset
 
-  defp validate(changeset, actor) do
+  defp validate_trees(changeset, actor) do
+    Enum.reduce(@trees, changeset, fn attribute, acc ->
+      if Ash.Changeset.changing_attribute?(acc, attribute),
+        do: validate(acc, actor, attribute),
+        else: acc
+    end)
+  end
+
+  defp validate(changeset, actor, attribute) do
     tenant = changeset.tenant || Ash.Changeset.get_attribute(changeset, :org_id)
 
     changeset
-    |> Ash.Changeset.get_attribute(:blocks)
+    |> Ash.Changeset.get_attribute(attribute)
     |> List.wrap()
     |> Enum.flat_map(&fragment_refs/1)
     |> Enum.reduce(changeset, &check_ref(&2, &1, actor, tenant))

@@ -3047,6 +3047,11 @@ msgstr "No se pudo guardar ese elemento."
 msgid "Couldn't save the new order."
 msgstr "No se pudo guardar el nuevo orden."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't save the working copy — check the title and body for errors."
+msgstr "No se pudo guardar la copia de trabajo: revisa el título y el cuerpo en busca de errores."
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't save those details."
@@ -3815,6 +3820,21 @@ msgstr "¿Desactivar la federación? Los seguidores dejan de recibir publicacion
 #, elixir-autogen, elixir-format
 msgid "Disabled"
 msgstr "Desactivado"
+
+#: lib/kiln_cms_web/components/content_editor/chrome_components.ex
+#, elixir-autogen, elixir-format
+msgid "Discard the changes"
+msgstr "Descartar los cambios"
+
+#: lib/kiln_cms_web/components/content_editor/chrome_components.ex
+#, elixir-autogen, elixir-format
+msgid "Discard the changes? The published text comes back in the editor; what you wrote is kept as a version."
+msgstr "¿Descartar los cambios? El texto publicado vuelve al editor; lo que escribiste se conserva como una versión."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Discarded the changes — the published text is back."
+msgstr "Cambios descartados: el texto publicado está de vuelta."
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
@@ -5775,6 +5795,11 @@ msgstr "Modo producción"
 msgid "Live published"
 msgstr "Publicado en vivo"
 
+#: lib/kiln_cms_web/components/content_editor/chrome_components.ex
+#, elixir-autogen, elixir-format
+msgid "Live · draft"
+msgstr "Publicado · borrador"
+
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
@@ -6006,6 +6031,11 @@ msgstr "lun"
 #, elixir-autogen, elixir-format
 msgid "Month"
 msgstr "Mes"
+
+#: lib/kiln_cms_web/components/content_editor/chrome_components.ex
+#, elixir-autogen, elixir-format
+msgid "More actions"
+msgstr "Más acciones"
 
 #: lib/kiln_cms_web/controllers/content_html/search.html.heex
 #, elixir-autogen, elixir-format
@@ -7597,10 +7627,20 @@ msgid "Preview of release “%{name}” — not the live site"
 msgstr "Vista previa del lanzamiento «%{name}» — no es el sitio publicado"
 
 #: lib/kiln_cms_web/live/preview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Preview of the published text"
+msgstr "Vista previa del texto publicado"
+
+#: lib/kiln_cms_web/live/preview_live.ex
 #: lib/kiln_cms_web/live/token_preview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Preview: %{title}"
 msgstr "Vista previa: %{title}"
+
+#: lib/kiln_cms_web/live/preview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Previewing unpublished changes — readers still get the published text"
+msgstr "Vista previa de cambios sin publicar: los lectores siguen viendo el texto publicado"
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
@@ -7706,6 +7746,11 @@ msgstr "Publicar"
 msgid "Publish %{count} selected item(s)? They go live on the site immediately."
 msgstr "¿Publicar %{count} elemento(s) seleccionado(s)? Se publican en el sitio inmediatamente."
 
+#: lib/kiln_cms_web/components/content_editor/chrome_components.ex
+#, elixir-autogen, elixir-format
+msgid "Publish changes"
+msgstr "Publicar cambios"
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Publish now"
@@ -7758,6 +7803,11 @@ msgstr "Entrada publicada"
 #, elixir-autogen, elixir-format
 msgid "Published to the witness"
 msgstr "Publicado en el testigo"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Published your changes."
+msgstr "Tus cambios se han publicado."
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -8815,6 +8865,11 @@ msgstr "Guardado"
 #, elixir-autogen, elixir-format
 msgid "Saved details."
 msgstr "Detalles guardados."
+
+#: lib/kiln_cms_web/components/content_editor/chrome_components.ex
+#, elixir-autogen, elixir-format
+msgid "Saved to the working copy"
+msgstr "Guardado en la copia de trabajo"
 
 #: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -10419,6 +10474,11 @@ msgstr "Todo el documento"
 msgid "The winning variant no longer exists."
 msgstr "La variante ganadora ya no existe."
 
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "The working copy has run ahead of the published text."
+msgstr "La copia de trabajo va por delante del texto publicado."
+
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/setup_live.ex
@@ -11566,6 +11626,11 @@ msgstr "Con ella activada, el editor muestra un panel Cumplimiento que cita las 
 msgid "Witnessed by checkpoint #%{sequence} at anchor position %{position}"
 msgstr "Atestiguado por el punto de control n.º %{sequence} en la posición de anclaje %{position}"
 
+#: lib/kiln_cms_web/components/version_diff_components.ex
+#, elixir-autogen, elixir-format
+msgid "Working title"
+msgstr "Título de trabajo"
+
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #, elixir-autogen, elixir-format
 msgid "Working…"
@@ -12072,6 +12137,11 @@ msgstr "p. ej. sitio-marketing"
 #, elixir-autogen, elixir-format
 msgid "edit"
 msgstr "edición"
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "edited since publishing"
+msgstr "editado tras publicar"
 
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format

@@ -157,9 +157,21 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
       # Values arrive in the shape PaperTrail stored (JSON), which
       # `force_change_attribute/3` casts back.
       value = Map.get_lazy(state, to_string(name), fn -> default(acc.resource, name) end)
-      Ash.Changeset.force_change_attribute(acc, name, value)
+      Ash.Changeset.force_change_attribute(acc, name, restorable_value(acc, name, value))
     end)
   end
+
+  # A working copy is only meaningful beside a published text
+  # (`KilnCMS.CMS.WorkingCopy`): restoring a version from a record's live period
+  # onto the draft it has since become would leave a shadow the draft's own
+  # autosave never clears. `state` is not restorable, so `changeset.data.state`
+  # is the effective one.
+  @working_copy_fields [:working_title, :working_blocks, :working_copy_at]
+
+  defp restorable_value(%{data: %{state: :published}}, _name, value), do: value
+  defp restorable_value(_changeset, :working_blocks, _value), do: []
+  defp restorable_value(_changeset, name, _value) when name in @working_copy_fields, do: nil
+  defp restorable_value(_changeset, _name, value), do: value
 
   # The value the attribute held before anything wrote it — which is what the
   # record carried at a version whose fold has no key for it.
