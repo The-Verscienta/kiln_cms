@@ -102,6 +102,19 @@ class PasteNotice {
     this.el.style.top = `${coords.bottom + 6}px`
     this.el.style.left = `${Math.max(8, coords.left)}px`
     this.el.hidden = false
+
+    // A caret near the bottom (or right edge) of the viewport — a long
+    // paste, or one near the end of a scrolled document — puts `coords`
+    // past the fold. `position: fixed` doesn't scroll into view like normal
+    // flow content, so an unclamped notice renders (and stays) off-screen,
+    // unreachable by mouse, keyboard or a click. Measured only once shown:
+    // its own size isn't known before layout.
+    const rect = this.el.getBoundingClientRect()
+    const top = Math.min(parseFloat(this.el.style.top), window.innerHeight - rect.height - 8)
+    const left = Math.min(parseFloat(this.el.style.left), window.innerWidth - rect.width - 8)
+    this.el.style.top = `${Math.max(8, top)}px`
+    this.el.style.left = `${Math.max(8, left)}px`
+
     clearTimeout(this.timer)
     this.timer = setTimeout(() => this.hide(), NOTICE_MS)
   }
