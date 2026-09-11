@@ -281,7 +281,9 @@ defmodule KilnCMSWeb.MalformedPayloadTest do
     # and file, with the reason, so removing the reason fails the test.
     @unguarded %{
       {"preview_live.ex", "cursor"} => "clamp/1 is total: is_number or 0.0",
-      {"token_preview_live.ex", "cursor"} => "clamp/1 is total: is_number or 0.0"
+      {"token_preview_live.ex", "cursor"} => "clamp/1 is total: is_number or 0.0",
+      {"content_editor_live.ex", "markdown_import_apply"} =>
+        "MarkdownImport.apply_import/2 is total: guarded clause plus a catch-all returning :error"
     }
 
     test "no handler binds a client value without saying what shape it expects" do
