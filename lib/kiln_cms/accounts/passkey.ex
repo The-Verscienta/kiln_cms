@@ -36,7 +36,7 @@ defmodule KilnCMS.Accounts.Passkey do
   end
 
   actions do
-    defaults [:read, :destroy]
+    defaults [:read]
 
     read :for_user do
       description "A user's registered passkeys (backs /editor/settings)."
@@ -44,10 +44,19 @@ defmodule KilnCMS.Accounts.Passkey do
       filter expr(user_id == ^arg(:user_id))
     end
 
+    # Demo mode: a visitor can't add or remove the shared account's passkeys
+    # (docs/demo-mode.md). Admins pass.
+    destroy :destroy do
+      primary? true
+      validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
+    end
+
     # Called by KilnCMS.Accounts.WebAuthn after Wax verified the attestation —
-    # never from user input directly.
+    # never from user input directly. The ceremony passes the enrolling user
+    # as the actor, which is all the demo-mode refusal reads.
     create :register do
       accept [:user_id, :name, :credential_id, :public_key, :sign_count]
+      validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
     end
 
     # Post-authentication bookkeeping (clone-detection counter + last use).

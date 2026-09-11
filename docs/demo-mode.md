@@ -206,6 +206,41 @@ A public demo lets anyone trigger whatever a visitor can reach, so:
   environment keys. Leave them out of the golden snapshot and the demo's
   environment. The shared account is an editor and can't configure them.
 
+### 7. The shared account's credentials
+
+Every visitor signs in as the same account, so a visitor who changed its
+password, or turned on two-factor with an authenticator only they hold, would
+lock everyone else out until the next reset. While demo mode is on, a
+**non-admin** can't change how an account signs in:
+
+| Refused | Action |
+|---|---|
+| Change the password | `User.change_password` |
+| Turn on two-factor | `User.setup_totp`, `User.confirm_totp` |
+| Turn it off, or mint new recovery codes | `User.disable_totp`, `User.regenerate_totp_recovery_codes` |
+| Add or remove a passkey | `Passkey.register`, `Passkey.destroy` |
+
+Each refusal is `KilnCMS.Accounts.Errors.DemoAccountLocked` (forbidden-class):
+*"this is a shared demo account — its password and sign-in methods can't be
+changed"*. It is a validation on each action
+(`KilnCMS.Accounts.Validations.NotDemoSharedAccount`), not a check in the
+settings page, so it holds for every caller, including the WebAuthn ceremony,
+which writes the passkey with `authorize?: false`. The settings page hides
+those forms and shows the same sentence in their place.
+
+- **Admins are exempt.** The operator curates the demo as an admin, and can
+  still repair the shared account from the console, their own account
+  included.
+- **A call with no actor passes.** That is a system call (`rpc`, `eval`), made
+  by whoever operates the node.
+
+Some things were already out of the shared account's reach, demo or not:
+
+- **Its email.** No action lets an account change its own email.
+- **API keys.** Minting, listing and revoking them is admin-only.
+- **A password reset by email.** Mail is inert on a demo, so the reset link
+  never reaches anyone.
+
 ## Refreshing the golden snapshot
 
 Edit the content on the demo (sign in as the admin, right after a reset), then
@@ -221,9 +256,11 @@ it forward. Recapture when you want the demo content itself to change.
 
 ## Known limits
 
-- **The shared account is shared.** Anything it can change about itself (its
-  password, its email, two-factor enrollment) a visitor can change for everyone
-  until the next reset. Keep the interval short.
+- **The shared account is shared.** What would lock other visitors out is
+  refused ([its credentials are fixed](#7-the-shared-accounts-credentials)),
+  but the rest of what it can change about itself is anyone's until the next
+  reset: its display name (the byline on content it publishes) and its
+  notification preferences (inert, since mail is).
 - **A reset takes the editor away for a few seconds.** Requests during the
   restore may fail. Visitors land on sign-in afterwards.
 - **One node.** The drain and the deferred-delete log are node-local. The other

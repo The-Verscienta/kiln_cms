@@ -11156,6 +11156,11 @@ msgstr ""
 msgid "This instance"
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "This is a shared demo account, so its password and sign-in methods can't be changed."
+msgstr ""
+
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "This is a test email from your KilnCMS instance."
