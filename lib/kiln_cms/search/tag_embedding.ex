@@ -100,6 +100,33 @@ defmodule KilnCMS.Search.TagEmbedding do
         end
       end
     end
+
+    # The site's tags within `:threshold` of `:vector`, nearest first — the
+    # tag leg of `KilnCMS.Search.hybrid/3`. No candidate list: a tag's name
+    # is world-readable, the rows only yield ids and distances, and the
+    # documents those ids lead to are read under the caller's own policy.
+    read :nearest_any do
+      argument :vector, {:array, :float}, allow_nil?: false
+      argument :threshold, :float, allow_nil?: false
+      argument :limit, :integer, default: 5
+
+      filter expr(not is_nil(^ref(:embedding)))
+
+      prepare fn query, _context ->
+        if KilnCMS.Search.semantic?() do
+          vector = Ash.Query.get_argument(query, :vector)
+          threshold = Ash.Query.get_argument(query, :threshold)
+
+          query
+          |> Ash.Query.filter(semantic_distance(query_vector: ^vector) <= ^threshold)
+          |> Ash.Query.sort([{:semantic_distance, {%{query_vector: vector}, :asc}}])
+          |> Ash.Query.load(semantic_distance: %{query_vector: vector})
+          |> Ash.Query.limit(Ash.Query.get_argument(query, :limit))
+        else
+          Ash.Query.limit(query, 0)
+        end
+      end
+    end
   end
 
   policies do

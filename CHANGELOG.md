@@ -94,6 +94,17 @@ migration, a rewritten column, a dropped config key).
   whether their text was saved. Rich-text blocks now honour the lock too: a
   block held by someone else is read-only in TipTap, not just ringed.
   Modelled on texttile's `Texttile.Articles.Lock`.
+- **Hybrid search fuses a tag leg.** A tag is an editor's statement of what
+  a document is about, so `KilnCMS.Search.hybrid/3` now finds the site's
+  tags whose names embed within `tag_leg_threshold` (default: the measured
+  `suggest_tags_threshold`) of the query — at most `tag_leg_limit` of them —
+  and every document carrying one joins fusion at half weight, reported as
+  `tag` in `legs`. Tag-name vectors are now written on every tag create and
+  rename (`KilnCMS.Search.TagEmbeddingWorker`) rather than lazily by the
+  suggestion panel; run `mix kiln.embed_all` once to backfill an existing
+  site's tags. On wherever semantic search is on (`config :kiln_cms,
+  KilnCMS.Search, tag_leg: false` switches it off); sits out under facet
+  filters.
 - **Search finds a record by its other names.** A custom field can now be
   flagged **Names the record** (`names_record` on
   `KilnCMS.CMS.FieldDefinition`; a checkbox in the field editor) — a Latin

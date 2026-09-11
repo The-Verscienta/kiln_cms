@@ -94,6 +94,32 @@ defmodule KilnCMS.Search.EmbeddingPipelineTest do
     assert is_nil(CMS.get_page!(page.id, authorize?: false).embedding)
   end
 
+  test "a tag's name is embedded on create and rename, and `mix kiln.embed_all` backfills tags" do
+    admin = admin()
+
+    # Created while semantic search is off: no job, no vector — the state an
+    # existing site's tags are in before the tag leg.
+    put_search_env(semantic: false)
+    tag = CMS.create_tag!(%{name: "immunity", slug: slug()}, actor: admin)
+    assert %{success: 0, failure: 0} = KilnCMS.DataCase.drain_oban()
+    assert [] = KilnCMS.SearchIndex.tag_embeddings_for!([tag.id], authorize?: false)
+
+    put_search_env(semantic: true)
+    output = ExUnit.CaptureIO.capture_io(fn -> Mix.Tasks.Kiln.EmbedAll.run([]) end)
+    assert output =~ ~r/and \d+ tag\(s\)/
+    KilnCMS.DataCase.drain_oban()
+
+    assert [%{name: "immunity"}] =
+             KilnCMS.SearchIndex.tag_embeddings_for!([tag.id], authorize?: false)
+
+    # A rename re-embeds under the new name.
+    CMS.update_tag!(tag, %{name: "immune support"}, actor: admin)
+    KilnCMS.DataCase.drain_oban()
+
+    assert [%{name: "immune support"}] =
+             KilnCMS.SearchIndex.tag_embeddings_for!([tag.id], authorize?: false)
+  end
+
   test "dynamic entries embed through the same pipeline (so `mix kiln.embed_all` covers them)" do
     admin = admin()
 

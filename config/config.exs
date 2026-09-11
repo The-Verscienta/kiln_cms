@@ -177,6 +177,11 @@ config :kiln_cms, KilnCMS.Search,
   # search is on; costs one indexed nearest-neighbour query per content type
   # per search. See `KilnCMS.Search.block_leg?/0`.
   block_leg: true,
+  # The tag leg of hybrid search: documents carrying a tag whose name embeds
+  # within `tag_leg_threshold` (default: `suggest_tags_threshold`) of the
+  # query, at most `tag_leg_limit` tags per query, at half weight. On
+  # wherever semantic search is on. See `KilnCMS.Search.tag_leg?/0`.
+  tag_leg: true,
   # Optional reranking of every search surface's fused results by a local
   # cross-encoder — the public search page, the editor palette, /api/search
   # and /api/ask alike. Off by default: it is CPU inference over every

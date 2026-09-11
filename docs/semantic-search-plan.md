@@ -180,6 +180,20 @@ floor, as they do for its title. Per-site, cached with the type registry
 (`KilnCMS.CMS.NameFields`), and free for every type with nothing flagged.
 Text fields only in practice: the value is matched as text.
 
+## Tag leg (2026-09-11)
+
+A tag is an editor's statement of what a document is *about*. The **tag leg**
+embeds nothing new: the tag-name vectors `KilnCMS.Search.TagEmbedding` holds
+(now written on every tag create and rename by
+`KilnCMS.Search.TagEmbeddingWorker`, and backfilled by `mix kiln.embed_all`)
+are searched for the tags within `tag_leg_threshold` of the query (default:
+the measured `suggest_tags_threshold`), at most `tag_leg_limit` (5) of them,
+and every document carrying one joins fusion at half weight — a topic match,
+reported as `tag` in `legs`, never enough to outrank a lexical or semantic hit
+on its own. The relevance floor judges a tag-only hit by its tag's distance.
+On wherever semantic search is on (`tag_leg: false` switches it off); sits
+out under facet filters.
+
 ## Phase 3 — Hybrid fusion (+ optional rerank)
 - `KilnCMS.Search.hybrid(type, query, opts)` runs both legs (top-N each), fuses
   by **Reciprocal Rank Fusion** in Elixir, returns merged records; falls back to
