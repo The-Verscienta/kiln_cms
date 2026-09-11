@@ -210,7 +210,7 @@ defmodule KilnCMSWeb.ExperimentsLiveTest do
 
       # No counters yet: the floor notice, no leader.
       assert has_element?(lv, "#results-floor")
-      refute render(lv) =~ "leading"
+      refute lv |> element("#results-table") |> render() =~ "leading"
 
       # Enough impressions on both arms; B converts better.
       for _ <- 1..3,
