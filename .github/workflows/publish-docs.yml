@@ -1,0 +1,75 @@
+# Publishes the user-facing guides to the Kiln site that dogfoods them
+# (kilncms.dev) — /docs/<slug> entries plus the /docs index page — whenever
+# they change on main. See scripts/publish_docs.exs for what is published and
+# how, and for the one-time setup (the Doc type, the admin API key).
+#
+# Configure in the repository settings:
+#   vars.KILN_DOCS_URL         e.g. https://kilncms.dev — unset skips the job,
+#                              so forks and unconfigured clones stay green
+#   secrets.KILN_DOCS_API_KEY  :read_write key on an admin account
+# The Doc type's id is looked up by name (/api/json/type-definitions/by-name).
+name: Publish docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "README.md"
+      - "CONTRIBUTING.md"
+      - "mix.exs"
+      - "scripts/publish_docs.exs"
+      - ".github/workflows/publish-docs.yml"
+  # A full re-sync, e.g. after restoring the site's database.
+  workflow_dispatch:
+
+# One run at a time, in order: two overlapping runs could each create the
+# same new guide before the other's create is visible.
+concurrency:
+  group: publish-docs
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish docs to ${{ vars.KILN_DOCS_URL }}
+    if: vars.KILN_DOCS_URL != ''
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The diff below needs the push's `before` commit.
+          fetch-depth: 0
+
+      - name: Set up Elixir/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      # Mix.install's build of earmark/req/jason, keyed on the script that
+      # pins them.
+      - name: Cache Mix.install
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/mix/installs
+          key: ${{ runner.os }}-publish-docs-${{ hashFiles('.tool-versions') }}-${{ hashFiles('scripts/publish_docs.exs') }}
+
+      - name: Publish
+        env:
+          KILN_URL: ${{ vars.KILN_DOCS_URL }}
+          KILN_DOCS_API_KEY: ${{ secrets.KILN_DOCS_API_KEY }}
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          # A manual run, a new branch (all-zero `before`) or a force-push that
+          # dropped `before` gets a full sync; otherwise only what changed.
+          if [ "$EVENT" != "push" ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            elixir scripts/publish_docs.exs --all
+          else
+            git diff --name-only "$BEFORE" "$GITHUB_SHA" \
+              | xargs -r elixir scripts/publish_docs.exs
+          fi
