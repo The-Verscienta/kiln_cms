@@ -243,6 +243,18 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **Links to a section land on it.** A link to `/docs/some-guide#setup`
+  opened the right page but at the top, because no rendered heading carried an
+  `id`. On public pages every heading now gets one, slugged from its text the
+  way GitHub does it (`## 5. What shipped: the PWA` → `#5-what-shipped-the-pwa`),
+  so fragments written against a guide on GitHub, or in Markdown from anywhere
+  else, work unchanged. This covers heading blocks, headings inside rich text
+  (Portable Text and stored HTML alike) and both inside columns. Repeats are
+  numbered `-1`, `-2` across the whole page. Ids are derived at render time and
+  never stored; the scrubber still strips any id an author writes. Fired `:web`
+  artifacts and the editor previews render without them, since they render one
+  block at a time and a LiveView can't carry duplicate ids.
+
 - **Clickable things show a pointer again.** Tailwind v4's preflight resets
   `button` to `cursor: default`, and only the kit's `.btn`/`.tab` restored it —
   so roughly a hundred controls showed an arrow: link-styled `<button>`s

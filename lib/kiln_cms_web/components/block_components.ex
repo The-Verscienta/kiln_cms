@@ -35,7 +35,10 @@ defmodule KilnCMSWeb.BlockComponents do
     <div class="kiln-block" data-block-id={@block[:id]}>
       <%= cond do %>
         <% @type == "heading" -> %>
-          <h2 class="text-xl font-bold">{@block.content}</h2>
+          <%!-- `:anchor` is set only on public delivery
+                (`KilnCMS.HeadingAnchors.anchor_tree/1`); the LiveView
+                previews render without one. --%>
+          <h2 id={@block[:anchor]} class="text-xl font-bold">{@block.content}</h2>
         <% @type == "rich_text" -> %>
           <%!-- `content` is sanitized-or-trusted at build time (the single
                 boundary in TypedBlocks.one_to_legacy); rendering it raw avoids
