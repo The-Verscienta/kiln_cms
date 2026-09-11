@@ -367,9 +367,19 @@ const Hooks = {
       this._collabPublished = () => this.pushEvent("collab_published", {})
       window.addEventListener("kiln:collab-published", this._collabPublished)
     },
+    // `data-locked` follows the advisory field lock (another editor holds
+    // this block, or took it over). `emitUpdate: false` — TipTap's setEditable
+    // otherwise fires onUpdate, which would schedule a body push and mark the
+    // record dirty for a change nobody made.
+    updated() {
+      if (!this.editor) return
+      const editable = this.el.dataset.locked !== "true"
+      if (this.editor.isEditable !== editable) this.editor.setEditable(editable, false)
+    },
     destroyed() {
       this._destroyed = true
       window.removeEventListener("kiln:collab-published", this._collabPublished)
+      this._flushRef && this.removeHandleEvent(this._flushRef)
       this.slash && this.slash.destroy()
       this.linkPrompt && this.linkPrompt.destroy()
       this.editor && this.editor.destroy()
@@ -961,6 +971,26 @@ window.addEventListener("keydown", e => {
 // Show progress bar on live navigation and form submits
 topbar.config({barColors: {0: "#29d"}, shadowColor: "rgba(0, 0, 0, .3)"})
 window.addEventListener("phx:page-loading-start", _info => topbar.show(300))
+
+// A field-lock takeover went through: put the caret where the person asked to
+// be. Core fields are bare names ("title" → form[title]); block fields are full
+// form paths; a rich-text body is its TipTap host, which may still be
+// remounting when the lock arrives, so the lookup is retried briefly.
+window.addEventListener("phx:lock_granted", ({detail}) => {
+  const field = detail && detail.field
+  if (!field) return
+  const name = field.includes("[") ? field : `form[${field}]`
+  const find = () =>
+    document.querySelector(`[data-lock-field="${CSS.escape(field)}"] .ProseMirror`) ||
+    document.querySelector(`[name="${CSS.escape(name)}"]`)
+  let tries = 0
+  const attempt = () => {
+    const el = find()
+    if (el) return el.focus()
+    if (++tries < 10) setTimeout(attempt, 100)
+  }
+  attempt()
+})
 window.addEventListener("phx:page-loading-stop", _info => topbar.hide())
 
 // connect if there are any LiveViews on the page

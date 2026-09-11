@@ -142,6 +142,7 @@ msgstr[0] "%{count} archivo mostrado"
 msgstr[1] "%{count} archivos mostrados"
 
 #: lib/kiln_cms_web/components/core_components.ex
+#: lib/kiln_cms_web/live/content_editor/shared.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} hour"
 msgid_plural "%{count} hours"
@@ -170,6 +171,7 @@ msgstr[0] "%{count} min de lectura"
 msgstr[1] "%{count} min de lectura"
 
 #: lib/kiln_cms_web/components/core_components.ex
+#: lib/kiln_cms_web/live/content_editor/shared.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} minute"
 msgid_plural "%{count} minutes"
@@ -389,18 +391,43 @@ msgstr "%{name} (copia)"
 
 #: lib/kiln_cms_web/live/content_editor/shared.ex
 #, elixir-autogen, elixir-format
+msgid "%{name} has had this open for %{open_for} but hasn't typed for %{idle}."
+msgstr "%{name} lleva %{open_for} con esto abierto, pero no escribe desde hace %{idle}."
+
+#: lib/kiln_cms_web/live/content_editor/shared.ex
+#, elixir-autogen, elixir-format
 msgid "%{name} is editing this field"
 msgstr "%{name} está editando este campo"
+
+#: lib/kiln_cms_web/live/content_editor/shared.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} is editing this field — take it over"
+msgstr "%{name} está editando este campo: tomar el control"
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "%{name} is on this block"
 msgstr "%{name} está en este bloque"
 
+#: lib/kiln_cms_web/live/content_editor/shared.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} is typing right now."
+msgstr "%{name} está escribiendo ahora mismo."
+
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "%{name} is typing…"
 msgstr "%{name} está escribiendo…"
+
+#: lib/kiln_cms_web/live/content_editor/session.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} took over “%{field}”. Your changes are saved."
+msgstr "%{name} ha tomado el control de “%{field}”. Tus cambios están guardados."
+
+#: lib/kiln_cms_web/live/content_editor/session.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} took over “%{field}”. Your unsaved changes are still in this form."
+msgstr "%{name} ha tomado el control de “%{field}”. Tus cambios sin guardar siguen en este formulario."
 
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
@@ -865,6 +892,11 @@ msgstr "Un breve resumen que se muestra en los listados y se usa como alternativ
 #, elixir-autogen, elixir-format
 msgid "A submission whose text contains any of these words or phrases is scored as spam and held for review rather than delivered. Matching ignores case and applies to every form on this site."
 msgstr "Un envío cuyo texto contenga cualquiera de estas palabras o frases se puntúa como spam y se retiene para revisión en lugar de entregarse. La coincidencia ignora mayúsculas y minúsculas y se aplica a todos los formularios de este sitio."
+
+#: lib/kiln_cms_web/live/content_editor/shared.ex
+#, elixir-autogen, elixir-format
+msgid "A takeover stops that mid-sentence: the field turns read-only on their side, and a note there says who took it."
+msgstr "Tomar el control lo interrumpe a media frase: el campo pasa a solo lectura en su lado y una nota allí indica quién lo tomó."
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
@@ -2070,6 +2102,7 @@ msgstr "No se puede reprogramar al pasado."
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/billing_live.ex
+#: lib/kiln_cms_web/live/content_editor/shared.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/experiment_live.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
@@ -2097,6 +2130,7 @@ msgstr "Cancelada"
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#: lib/kiln_cms_web/live/content_editor/shared.ex
 #, elixir-autogen, elixir-format
 msgid "Canonical URL"
 msgstr "URL canónica"
@@ -4489,6 +4523,7 @@ msgid "Everything with a cadence is inside it."
 msgstr "Todo lo que tiene una cadencia está dentro de ella."
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
+#: lib/kiln_cms_web/live/content_editor/shared.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Excerpt"
@@ -6985,6 +7020,11 @@ msgstr "Este lanzamiento está vacío"
 msgid "Nothing is blocked."
 msgstr "No hay nada bloqueado."
 
+#: lib/kiln_cms_web/live/content_editor/shared.ex
+#, elixir-autogen, elixir-format
+msgid "Nothing is lost — what they had typed is saved first."
+msgstr "No se pierde nada: lo que había escrito se guarda primero."
+
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Nothing is scanned and no panel appears until you switch it on, and what you switch on applies to this site only."
@@ -7499,6 +7539,7 @@ msgid "Path"
 msgstr "Ruta"
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
+#: lib/kiln_cms_web/live/content_editor/shared.ex
 #, elixir-autogen, elixir-format
 msgid "Path alias"
 msgstr "Alias de ruta"
@@ -9605,6 +9646,7 @@ msgstr "Omitido"
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/billing_live.ex
+#: lib/kiln_cms_web/live/content_editor/shared.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/form_live.ex
@@ -9650,6 +9692,7 @@ msgid "Social accounts"
 msgstr "Cuentas sociales"
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#: lib/kiln_cms_web/live/content_editor/shared.ex
 #, elixir-autogen, elixir-format
 msgid "Social image"
 msgstr "Imagen social"
@@ -10063,6 +10106,16 @@ msgstr "Se etiquetaron %{ok}; %{failed} no se pudieron actualizar."
 msgid "Tags"
 msgstr "Etiquetas"
 
+#: lib/kiln_cms_web/live/content_editor/shared.ex
+#, elixir-autogen, elixir-format
+msgid "Take over"
+msgstr "Tomar el control"
+
+#: lib/kiln_cms_web/live/content_editor/shared.ex
+#, elixir-autogen, elixir-format
+msgid "Take over “%{field}” from %{name}?"
+msgstr "¿Tomar el control de “%{field}” a %{name}?"
+
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "Target locale"
@@ -10137,6 +10190,11 @@ msgstr "Prueba puesta en cola: consulte las entregas más abajo."
 #, elixir-autogen, elixir-format
 msgid "Testing “%{title}”"
 msgstr "Probando «%{title}»"
+
+#: lib/kiln_cms_web/live/content_editor/shared.ex
+#, elixir-autogen, elixir-format
+msgid "Text block"
+msgstr "Bloque de texto"
 
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
@@ -10945,6 +11003,7 @@ msgstr "Texto enriquecido TipTap, bloques con arrastrar y soltar, vista previa e
 
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #: lib/kiln_cms_web/components/version_diff_components.ex
+#: lib/kiln_cms_web/live/content_editor/shared.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
@@ -11727,6 +11786,11 @@ msgstr "Qué se ejecuta en este sitio"
 msgid "What should the model do?"
 msgstr "¿Qué debe hacer el modelo?"
 
+#: lib/kiln_cms_web/live/content_editor/shared.ex
+#, elixir-autogen, elixir-format
+msgid "What they had typed stays in their editor, unsaved, until they save it."
+msgstr "Lo que había escrito permanece en su editor, sin guardar, hasta que lo guarde."
+
 #: lib/kiln_cms_web/controllers/content_controller.ex
 #, elixir-autogen, elixir-format
 msgid "What's on, soonest first."
@@ -12135,6 +12199,11 @@ msgstr "Opción predeterminada sin operaciones: genere una clave aquí mismo. Se
 #, elixir-autogen, elixir-format
 msgid "Zero-ops default: paste the secret here. Encrypted with a key derived from SECRET_KEY_BASE — rotating that secret orphans it."
 msgstr "Opción predeterminada sin configuración: pegue el secreto aquí. Cifrado con una clave derivada de SECRET_KEY_BASE; rotar ese secreto lo inutiliza."
+
+#: lib/kiln_cms_web/live/content_editor/shared.ex
+#, elixir-autogen, elixir-format
+msgid "a minute"
+msgstr "un minuto"
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -12889,6 +12958,11 @@ msgstr "traducido"
 #, elixir-autogen, elixir-format
 msgid "translation gaps"
 msgstr "huecos de traducción"
+
+#: lib/kiln_cms_web/live/content_editor/shared.ex
+#, elixir-autogen, elixir-format
+msgid "under a minute"
+msgstr "menos de un minuto"
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/system_live.ex

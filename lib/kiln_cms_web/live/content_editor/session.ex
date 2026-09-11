@@ -2,11 +2,30 @@ defmodule KilnCMSWeb.ContentEditor.Session do
   @moduledoc """
   Autosave, advisory collaboration state, and presence plumbing for the
   content editor, attached as `on_mount` lifecycle hooks (#1311): the
-  `handle_info` traffic for presence diffs, typing indicators, field cursors,
+  `handle_info` traffic for presence diffs, typing indicators, field locks,
   peer saves and the autosave timer, plus the `handle_event` heads for field
-  focus and block presence — all intercepted before
+  focus, the lock takeover and block presence — all intercepted before
   `KilnCMSWeb.ContentEditorLive`'s own callbacks. Messages and events this
   module doesn't own pass through untouched (`{:cont, socket}`).
+
+  ## Field locks
+
+  Focusing an input acquires an advisory lock on that field from
+  `KilnCMS.Collab.FieldLock`, the per-record process that orders every
+  session's focus events; blurring releases it. The lock map it announces is
+  what `@field_locks` (and the derived `@cursors` badges) render from, so a
+  field held by another session is readonly here until they blur, leave, go
+  idle, or are taken over.
+
+  The takeover runs in three messages. The taker's `confirm_takeover` asks the
+  lock process, which sends the holder `{:lock_flush, _, field}`; the holder
+  pushes `flush_body` to its client so the rich-text hook sends whatever still
+  sits in its debounce (`rich_text_body`, then `body_flushed`), persists a
+  pending draft autosave (the version snapshot), and answers `flushed/2` — or
+  the `:flush_fallback` timer answers for a client that does not. Then the
+  lock transfers: the holder gets `{:lock_taken, _, field, by}` and a note,
+  the taker gets `{:lock_granted, _, field}`, and a taker with nothing of its
+  own in flight reloads the record so the flushed text is what it edits.
 
   The record lifecycle stays in the LiveView: actually persisting an autosave
   and adopting a peer's save re-enter it through
@@ -16,13 +35,16 @@ defmodule KilnCMSWeb.ContentEditor.Session do
   Function bodies are moved verbatim from `KilnCMSWeb.ContentEditorLive`.
   """
 
-  import Phoenix.Component, only: [assign: 2, assign: 3]
-  import Phoenix.LiveView, only: [attach_hook: 4, put_flash: 3]
+  import Phoenix.Component, only: [assign: 3]
+  import Phoenix.LiveView, only: [attach_hook: 4, push_event: 3, put_flash: 3]
   import KilnCMSWeb.ContentEditor.Preview, only: [broadcast_preview: 1, refresh_preview: 1]
-  import KilnCMSWeb.ContentEditor.Shared, only: [changeset_errors: 1, color_for: 1]
+
+  import KilnCMSWeb.ContentEditor.Shared,
+    only: [changeset_errors: 1, cursors_from_locks: 2, field_label: 1]
 
   use Gettext, backend: KilnCMSWeb.Gettext
 
+  alias KilnCMS.Collab.FieldLock
   alias KilnCMSWeb.ContentEditorLive
   alias KilnCMSWeb.Presence
 
@@ -38,6 +60,13 @@ defmodule KilnCMSWeb.ContentEditor.Session do
   # bridge the gap between words, short enough that a closed tab stops typing
   # while the reader is still looking at the composer.
   @typing_ttl :timer.seconds(3)
+
+  # How long a holder asked to flush waits for its client's `body_flushed`
+  # before answering the lock anyway. Longer than the 300 ms `phx-debounce` /
+  # rich-text push debounce, so a keystroke already typed reaches the server
+  # first; well inside the lock's own 3 s flush timeout, so the lock never has
+  # to give up on a healthy session.
+  @flush_fallback_ms Application.compile_env(:kiln_cms, [:editor, :flush_fallback_ms], 700)
 
   def on_mount(:default, _params, _session, socket) do
     {:cont,
@@ -62,10 +91,9 @@ defmodule KilnCMSWeb.ContentEditor.Session do
 
   defp info(%Phoenix.Socket.Broadcast{event: "presence_diff"}, socket) do
     editors = Presence.editors(socket.assigns.kind, socket.assigns.record.id)
-    # Drop cursors for anyone who has left, so stale focus badges disappear.
-    present = MapSet.new(editors, & &1.id)
-    cursors = Map.filter(socket.assigns.cursors, fn {id, _} -> MapSet.member?(present, id) end)
-    socket = assign(socket, editors: editors, cursors: cursors)
+    # The focus badges are NOT pruned here: a lock outlives its holder's
+    # presence entry by the grace period, and the badge should say so.
+    socket = assign(socket, :editors, editors)
 
     # If the departing persister left us in charge while we hold live-synced
     # edits, take over persistence by scheduling the autosave we suppressed.
@@ -102,17 +130,72 @@ defmodule KilnCMSWeb.ContentEditor.Session do
   # editor down with a `FunctionClauseError`.
   defp info({:block_op, _op}, socket), do: {:halt, socket}
 
-  # A collaborator focused (field set) or left (field nil) a field. Ignore our
-  # own echo — we only render *other* people's cursors.
-  defp info({:cursor, %{id: id} = cursor}, socket) do
-    cursors =
-      cond do
-        id == socket.assigns.actor.id -> socket.assigns.cursors
-        is_nil(cursor.field) -> Map.delete(socket.assigns.cursors, id)
-        true -> Map.put(socket.assigns.cursors, id, put_color(cursor))
-      end
+  # The record's lock map changed — somebody focused, blurred, left, idled
+  # out, or was taken over. The full map arrives every time, so nothing here
+  # has to be reconciled.
+  defp info({:field_locks, topic, locks}, socket) do
+    if topic == lock_topic(socket),
+      do: {:halt, assign_locks(socket, locks)},
+      else: {:halt, socket}
+  end
 
-    {:halt, assign(socket, :cursors, cursors)}
+  # The lock asks this holder to flush before a takeover: first the client
+  # hands over what still sits in its debounce (`flush_body` → the rich-text
+  # hook answers `rich_text_body` then `body_flushed`), then the pending
+  # autosave persists it, only then the transfer. A client that does not
+  # answer within the fallback window is not waited for.
+  defp info({:lock_flush, _topic, field}, socket) do
+    Process.send_after(self(), :flush_fallback, @flush_fallback_ms)
+
+    {:halt,
+     socket
+     |> assign(:flushing, [field | socket.assigns.flushing])
+     |> push_event("flush_body", %{field: field})}
+  end
+
+  defp info(:flush_fallback, socket) do
+    if socket.assigns.flushing == [],
+      do: {:halt, socket},
+      else: {:halt, finish_flush(socket)}
+  end
+
+  # Somebody took a field from this session. The lock map broadcast has
+  # already made it readonly; this is the note saying who, and where the text
+  # this session had typed now stands. Only `:saved` earns "saved": a collab
+  # non-persister's `:synced` covers the shared prose, not a title it typed.
+  defp info({:lock_taken, _topic, field, by}, socket) do
+    label = field_label(field)
+
+    note =
+      if socket.assigns.save_state == :saved,
+        do:
+          gettext("%{name} took over “%{field}”. Your changes are saved.",
+            name: by.name,
+            field: label
+          ),
+        else:
+          gettext(
+            "%{name} took over “%{field}”. Your unsaved changes are still in this form.",
+            name: by.name,
+            field: label
+          )
+
+    {:halt, put_flash(socket, :info, note)}
+  end
+
+  # The takeover this session asked for went through. The displaced holder's
+  # flush persisted whatever it had (a draft autosaves), so a session with
+  # nothing of its own in flight reloads the record and edits the flushed
+  # text. A session with unsaved edits keeps its form — reloading would throw
+  # them away — and its next save meets the optimistic lock as any stale
+  # writer does. Either way the client is told to put the caret in the field.
+  defp info({:lock_granted, _topic, field}, socket) do
+    socket =
+      if draft?(socket) and socket.assigns.save_state == :saved,
+        do: ContentEditorLive.reload_latest(socket),
+        else: socket
+
+    {:halt, push_event(socket, "lock_granted", %{field: field})}
   end
 
   # Another editor of this item persisted a write (#694).
@@ -170,13 +253,57 @@ defmodule KilnCMSWeb.ContentEditor.Session do
   # ── handle_event hooks ──────────────────────────────────────────────────────
 
   defp event("field_focus", %{"field" => field}, socket) when is_binary(field) do
-    broadcast_cursor(socket, field)
-    {:halt, assign(socket, :self_field, field)}
+    {:halt, focus_field(socket, field)}
   end
 
   defp event("field_blur", _params, socket) do
-    broadcast_cursor(socket, nil)
-    {:halt, assign(socket, :self_field, nil)}
+    {:halt, blur_field(socket)}
+  end
+
+  # A click on a locked field (or its badge): open the takeover dialog for it,
+  # with the holder as it stands. Nothing to ask about a field nobody else
+  # holds — a stale click after the holder blurred is just a click.
+  defp event("ask_takeover", %{"field" => field}, socket) when is_binary(field) do
+    case Map.get(socket.assigns.field_locks, field) do
+      %{pid: pid} = holder when pid != self() ->
+        {:halt, assign(socket, :takeover, %{field: field, holder: holder})}
+
+      _free_or_mine ->
+        {:halt, socket}
+    end
+  end
+
+  defp event("ask_takeover", _params, socket), do: {:halt, socket}
+
+  defp event("cancel_takeover", _params, socket), do: {:halt, assign(socket, :takeover, nil)}
+
+  # The dialog closes at once either way: `:ok` means the field was free (or
+  # its holder gone) and the lock map broadcast already made it ours;
+  # `:pending` means the holder is flushing and `{:lock_granted, _, _}` follows.
+  defp event("confirm_takeover", _params, socket) do
+    case socket.assigns.takeover do
+      nil ->
+        {:halt, socket}
+
+      %{field: field} ->
+        FieldLock.takeover(lock_topic(socket), field, lock_user(socket), self())
+        {:halt, assign(socket, :takeover, nil)}
+    end
+  end
+
+  # The rich-text hook's answer to `flush_body`: its `rich_text_body` (if it
+  # had one pending) is already in, so the flush can settle now rather than
+  # on the fallback timer.
+  defp event("body_flushed", %{"field" => field}, socket) when is_binary(field) do
+    if field in socket.assigns.flushing,
+      do: {:halt, finish_flush(socket)},
+      else: {:halt, socket}
+  end
+
+  # A keystroke: activity for the idle rule and the takeover dialog's
+  # "is typing right now" — then on to the LiveView's own handler.
+  defp event(event, _params, socket) when event in ["validate", "rich_text_body"] do
+    {:cont, touch_lock(socket)}
   end
 
   # Block-scoped presence (advisory only — nothing here locks a block). The
@@ -369,21 +496,74 @@ defmodule KilnCMSWeb.ContentEditor.Session do
     assign(socket, :typing, typing)
   end
 
-  defp put_color(%{} = cursor), do: Map.put(cursor, :color, color_for(cursor.id))
+  # ── field locks ─────────────────────────────────────────────────────────────
 
-  # Tell other editors of this item which field we just focused (or left, when
-  # `field` is nil). Reuses the Presence editing topic.
-  defp broadcast_cursor(socket, field) do
-    Phoenix.PubSub.broadcast(
-      KilnCMS.PubSub,
-      Presence.topic(socket.assigns.kind, socket.assigns.record.id),
-      {:cursor,
-       %{
-         id: socket.assigns.actor.id,
-         name: Presence.display_name(socket.assigns.actor),
-         field: field
-       }}
-    )
+  # The lock map, and the badges derived from it, in one move — so the two
+  # can never disagree about who holds what.
+  def assign_locks(socket, locks) do
+    socket
+    |> assign(:field_locks, locks)
+    |> assign(:cursors, cursors_from_locks(locks, self()))
+  end
+
+  def lock_topic(socket), do: Presence.topic(socket.assigns.kind, socket.assigns.record.id)
+
+  defp lock_user(socket),
+    do: %{id: socket.assigns.actor.id, name: Presence.display_name(socket.assigns.actor)}
+
+  # Focus: ask for the field. A `{:held, _}` answer changes nothing here — the
+  # input is readonly through the lock map already, and the dialog is opened
+  # by a click, not by focus, so tabbing through a locked field stays quiet.
+  # A focus that arrives without the blur before it (a browser quirk, a
+  # dropped event) still lets go of the previous field first.
+  defp focus_field(socket, field) do
+    socket = if socket.assigns.self_field in [nil, field], do: socket, else: blur_field(socket)
+    FieldLock.acquire(lock_topic(socket), field, lock_user(socket), self())
+    assign(socket, :self_field, field)
+  end
+
+  defp blur_field(%{assigns: %{self_field: nil}} = socket), do: socket
+
+  defp blur_field(socket) do
+    FieldLock.release(lock_topic(socket), socket.assigns.self_field, self())
+    assign(socket, :self_field, nil)
+  end
+
+  # A keystroke in the focused field. Holding it: a ping, so the idle clock
+  # restarts and the takeover dialog says "typing right now". Not holding it
+  # and nobody else does either (the idle rule let it go while the tab sat
+  # there, and the person is back): take it again. Held by somebody else: the
+  # input is readonly and this keystroke is a stale event — nothing to do.
+  defp touch_lock(%{assigns: %{self_field: nil}} = socket), do: socket
+
+  defp touch_lock(socket) do
+    field = socket.assigns.self_field
+
+    case Map.get(socket.assigns.field_locks, field) do
+      %{pid: pid} when pid == self() -> FieldLock.ping(lock_topic(socket), self())
+      nil -> FieldLock.acquire(lock_topic(socket), field, lock_user(socket), self())
+      _held_by_other -> :ok
+    end
+
+    socket
+  end
+
+  # Settle every flush in flight: persist a pending draft autosave (the
+  # version snapshot a takeover promises), then tell the lock. Only a draft
+  # with an autosave queued (`:saving`) has anything to persist — published
+  # content saves by hand, and a collab non-persister's text lives in the
+  # shared document — so for those the flush is the client push alone.
+  defp finish_flush(socket) do
+    fields = socket.assigns.flushing
+    socket = assign(socket, :flushing, [])
+
+    socket =
+      if draft?(socket) and socket.assigns.save_state == :saving,
+        do: socket |> cancel_autosave_timer() |> ContentEditorLive.do_autosave(),
+        else: socket
+
+    Enum.each(fields, &FieldLock.flushed(lock_topic(socket), &1))
+    socket
   end
 
   # Tell the other editors of this item that the record on disk moved (#694).

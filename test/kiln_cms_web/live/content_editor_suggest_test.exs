@@ -658,12 +658,7 @@ defmodule KilnCMSWeb.ContentEditorSuggestTest do
       lv = suggest(conn, editor, record)
 
       topic = Presence.topic("page", record.id)
-
-      Phoenix.PubSub.broadcast(
-        KilnCMS.PubSub,
-        topic,
-        {:cursor, %{id: "other", name: "bob", field: "seo_title"}}
-      )
+      {_holder, :ok} = KilnCMS.Test.FieldLockHolder.hold(topic, "seo_title")
 
       html = render_click(lv, "seo_accept_all", %{})
 
@@ -728,8 +723,7 @@ defmodule KilnCMSWeb.ContentEditorSuggestTest do
       lv = suggest(conn, editor, record)
 
       topic = Presence.topic("page", record.id)
-      cursor = %{id: "other-editor", name: "bob", field: "seo_title"}
-      Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic, {:cursor, cursor})
+      {holder, :ok} = KilnCMS.Test.FieldLockHolder.hold(topic, "seo_title")
       assert render(lv) =~ "ring-warning"
 
       # The lock is advisory — the input goes readonly but still submits — so
@@ -741,7 +735,7 @@ defmodule KilnCMSWeb.ContentEditorSuggestTest do
       # exactly which ones were skipped rather than a generic notice.
       assert html =~ "Another editor is editing SEO title"
 
-      Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic, {:cursor, %{cursor | field: nil}})
+      KilnCMS.Test.FieldLockHolder.release(holder, "seo_title")
       render_click(lv, "seo_accept", %{"field" => "seo_title"})
       assert field_value(lv, "seo_title") == "SEO: Understanding kiln firing"
     end

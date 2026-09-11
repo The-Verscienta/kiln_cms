@@ -250,7 +250,10 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
             locked_fields={@locked_fields}
           />
         </div>
-        <div class={["relative", lock_ring(@locked_fields, "seo_title")]}>
+        <div
+          class={["relative", lock_ring(@locked_fields, "seo_title")]}
+          {takeover_attrs(@locked_fields, "seo_title")}
+        >
           <.input
             field={@form[:seo_title]}
             label={gettext("SEO title")}
@@ -264,7 +267,10 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
           />
           <.field_cursors field="seo_title" cursors={@cursors} />
         </div>
-        <div class={["relative", lock_ring(@locked_fields, "seo_description")]}>
+        <div
+          class={["relative", lock_ring(@locked_fields, "seo_description")]}
+          {takeover_attrs(@locked_fields, "seo_description")}
+        >
           <.input
             field={@form[:seo_description]}
             type="textarea"
@@ -279,7 +285,10 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
           />
           <.field_cursors field="seo_description" cursors={@cursors} />
         </div>
-        <div class={["relative", lock_ring(@locked_fields, "seo_keywords")]}>
+        <div
+          class={["relative", lock_ring(@locked_fields, "seo_keywords")]}
+          {takeover_attrs(@locked_fields, "seo_keywords")}
+        >
           <.input
             field={@form[:seo_keywords]}
             label={gettext("SEO keywords")}
@@ -291,7 +300,10 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
           </p>
           <.field_cursors field="seo_keywords" cursors={@cursors} />
         </div>
-        <div class={["relative", lock_ring(@locked_fields, "seo_image")]}>
+        <div
+          class={["relative", lock_ring(@locked_fields, "seo_image")]}
+          {takeover_attrs(@locked_fields, "seo_image")}
+        >
           <.input
             field={@form[:seo_image]}
             label={gettext("Social image")}
@@ -333,7 +345,10 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
           <.field_cursors field="seo_image" cursors={@cursors} />
         </div>
         <.social_card form={@form} media={@media} current_org={@current_org} />
-        <div class={["relative", lock_ring(@locked_fields, "canonical_url")]}>
+        <div
+          class={["relative", lock_ring(@locked_fields, "canonical_url")]}
+          {takeover_attrs(@locked_fields, "canonical_url")}
+        >
           <.input
             field={@form[:canonical_url]}
             label={gettext("Canonical URL")}

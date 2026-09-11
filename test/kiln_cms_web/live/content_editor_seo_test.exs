@@ -397,8 +397,7 @@ defmodule KilnCMSWeb.ContentEditorSeoTest do
       {lv, _html} = open_editor(conn, editor, page)
 
       topic = Presence.topic("page", page.id)
-      cursor = %{id: "other-editor", name: "bob", field: "seo_image"}
-      Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic, {:cursor, cursor})
+      {holder, :ok} = KilnCMS.Test.FieldLockHolder.hold(topic, "seo_image")
       assert render(lv) =~ "ring-warning"
 
       # The lock is advisory — a readonly input still submits — so the write
@@ -410,7 +409,7 @@ defmodule KilnCMSWeb.ContentEditorSeoTest do
       assert html =~ "Another editor is editing the social image"
 
       # Released when they move away.
-      Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic, {:cursor, %{cursor | field: nil}})
+      KilnCMS.Test.FieldLockHolder.release(holder, "seo_image")
       render_click(lv, "use_featured_image", %{})
       assert seo_image_value(lv) == item.url
     end

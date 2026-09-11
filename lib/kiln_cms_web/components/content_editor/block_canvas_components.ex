@@ -204,6 +204,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
         <div
           :if={field.name == @primary}
           class={["relative", lock_ring(@locked_fields, @bf[field.name].name)]}
+          {takeover_attrs(@locked_fields, @bf[field.name].name)}
         >
           <.input
             field={@bf[field.name]}
