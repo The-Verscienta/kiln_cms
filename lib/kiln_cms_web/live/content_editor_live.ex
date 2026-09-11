@@ -1439,7 +1439,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # indicator alone would leave a click on Save looking like nothing happened
   # — a flash saying why the rest did not run.
   defp flush_working_copy(socket, params) do
-    if socket.assigns.save_state in [:saving, :error] do
+    if socket.assigns.save_state in [:pending, :error] do
       socket = socket |> cancel_autosave_timer() |> autosave_working_copy(params)
 
       cond do
@@ -3469,6 +3469,40 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  # "Publish changes" (docs/working-copy.md): flush the text still waiting for
+  # the debounce first, so what goes live is what is on screen, then hand the
+  # working copy over. Re-fetched rather than adopting the action's result, as
+  # `mark_reviewed` does: `health`/`due_at` are calculations the result does
+  # not carry.
+  defp run_workflow(socket, "publish_changes") do
+    params =
+      socket.assigns.form
+      |> AshPhoenix.Form.params()
+      |> inject_children(socket.assigns.block_children)
+      |> inject_rich_bodies(socket.assigns.rich_bodies)
+
+    case flush_working_copy(socket, params) do
+      {:ok, socket} ->
+        live_transition(socket, "publish_changes", gettext("Published your changes."))
+
+      {:error, socket} ->
+        socket
+    end
+  end
+
+  # "Discard the changes": the published text is back, and every rich-text
+  # block remounts onto it — `reset_editors/1`, as a version restore does,
+  # since TipTap keeps whatever it was showing across a form replacement.
+  defp run_workflow(socket, "discard_changes") do
+    socket
+    |> cancel_autosave_timer()
+    |> live_transition(
+      "discard_changes",
+      gettext("Discarded the changes — the published text is back.")
+    )
+    |> reset_editors()
+  end
+
   defp run_workflow(socket, _action), do: socket
 
   defp settle_before_workflow(%{assigns: %{save_state: state}} = socket)
@@ -3523,42 +3557,6 @@ defmodule KilnCMSWeb.ContentEditorLive do
         put_flash(socket, :error, gettext("That action isn't allowed right now."))
     end
   end
-
-  # "Publish changes" (docs/working-copy.md): flush the text still waiting for
-  # the debounce first, so what goes live is what is on screen, then hand the
-  # working copy over. Re-fetched rather than adopting the action's result, as
-  # `mark_reviewed` does: `health`/`due_at` are calculations the result does
-  # not carry.
-  defp run_workflow(socket, "publish_changes") do
-    params =
-      socket.assigns.form
-      |> AshPhoenix.Form.params()
-      |> inject_children(socket.assigns.block_children)
-      |> inject_rich_bodies(socket.assigns.rich_bodies)
-
-    case flush_working_copy(socket, params) do
-      {:ok, socket} ->
-        live_transition(socket, "publish_changes", gettext("Published your changes."))
-
-      {:error, socket} ->
-        socket
-    end
-  end
-
-  # "Discard the changes": the published text is back, and every rich-text
-  # block remounts onto it — `reset_editors/1`, as a version restore does,
-  # since TipTap keeps whatever it was showing across a form replacement.
-  defp run_workflow(socket, "discard_changes") do
-    socket
-    |> cancel_autosave_timer()
-    |> live_transition(
-      "discard_changes",
-      gettext("Discarded the changes — the published text is back.")
-    )
-    |> reset_editors()
-  end
-
-  defp run_workflow(socket, _action), do: socket
 
   defp live_transition(socket, verb, flash) do
     %{kind: kind, record: record, actor: actor} = socket.assigns
