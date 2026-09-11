@@ -135,9 +135,9 @@ defmodule KilnCMSWeb.FunnelLive do
 
         <section class="space-y-3">
           <h2 class="text-lg font-medium">{gettext("Your funnels")} ({length(@funnels)})</h2>
-          <p :if={@funnels == []} class="text-sm text-base-content/60">
-            {gettext("No funnels yet.")}
-          </p>
+          <.empty_state :if={@funnels == []} icon="hero-funnel" title={gettext("No funnels yet")}>
+            {gettext("Create a funnel above to define multi-step journeys.")}
+          </.empty_state>
           <ul :if={@funnels != []} class="card divide-y divide-base-content/10 overflow-hidden">
             <li :for={funnel <- @funnels} class="flex items-center justify-between gap-3 p-3">
               <.link

@@ -52,7 +52,7 @@ defmodule KilnCMSWeb.OverviewLive do
      |> assign(:platform_admin?, KilnCMSWeb.LiveUserAuth.platform_admin?(socket))
      |> assign_backup_warning()
      |> assign_blocked_experiments()
-     |> assign(:page_title, gettext("Overview"))
+     |> assign(:page_title, gettext("Home"))
      |> load_metrics()}
   end
 
@@ -86,7 +86,9 @@ defmodule KilnCMSWeb.OverviewLive do
     |> assign(:fields_count, if(admin?, do: count(FieldDefinition, actor, org)))
     |> assign(:webhooks, if(admin?, do: webhook_health(actor, org)))
     |> assign(:forms, if(admin?, do: form_activity(actor, org)))
-    |> assign(:keys_count, if(admin?, do: count(ApiKey, actor, org)))
+    # Platform admins only, like the backup strip: API keys are instance-wide,
+    # and the tile links to a console that turns a per-org admin away.
+    |> assign(:keys_count, if(socket.assigns.platform_admin?, do: count(ApiKey, actor, org)))
     |> assign(
       :my_open_tasks,
       length(CMS.list_tasks_for_assignee!(actor.id, actor: actor, tenant: org))
@@ -204,14 +206,14 @@ defmodule KilnCMSWeb.OverviewLive do
       flash={@flash}
       current_user={@current_user}
       current_org={@current_org}
-      page_title={gettext("Overview")}
+      page_title={@page_title}
       active={:overview}
     >
       <div class="space-y-5">
         <div>
-          <h1 class="text-xl font-semibold tracking-tight">{gettext("Overview")}</h1>
+          <h1 class="text-xl font-semibold tracking-tight">{gettext("Home")}</h1>
           <p class="text-sm text-base-content/60">
-            {gettext("The site at a glance — eight domains arranged around your content.")}
+            {gettext("What needs you next — then eight domains around your content.")}
           </p>
         </div>
 
@@ -340,9 +342,21 @@ defmodule KilnCMSWeb.OverviewLive do
                   count: @unresolved_threads
                 )}
               </li>
+              <%!-- Admins are the ones who approve, so to them the same count
+                    is work waiting on them; to an editor it is status. --%>
               <li :if={Map.get(@by_state, :in_review, 0) > 0}>
                 <.link navigate={~p"/editor?status=in_review"} class="text-primary hover:underline">
-                  {gettext("%{count} waiting for review", count: Map.get(@by_state, :in_review, 0))}
+                  {if @admin?,
+                    do:
+                      ngettext(
+                        "%{count} item needs your approval",
+                        "%{count} items need your approval",
+                        Map.get(@by_state, :in_review, 0)
+                      ),
+                    else:
+                      gettext("%{count} waiting for review",
+                        count: Map.get(@by_state, :in_review, 0)
+                      )}
                 </.link>
               </li>
               <li :if={@stale > 0}>
@@ -374,12 +388,17 @@ defmodule KilnCMSWeb.OverviewLive do
                 {gettext("All quiet.")}
               </li>
             </ul>
-            <.link
-              navigate={~p"/editor"}
-              class="mt-auto pt-1 text-xs font-medium text-primary hover:underline"
-            >
-              {gettext("Open content")} <span aria-hidden="true">→</span>
-            </.link>
+            <div class="mt-auto flex flex-wrap items-center gap-3 pt-2">
+              <.link navigate={~p"/editor"} class="btn btn-sm btn-primary">
+                {gettext("Continue editing")}
+              </.link>
+              <.link
+                navigate={~p"/editor?status=draft"}
+                class="text-xs font-medium text-primary hover:underline"
+              >
+                {gettext("View drafts")} <span aria-hidden="true">→</span>
+              </.link>
+            </div>
           </div>
 
           <.tile :for={tile <- @tiles} tile={tile} />

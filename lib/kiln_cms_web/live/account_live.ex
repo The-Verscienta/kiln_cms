@@ -55,10 +55,13 @@ defmodule KilnCMSWeb.AccountLive do
 
   @impl true
   def mount(_params, _session, socket) do
+    tier = KilnCMSWeb.LiveUserAuth.effective_tier(socket)
+
     {:ok,
      socket
      |> assign(:page_title, gettext("Your account"))
      |> assign(:reconciling?, false)
+     |> assign(:editorial_tier, tier)
      |> load_memberships()
      |> load_subscriber()}
   end
@@ -263,6 +266,24 @@ defmodule KilnCMSWeb.AccountLive do
           <h1 class="text-3xl font-semibold">{gettext("Your account")}</h1>
           <p class="text-base-content/70">{@current_user.email}</p>
         </header>
+
+        <%!-- Editors and admins only. Nothing is said to anyone else: this is
+              the page every self-registered reader, member and newsletter
+              subscriber lands on, and telling each of them they lack editorial
+              access (and to ask for it) treats every reader as a would-be
+              editor. --%>
+        <section
+          :if={@editorial_tier in [:editor, :admin]}
+          class="card card-pad space-y-3"
+        >
+          <h2 class="text-lg font-medium">{gettext("Editorial workspace")}</h2>
+          <p class="text-sm text-base-content/70">
+            {gettext("Jump back into the console to write and publish.")}
+          </p>
+          <.link navigate={~p"/editor/overview"} class="btn btn-primary btn-sm">
+            {gettext("Open editor home")}
+          </.link>
+        </section>
 
         <section class="card card-pad space-y-4">
           <h2 class="text-lg font-medium">{gettext("Membership")}</h2>

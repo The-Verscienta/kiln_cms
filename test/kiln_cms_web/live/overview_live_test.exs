@@ -64,10 +64,22 @@ defmodule KilnCMSWeb.OverviewLiveTest do
 
     {:ok, lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/overview")
 
-    assert html =~ "Overview"
+    # The heading itself — the sidebar's "Home" link would satisfy a bare
+    # substring match on the whole page.
+    assert has_element?(lv, "h1", "Home")
     assert lv |> element("#overview-total") |> render() =~ ">3<"
     assert html =~ "1 published · 1 in review · 1 drafts"
     assert html =~ "1 waiting for review"
+  end
+
+  # Admins are the ones who approve, so the same count is work waiting on them.
+  test "an admin sees in-review items as waiting on their approval", %{conn: conn} do
+    seed_page(%{state: :in_review})
+
+    {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+    assert html =~ "1 item needs your approval"
+    refute html =~ "waiting for review"
   end
 
   test "a quiet site says so", %{conn: conn} do

@@ -277,24 +277,33 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
         :for={{item, i} <- Enum.with_index(@items)}
         class="flex items-start gap-2 rounded border border-base-content/10 p-2"
       >
-        <div class="grow space-y-1">
-          <input
-            type="text"
-            name={"#{@name}[#{i}][#{@key_a}]"}
-            value={item[@key_a]}
-            placeholder={@label_a}
-            aria-label={@label_a}
-            phx-debounce="300"
-            class="w-full rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
-          />
-          <textarea
-            name={"#{@name}[#{i}][#{@key_b}]"}
-            placeholder={@label_b}
-            aria-label={@label_b}
-            rows="2"
-            phx-debounce="300"
-            class="w-full rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
-          >{item[@key_b]}</textarea>
+        <div class="grow space-y-2">
+          <%!-- Each control is wrapped in its visible label, so the label names
+                it (and a click on it focuses it) without an id to keep unique
+                across rows. --%>
+          <label class="block space-y-1">
+            <span class="text-xs font-medium text-base-content/70">{@label_a}</span>
+            <input
+              type="text"
+              name={"#{@name}[#{i}][#{@key_a}]"}
+              value={item[@key_a]}
+              placeholder={@label_a}
+              aria-label={@label_a}
+              phx-debounce="300"
+              class="field-input w-full text-sm"
+            />
+          </label>
+          <label class="block space-y-1">
+            <span class="text-xs font-medium text-base-content/70">{@label_b}</span>
+            <textarea
+              name={"#{@name}[#{i}][#{@key_b}]"}
+              placeholder={@label_b}
+              aria-label={@label_b}
+              rows="2"
+              phx-debounce="300"
+              class="field-input w-full text-sm"
+            >{item[@key_b]}</textarea>
+          </label>
         </div>
         <button
           type="button"
@@ -779,16 +788,33 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
                   <.icon name="hero-bars-3" class="size-4" />
                   {dsl_label(child["_type"])}
                 </span>
-                <button
-                  type="button"
-                  phx-click="col_remove_child"
-                  phx-value-id={@block_id}
-                  phx-value-child={child["id"]}
-                  aria-label={gettext("Remove block")}
-                  class="text-base-content/50 hover:text-error"
-                >
-                  <.icon name="hero-trash" class="size-4" />
-                </button>
+                <div class="flex items-center gap-1">
+                  <%!-- Back onto the canvas, right after this columns block —
+                        offered for the types this editor nests, the only ones
+                        it knows how to hand back. --%>
+                  <button
+                    :if={child["_type"] in @child_types}
+                    type="button"
+                    phx-click="promote_child"
+                    phx-value-id={@block_id}
+                    phx-value-child={child["id"]}
+                    aria-label={gettext("Move to canvas")}
+                    title={gettext("Move to canvas")}
+                    class="text-base-content/50 hover:text-base-content"
+                  >
+                    <.icon name="hero-arrow-left-start-on-rectangle" class="size-4" />
+                  </button>
+                  <button
+                    type="button"
+                    phx-click="col_remove_child"
+                    phx-value-id={@block_id}
+                    phx-value-child={child["id"]}
+                    aria-label={gettext("Remove block")}
+                    class="text-base-content/50 hover:text-error"
+                  >
+                    <.icon name="hero-trash" class="size-4" />
+                  </button>
+                </div>
               </div>
               <.nested_child_fields block_id={@block_id} child={child} />
             </div>
@@ -827,18 +853,22 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
 
   def nested_child_fields(assigns) do
     ~H"""
-    <div class="space-y-1">
-      <input
-        :for={{field, ph} <- nested_fields_for(@child["_type"])}
-        type="text"
-        value={@child[field] || ""}
-        placeholder={ph}
-        phx-blur="col_update_child"
-        phx-value-id={@block_id}
-        phx-value-child={@child["id"]}
-        phx-value-field={field}
-        class="w-full rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
-      />
+    <div class="space-y-2">
+      <%!-- Wrapped in its visible label, which names the input and focuses it
+            on click — no id needed, so none to keep unique per child. --%>
+      <label :for={{field, label} <- nested_fields_for(@child["_type"])} class="block space-y-1">
+        <span class="text-xs font-medium text-base-content/70">{label}</span>
+        <input
+          type="text"
+          value={@child[field] || ""}
+          placeholder={label}
+          phx-blur="col_update_child"
+          phx-value-id={@block_id}
+          phx-value-child={@child["id"]}
+          phx-value-field={field}
+          class="field-input w-full text-sm"
+        />
+      </label>
       <%!-- Named, unlike its nameless siblings above, and the name carries the
       identifiers (#893). A `<select>` inside a form routes its own `phx-change`
       through LiveView's `pushInput`, which serializes the form filtered to the
@@ -852,19 +882,21 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
       content changeset exactly as the nameless inputs do: `validate` matches
       `%{"form" => params}` and never sees this key, and the nested tree is
       re-injected from socket state by `inject_children/2` regardless. --%>
-      <select
-        :if={@child["_type"] == "heading"}
-        name={"col_child[#{@block_id}][#{@child["id"]}][level]"}
-        phx-change="col_update_child"
-        class="rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
-      >
-        <%!-- Matched to what will actually publish. A child with no stored `level`
-        (a legacy one, or an empty string) made `to_int/1` return 0, so no option
-        was `selected` and the browser showed the first — H1 — while delivery
-        renders `h2`, because `Blocks.Heading.clamp/1` falls back to its default.
-        Harmless while the control was inert; a lie now that it works. --%>
-        <option :for={n <- 1..6} value={n} selected={child_heading_level(@child) == n}>H{n}</option>
-      </select>
+      <label :if={@child["_type"] == "heading"} class="block space-y-1">
+        <span class="text-xs font-medium text-base-content/70">{gettext("Heading level")}</span>
+        <select
+          name={"col_child[#{@block_id}][#{@child["id"]}][level]"}
+          phx-change="col_update_child"
+          class="field-select text-sm"
+        >
+          <%!-- Matched to what will actually publish. A child with no stored `level`
+          (a legacy one, or an empty string) made `to_int/1` return 0, so no option
+          was `selected` and the browser showed the first — H1 — while delivery
+          renders `h2`, because `Blocks.Heading.clamp/1` falls back to its default.
+          Harmless while the control was inert; a lie now that it works. --%>
+          <option :for={n <- 1..6} value={n} selected={child_heading_level(@child) == n}>H{n}</option>
+        </select>
+      </label>
     </div>
     """
   end

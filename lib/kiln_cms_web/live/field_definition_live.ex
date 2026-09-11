@@ -398,9 +398,13 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         <section class="space-y-6">
           <h2 class="text-lg font-medium">{gettext("Defined fields")}</h2>
 
-          <p :if={@grouped == []} class="text-sm text-base-content/60">
-            {gettext("No custom fields yet.")}
-          </p>
+          <.empty_state
+            :if={@grouped == []}
+            icon="hero-adjustments-horizontal"
+            title={gettext("No custom fields yet")}
+          >
+            {gettext("Add a field above to collect structured metadata on content.")}
+          </.empty_state>
 
           <div :for={{scope, definitions} <- @grouped} class="space-y-3">
             <h3 class="text-sm font-semibold text-base-content/80">

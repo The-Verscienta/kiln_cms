@@ -311,9 +311,13 @@ defmodule KilnCMSWeb.AutomationLive do
         <section class="space-y-4">
           <h2 class="text-lg font-medium">{gettext("Rules")} ({length(@rules)})</h2>
 
-          <p :if={@rules == []} class="text-sm text-base-content/60">
-            {gettext("No automation rules yet.")}
-          </p>
+          <.empty_state
+            :if={@rules == []}
+            icon="hero-cpu-chip"
+            title={gettext("No automation rules yet")}
+          >
+            {gettext("Add a rule above to run actions when content events fire.")}
+          </.empty_state>
 
           <ul :if={@rules != []} class="card divide-y divide-base-content/10 overflow-hidden">
             <li :for={rule <- @rules} id={"rule-#{rule.id}"} class="p-4">

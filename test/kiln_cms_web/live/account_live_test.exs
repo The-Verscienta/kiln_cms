@@ -124,6 +124,18 @@ defmodule KilnCMSWeb.AccountLiveTest do
       assert {:ok, _view, html} = live(conn, ~p"/account")
       assert html =~ "Your account"
       assert html =~ to_string(user.email)
+
+      # A reader is not told they lack editorial access, nor to ask for it:
+      # this is every self-registered reader's page, not an editor's waiting room.
+      refute html =~ "editorial access"
+      refute html =~ "Open editor home"
+    end
+
+    test "an editor is given a way back into the console", %{conn: conn} do
+      conn = log_in(conn, authed_user(:editor))
+
+      assert {:ok, view, _html} = live(conn, ~p"/account")
+      assert has_element?(view, ~s(a[href="/editor/overview"]), "Open editor home")
     end
 
     test "an editor may also use it", %{conn: conn} do

@@ -91,8 +91,9 @@ defmodule KilnCMSWeb.AutomationLiveTest do
       # rule can be scoped correctly, rather than left at "Any content type"
       # (which would also match every content-publish event) or pointed at an
       # actual content type (which `Rule.matching`'s exact string match would
-      # then never fire for).
-      assert html =~ "Tasks"
+      # then never fire for). Asserted on the option itself: the console
+      # sidebar's own "Tasks" link would satisfy a substring match on the page.
+      assert html =~ ~s(<option value="task">Tasks</option>)
 
       view
       |> form("#new-rule-form",
