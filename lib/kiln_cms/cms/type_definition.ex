@@ -260,7 +260,7 @@ defmodule KilnCMS.CMS.TypeDefinition do
       constraints: [max_length: KilnCMS.Limits.line()]
 
     # Optional pathauto alias pattern (#485): composes each entry's
-    # multi-segment `path_alias`, e.g. "/acupuncture/needle/size/[field:size]".
+    # multi-segment `path_alias`, e.g. "/products/shoes/size/[field:size]".
     # Nil = no auto alias (flat URLs; aliases stay manual).
     attribute :alias_pattern, :string,
       public?: true,

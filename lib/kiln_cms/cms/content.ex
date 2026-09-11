@@ -239,7 +239,7 @@ defmodule KilnCMS.CMS.Content do
     slug_pattern = opts |> Keyword.get(:slug_pattern) |> KilnCMS.Slug.Pattern.validate!()
 
     # Optional pathauto ALIAS pattern (#485), e.g.
-    # "/acupuncture/needle/size/[field:size]" — auto-fills `path_alias`.
+    # "/products/shoes/size/[field:size]" — auto-fills `path_alias`.
     alias_pattern =
       opts |> Keyword.get(:alias_pattern) |> KilnCMS.Slug.Pattern.validate!(usage: :alias)
 
@@ -3005,7 +3005,7 @@ defmodule KilnCMS.CMS.Content do
           constraints: [max_length: KilnCMS.Limits.line()]
 
         # Optional multi-segment path alias (#485): when set, the record's
-        # canonical public URL (`/acupuncture/needle/size/14mm`) — the flat
+        # canonical public URL (`/products/shoes/size/42`) — the flat
         # `/<prefix>/<slug>` URL 301s to it. The slug stays the single-segment
         # internal handle. Validated by `Validations.PathAliasValid`.
         attribute :path_alias, :string,

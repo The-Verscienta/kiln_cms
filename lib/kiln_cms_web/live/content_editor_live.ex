@@ -4742,7 +4742,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                 <.input
                   field={@form[:path_alias]}
                   label={gettext("Path alias (optional)")}
-                  placeholder="/acupuncture/needle/size/14mm"
+                  placeholder="/products/shoes/size/42"
                   readonly={field_locked?(@locked_fields, "path_alias")}
                   {field_attrs("path_alias")}
                 />
