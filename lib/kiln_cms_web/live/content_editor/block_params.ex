@@ -152,11 +152,17 @@ defmodule KilnCMSWeb.ContentEditor.BlockParams do
   # submitted has empty `params`, so a partial blocks param would drop the rest.
   def full_blocks_input(form) do
     form
+    |> block_subforms()
+    |> Enum.map(&block_input_map/1)
+  end
+
+  # The block union sub-forms, in their current order.
+  defp block_subforms(form) do
+    form
     |> ash_form()
     |> Map.get(:forms, %{})
     |> Map.get(:blocks, [])
     |> List.wrap()
-    |> Enum.map(&block_input_map/1)
   end
 
   defp block_input_map(%AshPhoenix.Form{} = sub), do: block_field_map(sub, "_union_type")
@@ -588,6 +594,131 @@ defmodule KilnCMSWeb.ContentEditor.BlockParams do
 
   def append_child(blocks, _type) when length(blocks) >= @max_children_per_column, do: blocks
   def append_child(blocks, type), do: blocks ++ [new_child(type)]
+
+  # ── moving a block between the canvas and a columns block ───────────────────
+
+  # Whether one column (`%{"blocks" => [...]}`) can take another child.
+  def column_has_room?(column),
+    do: length(List.wrap((column || %{})["blocks"])) < @max_children_per_column
+
+  # Where "Move into columns" drops a canvas block: the first column with room,
+  # of the first columns block in document order — `{block_id, column_index}` —
+  # or nil when there is no columns block or every column is full, and the
+  # button is not offered. One pass over the sub-forms, reading only the
+  # columns blocks' ids, so it is cheap enough to run per render.
+  def nest_target(form, block_children) do
+    form
+    |> block_subforms()
+    |> Enum.find_value(
+      &(block_type_string(&1) == "columns" && column_with_room(&1, block_children))
+    )
+  end
+
+  # `{block_id, column_index}` for the first column of columns sub-form `sub`
+  # that has room, or nil.
+  defp column_with_room(sub, block_children) do
+    id = to_string(AshPhoenix.Form.value(sub, :id))
+
+    case block_children |> Map.get(id) |> List.wrap() |> Enum.find_index(&column_has_room?/1) do
+      nil -> nil
+      ci -> {id, ci}
+    end
+  end
+
+  # One block's union input map (see `full_blocks_input/1`), or nil.
+  def block_input_at(form, index) do
+    case Enum.at(block_subforms(form), index) do
+      nil -> nil
+      sub -> block_input_map(sub)
+    end
+  end
+
+  # A canvas block's union input map as a nested column child, and back. The
+  # WHOLE block crosses over — every declared field and its stable id, with only
+  # the type key renamed (`_union_type` ⇄ `_type`, the one thing
+  # `block_field_map/2` varies) — because a column child is the same typed shape
+  # as a top-level block (`KilnCMS.Blocks.Columns`). A per-type field list here
+  # dropped whatever the nested editor does not show (an image's caption and
+  # media link, an embed's resolved card, a quote's admin-set `featured`), and a
+  # fresh id on the way back orphaned the block's comment threads.
+  #
+  # Rich text is the one reshape. The nested editor edits `legacy_html` only, so
+  # Portable Text becomes HTML on the way in — what `RichText.render/2`
+  # publishes either way — and HTML becomes Portable Text on the way out, where
+  # the canvas's TipTap editor reads `body`.
+  def block_to_child(%{"_union_type" => type} = block) do
+    block
+    |> Map.delete("_union_type")
+    |> Map.put("_type", type)
+    |> Map.update("id", Ash.UUID.generate(), &(stable_id(&1) || Ash.UUID.generate()))
+    |> rich_text_to_child()
+  end
+
+  def child_to_block(%{"_type" => type} = child) do
+    child
+    |> Map.delete("_type")
+    |> Map.put("_union_type", type)
+    |> rich_text_to_block()
+  end
+
+  defp rich_text_to_child(%{"_type" => "rich_text", "body" => [_ | _] = body} = child) do
+    child
+    |> Map.put("body", [])
+    |> Map.put("legacy_html", KilnCMS.Blocks.PortableText.to_html(body))
+  end
+
+  defp rich_text_to_child(child), do: child
+
+  defp rich_text_to_block(%{"_union_type" => "rich_text", "legacy_html" => html} = block)
+       when is_binary(html) and html != "" do
+    # Only when the conversion yields prose: an unparseable fragment keeps its
+    # `legacy_html`, which still renders, rather than trading it for nothing.
+    case {block["body"], KilnCMS.Blocks.PortableText.from_html(html)} do
+      {[_ | _], _} -> block
+      {_, [_ | _] = body} -> block |> Map.put("body", body) |> Map.put("legacy_html", "")
+      _ -> block
+    end
+  end
+
+  defp rich_text_to_block(block), do: block
+
+  # Whether a block or child map carries a non-default value in a field `role`
+  # may not edit (`editable_by`, e.g. a quote's `featured`). To
+  # `EnforceBlockFieldPolicy`, moving such a block in or out of a columns block
+  # clears the value in one tree and sets it in the other, which it refuses a
+  # non-admin at save — so the editor refuses the move up front rather than
+  # strand a document it can no longer save.
+  def holds_restricted_values?(_map, :admin), do: false
+
+  def holds_restricted_values?(map, role) do
+    case block_module(map["_union_type"] || map["_type"]) do
+      nil ->
+        false
+
+      mod ->
+        mod
+        |> Kiln.Block.Info.fields()
+        |> Enum.any?(fn field ->
+          not Kiln.Block.Policy.can_edit_field?(mod, field.name, role) and
+            not default_value?(map[to_string(field.name)], field.default)
+        end)
+    end
+  end
+
+  defp block_module(type) when is_binary(type),
+    do: Enum.find(KilnCMS.Blocks.modules(), &(to_string(Kiln.Block.Info.name(&1)) == type))
+
+  defp block_module(_type), do: nil
+
+  # Form values arrive typed or as their param strings ("false" for `false`).
+  defp default_value?(value, _default) when value in [nil, ""], do: true
+  defp default_value?(value, value), do: true
+
+  defp default_value?(value, default)
+       when is_binary(value) and (is_atom(default) or is_number(default)),
+       do: value == to_string(default)
+
+  defp default_value?(_value, _default), do: false
 
   # Keep at least one column so the block stays a valid container.
   def drop_column(cols, _ci) when length(cols) <= 1, do: cols

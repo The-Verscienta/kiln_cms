@@ -37,7 +37,7 @@
       <div class="mt-8 flex flex-wrap items-center gap-3">
         <a
           :if={@current_user && @current_user.role in [:editor, :admin]}
-          href={~p"/editor"}
+          href={~p"/editor/overview"}
           class="btn btn-primary"
         >
           {gettext("Open editor")}

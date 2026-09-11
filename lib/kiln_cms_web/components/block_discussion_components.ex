@@ -118,6 +118,9 @@ defmodule KilnCMSWeb.BlockDiscussionComponents do
           <span class="block text-base-content/50">
             {gettext("Type @ to bring someone in.")}
           </span>
+          <span class="block text-base-content/50">
+            {gettext("Comments live on this block — discuss here, not in a page gutter.")}
+          </span>
         </div>
 
         <%!-- Announced politely so a screen-reader user hears a reply arrive

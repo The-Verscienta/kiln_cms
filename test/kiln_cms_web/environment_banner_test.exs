@@ -105,14 +105,29 @@ defmodule KilnCMSWeb.EnvironmentBannerTest do
     assert before_header =~ "Environment: staging"
   end
 
+  # Minting an API key against the wrong deployment is one of the more
+  # expensive mistakes on the surface (#469). The page now renders in
+  # `Layouts.console`, so this pins that it carries the console's banner.
+  test "the API-key page carries it", %{conn: conn} do
+    put_env(label: "staging", tone: "warning")
+
+    {:ok, _lv, html} = conn |> log_in(admin()) |> live(~p"/editor/api-keys")
+
+    assert html =~ "Environment: staging"
+  end
+
   describe "surfaces outside the console shell" do
-    test "the account/API-key layout carries it too", %{conn: conn} do
+    test "the thin app shell carries it for a signed-in operator", %{conn: conn} do
       put_env(label: "staging", tone: "warning")
 
-      # `/editor/api-keys` renders in `Layouts.app`, not `Layouts.console` —
-      # minting a key against the wrong deployment is one of the more expensive
-      # mistakes on the surface.
-      {:ok, _lv, html} = conn |> log_in(admin()) |> live(~p"/editor/api-keys")
+      # `/developers` renders in `Layouts.app`, which carries its own banner —
+      # the one no longer exercised once the API-key page moved into the
+      # console.
+      html =
+        conn
+        |> log_in(admin())
+        |> Phoenix.ConnTest.get(~p"/developers")
+        |> Phoenix.ConnTest.html_response(200)
 
       assert html =~ "Environment: staging"
     end

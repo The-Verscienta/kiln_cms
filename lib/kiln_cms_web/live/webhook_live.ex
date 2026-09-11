@@ -274,9 +274,13 @@ defmodule KilnCMSWeb.WebhookLive do
             {gettext("Endpoints")} ({length(@endpoints)})
           </h2>
 
-          <p :if={@endpoints == []} class="text-sm text-base-content/60">
-            {gettext("No webhooks yet.")}
-          </p>
+          <.empty_state
+            :if={@endpoints == []}
+            icon="hero-bolt"
+            title={gettext("No webhooks yet")}
+          >
+            {gettext("Add an endpoint above to push content events to another system.")}
+          </.empty_state>
 
           <ul
             :if={@endpoints != []}

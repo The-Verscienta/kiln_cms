@@ -221,6 +221,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # Preview render is only refreshed while the Preview tab is showing;
          # this tracks whether an off-tab edit left it needing a re-render.
          |> assign(:preview_stale, false)
+         # Side-by-side preview: `:rail` keeps the inspector a narrow column,
+         # `:split` widens it to half the editor (`toggle_preview_layout`).
+         |> assign(:preview_layout, :rail)
          # AI-assisted SEO drafting (#60). Read once at mount: this is global
          # app config, so it can't change under a live session. `seo_drafts`
          # holds the current proposal (never persisted, never broadcast — each
@@ -1587,22 +1590,25 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # every panel stays mounted, so no form data is touched.
   def handle_event("switch_inspector_tab", %{"tab" => tab}, socket)
       when tab in ~w(settings preview history) do
-    socket = assign(socket, :inspector_tab, String.to_existing_atom(tab))
-
-    # Coming back to Preview after edits happened while it was hidden: catch it
-    # up now (refresh_preview short-circuits everywhere else while off-tab).
-    socket =
-      if socket.assigns.inspector_tab == :preview and socket.assigns[:preview_stale] do
-        refresh_preview(socket)
-      else
-        socket
-      end
-
-    {:noreply, socket}
+    {:noreply, show_inspector_tab(socket, String.to_existing_atom(tab))}
   end
 
   # Unknown/garbled tab value — ignore it rather than crash the editor.
   def handle_event("switch_inspector_tab", _params, socket), do: {:noreply, socket}
+
+  # Side-by-side preview (Theme A): `:split` widens the inspector to half the
+  # editor beside the canvas. Entering it shows the Preview tab through the same
+  # path as clicking that tab, so edits made while another tab was open are
+  # caught up rather than shown stale beside the canvas.
+  def handle_event("toggle_preview_layout", _params, socket) do
+    case socket.assigns.preview_layout do
+      :split ->
+        {:noreply, assign(socket, :preview_layout, :rail)}
+
+      _rail ->
+        {:noreply, socket |> assign(:preview_layout, :split) |> show_inspector_tab(:preview)}
+    end
+  end
 
   # Open the media browser to fill a specific image block.
   # Open the media browser to fill a specific existing image block, addressed by
@@ -3550,11 +3556,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
         |> assign_record(record)
         |> broadcast_saved()
         |> mark_saved()
-        |> put_flash(:info, gettext("Updated to %{state}.", state: state_label(record.state)))
+        |> put_flash(:info, KilnCMSWeb.WorkflowMessages.success(action, record.state))
         |> maybe_prompt_reviewer_assignment(action)
 
-      _ ->
-        put_flash(socket, :error, gettext("That action isn't allowed right now."))
+      # Described by the error returned, not by the button pressed — see
+      # WorkflowMessages; the content list shares the copy.
+      {:error, error} ->
+        put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.error(action, error))
     end
   end
 
@@ -3579,6 +3587,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
           do: flag_conflict(socket),
           else: put_flash(socket, :error, gettext("That action isn't allowed right now."))
     end
+  end
+
+  # Show inspector panel `tab`. Coming back to Preview after edits happened
+  # while it was hidden catches it up now: `refresh_preview` short-circuits
+  # everywhere else while the panel is off-tab (`Preview.refresh_preview_html/2`).
+  defp show_inspector_tab(socket, tab) do
+    socket = assign(socket, :inspector_tab, tab)
+
+    if tab == :preview and socket.assigns[:preview_stale],
+      do: refresh_preview(socket),
+      else: socket
   end
 
   # #817 (follow-up to #501): "Submit for review" only ever reaches here for
@@ -4859,6 +4878,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> assign(:locked_fields, locked_fields(assigns.field_locks, self()))
       |> assign(:related_field, related_field(assigns.kind))
       |> assign(:related_current, related_current(assigns.kind, assigns.record))
+      # Once per render, not once per block card: the "Move into columns"
+      # button on every nestable block reads it.
+      |> assign(
+        :nest_target,
+        KilnCMSWeb.ContentEditor.BlockParams.nest_target(assigns.form, assigns.block_children)
+      )
 
     ~H"""
     <Layouts.console
@@ -4942,13 +4967,29 @@ defmodule KilnCMSWeb.ContentEditorLive do
               {gettext("Preview")} &nearr;
               <span class="sr-only">{gettext("(opens in a new tab)")}</span>
             </.link>
-            <%!-- In-context (front-end) editing on Kiln's own rendered page (#354). --%>
+            <%!-- In-context (front-end) editing on Kiln's own rendered page
+                  (#354) — a primary mode, not a detour (Theme C). --%>
             <.link
               navigate={~p"/editor/site/#{@kind}/#{@record.slug}"}
-              class="btn btn-sm btn-default"
+              class="btn btn-sm btn-primary"
+              title={gettext("Edit on the rendered page")}
             >
-              <.icon name="hero-pencil-square" class="mr-1 size-4" />{gettext("Edit on page")}
+              <.icon name="hero-pencil-square" class="mr-1 size-4" />{gettext("Visual")}
             </.link>
+            <%!-- A toggle, so its label stays put and `aria-pressed` carries the
+                  state — a label that flips between "Side by side" and "Focus"
+                  tells a screen reader nothing about which is on. --%>
+            <button
+              type="button"
+              phx-click="toggle_preview_layout"
+              aria-pressed={to_string(@preview_layout == :split)}
+              class={[
+                "btn btn-sm",
+                if(@preview_layout == :split, do: "btn-primary", else: "btn-default")
+              ]}
+            >
+              <.icon name="hero-view-columns" class="mr-1 size-4" />{gettext("Side-by-side preview")}
+            </button>
             <%!-- Duplicate into a new draft (#471). The copy is made from the
                   SAVED row, which is the part worth warning about — and the
                   warning has to cover two different reasons the saved row is not
@@ -4986,7 +5027,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
           a11y_report={@a11y_report}
         />
 
-        <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+        <div class={[
+          "grid gap-6",
+          if(@preview_layout == :split,
+            do: "lg:grid-cols-2",
+            else: "lg:grid-cols-[minmax(0,1fr)_22rem]"
+          )
+        ]}>
           <div class="min-w-0 space-y-6">
             <div class="grid gap-4 sm:grid-cols-2">
               <div
@@ -5245,6 +5292,24 @@ defmodule KilnCMSWeb.ContentEditorLive do
                           class="rounded p-1 hover:bg-base-200 hover:text-base-content"
                         >
                           <.icon name="hero-document-duplicate" class="size-4" />
+                        </button>
+                        <%!-- The button alternative to dragging a block into a
+                              columns block, which the canvas and the nested
+                              Sortable can't do between them. Aimed at the first
+                              column with room (`nest_target/2`), and absent when
+                              there is none. --%>
+                        <button
+                          :if={@nest_target && block_type_string(bf) in @nested_child_types}
+                          type="button"
+                          phx-click="nest_into_columns"
+                          phx-value-bid={bf[:id].value}
+                          phx-value-cols={elem(@nest_target, 0)}
+                          phx-value-col={elem(@nest_target, 1)}
+                          aria-label={gettext("Move into columns")}
+                          title={gettext("Move into columns")}
+                          class="rounded p-1 hover:bg-base-200 hover:text-base-content"
+                        >
+                          <.icon name="hero-arrow-right-end-on-rectangle" class="size-4" />
                         </button>
                         <button
                           type="button"

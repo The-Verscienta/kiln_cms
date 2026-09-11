@@ -303,10 +303,18 @@ defmodule KilnCMSWeb.EditorLive do
   # Every bulk verb goes through the same two-step confirmation (audit
   # U-H3/U-M2): "Select all" can hold hundreds of items, and a single stray
   # click could otherwise publish, unpublish or archive all of them instantly.
-  def handle_event("bulk", %{"action" => verb}, socket)
-      when verb in ~w(publish unpublish archive unarchive delete) do
-    confirming = if MapSet.size(socket.assigns.selected) > 0, do: verb
-    {:noreply, assign(socket, :confirming_bulk, confirming)}
+  #
+  # Only a verb this tier is actually offered (`bulk_verbs/1`, the list the bar
+  # renders from) opens it: a crafted phx-value naming publish or delete as an
+  # editor would otherwise open a confirm bar for an action policy then refuses
+  # on every row.
+  def handle_event("bulk", %{"action" => verb}, socket) when is_binary(verb) do
+    if verb in bulk_verbs(socket.assigns.tier) do
+      confirming = if MapSet.size(socket.assigns.selected) > 0, do: verb
+      {:noreply, assign(socket, :confirming_bulk, confirming)}
+    else
+      {:noreply, put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.forbidden(verb))}
+    end
   end
 
   def handle_event("cancel_bulk", _params, socket),
@@ -555,9 +563,16 @@ defmodule KilnCMSWeb.EditorLive do
     org = socket.assigns.current_org
     record = get!(kind, id, actor, org)
 
+    # Flash copy shared with the content editor, chosen from the error the
+    # transition returned rather than from the verb (see WorkflowMessages).
     case do_transition(kind, verb, record, actor, org) do
-      {:ok, _} -> socket |> load_items() |> put_flash(:info, gettext("Updated."))
-      _ -> put_flash(socket, :error, gettext("That action isn't allowed right now."))
+      {:ok, record} ->
+        socket
+        |> load_items()
+        |> put_flash(:info, KilnCMSWeb.WorkflowMessages.success(verb, record.state))
+
+      {:error, error} ->
+        put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.error(verb, error))
     end
   end
 
@@ -598,13 +613,22 @@ defmodule KilnCMSWeb.EditorLive do
 
   defp bulk_actions(_tier) do
     [
+      {"submit", gettext("Submit for review")},
       {"unpublish", gettext("Unpublish")},
       {"archive", gettext("Archive")},
       {"unarchive", gettext("Unarchive")}
     ]
   end
 
+  # Every verb the bulk bar offers `tier`: the menu above, plus Delete, which
+  # the bar renders on its own button for admins only (`:if={@tier == :admin}`).
+  defp bulk_verbs(tier) do
+    verbs = Enum.map(bulk_actions(tier), &elem(&1, 0))
+    if tier == :admin, do: verbs ++ ["delete"], else: verbs
+  end
+
   defp bulk_verb_label("publish"), do: gettext("Publish")
+  defp bulk_verb_label("submit"), do: gettext("Submit for review")
   defp bulk_verb_label("unpublish"), do: gettext("Unpublish")
   defp bulk_verb_label("archive"), do: gettext("Archive")
   defp bulk_verb_label("unarchive"), do: gettext("Unarchive")
@@ -617,6 +641,13 @@ defmodule KilnCMSWeb.EditorLive do
   defp bulk_confirm_prompt("publish", n),
     do:
       gettext("Publish %{count} selected item(s)? They go live on the site immediately.",
+        count: n
+      )
+
+  defp bulk_confirm_prompt("submit", n),
+    do:
+      gettext(
+        "Submit %{count} selected draft(s) for review? An admin must publish them.",
         count: n
       )
 
@@ -1033,8 +1064,14 @@ defmodule KilnCMSWeb.EditorLive do
                 phx-value-id={record.id}
                 class="btn btn-sm btn-default"
               >
-                {gettext("Submit")}
+                {gettext("Submit for review")}
               </button>
+              <span
+                :if={record.state == :in_review and @tier == :editor}
+                class="text-xs text-base-content/70"
+              >
+                {gettext("Awaiting admin approval")}
+              </span>
               <button
                 :if={record.state in [:draft, :in_review] and @tier == :admin}
                 type="button"

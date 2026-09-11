@@ -344,10 +344,14 @@ defmodule KilnCMSWeb.LiveUserAuth do
   policies stay on the global role, so `effective_tier` would admit them to a
   page every action then forbids).
   """
-  def platform_admin?(socket_or_conn) do
-    case socket_or_conn.assigns[:current_user] do
-      %{role: :admin} -> true
-      _ -> false
-    end
-  end
+  def platform_admin?(socket_or_conn),
+    do: platform_admin_user?(socket_or_conn.assigns[:current_user])
+
+  @doc """
+  `platform_admin?/1` for a bare user — what a function component holding
+  only `current_user` (the console nav) asks, so the links it offers and the
+  pages behind them answer from one predicate.
+  """
+  def platform_admin_user?(%{role: :admin}), do: true
+  def platform_admin_user?(_user), do: false
 end

@@ -11,7 +11,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockOps do
   """
 
   import Phoenix.Component, only: [assign: 3]
-  import Phoenix.LiveView, only: [attach_hook: 4]
+  import Phoenix.LiveView, only: [attach_hook: 4, put_flash: 3]
 
   import KilnCMSWeb.ContentEditor.BlockParams
 
@@ -354,8 +354,118 @@ defmodule KilnCMSWeb.ContentEditor.BlockOps do
     end
   end
 
+  # ── moving a block between the canvas and a columns block ───────────────────
+  # The button alternative to dragging across the canvas/columns boundary,
+  # which the two Sortables can't do between them. Both directions carry the
+  # whole block and keep its id (`block_to_child/1` / `child_to_block/1`), and
+  # the source is removed only once the destination is known to take it — a
+  # full column refuses the move with a flash instead of swallowing the block.
+
+  defp on_event("nest_into_columns", %{"bid" => bid, "cols" => cols_id, "col" => col}, socket)
+       when is_binary(bid) and is_binary(cols_id) and is_binary(col) do
+    form = socket.assigns.form
+
+    with {:ok, ci} <- parse_index(col),
+         index when is_integer(index) <- block_index_by_id(form, bid),
+         %{"_union_type" => type} = block when type in @nested_child_types <-
+           block_input_at(form, index),
+         :ok <- movable(block, socket.assigns.tier),
+         :ok <- room_in(socket.assigns.block_children, cols_id, ci) do
+      bc =
+        update_column(
+          socket.assigns.block_children,
+          cols_id,
+          ci,
+          &(&1 ++ [block_to_child(block)])
+        )
+
+      {:halt,
+       socket
+       |> assign(:form, AshPhoenix.Form.remove_form(form, "#{form.name}[blocks][#{index}]"))
+       # The body now travels in the child; left here, it would be re-injected
+       # into whichever canvas block next carries this id.
+       |> assign(:rich_bodies, Map.delete(socket.assigns.rich_bodies, bid))
+       |> apply_children(bc)}
+    else
+      {:error, message} -> {:halt, put_flash(socket, :error, message)}
+      _ -> {:halt, socket}
+    end
+  end
+
+  defp on_event("nest_into_columns", _params, socket), do: {:halt, socket}
+
+  defp on_event("promote_child", %{"id" => cols_id, "child" => child_id}, socket)
+       when is_binary(cols_id) and is_binary(child_id) do
+    with %{"_type" => type} = child when type in @nested_child_types <-
+           find_child(socket.assigns.block_children, cols_id, child_id),
+         :ok <- movable(child, socket.assigns.tier) do
+      params = child_to_block(child)
+
+      bc =
+        update_columns(socket.assigns.block_children, cols_id, fn blocks ->
+          Enum.reject(blocks, &(&1["id"] == child_id))
+        end)
+
+      form =
+        socket.assigns.form
+        |> AshPhoenix.Form.add_form(socket.assigns.form.name <> "[blocks]", params: params)
+        # Straight after the columns block it came out of, not at the end.
+        |> position_new_block(cols_id)
+
+      {:halt,
+       socket
+       |> assign(:form, form)
+       |> assign(
+         :rich_bodies,
+         put_rich_body(socket.assigns.rich_bodies, child_id, params["body"])
+       )
+       |> apply_children(bc)}
+    else
+      {:error, message} -> {:halt, put_flash(socket, :error, message)}
+      _ -> {:halt, socket}
+    end
+  end
+
+  defp on_event("promote_child", _params, socket), do: {:halt, socket}
+
   # Events that are not block-canvas ops fall through to the LiveView.
   defp on_event(_event, _params, socket), do: {:cont, socket}
+
+  defp movable(map, role) do
+    if holds_restricted_values?(map, role) do
+      {:error,
+       gettext("This block has settings only an admin can change, so only an admin can move it.")}
+    else
+      :ok
+    end
+  end
+
+  defp room_in(block_children, cols_id, ci) do
+    case block_children |> Map.get(cols_id) |> List.wrap() |> Enum.at(ci) do
+      nil ->
+        :error
+
+      column ->
+        if column_has_room?(column),
+          do: :ok,
+          else: {:error, gettext("That column is full. Make room in it first.")}
+    end
+  end
+
+  defp find_child(block_children, cols_id, child_id) do
+    block_children
+    |> Map.get(cols_id)
+    |> List.wrap()
+    |> Enum.flat_map(&List.wrap(&1["blocks"]))
+    |> Enum.find(&(&1["id"] == child_id))
+  end
+
+  # The rendered form round-trips only `legacy_html` for rich text; the body
+  # rides server-side in `rich_bodies`, keyed by block id, and is re-injected on
+  # every validate (`inject_rich_bodies/2`). Without an entry, a promoted
+  # block's body would be replaced by the empty default on the next keystroke.
+  defp put_rich_body(rich_bodies, id, [_ | _] = body), do: Map.put(rich_bodies, id, body)
+  defp put_rich_body(rich_bodies, id, _body), do: Map.delete(rich_bodies, id)
 
   # The row/gallery helpers keep their `{:noreply, socket}` shape (the
   # LiveView's gallery multi-pick calls them too); the hook contract wants
