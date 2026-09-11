@@ -197,10 +197,7 @@ defmodule Mix.Tasks.Kiln.Search.MeasureFloor do
   defp targets(type, tenant) do
     case ContentTypes.get(type, tenant) do
       nil ->
-        known =
-          targets(nil, tenant)
-          |> Enum.map(&elem(&1, 0))
-          |> Enum.join(", ")
+        known = Enum.map_join(targets(nil, tenant), ", ", &elem(&1, 0))
 
         Mix.raise("Unknown content type #{inspect(type)}. Known: #{known}")
 
