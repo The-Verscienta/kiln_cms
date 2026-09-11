@@ -179,8 +179,11 @@ defmodule KilnCMSWeb.SlugRegenLive do
         </p>
       </form>
 
-      <div :if={@running?} class="mt-6 rounded border border-base-content/15 p-3 text-sm">
-        <span class="loading loading-spinner loading-xs mr-2"></span>
+      <div
+        :if={@running?}
+        class="mt-6 flex items-center gap-2 rounded border border-base-content/15 p-3 text-sm"
+      >
+        <.icon name="hero-arrow-path" class="size-4 motion-safe:animate-spin" />
         {gettext("Applying renames…")}
         <span :if={@progress} class="text-base-content/60">
           {gettext("%{scanned} scanned, %{changes} renamed so far.",

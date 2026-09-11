@@ -289,9 +289,9 @@ defmodule KilnCMSWeb.Layouts do
     >
       {gettext("Search")}
     </.link>
-    <%!-- `/editor/api-keys` and `/account` render here rather than in `console`,
-          and minting an API key against the wrong deployment is one of the more
-          expensive mistakes on the whole surface (#469). --%>
+    <%!-- Environment banner for thin chrome (auth-adjacent and marketing shells).
+          Minting an API key against the wrong deployment is expensive (#469);
+          API keys themselves now live in `Layouts.console`. --%>
     <.environment_banner />
     <header class="border-b border-base-content/10 px-4 py-4 sm:px-6 lg:px-8">
       <div class="mx-auto flex max-w-6xl items-center justify-between gap-4">
@@ -591,12 +591,12 @@ defmodule KilnCMSWeb.Layouts do
     author = [
       %{
         key: :overview,
-        label: gettext("Overview"),
+        label: gettext("Home"),
         path: ~p"/editor/overview",
         icon: "hero-squares-2x2"
       },
       %{key: :content, label: gettext("Content"), path: ~p"/editor", icon: "hero-document-text"},
-      %{key: :media, label: gettext("Media"), path: ~p"/media", icon: "hero-photo"},
+      %{key: :media, label: gettext("Media"), path: ~p"/editor/media", icon: "hero-photo"},
       %{key: :taxonomy, label: gettext("Taxonomy"), path: ~p"/editor/taxonomy", icon: "hero-tag"},
       %{key: :menus, label: gettext("Menus"), path: ~p"/editor/menus", icon: "hero-bars-3"},
       %{
@@ -604,6 +604,12 @@ defmodule KilnCMSWeb.Layouts do
         label: gettext("Calendar"),
         path: ~p"/editor/calendar",
         icon: "hero-calendar-days"
+      },
+      %{
+        key: :tasks,
+        label: gettext("Tasks"),
+        path: ~p"/editor/tasks",
+        icon: "hero-clipboard-document-check"
       },
       # Content releases (#500) — editorial planning, so it sits with the author
       # group next to the calendar it plots onto, not with the admin tools. The
@@ -638,146 +644,188 @@ defmodule KilnCMSWeb.Layouts do
       }
     ]
 
-    configure =
+    configure_groups =
       if role == :admin do
         [
           %{
-            key: :branding,
-            label: gettext("Branding"),
-            path: ~p"/editor/branding",
-            icon: "hero-swatch"
+            label: gettext("Content model"),
+            items: [
+              %{
+                key: :types,
+                label: gettext("Content types"),
+                path: ~p"/editor/types",
+                icon: "hero-cube"
+              },
+              %{
+                key: :fields,
+                label: gettext("Fields"),
+                path: ~p"/editor/fields",
+                icon: "hero-adjustments-horizontal"
+              },
+              %{
+                key: :feeds,
+                label: gettext("Feeds"),
+                path: ~p"/editor/feeds",
+                icon: "hero-rss"
+              }
+            ]
           },
           %{
-            key: :code_injection,
-            label: gettext("Code injection"),
-            path: ~p"/editor/code-injection",
-            icon: "hero-code-bracket"
+            label: gettext("Capture"),
+            items: [
+              %{
+                key: :forms,
+                label: gettext("Forms"),
+                path: ~p"/editor/forms",
+                icon: "hero-clipboard-document-list"
+              },
+              %{
+                key: :funnels,
+                label: gettext("Funnels"),
+                path: ~p"/editor/funnels",
+                icon: "hero-funnel"
+              },
+              %{
+                key: :compliance,
+                label: gettext("Claim checking"),
+                path: ~p"/editor/compliance",
+                icon: "hero-scale"
+              }
+            ]
           },
           %{
-            key: :types,
-            label: gettext("Content types"),
-            path: ~p"/editor/types",
-            icon: "hero-cube"
+            label: gettext("Delivery"),
+            items: [
+              %{
+                key: :branding,
+                label: gettext("Branding"),
+                path: ~p"/editor/branding",
+                icon: "hero-swatch"
+              },
+              %{
+                key: :code_injection,
+                label: gettext("Code injection"),
+                path: ~p"/editor/code-injection",
+                icon: "hero-code-bracket"
+              },
+              %{
+                key: :redirects,
+                label: gettext("Redirects"),
+                path: ~p"/editor/redirects",
+                icon: "hero-arrow-uturn-right"
+              },
+              %{
+                key: :slugs,
+                label: gettext("Slugs"),
+                path: ~p"/editor/slugs",
+                icon: "hero-link"
+              },
+              %{
+                key: :social,
+                label: gettext("Social"),
+                path: ~p"/editor/social",
+                icon: "hero-megaphone"
+              }
+            ]
           },
           %{
-            key: :fields,
-            label: gettext("Fields"),
-            path: ~p"/editor/fields",
-            icon: "hero-adjustments-horizontal"
-          },
-          # Next to Content types, not down with Mail: what a feed carries is a
-          # statement about content types, and the "has a public index" switch
-          # this page defers to lives one item up (#719).
-          %{
-            key: :feeds,
-            label: gettext("Feeds"),
-            path: ~p"/editor/feeds",
-            icon: "hero-rss"
-          },
-          %{
-            key: :forms,
-            label: gettext("Forms"),
-            path: ~p"/editor/forms",
-            icon: "hero-clipboard-document-list"
-          },
-          # Per-site claim checking (#857). Called "Claim checking" rather than
-          # "Compliance", which is already the Governance page's subject and the
-          # name of the editor panel this switches on — an admin looking for one
-          # should not have to guess which of two items owns it.
-          %{
-            key: :compliance,
-            label: gettext("Claim checking"),
-            path: ~p"/editor/compliance",
-            icon: "hero-scale"
-          },
-          %{
-            key: :funnels,
-            label: gettext("Funnels"),
-            path: ~p"/editor/funnels",
-            icon: "hero-funnel"
+            label: gettext("Ops"),
+            items: [
+              %{
+                key: :webhooks,
+                label: gettext("Webhooks"),
+                path: ~p"/editor/webhooks",
+                icon: "hero-bolt"
+              },
+              %{
+                key: :automation,
+                label: gettext("Automation"),
+                path: ~p"/editor/automation",
+                icon: "hero-cpu-chip"
+              },
+              %{
+                key: :backups,
+                label: gettext("Backups"),
+                path: ~p"/editor/backups",
+                icon: "hero-archive-box"
+              },
+              %{
+                key: :mail,
+                label: gettext("Mail"),
+                path: ~p"/editor/mail",
+                icon: "hero-envelope"
+              },
+              %{
+                key: :newsletter,
+                label: gettext("Newsletter"),
+                path: ~p"/editor/newsletter",
+                icon: "hero-megaphone"
+              }
+            ]
           },
           %{
-            key: :webhooks,
-            label: gettext("Webhooks"),
-            path: ~p"/editor/webhooks",
-            icon: "hero-bolt"
-          },
-          %{
-            key: :redirects,
-            label: gettext("Redirects"),
-            path: ~p"/editor/redirects",
-            icon: "hero-arrow-uturn-right"
-          },
-          %{
-            key: :slugs,
-            label: gettext("Slugs"),
-            path: ~p"/editor/slugs",
-            icon: "hero-link"
-          },
-          %{
-            key: :automation,
-            label: gettext("Automation"),
-            path: ~p"/editor/automation",
-            icon: "hero-cpu-chip"
-          },
-          %{
-            key: :social,
-            label: gettext("Social"),
-            path: ~p"/editor/social",
-            icon: "hero-megaphone"
-          },
-          %{
-            key: :backups,
-            label: gettext("Backups"),
-            path: ~p"/editor/backups",
-            icon: "hero-archive-box"
-          },
-          %{key: :mail, label: gettext("Mail"), path: ~p"/editor/mail", icon: "hero-envelope"},
-          %{
-            key: :newsletter,
-            label: gettext("Newsletter"),
-            path: ~p"/editor/newsletter",
-            icon: "hero-megaphone"
-          },
-          %{
-            key: :billing,
-            label: gettext("Billing"),
-            path: ~p"/editor/billing",
-            icon: "hero-credit-card"
-          },
-          %{
-            key: :governance,
-            label: gettext("Governance"),
-            path: ~p"/editor/governance",
-            icon: "hero-shield-check"
-          },
-          %{
-            key: :team,
-            label: gettext("Team"),
-            path: ~p"/editor/team",
-            icon: "hero-user-group"
-          },
-          %{key: :trash, label: gettext("Trash"), path: ~p"/editor/trash", icon: "hero-trash"},
-          %{
-            key: :system,
-            label: gettext("System"),
-            path: ~p"/editor/system",
-            icon: "hero-server-stack"
-          },
-          %{
-            key: :settings,
-            label: gettext("Settings"),
-            path: ~p"/editor/settings",
-            icon: "hero-cog-6-tooth"
+            label: gettext("Org"),
+            items:
+              [
+                %{
+                  key: :team,
+                  label: gettext("Team"),
+                  path: ~p"/editor/team",
+                  icon: "hero-user-group"
+                },
+                %{
+                  key: :governance,
+                  label: gettext("Governance"),
+                  path: ~p"/editor/governance",
+                  icon: "hero-shield-check"
+                },
+                %{
+                  key: :billing,
+                  label: gettext("Billing"),
+                  path: ~p"/editor/billing",
+                  icon: "hero-credit-card"
+                },
+                assigns[:current_user] && assigns.current_user.role == :admin &&
+                  %{
+                    key: :api_keys,
+                    label: gettext("API keys"),
+                    path: ~p"/editor/api-keys",
+                    icon: "hero-key"
+                  },
+                %{
+                  key: :trash,
+                  label: gettext("Trash"),
+                  path: ~p"/editor/trash",
+                  icon: "hero-trash"
+                },
+                %{
+                  key: :system,
+                  label: gettext("System"),
+                  path: ~p"/editor/system",
+                  icon: "hero-server-stack"
+                },
+                %{
+                  key: :settings,
+                  label: gettext("Settings"),
+                  path: ~p"/editor/settings",
+                  icon: "hero-cog-6-tooth"
+                }
+              ]
+              |> Enum.filter(& &1)
           }
         ]
       else
         [
           %{
-            key: :settings,
-            label: gettext("Settings"),
-            path: ~p"/editor/settings",
-            icon: "hero-cog-6-tooth"
+            label: gettext("Configure"),
+            items: [
+              %{
+                key: :settings,
+                label: gettext("Settings"),
+                path: ~p"/editor/settings",
+                icon: "hero-cog-6-tooth"
+              }
+            ]
           }
         ]
       end
@@ -790,13 +838,15 @@ defmodule KilnCMSWeb.Layouts do
     assigns =
       assigns
       |> assign(:author, Enum.filter(author, & &1))
-      |> assign(:configure, configure)
+      |> assign(:configure_groups, configure_groups)
       |> assign(:plugin, plugin)
 
     ~H"""
     <.side_link :for={i <- @author} item={i} active={@active} />
-    <p class="side-section">{gettext("Configure")}</p>
-    <.side_link :for={i <- @configure} item={i} active={@active} />
+    <div :for={group <- @configure_groups}>
+      <p class="side-section">{group.label}</p>
+      <.side_link :for={i <- group.items} item={i} active={@active} />
+    </div>
     <.side_link :for={i <- @plugin} item={i} active={@active} />
     """
   end
@@ -1001,7 +1051,7 @@ defmodule KilnCMSWeb.Layouts do
     <a href="/developers#json-api" class={@item}>{gettext("JSON:API")}</a>
     <a
       :if={@current_user && @current_user.role in [:editor, :admin]}
-      href={~p"/editor"}
+      href={~p"/editor/overview"}
       class={@item}
     >
       {gettext("Editor")}

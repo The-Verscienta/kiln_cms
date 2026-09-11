@@ -292,9 +292,13 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
         <section class="space-y-3">
           <h2 class="text-lg font-medium">{gettext("Defined types")}</h2>
 
-          <p :if={@definitions == []} class="text-sm text-base-content/60">
-            {gettext("No custom content types yet.")}
-          </p>
+          <.empty_state
+            :if={@definitions == []}
+            icon="hero-cube"
+            title={gettext("No custom content types yet")}
+          >
+            {gettext("Create a type above to extend what authors can publish.")}
+          </.empty_state>
 
           <ul
             :if={@definitions != []}

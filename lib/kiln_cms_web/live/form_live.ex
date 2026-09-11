@@ -202,7 +202,13 @@ defmodule KilnCMSWeb.FormLive do
 
         <section class="space-y-3">
           <h2 class="text-lg font-medium">{gettext("Your forms")} ({length(@forms)})</h2>
-          <p :if={@forms == []} class="text-sm text-base-content/60">{gettext("No forms yet.")}</p>
+          <.empty_state
+            :if={@forms == []}
+            icon="hero-clipboard-document-list"
+            title={gettext("No forms yet")}
+          >
+            {gettext("Create a form above to start collecting submissions.")}
+          </.empty_state>
           <ul :if={@forms != []} class="card divide-y divide-base-content/10 overflow-hidden">
             <li :for={form <- @forms} class="flex items-center justify-between gap-3 p-3">
               <.link

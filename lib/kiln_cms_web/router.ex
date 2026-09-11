@@ -313,6 +313,8 @@ defmodule KilnCMSWeb.Router do
         {KilnCMSWeb.LiveUserAuth, :restore_locale}
       ] do
       live "/media", MediaLive, :index
+      # Alias so docs/bookmarks can use the `/editor` prefix consistently.
+      live "/editor/media", MediaLive, :index
       live "/editor", EditorLive, :index
       live "/editor/overview", OverviewLive, :index
       live "/editor/calendar", CalendarLive, :index

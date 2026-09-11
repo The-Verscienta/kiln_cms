@@ -180,6 +180,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # defaulting straight to `:settings` left it unassigned and crashed
          # the Preview panel, which stays rendered (CSS-hidden) either way.
          |> assign(:inspector_tab, :preview)
+         # Theme A: inspector rail vs side-by-side wide preview.
+         |> assign(:preview_layout, :rail)
          # Preview render is only refreshed while the Preview tab is showing;
          # this tracks whether an off-tab edit left it needing a re-render.
          |> assign(:preview_stale, false)
@@ -1678,6 +1680,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Unknown/garbled tab value — ignore it rather than crash the editor.
   def handle_event("switch_inspector_tab", _params, socket), do: {:noreply, socket}
 
+  def handle_event("toggle_preview_layout", _params, socket) do
+    next = if socket.assigns.preview_layout == :split, do: :rail, else: :split
+
+    socket =
+      socket
+      |> assign(:preview_layout, next)
+      |> then(fn s ->
+        if next == :split, do: assign(s, :inspector_tab, :preview), else: s
+      end)
+
+    {:noreply, socket}
+  end
+
   def handle_event("field_focus", %{"field" => field}, socket) when is_binary(field) do
     broadcast_cursor(socket, field)
     {:noreply, assign(socket, :self_field, field)}
@@ -2650,6 +2665,63 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   def handle_event("remove_block", _params, socket), do: {:noreply, socket}
 
+  # Theme B: nest a top-level nestable block into the first column of a columns
+  # block (keyboard/button alternative to cross-list drag under LiveView).
+  def handle_event("nest_into_columns", %{"bid" => bid, "cols" => cols_id}, socket)
+      when is_binary(bid) and is_binary(cols_id) do
+    with index when not is_nil(index) <- block_index_by_id(socket.assigns.form, bid),
+         block when not is_nil(block) <- Enum.at(full_blocks_input(socket.assigns.form), index),
+         type when type in @nested_child_types <- block_param_type(block),
+         true <- is_list(socket.assigns.block_children[cols_id]) do
+      child = block_params_to_child(block)
+      path = "#{socket.assigns.form.name}[blocks][#{index}]"
+
+      bc =
+        update_column(socket.assigns.block_children, cols_id, 0, fn blocks ->
+          append_existing_child(blocks, child)
+        end)
+
+      {:noreply,
+       socket
+       |> assign(:form, AshPhoenix.Form.remove_form(socket.assigns.form, path))
+       |> apply_children(bc)
+       |> mark_dirty()}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("nest_into_columns", _params, socket), do: {:noreply, socket}
+
+  # Theme B: promote a nested column child back onto the top-level canvas.
+  def handle_event("promote_child", %{"id" => cols_id, "child" => child_id}, socket)
+      when is_binary(cols_id) and is_binary(child_id) do
+    cols = socket.assigns.block_children[cols_id] || []
+    child = Enum.find(Enum.flat_map(cols, &(&1["blocks"] || [])), &(&1["id"] == child_id))
+
+    if is_nil(child) do
+      {:noreply, socket}
+    else
+      bc =
+        update_columns(socket.assigns.block_children, cols_id, fn blocks ->
+          Enum.reject(blocks, &(&1["id"] == child_id))
+        end)
+
+      form =
+        AshPhoenix.Form.add_form(socket.assigns.form, socket.assigns.form.name <> "[blocks]",
+          params: child_to_block_params(child)
+        )
+
+      {:noreply,
+       socket
+       |> assign(:form, form)
+       |> apply_children(bc)
+       |> mark_dirty()}
+    end
+  end
+
+  def handle_event("promote_child", _params, socket), do: {:noreply, socket}
+
   def handle_event("reorder", %{"order" => order}, socket) when is_list(order) do
     form = AshPhoenix.Form.sort_forms(socket.assigns.form, [:blocks], order)
     {:noreply, socket |> assign(:form, form) |> mark_dirty()}
@@ -3387,15 +3459,27 @@ defmodule KilnCMSWeb.ContentEditorLive do
         |> assign_record(record)
         |> broadcast_saved()
         |> assign(:save_state, :saved)
-        |> put_flash(:info, gettext("Updated to %{state}.", state: state_label(record.state)))
+        |> put_flash(:info, workflow_success_flash(action, record.state))
         |> maybe_prompt_reviewer_assignment(action)
 
       _ ->
-        put_flash(socket, :error, gettext("That action isn't allowed right now."))
+        put_flash(socket, :error, workflow_error_flash(action))
     end
   end
 
   defp run_workflow(socket, _action), do: socket
+
+  defp workflow_success_flash("submit", _state),
+    do: gettext("Sent for review — an admin will publish when ready.")
+
+  defp workflow_success_flash(_action, state),
+    do: gettext("Updated to %{state}.", state: state_label(state))
+
+  defp workflow_error_flash("publish"),
+    do: gettext("Publishing requires an admin approval. Submit the draft for review instead.")
+
+  defp workflow_error_flash(_action),
+    do: gettext("That action isn't allowed right now.")
 
   # #817 (follow-up to #501): "Submit for review" only ever reaches here for
   # an editor (workflow_buttons/1 shows that button only when @state == :draft
@@ -4298,6 +4382,44 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp append_child(blocks, _type) when length(blocks) >= @max_children_per_column, do: blocks
   defp append_child(blocks, type), do: blocks ++ [new_child(type)]
+
+  defp append_existing_child(blocks, _child) when length(blocks) >= @max_children_per_column,
+    do: blocks
+
+  defp append_existing_child(blocks, child), do: blocks ++ [child]
+
+  defp block_param_type(%{"_union_type" => type}) when is_binary(type), do: type
+  defp block_param_type(%{"_type" => type}) when is_binary(type), do: type
+  defp block_param_type(_), do: nil
+
+  defp block_params_to_child(block) do
+    type = block_param_type(block)
+
+    %{"_type" => type, "id" => to_string(block["id"] || Ash.UUID.generate())}
+    |> Map.merge(Map.take(block, child_fields_for(type)))
+  end
+
+  defp child_to_block_params(child) do
+    type = child["_type"]
+
+    %{"_union_type" => type, "id" => Ash.UUID.generate()}
+    |> Map.merge(Map.take(child, child_fields_for(type)))
+  end
+
+  defp child_fields_for("heading"), do: ["text", "level"]
+  defp child_fields_for("rich_text"), do: ["legacy_html", "body"]
+  defp child_fields_for("quote"), do: ["text", "citation"]
+  defp child_fields_for("image"), do: ["url", "alt"]
+  defp child_fields_for("embed"), do: ["url"]
+  defp child_fields_for(_), do: []
+
+  defp columns_block_ids(form) do
+    form
+    |> full_blocks_input()
+    |> Enum.filter(&(block_param_type(&1) == "columns"))
+    |> Enum.map(&to_string(&1["id"]))
+    |> Enum.reject(&(&1 in [nil, ""]))
+  end
 
   # Keep at least one column so the block stays a valid container.
   defp drop_column(cols, _ci) when length(cols) <= 1, do: cols
@@ -6077,6 +6199,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
         :if={@open?}
         class="mt-2 space-y-2 rounded border border-base-content/15 bg-base-200/40 p-2"
       >
+        <p class="text-[11px] text-base-content/50">
+          {gettext("Comments live on this block — discuss here, not in a page gutter.")}
+        </p>
         <div :if={@thread == []} class="text-xs text-base-content/60">
           {gettext("No comments on this block yet.")}
         </div>
@@ -7366,24 +7491,30 @@ defmodule KilnCMSWeb.ContentEditorLive do
         :for={{item, i} <- Enum.with_index(@items)}
         class="flex items-start gap-2 rounded border border-base-content/10 p-2"
       >
-        <div class="grow space-y-1">
-          <input
-            type="text"
-            name={"#{@name}[#{i}][#{@key_a}]"}
-            value={item[@key_a]}
-            placeholder={@label_a}
-            aria-label={@label_a}
-            phx-debounce="300"
-            class="w-full rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
-          />
-          <textarea
-            name={"#{@name}[#{i}][#{@key_b}]"}
-            placeholder={@label_b}
-            aria-label={@label_b}
-            rows="2"
-            phx-debounce="300"
-            class="w-full rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
-          >{item[@key_b]}</textarea>
+        <div class="grow space-y-2">
+          <div class="space-y-1">
+            <label class="field-label text-xs">{@label_a}</label>
+            <input
+              type="text"
+              name={"#{@name}[#{i}][#{@key_a}]"}
+              value={item[@key_a]}
+              placeholder={@label_a}
+              aria-label={@label_a}
+              phx-debounce="300"
+              class="field-input w-full text-sm"
+            />
+          </div>
+          <div class="space-y-1">
+            <label class="field-label text-xs">{@label_b}</label>
+            <textarea
+              name={"#{@name}[#{i}][#{@key_b}]"}
+              placeholder={@label_b}
+              aria-label={@label_b}
+              rows="2"
+              phx-debounce="300"
+              class="field-input w-full text-sm"
+            >{item[@key_b]}</textarea>
+          </div>
         </div>
         <button
           type="button"
@@ -7887,6 +8018,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
                 >
                   <.icon name="hero-trash" class="size-4" />
                 </button>
+                <button
+                  type="button"
+                  phx-click="promote_child"
+                  phx-value-id={@block_id}
+                  phx-value-child={child["id"]}
+                  aria-label={gettext("Move to canvas")}
+                  title={gettext("Move to canvas")}
+                  class="text-base-content/50 hover:text-base-content"
+                >
+                  <.icon name="hero-arrow-left-start-on-rectangle" class="size-4" />
+                </button>
               </div>
               <.nested_child_fields block_id={@block_id} child={child} />
             </div>
@@ -7925,18 +8067,21 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp nested_child_fields(assigns) do
     ~H"""
-    <div class="space-y-1">
-      <input
-        :for={{field, ph} <- nested_fields_for(@child["_type"])}
-        type="text"
-        value={@child[field] || ""}
-        placeholder={ph}
-        phx-blur="col_update_child"
-        phx-value-id={@block_id}
-        phx-value-child={@child["id"]}
-        phx-value-field={field}
-        class="w-full rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
-      />
+    <div class="space-y-2">
+      <div :for={{field, ph} <- nested_fields_for(@child["_type"])} class="space-y-1">
+        <label class="field-label text-xs">{ph}</label>
+        <input
+          type="text"
+          value={@child[field] || ""}
+          placeholder={ph}
+          aria-label={ph}
+          phx-blur="col_update_child"
+          phx-value-id={@block_id}
+          phx-value-child={@child["id"]}
+          phx-value-field={field}
+          class="field-input w-full text-sm"
+        />
+      </div>
       <%!-- Named, unlike its nameless siblings above, and the name carries the
       identifiers (#893). A `<select>` inside a form routes its own `phx-change`
       through LiveView's `pushInput`, which serializes the form filtered to the
@@ -7950,19 +8095,22 @@ defmodule KilnCMSWeb.ContentEditorLive do
       content changeset exactly as the nameless inputs do: `validate` matches
       `%{"form" => params}` and never sees this key, and the nested tree is
       re-injected from socket state by `inject_children/2` regardless. --%>
-      <select
-        :if={@child["_type"] == "heading"}
-        name={"col_child[#{@block_id}][#{@child["id"]}][level]"}
-        phx-change="col_update_child"
-        class="rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
-      >
-        <%!-- Matched to what will actually publish. A child with no stored `level`
-        (a legacy one, or an empty string) made `to_int/1` return 0, so no option
-        was `selected` and the browser showed the first — H1 — while delivery
-        renders `h2`, because `Blocks.Heading.clamp/1` falls back to its default.
-        Harmless while the control was inert; a lie now that it works. --%>
-        <option :for={n <- 1..6} value={n} selected={child_heading_level(@child) == n}>H{n}</option>
-      </select>
+      <div :if={@child["_type"] == "heading"} class="space-y-1">
+        <label class="field-label text-xs">{gettext("Heading level")}</label>
+        <select
+          name={"col_child[#{@block_id}][#{@child["id"]}][level]"}
+          phx-change="col_update_child"
+          aria-label={gettext("Heading level")}
+          class="field-select text-sm"
+        >
+          <%!-- Matched to what will actually publish. A child with no stored `level`
+          (a legacy one, or an empty string) made `to_int/1` return 0, so no option
+          was `selected` and the browser showed the first — H1 — while delivery
+          renders `h2`, because `Blocks.Heading.clamp/1` falls back to its default.
+          Harmless while the control was inert; a lie now that it works. --%>
+          <option :for={n <- 1..6} value={n} selected={child_heading_level(@child) == n}>H{n}</option>
+        </select>
+      </div>
     </div>
     """
   end
@@ -8074,13 +8222,24 @@ defmodule KilnCMSWeb.ContentEditorLive do
               {gettext("Preview")} &nearr;
               <span class="sr-only">{gettext("(opens in a new tab)")}</span>
             </.link>
-            <%!-- In-context (front-end) editing on Kiln's own rendered page (#354). --%>
+            <%!-- Theme C: visual / in-context editing is a primary mode, not a detour. --%>
             <.link
               navigate={~p"/editor/site/#{@kind}/#{@record.slug}"}
-              class="btn btn-sm btn-default"
+              class="btn btn-sm btn-primary"
             >
-              <.icon name="hero-pencil-square" class="mr-1 size-4" />{gettext("Edit on page")}
+              <.icon name="hero-pencil-square" class="mr-1 size-4" />{gettext("Visual")}
             </.link>
+            <button
+              type="button"
+              phx-click="toggle_preview_layout"
+              class="btn btn-sm btn-default"
+              title={gettext("Toggle side-by-side preview")}
+            >
+              <.icon name="hero-view-columns" class="mr-1 size-4" />
+              {if @preview_layout == :split,
+                do: gettext("Focus"),
+                else: gettext("Side by side")}
+            </button>
             <%!-- Duplicate into a new draft (#471). The copy is made from the
                   SAVED row, which is the part worth warning about — and the
                   warning has to cover two different reasons the saved row is not
@@ -8116,7 +8275,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
           a11y_report={@a11y_report}
         />
 
-        <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+        <div class={[
+          "grid gap-6",
+          @preview_layout == :split && "lg:grid-cols-2",
+          @preview_layout != :split && "lg:grid-cols-[minmax(0,1fr)_22rem]"
+        ]}>
           <div class="min-w-0 space-y-6">
             <div class="grid gap-4 sm:grid-cols-2">
               <div class={["relative", lock_ring(@locked_fields, "title")]}>
@@ -8269,6 +8432,21 @@ defmodule KilnCMSWeb.ContentEditorLive do
                           class="rounded p-1 hover:bg-base-200 hover:text-base-content"
                         >
                           <.icon name="hero-document-duplicate" class="size-4" />
+                        </button>
+                        <button
+                          :if={
+                            block_type_string(bf) in @nested_child_types and
+                              columns_block_ids(@form) != []
+                          }
+                          type="button"
+                          phx-click="nest_into_columns"
+                          phx-value-bid={bf[:id].value}
+                          phx-value-cols={List.first(columns_block_ids(@form))}
+                          aria-label={gettext("Move into columns")}
+                          title={gettext("Move into columns")}
+                          class="rounded p-1 hover:bg-base-200 hover:text-base-content"
+                        >
+                          <.icon name="hero-arrow-right-end-on-rectangle" class="size-4" />
                         </button>
                         <button
                           type="button"
@@ -8529,16 +8707,27 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
             <%!-- ── Preview ─────────────────────────────────────────────── --%>
             <div class={[@inspector_tab != :preview && "hidden"]}>
-              <p class="mb-2 flex items-center gap-1.5 text-xs text-base-content/50">
-                <.icon name="hero-cursor-arrow-rays" class="size-3.5" />
-                {gettext("Hover a block and click Edit to change it on the page.")}
-              </p>
-              <.preview_article
-                form={@form}
-                html={@preview_html}
-                kind={@kind}
-                slug={@record.slug}
-              />
+              <div
+                :if={@preview_html == [] or @preview_html == nil}
+                class="rounded-lg border border-dashed border-base-content/20 px-4 py-8 text-center"
+              >
+                <p class="text-sm font-medium">{gettext("Nothing to preview yet")}</p>
+                <p class="mt-1 text-xs text-base-content/60">
+                  {gettext("Add blocks on the left — this pane shows exactly what publishes.")}
+                </p>
+              </div>
+              <div :if={@preview_html not in [[], nil]}>
+                <p class="mb-2 flex items-center gap-1.5 text-xs text-base-content/50">
+                  <.icon name="hero-cursor-arrow-rays" class="size-3.5" />
+                  {gettext("Hover a block and click Edit to change it on the page.")}
+                </p>
+                <.preview_article
+                  form={@form}
+                  html={@preview_html}
+                  kind={@kind}
+                  slug={@record.slug}
+                />
+              </div>
             </div>
 
             <%!-- ── Settings ────────────────────────────────────────────── --%>

@@ -64,7 +64,7 @@ defmodule KilnCMSWeb.OverviewLiveTest do
 
     {:ok, lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/overview")
 
-    assert html =~ "Overview"
+    assert html =~ "Home"
     assert lv |> element("#overview-total") |> render() =~ ">3<"
     assert html =~ "1 published · 1 in review · 1 drafts"
     assert html =~ "1 waiting for review"

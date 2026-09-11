@@ -55,7 +55,7 @@ defmodule KilnCMSWeb.OverviewLive do
      |> assign(:platform_admin?, KilnCMSWeb.LiveUserAuth.platform_admin?(socket))
      |> assign_backup_warning()
      |> assign_blocked_experiments()
-     |> assign(:page_title, gettext("Overview"))
+     |> assign(:page_title, gettext("Home"))
      |> load_metrics()}
   end
 
@@ -198,9 +198,9 @@ defmodule KilnCMSWeb.OverviewLive do
     >
       <div class="space-y-5">
         <div>
-          <h1 class="text-xl font-semibold tracking-tight">{gettext("Overview")}</h1>
+          <h1 class="text-xl font-semibold tracking-tight">{gettext("Home")}</h1>
           <p class="text-sm text-base-content/60">
-            {gettext("The site at a glance — eight domains arranged around your content.")}
+            {gettext("What needs you next — then eight domains around your content.")}
           </p>
         </div>
 
@@ -257,10 +257,6 @@ defmodule KilnCMSWeb.OverviewLive do
           <span :if={@experiments_off?} class="block text-sm font-medium">
             {gettext("Experiments are switched off for this deployment, so no arm is served.")}
           </span>
-          <%!-- NOT "cannot convert": the reasons below do not share an outcome
-                — some mean nothing converts, and `:goal_is_self` means a goal
-                that would convert its own impression if delivery let it. What
-                they share is that the numbers are not a result. --%>
           <span :if={@blocked_experiments != []} class="block text-sm font-medium">
             {ngettext(
               "%{count} running experiment is not producing usable results.",
@@ -273,6 +269,11 @@ defmodule KilnCMSWeb.OverviewLive do
               <span class="font-medium">{name}</span> — {blocked_headline(reason)}
             </li>
           </ul>
+          <span class="mt-2 block text-xs text-base-content/60">
+            {gettext(
+              "Experiments are managed from the CLI for now (`mix kiln.experiment`) — there is no console editor yet."
+            )}
+          </span>
         </.overview_strip>
 
         <div class="grid gap-4 lg:grid-cols-3">
@@ -309,7 +310,17 @@ defmodule KilnCMSWeb.OverviewLive do
                   )}
                 </.link>
               </li>
-              <li :if={Map.get(@by_state, :in_review, 0) > 0}>
+              <li :if={Map.get(@by_state, :in_review, 0) > 0 and @admin?}>
+                <.link navigate={~p"/editor?status=in_review"} class="text-primary hover:underline">
+                  {ngettext(
+                    "%{count} item needs your approval",
+                    "%{count} items need your approval",
+                    Map.get(@by_state, :in_review, 0),
+                    count: Map.get(@by_state, :in_review, 0)
+                  )}
+                </.link>
+              </li>
+              <li :if={Map.get(@by_state, :in_review, 0) > 0 and not @admin?}>
                 <.link navigate={~p"/editor?status=in_review"} class="text-primary hover:underline">
                   {gettext("%{count} waiting for review", count: Map.get(@by_state, :in_review, 0))}
                 </.link>
@@ -343,12 +354,17 @@ defmodule KilnCMSWeb.OverviewLive do
                 {gettext("All quiet.")}
               </li>
             </ul>
-            <.link
-              navigate={~p"/editor"}
-              class="mt-auto pt-1 text-xs font-medium text-primary hover:underline"
-            >
-              {gettext("Open content")} <span aria-hidden="true">→</span>
-            </.link>
+            <div class="mt-auto flex flex-wrap items-center gap-3 pt-2">
+              <.link navigate={~p"/editor"} class="btn btn-sm btn-primary">
+                {gettext("Continue editing")}
+              </.link>
+              <.link
+                navigate={~p"/editor?status=draft"}
+                class="text-xs font-medium text-primary hover:underline"
+              >
+                {gettext("View drafts")} <span aria-hidden="true">→</span>
+              </.link>
+            </div>
           </div>
 
           <.tile :for={tile <- @tiles} tile={tile} />

@@ -293,9 +293,20 @@ defmodule KilnCMSWeb.EditorLive do
   # U-H3/U-M2): "Select all" can hold hundreds of items, and a single stray
   # click could otherwise publish, unpublish or archive all of them instantly.
   def handle_event("bulk", %{"action" => verb}, socket)
-      when verb in ~w(publish unpublish archive unarchive delete) do
-    confirming = if MapSet.size(socket.assigns.selected) > 0, do: verb
-    {:noreply, assign(socket, :confirming_bulk, confirming)}
+      when verb in ~w(publish unpublish archive unarchive delete submit) do
+    # Publish is admin-only by policy — never open the confirm bar for editors
+    # even if a crafted phx-value sneaks past the template gate.
+    if verb == "publish" and socket.assigns.tier != :admin do
+      {:noreply,
+       put_flash(
+         socket,
+         :error,
+         gettext("Publishing requires an admin approval. Submit drafts for review instead.")
+       )}
+    else
+      confirming = if MapSet.size(socket.assigns.selected) > 0, do: verb
+      {:noreply, assign(socket, :confirming_bulk, confirming)}
+    end
   end
 
   def handle_event("cancel_bulk", _params, socket),
@@ -545,10 +556,28 @@ defmodule KilnCMSWeb.EditorLive do
     record = get!(kind, id, actor, org)
 
     case do_transition(kind, verb, record, actor, org) do
-      {:ok, _} -> socket |> load_items() |> put_flash(:info, gettext("Updated."))
-      _ -> put_flash(socket, :error, gettext("That action isn't allowed right now."))
+      {:ok, _} ->
+        socket |> load_items() |> put_flash(:info, transition_success_flash(verb))
+
+      _ ->
+        put_flash(socket, :error, transition_error_flash(verb))
     end
   end
+
+  defp transition_success_flash("submit"),
+    do: gettext("Sent for review — an admin will publish when ready.")
+
+  defp transition_success_flash("publish"), do: gettext("Published.")
+  defp transition_success_flash(_verb), do: gettext("Updated.")
+
+  defp transition_error_flash("publish"),
+    do: gettext("Publishing requires an admin approval. Submit the draft for review instead.")
+
+  defp transition_error_flash("return"),
+    do: gettext("Only an admin can return content to draft.")
+
+  defp transition_error_flash(_verb),
+    do: gettext("That action isn't allowed right now.")
 
   # All dispatch to the current site's org (epic #336): reads/writes are
   # tenant-scoped so an editor on one site's subdomain can only see and act on
@@ -587,6 +616,7 @@ defmodule KilnCMSWeb.EditorLive do
 
   defp bulk_actions(_tier) do
     [
+      {"submit", gettext("Submit for review")},
       {"unpublish", gettext("Unpublish")},
       {"archive", gettext("Archive")},
       {"unarchive", gettext("Unarchive")}
@@ -594,6 +624,7 @@ defmodule KilnCMSWeb.EditorLive do
   end
 
   defp bulk_verb_label("publish"), do: gettext("Publish")
+  defp bulk_verb_label("submit"), do: gettext("Submit for review")
   defp bulk_verb_label("unpublish"), do: gettext("Unpublish")
   defp bulk_verb_label("archive"), do: gettext("Archive")
   defp bulk_verb_label("unarchive"), do: gettext("Unarchive")
@@ -606,6 +637,13 @@ defmodule KilnCMSWeb.EditorLive do
   defp bulk_confirm_prompt("publish", n),
     do:
       gettext("Publish %{count} selected item(s)? They go live on the site immediately.",
+        count: n
+      )
+
+  defp bulk_confirm_prompt("submit", n),
+    do:
+      gettext(
+        "Submit %{count} selected draft(s) for review? An admin must publish them.",
         count: n
       )
 
@@ -1013,8 +1051,14 @@ defmodule KilnCMSWeb.EditorLive do
                 phx-value-id={record.id}
                 class="btn btn-sm btn-default"
               >
-                {gettext("Submit")}
+                {gettext("Submit for review")}
               </button>
+              <span
+                :if={record.state == :in_review and @tier == :editor}
+                class="text-xs text-base-content/70"
+              >
+                {gettext("Awaiting admin approval")}
+              </span>
               <button
                 :if={record.state in [:draft, :in_review] and @tier == :admin}
                 type="button"

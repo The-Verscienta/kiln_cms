@@ -114,17 +114,14 @@ defmodule KilnCMSWeb.ApiKeyLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app
+    <Layouts.console
       flash={@flash}
-      current_scope={@current_scope}
       current_user={@current_user}
       current_org={@current_org}
+      active={:api_keys}
     >
       <div class="space-y-8">
         <div>
-          <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
-            &larr; {gettext("All content")}
-          </.link>
           <h1 class="mt-1 text-2xl font-semibold">{gettext("API keys")}</h1>
           <p class="text-sm text-base-content/70">
             {gettext(
@@ -210,9 +207,9 @@ defmodule KilnCMSWeb.ApiKeyLive do
         <section class="space-y-4">
           <h2 class="text-lg font-medium">{gettext("Keys")} ({length(@keys)})</h2>
 
-          <p :if={@keys == []} class="text-sm text-base-content/60">
-            {gettext("No API keys yet.")}
-          </p>
+          <.empty_state :if={@keys == []} icon="hero-key" title={gettext("No API keys yet")}>
+            {gettext("Mint a key above to grant headless or MCP access.")}
+          </.empty_state>
 
           <div :if={@keys != []} class="overflow-x-auto">
             <table class="w-full text-left text-sm">
@@ -273,7 +270,7 @@ defmodule KilnCMSWeb.ApiKeyLive do
           </div>
         </section>
       </div>
-    </Layouts.app>
+    </Layouts.console>
     """
   end
 end

@@ -55,10 +55,13 @@ defmodule KilnCMSWeb.AccountLive do
 
   @impl true
   def mount(_params, _session, socket) do
+    tier = KilnCMSWeb.LiveUserAuth.effective_tier(socket)
+
     {:ok,
      socket
      |> assign(:page_title, gettext("Your account"))
      |> assign(:reconciling?, false)
+     |> assign(:editorial_tier, tier)
      |> load_memberships()
      |> load_subscriber()}
   end
@@ -263,6 +266,31 @@ defmodule KilnCMSWeb.AccountLive do
           <h1 class="text-3xl font-semibold">{gettext("Your account")}</h1>
           <p class="text-base-content/70">{@current_user.email}</p>
         </header>
+
+        <section
+          :if={@editorial_tier not in [:editor, :admin]}
+          class="card card-pad space-y-3 border border-info/30 bg-info/5"
+        >
+          <h2 class="text-lg font-medium">{gettext("Editorial access")}</h2>
+          <p class="text-sm text-base-content/80">
+            {gettext(
+              "You're signed in, but you don't have editorial access on this site yet. Ask an admin to invite you as an editor before you can create or edit content."
+            )}
+          </p>
+        </section>
+
+        <section
+          :if={@editorial_tier in [:editor, :admin]}
+          class="card card-pad space-y-3"
+        >
+          <h2 class="text-lg font-medium">{gettext("Editorial workspace")}</h2>
+          <p class="text-sm text-base-content/70">
+            {gettext("Jump back into the console to write and publish.")}
+          </p>
+          <.link navigate={~p"/editor/overview"} class="btn btn-primary btn-sm">
+            {gettext("Open editor home")}
+          </.link>
+        </section>
 
         <section class="card card-pad space-y-4">
           <h2 class="text-lg font-medium">{gettext("Membership")}</h2>

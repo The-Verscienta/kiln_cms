@@ -26,10 +26,12 @@ defmodule KilnCMSWeb.CalendarLive do
   @impl true
   def handle_params(params, _uri, socket) do
     month = parse_month(params["month"])
+    view = if params["view"] == "list", do: :list, else: :month
 
     {:noreply,
      socket
      |> assign(:month, month)
+     |> assign(:view, view)
      |> assign(:weeks, weeks(month))
      |> assign(:events, events(socket.assigns.current_user, socket.assigns.current_org, month))}
   end
@@ -177,9 +179,6 @@ defmodule KilnCMSWeb.CalendarLive do
 
   defp month_label(month), do: Calendar.strftime(month, "%B %Y")
 
-  defp shift_month(month, offset), do: month |> Date.shift(month: offset) |> month_param()
-  defp month_param(month), do: Calendar.strftime(month, "%Y-%m")
-
   defp kind_label(:publish), do: gettext("publishes")
   defp kind_label(:unpublish), do: gettext("unpublishes")
   defp kind_label(:published), do: gettext("went live")
@@ -216,7 +215,25 @@ defmodule KilnCMSWeb.CalendarLive do
           <h1 class="text-2xl font-semibold">{gettext("Editorial calendar")}</h1>
           <div class="flex items-center gap-2">
             <.link
-              patch={~p"/editor/calendar?month=#{shift_month(@month, -1)}"}
+              patch={calendar_path(@month, :month)}
+              class={[
+                "btn btn-sm",
+                (@view == :month && "btn-primary") || "btn-default"
+              ]}
+            >
+              {gettext("Month")}
+            </.link>
+            <.link
+              patch={calendar_path(@month, :list)}
+              class={[
+                "btn btn-sm",
+                (@view == :list && "btn-primary") || "btn-default"
+              ]}
+            >
+              {gettext("List")}
+            </.link>
+            <.link
+              patch={calendar_path(Date.shift(@month, month: -1), @view)}
               class="btn btn-sm btn-default"
               aria-label={gettext("Previous month")}
             >
@@ -224,13 +241,16 @@ defmodule KilnCMSWeb.CalendarLive do
             </.link>
             <span class="min-w-36 text-center text-sm font-medium">{month_label(@month)}</span>
             <.link
-              patch={~p"/editor/calendar?month=#{shift_month(@month, 1)}"}
+              patch={calendar_path(Date.shift(@month, month: 1), @view)}
               class="btn btn-sm btn-default"
               aria-label={gettext("Next month")}
             >
               &rarr;
             </.link>
-            <.link patch={~p"/editor/calendar"} class="btn btn-sm btn-default">
+            <.link
+              patch={calendar_path(Date.utc_today() |> Date.beginning_of_month(), @view)}
+              class="btn btn-sm btn-default"
+            >
               {gettext("Today")}
             </.link>
           </div>
@@ -259,7 +279,40 @@ defmodule KilnCMSWeb.CalendarLive do
           </span>
         </p>
 
-        <div class="overflow-x-auto">
+        <p :if={@view == :month} class="text-xs text-base-content/50 sm:hidden">
+          {gettext("Swipe sideways on small screens to see the full month grid.")}
+        </p>
+
+        <div :if={@view == :list} class="space-y-2">
+          <.empty_state
+            :if={flat_events(@events) == []}
+            icon="hero-calendar-days"
+            title={gettext("Nothing scheduled this month")}
+          >
+            {gettext("Scheduled publishes, tasks, and releases will show up here.")}
+          </.empty_state>
+          <ul :if={flat_events(@events) != []} class="card divide-y divide-base-content/10">
+            <li
+              :for={ev <- flat_events(@events)}
+              class="flex flex-wrap items-center gap-3 p-3"
+            >
+              <span class={["size-2.5 shrink-0 rounded-full border", kind_class(ev.kind)]} />
+              <div class="min-w-0 flex-1">
+                <.link navigate={event_path(ev)} class="font-medium hover:underline">
+                  {ev.title}
+                </.link>
+                <p class="text-xs text-base-content/60">
+                  {ev.label} · {kind_label(ev.kind)} · {Calendar.strftime(ev.at, "%b %-d, %H:%M")} UTC
+                </p>
+              </div>
+              <.link navigate={event_path(ev)} class="btn btn-sm btn-default">
+                {gettext("Open")}
+              </.link>
+            </li>
+          </ul>
+        </div>
+
+        <div :if={@view == :month} class="overflow-x-auto">
           <table class="w-full table-fixed border-collapse text-sm">
             <thead>
               <tr>
@@ -319,4 +372,19 @@ defmodule KilnCMSWeb.CalendarLive do
     </Layouts.console>
     """
   end
+
+  defp calendar_path(month, :list),
+    do: ~p"/editor/calendar?#{[month: Calendar.strftime(month, "%Y-%m"), view: "list"]}"
+
+  defp calendar_path(month, _view),
+    do: ~p"/editor/calendar?#{[month: Calendar.strftime(month, "%Y-%m")]}"
+
+  defp flat_events(events) when is_map(events) do
+    events
+    |> Map.values()
+    |> List.flatten()
+    |> Enum.sort_by(& &1.at, DateTime)
+  end
+
+  defp flat_events(_), do: []
 end
