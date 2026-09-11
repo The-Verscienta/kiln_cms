@@ -2311,8 +2311,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
     with %{} = redirect <- Enum.find(socket.assigns.redirects, &(&1.id == id)),
          :ok <- CMS.destroy_redirect(redirect, actor: actor, tenant: org) do
-      {:noreply,
-       socket |> load_redirects() |> put_flash(:info, gettext("Redirect deleted."))}
+      {:noreply, socket |> load_redirects() |> put_flash(:info, gettext("Redirect deleted."))}
     else
       # Already gone (deleted from `/editor/redirects`, or by the record moving
       # back onto that path) or refused — either way the list is stale, so
