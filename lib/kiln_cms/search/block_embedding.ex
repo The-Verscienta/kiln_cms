@@ -72,9 +72,13 @@ defmodule KilnCMS.Search.BlockEmbedding do
     read :nearest_to_vector do
       argument :vector, {:array, :float}, allow_nil?: false
       argument :exclude_document_id, :uuid
+      # One content type's blocks only — the block leg of
+      # `KilnCMS.Search.hybrid/3` runs per type, as every leg does.
+      argument :document_type, :atom
       argument :limit, :integer, default: 20
 
       filter expr(not is_nil(^ref(:embedding)))
+      filter expr(is_nil(^arg(:document_type)) or ^ref(:document_type) == ^arg(:document_type))
 
       filter expr(
                is_nil(^arg(:exclude_document_id)) or

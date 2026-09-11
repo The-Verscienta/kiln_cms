@@ -132,6 +132,25 @@ defmodule KilnCMS.Search do
   def rerank_model, do: cfg(:rerank_model, "BAAI/bge-reranker-base")
 
   @doc """
+  Whether `hybrid/3` runs the block leg — the semantic leg at block grain.
+
+  A document's embedding is computed over its whole `search_text`, of which
+  the model reads the first ~512 tokens: a long monograph's vector describes
+  its opening section and nothing after it, so a paraphrase or a question
+  about a section deep in the body embeds far from it. The per-block
+  embeddings the fire pipeline already writes (`KilnCMS.Search.BlockIndexer`,
+  Kiln v2 decision D16) describe each section on its own; this leg ranks
+  documents by their nearest block, so the section the query is about can
+  vouch for the document whatever its opening says. On by default wherever
+  semantic search is on, because the rows are already there; one extra
+  indexed nearest-neighbour query per content type per search is the cost.
+  `block_leg: false` switches it off. Block rows exist for **fired**
+  (published) documents only, so a draft is reached by the other legs alone.
+  """
+  @spec block_leg?() :: boolean()
+  def block_leg?, do: semantic?() and cfg(:block_leg, true)
+
+  @doc """
   Maximum cosine distance a semantic hit may have and still count as a match,
   or `nil` (the default) for no floor.
 
@@ -410,6 +429,15 @@ defmodule KilnCMS.Search do
   @relaxed_fallback_threshold 3
   @relaxed_weight 0.5
 
+  # The block leg is the semantic leg at block grain — same embedder, same
+  # distance, one more view of the document — so it carries the semantic
+  # leg's weight: a document reached both by its whole and by a section is
+  # corroborated the way a keyword-and-semantic hit is. Blocks outnumber
+  # documents, so the leg reads a multiple of the candidate count in blocks
+  # and keeps each document once, at its nearest block.
+  @block_weight 1.0
+  @block_candidates 4 * @hybrid_candidates
+
   # The facet arguments shared by `:search`, `:search_any`, `:search_title`
   # and `:search_semantic`.
   @facet_filters [:category_id, :author_id, :state, :tag_ids]
@@ -421,9 +449,10 @@ defmodule KilnCMS.Search do
 
   @doc """
   Hybrid search over any content type: fuse the keyword (`:search`, ts_rank),
-  semantic (`:search_semantic`, cosine) and title (`:search_title`, records
-  the query names) result lists by Reciprocal Rank Fusion and return the
-  merged records, best first.
+  semantic (`:search_semantic`, cosine), block (the nearest per-block
+  embedding per document — see `block_leg?/0`) and title (`:search_title`,
+  records the query names) result lists by Reciprocal Rank Fusion and return
+  the merged records, best first.
 
   `type` is anything the content registry resolves — `:page`, `:post`, a
   generated type's atom, a dynamic type's name string (searched on the shared
@@ -500,7 +529,14 @@ defmodule KilnCMS.Search do
     {keyword, relaxed} =
       without_search_vector(resource, fn -> keyword_legs(resource, query, args, read_opts) end)
 
+    # One embedding per call, shared by the two semantic legs: a sweep hands
+    # its vector down in `opts`; a direct caller gets it embedded here once,
+    # rather than once in the semantic leg's prepare and again for the block
+    # leg. `:unavailable` (semantic off, or the embedder failed) skips both.
+    opts = Keyword.put_new_lazy(opts, :query_vector, fn -> global_query_vector(query) end)
+
     semantic = run_leg(resource, :search_semantic, args, read_opts, semantic_context(opts))
+    {blocks, block_distances} = block_leg(resource, query, locale, filters, read_opts, opts)
     title = run_leg(resource, :search_title, args, read_opts)
 
     fuzzy =
@@ -516,11 +552,12 @@ defmodule KilnCMS.Search do
       {:keyword, keyword, 1.0},
       {:keyword_any, relaxed, @relaxed_weight},
       {:semantic, semantic, 1.0},
+      {:block, blocks, @block_weight},
       {:title, title, @title_weight},
       {:fuzzy, fuzzy, @fuzzy_weight}
     ]
     |> reciprocal_rank_fusion(k)
-    |> floor_semantic_only(semantic_max_distance())
+    |> floor_semantic_only(semantic_max_distance(), block_distances)
     |> Enum.take(limit)
     |> maybe_rerank(query, opts)
     |> load_results(load, read_opts)
@@ -548,15 +585,17 @@ defmodule KilnCMS.Search do
 
   @doc """
   Which legs of `hybrid/3` returned this record — a subset of
-  `[:keyword, :keyword_any, :semantic, :title, :fuzzy]`, in that order — or
-  `[]` for a record that did not come out of `hybrid/3`.
+  `[:keyword, :keyword_any, :semantic, :block, :title, :fuzzy]`, in that
+  order — or `[]` for a record that did not come out of `hybrid/3`.
 
   `:keyword` is the full-text leg, every query term matched; `:keyword_any`
   is its any-term relaxation, which runs only when the full match came up
   short on a multi-word query, so its presence on a hit means "matched some
-  of the terms"; `:semantic` is the embedding leg; `:title` a record the
-  query names outright (its whole title appears in the query); `:fuzzy` the
-  trigram title leg that runs only when the full match came up short.
+  of the terms"; `:semantic` is the embedding leg over the whole document;
+  `:block` the same embedding at block grain, a document reached through
+  its nearest section (`block_leg?/0`); `:title` a record the query names
+  outright (its whole title appears in the query); `:fuzzy` the trigram
+  title leg that runs only when the full match came up short.
 
   Provenance, for two readers: a client deciding how much to trust a hit (a
   keyword-and-semantic hit is a stronger claim than a fuzzy-only one, a
@@ -569,7 +608,7 @@ defmodule KilnCMS.Search do
   def hit_legs(_record), do: []
 
   @typedoc "A leg of `hybrid/3` — see `hit_legs/1`."
-  @type leg :: :keyword | :keyword_any | :semantic | :title | :fuzzy
+  @type leg :: :keyword | :keyword_any | :semantic | :block | :title | :fuzzy
 
   # A fused hit on its way out of `hybrid/3`: the record, the score it is
   # ordered by, and the legs that returned it.
@@ -614,9 +653,11 @@ defmodule KilnCMS.Search do
     end)
   end
 
-  # The one embedding a global sweep pays. `:unavailable` (disabled, or the
-  # embedder failed) tells each section's prepare to skip its semantic leg
-  # rather than retry the same failing call once per type.
+  # The one embedding a search pays — a global sweep's, shared by every
+  # section, or a single `hybrid/3` call's, shared by its semantic and block
+  # legs. `:unavailable` (disabled, or the embedder failed) tells each
+  # section's prepare to skip its semantic leg rather than retry the same
+  # failing call once per type.
   defp global_query_vector(query) do
     with true <- semantic?(),
          {:ok, vector} <- embed_query(query) do
@@ -639,29 +680,42 @@ defmodule KilnCMS.Search do
     end
   end
 
-  # The relevance floor, applied after fusion to hits only the semantic leg
+  # The relevance floor, applied after fusion to hits only the semantic legs
   # returned — the why is on `semantic_max_distance/0`. Runs before `limit`
-  # is taken, so a floored hit does not hold a slot, and the leg is sorted by
-  # distance, so the rows this drops sit at its tail and dropping them moves
-  # no other row's rank.
+  # is taken, so a floored hit does not hold a slot, and the legs are sorted
+  # by distance, so the rows this drops sit at their tails and dropping them
+  # moves no other row's rank.
   #
-  # The distance is the semantic leg's loaded `semantic_distance` calc, and a
-  # hit only that leg returned is that leg's record — but `Ash.NotLoaded` is
-  # truthy, so anything that is not a number fails closed rather than passing
-  # the floor by accident. That is worth a line in the log: it is also what a
-  # resource whose semantic prepare does not see the `:caller` context looks
-  # like, and the symptom otherwise is a type whose semantic-only hits simply
-  # never appear. The floor itself is a number or nil by the time it gets
-  # here — `semantic_max_distance/0` raises on anything else.
-  @spec floor_semantic_only([hit()], float() | nil) :: [hit()]
-  defp floor_semantic_only(hits, nil), do: hits
+  # "Only the semantic legs" is the document leg and the block leg together:
+  # both are the same embedder's distance, at two grains, and a hit they
+  # alone returned has no lexical alibi either. It is judged by the nearer
+  # of the two distances it has — the document's loaded `semantic_distance`
+  # calc, and the nearest block's distance the block leg kept — so a section
+  # within the floor keeps a document whose opening is not.
+  #
+  # `Ash.NotLoaded` is truthy, so a distance that is not a number is not a
+  # pass: a hit with no usable distance fails closed, with a line in the log,
+  # because that is also what a resource whose semantic prepare does not see
+  # the `:caller` context looks like, and the symptom otherwise is a type
+  # whose semantic-only hits simply never appear. The floor itself is a
+  # number or nil by the time it gets here — `semantic_max_distance/0` raises
+  # on anything else.
+  @spec floor_semantic_only([hit()], float() | nil, %{Ash.UUID.t() => float()}) :: [hit()]
+  defp floor_semantic_only(hits, nil, _block_distances), do: hits
 
-  defp floor_semantic_only(hits, max_distance) do
-    Enum.reject(hits, fn
-      {%{semantic_distance: distance}, _score, [:semantic]} when is_number(distance) ->
-        distance > max_distance
+  defp floor_semantic_only(hits, max_distance, block_distances) do
+    Enum.reject(hits, &floored?(&1, max_distance, block_distances))
+  end
 
-      {record, _score, [:semantic]} ->
+  # A hit some lexical leg returned needs no distance alibi.
+  defp floored?({_record, _score, legs} = hit, max_distance, block_distances) do
+    Enum.all?(legs, &(&1 in [:semantic, :block])) and
+      beyond?(hit, max_distance, block_distances)
+  end
+
+  defp beyond?({record, _score, _legs}, max_distance, block_distances) do
+    case nearest_distance(record, Map.get(block_distances, record.id)) do
+      nil ->
         Logger.warning(
           "semantic-only hit #{inspect(record.__struct__)} #{record.id} carries no " <>
             "distance; floored. Does its :search_semantic prepare honour the " <>
@@ -670,9 +724,87 @@ defmodule KilnCMS.Search do
 
         true
 
-      _hit ->
-        false
+      distance ->
+        distance > max_distance
+    end
+  end
+
+  defp nearest_distance(%{semantic_distance: doc}, block)
+       when is_number(doc) and is_number(block),
+       do: min(doc, block)
+
+  defp nearest_distance(%{semantic_distance: doc}, _block) when is_number(doc), do: doc
+  defp nearest_distance(_record, block) when is_number(block), do: block
+  defp nearest_distance(_record, _block), do: nil
+
+  # The block leg: the nearest per-block embeddings for this content type,
+  # one entry per document at its nearest block, then the documents read
+  # through the caller's own read options — so the block rows, which are
+  # read as the system (they hold only ids and distances, and every content
+  # policy still applies to the document read), can never surface a record
+  # the actor may not see. Returns the records nearest-block-first, and the
+  # distance each was reached at for the floor.
+  #
+  # Sits out under facet filters, as the fuzzy leg does: the block rows carry
+  # no facets, and applying them to the document read would give a leg whose
+  # candidate count is decided after the fact. A resource that declares no
+  # content type, or whose type the block index does not hold, gets no leg.
+  @spec block_leg(module(), String.t(), String.t(), map(), keyword(), keyword()) ::
+          {[struct()], %{Ash.UUID.t() => float()}}
+  defp block_leg(resource, query, locale, filters, read_opts, opts) do
+    with true <- block_leg?(),
+         true <- filters == %{},
+         {:ok, vector} <- leg_vector(query, opts),
+         type when is_atom(type) and not is_nil(type) <-
+           KilnCMS.CMS.ContentTypes.type_atom(resource) do
+      nearest = nearest_blocks(vector, type, read_opts[:tenant])
+      ids = Enum.map(nearest, &elem(&1, 0))
+
+      by_id =
+        resource
+        |> Ash.Query.new()
+        |> Ash.Query.filter(id in ^ids and locale == ^locale)
+        |> Ash.read!(read_opts)
+        |> Map.new(&{&1.id, &1})
+
+      records = ids |> Enum.map(&Map.get(by_id, &1)) |> Enum.reject(&is_nil/1)
+      {records, Map.new(nearest)}
+    else
+      _ -> {[], %{}}
+    end
+  end
+
+  # `[{document_id, distance}]`, nearest first, each document once — at its
+  # nearest block. Reads a multiple of the candidate count in blocks because
+  # a long document contributes many of them.
+  defp nearest_blocks(vector, type, tenant) do
+    KilnCMS.Search.BlockEmbedding
+    |> Ash.Query.for_read(:nearest_to_vector, %{
+      vector: vector,
+      document_type: type,
+      limit: @block_candidates
+    })
+    |> Ash.Query.load(semantic_distance: %{query_vector: vector})
+    |> Ash.read!(authorize?: false, tenant: tenant)
+    |> Enum.reduce({[], MapSet.new()}, fn row, {acc, seen} ->
+      if MapSet.member?(seen, row.document_id) do
+        {acc, seen}
+      else
+        {[{row.document_id, row.semantic_distance} | acc], MapSet.put(seen, row.document_id)}
+      end
     end)
+    |> elem(0)
+    |> Enum.reverse()
+    |> Enum.take(@hybrid_candidates)
+  end
+
+  # The query vector the block leg ranks by — the one embedding `hybrid/3`
+  # resolved for both semantic legs; `:unavailable` means there is none.
+  defp leg_vector(_query, opts) do
+    case Keyword.fetch(opts, :query_vector) do
+      {:ok, vector} when is_list(vector) -> {:ok, vector}
+      _none -> :error
+    end
   end
 
   @doc """

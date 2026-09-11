@@ -94,6 +94,19 @@ migration, a rewritten column, a dropped config key).
   whether their text was saved. Rich-text blocks now honour the lock too: a
   block held by someone else is read-only in TipTap, not just ringed.
   Modelled on texttile's `Texttile.Articles.Lock`.
+- **Hybrid search fuses a block leg.** A document's embedding covers the
+  first ~512 tokens of its text, so a long monograph's vector describes its
+  opening and a question about a section deep in the body embedded far from
+  it. `KilnCMS.Search.hybrid/3` now also ranks documents by their nearest
+  per-block embedding — the rows the fire pipeline already writes (D16) —
+  at the semantic leg's weight, reported as `block` in `legs` on
+  `/api/search` and `/api/ask`. The relevance floor judges a hit only the
+  semantic legs returned by the nearer of its document and block distances.
+  On wherever semantic search is on (`config :kiln_cms, KilnCMS.Search,
+  block_leg: false` switches it off), one indexed nearest-neighbour query
+  per content type per search; sits out under facet filters. Block rows
+  exist for fired documents only. The `:nearest_to_vector` read on
+  `KilnCMS.Search.BlockEmbedding` gained a `document_type` argument.
 - **A first-run setup wizard at `/setup` (#1317).** While an instance has no
   admin account, a three-step wizard creates one — email + password, an
   optional site name/colour/theme — and then sends the operator to sign-in,

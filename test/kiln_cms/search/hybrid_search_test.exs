@@ -657,4 +657,147 @@ defmodule KilnCMS.Search.HybridTest do
       assert ids(page.results) == Enum.take(by_distance, 2)
     end
   end
+
+  describe "the block leg: a document reached through its nearest section (D16)" do
+    # The per-block embeddings the fire pipeline writes describe each
+    # section; the leg ranks documents by their nearest block. Under the
+    # stub embedder a block whose text is the query sits at distance 0 from
+    # it (its ancestor context aside), while the document's own vector — over
+    # the whole text — sits somewhere else, which is exactly the long-document
+    # case the leg exists for.
+
+    alias KilnCMS.Search.BlockIndexer
+
+    defp indexed_page(admin, title, blocks) do
+      page = CMS.create_page!(%{title: title, slug: slug(), blocks: blocks}, actor: admin)
+      {:ok, _count} = BlockIndexer.reindex(page)
+      page
+    end
+
+    defp block_distance(page, query) do
+      {:ok, vector} = Search.embed_query(query)
+
+      KilnCMS.Search.BlockEmbedding
+      |> Ash.Query.for_read(:nearest_to_vector, %{vector: vector, document_type: :page, limit: 50})
+      |> Ash.Query.load(semantic_distance: %{query_vector: vector})
+      |> Ash.read!(authorize?: false)
+      |> Enum.find(&(&1.document_id == page.id))
+      |> Map.fetch!(:semantic_distance)
+    end
+
+    test "a record is reached through its nearest block, and carries :block" do
+      admin = admin()
+      section = "quiet rivers and cold streams"
+
+      deep =
+        indexed_page(admin, "Unrelated opening", [
+          %{
+            type: :rich_text,
+            content: "<p>An opening about something else entirely.</p>",
+            order: 0
+          },
+          %{type: :rich_text, content: "<p>#{section}</p>", order: 1}
+        ])
+
+      other =
+        indexed_page(admin, "Other", [%{type: :rich_text, content: "<p>mountains</p>", order: 0}])
+
+      KilnCMS.DataCase.drain_oban()
+
+      results = Search.hybrid(:page, section, actor: admin)
+      hit = Enum.find(results, &(&1.id == deep.id))
+      assert hit, "expected the page with the matching section among the results"
+      assert :block in Search.hit_legs(hit)
+      # The leg's order is the nearest block's: the section that is the query
+      # beats a block about mountains.
+      assert block_distance(deep, section) < block_distance(other, section)
+
+      put_search_env(block_leg: false)
+
+      refute Search.hybrid(:page, section, actor: admin)
+             |> Enum.any?(&(:block in Search.hit_legs(&1)))
+    end
+
+    test "the floor judges a semantic-only hit by its nearest distance, block included" do
+      admin = admin()
+      # Stop words only: no keyword, any-term, title or fuzzy leg can return
+      # this page — only the two semantic legs, at two grains.
+      query = "the and of"
+
+      page =
+        indexed_page(admin, "gamma", [%{type: :rich_text, content: "<p>#{query}</p>", order: 0}])
+
+      KilnCMS.DataCase.drain_oban()
+
+      block = block_distance(page, query)
+      document = distance_of(page, query, admin)
+      assert block < document, "premise: the section is nearer than the whole document"
+
+      # A floor the document fails and the block passes: kept, through the block.
+      put_search_env(semantic_max_distance: (block + document) / 2)
+      [hit] = Search.hybrid(:page, query, actor: admin)
+      assert hit.id == page.id
+      assert Search.hit_legs(hit) == [:semantic, :block]
+
+      # Without the block leg the same floor drops it: the document alone is beyond it.
+      put_search_env(block_leg: false)
+      assert Search.hybrid(:page, query, actor: admin) == []
+
+      # And a floor both fail drops it with the leg on.
+      put_search_env(block_leg: true, semantic_max_distance: block / 2)
+      assert Search.hybrid(:page, query, actor: admin) == []
+    end
+
+    test "reaches the entry tier: a dynamic type's entry is filed under :entry" do
+      # `Entry` declares itself with `__kiln_dynamic_entry__/0`, not a content
+      # type — the leg must still know its block rows are filed as `:entry`.
+      admin = admin()
+
+      definition =
+        CMS.create_type_definition!(
+          %{name: "bl#{System.unique_integer([:positive])}", label: "Bl"},
+          actor: admin
+        )
+
+      entry =
+        KilnCMS.CMS.ContentTypes.create!(
+          definition.name,
+          %{
+            title: "Opening",
+            slug: slug(),
+            blocks: [
+              %{type: :rich_text, content: "<p>quiet rivers and cold streams</p>", order: 0}
+            ]
+          },
+          actor: admin
+        )
+
+      {:ok, 1} = BlockIndexer.reindex(entry)
+      KilnCMS.DataCase.drain_oban()
+
+      results = Search.hybrid(definition.name, "quiet rivers and cold streams", actor: admin)
+      hit = Enum.find(results, &(&1.id == entry.id))
+      assert hit, "expected the entry among the results"
+      assert :block in Search.hit_legs(hit)
+    end
+
+    test "sits out under facet filters, and a document with no block rows is reached by the other legs" do
+      admin = admin()
+
+      page =
+        indexed_page(admin, "alpha beta", [%{type: :rich_text, content: "<p>alpha</p>", order: 0}])
+
+      # Created and never indexed at block grain (a draft that was never fired).
+      draft = CMS.create_page!(%{title: "alpha draft", slug: slug()}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      results = Search.hybrid(:page, "alpha", actor: admin)
+      assert :block in Search.hit_legs(Enum.find(results, &(&1.id == page.id)))
+      refute :block in Search.hit_legs(Enum.find(results, &(&1.id == draft.id)))
+
+      filtered = Search.hybrid(:page, "alpha", actor: admin, filters: %{author_id: admin.id})
+      assert page.id in ids(filtered)
+      refute Enum.any?(filtered, &(:block in Search.hit_legs(&1)))
+    end
+  end
 end
