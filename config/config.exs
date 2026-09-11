@@ -188,8 +188,8 @@ config :kiln_cms, KilnCMS.Search,
   # same golden set `mix kiln.search.eval` scores) and re-measure when the
   # corpus grows. Hybrid search applies it only to hits the semantic leg
   # alone returned — a record any other leg finds is never floored — while
-  # the per-type semantic-search routes floor the whole leg, so the task
-  # prints an edge for each. A number or nil; anything else raises. See
+  # the per-type semantic-search routes exempt only a title match, so the
+  # task prints an edge for each. A number or nil; anything else raises. See
   # `KilnCMS.Search.semantic_max_distance/0`.
   semantic_max_distance: nil,
   # Cosine-distance ceiling on a tag suggestion (#851). Unlike the ceiling

@@ -136,7 +136,7 @@ defmodule KilnCMS.Search.MeasureFloorTaskTest do
     end
 
     assert output =~ "Hybrid search (the search page, /api/search, /api/ask) floors only hits no"
-    assert output =~ "The per-type semantic-search routes floor the whole leg"
+    assert output =~ "The per-type semantic-search routes exempt only a title match"
   end
 
   @tag :tmp_dir
