@@ -5,6 +5,7 @@ defmodule KilnCMS.NotificationsTest do
   """
   use KilnCMS.DataCase, async: true
 
+  alias KilnCMS.Accounts.Scoping
   alias KilnCMS.CMS
 
   defp user(role, prefs \\ %{}) do
@@ -215,4 +216,72 @@ defmodule KilnCMS.NotificationsTest do
     refute review.subject =~ "\n"
     assert review.subject == "Review requested: #{marker} Bcc: evil@example.com"
   end
+
+  # Per-org capability tiers (#419): on a multi-site install an org's admins
+  # are usually MEMBERS whose tier comes from `OrgMembership.role`, not global
+  # admins. Every member here is a global VIEWER, so a tier of :admin can only
+  # have come from the membership — and each is a member of SOME org, so the
+  # negative case is an admin who is simply not an admin HERE (a
+  # membership-less account off the default org would be :none everywhere and
+  # prove nothing).
+  describe "review requests reach the admins of the content's org (#419)" do
+    test "an org's admin member hears about its content; another org's admin member does not" do
+      org_a = KilnCMS.OrgFixtures.org("notif-a")
+      org_b = KilnCMS.OrgFixtures.org("notif-b")
+      admin_a = member(org_a, :admin)
+      admin_b = member(org_b, :admin)
+      marker = "Org review #{System.unique_integer([:positive])}"
+
+      submit_in(org_b, "#{marker} B")
+      drain()
+      assert all_recipients(sent_emails("#{marker} B")) == [to_string(admin_b.email)]
+
+      # Not vacuous: admin_a IS an admin — of org A — and hears about org A's.
+      assert Scoping.effective_tier(admin_a, org_a.id) == :admin
+      submit_in(org_a, "#{marker} A")
+      drain()
+      assert all_recipients(sent_emails("#{marker} A")) == [to_string(admin_a.email)]
+    end
+
+    test "platform admins still hear, once each, even when they also hold an admin membership" do
+      org_b = KilnCMS.OrgFixtures.org("notif-platform")
+      platform = user(:admin)
+      platform_member = user(:admin)
+      membership(platform_member, org_b, :admin)
+      admin_b = member(org_b, :admin)
+      _editor_b = member(org_b, :editor)
+      title = "Platform review #{System.unique_integer([:positive])}"
+
+      submit_in(org_b, title)
+      drain()
+
+      assert all_recipients(sent_emails(title)) ==
+               Enum.sort(Enum.map([platform, platform_member, admin_b], &to_string(&1.email)))
+    end
+  end
+
+  defp membership(user, org, role) do
+    Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+      user_id: user.id,
+      organization_id: org.id,
+      role: role
+    })
+  end
+
+  # A global viewer whose tier on `org` comes from the membership alone.
+  defp member(org, role) do
+    user = user(:viewer)
+    membership(user, org, role)
+    user
+  end
+
+  # An editor member of `org` submits a page there.
+  defp submit_in(org, title) do
+    editor = member(org, :editor)
+    page = CMS.create_page!(%{title: title, slug: slug()}, actor: editor, tenant: org)
+    CMS.submit_page_for_review!(page, %{}, actor: editor, tenant: org)
+  end
+
+  # One email per recipient, so a duplicate recipient shows up as a repeat.
+  defp all_recipients(emails), do: emails |> Enum.flat_map(&recipients/1) |> Enum.sort()
 end

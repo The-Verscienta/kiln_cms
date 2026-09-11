@@ -98,7 +98,8 @@ defmodule KilnCMS.Automation.RuleWorker do
       the author nothing their own session couldn't do. Ash *validations*
       (e.g. `AssigneeIsEditor` on `Task`) still run under `authorize?: false`.
     * The one tenant-less read (`Accounts.User` in `editor?/2`) is a
-      by-primary-key lookup of a global row, and reads only `role`.
+      by-primary-key lookup of a global row; the candidate's tier is then
+      resolved on the rule's own org (`Scoping.effective_tier/2`).
   """
   use Oban.Worker, queue: :default, max_attempts: 5
 
@@ -347,12 +348,13 @@ defmodule KilnCMS.Automation.RuleWorker do
   end
 
   #
-  # Tenant-less `authorize?: false` lookup of the global `User` row by id —
-  # the same `role`-only check `AssigneeIsEditor` makes (roles are global, not
-  # per-org yet; see that validation's moduledoc). Reads only `role`.
-  defp editor?(id, _org_id) do
+  # The candidate's effective tier on the rule's org — the same resolution
+  # `AssigneeIsEditor` makes at the write, so an author who passes here is not
+  # then refused there (and an org-granted editor who is a global viewer is not
+  # skipped over). Tenant-less `authorize?: false` lookup of the `User` row.
+  defp editor?(id, org_id) do
     case Ash.get(KilnCMS.Accounts.User, id, authorize?: false) do
-      {:ok, %{role: role}} -> role in [:editor, :admin]
+      {:ok, user} -> KilnCMS.Accounts.Scoping.effective_tier(user, org_id) in [:editor, :admin]
       _ -> false
     end
   end
