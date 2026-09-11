@@ -28,8 +28,11 @@ defmodule KilnCMS.CMS.Mentions do
 
   ## Scope
 
-  Candidates come from the org's own members. A mention can never reach a user
-  outside the org the comment was written in, whatever the body says.
+  This module matches; it does not choose who is matchable. Candidates come
+  from `KilnCMS.Notifications.mention_roster/1` — the org's members plus
+  membership-less users — for both the notifier and the editor's autocomplete,
+  so a mention can never reach a user outside the org the comment was written
+  in, whatever the body says.
   """
 
   # `@` then a run of name characters. Deliberately no spaces: "@Alice Smith"

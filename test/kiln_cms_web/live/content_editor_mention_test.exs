@@ -185,6 +185,82 @@ defmodule KilnCMSWeb.ContentEditorMentionTest do
     end
   end
 
+  # The roster is the notifier's (`Notifications.mention_roster/1`): the
+  # content org's members, any global role, plus membership-less accounts —
+  # not everyone whose GLOBAL role is editor or admin.
+  describe "on a second org" do
+    setup do
+      site = KilnCMS.OrgFixtures.org("mention")
+      other = KilnCMS.OrgFixtures.org("mention-other")
+      family = surname()
+
+      %{
+        site: site,
+        family: family,
+        editor: member(authed_user(:viewer, "Opener #{surname()}"), site, :editor),
+        # Global :viewer — reachable here through the membership alone.
+        site_viewer: member(authed_user(:viewer, "Alice #{family}"), site, :viewer),
+        # Global :editor, but a member of the OTHER org only.
+        outsider: member(authed_user(:editor, "Alicia #{family}"), other, :editor)
+      }
+    end
+
+    defp member(user, org, role) do
+      Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+        user_id: user.id,
+        organization_id: org.id,
+        role: role
+      })
+
+      user
+    end
+
+    defp open_org_composer(ctx) do
+      target =
+        CMS.create_page!(
+          %{
+            title: "Mentions spec",
+            slug: "mentions-#{System.unique_integer([:positive])}",
+            blocks: [%{"_type" => "quote", "text" => "First block"}]
+          },
+          actor: ctx.editor,
+          tenant: ctx.site
+        )
+
+      {:ok, lv, _html} =
+        ctx.conn
+        |> org_conn(ctx.site)
+        |> log_in(ctx.editor)
+        |> live(~p"/editor/content/page/#{target.id}")
+
+      render_click(lv, "comment_open", %{"bid" => block_id(target)})
+      lv
+    end
+
+    test "suggests a member of this org whose global role is viewer", ctx do
+      html = ctx |> open_org_composer() |> write("@alice")
+
+      assert html =~ "Alice #{ctx.family}"
+
+      # And the notifier would resolve that handle to her.
+      assert [%{id: id}] =
+               Mentions.resolve(
+                 "@#{handle_for(ctx.family)}",
+                 KilnCMS.Notifications.mention_roster(ctx.site)
+               )
+
+      assert id == ctx.site_viewer.id
+    end
+
+    test "does not suggest a global editor whose only membership is another org", ctx do
+      html = ctx |> open_org_composer() |> write("@ali")
+
+      assert html =~ "Alice #{ctx.family}"
+      refute html =~ "Alicia #{ctx.family}"
+      refute ctx.outsider.id in Enum.map(KilnCMS.Notifications.mention_roster(ctx.site), & &1.id)
+    end
+  end
+
   describe "picking one" do
     setup do
       family = surname()

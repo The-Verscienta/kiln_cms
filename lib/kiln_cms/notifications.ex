@@ -191,21 +191,37 @@ defmodule KilnCMS.Notifications do
     end
   end
 
-  # Candidates for an `@name`: this org's members, plus every user who belongs
-  # to no org at all.
-  #
-  # Not simply "the org's members". `OrgMembership` backs the org SWITCHER
-  # (#336), so a single-org install never materialises a row for anyone —
-  # scoping strictly to memberships would mean `@name` matched nobody on the
-  # majority of deployments. And not simply "every user" either: on a
-  # multi-tenant install that would let a mention carry another tenant's
-  # content title into an outsider's inbox.
-  #
-  # The union is the honest reading of the data: a user with no membership row
-  # is not scoped to any org, and a user with rows is reachable only from the
-  # orgs those rows name.
-  defp org_users(record) do
-    org_id = Map.get(record, :org_id) || KilnCMS.Accounts.default_org_id()
+  defp org_users(record), do: record |> Map.get(:org_id) |> mention_roster()
+
+  @doc """
+  The candidates an `@name` in a comment on `org`'s content resolves against:
+  this org's members, plus every user who belongs to no org at all — any
+  global role — less anyone who has muted comment notifications.
+
+  Public because it is the one roster for mentions: `dispatch_comment/4`
+  resolves against it after the write, and the content editor's `@`
+  autocomplete suggests from it (and seeds a task assignee from it) before.
+  Two lists would let the dropdown offer a handle the notifier then cannot
+  find, or miss a teammate it would have reached.
+
+  Not simply "the org's members". `OrgMembership` backs the org SWITCHER
+  (#336), so a single-org install never materialises a row for anyone —
+  scoping strictly to memberships would mean `@name` matched nobody on the
+  majority of deployments. And not simply "every user" either: on a
+  multi-tenant install that would let a mention carry another tenant's
+  content title into an outsider's inbox.
+
+  The union is the honest reading of the data: a user with no membership row
+  is not scoped to any org, and a user with rows is reachable only from the
+  orgs those rows name.
+
+  A system read (`User`'s read policy is self-only). `org` takes the shapes
+  `KilnCMS.Accounts.org_id/1` does — nil is the default org. A failed read is
+  `[]`: a mention that cannot resolve its candidates simply does not fire.
+  """
+  @spec mention_roster(struct() | String.t() | nil) :: [struct()]
+  def mention_roster(org) do
+    org_id = KilnCMS.Accounts.org_id(org)
 
     members = KilnCMS.Accounts.list_memberships_for_org!(org_id, authorize?: false)
     member_ids = MapSet.new(members, & &1.user_id)
