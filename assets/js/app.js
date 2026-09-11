@@ -29,10 +29,15 @@ import {FocusTrap} from "./focus_trap"
 import {PasskeyEnroll, initPasskeySignIn} from "./passkeys"
 import {PushToggle} from "./push"
 import {initAdvisoryJump} from "./advisory_jump"
+import {SavedTicker} from "./saved_ticker"
+import {BodyImageUploader} from "./body_image_uploader"
+import {watchLiveness} from "./liveness"
 
 const clamp01 = (n) => Math.min(Math.max(n, 0), 1)
 
 const Hooks = {
+  SavedTicker,
+  BodyImageUploader,
   FocusTrap,
   // Passkey enrolment on /editor/settings (#331) — see assets/js/passkeys.js.
   PasskeyEnroll,
@@ -355,6 +360,7 @@ const Hooks = {
   // makes esbuild split ./rich_text (+ deps) into its own chunk.
   RichText: {
     mounted() {
+      this._serverVersion = this.el.dataset.recordVersion
       import("./rich_text").then(({mount}) => {
         if (!this._destroyed) mount(this)
       })
@@ -371,10 +377,26 @@ const Hooks = {
     // this block, or took it over). `emitUpdate: false` — TipTap's setEditable
     // otherwise fires onUpdate, which would schedule a body push and mark the
     // record dirty for a change nobody made.
+    //
+    // The host is also `phx-update="ignore"`, so this and the record-version
+    // tracking below are both patches this hook only ever sees as attribute
+    // changes. The version is read while the line is up and left alone while
+    // it is down, so `onReconnected` (see rich_text.js) can tell the version
+    // the rejoin brought from the one last heard before the drop.
     updated() {
-      if (!this.editor) return
-      const editable = this.el.dataset.locked !== "true"
-      if (this.editor.isEditable !== editable) this.editor.setEditable(editable, false)
+      if (this.editor) {
+        const editable = this.el.dataset.locked !== "true"
+        if (this.editor.isEditable !== editable) this.editor.setEditable(editable, false)
+      }
+      if (!this._offline) this._serverVersion = this.el.dataset.recordVersion
+    },
+    disconnected() {
+      this._offline = true
+    },
+    reconnected() {
+      const wasOffline = this._offline
+      this._offline = false
+      if (wasOffline && this.onReconnected) this.onReconnected()
     },
     destroyed() {
       this._destroyed = true
@@ -382,6 +404,8 @@ const Hooks = {
       this._flushRef && this.removeHandleEvent(this._flushRef)
       this.slash && this.slash.destroy()
       this.linkPrompt && this.linkPrompt.destroy()
+      this.flushGuard && this.flushGuard.destroy()
+      this.dropHint && this.dropHint.destroy()
       this.editor && this.editor.destroy()
       // Rich-text hosts remount on every conflict reload / version restore, so
       // a handler left registered would accumulate one dead listener per
@@ -995,6 +1019,9 @@ window.addEventListener("phx:page-loading-stop", _info => topbar.hide())
 
 // connect if there are any LiveViews on the page
 liveSocket.connect()
+// A line that is cut without a goodbye looks exactly like a working one; this
+// asks for itself while the page is in front and rebuilds a quiet line.
+watchLiveness(liveSocket)
 
 // Passkey sign-in affordance on /sign-in (#331) — progressive enhancement,
 // no-op on other pages and on browsers without WebAuthn.

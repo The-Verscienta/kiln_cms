@@ -118,6 +118,23 @@ migration, a rewritten column, a dropped config key).
   per content type per search; sits out under facet filters. Block rows
   exist for fired documents only. The `:nearest_to_vector` read on
   `KilnCMS.Search.BlockEmbedding` gained a `document_type` argument.
+- **Paste or drop a picture straight into the body.** An image file pasted
+  or dropped on a rich-text block no longer vanishes: it uploads into the
+  media library through the same `Ingest` pipeline as the library's own
+  uploads (sniffed, size-capped, metadata-stripped, derived), and lands as an
+  image block right after the block it was dropped on, alt text carried over.
+  A placeholder with the file name, progress and a Cancel stands in the block
+  list while it travels; a file the browser refuses (too large, not an image)
+  stays there with the reason and a Dismiss. Several files pasted together
+  keep their order. Read access alone does not get a file in (`may_write?`).
+- **A quiet-line watchdog for the editor.** A WebSocket cut without a goodbye
+  (a laptop that slept, a proxy that let go) used to look exactly like a
+  working one while every keystroke's push went nowhere. The page now pings
+  for itself while it is in front, marks a line that has been silent too
+  long, and rebuilds it through Phoenix's own reconnect. On the rejoin every
+  rich-text block re-sends the words it still holds — unless the record was
+  saved by someone else meanwhile, in which case their save wins, the block
+  reloads it, and a flash says so once.
 - **A first-run setup wizard at `/setup` (#1317).** While an instance has no
   admin account, a three-step wizard creates one — email + password, an
   optional site name/colour/theme — and then sends the operator to sign-in,
@@ -264,6 +281,24 @@ migration, a rewritten column, a dropped config key).
   Single-entity queries keep their rank 1 — the named record collects the
   new leg on top of the legs it already led — and the typo-tolerant fuzzy
   fallback is unchanged.
+
+### Changed
+
+- **The save line says only what it knows.** "Saving…" used to appear the
+  moment a draft was edited, two seconds before any request existed, and
+  could not tell a slow server from a dead line. It now flashes "Saved" when a
+  write actually lands, fades to the clock stamp of that write ("Last saved
+  14:32", the exact second in the tooltip), turns to "Offline — not saving"
+  while the line is down or quiet, and otherwise keeps the stamp while edits
+  queue behind the debounce. Non-drafts still show "Unsaved changes" until
+  Save; a failed autosave still says so.
+- **Save and the workflow buttons never miss the last keystrokes.** Each
+  rich-text block settles its debounced body push on the mousedown (or
+  Enter/Space) of any control carrying `data-flush-body`, before the click's
+  own round trip. A workflow transition (Publish, Submit for review, …) also
+  saves a draft's queued edits first, so what goes live is what is on the
+  screen; a non-draft with unsaved edits is told to Save first instead of
+  having them marked saved and dropped.
 
 ### Fixed
 

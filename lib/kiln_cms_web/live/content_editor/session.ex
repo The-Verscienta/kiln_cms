@@ -358,10 +358,11 @@ defmodule KilnCMSWeb.ContentEditor.Session do
         socket
         |> cancel_autosave_timer()
         |> assign(:autosave_timer, Process.send_after(self(), :autosave, @autosave_debounce_ms))
-        # `:saving` from the moment of edit — the change is queued to autosave,
-        # like a "Saving…" indicator (#136). Resolves to `:saved`/`:error` on
-        # flush.
-        |> assign(:save_state, :saving)
+        # `:pending` from the moment of edit: the change is queued behind the
+        # debounce, and the indicator keeps showing the last save's stamp
+        # rather than a "Saving…" that no request is behind yet. Resolves to
+        # `:saved`/`:error` when the flush lands.
+        |> assign(:save_state, :pending)
     end
   end
 
@@ -380,7 +381,7 @@ defmodule KilnCMSWeb.ContentEditor.Session do
       socket.assigns.editors |> Enum.map(& &1.id) |> Enum.min()
   end
 
-  defp perform_autosave(%{assigns: %{save_state: :saving}} = socket) do
+  defp perform_autosave(%{assigns: %{save_state: :pending}} = socket) do
     cond do
       not autosaves?(socket) ->
         assign(socket, :autosave_timer, nil)

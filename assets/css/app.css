@@ -460,6 +460,30 @@
 
 /* This file is for your main application CSS */
 
+/* A rich-text block with image files dragged over it (rich_text.js): the
+   whole block is the target, and the drop lands the pictures as image blocks
+   right after it. */
+.rt-dropping .ProseMirror {
+  border-color: var(--color-primary);
+  box-shadow: inset 0 0 0 2px color-mix(in oklch, var(--color-primary) 35%, transparent);
+}
+
+/* The editor's save line (saved_ticker.js): loud for a moment on a save that
+   landed, quiet the rest of the time; the error colour while the line to the
+   server is down or has gone quiet. */
+.save-status.fresh {
+  color: var(--color-success);
+  animation: save-status-flash 2.6s ease-out;
+}
+.save-status.offline {
+  color: var(--color-error);
+}
+@keyframes save-status-flash {
+  0% { opacity: 0.25; }
+  12% { opacity: 1; }
+  100% { opacity: 1; }
+}
+
 /* TipTap (ProseMirror) rich-text editor in the block editor */
 .ProseMirror {
   min-height: 6rem;

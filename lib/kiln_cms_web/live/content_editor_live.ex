@@ -40,6 +40,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMS.CMS.WorkingCopy
   alias KilnCMS.Collab
   alias KilnCMS.Collab.FieldLock
+  alias KilnCMS.Media.Ingest
   alias KilnCMS.Notifications
   alias KilnCMS.Search.Related
   alias KilnCMS.Slug
@@ -94,6 +95,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # update. Short relative to `@autosave_debounce_ms`: this coalesces a burst
   # arriving over milliseconds, not idle-typing.
   @comments_reload_debounce_ms 300
+
+  # Paste/drop image uploads into the body (the texttile pattern, adapted to a
+  # block editor): the rich-text hook hands the files to a hidden
+  # `live_file_input`, and each finished entry becomes an image block right
+  # after the block it was dropped on. Images only — the file and A/V blocks
+  # keep their own pickers — and at the image ceiling `Ingest` will enforce,
+  # so an oversized file is refused before a byte travels rather than after.
+  @body_image_accept ~w(.jpg .jpeg .png .webp .gif)
+  @body_image_max_entries 8
 
   @impl true
   def mount(%{"id" => id} = params, _session, socket) do
@@ -171,6 +181,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # A live document's settings edited since the last Save
          # (docs/working-copy.md) — its text autosaves, its settings do not.
          |> assign(:settings_dirty?, false)
+         # When the record was last written, by anyone: the stamp the save
+         # line shows between saves (`SavedTicker`). Follows `updated_at` so
+         # two tabs agree on it.
+         |> assign(:saved_at, record.updated_at)
+         # Paste/drop image uploads: which block each in-flight file was dropped
+         # on, keyed by its (client-unique) file name — see "body_images_anchor".
+         |> assign(:body_upload_anchors, %{})
+         |> allow_upload(:body_images,
+           accept: @body_image_accept,
+           max_entries: @body_image_max_entries,
+           max_file_size: Ingest.max_image_size(),
+           auto_upload: true,
+           progress: &handle_body_image_progress/3
+         )
          # Debounced comments reload (#1252 review) — see @comments_reload_debounce_ms.
          |> assign(:comments_reload_timer, nil)
          # Set when an optimistic-lock conflict blocks saving until reload.
@@ -1402,7 +1426,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     socket
     |> assign_record(reloaded)
     |> broadcast_saved()
-    |> assign(:save_state, :saved)
+    |> mark_saved()
     |> assign(:settings_dirty?, false)
     |> put_flash(:info, gettext("Saved."))
   end
@@ -1452,6 +1476,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def terminate(_reason, _socket), do: :ok
 
   @impl true
+  # A paste/drop upload starting (`BodyImageUploader` → `this.upload/2`) arrives
+  # as the form's own change event with `_target` naming the file input. The
+  # entries ride along on the socket; nothing in the form moved, so this must
+  # not touch the form or mark the draft dirty.
+  def handle_event("validate", %{"_target" => ["body_images"]}, socket), do: {:noreply, socket}
+
   def handle_event("validate", %{"form" => params} = event, socket) when is_map(params) do
     # The columns children live in socket state (they aren't bound form inputs);
     # re-inject them so a keystroke's partial params can't wipe the nested tree.
@@ -1508,6 +1538,49 @@ defmodule KilnCMSWeb.ContentEditorLive do
      |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
      |> broadcast_preview_and_refresh()
      |> mark_dirty()}
+  end
+
+  # The `BodyImageUploader` hook names the block each pasted/dropped file was
+  # dropped on, keyed by the (client-unique) file name, just before it hands
+  # the files to the `live_file_input`. The entries themselves arrive through
+  # the upload channel; this is the one thing they cannot carry. Both pushes
+  # travel the same channel in order, so the anchor is here before the entry.
+  def handle_event("body_images_anchor", %{"names" => names} = p, socket) when is_list(names) do
+    after_id = anchor_id(p["after"])
+
+    anchors =
+      Enum.reduce(names, socket.assigns.body_upload_anchors, fn
+        name, acc when is_binary(name) -> Map.put(acc, name, after_id)
+        _other, acc -> acc
+      end)
+
+    {:noreply, assign(socket, :body_upload_anchors, anchors)}
+  end
+
+  # Cancel one body upload, or dismiss one that failed the client-side checks
+  # (too large, not an image) and is standing in the list with its error.
+  def handle_event("cancel_body_image", %{"ref" => ref}, socket) when is_binary(ref) do
+    name =
+      Enum.find_value(socket.assigns.uploads.body_images.entries, fn entry ->
+        entry.ref == ref && entry.client_name
+      end)
+
+    {:noreply, socket |> cancel_upload(:body_images, ref) |> drop_anchor(name)}
+  end
+
+  # A rich-text block came back from a dropped connection to find the record
+  # saved by someone else meanwhile (rich_text.js compares the record version
+  # its host carried before and after the rejoin). It reloaded the saved text
+  # rather than write its own over a co-editor's save, and says so once.
+  def handle_event("rich_text_superseded", _params, socket) do
+    {:noreply,
+     put_flash(
+       socket,
+       :error,
+       gettext(
+         "This content was saved elsewhere while you were offline. A text block reloaded the saved version; the edits you made to it since were not applied."
+       )
+     )}
   end
 
   # Right inspector rail (Theme A): switch the visible panel. Pure view state —
@@ -2536,7 +2609,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
        socket
        |> assign_record(record)
        |> reset_editors()
-       |> assign(:save_state, :saved)
+       |> mark_saved()
        |> put_flash(
          :info,
          gettext("This was published. Your collaborative edits were saved with it.")
@@ -2724,7 +2797,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign_record(record)
          |> broadcast_saved()
          |> reset_editors()
-         |> assign(:save_state, :saved)
+         |> mark_saved()
          # Restore can be fired from inside the compare modal; the diff it was
          # showing describes a document that no longer exists.
          |> assign(:compare, nil)
@@ -2743,6 +2816,174 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # the "pick_image" handlers above and `route_picked_item/2` below (an
   # Unsplash import landing on the same target), so there is exactly one place
   # that knows how a pick reaches the form/blocks.
+  # --- body image uploads (paste / drop into a rich-text block) --------------
+
+  # `auto_upload: true` starts each file the moment the hook hands it over, and
+  # this fires on every progress tick; the work happens once the bytes are all
+  # here. The file goes through the same `Ingest` pipeline as the media
+  # library's own uploads (sniff, size cap, metadata strip, store, derive),
+  # under this session's actor and tenant, and the item it yields becomes an
+  # image block right after the block it was dropped on. The read-only viewer
+  # never sees a drop target, but an entry that reaches here anyway is refused.
+  defp handle_body_image_progress(:body_images, %{done?: false}, socket),
+    do: {:noreply, socket}
+
+  defp handle_body_image_progress(:body_images, entry, socket) do
+    name = entry.client_name
+
+    if socket.assigns.may_write? do
+      after_id = socket.assigns.body_upload_anchors[name]
+
+      result =
+        consume_uploaded_entry(socket, entry, fn %{path: path} ->
+          {:ok,
+           Ingest.store_file(path, name,
+             actor: socket.assigns.actor,
+             tenant: socket.assigns.current_org
+           )}
+        end)
+
+      case result do
+        {:ok, item} ->
+          block_id = Ash.UUID.generate()
+
+          {:noreply,
+           socket
+           |> assign(:media, [media_row(item) | socket.assigns.media])
+           |> insert_image_block(block_id, after_id, item)
+           |> shift_anchors(name, after_id, block_id)}
+
+        {:error, reason} ->
+          {:noreply,
+           socket
+           |> drop_anchor(name)
+           |> put_flash(
+             :error,
+             gettext("Couldn't upload %{name}: %{reason}",
+               name: name,
+               reason: ingest_failure_reason(reason)
+             )
+           )}
+      end
+    else
+      {:noreply,
+       socket
+       |> cancel_upload(:body_images, entry.ref)
+       |> drop_anchor(name)
+       |> put_flash(:error, gettext("You don't have permission to add images here."))}
+    end
+  end
+
+  # Where the block for an uploaded file lands: after the block named in the
+  # anchor event, or at the end of the list when the anchor is missing.
+  defp anchor_id(id) when is_binary(id) and id != "", do: id
+  defp anchor_id(_other), do: nil
+
+  defp drop_anchor(socket, nil), do: socket
+
+  defp drop_anchor(socket, name),
+    do: update(socket, :body_upload_anchors, &Map.delete(&1, name))
+
+  # The finished file's block becomes the anchor for the files that were
+  # pasted with it, so a multi-file paste lands in the order it was pasted
+  # rather than each new block pushing the earlier ones down.
+  defp shift_anchors(socket, done_name, after_id, block_id) do
+    anchors =
+      socket.assigns.body_upload_anchors
+      |> Map.delete(done_name)
+      |> Map.new(fn
+        {name, ^after_id} -> {name, block_id}
+        other -> other
+      end)
+
+    assign(socket, :body_upload_anchors, anchors)
+  end
+
+  # The same shape `apply_pick(:new, ...)` builds for a library pick, plus the
+  # item's alt text, positioned by the anchor the way the inline "+" does.
+  defp insert_image_block(socket, block_id, after_id, item) do
+    form =
+      AshPhoenix.Form.add_form(socket.assigns.form, socket.assigns.form.name <> "[blocks]",
+        params: %{
+          "_union_type" => "image",
+          "id" => block_id,
+          "url" => item.url,
+          "media_id" => item.id,
+          "alt" => item.alt || ""
+        }
+      )
+      |> position_new_block(after_id)
+
+    socket = assign(socket, :form, form)
+    broadcast_preview(socket)
+    socket |> refresh_preview() |> mark_dirty()
+  end
+
+  # The uploads standing in for a block that does not exist yet, rendered in
+  # the block list right after their anchor (`nil` — no anchor — is the end of
+  # the list). An entry that failed the client-side checks stays here with its
+  # error and a Dismiss, so the list says what happened to the file.
+  defp pending_body_images(uploads, anchors, after_id) do
+    Enum.filter(uploads.body_images.entries, &(anchors[&1.client_name] == after_id))
+  end
+
+  # The same vocabulary `KilnCMSWeb.MediaLive` uses for its own upload failures.
+  defp ingest_failure_reason(:too_many_pixels), do: gettext("image dimensions are too large")
+  defp ingest_failure_reason(:unsupported_format), do: gettext("unsupported file format")
+  defp ingest_failure_reason(:too_large), do: gettext("file is too large for its type")
+  defp ingest_failure_reason(:storage_failed), do: gettext("couldn't be stored")
+  defp ingest_failure_reason(:create_failed), do: gettext("couldn't be saved")
+  defp ingest_failure_reason(_other), do: gettext("upload failed")
+
+  defp upload_error_text(:too_large),
+    do: gettext("too large (max %{mb} MB)", mb: div(Ingest.max_image_size(), 1_000_000))
+
+  defp upload_error_text(:not_accepted), do: gettext("not an image type this editor accepts")
+
+  defp upload_error_text(:too_many_files),
+    do: gettext("too many files at once (max %{count})", count: @body_image_max_entries)
+
+  defp upload_error_text(_other), do: gettext("upload failed")
+
+  attr :entry, :map, required: true
+  attr :errors, :list, required: true
+
+  defp body_image_placeholder(assigns) do
+    ~H"""
+    <div
+      id={"body-upload-#{@entry.ref}"}
+      role="status"
+      class={[
+        "mt-3 rounded-lg border p-3 text-sm",
+        (@errors == [] && "border-base-content/10 bg-base-100") || "border-error/40 bg-error/5"
+      ]}
+    >
+      <div class="flex items-center gap-2">
+        <.icon name="hero-photo" class="size-4 shrink-0 text-base-content/60" />
+        <span class="min-w-0 truncate">
+          <%= if @errors == [] do %>
+            {gettext("Uploading %{name}… %{pct}%", name: @entry.client_name, pct: @entry.progress)}
+          <% else %>
+            {gettext("%{name} couldn't be uploaded: %{reason}",
+              name: @entry.client_name,
+              reason: Enum.map_join(@errors, ", ", &upload_error_text/1)
+            )}
+          <% end %>
+        </span>
+        <button
+          type="button"
+          phx-click="cancel_body_image"
+          phx-value-ref={@entry.ref}
+          class="ml-auto shrink-0 text-xs text-base-content/60 hover:text-base-content"
+        >
+          {if @errors == [], do: gettext("Cancel"), else: gettext("Dismiss")}
+        </button>
+      </div>
+      <progress :if={@errors == []} value={@entry.progress} max="100" class="mt-2 h-1 w-full"></progress>
+    </div>
+    """
+  end
+
   defp apply_pick(socket, :seo_image, _media_id, url), do: put_seo_image(socket, url)
 
   defp apply_pick(socket, :featured, media_id, _url) do
@@ -3217,6 +3458,45 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp run_workflow(socket, action)
        when action in ~w(submit return publish unpublish archive unarchive) do
+    # A transition takes the record as SAVED with it. Edits a draft still holds
+    # behind the autosave debounce — including the body a rich-text block just
+    # flushed on the button's mousedown — are saved first, so Publish publishes
+    # what is on the screen; a non-draft cannot autosave, so its unsaved edits
+    # stop the transition instead of being marked saved and thrown away.
+    case settle_before_workflow(socket) do
+      {:ok, socket} -> transition(socket, action)
+      {:error, socket} -> socket
+    end
+  end
+
+  defp run_workflow(socket, _action), do: socket
+
+  defp settle_before_workflow(%{assigns: %{save_state: state}} = socket)
+       when state in [:pending, :error] do
+    socket = socket |> cancel_autosave_timer() |> do_autosave()
+
+    case socket.assigns.save_state do
+      :saved ->
+        {:ok, socket}
+
+      _other ->
+        {:error,
+         put_flash(
+           socket,
+           :error,
+           gettext("Couldn't save your latest changes — fix the errors below, then try again.")
+         )}
+    end
+  end
+
+  defp settle_before_workflow(%{assigns: %{save_state: :unsaved}} = socket) do
+    {:error,
+     put_flash(socket, :error, gettext("Save your changes before changing this content's state."))}
+  end
+
+  defp settle_before_workflow(socket), do: {:ok, socket}
+
+  defp transition(socket, action) do
     # `publish` gets its own event; the rest share `:workflow` (tagged by action)
     # so the publish hot path is isolated in the metrics.
     {event, meta} =
@@ -3235,7 +3515,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         |> cancel_autosave_timer()
         |> assign_record(record)
         |> broadcast_saved()
-        |> assign(:save_state, :saved)
+        |> mark_saved()
         |> put_flash(:info, gettext("Updated to %{state}.", state: state_label(record.state)))
         |> maybe_prompt_reviewer_assignment(action)
 
@@ -3293,7 +3573,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         socket
         |> assign_record(fetch!(kind, updated.id, actor, record.org_id))
         |> broadcast_saved()
-        |> assign(:save_state, :saved)
+        |> mark_saved()
         |> put_flash(:info, flash)
 
       {:error, error} ->
@@ -3302,6 +3582,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
           else: put_flash(socket, :error, gettext("That action isn't allowed right now."))
     end
   end
+
 
   # #817 (follow-up to #501): "Submit for review" only ever reaches here for
   # an editor (workflow_buttons/1 shows that button only when @state == :draft
@@ -3333,6 +3614,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp maybe_prompt_reviewer_assignment(socket, _action), do: socket
 
   # --- dirty tracking + draft autosave ----------------------------------------
+
+  # A write landed and `@record` is the row it produced: the save line's stamp
+  # follows the record's own `updated_at`, so two tabs agree on when that was.
+  defp mark_saved(socket) do
+    socket
+    |> assign(:save_state, :saved)
+    |> assign(:saved_at, socket.assigns.record.updated_at)
+  end
 
   @doc false
   def do_autosave(socket) do
@@ -3440,7 +3729,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         reloaded =
           fetch!(socket.assigns.kind, record.id, socket.assigns.actor, socket.assigns.current_org)
 
-        socket |> assign_record(reloaded) |> broadcast_saved() |> assign(:save_state, :saved)
+        socket |> assign_record(reloaded) |> broadcast_saved() |> mark_saved()
 
       {:error, form} ->
         handle_autosave_error(socket, form)
@@ -3541,6 +3830,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp adopt_saved(%{assigns: %{save_state: :saved}} = socket, record) do
     socket
     |> assign(:record, record)
+    |> assign(:saved_at, record.updated_at)
     |> assign(:page_title, record.title)
     |> assign(:may_write?, may_write?(record, socket.assigns.actor, socket.assigns.current_org))
     |> assign(
@@ -4607,6 +4897,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
           data-kiln-focus={@focus_field}
           hidden
         ></span>
+        <%!-- Paste/drop image uploads: rich_text.js hands files to the
+              BodyImageUploader hook, which names their anchor block and feeds
+              this input (`this.upload/2`). Hidden — the editors are the
+              drop targets; the placeholders render in the block list. --%>
+        <div
+          id="body-image-uploader"
+          phx-hook="BodyImageUploader"
+          class="hidden"
+        >
+          <.live_file_input upload={@uploads.body_images} />
+        </div>
         <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
           <div class="min-w-0">
             <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
@@ -4665,6 +4966,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
           record={@record}
           save_state={@save_state}
           settings_dirty?={@settings_dirty?}
+          saved_at={@saved_at}
           tier={@tier}
           conflict={@conflict}
           editors={@editors}
@@ -4969,6 +5271,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         data-block-id={bf[:id].value}
                         data-locked={field_locked?(@locked_fields, bf[:body].name) && "true"}
                         data-content={rich_text_editor_html(bf)}
+                        data-record-version={@record.lock_version}
                         data-editor-label={gettext("Rich text editor")}
                         data-lock-field={bf[:body].name}
                         data-block-index={bf.index}
@@ -5164,9 +5467,24 @@ defmodule KilnCMSWeb.ContentEditorLive do
                       anchor={bf[:id].value}
                       compact
                     />
+                    <%!-- Images pasted or dropped on this block, still on their
+                          way up. Inside the card, not beside it: the sortable
+                          reads its direct children as blocks. --%>
+                    <.body_image_placeholder
+                      :for={
+                        entry <- pending_body_images(@uploads, @body_upload_anchors, bf[:id].value)
+                      }
+                      entry={entry}
+                      errors={upload_errors(@uploads.body_images, entry)}
+                    />
                   </div>
                 </.inputs_for>
               </div>
+              <.body_image_placeholder
+                :for={entry <- pending_body_images(@uploads, @body_upload_anchors, nil)}
+                entry={entry}
+                errors={upload_errors(@uploads.body_images, entry)}
+              />
 
               <%!-- Discussions whose block is gone. Deleting a block cascades
                     nothing, so without this section the thread would simply

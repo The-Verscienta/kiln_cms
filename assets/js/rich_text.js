@@ -146,6 +146,71 @@ const LinkOnPaste = Extension.create({
 // feeds `Kiln.Advisory.Checks.LinkText`'s `link_text_bare_url` warning with
 // links the author never made. Pasting (above) is an explicit gesture over an
 // explicit selection, so that one is on.
+// Pictures into the body (texttile's "paste one into the body, drop one on
+// it", adapted to a block editor). The rich-text schema has no image node —
+// and the browser's own drop into a contenteditable would write a data: URL
+// that the sanitizer strips on save, i.e. a picture that vanishes on reload.
+// So an image file pasted or dropped here never touches the document: it goes
+// to the `BodyImageUploader` hook, which uploads it into the media library,
+// and the server lands it as an image block right after this block, with a
+// placeholder standing in the list while the file travels.
+const IMAGE_FILE = /^image\//
+
+function imageFiles(dt) {
+  if (!dt) return []
+  return Array.from(dt.files || []).filter(f => IMAGE_FILE.test(f.type))
+}
+
+const ImageFiles = Extension.create({
+  name: "kilnImageFiles",
+
+  addOptions() {
+    return {send: null}
+  },
+
+  addProseMirrorPlugins() {
+    const {send} = this.options
+
+    return [
+      new Plugin({
+        key: new PluginKey("kilnImageFiles"),
+        props: {
+          handlePaste: (_view, event) => {
+            const files = imageFiles(event.clipboardData)
+            if (!files.length) return false
+            event.preventDefault()
+            send(files)
+            return true
+          },
+          handleDrop: (_view, event) => {
+            const files = imageFiles(event.dataTransfer)
+            if (!files.length) return false
+            event.preventDefault()
+            send(files)
+            return true
+          },
+        },
+      }),
+    ]
+  },
+})
+
+// The one message a block sends about its pictures: the files, and which
+// block they were dropped on, so the server knows where the new block goes.
+function bodyImageExtensions(hook) {
+  return [
+    ImageFiles.configure({
+      send: files =>
+        hook.el.dispatchEvent(
+          new CustomEvent("kiln:body-files", {
+            bubbles: true,
+            detail: {files, after: hook.el.dataset.blockId || null},
+          })
+        ),
+    }),
+  ]
+}
+
 const LINK_EXTENSIONS = [
   Link.configure({
     // Clicking a link inside the editor should put the caret in it, not
@@ -706,7 +771,11 @@ export function mount(hook) {
   if (collabToken && collabTopic && collabFragment) {
     mountCollab(hook, {token: collabToken, topic: collabTopic, fragment: collabFragment})
   } else {
-    buildEditor(hook, [StarterKit, ...LINK_EXTENSIONS, ...TABLE_EXTENSIONS], hook.el.dataset.content || "")
+    buildEditor(
+      hook,
+      [StarterKit, ...LINK_EXTENSIONS, ...TABLE_EXTENSIONS, ...bodyImageExtensions(hook)],
+      hook.el.dataset.content || ""
+    )
   }
 }
 
@@ -735,6 +804,7 @@ async function mountCollab(hook, {token, topic, fragment}) {
     StarterKit.configure({history: false}),
     ...LINK_EXTENSIONS,
     ...TABLE_EXTENSIONS,
+    ...bodyImageExtensions(hook),
     Collaboration.configure({document: handle.doc, field: fragment}),
     // Remote carets labeled with each collaborator's initials, in the same
     // color as their roster chip / lock badges.
@@ -903,6 +973,54 @@ function buildEditor(hook, extensions, content = null) {
     })
   }
 
+  // Settle the debounce on the mousedown of any control that carries
+  // `data-flush-body` (Save, the workflow buttons): the push goes out before
+  // the click's own round trip, over the same channel, so the event behind
+  // that button can never race the last 300 ms of typing. A keyboard has no
+  // mousedown, so Enter/Space on such a control flushes too. The attribute is
+  // the whole contract (texttile's data-flush-body); what the buttons send
+  // stays their business.
+  const flushFor = e => {
+    if (!hook._pendingPush) return
+    const control = e.target && e.target.closest && e.target.closest("[data-flush-body]")
+    if (control) pushBody()
+  }
+  const flushOnKey = e => {
+    if (e.key === "Enter" || e.key === " ") flushFor(e)
+  }
+  document.addEventListener("mousedown", flushFor, true)
+  document.addEventListener("keydown", flushOnKey, true)
+  hook.flushGuard = {
+    destroy() {
+      document.removeEventListener("mousedown", flushFor, true)
+      document.removeEventListener("keydown", flushOnKey, true)
+    },
+  }
+
+  // Say where a dragged picture may land: the block lights up while files are
+  // over it (the drop itself is the ImageFiles plugin's).
+  const host = hook.el
+  const carriesFiles = dt => !!dt && Array.from(dt.types || []).includes("Files")
+  const onDragOver = e => {
+    if (carriesFiles(e.dataTransfer)) host.classList.add("rt-dropping")
+  }
+  const onDragLeave = e => {
+    if (!e.relatedTarget || !host.contains(e.relatedTarget)) host.classList.remove("rt-dropping")
+  }
+  const onDrop = () => host.classList.remove("rt-dropping")
+  host.addEventListener("dragenter", onDragOver)
+  host.addEventListener("dragover", onDragOver)
+  host.addEventListener("dragleave", onDragLeave)
+  host.addEventListener("drop", onDrop)
+  hook.dropHint = {
+    destroy() {
+      host.removeEventListener("dragenter", onDragOver)
+      host.removeEventListener("dragover", onDragOver)
+      host.removeEventListener("dragleave", onDragLeave)
+      host.removeEventListener("drop", onDrop)
+    },
+  }
+
   // Reflect the cursor's active marks/nodes on the toolbar buttons.
   const syncToolbar = () => {
     if (!hook.toolbarButtons) return
@@ -940,6 +1058,7 @@ function buildEditor(hook, extensions, content = null) {
       syncToolbar()
       // Debounced push so the live preview reflects rich-text edits.
       hook._pendingPush = true
+      hook._everEdited = true
       clearTimeout(hook._debounce)
       hook._debounce = setTimeout(pushBody, 300)
     },
@@ -968,6 +1087,33 @@ function buildEditor(hook, extensions, content = null) {
     },
   })
   hook.editor = editor
+
+  // Back from a dropped line (liveness.js revives one; LiveView rejoins on its
+  // own too). The rejoin remounted the LiveView from the database, so the
+  // server has forgotten every body push since the last save — but this host
+  // is `phx-update="ignore"`, so the words are still here. LiveView keeps an
+  // ignored host's data-* attributes current, and the RichText hook stops
+  // reading `data-record-version` while the line is down, so the version on
+  // the host now is the rejoin's and `_serverVersion` is the last one heard
+  // before the drop. Equal: nobody else wrote the record, the document goes up
+  // again and autosave takes it from there. Moved: someone saved while we
+  // were away — their words win, this block reloads them, and the server
+  // says so once. Only a block that was edited has anything to lose or to
+  // send; under collaboration the shared doc already holds the truth.
+  hook._serverVersion = hook.el.dataset.recordVersion
+  hook.onReconnected = () => {
+    if (hook.collab) return
+    const now = hook.el.dataset.recordVersion
+    if (now === hook._serverVersion) {
+      if (hook._everEdited) pushBody()
+    } else {
+      hook.editor.commands.setContent(hook.el.dataset.content || "", false)
+      if (hook._everEdited) hook.pushEvent("rich_text_superseded", {})
+      hook._everEdited = false
+      hook._pendingPush = false
+    }
+    hook._serverVersion = now
+  }
   // The block editor can spawn new blocks from "/": choosing a block-insert
   // command adds it right after this block (anchored by the block's stable id —
   // the same B2 add_block path the inline "+" uses).

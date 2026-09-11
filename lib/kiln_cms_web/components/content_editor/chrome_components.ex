@@ -31,6 +31,9 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
   # A live document's settings edited but not yet saved (docs/working-copy.md):
   # its text autosaves into the working copy, its settings wait for Save.
   attr :settings_dirty?, :boolean, default: false
+  # When the record was last written by anyone: the stamp the save line shows
+  # between saves. `nil` only for a record whose `updated_at` is unknown.
+  attr :saved_at, :any, default: nil
 
   def editor_action_bar(assigns) do
     # Resolved once per render rather than per interpolation: `words_per_minute/0`
@@ -166,12 +169,18 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
             :if={@record.state == :draft or @save_state != :saved or @settings_dirty? or @pending?}
             state={if @settings_dirty?, do: :unsaved, else: @save_state}
             pending?={@pending?}
+            saved_at={@saved_at}
           />
           <.workflow_buttons state={@record.state} tier={@tier} pending?={@pending?} />
+          <%!-- `data-flush-body`: every rich-text block settles its debounced
+                body push on this button's mousedown, before the click's
+                round trip, so a Save can never miss the last keystrokes
+                (see the flush guard in rich_text.js). --%>
           <.button
             type="submit"
             variant="primary"
             disabled={@conflict}
+            data-flush-body
             phx-disable-with={gettext("Saving…")}
             title={@conflict && gettext("Reload to resolve the edit conflict before saving.")}
           >
@@ -265,35 +274,67 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
 
   attr :state, :atom, required: true
   attr :pending?, :boolean, default: false
+  attr :saved_at, :any, default: nil
 
-  # Draft autosave indicator shown next to the workflow/Save buttons. Covers the
-  # in-flight (:saving) and validation-failure (:error) states too (#136).
+  # The save line next to the workflow/Save buttons. It says only what it
+  # knows: a save that landed ("Saved", loud for a moment, then the clock
+  # stamp of that save), an autosave that failed validation (`:error`, #136),
+  # or edits a non-draft is holding for the Save button (`:unsaved`). A draft
+  # with a change queued behind the debounce (`:pending`) keeps the stamp —
+  # the old "Saving…" there described a request that did not exist yet, and
+  # could not tell a slow server from a dead line.
+  #
+  # The `SavedTicker` hook owns the words for the `:saved`/`:pending` states:
+  # it flashes "Saved" whenever `data-at` moves, fades to "Last saved 14:32",
+  # and turns to "Offline — not saving" while the socket is down or has gone
+  # quiet (see liveness.js). The server-rendered text is the no-JS fallback
+  # and the first paint. The wording travels as data attributes so the hook
+  # speaks the page's locale — with `%{time}` bound to itself, because the
+  # hook fills the clock in and Gettext would otherwise log a missing binding.
   def autosave_status(assigns) do
+    assigns = assign(assigns, :at_ms, saved_at_ms(assigns.saved_at))
+
     ~H"""
     <span
-      class={["text-xs", (@state == :error && "text-error") || "text-base-content/70"]}
+      id="save-status"
+      phx-hook="SavedTicker"
+      data-state={@state}
+      data-at={@at_ms}
+      data-word-saved={gettext("Saved")}
+      data-word-just-now={gettext("Last saved · just now")}
+      data-word-stamp={gettext("Last saved %{time}", time: "%{time}")}
+      data-word-narrow={gettext("saved %{time}", time: "%{time}")}
+      data-word-tooltip={gettext("The last save was at %{time}.", time: "%{time}")}
+      data-word-offline={gettext("Offline — not saving")}
+      class={["save-status text-xs", status_class(@state)]}
       aria-live="polite"
     >
-      <%= case @state do %>
-        <% :saving -> %>
-          {gettext("Saving…")}
-        <% :saved when @pending? -> %>
-          <%!-- Live · draft: the words are safe, and not yet what readers get. --%>
-          {gettext("Saved to the working copy")}
-        <% :saved -> %>
-          {gettext("Saved")}
-        <% :synced -> %>
-          <%!-- Collab: a co-editor persists; text edits are already in the
-                shared doc. Fields outside the text still need Save. --%>
-          {gettext("Synced live — co-editor saves")}
-        <% :error -> %>
-          {gettext("Couldn't autosave — check for errors")}
-        <% _ -> %>
-          {gettext("Unsaved changes")}
-      <% end %>
+      <span data-words>
+        <%= case @state do %>
+          <% :saved when @pending? -> %>
+            <%!-- Live · draft: the words are safe, and not yet what readers get. --%>
+            {gettext("Saved to the working copy")}
+          <% state when state in [:saved, :pending] -> %>
+            {gettext("Saved")}
+          <% :synced -> %>
+            <%!-- Collab: a co-editor persists; text edits are already in the
+                  shared doc. Fields outside the text still need Save. --%>
+            {gettext("Synced live — co-editor saves")}
+          <% :error -> %>
+            {gettext("Couldn't autosave — check for errors")}
+          <% _ -> %>
+            {gettext("Unsaved changes")}
+        <% end %>
+      </span>
     </span>
     """
   end
+
+  defp status_class(:error), do: "text-error"
+  defp status_class(_state), do: "text-base-content/70"
+
+  defp saved_at_ms(%DateTime{} = at), do: DateTime.to_unix(at, :millisecond)
+  defp saved_at_ms(_other), do: nil
 
   attr :state, :atom, required: true
   attr :tier, :atom, required: true
@@ -305,6 +346,7 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
       :if={@state == :draft and @tier == :editor}
       type="button"
       phx-click="workflow"
+      data-flush-body
       phx-value-action="submit"
       phx-disable-with={gettext("Submitting…")}
       class="btn btn-sm btn-default"
@@ -315,6 +357,7 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
       :if={@state in [:draft, :in_review] and @tier == :admin}
       type="button"
       phx-click="workflow"
+      data-flush-body
       phx-value-action="publish"
       phx-disable-with={gettext("Publishing…")}
       class="btn btn-sm btn-default"
@@ -325,6 +368,7 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
       :if={@state == :in_review and @tier == :admin}
       type="button"
       phx-click="workflow"
+      data-flush-body
       phx-value-action="return"
       phx-disable-with={gettext("Working…")}
       class="btn btn-sm btn-default"
@@ -341,6 +385,7 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
       :if={@state == :published and not @pending?}
       type="button"
       phx-click="workflow"
+      data-flush-body
       phx-value-action="unpublish"
       phx-disable-with={gettext("Working…")}
       class="btn btn-sm btn-default"
@@ -405,6 +450,7 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
       :if={@state == :archived}
       type="button"
       phx-click="workflow"
+      data-flush-body
       phx-value-action="unarchive"
       phx-disable-with={gettext("Working…")}
       class="btn btn-sm btn-default"
