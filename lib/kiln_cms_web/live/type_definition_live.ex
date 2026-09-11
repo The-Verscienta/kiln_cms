@@ -373,7 +373,7 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
                 <.input
                   field={@edit.form[:alias_pattern]}
                   label={gettext("Path alias pattern (optional)")}
-                  placeholder="/kiln/care/[slug]"
+                  placeholder="/products/shoes/size/[field:size]"
                 />
                 <div class="sm:col-span-2">
                   <.input

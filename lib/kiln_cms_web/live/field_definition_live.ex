@@ -338,11 +338,11 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
               label={gettext("Field type")}
               options={Enum.map(@field_types, &{type_label(&1), &1})}
             />
-            <.input field={@form[:label]} label={gettext("Label")} placeholder="Toxicity level" />
+            <.input field={@form[:label]} label={gettext("Label")} placeholder="Shoe size" />
             <.input
               field={@form[:name]}
               label={gettext("Machine name")}
-              placeholder="toxicity_level"
+              placeholder="shoe_size"
             />
             <.input
               :if={reference?(@form)}
