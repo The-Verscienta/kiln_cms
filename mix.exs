@@ -27,7 +27,16 @@ defmodule KilnCMS.MixProject do
       #
       # Read from `Mix.Project.config()[:gettext]` — a `config :gettext, …` in
       # `config/config.exs` is silently ignored, which costs an hour to notice.
-      gettext: [write_reference_line_numbers: false, sort_by_msgid: :case_sensitive],
+      #
+      # This must be a SINGLE `gettext:` key in this list — `Mix.Project.config()`
+      # is a keyword list, and a second `gettext:` key added later is silently
+      # shadowed (the first match wins), so its options never take effect. All
+      # gettext options belong here.
+      gettext: [
+        write_reference_line_numbers: false,
+        sort_by_msgid: :case_sensitive,
+        fuzzy_threshold: 1.0
+      ],
       app: :kiln_cms,
       version: @version,
       elixir: "~> 1.19",
@@ -39,13 +48,15 @@ defmodule KilnCMS.MixProject do
       listeners: [Phoenix.CodeReloader],
       # `mix coveralls.*` (#1314) — floor and skip list in coveralls.json.
       test_coverage: [tool: ExCoveralls],
-      # Never let `gettext.merge` copy a translation between non-identical
-      # msgids. Its fuzzy matcher is Jaro distance on the msgid, and at the
-      # 0.8 default our short UI strings collide constantly — "Site name" was
-      # matched to "Set name" and inherited its Spanish ("Establecer nombre"),
-      # "Powered by %{name}." inherited "Se restauró %{name}." ("It was
-      # restored"). Those land as *confident, wrong* translations that read as
-      # already-done work, which is worse than no translation at all.
+      # `fuzzy_threshold: 1.0` above (in the `gettext:` key near the top of this
+      # list) exists to never let `gettext.merge` copy a translation between
+      # non-identical msgids. Its fuzzy matcher is Jaro distance on the msgid,
+      # and at the 0.8 default our short UI strings collide constantly —
+      # "Site name" was matched to "Set name" and inherited its Spanish
+      # ("Establecer nombre"), "Powered by %{name}." inherited "Se restauró
+      # %{name}." ("It was restored"). Those land as *confident, wrong*
+      # translations that read as already-done work, which is worse than no
+      # translation at all.
       #
       # 1.0 means "only match identical msgids", and identical msgids are
       # already handled as exact matches before fuzzy is tried — so this
@@ -53,7 +64,6 @@ defmodule KilnCMS.MixProject do
       # falls back to English, which the untranslated-msgid CI check catches.
       # (`--no-fuzzy` does the same but is CLI-only; this applies to every
       # invocation, including someone running the bare command locally.)
-      gettext: [fuzzy_threshold: 1.0],
       consolidate_protocols: Mix.env() != :dev,
       name: "KilnCMS",
       source_url: @source_url,
