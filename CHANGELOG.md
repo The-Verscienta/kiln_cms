@@ -171,6 +171,21 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **Clickable things show a pointer again.** Tailwind v4's preflight resets
+  `button` to `cursor: default`, and only the kit's `.btn`/`.tab` restored it —
+  so roughly a hundred controls showed an arrow: link-styled `<button>`s
+  ("Dismiss", "Change"), icon buttons, the rich-text toolbar, `<summary>`,
+  selects, checkboxes and `phx-click` rows. One `@layer base` rule now covers
+  them all; disabled controls show `not-allowed`, and a control whose LiveView
+  round-trip is in flight dims and shows `progress` instead of inviting a
+  second click. Alongside it: a `.btn-link` kit class (focus ring + disabled
+  state for text-action buttons, 17 adopted), 17 hand-rolled bordered buttons
+  moved onto `.btn`, seven `select select-sm` controls that rendered unstyled
+  (DaisyUI classes the kit never defined) moved to `.field-select`, drag
+  handles show `grabbing` while pressed, the `<.table>` component's
+  `row_click` is reachable by keyboard (first cell focusable, Enter fires it),
+  and removing a funnel step, a release item or a push device now asks first.
+
 - **A query naming two records returned neither.** The keyword leg's
   `plainto_tsquery` ANDs every lexeme, so `?q=huang qi dang shen` matched
   neither monograph — each contains only its own name — and answered with

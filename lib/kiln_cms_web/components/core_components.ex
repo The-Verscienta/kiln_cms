@@ -827,7 +827,12 @@ defmodule KilnCMSWeb.CoreComponents do
   attr :id, :string, required: true
   attr :rows, :list, required: true
   attr :row_id, :any, default: nil, doc: "the function for generating the row id"
-  attr :row_click, :any, default: nil, doc: "the function for handling phx-click on each row"
+
+  attr :row_click, :any,
+    default: nil,
+    doc:
+      "the function for handling phx-click on each row; the row's first cell is also " <>
+        "focusable and fires it on Enter, so the row opens from the keyboard too"
 
   attr :row_item, :any,
     default: &Function.identity/1,
@@ -857,10 +862,20 @@ defmodule KilnCMSWeb.CoreComponents do
       </thead>
       <tbody id={@id} phx-update={is_struct(@rows, Phoenix.LiveView.LiveStream) && "stream"}>
         <tr :for={row <- @rows} id={@row_id && @row_id.(row)}>
+          <%!-- A click handler on a <td> is mouse-only: nothing in the row can
+                take focus. The first cell carries the keyboard half — Tab
+                reaches it, Enter fires the same handler. The pointer cursor
+                comes from the `[phx-click]` rule in app.css. --%>
           <td
-            :for={col <- @col}
+            :for={{col, i} <- Enum.with_index(@col)}
             phx-click={@row_click && @row_click.(row)}
-            class={@row_click && "hover:cursor-pointer"}
+            phx-keydown={@row_click && i == 0 && @row_click.(row)}
+            phx-key={@row_click && i == 0 && "Enter"}
+            tabindex={@row_click && i == 0 && "0"}
+            class={
+              @row_click && i == 0 &&
+                "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
+            }
           >
             {render_slot(col, @row_item.(row))}
           </td>

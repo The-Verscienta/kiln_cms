@@ -443,7 +443,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
                 phx-hook="Clipboard"
                 data-clipboard-text={link.path}
                 aria-label={gettext("Copy link to %{title}", title: link.title || link.slug)}
-                class="shrink-0 text-xs underline"
+                class="btn-link shrink-0 text-xs underline"
               >
                 {gettext("Copy")}
               </button>

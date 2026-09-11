@@ -313,7 +313,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
         phx-click="item_row_add"
         phx-value-index={@bf.index}
         phx-value-field={@field}
-        class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+        class="btn btn-sm btn-default"
       >
         <.icon name="hero-plus" class="mr-1 size-4" />{@add_label}
       </button>
@@ -401,7 +401,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
           phx-click="open_av_picker"
           phx-value-bid={@bf[:id].value}
           phx-value-field="media"
-          class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+          class="btn btn-sm btn-default"
         >
           <.icon name="hero-film" class="mr-1 size-4" />{gettext("Choose video")}
         </button>
@@ -410,7 +410,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
           phx-click="open_av_picker"
           phx-value-bid={@bf[:id].value}
           phx-value-field="poster"
-          class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+          class="btn btn-sm btn-default"
         >
           <.icon name="hero-photo" class="mr-1 size-4" />{if @bf[:poster_media_id].value in [
                                                                nil,
@@ -424,7 +424,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
           phx-click="open_av_picker"
           phx-value-bid={@bf[:id].value}
           phx-value-field="captions"
-          class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+          class="btn btn-sm btn-default"
         >
           <.icon name="hero-language" class="mr-1 size-4" />{if @bf[:captions_media_id].value in [
                                                                   nil,
@@ -506,7 +506,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
           phx-click="open_av_picker"
           phx-value-bid={@bf[:id].value}
           phx-value-field="media"
-          class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+          class="btn btn-sm btn-default"
         >
           <.icon name="hero-musical-note" class="mr-1 size-4" />{gettext("Choose audio")}
         </button>
@@ -569,7 +569,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
             data-image-handle
             aria-hidden="true"
             tabindex="-1"
-            class="mt-1 cursor-grab text-base-content/40"
+            class="mt-1 cursor-grab active:cursor-grabbing text-base-content/40"
           >
             <.icon name="hero-bars-2" class="size-4" />
           </button>
@@ -651,7 +651,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
         type="button"
         phx-click="open_gallery_picker"
         phx-value-bid={@bid}
-        class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+        class="btn btn-sm btn-default"
       >
         <.icon name="hero-photo" class="mr-1 size-4" />{gettext("Add images")}
       </button>
@@ -728,7 +728,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
           type="button"
           phx-click="col_add_column"
           phx-value-id={@block_id}
-          class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+          class="btn btn-sm btn-default"
         >
           <.icon name="hero-plus" class="mr-1 size-4" />{gettext("Add column")}
         </button>
@@ -773,7 +773,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
               <div class="mb-1 flex items-center justify-between gap-2">
                 <span
                   data-child-handle
-                  class="flex cursor-grab items-center gap-1 text-xs text-base-content/60"
+                  class="flex cursor-grab active:cursor-grabbing items-center gap-1 text-xs text-base-content/60"
                 >
                   <.icon name="hero-bars-3" class="size-4" />
                   {dsl_label(child["_type"])}

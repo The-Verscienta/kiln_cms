@@ -157,6 +157,34 @@
   h1, h2, h3 {
     letter-spacing: -0.012em;
   }
+
+  /* Tailwind v4's preflight resets `button` to `cursor: default`, and the
+     browser only gives `a` a pointer when it has an href — so every control
+     that is not a `.btn`/`.tab` showed an arrow: link-styled `<button>`s
+     ("underline text-primary"), icon buttons, the TipTap toolbar (built in JS),
+     `<summary>`, checkboxes, selects, and `phx-click` on a div/td. Restore the
+     hand here, once, instead of per call site. This is `@layer base`, so any
+     `cursor-*` utility (`cursor-grab`, `cursor-crosshair`) still wins. */
+  button,
+  [role="button"],
+  [role="tab"],
+  [role="option"],
+  [role="menuitem"],
+  [phx-click]:not(input, textarea, [contenteditable]),
+  summary,
+  select,
+  label:has(> input:is([type="checkbox"], [type="radio"])),
+  input:is([type="checkbox"], [type="radio"], [type="file"], [type="color"],
+    [type="range"], [type="submit"], [type="button"], [type="reset"]),
+  ::file-selector-button {
+    cursor: pointer;
+  }
+
+  :is(button, select, input):disabled,
+  [aria-disabled="true"],
+  label:has(> input:disabled) {
+    cursor: not-allowed;
+  }
 }
 
 /* Add variants based on LiveView classes */
@@ -244,6 +272,39 @@
   }
   .btn-danger:hover {
     background: color-mix(in oklch, var(--color-error) 12%, transparent);
+  }
+  /* An in-flow text action ("Undo", "Dismiss", "Change") — a `<button>`
+     that reads as a link. Call sites keep their own color, size and
+     underline utilities; this supplies what a bare `<button class="underline">`
+     lacked: the reset, a keyboard focus ring and a disabled state. No
+     `display` — several carry `mt-*`, which an inline box would ignore. */
+  .btn-link {
+    padding: 0;
+    border: 0;
+    background: none;
+    border-radius: var(--radius-sm);
+    text-underline-offset: 2px;
+    cursor: pointer;
+  }
+  .btn-link:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+  .btn-link:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  /* A LiveView round-trip in flight. Dim the control and show `progress` so
+     a slow publish or purge doesn't invite a second click. The 0.2s delay
+     sits on the loading state only, so a fast round-trip never flickers and
+     the restore is instant. Lives in this layer, not `base`, so it outranks
+     `.btn`'s own `transition`. */
+  :is(button, [role="button"], a).phx-click-loading,
+  .phx-submit-loading :is(button:not([type="button"]), [type="submit"]) {
+    cursor: progress;
+    opacity: 0.6;
+    transition: opacity 0.15s ease 0.2s;
   }
 
   /* ---- Surfaces --------------------------------------------------------- */

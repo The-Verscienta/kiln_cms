@@ -78,7 +78,14 @@ written as a function component or a raw `class="…"` in a template.
 
 - **Buttons** — `.btn` base + `.btn-primary` / `.btn-default` / `.btn-ghost` /
   `.btn-danger`, size `.btn-sm`, `.btn-block`. Prefer the `<.button>` function
-  component (`variant=`, `size=`), which emits exactly these classes.
+  component (`variant=`, `size=`), which emits exactly these classes. For a
+  compact inline control keep `.btn .btn-default` and shrink it with utilities
+  (`px-2 py-0.5 text-xs`) — utilities outrank the kit.
+- **Link-styled buttons** — `.btn-link` for an in-flow text action
+  ("Dismiss", "Undo", "Change") that must stay a `<button>` because it fires an
+  event rather than navigating. It supplies the reset, keyboard focus ring and
+  disabled state; the call site keeps its own colour and `underline` /
+  `hover:underline` utilities.
 - **Surfaces** — `.card` (the one raised container: base-100, hairline border,
   `--radius-lg`) + `.card-pad` for standard interior padding.
 - **Fields** — `.field-input`, `.field-select` (full-width, token border, focus
@@ -126,6 +133,19 @@ written as a function component or a raw `class="…"` in a template.
 - **Media, empty, and permission states** — each has a dedicated treatment
   (`<.empty_state>` for the first two; permission states degrade gracefully
   rather than dead-ending).
+- **Cursor & feedback** — anything clickable shows the pointer without a
+  per-site `cursor-pointer`: `@layer base` in `app.css` restores it on
+  `button`, `summary`, `select`, checkboxes/radios (and a `<label>` wrapping
+  one), ARIA `button`/`tab`/`option`/`menuitem` roles and any `[phx-click]`
+  element. Tailwind v4's preflight resets `button` to `cursor: default`, which
+  is why this has to be stated at all. Disabled controls show `not-allowed`.
+  A control whose LiveView round-trip is in flight (`phx-click-loading`, or a
+  submit button under `phx-submit-loading`) dims after 0.2s and shows
+  `progress`. Drag handles pair `cursor-grab` with `active:cursor-grabbing`.
+  Any `cursor-*` utility still overrides the base rule.
+- **Destructive actions confirm** — a `phx-click` that deletes, removes, revokes
+  or purges carries `data-confirm={gettext("…?")}`; name the thing and the
+  consequence ("Stop sending notifications to this device?").
 
 ## Layout
 

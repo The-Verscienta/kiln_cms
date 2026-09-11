@@ -754,7 +754,11 @@ defmodule KilnCMSWeb.MenuLive do
     >
       <li :for={node <- @nodes} data-sort-id={node.id} class="list-none">
         <div class="card flex flex-wrap items-center gap-3 p-3">
-          <span data-drag-handle class="cursor-grab text-base-content/40" aria-hidden="true">
+          <span
+            data-drag-handle
+            class="cursor-grab active:cursor-grabbing text-base-content/40"
+            aria-hidden="true"
+          >
             <.icon name="hero-bars-2" class="size-4" />
           </span>
           <div class="min-w-0 flex-1">
