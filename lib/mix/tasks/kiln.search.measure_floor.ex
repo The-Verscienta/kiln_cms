@@ -73,11 +73,11 @@ defmodule Mix.Tasks.Kiln.Search.MeasureFloor do
   hits after fusion — a record any other leg (keyword, its any-term
   relaxation, title or fuzzy) also returns is never floored — so for the
   search page, `/api/search` and `/api/ask` the number to set is where the
-  junk band starts. The per-type `semantic-search` API routes have no other
-  leg and floor the whole leg, so they return every expected record only
-  from the furthest expected distance up. A floor between the two keeps
-  hybrid clean and drops the hardest expected records from the per-type
-  routes; the report says which.
+  junk band starts. The per-type `semantic-search` API routes exempt only a
+  row whose title the query names, so an expected record the query reaches
+  by its prose alone (a paraphrase, a question form) is returned there only
+  from its own distance up. A floor between the two keeps hybrid clean and
+  drops those records from the per-type routes; the report says which.
 
   Reads run against one tenant — `--org` (a slug) or, absent, the default
   organization — through the published-only action with no actor, the way
@@ -435,7 +435,7 @@ defmodule Mix.Tasks.Kiln.Search.MeasureFloor do
     "  Hybrid search (the search page, /api/search, /api/ask) floors only hits no\n" <>
       "  other leg returned, so an expected record the keyword, any-term, title or\n" <>
       "  fuzzy leg also finds survives a floor below its distance: set it at the\n" <>
-      "  junk edge. The per-type semantic-search routes floor the whole leg, so they\n" <>
-      "  return every expected record only from the expected edge up.\n"
+      "  junk edge. The per-type semantic-search routes exempt only a title match, so\n" <>
+      "  they return a record reached by its prose alone only from the expected edge up.\n"
   end
 end

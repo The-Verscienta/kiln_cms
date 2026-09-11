@@ -149,7 +149,7 @@ migration, a rewritten column, a dropped config key).
   neighbour, then proposes the cutoff between the two bands, overall and per
   class (or says where they overlap, and what each edge costs on each
   surface: hybrid search never floors a corroborated hit, the per-type
-  `semantic-search` routes floor the whole leg). It measures through the
+  `semantic-search` routes exempt only a title match). It measures through the
   semantic leg hybrid search runs — the query's locale, embedded and
   published rows only, a dynamic type within its own definition — rather
   than reading the table directly. Built on the new
@@ -207,6 +207,17 @@ migration, a rewritten column, a dropped config key).
   `row_click` is reachable by keyboard (first cell focusable, Enter fires it),
   and removing a funnel step, a release item or a push device now asks first.
 
+- **The per-type `semantic-search` routes keep a record the query names.**
+  They apply `semantic_max_distance` themselves (there is no fusion to leave
+  it to), and used to floor every row by distance alone, so a floor set for
+  the search page dropped named records from the route the headless guide
+  tells delivery sites to use — the report's D2 on one more surface. The
+  `:search_semantic` / `:search_semantic_published` actions now ask the
+  title leg (`:search_title`) which rows it vouches for and exempt those
+  ids from the floor inside the same query, so the action stays a plain
+  paginated, countable read and a vouched row still sorts at its distance.
+  A row vouched only by the keyword, any-term or fuzzy legs is still floored
+  there; those legs are fusion's.
 - **A non-numeric `semantic_max_distance` now raises instead of flooring
   nothing.** Erlang orders `number < atom < bitstring`, so a string or atom
   in that key (an env var wired in without `String.to_float/1`, or `:none`
@@ -235,8 +246,8 @@ migration, a rewritten column, a dropped config key).
   semantic leg returned: a record any other leg (keyword, its any-term
   relaxation, title, fuzzy) also found needs no distance alibi. Junk still returns nothing (#871's guarantee) — with no
   lexical hit every fused hit is semantic-only and over the floor. The
-  per-type `semantic-search` API routes, which have no other leg, filter as
-  before. Reported as finding D2 / proposal P3 of the "Why Shen Beat Huang
+  per-type `semantic-search` API routes, which have no fusion to leave it
+  to, filter the leg themselves — exempting a row the query names by title. Reported as finding D2 / proposal P3 of the "Why Shen Beat Huang
   Qi" analysis.
 - **`/api/ask` cited sources in alphabetical order of content type, not by
   relevance.** `KilnCMS.Ask`'s retrieval flattened the sections in registry
