@@ -49,6 +49,31 @@ defmodule KilnCMSWeb.ContentControllerTest do
       assert html =~ "Hello Heading"
     end
 
+    # A `/docs/guide#section` link must land on the section, so every heading
+    # — a heading block and the ones inside stored rich-text HTML — carries a
+    # GitHub-style id, numbered across the page rather than per block.
+    test "headings carry page-unique ids for #fragment links", %{conn: conn} do
+      page =
+        page(%{
+          blocks: [
+            %{"_type" => "heading", "text" => "1. Getting started"},
+            %{
+              "_type" => "rich_text",
+              "legacy_html" =>
+                ~s(<p>See <a href="#1-getting-started">above</a>.</p>) <>
+                  "<h2>1. Getting started</h2><h3>Q&amp;A</h3>"
+            }
+          ]
+        })
+
+      html = conn |> get(~p"/#{page.slug}") |> html_response(200)
+
+      assert html =~ ~r/<h2 id="1-getting-started"[^>]*>\s*1. Getting started\s*<\/h2>/
+      assert html =~ ~s(<h2 id="1-getting-started-1">1. Getting started</h2>)
+      assert html =~ ~s(<h3 id="qa">Q&amp;A</h3>)
+      assert html =~ ~s(<a href="#1-getting-started">above</a>)
+    end
+
     # #479: HTML delivery renders live from the block tree, not from the fired
     # artifact, so fragment expansion has to happen on this path too.
     test "a fragment block inlines its target's body", %{conn: conn} do

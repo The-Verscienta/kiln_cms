@@ -89,10 +89,11 @@ defmodule KilnCMS.HTMLSanitizer do
 
   > #### `#fragment` targets {: .info}
   >
-  > A fragment href is *carried*, not resolved: `to_html/1` emits headings
-  > without `id`s, so a bare `#section` has nothing to land on in Kiln-rendered
-  > prose. It stays allowed because in-page anchors are legitimate against page
-  > chrome, and stripping them would break stored content that works today.
+  > A fragment href is *carried*, not resolved: nothing checks that `#section`
+  > names something on the page. On public pages every heading carries an `id`
+  > slugged from its text (`KilnCMS.HeadingAnchors`, GitHub's rules), so a
+  > fragment written against a heading lands on it. The renderers themselves
+  > (`to_html/1`, fired `:web` artifacts, the editor previews) emit none.
   """
   def safe_href(nil), do: nil
   def safe_href(""), do: nil

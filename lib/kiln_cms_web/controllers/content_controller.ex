@@ -1116,7 +1116,13 @@ defmodule KilnCMSWeb.ContentController do
 
     media = load_block_media(flat, org_id)
     forms = load_block_forms(flat, org_id)
-    Enum.map(tree, &enrich_block(&1, media, forms))
+
+    # Heading ids go on here, over the finished page, so `#section` links land
+    # and repeats are numbered page-wide. An experiment variant that patches
+    # blocks re-runs this function, so it is anchored the same way.
+    tree
+    |> Enum.map(&enrich_block(&1, media, forms))
+    |> KilnCMS.HeadingAnchors.anchor_tree()
   end
 
   defp expand_fragments(record, org_id, audiences) do
