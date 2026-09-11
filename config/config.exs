@@ -184,12 +184,12 @@ config :kiln_cms, KilnCMS.Search,
   # neighbours always exist, so without a ceiling the semantic leg answers
   # every query — gibberish included — and "no results" never happens. The
   # right value is model- and corpus-specific, so there is no safe default to
-  # ship: measure it with `mix kiln.search.measure_floor queries.tsv` (a
-  # sheet of queries, each with the slug it should find or nothing) and set
-  # it where the junk band starts. Re-measure when the corpus grows. Hybrid
-  # search applies it only to hits the semantic leg alone returned — a record
-  # any other leg (keyword, title, fuzzy) finds is never floored — so an entity the
-  # user names survives however far its prose embeds from the query. See
+  # ship: measure it with `mix kiln.search.measure_floor golden.json` (the
+  # same golden set `mix kiln.search.eval` scores) and re-measure when the
+  # corpus grows. Hybrid search applies it only to hits the semantic leg
+  # alone returned — a record any other leg finds is never floored — while
+  # the per-type semantic-search routes floor the whole leg, so the task
+  # prints an edge for each. A number or nil; anything else raises. See
   # `KilnCMS.Search.semantic_max_distance/0`.
   semantic_max_distance: nil,
   # Cosine-distance ceiling on a tag suggestion (#851). Unlike the ceiling

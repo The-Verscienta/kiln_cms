@@ -98,15 +98,11 @@ defmodule KilnCMS.CMS.Content do
   # exact-scan behaviour `cap_unbounded/2` exists to prevent. It can return
   # fewer than `limit` rows — that is the entire point.
   #
-  # A caller that fuses this leg with others (`KilnCMS.Search.hybrid/3`) asks
-  # for the floor to be left to it — `semantic_floor: :caller` in the query
-  # context — and gets every row with its distance loaded instead. Truncating
-  # the leg here judged every row by distance alone, including rows the
-  # keyword leg was about to vouch for: a short query naming two records
-  # embeds far from either's long prose, so the floor dropped both named
-  # records and kept two marginal neighbours (the "Why Shen Beat Huang Qi"
-  # report, D2). Fusion can tell a semantic-only hit from a corroborated one;
-  # this leg cannot, so it is the wrong place to decide.
+  # A caller that fuses this leg with others (`KilnCMS.Search.hybrid/3`, and
+  # `semantic_neighbours/3` measuring for it) asks for the floor to be left
+  # to it — `semantic_floor: :caller` in the query context — and gets every
+  # row with its distance loaded instead. Why the floor belongs after fusion
+  # is on `KilnCMS.Search.semantic_max_distance/0`.
   defp semantic_floor(%{context: %{semantic_floor: :caller}} = query, vector) do
     Ash.Query.load(query, semantic_distance: %{query_vector: vector})
   end

@@ -127,14 +127,21 @@ migration, a rewritten column, a dropped config key).
   analysis (findings D3 and D4).
 - **`mix kiln.search.measure_floor` measures the semantic relevance floor on
   your corpus.** `semantic_max_distance` ships as `nil` and its config comment
-  has always said to measure; this is the measurement. Give it a sheet of
-  queries — `query<TAB>expected-slug` for one that should find a record, a bare
-  line for junk that should find nothing — and it reports, per query and
-  content type, the expected record's raw cosine distance against its nearest
-  competitor and each junk query's nearest neighbour, then proposes the
-  cutoff between the two bands (or says where they overlap). Built on the new
-  `KilnCMS.Search.semantic_neighbours/3`, which `semantic_distances/3` now
-  wraps; both now leave out rows with no embedding.
+  has always said to measure; this is the measurement. Give it the golden set
+  `mix kiln.search.eval` scores — rows of `query`, `expected` slugs, `class`,
+  and optionally `type` and `locale`; a `junk` row expects nothing — and it
+  reports, per query and content type, each expected record's raw cosine
+  distance against its nearest competitor and each junk query's nearest
+  neighbour, then proposes the cutoff between the two bands, overall and per
+  class (or says where they overlap, and what each edge costs on each
+  surface: hybrid search never floors a corroborated hit, the per-type
+  `semantic-search` routes floor the whole leg). It measures through the
+  semantic leg hybrid search runs — the query's locale, embedded and
+  published rows only, a dynamic type within its own definition — rather
+  than reading the table directly. Built on the new
+  `KilnCMS.Search.semantic_neighbours/3` (which runs that leg, takes an
+  `Ash.Query` base, `:locale`, `:published` and `:slug`), which
+  `semantic_distances/3` now wraps.
 
 - **Search hits carry their score and provenance.** Every record out of
   `KilnCMS.Search.hybrid/3` (and so every content section of `global/2`)
@@ -186,6 +193,15 @@ migration, a rewritten column, a dropped config key).
   `row_click` is reachable by keyboard (first cell focusable, Enter fires it),
   and removing a funnel step, a release item or a push device now asks first.
 
+- **A non-numeric `semantic_max_distance` now raises instead of flooring
+  nothing.** Erlang orders `number < atom < bitstring`, so a string or atom
+  in that key (an env var wired in without `String.to_float/1`, or `:none`
+  for "off") compared as greater than every distance and hybrid search
+  silently admitted every semantic-only hit — #871 reopened on the search
+  page, `/api/search` and `/api/ask` — while the per-type semantic actions,
+  which cast the value in SQL, kept working. `KilnCMS.Search.semantic_max_distance/0`
+  now accepts a number or `nil` and raises on anything else, the way
+  `Related.suggest_tags/2` already guards its own ceiling.
 - **A query naming two records returned neither.** The keyword leg's
   `plainto_tsquery` ANDs every lexeme, so `?q=huang qi dang shen` matched
   neither monograph — each contains only its own name — and answered with
@@ -202,8 +218,8 @@ migration, a rewritten column, a dropped config key).
   entity-heavy corpus with a floor of 0.35, "huang qi dang shen" kept two
   marginal neighbours and dropped both named records. `Search.hybrid/3` now
   runs the leg unfloored and applies the floor after fusion, to hits only the
-  semantic leg returned: a record any other leg (keyword, title, fuzzy) also found needs
-  no distance alibi. Junk still returns nothing (#871's guarantee) — with no
+  semantic leg returned: a record any other leg (keyword, its any-term
+  relaxation, title, fuzzy) also found needs no distance alibi. Junk still returns nothing (#871's guarantee) — with no
   lexical hit every fused hit is semantic-only and over the floor. The
   per-type `semantic-search` API routes, which have no other leg, filter as
   before. Reported as finding D2 / proposal P3 of the "Why Shen Beat Huang
