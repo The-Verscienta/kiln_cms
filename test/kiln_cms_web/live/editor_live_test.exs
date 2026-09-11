@@ -17,15 +17,21 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
   @password "password123456"
 
-  defp authed_user(role) do
+  defp authed_user(role, attrs \\ %{}) do
     email = "editor-#{System.unique_integer([:positive])}@example.com"
 
-    Ash.Seed.seed!(User, %{
-      email: email,
-      hashed_password: Bcrypt.hash_pwd_salt(@password),
-      confirmed_at: DateTime.utc_now(),
-      role: role
-    })
+    Ash.Seed.seed!(
+      User,
+      Map.merge(
+        %{
+          email: email,
+          hashed_password: Bcrypt.hash_pwd_salt(@password),
+          confirmed_at: DateTime.utc_now(),
+          role: role
+        },
+        attrs
+      )
+    )
 
     strategy = AshAuthentication.Info.strategy!(User, :password)
 
@@ -36,6 +42,14 @@ defmodule KilnCMSWeb.EditorLiveTest do
       })
 
     user
+  end
+
+  # A valid v4 UUID that sorts below any random one (see the takeover test).
+  defp low_uuid do
+    suffix =
+      System.unique_integer([:positive]) |> Integer.to_string(16) |> String.pad_leading(12, "0")
+
+    "00000000-0000-4000-8000-#{String.downcase(suffix)}"
   end
 
   defp log_in(conn, user) do
@@ -1400,42 +1414,46 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
   end
 
-  describe "live cursors (collaborative field focus)" do
+  describe "field locks (collaborative field focus)" do
+    alias KilnCMS.Collab.FieldLock
+    alias KilnCMS.Test.FieldLockHolder
     alias KilnCMSWeb.Presence
 
-    test "focusing and leaving a field broadcasts cursor events", %{conn: conn} do
+    test "focusing a field takes its lock; leaving it lets go", %{conn: conn} do
       page = draft_page()
-      Phoenix.PubSub.subscribe(KilnCMS.PubSub, Presence.topic("page", page.id))
+      topic = Presence.topic("page", page.id)
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, topic)
 
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
+      lv_pid = lv.pid
       lv |> element(~s(input[name="form[title]"])) |> render_focus()
-      assert_receive {:cursor, %{field: "title"}}, 2_000
+      assert_receive {:field_locks, ^topic, %{"title" => %{pid: ^lv_pid}}}, 2_000
 
       lv |> element(~s(input[name="form[title]"])) |> render_blur()
-      assert_receive {:cursor, %{field: nil}}, 2_000
+      assert_receive {:field_locks, ^topic, locks} when not is_map_key(locks, "title"), 2_000
+      assert FieldLock.locks(topic) == %{}
     end
 
-    test "renders a badge for another editor's focused field, and clears it", %{conn: conn} do
+    test "renders a badge for a field another session holds, and clears it", %{conn: conn} do
       page = draft_page()
 
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
       topic = Presence.topic("page", page.id)
-      cursor = %{id: "other-editor", name: "bob", field: "title"}
+      {holder, :ok} = FieldLockHolder.hold(topic, "title")
 
-      # Scope to the cursor badge's title — a bare "bob" also matches unrelated
+      # Scope to the badge's title — a bare "bob" also matches unrelated
       # markup (e.g. the inserter's `role="combobox"`).
-      Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic, {:cursor, cursor})
       assert render(lv) =~ "bob is editing"
 
-      Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic, {:cursor, %{cursor | field: nil}})
+      FieldLockHolder.release(holder, "title")
       refute render(lv) =~ "bob is editing"
     end
 
-    test "soft-locks a field (readonly + ring) while another editor holds it", %{conn: conn} do
+    test "soft-locks a field (readonly + ring) while another session holds it", %{conn: conn} do
       page = draft_page()
 
       {:ok, lv, html} =
@@ -1444,71 +1462,257 @@ defmodule KilnCMSWeb.EditorLiveTest do
       refute html =~ "ring-warning"
 
       topic = Presence.topic("page", page.id)
-      cursor = %{id: "other-editor", name: "bob", field: "title"}
-
-      Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic, {:cursor, cursor})
+      {holder, :ok} = FieldLockHolder.hold(topic, "title")
       locked = render(lv)
       assert locked =~ "ring-warning"
       assert locked =~ "readonly"
 
       # Releases automatically when they leave the field.
-      Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic, {:cursor, %{cursor | field: nil}})
+      FieldLockHolder.release(holder, "title")
       refute render(lv) =~ "ring-warning"
     end
 
     # #140: rich-text blocks participate in the same collaborative locking as the
-    # title/slug/DSL inputs (the TipTap editor broadcasts focus/blur via its hook).
-    test "soft-locks a rich-text block while another editor holds it", %{conn: conn} do
+    # title/slug/DSL inputs (the TipTap editor acquires on focus via its hook),
+    # and the host carries `data-locked` so the hook makes the editor read-only.
+    test "soft-locks a rich-text block while another session holds it", %{conn: conn} do
       page = draft_page(%{blocks: [%{type: :rich_text, content: "<p>hi</p>", order: 0}]})
 
       {:ok, lv, html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
       refute html =~ "ring-warning"
+      refute html =~ ~s(data-locked="true")
 
-      # The block's lock field name (the legacy_html form field) is on the wrapper.
       [_, field] = Regex.run(~r/data-lock-field="([^"]+)"/, html)
-
       topic = Presence.topic("page", page.id)
-      cursor = %{id: "other-editor", name: "bob", field: field}
+      {holder, :ok} = FieldLockHolder.hold(topic, field)
 
-      Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic, {:cursor, cursor})
       locked = render(lv)
       assert locked =~ "ring-warning"
       assert locked =~ "bob is editing"
+      assert locked =~ ~s(data-locked="true")
 
-      Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic, {:cursor, %{cursor | field: nil}})
+      FieldLockHolder.release(holder, field)
+      unlocked = render(lv)
+      refute unlocked =~ "ring-warning"
+      refute unlocked =~ ~s(data-locked="true")
+    end
+
+    test "first come, first served: a field this session holds is refused to a later one",
+         %{conn: conn} do
+      page = draft_page()
+      user = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(user) |> live(~p"/editor/pages/#{page.id}")
+
+      lv |> element(~s(input[name="form[title]"])) |> render_focus()
+
+      topic = Presence.topic("page", page.id)
+      user_id = user.id
+      assert {_holder, {:held, %{user_id: ^user_id}}} = FieldLockHolder.hold(topic, "title")
+
+      # Still ours: no ring, no readonly for us.
       refute render(lv) =~ "ring-warning"
     end
 
-    test "simultaneous focus is broken by id — the lower id keeps the field", %{conn: conn} do
+    test "clicking a locked field opens the takeover dialog with the activity line",
+         %{conn: conn} do
       page = draft_page()
 
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
-      # We focus the title ourselves (sets self_field). Our id is a UUID (hex),
-      # so it sorts between "0000…" and "zzzz…".
-      lv |> element(~s(input[name="form[title]"])) |> render_focus()
       topic = Presence.topic("page", page.id)
+      {_holder, :ok} = FieldLockHolder.hold(topic, "title")
+      refute render(lv) =~ "takeover-dialog"
 
-      # A collaborator with a HIGHER id also on title -> we outrank them -> ours.
-      Phoenix.PubSub.broadcast(
-        KilnCMS.PubSub,
-        topic,
-        {:cursor, %{id: "zzzz-higher", name: "zoe", field: "title"}}
-      )
+      # The wrapper around the readonly input carries the click.
+      html =
+        lv
+        |> element(~s(div[phx-click="ask_takeover"][phx-value-field="title"]))
+        |> render_click()
 
-      refute render(lv) =~ "ring-warning"
+      assert html =~ "takeover-dialog"
+      assert html =~ "Take over “Title” from bob?"
+      # The holder just acquired: that counts as a keystroke.
+      assert html =~ "bob is typing right now."
+      assert html =~ "what they had typed is saved first"
 
-      # A collaborator with a LOWER id also on title -> they win -> locked for us.
-      Phoenix.PubSub.broadcast(
-        KilnCMS.PubSub,
-        topic,
-        {:cursor, %{id: "0000-lower", name: "abe", field: "title"}}
-      )
+      # Cancel closes it.
+      refute render_click(lv, "cancel_takeover", %{}) =~ "takeover-dialog"
 
-      assert render(lv) =~ "ring-warning"
+      # The badge is the keyboard route to the same dialog.
+      html =
+        lv
+        |> element(~s(button[phx-click="ask_takeover"][phx-value-field="title"]))
+        |> render_click()
+
+      assert html =~ "takeover-dialog"
+    end
+
+    test "a click on a free field is just a click", %{conn: conn} do
+      page = draft_page()
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      refute render_click(lv, "ask_takeover", %{"field" => "title"}) =~ "takeover-dialog"
+    end
+
+    test "a takeover of a holder that never answers goes through after the flush timeout",
+         %{conn: conn} do
+      page = draft_page()
+      topic = Presence.topic("page", page.id)
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, topic)
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      lv_pid = lv.pid
+      {holder, :ok} = FieldLockHolder.hold(topic, "title")
+      assert render(lv) =~ "readonly"
+
+      lv
+      |> element(~s(button[phx-click="ask_takeover"][phx-value-field="title"]))
+      |> render_click()
+
+      refute render_click(lv, "confirm_takeover", %{}) =~ "takeover-dialog"
+
+      # The holder was asked to flush — and ignores it.
+      assert_receive {:holder, ^holder, {:lock_flush, ^topic, "title"}}, 1_000
+      assert %{"title" => %{pid: ^holder}} = FieldLock.locks(topic)
+
+      # `flush_ms` is 400 in test config: the lock stops waiting on its own.
+      assert_receive {:field_locks, ^topic, %{"title" => %{pid: ^lv_pid}}}, 2_000
+      assert_receive {:holder, ^holder, {:lock_taken, ^topic, "title", _by}}, 1_000
+      assert_push_event(lv, "lock_granted", %{field: "title"})
+
+      unlocked = render(lv)
+      refute unlocked =~ "ring-warning"
+      refute unlocked =~ ~s(name="form[title]"[^>]*readonly)
+    end
+
+    test "a takeover between two editors flushes the holder's pending draft edit first",
+         %{conn: conn} do
+      page = draft_page(%{title: "Original"})
+      topic = Presence.topic("page", page.id)
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, topic)
+
+      # The collab prototype is on in test config, and with two editors present
+      # only the lowest user id autosaves — so Alice's id sorts first, making
+      # her the persister whose pending edit the flush has to land.
+      alice = authed_user(:editor, %{name: "Alice", id: low_uuid()})
+      bob = authed_user(:editor, %{name: "Bob"})
+
+      {:ok, holder, _html} = conn |> log_in(alice) |> live(~p"/editor/pages/#{page.id}")
+      {:ok, taker, _html} = conn |> log_in(bob) |> live(~p"/editor/pages/#{page.id}")
+      holder_pid = holder.pid
+      taker_pid = taker.pid
+
+      # Alice is in the title with an edit queued for autosave (2 s debounce —
+      # it has not persisted yet).
+      holder |> element(~s(input[name="form[title]"])) |> render_focus()
+      assert_receive {:field_locks, ^topic, %{"title" => %{pid: ^holder_pid}}}, 2_000
+      holder |> form("#page-editor", form: %{title: "Flushed by takeover"}) |> render_change()
+      assert Ash.get!(Page, page.id, authorize?: false).title == "Original"
+
+      assert render(taker) =~ "Alice is editing"
+
+      taker
+      |> element(~s(button[phx-click="ask_takeover"][phx-value-field="title"]))
+      |> render_click()
+
+      render_click(taker, "confirm_takeover", %{})
+
+      # Alice's client is asked for whatever sits in its debounce…
+      assert_push_event(holder, "flush_body", %{field: "title"})
+      # …and answers. The pending autosave persists before the lock moves.
+      render_hook(holder, "body_flushed", %{"field" => "title"})
+      assert Ash.get!(Page, page.id, authorize?: false).title == "Flushed by takeover"
+
+      assert_receive {:field_locks, ^topic, %{"title" => %{pid: ^taker_pid}}}, 2_000
+      assert_push_event(taker, "lock_granted", %{field: "title"})
+
+      # Bob had nothing in flight, so he edits the flushed text, unlocked.
+      taken = render(taker)
+      refute taken =~ "ring-warning"
+      assert taken =~ ~s(value="Flushed by takeover")
+
+      # Alice's title is read-only now, and she is told who has it and that
+      # her text is safe.
+      displaced = render(holder)
+      assert displaced =~ "ring-warning"
+      assert displaced =~ "Bob is editing"
+      assert displaced =~ "Bob took over “Title”. Your changes are saved."
+    end
+
+    test "a takeover on published content leaves the holder's unsaved text in their form",
+         %{conn: conn} do
+      page = draft_page(%{title: "Live", state: :published, published_at: DateTime.utc_now()})
+      topic = Presence.topic("page", page.id)
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, topic)
+
+      alice = authed_user(:editor, %{name: "Alice"})
+      {:ok, holder, _html} = conn |> log_in(alice) |> live(~p"/editor/pages/#{page.id}")
+
+      {:ok, taker, _html} =
+        conn |> log_in(authed_user(:editor, %{name: "Bob"})) |> live(~p"/editor/pages/#{page.id}")
+
+      holder_pid = holder.pid
+      holder |> element(~s(input[name="form[title]"])) |> render_focus()
+      assert_receive {:field_locks, ^topic, %{"title" => %{pid: ^holder_pid}}}, 2_000
+      holder |> form("#page-editor", form: %{title: "Not saved yet"}) |> render_change()
+
+      taker
+      |> element(~s(button[phx-click="ask_takeover"][phx-value-field="title"]))
+      |> render_click()
+
+      assert render(taker) =~ "stays in their editor, unsaved"
+      render_click(taker, "confirm_takeover", %{})
+      render_hook(holder, "body_flushed", %{"field" => "title"})
+
+      taker_pid = taker.pid
+      assert_receive {:field_locks, ^topic, %{"title" => %{pid: ^taker_pid}}}, 2_000
+
+      # Nothing autosaved on published content; the note says so.
+      assert Ash.get!(Page, page.id, authorize?: false).title == "Live"
+      displaced = render(holder)
+      assert displaced =~ "Your unsaved changes are still in this form."
+      assert displaced =~ ~s(value="Not saved yet")
+    end
+
+    test "the activity line says how active the holder is" do
+      import KilnCMSWeb.ContentEditor.Shared, only: [activity_line: 3]
+
+      now = ~U[2026-09-11 12:00:00Z]
+
+      holder = %{
+        acquired_at: ~U[2026-09-11 11:48:00Z],
+        last_keystroke_at: ~U[2026-09-11 11:59:50Z]
+      }
+
+      assert activity_line("Alice", holder, now) == "Alice is typing right now."
+
+      holder = %{holder | last_keystroke_at: ~U[2026-09-11 11:55:00Z]}
+
+      assert activity_line("Alice", holder, now) ==
+               "Alice has had this open for 12 minutes but hasn't typed for 5 minutes."
+
+      holder = %{
+        acquired_at: ~U[2026-09-11 11:59:20Z],
+        last_keystroke_at: ~U[2026-09-11 11:59:20Z]
+      }
+
+      assert activity_line("Alice", holder, now) ==
+               "Alice has had this open for under a minute but hasn't typed for under a minute."
+
+      holder = %{
+        acquired_at: ~U[2026-09-11 09:30:00Z],
+        last_keystroke_at: ~U[2026-09-11 11:58:30Z]
+      }
+
+      assert activity_line("Alice", holder, now) ==
+               "Alice has had this open for 2 hours but hasn't typed for a minute."
     end
   end
 

@@ -113,6 +113,11 @@ defmodule KilnCMS.Application do
       {Task.Supervisor, name: KilnCMS.TaskSupervisor, max_children: 100},
       KilnCMSWeb.Presence,
       KilnCMS.Collab.Locks,
+      # Advisory field locks for the content editor (KilnCMS.Collab.FieldLock):
+      # one process per record with a focused field, registered by its editing
+      # topic. Stops itself once every field is free.
+      {Registry, keys: :unique, name: KilnCMS.Collab.FieldLock.Registry},
+      {DynamicSupervisor, name: KilnCMS.Collab.FieldLock.Supervisor, strategy: :one_for_one},
       # Collaborative-editing CRDT prototype (KilnCMS.Collab.Crdt): one
       # DocServer per open document, registered by channel topic. Idle-cheap —
       # servers only exist while editors are attached (+ a grace period).
