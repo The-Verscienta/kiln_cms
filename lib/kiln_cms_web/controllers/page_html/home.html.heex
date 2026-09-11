@@ -5,7 +5,13 @@
   current_org={@current_org}
   container_class="mx-auto max-w-6xl"
 >
-  <section class="relative overflow-hidden rounded-3xl border border-base-content/10 bg-base-200/40 px-6 py-16 sm:px-10 sm:py-20">
+  <%!-- The stock front page — what an instance serves at `/` until the site has
+        a page of its own there. For most first visitors it is the only
+        explanation of what KilnCMS is, so it says so in full: what it does,
+        what it looks like (real console screenshots — regenerate them with
+        e2e/screenshots.config.js after a visible console change), and what a
+        developer gets. --%>
+  <section class="relative overflow-hidden rounded-3xl border border-base-content/10 bg-base-200/40 px-6 pt-16 sm:px-10 sm:pt-20">
     <div
       class="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-orange-500/20 blur-3xl"
       aria-hidden="true"
@@ -32,29 +38,15 @@
         <a
           :if={@current_user && @current_user.role in [:editor, :admin]}
           href={~p"/editor"}
-          class="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-content shadow-sm transition hover:bg-primary/90"
+          class="btn btn-primary"
         >
           {gettext("Open editor")}
         </a>
-        <a
-          :if={is_nil(@current_user)}
-          href={~p"/sign-in"}
-          class="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-content shadow-sm transition hover:bg-primary/90"
-        >
+        <a :if={is_nil(@current_user)} href={~p"/sign-in"} class="btn btn-primary">
           {gettext("Sign in to edit")}
         </a>
-        <a
-          href="/developers#graphql"
-          class="rounded-lg border border-base-content/20 px-5 py-2.5 text-sm font-semibold transition hover:bg-base-200"
-        >
-          {gettext("GraphQL API")}
-        </a>
-        <a
-          href="/developers#json-api"
-          class="rounded-lg border border-base-content/20 px-5 py-2.5 text-sm font-semibold transition hover:bg-base-200"
-        >
-          {gettext("JSON:API")}
-        </a>
+        <a href="/developers#graphql" class="btn btn-default">{gettext("GraphQL API")}</a>
+        <a href="/developers#json-api" class="btn btn-default">{gettext("JSON:API")}</a>
       </div>
 
       <%!-- Onboarding for viewer-role accounts (#142): self-registration defaults
@@ -68,32 +60,146 @@
         )}
       </p>
     </div>
+
+    <%!-- The editor, bleeding off the bottom edge of the hero card. --%>
+    <figure class="relative mt-12 -mb-px overflow-hidden rounded-t-xl border border-b-0 border-base-content/15 bg-base-100 shadow-2xl shadow-base-content/10">
+      <img
+        src={~p"/images/home/editor.jpg"}
+        width="1440"
+        height="900"
+        class="block w-full"
+        alt={
+          gettext(
+            "The KilnCMS block editor: a page's headings, text and image blocks, with the inspector alongside."
+          )
+        }
+      />
+    </figure>
   </section>
 
-  <section class="mt-10 grid gap-4 sm:grid-cols-3">
-    <article class="rounded-2xl border border-base-content/10 p-5">
-      <h2 class="text-base font-semibold">{gettext("Block editor")}</h2>
-      <p class="mt-2 text-sm leading-6 text-base-content/70">
+  <section class="mt-20" aria-labelledby="home-tour">
+    <h2 id="home-tour" class="text-2xl font-semibold tracking-tight sm:text-3xl">
+      {gettext("See it in action")}
+    </h2>
+    <p class="mt-3 max-w-2xl text-base-content/70">
+      {gettext("The editing console, as your team uses it every day.")}
+    </p>
+
+    <div class="mt-8 grid gap-6 md:grid-cols-3">
+      <figure :for={shot <- tour_shots()} class="card overflow-hidden">
+        <img
+          src={shot.src}
+          width="1440"
+          height="900"
+          loading="lazy"
+          class="block aspect-[16/10] w-full border-b border-base-content/10 object-cover object-left-top"
+          alt={shot.alt}
+        />
+        <figcaption class="p-4">
+          <p class="text-sm font-semibold">{shot.title}</p>
+          <p class="mt-1 text-sm leading-6 text-base-content/70">{shot.text}</p>
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="mt-20" aria-labelledby="home-features">
+    <h2 id="home-features" class="text-2xl font-semibold tracking-tight sm:text-3xl">
+      {gettext("Everything a content team needs")}
+    </h2>
+    <p class="mt-3 max-w-2xl text-base-content/70">
+      {gettext("Editing, review and delivery in one application you run yourself.")}
+    </p>
+
+    <div class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <article :for={feature <- features()} class="card card-pad">
+        <span class="inline-flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <.icon name={feature.icon} class="size-5" />
+        </span>
+        <h3 class="mt-4 text-base font-semibold">{feature.title}</h3>
+        <p class="mt-2 text-sm leading-6 text-base-content/70">{feature.text}</p>
+      </article>
+    </div>
+
+    <div class="mt-8 rounded-2xl border border-base-content/10 px-5 py-4">
+      <p class="text-sm font-semibold">{gettext("Also included")}</p>
+      <ul class="mt-3 flex flex-wrap gap-2">
+        <li
+          :for={item <- extras()}
+          class="rounded-full border border-base-content/15 px-3 py-1 text-sm text-base-content/80"
+        >
+          {item}
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <section
+    class="mt-20 grid items-start gap-10 lg:grid-cols-2"
+    aria-labelledby="home-developers"
+  >
+    <div>
+      <h2 id="home-developers" class="text-2xl font-semibold tracking-tight sm:text-3xl">
+        {gettext("Built for developers")}
+      </h2>
+      <p class="mt-3 text-base-content/70">
         {gettext(
-          "TipTap rich text, drag-and-drop blocks, live preview, and version restore — all in LiveView."
+          "Your frontend asks for published content over GraphQL or JSON:API, in any framework. Drafts stay private until you share a signed preview link."
         )}
       </p>
-    </article>
-    <article class="rounded-2xl border border-base-content/10 p-5">
-      <h2 class="text-base font-semibold">{gettext("Policy-driven RBAC")}</h2>
-      <p class="mt-2 text-sm leading-6 text-base-content/70">
-        {gettext(
-          "Published content is world-readable; drafts stay editor-only. Admins bypass; hard deletes and webhooks are locked down."
-        )}
-      </p>
-    </article>
-    <article class="rounded-2xl border border-base-content/10 p-5">
-      <h2 class="text-base font-semibold">{gettext("Headless delivery")}</h2>
-      <p class="mt-2 text-sm leading-6 text-base-content/70">
-        {gettext(
-          "AshGraphql and AshJsonApi expose your content model to any frontend, with signed preview tokens for drafts."
-        )}
-      </p>
-    </article>
+      <ul class="mt-6 space-y-3 text-sm leading-6">
+        <li :for={point <- developer_points()} class="flex gap-3">
+          <.icon name="hero-check-circle" class="mt-0.5 size-5 shrink-0 text-primary" />
+          <span class="text-base-content/80">{point}</span>
+        </li>
+      </ul>
+      <a href="/developers" class="btn btn-default mt-8">{gettext("Read the API docs")}</a>
+    </div>
+
+    <%!-- Delivery query, verbatim from the schema: `postBySlug` is the
+          published-only read every content type gets (`KilnCMS.CMS.Content`). --%>
+    <div class="card overflow-hidden">
+      <div class="flex items-center justify-between border-b border-base-content/10 px-4 py-2.5">
+        <span class="text-xs font-medium text-base-content/60">POST /gql</span>
+        <span class="text-xs text-base-content/50">GraphQL</span>
+      </div>
+      <pre class="overflow-x-auto p-4 text-[13px] leading-6" phx-no-curly-interpolation><code>query {
+  postBySlug(slug: "hello-world", locale: "en") {
+    title
+    excerpt
+    seoDescription
+  }
+}</code></pre>
+    </div>
+  </section>
+
+  <section class="mt-20 rounded-3xl border border-base-content/10 bg-base-200/40 px-6 py-12 sm:px-10">
+    <div class="grid gap-10 lg:grid-cols-[1fr_auto] lg:items-center">
+      <div>
+        <h2 class="text-2xl font-semibold tracking-tight sm:text-3xl">
+          {gettext("Run it on your own servers")}
+        </h2>
+        <p class="mt-3 max-w-2xl text-base-content/70">
+          {gettext(
+            "KilnCMS is self-hosted and needs only PostgreSQL — no Redis, no message broker, no separate search service. Your content stays in your own database."
+          )}
+        </p>
+        <p class="mt-5 text-sm text-base-content/60">
+          {gettext("Built on")}
+          <span class="font-medium text-base-content/80">
+            Elixir · Phoenix LiveView · Ash Framework · PostgreSQL · Oban
+          </span>
+        </p>
+      </div>
+      <div class="flex flex-wrap gap-3">
+        <a :if={is_nil(@current_user)} href={~p"/sign-in"} class="btn btn-primary">
+          {gettext("Sign in to edit")}
+        </a>
+        <a href="https://github.com/The-Verscienta/kiln_cms" class="btn btn-default">
+          <.icon name="hero-code-bracket" class="size-4" />
+          {gettext("Source on GitHub")}
+        </a>
+      </div>
+    </div>
   </section>
 </Layouts.app>
