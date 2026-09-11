@@ -939,7 +939,12 @@ const liveSocket = new LiveSocket("/live", Socket, {
       // (BlockPresence reports the focus; a sidebar field pushes
       // `field_focus`) that would otherwise strip them the instant they
       // appeared. Carry them across; the module removes them itself.
-      for (const cls of ["kiln-issue-mark", "kiln-focus-pulse"]) {
+      //
+      // `fresh` (saved_ticker.js) is the same shape: the save that just
+      // landed fires its own follow-up patches (preview refresh, presence),
+      // and the server-rendered class never includes it, so an untimed
+      // patch racing the 2.6s flash would clip it to a blink.
+      for (const cls of ["kiln-issue-mark", "kiln-focus-pulse", "fresh"]) {
         if (from.classList.contains(cls)) to.classList.add(cls)
       }
       if (from.tagName === "DETAILS") {

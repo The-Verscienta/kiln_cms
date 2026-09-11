@@ -162,7 +162,10 @@ test.describe("tag picker mid-session growth", () => {
         .getByRole("button", { name: /reload latest/i })
         .evaluate(el => el.click());
       await expect(conflictBanner).toBeHidden();
-      await expect(indicator).toHaveText("Saved");
+      // Several steps have run since the editor's save actually landed, so
+      // by now the SavedTicker's 2.6s flash (saved_ticker.js) may already
+      // have faded "Saved" to "Last saved · just now" — both are settled.
+      await expect(indicator).toHaveText(/^\s*(Saved|Last saved · just now)\s*$/);
       // Best-effort: clear the lingering error flash so it can't go on to
       // intercept a later click the same way. Explicit short timeout — the
       // default `actionTimeout` is unbounded, and with no flash present this
