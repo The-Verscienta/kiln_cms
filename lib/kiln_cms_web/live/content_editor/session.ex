@@ -551,7 +551,7 @@ defmodule KilnCMSWeb.ContentEditor.Session do
 
   # Settle every flush in flight: persist a pending draft autosave (the
   # version snapshot a takeover promises), then tell the lock. Only a draft
-  # with an autosave queued (`:saving`) has anything to persist — published
+  # with an autosave queued (`:pending`) has anything to persist — published
   # content saves by hand, and a collab non-persister's text lives in the
   # shared document — so for those the flush is the client push alone.
   defp finish_flush(socket) do
@@ -559,7 +559,7 @@ defmodule KilnCMSWeb.ContentEditor.Session do
     socket = assign(socket, :flushing, [])
 
     socket =
-      if draft?(socket) and socket.assigns.save_state == :saving,
+      if draft?(socket) and socket.assigns.save_state == :pending,
         do: socket |> cancel_autosave_timer() |> ContentEditorLive.do_autosave(),
         else: socket
 
