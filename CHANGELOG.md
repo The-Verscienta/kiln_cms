@@ -360,6 +360,18 @@ migration, a rewritten column, a dropped config key).
   which cast the value in SQL, kept working. `KilnCMS.Search.semantic_max_distance/0`
   now accepts a number or `nil` and raises on anything else, the way
   `Related.suggest_tags/2` already guards its own ceiling.
+- **The caret stayed put through a new block's first autosave.** Add a
+  rich-text block, click in, type: about two seconds later the draft
+  autosaved and the keystrokes that followed went nowhere — focus had left
+  the editor for the page body. The autosave rebuilds the form from the
+  saved record, and the block's bookkeeping inputs (`_persistent_id`,
+  `_union_type`, `_touched`, …) rendered as the card's siblings inside the
+  block list, a set that differs between a block just added and the same
+  block on the rebuilt form. New inputs appearing ahead of the card made the
+  patch detach and re-append it to restore order, and a detached focused
+  element loses focus. Those inputs now render inside the card, at its end,
+  so the card never moves; the block list's direct children are the block
+  cards alone, which is also what drag-to-reorder assumes.
 - **A query naming two records returned neither.** The keyword leg's
   `plainto_tsquery` ANDs every lexeme, so `?q=huang qi dang shen` matched
   neither monograph — each contains only its own name — and answered with
