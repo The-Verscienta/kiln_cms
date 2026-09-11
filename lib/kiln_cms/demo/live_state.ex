@@ -86,7 +86,7 @@ defmodule KilnCMS.Demo.LiveState do
 
     # Last, immediately before the restore: a socket evicted earlier would have
     # reconnected during the drain.
-    users = user_ids()
+    users = MapSet.new(user_ids())
     Enum.each(users, &SessionEviction.evict(&1, :demo_reset))
 
     %{
@@ -105,7 +105,7 @@ defmodule KilnCMS.Demo.LiveState do
   """
   @spec after_restore(MapSet.t(String.t())) :: non_neg_integer()
   def after_restore(users_before) do
-    users = MapSet.union(users_before, user_ids())
+    users = MapSet.union(users_before, MapSet.new(user_ids()))
     Enum.each(users, &SessionEviction.evict(&1, :demo_reset))
     on_every_node(:close_local_documents)
     MapSet.size(users)
@@ -233,13 +233,15 @@ defmodule KilnCMS.Demo.LiveState do
   end
 
   # Text ids straight from the table: this runs on both sides of the restore,
-  # and the users on each side are different rows.
+  # and the users on each side are different rows. A list, turned into a
+  # MapSet once by the caller — see `KilnCMS.Demo.Blobs.referenced_keys/0` for
+  # why no branch here builds one.
   defp user_ids do
     case Repo.query("SELECT id::text FROM users", []) do
-      {:ok, %{rows: rows}} -> MapSet.new(rows, fn [id] -> id end)
-      {:error, _} -> MapSet.new()
+      {:ok, %{rows: rows}} -> Enum.map(rows, fn [id] -> id end)
+      {:error, _} -> []
     end
   rescue
-    _error -> MapSet.new()
+    _error -> []
   end
 end

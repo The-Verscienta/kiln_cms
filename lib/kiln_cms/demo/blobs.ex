@@ -67,14 +67,19 @@ defmodule KilnCMS.Demo.Blobs do
   @doc """
   Every storage key the connected database references.
 
-  `{:error, _}` rather than an empty set on failure: the caller subtracts the
-  *golden* set from the candidates, and an empty golden set would make every
+  `{:error, _}` rather than an empty list on failure: the caller subtracts the
+  *golden* keys from the candidates, and an empty golden set would make every
   file a candidate.
+
+  A sorted list, not a `MapSet`: callers build their set once, from one
+  construction path. A helper that returns `MapSet.new()` on one branch and
+  `MapSet.new(rows, fun)` on another loses MapSet's opacity under OTP 29's
+  dialyzer.
   """
-  @spec referenced_keys() :: {:ok, MapSet.t(String.t())} | {:error, term()}
+  @spec referenced_keys() :: {:ok, [String.t()]} | {:error, term()}
   def referenced_keys do
     case Repo.query(@keys_sql, []) do
-      {:ok, %{rows: rows}} -> {:ok, MapSet.new(rows, fn [key] -> key end)}
+      {:ok, %{rows: rows}} -> {:ok, rows |> Enum.map(fn [key] -> key end) |> Enum.sort()}
       {:error, error} -> {:error, error}
     end
   rescue
@@ -127,7 +132,7 @@ defmodule KilnCMS.Demo.Blobs do
   def reap(dirty_keys, golden_keys) do
     candidates =
       dirty_keys
-      |> MapSet.union(take_deferred())
+      |> MapSet.union(MapSet.new(take_deferred()))
       |> MapSet.difference(golden_keys)
 
     Enum.reduce(candidates, %{deleted: 0, failed: 0}, fn key, acc ->
@@ -150,15 +155,15 @@ defmodule KilnCMS.Demo.Blobs do
       :ok ->
         keys =
           case File.read(taken) do
-            {:ok, body} -> body |> String.split("\n", trim: true) |> MapSet.new()
-            {:error, _} -> MapSet.new()
+            {:ok, body} -> String.split(body, "\n", trim: true)
+            {:error, _} -> []
           end
 
         File.rm(taken)
         keys
 
       {:error, _nothing_deferred} ->
-        MapSet.new()
+        []
     end
   end
 

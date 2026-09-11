@@ -123,7 +123,7 @@ defmodule KilnCMS.Demo.BlobsTest do
       })
 
       assert Blobs.referenced_keys() ==
-               {:ok, MapSet.new(~w(orig-a.png small-a.webp poster-a.jpg trashed.png))}
+               {:ok, ~w(orig-a.png poster-a.jpg small-a.webp trashed.png)}
     end
   end
 end

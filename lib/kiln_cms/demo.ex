@@ -308,7 +308,7 @@ defmodule KilnCMS.Demo do
 
   defp restore(golden, work, url, opts) do
     live? = Keyword.get(opts, :live?, true)
-    dirty_keys = keys_or_empty(Blobs.referenced_keys())
+    dirty_keys = MapSet.new(keys_or_empty(Blobs.referenced_keys()))
     quiesced = if live?, do: LiveState.quiesce(job_id: opts[:job_id]), else: nil
 
     try do
@@ -363,7 +363,7 @@ defmodule KilnCMS.Demo do
   defp reap(dirty_keys) do
     case Blobs.referenced_keys() do
       {:ok, golden_keys} ->
-        Blobs.reap(dirty_keys, golden_keys)
+        Blobs.reap(dirty_keys, MapSet.new(golden_keys))
 
       {:error, error} ->
         Logger.error(
@@ -378,7 +378,7 @@ defmodule KilnCMS.Demo do
 
   defp keys_or_empty({:error, error}) do
     Logger.warning("Demo reset couldn't read pre-reset media keys: #{inspect(error)}")
-    MapSet.new()
+    []
   end
 
   defp finish({:ok, summary}, golden, started) do
