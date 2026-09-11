@@ -2112,6 +2112,81 @@ defmodule KilnCMS.CMS.Content do
           validate KilnCMS.CMS.Validations.ScheduleOrder
         end
 
+        # The working copy of a live document (docs/working-copy.md). The
+        # editor's autosave on a PUBLISHED row: writes `working_title` /
+        # `working_blocks` and nothing else, so readers, search, feeds and the
+        # artifacts keep serving the published text. The exact complement of
+        # `:autosave`'s `state == :draft` filter, and a row-level CAS for the
+        # same reason (#1015): a struct that predates an unpublish must be
+        # refused at the row, not judged by a stale `state`.
+        #
+        # `StampWorkingCopy` sets `working_copy_at`, or clears all three when
+        # the text saved is the text that is live — a working copy exists only
+        # while it runs ahead. Coalesced like `:autosave`, since it fires per
+        # debounce. No `DeriveSlug`, no tag verbs, no `ApplyCustomFields`:
+        # everything outside the title and body is single-state and saves
+        # through `:update`.
+        update :save_working_copy do
+          require_atomic? false
+          accept [:working_title, :working_blocks]
+          change filter(expr(^ref(:state) == :published))
+          change optimistic_lock(:lock_version)
+          change KilnCMS.CMS.Changes.StampWorkingCopy
+          change KilnCMS.CMS.Changes.CoalesceAutosaveVersions
+        end
+
+        # "Publish changes": the working copy becomes the published text. Same
+        # URL, same `published_at`, no workflow email — a correction inside a
+        # live entry is not the entry going out — but everything derived from
+        # the text moves (search, embedding, artifacts, the `updated` webhook
+        # consumers already handle for a live edit), and
+        # `RecordPublishedVersion` re-points `published_version_id` at this
+        # write's version, which is the one the history panel marks live.
+        #
+        # `optimistic_lock` FIRST: `PromoteWorkingCopy` reads the working copy
+        # off `changeset.data`, so the struct must be the row. A stale struct
+        # (an autosave landed from another tab) fails the lock rather than
+        # publishing an older draft. The gates are the `:update` pair
+        # (`only_new: true`) rather than `:publish`'s, because this is an edit
+        # to a live page in every way that matters to them.
+        update :publish_changes do
+          require_atomic? false
+          accept []
+          change optimistic_lock(:lock_version)
+
+          change filter(expr(^ref(:state) == :published and not is_nil(^ref(:working_copy_at))))
+
+          change KilnCMS.CMS.Changes.PromoteWorkingCopy
+
+          validate {KilnCMS.CMS.Validations.MediaAltText, only_new: true},
+            where: [changing(:blocks)]
+
+          validate {KilnCMS.CMS.Validations.ComplianceClaims, only_new: true}
+          change KilnCMS.CMS.Changes.SetSearchText
+          change KilnCMS.CMS.Changes.EnqueueEmbedding
+          change KilnCMS.CMS.Changes.EnqueueOEmbed
+          change KilnCMS.CMS.Changes.RecordPublishedVersion
+          change KilnCMS.CMS.Changes.FireArtifacts
+          change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "updated"}
+        end
+
+        # "Discard the changes": the published text is back in the editor. The
+        # discarded words are not deleted — the `:save_working_copy` version
+        # that last wrote them is left in history, and restoring it brings the
+        # working copy back (`Changes.RestoreVersion`). This write records a
+        # version of its own, so the discard is visible in the panel too.
+        update :discard_changes do
+          require_atomic? false
+          accept []
+          change optimistic_lock(:lock_version)
+
+          change filter(expr(^ref(:state) == :published and not is_nil(^ref(:working_copy_at))))
+
+          change set_attribute(:working_title, nil)
+          change set_attribute(:working_blocks, [])
+          change set_attribute(:working_copy_at, nil)
+        end
+
         # Keyword search (all terms, and the any-term relaxation the hybrid
         # falls back to), semantic search, and autocomplete — each paired with
         # its `*_published` delivery twin (state pinned server-side, #297) —
@@ -2282,6 +2357,13 @@ defmodule KilnCMS.CMS.Content do
           accept []
           change filter(expr(^ref(:state) == :published))
           change transition_state(:draft)
+          # A pending working copy becomes the draft's text (docs/working-copy.md)
+          # — the author's latest words, with the text that was live kept as
+          # the version `published_version_id` pointed at. BEFORE `SetSearchText`,
+          # which is here only because the fold can change the text.
+          change KilnCMS.CMS.Changes.FoldWorkingCopy
+          change KilnCMS.CMS.Changes.SetSearchText
+          change KilnCMS.CMS.Changes.EnqueueEmbedding
           change KilnCMS.CMS.Changes.ClearPublishedVersion
           change KilnCMS.CMS.Changes.DeleteArtifacts
           change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "unpublished"}
@@ -2298,6 +2380,10 @@ defmodule KilnCMS.CMS.Content do
           require_atomic? false
           change transition_state(:draft)
           change set_attribute(:unpublish_at, nil)
+          # Same fold as `:unpublish` (docs/working-copy.md).
+          change KilnCMS.CMS.Changes.FoldWorkingCopy
+          change KilnCMS.CMS.Changes.SetSearchText
+          change KilnCMS.CMS.Changes.EnqueueEmbedding
           change KilnCMS.CMS.Changes.ClearPublishedVersion
           change KilnCMS.CMS.Changes.DeleteArtifacts
           change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "unpublished"}
@@ -2326,6 +2412,10 @@ defmodule KilnCMS.CMS.Content do
           require_atomic? false
           change transition_state(:archived)
           change set_attribute(:unpublish_at, nil)
+          # Same fold as `:unpublish` (docs/working-copy.md).
+          change KilnCMS.CMS.Changes.FoldWorkingCopy
+          change KilnCMS.CMS.Changes.SetSearchText
+          change KilnCMS.CMS.Changes.EnqueueEmbedding
           # Same teardown as `:archive` on a published record — the artifacts and
           # the published version would otherwise orphan (#879 pt 3).
           change KilnCMS.CMS.Changes.ClearPublishedVersion
@@ -2372,6 +2462,12 @@ defmodule KilnCMS.CMS.Content do
           accept []
           change filter(expr(^ref(:state) != :archived))
           change transition_state(:archived)
+          # A published record's pending working copy folds into the row, as
+          # on `:unpublish` (docs/working-copy.md); a no-op for every other
+          # state, which cannot carry one.
+          change KilnCMS.CMS.Changes.FoldWorkingCopy
+          change KilnCMS.CMS.Changes.SetSearchText
+          change KilnCMS.CMS.Changes.EnqueueEmbedding
           # Archiving a *published* record must tear down its published version and
           # artifacts exactly as `:unpublish` does — otherwise they orphan (no race
           # needed, #879 pt 3). Both are harmless when archiving a draft/in_review
@@ -2911,9 +3007,41 @@ defmodule KilnCMS.CMS.Content do
 
         attribute :published_at, :utc_datetime_usec, public?: true
 
-        # PaperTrail version id of the immutable snapshot taken at the last
-        # publish. Internal — not exposed via the public APIs.
+        # PaperTrail version id of the immutable snapshot whose fold is the
+        # text readers get — the last `:publish`, `:publish_scheduled` or
+        # `:publish_changes`. Internal — not exposed via the public APIs.
         attribute :published_version_id, :uuid
+
+        # The working copy of a LIVE document (docs/working-copy.md,
+        # `KilnCMS.CMS.WorkingCopy`): the title and body the editor is typing
+        # into while `title` / `blocks` keep serving readers. Set only while
+        # `state == :published` — `:save_working_copy` refuses any other state
+        # at the row, `:publish_changes` / `:discard_changes` clear them, and
+        # the retiring transitions fold them back into the row. `nil` means
+        # "nothing pending", which is what every existing row is, so this
+        # needs no data migration. Typed like `blocks` rather than one JSONB
+        # map, so the union's cast sanitizes the working body exactly as it
+        # does the live one — the signed-in preview renders it.
+        #
+        # Internal: never on the public APIs (delivery must serve the
+        # published text only), but versioned by PaperTrail so a discarded
+        # working copy survives as history.
+        attribute :working_title, :string do
+          public? false
+          constraints max_length: KilnCMS.Limits.line()
+        end
+
+        # `[]` and never NULL, unlike `blocks`: `Ash.Type.Union`'s array
+        # `prepare_change` walks the OLD value, so a nullable union array
+        # cannot be force-changed at all once it is nil. `working_copy_at` is
+        # the sentinel; an empty tree here says nothing on its own.
+        attribute :working_blocks, {:array, KilnCMS.CMS.BlockUnion} do
+          default []
+          allow_nil? false
+          public? false
+        end
+
+        attribute :working_copy_at, :utc_datetime_usec, public?: false
 
         # When set in the future, the AshOban scheduler publishes this record once
         # the time passes (cleared on publish).

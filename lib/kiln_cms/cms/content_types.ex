@@ -663,6 +663,10 @@ defmodule KilnCMS.CMS.ContentTypes do
 
   defp transition_fun(type, "publish"), do: "publish_#{type}"
   defp transition_fun(type, "unpublish"), do: "unpublish_#{type}"
+  # The working copy of a live document (docs/working-copy.md): neither moves
+  # `state`, but both are input-less updates the editor surfaces as buttons.
+  defp transition_fun(type, "publish_changes"), do: "publish_#{type}_changes"
+  defp transition_fun(type, "discard_changes"), do: "discard_#{type}_changes"
   defp transition_fun(type, "submit"), do: "submit_#{type}_for_review"
   defp transition_fun(type, "return"), do: "return_#{type}_to_draft"
   defp transition_fun(type, "archive"), do: "archive_#{type}"

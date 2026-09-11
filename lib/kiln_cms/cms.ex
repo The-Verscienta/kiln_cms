@@ -203,6 +203,10 @@ defmodule KilnCMS.CMS do
       define :return_page_to_draft, action: :return_to_draft
       define :publish_page, action: :publish
       define :publish_scheduled_page, action: :publish_scheduled
+      # The working copy of a live document (docs/working-copy.md).
+      define :save_page_working_copy, action: :save_working_copy
+      define :publish_page_changes, action: :publish_changes
+      define :discard_page_changes, action: :discard_changes
       define :unpublish_page, action: :unpublish
       define :archive_page, action: :archive
       # Freshness attestation (#500) — its own interface, not a `update_page` call
@@ -243,6 +247,10 @@ defmodule KilnCMS.CMS do
       define :return_post_to_draft, action: :return_to_draft
       define :publish_post, action: :publish
       define :publish_scheduled_post, action: :publish_scheduled
+      # The working copy of a live document (docs/working-copy.md).
+      define :save_post_working_copy, action: :save_working_copy
+      define :publish_post_changes, action: :publish_changes
+      define :discard_post_changes, action: :discard_changes
       define :unpublish_post, action: :unpublish
       define :archive_post, action: :archive
       # Freshness attestation (#500) — its own interface, not a `update_post` call
@@ -304,6 +312,10 @@ defmodule KilnCMS.CMS do
       define :return_entry_to_draft, action: :return_to_draft
       define :publish_entry, action: :publish
       define :publish_scheduled_entry, action: :publish_scheduled
+      # The working copy of a live document (docs/working-copy.md).
+      define :save_entry_working_copy, action: :save_working_copy
+      define :publish_entry_changes, action: :publish_changes
+      define :discard_entry_changes, action: :discard_changes
       define :unpublish_entry, action: :unpublish
       define :archive_entry, action: :archive
       # Freshness attestation (#500) — its own interface, not a `update_entry` call

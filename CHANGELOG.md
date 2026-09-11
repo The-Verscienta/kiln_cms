@@ -42,7 +42,24 @@ migration, a rewritten column, a dropped config key).
   policy as the actor — a type-scoped editor cannot prune a redirect at a type
   they may not author, and rows whose target is gone remain an admin job on
   `/editor/redirects`. Creating redirects stays admin-only.
-
+- **A working copy for live content (docs/working-copy.md).** A published
+  page, post or entry now keeps two texts: the working copy the editor types
+  into and the version readers get. Typing into a live document autosaves the
+  title and body into the working copy alone; once it runs ahead the state
+  pill reads **Live · draft**, the primary button turns into **Publish
+  changes** (same URL, same `published_at`, no workflow email) and a menu
+  offers **Discard the changes**, which puts the published text back and keeps
+  the discarded text as a version. Tags, slug and every other setting stay
+  single-state and go live on Save. The signed-in preview shows the working
+  copy with a strip saying so; the content list marks such records *edited
+  since publishing*; a release whose publish item points at a live document
+  with pending changes publishes them on go-live instead of skipping the item.
+  Three columns on the published row (`working_title`, `working_blocks`,
+  `working_copy_at`) plus the `save_working_copy` / `publish_changes` /
+  `discard_changes` actions; `published_version_id` now names the version
+  whose fold is the live text, whichever of the three publishes wrote it.
+  Migration `add_working_copy`, no data migration — existing rows read as
+  nothing pending.
 - **A first-run setup wizard at `/setup` (#1317).** While an instance has no
   admin account, a three-step wizard creates one — email + password, an
   optional site name/colour/theme — and then sends the operator to sign-in,

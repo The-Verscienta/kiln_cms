@@ -61,7 +61,14 @@ defmodule KilnCMS.CMS.VersionFields do
   # The block tree gets its own section in the diff, keyed on stable block ids —
   # printing it again as one field row would dump a Portable Text AST beneath
   # its own rendered diff. It is very much restorable.
-  @block_field :blocks
+  #
+  # The working copy's block tree and stamp (docs/working-copy.md) are kept out
+  # of the field rows for the same reason — a second AST dump — and because the
+  # stamp is a timestamp nobody reads; `working_title` IS a row, since a
+  # discarded working copy's title is exactly the kind of thing the panel is
+  # opened to find. All three restore: restoring the `:save_working_copy`
+  # version a discard left behind is how the discarded text comes back.
+  @not_a_row [:blocks, :working_blocks, :working_copy_at]
 
   # Reported by the diff, deliberately untouched by a restore. See the moduledoc.
   @not_restorable ~w(
@@ -79,7 +86,7 @@ defmodule KilnCMS.CMS.VersionFields do
   # label clause behind, is a build error rather than an English string in a
   # Spanish UI.
   @field_order ~w(
-    title slug path_alias excerpt state audience locale
+    title working_title slug path_alias excerpt state audience locale
     seo_title seo_description seo_keywords seo_image canonical_url
     published_at scheduled_at unpublish_at expiry_action
     review_after_days last_reviewed_at
@@ -138,7 +145,7 @@ defmodule KilnCMS.CMS.VersionFields do
   @doc "The attributes `KilnCMS.CMS.VersionDiff` compares as field rows, in display order."
   @spec diffable_fields(module()) :: [atom()]
   def diffable_fields(resource) do
-    Enum.reject(content_fields(resource), &(&1 == @block_field))
+    Enum.reject(content_fields(resource), &(&1 in @not_a_row))
   end
 
   @doc """

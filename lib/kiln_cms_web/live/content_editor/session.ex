@@ -198,10 +198,13 @@ defmodule KilnCMSWeb.ContentEditor.Session do
 
   # ── dirty tracking + draft autosave ─────────────────────────────────────────
 
-  # Every form-mutating event funnels through here. Drafts autosave;
-  # published/in-review/archived content is changed deliberately via the
-  # explicit Save button, so for those we only flip the dirty indicator
-  # (and the UnsavedGuard hook warns before navigating away).
+  # Every form-mutating event funnels through here. Drafts autosave. A LIVE
+  # document autosaves its text too — into the working copy, never the
+  # published columns (docs/working-copy.md) — while its settings are changed
+  # deliberately via the explicit Save button and go live at once; `scope`
+  # says which kind of edit this was (`:text` is the title or the body,
+  # `:settings` everything else). In-review/archived content only flips the
+  # dirty indicator (and the UnsavedGuard hook warns before navigating away).
   #
   # Under active collaboration (CRDT prototype), only ONE editor persists:
   # concurrent autosaves would race the optimistic lock even though the
@@ -209,11 +212,14 @@ defmodule KilnCMSWeb.ContentEditor.Session do
   # remote CRDT edits into its own form, so its autosave covers everyone's
   # typing; the others show `:synced` instead of autosaving (their edits to
   # non-CRDT fields still save via the explicit Save button).
-  def mark_dirty(socket) do
+  def mark_dirty(socket, scope \\ :text) do
     socket = refresh_preview(socket)
 
     cond do
-      not draft?(socket) ->
+      published?(socket) and scope == :settings ->
+        assign(socket, :settings_dirty?, true)
+
+      not autosaves?(socket) ->
         assign(socket, :save_state, :unsaved)
 
       collab_active?(socket) and not persister?(socket) ->
@@ -249,7 +255,7 @@ defmodule KilnCMSWeb.ContentEditor.Session do
 
   defp perform_autosave(%{assigns: %{save_state: :saving}} = socket) do
     cond do
-      not draft?(socket) ->
+      not autosaves?(socket) ->
         assign(socket, :autosave_timer, nil)
 
       # A lower-id editor joined between scheduling and firing — stand down;
@@ -298,6 +304,11 @@ defmodule KilnCMSWeb.ContentEditor.Session do
   end
 
   defp draft?(socket), do: socket.assigns.record.state == :draft
+  defp published?(socket), do: socket.assigns.record.state == :published
+
+  # The two states whose text autosaves: a draft into its own row, a live
+  # document into its working copy (`ContentEditorLive.do_autosave/1` picks).
+  defp autosaves?(socket), do: draft?(socket) or published?(socket)
 
   # ── presence helpers ────────────────────────────────────────────────────────
 

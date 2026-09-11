@@ -11,6 +11,8 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
 
   import KilnCMSWeb.ContentEditor.Shared, only: [color_for: 1, initials: 1]
 
+  alias KilnCMS.CMS.WorkingCopy
+
   # Sticky editor action bar (Theme A). Sits just under the console shell header
   # (`sticky top-14`, below the shell's `top-0` z-20 bar) so Save, workflow, and
   # the live save state are always reachable no matter how long the content runs.
@@ -26,6 +28,9 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
   attr :actor, :any, required: true
   attr :word_count, :integer, required: true
   attr :a11y_report, :map, required: true
+  # A live document's settings edited but not yet saved (docs/working-copy.md):
+  # its text autosaves into the working copy, its settings wait for Save.
+  attr :settings_dirty?, :boolean, default: false
 
   def editor_action_bar(assigns) do
     # Resolved once per render rather than per interpolation: `words_per_minute/0`
@@ -37,6 +42,7 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
       assigns
       |> assign(:wpm, wpm)
       |> assign(:reading_minutes, reading_minutes(assigns.word_count, wpm))
+      |> assign(:pending?, WorkingCopy.pending?(assigns.record))
 
     ~H"""
     <div
@@ -51,7 +57,7 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
             state_badge_class(@record.state)
           ]}>
             <span class="size-1.5 rounded-full bg-current opacity-70"></span>
-            {state_label(@record.state)}
+            {pill_label(@record.state, @pending?)}
           </span>
           <%!-- The freshness axis, next to the workflow one because they are
                 orthogonal and an editor needs both at a glance: this document
@@ -152,11 +158,16 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
         </div>
 
         <div class="ml-auto flex flex-wrap items-center gap-2">
+          <%!-- On a live document the line speaks for two things at once: the
+                text, which autosaves into the working copy, and the settings,
+                which wait for Save. An unsaved setting wins — Save covers both
+                — and a saved working copy says where the words went. --%>
           <.autosave_status
-            :if={@record.state == :draft or @save_state != :saved}
-            state={@save_state}
+            :if={@record.state == :draft or @save_state != :saved or @settings_dirty? or @pending?}
+            state={if @settings_dirty?, do: :unsaved, else: @save_state}
+            pending?={@pending?}
           />
-          <.workflow_buttons state={@record.state} tier={@tier} />
+          <.workflow_buttons state={@record.state} tier={@tier} pending?={@pending?} />
           <.button
             type="submit"
             variant="primary"
@@ -204,6 +215,12 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
   defp reading_minutes(0, _wpm), do: 0
   defp reading_minutes(words, wpm), do: ceil(words / wpm)
 
+  # The state word. A live document whose working copy has run ahead reads
+  # "Live · draft" (docs/working-copy.md): still live to readers, a draft to
+  # the editor, and the button beside it turns into "Publish changes".
+  defp pill_label(:published, true), do: gettext("Live · draft")
+  defp pill_label(state, _pending?), do: state_label(state)
+
   # Pill color for a content state in the action bar. Uses the `*-ink` tokens
   # for the same reason CoreComponents.badge/1 does: the bare accent on its own
   # pale tint only reaches ~2-4:1 in light mode.
@@ -247,6 +264,7 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
   end
 
   attr :state, :atom, required: true
+  attr :pending?, :boolean, default: false
 
   # Draft autosave indicator shown next to the workflow/Save buttons. Covers the
   # in-flight (:saving) and validation-failure (:error) states too (#136).
@@ -259,6 +277,9 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
       <%= case @state do %>
         <% :saving -> %>
           {gettext("Saving…")}
+        <% :saved when @pending? -> %>
+          <%!-- Live · draft: the words are safe, and not yet what readers get. --%>
+          {gettext("Saved to the working copy")}
         <% :saved -> %>
           {gettext("Saved")}
         <% :synced -> %>
@@ -276,6 +297,7 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
 
   attr :state, :atom, required: true
   attr :tier, :atom, required: true
+  attr :pending?, :boolean, default: false
 
   def workflow_buttons(assigns) do
     ~H"""
@@ -316,7 +338,7 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
       {gettext("Awaiting admin approval")}
     </span>
     <button
-      :if={@state == :published}
+      :if={@state == :published and not @pending?}
       type="button"
       phx-click="workflow"
       phx-value-action="unpublish"
@@ -325,6 +347,60 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
     >
       {gettext("Unpublish")}
     </button>
+    <%!-- Live · draft (docs/working-copy.md): the primary verb is now handing
+          the working copy over, and the rest — discarding it, unpublishing —
+          moves into a menu so the bar does not grow a fourth button. A
+          `<details>` menu, not a JS dropdown: it needs no hook, and the buttons
+          inside it are ordinary `phx-click`s. Not gated on tier: editing a live
+          document's text is already an editor's to do through Save, and this
+          publishes nothing an editor could not already ship that way. --%>
+    <button
+      :if={@state == :published and @pending?}
+      id="publish-changes"
+      type="button"
+      phx-click="workflow"
+      phx-value-action="publish_changes"
+      phx-disable-with={gettext("Publishing…")}
+      class="btn btn-sm btn-default"
+    >
+      {gettext("Publish changes")}
+    </button>
+    <details :if={@state == :published and @pending?} id="live-draft-menu" class="relative">
+      <summary
+        class="btn btn-sm btn-default cursor-pointer list-none"
+        aria-label={gettext("More actions")}
+        title={gettext("More actions")}
+      >
+        <.icon name="hero-ellipsis-horizontal" class="size-4" />
+      </summary>
+      <ul class="absolute right-0 z-20 mt-1 w-56 rounded-lg border border-base-content/10 bg-base-100 p-1 shadow-lg">
+        <li>
+          <button
+            type="button"
+            phx-click="workflow"
+            phx-value-action="discard_changes"
+            data-confirm={
+              gettext(
+                "Discard the changes? The published text comes back in the editor; what you wrote is kept as a version."
+              )
+            }
+            class="w-full rounded px-3 py-1.5 text-left text-sm hover:bg-base-200"
+          >
+            {gettext("Discard the changes")}
+          </button>
+        </li>
+        <li>
+          <button
+            type="button"
+            phx-click="workflow"
+            phx-value-action="unpublish"
+            class="w-full rounded px-3 py-1.5 text-left text-sm hover:bg-base-200"
+          >
+            {gettext("Unpublish")}
+          </button>
+        </li>
+      </ul>
+    </details>
     <button
       :if={@state == :archived}
       type="button"

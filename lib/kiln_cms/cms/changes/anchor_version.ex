@@ -22,7 +22,7 @@ defmodule KilnCMS.CMS.Changes.AnchorVersion do
 
   alias KilnCMS.Governance.Chain
 
-  @publish_actions [:publish, :publish_scheduled]
+  @publish_actions [:publish, :publish_scheduled, :publish_changes]
 
   # Actions PaperTrail is told to ignore (`ignore_actions` in the shared
   # `paper_trail` block) write no version, so there is nothing to fold. Worse,
