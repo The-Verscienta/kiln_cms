@@ -798,6 +798,20 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+      # Screenshots and traces for a failed run — `playwright-report/` above
+      # is only the JSON/list summary; the actual attachments a failure
+      # references (`test-failed-1.png`, `trace.zip`) land in Playwright's
+      # default output dir and were previously unrecoverable once the run
+      # finished.
+      - name: Upload test results (screenshots, traces)
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: playwright-test-results
+          path: e2e/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
   # Strict-tenancy smoke (#419): compile fail-closed (KILN_STRICT_TEST=1 is a
   # COMPILE-TIME config in config/test.exs) in its own build dir and run only
   # the @moduletag :strict_tenancy suite — the main suite exercises the
