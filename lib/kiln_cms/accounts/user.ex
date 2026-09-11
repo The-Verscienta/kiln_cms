@@ -272,6 +272,11 @@ defmodule KilnCMS.Accounts.User do
 
       argument :password_confirmation, :string, sensitive?: true, allow_nil?: false
 
+      # Demo mode: every visitor shares this account, so one of them changing
+      # its password would lock out the rest (docs/demo-mode.md). Admins pass.
+      # The same line guards each credential action below.
+      validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
+
       validate confirm(:password, :password_confirmation)
 
       validate {AshAuthentication.Strategy.Password.PasswordValidation,
@@ -587,6 +592,7 @@ defmodule KilnCMS.Accounts.User do
       description "Start 2FA enrolment by generating a new TOTP secret."
       accept []
       require_atomic? false
+      validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
       change set_attribute(:totp_pending_secret, &KilnCMS.Accounts.Totp.generate_secret/0)
     end
 
@@ -608,6 +614,8 @@ defmodule KilnCMS.Accounts.User do
       # from server-side session provenance, never client input.
       argument :current_code, :string, allow_nil?: true, sensitive?: true
       argument :recovery_login?, :boolean, allow_nil?: false, default: false
+
+      validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
 
       # Budgeted like the other two (#727). Not because a stolen-session
       # attacker can grind this into a bypass — they would have to have called
@@ -647,6 +655,8 @@ defmodule KilnCMS.Accounts.User do
 
       argument :code, :string, allow_nil?: false, sensitive?: true
 
+      validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
+
       # Above the validation on purpose — see the change's moduledoc. A wrong
       # code is the only one worth charging, and by the time the validation has
       # rejected it there is no hook left to charge from.
@@ -685,6 +695,7 @@ defmodule KilnCMS.Accounts.User do
 
       argument :code, :string, allow_nil?: false, sensitive?: true
 
+      validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
       change KilnCMS.Accounts.Changes.ThrottleSecondFactor
       validate KilnCMS.Accounts.Validations.ValidTotpCode
       change set_attribute(:totp_secret, nil)

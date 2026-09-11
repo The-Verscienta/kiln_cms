@@ -3,7 +3,7 @@ defmodule KilnCMS.Demo do
   **Demo mode**: a public "try the editor" instance that returns to a known-good
   state on a schedule. Off unless explicitly enabled. See `docs/demo-mode.md`.
 
-  A demo deployment is an ordinary Kiln with three differences:
+  A demo deployment is an ordinary Kiln with four differences:
 
     1. **It resets.** `reset/1` replaces the database with a *golden snapshot* —
        a `pg_dump` the operator captured once, after curating the demo content
@@ -16,6 +16,9 @@ defmodule KilnCMS.Demo do
     3. **Mail and federation are inert.** `config/runtime.exs` swaps the mailer
        for `Swoosh.Adapters.Logger` and switches federation off, because on a
        public demo anyone can trigger them.
+    4. **The shared account's credentials are fixed.** A non-admin can't change
+       a password, two-factor or passkeys (`locks_credentials?/1`), because
+       every visitor signs in as the same account.
 
   ## Hard off by default
 
@@ -87,6 +90,20 @@ defmodule KilnCMS.Demo do
   """
   @spec enabled?() :: boolean()
   def enabled?, do: config(:enabled, false) == true
+
+  @doc """
+  Whether demo mode refuses `actor` a change to its own credentials — password,
+  two-factor, passkeys (`KilnCMS.Accounts.Validations.NotDemoSharedAccount`).
+
+  True for every non-admin while demo mode is on: on a demo they are all the
+  one shared account, and a credential one visitor changed would lock the rest
+  out until the next reset. Admins are never refused (the operator curates the
+  demo as one), and neither is `nil` — a system call with no actor.
+  """
+  @spec locks_credentials?(term()) :: boolean()
+  def locks_credentials?(nil), do: false
+  def locks_credentials?(%{role: :admin}), do: false
+  def locks_credentials?(_actor), do: enabled?()
 
   @doc """
   Where the golden snapshot lives: `KILN_DEMO_GOLDEN_PATH`, else `demo/golden.dump`

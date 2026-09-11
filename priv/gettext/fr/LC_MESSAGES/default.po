@@ -11156,6 +11156,11 @@ msgstr "Cet objectif convertit sur une page ultérieure, ce qui nécessite l'aff
 msgid "This instance"
 msgstr "Cette instance"
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "This is a shared demo account, so its password and sign-in methods can't be changed."
+msgstr "Ceci est un compte de démonstration partagé : son mot de passe et ses méthodes de connexion ne peuvent pas être modifiés."
+
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "This is a test email from your KilnCMS instance."

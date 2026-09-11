@@ -93,6 +93,9 @@ defmodule KilnCMS.Accounts.WebAuthn do
           public_key: :erlang.term_to_binary(credential.credential_public_key),
           sign_count: auth_data.sign_count
         },
+        # No policy runs, but the demo-mode refusal reads the actor
+        # (Validations.NotDemoSharedAccount), so the enrolling user rides along.
+        actor: user,
         authorize?: false
       )
     else

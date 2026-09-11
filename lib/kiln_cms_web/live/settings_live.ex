@@ -8,6 +8,7 @@ defmodule KilnCMSWeb.SettingsLive do
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.Errors.DemoAccountLocked
   alias KilnCMS.Accounts.Errors.SecondFactorThrottled
   alias KilnCMS.Accounts.Totp
   alias KilnCMS.Accounts.WebAuthn
@@ -23,6 +24,10 @@ defmodule KilnCMSWeb.SettingsLive do
      |> assign(:form, prefs_form(user))
      |> assign(:profile_form, profile_form(user))
      |> assign(:password_form, password_form(user))
+     # Demo mode (docs/demo-mode.md): the shared account's password, 2FA and
+     # passkeys are fixed, so their forms give way to a note saying why. The
+     # actions refuse regardless — this only spares a visitor the attempt.
+     |> assign(:credentials_locked?, KilnCMS.Demo.locks_credentials?(user))
      |> assign(:totp_enabled?, Accounts.totp_enabled?(user))
      # Whether THIS session signed in with a recovery code (#786). Set by the
      # 2FA gate; read here so re-enrolling over a live secret can waive the
@@ -52,6 +57,11 @@ defmodule KilnCMSWeb.SettingsLive do
   # --- passkeys (#331) -------------------------------------------------------
 
   @impl true
+  # Refused before the browser prompt, not after it: the registration would be
+  # refused anyway, and a visitor shouldn't touch their fingerprint reader first.
+  def handle_event("passkey_begin", _params, %{assigns: %{credentials_locked?: true}} = socket),
+    do: {:noreply, put_flash(socket, :error, demo_locked_message())}
+
   def handle_event("passkey_begin", params, socket) do
     user = socket.assigns.current_user
     challenge = WebAuthn.registration_challenge()
@@ -82,9 +92,13 @@ defmodule KilnCMSWeb.SettingsLive do
              |> assign(:passkeys, WebAuthn.list(user))
              |> put_flash(:info, gettext("Passkey added — you can sign in with it now."))}
 
-          {:error, _reason} ->
+          {:error, reason} ->
             {:noreply,
-             put_flash(socket, :error, gettext("Couldn't verify that passkey — try again."))}
+             put_flash(
+               socket,
+               :error,
+               refusal_or(reason, gettext("Couldn't verify that passkey — try again."))
+             )}
         end
     end
   end
@@ -109,7 +123,8 @@ defmodule KilnCMSWeb.SettingsLive do
         |> assign(:passkeys, WebAuthn.list(user))
         |> put_flash(:info, gettext("Passkey removed."))
       else
-        _ -> put_flash(socket, :error, gettext("Couldn't remove that passkey."))
+        error ->
+          put_flash(socket, :error, refusal_or(error, gettext("Couldn't remove that passkey.")))
       end
 
     {:noreply, socket}
@@ -134,8 +149,13 @@ defmodule KilnCMSWeb.SettingsLive do
            qr_svg: qr_svg(uri)
          })}
 
-      {:error, _} ->
-        {:noreply, put_flash(socket, :error, gettext("Couldn't start two-factor setup."))}
+      {:error, error} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           refusal_or(error, gettext("Couldn't start two-factor setup."))
+         )}
     end
   end
 
@@ -292,7 +312,12 @@ defmodule KilnCMSWeb.SettingsLive do
          |> assign(:password_form, form)
          |> put_flash(
            :error,
-           gettext("Couldn't change your password. Check your current password and try again.")
+           # The submitted changeset carries the action's errors; the
+           # `Phoenix.HTML.Form` wrapping it holds only rendered field errors.
+           refusal_or(
+             form.source.source,
+             gettext("Couldn't change your password. Check your current password and try again.")
+           )
          )}
     end
   end
@@ -470,7 +495,9 @@ defmodule KilnCMSWeb.SettingsLive do
             {gettext("Enter your current password, then choose a new one (at least 8 characters).")}
           </p>
 
+          <.demo_locked_note :if={@credentials_locked?} />
           <.form
+            :if={!@credentials_locked?}
             for={@password_form}
             id="password-form"
             phx-change="validate_password"
@@ -525,7 +552,9 @@ defmodule KilnCMSWeb.SettingsLive do
             </button>
           </div>
 
-          <div :if={@totp_enabled?} class="space-y-3">
+          <.demo_locked_note :if={@credentials_locked?} />
+
+          <div :if={@totp_enabled? && !@credentials_locked?} class="space-y-3">
             <p class="flex items-center gap-1.5 text-sm font-medium text-success">
               <.icon name="hero-shield-check" class="size-4" />
               {gettext("Two-factor authentication is on.")}
@@ -563,7 +592,7 @@ defmodule KilnCMSWeb.SettingsLive do
             </form>
           </div>
 
-          <div :if={!@totp_enabled? && @enrolling} class="space-y-3">
+          <div :if={!@totp_enabled? && @enrolling && !@credentials_locked?} class="space-y-3">
             <p class="text-sm text-base-content/70">
               {gettext(
                 "Scan the QR code (or add the key) in your authenticator app, then enter the 6-digit code to confirm."
@@ -594,7 +623,7 @@ defmodule KilnCMSWeb.SettingsLive do
             </form>
           </div>
 
-          <div :if={!@totp_enabled? && !@enrolling}>
+          <div :if={!@totp_enabled? && !@enrolling && !@credentials_locked?}>
             <.button phx-click="start_totp" variant="primary">
               {gettext("Enable two-factor authentication")}
             </.button>
@@ -629,6 +658,7 @@ defmodule KilnCMSWeb.SettingsLive do
                 </p>
               </div>
               <button
+                :if={!@credentials_locked?}
                 type="button"
                 phx-click="remove_passkey"
                 phx-value-id={passkey.id}
@@ -641,7 +671,13 @@ defmodule KilnCMSWeb.SettingsLive do
             </li>
           </ul>
 
-          <form phx-submit="passkey_begin" class="flex items-end gap-2" id="add-passkey-form">
+          <.demo_locked_note :if={@credentials_locked?} />
+          <form
+            :if={!@credentials_locked?}
+            phx-submit="passkey_begin"
+            class="flex items-end gap-2"
+            id="add-passkey-form"
+          >
             <.input
               name="name"
               value=""
@@ -651,7 +687,7 @@ defmodule KilnCMSWeb.SettingsLive do
             />
             <.button type="submit" variant="primary">{gettext("Add a passkey")}</.button>
           </form>
-          <p class="mt-2 text-xs text-base-content/60">
+          <p :if={!@credentials_locked?} class="mt-2 text-xs text-base-content/60">
             {gettext("Your browser will prompt you to confirm with this device's screen lock.")}
           </p>
         </section>
@@ -789,15 +825,42 @@ defmodule KilnCMSWeb.SettingsLive do
   # "check your authenticator" sends someone to type five more codes into a
   # budget that has nothing left. Telling them apart discloses nothing — whoever
   # is here is already signed in as this account.
-  defp second_factor_error(%{errors: errors}, wrong_code_message) do
+  defp second_factor_error(%{errors: errors} = error, wrong_code_message) do
     case Enum.find(List.wrap(errors), &match?(%SecondFactorThrottled{}, &1)) do
       %SecondFactorThrottled{retry_after_seconds: seconds} ->
         gettext("Too many attempts — try again in %{seconds} seconds.", seconds: seconds)
 
       nil ->
-        wrong_code_message
+        refusal_or(error, wrong_code_message)
     end
   end
 
   defp second_factor_error(_error, wrong_code_message), do: wrong_code_message
+
+  # A demo-mode refusal (`DemoAccountLocked`) says so; anything else keeps the
+  # handler's own message. Takes an Ash error or a changeset (both carry
+  # `errors`), or whatever an `{:error, _}` held.
+  defp refusal_or(%{errors: errors}, fallback) do
+    if Enum.any?(List.wrap(errors), &match?(%DemoAccountLocked{}, &1)),
+      do: demo_locked_message(),
+      else: fallback
+  end
+
+  defp refusal_or({:error, error}, fallback), do: refusal_or(error, fallback)
+  defp refusal_or(_error, fallback), do: fallback
+
+  defp demo_locked_message do
+    gettext(
+      "This is a shared demo account, so its password and sign-in methods can't be changed."
+    )
+  end
+
+  defp demo_locked_note(assigns) do
+    ~H"""
+    <p class="flex items-center gap-1.5 text-sm text-base-content/70" data-role="demo-locked">
+      <.icon name="hero-lock-closed" class="size-4 shrink-0" />
+      {demo_locked_message()}
+    </p>
+    """
+  end
 end
