@@ -74,6 +74,10 @@ its visibility follows the credential, which is why viewer-minted keys matter.
     custom_filter: %{price: {:lte, 10}}
   )
 
+# The dynamic-type registry (editor-or-above key) and its custom-field schema
+{:ok, product_type} =
+  KilnClient.one("type-definitions", %{name: "product"}, include: ["field_definitions"])
+
 # Search
 {:ok, %{items: hits}} = KilnClient.text_search("posts", "elixir", locale: "en")
 {:ok, %{items: near}} = KilnClient.semantic_search("posts", "functional programming")

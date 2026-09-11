@@ -19,7 +19,34 @@ defmodule KilnCMS.CMS.TypeDefinition do
     domain: KilnCMS.CMS,
     data_layer: AshPostgres.DataLayer,
     authorizers: [Ash.Policy.Authorizer],
-    extensions: [AshArchival.Resource, AshAdmin.Resource]
+    extensions: [AshArchival.Resource, AshAdmin.Resource, AshJsonApi.Resource]
+
+  # Read-only discovery for headless writers: `POST /api/json/entries` needs a
+  # `type_definition_id`, and this is where a client finds it without going
+  # through `/mcp`'s `read_type_definitions` (same `:read`, same fields, same
+  # policies — editor-or-above of the request's org; viewers and anonymous
+  # callers get nothing). Archived types are filtered out of `:read` by
+  # AshArchival, so a client cannot create entries under a trashed type.
+  #
+  # No write routes: defining a type is an admin act in `/editor/types`, and
+  # every write reshapes the delivery registry — not surface a key should reach.
+  json_api do
+    type "type_definition"
+
+    # `?include=field_definitions` hands a client the `custom_fields` schema in
+    # the same call (AshJsonApi 400s on any include not declared here).
+    includes [:field_definitions]
+
+    routes do
+      base "/type-definitions"
+      index :read
+      # "doc" → id in one call, 404 on a miss (`filter[name]=` on the index
+      # answers the same question as a list).
+      get :by_name, route: "/by-name/:name"
+      # `/:id` last so it can't shadow the static sub-path above.
+      get :read
+    end
+  end
 
   admin do
     resource_group :content
@@ -28,13 +55,13 @@ defmodule KilnCMS.CMS.TypeDefinition do
     label_field :label
   end
 
+  archive do
+    exclude_read_actions([:archived, :get_by_id_including_archived])
+  end
+
   postgres do
     table "type_definitions"
     repo KilnCMS.Repo
-  end
-
-  archive do
-    exclude_read_actions([:archived, :get_by_id_including_archived])
   end
 
   actions do
@@ -303,8 +330,11 @@ defmodule KilnCMS.CMS.TypeDefinition do
     end
 
     # The dynamic type's schema: admin-defined fields, rendered by the editor
-    # and enforced on write by `Changes.ApplyCustomFields`.
+    # and enforced on write by `Changes.ApplyCustomFields`. Public so the
+    # JSON:API `include=field_definitions` can reach it (FieldDefinition's own
+    # read policy still applies to what comes back).
     has_many :field_definitions, KilnCMS.CMS.FieldDefinition do
+      public? true
       destination_attribute :type_definition_id
       sort position: :asc, name: :asc
     end

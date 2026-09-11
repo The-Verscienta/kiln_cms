@@ -29,6 +29,23 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **`/api/json/type-definitions` — headless discovery of dynamic content
+  types.** `POST /api/json/entries` needs a `type_definition_id`, and until
+  now the only place a client could find one was `/mcp`'s
+  `read_type_definitions`. The type registry is now a read-only JSON:API
+  collection: `GET /api/json/type-definitions` (filter by `name`, sort,
+  paginate), `GET /api/json/type-definitions/by-name/:name` to resolve a
+  machine name to its id in one call (`404` on a miss), and
+  `GET /api/json/type-definitions/:id`. `?include=field_definitions` returns
+  the type's custom-field schema alongside it, so a client can build an
+  entry's `custom_fields` from the same response (`FieldDefinition` gains a
+  JSON:API type for this, with no routes of its own). Same read and policies as
+  the MCP tool — an editor or admin of the request's org, a read-only key is
+  enough; viewers and anonymous callers get an empty list — scoped to the
+  host's org, archived types excluded. There are no write routes: types are
+  still defined in `/editor/types`. See `docs/json-api.md` → "Discovering
+  dynamic types".
+
 - **The content editor lists the redirects standing under a record's
   address.** Directly beneath the slug / path-alias fields, every retired path
   that still 301s to the record being edited is listed — old path, the

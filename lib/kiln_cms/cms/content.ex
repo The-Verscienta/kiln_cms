@@ -590,7 +590,8 @@ defmodule KilnCMS.CMS.Content do
 
               # Write surface (#330) — the shared entry tier, same policy stack
               # as the compiled types. `create` requires `type_definition_id`
-              # (discover types via `/api/json/type-definitions` or MCP's
+              # (discover it via `GET /api/json/type-definitions/by-name/:name`
+              # — `KilnCMS.CMS.TypeDefinition`'s read-only routes — or MCP's
               # `read_type_definitions`). See docs/json-api.md → "Writing".
               post :create
               patch :update
