@@ -3581,7 +3581,6 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
-
   # #817 (follow-up to #501): "Submit for review" only ever reaches here for
   # an editor (workflow_buttons/1 shows that button only when @state == :draft
   # and @tier == :editor — an admin's own path skips straight to Publish), so
