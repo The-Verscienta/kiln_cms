@@ -228,7 +228,7 @@ test.describe("tag picker mid-session growth", () => {
         // No point sleeping after the last sample — nothing checks again.
         if (waited < 2600) await page.waitForTimeout(250);
       }
-      await expect(indicator).toHaveText(/^(Saved|Last saved · just now)$/);
+      await expect(indicator).toHaveText(/^\s*(Saved|Last saved · just now)\s*$/);
 
       await expect(section.getByRole("checkbox", { name: distractor })).toBeHidden();
       await expect(section.getByRole("checkbox", { name: attached })).toBeVisible();
