@@ -21,12 +21,12 @@ Two Mix-managed runners produce exactly two artifacts:
 
 - **esbuild** (`0.25.4`, via the `:esbuild` hex package) bundles
   `assets/js/app.js` → `priv/static/assets/js/app.js`. Config:
-  [`config/config.exs:170`](../config/config.exs). The `--alias:@=.` flag lets
+  [`config/config.exs:811`](../config/config.exs). The `--alias:@=.` flag lets
   app.js import npm packages (e.g. `@tiptap/core`) resolved through
   `NODE_PATH`/`assets/node_modules`.
 - **tailwind** (`4.3.0`, via the `:tailwind` hex package) compiles
   `assets/css/app.css` → `priv/static/assets/css/app.css`. Config:
-  [`config/config.exs:180`](../config/config.exs).
+  [`config/config.exs:824`](../config/config.exs).
 
 Mix aliases tie it together ([`mix.exs:152`](../mix.exs)):
 
