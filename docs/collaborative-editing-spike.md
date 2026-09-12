@@ -1,12 +1,23 @@
 # Spike: Real-time collaborative editing (CRDT research)
 
+> **Production status: disabled — prototype.** CRDT co-editing (simultaneous
+> typing in one rich-text block) is gated on `config :kiln_cms,
+> :collab_prototype`, which is set only in `config/dev.exs` and
+> `config/test.exs`. A production build refuses `/ws/collab` joins, so editors
+> get presence, soft field locks and a conflict banner — not live co-editing.
+> Whether to finish and enable it is
+> [#1324](https://github.com/The-Verscienta/kiln_cms/issues/1324).
+
 **Issue:** #61 ([Stretch] Real-time collaborative editing — CRDT research).
-**Status:** research spike / feasibility doc — **overtaken by what shipped.** The
-spike proposed no code for v1, but the conclusion was later acted on: `y_ex` is a
-dependency, `KilnCMS.Collab` applies block ops and prose patches server-side over
+**Status:** research spike / feasibility doc — the prototype it recommended was
+**built and tested, and ships disabled** (see the banner above and §6
+*Prototype findings* at the end): `y_ex`
+is a dependency, `KilnCMS.Collab.Crdt` holds one authoritative Yjs doc per open
+document, `KilnCMS.Collab` applies block ops and prose patches server-side over
 one `DocumentEvent` substrate, and `Phoenix.Presence` drives
-[multiplayer preview](multiplayer-preview.md). Read this for the CRDT reasoning
-and the options that were rejected, not for the current design.
+[multiplayer preview](multiplayer-preview.md) (which *is* on in production).
+Read this for the CRDT reasoning and the options that were rejected, not for
+the current design.
 **Decision context:** D5 in `KilnCMS_Project_Plan.md` — *"Ship single-active-editor
 with Phoenix Presence indicators. CRDT/Yjs collaborative editing fights LiveView's
 server-authoritative model and is firmly post-v1 research."* This document is that

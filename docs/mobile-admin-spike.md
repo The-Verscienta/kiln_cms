@@ -3,6 +3,9 @@
 **Issue:** [#65](https://github.com/The-Verscienta/kiln_cms/issues/65) — *[Stretch] Mobile admin (LiveView Native)*.
 **Scope:** content moderation on the go — read the review queue and approve or
 return. **Not** block editing on a phone.
+**Status:** decided — LiveView Native not adopted; the installable
+PWA (`KilnCMSWeb.ManifestController`, #629) is the shipped mobile
+answer.
 **Date pinned:** 2026-07-31. Every version claim below was checked against
 hex.pm and the resolver on that date; re-check before acting on it.
 

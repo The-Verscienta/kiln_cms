@@ -1,5 +1,11 @@
 # Form Builder Redesign Plan
 
+**Status: Phase 1 shipped; Phases 2–5 not built; Phase 6 partial.** The visual
+builder (`KilnCMSWeb.FormBuilderLive`, `/editor/forms/:id`) with its
+Notifications / Confirmations / Embed / Entries tabs and the autoresponder are
+live. The field taxonomy is still the baseline seven types, and templates,
+conditional logic and multi-page forms don't exist yet.
+
 Goal: evolve Kiln's form editor from the current flat "add a field row" admin page into a
 visual form builder modeled on **WPForms** and **Formidable Forms** — the two strongest
 form-builder UX references in the WordPress ecosystem.

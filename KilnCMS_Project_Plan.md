@@ -12,7 +12,9 @@
 - Minimal ops (Postgres-centric; optional Dragonfly + Meilisearch only when scale demands)
 - Built for teams, agencies, and products like Verscienta Health
 
-**Status:** MVP backend largely complete (June 2026), ~69 tests passing, CI + static-analysis (credo/sobelow/dialyzer) + nonce-based CSP in place. Built on Phoenix 1.8 + Ash 3.
+**Status (reconciled 2026-09-11):** feature-complete against the phase checklist below, which is the status of record — every phase is shipped except the beta rounds (#59), which need people rather than code. Latest tag `v0.7.0`; `main` runs ahead of it (`CHANGELOG.md` → *Unreleased*). Suite size and coverage are measured in [`docs/test-coverage-plan.md`](docs/test-coverage-plan.md) rather than quoted here, because a count in this header is what went stale last time. Built on Phoenix 1.8 + Ash 3.
+
+*The rest of this block is the June 2026 MVP snapshot, kept for history:*
 
 - **Modeling & auth (Phase 1, done):** CMS domain — `Page`/`Post` (embedded `Block` tree, D3) + `MediaItem` + `WebhookEndpoint`; AshPaperTrail versioning, AshStateMachine workflow. AshAuthentication password + **magic-link** sign-in, `role` RBAC enforced by `Ash.Policy.Authorizer` (resource + field + version-resource policies). `author` relationship, `published`/`word_count` calcs, authored-count aggregates. Domain code interfaces throughout.
 - **Media (Phase 2):** LiveView upload library at `/media` (editor-gated) + pluggable `KilnCMS.Storage` (local adapter). Image variants (libvips) + S3 adapter remain.
@@ -20,7 +22,7 @@
 - **Headless (Phase 5):** AshJsonApi + AshGraphql + **signed preview tokens** (`/preview/:token`) + **HMAC-signed outbound webhooks** (Oban-delivered) on publish/unpublish.
 - **Search/SEO (Phase 6/7):** Postgres full-text `search` action; `seo_image`/`canonical_url`; dynamic `sitemap.xml` + `robots.txt`; `/up` health probe.
 
-**Biggest remaining piece:** Phase 3 content editor (TipTap + drag-and-drop blocks + real-time live preview). Other TODOs: AshAdmin actor wiring (dev-only), image variants/S3, DaisyUI removal. Repo lives at a **spaceless path** (`~/Github/kiln_cms`) — native deps (bcrypt, libvips) build via `make`, which fails on spaced/iCloud paths.
+**Since that snapshot:** the Phase 3 content editor shipped (TipTap + drag-and-drop blocks + live preview — `KilnCMSWeb.ContentEditorLive` plus its `content_editor/` components), as did AshAdmin actor wiring (`KilnCMSWeb.AshAdmin.ActorPlug`), image variants and the S3 adapter. DaisyUI is removed; only its class *naming* survives, in a self-owned kit ([`docs/design-language.md`](docs/design-language.md)). Repo lives at a **spaceless path** (`~/Github/kiln_cms`) — native deps (bcrypt, libvips) build via `make`, which fails on spaced/iCloud paths.
 
 > **Architecture north star — Kiln v2 (in progress).** Beyond the v1.0 feature list, KilnCMS is evolving toward a **typed, addressable content tree**: every block becomes a typed struct generated from one declarative Spark DSL, content is *fired* into immutable per-surface artifacts on publish, and history/search/migrations/structured-data all reduce to operations on that one tree. This **extends** (does not discard) the locked decisions below — the block model stays embedded + atomically versioned (D3), types stay compile-time (D4) — and is captured in **`kiln-cms-plan-v2.md`** (vision) and **`docs/kiln-v2-implementation-guide.md`** (step-by-step build). New decisions **D9–D16** and the **Kiln v2** section below record the direction. **Phase A (firing spike) is complete** — artifact format + serializer dispatch validated, decisions A1–A4 locked.
 

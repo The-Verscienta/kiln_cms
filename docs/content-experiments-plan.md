@@ -1,5 +1,10 @@
 # Content Experiments (A/B testing) — design
 
+**Status: shipped — Phases 1–3 done** (engine, `/editor/experiments` editor UI
+#982, sticky assignment #984, funnel-completion goal #1010, health #1008). The
+[Phasing](#phasing) section is the status of record; conversion-abuse bounding
+on the GET path is still open as #1007.
+
 Goal: let an editor test two or more versions of *part* of a published document —
 a headline, a hero block, a CTA — measure which converts better, and promote the
 winner. Issue #499.
@@ -320,7 +325,7 @@ readable rather than about leakage:
 
 ## Phasing
 
-**Phase 1 — the engine** (this PR)
+**Phase 1 — the engine** — **done** (#499)
 
 Resources, lifecycle, patch application on both delivery surfaces, stateless and
 keyed assignment, impression/conversion counters, the `form_submission` goal, the
