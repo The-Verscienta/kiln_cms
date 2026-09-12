@@ -19,6 +19,16 @@ setup (`docker compose up -d postgres`, then `mix setup`). A few environment
 notes that bite people:
 
 - **`mix` must be on your `PATH`** (Homebrew installs to `/opt/homebrew/bin`).
+- **First run fetches 102 MB, not 773 MB.** The ML stack behind semantic
+  search (Bumblebee, Nx, and EXLA — 671 MB of `deps/`, plus a one-time 110 MB
+  XLA archive download) is **opt-in**, because semantic search itself ships
+  disabled. `mix setup` prints one line saying it was skipped. Working on that
+  feature? Export `KILN_ML=1` and re-run `mix deps.get && mix compile`, and keep
+  it exported for every `mix` invocation after that — including `mix test` and
+  `mix precommit`, which skips `deps.unlock --unused` without it (that command
+  would otherwise strip the opted-out deps out of `mix.lock`). CI's
+  `Optional ML stack (semantic search)` job is the leg that compiles and tests
+  that shape.
 - **The repo must live at a space-free, non-iCloud path.** Native deps
   (`bcrypt_elixir`, libvips) build via `make`, which fails on spaced/iCloud
   paths.

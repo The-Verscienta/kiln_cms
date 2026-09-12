@@ -417,10 +417,15 @@ config :kiln_cms, KilnCMS.Firing.StaticExport,
   output_dir: nil,
   surfaces: [:web, :json, :json_ld, :llm]
 
-# Nx's backend is set per-env: EXLA.Backend in dev/test (where the :exla dep is
-# available — see config/dev.exs + test.exs), Nx.BinaryBackend (Nx's default)
-# elsewhere. EXLA is excluded from the prod build because its from-source XLA NIF
-# is too heavy for the build host; semantic search is disabled by default there.
+# Nx's backend is set per-env: EXLA.Backend in dev/test, Nx.BinaryBackend (Nx's
+# default) elsewhere. EXLA is excluded from the prod build because its
+# from-source XLA NIF is too heavy for the build host; semantic search is
+# disabled by default there.
+#
+# And since #1321 the :exla dep is not in a dev/test build either unless
+# `KILN_ML` is on, so config/dev.exs and config/test.exs set that key
+# conditionally — configuring an application that is not in the tree makes Mix
+# warn on every boot. See config/ml_flag.exs.
 
 # Organization name used as the JSON-LD publisher and as the provenance signing
 # identity. Override in runtime.exs. Deliberately instance-wide: `KilnCMS.Branding`

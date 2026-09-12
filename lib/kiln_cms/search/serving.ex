@@ -24,27 +24,44 @@ defmodule KilnCMS.Search.Serving do
   @spec name() :: atom()
   def name, do: @name
 
-  @doc """
-  Build the text-embedding serving. Loads the model + tokenizer from the Hugging
-  Face cache (downloading on first use), so this is slow and only called at
-  supervisor start.
-  """
-  @spec build() :: Nx.Serving.t()
-  def build do
-    model = KilnCMS.Search.model()
+  # Compiled one way or the other — see `KilnCMS.Search.ML`. Naming
+  # `Bumblebee.load_model/1` in a build without the dep is a compile *warning*,
+  # which `--warnings-as-errors` makes a compile failure, so the lean build must
+  # not contain this body at all.
+  if KilnCMS.Search.ML.available?() do
+    @doc """
+    Build the text-embedding serving. Loads the model + tokenizer from the Hugging
+    Face cache (downloading on first use), so this is slow and only called at
+    supervisor start.
+    """
+    @spec build() :: Nx.Serving.t()
+    def build do
+      model = KilnCMS.Search.model()
 
-    {:ok, model_info} = Bumblebee.load_model({:hf, model})
-    {:ok, tokenizer} = Bumblebee.load_tokenizer({:hf, model})
+      {:ok, model_info} = Bumblebee.load_model({:hf, model})
+      {:ok, tokenizer} = Bumblebee.load_tokenizer({:hf, model})
 
-    Bumblebee.Text.text_embedding(model_info, tokenizer,
-      compile: [
-        batch_size: KilnCMS.Search.batch_size(),
-        sequence_length: KilnCMS.Search.sequence_length()
-      ],
-      defn_options: KilnCMS.Search.defn_options(),
-      output_attribute: :hidden_state,
-      output_pool: KilnCMS.Search.pooling(),
-      embedding_processor: :l2_norm
-    )
+      Bumblebee.Text.text_embedding(model_info, tokenizer,
+        compile: [
+          batch_size: KilnCMS.Search.batch_size(),
+          sequence_length: KilnCMS.Search.sequence_length()
+        ],
+        defn_options: KilnCMS.Search.defn_options(),
+        output_attribute: :hidden_state,
+        output_pool: KilnCMS.Search.pooling(),
+        embedding_processor: :l2_norm
+      )
+    end
+  else
+    @doc """
+    Raises: this build has no ML stack, so there is no serving to build.
+
+    Unreachable in practice — `KilnCMS.Application` does not add an embedding
+    child to the supervision tree in a lean build. It raises rather than
+    returning a stub so that a future caller which forgets that gate fails
+    where the mistake is, rather than at the first `batched_run`.
+    """
+    @spec build() :: no_return()
+    def build, do: KilnCMS.Search.ML.unavailable!()
   end
 end

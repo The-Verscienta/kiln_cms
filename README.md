@@ -53,6 +53,34 @@ mix setup            # deps.get + ash.setup + assets.setup
 mix phx.server
 ```
 
+### Optional: semantic search (`KILN_ML=1`)
+
+`mix setup` used to fetch **773 MB** of dependencies. It now fetches **102 MB**.
+The difference is Bumblebee, Nx and **EXLA** — `deps/exla` alone is 666 MB, 86%
+of the old tree, and a machine that has never built it also downloads a 110 MB
+prebuilt XLA archive. Those three exist to back **semantic search**, which ships
+**disabled** (`config :kiln_cms, KilnCMS.Search, semantic: false`), so the
+default build no longer fetches them at all (#1321). `mix setup` prints one line
+saying so.
+
+Everything else works unchanged. The semantic path degrades rather than
+disappearing: the adapters still exist and return `{:error, …}`, hybrid search
+falls back to its keyword legs, and an install that has set `semantic: true`
+without the stack is told so once at boot.
+
+To build *with* it — this is the 671 MB the default build skips, and about a
+minute of extra compiling:
+
+```bash
+KILN_ML=1 mix deps.get
+KILN_ML=1 mix compile
+```
+
+Keep `KILN_ML=1` exported for every `mix` invocation afterwards (including
+`mix phx.server` and `mix test`), then turn the feature on with
+`semantic: true` and run `mix kiln.embed_all` once. See
+[`docs/semantic-search-plan.md`](docs/semantic-search-plan.md).
+
 Then visit:
 
 - App: <http://localhost:4000>
