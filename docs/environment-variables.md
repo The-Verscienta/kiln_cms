@@ -725,3 +725,20 @@ production.
 | `POSTGRES_PASSWORD` | `postgres` | E2E database password. | [`config/e2e.exs:29`](../config/e2e.exs#L29) |
 | `POSTGRES_HOST` | `localhost` | E2E database host. | [`config/e2e.exs:30`](../config/e2e.exs#L30) |
 | `POSTGRES_DB` | `kiln_cms_e2e_<checkout dirname>` | E2E database name — partitioned per checkout by default (#1353) so sibling worktrees never share persistent E2E data. | [`config/e2e.exs:31`](../config/e2e.exs#L31) |
+
+## Compile-time application config (not environment variables)
+
+Everything above is a `System.get_env/1` read in `config/runtime.exs`, which
+executes at boot. The two entries below are `Application.compile_env/3` reads
+instead — the same mechanism `:secure_session_cookie` already uses — because
+`KilnCMSWeb.Endpoint`'s `@session_options` is a module attribute evaluated when
+the endpoint compiles, not when it starts (see
+[`KilnCMSWeb.SessionCookie`](../lib/kiln_cms_web/session_cookie.ex)). They
+cannot be set with an exported shell variable; a downstream deployment sets
+them with `config :kiln_cms, :session_signing_salt, "…"` in its own
+`config/prod.exs` overlay instead.
+
+| Config key | Default | Purpose |
+|------------|---------|---------|
+| `:session_signing_salt` | `"Dsoh9oKb"` | Combined with `secret_key_base` (via `Plug.Crypto.KeyGenerator`) to derive the session cookie's signing key. Not a secret by itself — `secret_key_base` carries the real entropy — but every deployment built from this open-source tree derives its keys from the same public value unless overridden. **Changing it invalidates every existing session.** |
+| `:session_encryption_salt` | `"8fso5iqxDfI"` | Same derivation, for the cookie's encryption key. Same invalidation warning. |

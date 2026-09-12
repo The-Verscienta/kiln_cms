@@ -63,6 +63,21 @@ defmodule KilnCMSWeb.SessionCookie do
   @base "_kiln_cms_key"
   @host_prefix "__Host-"
 
+  # Neither value is a secret on its own — both are combined with
+  # `secret_key_base` via HMAC/HKDF (`Plug.Crypto.KeyGenerator`) to derive the
+  # actual signing/encryption keys, and `secret_key_base` is what carries the
+  # real entropy. But the literals below used to be the only possible value:
+  # every KilnCMS deployment built from this open-source tree derived its
+  # session keys from the same public salt, rather than something specific to
+  # the deployment. `Application.compile_env/3` here is the same pattern
+  # `:secure_session_cookie` already uses (see the moduledoc): a downstream
+  # `config/prod.exs` overlay can set `config :kiln_cms, :session_signing_salt,
+  # "…"` / `:session_encryption_salt` to something deployment-specific, and the
+  # default preserves the exact value every existing deployment already
+  # derives its keys from — changing it invalidates every live session.
+  @signing_salt Application.compile_env(:kiln_cms, :session_signing_salt, "Dsoh9oKb")
+  @encryption_salt Application.compile_env(:kiln_cms, :session_encryption_salt, "8fso5iqxDfI")
+
   @doc """
   The session cookie name for a given `Secure` setting.
 
@@ -148,8 +163,12 @@ defmodule KilnCMSWeb.SessionCookie do
 
   The session is signed (tamper-proof) *and* encrypted, so its contents are not
   readable client-side either — defense-in-depth for anything put in the session
-  (#217). Both salts derive keys from `secret_key_base`; rotating that
-  invalidates existing sessions.
+  (#217). Both salts derive keys from `secret_key_base`; rotating either
+  invalidates existing sessions. The salts themselves default to this
+  repository's own values but are `config :kiln_cms, :session_signing_salt` /
+  `:session_encryption_salt` overrides away from it (#1326) — set in a
+  downstream `config/prod.exs`, not `secret_key_base` itself, since compile-time
+  config is the only kind `KilnCMSWeb.Endpoint`'s `@session_options` reads.
 
   A non-boolean raises rather than being coerced. It is read through
   `Application.compile_env/3`, so this fails the build — but a downstream
@@ -164,8 +183,8 @@ defmodule KilnCMSWeb.SessionCookie do
       [
         store: :cookie,
         key: key(secure?),
-        signing_salt: "Dsoh9oKb",
-        encryption_salt: "8fso5iqxDfI",
+        signing_salt: @signing_salt,
+        encryption_salt: @encryption_salt,
         same_site: "Lax",
         http_only: true,
         # `__Host-` is honoured only at `Path=/` and only without a `Domain`.
