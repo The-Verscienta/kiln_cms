@@ -49,6 +49,16 @@ defmodule KilnCMS.Notifications.Notification do
   `user_id == NULL`, which no row satisfies — a system read returns nothing
   rather than everything.
 
+  ## Changes are announced, so a read on one device lands on the others
+
+  Both updates carry `KilnCMS.Notifications.Changes.Announce`, which broadcasts
+  a content-free `:notifications_changed` on the recipient's own topic after
+  the write commits. The count is a view of the data rather than of one
+  LiveView's clicks, so reading a notification on a phone drops the badge on
+  the desktop — and a session that did not make the change is exactly the one
+  that could not otherwise know. The create side is announced by
+  `KilnCMS.Notifications.record_in_app/1`, its only caller.
+
   `:notify` is the counterpart: system-only, because it writes a row addressed
   to somebody *other* than whoever acted. It is gated by `forbid_if
   actor_present()` rather than called with `authorize?: false`, so the policy
@@ -63,6 +73,7 @@ defmodule KilnCMS.Notifications.Notification do
     authorizers: [Ash.Policy.Authorizer]
 
   alias KilnCMS.Limits
+  alias KilnCMS.Notifications.Changes.Announce
 
   postgres do
     table "notifications"
@@ -132,6 +143,8 @@ defmodule KilnCMS.Notifications.Notification do
           _already_read -> changeset
         end
       end
+
+      change Announce
     end
 
     update :mark_unread do
@@ -139,6 +152,7 @@ defmodule KilnCMS.Notifications.Notification do
       accept []
       require_atomic? false
       change set_attribute(:read_at, nil)
+      change Announce
     end
   end
 
