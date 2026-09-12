@@ -30,7 +30,8 @@ mix phx.server
 `mix setup` seeds a demo admin and editor. The full setup — optional infra
 profiles for cache, search and object storage, plus the environment quirks that
 bite people (PATH, spaced/iCloud paths, the `igniter` dependency) — is in
-[Overview](../README.md) and [Contributing](../CONTRIBUTING.md).
+[Overview](https://github.com/The-Verscienta/kiln_cms/blob/main/README.md)
+and [Contributing](../CONTRIBUTING.md).
 
 On a **production** instance nothing is seeded: visit `/setup` while the site
 has no admin and a short wizard creates the first one (see
