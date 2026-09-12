@@ -142,6 +142,11 @@ longer exists, a `` `Module.fun/2` `` that was renamed or changed arity. Adding
 a new guide means adding it to both `extras` and `groups_for_extras` in
 `mix.exs`; an unlisted guide is silently invisible in the generated sidebar.
 
+"View Source" links resolve against the release tag matching `mix.exs`'s
+version, so in a local build they point at the last release rather than at your
+branch. That only matters if you are checking the links themselves; pin them to
+what you built with `DOCS_SOURCE_REF=$(git rev-parse HEAD) mix docs`.
+
 **Plans and spikes carry a `Status:` line.** Every `docs/*-plan.md` and
 `docs/*-spike.md` states its status in its first lines — `Status: shipped`,
 `Status: design only`, `Status: historical snapshot (date)` — and a test

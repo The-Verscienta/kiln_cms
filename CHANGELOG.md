@@ -27,6 +27,15 @@ migration, a rewritten column, a dropped config key).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`mix docs` "View Source" links point at the release tag, not `main`.**
+  `source_ref` was pinned to the branch, so every link in a published build
+  kept re-resolving as `main` moved and would eventually land on a shifted line
+  or a deleted function. It now defaults to `v<version>` from `mix.exs`, which
+  the release commit bumps to match the tag. A build from an untagged `main`
+  can pin itself with `DOCS_SOURCE_REF=$(git rev-parse HEAD) mix docs`.
+
 ## [0.8.0] - 2026-09-11
 
 ### Added
