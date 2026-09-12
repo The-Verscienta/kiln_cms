@@ -40,6 +40,13 @@ defmodule KilnCMS.Search.EmbeddingWorker do
   end
 
   defp embed(resource, org_id, id) do
+    # Bypass kept (#1402). Threading the system actor here would mean a
+    # `Checks.SystemActor` clause on the `Content` READ policy — a standing
+    # grant over every document on every site, drafts included, to every system
+    # caller. That is wider than this one call, which is bounded to a single id
+    # under one tenant, an id this worker was handed by the fire path. The
+    # WRITE below does carry the actor: `:set_embedding` is system-only, so it
+    # can be named in the policy block.
     case Ash.get(resource, id, authorize?: false, tenant: org_id) do
       # A passphrase-locked document (#496) is not embedded, and any vector it
       # already had is cleared — locking content that was previously indexed has
@@ -60,6 +67,10 @@ defmodule KilnCMS.Search.EmbeddingWorker do
     end
   end
 
+  # `:set_embedding` is a system-only content action; the content macro admits
+  # this actor for it by name (#1402).
+  defp system_actor, do: KilnCMS.SystemActor.new(:search)
+
   defp write_embedding(record, _org_id, nil), do: clear_embedding(record)
 
   defp write_embedding(record, org_id, text) do
@@ -67,7 +78,10 @@ defmodule KilnCMS.Search.EmbeddingWorker do
          {:ok, _record} <-
            record
            |> Ash.Changeset.for_update(:set_embedding, %{embedding: vector},
-             authorize?: false,
+             # A system-only content action, admitted by name inside the
+             # content macro's own create/update policy (#1402) — see the
+             # policy block there.
+             actor: system_actor(),
              tenant: org_id
            )
            |> Ash.update() do
@@ -80,7 +94,9 @@ defmodule KilnCMS.Search.EmbeddingWorker do
   defp clear_embedding(record) do
     record
     |> Ash.Changeset.for_update(:set_embedding, %{embedding: nil},
-      authorize?: false,
+      # Same system-only action as `write_embedding/3` above. Clearing the
+      # vector is what locking a previously indexed document must do.
+      actor: system_actor(),
       tenant: record.org_id
     )
     |> Ash.update()

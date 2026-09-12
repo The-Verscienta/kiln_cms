@@ -68,12 +68,20 @@ defmodule KilnCMS.Search.MeilisearchWorker do
   # The fallback still exists, and still means something: a type this worker has
   # no clause for is not indexable, and answering `:error` removes whatever a
   # previous version may have put there.
+  #
+  # All three keep `authorize?: false` (#1402): threading the system actor
+  # would mean granting it the `Content` read policy standing, over every
+  # document on every site — wider than these calls, which are one id under one
+  # tenant, handed here by the fire path, and passed straight to `published/1`,
+  # which drops anything an anonymous visitor could not read.
   defp load(org_id, "page", id),
     do: published(CMS.get_page(id, authorize?: false, tenant: org_id))
 
+  # (bypass: as above)
   defp load(org_id, "post", id),
     do: published(CMS.get_post(id, authorize?: false, tenant: org_id))
 
+  # (bypass: as above)
   defp load(org_id, "entry", id),
     do: published(CMS.get_entry(id, authorize?: false, tenant: org_id))
 

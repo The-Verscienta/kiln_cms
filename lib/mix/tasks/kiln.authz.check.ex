@@ -60,7 +60,8 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
   # cleans it up — never ahead of one.
   @default_paths [
     "lib/kiln_cms_web",
-    "lib/kiln_cms/firing"
+    "lib/kiln_cms/firing",
+    "lib/kiln_cms/search"
   ]
   @window 12
   @justification ~r/authorize\?|bypass/i

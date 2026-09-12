@@ -8,6 +8,11 @@ defmodule KilnCMS.Search.BlockIndexer do
   `BlockEmbedding`. Blocks whose `content_hash` is unchanged are skipped, so
   re-indexing only embeds what actually changed. Assumes semantic search is
   enabled (the worker guards that).
+
+  Indexing has no request actor — it runs from `BlockEmbeddingWorker` off the
+  fire path — so it runs as `%KilnCMS.SystemActor{subsystem: :search}`, which
+  `KilnCMS.Search.BlockEmbedding` admits by name for both reads and writes
+  (#1402). Nothing else has ever written that table.
   """
   require Ash.Query
 
@@ -16,8 +21,12 @@ defmodule KilnCMS.Search.BlockIndexer do
   alias KilnCMS.CMS.TypedBlocks
   alias KilnCMS.Firing.Engine
   alias KilnCMS.Search.VectorCache
+  alias KilnCMS.SystemActor
 
   require Logger
+
+  # See the moduledoc: the indexer is the system, and says so.
+  defp system_actor, do: SystemActor.new(:search)
 
   @doc "Re-index a document's blocks. Returns `{:ok, count_embedded}`."
   @spec reindex(struct()) :: {:ok, non_neg_integer()}
@@ -122,7 +131,7 @@ defmodule KilnCMS.Search.BlockIndexer do
       KilnCMS.Search.BlockEmbedding
       |> Ash.Query.filter(id in ^stale)
       |> Ash.bulk_destroy!(:destroy, %{},
-        authorize?: false,
+        actor: system_actor(),
         tenant: org_id,
         strategy: [:atomic, :stream],
         return_errors?: true
@@ -274,7 +283,7 @@ defmodule KilnCMS.Search.BlockIndexer do
         embedding: vector,
         embedded_at: DateTime.utc_now()
       },
-      authorize?: false,
+      actor: system_actor(),
       tenant: org_id
     )
     |> case do
@@ -295,7 +304,7 @@ defmodule KilnCMS.Search.BlockIndexer do
   # the DB) instead of a lookup query per block.
   defp existing_rows(org_id, type, document_id) do
     SearchIndex.block_embeddings_for!(type, document_id,
-      authorize?: false,
+      actor: system_actor(),
       tenant: org_id,
       query: [select: [:id, :block_key, :content_hash]]
     )

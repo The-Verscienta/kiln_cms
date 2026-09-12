@@ -132,7 +132,9 @@ ever be authorized by an explicit clause below.
 | `Firing.PublishedArtifact` | `read`, `for_document`, `get_surface`, `upsert`, `destroy` | The firing engine is the only writer an artifact has ever had, and unpublish is the only destroyer. On read the actor is admitted **alongside** `Checks.DocumentReadable`, not instead of it: delivery settles the audience question on the *document* first (`Firing.Delivery.resolve/5`) and then fetches the body by id, so re-running the document check there with the anonymous actor would refuse every gated page delivery had just unlocked. |
 | `CMS.TypeDefinition` | `read`, `by_name`, `including_archived` | Read-only. The fire path resolves a dynamic document's public type name and its schema.org `@type` from its definition. Writing one is still admin-only. |
 | `CMS.FieldDefinition` | `read`, `for_type`, `for_definition` | Read-only. Firing needs the field schema to turn a document's `custom_fields` values into JSON-LD. Defining a field is still admin-only. |
-| `CMS.Page`, `CMS.Post`, `CMS.Entry` (content) | `reindex_search_text` **only**, named inside the `action_type([:create, :update])` policy | A system-only action on a denormalized column, written by `Firing.Engine.fire/2` against the fragment-expanded block tree. It accepts no `:blocks` and is ignored by PaperTrail. The grant sits inside the policy written for people, narrowed to that one action by `forbid_unless action(...)` — see above for why that rather than a bypass. Nothing else on the content resources admits the system actor: it holds no tier, so `EditableContentType` / `ReadableContentType` / `InAudience` all refuse it, and a system actor reads no content at all. |
+| `Search.BlockEmbedding` | `read`, `for_document`, `nearest`, `upsert`, `destroy` | The per-block semantic index. `Search.BlockIndexer` is the only writer it has ever had — rows are derived from the document's own block tree — and `BlockSearch` / `Search.Related` are its only readers. Whether a *caller* may see a hit is decided one tier up, when the matching document is hydrated under their own authorization. |
+| `Search.TagEmbedding` | `read`, `for_tags`, `nearest`, `upsert`, `destroy` | Same shape, for tag-name vectors: written by `TagEmbeddingWorker` and `Search.Related`, read by `Search.Related` only. |
+| `CMS.Page`, `CMS.Post`, `CMS.Entry` (content) | `reindex_search_text` and `set_embedding` **only**, named inside the `action_type([:create, :update])` policy | Two system-only actions on denormalized columns: the fragment-expanded search text (`Firing.Engine.fire/2`) and the document-level search vector (`Search.EmbeddingWorker`). Both accept no `:blocks` and both are ignored by PaperTrail. The grant sits inside the policy written for people, narrowed to those two actions by `forbid_unless action(...)` — see above for why that rather than a bypass. Keep the list short and every member system-only. Nothing else on the content resources admits the system actor: it holds no tier, so `EditableContentType` / `ReadableContentType` / `InAudience` all refuse it, and a system actor reads no content at all. |
 
 Legend: ✅ allowed · ❌ forbidden · 🔎 allowed but row-filtered (reads return only the rows the policy permits, never an error) · ⚙️ system-only (`authorize?: false`).
 
@@ -541,18 +543,19 @@ tenant context.
 
 These three have no caller-facing write path: the firing engine and the search
 indexer write them as the **system**, so nobody — admin included — can create,
-update or destroy one through a policy meant for people. Two of them now say so
-in the policy block rather than being reached around it: `ReferenceEdge` and
-`PublishedArtifact` admit `%KilnCMS.SystemActor{}` by name (#1402, and see
-[The system actor](#the-system-actor)); `BlockEmbedding` still bypasses.
+update or destroy one through a policy meant for people. All three now say so in
+the policy block rather than being reached around it: each admits
+`%KilnCMS.SystemActor{}` by name (#1402, and see
+[The system actor](#the-system-actor)). `Search.TagEmbedding` — absent from the
+table only because nothing caller-facing reads it — has the same shape.
 
 All three used to read `authorize_if always()`. That was tightened in #565, and
 the reason it was safe is that every production reader is a system path:
 `Firing.Delivery` / `Firing.Engine.read/4` for artifacts, `Firing.References`
 for the re-fire wave, `Search.BlockIndexer` / `Search.BlockSearch` /
 `Search.Related` for embeddings. What changed is what an *actor-carrying*
-caller sees. Those system paths now carry `%KilnCMS.SystemActor{}` for
-artifacts and edges, and `authorize?: false` for embeddings.
+caller sees. Every one of those system paths now carries
+`%KilnCMS.SystemActor{}` rather than `authorize?: false`.
 
 `PublishedArtifact` is the one that mattered: it holds the **rendered body** of a
 document, so a blanket grant meant the audience axis enforced on `Content` was

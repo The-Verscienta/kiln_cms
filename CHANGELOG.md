@@ -48,6 +48,16 @@ migration, a rewritten column, a dropped config key).
   say why — a system clause on the `Content` read policy would be a standing
   grant over the whole corpus, much wider than the call it would replace.
   `mix kiln.authz.check` gates `lib/kiln_cms/firing/` from here on (#1402).
+- **The semantic index runs under its policies.** `Search.BlockEmbedding` and
+  `Search.TagEmbedding` — internal indexes with no caller-facing write path —
+  admit `%KilnCMS.SystemActor{}` by name, so the indexer, `BlockSearch` and
+  `Search.Related` no longer bypass them; the document-level `:set_embedding`
+  vector write joins `:reindex_search_text` as the second system-only content
+  action named in the content resources' own create/update policy. Two tag
+  reads turn out to need no bypass at all
+  (taxonomy is world-readable). The workers' *document* reads keep theirs, and
+  say why. `mix kiln.authz.check` now also gates `lib/kiln_cms/search/`
+  (#1402).
 
 ### Fixed
 

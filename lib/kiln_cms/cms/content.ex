@@ -2935,7 +2935,7 @@ defmodule KilnCMS.CMS.Content do
           # because a bypass would also skip every policy declared below it —
           # including ones a later PR adds, which is the whole thing the system
           # actor is supposed to stop happening. `forbid_unless` narrows this
-          # policy's remaining grant to exactly the named actions before
+          # policy's remaining grant to exactly those two actions before
           # offering it, so nothing else on the resource is affected: for a
           # person the first clause has already decided, and for a system actor
           # every other action forbids here.
@@ -2943,13 +2943,13 @@ defmodule KilnCMS.CMS.Content do
           #   * `:reindex_search_text` — recomputes the denormalized
           #     `search_text` from the fragment-expanded block tree
           #     (`KilnCMS.Firing.Engine.fire/2`).
+          #   * `:set_embedding` — writes the document-level search vector
+          #     (`KilnCMS.Search.EmbeddingWorker`).
           #
-          # It accepts no `:blocks` and is ignored by PaperTrail, and its only
-          # caller is the fire path, which had reached it with
-          # `authorize?: false` — skipping the read policies, the lock policy
-          # and everything else here. Keep the list that way: an action anyone
-          # else calls does not belong in it.
-          forbid_unless action([:reindex_search_text])
+          # Both accept no `:blocks`, both are ignored by PaperTrail, and
+          # neither has a caller that is a person. Keep the list that way: an
+          # action anyone else calls does not belong in it.
+          forbid_unless action([:reindex_search_text, :set_embedding])
           authorize_if KilnCMS.Checks.SystemActor
         end
 
