@@ -245,6 +245,52 @@ defmodule KilnCMS.MarkdownTest do
       assert PortableText.to_plain_text(body) == "Body."
     end
 
+    test "a comment above the leading H1 does not cost it the title" do
+      doc = Markdown.parse_document("<!-- license header -->\n\n# The Title\n\nBody.")
+
+      assert doc.title == "The Title"
+      assert [%{"value" => %{"body" => body}}] = doc.blocks
+      assert Enum.map(body, & &1["style"]) == ["normal"]
+      assert PortableText.to_plain_text(body) == "Body."
+    end
+
+    test "several comments, one of them multi-line, still leave a leading H1" do
+      doc =
+        Markdown.parse_document("""
+        <!-- Copyright the authors.
+             Licensed under the same terms as the rest of the manual. -->
+        <!-- Editors: keep the title in sync with the nav entry. -->
+
+        # The Title
+
+        Body.
+        """)
+
+      assert doc.title == "The Title"
+      assert [%{"value" => %{"body" => body}}] = doc.blocks
+      assert Enum.map(body, & &1["style"]) == ["normal"]
+      assert PortableText.to_plain_text(body) == "Body."
+    end
+
+    test "a comment above an H1 that repeats the front-matter title drops both" do
+      doc =
+        Markdown.parse_document("""
+        ---
+        title: Declared
+        ---
+        <!-- note -->
+
+        # Declared
+
+        Body.
+        """)
+
+      assert doc.title == "Declared"
+      assert [%{"value" => %{"body" => body}}] = doc.blocks
+      assert Enum.map(body, & &1["style"]) == ["normal"]
+      assert PortableText.to_plain_text(body) == "Body."
+    end
+
     test "an H1 that differs from the front-matter title stays in the body" do
       doc = Markdown.parse_document("---\ntitle: Declared\n---\n# Heading\n\nBody.")
 

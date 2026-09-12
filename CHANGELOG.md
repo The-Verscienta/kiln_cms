@@ -29,6 +29,13 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **A `.md` file that opens with an HTML comment keeps its title.** A license
+  or editing note above the leading `# H1` — a common shape for an imported
+  file — sat in front of the heading in the parsed tree, so
+  `KilnCMS.Markdown.parse_document/2` stopped recognizing it as the document's
+  title: the import arrived untitled *and* with the heading still in the body,
+  which then printed the name twice.
+
 - **Both password forms check the confirmation as you type.** On `/register`
   and on the new-password page behind a reset link, the two password boxes
   disagreeing was held back until submit — which on registration also clears the
