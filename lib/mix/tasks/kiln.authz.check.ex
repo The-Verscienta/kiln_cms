@@ -42,18 +42,26 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
 
   ## Scope
 
-  `lib/kiln_cms_web/` by default; pass paths (files or directories) to scan
-  something else. Non-web code is not gated yet: the worker/system sites in
-  `lib/kiln_cms/` are the system-actor follow-up, tracked in #1402.
+  The default paths are the parts of the tree that have been audited. The web
+  layer went first (#1329); non-web directories are added one at a time as the
+  system-actor migration works through them (#1402), which is what makes each
+  slice's cleanup stick. Pass paths (files or directories) to scan something
+  else — `mix kiln.authz.check lib` is the whole tree, and reports how much is
+  left.
 
       mix kiln.authz.check
       mix kiln.authz.check lib/kiln_cms/billing.ex
   """
-  @shortdoc "Fails on an unexplained `authorize?: false` in lib/kiln_cms_web/"
+  @shortdoc "Fails on an unexplained `authorize?: false` in the audited tree"
 
   use Mix.Task
 
-  @default_paths ["lib/kiln_cms_web"]
+  # Audited, and therefore gated. Add a directory here in the same PR that
+  # cleans it up — never ahead of one.
+  @default_paths [
+    "lib/kiln_cms_web",
+    "lib/kiln_cms/firing"
+  ]
   @window 12
   @justification ~r/authorize\?|bypass/i
 

@@ -2929,6 +2929,28 @@ defmodule KilnCMS.CMS.Content do
         # unrestricted editors are unchanged.
         policy action_type([:create, :update]) do
           authorize_if KilnCMS.CMS.Checks.EditableContentType
+
+          # The internal, system-only update actions (#1402). Admitted HERE
+          # rather than through a `bypass action(...)` at the top of the stack,
+          # because a bypass would also skip every policy declared below it —
+          # including ones a later PR adds, which is the whole thing the system
+          # actor is supposed to stop happening. `forbid_unless` narrows this
+          # policy's remaining grant to exactly the named actions before
+          # offering it, so nothing else on the resource is affected: for a
+          # person the first clause has already decided, and for a system actor
+          # every other action forbids here.
+          #
+          #   * `:reindex_search_text` — recomputes the denormalized
+          #     `search_text` from the fragment-expanded block tree
+          #     (`KilnCMS.Firing.Engine.fire/2`).
+          #
+          # It accepts no `:blocks` and is ignored by PaperTrail, and its only
+          # caller is the fire path, which had reached it with
+          # `authorize?: false` — skipping the read policies, the lock policy
+          # and everything else here. Keep the list that way: an action anyone
+          # else calls does not belong in it.
+          forbid_unless action([:reindex_search_text])
+          authorize_if KilnCMS.Checks.SystemActor
         end
 
         # Publishing is an admin approval step — editors submit for review

@@ -39,6 +39,15 @@ migration, a rewritten column, a dropped config key).
   The first resource converted is `Firing.ReferenceEdge` — the re-fire wave's
   link graph, which has no caller-facing write path at all. No behaviour
   changes for any caller-facing path (#1402).
+- **The firing path runs under the policies.** Everything `KilnCMS.Firing.*`
+  touches now carries `%KilnCMS.SystemActor{}` and a matching policy clause
+  instead of `authorize?: false`: the artifact table (written only by the
+  engine, destroyed only by unpublish), the reference graph, the type and
+  field definitions it reads, and the one system-only content action that
+  recomputes `search_text`. Two reads deliberately keep their bypass, and now
+  say why — a system clause on the `Content` read policy would be a standing
+  grant over the whole corpus, much wider than the call it would replace.
+  `mix kiln.authz.check` gates `lib/kiln_cms/firing/` from here on (#1402).
 
 ### Fixed
 
