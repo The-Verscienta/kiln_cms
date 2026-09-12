@@ -1,9 +1,9 @@
-# Kiln CMS — Design Language
+# KilnCMS — Design Language
 
 *Applies to the admin & authoring UI (`/editor/*`, media, auth). The public
 delivery frontend keeps its own minimal chrome.*
 
-Kiln CMS is a focused, editor-first content management system for thoughtful
+KilnCMS is a focused, editor-first content management system for thoughtful
 creators and teams. It prioritizes clarity, speed, and editorial flow over
 feature bloat. **Voice**: calm, confident, precise — like a trusted editor.
 The design goals: reduce cognitive load for writers/editors, make publishing
@@ -213,9 +213,14 @@ The authoring app frame (`lib/kiln_cms_web/components/layouts.ex`):
    Still deliberately bespoke: **icon-only / subtle destructive** buttons (kept
    as `btn-ghost` + `hover:text-error` rather than a solid `btn-danger`) and the
    translation locale **chips** (a matched link/button pair, not tabs).
-4. `Layouts.app/1` is **still used** by the `/` marketing landing
-   (`page_html/home.html.heex`) — a public-facing page, not an authoring tool —
-   so it is intentionally retained. Retire it only if/when the home page moves to
+4. **Done:** the `/` marketing landing (`page_html/home.html.heex`) moved to
+   `Layouts.public`. It is a public-facing page, not an authoring tool, and
+   serving it from the authoring shell gave the site root a theme toggle and an
+   account menu no other public URL has while skipping the site's own nav, theme
+   preset and attribution. `Layouts.public` took two optional attrs to absorb it
+   — `wide` (the reading-measure opt-out, replacing the old `container_class`)
+   and `current_user` (the account/sign-out pair). `Layouts.app/1` now has one
+   caller left, `page_html/developers.html.heex`; retire it when that page gets
    `Layouts.public` or its own treatment.
 
 Keep this document in step with the kit: **new shared pattern → document it here

@@ -12,7 +12,7 @@ defmodule KilnClient.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       description:
-        "Official Elixir client for the Kiln CMS delivery APIs — " <>
+        "Official Elixir client for the KilnCMS delivery APIs — " <>
           "published-by-default JSON:API reads, search, and fired artifacts.",
       package: package(),
       docs: docs(),
