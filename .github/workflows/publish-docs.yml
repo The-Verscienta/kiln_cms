@@ -50,8 +50,8 @@ jobs:
           version-file: .tool-versions
           version-type: strict
 
-      # Mix.install's build of earmark/req/jason, keyed on the script that
-      # pins them.
+      # Mix.install's build of earmark_parser/req/jason, keyed on the script
+      # that pins them.
       - name: Cache Mix.install
         uses: actions/cache@v5
         with:
