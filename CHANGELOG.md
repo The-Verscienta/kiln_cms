@@ -29,6 +29,23 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **The content-cache metric no longer inverts during a stampede, and a Courier
+  failure no longer amplifies one.** A burst of concurrent requests for one
+  just-invalidated key is deduplicated by Cachex into a single database read,
+  but every deduplicated caller was counted as a cache **hit** — so the worse
+  the stampede, the healthier `[:kiln_cms, :cache, :content]` looked. Those
+  callers are now tagged `coalesced`, distinct from a genuine `hit`. Separately,
+  when Cachex answers a fetch with an error (its courier worker died, or the
+  fallback itself raised), every blocked caller fell through to a silent
+  per-caller recompute — N simultaneous rebuilds, N sitemap rebuilds on the
+  generic helper, exactly the stampede the cache exists to prevent. The most
+  common form of that — a fallback raising, which on the delivery path is just a
+  404 — now runs once for the whole burst and hands every waiting caller the
+  original exception, so a missing hot URL costs one database read instead of
+  one per request. What is left in that arm is the cache itself failing, where
+  the caller still computes (a dead courier must not take the site down) but the
+  degrade is logged and tagged `error` so it is visible while it happens.
+
 - **Both password forms check the confirmation as you type.** On `/register`
   and on the new-password page behind a reset link, the two password boxes
   disagreeing was held back until submit — which on registration also clears the
