@@ -39,6 +39,15 @@ migration, a rewritten column, a dropped config key).
   account preferences stays muted in the inbox too. Rows are org-scoped and
   readable **only by their own recipient** — there is no admin bypass. The bell
   and `/editor/inbox` that read them follow.
+- **`/editor/inbox`.** The notification inbox: everything the console has told
+  this editor about, newest first, with an unread filter, per-row mark-read /
+  mark-unread and mark-all-read. Every row deep-links to the thing it concerns
+  — a comment or a block-anchored task opens that block's thread via the
+  `?comment=<block_id>` param the editor already reads at mount, which is the
+  console's only durable block anchor (heading `id`s exist in public delivery
+  only). Live: one `on_mount` hook subscribes each console page to the viewer's
+  own notification topic, so the list follows a notification that lands, or one
+  read in another tab, without a reload.
 
 ### Changed
 

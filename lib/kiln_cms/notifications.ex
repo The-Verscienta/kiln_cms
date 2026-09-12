@@ -103,6 +103,86 @@ defmodule KilnCMS.Notifications do
   @spec topic(String.t()) :: String.t()
   def topic(user_id) when is_binary(user_id), do: "notifications:user:#{user_id}"
 
+  @doc """
+  How many unread notifications `user` has on `org` — the bell's badge and the
+  inbox's unread tab.
+
+  Authorized as `user`: the read action filters to their own rows *and* the
+  policy requires it, so a wrong `user` argument counts zero rather than
+  somebody else's inbox. A failed read counts zero — a badge is chrome, and a
+  console page must not 500 because a count query did.
+  """
+  @spec unread_count(struct(), term()) :: non_neg_integer()
+  def unread_count(%{id: user_id} = user, org) do
+    Notification
+    |> Ash.Query.for_read(:unread_for_user, %{user_id: user_id}, actor: user, tenant: org)
+    # A count has no use for the action's `inserted_at: :desc` ordering.
+    |> Ash.Query.unset(:sort)
+    |> Ash.count(actor: user, tenant: org)
+    |> case do
+      {:ok, count} -> count
+      _error -> 0
+    end
+  end
+
+  @doc """
+  The `limit` most recent notifications for `user` on `org`, newest first —
+  the inbox list and the bell's dropdown.
+
+  Read *and* unread: this is "what happened lately", not a queue, and an item
+  that vanishes the moment it is read takes its own deep link with it.
+  """
+  @spec recent(struct(), term(), pos_integer()) :: [Notification.t()]
+  def recent(user, org, limit), do: read_window(user, org, :for_user, limit)
+
+  @doc """
+  The `limit` most recent **unread** notifications — the inbox's unread filter.
+
+  A separate read rather than a filter over `recent/3`'s window: a backlog
+  longer than the window would otherwise hide the oldest unread items behind
+  newer read ones, which is the case the filter exists for.
+  """
+  @spec recent_unread(struct(), term(), pos_integer()) :: [Notification.t()]
+  def recent_unread(user, org, limit), do: read_window(user, org, :unread_for_user, limit)
+
+  defp read_window(%{id: user_id} = user, org, action, limit) do
+    Notification
+    |> Ash.Query.for_read(action, %{user_id: user_id}, actor: user, tenant: org)
+    |> Ash.Query.limit(limit)
+    |> Ash.read(actor: user, tenant: org)
+    |> case do
+      {:ok, notifications} -> notifications
+      _error -> []
+    end
+  end
+
+  @doc """
+  Mark every unread notification `user` has on `org` as read; returns how many
+  moved.
+
+  Streamed rather than atomic because `:mark_read` keeps an already-set
+  `read_at` (see the resource) — and because it is authorized per row, so a
+  caller cannot sweep an inbox that is not theirs. One user's unread set is
+  tens of rows, not thousands.
+  """
+  @spec mark_all_read(struct(), term()) :: non_neg_integer()
+  def mark_all_read(%{id: user_id} = user, org) do
+    Notification
+    |> Ash.Query.for_read(:unread_for_user, %{user_id: user_id}, actor: user, tenant: org)
+    |> Ash.bulk_update(:mark_read, %{},
+      actor: user,
+      tenant: org,
+      strategy: [:stream],
+      allow_stream_with: :full_read,
+      return_records?: true,
+      return_errors?: true
+    )
+    |> case do
+      %Ash.BulkResult{status: :success, records: records} -> length(records || [])
+      _partial_or_error -> 0
+    end
+  end
+
   @type event ::
           :submitted_for_review
           | :published
