@@ -214,7 +214,7 @@ KILN_ENV_COLOR=warning   # or error, info, success — a tone name, never a hex
 **Leave both unset in production.** No label means no strip: production is the
 environment you recognise by the *absence* of a warning, and nothing has to be
 configured for that to hold. See
-[`environment-variables.md`](environment-variables.md#optional--environment-indicator).
+[`environment-variables.md`](environment-variables.md#environment-indicator).
 
 `scripts/staging.sh up` and the scrub both print this as a closing reminder.
 Neither can *set* the variable: the scrub runs as a throwaway process against a

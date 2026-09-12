@@ -518,7 +518,20 @@ defmodule KilnCMS.Config.EnvTest do
   end
 
   describe "the runtime.exs handoff (#634)" do
-    @runtime_exs Path.join([__DIR__, "..", "..", "..", "config", "runtime.exs"])
+    @config_dir Path.join([__DIR__, "..", "..", "..", "config"])
+    @runtime_exs Path.join(@config_dir, "runtime.exs")
+
+    # Since #1322 the configuration itself lives in per-concern fragments that
+    # `runtime.exs` evaluates; `runtime.exs` is the index. Both guards below
+    # were written when it was one file, so both must now read the fragments
+    # too — otherwise the split silently moved every call site out from under
+    # them, which is the failure mode the split most needed to avoid.
+    defp fragment_paths do
+      @config_dir
+      |> Path.join("runtime/**/*.exs")
+      |> Path.wildcard()
+      |> Enum.sort()
+    end
 
     test "runtime.exs hands the collected list to :config_warnings" do
       assert File.read!(@runtime_exs) =~
@@ -568,24 +581,69 @@ defmodule KilnCMS.Config.EnvTest do
              """
     end
 
-    test "no bare IO.warn survives in runtime.exs" do
+    test "no bare IO.warn survives in runtime.exs or any of its fragments" do
       # #912: an `IO.warn` there is a warning that reaches container stdout and
       # nothing else, which is what the collector exists to replace. The two
       # variables that had no parser now go through `one_of/2` and
       # `record_unusable/3`; a new bare call is the regression.
-      source = File.read!(@runtime_exs)
+      offenders =
+        [@runtime_exs | fragment_paths()]
+        |> Enum.filter(fn path ->
+          path
+          |> File.read!()
+          |> String.split("\n")
+          |> Enum.reject(&String.starts_with?(String.trim_leading(&1), "#"))
+          |> Enum.join("\n")
+          |> String.contains?("IO.warn")
+        end)
+        |> Enum.map(&Path.relative_to_cwd/1)
 
-      code =
-        source
-        |> String.split("\n")
-        |> Enum.reject(&String.starts_with?(String.trim_leading(&1), "#"))
-        |> Enum.join("\n")
-
-      refute code =~ "IO.warn",
+      assert offenders == [],
              """
-             config/runtime.exs warns with `IO.warn`, which never reaches Logger \
-             or Sentry. Use a reader on `KilnCMS.Config.Env`, or \
+             #{Enum.join(offenders, ", ")} warns with `IO.warn`, which never \
+             reaches Logger or Sentry. Use a reader on `KilnCMS.Config.Env`, or \
              `Env.record_unusable/3` when the shape has none (#912).\
+             """
+    end
+
+    test "every fragment on disk is actually evaluated by runtime.exs" do
+      # A fragment `runtime.exs` never calls is dead configuration, and silently
+      # so: the variables it reads simply stop being read, the feature they gate
+      # reverts to its compiled default, and nothing fails. Cheap to state here,
+      # and the one new failure mode the #1322 split introduced.
+      index = File.read!(@runtime_exs)
+
+      orphans =
+        for path <- fragment_paths(),
+            name = Path.relative_to(path, Path.join(@config_dir, "runtime")),
+            not String.contains?(index, "fragment.(\"#{name}\")"),
+            do: name
+
+      assert orphans == [],
+             """
+             config/runtime/ holds fragments that config/runtime.exs never \
+             evaluates: #{Enum.join(orphans, ", ")}. Every variable they read is \
+             silently unread. Add a `fragment.("<name>")` call at the position \
+             the block belongs in, or delete the file.\
+             """
+    end
+
+    test "no fragment is evaluated after the handoff" do
+      # The ordering argument above, restated for the split: a fragment
+      # evaluated below the `:config_warnings` handoff has already missed the
+      # drain, so every unrecognized value it reads warns on stderr and nowhere
+      # else. Appending a new `fragment.(...)` at the bottom of the file is the
+      # natural mistake, and it is invisible — the configuration still applies.
+      [_before, after_handoff] =
+        @runtime_exs
+        |> File.read!()
+        |> String.split("config :kiln_cms, :config_warnings", parts: 2)
+
+      refute after_handoff =~ ~r/\bfragment\.\(/,
+             """
+             config/runtime.exs evaluates a fragment below the \
+             `:config_warnings` handoff, so that fragment's unrecognized-value \
+             warnings reach stderr only (#634). Move the call above it.\
              """
     end
   end

@@ -169,7 +169,7 @@ be first-party.
       multi-tenant deployment: without it an unmatched `Host` (a bare hostname,
       an IP literal, `localhost`, or an attacker-supplied header) is served the
       **default org's** content, branding and analytics. Config table:
-      [environment-variables.md](environment-variables.md#optional--multi-tenancy-336).
+      [environment-variables.md](environment-variables.md#multi-tenancy-336).
 
 **Note:** a few deliberate single-org-bridge fallbacks remain where a nil tenant
 reads globally (the GraphQL context resolver, point-in-time index reads). They

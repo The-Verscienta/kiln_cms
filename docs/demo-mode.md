@@ -32,7 +32,7 @@ with these differences.
    changes with each version, so prefer object storage with **a bucket of the
    demo's own** — never production's (see [Media](#media)).
 5. **Set the demo variables** (full rows in
-   [`environment-variables.md`](environment-variables.md#optional--demo-mode)):
+   [`environment-variables.md`](environment-variables.md#demo-mode)):
 
    ```bash
    KILN_DEMO_RESET=confirm          # the sentinel — `true` does NOT enable it
@@ -270,7 +270,7 @@ it forward. Recapture when you want the demo content itself to change.
 
 ## Cross-references
 
-- [`environment-variables.md`](environment-variables.md#optional--demo-mode):
+- [`environment-variables.md`](environment-variables.md#demo-mode):
   `KILN_DEMO_RESET`, `KILN_DEMO_RESET_CRON`, `KILN_DEMO_GOLDEN_PATH`.
 - [`staging-environments.md`](staging-environments.md): the other destructive,
   guarded operation, whose conventions this follows.

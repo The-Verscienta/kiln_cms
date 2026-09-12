@@ -27,6 +27,32 @@ migration, a rewritten column, a dropped config key).
 
 ## [Unreleased]
 
+### Changed
+
+- **`config/runtime.exs` is now an index, not a 1,523-line file.** The
+  configuration moved into per-concern fragments under `config/runtime/`
+  (`observability.exs`, `governance.exs`, `prod/mailer.exs`, …), evaluated in
+  exactly the order their blocks appeared before. Behaviour is unchanged: the
+  same variables are read, in the same sequence, producing the same
+  application env and the same boot warnings in the same order. Operators
+  change nothing.
+
+  One thing to know if you build releases outside the shipped Dockerfile:
+  `mix release` copies only `config/runtime.exs` into `releases/<vsn>/`, so the
+  fragments are copied alongside it by a `:steps` hook in `mix.exs`, and the
+  Dockerfile now `COPY`s the directory into the build context. The hook refuses
+  to assemble a release if the directory is missing rather than producing an
+  image that fails on first boot.
+
+- **`docs/environment-variables.md` and `.env.example` lead with the short
+  list.** Both now open with **Required (3)** — `DATABASE_URL`,
+  `SECRET_KEY_BASE`, `TOKEN_SIGNING_SECRET`, the only variables that stop a
+  production boot — then **Common (10)**, then everything else grouped by
+  feature. The previous "Required (production)" section also listed `PHX_HOST`
+  and `PHX_SERVER`, neither of which raises; both are still documented, under
+  server & networking. The required set is derived from the code and pinned by
+  a test, so it cannot drift from what actually raises.
+
 ### Fixed
 
 - **Both password forms check the confirmation as you type.** On `/register`
