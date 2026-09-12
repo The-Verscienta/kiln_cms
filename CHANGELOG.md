@@ -27,6 +27,25 @@ migration, a rewritten column, a dropped config key).
 
 ## [Unreleased]
 
+### Added
+
+- **`docs/overlay-contract.md` — what a downstream overlay may rely on across
+  releases.** The semver table says a major bump means "the overlay contract
+  broke", but nothing said which surfaces that covers. This one does: a table
+  of covered surfaces (the `KilnCMS.CMS.Content` options and injected hooks,
+  the `Kiln.Plugin` callbacks, the block DSL and its `_type`/`_version`
+  attributes, the extension behaviours, the config keys, the `PROJECT` build
+  arg and `priv/` merge conventions, and the `public-*` CSS hooks), a matching
+  list of what is *not* covered and may change in a patch, the three things a
+  minor may still do that cost an overlay work — including the two production
+  incidents the `overlay_drift` job exists to prevent (#452/#459, #488/#504) —
+  the additive-first deprecation path, four CI commands a downstream repo
+  should run, and the soft spots stated outright: the block upcast path has
+  never run a real migration, eager backfill is unwired, `to_markdown/1` is
+  probed rather than declared, and `Kiln.Plugin` declares no optional
+  callbacks. Linked from `projects/README.md` (which keeps the mechanics) and
+  the getting-started guide router (#1328).
+
 ## [0.8.0] - 2026-09-11
 
 ### Added
