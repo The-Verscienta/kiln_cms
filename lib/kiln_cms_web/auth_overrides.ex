@@ -157,7 +157,10 @@ defmodule KilnCMSWeb.AuthOverrides do
     set :reset_toggle_text, "Forgot your password?"
     set :show_first, :sign_in
     set :hide_class, "hidden"
-    set :register_form_module, AshAuthentication.Phoenix.Components.Password.RegisterForm
+    # Kiln's own register form: upstream's, with the password confirmation
+    # checked on change instead of only on submit. See
+    # `KilnCMSWeb.AuthRegisterForm`.
+    set :register_form_module, KilnCMSWeb.AuthRegisterForm
     set :sign_in_form_module, AshAuthentication.Phoenix.Components.Password.SignInForm
     set :reset_form_module, AshAuthentication.Phoenix.Components.Password.ResetForm
   end

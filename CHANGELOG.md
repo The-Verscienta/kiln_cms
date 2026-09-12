@@ -27,6 +27,15 @@ migration, a rewritten column, a dropped config key).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The register form checks the password confirmation as you type.** The two
+  password boxes disagreeing was held back until submit — which also clears the
+  password field, so a typo in the confirmation cost re-typing both.
+  `KilnCMSWeb.AuthRegisterForm` wraps AshAuthentication's register form and
+  reveals that one error on `phx-change`; every other field stays quiet until
+  submit, as before.
+
 ## [0.8.0] - 2026-09-11
 
 ### Added
