@@ -61,6 +61,16 @@ migration, a rewritten column, a dropped config key).
   Configure hub and the palette all render from it, so a new settings screen is
   added in one place and appears in all three (#1319).
 
+### Fixed
+
+- **Both password forms check the confirmation as you type.** On `/register`
+  and on the new-password page behind a reset link, the two password boxes
+  disagreeing was held back until submit — which on registration also clears the
+  password field, so a typo in the confirmation cost re-typing both.
+  `KilnCMSWeb.AuthConfirmationFeedback` reveals that one error on `phx-change`;
+  every other field — an empty email, an invalid reset token — stays quiet until
+  submit, as before.
+
 ## [0.8.0] - 2026-09-11
 
 ### Added
