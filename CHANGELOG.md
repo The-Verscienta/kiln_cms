@@ -38,7 +38,9 @@ migration, a rewritten column, a dropped config key).
   recipient list, that enqueues the mail job: an event a user has muted in their
   account preferences stays muted in the inbox too. Rows are org-scoped and
   readable **only by their own recipient** — there is no admin bypass. The bell
-  and `/editor/inbox` that read them follow.
+  and `/editor/inbox` that read them follow. Reading one is announced on the
+  recipient's own PubSub topic, so a notification read on a phone drops the
+  badge on the desktop.
 - **`/editor/inbox`.** The notification inbox: everything the console has told
   this editor about, newest first, with an unread filter, per-row mark-read /
   mark-unread and mark-all-read. Every row deep-links to the thing it concerns

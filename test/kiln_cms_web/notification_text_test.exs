@@ -40,10 +40,27 @@ defmodule KilnCMSWeb.NotificationTextTest do
              "Ada assigned you a task"
   end
 
+  test "the actor's name is interpolated by gettext, not patched in afterwards" do
+    # A `gettext/1` call with no bindings logs `missing Gettext bindings:
+    # [:who]` on every render and leaves the placeholder for a `String.replace`
+    # to patch — which also means a locale that moves `%{who}` within its own
+    # sentence silently stops working. `capture_log` is the assertion: the
+    # render must be quiet.
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert NotificationText.headline(%{event: :comment_mention, actor_name: "Ada"}) ==
+                 "Ada mentioned you"
+      end)
+
+    refute log =~ "missing Gettext bindings"
+  end
+
   test "an actor-less event gets its own sentence, not a stand-in name" do
     # Scheduled publishing has no acting user; automation deliberately does not
-    # borrow one (#946). Neither may be rendered as if a person did it.
-    for actor_name <- [nil, ""] do
+    # borrow one (#946). Neither may be rendered as if a person did it. A blank
+    # name counts as absent — a sentence with a hole in it is worse than the
+    # neutral one.
+    for actor_name <- [nil, "", "   "] do
       assert NotificationText.headline(%{event: :published, actor_name: actor_name}) ==
                "Published"
 

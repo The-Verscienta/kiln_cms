@@ -301,6 +301,33 @@ defmodule KilnCMS.Notifications.NotificationTest do
       refute_receive :notifications_changed, 50
     end
 
+    test "marking read announces too, so another session's badge follows" do
+      me = user()
+      mine = record(me)
+
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, Notifications.topic(me.id))
+
+      {:ok, marked} = Notifications.mark_notification_read(mine, actor: me)
+      assert_receive :notifications_changed
+
+      # And back again — an unread is as much a change to the count as a read.
+      {:ok, _restored} = Notifications.mark_notification_unread(marked, actor: me)
+      assert_receive :notifications_changed
+    end
+
+    test "a refused mark announces nothing" do
+      me = user()
+      colleague = user()
+      mine = record(me)
+
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, Notifications.topic(me.id))
+
+      assert {:error, _forbidden} = Notifications.mark_notification_read(mine, actor: colleague)
+
+      # No badge moves for a read that did not happen.
+      refute_receive :notifications_changed, 50
+    end
+
     test "a failed write announces nothing" do
       me = user()
       Phoenix.PubSub.subscribe(KilnCMS.PubSub, Notifications.topic(me.id))
