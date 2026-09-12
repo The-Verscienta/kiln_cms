@@ -27,6 +27,24 @@ migration, a rewritten column, a dropped config key).
 
 ## [Unreleased]
 
+### Added
+
+- **The release image is published to GHCR on every version tag.**
+  `docker pull ghcr.io/the-verscienta/kiln_cms:<version>` (or `:latest`) now
+  gets the project-agnostic core, built by
+  `.github/workflows/release.yml` from the same `Dockerfile` CI builds on every
+  PR and stamped with the commit and build date. `linux/amd64` only. Submodule
+  overlays are unaffected — an overlay still builds its own image with
+  `--build-arg PROJECT=<name>`, and `mix kiln.update` remains the way a pinned
+  project moves between releases (#1328).
+
+- **`.github/SUPPORT.md`, and a "Status & maturity" section at the top of the
+  README.** Where questions, bugs and security reports each go, and what
+  response time to expect from a single-maintainer pre-1.0 project; plus, up
+  front, that KilnCMS is consumed as a git-submodule overlay rather than a Hex
+  package, and which surfaces are stable, which move without notice, and which
+  are off by default (#1328).
+
 ### Fixed
 
 - **Both password forms check the confirmation as you type.** On `/register`

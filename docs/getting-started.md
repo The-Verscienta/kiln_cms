@@ -9,6 +9,17 @@ truth for storage, actions, authorization and the publishing state machine.
 A KilnCMS install is meant to be *overlaid*, not forked: the reusable core lives
 in `lib/`, and a downstream site adds its own content types under `projects/`.
 
+**How that is distributed:** KilnCMS is **not on Hex** and is not consumed as a
+dependency. A site pins this repository as a **git submodule** and moves the pin
+between tagged releases with `mix kiln.update` — see
+[Downstream projects](https://github.com/The-Verscienta/kiln_cms/blob/main/projects/README.md) for the layout,
+[Releasing](releasing.md#updating-a-project-to-a-release) for the update flow,
+and the [status section of the Overview](https://github.com/The-Verscienta/kiln_cms#status--maturity)
+for what pre-1.0 means for the surfaces you would build against. A prebuilt core image
+is also published on each release tag
+(`docker pull ghcr.io/the-verscienta/kiln_cms:latest`) if you want to run it
+without a checkout.
+
 This page is the landing page for `mix docs` and the orientation path for a new
 contributor. It points at the right guide rather than restating it.
 
