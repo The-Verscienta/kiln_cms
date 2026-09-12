@@ -18,6 +18,7 @@ for the current model.
 | **`field_grants`** | which attributes an editor may change, per type | Phase 2, slice 3 |
 | **Custom `Role`** | a named, org-owned bundle of the three scope axes | Phase 2, slice 4 |
 | **`audiences`** | which *published*, audience-gated content a consumer can read — a separate axis from editorial scope | [memberships.md](memberships.md) |
+| **Temporary tier** (`granted_role`) | a *higher* tier that expires on its own, on the membership or the user | Temporary tiers |
 
 Each scope axis lives on the org membership (`KilnCMS.Accounts.OrgMembership`),
 on its custom role, and on the user; the effective value resolves
@@ -161,8 +162,12 @@ custom role simply has no extra restriction bundle.
 
 **Team UI.** `/editor/team` (admin-only) manages the current org's members —
 add by existing account email, set tier / custom role / per-member scope
-overrides, remove — and its custom roles. Scope inputs are plain
-comma-separated type lists and a JSON textarea for field grants.
+overrides, grant a temporary tier, remove — and its custom roles. Scope inputs
+are plain comma-separated type lists and a JSON textarea for field grants.
+
+The accounts it can add from — every registration on the instance, with the
+platform role, password resets and account removal — are at `/editor/accounts`:
+see [Account administration](account-administration.md).
 
 ## Per-org capability tiers (shipped — #419)
 
@@ -182,6 +187,24 @@ reads `Scoping.effective_tier/2`. Semantics:
 So `/editor/team`'s tier select now *governs*: an org can promote a global
 viewer to site editor, or demote a global editor to site viewer, without
 touching their other sites.
+
+## Temporary tiers (shipped)
+
+Either tier — the site tier on a membership, or the platform role on the user —
+can be granted for a bounded window: "editor on this site until Friday". Two
+columns carry it, `granted_role` and `granted_role_expires_at`, and the standing
+`role` is never overwritten, so expiry is a comparison rather than a scheduled
+write. `KilnCMS.Accounts.Preparations.FoldRoleGrant` presents a live grant as
+`role` on every read, which is how it reaches `Scoping.effective_tier/2` and the
+`actor_attribute_equals(:role, …)` policies without either knowing it exists.
+
+Grant a site tier from `/editor/team` (on the member's Edit panel) and a platform
+role from `/editor/accounts`. A grant carries **no scope axes** — it moves the
+tier only, leaving `editable_types`, `readable_types`, `field_grants` and the
+custom role exactly as they were.
+
+Full rules, including why a write of `role` must read the row unfolded first:
+[Account administration](account-administration.md).
 
 ## Later phases
 

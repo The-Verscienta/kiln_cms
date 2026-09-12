@@ -12,7 +12,7 @@ defmodule KilnCMS.Accounts.User do
     # `SecondFactorHoldExtension` carries no DSL of its own: it is the
     # compile-time pin on the `tokens` settings below that the two-factor hold
     # (#742) depends on. See `KilnCMS.Accounts.Verifiers.SecondFactorHoldContract`.
-    extensions: [AshAuthentication, KilnCMS.Accounts.SecondFactorHoldExtension]
+    extensions: [AshAuthentication, AshOban, KilnCMS.Accounts.SecondFactorHoldExtension]
 
   # The remember-me cookie's name, which is `__Host-`-prefixed exactly when the
   # session cookie is (#699). Resolved here rather than written as a literal
@@ -156,6 +156,13 @@ defmodule KilnCMS.Accounts.User do
     # to admins or the user themselves, so anonymous and bearer-other API callers
     # only ever get the public byline (`id`, `name`). Internal byline/JSON-LD
     # loads run with `authorize?: false`, so they still read `name`.
+    # `granted_role`/`granted_role_expires_at` are NOT listed here, and cannot be:
+    # field policies only cover public fields, and those two are `public? false`
+    # (access-control config, like `audiences`) so they reach no API surface at
+    # all. What they could still leak is through the fold — writing a real tier
+    # into the `role` field this policy withholds — which
+    # `KilnCMS.Accounts.Preparations.FoldRoleGrant` declines to do precisely
+    # because `role` comes back forbidden. See that module's `fold/1`.
     field_policy [
       :email,
       :role,
@@ -171,6 +178,26 @@ defmodule KilnCMS.Accounts.User do
     # Everything else (id, name, timestamps) follows the resource read policy.
     field_policy :* do
       authorize_if always()
+    end
+  end
+
+  # Expired temporary roles (`KilnCMS.Accounts.RoleGrant`). Authorization does not
+  # wait for this — `FoldRoleGrant` stops presenting a grant the instant it
+  # expires — so the trigger is hygiene plus the session eviction, and a missed
+  # run cannot leave anyone elevated. Hourly rather than nightly for the
+  # eviction's sake: a grant that ran out at 09:00 should not leave its holder's
+  # open console authorized until 04:00 tomorrow.
+  oban do
+    triggers do
+      trigger :expire_role_grants do
+        action :expire_role_grant
+        queue :default
+        scheduler_cron "5 * * * *"
+        where expr(not is_nil(granted_role) and granted_role_expires_at <= now())
+
+        worker_module_name KilnCMS.Accounts.User.AshOban.Worker.ExpireRoleGrants
+        scheduler_module_name KilnCMS.Accounts.User.AshOban.Scheduler.ExpireRoleGrants
+      end
     end
   end
 
@@ -220,10 +247,65 @@ defmodule KilnCMS.Accounts.User do
       require_atomic? false
       validate KilnCMS.Accounts.Validations.FieldGrantsShape
 
+      # This action writes the STANDING role, so it must not be handed a record
+      # whose live temporary role was folded into that field — the write would be
+      # dropped as a no-op. See the validation module.
+      validate KilnCMS.Accounts.Validations.UnfoldedRecord
+
+      # An admin demoting the last admin locks every operator out of `/editor`
+      # with no route back through the UI — see the validation module.
+      validate KilnCMS.Accounts.Validations.NotLastAdmin
+
+      # A standing tier at or above a live temporary one makes the grant
+      # meaningless; leaving it on the row would show a countdown that changes
+      # nothing when it runs out.
+      change KilnCMS.Accounts.Changes.ClearRedundantRoleGrant
+
       # Every socket authorizes once, at connect and join, and never again — so
       # a demotion or a narrowed scope left the live ones holding the grant they
       # had (#675). Dropping them makes the next message prove it again.
       change {KilnCMS.Accounts.Changes.EvictSessions, reason: :access_changed}
+    end
+
+    # Time-boxed elevation (`KilnCMS.Accounts.RoleGrant`) — "admin until Friday".
+    # Its own action rather than two more fields on `:manage_access`, because it
+    # is the one write here that does NOT change what the person permanently is:
+    # `role` is untouched, which is what lets expiry be a comparison rather than
+    # a scheduled revert. Clearing both fields revokes a grant early.
+    update :grant_temporary_role do
+      description "Grant or revoke a time-boxed elevation above the standing role."
+      accept [:granted_role, :granted_role_expires_at]
+      # The validation compares two attributes plus the standing role — no atomic
+      # expression.
+      require_atomic? false
+      validate KilnCMS.Accounts.Validations.TemporaryRoleGrant
+
+      # Both directions matter (#675). Revoking early narrows a live socket's
+      # grant; granting widens it, and a socket authorized a moment ago would
+      # otherwise keep the old tier until it happened to reconnect.
+      change {KilnCMS.Accounts.Changes.EvictSessions, reason: :role_grant_changed}
+    end
+
+    # The expiry sweep's write (AshOban trigger below). Authorization never needs
+    # it — `RoleGrant` already reads an expired grant as no grant — so this is
+    # hygiene plus the eviction: it clears the two dead columns and drops sockets
+    # that authorized while the grant was live.
+    update :expire_role_grant do
+      description "Clear an expired temporary role (system sweep)."
+      accept []
+      require_atomic? false
+      change set_attribute(:granted_role, nil)
+      change set_attribute(:granted_role_expires_at, nil)
+      change {KilnCMS.Accounts.Changes.EvictSessions, reason: :role_grant_expired}
+    end
+
+    # Send an account a password-reset link on an operator's behalf. Separate
+    # from the anonymous `:request_password_reset_token` above, which cannot
+    # report what happened by design — see KilnCMS.Accounts.AdminPasswordReset.
+    action :send_password_reset, :atom do
+      description "Email a password-reset link to a named account (admin-only)."
+      argument :user_id, :uuid, allow_nil?: false
+      run KilnCMS.Accounts.AdminPasswordReset
     end
 
     # Billing-derived read entitlements (#337 Phase 2). Written only by
@@ -250,6 +332,13 @@ defmodule KilnCMS.Accounts.User do
       description "Scrub personal data from a user while retaining audit history."
       require_atomic? false
       accept []
+
+      # Erasure resets the role to `:viewer`, so it is a demotion — `demotes?`
+      # rather than letting the validation read the attribute, because whether it
+      # would see `:admin` or the already-forced `:viewer` depends on which of the
+      # two lines below is declared first.
+      validate {KilnCMS.Accounts.Validations.NotLastAdmin, demotes?: true}
+
       change KilnCMS.Accounts.Changes.AnonymizeUser
 
       # The erasure revokes tokens, which stops new connections; the live ones
@@ -774,7 +863,21 @@ defmodule KilnCMS.Accounts.User do
     # Assigning the editorial role and consumer audiences is an admin action —
     # never self-service (a user must not grant themselves access). Covered by
     # the admin bypass above; explicit here to forbid everyone else.
-    policy action(:manage_access) do
+    #
+    # `:grant_temporary_role` and `:send_password_reset` are the same kind of
+    # operator lever and get the same grant. `:expire_role_grant` does not: it is
+    # the sweep's write, so it is listed with the system-only actions below.
+    policy action([:manage_access, :grant_temporary_role, :send_password_reset]) do
+      authorize_if actor_attribute_equals(:role, :admin)
+    end
+
+    # The expiry sweep's write. Not `forbid_if always()` like the two below: an
+    # admin ending a grant by hand is a legitimate call (it is what
+    # `:grant_temporary_role` with both fields blank does), and there is nothing
+    # here to keep from them. This grant is what lets the trigger run with no
+    # actor at all.
+    policy action(:expire_role_grant) do
+      authorize_if AshOban.Checks.AshObanInteraction
       authorize_if actor_attribute_equals(:role, :admin)
     end
 
@@ -786,6 +889,13 @@ defmodule KilnCMS.Accounts.User do
     policy action(:sync_billing_audiences) do
       forbid_if always()
     end
+  end
+
+  # Presents a live temporary role as `role` on every read, so the actor struct
+  # every policy reads already carries the effective tier. See the module — this
+  # is the whole enforcement mechanism for `KilnCMS.Accounts.RoleGrant`.
+  preparations do
+    prepare KilnCMS.Accounts.Preparations.FoldRoleGrant
   end
 
   attributes do
@@ -829,6 +939,25 @@ defmodule KilnCMS.Accounts.User do
       default :viewer
       allow_nil? false
       public? true
+    end
+
+    # A time-boxed elevation above `role` — "admin until Friday". `role` above
+    # stays the standing tier for the whole life of the grant, and
+    # `KilnCMS.Accounts.Preparations.FoldRoleGrant` presents this one as `role`
+    # on every read while it is live, so expiry needs nothing scheduled to take
+    # effect. See KilnCMS.Accounts.RoleGrant for why it is modelled this way
+    # round; `:grant_temporary_role` is the only action that writes it.
+    #
+    # Access-control config, so `public? false` like `audiences`: it reaches no
+    # API surface, and the field policy above therefore cannot cover it (field
+    # policies only apply to public fields). See the comment there.
+    attribute :granted_role, :atom do
+      constraints one_of: [:admin, :editor, :viewer]
+      public? false
+    end
+
+    attribute :granted_role_expires_at, :utc_datetime_usec do
+      public? false
     end
 
     # Consumer-facing access tiers this user belongs to (the *read* axis, kept

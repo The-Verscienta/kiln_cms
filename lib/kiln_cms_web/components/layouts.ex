@@ -878,6 +878,17 @@ defmodule KilnCMSWeb.Layouts do
                 path: ~p"/editor/team",
                 icon: "hero-user-group"
               },
+              # Beside Team, because the two answer adjacent questions: Team is
+              # who may author on THIS site, Accounts is who has registered at
+              # all. Platform-only for the same reason Team is — both are backed
+              # by instance-wide resources whose policies key on the global role.
+              %{
+                platform: true,
+                key: :accounts,
+                label: gettext("Accounts"),
+                path: ~p"/editor/accounts",
+                icon: "hero-identification"
+              },
               %{
                 key: :governance,
                 label: gettext("Governance"),

@@ -223,10 +223,31 @@ editor/admin only (privacy-first: no per-user data is stored anyway).
 |--------|:-----:|:----------------------:|:-----------------------:|:---------:|
 | read | ✅ all | 🔎 own record | 🔎 filtered out | ❌ |
 | `change_password` | ✅ | ✅ (own) | ❌ | ❌ |
+| `manage_access`, `grant_temporary_role`, `send_password_reset` | ✅ | ❌ | ❌ | ❌ |
+| `anonymize` | ✅ | ❌ | ❌ | ❌ |
+| `expire_role_grant` | ✅ | ❌ | ❌ | ❌ (⚙️ AshOban sweep) |
 | auth flows (sign-in, register, reset) | ✅ | ✅ | ✅ | ✅ (AshAuthentication bypass) |
 
 Field policy: the `role` field is visible only to **admins or the user
-themselves**; other readers see the record without `role`.
+themselves**; other readers see the record without `role`. `granted_role` and
+`granted_role_expires_at` are `public? false` and so reach no API surface at all —
+field policies cover only public fields, which is why they are not listed beside
+`role` there. What they *could* leak is through the read-time fold
+(`KilnCMS.Accounts.Preparations.FoldRoleGrant` presents a live grant as `role`),
+and that fold declines whenever `role` itself came back forbidden.
+
+The three admin levers above are the account console's
+([`account-administration.md`](account-administration.md)). Two are refused for
+everyone, admins included:
+
+| Action | Why nobody may call it |
+|---|---|
+| `:sign_in_with_passkey` | Mints a session token; only the verified WebAuthn ceremony reaches it (`authorize?: false`), and the preparation refuses any actor-carrying call — so not even an admin can mint a token for another account |
+| `:sync_billing_audiences` | Entitlements are recomputed by `KilnCMS.Billing.Entitlements` alone; the change module refuses an actor-carrying call, so no authorized path grants an audience by hand |
+
+`NotLastAdmin` sits on `:manage_access` and `:anonymize` as a **validation**, not
+a policy: admins bypass `User`'s policies wholesale, so a `forbid_if` would never
+fire, and the refusal has to carry a sentence.
 
 **Demo mode** (`KILN_DEMO_RESET=confirm`) narrows the self-service column:
 `change_password` and the TOTP actions (`setup_totp`, `confirm_totp`,
@@ -279,7 +300,12 @@ deletable.
 | Action | admin | editor | viewer | anonymous |
 |--------|:-----:|:------:|:------:|:---------:|
 | read (`read`, `for_user`, `for_org`) | ✅ all | 🔎 own rows | 🔎 own rows | ❌ |
-| `create`, `update`, `destroy` | ✅ | ❌ | ❌ | ❌ |
+| `create`, `update`, `destroy`, `grant_temporary_role` | ✅ | ❌ | ❌ | ❌ |
+| `expire_role_grant` | ✅ | ❌ | ❌ | ❌ (⚙️ AshOban sweep) |
+
+`expire_role_grant` needs a **bypass** rather than a policy: the write forbid
+below applies to it too, and Ash AND-combines every applicable policy, so a grant
+there would be overruled by that hard forbid.
 
 The read grants above are why both resources scope their deny to write actions
 only: Ash AND-combines every applicable policy, so a bare `policy always()`

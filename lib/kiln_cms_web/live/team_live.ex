@@ -15,13 +15,34 @@ defmodule KilnCMSWeb.TeamLive do
   JSON textarea for field grants (the same convention as the automation rule
   config), keeping the first team UI honest instead of half-modelling a
   permission matrix.
+
+  A member's tier can also be granted **temporarily** — "editor on this site until
+  Friday" — which leaves the standing tier alone and expires on its own; see
+  `KilnCMS.Accounts.RoleGrant`. That is why the membership list is read with
+  `RoleGrant.unfolded/0`: this page shows the standing tier beside a live grant,
+  and writes the standing tier, which Ash would silently drop against a folded
+  record.
+
+  The instance-wide account register — who has signed up at all, their platform
+  role, password resets, account removal — is `KilnCMSWeb.AccountsLive`.
   """
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.Role
+  alias KilnCMS.Accounts.RoleGrant
 
   @tier_options [{"Viewer", :viewer}, {"Editor", :editor}, {"Admin", :admin}]
+
+  # Offered lengths for a temporary tier, in hours — the same set
+  # `KilnCMSWeb.AccountsLive` offers for the platform role.
+  @grant_durations [
+    {"6 hours", 6},
+    {"24 hours", 24},
+    {"3 days", 72},
+    {"7 days", 168},
+    {"30 days", 720}
+  ]
 
   @impl true
   def mount(_params, _session, socket) do
@@ -155,6 +176,66 @@ defmodule KilnCMSWeb.TeamLive do
     )
   end
 
+  # Time-boxed per-site tiers (`KilnCMS.Accounts.RoleGrant`). Its own event rather
+  # than two more fields on the member form, because it writes a different action:
+  # `:grant_temporary_role` leaves the standing tier — the thing the form edits —
+  # alone, which is what lets the elevation expire without anything running.
+  def handle_event(
+        "grant_member_role",
+        %{"membership_id" => id, "role" => role, "hours" => hours} = params,
+        socket
+      )
+      when is_binary(id) and is_binary(role) and is_binary(hours) do
+    %{actor: actor} = socket.assigns
+
+    with {:ok, membership} <- get_membership(socket, id),
+         expires_at = grant_expiry(params),
+         {:ok, _} <-
+           Accounts.grant_membership_temporary_role(
+             membership,
+             %{granted_role: role, granted_role_expires_at: expires_at},
+             actor: actor
+           ) do
+      {:noreply,
+       socket
+       |> assign(:member_edit, nil)
+       |> load_data()
+       |> put_flash(
+         :info,
+         gettext("%{role} on this site until %{when}.",
+           role: role,
+           when: Calendar.strftime(expires_at, "%Y-%m-%d %H:%M UTC")
+         )
+       )}
+    else
+      {:error, error} -> {:noreply, put_flash(socket, :error, ash_error_message(error))}
+      _ -> {:noreply, socket}
+    end
+  end
+
+  # A pushed payload is client-chosen; give the guarded head above somewhere to
+  # fall (#764).
+  def handle_event("grant_member_role", _params, socket), do: {:noreply, socket}
+
+  def handle_event("revoke_member_role", %{"id" => id}, socket) when is_binary(id) do
+    %{actor: actor} = socket.assigns
+
+    socket =
+      with {:ok, membership} <- get_membership(socket, id),
+           {:ok, _} <-
+             Accounts.grant_membership_temporary_role(
+               membership,
+               %{granted_role: nil, granted_role_expires_at: nil},
+               actor: actor
+             ) do
+        socket |> load_data() |> put_flash(:info, gettext("Temporary tier ended."))
+      else
+        _ -> put_flash(socket, :error, gettext("Couldn't end that temporary tier."))
+      end
+
+    {:noreply, assign(socket, :member_edit, nil)}
+  end
+
   # --- roles -----------------------------------------------------------------
 
   def handle_event("create_role", %{"role" => params}, socket) when is_map(params) do
@@ -220,10 +301,14 @@ defmodule KilnCMSWeb.TeamLive do
     %{actor: actor, current_org: org} = socket.assigns
 
     members =
-      Accounts.list_memberships_for_org!(org.id,
-        actor: actor,
-        load: [:user, :custom_role],
-        query: [sort: [inserted_at: :asc]]
+      Accounts.list_memberships_for_org!(
+        org.id,
+        RoleGrant.unfolded() ++
+          [
+            actor: actor,
+            load: [:user, :custom_role],
+            query: [sort: [inserted_at: :asc]]
+          ]
       )
 
     roles =
@@ -339,6 +424,57 @@ defmodule KilnCMSWeb.TeamLive do
   defp presence(value), do: value
 
   defp tier_options, do: @tier_options
+
+  # Only tiers ABOVE the membership's standing one can be granted
+  # (`RoleGrant.elevation?/2`), so offering the rest would offer a refusal.
+  defp grantable_tiers(membership) do
+    Enum.filter(@tier_options, fn {_label, tier} ->
+      RoleGrant.elevation?(tier, membership.role)
+    end)
+  end
+
+  defp grant_durations, do: @grant_durations
+
+  # An explicit "until" wins over the preset, same as the account console's — see
+  # `KilnCMSWeb.AccountsLive`. A blank or unparseable value falls back to the
+  # preset; the action validates that whatever lands is in the future.
+  # Minute-precision `datetime-local` values are not valid ISO 8601, and a browser
+  # may or may not include seconds — try as given, then padded (same as
+  # `KilnCMSWeb.AccountsLive`).
+  defp grant_expiry(%{"until" => until}) when is_binary(until) and until != "" do
+    case NaiveDateTime.from_iso8601(until) do
+      {:ok, naive} -> DateTime.from_naive!(naive, "Etc/UTC")
+      _ -> padded_expiry(until)
+    end
+  end
+
+  defp grant_expiry(%{"hours" => hours}),
+    do: DateTime.add(DateTime.utc_now(), grant_hours(hours), :hour)
+
+  defp padded_expiry(until) do
+    case NaiveDateTime.from_iso8601(until <> ":00") do
+      {:ok, naive} -> DateTime.from_naive!(naive, "Etc/UTC")
+      _ -> nil
+    end
+  end
+
+  defp grant_hours(raw) do
+    case Integer.parse(to_string(raw)) do
+      {hours, ""} when hours > 0 -> hours
+      # The shortest offered grant, not the longest: a mangled value must not
+      # hand out a month of admin.
+      _ -> @grant_durations |> List.first() |> elem(1)
+    end
+  end
+
+  defp grant_summary(%{granted_role: role, granted_role_expires_at: at} = membership) do
+    if RoleGrant.live?(membership) do
+      gettext("%{role} until %{when}",
+        role: role,
+        when: Calendar.strftime(at, "%Y-%m-%d %H:%M UTC")
+      )
+    end
+  end
 
   defp custom_role_options(roles),
     do: [{gettext("No custom role"), ""}] ++ Enum.map(roles, &{&1.name, &1.id})
@@ -474,6 +610,9 @@ defmodule KilnCMSWeb.TeamLive do
                   <span class="font-medium">{membership.user.email}</span>
                   <p class="text-sm text-base-content/70">
                     <.badge>{membership.role}</.badge>
+                    <.badge :if={grant_summary(membership)} variant="warning" class="ml-1">
+                      {grant_summary(membership)}
+                    </.badge>
                     <.badge :if={membership.custom_role} variant="outline" class="ml-1">
                       {membership.custom_role.name}
                     </.badge>
@@ -535,6 +674,11 @@ defmodule KilnCMSWeb.TeamLive do
                   </button>
                 </div>
               </.form>
+
+              <.temporary_tier
+                :if={@member_edit != nil && @member_edit.id == membership.id}
+                membership={membership}
+              />
             </li>
           </ul>
         </section>
@@ -632,6 +776,70 @@ defmodule KilnCMSWeb.TeamLive do
         </section>
       </div>
     </Layouts.console>
+    """
+  end
+
+  attr :membership, :map, required: true
+
+  # A separate form beside the member form, not fields inside it: this submits a
+  # different action (`:grant_temporary_role`, which leaves the standing tier
+  # alone) and must not be saved by the same button that rewrites it.
+  defp temporary_tier(assigns) do
+    ~H"""
+    <div class="mt-4 border-t border-base-content/10 pt-4">
+      <p class="text-sm font-medium">{gettext("Temporary tier")}</p>
+      <p class="text-xs text-base-content/60">
+        {gettext(
+          "A higher tier on this site that expires on its own. The site tier above is untouched, so the elevation ends whether or not anything runs on time."
+        )}
+      </p>
+
+      <div :if={grant_summary(@membership)} class="mt-3 flex items-center gap-3">
+        <span class="text-sm">{grant_summary(@membership)}</span>
+        <button
+          type="button"
+          phx-click="revoke_member_role"
+          phx-value-id={@membership.id}
+          class="btn btn-sm btn-default"
+        >
+          {gettext("End it now")}
+        </button>
+      </div>
+
+      <p
+        :if={is_nil(grant_summary(@membership)) and grantable_tiers(@membership) == []}
+        class="mt-3 text-sm text-base-content/60"
+      >
+        {gettext("This member already holds the highest tier on this site.")}
+      </p>
+
+      <form
+        :if={is_nil(grant_summary(@membership)) and grantable_tiers(@membership) != []}
+        phx-submit="grant_member_role"
+        id={"grant-member-#{@membership.id}"}
+        class="mt-3 space-y-4"
+      >
+        <input type="hidden" name="membership_id" value={@membership.id} />
+        <div class="grid gap-4 sm:grid-cols-2">
+          <.input
+            name="role"
+            value=""
+            type="select"
+            label={gettext("Grant tier")}
+            options={grantable_tiers(@membership)}
+          />
+          <.input
+            name="hours"
+            value="24"
+            type="select"
+            label={gettext("For")}
+            options={grant_durations()}
+          />
+        </div>
+        <.input name="until" value="" type="datetime-local" label={gettext("Or until (UTC)")} />
+        <.button type="submit">{gettext("Grant")}</.button>
+      </form>
+    </div>
     """
   end
 

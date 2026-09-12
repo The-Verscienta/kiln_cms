@@ -148,5 +148,100 @@ defmodule KilnCMSWeb.TeamLiveTest do
       assert html =~ "Saved."
       assert html =~ "Assignable"
     end
+
+    test "grants and then ends a temporary tier on this site", %{conn: conn} do
+      colleague = authed_user(:viewer)
+
+      {:ok, membership} =
+        Accounts.create_org_membership(
+          %{
+            user_id: colleague.id,
+            organization_id: Accounts.default_org_id(),
+            role: :viewer
+          },
+          authorize?: false
+        )
+
+      {:ok, view, _html} = live(conn, ~p"/editor/team")
+      view |> element("#member-#{membership.id} button", "Edit") |> render_click()
+
+      html =
+        view
+        |> form("#grant-member-#{membership.id}", %{"role" => "editor", "hours" => "24"})
+        |> render_submit()
+
+      assert html =~ "editor on this site until"
+
+      granted = reread_membership(membership)
+      assert granted.granted_role == :editor
+      # The standing site tier is untouched — that is what lets the grant expire
+      # without anything having to run (see KilnCMS.Accounts.RoleGrant).
+      assert granted.role == :viewer
+
+      view |> element("#member-#{membership.id} button", "Edit") |> render_click()
+      html = view |> element("#member-#{membership.id} button", "End it now") |> render_click()
+
+      assert html =~ "Temporary tier ended"
+      assert is_nil(reread_membership(membership).granted_role)
+    end
+
+    test "an explicit expiry wins over the preset on a site tier", %{conn: conn} do
+      colleague = authed_user(:viewer)
+
+      {:ok, membership} =
+        Accounts.create_org_membership(
+          %{
+            user_id: colleague.id,
+            organization_id: Accounts.default_org_id(),
+            role: :viewer
+          },
+          authorize?: false
+        )
+
+      {:ok, view, _html} = live(conn, ~p"/editor/team")
+      view |> element("#member-#{membership.id} button", "Edit") |> render_click()
+
+      until = DateTime.utc_now() |> DateTime.add(9, :day) |> Calendar.strftime("%Y-%m-%dT%H:%M")
+
+      view
+      |> form("#grant-member-#{membership.id}", %{
+        "role" => "editor",
+        "hours" => "24",
+        "until" => until
+      })
+      |> render_submit()
+
+      granted = reread_membership(membership)
+      assert granted.granted_role == :editor
+      assert DateTime.diff(granted.granted_role_expires_at, DateTime.utc_now(), :day) >= 8
+    end
+
+    test "offers no grant to a member who already holds the top tier", %{conn: conn} do
+      colleague = authed_user(:viewer)
+
+      {:ok, membership} =
+        Accounts.create_org_membership(
+          %{
+            user_id: colleague.id,
+            organization_id: Accounts.default_org_id(),
+            role: :admin
+          },
+          authorize?: false
+        )
+
+      {:ok, view, _html} = live(conn, ~p"/editor/team")
+      html = view |> element("#member-#{membership.id} button", "Edit") |> render_click()
+
+      assert html =~ "already holds the highest tier"
+      refute html =~ "grant-member-#{membership.id}"
+    end
+  end
+
+  defp reread_membership(membership) do
+    Accounts.get_org_membership!(
+      membership.user_id,
+      membership.organization_id,
+      KilnCMS.Accounts.RoleGrant.unfolded() ++ [authorize?: false]
+    )
   end
 end

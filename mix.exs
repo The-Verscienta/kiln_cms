@@ -253,6 +253,7 @@ defmodule KilnCMS.MixProject do
       "docs/policy-matrix.md": [],
       "docs/code-injection.md": [],
       "docs/granular-rbac.md": [],
+      "docs/account-administration.md": [],
       "docs/multi-tenancy.md": [],
       "docs/passkeys.md": [],
       "docs/two-factor-auth.md": [],

@@ -43,6 +43,7 @@ defmodule KilnCMS.Accounts.Scoping do
   require Ash.Query
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.RoleGrant
 
   @axes [:editable_types, :readable_types]
 
@@ -199,6 +200,11 @@ defmodule KilnCMS.Accounts.Scoping do
   `subject` may be the query/changeset under authorization, a raw org id
   (what the web layer passes from `current_org`), an `%Organization{}`, or nil
   (default org).
+
+  Nothing here knows about **temporary tiers** (`KilnCMS.Accounts.RoleGrant`) and
+  nothing needs to: both the actor and the membership were loaded through reads
+  that `KilnCMS.Accounts.Preparations.FoldRoleGrant` had already folded, so the
+  `role` each branch reads is the tier in force at that moment.
   """
   @spec effective_tier(
           map() | nil,
@@ -243,12 +249,22 @@ defmodule KilnCMS.Accounts.Scoping do
     platform? = :admin in tiers
     legacy? = org_id == Accounts.default_org_id()
 
+    # Every `role` test goes through `RoleGrant.expression/1`, which is
+    # `effective_role/1` in SQL — a temporary admin belongs on the admin roster
+    # while their grant is live and not a minute longer. The read below folds the
+    # returned rows the same way (`Preparations.FoldRoleGrant`), so a caller that
+    # reads `user.role` off this list sees the tier it matched on.
+    #
+    # The `exists/2` clause resolves the same expression against the membership's
+    # own columns, which are named identically for exactly this reason.
+    admin_tier = RoleGrant.expression([:admin])
+    wanted = RoleGrant.expression(tiers)
+
     Accounts.User
     |> Ash.Query.filter(
-      (^platform? and role == :admin) or
-        (role != :admin and
-           exists(org_memberships, organization_id == ^org_id and role in ^tiers)) or
-        (^legacy? and role in ^tiers and not exists(org_memberships, true))
+      (^platform? and ^admin_tier) or
+        (not (^admin_tier) and exists(org_memberships, organization_id == ^org_id and ^wanted)) or
+        (^legacy? and ^wanted and not exists(org_memberships, true))
     )
     |> Ash.read!(authorize?: false)
   end

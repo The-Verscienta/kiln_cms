@@ -8,6 +8,11 @@ defmodule KilnCMS.Accounts.User.Senders.SendPasswordResetEmail do
   rather than on the action because the sender is the outbound boundary every
   entry point passes through, and it is the mail, not the request, that costs
   the recipient something.
+
+  `bypass_budget?: true` skips it, and only `KilnCMS.Accounts.AdminPasswordReset`
+  passes it — an operator sending a colleague a reset link from the accounts
+  console is not the anonymous sender the budget defends against, and a silent
+  drop there would make the console's confirmation a lie. See that module.
   """
 
   use AshAuthentication.Sender
@@ -26,7 +31,11 @@ defmodule KilnCMS.Accounts.User.Senders.SendPasswordResetEmail do
     site = KilnCMS.Branding.for_org(opts[:tenant]).site_name
     address = to_string(user.email)
 
-    if AccountThrottle.allow_mail?(:password_reset, address) do
+    # `Keyword.get`, not `opts[...]`: the opt is absent on every path but the
+    # admin one, and `nil or …` raises rather than falling through to the budget.
+    bypass? = Keyword.get(opts, :bypass_budget?, false)
+
+    if bypass? or AccountThrottle.allow_mail?(:password_reset, address) do
       new()
       |> from(Application.fetch_env!(:kiln_cms, :email_from))
       |> to(address)
