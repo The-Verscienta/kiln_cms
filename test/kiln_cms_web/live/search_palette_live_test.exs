@@ -113,7 +113,7 @@ defmodule KilnCMSWeb.SearchPaletteLiveTest do
     {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/search")
 
     # The input is named and points at the live status region.
-    assert html =~ ~s(aria-label="Search content")
+    assert html =~ ~s(aria-label="Search content and settings")
     assert html =~ ~s(aria-describedby="search-status")
     assert html =~ ~s(id="search-status")
     assert html =~ ~s(aria-live="polite")
