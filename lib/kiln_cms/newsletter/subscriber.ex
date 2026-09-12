@@ -156,8 +156,11 @@ defmodule KilnCMS.Newsletter.Subscriber do
     end
 
     # Linking a member is driven by billing, never by a human (#337 Phase 2) —
-    # it is the one write that may set `user_id`.
+    # it is the one write that may set `user_id`. Closed to everyone including
+    # admins; `KilnCMS.Newsletter.TierSync` is named here (#1402) instead of
+    # reaching around the block.
     policy action(:link_member) do
+      authorize_if KilnCMS.Checks.SystemActor
       forbid_if always()
     end
 
@@ -181,9 +184,17 @@ defmodule KilnCMS.Newsletter.Subscriber do
     end
 
     # Admin-only management. Public subscribe/confirm/unsubscribe and the send
-    # pipeline run as the system (`authorize?: false`) behind token checks.
+    # pipeline still run `authorize?: false` behind token checks.
     policy always() do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
+
+      # Ash ANDs policies, so the `:link_member` grant above is not enough on
+      # its own — this blanket policy applies to that action too, and to the
+      # read `TierSync` makes to find an existing subscriber before linking.
+      # Narrowed to those two rather than widened: managing a subscriber list
+      # by hand stays an admin act.
+      forbid_unless action([:read, :link_member])
+      authorize_if KilnCMS.Checks.SystemActor
     end
   end
 

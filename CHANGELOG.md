@@ -66,6 +66,16 @@ migration, a rewritten column, a dropped config key).
   opens tasks, it does not edit what anyone said or close their work. The
   content and user lookups keep their bypass, and now say why.
   `mix kiln.authz.check` now also gates `lib/kiln_cms/automation/` (#1402).
+- **Billing and the newsletter tier sync run under the policies.** The last two
+  of the four modules #1329 audited: `Billing.Settings` (read and first-use
+  init only — the write path to payment credentials stays platform-admin),
+  `Billing.Membership` and `Billing.MembershipEvent` (the provider-state,
+  append and GDPR-erasure actions that are `forbid_if always()` for every
+  person, admin included), and `Newsletter.Segment` / `Subscriber` /
+  `SegmentMembership` for the tier-backed lifecycle. The one caller that may
+  take those actions is now named in each policy block instead of reaching
+  around it. The `Accounts.User` lookups keep their bypass, and say why
+  (#1402).
 
 ### Fixed
 

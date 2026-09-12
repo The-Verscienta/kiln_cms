@@ -34,27 +34,41 @@ defmodule KilnCMS.Newsletter.TierSync do
   entitlement recompute), and from a nightly reconcile as the net, since provider
   webhooks are at-least-once *and* occasionally missed.
 
-  ## Why every call here is `authorize?: false` (#1309)
+  ## How this sync is authorized (#1309, #1402)
 
   There is no acting user in hand: the callers are `Billing.Changes.RecordTransition`
   (a membership transition's `after_action`, where `user_id` / `org_id` come
   from the `Billing.Membership` row) and `Billing.MembershipTier`'s
   `after_action` (an org admin's tier create/update, whose `name` / `slug` /
   `description` feed `ensure_segment/1` — request-authored, but under a policy
-  that admitted only an `OrgAdmin` of that org). The
-  Newsletter actions this drives (`Segment.for_tier`, `Subscriber.link_member`)
-  are `forbid_if always()` — the bypass is the *only* way in — and every
-  Newsletter read/write below carries `tenant: org_id`, so nothing crosses a
-  site. Two reads are tenant-less by design: `Billing.memberships_for_export`
-  is a `multitenancy :bypass` cross-org read that `entitled_tiers/2` filters
-  back down to `org_id` in memory, and `Accounts.get_user` reads the global
-  `User` table by the membership's own id.
+  that admitted only an `OrgAdmin` of that org).
+
+  So it runs as `%KilnCMS.SystemActor{subsystem: :newsletter}`, and every
+  resource it touches admits that actor by name rather than being bypassed:
+  `Newsletter.Segment` for `:read` / `:for_tier` / `:sync_managed`,
+  `Newsletter.Subscriber` for `:read` / `:link_member`,
+  `Newsletter.SegmentMembership` outright (the sync is what maintains those
+  join rows), and `Billing.Membership` for reads. The two tier-backed actions
+  are `forbid_if always()` for every person, admin included — they always were,
+  and now the one caller that may take them says so in the policy block.
+
+  Every Newsletter read/write below carries `tenant: org_id`, so nothing
+  crosses a site. Two reads are tenant-less by design:
+  `Billing.memberships_for_export` is a `multitenancy :bypass` cross-org read
+  that `entitled_tiers/2` filters back down to `org_id` in memory, and
+  `Accounts.get_user` reads the global `User` table by the membership's own id
+  — that one keeps `authorize?: false`, deliberately, because `User`'s read
+  policy is self-only and a system clause there would be a standing grant over
+  every account on the deployment.
   """
   require Ash.Query
   require Logger
 
   alias KilnCMS.Billing
   alias KilnCMS.Newsletter
+
+  # See "How this sync is authorized" above.
+  defp system_actor, do: KilnCMS.SystemActor.new(:newsletter)
 
   @doc """
   Reconcile one person's tier-segment membership within one organization.
@@ -95,9 +109,9 @@ defmodule KilnCMS.Newsletter.TierSync do
         slug: "tier-" <> tier.slug,
         description: tier.description
       },
-      # System bypass, tenant-scoped — see the moduledoc; `:for_tier` is
-      # `forbid_if always()`, so no actor could take this path.
-      authorize?: false,
+      # `:for_tier` is `forbid_if always()` — closed to every person, admin
+      # included — and admits this sync's system actor by name (#1402).
+      actor: system_actor(),
       tenant: tier.org_id
     )
 
@@ -108,10 +122,12 @@ defmodule KilnCMS.Newsletter.TierSync do
       :ok
   end
 
-  # Tenant-less on purpose: `:all_for_user` is `multitenancy :bypass`; the
-  # `authorize?: false` read is narrowed to `org_id` right below (moduledoc).
+  # Tenant-less on purpose: `:all_for_user` is `multitenancy :bypass`; the read
+  # is narrowed to `org_id` right below (moduledoc). `Billing.Membership`
+  # admits this actor for reads (#1402) — a paid membership is exactly what
+  # grants the tier segment being synced.
   defp entitled_tiers(user_id, org_id) do
-    case Billing.memberships_for_export(user_id, authorize?: false) do
+    case Billing.memberships_for_export(user_id, actor: system_actor()) do
       {:ok, memberships} ->
         ids =
           memberships
@@ -127,8 +143,9 @@ defmodule KilnCMS.Newsletter.TierSync do
 
   defp managed_segments(org_id) do
     KilnCMS.Newsletter.Segment
-    # System read, tenant-scoped (bypass rationale in the moduledoc).
-    |> Ash.Query.for_read(:read, %{}, authorize?: false, tenant: org_id)
+    # System read, tenant-scoped — `Segment` admits this actor for `:read`,
+    # `:for_tier` and `:sync_managed`, and nothing else (#1402).
+    |> Ash.Query.for_read(:read, %{}, actor: system_actor(), tenant: org_id)
     |> Ash.Query.filter(managed_by == :tier)
     |> Ash.read()
   end
@@ -152,8 +169,9 @@ defmodule KilnCMS.Newsletter.TierSync do
   defp subscriber_for(user_id, org_id, create?) do
     existing =
       KilnCMS.Newsletter.Subscriber
-      # System read, tenant-scoped (bypass rationale in the moduledoc).
-      |> Ash.Query.for_read(:read, %{}, authorize?: false, tenant: org_id)
+      # System read, tenant-scoped — `Subscriber` admits this actor for `:read`
+      # and `:link_member`, and nothing else (#1402).
+      |> Ash.Query.for_read(:read, %{}, actor: system_actor(), tenant: org_id)
       |> Ash.Query.filter(user_id == ^user_id)
       |> Ash.Query.limit(1)
       |> Ash.read!()
@@ -170,9 +188,12 @@ defmodule KilnCMS.Newsletter.TierSync do
   # duplicated — and `upsert_fields [:user_id]` means their consent status is
   # untouched by the link.
   #
-  # `get_user` is a tenant-less `authorize?: false` read of the global `User`
-  # row named by the membership itself; `link_member` is `forbid_if always()`,
-  # so the bypass is the only way to write it (moduledoc).
+  # `get_user` keeps its bypass deliberately (#1402): `User`'s read policy is
+  # self-only, so admitting the system actor there would be a standing grant
+  # over every account on the deployment — far wider than this by-primary-key
+  # read of the one row the membership itself names, of which only the email
+  # and name are used. `link_member` is `forbid_if always()` for every person
+  # and admits this actor by name.
   defp link_new(user_id, org_id) do
     with {:ok, user} <- KilnCMS.Accounts.get_user(user_id, authorize?: false),
          true <- verified?(user),
@@ -180,8 +201,9 @@ defmodule KilnCMS.Newsletter.TierSync do
            Newsletter.link_member_subscriber(
              user.id,
              %{email: to_string(user.email), name: user.name},
-             # bypass: `link_member` is forbid_if always() (see above)
-             authorize?: false,
+             # `link_member` is `forbid_if always()` for every person (see
+             # above) and admits this actor by name.
+             actor: system_actor(),
              tenant: org_id
            ) do
       subscriber
@@ -208,18 +230,19 @@ defmodule KilnCMS.Newsletter.TierSync do
     else
       Newsletter.add_to_segment(
         %{segment_id: segment.id, subscriber_id: subscriber.id},
-        # System write, tenant-scoped (bypass rationale in the moduledoc).
-        authorize?: false,
+        # `SegmentMembership` admits this actor (#1402): the sync is what adds
+        # and removes the tier-backed join rows as entitlements change.
+        actor: system_actor(),
         tenant: org_id
       )
     end
   end
 
-  # System write, tenant-scoped (bypass rationale in the moduledoc).
+  # The other half of `join/3`'s grant on `SegmentMembership` (#1402).
   defp leave(subscriber, segment, org_id) do
     subscriber
     |> join_rows(segment, org_id)
-    |> Enum.each(&Newsletter.remove_from_segment(&1, authorize?: false, tenant: org_id))
+    |> Enum.each(&Newsletter.remove_from_segment(&1, actor: system_actor(), tenant: org_id))
   end
 
   defp joined?(subscriber, segment, org_id),
@@ -227,8 +250,8 @@ defmodule KilnCMS.Newsletter.TierSync do
 
   defp join_rows(subscriber, segment, org_id) do
     KilnCMS.Newsletter.SegmentMembership
-    # System read, tenant-scoped (bypass rationale in the moduledoc).
-    |> Ash.Query.for_read(:read, %{}, authorize?: false, tenant: org_id)
+    # System read, tenant-scoped — same grant as `join/3` (#1402).
+    |> Ash.Query.for_read(:read, %{}, actor: system_actor(), tenant: org_id)
     |> Ash.Query.filter(segment_id == ^segment.id and subscriber_id == ^subscriber.id)
     |> Ash.read!()
   end
