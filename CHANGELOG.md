@@ -27,6 +27,8 @@ migration, a rewritten column, a dropped config key).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-11
+
 ### Added
 
 - **`docs/multi-tenancy.md`** — the isolation model in one place: host → org
@@ -388,6 +390,49 @@ migration, a rewritten column, a dropped config key).
   screen; a non-draft with unsaved edits is told to Save first instead of
   having them marked saved and dropped.
 
+- **CI's main gate is five parallel jobs instead of one serial one.** The
+  `Compile, lint, scan & test` job ran the compile, every lint, the suite
+  under coverage and then dialyzer back to back on one runner (17m57s on its
+  last green run, with nothing else in the workflow over five minutes). Now:
+  `Compile, lint & scan`; six `Test (shard n)` jobs that run the suite under
+  coverage (`mix coveralls.json --partitions`, each shard exporting its raw
+  `:cover` data); `Coverage (full suite)`, which runs the new
+  `mix kiln.coverage.merge` to import that data, refuse a merge over fewer
+  shards than expected, enforce `minimum_coverage` on the union and write the
+  `coverage-report` artifact and per-directory rollup — no tests, no
+  database; and `Dialyzer`. A fifth job keeps the old name and waits on all
+  of them, so the "Require CI on main" ruleset still gates on the one context
+  it names — and now on everything that context used to mean. The required
+  check completes in about seven minutes; a failing test surfaces in about
+  four.
+- **The CI build cache is trusted again.** Every job hit the deps/_build cache
+  on its exact key and still recompiled the whole app, 70–108 seconds apiece.
+  Mix records the evaluated compile-time config in its build manifest and
+  recompiles everything when the project's own values change, and two things
+  made them change: the cache key ignored `mix.exs` and `config/`, so an
+  exact hit could restore a build compiled under older settings; and the test
+  database's name came from `MIX_TEST_PARTITION` inside `config/test.exs`, so
+  it differed for every partition. The key now includes the toolchain, the
+  lock and the config files the `:test` build actually loads, and the test
+  Repo's `hostname:`/`database:` moved to `config/runtime.exs` (read at boot,
+  outside the compile-time record). `.github/actions/setup-mix` owns the
+  toolchain, cache, `deps.get` and compile for the four main jobs; only
+  `build` saves the cache. One file is still backdated on an exact hit:
+  `mix.exs`, whose staleness check in Mix is mtime alone (no value
+  comparison exists to hide), and whose digest the key already carries — a
+  checkout-stamped `mix.exs` otherwise recompiles the ~95 modules that
+  depend on `Mix.Project` on every job. No change to how `MIX_TEST_PARTITION`
+  is used locally.
+
+### Removed
+
+- **A dead `blank_to_nil/1` in `KilnCMSWeb.CodeInjectionLive`.** It trimmed a
+  cleared Head/Footer HTML textarea to `nil` before saving — which the `:string`
+  attribute's own cast already does, so the helper could be deleted without any
+  test being able to tell. No behaviour change: a cleared box still stores
+  nothing rather than an empty element, and `KilnCMSWeb.CodeInjectionLiveTest`
+  asserts that directly.
+
 ### Fixed
 
 - **Links to a section land on it.** A link to `/docs/some-guide#setup`
@@ -666,53 +711,6 @@ migration, a rewritten column, a dropped config key).
   remaining gaps in priority order, along with the three that only *look* like
   gaps (compile-time macro bodies, dev-only modules, deliberately excluded
   tags).
-
-### Changed
-
-- **CI's main gate is five parallel jobs instead of one serial one.** The
-  `Compile, lint, scan & test` job ran the compile, every lint, the suite
-  under coverage and then dialyzer back to back on one runner (17m57s on its
-  last green run, with nothing else in the workflow over five minutes). Now:
-  `Compile, lint & scan`; six `Test (shard n)` jobs that run the suite under
-  coverage (`mix coveralls.json --partitions`, each shard exporting its raw
-  `:cover` data); `Coverage (full suite)`, which runs the new
-  `mix kiln.coverage.merge` to import that data, refuse a merge over fewer
-  shards than expected, enforce `minimum_coverage` on the union and write the
-  `coverage-report` artifact and per-directory rollup — no tests, no
-  database; and `Dialyzer`. A fifth job keeps the old name and waits on all
-  of them, so the "Require CI on main" ruleset still gates on the one context
-  it names — and now on everything that context used to mean. The required
-  check completes in about seven minutes; a failing test surfaces in about
-  four.
-- **The CI build cache is trusted again.** Every job hit the deps/_build cache
-  on its exact key and still recompiled the whole app, 70–108 seconds apiece.
-  Mix records the evaluated compile-time config in its build manifest and
-  recompiles everything when the project's own values change, and two things
-  made them change: the cache key ignored `mix.exs` and `config/`, so an
-  exact hit could restore a build compiled under older settings; and the test
-  database's name came from `MIX_TEST_PARTITION` inside `config/test.exs`, so
-  it differed for every partition. The key now includes the toolchain, the
-  lock and the config files the `:test` build actually loads, and the test
-  Repo's `hostname:`/`database:` moved to `config/runtime.exs` (read at boot,
-  outside the compile-time record). `.github/actions/setup-mix` owns the
-  toolchain, cache, `deps.get` and compile for the four main jobs; only
-  `build` saves the cache. One file is still backdated on an exact hit:
-  `mix.exs`, whose staleness check in Mix is mtime alone (no value
-  comparison exists to hide), and whose digest the key already carries — a
-  checkout-stamped `mix.exs` otherwise recompiles the ~95 modules that
-  depend on `Mix.Project` on every job. No change to how `MIX_TEST_PARTITION`
-  is used locally.
-
-### Removed
-
-- **A dead `blank_to_nil/1` in `KilnCMSWeb.CodeInjectionLive`.** It trimmed a
-  cleared Head/Footer HTML textarea to `nil` before saving — which the `:string`
-  attribute's own cast already does, so the helper could be deleted without any
-  test being able to tell. No behaviour change: a cleared box still stores
-  nothing rather than an empty element, and `KilnCMSWeb.CodeInjectionLiveTest`
-  asserts that directly.
-
-### Fixed
 
 - **A keystroke that raced "Add block" no longer deletes the block — or
   crashes the editor** (#1334). A `phx-change`/`phx-submit`'s `blocks` params
@@ -999,6 +997,38 @@ migration, a rewritten column, a dropped config key).
   `config :kiln_cms, KilnCMSWeb.RateLimit, limits: %{collab_event: …}`.
   Events on `/live` and subscription documents on `/ws/gql` remain uncounted
   (threat model item 10).
+
+### Upgrading
+
+Six migrations ship with this release, all additive; they run on boot. Take a
+backup first (`scripts/backup.sh`). Nothing below is needed to get a working
+instance — but two items change what editors may do, and one leaves a new
+search leg silent until it is run.
+
+**Editors cannot publish until you say so, and a scheduled date now needs the
+same permission.** The new per-site *editors can publish* switch defaults to
+off, so an existing site keeps admin approval exactly as before and needs no
+action; turn it on under the site's editorial settings if you want editors
+publishing directly. Separately, setting or changing a scheduled publish date
+is now gated like publishing itself, so an editor who could previously queue a
+future publish on a site that requires approval can no longer do so. Nothing
+already scheduled changes.
+
+**Run `mix kiln.embed_all` once if semantic search is on.** The new tag leg
+reaches documents through the tags an editor put on them, and it reads tag-name
+vectors that are now written whenever a tag is created or renamed. Existing tags
+carry no vector until this task backfills them, so until you run it the tag leg
+contributes nothing — results are the old results, not wrong ones. Safe to run
+after deploy, and unnecessary where semantic search is off (`config :kiln_cms,
+KilnCMS.Search, tag_leg: false` switches the leg off outright).
+
+**Demo mode is new, opt-in, and destructive where it is on.** `KILN_DEMO_RESET`
+turns an instance into a public demo that wipes its own database back to a
+golden snapshot on a schedule — hourly unless `KILN_DEMO_RESET_CRON` says
+otherwise, from `KILN_DEMO_GOLDEN_PATH`. The variable must read exactly
+`confirm`: any other value, including `true` or `1`, leaves demo mode off, so no
+existing instance can drift into it by accident. Never set it on an instance
+holding real content — a reset is not reversible by rolling the pin back.
 
 ## [0.7.0] - 2026-08-16
 
@@ -5106,7 +5136,8 @@ one that can't be described by a changelog diff. Before moving the pin:
 
 After this release, `mix kiln.update --check` does all of the above for you.
 
-[Unreleased]: https://github.com/The-Verscienta/kiln_cms/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/The-Verscienta/kiln_cms/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/The-Verscienta/kiln_cms/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/The-Verscienta/kiln_cms/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/The-Verscienta/kiln_cms/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/The-Verscienta/kiln_cms/releases/tag/v0.5.0
