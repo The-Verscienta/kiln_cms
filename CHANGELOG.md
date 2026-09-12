@@ -46,6 +46,35 @@ migration, a rewritten column, a dropped config key).
   callbacks. Linked from `projects/README.md` (which keeps the mechanics) and
   the getting-started guide router (#1328).
 
+- **`Kiln.FieldType.parse_float/1` — a covered numeric parse for a custom
+  field type's `cast/2`.** `Float.parse/1` is not total, and *how* it fails is
+  toolchain-dependent: on a literal that overflows a double it returns `:error`
+  on Elixir 1.20 and **raises** `ArgumentError` on 1.19, the version
+  `.tool-versions` pins. A `cast/2` runs on every content write including
+  public ones, so the difference is a validation message on one toolchain and a
+  500 on the other. The core already had this as `KilnCMS.CMS.Computed`'s
+  `@doc false` `safe_float/1`; it is now public, documented, spec'd, and listed
+  in the covered-surfaces table, because a downstream field type needs it for
+  exactly the reason the core's own `Geolocation` does.
+
+### Changed
+
+- **The in-tree example overlay no longer reaches past the overlay contract.**
+  The money field type (`projects/example/field_types/money.ex`) parsed its
+  amount through `KilnCMS.CMS.Computed`'s `safe_float/1`, which is marked
+  `@doc false` — a surface `docs/overlay-contract.md` explicitly excludes. It
+  now calls `Kiln.FieldType.parse_float/1`. Its `cast/2` semantics are
+  unchanged and are now pinned by tests. The `@doc false` helper is gone; it
+  was core-internal, so this is not a contract break, and the four core call
+  sites moved with it.
+
+- **`docs/overlay-contract.md` says why the example's `:test` plugin list names
+  a core fixture.** `projects/example/project.exs` restates
+  `KilnCMS.FixturePlugin` because `:plugins` *replaces* rather than merges and
+  `config/project.exs` is imported last — an artifact of the example living in
+  the core's repo, not a pattern a real overlay should copy. The "Not covered"
+  entry now says both halves.
+
 ## [0.8.0] - 2026-09-11
 
 ### Added
