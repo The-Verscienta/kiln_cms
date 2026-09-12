@@ -58,6 +58,14 @@ migration, a rewritten column, a dropped config key).
   (taxonomy is world-readable). The workers' *document* reads keep theirs, and
   say why. `mix kiln.authz.check` now also gates `lib/kiln_cms/search/`
   (#1402).
+- **Editorial automation runs under the policies.** `KilnCMS.Automation.RuleWorker`
+  carries `%KilnCMS.SystemActor{}`: `Automation.Rule` and `Social.Account`
+  admit it for **reads only** (authoring a rule, and the credentials for a
+  site's public voice, stay admin acts), and `CMS.Comment` / `CMS.Task` admit
+  it for create and read but **not** update — automation posts findings and
+  opens tasks, it does not edit what anyone said or close their work. The
+  content and user lookups keep their bypass, and now say why.
+  `mix kiln.authz.check` now also gates `lib/kiln_cms/automation/` (#1402).
 
 ### Fixed
 

@@ -60,6 +60,7 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
   # cleans it up — never ahead of one.
   @default_paths [
     "lib/kiln_cms_web",
+    "lib/kiln_cms/automation",
     "lib/kiln_cms/firing",
     "lib/kiln_cms/search"
   ]

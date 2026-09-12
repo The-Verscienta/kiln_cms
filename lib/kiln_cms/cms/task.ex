@@ -278,7 +278,16 @@ defmodule KilnCMS.CMS.Task do
 
     # Editor-facing only — no audience/public-read carve-out, same as Comment:
     # a task is never part of a delivered document.
+    #
+    # The system actor is admitted for the same two action types (#1402):
+    # `KilnCMS.Automation.RuleWorker` assigns an intelligence reaction's
+    # findings as a task (#946) and probes for an open lifecycle review before
+    # creating another. `AssigneeIsEditor` still vets the assignee — validations
+    # run whatever the actor is — and `creator_id` stays unstamped, since the
+    # actor has no `:id`: `created_by_rule_id` is the provenance. `update` is
+    # NOT admitted: automation opens tasks, it does not complete them.
     policy action_type([:create, :read]) do
+      authorize_if KilnCMS.Checks.SystemActor
       authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 
