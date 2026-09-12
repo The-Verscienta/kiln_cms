@@ -147,7 +147,7 @@ defmodule KilnCMSWeb.SystemLive do
           </.link>
           <h1 class="mt-1 text-2xl font-semibold">{gettext("System")}</h1>
           <p class="text-sm text-base-content/70">
-            {gettext("The Kiln core this instance is built from, and how to update it.")}
+            {gettext("Which version of Kiln this site is running, and how to update it.")}
           </p>
         </div>
 

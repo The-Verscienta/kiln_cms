@@ -403,12 +403,66 @@
   .side-link[aria-current] .side-icon {
     color: var(--color-primary-ink);
   }
+  /* A group head is a <button>: the sections collapse (#1319). Which ones are
+     collapsed is read from <html data-nav-collapsed="delivery operations">,
+     restored by root.html.heex before first paint — so the only thing the rules
+     below do is hand each group a `--side-group-*` value, which its own
+     children pick up by inheritance. That keeps ONE declaration per group key
+     instead of a pair, and keeps display on `.side-*` in this layer where it
+     belongs. Adding a group in `KilnCMSWeb.ConsoleNav` means adding its key to
+     the list below; `console_nav_test.exs` fails if you forget. */
   .side-section {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 0.4rem;
     padding: 0 0.65rem;
     margin: 1.25rem 0 0.4rem;
     font-size: 0.78rem;
     font-weight: 600;
+    text-align: left;
     color: color-mix(in oklch, var(--color-base-content) 66%, transparent);
+  }
+  .side-section:hover {
+    color: var(--color-base-content);
+  }
+  .side-section .side-text {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .side-section-mark {
+    flex-shrink: 0;
+    color: color-mix(in oklch, var(--color-base-content) 45%, transparent);
+  }
+  .side-section-chevron {
+    flex-shrink: 0;
+    color: color-mix(in oklch, var(--color-base-content) 45%, transparent);
+    transform: var(--side-group-chevron, none);
+    transition: transform 0.15s;
+  }
+  .side-group-items {
+    display: var(--side-group-display, block);
+  }
+  /* The operator band (#1319): the instance-wide screens, ruled off from the
+     day-to-day admin above them and set a shade back, so "restore last night's
+     backup" never sits flush against "edit the footer". */
+  .side-group-op {
+    margin-top: 1.25rem;
+    padding-top: 0.35rem;
+    border-top: 1px solid var(--color-sidebar-line);
+  }
+  .side-group-op .side-icon {
+    color: color-mix(in oklch, var(--color-base-content) 42%, transparent);
+  }
+  [data-nav-collapsed~="content_model"] .side-group[data-nav-group="content_model"],
+  [data-nav-collapsed~="capture"] .side-group[data-nav-group="capture"],
+  [data-nav-collapsed~="delivery"] .side-group[data-nav-group="delivery"],
+  [data-nav-collapsed~="integrations"] .side-group[data-nav-group="integrations"],
+  [data-nav-collapsed~="organization"] .side-group[data-nav-group="organization"],
+  [data-nav-collapsed~="operations"] .side-group[data-nav-group="operations"],
+  [data-nav-collapsed~="configure"] .side-group[data-nav-group="configure"] {
+    --side-group-display: none;
+    --side-group-chevron: rotate(-90deg);
   }
   .side-icon-btn {
     display: inline-grid;
@@ -572,14 +626,27 @@
       gap: 0;
       padding-inline: 0;
     }
-    /* A group head becomes a hairline; its text stays for screen readers. */
+    /* A group head becomes a hairline; its text stays for screen readers. The
+       rail has no room to say *why* items would be missing, so section
+       collapse is ignored there and the head stops taking clicks (app.js
+       refuses the toggle in rail mode too). */
     [data-sidebar="collapsed"] .side-section {
+      display: block;
       height: 1px;
       margin: 0.9rem 0.4rem;
       padding: 0;
       overflow: hidden;
       font-size: 0;
       background: var(--color-sidebar-line);
+      pointer-events: none;
+    }
+    [data-sidebar="collapsed"][data-nav-collapsed] .side-group[data-nav-group] {
+      --side-group-display: block;
+    }
+    [data-sidebar="collapsed"] .side-group-op {
+      margin-top: 0;
+      padding-top: 0;
+      border-top: 0;
     }
     [data-sidebar="collapsed"] .side-theme {
       grid-template-columns: 1fr;

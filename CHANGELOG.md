@@ -27,6 +27,21 @@ migration, a rewritten column, a dropped config key).
 
 ## [Unreleased]
 
+### Changed
+
+- **The Configure sidebar is sections, and ⌘K finds settings screens.** The
+  admin half of the console nav now sits in five collapsible sections — Content
+  model, Capture, Delivery, Integrations, Organization — with a sixth,
+  **Operations**, ruled off below them for the instance-wide screens a platform
+  admin owns (Team, Billing, Mail, API keys, Backups, System). Every item in
+  that band is platform-gated, so an org admin sees no band at all. Which
+  sections are collapsed is remembered per browser, like the icon rail, and is
+  ignored in the rail itself. The ⌘K palette gained a **Go to** category ahead
+  of the content results: it searches the same list the sidebar draws, already
+  filtered to what you may open, so "backups" or "slugs" is one keystroke away
+  from the screen rather than a scan down 25 items. The System screen no longer
+  describes itself as "the Kiln core this instance is built from" (#1319).
+
 ### Fixed
 
 - **Both password forms check the confirmation as you type.** On `/register`
