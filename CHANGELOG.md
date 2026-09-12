@@ -29,11 +29,12 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
-- **The register form checks the password confirmation as you type.** The two
-  password boxes disagreeing was held back until submit — which also clears the
+- **Both password forms check the confirmation as you type.** On `/register`
+  and on the new-password page behind a reset link, the two password boxes
+  disagreeing was held back until submit — which on registration also clears the
   password field, so a typo in the confirmation cost re-typing both.
-  `KilnCMSWeb.AuthRegisterForm` wraps AshAuthentication's register form and
-  reveals that one error on `phx-change`; every other field stays quiet until
+  `KilnCMSWeb.AuthConfirmationFeedback` reveals that one error on `phx-change`;
+  every other field — an empty email, an invalid reset token — stays quiet until
   submit, as before.
 
 ## [0.8.0] - 2026-09-11
