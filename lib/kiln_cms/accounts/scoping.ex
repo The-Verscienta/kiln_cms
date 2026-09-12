@@ -210,9 +210,19 @@ defmodule KilnCMS.Accounts.Scoping do
           map() | nil,
           Ash.Query.t() | Ash.Changeset.t() | struct() | String.t() | nil
         ) :: :admin | :editor | :viewer | :none
-  def effective_tier(%{role: :admin}, _subject), do: :admin
-
   def effective_tier(%{} = actor, subject) do
+    # `RoleGrant.effective_role/1` rather than matching `%{role: :admin}`: a
+    # LiveView holds the actor it mounted with, so a folded `role: :admin` can
+    # outlive the grant that put it there. The expiry is re-checked here, at the
+    # moment of the decision.
+    if RoleGrant.effective_role(actor) == :admin,
+      do: :admin,
+      else: member_tier(actor, subject)
+  end
+
+  def effective_tier(_actor, _subject), do: :none
+
+  defp member_tier(actor, subject) do
     org = subject_org_id(subject)
 
     case affiliation(actor, org) do
@@ -221,8 +231,6 @@ defmodule KilnCMS.Accounts.Scoping do
       :foreign_org -> :none
     end
   end
-
-  def effective_tier(_actor, _subject), do: :none
 
   @doc """
   The users whose `effective_tier/2` on `org` is one of `tiers` — its inverse,
@@ -271,7 +279,9 @@ defmodule KilnCMS.Accounts.Scoping do
 
   # A membership-less account's global role applies only on the default org.
   defp legacy_tier(actor, org) do
-    if org == Accounts.default_org_id(), do: Map.get(actor, :role) || :none, else: :none
+    if org == Accounts.default_org_id(),
+      do: RoleGrant.effective_role(actor) || :none,
+      else: :none
   end
 
   @doc """

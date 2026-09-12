@@ -105,10 +105,12 @@ msgid_plural "%{count} days"
 msgstr[0] ""
 msgstr[1] ""
 
-#: lib/kiln_cms_web/live/accounts_live.ex
+#: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format
-msgid "%{count} days left"
-msgstr ""
+msgid "%{count} day left"
+msgid_plural "%{count} days left"
+msgstr[0] ""
+msgstr[1] ""
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -154,10 +156,12 @@ msgid_plural "%{count} hours"
 msgstr[0] ""
 msgstr[1] ""
 
-#: lib/kiln_cms_web/live/accounts_live.ex
+#: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format
-msgid "%{count} hours left"
-msgstr ""
+msgid "%{count} hour left"
+msgid_plural "%{count} hours left"
+msgstr[0] ""
+msgstr[1] ""
 
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #, elixir-autogen, elixir-format
@@ -1083,18 +1087,24 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
-msgid "Account erased and %{count} documents archived."
-msgstr ""
+msgid "Account erased and %{count} document archived."
+msgid_plural "Account erased and %{count} documents archived."
+msgstr[0] ""
+msgstr[1] ""
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
-msgid "Account erased and %{count} documents moved to trash."
-msgstr ""
+msgid "Account erased and %{count} document moved to trash."
+msgid_plural "Account erased and %{count} documents moved to trash."
+msgstr[0] ""
+msgstr[1] ""
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
-msgid "Account erased. %{count} documents handled, %{failed} could not be — check the trash and the content list."
-msgstr ""
+msgid "Account erased. %{count} document handled, %{failed} could not be — check the trash and the content list."
+msgid_plural "Account erased. %{count} documents handled, %{failed} could not be — check the trash and the content list."
+msgstr[0] ""
+msgstr[1] ""
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
@@ -10354,6 +10364,16 @@ msgstr ""
 msgid "Soft-deleted content. Restore brings it back to where it was. Trash is purged automatically after %{days} days."
 msgstr ""
 
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Some content could not be counted (%{types}), so the numbers above may be low."
+msgstr ""
+
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Some content could not be read and was not handled: %{types}."
+msgstr ""
+
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
 msgid "Some tiers grant an audience that is no longer configured. Restore it in config :kiln_cms, :audiences, or retire those tiers."
@@ -13269,6 +13289,11 @@ msgstr ""
 msgid "erased"
 msgstr ""
 
+#: lib/kiln_cms_web/components/core_components.ex
+#, elixir-autogen, elixir-format
+msgid "expired"
+msgstr ""
+
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "expires"
@@ -13867,7 +13892,7 @@ msgstr ""
 msgid "under a minute"
 msgstr ""
 
-#: lib/kiln_cms_web/live/accounts_live.ex
+#: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format
 msgid "under an hour left"
 msgstr ""

@@ -31,18 +31,9 @@ defmodule KilnCMSWeb.TeamLive do
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.Role
   alias KilnCMS.Accounts.RoleGrant
+  alias KilnCMSWeb.RoleGrantForm
 
   @tier_options [{"Viewer", :viewer}, {"Editor", :editor}, {"Admin", :admin}]
-
-  # Offered lengths for a temporary tier, in hours — the same set
-  # `KilnCMSWeb.AccountsLive` offers for the platform role.
-  @grant_durations [
-    {"6 hours", 6},
-    {"24 hours", 24},
-    {"3 days", 72},
-    {"7 days", 168},
-    {"30 days", 720}
-  ]
 
   @impl true
   def mount(_params, _session, socket) do
@@ -189,7 +180,7 @@ defmodule KilnCMSWeb.TeamLive do
     %{actor: actor} = socket.assigns
 
     with {:ok, membership} <- get_membership(socket, id),
-         expires_at = grant_expiry(params),
+         expires_at = RoleGrantForm.expiry(params),
          {:ok, _} <-
            Accounts.grant_membership_temporary_role(
              membership,
@@ -204,7 +195,7 @@ defmodule KilnCMSWeb.TeamLive do
          :info,
          gettext("%{role} on this site until %{when}.",
            role: role,
-           when: Calendar.strftime(expires_at, "%Y-%m-%d %H:%M UTC")
+           when: RoleGrantForm.format(expires_at)
          )
        )}
     else
@@ -433,45 +424,11 @@ defmodule KilnCMSWeb.TeamLive do
     end)
   end
 
-  defp grant_durations, do: @grant_durations
-
-  # An explicit "until" wins over the preset, same as the account console's — see
-  # `KilnCMSWeb.AccountsLive`. A blank or unparseable value falls back to the
-  # preset; the action validates that whatever lands is in the future.
-  # Minute-precision `datetime-local` values are not valid ISO 8601, and a browser
-  # may or may not include seconds — try as given, then padded (same as
-  # `KilnCMSWeb.AccountsLive`).
-  defp grant_expiry(%{"until" => until}) when is_binary(until) and until != "" do
-    case NaiveDateTime.from_iso8601(until) do
-      {:ok, naive} -> DateTime.from_naive!(naive, "Etc/UTC")
-      _ -> padded_expiry(until)
-    end
-  end
-
-  defp grant_expiry(%{"hours" => hours}),
-    do: DateTime.add(DateTime.utc_now(), grant_hours(hours), :hour)
-
-  defp padded_expiry(until) do
-    case NaiveDateTime.from_iso8601(until <> ":00") do
-      {:ok, naive} -> DateTime.from_naive!(naive, "Etc/UTC")
-      _ -> nil
-    end
-  end
-
-  defp grant_hours(raw) do
-    case Integer.parse(to_string(raw)) do
-      {hours, ""} when hours > 0 -> hours
-      # The shortest offered grant, not the longest: a mangled value must not
-      # hand out a month of admin.
-      _ -> @grant_durations |> List.first() |> elem(1)
-    end
-  end
-
   defp grant_summary(%{granted_role: role, granted_role_expires_at: at} = membership) do
     if RoleGrant.live?(membership) do
       gettext("%{role} until %{when}",
         role: role,
-        when: Calendar.strftime(at, "%Y-%m-%d %H:%M UTC")
+        when: RoleGrantForm.format(at)
       )
     end
   end
@@ -833,7 +790,7 @@ defmodule KilnCMSWeb.TeamLive do
             value="24"
             type="select"
             label={gettext("For")}
-            options={grant_durations()}
+            options={RoleGrantForm.durations()}
           />
         </div>
         <.input name="until" value="" type="datetime-local" label={gettext("Or until (UTC)")} />

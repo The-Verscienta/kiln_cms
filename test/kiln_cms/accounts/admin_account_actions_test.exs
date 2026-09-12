@@ -3,10 +3,8 @@ defmodule KilnCMS.Accounts.AdminAccountActionsTest do
   The operator levers behind `/editor/accounts`: sending a named account a
   password-reset link, and the guard that stops an admin removing the last admin.
 
-  Not `async: true`: the admin-reset path deliberately bypasses the per-address
-  mail budget, and `KilnCMS.Accounts.AccountThrottle`'s counters are one
-  node-wide ETS table — a concurrent test spending that budget would make
-  "bypassed" indistinguishable from "allowed anyway".
+  Not `async: true`: these tests tighten `KilnCMS.Accounts.AccountThrottle`'s
+  mail budget, whose counters are one node-wide ETS table.
   """
   use KilnCMS.DataCase, async: false
 
@@ -76,10 +74,10 @@ defmodule KilnCMS.Accounts.AdminAccountActionsTest do
       assert Exception.message(error) =~ "erased"
     end
 
-    # The per-address budget exists because anyone can name any address on the
-    # public form. An admin has already proved who they are, and a silent drop
-    # here would make the console's confirmation a lie.
-    test "the per-address mail budget does not silence it" do
+    # The budget bounds reset mail to one address per hour whoever asks — a
+    # temporary admin included. The admin path charges it, once, and says so by
+    # name when it is spent, instead of reporting "sent" for mail the sender drops.
+    test "a spent per-address budget is refused by name, and nothing is sent" do
       previous = Application.get_env(:kiln_cms, AccountThrottle, [])
       Application.put_env(:kiln_cms, AccountThrottle, Keyword.put(previous, :mail_budget, 1))
       on_exit(fn -> Application.put_env(:kiln_cms, AccountThrottle, previous) end)
@@ -89,14 +87,170 @@ defmodule KilnCMS.Accounts.AdminAccountActionsTest do
       address = to_string(subject.email)
       on_exit(fn -> AccountThrottle.reset(address) end)
 
-      # Spend the whole budget (one), so the public path would now drop the mail.
-      assert AccountThrottle.allow_mail?(:password_reset, address)
-      refute AccountThrottle.allow_mail?(:password_reset, address)
-
       assert {:ok, :sent} = Accounts.send_user_password_reset(subject.id, actor: admin)
       drain_oban()
-
       assert_email_sent(fn mail -> assert {_name, ^address} = hd(mail.to) end)
+
+      assert {:error, error} = Accounts.send_user_password_reset(subject.id, actor: admin)
+      assert Exception.message(error) =~ "too many reset links"
+      drain_oban()
+      assert_no_email_sent()
+    end
+
+    # One admin reset spends one unit, not two (the action charges; the sender is
+    # told it was charged) — and shares the budget with the owner's own requests.
+    test "an admin reset spends exactly one unit of the shared budget" do
+      previous = Application.get_env(:kiln_cms, AccountThrottle, [])
+      Application.put_env(:kiln_cms, AccountThrottle, Keyword.put(previous, :mail_budget, 2))
+      on_exit(fn -> Application.put_env(:kiln_cms, AccountThrottle, previous) end)
+
+      admin = user(:admin)
+      subject = user(:editor)
+      address = to_string(subject.email)
+      on_exit(fn -> AccountThrottle.reset(address) end)
+
+      assert {:ok, :sent} = Accounts.send_user_password_reset(subject.id, actor: admin)
+      # One unit left of two.
+      assert AccountThrottle.allow_mail?(:password_reset, address)
+      refute AccountThrottle.allow_mail?(:password_reset, address)
+    end
+  end
+
+  describe "a temporary admin" do
+    setup do
+      standing = user(:admin)
+      temp = user(:editor)
+
+      {:ok, _} =
+        Accounts.grant_user_temporary_role(
+          temp,
+          %{
+            granted_role: :admin,
+            granted_role_expires_at: DateTime.add(DateTime.utc_now(), 6, :hour)
+          },
+          actor: standing
+        )
+
+      # The session actor: loaded through a read, so the grant is folded in.
+      actor = Accounts.get_user!(temp.id, authorize?: false)
+      assert actor.role == :admin
+
+      %{standing: standing, temp: temp, actor: actor}
+    end
+
+    test "cannot make itself a permanent admin", %{temp: temp, actor: actor} do
+      target =
+        Accounts.get_user!(temp.id, KilnCMS.Accounts.RoleGrant.unfolded() ++ [authorize?: false])
+
+      assert {:error, error} = Accounts.manage_user_access(target, %{role: :admin}, actor: actor)
+      assert Exception.message(error) =~ "standing admin"
+
+      assert Accounts.get_user!(
+               temp.id,
+               KilnCMS.Accounts.RoleGrant.unfolded() ++ [authorize?: false]
+             ).role ==
+               :editor
+    end
+
+    test "cannot extend its own grant", %{temp: temp, actor: actor} do
+      target =
+        Accounts.get_user!(temp.id, KilnCMS.Accounts.RoleGrant.unfolded() ++ [authorize?: false])
+
+      assert {:error, error} =
+               Accounts.grant_user_temporary_role(
+                 target,
+                 %{
+                   granted_role: :admin,
+                   granted_role_expires_at: DateTime.add(DateTime.utc_now(), 365, :day)
+                 },
+                 actor: actor
+               )
+
+      assert Exception.message(error) =~ "standing admin"
+    end
+
+    test "cannot confer a site tier that would outlast the grant", %{actor: actor} do
+      colleague = user(:viewer)
+
+      assert {:error, error} =
+               Accounts.create_org_membership(
+                 %{
+                   user_id: colleague.id,
+                   organization_id: Accounts.default_org_id(),
+                   role: :admin
+                 },
+                 actor: actor
+               )
+
+      assert Exception.message(error) =~ "standing admin"
+    end
+
+    # The grant is for ordinary admin work; only tier-granting is withheld.
+    test "can still do ordinary admin work", %{actor: actor} do
+      subject = user(:viewer)
+      assert {:ok, :sent} = Accounts.send_user_password_reset(subject.id, actor: actor)
+    end
+  end
+
+  describe "erasure and a live grant" do
+    test "clears the grant, the site grants and the API keys" do
+      admin = user(:admin)
+      subject = user(:editor)
+      in_6h = DateTime.add(DateTime.utc_now(), 6, :hour)
+
+      {:ok, _} =
+        Accounts.grant_user_temporary_role(
+          subject,
+          %{granted_role: :admin, granted_role_expires_at: in_6h},
+          actor: admin
+        )
+
+      membership =
+        Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+          user_id: subject.id,
+          organization_id: Accounts.default_org_id(),
+          role: :viewer
+        })
+
+      {:ok, _} =
+        Accounts.grant_membership_temporary_role(
+          membership,
+          %{granted_role: :editor, granted_role_expires_at: in_6h},
+          actor: admin
+        )
+
+      {:ok, key} =
+        Accounts.mint_api_key(subject.id, "ci", DateTime.add(DateTime.utc_now(), 30, :day),
+          actor: admin
+        )
+
+      {:ok, _} = Accounts.anonymize_user(subject, actor: admin)
+
+      erased =
+        Accounts.get_user!(
+          subject.id,
+          KilnCMS.Accounts.RoleGrant.unfolded() ++ [authorize?: false]
+        )
+
+      assert is_nil(erased.granted_role)
+      assert is_nil(erased.granted_role_expires_at)
+      # And a fresh, folded read no longer presents it as an admin.
+      assert Accounts.get_user!(subject.id, authorize?: false).role == :viewer
+
+      refute subject.id in Enum.map(
+               KilnCMS.Accounts.Scoping.users_with_tier(Accounts.default_org_id(), [:admin]),
+               & &1.id
+             )
+
+      assert is_nil(
+               Accounts.get_org_membership!(
+                 subject.id,
+                 Accounts.default_org_id(),
+                 KilnCMS.Accounts.RoleGrant.unfolded() ++ [authorize?: false]
+               ).granted_role
+             )
+
+      assert Accounts.get_api_key!(key.id, authorize?: false).revoked_at
     end
   end
 
@@ -111,6 +265,30 @@ defmodule KilnCMS.Accounts.AdminAccountActionsTest do
 
       assert Exception.message(error) =~ "no admin"
       assert Accounts.get_user!(admin.id, authorize?: false).role == :admin
+    end
+
+    # A system call is not exempt merely for having no actor — `Beta.Round` seats
+    # testers through `:manage_access` with `authorize?: false`.
+    test "cannot be demoted by an actorless system call" do
+      admin = user(:admin)
+
+      assert {:error, error} =
+               Accounts.manage_user_access(admin, %{role: :viewer}, authorize?: false)
+
+      assert Exception.message(error) =~ "no admin"
+    end
+
+    # The one named exemption: a staging scrub erases every account on purpose.
+    test "can be erased by the scrub's named exemption" do
+      admin = user(:admin)
+
+      assert {:ok, erased} =
+               Accounts.anonymize_user(admin,
+                 authorize?: false,
+                 context: KilnCMS.Accounts.Validations.NotLastAdmin.exempt()
+               )
+
+      assert erased.anonymized_at
     end
 
     test "cannot be erased" do

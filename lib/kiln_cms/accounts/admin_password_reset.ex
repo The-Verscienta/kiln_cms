@@ -16,24 +16,29 @@ defmodule KilnCMS.Accounts.AdminPasswordReset do
     * `{:error, %Ash.Error.Invalid{}}` — the account cannot be reset this way
       (an erased account, or one with no password identity), named as such.
 
-  ## The per-address mail budget is bypassed, deliberately
+  ## The per-address mail budget still applies
 
-  `KilnCMS.Accounts.AccountThrottle`'s five-per-hour budget exists because
-  anyone can name anyone's address on the public form. Nobody can reach this
-  action without already holding an admin session, and the amount of mail an
-  admin can send through the console dwarfs one reset link. Charging it here
-  would buy nothing and cost the thing this action exists for: on a spent budget
-  the button would report success and send nothing, which is exactly the lie the
-  public endpoint is *supposed* to tell and this one must not.
+  `KilnCMS.Accounts.AccountThrottle`'s budget bounds how much reset mail one
+  address can be sent in an hour, whoever asks. An earlier version bypassed it
+  here on the grounds that an admin is trusted — but a *temporary* admin is a
+  grantee, not necessarily an operator, and the bypass also skipped the budget's
+  consumption, so the admin path and the owner's own requests became two
+  independent allowances. The budget is charged here, once, before a token is
+  minted; a refusal is reported to the operator by name instead of being dropped
+  silently the way the anonymous form must.
 
-  It is logged instead, so an operator reading the mail log can tell an
-  admin-initiated reset from a self-service one.
+  ## "Sent" means enqueued
+
+  `{:ok, :sent}` is returned only after the mail was handed to the queue.
+  `KilnCMS.Mail.enqueue!/1` raises on an insert failure; that is caught and
+  reported as an error, so the console flashes it rather than crashing.
   """
   use Ash.Resource.Actions.Implementation
 
   require Logger
 
   alias AshAuthentication.Strategy.Password
+  alias KilnCMS.Accounts.AccountThrottle
   alias KilnCMS.Accounts.User
 
   @impl true
@@ -42,22 +47,40 @@ defmodule KilnCMS.Accounts.AdminPasswordReset do
 
     with {:ok, user} <- fetch(user_id),
          :ok <- resettable(user),
+         :ok <- within_budget(user),
          {:ok, token} <- reset_token(user) do
-      {sender, opts} = sender()
-
-      # The strategy's own sender opts come first, so this cannot silently drop a
-      # future DSL option; `bypass_budget?: true` is read by
-      # `KilnCMS.Accounts.User.Senders.SendPasswordResetEmail`.
-      Logger.info("Admin-initiated password reset for user #{user.id}")
-
-      sender.send(
-        user,
-        token,
-        Keyword.merge(opts, tenant: context.tenant, bypass_budget?: true)
-      )
-
-      {:ok, :sent}
+      deliver(user, token, context)
     end
+  end
+
+  # Charged before the token is minted, so a refused request leaves no unused
+  # reset token behind. `allow_mail?/2` consumes a unit whether or not it allows.
+  defp within_budget(user) do
+    if AccountThrottle.allow_mail?(:password_reset, to_string(user.email)) do
+      :ok
+    else
+      invalid(
+        :user_id,
+        "this address has been sent too many reset links in the last hour — try again later"
+      )
+    end
+  end
+
+  defp deliver(user, token, context) do
+    {sender, opts} = sender()
+    Logger.info("Admin-initiated password reset for user #{user.id}")
+
+    # The strategy's own sender opts come first, so this cannot silently drop a
+    # future DSL option. `budget_checked?: true` tells the sender the budget was
+    # charged above, so it is not charged twice.
+    :ok =
+      sender.send(user, token, Keyword.merge(opts, tenant: context.tenant, budget_checked?: true))
+
+    {:ok, :sent}
+  rescue
+    error ->
+      Logger.error("Admin-initiated password reset could not be enqueued: #{inspect(error)}")
+      invalid(:user_id, "the reset email could not be queued — check the mail settings")
   end
 
   # Read with `authorize?: false` after the action's own admin-only policy has

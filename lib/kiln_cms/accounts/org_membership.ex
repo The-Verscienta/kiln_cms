@@ -148,17 +148,17 @@ defmodule KilnCMS.Accounts.OrgMembership do
 
   policies do
     # Managing memberships is a platform-operator task for now — admins only.
-    bypass actor_attribute_equals(:role, :admin) do
+    bypass KilnCMS.Accounts.Checks.PlatformAdmin do
       authorize_if always()
     end
 
-    # The expiry sweep runs with no actor, so the admin bypass above can't carry
-    # it. A `bypass` and not a `policy`, because the blanket write forbid below
-    # applies to this update too and Ash AND-combines every applicable policy — a
-    # grant there would be overruled by that hard forbid, where a bypass
-    # short-circuits past it.
-    bypass action(:expire_role_grant) do
-      authorize_if AshOban.Checks.AshObanInteraction
+    # The hourly `expire_role_grants` trigger runs with no actor. Unconditional —
+    # not scoped to `action(:expire_role_grant)` — because AshOban's scheduler
+    # first *reads* the rows to sweep, and a write-scoped grant never matched that
+    # read: the self-only read policy below filtered it to nothing, so the sweep
+    # silently never ran. Mirrors `KilnCMS.Accounts.Token`.
+    bypass AshOban.Checks.AshObanInteraction do
+      authorize_if always()
     end
 
     # A user may read their own memberships (to populate their org switcher).
@@ -188,6 +188,11 @@ defmodule KilnCMS.Accounts.OrgMembership do
     validate KilnCMS.Accounts.Validations.FieldGrantsShape, on: [:create, :update]
     # A client-supplied role_id must reference a role of THIS org.
     validate KilnCMS.Accounts.Validations.RoleBelongsToOrg, on: [:create, :update]
+    # A temporary platform admin must not confer a site tier — on anyone, itself
+    # included — that would outlast the grant that let it act. Covers create,
+    # `:update` and `:grant_temporary_role`; the actorless sweep and billing sync
+    # pass. See the validation module.
+    validate KilnCMS.Accounts.Validations.StandingAdminOnly, on: [:create, :update]
   end
 
   attributes do

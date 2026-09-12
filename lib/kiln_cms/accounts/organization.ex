@@ -102,7 +102,7 @@ defmodule KilnCMS.Accounts.Organization do
     # Provisioning and managing tenants is a platform-operator task — admins
     # only. (A per-org RBAC model, where an org admin manages their own org,
     # arrives with the admin-UI phase; for now `role` is the platform role.)
-    bypass actor_attribute_equals(:role, :admin) do
+    bypass KilnCMS.Accounts.Checks.PlatformAdmin do
       authorize_if always()
     end
 

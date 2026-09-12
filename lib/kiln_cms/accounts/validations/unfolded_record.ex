@@ -27,9 +27,18 @@ defmodule KilnCMS.Accounts.Validations.UnfoldedRecord do
 
   alias KilnCMS.Accounts.RoleGrant
 
+  # Only when `role` was SUBMITTED. The hazard is specific to a write that submits
+  # `role` — that is the attribute Ash drops as equal to the folded value. An
+  # update that never mentions it (`KilnCMS.Billing.Entitlements` writing only
+  # `audiences` on a membership) builds on a folded record harmlessly, and
+  # refusing it silently broke entitlement sync for anyone holding a live grant.
+  #
+  # The test is on the submitted params, not on `changing_attribute?/2`: a dropped
+  # `role` is precisely a role that is *not* changing, so "is it changing" would
+  # wave through the one write this exists to stop.
   @impl true
   def validate(changeset, _opts, _context) do
-    if RoleGrant.folded?(changeset.data) do
+    if RoleGrant.folded?(changeset.data) and role_submitted?(changeset) do
       {:error,
        field: :role,
        message:
@@ -39,4 +48,9 @@ defmodule KilnCMS.Accounts.Validations.UnfoldedRecord do
       :ok
     end
   end
+
+  defp role_submitted?(%{params: params}) when is_map(params),
+    do: Map.has_key?(params, :role) or Map.has_key?(params, "role")
+
+  defp role_submitted?(_changeset), do: false
 end

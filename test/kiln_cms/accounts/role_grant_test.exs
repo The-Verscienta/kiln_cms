@@ -6,6 +6,8 @@ defmodule KilnCMS.Accounts.RoleGrantTest do
   """
   use KilnCMS.DataCase, async: true
 
+  require Ash.Query
+
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.{OrgMembership, Role, RoleGrant, User}
 
@@ -276,29 +278,11 @@ defmodule KilnCMS.Accounts.RoleGrantTest do
   end
 
   describe "the expiry sweep" do
-    # The trigger's WIRING, not a run of it: the sweep is what evicts a
-    # grant-holder's live sockets, and a scheduler pointed at the wrong action (or
-    # a `where` that never matches) would fail silently — authorization is already
-    # correct without it, so nothing else would go red.
-    #
-    # Structural rather than executed, because an AshOban scheduler runs in its own
-    # process and so cannot see this test's sandbox transaction; the action's own
-    # behaviour is covered below.
-    test "both resources register an hourly trigger on the expiry action" do
-      for resource <- [User, OrgMembership] do
-        assert [trigger] = AshOban.Info.oban_triggers(resource)
-        assert trigger.name == :expire_role_grants
-        assert trigger.action == :expire_role_grant
-        # Hourly, not nightly: a grant that ran out at 09:00 must not leave its
-        # holder's open console authorized until tomorrow morning.
-        assert trigger.scheduler_cron =~ ~r/^\d+ \* \* \* \*$/
-      end
-    end
-
-    # The `where` the scheduler filters on, asserted against real rows rather than
-    # by reading the expression back — a filter that matched everything, or
-    # nothing, would look identical in the DSL.
-    test "the trigger's filter matches an expired grant and not a live one" do
+    # Executed in-band, the way `trash_purge_test.exs` runs its trigger. The
+    # sweep's own action behaviour is covered below; this is the part that was
+    # broken — AshOban's scheduler READS the rows with `authorize?: true` and no
+    # actor, and a grant scoped to the write action let that read see nothing.
+    test "the AshOban trigger actually runs: expired grants cleared, live ones kept" do
       admin = user(:admin)
       expired = user(:viewer)
       live = user(:viewer)
@@ -314,17 +298,51 @@ defmodule KilnCMS.Accounts.RoleGrantTest do
 
       Ash.Seed.update!(reread_unfolded(expired), %{granted_role_expires_at: in_hours(-1)})
 
-      [trigger] = AshOban.Info.oban_triggers(User)
+      assert %{success: success, failure: 0} =
+               AshOban.schedule_and_run_triggers({User, :expire_role_grants},
+                 drain_queues?: true,
+                 with_recursion: true,
+                 with_scheduled: true
+               )
 
-      matching =
-        User
-        |> Ash.Query.do_filter(trigger.where)
-        |> Ash.read!(authorize?: false)
-        |> Enum.map(& &1.id)
+      assert success >= 1
+      assert is_nil(reread_unfolded(expired).granted_role)
+      assert reread_unfolded(live).granted_role == :editor
+    end
 
-      assert expired.id in matching
-      refute live.id in matching
-      refute admin.id in matching
+    test "the membership trigger actually runs too" do
+      admin = user(:admin)
+      member = user(:viewer)
+
+      membership =
+        Ash.Seed.seed!(OrgMembership, %{
+          user_id: member.id,
+          organization_id: Accounts.default_org_id(),
+          role: :viewer
+        })
+
+      {:ok, granted} =
+        Accounts.grant_membership_temporary_role(
+          membership,
+          %{granted_role: :editor, granted_role_expires_at: in_hours(2)},
+          actor: admin
+        )
+
+      Ash.Seed.update!(granted, %{granted_role_expires_at: in_hours(-1)})
+
+      AshOban.schedule_and_run_triggers({OrgMembership, :expire_role_grants},
+        drain_queues?: true,
+        with_recursion: true,
+        with_scheduled: true
+      )
+
+      assert is_nil(
+               Accounts.get_org_membership!(
+                 member.id,
+                 Accounts.default_org_id(),
+                 RoleGrant.unfolded() ++ [authorize?: false]
+               ).granted_role
+             )
     end
 
     test "clears an expired grant and leaves a live one alone" do
@@ -352,6 +370,138 @@ defmodule KilnCMS.Accounts.RoleGrantTest do
       assert swept.role == :viewer
 
       assert reread_unfolded(live).granted_role == :editor
+    end
+  end
+
+  describe "an actor that outlives its grant" do
+    # A LiveView assigns `current_user` once at mount. The folded `role: :admin`
+    # on that struct must stop authorizing the moment the grant expires — the
+    # expiry is re-checked at the decision, not trusted from the load.
+    setup do
+      admin = user(:admin)
+      subject = user(:editor)
+
+      {:ok, _} =
+        Accounts.grant_user_temporary_role(
+          subject,
+          %{granted_role: :admin, granted_role_expires_at: in_hours(1)},
+          actor: admin
+        )
+
+      # Mount-time actor, folded while the grant was live...
+      actor = reread(subject)
+      assert actor.role == :admin
+
+      # ...and then the clock moves past the expiry, with the struct unchanged.
+      stale = %{actor | granted_role_expires_at: in_hours(-1)}
+      %{admin: admin, stale: stale, subject: subject}
+    end
+
+    test "PlatformAdmin refuses it", %{stale: stale} do
+      refute KilnCMS.Accounts.Checks.PlatformAdmin.match?(stale, %{}, [])
+    end
+
+    test "effective_tier and the console gate refuse it", %{stale: stale} do
+      assert KilnCMS.Accounts.Scoping.effective_tier(stale, Accounts.default_org_id()) == :editor
+      refute KilnCMSWeb.LiveUserAuth.platform_admin_user?(stale)
+    end
+
+    test "a policy guarded by the admin bypass refuses it", %{stale: stale} do
+      other = user(:viewer)
+      assert {:error, %Ash.Error.Forbidden{}} = Accounts.anonymize_user(other, actor: stale)
+    end
+
+    test "a live grant still authorizes", %{subject: subject} do
+      assert KilnCMS.Accounts.Checks.PlatformAdmin.match?(reread(subject), %{}, [])
+    end
+  end
+
+  describe "the fold is idempotent" do
+    # A second fold pass (an `Ash.load/2` re-runs a read's preparations) must not
+    # overwrite `:standing_role` with the granted tier.
+    test "folding a folded record keeps the standing role" do
+      admin = user(:admin)
+      subject = user(:editor)
+
+      {:ok, _} =
+        Accounts.grant_user_temporary_role(
+          subject,
+          %{granted_role: :admin, granted_role_expires_at: in_hours(3)},
+          actor: admin
+        )
+
+      folded = reread(subject)
+      assert RoleGrant.standing_role(folded) == :editor
+
+      {:ok, [refolded]} =
+        KilnCMS.Accounts.Preparations.FoldRoleGrant.prepare(Ash.Query.new(User), [], %{})
+        |> Map.fetch!(:after_action)
+        |> List.last()
+        |> then(& &1.(Ash.Query.new(User), [folded]))
+
+      assert refolded.role == :admin
+      assert RoleGrant.standing_role(refolded) == :editor
+    end
+  end
+
+  describe "ClearRedundantRoleGrant" do
+    # A narrowed select leaves the grant columns unloaded; that is not a grant.
+    test "does not revoke a grant whose columns were not selected" do
+      admin = user(:admin)
+      subject = user(:viewer)
+
+      {:ok, _} =
+        Accounts.grant_user_temporary_role(
+          subject,
+          %{granted_role: :admin, granted_role_expires_at: in_hours(3)},
+          actor: admin
+        )
+
+      # Only the two grant columns are left out; the action's other validations
+      # read the rest.
+      narrowed =
+        User
+        |> Ash.Query.deselect([:granted_role, :granted_role_expires_at])
+        |> Ash.Query.filter(id == ^subject.id)
+        |> Ash.read_one!(authorize?: false, context: %{fold_role_grant?: false})
+
+      assert %Ash.NotLoaded{} = narrowed.granted_role
+
+      {:ok, _} = Accounts.manage_user_access(narrowed, %{audiences: [:member]}, actor: admin)
+
+      assert reread_unfolded(subject).granted_role == :admin
+    end
+  end
+
+  describe "UnfoldedRecord" do
+    # Only a write that SUBMITS `role` is at risk from a folded base.
+    test "does not refuse an update that never mentions role" do
+      admin = user(:admin)
+      member = user(:viewer)
+
+      membership =
+        Ash.Seed.seed!(OrgMembership, %{
+          user_id: member.id,
+          organization_id: Accounts.default_org_id(),
+          role: :viewer
+        })
+
+      {:ok, _} =
+        Accounts.grant_membership_temporary_role(
+          membership,
+          %{granted_role: :editor, granted_role_expires_at: in_hours(3)},
+          actor: admin
+        )
+
+      folded =
+        Accounts.get_org_membership!(member.id, Accounts.default_org_id(), authorize?: false)
+
+      assert RoleGrant.folded?(folded)
+
+      assert {:ok, updated} =
+               Accounts.update_org_membership(folded, %{audiences: [:member]}, authorize?: false)
+
+      assert updated.audiences == [:member]
     end
   end
 

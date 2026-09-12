@@ -125,6 +125,33 @@ defmodule KilnCMSWeb.AccountsLiveTest do
     end
   end
 
+  describe "client-shaped input" do
+    setup %{conn: conn} do
+      %{conn: log_in(conn, authed_user(:admin))}
+    end
+
+    # `?page[]=1` decodes to a list; it used to reach `Integer.parse/1` and crash.
+    test "bracketed query parameters read as absent", %{conn: conn} do
+      assert {:ok, _view, html} =
+               live(conn, "/editor/accounts?page[]=2&q[]=x&role[a]=admin&status[]=erased")
+
+      assert html =~ "Accounts"
+    end
+
+    # On the register there is no account; a pushed account event must not
+    # dereference nil.
+    test "account events pushed on the register are ignored", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/editor/accounts")
+
+      for event <- ~w(send_password_reset sign_out_everywhere confirm_removal revoke_grant) do
+        assert render_hook(view, event, %{}) =~ "Accounts"
+      end
+
+      assert render_hook(view, "page", %{"to" => ["2"]}) =~ "Accounts"
+      assert render_hook(view, "save_access", %{}) =~ "Accounts"
+    end
+  end
+
   describe "one account" do
     setup %{conn: conn} do
       admin = authed_user(:admin)
@@ -214,6 +241,25 @@ defmodule KilnCMSWeb.AccountsLiveTest do
         assert granted.granted_role == :editor
         assert DateTime.diff(granted.granted_role_expires_at, DateTime.utc_now(), :day) >= 12
       end
+    end
+
+    # A browser that renders `datetime-local` as a text box accepts anything. An
+    # unparseable value falls back to the preset instead of becoming a nil expiry.
+    test "an unparseable explicit expiry falls back to the preset", %{
+      conn: conn,
+      subject: subject
+    } do
+      {:ok, view, _html} = live(conn, ~p"/editor/accounts/#{subject.id}")
+
+      view
+      |> form("#grant-form", %{
+        "grant" => %{"role" => "editor", "hours" => "72", "until" => "23/09/2026 14:30"}
+      })
+      |> render_submit()
+
+      granted = reread(subject)
+      assert granted.granted_role == :editor
+      assert DateTime.diff(granted.granted_role_expires_at, DateTime.utc_now(), :hour) >= 71
     end
 
     test "a blank explicit expiry falls back to the preset", %{conn: conn, subject: subject} do

@@ -37,6 +37,8 @@ defmodule KilnCMSWeb.AccountsLive do
   alias KilnCMS.Accounts.AccountRemoval
   alias KilnCMS.Accounts.RoleGrant
   alias KilnCMS.Accounts.SessionEviction
+  alias KilnCMSWeb.Params
+  alias KilnCMSWeb.RoleGrantForm
 
   # One page of the register. The read action carries no `pagination`, so paging
   # is `limit`/`offset` with one extra row fetched to know whether "Next" exists
@@ -46,18 +48,13 @@ defmodule KilnCMSWeb.AccountsLive do
 
   @role_options [{"Viewer", :viewer}, {"Editor", :editor}, {"Admin", :admin}]
 
-  # Offered grant lengths. Hours as well as days because the shape this is for —
-  # "cover me while I'm on call", "let the contractor publish this afternoon" —
-  # is often shorter than a day.
-  @grant_durations [
-    {"6 hours", 6},
-    {"24 hours", 24},
-    {"3 days", 72},
-    {"7 days", 168},
-    {"30 days", 720}
-  ]
-
   @statuses ~w(all unconfirmed temporary erased)
+
+  # The events that act on the account being viewed. On the register
+  # (`live_action: :index`) there is no account, and a client can push any event
+  # name — so these get one early no-op clause instead of dereferencing `nil`.
+  @account_events ~w(save_access grant_role revoke_grant send_password_reset
+                     sign_out_everywhere confirm_removal cancel_removal remove_account)
 
   @impl true
   def mount(_params, _session, socket) do
@@ -85,10 +82,13 @@ defmodule KilnCMSWeb.AccountsLive do
   defp apply_action(socket, :index, params) do
     socket
     |> assign(:account, nil)
-    |> assign(:search, params["q"] || "")
-    |> assign(:role_filter, role_filter(params["role"]))
-    |> assign(:status, status(params["status"]))
-    |> assign(:page, page_number(params["page"]))
+    # Every parameter goes through `KilnCMSWeb.Params` (#751): `?page[]=1` decodes
+    # to a LIST, which `Integer.parse/1` has no clause for, and `?q[a]=1` to a map.
+    # A malformed parameter reads as absent — the same page the omitted one gives.
+    |> assign(:search, Params.string(params, "q", ""))
+    |> assign(:role_filter, role_filter(Params.string(params, "role")))
+    |> assign(:status, status(Params.string(params, "status")))
+    |> assign(:page, Params.integer(params, "page", 1, 1..100_000))
     |> load_accounts()
   end
 
@@ -111,6 +111,10 @@ defmodule KilnCMSWeb.AccountsLive do
   # --- the register ----------------------------------------------------------
 
   @impl true
+  def handle_event(event, _params, %{assigns: %{account: nil}} = socket)
+      when event in @account_events,
+      do: {:noreply, socket}
+
   def handle_event("filter", %{"q" => q} = params, socket) when is_binary(q) do
     {:noreply,
      push_patch(socket,
@@ -131,6 +135,8 @@ defmodule KilnCMSWeb.AccountsLive do
        to: ~p"/editor/accounts?#{%{q: q, role: to_string(role), status: status, page: to}}"
      )}
   end
+
+  def handle_event("page", _params, socket), do: {:noreply, socket}
 
   # --- one account -----------------------------------------------------------
 
@@ -153,6 +159,8 @@ defmodule KilnCMSWeb.AccountsLive do
     end
   end
 
+  def handle_event("save_access", _params, socket), do: {:noreply, socket}
+
   def handle_event(
         "grant_role",
         %{"grant" => %{"role" => role, "hours" => hours} = grant},
@@ -163,7 +171,7 @@ defmodule KilnCMSWeb.AccountsLive do
 
     case Accounts.grant_user_temporary_role(
            account,
-           %{granted_role: role, granted_role_expires_at: grant_expiry(grant)},
+           %{granted_role: role, granted_role_expires_at: RoleGrantForm.expiry(grant)},
            actor: actor
          ) do
       {:ok, user} ->
@@ -234,8 +242,7 @@ defmodule KilnCMSWeb.AccountsLive do
   # everything they wrote" means something different when it is 4 pages than when
   # it is 400 posts.
   def handle_event("confirm_removal", _params, socket) do
-    {:noreply,
-     assign(socket, :removing, %{counts: AccountRemoval.authored_counts(socket.assigns.account)})}
+    {:noreply, assign(socket, :removing, AccountRemoval.authored_counts(socket.assigns.account))}
   end
 
   def handle_event("cancel_removal", _params, socket),
@@ -377,51 +384,6 @@ defmodule KilnCMSWeb.AccountsLive do
   defp status(status) when status in @statuses, do: status
   defp status(_other), do: "all"
 
-  defp page_number(nil), do: 1
-
-  defp page_number(raw) do
-    case Integer.parse(raw) do
-      {page, ""} when page > 0 -> page
-      _ -> 1
-    end
-  end
-
-  # An explicit "until" wins over the preset: the presets cover the shapes this is
-  # usually for ("cover me while I'm on call"), and the field covers the ones they
-  # cannot ("until the contractor's last day"). A blank or unparseable datetime
-  # falls back to the preset rather than refusing — the action still validates
-  # that whatever lands is in the future, so a stale value is caught there with a
-  # message instead of here with a silent nil.
-  defp grant_expiry(%{"until" => until}) when is_binary(until) and until != "" do
-    # A `datetime-local` value is minute-precision (`2026-09-23T14:30`), which
-    # ISO 8601 does not accept — but a browser may include seconds, so try the
-    # value as given before padding it rather than only padding and silently
-    # falling back to the preset on the longer form.
-    case NaiveDateTime.from_iso8601(until) do
-      {:ok, naive} -> DateTime.from_naive!(naive, "Etc/UTC")
-      _ -> padded_expiry(until)
-    end
-  end
-
-  defp grant_expiry(%{"hours" => hours}),
-    do: DateTime.add(DateTime.utc_now(), grant_hours(hours), :hour)
-
-  defp padded_expiry(until) do
-    case NaiveDateTime.from_iso8601(until <> ":00") do
-      {:ok, naive} -> DateTime.from_naive!(naive, "Etc/UTC")
-      _ -> nil
-    end
-  end
-
-  defp grant_hours(raw) do
-    case Integer.parse(to_string(raw)) do
-      {hours, ""} when hours > 0 -> hours
-      # Fall back to the shortest offered grant rather than the longest: a
-      # mangled value must not hand out a month of admin.
-      _ -> @grant_durations |> List.first() |> elem(1)
-    end
-  end
-
   # The audience checkboxes arrive as `%{"audience_member" => "true", ...}` —
   # only the checked ones are submitted, so the absent ones are the removals.
   defp checked_audiences(params) do
@@ -430,19 +392,43 @@ defmodule KilnCMSWeb.AccountsLive do
         do: audience
   end
 
+  # A type the sweep could not read is named, never folded into a success count:
+  # "N documents archived" beside a type that was skipped is the false report the
+  # sweep used to give.
+  defp removal_message(%{unreadable: [_ | _] = unreadable} = result) do
+    removal_message(%{result | unreadable: []}) <>
+      " " <>
+      gettext("Some content could not be read and was not handled: %{types}.",
+        types: Enum.join(unreadable, ", ")
+      )
+  end
+
   defp removal_message(%{disposition: :keep}),
     do: gettext("Account erased. Its content was left as it was.")
 
-  defp removal_message(%{disposition: disposition, affected: affected, failed: 0}) do
-    case disposition do
-      :archive -> gettext("Account erased and %{count} documents archived.", count: affected)
-      :trash -> gettext("Account erased and %{count} documents moved to trash.", count: affected)
-    end
+  defp removal_message(%{disposition: :archive, affected: affected, failed: 0}) do
+    ngettext(
+      "Account erased and %{count} document archived.",
+      "Account erased and %{count} documents archived.",
+      affected,
+      count: affected
+    )
+  end
+
+  defp removal_message(%{disposition: :trash, affected: affected, failed: 0}) do
+    ngettext(
+      "Account erased and %{count} document moved to trash.",
+      "Account erased and %{count} documents moved to trash.",
+      affected,
+      count: affected
+    )
   end
 
   defp removal_message(%{affected: affected, failed: failed}) do
-    gettext(
+    ngettext(
+      "Account erased. %{count} document handled, %{failed} could not be — check the trash and the content list.",
       "Account erased. %{count} documents handled, %{failed} could not be — check the trash and the content list.",
+      affected,
       count: affected,
       failed: failed
     )
@@ -468,24 +454,9 @@ defmodule KilnCMSWeb.AccountsLive do
     end
   end
 
-  defp grant_durations, do: @grant_durations
-
   defp live_grant?(user), do: RoleGrant.live?(user)
 
-  defp format_datetime(nil), do: ""
-
-  defp format_datetime(%DateTime{} = at),
-    do: Calendar.strftime(at, "%Y-%m-%d %H:%M UTC")
-
-  # A coarse countdown, because the exact remaining seconds of a grant is not a
-  # thing anyone acts on and rendering it would need a timer on the page.
-  defp remaining(%DateTime{} = at) do
-    case DateTime.diff(at, DateTime.utc_now(), :hour) do
-      hours when hours >= 48 -> gettext("%{count} days left", count: div(hours, 24))
-      hours when hours >= 1 -> gettext("%{count} hours left", count: hours)
-      _ -> gettext("under an hour left")
-    end
-  end
+  defp format_datetime(at), do: RoleGrantForm.format(at)
 
   defp status_options do
     [
@@ -578,7 +549,7 @@ defmodule KilnCMSWeb.AccountsLive do
                 <.badge :if={live_grant?(user)} variant="warning">
                   {gettext("%{role} · %{remaining}",
                     role: user.granted_role,
-                    remaining: remaining(user.granted_role_expires_at)
+                    remaining: time_left(user.granted_role_expires_at)
                   )}
                 </.badge>
                 <.badge :if={is_nil(user.confirmed_at)} variant="outline">
@@ -745,7 +716,7 @@ defmodule KilnCMSWeb.AccountsLive do
           {gettext("%{role} until %{when} — %{remaining}.",
             role: @account.granted_role,
             when: format_datetime(@account.granted_role_expires_at),
-            remaining: remaining(@account.granted_role_expires_at)
+            remaining: time_left(@account.granted_role_expires_at)
           )}
         </p>
         <button type="button" phx-click="revoke_grant" class="btn btn-sm btn-default">
@@ -779,7 +750,7 @@ defmodule KilnCMSWeb.AccountsLive do
             value="24"
             type="select"
             label={gettext("For")}
-            options={grant_durations()}
+            options={RoleGrantForm.durations()}
           />
         </div>
         <div>
@@ -822,7 +793,7 @@ defmodule KilnCMSWeb.AccountsLive do
               <.badge :if={live_grant?(membership)} variant="warning">
                 {gettext("%{role} · %{remaining}",
                   role: membership.granted_role,
-                  remaining: remaining(membership.granted_role_expires_at)
+                  remaining: time_left(membership.granted_role_expires_at)
                 )}
               </.badge>
               <.badge :if={membership.custom_role} variant="outline">
@@ -897,7 +868,16 @@ defmodule KilnCMSWeb.AccountsLive do
           <li :for={{label, count} <- @removing.counts}>{label}: {count}</li>
         </ul>
       </div>
-      <p :if={@removing.counts == []} class="text-sm text-base-content/60">
+      <p :if={@removing.unreadable != []} class="text-sm text-warning-ink" role="alert">
+        {gettext(
+          "Some content could not be counted (%{types}), so the numbers above may be low.",
+          types: Enum.join(@removing.unreadable, ", ")
+        )}
+      </p>
+      <p
+        :if={@removing.counts == [] and @removing.unreadable == []}
+        class="text-sm text-base-content/60"
+      >
         {gettext("This account has authored nothing.")}
       </p>
 

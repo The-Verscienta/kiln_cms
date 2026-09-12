@@ -19,15 +19,21 @@ defmodule KilnCMS.Accounts.Validations.NotLastAdmin do
   `User`'s policies wholesale, so a `forbid_if` here would never fire, and the
   refusal needs to carry a sentence rather than a bare `Forbidden`.
 
-  ## System calls pass
+  ## One named exemption, not "any system call"
 
-  Keyed on the actor, like `NotDemoSharedAccount`: a call with **no actor** is a
-  system call and is let through. `KilnCMS.Staging.Scrub` erases *every* account on
-  a clone of production — the last admin very much included, since the whole point
-  is that a staging environment holds no real operator's credentials, and it
-  provisions a fresh admin afterwards. Refusing that would break the scrub, and
-  for nothing: this guard exists to catch an operator's slip in the console, not
-  to stop the application from doing something it was written to do on purpose.
+  `KilnCMS.Staging.Scrub` erases *every* account on a clone of production — the
+  last admin very much included, since the whole point is that a staging
+  environment holds no real operator's credentials, and it provisions a fresh
+  admin afterwards. It opts out explicitly with
+  `context: %{last_admin_guard?: false}` (see `exempt/0`).
+
+  The exemption is keyed on that flag and **not** on a missing actor. An earlier
+  version let every actorless call through, which made `KilnCMS.Beta.Round` —
+  which seats testers through `:manage_access` with `authorize?: false` — able to
+  demote the instance's only admin, flipping `Bootstrap.bootstrapped?/0` false and
+  re-opening the anonymous first-run `:bootstrap_admin` action. A system call that
+  would lock every operator out is still refused unless it says, by name, that
+  locking them out is the point.
 
   ## Counted, not reserved
 
@@ -51,12 +57,10 @@ defmodule KilnCMS.Accounts.Validations.NotLastAdmin do
   require Ash.Query
 
   @impl true
-  def validate(changeset, opts, context) do
+  def validate(changeset, opts, _context) do
     demotion? = Keyword.get(opts, :demotes?, false) or demoting_an_admin?(changeset)
 
-    # `not is_nil/1`, not `&&`: `and` raises on a non-boolean left side, and a
-    # system call's actor is `nil`.
-    if not is_nil(context.actor) and demotion? and standing_admin?(changeset) and
+    if not exempt?(changeset) and demotion? and standing_admin?(changeset) and
          last_admin?(changeset.data.id) do
       {:error,
        field: :role,
@@ -65,6 +69,16 @@ defmodule KilnCMS.Accounts.Validations.NotLastAdmin do
       :ok
     end
   end
+
+  @doc """
+  The context that exempts a write from this guard — for
+  `KilnCMS.Staging.Scrub`'s whole-instance erasure only. See the moduledoc.
+  """
+  @spec exempt() :: map()
+  def exempt, do: %{last_admin_guard?: false}
+
+  defp exempt?(%{context: %{last_admin_guard?: false}}), do: true
+  defp exempt?(_changeset), do: false
 
   # The record was read through `KilnCMS.Accounts.Preparations.FoldRoleGrant`, so
   # `changeset.data.role` may be an *effective* tier — and an admin who is only

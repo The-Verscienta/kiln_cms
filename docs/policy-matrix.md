@@ -228,6 +228,14 @@ editor/admin only (privacy-first: no per-user data is stored anyway).
 | `expire_role_grant` | ✅ | ❌ | ❌ | ❌ (⚙️ AshOban sweep) |
 | auth flows (sign-in, register, reset) | ✅ | ✅ | ✅ | ✅ (AshAuthentication bypass) |
 
+"admin" throughout this section is `KilnCMS.Accounts.Checks.PlatformAdmin`: the
+**effective** platform role, which counts a temporary admin grant only until it
+expires — re-checked at authorization, so a long-lived LiveView or GraphQL
+socket's actor stops authorizing the moment its grant runs out.
+`:manage_access` and `:grant_temporary_role` additionally carry
+`Validations.StandingAdminOnly`: a *temporary* admin passes the policy but cannot
+confer or extend a tier.
+
 Field policy: the `role` field is visible only to **admins or the user
 themselves**; other readers see the record without `role`. `granted_role` and
 `granted_role_expires_at` are `public? false` and so reach no API surface at all —
@@ -303,9 +311,12 @@ deletable.
 | `create`, `update`, `destroy`, `grant_temporary_role` | ✅ | ❌ | ❌ | ❌ |
 | `expire_role_grant` | ✅ | ❌ | ❌ | ❌ (⚙️ AshOban sweep) |
 
-`expire_role_grant` needs a **bypass** rather than a policy: the write forbid
-below applies to it too, and Ash AND-combines every applicable policy, so a grant
-there would be overruled by that hard forbid.
+The AshOban grant is an **unconditional** `bypass AshOban.Checks.AshObanInteraction`
+at the top of the policies, not one scoped to `expire_role_grant`: the scheduler
+reads the rows to sweep through the primary read first, and a write-scoped grant
+leaves that read filtered to nothing. Every create/update also carries
+`Validations.StandingAdminOnly`, so a temporary platform admin cannot confer a
+site tier that would outlast its own grant.
 
 The read grants above are why both resources scope their deny to write actions
 only: Ash AND-combines every applicable policy, so a bare `policy always()`

@@ -216,6 +216,35 @@ defmodule KilnCMSWeb.TeamLiveTest do
       assert DateTime.diff(granted.granted_role_expires_at, DateTime.utc_now(), :day) >= 8
     end
 
+    # A crafted payload — blank role, unparseable date — used to validate as a
+    # no-op revoke and then crash formatting a nil expiry for the success flash.
+    test "a blank role with a garbage date is refused, not crashed on", %{conn: conn} do
+      colleague = authed_user(:viewer)
+
+      {:ok, membership} =
+        Accounts.create_org_membership(
+          %{
+            user_id: colleague.id,
+            organization_id: Accounts.default_org_id(),
+            role: :viewer
+          },
+          authorize?: false
+        )
+
+      {:ok, view, _html} = live(conn, ~p"/editor/team")
+
+      html =
+        render_hook(view, "grant_member_role", %{
+          "membership_id" => membership.id,
+          "role" => "",
+          "hours" => "24",
+          "until" => "nope"
+        })
+
+      assert html =~ "is required"
+      assert is_nil(reread_membership(membership).granted_role)
+    end
+
     test "offers no grant to a member who already holds the top tier", %{conn: conn} do
       colleague = authed_user(:viewer)
 

@@ -129,33 +129,53 @@ defmodule KilnCMS.Accounts.AccountRemovalTest do
     test "counts per type and skips empty ones", %{author: author} do
       for _ <- 1..3, do: post_by(author)
 
-      counts = AccountRemoval.authored_counts(author)
+      %{counts: counts, unreadable: []} = AccountRemoval.authored_counts(author)
 
       assert {"Post", 3} in counts
       refute Enum.any?(counts, fn {label, _} -> label == "Page" end)
     end
 
     test "is empty for an account that wrote nothing", %{author: author} do
-      assert AccountRemoval.authored_counts(author) == []
+      assert AccountRemoval.authored_counts(author) == %{counts: [], unreadable: []}
     end
   end
 
-  describe "ordering" do
-    # Content first, account second: a failure part-way through must leave an
-    # account that is still an account, with content an admin can see and finish.
-    test "a refused erasure leaves the disposition applied and the account intact", %{
-      admin: admin
-    } do
-      # The only admin on the instance, so `:anonymize` is refused by the
-      # last-admin guard — the cleanest way to exercise a failing erasure.
-      post = post_by(admin)
+  describe "preflight" do
+    # A refusal that is knowable before any write must be reported before any
+    # write. The previous order trashed every document and THEN reported only the
+    # refusal, as if nothing had happened.
+    test "an erasure the last-admin guard refuses touches no content", %{admin: admin} do
+      post = post_by(admin, publisher: admin)
 
-      assert {:error, _error} = AccountRemoval.remove(admin, :archive, actor: admin)
+      assert {:error, error} = AccountRemoval.remove(admin, :trash, actor: admin)
+      assert Exception.message(error) =~ "no admin"
 
-      assert {:ok, %{state: :archived}} = reread(post)
+      # Still published, not in the trash.
+      assert {:ok, %{state: :published}} = reread(post)
       still_there = Accounts.get_user!(admin.id, authorize?: false)
       assert is_nil(still_there.anonymized_at)
-      assert still_there.role == :admin
+    end
+
+    test "an actor the erasure policy refuses touches no content", %{author: author} do
+      editor = user(:editor)
+      post = post_by(author)
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               AccountRemoval.remove(author, :archive, actor: editor)
+
+      assert {:ok, %{state: :draft}} = reread(post)
+    end
+  end
+
+  describe "the result" do
+    test "reports which types could not be read, and none on a clean run", %{
+      admin: admin,
+      author: author
+    } do
+      post_by(author)
+
+      assert {:ok, %{affected: 1, failed: 0, unreadable: []}} =
+               AccountRemoval.remove(author, :archive, actor: admin)
     end
   end
 end

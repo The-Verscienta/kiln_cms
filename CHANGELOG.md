@@ -72,7 +72,19 @@ migration, a rewritten column, a dropped config key).
 - **A guard on the last admin.** Demoting or erasing the only platform admin is
   refused rather than silently locking every operator out of `/editor` — `/setup`
   does not come back, because the account still exists. A temporary admin does
-  not count as the other one.
+  not count as the other one, and the guard covers actorless system calls too;
+  only `Staging.Scrub` is exempt, by name.
+
+- **`KilnCMS.Accounts.Checks.PlatformAdmin` replaces
+  `actor_attribute_equals(:role, :admin)`** on every platform resource. It asks
+  for the *effective* role and re-checks a temporary grant's expiry at
+  authorization time, so a LiveView or GraphQL socket that mounted while a grant
+  was live stops authorizing as admin the moment it expires. Behaviour for
+  standing admins is unchanged.
+
+- **Erasure revokes API keys.** `:anonymize` deleted passkeys and IdP links and
+  revoked session tokens, but left API keys live — each a complete credential for
+  the erased account. It now revokes them, and clears any temporary grants.
 
 - **`ContentTypes.count!/2`** — the count `list!/2` would return rows for,
   without the rows, for compiled and dynamic types alike.

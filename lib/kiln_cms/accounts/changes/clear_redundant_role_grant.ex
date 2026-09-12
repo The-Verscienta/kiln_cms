@@ -31,7 +31,11 @@ defmodule KilnCMS.Accounts.Changes.ClearRedundantRoleGrant do
     # a folded record is NOT what that field holds.
     role = RoleGrant.standing_role(changeset)
 
-    if not is_nil(granted) and not RoleGrant.elevation?(granted, role) do
+    # `granted in tiers()`, not `not is_nil(granted)`: a record read with a
+    # narrowed `select` carries `%Ash.NotLoaded{}` here, which is not nil and is
+    # never an elevation — so the old test force-cleared a live grant that the
+    # write never meant to touch.
+    if granted in RoleGrant.tiers() and not RoleGrant.elevation?(granted, role) do
       changeset
       |> Ash.Changeset.force_change_attribute(:granted_role, nil)
       |> Ash.Changeset.force_change_attribute(:granted_role_expires_at, nil)

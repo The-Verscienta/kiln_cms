@@ -67,7 +67,12 @@ defmodule KilnCMS.Accounts.RoleGrant do
   """
   @spec effective_role(map()) :: atom() | nil
   def effective_role(record) do
-    if live?(record), do: Map.get(record, :granted_role), else: Map.get(record, :role)
+    # `standing_role/1`, not `Map.get(record, :role)`, on the expired branch: on a
+    # struct `FoldRoleGrant` folded while the grant was live, `role` still holds
+    # the granted tier. Reading it would make the check this function backs
+    # (`KilnCMS.Accounts.Checks.PlatformAdmin`) keep authorizing a long-lived
+    # actor whose grant has since run out.
+    if live?(record), do: Map.get(record, :granted_role), else: standing_role(record)
   end
 
   @doc """

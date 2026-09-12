@@ -57,14 +57,32 @@ Here `role` keeps the standing value for the whole life of the grant and
 `granted_role` shadows it, so expiry is a *comparison* rather than an event.
 Nothing has to run on time.
 
-**How it reaches the policies.** `role` on an actor struct is what a dozen
-`actor_attribute_equals(:role, :admin)` policies, `Scoping.effective_tier/2` and
-`LiveUserAuth.platform_admin?/1` read.
-`KilnCMS.Accounts.Preparations.FoldRoleGrant` — declared on both resources'
-top-level `preparations`, so it runs for *every* read action — presents a live
-grant as `role` on every record those reads return. Every actor in the system is
-loaded through a read, so a grant one millisecond past its expiry already
-authorizes as the standing role.
+**How it reaches the policies.** Two layers, because either alone has a hole.
+
+- `KilnCMS.Accounts.Preparations.FoldRoleGrant` — on both resources' top-level
+  `preparations`, so it runs for *every* read — presents a live grant as `role`
+  on the records a read returns. That is what makes rosters, the console and
+  anything reading `user.role` see the tier in force.
+- The **authorization decision** re-checks the expiry itself.
+  `KilnCMS.Accounts.Checks.PlatformAdmin` (on every platform resource, in place
+  of `actor_attribute_equals(:role, :admin)`), `Scoping.effective_tier/2` and
+  `LiveUserAuth.platform_admin_user?/1` all ask `RoleGrant.effective_role/1`,
+  which compares `granted_role_expires_at` with the clock *now*.
+
+The second layer exists because an actor struct can outlive its grant: a
+LiveView assigns `current_user` once at mount, and the GraphQL socket freezes it
+at connect. With only the fold, a grant that expired mid-session kept authorizing
+that session as an admin. With the check, it stops the second it expires,
+whether or not anything re-reads the account.
+
+**A grantee cannot grant.** `Validations.StandingAdminOnly` refuses
+`:manage_access` and `:grant_temporary_role` on `User`, and every create/update
+on `OrgMembership`, from an actor who is an admin only temporarily. Otherwise a
+grantee could write `role: :admin` onto their own account or renew their own grant
+indefinitely, and the bound would be whatever they chose. Ordinary admin work —
+password resets, signing someone out, removing an account — stays available to
+them. It is a validation rather than a policy because both resources open with an
+admin bypass that would short-circuit a `forbid_if`.
 
 **Only elevations.** A grant must name a higher tier than the row's own. A
 temporary *demotion* is a demotion: write it to `role`, where it holds until
@@ -79,9 +97,11 @@ unparseable value is refused with a message rather than becoming "no expiry",
 which `RoleGrant` would read as no grant at all.
 
 **The hourly sweep** (`AshOban` triggers `expire_role_grants` on both resources)
-clears the two dead columns and evicts the holder's live sockets. It is hygiene
-and session teardown, not enforcement — a missed run cannot leave anyone
-elevated.
+clears the two dead columns and evicts the holder's live sockets. Enforcement does
+not depend on it — see the two layers above. Both resources grant
+`AshOban.Checks.AshObanInteraction` as an **unconditional** bypass, like
+`KilnCMS.Accounts.Token`: the scheduler *reads* the rows before any worker writes,
+and a grant scoped to the write action leaves that read filtered to nothing.
 
 ### Reading a row you are about to write
 
@@ -112,11 +132,14 @@ address exists, and its sender drops the mail silently when the per-address
 budget is spent. All correct for a public endpoint that must not become an
 account oracle, all wrong for a button in the console.
 
-The admin path therefore **bypasses the per-address mail budget** and logs that
-it did. Nobody reaches it without an admin session, and on a spent budget the
-button would otherwise report success and send nothing. Erased accounts are
-refused: their password hash has no matching plaintext and their address is a
-`@deleted.invalid` tombstone.
+The admin path **still charges the per-address mail budget** — once, before a
+token is minted — and a spent budget is refused *by name* ("too many reset links
+in the last hour") instead of being dropped silently. The budget bounds mail to an
+address whoever asks, a temporary admin included, and it is shared with the
+owner's own requests rather than being a second, independent allowance. "Sent"
+means the mail reached the queue; an enqueue failure is reported, not crashed on.
+Erased accounts are refused: their password hash has no matching plaintext and
+their address is a `@deleted.invalid` tombstone.
 
 ## Signing an account out
 
@@ -170,10 +193,17 @@ live sockets are dropped. Nothing personal remains and nothing can sign in
 again. What remains is a referenced id, and the console says so rather than
 claiming a delete it did not do.
 
-**Content first, account second.** A failure part-way through then leaves an
-account that is still an account — recoverable, with its content in a mixed
-state an admin can see and finish. The other order would leave a tombstone whose
-content was never dealt with and whose author is no longer nameable.
+**Preflight, then content, then account.** Refusals that are knowable up front —
+the last-admin guard, a policy the actor fails — are checked before any document
+is touched, so a refused removal changes nothing. After that the content goes
+first, so a failure part-way through leaves an account that is still an account,
+with its content in a state the admin is told about.
+
+A content type whose documents **could not be read** is reported by name — on the
+confirmation screen ("could not be counted") and in the result — never folded into
+a success count. Erasure also clears the account's temporary grant and any
+per-site grants, and **revokes its API keys**: a surviving key would sign the
+tombstone straight back in.
 
 ## The last admin
 
@@ -185,3 +215,9 @@ fix is a release console.
 
 A temporary admin does not count as the other one. A grant expires, so an
 instance whose only admin holds one is the same lockout, merely deferred.
+
+The guard applies to system calls too — `KilnCMS.Beta.Round` seats testers through
+`:manage_access` with no actor, and demoting the sole admin there would also flip
+`Bootstrap.bootstrapped?/0` and re-open the anonymous first-run wizard. The one
+exemption is by name: `KilnCMS.Staging.Scrub`, which erases every account on a
+clone of production on purpose, passes `context: NotLastAdmin.exempt()`.

@@ -70,7 +70,7 @@ defmodule KilnCMS.Accounts.Role do
     # Role definition and assignment is org administration — admins only,
     # mirroring OrgMembership. Scoping resolution reads with `authorize?: false`.
     policy always() do
-      authorize_if actor_attribute_equals(:role, :admin)
+      authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
     end
   end
 

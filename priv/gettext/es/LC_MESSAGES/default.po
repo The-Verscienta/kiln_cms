@@ -105,10 +105,12 @@ msgid_plural "%{count} days"
 msgstr[0] "%{count} día"
 msgstr[1] "%{count} días"
 
-#: lib/kiln_cms_web/live/accounts_live.ex
+#: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format
-msgid "%{count} days left"
-msgstr "Quedan %{count} días"
+msgid "%{count} day left"
+msgid_plural "%{count} days left"
+msgstr[0] "Queda %{count} día"
+msgstr[1] "Quedan %{count} días"
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -154,10 +156,12 @@ msgid_plural "%{count} hours"
 msgstr[0] "%{count} hora"
 msgstr[1] "%{count} horas"
 
-#: lib/kiln_cms_web/live/accounts_live.ex
+#: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format
-msgid "%{count} hours left"
-msgstr "Quedan %{count} horas"
+msgid "%{count} hour left"
+msgid_plural "%{count} hours left"
+msgstr[0] "Queda %{count} hora"
+msgstr[1] "Quedan %{count} horas"
 
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #, elixir-autogen, elixir-format
@@ -1083,18 +1087,24 @@ msgstr "Cuenta conectada."
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
-msgid "Account erased and %{count} documents archived."
-msgstr "Cuenta borrada y %{count} documentos archivados."
+msgid "Account erased and %{count} document archived."
+msgid_plural "Account erased and %{count} documents archived."
+msgstr[0] "Cuenta borrada y %{count} documento archivado."
+msgstr[1] "Cuenta borrada y %{count} documentos archivados."
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
-msgid "Account erased and %{count} documents moved to trash."
-msgstr "Cuenta borrada y %{count} documentos enviados a la papelera."
+msgid "Account erased and %{count} document moved to trash."
+msgid_plural "Account erased and %{count} documents moved to trash."
+msgstr[0] "Cuenta borrada y %{count} documento enviado a la papelera."
+msgstr[1] "Cuenta borrada y %{count} documentos enviados a la papelera."
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
-msgid "Account erased. %{count} documents handled, %{failed} could not be — check the trash and the content list."
-msgstr "Cuenta borrada. %{count} documentos procesados, %{failed} no se pudieron — revise la papelera y la lista de contenidos."
+msgid "Account erased. %{count} document handled, %{failed} could not be — check the trash and the content list."
+msgid_plural "Account erased. %{count} documents handled, %{failed} could not be — check the trash and the content list."
+msgstr[0] "Cuenta borrada. %{count} documento procesado, %{failed} no se pudieron — revise la papelera y la lista de contenidos."
+msgstr[1] "Cuenta borrada. %{count} documentos procesados, %{failed} no se pudieron — revise la papelera y la lista de contenidos."
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
@@ -10354,6 +10364,16 @@ msgstr "Vista previa al compartir"
 msgid "Soft-deleted content. Restore brings it back to where it was. Trash is purged automatically after %{days} days."
 msgstr "Contenido eliminado de forma reversible. Restaurar lo devuelve a donde estaba. La papelera se vacía automáticamente después de %{days} días."
 
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Some content could not be counted (%{types}), so the numbers above may be low."
+msgstr "Parte del contenido no se pudo contar (%{types}), así que las cifras de arriba pueden ser bajas."
+
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Some content could not be read and was not handled: %{types}."
+msgstr "Parte del contenido no se pudo leer y no se procesó: %{types}."
+
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
 msgid "Some tiers grant an audience that is no longer configured. Restore it in config :kiln_cms, :audiences, or retire those tiers."
@@ -13269,6 +13289,11 @@ msgstr "activada"
 msgid "erased"
 msgstr "borrado"
 
+#: lib/kiln_cms_web/components/core_components.ex
+#, elixir-autogen, elixir-format
+msgid "expired"
+msgstr "caducado"
+
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "expires"
@@ -13867,7 +13892,7 @@ msgstr "sin confirmar"
 msgid "under a minute"
 msgstr "menos de un minuto"
 
-#: lib/kiln_cms_web/live/accounts_live.ex
+#: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format
 msgid "under an hour left"
 msgstr "menos de una hora"

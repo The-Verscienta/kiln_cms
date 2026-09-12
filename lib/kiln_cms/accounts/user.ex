@@ -171,7 +171,7 @@ defmodule KilnCMS.Accounts.User do
       :notify_on_return_to_draft,
       :notify_on_comment
     ] do
-      authorize_if actor_attribute_equals(:role, :admin)
+      authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
       authorize_if expr(id == ^actor(:id))
     end
 
@@ -247,6 +247,10 @@ defmodule KilnCMS.Accounts.User do
       require_atomic? false
       validate KilnCMS.Accounts.Validations.FieldGrantsShape
 
+      # A temporary admin must not be able to make itself a permanent one — the
+      # bound on a grant is otherwise whatever the grantee decides. See the module.
+      validate KilnCMS.Accounts.Validations.StandingAdminOnly
+
       # This action writes the STANDING role, so it must not be handed a record
       # whose live temporary role was folded into that field — the write would be
       # dropped as a no-op. See the validation module.
@@ -278,6 +282,9 @@ defmodule KilnCMS.Accounts.User do
       # The validation compares two attributes plus the standing role — no atomic
       # expression.
       require_atomic? false
+
+      # A grantee cannot extend or re-grant itself; see the validation module.
+      validate KilnCMS.Accounts.Validations.StandingAdminOnly
       validate KilnCMS.Accounts.Validations.TemporaryRoleGrant
 
       # Both directions matter (#675). Revoking early narrows a live socket's
@@ -800,9 +807,22 @@ defmodule KilnCMS.Accounts.User do
       authorize_if always()
     end
 
+    # The hourly `expire_role_grants` trigger runs with no actor. Unconditional,
+    # like `KilnCMS.Accounts.Token`'s: AshOban's scheduler *reads* the rows it will
+    # sweep through the primary read before any worker writes, and a grant scoped
+    # to `action(:expire_role_grant)` never matched that read — with a nil actor the
+    # self-only read policy below filtered it to zero rows, so the sweep (and the
+    # session eviction it exists for) silently never ran. `AshObanInteraction` only
+    # matches AshOban's own scheduler/worker context.
+    bypass AshOban.Checks.AshObanInteraction do
+      authorize_if always()
+    end
+
     # Admins manage all users — listing accounts and assigning roles (RBAC
-    # promotion happens here, never via self-registration).
-    bypass actor_attribute_equals(:role, :admin) do
+    # promotion happens here, never via self-registration). `PlatformAdmin`
+    # re-checks a temporary admin grant's expiry at authorization time; see
+    # that module.
+    bypass KilnCMS.Accounts.Checks.PlatformAdmin do
       authorize_if always()
     end
 
@@ -839,7 +859,7 @@ defmodule KilnCMS.Accounts.User do
     # Erasure is an operator action — admins only (covered by the admin bypass
     # above; this makes the intent explicit and forbids everyone else).
     policy action(:anonymize) do
-      authorize_if actor_attribute_equals(:role, :admin)
+      authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
     end
 
     # First-run bootstrap (#1317): anyone may create the first admin while no
@@ -865,20 +885,12 @@ defmodule KilnCMS.Accounts.User do
     # the admin bypass above; explicit here to forbid everyone else.
     #
     # `:grant_temporary_role` and `:send_password_reset` are the same kind of
-    # operator lever and get the same grant. `:expire_role_grant` does not: it is
-    # the sweep's write, so it is listed with the system-only actions below.
+    # operator lever and get the same grant. The two that confer a tier also carry
+    # `Validations.StandingAdminOnly`, because a *temporary* admin passes this.
+    # `:expire_role_grant` is reached by the sweep through the AshOban bypass at
+    # the top, and by an admin through the `PlatformAdmin` bypass.
     policy action([:manage_access, :grant_temporary_role, :send_password_reset]) do
-      authorize_if actor_attribute_equals(:role, :admin)
-    end
-
-    # The expiry sweep's write. Not `forbid_if always()` like the two below: an
-    # admin ending a grant by hand is a legitimate call (it is what
-    # `:grant_temporary_role` with both fields blank does), and there is nothing
-    # here to keep from them. This grant is what lets the trigger run with no
-    # actor at all.
-    policy action(:expire_role_grant) do
-      authorize_if AshOban.Checks.AshObanInteraction
-      authorize_if actor_attribute_equals(:role, :admin)
+      authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
     end
 
     # Billing entitlements are system-only: only `KilnCMS.Billing.Entitlements`

@@ -66,8 +66,15 @@ defmodule KilnCMS.Accounts.Preparations.FoldRoleGrant do
   # the standing `role` is behind the #183 field policy, so an anonymous author
   # byline read carries `%Ash.ForbiddenField{}` there — and writing a real tier
   # over it would disclose through the fold exactly what that policy withholds.
+  #
+  # `not RoleGrant.folded?/1` makes the fold idempotent. A second pass over an
+  # already-folded struct (an `Ash.load/2` re-runs the read's preparations over
+  # `:initial_data`) would otherwise stash the *granted* tier as `:standing_role`,
+  # and `standing_role/1` would lie from then on — to `ClearRedundantRoleGrant`,
+  # `NotLastAdmin` and `TemporaryRoleGrant` alike.
   defp fold(record) when is_struct(record) do
-    if Map.get(record, :role) in RoleGrant.tiers() and RoleGrant.live?(record) do
+    if not RoleGrant.folded?(record) and Map.get(record, :role) in RoleGrant.tiers() and
+         RoleGrant.live?(record) do
       record
       |> Ash.Resource.put_metadata(:standing_role, record.role)
       |> Map.put(:role, record.granted_role)

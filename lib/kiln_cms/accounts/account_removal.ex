@@ -84,7 +84,8 @@ defmodule KilnCMS.Accounts.AccountRemoval do
   @type result :: %{
           disposition: disposition(),
           affected: non_neg_integer(),
-          failed: non_neg_integer()
+          failed: non_neg_integer(),
+          unreadable: [String.t()]
         }
 
   @doc """
@@ -101,14 +102,36 @@ defmodule KilnCMS.Accounts.AccountRemoval do
   @spec remove(struct(), disposition(), keyword()) :: {:ok, result()} | {:error, term()}
   def remove(user, disposition, opts \\ []) when disposition in @dispositions do
     actor = Keyword.fetch!(opts, :actor)
-    {affected, failed} = dispose_content(user, disposition, actor)
 
-    case Accounts.anonymize_user(user, actor: actor) do
-      {:ok, _erased} ->
-        {:ok, %{disposition: disposition, affected: affected, failed: failed}}
+    # Preflight the erasure before touching any content. Some refusals are
+    # deterministic — `NotLastAdmin` on the instance's only admin, a policy the
+    # actor fails — and applying the disposition first would trash hundreds of
+    # documents and then report only the refusal, as if nothing had happened.
+    # Building the changeset runs the action's validations and `Ash.can?` runs its
+    # policies, without writing anything.
+    with :ok <- erasure_allowed(user, actor) do
+      %{affected: affected, failed: failed, unreadable: unreadable} =
+        dispose_content(user, disposition, actor)
 
-      {:error, error} ->
-        {:error, error}
+      with {:ok, _erased} <- Accounts.anonymize_user(user, actor: actor) do
+        {:ok,
+         %{
+           disposition: disposition,
+           affected: affected,
+           failed: failed,
+           unreadable: unreadable
+         }}
+      end
+    end
+  end
+
+  defp erasure_allowed(user, actor) do
+    changeset = Ash.Changeset.for_update(user, :anonymize, %{}, actor: actor)
+
+    cond do
+      not changeset.valid? -> {:error, Ash.Error.to_error_class(changeset.errors)}
+      not Ash.can?(changeset, actor) -> {:error, Ash.Error.Forbidden.exception([])}
+      true -> :ok
     end
   end
 
@@ -124,44 +147,63 @@ defmodule KilnCMS.Accounts.AccountRemoval do
   A system read: it spans organizations by design and no single actor's scope
   covers them all.
   """
-  @spec authored_counts(struct()) :: [{String.t(), non_neg_integer()}]
+  @spec authored_counts(struct()) :: %{
+          counts: [{String.t(), non_neg_integer()}],
+          unreadable: [String.t()]
+        }
   def authored_counts(user) do
-    for org_id <- Accounts.list_org_ids(), ct <- ContentTypes.all_for_org(org_id) do
-      {ct.label, count_authored(ct, user.id, org_id)}
-    end
-    |> Enum.reduce(%{}, fn {label, count}, acc -> Map.update(acc, label, count, &(&1 + count)) end)
-    |> Enum.reject(fn {_label, count} -> count == 0 end)
-    |> Enum.sort_by(fn {label, count} -> {-count, label} end)
+    results =
+      for org_id <- Accounts.list_org_ids(), ct <- ContentTypes.all_for_org(org_id) do
+        {ct.label, count_authored(ct, user.id, org_id)}
+      end
+
+    counts =
+      for({label, {:ok, count}} <- results, do: {label, count})
+      |> Enum.reduce(%{}, fn {label, count}, acc ->
+        Map.update(acc, label, count, &(&1 + count))
+      end)
+      |> Enum.reject(fn {_label, count} -> count == 0 end)
+      |> Enum.sort_by(fn {label, count} -> {-count, label} end)
+
+    # A type whose count failed is reported as unknown, not as zero: a silent 0
+    # on the confirmation screen agrees with a sweep that then skips the type.
+    unreadable = for({label, :error} <- results, do: label) |> Enum.uniq() |> Enum.sort()
+
+    %{counts: counts, unreadable: unreadable}
   end
 
   defp count_authored(ct, user_id, org_id) do
-    ContentTypes.count!(ct.type,
-      authorize?: false,
-      tenant: org_id,
-      query: [filter: Ash.Expr.expr(author_id == ^user_id)]
-    )
+    {:ok,
+     ContentTypes.count!(ct.type,
+       authorize?: false,
+       tenant: org_id,
+       query: [filter: Ash.Expr.expr(author_id == ^user_id)]
+     )}
   rescue
     # A type whose read fails (a dynamic type mid-migration, a tenant with no
-    # table yet) must not 500 the confirmation screen — these counts tell an
-    # admin how big the decision is, they don't gate it.
+    # table yet) must not 500 the confirmation screen — but it must not read as
+    # "nothing here" either.
     error ->
       Logger.warning("authored_counts failed for #{inspect(ct.type)}: #{inspect(error)}")
-      0
+      :error
   end
 
   # `:keep` is the absence of work, not a loop over every document doing nothing.
-  defp dispose_content(_user, :keep, _actor), do: {0, 0}
+  defp dispose_content(_user, :keep, _actor), do: %{affected: 0, failed: 0, unreadable: []}
 
   defp dispose_content(user, disposition, actor) do
     # Cross-organization by necessity: the account may have authored on several
-    # sites, and each write is re-scoped to its own org (#419). One org's failure
-    # is counted and the sweep continues — a partial disposition an admin can see
-    # beats abandoning the rest.
-    Enum.reduce(Accounts.list_org_ids(), {0, 0}, fn org_id, totals ->
-      Enum.reduce(ContentTypes.all_for_org(org_id), totals, fn ct, acc ->
-        dispose_type(ct, user, disposition, actor, org_id, acc, nil)
+    # sites, and each write is re-scoped to its own org (#419). One type's failure
+    # is recorded and the sweep continues — a partial disposition an admin is told
+    # about beats abandoning the rest.
+    {affected, failed, unreadable} =
+      Enum.reduce(Accounts.list_org_ids(), {0, 0, []}, fn org_id, totals ->
+        Enum.reduce(ContentTypes.all_for_org(org_id), totals, fn ct, acc ->
+          dispose_type(ct, user, disposition, actor, org_id, acc, nil)
+        end)
       end)
-    end)
+
+    %{affected: affected, failed: failed, unreadable: unreadable |> Enum.uniq() |> Enum.sort()}
   end
 
   # One type's documents in @page_size batches, walking oldest-first behind a
@@ -178,29 +220,51 @@ defmodule KilnCMS.Accounts.AccountRemoval do
   # in one transaction, so its documents can share a timestamp to the microsecond,
   # and a bare `inserted_at > cursor` would step over every sibling of the last
   # row in a batch — silently leaving content the admin asked to be dealt with.
-  defp dispose_type(ct, user, disposition, actor, org_id, {ok, failed}, cursor) do
-    batch = authored_batch(ct, user.id, org_id, cursor)
+  defp dispose_type(ct, user, disposition, actor, org_id, {ok, failed, unreadable}, cursor) do
+    case authored_batch(ct, user.id, org_id, cursor) do
+      # A failed read is NOT the end of the rows. Treating it as `[]` (shorter
+      # than a page, so "done") made a truncated sweep report every document
+      # handled and none failed, while the rest stayed published. The type is
+      # recorded so the result — and the admin's flash — says it was not finished.
+      :error ->
+        {ok, failed, [ct.label | unreadable]}
 
-    totals =
-      Enum.reduce(batch, {ok, failed}, fn record, {o, f} ->
-        case apply_disposition(disposition, ct.type, record, actor, org_id) do
-          {:error, error} ->
-            Logger.warning(
-              "Account removal could not #{disposition} #{ct.type} #{record.id}: #{inspect(error)}"
-            )
+      {:ok, batch} ->
+        {ok, failed} =
+          Enum.reduce(batch, {ok, failed}, &tally(&1, &2, disposition, ct.type, actor, org_id))
 
-            {o, f + 1}
+        if length(batch) < @page_size do
+          {ok, failed, unreadable}
+        else
+          last = List.last(batch)
 
-          _ok ->
-            {o + 1, f}
+          dispose_type(
+            ct,
+            user,
+            disposition,
+            actor,
+            org_id,
+            {ok, failed, unreadable},
+            {last.inserted_at, last.id}
+          )
         end
-      end)
+    end
+  end
 
-    if length(batch) < @page_size do
-      totals
-    else
-      last = List.last(batch)
-      dispose_type(ct, user, disposition, actor, org_id, totals, {last.inserted_at, last.id})
+  # One document: apply the disposition and count the outcome. A refused write is
+  # logged and counted as failed — never raised, so one stale lock does not
+  # abandon the rest of the sweep.
+  defp tally(record, {ok, failed}, disposition, type, actor, org_id) do
+    case apply_disposition(disposition, type, record, actor, org_id) do
+      {:error, error} ->
+        Logger.warning(
+          "Account removal could not #{disposition} #{type} #{record.id}: #{inspect(error)}"
+        )
+
+        {ok, failed + 1}
+
+      _ok ->
+        {ok + 1, failed}
     end
   end
 
@@ -209,19 +273,20 @@ defmodule KilnCMS.Accounts.AccountRemoval do
   # every org — which no actor's own scope covers. The *writes* below keep the
   # actor, so each one is still authorized and still attributed.
   defp authored_batch(ct, user_id, org_id, cursor) do
-    ContentTypes.list!(ct.type,
-      authorize?: false,
-      tenant: org_id,
-      query: [
-        filter: authored_filter(user_id, cursor),
-        sort: [inserted_at: :asc, id: :asc],
-        limit: @page_size
-      ]
-    )
+    {:ok,
+     ContentTypes.list!(ct.type,
+       authorize?: false,
+       tenant: org_id,
+       query: [
+         filter: authored_filter(user_id, cursor),
+         sort: [inserted_at: :asc, id: :asc],
+         limit: @page_size
+       ]
+     )}
   rescue
     error ->
       Logger.warning("Account removal could not read #{inspect(ct.type)}: #{inspect(error)}")
-      []
+      :error
   end
 
   defp authored_filter(user_id, nil), do: Ash.Expr.expr(author_id == ^user_id)
