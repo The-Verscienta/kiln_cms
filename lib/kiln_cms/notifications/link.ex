@@ -38,11 +38,22 @@ defmodule KilnCMS.Notifications.Link do
   """
   use KilnCMSWeb, :verified_routes
 
-  @typedoc "Anything carrying the anchor trio — a `Notification`, a `Task`, or a plain map."
+  @typedoc """
+  Anything carrying the anchor trio — a `Notification`, a `Task`, or a plain map.
+
+  Open (`optional(any()) => any()`) on purpose, and not merely for looseness:
+  a closed map type here is one dialyzer *narrows the caller's variable to*.
+  The bell renders `Link.editor_path(notification)` and
+  `NotificationText.headline(notification)` from the same comprehension
+  variable, and with the trio-only type the first call taught dialyzer the
+  value had no `:event` key — so it called the second unreachable. The type
+  was describing a requirement as if it were the whole shape.
+  """
   @type subject :: %{
           required(:content_type) => String.t(),
           required(:content_id) => String.t(),
-          optional(:block_id) => String.t() | nil
+          optional(:block_id) => String.t() | nil,
+          optional(any()) => any()
         }
 
   @doc """
