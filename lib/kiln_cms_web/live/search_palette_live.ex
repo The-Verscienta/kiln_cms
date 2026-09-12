@@ -4,11 +4,22 @@ defmodule KilnCMSWeb.SearchPaletteLive do
   search box that runs `KilnCMS.Search.global/2` across pages, posts, and media
   and links straight to where each result is edited. Each search is recorded for
   analytics. Editor-gated by the `:editor_routes` live session.
+
+  It also answers for **settings screens** (#1319). The palette used to be
+  content-only, so the fastest route to "where do I turn off full-text RSS" was
+  to read two dozen sidebar links; now "rss" surfaces Feeds here, matched by
+  name, group, description or keyword against `KilnCMSWeb.ConsoleNav` — the same
+  list the sidebar and the Configure hub draw from, filtered by the same role
+  gates, so the palette never offers a screen the viewer would only be bounced
+  from. Those matches are computed in memory and are deliberately left OUT of
+  the analytics `result_count`: that counter measures whether readers can find
+  *content*, and a query answered by a settings screen found no document.
   """
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.Search
   alias KilnCMS.Search.Highlight
+  alias KilnCMSWeb.ConsoleNav
 
   @impl true
   def mount(_params, _session, socket) do
@@ -18,6 +29,12 @@ defmodule KilnCMSWeb.SearchPaletteLive do
      |> assign(:query, "")
      |> assign(:searched, false)
      |> assign(:retention_days, KilnCMS.Analytics.SearchQuery.retention_days())
+     |> assign(:role, KilnCMSWeb.LiveUserAuth.effective_tier(socket))
+     |> assign(
+       :platform_admin?,
+       KilnCMSWeb.LiveUserAuth.platform_admin_user?(socket.assigns.current_user)
+     )
+     |> assign(:settings, [])
      |> assign(:results, empty())}
   end
 
@@ -39,7 +56,11 @@ defmodule KilnCMSWeb.SearchPaletteLive do
 
     socket =
       if query == "" do
-        socket |> assign(:query, "") |> assign(:searched, false) |> assign(:results, empty())
+        socket
+        |> assign(:query, "")
+        |> assign(:searched, false)
+        |> assign(:settings, [])
+        |> assign(:results, empty())
       else
         results =
           Search.global(query,
@@ -58,7 +79,14 @@ defmodule KilnCMSWeb.SearchPaletteLive do
 
         record_query_async(query, total, socket.assigns.current_org)
 
-        socket |> assign(:query, query) |> assign(:searched, true) |> assign(:results, results)
+        socket
+        |> assign(:query, query)
+        |> assign(:searched, true)
+        |> assign(
+          :settings,
+          ConsoleNav.search(query, socket.assigns.role, socket.assigns.platform_admin?)
+        )
+        |> assign(:results, results)
       end
 
     {:noreply, socket}
@@ -101,7 +129,10 @@ defmodule KilnCMSWeb.SearchPaletteLive do
 
   @impl true
   def render(assigns) do
-    assigns = assign(assigns, :count, result_count(assigns.results))
+    assigns =
+      assigns
+      |> assign(:count, result_count(assigns.results))
+      |> assign(:settings_count, length(assigns.settings))
 
     ~H"""
     <Layouts.console
@@ -114,7 +145,9 @@ defmodule KilnCMSWeb.SearchPaletteLive do
         <div>
           <h1 class="text-2xl font-semibold">{gettext("Search")}</h1>
           <p class="text-sm text-base-content/70">
-            {gettext("Find pages, posts, and media — press ⌘K / Ctrl-K from anywhere to jump here.")}
+            {gettext(
+              "Find pages, posts, media and settings screens — press ⌘K / Ctrl-K from anywhere to jump here."
+            )}
           </p>
           <p class="mt-1 text-xs text-base-content/70">
             {gettext(
@@ -125,14 +158,14 @@ defmodule KilnCMSWeb.SearchPaletteLive do
         </div>
 
         <form phx-change="search" id="palette-search" role="search">
-          <label for="palette-q" class="sr-only">{gettext("Search content")}</label>
+          <label for="palette-q" class="sr-only">{gettext("Search content and settings")}</label>
           <input
             id="palette-q"
             type="text"
             name="q"
             value={@query}
-            placeholder={gettext("Search content…")}
-            aria-label={gettext("Search content")}
+            placeholder={gettext("Search content and settings…")}
+            aria-label={gettext("Search content and settings")}
             aria-describedby="search-status"
             autocomplete="off"
             autofocus
@@ -144,17 +177,42 @@ defmodule KilnCMSWeb.SearchPaletteLive do
         <%!-- Announce result changes to screen readers (#176). --%>
         <p id="search-status" role="status" aria-live="polite" class="sr-only">
           <%= cond do %>
-            <% @searched and @count == 0 -> %>
+            <% @searched and @count + @settings_count == 0 -> %>
               {gettext("No results for “%{query}”.", query: @query)}
             <% @searched -> %>
-              {gettext("%{count} results for “%{query}”.", count: @count, query: @query)}
+              {gettext("%{count} results for “%{query}”.",
+                count: @count + @settings_count,
+                query: @query
+              )}
             <% true -> %>
           <% end %>
         </p>
 
-        <p :if={@searched and @count == 0} class="text-sm text-base-content/70">
+        <p :if={@searched and @count + @settings_count == 0} class="text-sm text-base-content/70">
           {gettext("No results for “%{query}”.", query: @query)}
         </p>
+
+        <%!-- Settings first (#1319): a settings hit is a place you meant to go,
+              while a content hit is a document you may or may not have meant.
+              Ranked and gated by `ConsoleNav.search/4`. --%>
+        <.section :if={@settings != []} title={gettext("Settings")}>
+          <.link
+            :for={item <- @settings}
+            navigate={item.path}
+            class="flex items-start gap-3 rounded px-3 py-2 hover:bg-base-200"
+          >
+            <.icon name={item.icon} class="mt-0.5 size-4 shrink-0 text-base-content/60" />
+            <span class="min-w-0">
+              <span class="font-medium">{item.label}</span>
+              <span class="ml-2 text-xs uppercase tracking-wide text-base-content/50">
+                {item.group}
+              </span>
+              <span :if={item[:description]} class="block text-xs text-base-content/70">
+                {item.description}
+              </span>
+            </span>
+          </.link>
+        </.section>
 
         <div :if={@count > 0} class="space-y-6">
           <.section :if={@results.pages != []} title={gettext("Pages")}>

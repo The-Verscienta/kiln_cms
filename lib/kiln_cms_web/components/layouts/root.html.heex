@@ -182,6 +182,28 @@
         if (localStorage.getItem("kiln:sidebar") === "collapsed") {
           document.documentElement.setAttribute("data-sidebar", "collapsed");
         }
+        // Collapsed Configure sections (layouts.ex `side_group/1`, #1319),
+        // restored here for the same reason and expressed as a <style> rather
+        // than as attributes on the nav: this runs in <head>, before the nav
+        // exists, and a rule in <head> is never patched away by LiveView. The
+        // keys are filtered to [a-z] before they reach a selector — they come
+        // from localStorage, which a page-level script could have written.
+        // app.js `applyNavClosed` rewrites this same element on every toggle.
+        const navClosed = (localStorage.getItem("kiln:nav-closed") || "")
+          .split(" ")
+          .filter((key) => /^[a-z]+$/.test(key));
+        if (navClosed.length) {
+          const style = document.createElement("style");
+          style.id = "kiln-nav-closed";
+          style.textContent = navClosed
+            .map(
+              (key) =>
+                `.side-group[data-nav-group="${key}"] .side-group-items{display:none}` +
+                `@media (min-width:64rem){[data-sidebar="collapsed"] .side-group[data-nav-group="${key}"] .side-group-items{display:block}}`
+            )
+            .join("");
+          document.head.append(style);
+        }
         window.addEventListener("storage", (e) => e.key === "phx:theme" && setTheme(e.newValue || "system"));
         
         window.addEventListener("phx:set-theme", (e) => setTheme(e.target.dataset.phxTheme));

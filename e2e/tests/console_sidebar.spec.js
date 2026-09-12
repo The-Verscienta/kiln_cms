@@ -56,6 +56,58 @@ test.describe("console sidebar", () => {
     await expect(page.locator(".side-tip")).toHaveCount(0);
   });
 
+  // #1319. The closed set lives in localStorage and is applied as a <style> in
+  // <head>, for the same reason the rail lives on <html>: LiveView patches the
+  // nav markup, so state kept ON those elements does not survive a navigation.
+  // Only a real browser can show that it does.
+  test("Configure sections collapse, and stay collapsed across navigation and reload", async ({
+    page,
+  }) => {
+    const head = sidebar(page).getByRole("button", { name: "Content model" });
+    const types = sidebar(page).getByRole("link", { name: "Content types", exact: true });
+    const branding = sidebar(page).getByRole("link", { name: "Branding", exact: true });
+
+    await expect(head).toHaveAttribute("aria-expanded", "true");
+    await expect(types).toBeVisible();
+
+    await head.click();
+    await expect(head).toHaveAttribute("aria-expanded", "false");
+    await expect(types).toBeHidden();
+    // Only that group: the others are untouched.
+    await expect(branding).toBeVisible();
+
+    // A live navigation re-renders the whole nav from the server, which draws
+    // every group expanded — the rule in <head> is what keeps this one closed.
+    await branding.click();
+    await expect(page).toHaveURL("/editor/branding");
+    await expect(types).toBeHidden();
+    await expect(head).toHaveAttribute("aria-expanded", "false");
+
+    // A full load restores it before first paint, like the rail.
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(types).toBeHidden();
+
+    await head.click();
+    await expect(types).toBeVisible();
+    await expect(head).toHaveAttribute("aria-expanded", "true");
+  });
+
+  // A group closed at full width must not strand its links on the rail, where
+  // there is no heading left to click.
+  test("the icon rail re-opens every collapsed section", async ({ page }) => {
+    const head = sidebar(page).getByRole("button", { name: "Content model" });
+    const types = sidebar(page).getByRole("link", { name: "Content types", exact: true });
+
+    await head.click();
+    await expect(types).toBeHidden();
+
+    await page.getByRole("button", { name: "Collapse sidebar" }).click();
+    await expect(types).toBeVisible();
+
+    await page.getByRole("button", { name: "Expand sidebar" }).click();
+    await expect(types).toBeHidden();
+  });
+
   test("the theme switch sets the theme from the sidebar", async ({ page }) => {
     const html = page.locator("html");
 

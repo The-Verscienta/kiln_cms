@@ -100,11 +100,14 @@ written as a function component or a raw `class="…"` in a template.
   Wrap wide tables in `overflow-x-auto`. Also styles the `<.table>` component.
 - **Shell nav** — `.side-link` (+ `aria-current="page"` for the active item:
   a bordered, raised row with the icon in ember ink), `.side-icon` (its
-  outlined icon), `.side-section` (sentence-case group label),
+  outlined icon), `.side-section` (sentence-case group label — a `<button>`
+  that collapses its `.side-group-items`, with `.side-chevron` for the caret),
+  `.side-group-instance` (the seam above the operator sections),
   `.side-icon-btn` (the bordered square button), `.side-theme` (segmented
   System / Light / Dark switch), `.side-account` + `.side-menu` (account row
   and its menu). Panel colours are the `sidebar`, `sidebar-raised` and
-  `sidebar-line` tokens.
+  `sidebar-line` tokens. Which groups are collapsed lives in a `<style>` in
+  `<head>`, not on these elements — see `Layouts.side_group/1`.
 - **Misc** — `.kbd` (keyboard hint, used by the ⌘K search affordance).
 
 ### Do / Don't

@@ -27,6 +27,40 @@ migration, a rewritten column, a dropped config key).
 
 ## [Unreleased]
 
+### Added
+
+- **A Configure hub at `/editor/configure`, and settings in ⌘K.** The console
+  had twenty-odd configuration screens and no screen that *was* configuration:
+  the one page named Settings is your own profile and 2FA, and the sidebar
+  offers names with no explanation attached, so finding "where do I turn off
+  full-text RSS" meant guessing between Feeds, Delivery and Code injection. The
+  hub lists every configuration screen, grouped, each with a line saying what
+  it is for, over a filter that matches those descriptions and a keyword list as
+  well as the names — "rss" finds Feeds, "stripe" finds Billing, "passkey" finds
+  your own settings. The ⌘K palette, until now content-only, answers the same
+  way and puts settings matches first (#1319).
+
+### Changed
+
+- **The Configure sidebar sections collapse, and the operator screens are drawn
+  apart from the rest.** Five sections — Site, Content model, Capture,
+  Integrations, Operations — each with a heading you can click shut; which ones
+  are closed is remembered per browser and restored before first paint, so a
+  collapsed section never flashes open on a navigation. Operations (Team,
+  Governance, API keys, Mail, Backups, Billing, System) sits below a rule,
+  because changing the mail transport or the build is not the same kind of act
+  as changing this site's branding. The per-user screen is now labelled **Your
+  settings** under an **Account** heading, so nothing named "Settings" looks
+  like it holds the site's configuration (#1319).
+
+- The System screen said it showed "the Kiln core this instance is built from" —
+  release-engineering vocabulary on a page an org admin can reach. It now says
+  which version of the software is running here (#1319).
+
+- `KilnCMSWeb.ConsoleNav` is the console's navigation map: the sidebar, the
+  Configure hub and the palette all render from it, so a new settings screen is
+  added in one place and appears in all three (#1319).
+
 ## [0.8.0] - 2026-09-11
 
 ### Added

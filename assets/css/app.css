@@ -403,12 +403,44 @@
   .side-link[aria-current] .side-icon {
     color: var(--color-primary-ink);
   }
+  /* A Configure section head. A <button> that collapses the group below it
+     (#1319): the closed set lives in a <style> in <head> that app.js writes and
+     root.html.heex restores before first paint, so nothing here carries the
+     state — see `Layouts.side_group/1` for why that indirection is load-bearing.
+     Full width so the whole row is the hit target. */
   .side-section {
-    padding: 0 0.65rem;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    width: 100%;
+    padding: 0.2rem 0.65rem;
     margin: 1.25rem 0 0.4rem;
+    border-radius: var(--radius-sm);
     font-size: 0.78rem;
     font-weight: 600;
     color: color-mix(in oklch, var(--color-base-content) 66%, transparent);
+    transition: color 0.12s;
+  }
+  .side-section:hover {
+    color: var(--color-base-content);
+  }
+  .side-chevron {
+    opacity: 0.65;
+    transition: transform 0.15s;
+  }
+  .side-section[aria-expanded="false"] .side-chevron {
+    transform: rotate(-90deg);
+  }
+  /* The operator sections — backups, mail transport, the build — are not
+     day-to-day site admin, so the reader gets a visible seam rather than one
+     more heading in the same rhythm (#1319). */
+  .side-group-instance {
+    margin-top: 0.9rem;
+    padding-top: 0.15rem;
+    border-top: 1px solid var(--color-sidebar-line);
+  }
+  .side-group-instance > .side-section {
+    margin-top: 0.7rem;
   }
   .side-icon-btn {
     display: inline-grid;
@@ -572,14 +604,22 @@
       gap: 0;
       padding-inline: 0;
     }
-    /* A group head becomes a hairline; its text stays for screen readers. */
+    /* A group head becomes a hairline; its text stays for screen readers. The
+       rail has no room to draw a collapse control, and app.js's injected rules
+       re-open every group at this width, so the button is inert here — but it
+       stays focusable and still carries its accessible name. */
     [data-sidebar="collapsed"] .side-section {
+      display: block;
       height: 1px;
+      width: auto;
       margin: 0.9rem 0.4rem;
       padding: 0;
       overflow: hidden;
       font-size: 0;
       background: var(--color-sidebar-line);
+    }
+    [data-sidebar="collapsed"] .side-group-instance {
+      border-top: 0;
     }
     [data-sidebar="collapsed"] .side-theme {
       grid-template-columns: 1fr;

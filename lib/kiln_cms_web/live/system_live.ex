@@ -147,7 +147,10 @@ defmodule KilnCMSWeb.SystemLive do
           </.link>
           <h1 class="mt-1 text-2xl font-semibold">{gettext("System")}</h1>
           <p class="text-sm text-base-content/70">
-            {gettext("The Kiln core this instance is built from, and how to update it.")}
+            <%!-- "The Kiln core this instance is built from" was release-engineering
+                  vocabulary on a screen an org admin can reach (#1319). Same
+                  facts, named the way the reader would name them. --%>
+            {gettext("Which version of the software is running here, and how to update it.")}
           </p>
         </div>
 

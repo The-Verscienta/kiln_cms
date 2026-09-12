@@ -1088,7 +1088,52 @@ document.addEventListener("focusin", onSideTipTarget)
 document.addEventListener("scroll", hideSideTip, true)
 window.addEventListener("phx:page-loading-start", hideSideTip)
 
+// Collapsed Configure sections (Layouts.side_group/1, #1319). The closed set
+// lives in localStorage and is applied as a <style> in <head>: root.html.heex
+// writes it before first paint, this keeps it in step. A stylesheet rule rather
+// than a class on each group because the nav markup is LiveView's to patch —
+// anything we set on those elements is gone after the next navigation, while
+// <head> is never patched. The rules are unlayered, so they outrank app.css's
+// `@layer components`; the paired media query re-opens every group on the icon
+// rail, where a collapsed group would have no control to reopen it.
+const NAV_CLOSED_KEY = "kiln:nav-closed"
+
+const navClosed = () =>
+  new Set((localStorage.getItem(NAV_CLOSED_KEY) || "").split(" ").filter(k => /^[a-z]+$/.test(k)))
+
+const applyNavClosed = closed => {
+  let style = document.getElementById("kiln-nav-closed")
+  if (!style) {
+    style = Object.assign(document.createElement("style"), {id: "kiln-nav-closed"})
+    document.head.append(style)
+  }
+  style.textContent = [...closed]
+    .map(
+      k =>
+        `.side-group[data-nav-group="${k}"] .side-group-items{display:none}` +
+        `@media (min-width:64rem){[data-sidebar="collapsed"] .side-group[data-nav-group="${k}"] .side-group-items{display:block}}`
+    )
+    .join("")
+  // The server renders every head expanded; say which ones aren't.
+  document.querySelectorAll("[data-nav-toggle]").forEach(button => {
+    button.setAttribute("aria-expanded", closed.has(button.dataset.navToggle) ? "false" : "true")
+  })
+}
+
+// Re-sync after a live navigation, which re-renders the nav from the server.
+const syncNavClosed = () => applyNavClosed(navClosed())
+document.addEventListener("DOMContentLoaded", syncNavClosed)
+window.addEventListener("phx:page-loading-stop", syncNavClosed)
+
 document.addEventListener("click", e => {
+  const groupToggle = e.target.closest("[data-nav-toggle]")
+  if (groupToggle) {
+    const closed = navClosed()
+    const key = groupToggle.dataset.navToggle
+    closed.has(key) ? closed.delete(key) : closed.add(key)
+    localStorage.setItem(NAV_CLOSED_KEY, [...closed].join(" "))
+    applyNavClosed(closed)
+  }
   if (e.target.closest("[data-sidebar-toggle]")) {
     const collapse = document.documentElement.dataset.sidebar !== "collapsed"
     if (collapse) document.documentElement.dataset.sidebar = "collapsed"

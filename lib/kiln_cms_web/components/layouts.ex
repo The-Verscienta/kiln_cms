@@ -12,6 +12,7 @@ defmodule KilnCMSWeb.Layouts do
   embed_templates "layouts/*"
 
   alias KilnCMS.Branding
+  alias KilnCMSWeb.ConsoleNav
 
   @doc """
   The masked CSRF token for the `<meta>` tag in `root.html.heex`, or `nil` if
@@ -636,9 +637,11 @@ defmodule KilnCMSWeb.Layouts do
   defp user_initial(%{email: email}), do: user_initial(%{email: to_string(email)})
   defp user_initial(_), do: "?"
 
-  # The console sidebar navigation: two role-gated groups (author + configure)
-  # plus any plugin-contributed items. `active` (an atom like :content) lights
-  # the matching link via aria-current, which the `.side-link` style keys off.
+  # The console sidebar navigation. The map itself — grouping, role gates,
+  # descriptions — lives in `KilnCMSWeb.ConsoleNav`, which the Configure hub
+  # and the ⌘K palette read too (#1319); this function is only its markup.
+  # `active` (an atom like :content) lights the matching link via aria-current,
+  # which the `.side-link` style keys off.
   attr :current_user, :map, default: nil
   attr :current_org, :map, default: nil
   attr :active, :atom, default: nil
@@ -661,271 +664,12 @@ defmodule KilnCMSWeb.Layouts do
         assigns[:current_org] || KilnCMS.Accounts.default_org_id()
       )
 
-    multi_locale? = length(KilnCMS.I18n.locales()) > 1
-
-    author = [
-      %{
-        key: :overview,
-        label: gettext("Home"),
-        path: ~p"/editor/overview",
-        icon: "hero-squares-2x2"
-      },
-      %{key: :content, label: gettext("Content"), path: ~p"/editor", icon: "hero-document-text"},
-      %{key: :media, label: gettext("Media"), path: ~p"/media", icon: "hero-photo"},
-      %{key: :taxonomy, label: gettext("Taxonomy"), path: ~p"/editor/taxonomy", icon: "hero-tag"},
-      %{key: :menus, label: gettext("Menus"), path: ~p"/editor/menus", icon: "hero-bars-3"},
-      %{
-        key: :calendar,
-        label: gettext("Calendar"),
-        path: ~p"/editor/calendar",
-        icon: "hero-calendar-days"
-      },
-      %{
-        key: :tasks,
-        label: gettext("Tasks"),
-        path: ~p"/editor/tasks",
-        icon: "hero-clipboard-document-check"
-      },
-      # Content releases (#500) — editorial planning, so it sits with the author
-      # group next to the calendar it plots onto, not with the admin tools. The
-      # admin-only half (schedule/publish/roll back) is gated on the page.
-      %{
-        key: :releases,
-        label: gettext("Releases"),
-        path: ~p"/editor/releases",
-        icon: "hero-rocket-launch"
-      },
-      multi_locale? &&
-        %{
-          key: :translations,
-          label: gettext("Translations"),
-          path: ~p"/editor/translations",
-          icon: "hero-language"
-        },
-      %{
-        key: :analytics,
-        label: gettext("Analytics"),
-        path: ~p"/editor/analytics",
-        icon: "hero-chart-bar"
-      },
-      # Outbound broken links (#474). In the author group, not the admin one:
-      # fixing a dead citation is editorial work. The opt-in switch on the page
-      # is what admins own.
-      %{
-        key: :links,
-        label: gettext("Links"),
-        path: ~p"/editor/links",
-        icon: "hero-link-slash"
-      }
-    ]
-
     # The instance-wide consoles — Team, Billing, System, Mail, Backups, API
-    # keys — gate their pages on the GLOBAL role (`LiveUserAuth.platform_admin?/1`,
-    # #419/#1160), not on the per-org tier `role` above. A per-org admin passes
-    # `role == :admin` and would be shown links those pages only bounce, so the
-    # links ask the same predicate the pages do.
+    # keys — gate their pages on the GLOBAL role
+    # (`LiveUserAuth.platform_admin_user?/1`, #419/#1160), not on the per-org
+    # tier `role` above. `ConsoleNav` drops the `platform: true` items for
+    # anyone else, so the links ask the same predicate the pages do.
     platform_admin? = KilnCMSWeb.LiveUserAuth.platform_admin_user?(assigns[:current_user])
-
-    settings = %{
-      key: :settings,
-      label: gettext("Settings"),
-      path: ~p"/editor/settings",
-      icon: "hero-cog-6-tooth"
-    }
-
-    configure_groups =
-      if role == :admin do
-        [
-          %{
-            label: gettext("Content model"),
-            items: [
-              %{
-                key: :types,
-                label: gettext("Content types"),
-                path: ~p"/editor/types",
-                icon: "hero-cube"
-              },
-              %{
-                key: :fields,
-                label: gettext("Fields"),
-                path: ~p"/editor/fields",
-                icon: "hero-adjustments-horizontal"
-              },
-              # Next to Content types, not down with Mail: what a feed carries
-              # is a statement about content types, and the "has a public
-              # index" switch this page defers to lives two items up (#719).
-              %{key: :feeds, label: gettext("Feeds"), path: ~p"/editor/feeds", icon: "hero-rss"}
-            ]
-          },
-          %{
-            label: gettext("Capture"),
-            items: [
-              %{
-                key: :forms,
-                label: gettext("Forms"),
-                path: ~p"/editor/forms",
-                icon: "hero-clipboard-document-list"
-              },
-              %{
-                key: :funnels,
-                label: gettext("Funnels"),
-                path: ~p"/editor/funnels",
-                icon: "hero-funnel"
-              },
-              # Content experiments (#982). Beside Funnels: both are "measure
-              # what this content does", and an experiment's goal can be a funnel.
-              %{
-                key: :experiments,
-                label: gettext("Experiments"),
-                path: ~p"/editor/experiments",
-                icon: "hero-beaker"
-              },
-              # Per-site claim checking (#857). Called "Claim checking" rather
-              # than "Compliance", which is already the Governance page's
-              # subject and the name of the editor panel this switches on — an
-              # admin looking for one should not have to guess which of two
-              # items owns it.
-              %{
-                key: :compliance,
-                label: gettext("Claim checking"),
-                path: ~p"/editor/compliance",
-                icon: "hero-scale"
-              }
-            ]
-          },
-          %{
-            label: gettext("Delivery"),
-            items: [
-              %{
-                key: :branding,
-                label: gettext("Branding"),
-                path: ~p"/editor/branding",
-                icon: "hero-swatch"
-              },
-              %{
-                key: :code_injection,
-                label: gettext("Code injection"),
-                path: ~p"/editor/code-injection",
-                icon: "hero-code-bracket"
-              },
-              %{
-                key: :redirects,
-                label: gettext("Redirects"),
-                path: ~p"/editor/redirects",
-                icon: "hero-arrow-uturn-right"
-              },
-              %{key: :slugs, label: gettext("Slugs"), path: ~p"/editor/slugs", icon: "hero-link"},
-              %{
-                key: :social,
-                label: gettext("Social"),
-                path: ~p"/editor/social",
-                icon: "hero-megaphone"
-              }
-            ]
-          },
-          %{
-            label: gettext("Ops"),
-            items: [
-              %{
-                key: :webhooks,
-                label: gettext("Webhooks"),
-                path: ~p"/editor/webhooks",
-                icon: "hero-bolt"
-              },
-              # ActivityPub federation (#967) — beside Webhooks: both are "what
-              # this site tells other servers", and both are admin-only.
-              %{
-                key: :federation,
-                label: gettext("Federation"),
-                path: ~p"/editor/federation",
-                icon: "hero-globe-alt"
-              },
-              %{
-                key: :automation,
-                label: gettext("Automation"),
-                path: ~p"/editor/automation",
-                icon: "hero-cpu-chip"
-              },
-              %{
-                platform: true,
-                key: :backups,
-                label: gettext("Backups"),
-                path: ~p"/editor/backups",
-                icon: "hero-archive-box"
-              },
-              %{
-                platform: true,
-                key: :mail,
-                label: gettext("Mail"),
-                path: ~p"/editor/mail",
-                icon: "hero-envelope"
-              },
-              %{
-                key: :newsletter,
-                label: gettext("Newsletter"),
-                path: ~p"/editor/newsletter",
-                icon: "hero-megaphone"
-              }
-            ]
-          },
-          %{
-            label: gettext("Org"),
-            items: [
-              %{
-                platform: true,
-                key: :team,
-                label: gettext("Team"),
-                path: ~p"/editor/team",
-                icon: "hero-user-group"
-              },
-              %{
-                key: :governance,
-                label: gettext("Governance"),
-                path: ~p"/editor/governance",
-                icon: "hero-shield-check"
-              },
-              %{
-                platform: true,
-                key: :billing,
-                label: gettext("Billing"),
-                path: ~p"/editor/billing",
-                icon: "hero-credit-card"
-              },
-              %{
-                platform: true,
-                key: :api_keys,
-                label: gettext("API keys"),
-                path: ~p"/editor/api-keys",
-                icon: "hero-key"
-              },
-              %{
-                key: :trash,
-                label: gettext("Trash"),
-                path: ~p"/editor/trash",
-                icon: "hero-trash"
-              },
-              %{
-                platform: true,
-                key: :system,
-                label: gettext("System"),
-                path: ~p"/editor/system",
-                icon: "hero-server-stack"
-              },
-              settings
-            ]
-          }
-        ]
-      else
-        [%{label: gettext("Configure"), items: [settings]}]
-      end
-
-    # Drop the platform-only items for anyone else, then any group left empty.
-    configure_groups =
-      configure_groups
-      |> Enum.map(fn group ->
-        %{group | items: visible_nav_items(group.items, platform_admin?)}
-      end)
-      |> Enum.reject(&(&1.items == []))
 
     plugin =
       for item <- Kiln.Plugins.nav_items(), nav_item_visible?(item, role) do
@@ -934,33 +678,85 @@ defmodule KilnCMSWeb.Layouts do
 
     assigns =
       assigns
-      |> assign(:author, Enum.filter(author, & &1))
-      |> assign(:configure_groups, configure_groups)
+      |> assign(:author, ConsoleNav.author_items())
+      |> assign(:configure_groups, ConsoleNav.configure_groups(role, platform_admin?))
+      |> assign(:show_hub?, role == :admin)
       |> assign(:plugin, plugin)
 
     ~H"""
     <.side_link :for={i <- @author} item={i} active={@active} />
-    <div :for={group <- @configure_groups}>
-      <p class="side-section">{group.label}</p>
-      <.side_link :for={i <- group.items} item={i} active={@active} />
-    </div>
+    <%!-- The Configure hub (#1319): one screen that names every configuration
+          screen and says what it is for. It sits above the groups rather than
+          inside one because it is the way in when you do not yet know which
+          group owns the thing you came to change. --%>
+    <.side_link
+      :if={@show_hub?}
+      item={
+        %{
+          key: :configure,
+          label: gettext("Configure"),
+          path: ~p"/editor/configure",
+          icon: "hero-cog-6-tooth"
+        }
+      }
+      active={@active}
+      class="mt-5"
+    />
+    <.side_group :for={group <- @configure_groups} group={group} active={@active} />
     <.side_link :for={i <- @plugin} item={i} active={@active} />
     """
   end
 
-  # Items tagged `platform: true` are for platform admins alone (see the
-  # comment on `platform_admin?` in `console_nav/1`).
-  defp visible_nav_items(items, true = _platform_admin?), do: items
-  defp visible_nav_items(items, false), do: Enum.reject(items, &Map.get(&1, :platform, false))
+  # One collapsible Configure section.
+  #
+  # The heading is a real <button>, and what it collapses is a plain <div> — not
+  # a <details>/<summary>, because the open/closed state has to survive both a
+  # LiveView patch and a full navigation, with no server round-trip and no flash
+  # of the wrong state. It does that by living in a <style> element in <head>
+  # (app.js `applyNavClosed`, written before first paint by root.html.heex):
+  # LiveView never patches <head>, so a rule there outlives every re-render of
+  # this markup, whereas an attribute app.js set on THIS element would be
+  # reverted by the next patch that touched it. `aria-expanded` renders open and
+  # is re-synced by that same function.
+  #
+  # A `scope: :instance` group draws a rule above itself: operator screens —
+  # backups, mail transport, the build — are not day-to-day site admin, and the
+  # reader should be able to see where one ends and the other begins (#1319).
+  attr :group, :map, required: true
+  attr :active, :atom, default: nil
+
+  defp side_group(assigns) do
+    ~H"""
+    <div
+      class={["side-group", @group.scope == :instance && "side-group-instance"]}
+      data-nav-group={@group.key}
+    >
+      <button
+        type="button"
+        class="side-section"
+        data-nav-toggle={@group.key}
+        aria-expanded="true"
+        aria-controls={"side-group-" <> @group.key}
+      >
+        <span class="side-text min-w-0 flex-1 truncate text-left">{@group.label}</span>
+        <.icon name="hero-chevron-down" class="side-text side-chevron size-3.5 shrink-0" />
+      </button>
+      <div class="side-group-items" id={"side-group-" <> @group.key}>
+        <.side_link :for={i <- @group.items} item={i} active={@active} />
+      </div>
+    </div>
+    """
+  end
 
   attr :item, :map, required: true
   attr :active, :atom, default: nil
+  attr :class, :string, default: nil
 
   defp side_link(assigns) do
     ~H"""
     <.link
       navigate={@item.path}
-      class="side-link"
+      class={["side-link", @class]}
       aria-current={@item.key == @active && "page"}
       data-side-tip={@item.label}
     >
