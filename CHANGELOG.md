@@ -37,6 +37,16 @@ migration, a rewritten column, a dropped config key).
   every other field — an empty email, an invalid reset token — stays quiet until
   submit, as before.
 
+- **The new-password button says "Change password".** The button on the page
+  behind a reset link read "Reset password with token" — the name of the Ash
+  action, humanized, on the same button that then said "Changing password ..."
+  while it worked. `KilnCMSWeb.AuthOverrides` had asked for the right wording
+  since it was written, but `AshAuthentication.Phoenix.Components.Reset.Form`
+  declares no `button_text`, and a setting naming a key its component does not
+  declare compiles and is then read by nothing. Kiln's own form component
+  declares it. A new test checks every setting in that file the same way, so the
+  next one that lands on a key upstream renamed fails instead of going quiet.
+
 ## [0.8.0] - 2026-09-11
 
 ### Added
