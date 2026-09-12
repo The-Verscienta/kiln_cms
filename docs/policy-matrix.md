@@ -233,7 +233,7 @@ themselves**; other readers see the record without `role`.
 `disable_totp`, `regenerate_totp_recovery_codes`) refuse every non-admin actor
 with `DemoAccountLocked`, as do `Passkey.register` and `Passkey.destroy` below.
 Every visitor to a demo is the same shared account. See
-[`demo-mode.md`](demo-mode.md#7-the-shared-accounts-credentials).
+[`demo-mode.md`](demo-mode.md#7-credentials-for-the-shared-account).
 
 `Token` — every AshAuthentication action is gated to the AshAuthentication
 interaction bypass, and the nightly expunge trigger to the AshOban one. There are

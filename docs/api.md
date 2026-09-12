@@ -482,7 +482,7 @@ paywalled; it never appears in a feed, which anonymous readers and third-party
 aggregators fetch. The same rule holds for the optional Meilisearch index (#1006)
 — it has no audience facet and its queries are anonymous, so a gated document is
 kept out of it and removed from it when gating is applied. See
-[`meilisearch.md`](meilisearch.md#what-is-in-the-index--and-what-is-not-1006).
+*What is in the index — and what is not (#1006)* in [`meilisearch.md`](meilisearch.md).
 
 **A type syndicates if it already has a public index.** For a dynamic content
 type that is the per-type "Has a public index of published entries" checkbox in

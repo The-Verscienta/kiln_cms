@@ -353,7 +353,7 @@ default. `GET /api/json/open_api` describes each of them on the resource's
 
 | Field | Type | Filterable / sortable |
 |-------|------|------------------------|
-| `path` | string | No — full public URL path (`/blog/my-post`); see [URLs, pathauto & redirects](#urls-pathauto--redirects) |
+| `path` | string | No — full public URL path (`/blog/my-post`); see *URLs, pathauto & redirects* below |
 | `published` | boolean | Yes — convenience flag for `state == :published` (a real SQL expression, unlike the rest of this table) |
 | `word_count` | integer | No — total word count across the block tree |
 | `reading_time_minutes` | integer | No — `word_count` ÷ the configured words-per-minute rate |

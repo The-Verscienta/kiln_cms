@@ -1,7 +1,7 @@
 defmodule KilnCMS.Accounts.DemoCredentialsLockTest do
   @moduledoc """
   Demo mode fixes the shared account's credentials (`docs/demo-mode.md`,
-  "The shared account's credentials"): every visitor to a demo signs in as the
+  "Credentials for the shared account"): every visitor to a demo signs in as the
   same account, so a password or second factor one of them set would lock out
   the rest until the next reset. A non-admin is refused every change to how an
   account signs in; admins still manage accounts.

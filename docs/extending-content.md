@@ -239,8 +239,8 @@ config :kiln_cms, :plugins, [Ratings.Plugin]
 A `Kiln.Plugin` module contributes, per callback (all optional): **block
 types** (`Kiln.Block` modules — they join the storage union, editor palette,
 firing, search and the XLIFF translation export automatically; see
-[localization workflows](localization-workflows.md#translation-vendors--xliff-20-exportimport)
-for the `translatable:` field option that decides what a translator sees),
+*Translation vendors — XLIFF 2.0 export/import* in
+[localization workflows](localization-workflows.md) for the `translatable:` field option that decides what a translator sees),
 **custom field types** (`Kiln.FieldType`
 modules — admins pick them in the fields admin like any built-in; the
 plugin's `cast/2` coerces + validates every content write to a JSON-native
