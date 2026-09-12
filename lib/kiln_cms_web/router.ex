@@ -381,7 +381,10 @@ defmodule KilnCMSWeb.Router do
         {KilnCMSWeb.LiveUserAuth, :current_user},
         {KilnCMSWeb.LiveUserAuth, :assign_current_org},
         {KilnCMSWeb.LiveUserAuth, :live_admin_required},
-        {KilnCMSWeb.LiveUserAuth, :restore_locale}
+        {KilnCMSWeb.LiveUserAuth, :restore_locale},
+        # As in `:editor_routes` — these pages render the same console shell,
+        # so the bell in their top bar has to be live too (#1320).
+        {KilnCMSWeb.LiveNotifications, :notifications}
       ] do
       live "/editor/trash", TrashLive, :index
       live "/editor/webhooks", WebhookLive, :index

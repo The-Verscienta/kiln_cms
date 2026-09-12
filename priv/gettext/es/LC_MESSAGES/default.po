@@ -6274,6 +6274,7 @@ msgid "March"
 msgstr "marzo"
 
 #: lib/kiln_cms_web/live/inbox_live.ex
+#: lib/kiln_cms_web/live/notification_bell.ex
 #, elixir-autogen, elixir-format
 msgid "Mark all read"
 msgstr "Marcar todo como leído"
@@ -7387,6 +7388,11 @@ msgstr "Nada que renombrar"
 msgid "Nothing unread."
 msgstr "Nada sin leer."
 
+#: lib/kiln_cms_web/live/notification_bell.ex
+#, elixir-autogen, elixir-format
+msgid "Nothing yet."
+msgstr "Nada todavía."
+
 #: lib/kiln_cms_web/live/inbox_live.ex
 #, elixir-autogen, elixir-format
 msgid "Nothing yet. Review requests, comments, mentions and task assignments land here."
@@ -7398,6 +7404,7 @@ msgid "Notification preferences saved."
 msgstr "Preferencias de notificación guardadas."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
+#: lib/kiln_cms_web/live/notification_bell.ex
 #, elixir-autogen, elixir-format
 msgid "Notifications"
 msgstr "Notificaciones"
@@ -7416,6 +7423,13 @@ msgstr "Las notificaciones están activadas en este dispositivo."
 #, elixir-autogen, elixir-format
 msgid "Notifications never contain draft content — only that something is waiting, and what kind."
 msgstr "Las notificaciones nunca contienen contenido en borrador: solo que algo está esperando y de qué tipo es."
+
+#: lib/kiln_cms_web/live/notification_bell.ex
+#, elixir-autogen, elixir-format
+msgid "Notifications, %{count} unread"
+msgid_plural "Notifications, %{count} unread items"
+msgstr[0] "Notificaciones, %{count} sin leer"
+msgstr[1] "Notificaciones, %{count} sin leer"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -7638,6 +7652,11 @@ msgstr "Abrir el editor completo"
 #, elixir-autogen, elixir-format
 msgid "Open in"
 msgstr "Abrir en"
+
+#: lib/kiln_cms_web/live/notification_bell.ex
+#, elixir-autogen, elixir-format
+msgid "Open inbox"
+msgstr "Abrir la bandeja"
 
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format

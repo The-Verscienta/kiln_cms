@@ -6274,6 +6274,7 @@ msgid "March"
 msgstr ""
 
 #: lib/kiln_cms_web/live/inbox_live.ex
+#: lib/kiln_cms_web/live/notification_bell.ex
 #, elixir-autogen, elixir-format
 msgid "Mark all read"
 msgstr ""
@@ -7387,6 +7388,11 @@ msgstr ""
 msgid "Nothing unread."
 msgstr ""
 
+#: lib/kiln_cms_web/live/notification_bell.ex
+#, elixir-autogen, elixir-format
+msgid "Nothing yet."
+msgstr ""
+
 #: lib/kiln_cms_web/live/inbox_live.ex
 #, elixir-autogen, elixir-format
 msgid "Nothing yet. Review requests, comments, mentions and task assignments land here."
@@ -7398,6 +7404,7 @@ msgid "Notification preferences saved."
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
+#: lib/kiln_cms_web/live/notification_bell.ex
 #, elixir-autogen, elixir-format
 msgid "Notifications"
 msgstr ""
@@ -7416,6 +7423,13 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Notifications never contain draft content — only that something is waiting, and what kind."
 msgstr ""
+
+#: lib/kiln_cms_web/live/notification_bell.ex
+#, elixir-autogen, elixir-format
+msgid "Notifications, %{count} unread"
+msgid_plural "Notifications, %{count} unread items"
+msgstr[0] ""
+msgstr[1] ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -7637,6 +7651,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
 msgid "Open in"
+msgstr ""
+
+#: lib/kiln_cms_web/live/notification_bell.ex
+#, elixir-autogen, elixir-format
+msgid "Open inbox"
 msgstr ""
 
 #: lib/kiln_cms_web/live/task_live.ex

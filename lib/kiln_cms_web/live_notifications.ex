@@ -2,15 +2,35 @@ defmodule KilnCMSWeb.LiveNotifications do
   @moduledoc """
   Keeps notification surfaces live across the console (#1320).
 
-  An `on_mount` hook on the `:editor_routes` live_session: it subscribes the
-  LiveView process to the signed-in user's notification topic
+  An `on_mount` hook on the `:editor_routes` and `:admin_routes` live_sessions:
+  it subscribes the LiveView process to the signed-in user's notification topic
   (`KilnCMS.Notifications.topic/1`) and attaches a `handle_info` hook that
-  reloads whichever surface on the page shows notifications.
+  reloads whichever surfaces on the page show notifications — the top bar's
+  bell on every console page, and the list on `/editor/inbox`.
 
   One line in the router covers every console page, present and future — which
   is the point. The alternative was a `subscribe` call and a `handle_info`
   clause in each of the 43 LiveViews that render the console shell, i.e. a
   contract nobody would remember on page 44.
+
+  ## Why the bell needs this at all
+
+  `KilnCMSWeb.NotificationBell` is a LiveComponent, and a LiveComponent has no
+  process of its own — it cannot subscribe to PubSub or receive a message. The
+  subscription therefore has to live in the parent LiveView, which is what this
+  hook puts there; `NotificationBell.refresh/0` then reaches the component
+  through `send_update/2`.
+
+  Three pages in these live_sessions render no console shell at all, on
+  purpose — `PreviewLive`, `InContextEditLive` and `PresentationLive` are
+  full-bleed editing surfaces. They have no bell, so a notification arriving
+  while one is open logs LiveView's own `send_update failed because
+  component … does not exist` warning. That is LiveView's documented
+  not-an-error path (its source says "only a warning, because there can be
+  race conditions where a component is removed before a `send_update`
+  happens"), and it is left alone deliberately: the alternatives are a
+  process-dictionary flag set from inside the component, or the 43 per-page
+  opt-ins this hook exists to avoid.
 
   ## The hook halts, so pages opt in explicitly
 
@@ -38,6 +58,7 @@ defmodule KilnCMSWeb.LiveNotifications do
   import Phoenix.LiveView, only: [attach_hook: 4, connected?: 1]
 
   alias KilnCMS.Notifications
+  alias KilnCMSWeb.NotificationBell
 
   @doc """
   Reload this page's notification surface. Return the updated socket.
@@ -69,7 +90,12 @@ defmodule KilnCMSWeb.LiveNotifications do
     end
   end
 
-  defp refresh(:notifications_changed, socket), do: {:halt, reload_page(socket)}
+  defp refresh(:notifications_changed, socket) do
+    # The bell is on every console page; the page-level surface is opt-in.
+    NotificationBell.refresh()
+    {:halt, reload_page(socket)}
+  end
+
   defp refresh(_message, socket), do: {:cont, socket}
 
   defp reload_page(%{view: view} = socket) do

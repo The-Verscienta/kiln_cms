@@ -109,7 +109,7 @@ defmodule KilnCMSWeb.TaskLiveTest do
     assert html =~ page.title
 
     html = lv |> element("button", "Mark done") |> render_click()
-    refute html =~ page.title
+    refute main(html) =~ page.title
   end
 
   test "an overdue task is flagged", %{conn: conn} do
@@ -166,5 +166,14 @@ defmodule KilnCMSWeb.TaskLiveTest do
       assert html =~ "stay open when their content publishes"
       assert html =~ "Turn on"
     end
+  end
+
+  # The console shell carries a notification bell whose dropdown renders
+  # content titles and `?comment=` deep links of its own (#1320), so a
+  # whole-page substring assertion can no longer tell this page's list apart
+  # from the chrome around it. `main/1` narrows to `<main id="main">`, which is
+  # the page's own body — the assertion means what it says again.
+  defp main(html) do
+    html |> Floki.parse_document!() |> Floki.find("#main") |> Floki.raw_html()
   end
 end

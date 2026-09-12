@@ -522,6 +522,154 @@
     outline: 2px solid color-mix(in oklch, var(--color-primary) 60%, transparent);
     outline-offset: 1px;
   }
+  /* The top bar's notification bell (#1320). Its own `.bell-*` kit rather
+     than utilities on the markup, for the reason the whole `.side-*` kit
+     exists (docs/design-language.md): the shell owns its own display, so a
+     utility sweep cannot silently re-lay-out the chrome.
+
+     Not `.side-menu`: that panel is sidebar-flavoured and opens UPWARD from a
+     dark rail. This one hangs DOWN from the light workspace header, and
+     drawing it in the sidebar's palette would make it read as a different
+     application's menu. */
+  .bell {
+    position: relative;
+    display: flex;
+  }
+  .bell-root {
+    position: relative;
+  }
+  .bell-trigger {
+    display: flex;
+    position: relative;
+    align-items: center;
+    padding: 0.4rem;
+    border-radius: var(--radius-md);
+    list-style: none;
+    color: color-mix(in oklch, var(--color-base-content) 70%, transparent);
+    transition: background-color 0.12s, color 0.12s;
+  }
+  .bell-trigger::-webkit-details-marker {
+    display: none;
+  }
+  .bell-trigger:hover,
+  .bell-root[open] > .bell-trigger {
+    background: var(--color-base-200);
+    color: var(--color-base-content);
+  }
+  .bell-trigger:focus-visible {
+    outline: 2px solid color-mix(in oklch, var(--color-primary) 60%, transparent);
+    outline-offset: 1px;
+  }
+  /* Overlaps the bell's top-right corner. `min-width` rather than a fixed
+     size so "8+" is not clipped, and `tabular-nums` so the pill does not
+     jitter as the count changes. */
+  .bell-badge {
+    position: absolute;
+    top: 0.05rem;
+    right: 0.05rem;
+    display: grid;
+    place-items: center;
+    min-width: 1.05rem;
+    height: 1.05rem;
+    padding: 0 0.2rem;
+    border-radius: 999px;
+    background: var(--color-primary);
+    color: var(--color-primary-content);
+    font-size: 0.65rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+  .bell-panel {
+    position: absolute;
+    z-index: 50;
+    top: calc(100% + 0.5rem);
+    /* Anchored to the right edge: the bell sits in the header's right-hand
+       cluster, so a left-anchored panel would hang off the viewport. */
+    right: 0;
+    width: min(22rem, calc(100vw - 2rem));
+    display: grid;
+    border: 1px solid var(--color-base-content, currentColor);
+    border-color: color-mix(in oklch, var(--color-base-content) 12%, transparent);
+    border-radius: var(--radius-lg);
+    background: var(--color-base-100);
+    box-shadow: 0 12px 32px -8px rgb(0 0 0 / 0.25);
+    overflow: hidden;
+  }
+  .bell-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.6rem 0.75rem;
+    border-bottom: 1px solid color-mix(in oklch, var(--color-base-content) 10%, transparent);
+    font-size: 0.85rem;
+  }
+  .bell-action {
+    border-radius: var(--radius-sm);
+    padding: 0.15rem 0.4rem;
+    font-size: 0.75rem;
+    color: color-mix(in oklch, var(--color-base-content) 60%, transparent);
+  }
+  .bell-action:hover {
+    background: var(--color-base-200);
+    color: var(--color-base-content);
+  }
+  .bell-empty {
+    padding: 1rem 0.75rem;
+    font-size: 0.8rem;
+    color: color-mix(in oklch, var(--color-base-content) 60%, transparent);
+  }
+  /* Caps the panel rather than the item count: eight short rows fit, and a
+     couple of long ones scroll instead of pushing the inbox link off-screen. */
+  .bell-list {
+    max-height: 24rem;
+    overflow-y: auto;
+  }
+  .bell-item {
+    display: grid;
+    gap: 0.1rem;
+    padding: 0.55rem 0.75rem;
+    border-bottom: 1px solid color-mix(in oklch, var(--color-base-content) 7%, transparent);
+  }
+  .bell-item:hover {
+    background: var(--color-base-200);
+  }
+  .bell-item-unread {
+    background: color-mix(in oklch, var(--color-primary) 6%, transparent);
+  }
+  .bell-item-unread:hover {
+    background: color-mix(in oklch, var(--color-primary) 12%, transparent);
+  }
+  .bell-item-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+    font-size: 0.82rem;
+  }
+  .bell-item-time {
+    flex-shrink: 0;
+    font-size: 0.7rem;
+    color: color-mix(in oklch, var(--color-base-content) 50%, transparent);
+  }
+  .bell-item-sub {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.75rem;
+    color: color-mix(in oklch, var(--color-base-content) 65%, transparent);
+  }
+  .bell-foot {
+    padding: 0.5rem 0.75rem;
+    text-align: center;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--color-primary);
+  }
+  .bell-foot:hover {
+    background: var(--color-base-200);
+  }
   /* Rail tooltip (app.js): one fixed element on <body>, because the nav
      scrolls and would clip anything positioned inside it. */
   .side-tip {

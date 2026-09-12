@@ -50,6 +50,13 @@ migration, a rewritten column, a dropped config key).
   only). Live: one `on_mount` hook subscribes each console page to the viewer's
   own notification topic, so the list follows a notification that lands, or one
   read in another tab, without a reload.
+- **A notification bell in the console top bar**, on every `/editor/*` page:
+  an unread badge (capped at `8+`, with the real number in its accessible
+  label), a dropdown of the eight most recent items — read ones included, since
+  a list that empties itself takes each item's deep link with it — and
+  mark-all-read. PubSub-driven: the badge moves when a notification arrives or
+  is read elsewhere, without a reload. Clicking an item marks it read and
+  navigates to the block, comment or task it concerns.
 
 ### Changed
 
