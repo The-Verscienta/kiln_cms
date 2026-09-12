@@ -76,6 +76,14 @@ migration, a rewritten column, a dropped config key).
   take those actions is now named in each policy block instead of reaching
   around it. The `Accounts.User` lookups keep their bypass, and say why
   (#1402).
+- **`mix kiln.authz.check` now gates all of `lib/`.** It was the web layer
+  only; every file is checked from here on, with the pre-existing unexplained
+  bypasses recorded per file in the task's `@backlog` — 129 files, 313 sites.
+  That list is a ratchet: a file with no entry must be clean, so **new code is
+  gated from the day it lands**; a listed file may not gain a site; and a
+  listed file that loses one fails too, with the number to write, so the
+  allowance can never drift out of date. Nothing may be added to it, and
+  emptying it finishes #1402.
 
 ### Fixed
 

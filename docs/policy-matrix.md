@@ -62,6 +62,15 @@ Two non-role actors also appear below:
   pasted under a justified one needs its own. `mix kiln.authz.check` (part of
   `mix precommit` and CI) fails on a new one without that comment (#1309).
 
+  **The gate covers all of `lib/`** (#1402). Files that predate the
+  system-actor migration and still carry unexplained bypasses are listed in the
+  task's `@backlog` with the exact count each one has — 129 files, 313 sites
+  when that landed. It is a ratchet, not an exemption: a file with no entry
+  must be clean, so new code is gated from the day it lands; a listed file may
+  not gain a site; and a listed file that *loses* one fails too, with the
+  number to write, because an allowance nobody maintains stops being a
+  ratchet. Nothing may be added. Emptying it finishes #1402.
+
 ### The system actor
 
 `%KilnCMS.SystemActor{}` (`lib/kiln_cms/system_actor.ex`) is the actor a worker,
