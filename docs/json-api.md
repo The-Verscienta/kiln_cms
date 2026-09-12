@@ -566,6 +566,17 @@ which **sanitizes** rich-text HTML and media URLs. On an update, **omit**
 `block_tree` to leave the body untouched (a metadata-only `PATCH` never wipes
 it); send `[]` to clear it.
 
+**Or send Markdown — `body_markdown`.** A Markdown string in place of
+`block_tree`, converted server-side by `KilnCMS.Markdown` (the converter the
+editor's paste and `.md` import use) into the same block maps, then cast and
+sanitized the same way: headings, lists, tables and fenced code become
+Portable Text, a standalone image an `image` block, a bare YouTube/Vimeo link
+an `embed`. Raw HTML in it goes through the rich-text allowlist. Send one or
+the other — both is a 400. `""` clears the body; front matter is dropped (title
+and slug are their own attributes). The blocks it produces carry no `_id`s, so
+it replaces the body wholesale, like an id-less `block_tree`. Details:
+[Markdown](markdown.md#writing-markdown-through-the-api).
+
 **Round-trip block ids when updating.** Read the tree's identity first — the
 `block_ids` calculation (`?fields[post]=block_ids`) projects the stored tree to
 `_id`/`_type` only, nested `columns` children included in the positions they

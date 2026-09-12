@@ -187,6 +187,7 @@ defmodule KilnCMS.MixProject do
       "CONTRIBUTING.md": [],
       # Authoring & editorial
       "docs/editor-shortcuts.md": [],
+      "docs/markdown.md": [],
       "docs/advisories.md": [],
       "docs/compliance.md": [],
       "docs/link-checking.md": [],
@@ -302,6 +303,7 @@ defmodule KilnCMS.MixProject do
       "Getting started": ["docs/getting-started.md", "README.md", "CONTRIBUTING.md"],
       "Authoring & editorial": [
         "docs/editor-shortcuts.md",
+        "docs/markdown.md",
         "docs/advisories.md",
         "docs/compliance.md",
         "docs/link-checking.md",
@@ -545,6 +547,14 @@ defmodule KilnCMS.MixProject do
       # this CMS stores. Backed by mochiweb (already here through
       # html_sanitize_ex) rather than a NIF, so it adds no build weight.
       {:floki, "~> 0.38"},
+      # Markdown → structured content (`KilnCMS.Markdown`): editor paste, `.md`
+      # import, and the `body_markdown` API argument. The PARSER only, and pure
+      # Elixir — the one ex_doc already uses, now needed at runtime. Not
+      # `earmark`: that package is retired on Hex, carries a stored-XSS advisory
+      # in its HTML renderer, and would fail `mix deps.audit`. Its AST is
+      # rendered through Floki (which escapes) instead, and the HTML is never
+      # trusted even then — see `KilnCMS.Markdown`.
+      {:earmark_parser, "~> 1.4"},
       # Fire-time syntax highlighting for rich-text code blocks (#503). Each
       # lexer is its own OTP app that registers language names with
       # Makeup.Registry on boot — see KilnCMS.Highlight.

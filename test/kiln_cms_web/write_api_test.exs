@@ -525,6 +525,46 @@ defmodule KilnCMSWeb.WriteApiTest do
       assert length(post.blocks) == 1
     end
 
+    test "body_markdown writes the body as typed blocks, its raw HTML sanitized" do
+      key = mint(user(:editor), :read_write)
+      s = slug()
+
+      markdown =
+        "## Hello\n\nBody <script>alert(1)</script>text.\n\n![Map](https://img.example.com/m.png)"
+
+      assert {201, _} =
+               post_json(
+                 "/api/json/posts",
+                 %{title: "From Markdown", slug: s, body_markdown: markdown},
+                 type: "post",
+                 bearer: key
+               )
+
+      [post] = CMS.list_posts!(actor: user(:admin), query: [filter: [slug: s]])
+
+      assert [
+               %Ash.Union{value: %KilnCMS.Blocks.RichText{body: [heading, para]}},
+               %Ash.Union{value: %KilnCMS.Blocks.Image{url: "https://img.example.com/m.png"}}
+             ] = post.blocks
+
+      assert heading["style"] == "h2"
+      assert KilnCMS.Blocks.PortableText.to_plain_text([para]) == "Body text."
+    end
+
+    test "block_tree and body_markdown together are refused" do
+      key = mint(user(:editor), :read_write)
+
+      assert {400, body} =
+               post_json(
+                 "/api/json/posts",
+                 %{title: "Both", slug: slug(), block_tree: [], body_markdown: "Hi"},
+                 type: "post",
+                 bearer: key
+               )
+
+      assert [%{"detail" => "send either block_tree or body_markdown, not both"}] = body["errors"]
+    end
+
     # `block_tree` is exactly the path the content editor's field filtering
     # never covered: `Kiln.Block.Policy` was enforced only by the LiveView
     # declining to render an admin-only field, so a key-authenticated editor

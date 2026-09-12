@@ -22,6 +22,7 @@ import Table from "@tiptap/extension-table"
 import TableRow from "@tiptap/extension-table-row"
 import TableHeader from "@tiptap/extension-table-header"
 import TableCell from "@tiptap/extension-table-cell"
+import {markdownPaste} from "./markdown_paste"
 
 // Tables (#475): StarterKit doesn't include them, so every editor mount adds
 // this set. Column resizing stays off in v1 — colwidths wouldn't survive the
@@ -1036,7 +1037,9 @@ function buildEditor(hook, extensions, content = null) {
 
   const editor = new Editor({
     element: hook.el.querySelector("[data-editor]"),
-    extensions,
+    // Markdown paste / `.md` drop (markdown_paste.js) — block editor only: it
+    // round-trips through this LiveView's `markdown_paste` event.
+    extensions: [...extensions, markdownPaste(hook)],
     ...(content != null ? {content} : {}),
     // Name the contenteditable surface for assistive tech — without this a
     // screen reader lands in an unlabeled editable region (#170). The label

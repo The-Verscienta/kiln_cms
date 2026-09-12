@@ -106,10 +106,16 @@ defmodule KilnCMS.CMS.Changes.EnforceFieldGrants do
 
   defp basis(changeset), do: WorkingCopy.basis(changeset.data)
 
-  # `block_tree` is an argument, not an accepted attribute — it force-changes
-  # `blocks` downstream (ApplyBlocksInput), so gate it on the "blocks" grant.
+  # `block_tree` and `body_markdown` are arguments, not accepted attributes —
+  # either force-changes `blocks` downstream (ApplyBlocksInput), so both are
+  # gated on the "blocks" grant. Markdown is the same write in another syntax;
+  # ungated it would be the way around the grant.
   defp maybe_block_tree_violation(changeset, allowed) do
-    if Ash.Changeset.get_argument(changeset, :block_tree) != nil and "blocks" not in allowed do
+    body_arg? =
+      Ash.Changeset.get_argument(changeset, :block_tree) != nil or
+        Ash.Changeset.get_argument(changeset, :body_markdown) != nil
+
+    if body_arg? and "blocks" not in allowed do
       add_violation(changeset, "blocks")
     else
       changeset

@@ -2005,6 +2005,9 @@ defmodule KilnCMS.CMS.Content do
           # the auto API, so accept the body as a public array of block maps and
           # cast it into the union (sanitized on cast). Omitted = empty body.
           argument :block_tree, {:array, :map}
+          # …or the body as Markdown (`KilnCMS.Markdown`); not both. Untrimmed:
+          # leading indentation is a code block, not noise.
+          argument :body_markdown, :string, constraints: [trim?: false, allow_empty?: true]
           change KilnCMS.CMS.Changes.ApplyBlocksInput
           change KilnCMS.CMS.Changes.ApplyCustomFields
           # AFTER `ApplyCustomFields`: the schedule this reads is the coerced
@@ -2052,6 +2055,7 @@ defmodule KilnCMS.CMS.Content do
           # Headless block-body writes (#330) — see `:create`. Omitted argument
           # leaves the existing body untouched (a metadata-only PATCH is safe).
           argument :block_tree, {:array, :map}
+          argument :body_markdown, :string, constraints: [trim?: false, allow_empty?: true]
           change KilnCMS.CMS.Changes.ApplyBlocksInput
           change KilnCMS.CMS.Changes.ApplyCustomFields
           # AFTER `ApplyCustomFields` — see `:create` (#766).

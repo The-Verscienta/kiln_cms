@@ -1150,6 +1150,11 @@ msgstr "Añadir una etiqueta…"
 msgid "Add a webhook"
 msgstr "Añadir un webhook"
 
+#: lib/kiln_cms_web/live/content_editor/markdown_import.ex
+#, elixir-autogen, elixir-format
+msgid "Add after existing blocks"
+msgstr "Añadir después de los bloques existentes"
+
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Add an endpoint above to push content events to another system."
@@ -1504,6 +1509,11 @@ msgstr "También adjuntadas"
 #, elixir-autogen, elixir-format
 msgid "Also included"
 msgstr "También incluye"
+
+#: lib/kiln_cms_web/live/content_editor/markdown_import.ex
+#, elixir-autogen, elixir-format
+msgid "Also set, from the file"
+msgstr "También establecido, desde el archivo"
 
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
@@ -2160,6 +2170,7 @@ msgstr "No se puede reprogramar al pasado."
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/billing_live.ex
+#: lib/kiln_cms_web/live/content_editor/markdown_import.ex
 #: lib/kiln_cms_web/live/content_editor/shared.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
@@ -4680,6 +4691,7 @@ msgid "Everything with a cadence is inside it."
 msgstr "Todo lo que tiene una cadencia está dentro de ella."
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
+#: lib/kiln_cms_web/live/content_editor/markdown_import.ex
 #: lib/kiln_cms_web/live/content_editor/shared.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -5581,10 +5593,21 @@ msgid "Images: PNG, JPG, WEBP, GIF up to 10 MB"
 msgstr "Imágenes: PNG, JPG, WEBP, GIF hasta 10 MB"
 
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
+#: lib/kiln_cms_web/live/content_editor/markdown_import.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Import"
 msgstr "Importar"
+
+#: lib/kiln_cms_web/live/content_editor/markdown_import.ex
+#, elixir-autogen, elixir-format
+msgid "Import %{name}"
+msgstr "Importar %{name}"
+
+#: lib/kiln_cms_web/live/content_editor/markdown_import.ex
+#, elixir-autogen, elixir-format
+msgid "Import Markdown"
+msgstr "Importar Markdown"
 
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
@@ -5600,6 +5623,13 @@ msgstr "Importa un archivo cada vez."
 #, elixir-autogen, elixir-format
 msgid "Import result — %{filename}"
 msgstr "Resultado de la importación — %{filename}"
+
+#: lib/kiln_cms_web/live/content_editor/markdown_import.ex
+#, elixir-autogen, elixir-format
+msgid "Imported %{count} block from %{name}."
+msgid_plural "Imported %{count} blocks from %{name}."
+msgstr[0] "Se importó %{count} bloque de %{name}."
+msgstr[1] "Se importaron %{count} bloques de %{name}."
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -6230,6 +6260,11 @@ msgstr "Marcar como hecha"
 #, elixir-autogen, elixir-format
 msgid "Mark reviewed"
 msgstr "Marcar como revisado"
+
+#: lib/kiln_cms_web/live/content_editor/markdown_import.ex
+#, elixir-autogen, elixir-format
+msgid "Markdown file"
+msgstr "Archivo Markdown"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -8839,6 +8874,16 @@ msgstr "Reemplazar bloque"
 msgid "Replace everything in this block? You can undo it in the editor."
 msgstr "¿Reemplazar todo el contenido de este bloque? Puedes deshacerlo en el editor."
 
+#: lib/kiln_cms_web/live/content_editor/markdown_import.ex
+#, elixir-autogen, elixir-format
+msgid "Replace existing blocks"
+msgstr "Reemplazar los bloques existentes"
+
+#: lib/kiln_cms_web/live/content_editor/markdown_import.ex
+#, elixir-autogen, elixir-format
+msgid "Replace or extend this document's blocks with a Markdown (.md) file"
+msgstr "Reemplaza o amplía los bloques de este documento con un archivo Markdown (.md)"
+
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "Replace passphrase"
@@ -9938,6 +9983,7 @@ msgstr "Omitido"
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/billing_live.ex
+#: lib/kiln_cms_web/live/content_editor/markdown_import.ex
 #: lib/kiln_cms_web/live/content_editor/shared.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -10605,10 +10651,25 @@ msgstr "Ese experimento no existe."
 msgid "That file could not be uploaded."
 msgstr "No se pudo subir ese archivo."
 
+#: lib/kiln_cms_web/live/content_editor/markdown_import.ex
+#, elixir-autogen, elixir-format
+msgid "That file has nothing in it to import."
+msgstr "Ese archivo no tiene nada que importar."
+
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "That file is larger than the %{max} MB limit."
 msgstr "Ese archivo supera el límite de %{max} MB."
+
+#: lib/kiln_cms_web/live/content_editor/markdown_import.ex
+#, elixir-autogen, elixir-format
+msgid "That file is too large to import (the limit is %{size} MB)."
+msgstr "Ese archivo es demasiado grande para importarlo (el límite es %{size} MB)."
+
+#: lib/kiln_cms_web/live/content_editor/markdown_import.ex
+#, elixir-autogen, elixir-format
+msgid "That file isn't UTF-8 text, so it can't be imported."
+msgstr "Ese archivo no es texto UTF-8, así que no se puede importar."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -10835,6 +10896,13 @@ msgstr "La consola de edición, tal como su equipo la usa cada día."
 #, elixir-autogen, elixir-format
 msgid "The entry limit is deployment-wide and not configurable per site: it bounds the work a feed request costs the server, rather than expressing a publishing choice."
 msgstr "El límite de entradas es para todo el despliegue y no se configura por sitio: acota el trabajo que una petición de feed le cuesta al servidor, en lugar de expresar una decisión editorial."
+
+#: lib/kiln_cms_web/live/content_editor/markdown_import.ex
+#, elixir-autogen, elixir-format
+msgid "The file converts to %{count} block."
+msgid_plural "The file converts to %{count} blocks."
+msgstr[0] "El archivo se convierte en %{count} bloque."
+msgstr[1] "El archivo se convierte en %{count} bloques."
 
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
@@ -11116,6 +11184,13 @@ msgstr "Este contenido ya no existe: el lanzamiento no se publicará tal como es
 msgid "This content was saved elsewhere while you were offline. A text block reloaded the saved version; the edits you made to it since were not applied."
 msgstr "Este contenido se guardó en otro lugar mientras estaba sin conexión. Un bloque de texto recargó la versión guardada; los cambios que hizo en él desde entonces no se aplicaron."
 
+#: lib/kiln_cms_web/live/content_editor/markdown_import.ex
+#, elixir-autogen, elixir-format
+msgid "This document already has %{count} block."
+msgid_plural "This document already has %{count} blocks."
+msgstr[0] "Este documento ya tiene %{count} bloque."
+msgstr[1] "Este documento ya tiene %{count} bloques."
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "This document's chain was anchored before the fold order was assigned, so this verdict may be the ordering bug rather than tampering — see #598."
@@ -11341,6 +11416,7 @@ msgstr "Texto enriquecido TipTap, bloques con arrastrar y soltar, vista previa e
 
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #: lib/kiln_cms_web/components/version_diff_components.ex
+#: lib/kiln_cms_web/live/content_editor/markdown_import.ex
 #: lib/kiln_cms_web/live/content_editor/shared.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/slug_regen_live.ex

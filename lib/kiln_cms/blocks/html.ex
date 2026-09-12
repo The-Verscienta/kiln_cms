@@ -90,6 +90,9 @@ defmodule KilnCMS.Blocks.Html do
     * `:autop` — reproduce WordPress' paragraph wrapping first (default `true`).
       Pass `false` for HTML that already marks its own paragraphs and whose
       blank lines are insignificant.
+    * `:shortcodes` — run the WordPress passes: strip Gutenberg delimiters,
+      expand `[caption]`/`[embed]`, remove other shortcodes (default `true`).
+      Pass `false` for HTML from anywhere else, where bracketed text is prose.
   """
   @spec to_portable_text(String.t() | nil, keyword()) :: [PortableText.pt_block()]
   def to_portable_text(html, opts \\ [])
@@ -151,10 +154,7 @@ defmodule KilnCMS.Blocks.Html do
 
     prepared =
       shielded
-      |> strip_gutenberg_comments()
-      |> expand_captions()
-      |> expand_embed_shortcodes()
-      |> strip_shortcodes()
+      |> maybe_wordpress(Keyword.get(opts, :shortcodes, true))
       |> maybe_autop(Keyword.get(opts, :autop, true))
       |> restore_pre(pres)
 
@@ -177,6 +177,19 @@ defmodule KilnCMS.Blocks.Html do
           {:error, _message} -> []
         end
     end
+  end
+
+  # The WordPress passes. Off for HTML that never saw WordPress (the Markdown
+  # converter's output): there `[x=1]` and a literal `[embed]` are prose, and
+  # stripping them as shortcodes deletes the author's words.
+  defp maybe_wordpress(html, false), do: html
+
+  defp maybe_wordpress(html, _true) do
+    html
+    |> strip_gutenberg_comments()
+    |> expand_captions()
+    |> expand_embed_shortcodes()
+    |> strip_shortcodes()
   end
 
   # `<!-- wp:paragraph {"align":"left"} -->` and its closing form. The JSON

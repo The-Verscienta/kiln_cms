@@ -59,6 +59,12 @@ Authoring (require a write key + editor role): `create_page` / `update_page` /
 `create_tag` takes an optional `tag_group_id` — discover the groups with
 `read_tag_groups`.
 
+> **Body: `body_markdown`.** The create/update tools take the body either as
+> `block_tree` (typed block maps) or as `body_markdown` — plain Markdown, the
+> shape a model usually has already, converted server-side into the same
+> blocks (see [Markdown](markdown.md#writing-markdown-through-the-api)). One or
+> the other, not both; raw HTML in the Markdown is sanitized.
+
 > **Tags: prefer `add_tag_ids` / `remove_tag_ids`.** `update_page` /
 > `update_post` / `update_entry` accept three tag arguments (#521):
 >

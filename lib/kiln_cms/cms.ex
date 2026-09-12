@@ -27,6 +27,11 @@ defmodule KilnCMS.CMS do
   # and a model sends `add_tag_ids` to a create, which Ash rejects outright.
   @create_tag_hint "Tags: pass tag_ids (the merge verbs are update-only)."
 
+  # The body can be written as Markdown — usually the shape a model already
+  # has — and `KilnCMS.Markdown` turns it into the same typed blocks.
+  @body_hint "Body: block_tree (typed block maps) or body_markdown (Markdown, " <>
+               "converted to blocks server-side) — not both."
+
   # Load the links a tag write touches back onto the tool result (#640).
   #
   # `remove_tag_ids` is `on_no_match: :ignore` so removal stays idempotent — a
@@ -127,11 +132,11 @@ defmodule KilnCMS.CMS do
 
     # Authoring — requires a read-write API key on an editor (or admin) account.
     tool :create_page, KilnCMS.CMS.Page, :create do
-      description "Create a page as a draft. #{@create_tag_hint}"
+      description "Create a page as a draft. #{@create_tag_hint} #{@body_hint}"
     end
 
     tool :update_page, KilnCMS.CMS.Page, :update do
-      description "Update a page's content/metadata (state unchanged). #{@tag_merge_hint}"
+      description "Update a page's content/metadata (state unchanged). #{@tag_merge_hint} #{@body_hint}"
       load &KilnCMS.CMS.McpLoads.update/1
     end
 
@@ -140,11 +145,11 @@ defmodule KilnCMS.CMS do
     end
 
     tool :create_post, KilnCMS.CMS.Post, :create do
-      description "Create a blog post as a draft. #{@create_tag_hint}"
+      description "Create a blog post as a draft. #{@create_tag_hint} #{@body_hint}"
     end
 
     tool :update_post, KilnCMS.CMS.Post, :update do
-      description "Update a blog post's content/metadata (state unchanged). #{@tag_merge_hint}"
+      description "Update a blog post's content/metadata (state unchanged). #{@tag_merge_hint} #{@body_hint}"
       load &KilnCMS.CMS.McpLoads.update/1
     end
 
@@ -153,11 +158,11 @@ defmodule KilnCMS.CMS do
     end
 
     tool :create_entry, KilnCMS.CMS.Entry, :create do
-      description "Create a dynamic-type entry as a draft (requires type_definition_id). #{@create_tag_hint}"
+      description "Create a dynamic-type entry as a draft (requires type_definition_id). #{@create_tag_hint} #{@body_hint}"
     end
 
     tool :update_entry, KilnCMS.CMS.Entry, :update do
-      description "Update a dynamic-type entry's content/metadata (state unchanged). #{@tag_merge_hint}"
+      description "Update a dynamic-type entry's content/metadata (state unchanged). #{@tag_merge_hint} #{@body_hint}"
       load &KilnCMS.CMS.McpLoads.update/1
     end
 
