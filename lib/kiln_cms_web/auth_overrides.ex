@@ -13,6 +13,29 @@ defmodule KilnCMSWeb.AuthOverrides do
     SignOutLive
   }
 
+  @doc """
+  The runtime form of AshAuthentication's compile-time `override_for/2` macro.
+
+  That macro keys its lookup on the *calling* module, which is right for a
+  component reading its own settings and useless for one reading another's — a
+  call to it from a Kiln module looks for `{KilnCMSWeb.Whatever, :root_class}`,
+  which nobody has set. `KilnCMSWeb.AuthReset` and `KilnCMSWeb.ResetLive` copy a
+  library render each (see `KilnCMSWeb.AuthResetForm` for why) and have to draw
+  the classes set for the components they stand in for, so they name the
+  component explicitly and call this. Same reduce the macro expands to: the
+  first module in the list that has an opinion wins, and `default` is what no
+  opinion means.
+  """
+  @spec override_for([module], module, atom, any) :: any
+  def override_for(overrides, component, selector, default \\ nil) do
+    Enum.reduce_while(overrides, default, fn module, value ->
+      case Map.fetch(module.overrides(), {component, selector}) do
+        {:ok, override} -> {:halt, override}
+        :error -> {:cont, value}
+      end
+    end)
+  end
+
   @page_root "grid min-h-screen place-items-center bg-base-100 px-4"
   @card_root "mx-auto w-full max-w-sm lg:max-w-md"
   @title "text-2xl font-semibold tracking-tight text-base-content"
@@ -157,7 +180,10 @@ defmodule KilnCMSWeb.AuthOverrides do
     set :reset_toggle_text, "Forgot your password?"
     set :show_first, :sign_in
     set :hide_class, "hidden"
-    set :register_form_module, AshAuthentication.Phoenix.Components.Password.RegisterForm
+    # Kiln's own register form: upstream's, with the password confirmation
+    # checked on change instead of only on submit. See
+    # `KilnCMSWeb.AuthRegisterForm`.
+    set :register_form_module, KilnCMSWeb.AuthRegisterForm
     set :sign_in_form_module, AshAuthentication.Phoenix.Components.Password.SignInForm
     set :reset_form_module, AshAuthentication.Phoenix.Components.Password.ResetForm
   end
