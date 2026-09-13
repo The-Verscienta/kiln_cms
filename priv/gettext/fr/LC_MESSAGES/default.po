@@ -8301,8 +8301,8 @@ msgstr "Notifications push"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
-msgid "Q&A list, fired as FAQPage structured data"
-msgstr "Liste de questions-réponses, publiée en données structurées FAQPage"
+msgid "Q&A list, published with question-and-answer structured data"
+msgstr "Liste de questions-réponses, publiée en données structurées de questions fréquentes"
 
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format
@@ -9763,8 +9763,8 @@ msgstr "Clé de configuration"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
-msgid "Several images with captions, fired as ImageGallery structured data"
-msgstr "Plusieurs images avec légendes, publiées en données structurées ImageGallery"
+msgid "Several images with captions, published with image-gallery structured data"
+msgstr "Plusieurs images avec légendes, publiées en données structurées de galerie d'images"
 
 #: lib/kiln_cms_web/live/token_preview_live.ex
 #, elixir-autogen, elixir-format
@@ -10211,8 +10211,8 @@ msgstr "Libellé de l'étape (facultatif)"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
-msgid "Step-by-step guide, fired as HowTo structured data"
-msgstr "Guide pas à pas, publié en données structurées HowTo"
+msgid "Step-by-step guide, published with how-to structured data"
+msgstr "Guide pas à pas, publié en données structurées de mode d'emploi"
 
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
 #: lib/kiln_cms_web/live/setup_live.ex
@@ -10743,8 +10743,8 @@ msgstr "Cette formule n'est pas disponible."
 
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #, elixir-autogen, elixir-format
-msgid "That post hasn't been fired yet — republish it and retry."
-msgstr "Cet article n'a pas encore été déclenché — republiez-le et réessayez."
+msgid "That post hasn't finished publishing yet — republish it and retry."
+msgstr "Cet article n'a pas fini d'être publié — republiez-le et réessayez."
 
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #, elixir-autogen, elixir-format
