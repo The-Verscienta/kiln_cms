@@ -37,6 +37,19 @@ migration, a rewritten column, a dropped config key).
   can pin itself with `DOCS_SOURCE_REF=$(git rev-parse HEAD) mix docs`.
 ### Added
 
+- **A secrets-rotation runbook**, [`docs/secrets-rotation.md`](docs/secrets-rotation.md),
+  closing residual risk 12 in `docs/threat-model.md` (#1304). Per-secret
+  procedures against a running deployment, written from what the code does
+  rather than what would be reasonable — so it says plainly that nothing here
+  supports a dual-key transition: `TOKEN_SIGNING_SECRET` and `SECRET_KEY_BASE`
+  are hard cutovers that sign every user out, while `DATABASE_URL` and the S3
+  keys can be rolled without downtime only because Postgres and S3 will each
+  hold two credentials at once. It also documents the trap: `SECRET_KEY_BASE`
+  keys `KilnCMS.Keys.Vault`, so rotating it **permanently orphans** the DKIM
+  key, social credentials, payment secrets and the ActivityPub actor key, with
+  no re-encryption path — and every one of those fails quietly, behind a
+  settings page that keeps rendering from its plaintext columns. The actor key
+  is called out as the one rotation that cannot be done safely today.
 - **The release image is published to GHCR on every version tag.**
   `docker pull ghcr.io/the-verscienta/kiln_cms:<version>` (or `:latest`) now
   gets the project-agnostic core, built by
