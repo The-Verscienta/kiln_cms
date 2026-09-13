@@ -13,7 +13,8 @@ defmodule KilnCMSWeb.SurfaceTest do
   alias KilnCMSWeb.Surface
 
   @console ~w(
-    /editor /editor/account/export.json /editor/analytics /editor/analytics/export.csv
+    /editor /editor/account/export.json /editor/accounts /editor/accounts/:id
+    /editor/analytics /editor/analytics/export.csv
     /editor/analytics/export.json /editor/api-keys /editor/automation /editor/backups
     /editor/billing /editor/branding /editor/calendar /editor/code-injection
     /editor/compliance /editor/content/:type/:id /editor/experiments /editor/experiments/:id

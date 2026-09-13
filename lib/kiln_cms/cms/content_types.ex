@@ -518,6 +518,35 @@ defmodule KilnCMS.CMS.ContentTypes do
     end
   end
 
+  @doc """
+  How many records of `type` match — the count `list!/2` would return rows for,
+  without the rows.
+
+  Takes the same `:tenant` / `:actor` / `:authorize?` opts and the same
+  `query: [filter: …]`; `limit`, `sort` and `select` are meaningless here and a
+  `limit` would silently cap the answer, so pass neither. Counts through the
+  primary read, so AshArchival's soft-delete filter applies (trashed records are
+  not counted) exactly as it does for `list!/2`.
+  """
+  def count!(type, opts \\ []) do
+    case get!(type, org_from(opts)) do
+      %{source: :dynamic, definition: definition} ->
+        count_query(CMS.Entry, scoped(opts, definition))
+
+      %{resource: resource} ->
+        count_query(resource, opts)
+    end
+  end
+
+  defp count_query(resource, opts) do
+    {query_opts, opts} = Keyword.pop(opts, :query, [])
+
+    resource
+    |> Ash.Query.new()
+    |> Ash.Query.build(query_opts)
+    |> Ash.count!(opts)
+  end
+
   def get_record!(type, id, opts \\ []) do
     case get!(type, org_from(opts)) do
       %{source: :dynamic, definition: definition} -> CMS.get_entry!(id, scoped(opts, definition))

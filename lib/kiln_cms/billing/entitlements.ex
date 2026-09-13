@@ -179,7 +179,13 @@ defmodule KilnCMS.Billing.Entitlements do
   # can move per-org later. Rows are created when missing: a reader who pays on a
   # site they have no membership row for still needs one to carry the audience.
   defp write_org_memberships(user_id, managed, by_org) do
-    case Accounts.list_memberships_for_user(user_id, authorize?: false) do
+    # Unfolded: these rows are written back below, and a record with a live
+    # temporary tier folded into `role` is not the stored row
+    # (`KilnCMS.Accounts.RoleGrant.unfolded/0`).
+    case Accounts.list_memberships_for_user(
+           user_id,
+           KilnCMS.Accounts.RoleGrant.unfolded() ++ [authorize?: false]
+         ) do
       {:ok, memberships} ->
         Enum.each(memberships, &sync_existing(&1, managed, by_org))
         create_missing(user_id, memberships, by_org)
