@@ -138,11 +138,21 @@ defmodule KilnCMS.Billing.Settings do
     # `KilnCMS.Mail.Settings`: this is an instance-wide singleton with no
     # `multitenancy` block, so an `OrgAdmin` check would resolve a tenant-less
     # subject to the DEFAULT org and let a default-org membership admin rewrite
-    # payment credentials for every site. The checkout path and webhook receiver
-    # read with `authorize?: false` as system callers
-    # (`KilnCMS.Billing.credentials/0`).
+    # payment credentials for every site.
+    #
+    # The checkout path and the webhook receiver read this singleton with no
+    # actor of their own (`KilnCMS.Billing.credentials/0`), and
+    # `ensure_settings!/0` inserts the empty row on first use. Both are
+    # admitted by name (#1402) and narrowed to those two actions inside this
+    # policy — Ash ANDs policies, so a second one could not lift this one's
+    # refusal, and widening it outright would hand system code the write path
+    # to payment credentials. `:init` accepts no attributes, and every secret
+    # column is vault-encrypted and `sensitive?`.
     policy always() do
       authorize_if actor_attribute_equals(:role, :admin)
+
+      forbid_unless action([:read, :init])
+      authorize_if KilnCMS.Checks.SystemActor
     end
   end
 

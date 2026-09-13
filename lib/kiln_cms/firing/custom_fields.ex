@@ -119,6 +119,11 @@ defmodule KilnCMS.Firing.CustomFields do
 
   defp place(_definition, _value), do: []
 
+  # Firing has no request actor (see `KilnCMS.Firing.Engine`). `FieldDefinition`
+  # admits it for reads (#1402) — the field schema is what turns a document's
+  # `custom_fields` values into JSON-LD. Defining a field stays admin-only.
+  defp system_actor, do: KilnCMS.SystemActor.new(:firing)
+
   # The definitions in scope: the owning dynamic type's (D17) or the compiled
   # content type's, under the document's own org (epic #336).
   defp definitions(%{org_id: org_id} = document) do
@@ -129,10 +134,10 @@ defmodule KilnCMS.Firing.CustomFields do
         []
 
       {nil, type} ->
-        KilnCMS.CMS.field_definitions_for!(type, authorize?: false, tenant: org_id)
+        KilnCMS.CMS.field_definitions_for!(type, actor: system_actor(), tenant: org_id)
 
       {id, _type} ->
-        KilnCMS.CMS.field_definitions_for_definition!(id, authorize?: false, tenant: org_id)
+        KilnCMS.CMS.field_definitions_for_definition!(id, actor: system_actor(), tenant: org_id)
     end
   end
 

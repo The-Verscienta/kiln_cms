@@ -99,13 +99,18 @@ defmodule KilnCMS.Billing.MembershipEvent do
     end
 
     policy action_type(:read) do
+      authorize_if KilnCMS.Checks.SystemActor
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
       authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 
-    # Append-only: writes only via `authorize?: false`, and there is no `destroy`
-    # action at all. Same shape as `KilnCMS.History.DocumentEvent`.
+    # Append-only for people — no person may write one and there is no
+    # `destroy` action at all. Same shape as `KilnCMS.History.DocumentEvent`.
+    # The entitlement trail is written by the billing pipeline and redacted by
+    # GDPR erasure (`:anonymize_actor`), both of which now say so here (#1402)
+    # rather than bypassing the block.
     policy action_type([:create, :update]) do
+      authorize_if KilnCMS.Checks.SystemActor
       forbid_if always()
     end
   end
