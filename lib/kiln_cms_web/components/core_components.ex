@@ -998,6 +998,41 @@ defmodule KilnCMSWeb.CoreComponents do
   end
 
   @doc """
+  A coarse "how long until", for a deadline where the exact value is noise — the
+  forward twin of `ago/1`, and pluralized the same way.
+
+  Rounds **up**. A grant created for three days has 71h59m left a moment later;
+  truncating (twice — hours, then days) rendered it "2 days left" beside an
+  expiry timestamp three days out. Rounding up keeps the countdown and the
+  timestamp in agreement, and never tells someone they have less time than they
+  do. A deadline already passed reads as "expired".
+  """
+  @spec time_left(DateTime.t() | nil) :: String.t()
+  def time_left(nil), do: gettext("an unknown time")
+
+  def time_left(%DateTime{} = at) do
+    seconds = DateTime.diff(at, DateTime.utc_now(), :second)
+    hours = ceil_div(seconds, 3600)
+
+    cond do
+      seconds <= 0 ->
+        gettext("expired")
+
+      seconds < 3600 ->
+        gettext("under an hour left")
+
+      hours < 48 ->
+        ngettext("%{count} hour left", "%{count} hours left", hours, count: hours)
+
+      true ->
+        days = ceil_div(seconds, 86_400)
+        ngettext("%{count} day left", "%{count} days left", days, count: days)
+    end
+  end
+
+  defp ceil_div(n, d), do: div(n + d - 1, d)
+
+  @doc """
   A coarse "how long ago", for a timestamp where the exact value is noise.
 
   Shared by the backup panel and the push-device list (#628): both want

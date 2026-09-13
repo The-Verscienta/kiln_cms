@@ -48,7 +48,7 @@ change and forces a major bump. Additions to these surfaces are not breaking.
 Delivery URLs, GraphQL field names and JSON:API routes are derived from `:type`
 and `:plural`, so they inherit the promise above — but the HTTP contract has
 its own, stricter policy, including a versioned-prefix migration path. See
-[Versioning & stability](api.md#versioning--stability) in the API guide; where
+*Versioning & stability* in the [API guide](api.md); where
 the two documents disagree about an HTTP surface, that one wins.
 
 ## Not covered

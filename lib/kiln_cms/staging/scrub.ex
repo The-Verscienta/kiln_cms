@@ -142,7 +142,14 @@ defmodule KilnCMS.Staging.Scrub do
   defp anonymize_users do
     Accounts.list_users!(authorize?: false)
     |> Enum.reject(& &1.anonymized_at)
-    |> Enum.map(&Accounts.anonymize_user!(&1, authorize?: false))
+    # The one caller `NotLastAdmin` is written to exempt: a scrubbed clone must
+    # hold no real operator's credentials, so erasing the last admin is the point.
+    |> Enum.map(
+      &Accounts.anonymize_user!(&1,
+        authorize?: false,
+        context: KilnCMS.Accounts.Validations.NotLastAdmin.exempt()
+      )
+    )
     |> length()
   end
 
