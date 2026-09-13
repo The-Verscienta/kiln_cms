@@ -8,7 +8,7 @@
 
 ## 0. Read this first — where we are vs. where v2 points
 
-Kiln CMS already ships a substantial, production-shaped CMS. Several v2 ideas are
+KilnCMS already ships a substantial, production-shaped CMS. Several v2 ideas are
 **already partly built**; others are **genuinely new** and reshape the core. The
 guide's job is to evolve the former and introduce the latter behind seams, so the
 app stays green the whole way.

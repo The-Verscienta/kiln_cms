@@ -2646,11 +2646,18 @@ defmodule KilnCMS.CMS.Content do
         # `KilnCMS.Search.EmbeddingWorker`. Kept separate from `:update` so it
         # neither re-runs the content changes nor enqueues another embedding, and
         # it's excluded from PaperTrail (see the `paper_trail` block).
+        #
+        # A `nil` embedding CLEARS the vector (and `embedded_at`): the worker does
+        # that when a previously indexed document is passphrase-locked (#496).
+        # With `allow_nil?: false` an explicit `nil` was a `Required` error, so
+        # the clear silently never happened and locked content stayed reachable
+        # through document-level semantic search.
         update :set_embedding do
           require_atomic? false
-          argument :embedding, KilnCMS.Search.Vector, allow_nil?: false
+          argument :embedding, KilnCMS.Search.Vector, allow_nil?: true
           change set_attribute(:embedding, arg(:embedding))
-          change set_attribute(:embedded_at, &DateTime.utc_now/0)
+          change set_attribute(:embedded_at, &DateTime.utc_now/0), where: present(:embedding)
+          change set_attribute(:embedded_at, nil), where: absent(:embedding)
         end
 
         # Internal: wire `published_version_id` after publish without a new

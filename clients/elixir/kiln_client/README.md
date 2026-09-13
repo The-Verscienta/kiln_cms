@@ -1,6 +1,6 @@
 # KilnClient
 
-Official Elixir client for the [Kiln CMS](https://github.com/The-Verscienta/kiln_cms)
+Official Elixir client for the [KilnCMS](https://github.com/The-Verscienta/kiln_cms)
 delivery APIs: the JSON:API read surface (`/api/json/*`), per-type keyword /
 semantic search and autocomplete, hybrid search (`/api/search`), and fired
 artifacts (`/api/content/:type/:slug`).

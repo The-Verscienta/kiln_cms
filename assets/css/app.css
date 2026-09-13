@@ -1280,6 +1280,15 @@ pre.highlight .gs {
   max-width: var(--public-measure);
 }
 
+/* `wide` on `Layouts.public` — the stock front page, which is a fixed
+   marketing design (screenshot row, feature grid) rather than preset-driven
+   prose: it uses none of the `public-*` structure hooks, so it takes the width
+   it was drawn at whatever the preset's reading measure is. Higher specificity
+   than the `[data-public-theme]` blocks above, so order here doesn't matter. */
+.public-shell[data-public-wide="true"] {
+  --public-measure: 72rem;
+}
+
 /* Headings across the shell — the chrome's own and the fired content's
    (`.kiln-block` sets size/weight per level; the preset supplies family and
    tracking, and its weight only where the block styles don't). */

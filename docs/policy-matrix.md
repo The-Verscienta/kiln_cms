@@ -62,6 +62,15 @@ Two non-role actors also appear below:
   pasted under a justified one needs its own. `mix kiln.authz.check` (part of
   `mix precommit` and CI) fails on a new one without that comment (#1309).
 
+  **The gate covers all of `lib/`** (#1402). Files that predate the
+  system-actor migration and still carry unexplained bypasses are listed in the
+  task's `@backlog` with the exact count each one has — 129 files, 313 sites
+  when that landed. It is a ratchet, not an exemption: a file with no entry
+  must be clean, so new code is gated from the day it lands; a listed file may
+  not gain a site; and a listed file that *loses* one fails too, with the
+  number to write, because an allowance nobody maintains stops being a
+  ratchet. Nothing may be added. Emptying it finishes #1402.
+
 ### The system actor
 
 `%KilnCMS.SystemActor{}` (`lib/kiln_cms/system_actor.ex`) is the actor a worker,
@@ -618,6 +627,34 @@ document, because firing is asynchronous. Editors short-circuit the check.
 The other two are enumeration surfaces — the link graph (including edges from
 unpublished drafts) and `ancestor_context` block text from every indexed
 document, drafts included — so they are simply editor-and-up.
+
+## In-app notifications — `Notifications.Notification` (#1320)
+
+| Action | own recipient | another user (any role) | anonymous |
+|--------|:-------------:|:-----------------------:|:---------:|
+| read (`read`, `for_user`, `unread_for_user`) | ✅ | 🔎 nothing | 🔎 nothing |
+| `mark_read`, `mark_unread` | ✅ | ❌ | ❌ |
+| `notify` (create) | ❌ | ❌ | ⚙️ actor-less only |
+
+`authorize_if expr(user_id == ^actor(:id))` is the whole read policy, and this
+is the one resource in the tree with **no admin bypass at all**. A notification
+list is a reading history — who was named in which review note, which drafts
+someone is watching — and a platform admin has no operational need for it. The
+sibling `Accounts.PushSubscription` *does* have an admin bypass (an operator
+has to be able to see where a device came from); this deliberately does not.
+
+`notify` is the notifier's write, and it addresses somebody *other* than
+whoever acted, so it cannot be authorized against the acting user. Rather than
+calling it with `authorize?: false`, it is gated `forbid_if actor_present()` +
+`authorize_if always()`: the policy still runs and still decides, so an
+authenticated caller that reaches the action is refused by a rule a reader can
+see. `KilnCMS.Notifications.record_in_app/1` is the only caller.
+
+An actor-less *read* is fail-closed for free: `^actor(:id)` templates to `nil`,
+the filter reduces to `user_id == NULL`, and no row satisfies it.
+
+Org-scoped (`multitenancy strategy :attribute, attribute :org_id`) — a user who
+edits two sites sees each site's notifications in that site's console only.
 
 ## Webhook deliveries — `WebhookDelivery`
 

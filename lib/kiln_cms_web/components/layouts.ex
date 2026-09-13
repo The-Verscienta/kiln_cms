@@ -686,6 +686,15 @@ defmodule KilnCMSWeb.Layouts do
         path: ~p"/editor/tasks",
         icon: "hero-clipboard-document-check"
       },
+      # The notification inbox (#1320), next to Tasks: both answer "what is
+      # waiting for me", and the bell in the top bar is the glance while this
+      # is the list.
+      %{
+        key: :inbox,
+        label: gettext("Inbox"),
+        path: ~p"/editor/inbox",
+        icon: "hero-inbox"
+      },
       # Content releases (#500) — editorial planning, so it sits with the author
       # group next to the calendar it plots onto, not with the admin tools. The
       # admin-only half (schedule/publish/roll back) is gated on the page.
@@ -1096,6 +1105,22 @@ defmodule KilnCMSWeb.Layouts do
     default: nil,
     doc: "the request's organization (#336), supplying the white-label branding (#48)"
 
+  # The stock front page is a marketing page, not an article: a screenshot row
+  # and a feature grid that the reading measure would crush. It opts out with
+  # `wide`, which widens `--public-measure` for that page alone (app.css) rather
+  # than letting each caller invent its own container width — the mistake that
+  # had `/` rendering in the *authoring* shell just to get `max-w-6xl`.
+  attr :wide, :boolean,
+    default: false,
+    doc: "widen the reading measure for a full-width page (the stock front page)"
+
+  # Optional, and nil for the content delivery templates on purpose: a published
+  # Page or Post is the same document for every reader, and this layout has no
+  # authoring nav to hang an account menu off. Passed only where a signed-in
+  # reader is the point — the stock front page, which had these two links from
+  # `Layouts.app` before it moved here and must not lose them.
+  attr :current_user, :any, default: nil, doc: "signed-in reader, for the account/sign-out pair"
+
   slot :inner_block, required: true
 
   def public(assigns) do
@@ -1111,7 +1136,7 @@ defmodule KilnCMSWeb.Layouts do
       |> assign(:footer_items, public_menu_items(brand.footer_menu_key, assigns))
 
     ~H"""
-    <div class="public-shell" data-public-theme={@brand.theme}>
+    <div class="public-shell" data-public-theme={@brand.theme} data-public-wide={@wide && "true"}>
       <%!-- The `public-*` classes are style hooks for the theme presets in
             app.css. They carry no styles of their own. --%>
       <header class="public-header border-b border-base-content/10 px-4 py-4 sm:px-6 lg:px-8">
@@ -1149,6 +1174,12 @@ defmodule KilnCMSWeb.Layouts do
                 {item.label}
               </a>
             <% end %>
+            <a :if={@current_user} href={~p"/account"} class="hover:text-base-content">
+              {gettext("Account")}
+            </a>
+            <a :if={@current_user} href={~p"/sign-out"} class="hover:text-base-content">
+              {gettext("Sign out")}
+            </a>
             <span
               :if={length(@locale_links) > 1}
               class="flex items-center gap-1"
