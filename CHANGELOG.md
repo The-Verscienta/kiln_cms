@@ -37,6 +37,16 @@ migration, a rewritten column, a dropped config key).
   can pin itself with `DOCS_SOURCE_REF=$(git rev-parse HEAD) mix docs`.
 ### Added
 
+- **A Configure hub at `/editor/configure`.** The console had twenty-odd
+  configuration screens and no screen that *was* configuration: the one page
+  named Settings is your own profile and 2FA, and a sidebar link is a name with
+  no explanation attached, so "where do I turn off full-text RSS" meant guessing
+  between Feeds, Delivery and Code injection. The hub lists every configuration
+  screen you may open, grouped as the sidebar groups them, each with a line
+  saying what it is for, over a filter that matches those descriptions and a
+  keyword list as well as the names — "rss" finds Feeds, "stripe" finds
+  Billing, "passkey" finds your own settings (#1319).
+
 - **The release image is published to GHCR on every version tag.**
   `docker pull ghcr.io/the-verscienta/kiln_cms:<version>` (or `:latest`) now
   gets the project-agnostic core, built by
@@ -52,6 +62,7 @@ migration, a rewritten column, a dropped config key).
   front, that KilnCMS is consumed as a git-submodule overlay rather than a Hex
   package, and which surfaces are stable, which move without notice, and which
   are off by default (#1328).
+
 - **`docs/overlay-contract.md` — what a downstream overlay may rely on across
   releases.** The semver table says a major bump means "the overlay contract
   broke", but nothing said which surfaces that covers. This one does: a table
@@ -100,6 +111,24 @@ migration, a rewritten column, a dropped config key).
   probed rather than declared, and the hand-rolled `@behaviour` path breaks on
   callback additions. Linked from `projects/README.md` (which keeps the
   mechanics) and the getting-started guide router (#1328).
+
+### Changed
+
+- **The Configure sidebar is sections, and ⌘K finds settings screens.** The
+  admin half of the console nav now sits in collapsible sections — Content
+  model, Capture, Delivery, Integrations, Organization, Account — with
+  **Operations** ruled off below them for the instance-wide screens a platform
+  admin owns (Team, Billing, Mail, API keys, Backups, System). Every item in
+  that band is platform-gated, so an org admin sees no band at all. Which
+  sections are collapsed is remembered per browser, like the icon rail, and is
+  ignored in the rail itself. The ⌘K palette gained a **Go to** category ahead
+  of the content results, searching the same list the sidebar and the hub
+  draw — by name, section, description and keyword, already filtered to what
+  you may open — so "backups" or "dkim" is one keystroke from the screen rather
+  than a scan down 25 items. The per-user screen is now labelled **Your
+  settings** under an **Account** heading, so nothing named "Settings" looks
+  like it holds the site's configuration, and the System screen no longer
+  describes itself as "the Kiln core this instance is built from" (#1319).
 
 ### Fixed
 

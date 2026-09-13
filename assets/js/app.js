@@ -919,6 +919,34 @@ const Hooks = {
   },
 }
 
+// Collapsible nav sections (#1319), persisted the same way the rail is: the
+// list of collapsed group keys lives on <html data-nav-collapsed>, which
+// LiveView never patches, and in localStorage, which root.html.heex replays
+// before first paint. The server always renders the expanded markup — CSS does
+// the hiding — so the only thing left to correct here is `aria-expanded`.
+const collapsedGroups = () =>
+  (document.documentElement.dataset.navCollapsed || "").split(" ").filter(Boolean)
+
+// One head, told what <html> already says.
+const markNavGroup = btn =>
+  btn.setAttribute("aria-expanded", String(!collapsedGroups().includes(btn.dataset.navGroupToggle)))
+
+const syncNavGroups = () =>
+  document.querySelectorAll("[data-nav-group-toggle]").forEach(markNavGroup)
+
+const toggleNavGroup = key => {
+  const collapsed = collapsedGroups()
+  const next = collapsed.includes(key)
+    ? collapsed.filter(k => k !== key)
+    : [...collapsed, key]
+  if (next.length) document.documentElement.dataset.navCollapsed = next.join(" ")
+  else delete document.documentElement.dataset.navCollapsed
+  localStorage.setItem("kiln:nav-collapsed", next.join(" "))
+  syncNavGroups()
+}
+
+syncNavGroups()
+
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
@@ -947,6 +975,12 @@ const liveSocket = new LiveSocket("/live", Socket, {
       for (const cls of ["kiln-issue-mark", "kiln-focus-pulse", "fresh"]) {
         if (from.classList.contains(cls)) to.classList.add(cls)
       }
+      // The nav section heads always arrive from the server as expanded
+      // (#1319) — the collapse lives on <html data-nav-collapsed> and in CSS,
+      // so a patch would otherwise tell a screen reader a section is open
+      // while it is drawn shut. `onNodeAdded` below covers the other half: a
+      // live redirect rebuilds the sidebar rather than updating it.
+      if (from.hasAttribute("data-nav-group-toggle")) markNavGroup(to)
       if (from.tagName === "DETAILS") {
         const serverOpen = to.hasAttribute("open")
         const prevServerOpen = from.dataset.serverOpen
@@ -955,6 +989,11 @@ const liveSocket = new LiveSocket("/live", Socket, {
         }
         to.dataset.serverOpen = String(serverOpen)
       }
+    },
+
+    onNodeAdded(el) {
+      if (el.hasAttribute?.("data-nav-group-toggle")) markNavGroup(el)
+      el.querySelectorAll?.("[data-nav-group-toggle]").forEach(markNavGroup)
     },
   },
 })
@@ -1098,6 +1137,11 @@ document.addEventListener("click", e => {
     // The clicked toggle just hid itself; hand focus to its twin.
     document.querySelector(collapse ? ".side-expand" : ".side-collapse")?.focus()
   }
+  // In rail mode the group heads are hairlines with no label, so a collapsed
+  // section would lose its items with nothing on screen to say why. CSS
+  // already forces them open there; refuse the toggle so the two agree.
+  const groupToggle = e.target.closest("[data-nav-group-toggle]")
+  if (groupToggle && !railMode()) toggleNavGroup(groupToggle.dataset.navGroupToggle)
   // The account menu is a <details>: a click anywhere outside closes it.
   document.querySelectorAll(".side-account[open]").forEach(d => {
     if (!d.contains(e.target)) d.removeAttribute("open")

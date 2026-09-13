@@ -282,6 +282,13 @@ msgid_plural "%{count} selected"
 msgstr[0] "%{count} seleccionado"
 msgstr[1] "%{count} seleccionados"
 
+#: lib/kiln_cms_web/live/configure_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} setting matches “%{query}”."
+msgid_plural "%{count} settings match “%{query}”."
+msgstr[0] "%{count} ajuste coincide con «%{query}»."
+msgstr[1] "%{count} ajustes coinciden con «%{query}»."
+
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} slugs would change (%{pinned} hand-picked skipped)"
@@ -930,6 +937,11 @@ msgstr "Un tipo que quites de los feeds de este sitio deja también de anunciars
 msgid "A version you were comparing was superseded."
 msgstr "Una versión que estabas comparando fue reemplazada."
 
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "A/B a headline or a block, and promote the winner."
+msgstr "Pruebe en A/B un titular o un bloque, y promocione el ganador."
+
 #: lib/kiln_cms_web/controllers/page_html.ex
 #, elixir-autogen, elixir-format
 msgid "A/B experiments"
@@ -961,6 +973,7 @@ msgid "API key created — copy it now, it won't be shown again."
 msgstr "Clave API creada: cópiala ahora, no se volverá a mostrar."
 
 #: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
 msgid "API keys"
@@ -1012,6 +1025,7 @@ msgid "Accessible"
 msgstr "Accesible"
 
 #: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
@@ -1583,7 +1597,7 @@ msgstr "Una exportación se limita a %{max} registros — %{over} filas seleccio
 msgid "An unexpected error occurred on our side. It has been recorded — please try again in a moment."
 msgstr "Se produjo un error inesperado de nuestro lado. Ha quedado registrado — inténtelo de nuevo en un momento."
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/controllers/page_html.ex
 #: lib/kiln_cms_web/live/analytics_live.ex
 #: lib/kiln_cms_web/live/funnel_live.ex
@@ -1890,7 +1904,7 @@ msgid "Auto-fills each entry's multi-segment canonical URL. Same tokens plus [sl
 msgstr "Rellena automáticamente la URL canónica de varios segmentos de cada entrada. Los mismos tokens más [slug]; los segmentos que se expanden vacíos se descartan. En blanco = URL planas."
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/automation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Automation"
@@ -1948,13 +1962,13 @@ msgstr "Creando copia…"
 msgid "Backup started — this page updates when it finishes."
 msgstr "Copia iniciada: esta página se actualizará cuando termine."
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Backups"
 msgstr "Copias de seguridad"
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
 msgid "Billing"
@@ -2040,6 +2054,11 @@ msgstr "Bloquea la publicación (error)"
 msgid "Blog"
 msgstr "Blog"
 
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Bluesky and Mastodon accounts this site announces from."
+msgstr "Las cuentas de Bluesky y Mastodon desde las que anuncia este sitio."
+
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
 msgid "Bluesky: an app password, never your account password. Mastodon: an access token with write:statuses."
@@ -2065,7 +2084,7 @@ msgstr "Ambas superficies funcionan de forma anónima y solo devuelven contenido
 msgid "Brand colour"
 msgstr "Color de marca"
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
 msgid "Branding"
@@ -2150,6 +2169,7 @@ msgid "CHECKPOINT TAMPERED: %{reason}"
 msgstr "PUNTO DE CONTROL MANIPULADO: %{reason}"
 
 #: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/calendar_live.ex
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -2232,7 +2252,7 @@ msgstr "Etiqueta de los subtítulos"
 msgid "Captions language"
 msgstr "Idioma de los subtítulos"
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "Capture"
 msgstr "Captura"
@@ -2475,7 +2495,7 @@ msgstr "Elegir…"
 msgid "Citation"
 msgstr "Fuente"
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/compliance_live.ex
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -2552,7 +2572,7 @@ msgstr "Cerrar"
 msgid "Closed"
 msgstr "Cerrados"
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #, elixir-autogen, elixir-format
@@ -2696,7 +2716,8 @@ msgstr "Concluido"
 msgid "Condenses this block into a single short paragraph."
 msgstr "Condensa este bloque en un solo párrafo breve."
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/configure_live.ex
 #, elixir-autogen, elixir-format
 msgid "Configure"
 msgstr "Configurar"
@@ -2772,7 +2793,7 @@ msgstr "Consentimiento registrado."
 msgid "Consent records"
 msgstr "Registros de consentimiento"
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/analytics_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/menu_live.ex
@@ -2792,6 +2813,11 @@ msgstr "Bloques de contenido"
 #, elixir-autogen, elixir-format
 msgid "Content can carry any number of tags."
 msgstr "El contenido puede llevar cualquier número de etiquetas."
+
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Content freshness, provenance and the audit record."
+msgstr "Vigencia del contenido, procedencia y registro de auditoría."
 
 #: lib/kiln_cms_web/live/analytics_live.ex
 #, elixir-autogen, elixir-format
@@ -2823,7 +2849,7 @@ msgstr "La inteligencia de contenido no está disponible para llamadas no superv
 msgid "Content item"
 msgstr "Elemento de contenido"
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "Content model"
 msgstr "Modelo de contenido"
@@ -2864,7 +2890,7 @@ msgstr "Tipo de contenido restaurado."
 msgid "Content type → attributes a member may change. Empty = no field restriction."
 msgstr "Tipo de contenido → atributos que un miembro puede cambiar. Vacío = sin restricción de campos."
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #: lib/kiln_cms_web/live/type_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -3527,6 +3553,11 @@ msgstr "Personalizado"
 msgid "Custom CSS"
 msgstr "CSS personalizado"
 
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Custom CSS, scripts and the origins they may reach."
+msgstr "CSS personalizado, scripts y los orígenes a los que pueden acceder."
+
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #, elixir-autogen, elixir-format
 msgid "Custom HTML added to every page of this site's public pages. Not the editor."
@@ -3861,6 +3892,11 @@ msgstr "Eliminar webhook"
 msgid "Delete “%{name}”?"
 msgstr "¿Eliminar «%{name}»?"
 
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Deleted content, restorable until it is purged."
+msgstr "Contenido eliminado, restaurable hasta que se purgue."
+
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Deleted."
@@ -3872,7 +3908,7 @@ msgstr "Eliminado."
 msgid "Delivered"
 msgstr "Entregado"
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "Delivery"
 msgstr "Entrega"
@@ -4675,6 +4711,11 @@ msgstr "Cada petición vuelve a leer la base de datos hasta que la caché se cal
 msgid "Every scanned slug already matches its derivation."
 msgstr "Todos los slugs analizados ya coinciden con su derivación."
 
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Every settings screen, and what each one is for."
+msgstr "Cada pantalla de configuración, y para qué sirve."
+
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
 msgid "Every variant is over the floor and no arm leads outright."
@@ -4689,6 +4730,11 @@ msgstr "Todo lo que necesita un equipo de contenido"
 #, elixir-autogen, elixir-format
 msgid "Everything with a cadence is inside it."
 msgstr "Todo lo que tiene una cadencia está dentro de ella."
+
+#: lib/kiln_cms_web/live/configure_live.ex
+#, elixir-autogen, elixir-format
+msgid "Everything you can change about this site, and about this deployment. Your own profile, password and sign-in live under Your settings instead."
+msgstr "Todo lo que puede cambiar de este sitio y de este despliegue. Su propio perfil, su contraseña y su inicio de sesión están en Su configuración."
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/content_editor/markdown_import.ex
@@ -4733,7 +4779,7 @@ msgstr "Experimento eliminado."
 msgid "Experiment started."
 msgstr "Experimento iniciado."
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/experiment_live.ex
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
@@ -4848,7 +4894,7 @@ msgstr "Imagen destacada"
 msgid "February"
 msgstr "febrero"
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Federation"
@@ -4879,7 +4925,7 @@ msgstr "Configuración de feeds restablecida a los valores del operador."
 msgid "Feed settings saved."
 msgstr "Configuración de feeds guardada."
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Feeds"
@@ -4922,6 +4968,7 @@ msgstr "Tipos de campo"
 
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/components/version_diff_components.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Fields"
@@ -4989,6 +5036,16 @@ msgstr "Filtrar por tipo"
 msgid "Filter by uploader"
 msgstr "Filtrar por quién lo subió"
 
+#: lib/kiln_cms_web/live/configure_live.ex
+#, elixir-autogen, elixir-format
+msgid "Filter settings"
+msgstr "Filtrar la configuración"
+
+#: lib/kiln_cms_web/live/configure_live.ex
+#, elixir-autogen, elixir-format
+msgid "Filter settings — try “rss”, “passkey”, “redirect”…"
+msgstr "Filtrar la configuración: pruebe con «rss», «passkey», «redirect»…"
+
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "Filter tags"
@@ -5011,8 +5068,8 @@ msgstr "Referencia de filtrado"
 
 #: lib/kiln_cms_web/live/search_palette_live.ex
 #, elixir-autogen, elixir-format
-msgid "Find pages, posts, and media — press ⌘K / Ctrl-K from anywhere to jump here."
-msgstr "Encuentre páginas, entradas y medios — pulse ⌘K / Ctrl-K desde cualquier lugar para llegar aquí."
+msgid "Find pages, posts, media and settings screens — press ⌘K / Ctrl-K from anywhere to jump here."
+msgstr "Encuentre páginas, entradas, medios y pantallas de configuración — pulse ⌘K / Ctrl-K desde cualquier lugar para llegar aquí."
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
@@ -5146,6 +5203,7 @@ msgid "Formatted text with bold, italic, and lists"
 msgstr "Texto con formato: negrita, cursiva y listas"
 
 #: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/controllers/page_html.ex
 #: lib/kiln_cms_web/live/form_live.ex
 #: lib/kiln_cms_web/live/form_settings_live.ex
@@ -5224,7 +5282,7 @@ msgstr "Embudo creado — añada sus pasos."
 msgid "Funnel deleted."
 msgstr "Embudo eliminado."
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/analytics_live.ex
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
 #: lib/kiln_cms_web/live/funnel_live.ex
@@ -5273,6 +5331,11 @@ msgstr "Publica tu sitio"
 msgid "Go live at"
 msgstr "Publicar el"
 
+#: lib/kiln_cms_web/live/search_palette_live.ex
+#, elixir-autogen, elixir-format
+msgid "Go to"
+msgstr "Ir a"
+
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "Go to content"
@@ -5320,7 +5383,7 @@ msgstr "Embudo objetivo"
 msgid "Good"
 msgstr "Bien"
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Governance"
@@ -5472,6 +5535,11 @@ msgstr "Texto del encabezado"
 msgid "Headless CMS on Phoenix + Ash"
 msgstr "CMS headless sobre Phoenix + Ash"
 
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Headless access to the delivery and authoring APIs."
+msgstr "Acceso headless a las API de entrega y de autoría."
+
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
 msgid "Headless consumer guide"
@@ -5529,7 +5597,7 @@ msgstr "Testigo del historial"
 msgid "Hits"
 msgstr "Peticiones"
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Home"
@@ -5549,6 +5617,16 @@ msgstr "Host o URI del actor"
 #, elixir-autogen, elixir-format
 msgid "Hover a block and click Edit to change it on the page."
 msgstr "Pase el cursor sobre un bloque y haga clic en Editar para cambiarlo en la página."
+
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "How URLs are built, and bulk regeneration."
+msgstr "Cómo se construyen las URL, y regeneración masiva."
+
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "How this instance sends email, and its DNS records."
+msgstr "Cómo envía correo esta instancia, y sus registros DNS."
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -5774,6 +5852,11 @@ msgstr "Instrucción"
 #, elixir-autogen, elixir-format
 msgid "Instruction for the model"
 msgstr "Instrucción para el modelo"
+
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Integrations"
+msgstr "Integraciones"
 
 #: lib/kiln_cms_web/live/analytics_live.ex
 #, elixir-autogen, elixir-format
@@ -6100,7 +6183,7 @@ msgid_plural "%{count} links have text like “%{example}” that doesn't say wh
 msgstr[0] "El texto del enlace «%{example}» no indica a dónde lleva: los lectores de pantalla pueden listar los enlaces fuera de contexto."
 msgstr[1] "%{count} enlaces tienen un texto como «%{example}» que no indica a dónde llevan: los lectores de pantalla pueden listar los enlaces fuera de contexto."
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/link_report_live.ex
 #, elixir-autogen, elixir-format
 msgid "Links"
@@ -6203,7 +6286,7 @@ msgstr "Servidor MCP para asistentes de IA"
 msgid "Machine name"
 msgstr "Nombre interno"
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Mail"
@@ -6296,7 +6379,7 @@ msgstr "Se busca como subcadena, sin distinguir mayúsculas ni saltos de línea,
 msgid "May"
 msgstr "mayo"
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/overview_live.ex
 #: lib/kiln_cms_web/live/search_palette_live.ex
@@ -6367,7 +6450,7 @@ msgstr "Menú"
 msgid "Menu deleted."
 msgstr "Menú eliminado."
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
 msgid "Menus"
@@ -6555,6 +6638,11 @@ msgstr "Nombre (opcional)"
 msgid "Name your site"
 msgstr "Pon nombre a tu sitio"
 
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Name, logo, colours and the public theme."
+msgstr "Nombre, logotipo, colores y el tema público."
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Names the record (search finds it by this value)"
@@ -6652,7 +6740,12 @@ msgstr "Pestaña nueva"
 msgid "New tier"
 msgstr "Nuevo nivel"
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "New types of document, without a code change."
+msgstr "Nuevos tipos de documento, sin cambiar el código."
+
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/account_live.ex
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #, elixir-autogen, elixir-format
@@ -7271,6 +7364,11 @@ msgstr "Todavía no se ha configurado nada para este sitio, así que sigue lo qu
 msgid "Nothing has written %{path} yet. Either no backup has run, or it writes somewhere else."
 msgstr "Todavía no se ha escrito %{path}. O no se ha ejecutado ninguna copia, o se guarda en otro sitio."
 
+#: lib/kiln_cms_web/live/configure_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nothing here matches “%{query}”."
+msgstr "Aquí no hay nada que coincida con «%{query}»."
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Nothing in this release"
@@ -7599,9 +7697,9 @@ msgstr "Especificación OpenAPI (JSON)"
 msgid "Opens the Accessibility panel."
 msgstr "Abre el panel de accesibilidad."
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
-msgid "Ops"
+msgid "Operations"
 msgstr "Operaciones"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -7640,9 +7738,14 @@ msgstr "Opciones (una por línea — solo para tipo selección)"
 msgid "Options — one per line"
 msgstr "Opciones: una por línea"
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
-msgid "Org"
+msgid "Ordered content steps, and where readers drop out."
+msgstr "Pasos de contenido ordenados, y dónde abandonan los lectores."
+
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Organization"
 msgstr "Organización"
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
@@ -8172,6 +8275,11 @@ msgstr "Identificador de precio del proveedor"
 msgid "Provisioning URI"
 msgstr "URI de aprovisionamiento"
 
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Public forms and the submissions they collect."
+msgstr "Formularios públicos y los envíos que recogen."
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Public routes"
@@ -8461,7 +8569,7 @@ msgstr "Redirección eliminada."
 msgid "Redirect from %{path} created."
 msgstr "Redirección desde %{path} creada."
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/controllers/page_html.ex
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
@@ -8602,7 +8710,7 @@ msgstr "Lanzamiento programado."
 msgid "Release shipped"
 msgstr "Lanzamiento publicado"
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Releases"
@@ -9193,6 +9301,11 @@ msgstr "Ejecútelo en sus propios servidores"
 msgid "Running"
 msgstr "En curso"
 
+#: lib/kiln_cms_web/live/configure_live.ex
+#, elixir-autogen, elixir-format
+msgid "Running the deployment, not just this site."
+msgstr "Gestionar el despliegue, no solo este sitio."
+
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "SEO & scheduling"
@@ -9503,13 +9616,13 @@ msgstr "Buscar por título"
 
 #: lib/kiln_cms_web/live/search_palette_live.ex
 #, elixir-autogen, elixir-format
-msgid "Search content"
-msgstr "Buscar contenido"
+msgid "Search content and settings"
+msgstr "Buscar contenido y configuración"
 
 #: lib/kiln_cms_web/live/search_palette_live.ex
 #, elixir-autogen, elixir-format
-msgid "Search content…"
-msgstr "Buscar contenido…"
+msgid "Search content and settings…"
+msgstr "Buscar contenido y configuración…"
 
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #, elixir-autogen, elixir-format
@@ -9662,6 +9775,11 @@ msgstr "Enviar un boletín"
 #, elixir-autogen, elixir-format
 msgid "Send a published post to your subscribers via the built-in mail server."
 msgstr "Envíe una entrada publicada a sus suscriptores mediante el servidor de correo integrado."
+
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Send a published post to your subscribers."
+msgstr "Envíe una entrada publicada a sus suscriptores."
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -9895,6 +10013,11 @@ msgstr "Cerrar sesión"
 msgid "Sign-in could not be completed right now. Try again in a moment."
 msgstr "No se pudo completar el inicio de sesión en este momento. Inténtelo de nuevo en unos instantes."
 
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Signed POSTs to other services when content changes."
+msgstr "POST firmados a otros servicios cuando cambia el contenido."
+
 #: lib/kiln_cms_web/controllers/passkey_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Signed in with a passkey."
@@ -10012,13 +10135,13 @@ msgstr "Regeneración de slugs"
 msgid "Slug regeneration finished: %{changed} renamed."
 msgstr "Regeneración de slugs finalizada: %{changed} renombrados."
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
 msgid "Slugs"
 msgstr "Slugs"
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/analytics_live.ex
 #, elixir-autogen, elixir-format
 msgid "Social"
@@ -10400,6 +10523,7 @@ msgid "Syndicate the full body of every %{type}"
 msgstr "Sindicar el cuerpo completo de cada %{type}"
 
 #: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "System"
@@ -10494,21 +10618,21 @@ msgstr "Tarea vencida"
 msgid "Task moved to this block."
 msgstr "Tarea movida a este bloque."
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
 msgid "Tasks"
 msgstr "Tareas"
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/search_palette_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Taxonomy"
 msgstr "Taxonomía"
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "Team"
@@ -10771,11 +10895,6 @@ msgstr "Ese nivel ya no existe."
 msgid "The DNS check failed unexpectedly."
 msgstr "La comprobación de DNS falló inesperadamente."
 
-#: lib/kiln_cms_web/live/system_live.ex
-#, elixir-autogen, elixir-format
-msgid "The Kiln core this instance is built from, and how to update it."
-msgstr "El núcleo de Kiln con el que se construyó esta instancia, y cómo actualizarlo."
-
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex
 #, elixir-autogen, elixir-format
 msgid "The KilnCMS block editor: a page's headings, text and image blocks, with the inspector alongside."
@@ -10837,6 +10956,11 @@ msgstr "No se pudo registrar la campaña: compruebe los detalles."
 msgid "The change could not be saved."
 msgstr "No se pudo guardar el cambio."
 
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "The claims vocabulary the editor panel checks against."
+msgstr "El vocabulario de afirmaciones con el que contrasta el panel del editor."
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "The command reports new migrations and any required upgrade steps before it changes the pin. It does not deploy."
@@ -10851,6 +10975,11 @@ msgstr "La comprobación de la conexión falló. Consulte los registros del serv
 #, elixir-autogen, elixir-format
 msgid "The control won — the document already reads that way; nothing to promote."
 msgstr "Ganó el control: el documento ya dice eso; no hay nada que promover."
+
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "The database and uploaded media, and when they were last saved."
+msgstr "La base de datos y los medios subidos, y cuándo se guardaron por última vez."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -11009,6 +11138,11 @@ msgstr "Las contraseñas no coinciden."
 #, elixir-autogen, elixir-format
 msgid "The path must start with /."
 msgstr "La ruta debe empezar por /."
+
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "The payment provider, and the tiers readers can buy."
+msgstr "El proveedor de pagos, y los niveles que los lectores pueden comprar."
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
@@ -11231,6 +11365,11 @@ msgstr "Este objetivo convierte en una página posterior, lo que requiere asigna
 msgid "This instance"
 msgstr "Esta instancia"
 
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "This instance's version, plugins and health."
+msgstr "La versión de esta instancia, sus plugins y su estado."
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "This is a shared demo account, so its password and sign-in methods can't be changed."
@@ -11321,6 +11460,11 @@ msgstr "Este ajuste se aplica solo a este formulario: los formularios de otros s
 #, elixir-autogen, elixir-format
 msgid "This site"
 msgstr "Este sitio"
+
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "This site as an ActivityPub actor, and its followers."
+msgstr "Este sitio como actor de ActivityPub, y quiénes lo siguen."
 
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
@@ -11490,6 +11634,7 @@ msgid "Translation vendors (XLIFF)"
 msgstr "Proveedores de traducción (XLIFF)"
 
 #: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/controllers/page_html.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_history_component.ex
 #: lib/kiln_cms_web/live/overview_live.ex
@@ -11498,7 +11643,7 @@ msgstr "Proveedores de traducción (XLIFF)"
 msgid "Translations"
 msgstr "Traducciones"
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/trash_live.ex
 #, elixir-autogen, elixir-format
@@ -11607,6 +11752,11 @@ msgstr "Escriba / para dar formato a este texto o insertar un bloque abajo."
 #, elixir-autogen, elixir-format
 msgid "Type @ to bring someone in."
 msgstr "Escribe @ para incluir a alguien."
+
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Typed custom fields on a content type."
+msgstr "Campos personalizados tipados en un tipo de contenido."
 
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
@@ -12162,7 +12312,7 @@ msgstr "Webhook eliminado."
 msgid "Webhook signing secret"
 msgstr "Secreto de firma de webhooks"
 
-#: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/controllers/page_html.ex
 #: lib/kiln_cms_web/live/overview_live.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
@@ -12244,10 +12394,20 @@ msgstr "Qué hay, lo más próximo primero."
 msgid "When"
 msgstr "Cuándo"
 
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "When something is published, do this."
+msgstr "Cuando se publique algo, haga esto."
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Where backups go"
 msgstr "Dónde se guardan las copias"
+
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Where moved URLs point, and what visitors asked for in vain."
+msgstr "A dónde apuntan las URL movidas, y qué pidieron en vano los visitantes."
 
 #: lib/kiln_cms_web/live/analytics_live.ex
 #, elixir-autogen, elixir-format
@@ -12258,6 +12418,16 @@ msgstr "De dónde vinieron los lectores"
 #, elixir-autogen, elixir-format
 msgid "Which of this site's content types appear in its Atom and JSON feeds, and how much of each entry they carry."
 msgstr "Qué tipos de contenido de este sitio aparecen en sus feeds Atom y JSON, y cuánto de cada entrada llevan."
+
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Which types syndicate, and whether in full."
+msgstr "Qué tipos se sindican, y si lo hacen por completo."
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Which version of Kiln this site is running, and how to update it."
+msgstr "Qué versión de Kiln utiliza este sitio, y cómo actualizarla."
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
@@ -12273,6 +12443,11 @@ msgstr "Quién"
 #, elixir-autogen, elixir-format
 msgid "Who can author what on this site: members, their capability tier, and granular scope — assigned directly or through a custom role."
 msgstr "Quién puede crear qué en este sitio: los miembros, su nivel de capacidad y su alcance granular, asignado directamente o mediante un rol personalizado."
+
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Who can author what, and under which role."
+msgstr "Quién puede crear qué, y con qué rol."
 
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
@@ -12633,6 +12808,11 @@ msgstr "Su contraseña se ha restablecido correctamente"
 msgid "Your plan"
 msgstr "Tu plan"
 
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Your profile, password, two-factor, passkeys and notifications."
+msgstr "Su perfil, contraseña, doble factor, claves de acceso y notificaciones."
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Your recovery codes — save them now, they won't be shown again."
@@ -12643,6 +12823,11 @@ msgstr "Sus códigos de recuperación: guárdelos ahora, no se volverán a mostr
 #, elixir-autogen, elixir-format
 msgid "Your role cannot copy this content's blocks, so it cannot be translated."
 msgstr "Tu rol no puede copiar los bloques de este contenido, así que no se puede traducir."
+
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Your settings"
+msgstr "Su configuración"
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -12658,6 +12843,11 @@ msgstr "Tu sitio está listo: inicia sesión con la cuenta que acabas de crear. 
 #, elixir-autogen, elixir-format
 msgid "Your submission couldn't be saved: %{detail}"
 msgstr "No se pudo guardar su envío: %{detail}"
+
+#: lib/kiln_cms_web/live/configure_live.ex
+#, elixir-autogen, elixir-format
+msgid "Yours alone — nobody else on the team sees or inherits these."
+msgstr "Solo suyos: nadie más del equipo los ve ni los hereda."
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format

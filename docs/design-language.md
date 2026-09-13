@@ -176,12 +176,31 @@ The authoring app frame (`lib/kiln_cms_web/components/layouts.ex`):
 - **Left sidebar** (persistent and full-height on `lg+`, slide-in drawer on
   mobile via a CSS-only peer checkbox — works before the LiveView socket
   connects), drawn after Untitled UI's dark sidebar: in dark mode the panel
-  sits a step *below* the workspace. Brand row with a collapse button, two
-  role-gated nav groups (**author**: Content, Media, Taxonomy, Calendar,
-  Translations, Analytics — **configure**: Content types, Fields, Forms,
-  Webhooks, Mail, Trash, Settings), plugin-contributed items, then a foot with
-  the segmented theme switch and the account row (avatar, name over email)
-  whose menu holds Account, GraphQL / JSON:API and Sign out.
+  sits a step *below* the workspace. Brand row with a collapse button, the
+  role-gated nav (below), plugin-contributed items, then a foot with the
+  segmented theme switch and the account row (avatar, name over email) whose
+  menu holds Account, GraphQL / JSON:API and Sign out.
+- **The nav itself** is data, in `KilnCMSWeb.ConsoleNav` — the sidebar draws
+  it, the Configure hub (`/editor/configure`) lists it with a one-line
+  description per screen, and the ⌘K palette searches it by name, section,
+  description and keyword. So a screen is reachable the day it is added, and
+  one the actor may not open is absent from all three. The **author** items
+  (Content, Media, Taxonomy, Calendar, Translations, Analytics, …) run
+  ungrouped at the top; below them an admin gets the **Configure** hub link,
+  then collapsible sections — Content model, Capture, Delivery, Integrations,
+  Organization, Account (**Your settings**, the per-user screen) — and
+  **Operations**, ruled off below them for the instance-wide, platform-admin
+  screens (Team, Billing, Mail, API keys, Backups, System). Every item in that
+  band is `platform: true`, so for anyone else the band empties and is dropped:
+  the separation is never half day-to-day admin. A non-admin gets the Account
+  section alone.
+- **Section collapse** is stored the way the rail is: a space-separated list of
+  group keys on `<html data-nav-collapsed>` + `localStorage`
+  (`kiln:nav-collapsed`), replayed by `root.html.heex` before first paint. The
+  server always renders the section expanded and `app.css` does the hiding (one
+  `--side-group-display` rule per group key), so nothing flashes open and no
+  assign is involved; `app.js` only corrects `aria-expanded`. In the icon rail
+  collapse is ignored — a 4.5rem column has no room to say why items are gone.
 - **Icon rail** (`lg+`): the collapse button folds the sidebar to icons. The
   state lives on `<html data-sidebar="collapsed">` + `localStorage`
   (`kiln:sidebar`), restored before first paint by `root.html.heex` and
