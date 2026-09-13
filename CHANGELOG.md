@@ -1024,6 +1024,18 @@ migration, a rewritten column, a dropped config key).
 
 ### Security
 
+- **The session cookie's signing and encryption salts are configurable, not
+  hardcoded.** `KilnCMSWeb.SessionCookie.options/1` derived both from literal
+  strings (`"Dsoh9oKb"`, `"8fso5iqxDfI"`) baked into this open-source file, so
+  every deployment built from this tree derived its session keys from the same
+  public constant rather than something deployment-specific. Neither is a
+  secret by itself — both are combined with `secret_key_base` via
+  `Plug.Crypto.KeyGenerator`, and `secret_key_base` carries the real entropy —
+  but they are now `Application.compile_env/3` reads (`:session_signing_salt`
+  / `:session_encryption_salt`, same mechanism `:secure_session_cookie`
+  already uses), overridable from a downstream `config/prod.exs` without
+  forking the module. Defaults are unchanged, so no existing deployment's
+  sessions are invalidated by upgrading (#1326).
 - **`/ws/gql`, `/ws/bridge` and `/ws/collab` connects are now budgeted per
   client address**, closing the `/ws/*` half of `docs/threat-model.md` item
   10's residual gap (the `/live` half was closed earlier by #1183). A new

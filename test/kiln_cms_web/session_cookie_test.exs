@@ -113,6 +113,22 @@ defmodule KilnCMSWeb.SessionCookieTest do
     end
   end
 
+  describe "the session salts (#1326)" do
+    test "default to this repository's existing values, so no build silently invalidates every live session" do
+      # Both salts used to be literals inside this module; they are now
+      # `Application.compile_env/3` reads with these same values as the
+      # fallback (see the moduledoc), so a deployment that never overrides
+      # `:session_signing_salt` / `:session_encryption_salt` keeps deriving
+      # the exact keys it always has. Pinned as exact values, not merely
+      # truthy, because a *different* default would be the kind of change
+      # that reads as harmless in a diff and silently signs every existing
+      # visitor out.
+      opts = SessionCookie.options(false)
+      assert opts[:signing_salt] == "Dsoh9oKb"
+      assert opts[:encryption_salt] == "8fso5iqxDfI"
+    end
+  end
+
   describe "the endpoint" do
     test "takes its whole session cookie from the rule rather than restating it" do
       running = Endpoint.session_options()
