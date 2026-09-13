@@ -116,7 +116,7 @@ defmodule KilnCMS.Notifications.Tasks do
   # not whether they may be told the name of the thing they were assigned.
   defp content_title(task) do
     case ContentTypes.get_record(task.content_type, task.content_id,
-           # System read — see above; the recipient is already decided.
+           # `authorize?: false`: a system read — see above; the recipient is already decided.
            authorize?: false,
            tenant: task.org_id,
            query: [select: [:id, :title]]
