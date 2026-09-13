@@ -11,13 +11,14 @@ Every Kiln site also serves a human-readable summary of these surfaces at
 the Swagger UI / OpenAPI spec links (#319).
 
 **Building in Elixir?** Use the official client,
-[`kiln_client`](../clients/elixir/kiln_client/README.md) — it wraps the
-JSON:API reads, search, and artifact surfaces with the safe defaults below
-(published-only reads, `Req.Test`-stubbable) already encoded.
+[`kiln_client`](https://github.com/The-Verscienta/kiln_cms/blob/main/clients/elixir/kiln_client/README.md)
+— it wraps the JSON:API reads, search, and artifact surfaces with the safe
+defaults below (published-only reads, `Req.Test`-stubbable) already encoded.
 
 **Building in JS/TS?** Use the official client,
-[`@kiln-cms/client`](../clients/js/README.md) — the same surfaces and safe
-defaults as the Elixir client (published-only reads, injectable `fetch`), plus
+[`@kiln-cms/client`](https://github.com/The-Verscienta/kiln_cms/blob/main/clients/js/README.md)
+— the same surfaces and safe defaults as the Elixir client (published-only
+reads, injectable `fetch`), plus
 preview tokens, `?as_of=` point-in-time reads, and a bundled `kiln-types`
 generator that emits per-site TypeScript types from `GET /api/schema` (dynamic
 content types and custom fields included). `examples/astro-blog` consumes it

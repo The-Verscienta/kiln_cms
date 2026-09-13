@@ -179,6 +179,9 @@ Kiln is an **opinionated, security-first, self-hosted platform** for teams that
 value the BEAM's operational model and batteries-included infra (search, mail,
 real-time, AI authoring) in one deployment that is *both* the site and the API.
 It trades away a marketplace, managed hosting, and runtime-installable
-extensions to get there — and, until #1324 lands, production co-editing. Its
+extensions to get there — and, for now, production co-editing: #1324 resolved
+by *labelling* the CRDT prototype as prod-disabled rather than shipping it, and
+graduating it is Theme F of
+[content-editor-modernization.md](content-editor-modernization.md). Its
 most defensible ground is **structured content + real-time (vs. Sanity)** and
 **content + native email (vs. everyone)**.

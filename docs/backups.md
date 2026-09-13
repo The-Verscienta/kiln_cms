@@ -41,7 +41,10 @@ data or capability:
 > from `secret_key_base`**. A database restore booted under a *different*
 > `SECRET_KEY_BASE` comes up fine, but every database-stored key is
 > unrecoverable (and all sessions/tokens invalidate). Store it with the same
-> care as the dumps — a dump without it is only a partial backup.
+> care as the dumps — a dump without it is only a partial backup. Replacing
+> it deliberately is its own procedure, with its own losses —
+> the `SECRET_KEY_BASE` section of
+> [`secrets-rotation.md`](secrets-rotation.md).
 
 Not needed in backups: fired artifacts and search indexes are *derived* state —
 they restore with the DB anyway, and can always be rebuilt (`mix kiln.refire_all`,
@@ -134,7 +137,10 @@ the database underneath a running BEAM, with a credible answer for a failure
 halfway. Akeeba-class complexity, and Akeeba-class risk.
 
 **Secrets.** `SECRET_KEY_BASE` and friends are not in these files and never
-will be — see the table above.
+will be — see the table above. Rotating them is
+[`secrets-rotation.md`](secrets-rotation.md), which is the companion to this
+document: this one keeps the data, that one keeps the keys that make some of
+the data readable.
 
 ## Restore runbook (full loss → serving)
 

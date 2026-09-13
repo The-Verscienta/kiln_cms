@@ -4,7 +4,7 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
 
   `authorize?: false` skips *every* policy on the resource — including the
   ones a later PR adds, and including any policy declared below a `bypass`
-  (`docs/policy-matrix.md`, "Policy bypasses"). In a row-based multi-tenant
+  (`docs/policy-matrix.md`, "The system actor"). In a row-based multi-tenant
   system that makes each bypass a small piece of the authorization surface
   that no policy block documents. #1309 counted 563 of them; the ones that
   matter most are the ones on request paths, where the caller is a browser or
@@ -42,18 +42,28 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
 
   ## Scope
 
-  `lib/kiln_cms_web/` by default; pass paths (files or directories) to scan
-  something else. Non-web code is not gated yet: the worker/system sites in
-  `lib/kiln_cms/` are the system-actor follow-up, tracked in #1402.
+  The default paths are the parts of the tree that have been audited. The web
+  layer went first (#1329); non-web directories are added one at a time as the
+  system-actor migration works through them (#1402), which is what makes each
+  slice's cleanup stick. Pass paths (files or directories) to scan something
+  else — `mix kiln.authz.check lib` is the whole tree, and reports how much is
+  left.
 
       mix kiln.authz.check
       mix kiln.authz.check lib/kiln_cms/billing.ex
   """
-  @shortdoc "Fails on an unexplained `authorize?: false` in lib/kiln_cms_web/"
+  @shortdoc "Fails on an unexplained `authorize?: false` in the audited tree"
 
   use Mix.Task
 
-  @default_paths ["lib/kiln_cms_web"]
+  # Audited, and therefore gated. Add a directory here in the same PR that
+  # cleans it up — never ahead of one.
+  @default_paths [
+    "lib/kiln_cms_web",
+    "lib/kiln_cms/automation",
+    "lib/kiln_cms/firing",
+    "lib/kiln_cms/search"
+  ]
   @window 12
   @justification ~r/authorize\?|bypass/i
 

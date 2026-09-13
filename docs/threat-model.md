@@ -69,6 +69,14 @@ the router so preflights are answered before route matching).
 | Sockets | `/live`, `/ws/collab`, `/ws/bridge` | session / signed token + per-document read / API key + per-document read | `/live` root joins `:live_join` per address (#1183); every frame on a `/ws/collab` connection `:collab_event` per account (#1305); otherwise none (except the sign-in submit, above) |
 | Dev tools | `/dev/dashboard`, `/dev/mailbox`, `/admin`, `/gql/playground` | compile-gated off in prod | — |
 
+**`/ws/collab` is a prototype surface.** Its joins are refused unless
+`config :kiln_cms, :collab_prototype` is set, and that is set only in
+`config/dev.exs` and `config/test.exs` — so a production build carries the socket
+but accepts no CRDT session (#1324, and
+[collaborative-editing-spike.md](collaborative-editing-spike.md)). Everything
+below about the collab room is modelled as if it were live, because that is the
+bar it has to clear before it can be enabled; it is not a live surface today.
+
 **The server-side Ash policies are the authorization boundary.** Every read and
 mutation through GraphQL, JSON:API, REST, MCP and LiveView runs through
 `Ash.Policy.Authorizer` with the request's actor and tenant. The API layers add
@@ -983,9 +991,21 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
 11. **Periodic CSP re-review** as the editor adds third-party assets. The
     runtime `img-src` is widened by `CSP_IMG_SRC` and by the Unsplash
     integration — the only externally-influenced part of the policy.
-12. **Secrets rotation runbook** (DB URL, `SECRET_KEY_BASE`,
-    `TOKEN_SIGNING_SECRET`, S3 keys) is not written down; pairs with
-    [`backups.md`](backups.md).
+12. ~~**Secrets rotation runbook** (DB URL, `SECRET_KEY_BASE`,
+    `TOKEN_SIGNING_SECRET`, S3 keys) is not written down.~~ **Closed by
+    #1304:** [`secrets-rotation.md`](secrets-rotation.md) is the per-secret
+    procedure, verified against what the code does rather than what would be
+    reasonable. *Residual, and the reason to read it before an incident rather
+    than during one:* nothing in this application supports a dual-key
+    transition. `TOKEN_SIGNING_SECRET` and `SECRET_KEY_BASE` are hard
+    cutovers that sign every user out, and `SECRET_KEY_BASE` additionally
+    keys `KilnCMS.Keys.Vault`, so rotating it **permanently orphans**
+    database-stored key material — the DKIM key, social credentials, payment
+    secrets and the ActivityPub actor key — with no re-encryption path. Three
+    of those four have a documented way back; the federation actor key has
+    none, which the runbook flags as the one rotation that cannot be done
+    safely today. Pairs with [`backups.md`](backups.md), where the same
+    `SECRET_KEY_BASE` is part of the backup.
 13. ~~**The collaborative-editing socket is scoped by topic, not by
     tenancy.**~~ **Closed by #655.** The socket token still names only a user,
     so it establishes *who* and nothing more; `CollabChannel.join/3` now

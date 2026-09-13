@@ -85,7 +85,7 @@ defmodule KilnCMS.Accounts.ApiKey do
 
     # Minting, listing and revoking keys is an operator task — admins only.
     policy always() do
-      authorize_if actor_attribute_equals(:role, :admin)
+      authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
     end
   end
 
