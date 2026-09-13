@@ -82,6 +82,12 @@ defmodule KilnCMS.Accounts do
       define :update_org_membership, action: :update
       define :create_org_membership, action: :create
       define :remove_org_membership, action: :destroy
+
+      # Time-boxed per-site tiers (KilnCMS.Accounts.RoleGrant). Pass both fields
+      # to grant, both blank to revoke early; `expire_membership_role_grant` is
+      # the hourly sweep's write and takes no input.
+      define :grant_membership_temporary_role, action: :grant_temporary_role
+      define :expire_membership_role_grant, action: :expire_role_grant
     end
 
     # Custom roles (#332 slice 4) — named bundles of the grant axes, assigned
@@ -123,7 +129,25 @@ defmodule KilnCMS.Accounts do
       # from the ceremony after Wax verification; see the action + preparation).
       define :complete_passkey_sign_in, action: :sign_in_with_passkey, args: [:user_id]
       # Admin-only: assign role + consumer audiences; pass `actor: admin`.
+      # The record MUST come from a read that suppressed the temporary-role fold
+      # (`KilnCMS.Accounts.RoleGrant.unfolded/0`) — the action refuses a folded
+      # one, because Ash would silently drop a `role` write that matched it.
       define :manage_user_access, action: :manage_access
+      # Time-boxed elevation above the standing role (KilnCMS.Accounts.RoleGrant).
+      # Pass both grant fields to grant, both blank to revoke early.
+      define :grant_user_temporary_role, action: :grant_temporary_role
+      # The hourly expiry sweep's write; takes no input. Authorization never waits
+      # for it — see KilnCMS.Accounts.RoleGrant.
+      define :expire_user_role_grant, action: :expire_role_grant
+      # Email a named account a password-reset link, on an operator's behalf
+      # (admin-only). Answers `{:ok, :sent}` or a named error — unlike the
+      # anonymous `:request_password_reset_token`, which cannot.
+      define :send_user_password_reset, action: :send_password_reset, args: [:user_id]
+      # Revoke every stored token for an account (AshAuthentication's
+      # `log_out_everywhere` add-on). Signs the account out of every browser on
+      # its next request; pair it with `KilnCMS.Accounts.SessionEviction.evict/2`
+      # to drop the sockets that are already connected.
+      define :log_out_user_everywhere, action: :log_out_everywhere, args: [:user]
       # System-only (`authorize?: false`) — called by KilnCMS.Billing.Entitlements,
       # the declarative recompute. An actor-carrying call is refused by the change
       # module, since the admin policy bypass would defeat a `forbid_if` alone.
