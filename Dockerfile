@@ -125,7 +125,12 @@ RUN npm --prefix assets ci
 RUN ERL_FLAGS="+S 2:2" mix compile
 RUN mix assets.deploy
 
+# `config/runtime/` holds the per-concern fragments runtime.exs imports (#1322).
+# Both halves are required: this puts them in the build context, and the
+# `:steps` hook in mix.exs copies them next to runtime.exs inside the assembled
+# release. Drop either and the image builds fine and fails on first boot.
 COPY config/runtime.exs config/
+COPY config/runtime config/runtime
 COPY rel rel
 
 # Package application source so Sentry can show code context around stack frames

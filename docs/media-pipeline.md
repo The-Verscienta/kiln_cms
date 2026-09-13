@@ -666,7 +666,7 @@ Switch adapters by setting `S3_BUCKET`; `S3_PUBLIC_BASE_URL` then becomes
 required (the app refuses to boot without it) and is the **CDN hostname** —
 every media URL the CMS emits, original and variant alike, is that base plus
 the storage key. Non-AWS stores also need `S3_ENDPOINT_HOST`. Full table:
-[`environment-variables.md`](environment-variables.md#optional--object-storage-s3-compatible).
+[`environment-variables.md`](environment-variables.md#object-storage-s3-compatible).
 
 ### Caching contract
 
