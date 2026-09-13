@@ -166,7 +166,15 @@ defmodule KilnCMS.CMS.TypeDefinition do
     end
 
     # Editors may read definitions so the editor UI can list dynamic types.
+    #
+    # The system actor reads them too (#1402): the fire path resolves a dynamic
+    # document's public type name and its schema.org @type from its definition,
+    # and delivery resolves the URL segment. Those ran `authorize?: false`,
+    # which also skipped the admin bypass and this policy both; the grant is
+    # the same, now written down. It is read-only — definitions are still
+    # admin-only to write, through the bypass above.
     policy action_type(:read) do
+      authorize_if KilnCMS.Checks.SystemActor
       authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 
