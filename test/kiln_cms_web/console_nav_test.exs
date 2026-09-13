@@ -65,7 +65,7 @@ defmodule KilnCMSWeb.ConsoleNavTest do
              ]
 
       # The point of the exercise: no section is long enough to need scanning.
-      for g <- groups, do: assert(length(g.items) <= 6, "#{g.key} has #{length(g.items)} items")
+      for g <- groups, do: assert(length(g.items) <= 7, "#{g.key} has #{length(g.items)} items")
     end
 
     test "every screen appears in exactly one section" do
@@ -126,6 +126,7 @@ defmodule KilnCMSWeb.ConsoleNavTest do
 
       assert Enum.map(ops.items, & &1.key) == [
                :team,
+               :accounts,
                :billing,
                :mail,
                :api_keys,

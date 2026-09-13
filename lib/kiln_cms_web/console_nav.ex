@@ -20,7 +20,7 @@ defmodule KilnCMSWeb.ConsoleNav do
     * `:author` — the day-to-day editorial screens, drawn ungrouped at the top.
     * `:hub` — the Configure hub link, for an admin; `nil` for anyone else.
     * `:configure_groups` — the configuration screens, in collapsible sections.
-      The last one is `operator?: true`: the instance-wide screens (Team,
+      The last one is `operator?: true`: the instance-wide screens (Team, Accounts,
       Billing, Mail, API keys, Backups, System) that `platform_admin_user?/1`
       gates, set apart because "restore last night's backup" and "fix a typo in
       a footer" are not the same job. Every item in it is `platform: true`, so
@@ -459,6 +459,26 @@ defmodule KilnCMSWeb.ConsoleNav do
             icon: "hero-user-group",
             description: gettext("Who can author what, and under which role."),
             keywords: ["users", "members", "roles", "permissions", "rbac", "invite"]
+          },
+          # Beside Team, because the two answer adjacent questions: Team is who
+          # may author on THIS site, Accounts is who has registered at all (#1462).
+          # Platform-only for the same reason Team is — both are backed by
+          # instance-wide resources whose policies key on the global role.
+          %{
+            platform: true,
+            key: :accounts,
+            label: gettext("Accounts"),
+            path: ~p"/editor/accounts",
+            icon: "hero-identification",
+            description: gettext("Everyone registered on this instance, and their access."),
+            keywords: [
+              "registrations",
+              "users",
+              "temporary role",
+              "grant",
+              "password reset",
+              "erase"
+            ]
           },
           %{
             platform: true,

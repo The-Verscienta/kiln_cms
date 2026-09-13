@@ -190,7 +190,7 @@ The authoring app frame (`lib/kiln_cms_web/components/layouts.ex`):
   then collapsible sections — Content model, Capture, Delivery, Integrations,
   Organization, Account (**Your settings**, the per-user screen) — and
   **Operations**, ruled off below them for the instance-wide, platform-admin
-  screens (Team, Billing, Mail, API keys, Backups, System). Every item in that
+  screens (Team, Accounts, Billing, Mail, API keys, Backups, System). Every item in that
   band is `platform: true`, so for anyone else the band empties and is dropped:
   the separation is never half day-to-day admin. A non-admin gets the Account
   section alone.
