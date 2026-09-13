@@ -72,7 +72,8 @@ defmodule Mix.Tasks.Kiln.Changelog do
   ### `--verify REF`
 
   Takes every paragraph of the **release entries** in `CHANGELOG.md` as of
-  `REF` and asserts it still exists — in `CHANGELOG.md`, in `docs/changelog/`,
+  `REF`, and of the long forms already in `docs/changelog/` and
+  `docs/decisions/` at `REF`, and asserts it still exists — in `CHANGELOG.md`, in `docs/changelog/`,
   or in `docs/decisions/`. Comparison is on collapsed whitespace with link
   targets removed, so re-wrapping and re-rooting a link are fine and a dropped
   sentence is not. This file's own front matter is excluded: it documents the
@@ -118,8 +119,10 @@ defmodule Mix.Tasks.Kiln.Changelog do
 
   # What this task — and only this task — writes onto a summary it shortened.
   # An issue link is not enough: `--check` itself tells contributors to write
-  # `- **Summary.** ([#1234](...))`, and that entry has no archive block.
-  @long_form_link ~r{\[long form\]\(docs/(?:changelog|decisions)/}
+  # `- **Summary.** ([#1234](...))`, and that entry has no archive block. `\s+`,
+  # not a space: every links line is wider than the file's 80 columns, so an
+  # editor fill splits the label across lines.
+  @long_form_link ~r{\[long\s+form\]\(\s*docs/(?:changelog|decisions)/}
 
   # The line of links `--condense` puts under a summary. It is not prose, so it
   # does not count toward the Unreleased cap.
@@ -292,42 +295,70 @@ defmodule Mix.Tasks.Kiln.Changelog do
   defp push(done, current), do: [current | done]
 
   @doc false
-  # An `Upgrade notes` section is prose, not bullets: paragraphs, where a new
-  # note starts at a paragraph opening with a bold lead. Returns those notes,
-  # each still verbatim.
+  # `Upgrade notes` and `Breaking` bodies as notes: paragraphs, where a new note
+  # starts at a bold lead or a top-level bullet. Returns those notes, each still
+  # verbatim — indentation included, since it is what nests a list or a code
+  # block under the note above it.
   def notes(body) do
     body
     |> String.split(~r/\n\s*\n/)
-    |> Enum.map(&String.trim/1)
-    |> Enum.reject(&(&1 == ""))
+    |> Enum.map(&(&1 |> String.replace(~r/\A\n+/, "") |> String.trim_trailing()))
+    |> Enum.reject(&(String.trim(&1) == ""))
     |> Enum.reduce([], &add_paragraph/2)
     |> Enum.reverse()
     |> Enum.map(&(&1 |> Enum.reverse() |> Enum.join("\n\n")))
   end
 
-  # A bold lead opens a note, and prose continues the note above it.
+  # A bold lead opens a note.
   #
-  # A bullet paragraph is either a list of notes or a list *inside* one. It is
-  # a list of notes — one per bullet — when it opens the section, follows
-  # another bullet note, or is a summary this task already condensed: a
-  # `### Breaking` written as `- a.` / `- b.` must not collapse into one note
-  # summarised to its first sentence, which drops `b` from what `mix
-  # kiln.update` prints. It is a list inside a note when it follows a bold-lead
-  # note ("two smaller contract notes on the same endpoint:").
+  # A bullet paragraph is a list of notes — one per top-level bullet — unless it
+  # follows a note whose last paragraph introduces it with a colon ("two smaller
+  # contract notes on the same endpoint:"), where it is that note's own list. A
+  # summary this task already condensed is always its own note.
+  #
+  # Prose continues a prose note. After a bullet note, an indented paragraph or a
+  # code fence continues that bullet — apart from any top-level bullet lines
+  # inside it, which are the next notes — while prose at column zero is a new
+  # note: a blank line and an unindented paragraph end a markdown list.
   defp add_paragraph("**" <> _ = para, notes), do: [[para] | notes]
 
   defp add_paragraph("- " <> _ = para, notes) do
-    if notes == [] or bullet_note?(hd(notes)) or condensed?(para) do
-      para |> bullets() |> Enum.reduce(notes, &[[&1] | &2])
+    if notes == [] or bullet_note?(hd(notes)) or condensed?(para) or
+         not introduces_list?(hd(notes)) do
+      push_notes(split_bullets(para), notes)
     else
       [[para | hd(notes)] | tl(notes)]
     end
   end
 
   defp add_paragraph(para, []), do: [[para]]
-  defp add_paragraph(para, [note | notes]), do: [[para | note] | notes]
+
+  defp add_paragraph(para, [note | rest] = notes) do
+    cond do
+      not bullet_note?(note) ->
+        [[para | note] | rest]
+
+      String.match?(para, ~r/\A\s/) or String.starts_with?(para, "```") ->
+        [continuation | bullets] = split_bullets(para)
+        push_notes(bullets, [[continuation | note] | rest])
+
+      true ->
+        [[para] | notes]
+    end
+  end
+
+  defp push_notes(units, notes), do: Enum.reduce(units, notes, &[[&1] | &2])
+
+  # Top-level bullets with every line kept. Unlike `bullets/1`, a line that is
+  # neither `- ` nor indented stays with the bullet above it instead of being
+  # dropped: these sections are written by hand, and a lost line is a step an
+  # operator was meant to take.
+  defp split_bullets(para), do: String.split(para, ~r/\n(?=- )/)
 
   defp bullet_note?(paragraphs), do: String.starts_with?(List.last(paragraphs), "- ")
+
+  defp introduces_list?([last | _]),
+    do: last |> String.trim_trailing() |> String.ends_with?(":")
 
   # ---- summarising -------------------------------------------------------
 
@@ -380,13 +411,15 @@ defmodule Mix.Tasks.Kiln.Changelog do
   end
 
   @doc false
-  # Link targets are stripped first: a summary already carrying
+  # Link targets and code spans are stripped first: a summary already carrying
   # `[long form](docs/changelog/v0.6.0.md#404-capture-...)` would otherwise be
-  # read as referencing issue #404.
+  # read as referencing issue #404, and a long form quoting `#5-what-shipped` or
+  # `#000` as issue #5 or #0.
   def references(entry) do
     entry
     |> String.replace(~r/\]\([^)]*\)/, "]")
-    |> then(&Regex.scan(~r/#(\d+)/, &1))
+    |> String.replace(~r/`[^`]*`/, "")
+    |> then(&Regex.scan(~r/(?<![\w&])#(\d+)\b/, &1))
     |> Enum.map(&List.last/1)
     |> Enum.uniq()
   end
@@ -532,17 +565,23 @@ defmodule Mix.Tasks.Kiln.Changelog do
     {summaries, archived} =
       section
       |> notes()
-      |> Enum.map(&note_result(&1, name, {kept, anchors}, archive_path))
+      |> Enum.with_index()
+      |> Enum.map(fn {note, i} ->
+        note_result(note, name, {kept, Map.get(anchors, {name, i})}, archive_path)
+      end)
       |> Enum.unzip()
 
     {Enum.join(summaries, "\n\n"), Enum.join(archived, "\n\n"), []}
   end
 
-  defp condense_section(release, name, section, ctx, archive_path) do
+  defp condense_section(release, name, section, {prs, kept, anchors}, archive_path) do
     {summaries, archived, adrs} =
       section
       |> bullets()
-      |> Enum.map(&entry_result(&1, release, name, ctx, archive_path))
+      |> Enum.with_index()
+      |> Enum.map(fn {entry, i} ->
+        entry_result(entry, release, name, {prs, kept, Map.get(anchors, {name, i})}, archive_path)
+      end)
       |> Enum.reduce({[], [], []}, fn {s, a, d}, {ss, as, ds} ->
         {[s | ss], [a | as], (d && [d | ds]) || ds}
       end)
@@ -551,24 +590,30 @@ defmodule Mix.Tasks.Kiln.Changelog do
      adrs}
   end
 
-  defp note_result(note, name, {kept, anchors}, archive_path) do
-    if condensed?(note),
-      do: {String.trim(note), keep_block(kept, note, name)},
-      else: condense_note(note, Map.fetch!(anchors, note), kept, archive_path)
+  defp note_result(note, name, {kept, anchor}, archive_path) do
+    if condensed?(note) do
+      {note |> String.trim() |> repoint_long_form(archive_path), keep_block(kept, note, name)}
+    else
+      condense_note(note, anchor, kept, archive_path)
+    end
   end
 
   defp condense_note(note, anchor, kept, archive_path) do
-    detail = if long_form?(note, references(note)), do: "#{archive_path}##{anchor}", else: nil
-    {entry_line(summarize(note), references(note), detail), archived_block(kept, anchor, note)}
+    refs = references(note)
+    detail = if long_form?(note, refs, Map.get(kept, anchor)), do: "#{archive_path}##{anchor}"
+    {entry_line(summarize(note), refs, detail), archived_block(kept, anchor, note)}
   end
 
-  # Already condensed: keep the summary as written and re-adopt the archive
-  # block it names. Not yet: condense it.
-  defp entry_result(entry, release, name, {prs, kept, anchors}, archive_path) do
+  # Already condensed: keep the summary as written — pointed at this release's
+  # archive, and credited to a pull request if it had none — and re-adopt the
+  # archive block it names. Not yet: condense it.
+  defp entry_result(entry, release, name, {prs, kept, anchor}, archive_path) do
     if condensed?(entry) do
-      {String.trim(entry), keep_block(kept, entry, name), nil}
+      block = keep_block(kept, entry, name)
+      summary = entry |> String.trim() |> repoint_long_form(archive_path) |> attribute(block, prs)
+      {summary, block, nil}
     else
-      condense_entry(release, name, entry, {prs, Map.fetch!(anchors, entry), kept}, archive_path)
+      condense_entry(release, name, entry, {prs, anchor, kept}, archive_path)
     end
   end
 
@@ -578,7 +623,9 @@ defmodule Mix.Tasks.Kiln.Changelog do
 
     case decision_for(release.version, name, entry) do
       nil ->
-        detail = if long_form?(entry, refs), do: "#{archive_path}##{anchor}", else: nil
+        detail =
+          if long_form?(entry, refs, Map.get(kept, anchor)), do: "#{archive_path}##{anchor}"
+
         {entry_line(lead, refs, detail), archived_block(kept, anchor, entry), nil}
 
       {number, title} ->
@@ -594,71 +641,144 @@ defmodule Mix.Tasks.Kiln.Changelog do
     end
   end
 
-  # An entry is archived as its author wrote it. One that was not shortened has
-  # no long-form marker, so every run re-derives it — from CHANGELOG.md's
-  # rendering after the first. Keep the block already in the archive whenever
-  # it says the same thing: rebuilding it from the rendering would change the
-  # archive's bytes on every run and swap the author's `(#1313)` for a link,
-  # which is exactly the wording `--verify` looks for.
-  defp archived_block(kept, anchor, entry) do
-    with block when is_binary(block) <- Map.get(kept, anchor),
-         true <- same_prose?(block, entry) do
-      block
+  # A condensed entry with no pull request — condensed before its PR had a
+  # number — is looked up again on every run, so the merge that later shipped it
+  # is credited rather than never linked. Its long form is tried first, since
+  # that is what its author committed; the summary only when no commit wrote the
+  # long form (an entry condensed before its first commit). A decision record's
+  # stub is generated text, so it has no summary fallback.
+  defp attribute(summary, block, prs) do
+    with [] <- references(summary),
+         {pr, _text, _added} when is_binary(pr) <-
+           history_commit(block_text(block), prs) ||
+             (entry_anchor(summary) && history_commit(summary, prs)) do
+      Regex.replace(
+        ~r/\(\[long(\s+)form\]\(/,
+        summary,
+        "([##{pr}](#{@repo_url}/issues/#{pr}) · [long\\1form](",
+        global: false
+      )
     else
-      _ -> anchor_tag(anchor) <> "\n\n" <> String.trim(entry)
+      _ -> summary
     end
   end
 
-  defp same_prose?(block, entry) do
-    body = block |> String.split("\n", parts: 2) |> List.last()
-    bare(flatten(body)) == bare(flatten(entry))
+  # An entry is archived as its author wrote it. One that was not shortened has
+  # no long-form marker, so every run re-derives it — from CHANGELOG.md's
+  # rendering after the first. Keep the block already in the archive whenever
+  # it holds this entry: rebuilding it from the rendering would change the
+  # archive's bytes on every run and swap the author's `(#1313)` for a link,
+  # which is exactly the wording `--verify` looks for.
+  defp archived_block(kept, anchor, entry) do
+    block = Map.get(kept, anchor)
+
+    if block && matches_kept?(block, entry),
+      do: block,
+      else: anchor_tag(anchor) <> "\n\n" <> String.trim(entry)
   end
+
+  # A kept block holds an entry when it says the same thing — compared with the
+  # entry's links rerooted the way the archive writes them, and with its
+  # references too when the block has any, so correcting one rebuilds the block —
+  # or when the entry is a shortening of it: a condensed summary whose long-form
+  # link was relabeled or deleted by hand, which must never replace its long form.
+  defp matches_kept?(block, entry), do: same_kept?(block, entry) or extends_kept?(block, entry)
+
+  defp same_kept?(block, entry) do
+    text = block_text(block)
+    rerooted = reroot_links(entry)
+
+    bare(flatten(text)) == bare(flatten(rerooted)) and
+      references(text) in [[], references(rerooted)]
+  end
+
+  defp extends_kept?(nil, _entry), do: false
+
+  defp extends_kept?(block, entry) do
+    body = bare(flatten(block_text(block)))
+    prose = bare(flatten(reroot_links(entry)))
+    String.length(body) > String.length(prose) and String.starts_with?(body, prose)
+  end
+
+  defp block_text(block), do: block |> String.split("\n", parts: 2) |> List.last()
 
   # Whether the summary actually leaves anything out. One that doesn't gets no
   # "long form" link — the link would point at a copy of itself — and, since it
   # then carries no marker, is simply re-derived to the same text next run.
   defp shortened?(entry), do: bare(flatten(entry)) != bare(summarize(entry))
 
-  # Whether a summary links its long form: when something was left out of it, or
+  # Whether a summary links its long form: when something was left out of it;
   # when it has no pull request to link instead — `--check` fails a summary with
   # nowhere to go, and git names no pull request for an entry committed without
-  # one. That link also marks the entry as condensed, so it is never looked up
-  # in git again once its lines have been rewrapped.
-  defp long_form?(entry, refs), do: shortened?(entry) or refs == []
+  # one; or when the archive already holds a longer version of it, which a
+  # summary that lost its link must point back at. That link also marks the
+  # entry as condensed.
+  defp long_form?(entry, refs, block) do
+    shortened?(entry) or refs == [] or extends_kept?(block, entry)
+  end
 
-  # Prose only: a summary's link line and an author's bare `(#1234)` removed.
+  # Prose only: the links line this task writes and an author's bare `(#1234)`
+  # removed. Any other parenthetical of links — an advisory, a guide — is the
+  # author's and stays prose.
   defp bare(text) do
     text
-    |> String.replace(~r/\s*\(\s*(?:\[[^\]]*\]\([^)]*\)\s*[,·]?\s*)+\)/u, "")
+    |> String.replace(~r/\s*\(\s*(?:\[(?:#\d+|long\s+form)\]\([^)]*\)\s*[,·]?\s*)+\)/u, "")
     |> String.replace(~r/\s*\((?:#\d+[,;]?\s*)+\)/, "")
     |> String.trim()
     |> String.trim_trailing(".")
   end
 
-  # One anchor per new archive block, unique within the release. The slug alone
-  # is not: two entries opening "**Typo fixes.**" — or sharing the first 80
-  # characters of a long lead — would share an `id`, the archive re-read would
-  # keep one block for both, and a second `--condense` would overwrite the
-  # other's long form. Anchors already in the archive are taken, so a new entry
-  # never lands on an old one either.
+  # One anchor per archive block, unique within the release and stable across
+  # runs. A condensed entry keeps the anchor its link names. An entry re-derived
+  # every run — not shortened, so it carries no marker — keeps the anchor of the
+  # archive block that holds it, claimed before any new entry is given one, so a
+  # later entry with the same opening can never take it. Only what is left gets
+  # a new slug, suffixed `-1`, `-2` past every anchor in use. Keyed by
+  # `{section, position}` rather than by text: two identical entries are still
+  # two blocks.
   defp assign_anchors(sections, kept) do
     {condensed, fresh} =
       sections
-      |> Enum.flat_map(fn {name, body} -> units(name, body) end)
-      |> Enum.split_with(&condensed?/1)
+      |> Enum.flat_map(fn {name, body} -> keyed_units(name, body) end)
+      |> Enum.split_with(fn {_key, unit} -> condensed?(unit) end)
 
     taken =
       condensed
-      |> Enum.map(&kept_anchor(kept, &1))
+      |> Enum.map(fn {_key, unit} -> kept_anchor(kept, unit) end)
       |> Enum.reject(&is_nil/1)
       |> MapSet.new()
 
-    fresh
-    |> Enum.reduce({%{}, taken}, fn unit, {anchors, taken} ->
+    {anchors, taken, unmatched} = Enum.reduce(fresh, {%{}, taken, []}, &claim_kept(&1, &2, kept))
+
+    unmatched
+    |> Enum.reverse()
+    |> Enum.reduce({anchors, taken}, fn {key, unit}, {anchors, taken} ->
       anchor = unique_anchor(slug(summarize(unit)), taken)
-      {Map.put_new(anchors, unit, anchor), MapSet.put(taken, anchor)}
+      {Map.put(anchors, key, anchor), MapSet.put(taken, anchor)}
     end)
     |> elem(0)
+  end
+
+  defp keyed_units(name, body) do
+    name |> units(body) |> Enum.with_index() |> Enum.map(fn {unit, i} -> {{name, i}, unit} end)
+  end
+
+  defp claim_kept({key, unit}, {anchors, taken, unmatched}, kept) do
+    case kept_match(kept, taken, unit) do
+      nil -> {anchors, taken, [{key, unit} | unmatched]}
+      anchor -> {Map.put(anchors, key, anchor), MapSet.put(taken, anchor), unmatched}
+    end
+  end
+
+  defp kept_match(kept, taken, unit) do
+    base = slug(summarize(unit))
+    suffixed = ~r/\A#{Regex.escape(base)}-\d+\z/
+
+    kept
+    |> Map.keys()
+    |> Enum.filter(&(&1 == base or String.match?(&1, suffixed)))
+    |> Enum.sort_by(&{String.length(&1), &1})
+    |> Enum.find(&(not MapSet.member?(taken, &1) and matches_kept?(Map.fetch!(kept, &1), unit)))
   end
 
   defp unique_anchor(base, taken) do
@@ -699,11 +819,16 @@ defmodule Mix.Tasks.Kiln.Changelog do
   end
 
   # A summary pointing at a decision record has no archive anchor of its own in
-  # its link; its archive block is the stub that names the same record.
+  # its link; its archive block is the stub that links the same record — by that
+  # exact link, since other long forms may well mention the record's path.
   defp decision_stub(kept, entry) do
-    case Regex.run(~r{\[long form\]\((#{@decisions_dir}/[^)\s]+)\)}, entry) do
-      [_, path] -> Enum.find(kept, fn {_anchor, block} -> String.contains?(block, path) end)
-      nil -> nil
+    case Regex.run(~r{\[long\s+form\]\(\s*(#{@decisions_dir}/[^)\s]+)\)}, entry) do
+      [_, path] ->
+        link = "[#{path}](#{relative_to_archive(path)})"
+        Enum.find(kept, fn {_anchor, block} -> String.contains?(block, link) end)
+
+      nil ->
+        nil
     end
   end
 
@@ -720,37 +845,79 @@ defmodule Mix.Tasks.Kiln.Changelog do
     """
   end
 
-  # The archive anchor a condensed entry names in its own "long form" link, or
-  # nil for one that links a decision record instead.
+  # The archive anchor a condensed entry's own "long form" link names — not the
+  # first archive link anywhere in it, since a summary may link another entry's
+  # long form in its prose — or nil for one that links a decision record.
   defp entry_anchor(entry) do
-    case Regex.run(~r/\]\(#{@archive_dir}\/[^)#\s]+#([^)\s]+)\)/, entry) do
+    case Regex.run(~r/\[long\s+form\]\(\s*#{@archive_dir}\/[^)#\s]+#([^)\s]+)\)/, entry) do
       [_, anchor] -> anchor
       nil -> nil
     end
+  end
+
+  # The anchor is looked up in this release's archive whichever file the link
+  # names, so point the link at that file too: renaming `unreleased.md` by hand
+  # at a release cut would otherwise leave every summary linking the old name.
+  defp repoint_long_form(entry, archive_path) do
+    Regex.replace(
+      ~r/(\[long\s+form\]\(\s*)#{@archive_dir}\/[^)#\s]+#/,
+      entry,
+      "\\1#{archive_path}#"
+    )
   end
 
   # `%{anchor => block}` for an archive already on disk. A block runs from its
   # anchor tag to the next anchor tag or `## ` section heading.
   defp archived_blocks(path) do
     case File.read(path) do
-      {:ok, text} ->
-        ~r/<a id="([^"]+)"><\/a>/
-        |> Regex.split(text, include_captures: true, trim: true)
-        |> Enum.chunk_every(2, 1)
-        |> Enum.flat_map(fn
-          [<<"<a id=\"", _::binary>> = tag, body] ->
-            # Rebuilt in the shape generation writes, so re-reading a block and
-            # writing it straight back out is byte-identical.
-            [{anchor_id(tag), tag <> "\n\n" <> block_body(body)}]
-
-          _ ->
-            []
-        end)
-        |> Map.new()
-
-      {:error, _} ->
-        %{}
+      {:ok, text} -> parse_archive(path, text)
+      {:error, _} -> %{}
     end
+  end
+
+  # Two blocks under one id — two branches condensing entries with the same
+  # opening, merged — would collapse to one here and the next write would drop
+  # the other long form, so that stops instead.
+  defp parse_archive(path, text) do
+    case duplicate_anchor_ids(text) do
+      [] -> :ok
+      dups -> Mix.raise(duplicate_anchor_message(path, dups))
+    end
+
+    ~r/<a id="([^"]+)"><\/a>/
+    |> Regex.split(text, include_captures: true, trim: true)
+    |> Enum.chunk_every(2, 1)
+    |> Enum.flat_map(fn
+      [<<"<a id=\"", _::binary>> = tag, body] ->
+        # Rebuilt in the shape generation writes, so re-reading a block and
+        # writing it straight back out is byte-identical.
+        [{anchor_id(tag), tag <> "\n\n" <> block_body(body)}]
+
+      _ ->
+        []
+    end)
+    |> Map.new()
+  end
+
+  defp duplicate_anchor_ids(text) do
+    ~r/<a id="([^"]+)"><\/a>/
+    |> Regex.scan(text)
+    |> Enum.map(&List.last/1)
+    |> Enum.frequencies()
+    |> Enum.filter(fn {_id, count} -> count > 1 end)
+    |> Enum.map(fn {id, _count} -> id end)
+    |> Enum.sort()
+  end
+
+  defp duplicate_anchor_message(path, ids) do
+    """
+    #{path} has more than one block under the same anchor: #{Enum.join(ids, ", ")}.
+
+    Usually two branches condensed entries that open the same way. Rename one
+    block's `<a id>` and the `[long form]` link in CHANGELOG.md that points at
+    it, then re-run: reading the archive as it is would keep one block and drop
+    the other.
+    """
   end
 
   defp anchor_id(tag), do: Regex.run(~r/id="([^"]+)"/, tag) |> Enum.at(1)
@@ -964,22 +1131,35 @@ defmodule Mix.Tasks.Kiln.Changelog do
   #
   # Public only so it can be tested against a fake `git log` rather than a repo.
   def from_history(entry, index) do
-    needle = entry |> flatten() |> String.slice(0, 80)
-
-    lines =
-      entry
-      |> String.split("\n")
-      |> Enum.map(&String.trim/1)
-      |> Enum.filter(&(String.length(&1) >= 40))
-
-    wrote? = fn {_pr, text, added} ->
-      String.contains?(text, needle) or Enum.any?(lines, &MapSet.member?(added, &1))
-    end
-
-    case Enum.find(index, wrote?) do
+    case history_commit(entry, index) do
       {pr, _text, _added} when is_binary(pr) -> [pr]
       _ -> []
     end
+  end
+
+  # The earliest commit that wrote `entry`, whether or not it names a pull
+  # request. The opening words need 40 characters, like a verbatim line: a short
+  # phrase is found inside unrelated entries.
+  defp history_commit(entry, index) do
+    split = String.split(entry, "\n")
+    needle = split |> index_text() |> String.slice(0, 80)
+    lines = split |> Enum.map(&String.trim/1) |> Enum.filter(&(String.length(&1) >= 40))
+
+    Enum.find(index, fn {_pr, text, added} ->
+      (String.length(needle) >= 40 and String.contains?(text, needle)) or
+        Enum.any?(lines, &MapSet.member?(added, &1))
+    end)
+  end
+
+  # The one normalisation both sides of the opening-words match use: each line
+  # trimmed with its bullet marker dropped, joined, whitespace collapsed. An
+  # entry flattened any other way never matches the commit that wrote it once
+  # it holds a nested list.
+  defp index_text(lines) do
+    lines
+    |> Enum.map_join(" ", &(&1 |> String.trim() |> String.replace(~r/^- /, "")))
+    |> String.replace(~r/\s+/, " ")
+    |> String.trim()
   end
 
   # One entry: the summary wrapped as a bullet, then its links on a line of
@@ -1031,12 +1211,7 @@ defmodule Mix.Tasks.Kiln.Changelog do
           _line -> []
         end)
 
-      text =
-        added
-        |> Enum.map_join(" ", &String.replace(&1, ~r/^- /, ""))
-        |> String.replace(~r/\s+/, " ")
-
-      {subject_pr(subject), text, MapSet.new(added)}
+      {subject_pr(subject), index_text(added), MapSet.new(added)}
     end)
   end
 
@@ -1080,7 +1255,7 @@ defmodule Mix.Tasks.Kiln.Changelog do
         release.body
         |> sections()
         |> Enum.flat_map(&check_section(release, &1))
-      end) ++ check_links(text)
+      end) ++ check_links(text) ++ check_duplicate_anchors()
 
     report(problems)
   end
@@ -1163,6 +1338,19 @@ defmodule Mix.Tasks.Kiln.Changelog do
     end)
   end
 
+  # An archive with two blocks under one id cannot be read back without losing
+  # one of them, and a link to that id opens whichever comes first.
+  defp check_duplicate_anchors do
+    "#{@archive_dir}/*.md"
+    |> Path.wildcard()
+    |> Enum.flat_map(fn path ->
+      case duplicate_anchor_ids(File.read!(path)) do
+        [] -> []
+        ids -> ["#{path} has more than one block under #{Enum.join(ids, ", ")}."]
+      end
+    end)
+  end
+
   # `--condense` keeps the author's opening sentence as written, so once an entry
   # is condensed only a shorter opening can bring it under the cap.
   defp too_long_advice(entry) do
@@ -1194,11 +1382,12 @@ defmodule Mix.Tasks.Kiln.Changelog do
   # ---- verify ------------------------------------------------------------
 
   defp verify(ref) do
-    before =
-      case System.cmd("git", ["show", "#{ref}:#{@changelog}"], stderr_to_stdout: true) do
-        {out, 0} -> out
-        {out, _} -> Mix.raise("Could not read #{ref}:#{@changelog}:\n#{out}")
-      end
+    before = git_show!(ref, @changelog)
+
+    archived_before =
+      ref
+      |> archive_paths()
+      |> Enum.map_join("\n\n", &(ref |> git_show!(&1) |> archive_prose()))
 
     haystack =
       [
@@ -1209,9 +1398,8 @@ defmodule Mix.Tasks.Kiln.Changelog do
       |> normalize()
 
     missing =
-      before
-      |> release_prose()
-      |> paragraphs()
+      (paragraphs(release_prose(before)) ++ paragraphs(archived_before))
+      |> Enum.uniq()
       |> Enum.reject(&String.contains?(haystack, normalize(&1)))
 
     if missing == [] do
@@ -1219,12 +1407,58 @@ defmodule Mix.Tasks.Kiln.Changelog do
         :green,
         "No loss: ",
         :reset,
-        "every paragraph of #{ref}:#{@changelog} is still reachable."
+        "every paragraph of #{ref}'s #{@changelog} and its long forms is still reachable."
       ])
     else
       Enum.each(missing, &Mix.shell().error("MISSING: " <> String.slice(normalize(&1), 0, 160)))
-      Mix.raise("#{length(missing)} paragraph(s) of #{ref}:#{@changelog} have no destination.")
+      Mix.raise("#{length(missing)} paragraph(s) of #{ref}'s changelog have no destination.")
     end
+  end
+
+  defp git_show!(ref, path) do
+    case System.cmd("git", ["show", "#{ref}:#{path}"], stderr_to_stdout: true) do
+      {out, 0} -> out
+      {out, _} -> Mix.raise("Could not read #{ref}:#{path}:\n#{out}")
+    end
+  end
+
+  # The long forms `REF` had already moved out of CHANGELOG.md. Checking only
+  # CHANGELOG.md at a condensed `REF` proves nothing about them: it holds just
+  # the summaries, so a long form lost from the archive still read as no loss.
+  defp archive_paths(ref) do
+    case System.cmd(
+           "git",
+           ["ls-tree", "-r", "--name-only", ref, "--", @archive_dir, @decisions_dir],
+           stderr_to_stdout: true
+         ) do
+      {out, 0} ->
+        out
+        |> String.split("\n", trim: true)
+        |> Enum.filter(&archived_long_form?/1)
+
+      {_out, _} ->
+        []
+    end
+  end
+
+  defp archived_long_form?(path) do
+    String.ends_with?(path, ".md") and
+      (String.starts_with?(path, @archive_dir <> "/") or
+         Regex.match?(~r/\A#{@decisions_dir}\/\d{4}-/, path))
+  end
+
+  # An archive's prose is its entries. Its intro and anchor tags are generated,
+  # and change when a release is cut and the file renamed.
+  defp archive_prose(text) do
+    text
+    |> String.split(~r/\n\s*\n/)
+    |> Enum.reject(fn para ->
+      para = String.trim(para)
+
+      String.starts_with?(para, "<a id=") or
+        String.starts_with?(para, "The long-form entries behind")
+    end)
+    |> Enum.join("\n\n")
   end
 
   # The release entries, and only those. This file's own front matter — how to

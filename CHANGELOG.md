@@ -193,7 +193,7 @@ Every summary line below that was shortened links to its own entry there.
 ### Fixed
 
 - **Links to a section land on it.**
-  ([#5](https://github.com/The-Verscienta/kiln_cms/issues/5) · [long form](docs/changelog/v0.8.0.md#links-to-a-section-land-on-it))
+  ([#1439](https://github.com/The-Verscienta/kiln_cms/issues/1439) · [long form](docs/changelog/v0.8.0.md#links-to-a-section-land-on-it))
 
 - **Clickable things show a pointer again.**
   ([#1420](https://github.com/The-Verscienta/kiln_cms/issues/1420) · [long form](docs/changelog/v0.8.0.md#clickable-things-show-a-pointer-again))
@@ -382,7 +382,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#501](https://github.com/The-Verscienta/kiln_cms/issues/501) · [long form](docs/changelog/v0.7.0.md#stale-content-raises-real-work-a-freshness-sweep-two-automation-triggers-and-a))
 
 - **Office documents and zip archives in the document library**.
-  ([#808](https://github.com/The-Verscienta/kiln_cms/issues/808), [#481](https://github.com/The-Verscienta/kiln_cms/issues/481), [#807](https://github.com/The-Verscienta/kiln_cms/issues/807) · [long form](docs/changelog/v0.7.0.md#office-documents-and-zip-archives-in-the-document-library))
+  ([#808](https://github.com/The-Verscienta/kiln_cms/issues/808), [#481](https://github.com/The-Verscienta/kiln_cms/issues/481) · [long form](docs/changelog/v0.7.0.md#office-documents-and-zip-archives-in-the-document-library))
 
 - **`EMBED_ORIGINS_LOCKED` — an operator ceiling over what a tenant may open to
   framing**.
@@ -459,7 +459,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **The xmerl name-budget scanner no longer trips OTP 29's dialyzer** (#599
   family).
-  ([#599](https://github.com/The-Verscienta/kiln_cms/issues/599), [#1105](https://github.com/The-Verscienta/kiln_cms/issues/1105) · [long form](docs/changelog/v0.6.0.md#the-xmerl-name-budget-scanner-no-longer-trips-otp-29s-dialyzer-599-family))
+  ([#599](https://github.com/The-Verscienta/kiln_cms/issues/599) · [long form](docs/changelog/v0.6.0.md#the-xmerl-name-budget-scanner-no-longer-trips-otp-29s-dialyzer-599-family))
 
 - **A database outage no longer 404s every request as an unknown host**.
   ([#341](https://github.com/The-Verscienta/kiln_cms/issues/341), [#1124](https://github.com/The-Verscienta/kiln_cms/issues/1124), [#563](https://github.com/The-Verscienta/kiln_cms/issues/563) · [long form](docs/changelog/v0.6.0.md#a-database-outage-no-longer-404s-every-request-as-an-unknown-host))

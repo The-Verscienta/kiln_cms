@@ -152,6 +152,15 @@ defmodule Mix.Tasks.Kiln.ChangelogTest do
 
       assert Changelog.references(entry) == ["920"]
     end
+
+    # A long form quoting a heading anchor, a colour or an HTML entity would
+    # otherwise be linked to issue #5, #0 or #39 — and skip the git lookup that
+    # finds the real pull request.
+    test "does not read numbers out of code spans or entities" do
+      entry = "- **Links land.** GitHub turns it into `#5-what-shipped`, `#000` and `&#39;`."
+
+      assert Changelog.references(entry) == []
+    end
   end
 
   describe "from_history/2" do
@@ -226,6 +235,34 @@ defmodule Mix.Tasks.Kiln.ChangelogTest do
         |> Changelog.build_index()
 
       assert Changelog.from_history(@entry, index) == ["1397"]
+    end
+
+    # The opening words are compared with both sides flattened the same way, so
+    # a nested list in the entry's first 80 characters still matches.
+    test "an entry opening with a nested list is credited to its commit" do
+      entry = "- **Contract notes:**\n  - Errors carry `code`.\n  - Send `code` as text.\n"
+
+      index =
+        git_log([
+          {"Contract notes (#1500)",
+           ["- **Contract notes:**", "  - Errors carry `code`.", "  - Send `code` as text."]}
+        ])
+        |> Changelog.build_index()
+
+      assert Changelog.from_history(entry, index) == ["1500"]
+    end
+
+    # A short phrase is found inside unrelated entries, so the opening-words
+    # match needs as much text as a verbatim line does.
+    test "a short entry is not credited to an older entry that contains its words" do
+      index =
+        git_log([
+          {"Harden sign-in (#100)", ["- **Toolbar.** Typo fixes. The error page also names it."]},
+          {"Fix typos (#200)", ["- Typo fixes."]}
+        ])
+        |> Changelog.build_index()
+
+      assert Changelog.from_history("- Typo fixes.\n", index) == []
     end
 
     test "an entry first written by a commit naming no pull request has none" do
