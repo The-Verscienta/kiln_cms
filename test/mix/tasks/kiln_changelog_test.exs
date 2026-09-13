@@ -154,6 +154,92 @@ defmodule Mix.Tasks.Kiln.ChangelogTest do
     end
   end
 
+  describe "from_history/2" do
+    # `git log --reverse --format=@@@%s -p -U0 -- CHANGELOG.md`, oldest first.
+    defp git_log(commits) do
+      Enum.map_join(commits, "\n", fn {subject, added} ->
+        "@@@#{subject}\n\n--- a/CHANGELOG.md\n+++ b/CHANGELOG.md\n@@ -1 +1 @@\n" <>
+          Enum.map_join(added, "\n", &("+" <> &1))
+      end)
+    end
+
+    @entry """
+    - **The main gate runs five parallel jobs instead of one serial job.** The
+      compile, every lint and the suite under coverage used to run in sequence.
+    """
+
+    test "credits the pull request that first wrote the entry" do
+      index =
+        git_log([
+          {"Split the CI gate (#1397)",
+           [
+             "- **The main gate runs five parallel jobs instead of one serial job.** The",
+             "  compile, every lint and the suite under coverage used to run in sequence."
+           ]}
+        ])
+        |> Changelog.build_index()
+
+      assert Changelog.from_history(@entry, index) == ["1397"]
+    end
+
+    # A run of `--condense` rewraps lines and commits them under its own pull
+    # request. The entry's opening words are already in an earlier commit.
+    test "a later rewrap does not take the credit" do
+      index =
+        git_log([
+          {"Split the CI gate (#1397)",
+           [
+             "- **The main gate runs five parallel jobs instead of one serial job.** The",
+             "  compile, every lint and the suite under coverage used to run in sequence."
+           ]},
+          {"Condense the changelog (#1469)",
+           [
+             "- **The main gate runs five parallel jobs instead of one serial",
+             "  job.** The compile, every lint and the suite under coverage used to run in",
+             "  sequence."
+           ]}
+        ])
+        |> Changelog.build_index()
+
+      rewrapped = """
+      - **The main gate runs five parallel jobs instead of one serial
+        job.** The compile, every lint and the suite under coverage used to run in
+        sequence.
+      """
+
+      assert Changelog.from_history(rewrapped, index) == ["1397"]
+    end
+
+    # A release cut that edits an entry's opening adds the new opening under the
+    # release's pull request. A line it did not touch is still the original's.
+    test "a later edit to the opening does not take the credit" do
+      index =
+        git_log([
+          {"Split the CI gate (#1397)",
+           [
+             "- **CI runs five jobs.** The",
+             "  compile, every lint and the suite under coverage used to run in sequence."
+           ]},
+          {"chore: release v0.8.0 (#1444)",
+           ["- **The main gate runs five parallel jobs instead of one serial job.** The"]}
+        ])
+        |> Changelog.build_index()
+
+      assert Changelog.from_history(@entry, index) == ["1397"]
+    end
+
+    test "an entry first written by a commit naming no pull request has none" do
+      index =
+        git_log([
+          {"Split the CI gate", [String.trim_trailing(@entry)]},
+          {"Condense the changelog (#1469)", ["- **The main gate runs five parallel jobs"]}
+        ])
+        |> Changelog.build_index()
+
+      assert Changelog.from_history(@entry, index) == []
+    end
+  end
+
   describe "slug/1" do
     test "matches GitHub's heading anchor" do
       assert Changelog.slug("**`/api/json/type-definitions`** — headless discovery") ==

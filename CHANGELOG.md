@@ -93,7 +93,7 @@ Every summary line below that was shortened links to its own entry there.
 - **`docs/multi-tenancy.md`** — the isolation model in one place: host → org
   resolution, the default org, `TENANT_STRICT_HOST`, compile-time strict
   tenancy, and what is and isn't per-org.
-  ([#1313](https://github.com/The-Verscienta/kiln_cms/issues/1313) · [long form](docs/changelog/v0.8.0.md#docsmulti-tenancymd-the-isolation-model-in-one-place-host-org-resolution-the))
+  ([#1313](https://github.com/The-Verscienta/kiln_cms/issues/1313))
 
 - **`monograph` public theme preset.**
   ([#1442](https://github.com/The-Verscienta/kiln_cms/issues/1442) · [long form](docs/changelog/v0.8.0.md#monograph-public-theme-preset))
@@ -185,7 +185,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#1416](https://github.com/The-Verscienta/kiln_cms/issues/1416) · [long form](docs/changelog/v0.8.0.md#save-and-the-workflow-buttons-never-miss-the-last-keystrokes))
 
 - **CI's main gate is five parallel jobs instead of one serial one.**
-  ([#1397](https://github.com/The-Verscienta/kiln_cms/issues/1397) · [long form](docs/changelog/v0.8.0.md#cis-main-gate-is-five-parallel-jobs-instead-of-one-serial-one))
+  ([#1392](https://github.com/The-Verscienta/kiln_cms/issues/1392) · [long form](docs/changelog/v0.8.0.md#cis-main-gate-is-five-parallel-jobs-instead-of-one-serial-one))
 
 - **The CI build cache is trusted again.**
   ([#1397](https://github.com/The-Verscienta/kiln_cms/issues/1397) · [long form](docs/changelog/v0.8.0.md#the-ci-build-cache-is-trusted-again))

@@ -57,10 +57,17 @@ defmodule Mix.Tasks.Kiln.Changelog do
   renames `docs/changelog/unreleased.md` to match and re-points the links (see
   `docs/releasing.md`).
 
-  Entries whose text carries no `#1234` reference get one from git: the commit
-  that first added those lines to `CHANGELOG.md` is, by this repo's workflow,
-  the pull-request merge that shipped the change. Upgrade notes and breaking
-  notes do not, since the commit that adds them is the release cut.
+  Entries whose text carries no `#1234` reference get one from git: the pull
+  request of the earliest commit that added one of the entry's lines verbatim or
+  whose added text contains its opening words — so neither a later rewrap nor a
+  later edit to the opening takes the credit. An entry git names no pull request
+  for links its long form instead, so every summary has somewhere to go.
+  Upgrade notes and breaking notes take only the references they carry, since
+  the commit that adds them is the release cut.
+
+  Anchors are unique within a release: two entries opening the same way get
+  `typo-fixes` and `typo-fixes-1`, and a new entry never takes an anchor an
+  existing archive block still uses.
 
   ### `--verify REF`
 
@@ -104,6 +111,19 @@ defmodule Mix.Tasks.Kiln.Changelog do
   ]
 
   @legacy_sections %{"Upgrading" => "Upgrade notes"}
+
+  # Sections written as prose an operator acts on, rather than as one bullet
+  # per change.
+  @note_sections ["Upgrade notes", "Breaking"]
+
+  # What this task — and only this task — writes onto a summary it shortened.
+  # An issue link is not enough: `--check` itself tells contributors to write
+  # `- **Summary.** ([#1234](...))`, and that entry has no archive block.
+  @long_form_link ~r{\[long form\]\(docs/(?:changelog|decisions)/}
+
+  # The line of links `--condense` puts under a summary. It is not prose, so it
+  # does not count toward the Unreleased cap.
+  @links_line ~r/^\s*\(\[(?:#\d+|long form)\]\(/
 
   # Upgrade-note paragraphs that are a *break* rather than a step: an observable
   # contract changed, or an overlay/deployment has to change to keep working.
@@ -277,32 +297,37 @@ defmodule Mix.Tasks.Kiln.Changelog do
   # each still verbatim.
   def notes(body) do
     body
-    |> String.split(~r/\n\n+/)
-    |> Enum.reduce([], fn para, acc ->
-      cond do
-        String.trim(para) == "" -> acc
-        new_note?(para) -> [[para] | acc]
-        acc == [] -> [[para]]
-        true -> [[para | hd(acc)] | tl(acc)]
-      end
-    end)
+    |> String.split(~r/\n\s*\n/)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.reduce([], &add_paragraph/2)
     |> Enum.reverse()
     |> Enum.map(&(&1 |> Enum.reverse() |> Enum.join("\n\n")))
   end
 
-  # A bold lead opens a note. So does a bullet this task already condensed —
-  # otherwise a second `--condense` reads a whole condensed section as one note,
-  # keeps the first one's archive block and drops the rest.
+  # A bold lead opens a note, and prose continues the note above it.
   #
-  # A plain bullet does *not*: an upgrade note may carry its own list ("two
-  # smaller contract notes on the same endpoint:"), and those items belong to
-  # the note above them.
-  defp new_note?(paragraph) do
-    trimmed = String.trim_leading(paragraph)
+  # A bullet paragraph is either a list of notes or a list *inside* one. It is
+  # a list of notes — one per bullet — when it opens the section, follows
+  # another bullet note, or is a summary this task already condensed: a
+  # `### Breaking` written as `- a.` / `- b.` must not collapse into one note
+  # summarised to its first sentence, which drops `b` from what `mix
+  # kiln.update` prints. It is a list inside a note when it follows a bold-lead
+  # note ("two smaller contract notes on the same endpoint:").
+  defp add_paragraph("**" <> _ = para, notes), do: [[para] | notes]
 
-    String.starts_with?(trimmed, "**") or
-      (String.starts_with?(trimmed, "- ") and condensed?(paragraph))
+  defp add_paragraph("- " <> _ = para, notes) do
+    if notes == [] or bullet_note?(hd(notes)) or condensed?(para) do
+      para |> bullets() |> Enum.reduce(notes, &[[&1] | &2])
+    else
+      [[para | hd(notes)] | tl(notes)]
+    end
   end
+
+  defp add_paragraph(para, []), do: [[para]]
+  defp add_paragraph(para, [note | notes]), do: [[para | note] | notes]
+
+  defp bullet_note?(paragraphs), do: String.starts_with?(List.last(paragraphs), "- ")
 
   # ---- summarising -------------------------------------------------------
 
@@ -346,6 +371,7 @@ defmodule Mix.Tasks.Kiln.Changelog do
   # An entry as one flowing line: bullet marker gone, wrapping undone.
   def flatten(entry) do
     entry
+    |> String.trim()
     |> String.replace(~r/^- /, "")
     |> String.split("\n")
     |> Enum.map_join(" ", &String.trim/1)
@@ -439,15 +465,20 @@ defmodule Mix.Tasks.Kiln.Changelog do
     release = adopt_renamed_archive(release, archive_path)
     kept = archived_blocks(archive_path)
 
-    {summaries, archived, adrs} =
+    sections =
       release.body
       |> sections()
       |> merge_duplicate_sections()
       |> split_breaking(release.version)
       |> Enum.sort_by(fn {name, _} -> section_rank(name) end)
+
+    ctx = {prs, kept, assign_anchors(sections, kept)}
+
+    {summaries, archived, adrs} =
+      sections
       |> Enum.reduce({[], [], []}, fn {name, section}, {ss, as, ds} ->
         {summary, archive, section_adrs} =
-          condense_section(release, name, section, {prs, kept}, archive_path)
+          condense_section(release, name, section, ctx, archive_path)
 
         {[{name, summary} | ss], [{name, archive} | as], section_adrs ++ ds}
       end)
@@ -496,22 +527,22 @@ defmodule Mix.Tasks.Kiln.Changelog do
   # commit rather than in the pull request that caused them, so unlike an entry
   # they take only the references their own text carries. The git fallback here
   # would name the release commit, which tells nobody anything.
-  defp condense_section(_release, name, section, {_prs, kept}, archive_path)
-       when name in ["Upgrade notes", "Breaking"] do
+  defp condense_section(_release, name, section, {_prs, kept, anchors}, archive_path)
+       when name in @note_sections do
     {summaries, archived} =
       section
       |> notes()
-      |> Enum.map(&note_result(&1, name, kept, archive_path))
+      |> Enum.map(&note_result(&1, name, {kept, anchors}, archive_path))
       |> Enum.unzip()
 
     {Enum.join(summaries, "\n\n"), Enum.join(archived, "\n\n"), []}
   end
 
-  defp condense_section(release, name, section, {prs, kept}, archive_path) do
+  defp condense_section(release, name, section, ctx, archive_path) do
     {summaries, archived, adrs} =
       section
       |> bullets()
-      |> Enum.map(&entry_result(&1, release, name, {prs, kept}, archive_path))
+      |> Enum.map(&entry_result(&1, release, name, ctx, archive_path))
       |> Enum.reduce({[], [], []}, fn {s, a, d}, {ss, as, ds} ->
         {[s | ss], [a | as], (d && [d | ds]) || ds}
       end)
@@ -520,37 +551,35 @@ defmodule Mix.Tasks.Kiln.Changelog do
      adrs}
   end
 
-  defp note_result(note, name, kept, archive_path) do
+  defp note_result(note, name, {kept, anchors}, archive_path) do
     if condensed?(note),
       do: {String.trim(note), keep_block(kept, note, name)},
-      else: condense_note(note, archive_path)
+      else: condense_note(note, Map.fetch!(anchors, note), kept, archive_path)
   end
 
-  defp condense_note(note, archive_path) do
-    anchor = slug(summarize(note))
-    detail = if shortened?(note), do: "#{archive_path}##{anchor}", else: nil
-
-    {entry_line(summarize(note), references(note), detail),
-     anchor_tag(anchor) <> "\n\n" <> String.trim(note)}
+  defp condense_note(note, anchor, kept, archive_path) do
+    detail = if long_form?(note, references(note)), do: "#{archive_path}##{anchor}", else: nil
+    {entry_line(summarize(note), references(note), detail), archived_block(kept, anchor, note)}
   end
 
   # Already condensed: keep the summary as written and re-adopt the archive
   # block it names. Not yet: condense it.
-  defp entry_result(entry, release, name, {prs, kept}, archive_path) do
-    if condensed?(entry),
-      do: {String.trim(entry), keep_block(kept, entry, name), nil},
-      else: condense_entry(release, name, entry, prs, archive_path)
+  defp entry_result(entry, release, name, {prs, kept, anchors}, archive_path) do
+    if condensed?(entry) do
+      {String.trim(entry), keep_block(kept, entry, name), nil}
+    else
+      condense_entry(release, name, entry, {prs, Map.fetch!(anchors, entry), kept}, archive_path)
+    end
   end
 
-  defp condense_entry(release, name, entry, prs, archive_path) do
+  defp condense_entry(release, name, entry, {prs, anchor, kept}, archive_path) do
     lead = summarize(entry)
-    anchor = slug(lead)
     refs = entry_references(entry, prs)
 
     case decision_for(release.version, name, entry) do
       nil ->
-        detail = if shortened?(entry), do: "#{archive_path}##{anchor}", else: nil
-        {entry_line(lead, refs, detail), anchor_tag(anchor) <> "\n\n" <> String.trim(entry), nil}
+        detail = if long_form?(entry, refs), do: "#{archive_path}##{anchor}", else: nil
+        {entry_line(lead, refs, detail), archived_block(kept, anchor, entry), nil}
 
       {number, title} ->
         path = decision_path(number, title)
@@ -565,29 +594,116 @@ defmodule Mix.Tasks.Kiln.Changelog do
     end
   end
 
-  # An entry that is already a single line has nothing moved out of it, so it
-  # gets no "long form" link — the link would point at a copy of itself.
-  defp shortened?(entry) do
-    length(String.split(String.trim(entry), "\n")) > 1
+  # An entry is archived as its author wrote it. One that was not shortened has
+  # no long-form marker, so every run re-derives it — from CHANGELOG.md's
+  # rendering after the first. Keep the block already in the archive whenever
+  # it says the same thing: rebuilding it from the rendering would change the
+  # archive's bytes on every run and swap the author's `(#1313)` for a link,
+  # which is exactly the wording `--verify` looks for.
+  defp archived_block(kept, anchor, entry) do
+    with block when is_binary(block) <- Map.get(kept, anchor),
+         true <- same_prose?(block, entry) do
+      block
+    else
+      _ -> anchor_tag(anchor) <> "\n\n" <> String.trim(entry)
+    end
   end
+
+  defp same_prose?(block, entry) do
+    body = block |> String.split("\n", parts: 2) |> List.last()
+    bare(flatten(body)) == bare(flatten(entry))
+  end
+
+  # Whether the summary actually leaves anything out. One that doesn't gets no
+  # "long form" link — the link would point at a copy of itself — and, since it
+  # then carries no marker, is simply re-derived to the same text next run.
+  defp shortened?(entry), do: bare(flatten(entry)) != bare(summarize(entry))
+
+  # Whether a summary links its long form: when something was left out of it, or
+  # when it has no pull request to link instead — `--check` fails a summary with
+  # nowhere to go, and git names no pull request for an entry committed without
+  # one. That link also marks the entry as condensed, so it is never looked up
+  # in git again once its lines have been rewrapped.
+  defp long_form?(entry, refs), do: shortened?(entry) or refs == []
+
+  # Prose only: a summary's link line and an author's bare `(#1234)` removed.
+  defp bare(text) do
+    text
+    |> String.replace(~r/\s*\(\s*(?:\[[^\]]*\]\([^)]*\)\s*[,·]?\s*)+\)/u, "")
+    |> String.replace(~r/\s*\((?:#\d+[,;]?\s*)+\)/, "")
+    |> String.trim()
+    |> String.trim_trailing(".")
+  end
+
+  # One anchor per new archive block, unique within the release. The slug alone
+  # is not: two entries opening "**Typo fixes.**" — or sharing the first 80
+  # characters of a long lead — would share an `id`, the archive re-read would
+  # keep one block for both, and a second `--condense` would overwrite the
+  # other's long form. Anchors already in the archive are taken, so a new entry
+  # never lands on an old one either.
+  defp assign_anchors(sections, kept) do
+    {condensed, fresh} =
+      sections
+      |> Enum.flat_map(fn {name, body} -> units(name, body) end)
+      |> Enum.split_with(&condensed?/1)
+
+    taken =
+      condensed
+      |> Enum.map(&kept_anchor(kept, &1))
+      |> Enum.reject(&is_nil/1)
+      |> MapSet.new()
+
+    fresh
+    |> Enum.reduce({%{}, taken}, fn unit, {anchors, taken} ->
+      anchor = unique_anchor(slug(summarize(unit)), taken)
+      {Map.put_new(anchors, unit, anchor), MapSet.put(taken, anchor)}
+    end)
+    |> elem(0)
+  end
+
+  defp unique_anchor(base, taken) do
+    0
+    |> Stream.iterate(&(&1 + 1))
+    |> Stream.map(fn
+      0 -> base
+      n -> "#{base}-#{n}"
+    end)
+    |> Enum.find(&(not MapSet.member?(taken, &1)))
+  end
+
+  defp units(nil, _body), do: []
+  defp units(name, body) when name in @note_sections, do: notes(body)
+  defp units(_name, body), do: bullets(body)
 
   # An entry a previous run already condensed. Its long form is in the archive,
   # not in `CHANGELOG.md`, so re-condensing it would summarise a summary and —
   # worse, since the archive is rewritten from what this function is handed —
   # overwrite the long form with it.
-  defp condensed?(entry) do
-    String.match?(
-      entry,
-      ~r{\]\((?:#{Regex.escape(@repo_url)}/issues/\d+|#{@archive_dir}/|#{@decisions_dir}/)}
-    )
-  end
+  defp condensed?(entry), do: String.match?(entry, @long_form_link)
 
   # The archive block a condensed entry stands for, keyed by the anchor in its
   # own "long form" link.
   defp keep_block(kept, entry, section) do
-    case Map.fetch(kept, entry_anchor(entry)) do
-      {:ok, block} -> block
-      :error -> Mix.raise(orphaned_message(entry, section))
+    block =
+      case entry_anchor(entry) do
+        nil -> with {_anchor, block} <- decision_stub(kept, entry), do: block
+        anchor -> Map.get(kept, anchor)
+      end
+
+    block || Mix.raise(orphaned_message(entry, section))
+  end
+
+  # The archive anchor a condensed entry will keep, so a new entry avoids it.
+  defp kept_anchor(kept, entry) do
+    entry_anchor(entry) || with({anchor, _block} <- decision_stub(kept, entry), do: anchor)
+  end
+
+  # A summary pointing at a decision record has no archive anchor of its own in
+  # its link; its archive block is the stub that names the same record.
+  defp decision_stub(kept, entry) do
+    case Regex.run(~r{\[long form\]\((#{@decisions_dir}/[^)\s]+)\)}, entry) do
+      [_, path] -> Enum.find(kept, fn {_anchor, block} -> String.contains?(block, path) end)
+      nil -> nil
     end
   end
 
@@ -604,13 +720,12 @@ defmodule Mix.Tasks.Kiln.Changelog do
     """
   end
 
-  # A condensed entry names its own archive anchor. One that links only to a
-  # decision record has no archive anchor of its own to find, so fall back to
-  # re-deriving it the way it was derived in the first place.
+  # The archive anchor a condensed entry names in its own "long form" link, or
+  # nil for one that links a decision record instead.
   defp entry_anchor(entry) do
     case Regex.run(~r/\]\(#{@archive_dir}\/[^)#\s]+#([^)\s]+)\)/, entry) do
       [_, anchor] -> anchor
-      nil -> slug(summarize(entry))
+      nil -> nil
     end
   end
 
@@ -836,22 +951,35 @@ defmodule Mix.Tasks.Kiln.Changelog do
     end
   end
 
-  # An entry with no `#1234` of its own still has one: the commit that first
-  # added its lines to CHANGELOG.md is the pull request that shipped it. Look
-  # up its longest line, which is the least likely to collide with another
-  # entry's wrapping.
-  defp from_history(entry, prs) do
-    entry
-    |> String.split("\n")
-    |> Enum.map(&String.trim/1)
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.sort_by(&(-String.length(&1)))
-    |> Enum.find_value([], fn line ->
-      case Map.get(prs, line) do
-        nil -> nil
-        pr -> [pr]
-      end
-    end)
+  @doc false
+  # An entry with no `#1234` of its own still has one: the pull request of the
+  # earliest commit that wrote it. A commit "wrote" the entry if it added one of
+  # its lines verbatim, or if its added text contains the entry's opening words.
+  #
+  # Either alone misattributes. Verbatim lines miss an entry whose lines were
+  # all rewrapped — by a run of this task, committed under its own pull request,
+  # which then takes the credit. Opening words miss an entry whose opening was
+  # edited later — a release cut tightening the wording takes the credit.
+  # Taking the earliest commit that satisfies either gets both right.
+  #
+  # Public only so it can be tested against a fake `git log` rather than a repo.
+  def from_history(entry, index) do
+    needle = entry |> flatten() |> String.slice(0, 80)
+
+    lines =
+      entry
+      |> String.split("\n")
+      |> Enum.map(&String.trim/1)
+      |> Enum.filter(&(String.length(&1) >= 40))
+
+    wrote? = fn {_pr, text, added} ->
+      String.contains?(text, needle) or Enum.any?(lines, &MapSet.member?(added, &1))
+    end
+
+    case Enum.find(index, wrote?) do
+      {pr, _text, _added} when is_binary(pr) -> [pr]
+      _ -> []
+    end
   end
 
   # One entry: the summary wrapped as a bullet, then its links on a line of
@@ -872,9 +1000,11 @@ defmodule Mix.Tasks.Kiln.Changelog do
     if detail, do: "(#{links} · [long form](#{detail}))", else: "(#{links})"
   end
 
-  # `text -> "1234"` for every line ever added to CHANGELOG.md by a commit whose
-  # subject ends in `(#1234)`. First writer wins: a line re-touched by a later
-  # consolidation still belongs to the PR that introduced it.
+  # `[{pr | nil, added_text, added_lines}]`, oldest commit first, for every
+  # commit that touched CHANGELOG.md. `added_text` is the added lines with
+  # bullets and indentation stripped and whitespace collapsed, so a rewrapped
+  # paragraph still matches the words it was wrapped from; `added_lines` is the
+  # same lines, trimmed, for the verbatim match.
   defp pull_request_index do
     case System.cmd(
            "git",
@@ -882,29 +1012,33 @@ defmodule Mix.Tasks.Kiln.Changelog do
            stderr_to_stdout: true
          ) do
       {out, 0} -> build_index(out)
-      {_out, _} -> %{}
+      {_out, _} -> []
     end
   end
 
-  defp build_index(out) do
+  @doc false
+  # Public only so `from_history/2` can be tested against a fake `git log`.
+  def build_index(out) do
     out
-    |> String.split("\n")
-    |> Enum.reduce({%{}, nil}, &index_line/2)
-    |> elem(0)
+    |> String.split(~r/^@@@/m, trim: true)
+    |> Enum.map(fn commit ->
+      [subject | diff] = String.split(commit, "\n")
+
+      added =
+        Enum.flat_map(diff, fn
+          "+++" <> _rest -> []
+          "+" <> line -> [String.trim(line)]
+          _line -> []
+        end)
+
+      text =
+        added
+        |> Enum.map_join(" ", &String.replace(&1, ~r/^- /, ""))
+        |> String.replace(~r/\s+/, " ")
+
+      {subject_pr(subject), text, MapSet.new(added)}
+    end)
   end
-
-  defp index_line("@@@" <> subject, {index, _pr}), do: {index, subject_pr(subject)}
-
-  defp index_line("+++" <> _rest, acc), do: acc
-
-  defp index_line("+" <> added, {index, pr}) when pr != nil do
-    case String.trim(added) do
-      "" -> {index, pr}
-      text -> {Map.put_new(index, text, pr), pr}
-    end
-  end
-
-  defp index_line(_line, acc), do: acc
 
   defp subject_pr(subject) do
     case Regex.run(~r/\(#(\d+)\)\s*$/, subject) do
@@ -963,13 +1097,20 @@ defmodule Mix.Tasks.Kiln.Changelog do
         ]
       end
 
-    entries = if name == "Upgrade notes", do: notes(body), else: bullets(body)
+    entries = units(name, body)
 
     unknown ++ Enum.flat_map(entries, &check_entry(release, name, &1))
   end
 
   defp check_entry(release, name, entry) do
-    lines = entry |> String.trim() |> String.split("\n") |> length()
+    # The links line is navigation, not reading: counting it would fail an entry
+    # `--condense` itself produced from a three-line opening sentence.
+    lines =
+      entry
+      |> String.trim()
+      |> String.split("\n")
+      |> Enum.reject(&String.match?(&1, @links_line))
+      |> length()
 
     too_long =
       if release.version == nil and lines > @unreleased_max_lines do
@@ -979,9 +1120,7 @@ defmodule Mix.Tasks.Kiln.Changelog do
 
               #{String.slice(flatten(entry), 0, 70)}...
 
-          Unreleased entries are read by an operator deciding whether to upgrade.
-          Keep the summary to #{@unreleased_max_lines} lines and put the reasoning in the pull
-          request, then link it: `- **Summary.** ([#1234](...))`.
+          #{too_long_advice(entry)}
           """
         ]
       else
@@ -1022,6 +1161,19 @@ defmodule Mix.Tasks.Kiln.Changelog do
           []
       end
     end)
+  end
+
+  # `--condense` keeps the author's opening sentence as written, so once an entry
+  # is condensed only a shorter opening can bring it under the cap.
+  defp too_long_advice(entry) do
+    if condensed?(entry) do
+      "Its opening sentence alone is over the cap, and `--condense` never rewrites\n" <>
+        "it. Shorten the bold lead — the rest is already in the long form."
+    else
+      "Run `mix kiln.changelog --condense` to move the reasoning to docs/changelog/,\n" <>
+        "or write the summary yourself and link the pull request:\n" <>
+        "`- **Summary.** ([#1234](...))`."
+    end
   end
 
   defp describe(%{version: nil}), do: "Unreleased"
