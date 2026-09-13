@@ -7,6 +7,81 @@ interactivity is handled by LiveView + colocated JS hooks — no Surface, no Alp
 See [`KilnCMS_Project_Plan.md`](KilnCMS_Project_Plan.md) for the full vision, architecture, and
 the resolved architectural decisions (D1–D8).
 
+## Status & maturity
+
+**Pre-1.0 (`v0.8.0`), single maintainer, and consumed as a source overlay
+rather than a package.** If you are evaluating KilnCMS for a team, read this
+section before the feature list.
+
+**How it is consumed.** KilnCMS is **not published on Hex**. A downstream site
+pins this repository as a **git submodule**, adds its own content types under
+[`projects/<name>/`][overlay], and moves the pin between tagged releases with
+`mix kiln.update` (see
+[Releasing](docs/releasing.md#updating-a-project-to-a-release)). Your code
+layers onto the core; you do not fork it and you do not `mix deps.get` it. The
+interface that layering is written against — which surfaces are promised, and
+what a minor release may still do to you — is the **overlay contract**
+([`projects/README.md`][contract]; a fuller written policy is in flight as
+[#1453](https://github.com/The-Verscienta/kiln_cms/pull/1453)).
+
+[overlay]: https://github.com/The-Verscienta/kiln_cms/blob/main/projects/README.md
+[contract]: https://github.com/The-Verscienta/kiln_cms/blob/main/projects/README.md#the-overlay-contract
+
+<!-- Those two are absolute URLs for a different reason than the `.github/`
+     links further down. `README.md` is the basename of four registered ExDoc
+     extras (this one, `examples/`, `projects/`, `clients/elixir/kiln_client/`),
+     and ExDoc resolves a relative `README.md` link to the last of them
+     whatever path is written — so `[...](projects/README.md)` silently lands
+     on the Elixir client's page in `mix docs` output, with no warning to say
+     so. The relative README links already in the guides have the same problem;
+     not fixed here. -->
+
+A prebuilt container image is published to GHCR on every release tag, if you
+want to run the core without a checkout:
+
+```bash
+docker pull ghcr.io/the-verscienta/kiln_cms:latest   # linux/amd64
+```
+
+That image is the **project-agnostic core**. An overlay builds its own from the
+same [`Dockerfile`](https://github.com/The-Verscienta/kiln_cms/blob/main/Dockerfile)
+with `--build-arg PROJECT=<name>`.
+
+**What pre-1.0 means for API stability.** Semver here is interpreted against the
+overlay contract, not against every module: **major** = an overlay needs code
+changes to compile, **minor** = new capability plus possible migrations,
+**patch** = fixes (the full definition is at the top of
+[`CHANGELOG.md`](CHANGELOG.md)). Practically:
+
+| Stability | Surfaces |
+|---|---|
+| **Stable** — changes follow a deprecation path | The overlay contract surfaces (the `KilnCMS.CMS.Content` options, workflow action names, `Kiln.Plugin` callbacks, the block DSL, the extension behaviours and registries, config keys, the `PROJECT` build arg, the `public-*` CSS hooks); the published-content read contract on the HTTP APIs (*Versioning & stability* in [`docs/api.md`](docs/api.md)) |
+| **Moves without notice** | Everything inside `KilnCMSWeb.*` bar the plugin and JSON:API routers, core internals, the console's `side-*` classes, core Oban queue names, and search *ranking* |
+| **Experimental / off by default** | Semantic + hybrid search and the Meilisearch backend (both feature-flagged off); the CRDT collaborative-editing prototype (`:collab_prototype`, dev/test only) |
+
+**Bus factor is one.** One maintainer, no external contributors yet, and a
+large share of the commit history is AI-pair-programmed (every such commit is
+`Co-Authored-By`-attributed). What offsets that is mechanical rather than
+social: a `mix precommit` gate and a CI suite that includes dialyzer, sobelow,
+`mix deps.audit`, a policy-coverage guard that fails the build for an Ash
+resource with no authorizer, an overlay-drift job, and a release-image build.
+The [issue tracker](https://github.com/The-Verscienta/kiln_cms/issues) is the
+project's real backlog, including its own audit findings. If that bus factor is
+a blocker for you, it should be — say so in an issue; the surfaces most worth a
+second pair of eyes are named in
+[`docs/threat-model.md`](docs/threat-model.md).
+
+**Getting help, and reporting problems.** Questions and bugs belong in
+[issues](https://github.com/The-Verscienta/kiln_cms/issues); see
+[`.github/SUPPORT.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/.github/SUPPORT.md)
+for what goes where and what response time to actually expect. **Security
+problems never go in an issue** — report them privately
+([`.github/SECURITY.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/.github/SECURITY.md)).
+
+<!-- Those two are full URLs, not relative paths, for the reason spelled out
+     under "Security" below: `.github/` is outside ExDoc's `extras`, so a
+     relative link fails `mix docs --warnings-as-errors`. -->
+
 ## Stack
 
 | Concern | Choice |
