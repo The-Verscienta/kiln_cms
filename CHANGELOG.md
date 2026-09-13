@@ -27,8 +27,31 @@ migration, a rewritten column, a dropped config key).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`mix docs` "View Source" links point at the release tag, not `main`.**
+  `source_ref` was pinned to the branch, so every link in a published build
+  kept re-resolving as `main` moved and would eventually land on a shifted line
+  or a deleted function. It now defaults to `v<version>` from `mix.exs`, which
+  the release commit bumps to match the tag. A build from an untagged `main`
+  can pin itself with `DOCS_SOURCE_REF=$(git rev-parse HEAD) mix docs`.
 ### Added
 
+- **The release image is published to GHCR on every version tag.**
+  `docker pull ghcr.io/the-verscienta/kiln_cms:<version>` (or `:latest`) now
+  gets the project-agnostic core, built by
+  `.github/workflows/release.yml` from the same `Dockerfile` CI builds on every
+  PR and stamped with the commit and build date. `linux/amd64` only. Submodule
+  overlays are unaffected — an overlay still builds its own image with
+  `--build-arg PROJECT=<name>`, and `mix kiln.update` remains the way a pinned
+  project moves between releases (#1328).
+
+- **`.github/SUPPORT.md`, and a "Status & maturity" section at the top of the
+  README.** Where questions, bugs and security reports each go, and what
+  response time to expect from a single-maintainer pre-1.0 project; plus, up
+  front, that KilnCMS is consumed as a git-submodule overlay rather than a Hex
+  package, and which surfaces are stable, which move without notice, and which
+  are off by default (#1328).
 - **`docs/overlay-contract.md` — what a downstream overlay may rely on across
   releases.** The semver table says a major bump means "the overlay contract
   broke", but nothing said which surfaces that covers. This one does: a table
@@ -42,6 +65,38 @@ migration, a rewritten column, a dropped config key).
   the additive-first deprecation path, four CI commands a downstream repo
   should run, and the soft spots stated outright: the block upcast path has
   never run a real migration, eager backfill is unwired, `to_markdown/1` is
+  probed rather than declared, and `Kiln.Plugin` declares no optional
+  callbacks. Linked from `projects/README.md` (which keeps the mechanics) and
+  the getting-started guide router (#1328).
+
+- **`Kiln.FieldType.parse_float/1` — a covered numeric parse for a custom
+  field type's `cast/2`.** `Float.parse/1` is not total, and *how* it fails is
+  toolchain-dependent: on a literal that overflows a double it returns `:error`
+  on Elixir 1.20 and **raises** `ArgumentError` on 1.19, the version
+  `.tool-versions` pins. A `cast/2` runs on every content write including
+  public ones, so the difference is a validation message on one toolchain and a
+  500 on the other. The core already had this as `KilnCMS.CMS.Computed`'s
+  `@doc false` `safe_float/1`; it is now public, documented, spec'd, and listed
+  in the covered-surfaces table, because a downstream field type needs it for
+  exactly the reason the core's own `Geolocation` does.
+
+### Changed
+
+- **The in-tree example overlay no longer reaches past the overlay contract.**
+  The money field type (`projects/example/field_types/money.ex`) parsed its
+  amount through `KilnCMS.CMS.Computed`'s `safe_float/1`, which is marked
+  `@doc false` — a surface `docs/overlay-contract.md` explicitly excludes. It
+  now calls `Kiln.FieldType.parse_float/1`. Its `cast/2` semantics are
+  unchanged and are now pinned by tests. The `@doc false` helper is gone; it
+  was core-internal, so this is not a contract break, and the four core call
+  sites moved with it.
+
+- **`docs/overlay-contract.md` says why the example's `:test` plugin list names
+  a core fixture.** `projects/example/project.exs` restates
+  `KilnCMS.FixturePlugin` because `:plugins` *replaces* rather than merges and
+  `config/project.exs` is imported last — an artifact of the example living in
+  the core's repo, not a pattern a real overlay should copy. The "Not covered"
+  entry now says both halves.
   probed rather than declared, and the hand-rolled `@behaviour` path breaks on
   callback additions. Linked from `projects/README.md` (which keeps the
   mechanics) and the getting-started guide router (#1328).
@@ -54,6 +109,15 @@ migration, a rewritten column, a dropped config key).
   `KilnCMS.Markdown.parse_document/2` stopped recognizing it as the document's
   title: the import arrived untitled *and* with the heading still in the body,
   which then printed the name twice.
+- **An HTML comment in imported Markdown is no longer published as prose.**
+  `<!-- a note to whoever edits this file -->` standing on its own between
+  paragraphs came through `KilnCMS.Markdown` as a visible paragraph — earmark
+  hands a block comment back tagged with the atom `:comment`, which matched
+  none of the renderer's tag lists and fell through to the clause that keeps a
+  node's text. Affected `.md` import, Markdown pasted into a rich-text block,
+  and the `body_markdown` write argument. A comment written mid-sentence was
+  already dropped by the sanitizer, and one inside a fenced code block is the
+  example, so it still survives.
 
 - **Links to a `README.md` from a guide pointed at the wrong README.** ExDoc
   resolves a relative link between extras by basename alone, taking whichever
