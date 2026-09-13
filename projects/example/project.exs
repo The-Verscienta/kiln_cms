@@ -53,8 +53,16 @@ config :kiln_cms,
 config :kiln_cms, :csp_img_src, ["https://imagedelivery.net"]
 
 # Register the plugin (D18 seams: `mix kiln.plugins.doctor`, nav, blocks).
-# In test, the core's test.exs registers KilnCMS.FixturePlugin — this file is
-# imported after it and replaces the list, so restate the fixture plugin too.
+#
+# `:plugins` replaces rather than merges, exactly like `ash_domains` above. In
+# test the core's test.exs registers KilnCMS.FixturePlugin and this file is
+# imported after it, so the fixture plugin has to be restated or activating the
+# example here deregisters the plugin the core's own suite is written against.
+#
+# That restatement is an artifact of this example living *inside* the core repo
+# and being compiled by its `:test` env — it is not a pattern for a real
+# overlay, which has its own test suite and must not name core `test/support`
+# modules. See "Not covered" in docs/overlay-contract.md.
 if config_env() == :test do
   config :kiln_cms, :plugins, [KilnCMS.FixturePlugin, Example.Plugin]
 else

@@ -4,7 +4,7 @@ What a `projects/<name>/` subproject may rely on, what it may not, and what
 happens when something it relies on has to change.
 
 Two other documents already own neighbouring ground, and this one does not
-repeat them: [Downstream projects](../projects/README.md) describes the
+repeat them: [Downstream projects](https://github.com/The-Verscienta/kiln_cms/blob/main/projects/README.md) describes the
 *mechanics* — how an overlay attaches, how it is activated and built — and
 [`CHANGELOG.md`](../CHANGELOG.md) defines what major, minor and patch *mean*
 here. The question neither answers is the one a team has to answer before
@@ -33,7 +33,7 @@ change and forces a major bump. Additions to these surfaces are not breaking.
 | The `_type` and `_version` attributes | Injected on every block, and the discriminator a stored block map is resolved by |
 | `Kiln.Block.Renderer` | The `:web`, `:json` and `:json_ld` surfaces, and that an implementation returning `nil` for an unhandled surface is correct |
 | `Kiln.Block.Info` | Introspection over a block's definition, version, fields and migrations |
-| `Kiln.FieldType` | `cast/2` stays required; the optional callbacks stay optional |
+| `Kiln.FieldType` | `cast/2` stays required; the optional callbacks stay optional; `parse_float/1` keeps `Float.parse/1`'s return shape and stays total (it is how a `cast/2` parses a number without inheriting `Float.parse/1`'s toolchain-dependent raise) |
 | `Kiln.Advisory`, `Kiln.Forms.SpamCheck` | Their `check/1` callbacks, outcome shapes, and registries |
 | `Kiln.Plugins`, `Kiln.Version`, `Kiln.Updates`, `Kiln.Tokens` | Their documented functions and return shapes |
 | `KilnCMS.Blocks`, `KilnCMS.Blocks.Upcaster`, `KilnCMS.CMS.ContentTypes` | The registry and dispatch functions an overlay calls |
@@ -77,7 +77,23 @@ that counting as a major.
 - **The generated GraphQL schema module itself**, as distinct from the schema it
   produces.
 - **Seeds, fixtures, and `projects/example/`.** The example overlay is a
-  worked reference that tracks the core; it is not an API.
+  worked reference that tracks the core; it is not an API. Nor is core test
+  support: `test/support/` compiles only in the core's own `:test` env, and
+  nothing in it — `KilnCMS.FixturePlugin` included — is a name your overlay
+  may hold.
+
+  One in-tree exception, which is **not** a pattern to copy.
+  `projects/example/project.exs` restates `KilnCMS.FixturePlugin` in its
+  `:test` plugin list. That is not the example depending on a fixture; it is
+  the replace semantics of `:plugins`. `config/test.exs` registers the fixture
+  plugin, `config/project.exs` is imported last, and an Elixir config list is
+  *replaced* rather than merged — so activating the example inside this
+  repository without restating it would deregister the plugin the core's own
+  suite is written against. The example lives in the core's repo and is
+  compiled by the core's `:test` env; your overlay is not, and has its own
+  test suite. What does transfer is the mechanic: `:plugins` replaces, exactly
+  as `:ash_domains` and `:content_domains` do, so every core entry you want
+  kept has to be restated — and re-synced when you bump the pin.
 
 ## What a minor may still do to you
 
@@ -177,10 +193,6 @@ Stated rather than discovered later.
   declares `@behaviour` instead of using the `use` form gets missing-callback
   warnings when a callback is added, which `--warnings-as-errors` turns into a
   failed build. The `use` form is what makes additions safe; prefer it.
-- **The in-tree example overlay itself reaches past this contract**, in one
-  spot: its money field type calls a `@doc false` numeric helper out of the
-  core. The reference overlay should model the contract it demonstrates, so
-  either that helper earns a covered home or the example stops calling it.
 
 ## Status of this document
 

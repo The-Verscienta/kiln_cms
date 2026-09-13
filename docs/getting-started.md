@@ -9,6 +9,17 @@ truth for storage, actions, authorization and the publishing state machine.
 A KilnCMS install is meant to be *overlaid*, not forked: the reusable core lives
 in `lib/`, and a downstream site adds its own content types under `projects/`.
 
+**How that is distributed:** KilnCMS is **not on Hex** and is not consumed as a
+dependency. A site pins this repository as a **git submodule** and moves the pin
+between tagged releases with `mix kiln.update` — see
+[Downstream projects](https://github.com/The-Verscienta/kiln_cms/blob/main/projects/README.md) for the layout,
+[Releasing](releasing.md#updating-a-project-to-a-release) for the update flow,
+and the [status section of the Overview](https://github.com/The-Verscienta/kiln_cms#status--maturity)
+for what pre-1.0 means for the surfaces you would build against. A prebuilt core image
+is also published on each release tag
+(`docker pull ghcr.io/the-verscienta/kiln_cms:latest`) if you want to run it
+without a checkout.
+
 This page is the landing page for `mix docs` and the orientation path for a new
 contributor. It points at the right guide rather than restating it.
 
@@ -72,7 +83,7 @@ declarative, so the module *is* the specification.
 |--------------|------|
 | Use the editor | [Editor shortcuts](editor-shortcuts.md), [Editorial advisories](advisories.md), [Claim checking](compliance.md) |
 | Model new content | [Extending the content model](extending-content.md) |
-| Overlay the core with your own project | [The overlay contract](overlay-contract.md) — what you may rely on across releases; [Downstream projects](../projects/README.md) for the mechanics |
+| Overlay the core with your own project | [The overlay contract](overlay-contract.md) — what you may rely on across releases; [Downstream projects](https://github.com/The-Verscienta/kiln_cms/blob/main/projects/README.md) for the mechanics |
 | Understand who can do what | [Authorization policy matrix](policy-matrix.md), [Granular RBAC](granular-rbac.md) |
 | Run several sites from one install | [Multi-tenancy](multi-tenancy.md) |
 | Consume the content headlessly | [Headless consumer guide](headless-consumer-guide.md) — it routes you to [JSON:API](json-api.md), [GraphQL](headless-graphql-api.md), [MCP](mcp.md) or [RAG](rag.md) |
