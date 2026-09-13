@@ -9,6 +9,7 @@ defmodule KilnCMSWeb.ConsoleNavTest do
 
   import Phoenix.LiveViewTest
 
+  alias KilnCMS.Accounts
   alias KilnCMS.Accounts.User
   alias KilnCMSWeb.ConsoleNav
 
@@ -152,6 +153,35 @@ defmodule KilnCMSWeb.ConsoleNavTest do
       groups = ConsoleNav.nav(authed_user(:editor), nil).configure_groups
 
       refute Enum.any?(groups, &(&1.key == :operations))
+    end
+
+    test "is dropped for an org admin, who still gets the site sections and the hub" do
+      # A global editor made admin of this site by membership: effective tier
+      # :admin, so `configure_groups(:admin, false)` — the case the editor
+      # fixture above never reaches.
+      user = authed_user(:editor)
+
+      {:ok, _membership} =
+        Accounts.create_org_membership(
+          %{user_id: user.id, organization_id: Accounts.default_org_id(), role: :admin},
+          authorize?: false
+        )
+
+      nav = ConsoleNav.nav(user, nil)
+
+      assert Enum.map(nav.configure_groups, & &1.key) == [
+               :content_model,
+               :capture,
+               :delivery,
+               :integrations,
+               :organization,
+               :account
+             ]
+
+      assert %{key: :configure} = nav.hub
+      refute Enum.any?(Enum.flat_map(nav.configure_groups, & &1.items), & &1[:platform])
+      assert ConsoleNav.search("backup", user, nil) == []
+      assert :governance in Enum.map(ConsoleNav.search("audit", user, nil), & &1.key)
     end
   end
 

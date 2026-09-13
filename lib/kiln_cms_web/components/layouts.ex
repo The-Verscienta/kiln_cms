@@ -712,7 +712,7 @@ defmodule KilnCMSWeb.Layouts do
     <.link
       navigate={@item.path}
       class={["side-link", @class]}
-      aria-current={@item.key == @active && "page"}
+      aria-current={@item.key && @item.key == @active && "page"}
       data-side-tip={@item.label}
     >
       <.icon name={@item.icon} class="side-icon size-5 shrink-0" />
@@ -1160,7 +1160,7 @@ defmodule KilnCMSWeb.Layouts do
     <%!-- Plugin-contributed nav (D18), each gated by its declared role. --%>
     <a
       :for={item <- Kiln.Plugins.nav_items()}
-      :if={@current_user && nav_item_visible?(item, @current_user.role)}
+      :if={@current_user && KilnCMSWeb.ConsoleNav.plugin_visible?(item, @current_user.role)}
       href={item.path}
       class={@item}
     >
@@ -1170,13 +1170,6 @@ defmodule KilnCMSWeb.Layouts do
     <a :if={@current_user} href={~p"/sign-out"} class={@item}>{gettext("Sign out")}</a>
     """
   end
-
-  # A plugin nav item is visible when the user's effective tier meets its
-  # declared role (`:editor` admits admins too, mirroring the core links);
-  # `:viewer`/`:none` see neither.
-  defp nav_item_visible?(%{role: :admin}, tier), do: tier == :admin
-  defp nav_item_visible?(%{role: :editor}, tier), do: tier in [:editor, :admin]
-  defp nav_item_visible?(_item, _tier), do: false
 
   @doc """
   Provides dark vs light theme toggle based on themes defined in app.css.

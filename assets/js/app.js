@@ -927,12 +927,34 @@ const Hooks = {
 const collapsedGroups = () =>
   (document.documentElement.dataset.navCollapsed || "").split(" ").filter(Boolean)
 
-// One head, told what <html> already says.
+// One head, told what <html> already says. A section holding the current page
+// is kept open by app.css whatever <html> says, so it reads as expanded too.
 const markNavGroup = btn =>
-  btn.setAttribute("aria-expanded", String(!collapsedGroups().includes(btn.dataset.navGroupToggle)))
+  btn.setAttribute(
+    "aria-expanded",
+    String(
+      !collapsedGroups().includes(btn.dataset.navGroupToggle) ||
+        !!btn.closest(".side-group")?.querySelector("[aria-current]"),
+    ),
+  )
 
 const syncNavGroups = () =>
   document.querySelectorAll("[data-nav-group-toggle]").forEach(markNavGroup)
+
+// morphdom calls onNodeAdded for every node of an added subtree, so coalesce
+// those calls into one pass over the few heads once the patch is done.
+let navSyncQueued = false
+const queueNavSync = () => {
+  if (navSyncQueued) return
+  navSyncQueued = true
+  queueMicrotask(() => {
+    navSyncQueued = false
+    syncNavGroups()
+  })
+}
+
+// Navigating moves aria-current, which changes which sections read as open.
+window.addEventListener("phx:page-loading-stop", syncNavGroups)
 
 const toggleNavGroup = key => {
   const collapsed = collapsedGroups()
@@ -941,7 +963,11 @@ const toggleNavGroup = key => {
     : [...collapsed, key]
   if (next.length) document.documentElement.dataset.navCollapsed = next.join(" ")
   else delete document.documentElement.dataset.navCollapsed
-  localStorage.setItem("kiln:nav-collapsed", next.join(" "))
+  try {
+    localStorage.setItem("kiln:nav-collapsed", next.join(" "))
+  } catch (_) {
+    // Storage blocked: the section still toggles for this page view.
+  }
   syncNavGroups()
 }
 
@@ -991,9 +1017,8 @@ const liveSocket = new LiveSocket("/live", Socket, {
       }
     },
 
-    onNodeAdded(el) {
-      if (el.hasAttribute?.("data-nav-group-toggle")) markNavGroup(el)
-      el.querySelectorAll?.("[data-nav-group-toggle]").forEach(markNavGroup)
+    onNodeAdded() {
+      queueNavSync()
     },
   },
 })

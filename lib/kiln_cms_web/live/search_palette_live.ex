@@ -27,6 +27,11 @@ defmodule KilnCMSWeb.SearchPaletteLive do
      |> assign(:searched, false)
      |> assign(:retention_days, KilnCMS.Analytics.SearchQuery.retention_days())
      |> assign(:screens, [])
+     # Built once: what this actor may open does not change while they type.
+     |> assign(
+       :destinations,
+       ConsoleNav.destinations(socket.assigns.current_user, socket.assigns.current_org)
+     )
      |> assign(:results, empty())}
   end
 
@@ -76,10 +81,7 @@ defmodule KilnCMSWeb.SearchPaletteLive do
         socket
         |> assign(:query, query)
         |> assign(:searched, true)
-        |> assign(
-          :screens,
-          ConsoleNav.search(query, socket.assigns.current_user, socket.assigns.current_org)
-        )
+        |> assign(:screens, ConsoleNav.match(socket.assigns.destinations, query))
         |> assign(:results, results)
       end
 

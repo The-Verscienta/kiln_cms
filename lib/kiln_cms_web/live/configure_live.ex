@@ -92,7 +92,15 @@ defmodule KilnCMSWeb.ConfigureLive do
         </:subtitle>
       </.header>
 
-      <form phx-change="filter" id="configure-filter" role="search" class="mt-6">
+      <%!-- phx-submit too: without it, Enter submits natively and reloads the
+            page, and the filter is lost. --%>
+      <form
+        phx-change="filter"
+        phx-submit="filter"
+        id="configure-filter"
+        role="search"
+        class="mt-6"
+      >
         <label for="configure-q" class="sr-only">{gettext("Filter settings")}</label>
         <input
           id="configure-q"

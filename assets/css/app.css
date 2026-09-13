@@ -464,6 +464,12 @@
     --side-group-display: none;
     --side-group-chevron: rotate(-90deg);
   }
+  /* Never hide where the reader is: a collapsed section that holds the current
+     page stays open, so the sidebar always shows the active link. */
+  [data-nav-collapsed] .side-group[data-nav-group]:has([aria-current]) {
+    --side-group-display: block;
+    --side-group-chevron: none;
+  }
   .side-icon-btn {
     display: inline-grid;
     place-items: center;
@@ -626,19 +632,20 @@
       gap: 0;
       padding-inline: 0;
     }
-    /* A group head becomes a hairline; its text stays for screen readers. The
-       rail has no room to say *why* items would be missing, so section
-       collapse is ignored there and the head stops taking clicks (app.js
-       refuses the toggle in rail mode too). */
+    /* A group becomes a hairline. The rail has no room to say *why* items
+       would be missing, so section collapse is ignored there — and the head
+       is hidden outright rather than shrunk, so it leaves the tab order
+       instead of being a focusable button that does nothing (app.js refuses
+       the toggle in rail mode too). */
     [data-sidebar="collapsed"] .side-section {
+      display: none;
+    }
+    [data-sidebar="collapsed"] .side-group::before {
+      content: "";
       display: block;
       height: 1px;
       margin: 0.9rem 0.4rem;
-      padding: 0;
-      overflow: hidden;
-      font-size: 0;
       background: var(--color-sidebar-line);
-      pointer-events: none;
     }
     [data-sidebar="collapsed"][data-nav-collapsed] .side-group[data-nav-group] {
       --side-group-display: block;

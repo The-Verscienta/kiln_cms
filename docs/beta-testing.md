@@ -43,9 +43,9 @@ The editor surface is split across two `ash_authentication_live_session`s in
 Nineteen pages sit behind `:admin_routes`: Trash, Team, Webhooks, Forms,
 Funnels, Automation, Governance, Content types, Fields, Branding, Code
 injection, Redirects, Slugs, Backups, Mail, Newsletter, Billing, API keys and
-System. For a tester on the `editor` tier the sidebar's **Configure** group
-collapses to a single **Settings** link — the nav is built from
-`KilnCMS.Accounts.Scoping.effective_tier/2` in `KilnCMSWeb.Layouts` — so those
+System. For a tester on the `editor` tier the sidebar's configuration sections
+collapse to a single **Your settings** link under **Account** — the nav is built
+from `KilnCMS.Accounts.Scoping.effective_tier/2` in `KilnCMSWeb.ConsoleNav` — so those
 pages read as *missing*. Typing the URL directly is clearer: it bounces to `/`
 with "You need admin access to view that page."
 

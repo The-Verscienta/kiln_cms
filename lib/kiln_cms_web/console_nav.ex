@@ -88,7 +88,7 @@ defmodule KilnCMSWeb.ConsoleNav do
         Enum.map(group.items, &Map.put(&1, :section, group.label))
       end)
 
-    author ++ List.wrap(hub) ++ grouped ++ plugin
+    Enum.map(author ++ List.wrap(hub) ++ grouped ++ plugin, &Map.put(&1, :haystack, haystack(&1)))
   end
 
   @doc """
@@ -99,14 +99,20 @@ defmodule KilnCMSWeb.ConsoleNav do
   subject of, and an admin who types "back" wants Backups at the first
   keystroke, not after a ranking pass.
   """
-  def search(query, user, org, opts \\ []) do
+  def search(query, user, org, opts \\ []), do: user |> destinations(org) |> match(query, opts)
+
+  @doc """
+  `search/4` over destinations the caller already holds — what the palette
+  runs on each keystroke, so the nav is built and normalized once per session
+  rather than once per search.
+  """
+  def match(destinations, query, opts \\ []) do
     limit = Keyword.get(opts, :limit, 6)
 
-    user
-    |> destinations(org)
+    destinations
     |> Enum.map(&{rank(&1, query), &1})
     |> Enum.reject(fn {rank, _item} -> is_nil(rank) end)
-    |> Enum.sort_by(fn {rank, item} -> {rank, normalize(item.label)} end)
+    |> Enum.sort_by(fn {rank, item} -> {rank, elem(haystack_of(item), 0)} end)
     |> Enum.take(limit)
     |> Enum.map(fn {_rank, item} -> item end)
   end
@@ -130,20 +136,28 @@ defmodule KilnCMSWeb.ConsoleNav do
   """
   def rank(item, query) do
     needle = normalize(query)
-    label = normalize(item.label)
-
-    context = [
-      Map.get(item, :section, ""),
-      Map.get(item, :description, "") | Map.get(item, :keywords, [])
-    ]
+    {label, context} = haystack_of(item)
 
     cond do
       needle == "" -> nil
       String.starts_with?(label, needle) -> 0
       String.contains?(label, needle) -> 1
-      Enum.any?(context, &String.contains?(normalize(&1), needle)) -> 2
+      Enum.any?(context, &String.contains?(&1, needle)) -> 2
       true -> nil
     end
+  end
+
+  # The normalized label and match context, precomputed by `destinations/2`;
+  # built on demand for an item that did not come from there (the hub's).
+  defp haystack_of(item), do: Map.get_lazy(item, :haystack, fn -> haystack(item) end)
+
+  defp haystack(item) do
+    context = [
+      Map.get(item, :section, ""),
+      Map.get(item, :description, "") | Map.get(item, :keywords, [])
+    ]
+
+    {normalize(item.label), Enum.map(context, &normalize/1)}
   end
 
   defp normalize(nil), do: ""
@@ -553,7 +567,12 @@ defmodule KilnCMSWeb.ConsoleNav do
     end
   end
 
-  defp plugin_visible?(%{role: :admin}, tier), do: tier == :admin
-  defp plugin_visible?(%{role: :editor}, tier), do: tier in [:editor, :admin]
-  defp plugin_visible?(_item, _tier), do: false
+  @doc """
+  Whether a plugin nav item is visible to `tier`: `:editor` admits admins too,
+  mirroring the core links; `:viewer`/`:none` see neither. The console sidebar,
+  the palette and the public header all ask this one predicate.
+  """
+  def plugin_visible?(%{role: :admin}, tier), do: tier == :admin
+  def plugin_visible?(%{role: :editor}, tier), do: tier in [:editor, :admin]
+  def plugin_visible?(_item, _tier), do: false
 end
