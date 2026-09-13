@@ -2,7 +2,7 @@
  * Kiln visual-editing bridge (#355) — https://github.com/The-Verscienta/kiln_cms
  *
  * A dependency-free overlay an EXTERNAL headless front end embeds to get
- * in-context editing against a Kiln CMS. It:
+ * in-context editing against a Kiln site. It:
  *
  *   1. decodes the invisible stega field-mapping Kiln bakes into the annotated
  *      preview (`GET /api/visual-editing/:type/:slug`) — or reads explicit
