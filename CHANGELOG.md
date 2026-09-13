@@ -27,6 +27,15 @@ migration, a rewritten column, a dropped config key).
 
 ## [Unreleased]
 
+### Changed
+
+- **The docs publisher no longer installs `earmark`.**
+  `scripts/publish_docs.exs` renders with `earmark_parser` — the parser mix.exs
+  already depends on — and a renderer ported from `KilnCMS.Markdown`, so the
+  retired package and its stored-XSS advisory are gone from the repo entirely.
+  Nothing about a guide's published HTML changes, with one exception: the
+  fenced HTML example in `docs/visual-editing-bridge.md` regains two lines that
+  earmark's own parser was silently eating.
 ### Security
 
 - **A system actor, so internal callers run under the policies instead of
@@ -95,6 +104,19 @@ migration, a rewritten column, a dropped config key).
   can pin itself with `DOCS_SOURCE_REF=$(git rev-parse HEAD) mix docs`.
 ### Added
 
+- **A secrets-rotation runbook**, [`docs/secrets-rotation.md`](docs/secrets-rotation.md),
+  closing residual risk 12 in `docs/threat-model.md` (#1304). Per-secret
+  procedures against a running deployment, written from what the code does
+  rather than what would be reasonable — so it says plainly that nothing here
+  supports a dual-key transition: `TOKEN_SIGNING_SECRET` and `SECRET_KEY_BASE`
+  are hard cutovers that sign every user out, while `DATABASE_URL` and the S3
+  keys can be rolled without downtime only because Postgres and S3 will each
+  hold two credentials at once. It also documents the trap: `SECRET_KEY_BASE`
+  keys `KilnCMS.Keys.Vault`, so rotating it **permanently orphans** the DKIM
+  key, social credentials, payment secrets and the ActivityPub actor key, with
+  no re-encryption path — and every one of those fails quietly, behind a
+  settings page that keeps rendering from its plaintext columns. The actor key
+  is called out as the one rotation that cannot be done safely today.
 - **`/editor/accounts` — the instance-wide account register.** Platform-admin
   only. Lists every registration (search by email or name; filter by platform
   role, or to unconfirmed / temporarily elevated / erased accounts), and carries
@@ -220,6 +242,22 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **The content-cache metric no longer inverts during a stampede, and a Courier
+  failure no longer amplifies one.** A burst of concurrent requests for one
+  just-invalidated key is deduplicated by Cachex into a single database read,
+  but every deduplicated caller was counted as a cache **hit** — so the worse
+  the stampede, the healthier `[:kiln_cms, :cache, :content]` looked. Those
+  callers are now tagged `coalesced`, distinct from a genuine `hit`. Separately,
+  when Cachex answers a fetch with an error (its courier worker died, or the
+  fallback itself raised), every blocked caller fell through to a silent
+  per-caller recompute — N simultaneous rebuilds, N sitemap rebuilds on the
+  generic helper, exactly the stampede the cache exists to prevent. The most
+  common form of that — a fallback raising, which on the delivery path is just a
+  404 — now runs once for the whole burst and hands every waiting caller the
+  original exception, so a missing hot URL costs one database read instead of
+  one per request. What is left in that arm is the cache itself failing, where
+  the caller still computes (a dead courier must not take the site down) but the
+  degrade is logged and tagged `error` so it is visible while it happens.
 - **An arrow key can no longer walk a calendar chip off the grid it is drawn
   on.** On the editorial calendar, `ArrowDown` from the last row of a month
   that ends on a Sunday — or either vertical key in week view, whose grid is a

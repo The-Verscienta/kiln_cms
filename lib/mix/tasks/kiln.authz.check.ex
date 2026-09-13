@@ -75,7 +75,6 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
   @backlog %{
     "lib/kiln_cms/accounts.ex" => 3,
     "lib/kiln_cms/accounts/bootstrap.ex" => 2,
-    "lib/kiln_cms/accounts/changes/anonymize_user.ex" => 4,
     "lib/kiln_cms/accounts/changes/evict_role_members.ex" => 1,
     "lib/kiln_cms/accounts/changes/register_with_sso.ex" => 2,
     "lib/kiln_cms/accounts/changes/reload_pending_totp_secret.ex" => 1,

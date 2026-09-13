@@ -31,6 +31,10 @@ defmodule KilnCMS.Cache do
   # Safety net only — invalidation is normally driven by content writes.
   @ttl :timer.minutes(60)
 
+  # Marks a fallback that raised, carried back through Cachex uncached (see
+  # `fetcher/2`). Namespaced so it can never be mistaken for a cached value.
+  @raised :"$kiln_cms_cache_fallback_raised"
+
   # Hard cap on cached entries. Without it an anonymous flood of distinct slugs
   # (one entry per `{type, slug, locale}`) could grow the cache without bound.
   # An evented LRW policy reclaims ~10% of entries once the cap is hit.
@@ -107,23 +111,106 @@ defmodule KilnCMS.Cache do
   # `Cachex.fetch` deduplicates concurrent fallback executions per key
   # (Courier), so a burst of requests for a hot page right after an
   # invalidation computes the value once instead of stampeding the DB.
+  #
+  # The read is ours rather than `Cachex.fetch`'s because the reply tags alone
+  # cannot say who was served how (#1377). Cachex answers the fetch that ran
+  # the fallback with `{:commit, value}` and every caller it deduplicated with
+  # `{:ok, value}` — but `{:ok, value}` is also the shape of a plain cache hit,
+  # so counting that clause as `:hit` records the N-1 coalesced waiters of a
+  # stampede as hits and the hit-rate graph looks healthiest exactly when the
+  # cache is failing. What separates the two is whether the entry existed when
+  # this request ARRIVED, which only a read taken before the fetch can answer.
+  # `Cachex.Actions.Fetch` takes the same read before dispatching to the
+  # Courier, so a hit still costs one ETS lookup and only the miss path pays a
+  # second one.
   defp fetch_published_cached(shape, org_id, type, slug, locale, fun) do
-    case Cachex.fetch(@cache, key(shape, org_id, type, slug, locale), fn _key ->
-           commit(fun.(), @ttl)
-         end) do
-      {:ok, value} -> emit(:hit, value)
-      {:commit, value} -> emit(:miss, value)
-      {:ignore, value} -> emit(:miss, value)
-      _ -> emit(:miss, fun.())
+    key = key(shape, org_id, type, slug, locale)
+
+    case Cachex.get(@cache, key) do
+      {:ok, value} when not is_nil(value) -> emit(:hit, value)
+      _ -> fetch_published_uncached(key, fun)
     end
   end
 
-  # Emit a content-cache hit/miss event (for cache-hit-rate dashboards, #206) and
+  # Reached only after the read above found nothing, so `{:ok, value}` here is
+  # a value someone else's in-flight fallback produced — a coalesced waiter,
+  # the shape a stampede is made of — and never a hit.
+  defp fetch_published_uncached(key, fun) do
+    case Cachex.fetch(@cache, key, fetcher(fun, @ttl)) do
+      {:commit, value} -> emit(:miss, value)
+      {:ok, value} -> emit(:coalesced, value)
+      {:ignore, {@raised, kind, reason, stack}} -> :erlang.raise(kind, reason, stack)
+      {:ignore, value} -> emit(:miss, value)
+      other -> degraded(key, other, fun)
+    end
+  end
+
+  # A fallback that raises is not an exceptional case on the delivery path: a
+  # request for a slug that does not exist reaches a bang code interface and
+  # `Ash.Error.Query.NotFound` is how the controller learns to send a 404.
+  #
+  # Left to Cachex that raise is rescued inside the Courier's worker into a
+  # `{:error, %Cachex.Error{}}` — a message and a stack, not the caller's own
+  # exception, and nothing a `rescue` clause can match by type. The pre-#1376
+  # code recovered the real exception by re-running the fallback in the caller,
+  # which meant every caller of a burst re-ran it: one 404 on a hot URL, N
+  # database reads. Catching it here keeps the single execution the Courier
+  # arranged and hands each caller the original exception with its original
+  # stack, so `rescue` still matches and the compute still happens once.
+  #
+  # `{:ignore, _}` is the one reply Cachex hands unchanged to the owner AND to
+  # every deduplicated waiter, and it caches nothing — exactly what a failed
+  # compute needs.
+  defp fetcher(fun, ttl) do
+    fn _key ->
+      try do
+        commit(fun.(), ttl)
+      catch
+        kind, reason -> {:ignore, {@raised, kind, reason, __STACKTRACE__}}
+      end
+    end
+  end
+
+  # The degrade is counted BEFORE it is run: the recompute is the same fallback
+  # that just failed, so it may well raise, and counting afterwards would lose
+  # the event for the callers that need it counted most.
+  defp degraded(key, reason, fun) do
+    count(:error)
+    degrade(key, reason, fun)
+  end
+
+  # What is left in the error arm once `fetcher/2` has taken the raises out of
+  # it is the cache itself failing: the Courier's worker was killed, or there is
+  # no cache process to answer. The deduplication this module exists for did not
+  # happen, and every blocked caller lands here at once — so the degrade
+  # direction is chosen rather than silent (#1376). Compute in the caller, so a
+  # dead courier does not take the site down with it, but log it (and, on the
+  # published path, count it as `:error`), because N callers each recomputing —
+  # N sitemap rebuilds, on the generic path — is the stampede the Courier was
+  # guarding against, and it has to be visible while it is happening. A silent
+  # per-caller recompute is what made it invisible before.
+  #
+  # Retrying through Cachex instead would put the same failing call back in
+  # front of the same broken courier, one more round trip before arriving here
+  # anyway.
+  defp degrade(key, reason, fun) do
+    Logger.warning(
+      "cache fetch failed for #{inspect(key)} (#{inspect(reason)}); computing in the " <>
+        "caller — per-key deduplication is degraded for the duration"
+    )
+
+    fun.()
+  end
+
+  # Emit a content-cache lookup event (for cache-hit-rate dashboards, #206) and
   # return `value` unchanged.
   defp emit(result, value) do
-    :telemetry.execute([:kiln_cms, :cache, :content], %{count: 1}, %{result: result})
+    count(result)
     value
   end
+
+  defp count(result),
+    do: :telemetry.execute([:kiln_cms, :cache, :content], %{count: 1}, %{result: result})
 
   @doc """
   Generic cache-aside helper: return the value cached under `key`, or compute it
@@ -137,13 +224,16 @@ defmodule KilnCMS.Cache do
   end
 
   # Stampede-safe like `fetch_published/4` — one concurrent rebuild per key
-  # (this also guards the sitemap, whose rebuild is expensive).
+  # (this also guards the sitemap, whose rebuild is expensive, which is why the
+  # `{:error, _}` arm degrades through the same logged path rather than letting
+  # every blocked caller rebuild a sitemap at once, #1376).
   defp fetch_cached(key, ttl, fun) do
-    case Cachex.fetch(@cache, key, fn _key -> commit(fun.(), ttl) end) do
+    case Cachex.fetch(@cache, key, fetcher(fun, ttl)) do
       {:ok, value} -> value
       {:commit, value} -> value
+      {:ignore, {@raised, kind, reason, stack}} -> :erlang.raise(kind, reason, stack)
       {:ignore, value} -> value
-      _ -> fun.()
+      other -> degrade(key, other, fun)
     end
   end
 

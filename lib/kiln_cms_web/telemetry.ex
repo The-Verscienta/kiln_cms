@@ -121,7 +121,10 @@ defmodule KilnCMSWeb.Telemetry do
       # Delivery / cache / firing Metrics (#206)
       counter("kiln_cms.cache.content.count",
         tags: [:result],
-        description: "Public content cache lookups, tagged hit/miss"
+        description:
+          "Public content cache lookups, tagged hit / miss / coalesced (deduplicated " <>
+            "into another caller's in-flight read, #1377) / error (the fetch failed and " <>
+            "the caller recomputed outside the stampede guard, #1376)"
       ),
       summary("kiln_cms.firing.fire.duration",
         unit: {:native, :millisecond},
