@@ -128,9 +128,12 @@ defmodule KilnCMS.Markdown do
 
   The title is the front matter's `title`, else a **leading** `# H1` (the
   first thing in the body — a heading further down is a section, not the
-  document's name). A leading H1 that supplied the title, or that repeats the
-  front-matter title, is removed from the body: the title is rendered by the
-  page, and keeping it would print it twice.
+  document's name). An HTML comment above it does not cost the heading that
+  place: a `.md` file that opens with a license or editing note still has a
+  leading H1. A leading H1 that supplied the title, or that repeats the
+  front-matter title, is removed from the body — along with any comments in
+  front of it: the title is rendered by the page, and keeping it would print
+  it twice.
 
   Options: `:media_resolver`, as in `to_blocks/2`.
   """
@@ -227,6 +230,13 @@ defmodule KilnCMS.Markdown do
       _ -> value
     end
   end
+
+  # A block-level `<!-- … -->` is a node of its own, so a file that opens with a
+  # license or editing note — a common shape for an imported `.md` — puts one in
+  # front of the title heading. Skip past those notes to find it, and hand back
+  # a `rest` without them: they belong to the heading's preamble, and leaving
+  # them in would re-open the body with the chrome the title was lifted out of.
+  defp leading_h1([{_tag, _attrs, _children, %{comment: true}} | rest]), do: leading_h1(rest)
 
   defp leading_h1([{"h1", _attrs, children, _meta} | rest]) do
     case children |> plain_text() |> String.trim() do

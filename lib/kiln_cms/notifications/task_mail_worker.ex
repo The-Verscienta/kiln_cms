@@ -16,6 +16,7 @@ defmodule KilnCMS.Notifications.TaskMailWorker do
 
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Mail
+  alias KilnCMS.Notifications.Link
 
   @impl Oban.Worker
   def perform(%Oban.Job{id: id, args: %{"kind" => "assigned"} = args}) do
@@ -173,18 +174,10 @@ defmodule KilnCMS.Notifications.TaskMailWorker do
   # unescaped is a header-injection risk, see #468).
   defp plain(value), do: value |> to_string() |> String.replace(~r/[\r\n]+/, " ")
 
-  defp editor_url("page", id), do: url(~p"/editor/pages/#{id}")
-  defp editor_url("post", id), do: url(~p"/editor/posts/#{id}")
-  defp editor_url(kind, id), do: url(~p"/editor/content/#{kind}/#{id}")
-
   # `?comment=<block_id>` is the editor's existing landing param (the shared
   # preview's pins already use it), so a block task's email opens the same
-  # drawer a pin does rather than needing a second deep-link vocabulary.
-  defp editor_url(kind, id, nil), do: editor_url(kind, id)
-
-  defp editor_url("page", id, block_id), do: url(~p"/editor/pages/#{id}?comment=#{block_id}")
-  defp editor_url("post", id, block_id), do: url(~p"/editor/posts/#{id}?comment=#{block_id}")
-
-  defp editor_url(kind, id, block_id),
-    do: url(~p"/editor/content/#{kind}/#{id}?comment=#{block_id}")
+  # drawer a pin does rather than needing a second deep-link vocabulary. Owned
+  # by `KilnCMS.Notifications.Link` since #1320, so this email, the workflow
+  # email and the in-app inbox row all resolve to the same URL.
+  defp editor_url(kind, id, block_id \\ nil), do: Link.editor_url(kind, id, block_id)
 end

@@ -94,6 +94,10 @@ defmodule KilnCMS.Accounts.Validations.NotLastAdmin do
   # Any *other* standing admin is enough. `granted_role` is deliberately not
   # counted: a grant expires, and an instance whose only admin is an expiring one
   # is the lockout this exists to prevent, just deferred.
+  #
+  # `authorize?: false`: the answer has to count every standing admin on the
+  # instance, whatever the actor may read. A row-filtered read would hide other
+  # admins and refuse a demotion that is safe. It selects ids only.
   defp last_admin?(id) do
     KilnCMS.Accounts.User
     |> Ash.Query.filter(role == :admin and id != ^id)

@@ -26,6 +26,7 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
 
   alias Kiln.Tokens
   alias KilnCMS.Mail
+  alias KilnCMS.Notifications.Link
 
   @templates %{
     "submitted_for_review" => %{
@@ -174,7 +175,7 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
   # HTML-escape any editor/importer-controlled value before it lands in the
   # email body. Titles and actor names are author-supplied (and copied verbatim
   # by a downstream importer), so interpolating them raw would inject markup
-  # into a transactional email. `editor_url/2` values are server-generated
+  # into a transactional email. `editor_url/3` values are server-generated
   # verified routes and don't need escaping.
   defp h(value) do
     value |> to_string() |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
@@ -188,15 +189,11 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
   defp reviewer(nil), do: "A reviewer"
   defp reviewer(who), do: who
 
-  # A comment notification links to the THREAD, not just the document — the
-  # `?comment=<block_id>` deep link the editor reads at mount, and the same one
-  # the shared preview's pins use (#802).
-  defp editor_url(kind, id, nil), do: editor_url(kind, id)
-
-  defp editor_url(kind, id, block_id),
-    do: editor_url(kind, id) <> "?" <> URI.encode_query(comment: block_id)
-
-  defp editor_url("page", id), do: url(~p"/editor/pages/#{id}")
-  defp editor_url("post", id), do: url(~p"/editor/posts/#{id}")
-  defp editor_url(kind, id), do: url(~p"/editor/content/#{kind}/#{id}")
+  # One deep-link vocabulary for every channel (#1320): `KilnCMS.Notifications.Link`
+  # owns the page/post routes and the `?comment=<block_id>` thread anchor the
+  # editor reads at mount, so the link in this email is the same link the
+  # in-app inbox row resolves to. A comment notification therefore lands on
+  # the THREAD, not just the document — the same param the shared preview's
+  # pins use (#802).
+  defp editor_url(kind, id, block_id), do: Link.editor_url(kind, id, block_id)
 end

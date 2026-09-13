@@ -29,6 +29,27 @@ migration, a rewritten column, a dropped config key).
 
 ### Changed
 
+- **The stock front page now renders in the public delivery chrome.** `/` was
+  the one public URL served out of `Layouts.app`, the authoring shell — so a
+  first-run instance gave its front page a theme toggle and an account menu no
+  other public page has, while skipping the site's own header and footer menus,
+  its theme preset and the attribution line. It now uses `Layouts.public` like
+  every other delivery URL. That layout gained two optional attrs to make the
+  move lossless: `wide`, which widens `--public-measure` to the 72rem the page
+  was drawn at (all the old `container_class` was doing), and `current_user`,
+  which draws the account/sign-out pair for a signed-in reader. Nothing changes
+  for a site that has published a Home page of its own — that page already
+  rendered in this shell.
+
+- **The public search form has a submit button.** It was a label and a single
+  text input, which submits on Enter and nothing else: a touch keyboard without
+  a Search key and a screen reader reading the form both had no way to run the
+  query. The button carries a `public-search-submit` hook for the theme presets.
+
+- **The product name is spelled `KilnCMS` everywhere.** Thirteen places still
+  said "Kiln CMS" — among them the heading and opening line of
+  `docs/design-language.md`, which `scripts/publish_docs.exs` publishes as a
+  public docs page, and the `title` of the exported delivery schema.
 - **The docs publisher no longer installs `earmark`.**
   `scripts/publish_docs.exs` renders with `earmark_parser` — the parser mix.exs
   already depends on — and a renderer ported from `KilnCMS.Markdown`, so the
@@ -85,6 +106,14 @@ migration, a rewritten column, a dropped config key).
   take those actions is now named in each policy block instead of reaching
   around it. The `Accounts.User` lookups keep their bypass, and say why
   (#1402).
+- **`mix kiln.authz.check` now gates all of `lib/`.** It was the web layer
+  only; every file is checked from here on, with the pre-existing unexplained
+  bypasses recorded per file in the task's `@backlog` — 129 files, 313 sites.
+  That list is a ratchet: a file with no entry must be clean, so **new code is
+  gated from the day it lands**; a listed file may not gain a site; and a
+  listed file that loses one fails too, with the number to write, so the
+  allowance can never drift out of date. Nothing may be added to it, and
+  emptying it finishes #1402.
 
 ### Fixed
 
@@ -106,6 +135,37 @@ migration, a rewritten column, a dropped config key).
   keyword list as well as the names — "rss" finds Feeds, "stripe" finds
   Billing, "passkey" finds your own settings (#1319).
 
+- **Notifications are persisted, not only mailed.** Every workflow event
+  already dispatched by email and Web Push — submitted for review, published,
+  returned to draft, a comment, an `@mention`, a task assignment — now also
+  writes a `KilnCMS.Notifications.Notification` row for each recipient, so an
+  editor who does not read email and has not granted push has somewhere to find
+  out. The row is written from the same place, on the same already-filtered
+  recipient list, that enqueues the mail job: an event a user has muted in their
+  account preferences stays muted in the inbox too. Rows are org-scoped and
+  readable **only by their own recipient** — there is no admin bypass. The bell
+  and `/editor/inbox` that read them follow. Reading one is announced on the
+  recipient's own PubSub topic, so a notification read on a phone drops the
+  badge on the desktop.
+- **`/editor/inbox`.** The notification inbox: everything the console has told
+  this editor about, newest first, with an unread filter, per-row mark-read /
+  mark-unread and mark-all-read. Every row deep-links to the thing it concerns
+  — a comment or a block-anchored task opens that block's thread via the
+  `?comment=<block_id>` param the editor already reads at mount, which is the
+  console's only durable block anchor (heading `id`s exist in public delivery
+  only). Live: one `on_mount` hook subscribes each console page to the viewer's
+  own notification topic, so the list follows a notification that lands, or one
+  read in another tab, without a reload.
+
+### Changed
+
+- **Workflow and task notifications now dispatch after the write commits.**
+  `NotifyWorkflowEmail` and `NotifyTaskAssigned` moved from
+  `Ash.Changeset.after_action` to `after_transaction`, joining `NotifyComment`,
+  which was already there. Two effects: a query inside the notifier can no
+  longer poison the editorial action's transaction and lose the content, and a
+  rolled-back submit-for-review no longer mails the reviewers about a
+  transition that never happened.
 - **A secrets-rotation runbook**, [`docs/secrets-rotation.md`](docs/secrets-rotation.md),
   closing residual risk 12 in `docs/threat-model.md` (#1304). Per-secret
   procedures against a running deployment, written from what the code does
@@ -264,6 +324,12 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **A `.md` file that opens with an HTML comment keeps its title.** A license
+  or editing note above the leading `# H1` — a common shape for an imported
+  file — sat in front of the heading in the parsed tree, so
+  `KilnCMS.Markdown.parse_document/2` stopped recognizing it as the document's
+  title: the import arrived untitled *and* with the heading still in the body,
+  which then printed the name twice.
 - **The content-cache metric no longer inverts during a stampede, and a Courier
   failure no longer amplifies one.** A burst of concurrent requests for one
   just-invalidated key is deduplicated by Cachex into a single database read,

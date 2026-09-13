@@ -683,6 +683,17 @@ defmodule KilnCMSWeb.ContentControllerTest do
       assert filtered =~ "All results"
     end
 
+    # The form was a label and one input — no submit control at all. A lone text
+    # input submits on Enter and nothing else, which leaves a touch keyboard
+    # without a Search key, and a screen reader reading the form, with no way to
+    # run the query.
+    test "the form carries a submit control", %{conn: conn} do
+      html = conn |> get(~p"/search") |> html_response(200)
+
+      assert html =~ ~s(type="submit")
+      assert html =~ "public-search-submit"
+    end
+
     test "a typo gets fuzzy-rescued results plus a did-you-mean link", %{conn: conn} do
       page = page(%{title: "Fermentation Handbook #{uniq()}"})
 

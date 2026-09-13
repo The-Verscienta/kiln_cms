@@ -1,10 +1,21 @@
-<Layouts.app
-  flash={@flash}
-  current_scope={@current_scope}
-  current_user={@current_user}
+<%!-- The delivery shell, not the authoring one. This page is served at `/` to
+      anonymous visitors, so it belongs in the same chrome as every other public
+      URL — the site's own header/footer menus, its theme preset and its
+      attribution line. Rendering it in `Layouts.app` gave `/` alone a theme
+      toggle and a sign-out menu no other public page has, and dropped the
+      configured nav; `wide` is what that layout was really being used for. --%>
+<Layouts.public
   current_org={@current_org}
-  container_class="mx-auto max-w-6xl"
+  locale={@locale}
+  current_user={@current_user}
+  wide={true}
 >
+  <%!-- `Layouts.public` takes no `flash` attr (it is shared by the delivery
+        templates and both preview LiveViews), so the group is rendered here at
+        the page's own level — exactly as `MembershipLive` and `AccountLive` do.
+        `/` is the landing spot for sign-out and for the editor-access refusal,
+        both of which report only by flashing. --%>
+  <Layouts.flash_group flash={@flash} />
   <%!-- The stock front page — what an instance serves at `/` until the site has
         a page of its own there. For most first visitors it is the only
         explanation of what KilnCMS is, so it says so in full: what it does,
@@ -202,4 +213,4 @@
       </div>
     </div>
   </section>
-</Layouts.app>
+</Layouts.public>
