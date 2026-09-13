@@ -28,7 +28,7 @@ defmodule KilnCMS.Notifications.Tasks do
   preference to consult: there is no `User.notify_on_task_assigned`, so the
   mail has always gone to the assignee unconditionally. The in-app row
   follows the same rule, for the same reason the other channels share
-  `KilnCMS.Notifications.notify/4` — one decision per event, whatever that
+  the private `notify` in `KilnCMS.Notifications` — one decision per event, whatever that
   decision is. If a preference is ever added it is added once, here, and both
   channels move together.
 
