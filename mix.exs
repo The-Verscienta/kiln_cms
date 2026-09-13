@@ -240,6 +240,7 @@ defmodule KilnCMS.MixProject do
       "docs/social-posting.md": [],
       "docs/point-in-time.md": [],
       # Modeling & extending
+      "docs/overlay-contract.md": [title: "The overlay contract"],
       "docs/extending-content.md": [],
       "docs/events.md": [title: "Events"],
       "docs/design-language.md": [],
@@ -291,6 +292,7 @@ defmodule KilnCMS.MixProject do
       "docs/content-experiments-plan.md": [],
       "docs/mobile-admin-spike.md": [],
       "docs/plugin-system-plan.md": [],
+      "docs/plugin-registry-plan.md": [],
       "docs/search-roadmap.md": [],
       "docs/search-tsvector-migration.md": [],
       "docs/semantic-search-plan.md": [],
@@ -359,6 +361,7 @@ defmodule KilnCMS.MixProject do
         "docs/chain-fold-order.md"
       ],
       "Modeling & extending": [
+        "docs/overlay-contract.md",
         "docs/extending-content.md",
         "docs/events.md",
         "docs/design-language.md",
@@ -412,6 +415,7 @@ defmodule KilnCMS.MixProject do
         "docs/content-experiments-plan.md",
         "docs/mobile-admin-spike.md",
         "docs/plugin-system-plan.md",
+        "docs/plugin-registry-plan.md",
         "docs/search-roadmap.md",
         "docs/search-tsvector-migration.md",
         "docs/semantic-search-plan.md",
