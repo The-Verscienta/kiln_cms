@@ -143,6 +143,11 @@ longer exists, a `` `Module.fun/2` `` that was renamed or changed arity. Adding
 a new guide means adding it to both `extras` and `groups_for_extras` in
 `mix.exs`; an unlisted guide is silently invisible in the generated sidebar.
 
+"View Source" links resolve against the release tag matching `mix.exs`'s
+version, so in a local build they point at the last release rather than at your
+branch. That only matters if you are checking the links themselves; pin them to
+what you built with `DOCS_SOURCE_REF=$(git rev-parse HEAD) mix docs`.
+
 **A link to a `README.md` is written as a full URL.** ExDoc resolves a relative
 link between guides by **basename alone** — it ignores the directories you wrote
 and takes whichever extra with that basename was registered last in `mix.exs`.
