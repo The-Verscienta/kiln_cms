@@ -8579,7 +8579,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
-msgid "Q&A list, fired as FAQPage structured data"
+msgid "Q&A list, published with question-and-answer structured data"
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
@@ -10062,7 +10062,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
-msgid "Several images with captions, fired as ImageGallery structured data"
+msgid "Several images with captions, published with image-gallery structured data"
 msgstr ""
 
 #: lib/kiln_cms_web/live/token_preview_live.ex
@@ -10541,7 +10541,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
-msgid "Step-by-step guide, fired as HowTo structured data"
+msgid "Step-by-step guide, published with how-to structured data"
 msgstr ""
 
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
@@ -11093,7 +11093,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #, elixir-autogen, elixir-format
-msgid "That post hasn't been fired yet — republish it and retry."
+msgid "That post hasn't finished publishing yet — republish it and retry."
 msgstr ""
 
 #: lib/kiln_cms_web/live/newsletter_live.ex
