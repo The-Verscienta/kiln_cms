@@ -17,7 +17,7 @@ genuinely large — but almost none of it is something you have to decide.
 Variables are read at boot by [`config/runtime.exs`](../config/runtime.exs),
 which executes for releases after compilation and before the system starts. That
 file is an index: the configuration itself lives in per-concern fragments under
-[`config/runtime/`](../config/runtime), and the "Where it's read" column points
+[`config/runtime/`](https://github.com/The-Verscienta/kiln_cms/tree/main/config/runtime), and the "Where it's read" column points
 into whichever one holds the read.
 
 > **Scope.** Most variables only take effect when `config_env() == :prod` (i.e. in
