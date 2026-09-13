@@ -41,7 +41,8 @@ mix phx.server
 `mix setup` seeds a demo admin and editor. The full setup — optional infra
 profiles for cache, search and object storage, plus the environment quirks that
 bite people (PATH, spaced/iCloud paths, the `igniter` dependency) — is in
-[Overview](../README.md) and [Contributing](../CONTRIBUTING.md).
+[Overview](https://github.com/The-Verscienta/kiln_cms/blob/main/README.md)
+and [Contributing](../CONTRIBUTING.md).
 
 On a **production** instance nothing is seeded: visit `/setup` while the site
 has no admin and a short wizard creates the first one (see
@@ -82,6 +83,7 @@ declarative, so the module *is* the specification.
 |--------------|------|
 | Use the editor | [Editor shortcuts](editor-shortcuts.md), [Editorial advisories](advisories.md), [Claim checking](compliance.md) |
 | Model new content | [Extending the content model](extending-content.md) |
+| Overlay the core with your own project | [The overlay contract](overlay-contract.md) — what you may rely on across releases; [Downstream projects](../projects/README.md) for the mechanics |
 | Understand who can do what | [Authorization policy matrix](policy-matrix.md), [Granular RBAC](granular-rbac.md) |
 | Run several sites from one install | [Multi-tenancy](multi-tenancy.md) |
 | Consume the content headlessly | [Headless consumer guide](headless-consumer-guide.md) — it routes you to [JSON:API](json-api.md), [GraphQL](headless-graphql-api.md), [MCP](mcp.md) or [RAG](rag.md) |
