@@ -103,6 +103,12 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **A `.md` file that opens with an HTML comment keeps its title.** A license
+  or editing note above the leading `# H1` — a common shape for an imported
+  file — sat in front of the heading in the parsed tree, so
+  `KilnCMS.Markdown.parse_document/2` stopped recognizing it as the document's
+  title: the import arrived untitled *and* with the heading still in the body,
+  which then printed the name twice.
 - **An HTML comment in imported Markdown is no longer published as prose.**
   `<!-- a note to whoever edits this file -->` standing on its own between
   paragraphs came through `KilnCMS.Markdown` as a visible paragraph — earmark
