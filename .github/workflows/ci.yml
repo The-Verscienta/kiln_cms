@@ -137,6 +137,15 @@ jobs:
         # by copy-paste alone. Non-web code is not gated yet.
         run: mix kiln.authz.check
 
+      - name: Check the changelog stays skimmable
+        # CHANGELOG.md is what `mix kiln.update` shows an operator who is about
+        # to move a production pin, and entries accrete one per PR. This holds
+        # Unreleased entries to three lines and fails on one with no PR, issue
+        # or long-form link to follow (#1325). The long form itself lives in
+        # docs/changelog/ and docs/decisions/; `--check` also proves every link
+        # into them still resolves.
+        run: mix kiln.changelog --check
+
       # NOTE (#419): the migration/snapshot drift check moved to the
       # strict_tenancy job — snapshots are generated from the STRICT build
       # (the canonical prod schema: org-composite FKs), which this fail-open

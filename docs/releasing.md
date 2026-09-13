@@ -34,24 +34,47 @@ people to pass the flag reflexively.
    core, so a green run is evidence the overlay contract still holds.
 
 2. **Write the changelog entry.** Move `## [Unreleased]` items into a new
-   `## [X.Y.Z]` section. Add an `### Upgrading` subsection if — and only if —
-   moving to this release needs more than a rebuild:
+   `## [X.Y.Z]` section, and rename `docs/changelog/unreleased.md` to
+   `docs/changelog/vX.Y.Z.md` — it already holds the long form of everything
+   in that section.
 
-   - a new required env var or config key;
+   Add an `### Upgrade notes` subsection if — and only if — moving to this
+   release needs more than a rebuild:
+
+   - a manual backfill or reindex step, and whether it can run after deploy;
    - a migration that rewrites or drops data (say so, and say it's not
      reversible by rolling the pin back);
-   - anything a subproject must change to keep compiling;
-   - a manual backfill or reindex step, and whether it can run after deploy.
+   - anything else to do against a *deployed* instance.
 
-   Write them as imperative steps against a *deployed* instance. `mix
-   kiln.update` prints this section verbatim before it moves anyone's pin, so
-   it's the last chance to warn an operator.
+   Add a `### Breaking` subsection for anything that changes an observable
+   contract or forces a change on the operator:
 
-3. **Bump the version** in [`mix.exs`](../mix.exs). This is what a running
+   - a new required env var or config key, or one whose default flipped;
+   - a response shape, status code or route that changed;
+   - anything a subproject must change to keep compiling.
+
+   Write both as imperative steps. Those two sections are the **only** thing
+   `mix kiln.update` prints before it moves anyone's pin (#1325), so they are
+   the last chance to warn an operator — and everything else you want to say
+   belongs in the entry itself, which the next step files away.
+
+3. **Condense and check.**
+
+   ```bash
+   mix kiln.changelog --condense
+   mix kiln.changelog --verify HEAD
+   ```
+
+   `--condense` rewrites each entry in `CHANGELOG.md` down to its own opening
+   line plus a link to the long form under `docs/changelog/`. `--verify` then
+   proves, paragraph by paragraph, that nothing was dropped on the way — run
+   it before you commit, not after.
+
+4. **Bump the version** in [`mix.exs`](../mix.exs). This is what a running
    instance reports (`Kiln.Version`) and what the update check compares
    against, so it must match the tag.
 
-4. **Commit, tag, push.**
+5. **Commit, tag, push.**
 
    ```bash
    git commit -am "chore: release vX.Y.Z"
@@ -59,7 +82,7 @@ people to pass the flag reflexively.
    git push origin main --tags
    ```
 
-5. **Publish a GitHub release** for the tag. This is not optional: `mix
+6. **Publish a GitHub release** for the tag. This is not optional: `mix
    kiln.update` reads git tags, but the admin update page (`Kiln.Updates`)
    reads the *releases* API, because a running container has no checkout. A
    tag with no release leaves every deployed instance reporting "up to date"
@@ -67,7 +90,7 @@ people to pass the flag reflexively.
 
    Paste the changelog section in as the release body.
 
-6. **Verify** from a project checkout:
+7. **Verify** from a project checkout:
 
    ```bash
    cd <your kiln checkout> && git fetch --tags && mix kiln.update --check
