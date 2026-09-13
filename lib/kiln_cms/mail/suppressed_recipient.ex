@@ -44,7 +44,7 @@ defmodule KilnCMS.Mail.SuppressedRecipient do
     # expose the cross-site bounce list to a default-org membership admin. The
     # delivery pipeline writes/reads as the system (`authorize?: false`).
     policy always() do
-      authorize_if actor_attribute_equals(:role, :admin)
+      authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
     end
   end
 
