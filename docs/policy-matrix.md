@@ -487,6 +487,34 @@ The other two are enumeration surfaces — the link graph (including edges from
 unpublished drafts) and `ancestor_context` block text from every indexed
 document, drafts included — so they are simply editor-and-up.
 
+## In-app notifications — `Notifications.Notification` (#1320)
+
+| Action | own recipient | another user (any role) | anonymous |
+|--------|:-------------:|:-----------------------:|:---------:|
+| read (`read`, `for_user`, `unread_for_user`) | ✅ | 🔎 nothing | 🔎 nothing |
+| `mark_read`, `mark_unread` | ✅ | ❌ | ❌ |
+| `notify` (create) | ❌ | ❌ | ⚙️ actor-less only |
+
+`authorize_if expr(user_id == ^actor(:id))` is the whole read policy, and this
+is the one resource in the tree with **no admin bypass at all**. A notification
+list is a reading history — who was named in which review note, which drafts
+someone is watching — and a platform admin has no operational need for it. The
+sibling `Accounts.PushSubscription` *does* have an admin bypass (an operator
+has to be able to see where a device came from); this deliberately does not.
+
+`notify` is the notifier's write, and it addresses somebody *other* than
+whoever acted, so it cannot be authorized against the acting user. Rather than
+calling it with `authorize?: false`, it is gated `forbid_if actor_present()` +
+`authorize_if always()`: the policy still runs and still decides, so an
+authenticated caller that reaches the action is refused by a rule a reader can
+see. `KilnCMS.Notifications.record_in_app/1` is the only caller.
+
+An actor-less *read* is fail-closed for free: `^actor(:id)` templates to `nil`,
+the filter reduces to `user_id == NULL`, and no row satisfies it.
+
+Org-scoped (`multitenancy strategy :attribute, attribute :org_id`) — a user who
+edits two sites sees each site's notifications in that site's console only.
+
 ## Webhook deliveries — `WebhookDelivery`
 
 | Action | admin | editor | viewer | anonymous |

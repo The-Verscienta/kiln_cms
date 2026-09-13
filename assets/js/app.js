@@ -1098,16 +1098,20 @@ document.addEventListener("click", e => {
     // The clicked toggle just hid itself; hand focus to its twin.
     document.querySelector(collapse ? ".side-expand" : ".side-collapse")?.focus()
   }
-  // The account menu is a <details>: a click anywhere outside closes it.
-  document.querySelectorAll(".side-account[open]").forEach(d => {
+  // Self-closing menus are <details data-autoclose> (the sidebar account menu,
+  // the top bar's notification bell): a click anywhere outside closes them.
+  // Keyed on the attribute rather than each class, so the next such menu opts
+  // in by declaring it instead of by editing this file.
+  document.querySelectorAll("details[data-autoclose][open]").forEach(d => {
     if (!d.contains(e.target)) d.removeAttribute("open")
   })
 })
 document.addEventListener("keydown", e => {
-  const open = e.key === "Escape" && document.querySelector(".side-account[open]")
+  const open = e.key === "Escape" && document.querySelector("details[data-autoclose][open]")
   if (!open) return
   open.removeAttribute("open")
-  open.querySelector("summary").focus()
+  // Focus goes back to the control that opened it, not to <body>.
+  open.querySelector("summary")?.focus()
 })
 
 if (process.env.NODE_ENV === "development") {

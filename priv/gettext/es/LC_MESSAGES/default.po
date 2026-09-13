@@ -582,6 +582,36 @@ msgid_plural "%{used} of them are used by published documents."
 msgstr[0] "%{used} de ellos se usa en documentos publicados."
 msgstr[1] "%{used} de ellos se usan en documentos publicados."
 
+#: lib/kiln_cms_web/notification_text.ex
+#, elixir-autogen, elixir-format
+msgid "%{who} asked for a review"
+msgstr "%{who} solicitó una revisión"
+
+#: lib/kiln_cms_web/notification_text.ex
+#, elixir-autogen, elixir-format
+msgid "%{who} assigned you a task"
+msgstr "%{who} te asignó una tarea"
+
+#: lib/kiln_cms_web/notification_text.ex
+#, elixir-autogen, elixir-format
+msgid "%{who} commented"
+msgstr "%{who} comentó"
+
+#: lib/kiln_cms_web/notification_text.ex
+#, elixir-autogen, elixir-format
+msgid "%{who} mentioned you"
+msgstr "%{who} te mencionó"
+
+#: lib/kiln_cms_web/notification_text.ex
+#, elixir-autogen, elixir-format
+msgid "%{who} requested changes"
+msgstr "%{who} solicitó cambios"
+
+#: lib/kiln_cms_web/notification_text.ex
+#, elixir-autogen, elixir-format
+msgid "%{who} resolved a thread"
+msgstr "%{who} resolvió una conversación"
+
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "%{who} — due %{date}%{note}"
@@ -1385,6 +1415,7 @@ msgstr "Tras cambiar las convenciones de slug, todos los slugs existentes parece
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
+#: lib/kiln_cms_web/live/inbox_live.ex
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
@@ -2301,6 +2332,7 @@ msgid "Changed"
 msgstr "Modificado"
 
 #: lib/kiln_cms/notifications.ex
+#: lib/kiln_cms_web/notification_text.ex
 #, elixir-autogen, elixir-format
 msgid "Changes requested"
 msgstr "Cambios solicitados"
@@ -5685,7 +5717,9 @@ msgstr "Las copias desde la aplicación están desactivadas (BACKUP_ENABLED)."
 msgid "Inactive"
 msgstr "Inactivo"
 
+#: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/federation_live.ex
+#: lib/kiln_cms_web/live/inbox_live.ex
 #, elixir-autogen, elixir-format
 msgid "Inbox"
 msgstr "Bandeja de entrada"
@@ -6239,6 +6273,12 @@ msgstr "Gestione su perfil, contraseña y preferencias de notificación."
 msgid "March"
 msgstr "marzo"
 
+#: lib/kiln_cms_web/live/inbox_live.ex
+#: lib/kiln_cms_web/live/notification_bell.ex
+#, elixir-autogen, elixir-format
+msgid "Mark all read"
+msgstr "Marcar todo como leído"
+
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Mark as reviewed"
@@ -6255,16 +6295,33 @@ msgstr "Marcar como spam"
 msgid "Mark done"
 msgstr "Marcar como hecha"
 
+#: lib/kiln_cms_web/live/inbox_live.ex
+#, elixir-autogen, elixir-format
+msgid "Mark read"
+msgstr "Marcar como leído"
+
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "Mark reviewed"
 msgstr "Marcar como revisado"
 
+#: lib/kiln_cms_web/live/inbox_live.ex
+#, elixir-autogen, elixir-format
+msgid "Mark unread"
+msgstr "Marcar como no leído"
+
 #: lib/kiln_cms_web/live/content_editor/markdown_import.ex
 #, elixir-autogen, elixir-format
 msgid "Markdown file"
 msgstr "Archivo Markdown"
+
+#: lib/kiln_cms_web/live/inbox_live.ex
+#, elixir-autogen, elixir-format
+msgid "Marked %{count} notification read"
+msgid_plural "Marked %{count} notifications read"
+msgstr[0] "Se marcó %{count} notificación como leída"
+msgstr[1] "Se marcaron %{count} notificaciones como leídas"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -6611,6 +6668,11 @@ msgstr "Nombre de la nueva %{kind}"
 #, elixir-autogen, elixir-format
 msgid "New %{type}"
 msgstr "Crear %{type}"
+
+#: lib/kiln_cms_web/notification_text.ex
+#, elixir-autogen, elixir-format
+msgid "New comment"
+msgstr "Nuevo comentario"
 
 #: lib/kiln_cms_web/live/type_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -7321,12 +7383,28 @@ msgstr "No se encontró nada similar."
 msgid "Nothing to rename"
 msgstr "Nada que renombrar"
 
+#: lib/kiln_cms_web/live/inbox_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nothing unread."
+msgstr "Nada sin leer."
+
+#: lib/kiln_cms_web/live/notification_bell.ex
+#, elixir-autogen, elixir-format
+msgid "Nothing yet."
+msgstr "Nada todavía."
+
+#: lib/kiln_cms_web/live/inbox_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nothing yet. Review requests, comments, mentions and task assignments land here."
+msgstr "Nada todavía. Aquí llegan las solicitudes de revisión, los comentarios, las menciones y las asignaciones de tareas."
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Notification preferences saved."
 msgstr "Preferencias de notificación guardadas."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
+#: lib/kiln_cms_web/live/notification_bell.ex
 #, elixir-autogen, elixir-format
 msgid "Notifications"
 msgstr "Notificaciones"
@@ -7345,6 +7423,13 @@ msgstr "Las notificaciones están activadas en este dispositivo."
 #, elixir-autogen, elixir-format
 msgid "Notifications never contain draft content — only that something is waiting, and what kind."
 msgstr "Las notificaciones nunca contienen contenido en borrador: solo que algo está esperando y de qué tipo es."
+
+#: lib/kiln_cms_web/live/notification_bell.ex
+#, elixir-autogen, elixir-format
+msgid "Notifications, %{count} unread"
+msgid_plural "Notifications, %{count} unread items"
+msgstr[0] "Notificaciones, %{count} sin leer"
+msgstr[1] "Notificaciones, %{count} sin leer"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -7567,6 +7652,11 @@ msgstr "Abrir el editor completo"
 #, elixir-autogen, elixir-format
 msgid "Open in"
 msgstr "Abrir en"
+
+#: lib/kiln_cms_web/live/notification_bell.ex
+#, elixir-autogen, elixir-format
+msgid "Open inbox"
+msgstr "Abrir la bandeja"
 
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
@@ -8223,6 +8313,7 @@ msgstr "¿Publicar este lanzamiento ahora? Todos los elementos se publican junto
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/release_live.ex
+#: lib/kiln_cms_web/notification_text.ex
 #, elixir-autogen, elixir-format
 msgid "Published"
 msgstr "Publicado"
@@ -9048,6 +9139,7 @@ msgid "Review queue"
 msgstr "Cola de revisión"
 
 #: lib/kiln_cms/notifications.ex
+#: lib/kiln_cms_web/notification_text.ex
 #, elixir-autogen, elixir-format
 msgid "Review requested"
 msgstr "Revisión solicitada"
@@ -10479,6 +10571,11 @@ msgstr "Slug de destino"
 msgid "Target type"
 msgstr "Tipo de destino"
 
+#: lib/kiln_cms_web/notification_text.ex
+#, elixir-autogen, elixir-format
+msgid "Task assigned"
+msgstr "Tarea asignada"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Task created on this block."
@@ -11379,6 +11476,11 @@ msgstr "Los metadatos de esta subida se están eliminando en segundo plano. No s
 msgid "This was published. Your collaborative edits were saved with it."
 msgstr "Esto se publicó. Tus ediciones colaborativas se guardaron con ello."
 
+#: lib/kiln_cms_web/notification_text.ex
+#, elixir-autogen, elixir-format
+msgid "Thread resolved"
+msgstr "Conversación resuelta"
+
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Three quick steps: your admin account, your site's look, and you're in."
@@ -11723,6 +11825,16 @@ msgstr "Despublicar al lanzarse"
 #, elixir-autogen, elixir-format
 msgid "Unpublishes"
 msgstr "Se despublica el"
+
+#: lib/kiln_cms_web/live/inbox_live.ex
+#, elixir-autogen, elixir-format
+msgid "Unread"
+msgstr "Sin leer"
+
+#: lib/kiln_cms_web/live/inbox_live.ex
+#, elixir-autogen, elixir-format
+msgid "Unread (%{count})"
+msgstr "Sin leer (%{count})"
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
@@ -12516,6 +12628,11 @@ msgstr "Necesita acceso de administrador para ver esa página."
 #, elixir-autogen, elixir-format
 msgid "You need editor access to view that page."
 msgstr "Necesita acceso de editor para ver esa página."
+
+#: lib/kiln_cms_web/notification_text.ex
+#, elixir-autogen, elixir-format
+msgid "You were mentioned"
+msgstr "Te han mencionado"
 
 #: lib/kiln_cms_web/controllers/newsletter_controller.ex
 #, elixir-autogen, elixir-format

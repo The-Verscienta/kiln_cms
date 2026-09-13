@@ -27,6 +27,47 @@ migration, a rewritten column, a dropped config key).
 
 ## [Unreleased]
 
+### Added
+
+- **Notifications are persisted, not only mailed.** Every workflow event
+  already dispatched by email and Web Push — submitted for review, published,
+  returned to draft, a comment, an `@mention`, a task assignment — now also
+  writes a `KilnCMS.Notifications.Notification` row for each recipient, so an
+  editor who does not read email and has not granted push has somewhere to find
+  out. The row is written from the same place, on the same already-filtered
+  recipient list, that enqueues the mail job: an event a user has muted in their
+  account preferences stays muted in the inbox too. Rows are org-scoped and
+  readable **only by their own recipient** — there is no admin bypass. The bell
+  and `/editor/inbox` that read them follow. Reading one is announced on the
+  recipient's own PubSub topic, so a notification read on a phone drops the
+  badge on the desktop.
+- **`/editor/inbox`.** The notification inbox: everything the console has told
+  this editor about, newest first, with an unread filter, per-row mark-read /
+  mark-unread and mark-all-read. Every row deep-links to the thing it concerns
+  — a comment or a block-anchored task opens that block's thread via the
+  `?comment=<block_id>` param the editor already reads at mount, which is the
+  console's only durable block anchor (heading `id`s exist in public delivery
+  only). Live: one `on_mount` hook subscribes each console page to the viewer's
+  own notification topic, so the list follows a notification that lands, or one
+  read in another tab, without a reload.
+- **A notification bell in the console top bar**, on every `/editor/*` page:
+  an unread badge (capped at `8+`, with the real number in its accessible
+  label), a dropdown of the eight most recent items — read ones included, since
+  a list that empties itself takes each item's deep link with it — and
+  mark-all-read. PubSub-driven: the badge moves when a notification arrives or
+  is read elsewhere, without a reload. Clicking an item marks it read and
+  navigates to the block, comment or task it concerns.
+
+### Changed
+
+- **Workflow and task notifications now dispatch after the write commits.**
+  `NotifyWorkflowEmail` and `NotifyTaskAssigned` moved from
+  `Ash.Changeset.after_action` to `after_transaction`, joining `NotifyComment`,
+  which was already there. Two effects: a query inside the notifier can no
+  longer poison the editorial action's transaction and lose the content, and a
+  rolled-back submit-for-review no longer mails the reviewers about a
+  transition that never happened.
+
 ### Fixed
 
 - **`mix docs` "View Source" links point at the release tag, not `main`.**

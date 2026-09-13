@@ -520,6 +520,19 @@ defmodule KilnCMSWeb.Layouts do
                 <span>{gettext("Search")}</span>
                 <span class="kbd ml-1">⌘K</span>
               </.link>
+              <%!-- The notification bell (#1320). A LiveComponent, so it loads
+                    and owns its own rows from the `current_user` this layout
+                    already has — see `KilnCMSWeb.NotificationBell` for why it
+                    is not two more attributes on all 43 call sites. Rendered
+                    only for a signed-in user: there is nothing to count
+                    otherwise, and the component's reads need an actor. --%>
+              <.live_component
+                :if={@current_user}
+                module={KilnCMSWeb.NotificationBell}
+                id={KilnCMSWeb.NotificationBell.id()}
+                current_user={@current_user}
+                current_org={@current_org}
+              />
               {render_slot(@actions)}
               <.locale_switcher />
             </div>
@@ -685,6 +698,15 @@ defmodule KilnCMSWeb.Layouts do
         label: gettext("Tasks"),
         path: ~p"/editor/tasks",
         icon: "hero-clipboard-document-check"
+      },
+      # The notification inbox (#1320), next to Tasks: both answer "what is
+      # waiting for me", and the bell in the top bar is the glance while this
+      # is the list.
+      %{
+        key: :inbox,
+        label: gettext("Inbox"),
+        path: ~p"/editor/inbox",
+        icon: "hero-inbox"
       },
       # Content releases (#500) — editorial planning, so it sits with the author
       # group next to the calendar it plots onto, not with the admin tools. The
@@ -1016,12 +1038,19 @@ defmodule KilnCMSWeb.Layouts do
   # The account row — avatar, name over email — opening a menu of what used to
   # sit loose in the footer. A <details> so it opens before the socket
   # connects; `ignore_attributes` keeps LiveView's next patch from stripping the
-  # client-set `open`, and app.js closes it on an outside click or Escape.
+  # client-set `open`, and `data-autoclose` is what app.js keys the
+  # outside-click/Escape close on (#1320 generalized it off `.side-account`, so
+  # the bell could share one handler rather than adding a second).
   defp sidebar_account(assigns) do
     assigns = assign(assigns, :name, display_name(assigns.current_user))
 
     ~H"""
-    <details id="side-account" class="side-account" phx-mounted={JS.ignore_attributes(["open"])}>
+    <details
+      id="side-account"
+      class="side-account"
+      data-autoclose
+      phx-mounted={JS.ignore_attributes(["open"])}
+    >
       <summary class="side-account-row" data-side-tip={@name || @current_user.email}>
         <span class="grid size-9 shrink-0 place-items-center rounded-full bg-primary/15 text-sm font-semibold text-primary-ink uppercase">
           {user_initial(@current_user)}

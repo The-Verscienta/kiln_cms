@@ -11,17 +11,50 @@ defmodule KilnCMS.Notifications.Tasks do
   """
   require Logger
 
+  alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.Notifications
   alias KilnCMS.Notifications.TaskMailWorker
   alias KilnCMS.Webhooks
 
   @doc """
-  A task was assigned (or reassigned): email the assignee and fire the
-  `task.assigned` automation/webhook event. Never raises — a notification
-  failure must not roll back the assignment that triggered it.
+  A task was assigned (or reassigned): email the assignee, record it in their
+  in-app inbox (#1320), and fire the `task.assigned` automation/webhook event.
+  Never raises — a notification failure must not roll back the assignment that
+  triggered it.
+
+  ## Both channels off the same decision, which here is "always"
+
+  Unlike the content-workflow events, task assignment has **no** per-user
+  preference to consult: there is no `User.notify_on_task_assigned`, so the
+  mail has always gone to the assignee unconditionally. The in-app row
+  follows the same rule, for the same reason the other channels share
+  `KilnCMS.Notifications.notify/4` — one decision per event, whatever that
+  decision is. If a preference is ever added it is added once, here, and both
+  channels move together.
+
+  The in-app row is written even when the assignee has no deliverable address:
+  a missing email is a missing *channel*, not an opt-out.
   """
   @spec dispatch_assigned(struct(), map() | nil) :: :ok
   def dispatch_assigned(task, actor) do
     task = Ash.load!(task, [:assignee], authorize?: false)
+
+    if task.assignee do
+      Notifications.record_in_app(%{
+        user_id: task.assignee_id,
+        org_id: task.org_id,
+        event: :task_assigned,
+        content_type: task.content_type,
+        content_id: task.content_id,
+        block_id: task.block_id,
+        title: content_title(task),
+        # The assignment note is what the assignee needs to read, and it is
+        # the task's own field rather than a comment body — the same value
+        # the email's `note_line/1` renders.
+        excerpt: task.note,
+        actor_name: actor_name(actor)
+      })
+    end
 
     if task.assignee && task.assignee.email do
       %{
@@ -75,4 +108,21 @@ defmodule KilnCMS.Notifications.Tasks do
 
   defp actor_name(%{name: name}) when is_binary(name) and name != "", do: name
   defp actor_name(_actor), do: nil
+
+  # The title of the content the task hangs off, for the inbox row — the same
+  # resolution (and the same `content_type` fallback when the record is gone)
+  # `TaskMailWorker.content_title/3` uses for the email subject. A system read:
+  # the assignee's own read policy governs what they may open in the editor,
+  # not whether they may be told the name of the thing they were assigned.
+  defp content_title(task) do
+    case ContentTypes.get_record(task.content_type, task.content_id,
+           # System read — see above; the recipient is already decided.
+           authorize?: false,
+           tenant: task.org_id,
+           query: [select: [:id, :title]]
+         ) do
+      {:ok, %{title: title}} when is_binary(title) -> title
+      _unreadable -> task.content_type
+    end
+  end
 end
