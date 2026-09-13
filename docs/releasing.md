@@ -76,7 +76,8 @@ people to pass the flag reflexively.
 ## Updating a project to a release
 
 From inside the project's pinned Kiln checkout — `kiln/upstream`, `upstream/`,
-wherever that project puts it (see [`projects/README.md`](../projects/README.md)
+wherever that project puts it (see
+[`projects/README.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/projects/README.md)
 for the overlay layout). The task refuses to run outside a Kiln checkout, so
 pointing it at the project repo itself is an error, not a wrong answer:
 
