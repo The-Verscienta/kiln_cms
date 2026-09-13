@@ -133,7 +133,9 @@ the block union and the router need the list during compilation.
   `Kiln.Plugins.manifests/0`, `mix kiln.plugins.list`), plus the already-safe
   data-driven runtime config (D17 dynamic types, `Kiln.FieldType`, #342 rules).
   A true third-party runtime-code sandbox (WASM / out-of-process) is a future
-  dedicated effort.
+  dedicated effort. The hosted catalog itself — submissions, verification,
+  per-version compatibility — is designed in
+  `docs/plugin-registry-plan.md` (#1447).
 - **Public plugin routes** — content types already get public delivery;
   arbitrary public routes invite router-conflict complexity for no proven
   need.
