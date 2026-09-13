@@ -128,6 +128,16 @@ written as a function component or a raw `class="…"` in a template.
 - Status terminology stays consistent everywhere it appears (draft, in
   review, published, archived — never a synonym mid-flow).
 - Copy overall: concise, calm, action-oriented, non-technical where possible.
+- No internal metaphors in editor-facing strings. Kiln's own vocabulary —
+  "firing", the kiln imagery — stays in module names, module docs and
+  comments. What an author reads says what happened to *their* content:
+  "published with…", not "fired as…"; "hasn't finished publishing", not
+  "hasn't been fired". The same applies to implementation nouns the author
+  never chose: name the behaviour ("question-and-answer structured data"),
+  not the schema.org type ("FAQPage"). The one audience that keeps the term
+  is the operator/integrator — "fired artifact" is the name the API reference,
+  `docs/static-export.md` and the System → Delivery cache panel all use for
+  the same thing, and renaming it only there would break the trail.
 
 ## UX patterns
 
@@ -170,16 +180,20 @@ The authoring app frame (`lib/kiln_cms_web/components/layouts.ex`):
   role-gated nav (below), plugin-contributed items, then a foot with the
   segmented theme switch and the account row (avatar, name over email) whose
   menu holds Account, GraphQL / JSON:API and Sign out.
-- **The nav itself** is data, in `KilnCMSWeb.ConsoleNav` — the sidebar draws it
-  and the ⌘K palette searches it, so a screen is reachable by name the day it
-  is added and one the actor may not open is absent from both. The **author**
-  items (Content, Media, Taxonomy, Calendar, Translations, Analytics, …) run
-  ungrouped at the top; the admin screens sit in five collapsible sections —
-  Content model, Capture, Delivery, Integrations, Organization — with a sixth,
+- **The nav itself** is data, in `KilnCMSWeb.ConsoleNav` — the sidebar draws
+  it, the Configure hub (`/editor/configure`) lists it with a one-line
+  description per screen, and the ⌘K palette searches it by name, section,
+  description and keyword. So a screen is reachable the day it is added, and
+  one the actor may not open is absent from all three. The **author** items
+  (Content, Media, Taxonomy, Calendar, Translations, Analytics, …) run
+  ungrouped at the top; below them an admin gets the **Configure** hub link,
+  then collapsible sections — Content model, Capture, Delivery, Integrations,
+  Organization, Account (**Your settings**, the per-user screen) — and
   **Operations**, ruled off below them for the instance-wide, platform-admin
   screens (Team, Billing, Mail, API keys, Backups, System). Every item in that
   band is `platform: true`, so for anyone else the band empties and is dropped:
-  the separation is never half day-to-day admin.
+  the separation is never half day-to-day admin. A non-admin gets the Account
+  section alone.
 - **Section collapse** is stored the way the rail is: a space-separated list of
   group keys on `<html data-nav-collapsed>` + `localStorage`
   (`kiln:nav-collapsed`), replayed by `root.html.heex` before first paint. The

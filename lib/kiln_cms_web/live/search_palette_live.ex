@@ -182,18 +182,25 @@ defmodule KilnCMSWeb.SearchPaletteLive do
         </p>
 
         <div :if={@count > 0} class="space-y-6">
-          <%!-- Screens lead (#1319): a name match on a destination is an
-                unambiguous answer, and the content hits below it are not. --%>
+          <%!-- Screens lead (#1319): a match on a destination is an unambiguous
+                answer, and the content hits below it are not. The description
+                is shown because a keyword match ("rss" → Feeds) otherwise
+                leaves the reader to guess why this screen came up. --%>
           <.section :if={@screens != []} title={gettext("Go to")}>
             <.link
               :for={screen <- @screens}
               navigate={screen.path}
-              class="flex items-center gap-2 rounded px-3 py-2 hover:bg-base-200"
+              class="flex items-start gap-3 rounded px-3 py-2 hover:bg-base-200"
             >
-              <.icon name={screen.icon} class="size-4 shrink-0 text-base-content/50" />
-              <span class="font-medium">{screen.label}</span>
-              <span :if={screen[:section]} class="text-xs text-base-content/60">
-                {screen.section}
+              <.icon name={screen.icon} class="mt-0.5 size-4 shrink-0 text-base-content/50" />
+              <span class="min-w-0">
+                <span class="font-medium">{screen.label}</span>
+                <span :if={screen[:section]} class="ml-2 text-xs text-base-content/60">
+                  {screen.section}
+                </span>
+                <span :if={screen[:description]} class="block text-xs text-base-content/70">
+                  {screen.description}
+                </span>
               </span>
             </.link>
           </.section>

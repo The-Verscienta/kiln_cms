@@ -95,8 +95,9 @@ Paths verified against `lib/kiln_cms_web/router.ex`. Note `/media`, which is
 | Editorial tasks | `/editor/tasks` | editor | assign and work editorial to-dos |
 | Analytics | `/editor/analytics` | editor | read content/usage analytics |
 | Broken links | `/editor/links` | editor (opt-in switch is admin) | review dead outbound citations |
-| Search palette | `/editor/search` | editor | jump-to-content |
-| Settings | `/editor/settings` | editor | personal / site settings |
+| Search palette | `/editor/search` | editor | jump-to-content, and to a settings screen by name or subject ("rss", "passkey") |
+| Your settings | `/editor/settings` | editor | **personal only** — profile, password, 2FA, passkeys, notification prefs |
+| Configure | `/editor/configure` | **admin** | the hub: every settings screen you may open, with what each is for and a filter |
 | Trash | `/editor/trash` | **admin** | recover deleted content |
 | Team | `/editor/team` | **admin** | add users, set roles |
 | Webhooks | `/editor/webhooks` | **admin** | register outbound webhooks, inspect deliveries |
@@ -108,8 +109,8 @@ Paths verified against `lib/kiln_cms_web/router.ex`. Note `/media`, which is
 | Redirects / Slugs | `/editor/redirects`, `/editor/slugs` | **admin** | manage redirects, bulk-regenerate slugs |
 | Mail / Newsletter | `/editor/mail`, `/editor/newsletter` | **admin** | delivery settings, campaigns |
 | Backups | `/editor/backups` | **admin** | status, back up now, retention |
-| API keys | `/editor/api-keys` | **admin** | issue and revoke headless keys — **no sidebar entry**, reachable by URL only |
-| Billing / System | `/editor/billing`, `/editor/system` | **admin** | membership providers; which core this instance runs |
+| API keys | `/editor/api-keys` | **admin** | issue and revoke headless keys |
+| Billing / System | `/editor/billing`, `/editor/system` | **admin** | membership providers; which version of Kiln this site is running |
 
 Routes behind optional infrastructure — the presentation console
 (`/editor/presentation/...`, needs `PRESENTATION_PREVIEW_URL`) and Translations

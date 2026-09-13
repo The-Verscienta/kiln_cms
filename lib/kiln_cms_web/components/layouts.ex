@@ -660,11 +660,16 @@ defmodule KilnCMSWeb.Layouts do
     assigns =
       assigns
       |> assign(:author, nav.author)
+      |> assign(:hub, nav.hub)
       |> assign(:configure_groups, nav.configure_groups)
       |> assign(:plugin, nav.plugin)
 
     ~H"""
     <.side_link :for={i <- @author} item={i} active={@active} />
+    <%!-- The Configure hub (#1319) sits above the sections rather than inside
+          one: it is the way in when you do not yet know which section owns the
+          thing you came to change. --%>
+    <.side_link :if={@hub} item={@hub} active={@active} class="mt-5" />
     <div
       :for={group <- @configure_groups}
       class={["side-group", group[:operator?] && "side-group-op"]}
@@ -700,12 +705,13 @@ defmodule KilnCMSWeb.Layouts do
 
   attr :item, :map, required: true
   attr :active, :atom, default: nil
+  attr :class, :string, default: nil
 
   defp side_link(assigns) do
     ~H"""
     <.link
       navigate={@item.path}
-      class="side-link"
+      class={["side-link", @class]}
       aria-current={@item.key == @active && "page"}
       data-side-tip={@item.label}
     >

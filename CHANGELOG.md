@@ -27,23 +27,65 @@ migration, a rewritten column, a dropped config key).
 
 ## [Unreleased]
 
+### Added
+
+- **A Configure hub at `/editor/configure`.** The console had twenty-odd
+  configuration screens and no screen that *was* configuration: the one page
+  named Settings is your own profile and 2FA, and a sidebar link is a name with
+  no explanation attached, so "where do I turn off full-text RSS" meant guessing
+  between Feeds, Delivery and Code injection. The hub lists every configuration
+  screen you may open, grouped as the sidebar groups them, each with a line
+  saying what it is for, over a filter that matches those descriptions and a
+  keyword list as well as the names — "rss" finds Feeds, "stripe" finds
+  Billing, "passkey" finds your own settings (#1319).
+
+- **`docs/overlay-contract.md` — what a downstream overlay may rely on across
+  releases.** The semver table says a major bump means "the overlay contract
+  broke", but nothing said which surfaces that covers. This one does: a table
+  of covered surfaces (the `KilnCMS.CMS.Content` options and injected hooks,
+  the `Kiln.Plugin` callbacks, the block DSL and its `_type`/`_version`
+  attributes, the extension behaviours, the config keys, the `PROJECT` build
+  arg and `priv/` merge conventions, and the `public-*` CSS hooks), a matching
+  list of what is *not* covered and may change in a patch, the three things a
+  minor may still do that cost an overlay work — including the two production
+  incidents the `overlay_drift` job exists to prevent (#452/#459, #488/#504) —
+  the additive-first deprecation path, four CI commands a downstream repo
+  should run, and the soft spots stated outright: the block upcast path has
+  never run a real migration, eager backfill is unwired, `to_markdown/1` is
+  probed rather than declared, and the hand-rolled `@behaviour` path breaks on
+  callback additions. Linked from `projects/README.md` (which keeps the
+  mechanics) and the getting-started guide router (#1328).
+
 ### Changed
 
 - **The Configure sidebar is sections, and ⌘K finds settings screens.** The
-  admin half of the console nav now sits in five collapsible sections — Content
-  model, Capture, Delivery, Integrations, Organization — with a sixth,
-  **Operations**, ruled off below them for the instance-wide screens a platform
+  admin half of the console nav now sits in collapsible sections — Content
+  model, Capture, Delivery, Integrations, Organization, Account — with
+  **Operations** ruled off below them for the instance-wide screens a platform
   admin owns (Team, Billing, Mail, API keys, Backups, System). Every item in
   that band is platform-gated, so an org admin sees no band at all. Which
   sections are collapsed is remembered per browser, like the icon rail, and is
   ignored in the rail itself. The ⌘K palette gained a **Go to** category ahead
-  of the content results: it searches the same list the sidebar draws, already
-  filtered to what you may open, so "backups" or "slugs" is one keystroke away
-  from the screen rather than a scan down 25 items. The System screen no longer
+  of the content results, searching the same list the sidebar and the hub
+  draw — by name, section, description and keyword, already filtered to what
+  you may open — so "backups" or "dkim" is one keystroke from the screen rather
+  than a scan down 25 items. The per-user screen is now labelled **Your
+  settings** under an **Account** heading, so nothing named "Settings" looks
+  like it holds the site's configuration, and the System screen no longer
   describes itself as "the Kiln core this instance is built from" (#1319).
 
 ### Fixed
 
+- **Links to a `README.md` from a guide pointed at the wrong README.** ExDoc
+  resolves a relative link between extras by basename alone, taking whichever
+  extra with that basename was registered last — so `[Overview](../README.md)`
+  in `docs/getting-started.md`, and ten links like it, rendered in the published
+  docs as links to the Elixir client's README. `mix docs --warnings-as-errors`
+  warns only when a basename is missing entirely, never when it resolves to the
+  wrong page, so the docs job was green throughout. Every link to a README is
+  now its full github.com URL, correct in both renderings, and
+  `test/kiln_cms/docs/extras_links_test.exs` fails the build if a relative link
+  between extras renders as a link to a different file than the one it names.
 - **Both password forms check the confirmation as you type.** On `/register`
   and on the new-password page behind a reset link, the two password boxes
   disagreeing was held back until submit — which on registration also clears the
