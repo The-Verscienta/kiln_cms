@@ -168,8 +168,8 @@ be first-party.
       `KilnCMSWeb.Tenant`. Set **`TENANT_STRICT_HOST=true`** on any real
       multi-tenant deployment: without it an unmatched `Host` (a bare hostname,
       an IP literal, `localhost`, or an attacker-supplied header) is served the
-      **default org's** content, branding and analytics. Config table:
-      [environment-variables.md](environment-variables.md#optional--multi-tenancy-336).
+      **default org's** content, branding and analytics. Config table: *Optional — multi-tenancy (#336)* in
+      [environment-variables.md](environment-variables.md).
 
 **Note:** a few deliberate single-org-bridge fallbacks remain where a nil tenant
 reads globally (the GraphQL context resolver, point-in-time index reads). They
