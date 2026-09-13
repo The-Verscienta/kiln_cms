@@ -26,6 +26,25 @@ defmodule KilnCMS.Firing.Delivery do
   whose record + artifact are warm in cache — a reliability guarantee a
   request-per-query CMS structurally can't match (the BEAM keeps the cache and
   the web layer up independently of the DB connection).
+
+  ## Authorization on this path (#1309, #1402)
+
+  The **record** reads keep `authorize?: false`, deliberately, and the per-site
+  comments below point here. Their action's own `filter` is the grant:
+  `:public_by_slug` matches published + `:public`-or-unlocked rows and nothing
+  else, `:locked_by_slug` matches published + locked rows and returns no block
+  tree. Passing an actor instead would change the answer for a signed-in
+  reader, and threading the *system actor* would be strictly worse than the
+  bypass it replaced: admitting `Checks.SystemActor` on the `Content` read
+  policy is a standing grant to every system caller over the whole corpus,
+  drafts included, where the bypass is one call site whose filter is pinned by
+  tests. A narrower grant is not expressible, so this one stays declared in
+  prose.
+
+  The **artifact** read does run as `%KilnCMS.SystemActor{subsystem:
+  :delivery}`. By then the audience question is already settled — `resolve/5`
+  read the document through that filter — and `PublishedArtifact`'s policy
+  admits the actor by name alongside editors and `Checks.DocumentReadable`.
   """
   require Logger
 
@@ -102,6 +121,10 @@ defmodule KilnCMS.Firing.Delivery do
     do: read_published(org_id, type, slug, locale, unlocks)
 
   defp read_published(org_id, type, slug, locale, unlocks) do
+    # Bypass kept (see the moduledoc's "Authorization on this path"): the
+    # `:public_by_slug` action's own filter carries the published / audience /
+    # unlock grant, and a system actor here would be a standing corpus-wide
+    # grant rather than this one pinned filter.
     ContentTypes.get_published_by_slug(type, slug, locale,
       unlocks: unlocks,
       authorize?: false,
@@ -121,6 +144,10 @@ defmodule KilnCMS.Firing.Delivery do
   @spec locked(Ash.UUID.t(), atom() | String.t(), String.t(), String.t()) ::
           {:ok, struct()} | :not_found
   def locked(org_id, type, slug, locale) do
+    # Bypass kept for the same reason as `read_published/5` — see the
+    # moduledoc. This action's filter is narrower still: published AND locked,
+    # projected without the block tree, so it can describe a document it cannot
+    # serve.
     case ContentTypes.get_locked_by_slug(type, slug, locale,
            not_found_error?: false,
            authorize?: false,
@@ -157,7 +184,14 @@ defmodule KilnCMS.Firing.Delivery do
   end
 
   defp fetch_artifact(org_id, type, id, surface) do
-    case Firing.get_artifact(type, id, surface, authorize?: false, tenant: org_id) do
+    # System actor (#1402) rather than a bypass: `resolve/5` has already
+    # authorized the *document* through its action's filter, and
+    # `PublishedArtifact`'s read policy admits this actor by name. See the
+    # moduledoc.
+    case Firing.get_artifact(type, id, surface,
+           actor: KilnCMS.SystemActor.new(:delivery),
+           tenant: org_id
+         ) do
       {:ok, %{body: body} = artifact} ->
         # A row written before the current `@format_version` is served once more
         # and re-fired in the background (#615) — see `Engine.migrate_if_stale/4`.
