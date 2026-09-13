@@ -74,6 +74,29 @@ migration, a rewritten column, a dropped config key).
   `config/project.exs` is imported last — an artifact of the example living in
   the core's repo, not a pattern a real overlay should copy. The "Not covered"
   entry now says both halves.
+  probed rather than declared, and the hand-rolled `@behaviour` path breaks on
+  callback additions. Linked from `projects/README.md` (which keeps the
+  mechanics) and the getting-started guide router (#1328).
+
+### Fixed
+
+- **Links to a `README.md` from a guide pointed at the wrong README.** ExDoc
+  resolves a relative link between extras by basename alone, taking whichever
+  extra with that basename was registered last — so `[Overview](../README.md)`
+  in `docs/getting-started.md`, and ten links like it, rendered in the published
+  docs as links to the Elixir client's README. `mix docs --warnings-as-errors`
+  warns only when a basename is missing entirely, never when it resolves to the
+  wrong page, so the docs job was green throughout. Every link to a README is
+  now its full github.com URL, correct in both renderings, and
+  `test/kiln_cms/docs/extras_links_test.exs` fails the build if a relative link
+  between extras renders as a link to a different file than the one it names.
+- **Both password forms check the confirmation as you type.** On `/register`
+  and on the new-password page behind a reset link, the two password boxes
+  disagreeing was held back until submit — which on registration also clears the
+  password field, so a typo in the confirmation cost re-typing both.
+  `KilnCMSWeb.AuthConfirmationFeedback` reveals that one error on `phx-change`;
+  every other field — an empty email, an invalid reset token — stays quiet until
+  submit, as before.
 
 ## [0.8.0] - 2026-09-11
 
