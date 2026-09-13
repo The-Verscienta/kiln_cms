@@ -102,13 +102,23 @@ defmodule KilnCMS.Newsletter.Segment do
       authorize_if always()
     end
 
-    # The tier-backed lifecycle is driven by billing, not by a human.
+    # The tier-backed lifecycle is driven by billing, not by a human — closed
+    # to everyone including admins, and `KilnCMS.Newsletter.TierSync` is named
+    # here (#1402) instead of reaching around the block.
     policy action([:for_tier, :sync_managed]) do
+      authorize_if KilnCMS.Checks.SystemActor
       forbid_if always()
     end
 
     policy always() do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
+
+      # Ash ANDs policies, so the grant above is not enough on its own: this
+      # blanket admin policy applies to those two actions too, and to the read
+      # `TierSync` makes to find the segments it manages. Narrowed here rather
+      # than widened — managing a segment by hand stays an admin act.
+      forbid_unless action([:read, :for_tier, :sync_managed])
+      authorize_if KilnCMS.Checks.SystemActor
     end
   end
 

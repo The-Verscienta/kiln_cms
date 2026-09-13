@@ -991,9 +991,21 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
 11. **Periodic CSP re-review** as the editor adds third-party assets. The
     runtime `img-src` is widened by `CSP_IMG_SRC` and by the Unsplash
     integration — the only externally-influenced part of the policy.
-12. **Secrets rotation runbook** (DB URL, `SECRET_KEY_BASE`,
-    `TOKEN_SIGNING_SECRET`, S3 keys) is not written down; pairs with
-    [`backups.md`](backups.md).
+12. ~~**Secrets rotation runbook** (DB URL, `SECRET_KEY_BASE`,
+    `TOKEN_SIGNING_SECRET`, S3 keys) is not written down.~~ **Closed by
+    #1304:** [`secrets-rotation.md`](secrets-rotation.md) is the per-secret
+    procedure, verified against what the code does rather than what would be
+    reasonable. *Residual, and the reason to read it before an incident rather
+    than during one:* nothing in this application supports a dual-key
+    transition. `TOKEN_SIGNING_SECRET` and `SECRET_KEY_BASE` are hard
+    cutovers that sign every user out, and `SECRET_KEY_BASE` additionally
+    keys `KilnCMS.Keys.Vault`, so rotating it **permanently orphans**
+    database-stored key material — the DKIM key, social credentials, payment
+    secrets and the ActivityPub actor key — with no re-encryption path. Three
+    of those four have a documented way back; the federation actor key has
+    none, which the runbook flags as the one rotation that cannot be done
+    safely today. Pairs with [`backups.md`](backups.md), where the same
+    `SECRET_KEY_BASE` is part of the backup.
 13. ~~**The collaborative-editing socket is scoped by topic, not by
     tenancy.**~~ **Closed by #655.** The socket token still names only a user,
     so it establishes *who* and nothing more; `CollabChannel.join/3` now
