@@ -107,7 +107,7 @@ defmodule KilnCMS.Accounts.PushSubscription do
   end
 
   policies do
-    bypass actor_attribute_equals(:role, :admin) do
+    bypass KilnCMS.Accounts.Checks.PlatformAdmin do
       authorize_if always()
     end
 

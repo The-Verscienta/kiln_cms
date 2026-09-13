@@ -1186,7 +1186,7 @@ if config_env() == :prod do
   # returned, and the cross-encoder runs on the CPU — the deployment that
   # asked for this runs on hardware without AVX2 and could not afford it on
   # every query; measure a question's cost on your host before exposing it.
-  # See docs/rag.md, "Reranking ask's sources".
+  # See docs/rag.md, "Reranking ask sources".
   #
   # `fetch/1`, not `flag/2`: an unset variable must not rewrite a project
   # overlay's `config :kiln_cms, KilnCMS.Ask, rerank: true` back to false.
