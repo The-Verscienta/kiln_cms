@@ -86,17 +86,6 @@ defmodule KilnCMS.CMS.ComputedTest do
       assert is_number(Computed.evaluate("{{ round(#{huge}, 2) }}", context()))
     end
 
-    test "safe_float/1 is total across toolchain versions" do
-      # `Float.parse/1` is version-dependent for an overflow literal: it returns
-      # `:error` on Elixir 1.20 but *raises* ArgumentError from
-      # `:erlang.list_to_float/1` on 1.19 — the version `.tool-versions` pins and
-      # CI runs. Anything pattern-matching its result must go through this.
-      assert Computed.safe_float(String.duplicate("9", 400) <> ".0") == :error
-      assert Computed.safe_float("not a number") == :error
-      assert Computed.safe_float("1.5") == {1.5, ""}
-      assert Computed.safe_float("2.5kg") == {2.5, "kg"}
-    end
-
     test "every advertised function parses AND evaluates" do
       # Parsing only consults the `@functions` allowlist, so a name listed there
       # with no matching `call/2` clause would parse fine and then raise at

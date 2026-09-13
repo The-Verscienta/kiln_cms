@@ -43,7 +43,7 @@ The JSON:API is one of several headless surfaces. Pick the one that fits:
 | **Sign-in**            | `POST /api/auth/sign_in`          | Exchange credentials for a bearer token (JWT).        | [§ Authentication](#authentication) |
 | **JSON:API**           | `/api/json`                       | Structured, filterable reads of Page/Post/MediaItem.  | [json-api.md](json-api.md) |
 | **GraphQL**            | `POST /gql`                       | Curated delivery reads + full-text/semantic search.   | [headless-graphql-api.md](headless-graphql-api.md) |
-| **Fired artifacts**    | `GET /api/content/:type/:slug`    | Pre-rendered block tree (`json`, `json_ld`, `web`).   | [`examples/README.md`](../examples/README.md) |
+| **Fired artifacts**    | `GET /api/content/:type/:slug`    | Pre-rendered block tree (`json`, `json_ld`, `web`).   | [`examples/README.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/examples/README.md) |
 | **Locales**            | `GET /api/locales`                | Discover configured content locales + the default.    | [§ Locale discovery](#locale-discovery) |
 | **Schema**             | `GET /api/schema`                 | JSON Schema for the fired `json` payloads — generate types, validate responses. | [§ Schema discovery](#schema-discovery-typed-clients) |
 | **Embeddable form**    | `<script src="…/embed.js">`       | Render a form in an auto-resizing iframe on any site. | [§ Embeddable forms](#embeddable-forms) |
@@ -96,7 +96,8 @@ resolved to** — the same per-org authorization boundary the server enforces
 account has no tier. Shape UI on it only for the org you signed in against.
 
 > The account must already exist with an `:editor` or `:admin` role — signup
-> always creates a `:viewer`. See [**Creating an admin user**](../README.md#creating-an-admin-user)
+> always creates a `:viewer`. See
+> [**Creating an admin user**](https://github.com/The-Verscienta/kiln_cms/blob/main/README.md#creating-an-admin-user)
 > in the README for seeding the first admin and promoting other users.
 
 Then send the token on JSON:API / GraphQL requests:
@@ -481,7 +482,7 @@ paywalled; it never appears in a feed, which anonymous readers and third-party
 aggregators fetch. The same rule holds for the optional Meilisearch index (#1006)
 — it has no audience facet and its queries are anonymous, so a gated document is
 kept out of it and removed from it when gating is applied. See
-[`meilisearch.md`](meilisearch.md#what-is-in-the-index--and-what-is-not-1006).
+*What is in the index — and what is not (#1006)* in [`meilisearch.md`](meilisearch.md).
 
 **A type syndicates if it already has a public index.** For a dynamic content
 type that is the per-type "Has a public index of published entries" checkbox in

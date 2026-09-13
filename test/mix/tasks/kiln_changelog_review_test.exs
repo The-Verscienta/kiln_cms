@@ -371,6 +371,32 @@ defmodule Mix.Tasks.Kiln.ChangelogReviewTest do
     assert_raise Mix.Error, ~r/no destination/, fn -> run!(dir, ["--verify", "HEAD"]) end
   end
 
+  # Entries on main run straight into the next `### ` heading with no blank
+  # line. `--verify` must compare the entry, not the entry with a heading glued
+  # to its end, or every such entry reads as lost.
+  test "--verify compares an entry that runs straight into a heading", %{tmp_dir: dir} do
+    git!(dir, ~w[init -q])
+
+    changelog!(dir, """
+    ## [0.9.0] - 2026-09-20
+
+    ### Security
+
+    - **A system actor, so internal callers run under the policies instead of
+      around them.** No behaviour changes for any caller-facing path (#1402).
+    ### Fixed
+
+    - **Links point at the release tag.** Every link used to re-resolve as `main`
+      moved (#1450).
+    """)
+
+    commit!(dir, "Entries as merged (#1)")
+    condense!(dir)
+
+    run!(dir, ["--verify", "HEAD"])
+    assert_received {:mix_shell, :info, ["No loss: " <> _]}
+  end
+
   test "a condensed entry with no reference is credited once its merge exists",
        %{tmp_dir: dir} do
     git!(dir, ~w[init -q])

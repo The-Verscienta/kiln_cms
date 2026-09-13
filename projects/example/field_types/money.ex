@@ -68,7 +68,10 @@ defmodule Example.FieldTypes.Money do
   defp amount(value) when is_integer(value) and value >= 0, do: {:ok, value / 1}
 
   defp amount(value) when is_binary(value) do
-    case KilnCMS.CMS.Computed.safe_float(String.trim(value)) do
+    # `Kiln.FieldType.parse_float/1`, not `Float.parse/1`: the latter raises on
+    # a literal that overflows a double under this project's pinned Elixir, and
+    # a `cast/2` raising is a 500 rather than the validation message below.
+    case Kiln.FieldType.parse_float(String.trim(value)) do
       {number, ""} when number >= 0 -> {:ok, number}
       _ -> {:error, "amount must be a non-negative number"}
     end

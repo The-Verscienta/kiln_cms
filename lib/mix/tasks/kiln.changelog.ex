@@ -1474,11 +1474,12 @@ defmodule Mix.Tasks.Kiln.Changelog do
   # structure, not content: they are rewritten by design and prove nothing.
   defp paragraphs(text) do
     text
-    # Blank lines, and also the start of a bullet: entries in this file are not
-    # reliably separated by a blank line, so a blank-line split alone yields
-    # chunks that straddle two entries and can never match a destination that
-    # (correctly) keeps them apart.
-    |> String.split(~r/\n\s*\n|\n(?=- )/)
+    # Blank lines, and also the start of a bullet or a heading: entries in this
+    # file are not reliably separated by a blank line — an entry can run straight
+    # into the next `### ` — so a blank-line split alone yields chunks that
+    # straddle two entries, or an entry and a heading, and can never match a
+    # destination that (correctly) keeps them apart.
+    |> String.split(~r/\n\s*\n|\n(?=- )|\n(?=\#{1,6} )/)
     |> Enum.map(&String.trim/1)
     |> Enum.reject(fn para ->
       para == "" or String.starts_with?(para, "#") or

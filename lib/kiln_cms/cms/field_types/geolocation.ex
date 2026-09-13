@@ -217,12 +217,12 @@ defmodule KilnCMS.CMS.FieldTypes.Geolocation do
   end
 
   defp number(value) when is_binary(value) do
-    # `Computed.safe_float/1`, not `Float.parse/1`: the latter *raises* on a
-    # literal that overflows a double under Elixir 1.19 (this project's pinned
-    # toolchain) and merely returns `:error` under 1.20 — and this runs on a
-    # public write surface, where a raise is a 500 rather than a validation
-    # message.
-    case value |> String.trim() |> KilnCMS.CMS.Computed.safe_float() do
+    # `Kiln.FieldType.parse_float/1`, not `Float.parse/1`: the latter *raises*
+    # on a literal that overflows a double under Elixir 1.19 (this project's
+    # pinned toolchain) and merely returns `:error` under 1.20 — and this runs
+    # on a public write surface, where a raise is a 500 rather than a
+    # validation message.
+    case value |> String.trim() |> Kiln.FieldType.parse_float() do
       {number, ""} -> {:ok, number}
       _ -> :error
     end

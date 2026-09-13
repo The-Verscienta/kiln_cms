@@ -16,7 +16,7 @@ your deployment.
   cookie is recorded for visitors. Two narrow exceptions, neither of which
   happens on an ordinary page view: a visitor who types a passphrase into a
   locked page gets an unlock cookie carrying no identifier (see
-  [Transport & at-rest notes](#transport--at-rest-notes)), and
+  *Transport & at-rest notes* below), and
   [sticky A/B assignment](#sticky-assignment-cookie-984) is an opt-in that is off
   unless you turn it on.
 - The only personal data we store is **operator/editor account data** (email,
@@ -36,9 +36,9 @@ your deployment.
 | Notification preferences | `users.notify_on_*` | No | Per-user opt-out (issue #46). |
 | Auth tokens | `tokens` | Pseudonymous | jti, subject (`user?id=<uuid>`), purpose, expiry. See [Auth tokens](#auth-token-retention-218). |
 | Audit / version history | `document_events`, AshPaperTrail versions | Pseudonymous | Carries `actor_id`. See [Audit trail vs erasure](#audit-trail-vs-user-erasure-219). |
-| Recorded search queries | `search_queries` | Possibly | Query text only — **no** actor/IP. See [Search query retention](#search-query-retention-213--disclosure-220). |
+| Recorded search queries | `search_queries` | Possibly | Query text only — **no** actor/IP. See *Search query retention (#213) + disclosure (#220)* below. |
 | Consumer audiences | `users.audiences`, `org_memberships.audiences` | No | Which gated content a reader may see. Granted by an admin or by an active paid membership. Cleared on erasure. |
-| Paid memberships | `billing_memberships` | Pseudonymous | Status, period end, and the payment provider's customer/subscription ids. See [Payments](#payments-337). |
+| Paid memberships | `billing_memberships` | Pseudonymous | Status, period end, and the payment provider's customer/subscription ids. See [Paid memberships](memberships.md). |
 | Entitlement audit trail | `billing_membership_events` | Pseudonymous | Status transitions and the audience delta, with the causing provider event id. `actor_id` nulled on erasure. |
 | Recorded payment webhooks | `billing_webhook_events` | Yes (transient) | The provider's full event payload, which can carry a customer email and amounts. Purged on retention and by the staging scrub. |
 | Aggregate view counts | `content_views` | No | One upserting counter per content item — no visitor data. |

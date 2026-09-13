@@ -331,3 +331,32 @@ Findings against the §3 risks:
    **The spike is fully graduated** — every item from §3's recommendation and
    §6's findings is implemented and tested. What remains is product surface
    (e.g. enabling the flag per deployment), not architecture.
+
+## Why `y_ex` still ships in the production image
+
+[#1324](https://github.com/The-Verscienta/kiln_cms/issues/1324) asked whether
+`y_ex` — a Rust NIF the prod image carries for a prototype that is never enabled
+there — could move to `only: [:dev, :test]` in `mix.exs`. **It cannot, not on its
+own.** Checked and measured, 2026-09-12:
+
+- `Crdt.Materializer` **pattern-matches Yjs structs**:
+  `defp node_json(%Yex.XmlElement{} = el)` and `%Yex.XmlText{}`
+  (`lib/kiln_cms/collab/crdt/materializer.ex:90`). Struct patterns are expanded
+  at compile time, so a `MIX_ENV=prod mix compile` without the dep fails with
+  `error: struct Yex.XmlText is undefined` — a hard error, not a warning.
+- Even without those, `doc_server.ex`, `materializer.ex` and `checkpoint.ex` make
+  ~20 remote `Yex.*` calls. Each becomes a "module Yex is not available"
+  warning, and both `mix precommit` and CI compile with
+  `--warnings-as-errors`.
+- The flag is read at **runtime** (`Crdt.enabled?/0` is `Application.get_env/2`),
+  so runtime gating is not the obstacle — compilation is.
+
+Dropping the dep therefore also means keeping the collab tree out of the prod
+`elixirc_paths`, and the tree is not isolated: `KilnCMS.Application` starts
+`Crdt.Registry` and `Crdt.DocSupervisor` unconditionally and calls
+`Crdt.max_documents/0` at boot (`application.ex:124`), `ContentEditorLive` calls
+`Crdt.enabled?/0`, the publish-path change `Changes.CheckpointCollabRoom` aliases
+`Collab.Crdt`, and the demo reset references `Crdt.DocSupervisor`. That is Theme F
+work (see [content-editor-modernization.md](content-editor-modernization.md)),
+not a packaging tweak — and if Theme F ships, the dep is wanted in prod anyway.
+The NIF stays. Revisit only if the prototype is abandoned rather than graduated.

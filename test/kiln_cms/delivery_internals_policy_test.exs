@@ -12,8 +12,9 @@ defmodule KilnCMS.DeliveryInternalsPolicyTest do
 
     * a caller carrying an **actor** is now filtered, and
     * the **system** paths (firing engine, indexer, form renderer) still work —
-      they run `authorize?: false`, which is the whole reason tightening these
-      was safe.
+      they ran `authorize?: false`, which is the whole reason tightening these
+      was safe. `ReferenceEdge` has since moved to `%KilnCMS.SystemActor{}` and
+      an explicit policy clause (#1402); the rest still bypass.
 
   Assertions are membership checks over seeded rows, never full-table counts —
   the sandbox is shared.
@@ -27,8 +28,10 @@ defmodule KilnCMS.DeliveryInternalsPolicyTest do
   alias KilnCMS.CMS.Audiences
   alias KilnCMS.Firing
   alias KilnCMS.Firing.Engine
+  alias KilnCMS.Firing.References
   alias KilnCMS.Search.BlockEmbedding
   alias KilnCMS.SearchIndex
+  alias KilnCMS.SystemActor
 
   @gated hd(Audiences.gated())
 
@@ -78,6 +81,19 @@ defmodule KilnCMS.DeliveryInternalsPolicyTest do
       to_type: :page,
       to_id: Ash.UUID.generate()
     })
+  end
+
+  # A typed block tree whose single block references `target_id` — the shape
+  # `References.extract/1` pulls an edge out of.
+  defp ref_blocks(target_id) do
+    KilnCMS.CMS.TypedBlocks.from_legacy([
+      %{
+        type: :custom,
+        content: "see also",
+        data: %{"ref" => %{"type" => "page", "id" => target_id}},
+        order: 0
+      }
+    ])
   end
 
   defp embedding do
@@ -240,6 +256,73 @@ defmodule KilnCMS.DeliveryInternalsPolicyTest do
                  authorize?: false,
                  tenant: org_id()
                )
+    end
+
+    test "the system actor reads it under the policy, not around it (#1402)" do
+      edge = edge()
+
+      assert {:ok, [%{id: id}]} =
+               Firing.edges_from(edge.from_type, edge.from_id,
+                 actor: SystemActor.new(:firing),
+                 tenant: org_id()
+               )
+
+      assert id == edge.id
+    end
+  end
+
+  describe "ReferenceEdge writes (#1402)" do
+    # `References.rebuild/4` on the fire path is the only writer there has ever
+    # been; it used to reach a `forbid_if always()` policy through
+    # `authorize?: false`, and now carries `%SystemActor{}` which the policy
+    # admits by name. Drop `authorize_if KilnCMS.Checks.SystemActor` from
+    # `ReferenceEdge`'s write policy and the first test below fails — that is
+    # what makes the conversion real rather than cosmetic.
+
+    test "the fire path rebuilds a document's edges" do
+      referrer = page(:public)
+      target = page(:public)
+
+      assert :ok = References.rebuild(org_id(), :page, referrer, ref_blocks(target.id))
+
+      assert {:ok, [%{to_type: :page, to_id: to_id}]} =
+               Firing.edges_from(:page, referrer.id, authorize?: false, tenant: org_id())
+
+      assert to_id == target.id
+
+      # The destroy half of the rebuild is the same grant: re-running with no
+      # references has to clear the edge, not leave it behind.
+      assert :ok = References.rebuild(org_id(), :page, referrer, [])
+
+      assert {:ok, []} =
+               Firing.edges_from(:page, referrer.id, authorize?: false, tenant: org_id())
+    end
+
+    test "no person may write the graph, admin included" do
+      target = page(:public)
+
+      for actor <- [nil, user(:viewer), user(:editor), user(:admin)] do
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 Ash.create(
+                   Firing.ReferenceEdge,
+                   %{
+                     from_type: :page,
+                     from_id: Ash.UUID.generate(),
+                     to_type: :page,
+                     to_id: target.id
+                   },
+                   action: :upsert,
+                   actor: actor,
+                   tenant: org_id()
+                 )
+      end
+    end
+
+    test "an admin may not destroy an edge the system wrote" do
+      edge = edge()
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               Ash.destroy(edge, actor: user(:admin), tenant: org_id())
     end
   end
 

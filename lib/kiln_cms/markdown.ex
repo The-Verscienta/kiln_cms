@@ -285,6 +285,14 @@ defmodule KilnCMS.Markdown do
 
   defp render_node(text, _opts) when is_binary(text), do: text_html(text)
 
+  # An HTML comment: `{:comment, [], [lines], %{comment: true}}`, whose tag is
+  # the ATOM `:comment` and so matches none of the tag lists above. Its text is
+  # a note to whoever edits the file, never content — without this the catch-all
+  # at the bottom would render it as a paragraph of visible prose. A comment
+  # written mid-sentence never reaches here: it stays inside the paragraph's
+  # text run, where `text_html/1` hands it to the sanitizer, which drops it.
+  defp render_node({_tag, _attrs, _children, %{comment: true}}, _opts), do: ""
+
   defp render_node({tag, _attrs, _children, %{verbatim: true}}, _opts)
        when tag in @dropped_raw,
        do: ""
@@ -344,8 +352,8 @@ defmodule KilnCMS.Markdown do
 
   defp render_node({tag, _attrs, _children, _meta}, _opts) when tag in @void_tags, do: "<#{tag}>"
 
-  # Anything else (a comment, an element this list does not know): its text
-  # is still the author's, the wrapper is not trusted.
+  # Anything else (an element this list does not know): its text is still the
+  # author's, the wrapper is not trusted.
   defp render_node({_tag, _attrs, children, _meta}, opts) when is_list(children),
     do: render(children, opts)
 

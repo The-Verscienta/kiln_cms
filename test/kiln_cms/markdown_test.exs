@@ -135,6 +135,23 @@ defmodule KilnCMS.MarkdownTest do
       assert html == "<p>before</p><p>after</p>"
     end
 
+    test "an HTML comment between paragraphs is not published as prose" do
+      assert Markdown.to_html(
+               "before\n\n<!-- a note to whoever edits this\n     and more -->\n\nafter"
+             ) ==
+               "<p>before</p><p>after</p>"
+    end
+
+    test "an HTML comment written mid-sentence is dropped too" do
+      assert Markdown.to_html("a <!-- note --> b") == "<p>a  b</p>"
+      assert text("a <!-- note --> b") == "a b"
+    end
+
+    test "a comment inside a fenced block is the example, and survives" do
+      assert Markdown.to_html("```html\n<!-- kept -->\n```") ==
+               ~s(<pre><code class="language-html">&lt;!-- kept --&gt;</code></pre>)
+    end
+
     test "event-handler attributes on raw HTML are stripped" do
       html =
         Markdown.to_html(

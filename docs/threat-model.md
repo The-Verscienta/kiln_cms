@@ -69,6 +69,14 @@ the router so preflights are answered before route matching).
 | Sockets | `/live`, `/ws/collab`, `/ws/bridge` | session / signed token + per-document read / API key + per-document read | `/live` root joins `:live_join` per address (#1183); every frame on a `/ws/collab` connection `:collab_event` per account (#1305); otherwise none (except the sign-in submit, above) |
 | Dev tools | `/dev/dashboard`, `/dev/mailbox`, `/admin`, `/gql/playground` | compile-gated off in prod | — |
 
+**`/ws/collab` is a prototype surface.** Its joins are refused unless
+`config :kiln_cms, :collab_prototype` is set, and that is set only in
+`config/dev.exs` and `config/test.exs` — so a production build carries the socket
+but accepts no CRDT session (#1324, and
+[collaborative-editing-spike.md](collaborative-editing-spike.md)). Everything
+below about the collab room is modelled as if it were live, because that is the
+bar it has to clear before it can be enabled; it is not a live surface today.
+
 **The server-side Ash policies are the authorization boundary.** Every read and
 mutation through GraphQL, JSON:API, REST, MCP and LiveView runs through
 `Ash.Policy.Authorizer` with the request's actor and tenant. The API layers add

@@ -14,9 +14,10 @@ and report it privately.
 
 ## Getting set up
 
-See the **Getting started** section of the [README](README.md) for the full
-setup (`docker compose up -d postgres`, then `mix setup`). A few environment
-notes that bite people:
+See the **Getting started** section of the
+[README](https://github.com/The-Verscienta/kiln_cms/blob/main/README.md)
+for the full setup (`docker compose up -d postgres`, then `mix setup`). A few
+environment notes that bite people:
 
 - **`mix` must be on your `PATH`** (Homebrew installs to `/opt/homebrew/bin`).
 - **The repo must live at a space-free, non-iCloud path.** Native deps
@@ -141,6 +142,39 @@ It fails on dead cross-references — a `docs/` file listed in `extras` that no
 longer exists, a `` `Module.fun/2` `` that was renamed or changed arity. Adding
 a new guide means adding it to both `extras` and `groups_for_extras` in
 `mix.exs`; an unlisted guide is silently invisible in the generated sidebar.
+
+"View Source" links resolve against the release tag matching `mix.exs`'s
+version, so in a local build they point at the last release rather than at your
+branch. That only matters if you are checking the links themselves; pin them to
+what you built with `DOCS_SOURCE_REF=$(git rev-parse HEAD) mix docs`.
+
+**A link to a `README.md` is written as a full URL.** ExDoc resolves a relative
+link between guides by **basename alone** — it ignores the directories you wrote
+and takes whichever extra with that basename was registered last in `mix.exs`.
+Four extras are called `README.md` (the root one plus `examples/`, `projects/`
+and `clients/elixir/kiln_client/`), so `[Overview](../README.md)` rendered as a
+link to the Elixir client's page, and `mix docs --warnings-as-errors` reported
+nothing: it warns only when a basename is missing entirely, never when it
+resolves to the wrong page. Link any README by its full
+`https://github.com/The-Verscienta/kiln_cms/blob/main/…` URL, which is right both
+on github.com and in the generated docs — the same reason `.github/SECURITY.md`
+and `AGENTS.md` are linked that way. A test
+(`test/kiln_cms/docs/extras_links_test.exs`) fails the build if any relative link
+between extras renders as a link to a different file than the one it names; the
+fix is the full URL, never reordering `extras:`, which only moves which of the
+colliding links is wrong.
+
+**A `#fragment` link must land in both renderings.** ExDoc and github.com
+slug headings differently: GitHub keeps a hyphen for each space around dropped
+punctuation (`## Storage & CDN` → `storage--cdn`) where ExDoc collapses the run
+(`storage-cdn`), an apostrophe or slash splits the word in ExDoc and not on
+GitHub (`What's` → `what-s` vs `whats`), and ExDoc gives ids only to `##` and
+`###` headings. `--warnings-as-errors` never looks at fragments. The same test
+fails when a fragment between extras is missing from either slug set. Fix it by
+linking the file without a fragment and naming the section in the sentence
+("see *Storage & CDN* in …"), or — once you have checked that nothing outside
+the docs uses the old anchor — by rewording the heading so both slugs agree
+(`## Storage and CDN`).
 
 **Plans and spikes carry a `Status:` line.** Every `docs/*-plan.md` and
 `docs/*-spike.md` states its status in its first lines — `Status: shipped`,

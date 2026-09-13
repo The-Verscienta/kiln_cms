@@ -154,7 +154,8 @@ Authorization: Bearer <read-write key>
 - **The whole body is replaced.** The blocks it produces carry no `_id`s, so a
   `body_markdown` update replaces the body wholesale, the same as a
   `block_tree` sent without ids (see
-  [Writing body content](json-api.md#writing-body-content-the-block_tree-attribute)).
+  *Writing body content — the `block_tree` attribute* in
+  [`json-api.md`](json-api.md)).
 - **The body only.** Front matter is dropped and nothing else is read from
   the Markdown. Title, slug and excerpt are their own attributes.
 - **Grants and limits.** It needs the same `blocks` field grant as
