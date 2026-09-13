@@ -4837,7 +4837,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp block_description("portable_text"), do: gettext("Portable Text rich content")
 
   defp block_description("gallery"),
-    do: gettext("Several images with captions, fired as ImageGallery structured data")
+    do: gettext("Several images with captions, published with image-gallery structured data")
 
   # Says what it is NOT, because that is the only difference an editor can see:
   # this and the FAQ block draw the same collapsing panels, and picking the wrong
@@ -4845,10 +4845,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp block_description("accordion"),
     do: gettext("Collapsible panels with no structured data — use FAQ for questions and answers")
 
-  defp block_description("faq"), do: gettext("Q&A list, fired as FAQPage structured data")
+  defp block_description("faq"),
+    do: gettext("Q&A list, published with question-and-answer structured data")
 
   defp block_description("how_to"),
-    do: gettext("Step-by-step guide, fired as HowTo structured data")
+    do: gettext("Step-by-step guide, published with how-to structured data")
 
   defp block_description("claim"), do: gettext("Sourced claim with citation metadata")
   defp block_description("custom"), do: gettext("Custom block payload")
