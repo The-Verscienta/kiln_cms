@@ -8301,8 +8301,8 @@ msgstr "Notificaciones push"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
-msgid "Q&A list, fired as FAQPage structured data"
-msgstr "Lista de preguntas y respuestas, emitida como datos estructurados FAQPage"
+msgid "Q&A list, published with question-and-answer structured data"
+msgstr "Lista de preguntas y respuestas, publicada con datos estructurados de preguntas frecuentes"
 
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format
@@ -9763,8 +9763,8 @@ msgstr "Clave de configuración"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
-msgid "Several images with captions, fired as ImageGallery structured data"
-msgstr "Varias imágenes con pies de foto, publicadas como datos estructurados ImageGallery"
+msgid "Several images with captions, published with image-gallery structured data"
+msgstr "Varias imágenes con pies de foto, publicadas con datos estructurados de galería de imágenes"
 
 #: lib/kiln_cms_web/live/token_preview_live.ex
 #, elixir-autogen, elixir-format
@@ -10211,8 +10211,8 @@ msgstr "Etiqueta del paso (opcional)"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
-msgid "Step-by-step guide, fired as HowTo structured data"
-msgstr "Guía paso a paso, emitida como datos estructurados HowTo"
+msgid "Step-by-step guide, published with how-to structured data"
+msgstr "Guía paso a paso, publicada con datos estructurados de instrucciones"
 
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
 #: lib/kiln_cms_web/live/setup_live.ex
@@ -10738,8 +10738,8 @@ msgstr "Ese plan no está disponible."
 
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #, elixir-autogen, elixir-format
-msgid "That post hasn't been fired yet — republish it and retry."
-msgstr "Esa entrada aún no se ha renderizado: vuelva a publicarla e inténtelo de nuevo."
+msgid "That post hasn't finished publishing yet — republish it and retry."
+msgstr "Esa entrada aún no ha terminado de publicarse: vuelva a publicarla e inténtelo de nuevo."
 
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #, elixir-autogen, elixir-format
