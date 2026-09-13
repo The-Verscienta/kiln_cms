@@ -203,7 +203,7 @@ defmodule KilnCMSWeb.NewsletterLive do
   defp send_error(:not_published), do: gettext("Only published posts can be sent.")
 
   defp send_error(:not_fired),
-    do: gettext("That post hasn't been fired yet — republish it and retry.")
+    do: gettext("That post hasn't finished publishing yet — republish it and retry.")
 
   defp send_error(:already_sent),
     do: gettext("A campaign for this publish revision was already sent.")
