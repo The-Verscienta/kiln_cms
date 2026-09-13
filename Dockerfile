@@ -53,6 +53,12 @@ RUN mix local.hex --force && mix local.rebar --force
 
 ENV MIX_ENV="prod"
 
+# The ML stack (Bumblebee/Nx/EXLA) is opt-in (#1321): `--build-arg KILN_ML=1`
+# builds it into the image; left empty the release is the lean tree and semantic
+# search degrades as it does in any build without the stack.
+ARG KILN_ML=""
+ENV KILN_ML=${KILN_ML}
+
 COPY mix.exs mix.lock ./
 # mix.exs requires config/ml_flag.exs (which requires strict_test_flag.exs) to
 # decide its dep list (#1321), so both have
@@ -91,9 +97,14 @@ COPY config/config.exs config/${MIX_ENV}.exs config/
 # struct usage; other unlisted deps like jason/progress_bar/castore are only
 # called as plain functions, which just warn under this scheme — see the
 # Jason warnings on `safetensors` below — not hard-fail.)
-RUN ERL_FLAGS="+S 2:2" mix deps.compile \
+#
+# Only when the stack is in the tree: without KILN_ML, mix.exs leaves these deps
+# out and `mix deps.compile <name>` on an absent dep is an error.
+RUN if [ -d deps/bumblebee ]; then \
+  ERL_FLAGS="+S 2:2" mix deps.compile \
   complex nx nx_image nx_signal polaris axon safetensors unpickler \
-  rustler_precompiled unzip tokenizers bumblebee
+  rustler_precompiled unzip tokenizers bumblebee; \
+  fi
 RUN ERL_FLAGS="+S 2:2" mix deps.compile
 
 COPY priv priv
