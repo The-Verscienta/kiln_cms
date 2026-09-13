@@ -27,6 +27,25 @@ migration, a rewritten column, a dropped config key).
 
 ## [Unreleased]
 
+### Added
+
+- **`docs/overlay-contract.md` — what a downstream overlay may rely on across
+  releases.** The semver table says a major bump means "the overlay contract
+  broke", but nothing said which surfaces that covers. This one does: a table
+  of covered surfaces (the `KilnCMS.CMS.Content` options and injected hooks,
+  the `Kiln.Plugin` callbacks, the block DSL and its `_type`/`_version`
+  attributes, the extension behaviours, the config keys, the `PROJECT` build
+  arg and `priv/` merge conventions, and the `public-*` CSS hooks), a matching
+  list of what is *not* covered and may change in a patch, the three things a
+  minor may still do that cost an overlay work — including the two production
+  incidents the `overlay_drift` job exists to prevent (#452/#459, #488/#504) —
+  the additive-first deprecation path, four CI commands a downstream repo
+  should run, and the soft spots stated outright: the block upcast path has
+  never run a real migration, eager backfill is unwired, `to_markdown/1` is
+  probed rather than declared, and the hand-rolled `@behaviour` path breaks on
+  callback additions. Linked from `projects/README.md` (which keeps the
+  mechanics) and the getting-started guide router (#1328).
+
 ### Fixed
 
 - **A `.md` file that opens with an HTML comment keeps its title.** A license
@@ -36,6 +55,16 @@ migration, a rewritten column, a dropped config key).
   title: the import arrived untitled *and* with the heading still in the body,
   which then printed the name twice.
 
+- **Links to a `README.md` from a guide pointed at the wrong README.** ExDoc
+  resolves a relative link between extras by basename alone, taking whichever
+  extra with that basename was registered last — so `[Overview](../README.md)`
+  in `docs/getting-started.md`, and ten links like it, rendered in the published
+  docs as links to the Elixir client's README. `mix docs --warnings-as-errors`
+  warns only when a basename is missing entirely, never when it resolves to the
+  wrong page, so the docs job was green throughout. Every link to a README is
+  now its full github.com URL, correct in both renderings, and
+  `test/kiln_cms/docs/extras_links_test.exs` fails the build if a relative link
+  between extras renders as a link to a different file than the one it names.
 - **Both password forms check the confirmation as you type.** On `/register`
   and on the new-password page behind a reset link, the two password boxes
   disagreeing was held back until submit — which on registration also clears the
