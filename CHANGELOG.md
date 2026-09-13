@@ -103,6 +103,16 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **An HTML comment in imported Markdown is no longer published as prose.**
+  `<!-- a note to whoever edits this file -->` standing on its own between
+  paragraphs came through `KilnCMS.Markdown` as a visible paragraph — earmark
+  hands a block comment back tagged with the atom `:comment`, which matched
+  none of the renderer's tag lists and fell through to the clause that keeps a
+  node's text. Affected `.md` import, Markdown pasted into a rich-text block,
+  and the `body_markdown` write argument. A comment written mid-sentence was
+  already dropped by the sanitizer, and one inside a fenced code block is the
+  example, so it still survives.
+
 - **Links to a `README.md` from a guide pointed at the wrong README.** ExDoc
   resolves a relative link between extras by basename alone, taking whichever
   extra with that basename was registered last — so `[Overview](../README.md)`

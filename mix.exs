@@ -591,8 +591,9 @@ defmodule KilnCMS.MixProject do
       # Elixir — the one ex_doc already uses, now needed at runtime. Not
       # `earmark`: that package is retired on Hex, carries a stored-XSS advisory
       # in its HTML renderer, and would fail `mix deps.audit`. Its AST is
-      # rendered through Floki (which escapes) instead, and the HTML is never
-      # trusted even then — see `KilnCMS.Markdown`.
+      # rendered to HTML by `KilnCMS.Markdown` itself, from a closed tag list
+      # with every text run and attribute escaped, and the result is sanitized
+      # on the way into storage even then — see that module.
       {:earmark_parser, "~> 1.4"},
       # Fire-time syntax highlighting for rich-text code blocks (#503). Each
       # lexer is its own OTP app that registers language names with
