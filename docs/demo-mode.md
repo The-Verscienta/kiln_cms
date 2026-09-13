@@ -6,7 +6,7 @@ account, and that returns to a known-good state on a schedule. It is how
 
 Demo mode is **hard off by default**. It is enabled by one variable, and even
 then it refuses to run against anything that doesn't look like a demo (see
-[the guard rails](#guard-rails)). The reset drops every table in the database it
+[the guard rails](#4-guard-rails)). The reset drops every table in the database it
 points at, so it has to be *unable* to run anywhere else, not merely configured
 not to.
 
@@ -30,9 +30,9 @@ with these differences.
    images must still exist after every image upgrade. The Local adapter writes
    inside the release (`/app/lib/kiln_cms-<version>/priv/uploads`), a path that
    changes with each version, so prefer object storage with **a bucket of the
-   demo's own** — never production's (see [Media](#media)).
-5. **Set the demo variables** (full rows in
-   [`environment-variables.md`](environment-variables.md#optional--demo-mode)):
+   demo's own** — never production's (see [Media](#3-media)).
+5. **Set the demo variables** (full rows under *Optional — demo mode* in
+   [`environment-variables.md`](environment-variables.md)):
 
    ```bash
    KILN_DEMO_RESET=confirm          # the sentinel — `true` does NOT enable it
@@ -42,7 +42,7 @@ with these differences.
    Leave the outbound integrations unset: no `MAIL_MODE`/`SMTP_*` (mail is inert
    anyway), no LLM provider keys, no `KILN_VAPID_*`, no Unsplash key. Visitors
    are strangers, and each of those spends your money or sends in your name.
-6. **Boot it, sign in as the admin** ([first admin](deploy.md#first-admin--bootstrap)),
+6. **Boot it, sign in as the admin** (*First admin — bootstrap* in [`deploy.md`](deploy.md)),
    create the shared account with role **editor**, and curate the demo
    content: pages, media, a few drafts worth editing.
 7. **Capture the golden snapshot** from inside the running container:
@@ -206,7 +206,7 @@ A public demo lets anyone trigger whatever a visitor can reach, so:
   environment keys. Leave them out of the golden snapshot and the demo's
   environment. The shared account is an editor and can't configure them.
 
-### 7. The shared account's credentials
+### 7. Credentials for the shared account
 
 Every visitor signs in as the same account, so a visitor who changed its
 password, or turned on two-factor with an authenticator only they hold, would
@@ -257,7 +257,7 @@ it forward. Recapture when you want the demo content itself to change.
 ## Known limits
 
 - **The shared account is shared.** What would lock other visitors out is
-  refused ([its credentials are fixed](#7-the-shared-accounts-credentials)),
+  refused ([its credentials are fixed](#7-credentials-for-the-shared-account)),
   but the rest of what it can change about itself is anyone's until the next
   reset: its display name (the byline on content it publishes) and its
   notification preferences (inert, since mail is).
@@ -270,7 +270,7 @@ it forward. Recapture when you want the demo content itself to change.
 
 ## Cross-references
 
-- [`environment-variables.md`](environment-variables.md#optional--demo-mode):
+- [`environment-variables.md`](environment-variables.md), *Optional — demo mode*:
   `KILN_DEMO_RESET`, `KILN_DEMO_RESET_CRON`, `KILN_DEMO_GOLDEN_PATH`.
 - [`staging-environments.md`](staging-environments.md): the other destructive,
   guarded operation, whose conventions this follows.

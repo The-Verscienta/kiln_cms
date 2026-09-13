@@ -164,6 +164,18 @@ between extras renders as a link to a different file than the one it names; the
 fix is the full URL, never reordering `extras:`, which only moves which of the
 colliding links is wrong.
 
+**A `#fragment` link must land in both renderings.** ExDoc and github.com
+slug headings differently: GitHub keeps a hyphen for each space around dropped
+punctuation (`## Storage & CDN` → `storage--cdn`) where ExDoc collapses the run
+(`storage-cdn`), an apostrophe or slash splits the word in ExDoc and not on
+GitHub (`What's` → `what-s` vs `whats`), and ExDoc gives ids only to `##` and
+`###` headings. `--warnings-as-errors` never looks at fragments. The same test
+fails when a fragment between extras is missing from either slug set. Fix it by
+linking the file without a fragment and naming the section in the sentence
+("see *Storage & CDN* in …"), or — once you have checked that nothing outside
+the docs uses the old anchor — by rewording the heading so both slugs agree
+(`## Storage and CDN`).
+
 **Plans and spikes carry a `Status:` line.** Every `docs/*-plan.md` and
 `docs/*-spike.md` states its status in its first lines — `Status: shipped`,
 `Status: design only`, `Status: historical snapshot (date)` — and a test

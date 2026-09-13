@@ -121,7 +121,7 @@ search-ranking report, D2/P3). Junk still returns nothing: with no lexical hit
 every fused hit is semantic-only, and every one is over the floor.
 
 **Measuring it.** Use the golden set `mix kiln.search.eval` scores
-([search-roadmap.md §11](search-roadmap.md#11-ranking-eval-harness)) — rows of
+([search-roadmap.md](search-roadmap.md) §11, *Ranking eval harness*) — rows of
 `query`, `expected` slugs, `class`, and optionally `type` (give one when the
 slug exists in more than one type) and `locale`; a `junk` row expects nothing
 — covering the classes the floor has to serve, then:
@@ -208,7 +208,7 @@ out under facet filters.
   the same question. `Search.global/2` takes `rerank: true | false` to carry a
   caller's verdict down, and `hybrid/3`'s `rerank: true` is the whole gate; the
   model loads at boot when either switch is on. Reranking fixes ordering, not
-  recall, and is CPU inference — see [rag.md](rag.md#reranking-asks-sources)
+  recall, and is CPU inference — see [rag.md](rag.md#reranking-ask-sources)
   for the report's two caveats before turning either on.
 
 ## Recall is approximate, and filters make it worse (#998)

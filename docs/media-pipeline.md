@@ -531,7 +531,7 @@ non-`:public` audience — from the media library's item detail panel —
   AWS credentials read directly — it needs no public-read config, no CDN, and
   no `S3_PUBLIC_BASE_URL` equivalent. **Not configuring it refuses gating
   outright** rather than silently leaving the blob in the public bucket: the
-  public bucket is public at the *bucket* level (see "Production storage &
+  public bucket is public at the *bucket* level (see "Production storage and
   CDN" below), so an object sitting there is reachable at its plain URL
   regardless of what the app ever links to — gating can't be faked on top of
   that.
@@ -656,7 +656,7 @@ relocation; and the stream route chunks its responses as described above. The
 one deliberate exception is `GET /media/:id/download`, which is a whole-file
 response by definition — keep the document caps in mind if you raise them.
 
-## Production storage & CDN
+## Production storage and CDN
 
 Development uses the Local adapter (`priv/uploads`, served by the app's own
 `Plug.Static` mount). Production should serve media from object storage with a
@@ -666,7 +666,8 @@ Switch adapters by setting `S3_BUCKET`; `S3_PUBLIC_BASE_URL` then becomes
 required (the app refuses to boot without it) and is the **CDN hostname** —
 every media URL the CMS emits, original and variant alike, is that base plus
 the storage key. Non-AWS stores also need `S3_ENDPOINT_HOST`. Full table:
-[`environment-variables.md`](environment-variables.md#optional--object-storage-s3-compatible).
+*Optional — object storage (S3-compatible)* in
+[`environment-variables.md`](environment-variables.md).
 
 ### Caching contract
 

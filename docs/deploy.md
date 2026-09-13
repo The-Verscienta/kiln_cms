@@ -26,7 +26,7 @@ Everything else in this guide is optional.
 | Pool sizing, Oban queues, load testing? | [`performance.md`](performance.md) |
 | A throwaway copy of production for rehearsal? | [`staging-environments.md`](staging-environments.md) |
 | A public "try the editor" instance that resets itself on a schedule? | [`demo-mode.md`](demo-mode.md) — its own app and database; hard off unless `KILN_DEMO_RESET=confirm` |
-| Media on object storage with a CDN? | [`media-pipeline.md`](media-pipeline.md#production-storage--cdn) |
+| Media on object storage with a CDN? | [`media-pipeline.md`](media-pipeline.md#production-storage-and-cdn) |
 | Typo-tolerant search? | [`meilisearch.md`](meilisearch.md) |
 
 ## The short version
@@ -79,8 +79,9 @@ Two more that a real deployment almost always wants:
   collapses into one counter for the entire internet and the per-IP
   brute-force protection on `/sign-in` stops being per-IP. Nothing errors —
   the app logs a warning once. Leave it unset **only** when the app is
-  internet-facing directly. Details and the private-range caveat:
-  [`environment-variables.md`](environment-variables.md#optional--server--networking).
+  internet-facing directly. Details and the private-range caveat are under
+  *Optional — server & networking* in
+  [`environment-variables.md`](environment-variables.md).
 
 Generate the two secrets once, store them in your secret manager, and never
 regenerate `SECRET_KEY_BASE` on an existing deployment.
@@ -368,7 +369,7 @@ behind a profile so you can enable exactly what you turned on:
 
 | Service | Enable in the app by | Compose profile | Notes |
 |---------|----------------------|-----------------|-------|
-| **Object storage** (S3, R2, B2, Wasabi, MinIO) | `S3_BUCKET` + `S3_PUBLIC_BASE_URL` + `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`; `S3_ENDPOINT_HOST` for anything non-AWS | `storage` (MinIO) | **Recommended for any Docker deployment.** The Local adapter writes under the release's own `priv/uploads` (`/app/lib/kiln_cms-<version>/priv/uploads` in the image), a path that changes with every version bump, so persisting it across image upgrades means re-mounting a volume per release. Object storage sidesteps that and lets a CDN serve the bytes. [`media-pipeline.md`](media-pipeline.md#production-storage--cdn) is the guide; the CDN hostname goes in `CSP_IMG_SRC`. |
+| **Object storage** (S3, R2, B2, Wasabi, MinIO) | `S3_BUCKET` + `S3_PUBLIC_BASE_URL` + `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`; `S3_ENDPOINT_HOST` for anything non-AWS | `storage` (MinIO) | **Recommended for any Docker deployment.** The Local adapter writes under the release's own `priv/uploads` (`/app/lib/kiln_cms-<version>/priv/uploads` in the image), a path that changes with every version bump, so persisting it across image upgrades means re-mounting a volume per release. Object storage sidesteps that and lets a CDN serve the bytes. [`media-pipeline.md`](media-pipeline.md#production-storage-and-cdn) is the guide; the CDN hostname goes in `CSP_IMG_SRC`. |
 | **Meilisearch** (typo-tolerant, faceted search) | `MEILI_URL` (+ `MEILI_MASTER_KEY`, `MEILI_INDEX`) — then backfill the index once from the running release: `bin/kiln_cms rpc 'KilnCMS.Search.Meilisearch.reindex_all()'` (`mix kiln.meili.reindex` is the same thing from a checkout) | `search` | Postgres full-text search is the default and stays available. Run Meilisearch with `MEILI_ENV=production` and a real master key (16+ bytes) — it refuses to start otherwise. [`meilisearch.md`](meilisearch.md). |
 | **Dragonfly / Redis** (shared cache) | Nothing yet — see note | `cache` | Kiln's caches are in-process by decision (D2: minimal ops). **Nothing in the app reads a Redis/Dragonfly URL** — a shared tier-2 cache is a documented intention (`KilnCMS.Firing.Cache`), not a setting you can point at this service. Cross-node cache busts already travel over native PubSub. The profile is kept for parity with the dev compose file; on a single node it does nothing for you. Don't run it expecting a speedup. |
 
