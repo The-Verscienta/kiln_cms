@@ -100,7 +100,7 @@ choice below follows from them.
   allow-listed category *in the web layer*; scheme, path, query and fragment are
   discarded before anything crosses into `KilnCMS.Analytics`.
 - **Aggregate funnels only.** Step counts, not followed journeys — see
-  [Funnels](#2-funnels).
+  *2. Funnels — definitions only, counts derived* below.
 
 Consequence, stated honestly: KilnCMS **cannot** report unique visitors, bounce
 rate, session duration, or an individual's path. Those metrics require visitor

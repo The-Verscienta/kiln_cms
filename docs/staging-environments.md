@@ -52,7 +52,7 @@ is PII-free using the same code path production erasure uses. Nothing new decide
 3. **Scrub** — remove personal data and outbound secrets (below). **Do this before you
    expose the environment.**
 4. **Serve** — start a Kiln instance with `DATABASE_URL` pointing at the clone. Keep
-   outbound integrations off (they are off by default — see [What's already safe](#whats-already-safe-by-default)).
+   outbound integrations off (they are off by default — see *What's already safe by default* below).
 5. **Tear down** — drop the throwaway database. Nothing else persists.
 
 ## The scrub
@@ -83,7 +83,7 @@ anonymized and re-purges empty tables cheaply.
 > production — can never terminate a real customer's billing. The corollary is
 > that erasing a real member in **production** doesn't cancel their subscription
 > either; do that in the provider's dashboard. See
-> [data flows](data-flows.md#erasure-gdpr-art-17--anonymization).
+> *Erasure (GDPR Art. 17) — anonymization* in [data flows](data-flows.md).
 
 ### Preview tokens need no scrub
 

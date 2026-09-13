@@ -4,7 +4,7 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
 
   `authorize?: false` skips *every* policy on the resource — including the
   ones a later PR adds, and including any policy declared below a `bypass`
-  (`docs/policy-matrix.md`, "Policy bypasses"). In a row-based multi-tenant
+  (`docs/policy-matrix.md`, "The system actor"). In a row-based multi-tenant
   system that makes each bypass a small piece of the authorization surface
   that no policy block documents. #1309 counted 563 of them; the ones that
   matter most are the ones on request paths, where the caller is a browser or
