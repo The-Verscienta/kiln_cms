@@ -59,7 +59,28 @@ people to pass the flag reflexively.
    git push origin main --tags
    ```
 
-5. **Publish a GitHub release** for the tag. This is not optional: `mix
+5. **Watch the release image publish.** Pushing the tag starts
+   [`.github/workflows/release.yml`](https://github.com/The-Verscienta/kiln_cms/blob/main/.github/workflows/release.yml),
+   which builds the release image and pushes it to
+   `ghcr.io/the-verscienta/kiln_cms` as both `X.Y.Z` and `latest`, stamped with
+   the commit and build date. Nothing to run by hand; it authenticates as
+   `GITHUB_TOKEN`.
+
+   The tag build is usually cold — the version bump in `mix.exs` invalidates
+   the dep layer — so budget most of an hour, and check the run before
+   announcing the release.
+
+   **One-time, the first time this ever runs:** a new GHCR package is created
+   **private**. Open the package (repository → Packages → `kiln_cms`) →
+   *Package settings* → **Change visibility → Public**, and link it to this
+   repository while you are there. Until that is done `docker pull` fails with
+   a 403 for everyone but the maintainer, and the workflow itself reports
+   success — it pushed fine.
+
+   Only `vX.Y.Z` tags trigger it. A scratch or rescue tag publishes nothing,
+   which is the same rule `mix kiln.update` applies to tags it cannot parse.
+
+6. **Publish a GitHub release** for the tag. This is not optional: `mix
    kiln.update` reads git tags, but the admin update page (`Kiln.Updates`)
    reads the *releases* API, because a running container has no checkout. A
    tag with no release leaves every deployed instance reporting "up to date"
@@ -67,7 +88,7 @@ people to pass the flag reflexively.
 
    Paste the changelog section in as the release body.
 
-6. **Verify** from a project checkout:
+7. **Verify** from a project checkout:
 
    ```bash
    cd <your kiln checkout> && git fetch --tags && mix kiln.update --check
@@ -76,7 +97,8 @@ people to pass the flag reflexively.
 ## Updating a project to a release
 
 From inside the project's pinned Kiln checkout — `kiln/upstream`, `upstream/`,
-wherever that project puts it (see [`projects/README.md`](../projects/README.md)
+wherever that project puts it (see
+[`projects/README.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/projects/README.md)
 for the overlay layout). The task refuses to run outside a Kiln checkout, so
 pointing it at the project repo itself is an error, not a wrong answer:
 
@@ -97,8 +119,13 @@ project has drifted behind upstream.
 
 ## Build stamping
 
-Build images with the commit and date recorded, so a deployed instance can say
-exactly what it is on `/editor/system`:
+The release workflow already does this for the published core image — this is
+the recipe for building one yourself: locally, or for an overlay (which is the
+only way to get a `PROJECT=` image, since the published one is deliberately
+project-agnostic).
+
+Build with the commit and date recorded, so a deployed instance can say exactly
+what it is on `/editor/system`:
 
 ```bash
 docker build \

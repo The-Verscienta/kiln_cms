@@ -89,12 +89,19 @@ defmodule KilnCMS.MixProject do
       # HTML only. Nothing consumes the EPUB, and building it doubles both the
       # run time and every warning the docs gate reports.
       formatters: ["html"],
-      # Docs are built from `main`, which runs ahead of the latest release tag
-      # (`v0.5.0`…). ExDoc's default `source_ref` of "v#{version}" would link
-      # "View Source" to the tagged file, which can lack the function being
-      # documented or sit at a different line. Point at the branch the docs
-      # were built from instead.
-      source_ref: "main",
+      # "View Source" links are only useful if they point at an immutable ref.
+      # A branch is not one: links built from `main` keep resolving as the
+      # branch moves, so a published build eventually points at a shifted line
+      # or a function that no longer exists. Point at this version's release
+      # tag — `@version` is bumped to match the tag in the release commit
+      # (see `docs/releasing.md`), so a docs build of a release resolves to
+      # exactly the code it documents.
+      #
+      # A build from an untagged mid-cycle `main` is the case the tag cannot
+      # cover: `@version` there still names the *previous* release, whose tag
+      # predates the code being documented. Pin such a build to its own commit
+      # with `DOCS_SOURCE_REF=$(git rev-parse HEAD) mix docs`.
+      source_ref: System.get_env("DOCS_SOURCE_REF", "v#{@version}"),
       nest_modules_by_prefix: [KilnCMS, KilnCMSWeb, Kiln],
       # Two exclusions:
       #
@@ -181,6 +188,30 @@ defmodule KilnCMS.MixProject do
   # `title:` is only overridden where a document's H1 carries internal phase
   # numbering that would otherwise read as part of the feature's name.
   # `filename:` is required wherever two extras share a basename (README).
+  #
+  # **A shared basename makes relative links to those files unwritable.** ExDoc
+  # resolves a relative link from one extra to another by basename and nothing
+  # else — `ExDoc.Formatter.extra_paths/1` is a `Map.put(acc,
+  # Path.basename(source_path), id)` folded over this list in order, and
+  # `ExDoc.Autolink.build_extra_link/2` looks a link up as
+  # `config.extras[Path.basename(path)]`. The directories in the link are never
+  # consulted, and `filename:` renames the *output* page without affecting this
+  # lookup. So every relative link to any of the four README extras below
+  # resolved to whichever is registered last — ten links written as
+  # `../README.md`, `../projects/README.md` or `../examples/README.md` rendered
+  # as links to the Elixir client's page.
+  #
+  # `--warnings-as-errors` does not catch it: ExDoc warns when a basename is
+  # absent from that map, not when it is present and wrong. The docs job stayed
+  # green for as long as the links were wrong.
+  #
+  # Link a README by its full
+  # `https://github.com/The-Verscienta/kiln_cms/blob/main/…` URL instead —
+  # correct both on github.com and in the generated docs.
+  # `test/kiln_cms/docs/extras_links_test.exs` fails the build if a relative link
+  # between extras renders as a link to a different file than it names, for
+  # README and for any basename that collides later. Reordering this list is not
+  # a fix: it only changes which of the colliding links is wrong.
   defp extras do
     [
       # Getting started
@@ -216,6 +247,7 @@ defmodule KilnCMS.MixProject do
       "docs/social-posting.md": [],
       "docs/point-in-time.md": [],
       # Modeling & extending
+      "docs/overlay-contract.md": [title: "The overlay contract"],
       "docs/extending-content.md": [],
       "docs/events.md": [title: "Events"],
       "docs/design-language.md": [],
@@ -267,6 +299,7 @@ defmodule KilnCMS.MixProject do
       "docs/content-experiments-plan.md": [],
       "docs/mobile-admin-spike.md": [],
       "docs/plugin-system-plan.md": [],
+      "docs/plugin-registry-plan.md": [],
       "docs/search-roadmap.md": [],
       "docs/search-tsvector-migration.md": [],
       "docs/semantic-search-plan.md": [],
@@ -335,6 +368,7 @@ defmodule KilnCMS.MixProject do
         "docs/chain-fold-order.md"
       ],
       "Modeling & extending": [
+        "docs/overlay-contract.md",
         "docs/extending-content.md",
         "docs/events.md",
         "docs/design-language.md",
@@ -388,6 +422,7 @@ defmodule KilnCMS.MixProject do
         "docs/content-experiments-plan.md",
         "docs/mobile-admin-spike.md",
         "docs/plugin-system-plan.md",
+        "docs/plugin-registry-plan.md",
         "docs/search-roadmap.md",
         "docs/search-tsvector-migration.md",
         "docs/semantic-search-plan.md",
@@ -556,8 +591,9 @@ defmodule KilnCMS.MixProject do
       # Elixir — the one ex_doc already uses, now needed at runtime. Not
       # `earmark`: that package is retired on Hex, carries a stored-XSS advisory
       # in its HTML renderer, and would fail `mix deps.audit`. Its AST is
-      # rendered through Floki (which escapes) instead, and the HTML is never
-      # trusted even then — see `KilnCMS.Markdown`.
+      # rendered to HTML by `KilnCMS.Markdown` itself, from a closed tag list
+      # with every text run and attribute escaped, and the result is sanitized
+      # on the way into storage even then — see that module.
       {:earmark_parser, "~> 1.4"},
       # Fire-time syntax highlighting for rich-text code blocks (#503). Each
       # lexer is its own OTP app that registers language names with

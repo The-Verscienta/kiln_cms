@@ -1,0 +1,138 @@
+# Publishes the release container image to GHCR when a version tag is pushed
+# (#1328). `docs/releasing.md` is the surrounding checklist; this is the one
+# step in it that is no longer manual.
+#
+# Why its own workflow rather than a job in `ci.yml`: `ci.yml` triggers on
+# pushes to `main`, pull requests and the merge queue, none of which a tag is.
+# Adding `push: tags:` there would run the whole suite — six test shards,
+# dialyzer, the coverage merge — a second time against the exact commit that
+# already passed them as part of the release PR, and the image job in `ci.yml`
+# deliberately never pushes (see its comment). Publishing is a different event
+# with a different permission set, so it gets its own file.
+name: Release
+
+on:
+  push:
+    # Release tags only. `docs/releasing.md` cuts them as `vX.Y.Z`, and
+    # `mix kiln.update` discards any tag it cannot parse as a version — so a
+    # non-release tag (a rescue tag, a scratch marker) must not produce an
+    # image either. `v*.*.*` requires all three components; `v*` would match
+    # things like `v-wip`.
+    tags: ["v*.*.*"]
+
+# A second push of the same tag would otherwise race itself for the same
+# registry tag. Not cancel-in-progress: a half-pushed manifest is worse than a
+# queued run.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  # Push to ghcr.io as GITHUB_TOKEN. No PAT, no org secret: the token is
+  # minted per run and expires with it.
+  packages: write
+
+jobs:
+  image:
+    name: Publish release image to GHCR
+    runs-on: ubuntu-latest
+
+    # Same budget as `ci.yml`'s build-only image job, plus headroom for the
+    # push. A tag build is usually cold: GHA caches are ref-scoped, and a tag
+    # ref can read the default branch's scope but the release commit is the
+    # one that just bumped `mix.exs` — which invalidates the dep layer
+    # (`COPY mix.exs mix.lock` precedes `mix deps.compile`), so the expensive
+    # part recompiles on essentially every release.
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Stamp the build
+        # `date` at build time, not `github.event.*`: the only field on the
+        # push event that looks like this (`repository.updated_at`) is when the
+        # repository record last changed, which is not when this image was
+        # built. `Kiln.Version` surfaces whatever lands here on
+        # /editor/system, so a plausible-but-wrong timestamp is worse than
+        # none. Format matches `docs/releasing.md`'s manual recipe.
+        run: echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - name: Derive image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          # Lowercase, because a registry reference must be: the repository is
+          # `The-Verscienta/kiln_cms`, and `ghcr.io/The-Verscienta/...` is not
+          # a valid name.
+          images: ghcr.io/the-verscienta/kiln_cms
+          # The exact version and `latest`, and nothing that floats within a
+          # line. A `0.8` tag would imply a maintained 0.8.x line, and
+          # `.github/SECURITY.md` says plainly that there is none — fixes land
+          # on `main` and releases move forward only. `{{major}}` is worse
+          # still pre-1.0: every release so far would be `0`.
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=latest
+          labels: |
+            org.opencontainers.image.version=${{ github.ref_name }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # linux/amd64 only, deliberately. The Dockerfile compiles the whole
+          # Ash + Nx/Axon/Bumblebee dep tree and caps the BEAM to two
+          # schedulers to survive a small host's RAM; a second arch built
+          # under QEMU emulation is hours, not minutes, and `tokenizers`
+          # fetches a precompiled NIF per target. An arm64 image is a separate
+          # decision that needs an arm64 runner, not a `platforms:` line here.
+          platforms: linux/amd64
+          # `Kiln.Version` reports these on /editor/system — how an operator
+          # identifies a running container. The Dockerfile's own ARGs default
+          # them to empty, so omitting them here would publish an image that
+          # cannot name its own commit.
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            BUILD_DATE=${{ env.BUILD_DATE }}
+          # No PROJECT build arg: the published image is the project-agnostic
+          # core, which is the only thing that is anyone else's to pull. A
+          # downstream overlay builds its own image with
+          # `--build-arg PROJECT=<name>` (see the Dockerfile).
+          #
+          # Read main's cache, never write: a release is a one-off, and
+          # `mode=max` on the full dep tree would evict the entries the PR
+          # jobs live on (same reasoning as `ci.yml`'s image job).
+          cache-from: type=gha
+
+      - name: Summarize
+        # Both values reach the script through `env`, not through `${{ }}`
+        # interpolated into the shell. `github.ref_name` is attacker-shaped in
+        # the general case — it is whatever the pushed ref is called — and
+        # `steps.meta.outputs.tags` is derived from it, so interpolating either
+        # one into a `run:` body is the classic Actions script-injection shape
+        # even where only maintainers can push tags.
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          REF: ${{ github.ref_name }}
+        run: |
+          {
+            echo "### Published"
+            echo
+            printf '%s\n' "$TAGS" | sed 's/^/- `/; s/$/`/'
+            echo
+            echo "Pull: \`docker pull ghcr.io/the-verscienta/kiln_cms:$REF\`"
+          } >> "$GITHUB_STEP_SUMMARY"
