@@ -61,6 +61,13 @@ defmodule KilnCMS.Firing.Sweep do
   end
 
   defp sweep_org(type, resource, org_id) do
+    # Bypass kept, deliberately (#1402): converting this to the firing system
+    # actor would mean admitting `Checks.SystemActor` on the `Content` read
+    # policy — a standing grant over every document on every site, drafts
+    # included, to every system caller. That is much wider than this one call.
+    # What bounds it instead is the query: one org's tenant, `state ==
+    # :published`, and a select of `[:id, :org_id]`, so nothing but ids leaves
+    # here and they leave as Oban job args.
     resource
     |> Ash.Query.filter(state == :published)
     |> Ash.Query.select([:id, :org_id])
@@ -103,6 +110,8 @@ defmodule KilnCMS.Firing.Sweep do
   end
 
   defp sweep_dynamic_type(org_id, type_definition_id) do
+    # Same bypass, same reason and same bounds as `sweep_org/3` above, one
+    # dynamic type narrower.
     KilnCMS.CMS.Entry
     |> Ash.Query.filter(state == :published and type_definition_id == ^type_definition_id)
     |> Ash.Query.select([:id, :org_id])

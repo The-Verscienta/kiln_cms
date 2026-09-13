@@ -52,8 +52,10 @@ defmodule KilnCMS.Firing.SchemaOrg do
   """
   @spec resolve(struct()) :: String.t()
   def resolve(%{type_definition_id: id} = document) when not is_nil(id) do
+    # Firing's system actor (#1402) — `TypeDefinition` admits it for reads;
+    # only `schema_org_type` is used. Tenant-strict, as the docstring says.
     case KilnCMS.CMS.get_type_definition(id,
-           authorize?: false,
+           actor: KilnCMS.SystemActor.new(:firing),
            tenant: Map.get(document, :org_id)
          ) do
       {:ok, %{schema_org_type: type}} -> normalize(type)

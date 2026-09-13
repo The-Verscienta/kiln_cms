@@ -57,8 +57,15 @@ defmodule KilnCMS.Search.Related do
   alias KilnCMS.Search
   alias KilnCMS.Search.BlockIndexer
   alias KilnCMS.Search.VectorCache
+  alias KilnCMS.SystemActor
 
   require Ash.Query
+
+  # Every embedding table this module touches is an internal index with no
+  # caller-facing write path; `BlockEmbedding` and `TagEmbedding` admit this
+  # actor by name (#1402). Caller-facing authorization happens when the
+  # matching documents and tags are hydrated, not here.
+  defp system_actor, do: SystemActor.new(:search)
 
   @typedoc """
   A scored neighbouring document. `path` is the canonical *public page* path
@@ -275,7 +282,11 @@ defmodule KilnCMS.Search.Related do
          centroid when is_list(centroid) <- centroid(record, budget_ctx) do
       KilnCMS.SearchIndex.nearest_block_embeddings!(
         %{vector: centroid, exclude_document_id: record.id, limit: fetch_limit * 3},
-        authorize?: false,
+        # The index reads as the search system actor (#1402), which
+        # `BlockEmbedding` admits by name. Whether the CALLER may see a
+        # neighbour is decided afterwards, by hydrating each document under
+        # their own authorization.
+        actor: system_actor(),
         tenant: record.org_id,
         load: [semantic_distance: %{query_vector: centroid}]
       )
@@ -341,7 +352,8 @@ defmodule KilnCMS.Search.Related do
     storage = KilnCMS.Firing.Engine.document_type(record)
 
     KilnCMS.SearchIndex.block_embeddings_for!(storage, record.id,
-      authorize?: false,
+      # Search system actor (#1402) — same grant as `neighbours/3`.
+      actor: system_actor(),
       tenant: record.org_id
     )
     |> Enum.map(&to_list(&1.embedding))
@@ -450,7 +462,9 @@ defmodule KilnCMS.Search.Related do
         threshold: threshold * 1.0,
         limit: limit
       },
-      authorize?: false,
+      # `TagEmbedding` admits the search system actor (#1402); only ids and
+      # distances come back, and the tags themselves are re-read below.
+      actor: system_actor(),
       tenant: org_id
     )
     |> Enum.map(fn row ->
@@ -470,7 +484,10 @@ defmodule KilnCMS.Search.Related do
     full =
       KilnCMS.CMS.Tag
       |> Ash.Query.filter(id in ^ids)
-      |> Ash.read!(authorize?: false, tenant: org_id)
+      # Taxonomy is world-readable (published content references it), so this
+      # needs no bypass and no actor at all — an actorless authorized read
+      # returns exactly the same rows (#1402).
+      |> Ash.read!(tenant: org_id)
       |> Map.new(&{&1.id, &1})
 
     Enum.map(scored, fn %{tag: %{id: id}} = entry ->
@@ -495,7 +512,8 @@ defmodule KilnCMS.Search.Related do
   defp ensure_tag_embeddings(candidates, org_id, budget_ctx) do
     stored =
       KilnCMS.SearchIndex.tag_embeddings_for!(Enum.map(candidates, & &1.id),
-        authorize?: false,
+        # Search system actor (#1402), as everywhere else in this module.
+        actor: system_actor(),
         tenant: org_id
       )
       |> Map.new(&{&1.tag_id, &1})
@@ -528,7 +546,9 @@ defmodule KilnCMS.Search.Related do
   defp store_tag_embedding(tag, vector, org_id) do
     KilnCMS.SearchIndex.upsert_tag_embedding!(
       %{tag_id: tag.id, name: tag.name, embedding: vector, embedded_at: DateTime.utc_now()},
-      authorize?: false,
+      # `TagEmbedding` has no caller-facing write path; the search system actor
+      # is the only writer, and is admitted by name (#1402).
+      actor: system_actor(),
       tenant: org_id
     )
   end
