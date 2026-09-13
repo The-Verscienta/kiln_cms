@@ -131,6 +131,13 @@ human review that a package is safe to compile in, exactly the bar core code
 clears. This keeps the security property intact: nothing is "installed" until a
 maintainer adds the dep and re-releases.
 
+**A hosted index** — that governance artifact, built out as a public catalog on
+kilncms.dev with a submission path, a compile-and-`doctor` verification
+pipeline and per-version compatibility data — is designed in
+[Plugin registry on kilncms.dev](plugin-registry-plan.md) (#1447). It changes
+nothing above: it distributes metadata and trust, never code, and is never in
+the install path.
+
 ### 2c. What's already runtime-configurable without code
 
 For the "extend a live instance *without a rebuild*" cases, Kiln already ships
@@ -172,7 +179,9 @@ rule-shaped is data an operator changes without a deploy.
   - `Kiln.Plugins.manifests/0` — the plain-data registry view;
   - `mix kiln.plugins.list` — local discovery of installed plugins.
 - **Explicitly out of scope, by design:** runtime loading of arbitrary plugin
-  code; a hosted marketplace service; screenshot/media hosting in-node.
+  code; a hosted marketplace service (since designed as a *catalog* in
+  [Plugin registry on kilncms.dev](plugin-registry-plan.md), #1447);
+  screenshot/media hosting in-node.
 - **Deferred to a future dedicated effort:** any true third-party runtime-code
   sandbox (WASM / out-of-process), per §1.
 
