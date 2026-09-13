@@ -27,6 +27,28 @@ migration, a rewritten column, a dropped config key).
 
 ## [Unreleased]
 
+### Changed
+
+- **The ML stack behind semantic search is now opt-in (`KILN_ML=1`).** A first
+  `mix setup` fetched 773 MB of dependencies, 666 MB of it `deps/exla`, to back
+  semantic search — which ships disabled. Bumblebee, Nx and EXLA now stay out of
+  the dependency tree unless `KILN_ML` is set, taking a default `deps/` to
+  102 MB and saving a one-time 110 MB archive download; `mix setup` prints one
+  line saying so.
+
+  Nothing is removed. `KilnCMS.Search.Embedder.Bumblebee` and
+  `KilnCMS.Search.Reranker.Bumblebee` still exist and return
+  `{:error, %KilnCMS.Search.ML.NotCompiledError{}}` in a lean build, so hybrid
+  search falls back to its keyword legs and every caller's existing error
+  handling covers it. A deployment that has set `semantic: true` is warned once
+  at boot that its build cannot serve it.
+
+  **Upgrading:** a deployment already running semantic search must build with
+  `KILN_ML=1` — `KILN_ML=1 mix deps.get && KILN_ML=1 mix compile` — and keep the
+  variable set for every `mix` invocation, including in its image build.
+  Nothing in the database or configuration changes. Contributors touching the
+  semantic path should read the `KILN_ML` note in `CONTRIBUTING.md`: a lean
+  build compiles a different shape of those modules.
 ### Fixed
 
 - **`mix docs` "View Source" links point at the release tag, not `main`.**

@@ -1,15 +1,16 @@
 defmodule KilnCMS.Config.ReportUsageTest do
   @moduledoc """
-  Pins that the seven post-boot configuration warnings #1126 moved onto
+  Pins that the post-boot configuration warnings #1126 moved onto
   `KilnCMS.Config.Report.warn/3` stay there.
 
-  A source-grep rather than exercising each check: five of the six
+  A source-grep rather than exercising each check: most of the
   `KilnCMS.Application` checks need boot-time conditions (`:prod` compile
   env, a second organization, an unsigned provenance chain, egress flags on
-  three separate AI features) that are awkward and slow to assemble just to
+  three separate AI features, a build compiled without the optional ML stack)
+  that are awkward and slow to assemble just to
   prove which function a private helper calls — and `KilnCMS.Config.Report`
   itself is already exercised directly (`KilnCMS.Config.ReportTest`). What
-  actually needs pinning is that nobody quietly reverts one of these seven
+  actually needs pinning is that nobody quietly reverts one of these
   call sites to a bare `Logger.warning`, which would compile clean, pass
   every other test, and simply stop reaching Sentry — exactly the silent
   regression #1126 exists to prevent. Same technique
@@ -39,6 +40,7 @@ defmodule KilnCMS.Config.ReportUsageTest do
       warn_if_seo_drafting_egresses
       warn_if_assist_egresses
       warn_if_ask_egresses
+      warn_if_semantic_without_ml
     )
 
     assert Enum.sort(Map.keys(functions)) == Enum.sort(expected),

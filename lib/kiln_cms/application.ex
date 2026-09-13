@@ -22,6 +22,7 @@ defmodule KilnCMS.Application do
     warn_if_seo_drafting_egresses()
     warn_if_assist_egresses()
     warn_if_ask_egresses()
+    warn_if_semantic_without_ml()
 
     # Ensure custom AshPhoenix form error impls (e.g. for StaleRecord) are
     # loaded so they register with the protocol and prevent unhandled errors.
@@ -475,30 +476,73 @@ defmodule KilnCMS.Application do
     end
   end
 
-  # The embedding serving is only started when semantic search is enabled with
-  # the local Bumblebee adapter — loading the model is expensive, so the default
-  # install (and any deployment using a remote embedder) skips it entirely.
+  # Another boot check of the `warn_if_*` shape, and the one that is about the
+  # *build* rather than the configuration (#1321). Semantic search needs Bumblebee and
+  # Nx compiled in, which they are only with `KILN_ML=1`; without them a
+  # `semantic: true` install starts no serving, every embed returns
+  # `{:error, %KilnCMS.Search.ML.NotCompiledError{}}`, and search quietly falls
+  # back to its keyword legs. That is a working site returning worse results —
+  # exactly the failure an operator has no way to notice — so it is worth a
+  # warning even though nothing is broken.
+  #
+  # Compiled to a no-op in an ML build rather than checked at runtime: that
+  # keeps `KilnCMS.Search.ML.available?/0` a compile-time constant everywhere,
+  # which is what lets every other call site branch in its module body.
+  if KilnCMS.Search.ML.available?() do
+    defp warn_if_semantic_without_ml, do: :ok
+  else
+    defp warn_if_semantic_without_ml do
+      if KilnCMS.Search.semantic?() do
+        KilnCMS.Config.Report.warn(
+          "semantic_without_ml",
+          "Semantic search is enabled (config :kiln_cms, KilnCMS.Search, semantic: true) but " <>
+            "this build was compiled without the optional ML stack, so no embedding serving " <>
+            "starts and every embed fails — search falls back to its keyword legs. Re-run " <>
+            "`mix deps.get && mix compile` with KILN_ML=1 to include it."
+        )
+      end
+
+      :ok
+    end
+  end
+
   # GraphQL subscription resolution batches through this out-of-band worker in
   # prod. In test it is off: AshGraphql then falls back to resolving in the
   # publishing process, which keeps reads on the test's sandbox connection.
+  #
+  # (The two sentences about the embedding serving that used to open this
+  # comment belonged to `embedding_children/0` below, and have moved there.)
   defp subscription_batcher do
     if Application.get_env(:kiln_cms, :start_subscription_batcher, true),
       do: [AshGraphql.Subscription.Batcher],
       else: []
   end
 
-  defp embedding_children do
-    if KilnCMS.Search.semantic?() and
-         KilnCMS.Search.embedder() == KilnCMS.Search.Embedder.Bumblebee do
-      [
-        {Nx.Serving,
-         serving: KilnCMS.Search.Serving.build(),
-         name: KilnCMS.Search.Serving.name(),
-         batch_timeout: 50}
-      ]
-    else
-      []
+  # The embedding serving is only started when semantic search is enabled with
+  # the local Bumblebee adapter — loading the model is expensive, so the default
+  # install (and any deployment using a remote embedder) skips it entirely.
+  #
+  # A build without the optional ML stack (#1321) has no `Nx.Serving` to name at
+  # all, so this function is compiled in one of two shapes — see
+  # `KilnCMS.Search.ML`. The lean shape starts nothing;
+  # `warn_if_semantic_without_ml/0` above is what tells an operator who did
+  # configure `semantic: true` why nothing semantic will happen.
+  if KilnCMS.Search.ML.available?() do
+    defp embedding_children do
+      if KilnCMS.Search.semantic?() and
+           KilnCMS.Search.embedder() == KilnCMS.Search.Embedder.Bumblebee do
+        [
+          {Nx.Serving,
+           serving: KilnCMS.Search.Serving.build(),
+           name: KilnCMS.Search.Serving.name(),
+           batch_timeout: 50}
+        ]
+      else
+        []
+      end
     end
+  else
+    defp embedding_children, do: []
   end
 
   # The reranker serving is only started when some scope reranks — every
@@ -506,18 +550,26 @@ defmodule KilnCMS.Application do
   # (`KilnCMS.Ask.rerank?/0`, which already folds the global switch in) — with
   # the local Bumblebee adapter (same gating as the embedder). A default
   # install enables neither and loads nothing.
-  defp reranker_children do
-    if KilnCMS.Ask.rerank?() and
-         KilnCMS.Search.reranker() == KilnCMS.Search.Reranker.Bumblebee do
-      [
-        {Nx.Serving,
-         serving: KilnCMS.Search.RerankerServing.build(),
-         name: KilnCMS.Search.RerankerServing.name(),
-         batch_timeout: 50}
-      ]
-    else
-      []
+  #
+  # Same two shapes as `embedding_children/0`, and no second warning in the lean
+  # one: reranking is a refinement of a search that is already degraded, and the
+  # embedder's warning above has already named the cause.
+  if KilnCMS.Search.ML.available?() do
+    defp reranker_children do
+      if KilnCMS.Ask.rerank?() and
+           KilnCMS.Search.reranker() == KilnCMS.Search.Reranker.Bumblebee do
+        [
+          {Nx.Serving,
+           serving: KilnCMS.Search.RerankerServing.build(),
+           name: KilnCMS.Search.RerankerServing.name(),
+           batch_timeout: 50}
+        ]
+      else
+        []
+      end
     end
+  else
+    defp reranker_children, do: []
   end
 
   # Tell Phoenix to update the endpoint configuration

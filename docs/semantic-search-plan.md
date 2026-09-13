@@ -11,9 +11,10 @@ counts/filters (`Search.facets/2`, `?facets=true`, public category filter
 bar) — see `search-roadmap.md`. **Decisions locked
 (2026-06-23):** pgvector available in production Postgres; **local Bumblebee**
 embeddings (no hosted API), model `BAAI/bge-small-en-v1.5` (384-d, CLS pooling +
-L2 norm); Bumblebee/Nx/EXLA included in the build but the serving only starts
-when `semantic: true`; in-Postgres (pgvector + HNSW) preferred over the
-Meilisearch already in `docker-compose.yml`.
+L2 norm); the serving only starts when `semantic: true`, and since #1321
+Bumblebee/Nx/EXLA are **not in the build at all** unless `KILN_ML=1` — see
+"Building with the ML stack" below; in-Postgres (pgvector + HNSW) preferred
+over the Meilisearch already in `docker-compose.yml`.
 
 ## Goal
 Add meaning-based search alongside the existing `ts_rank` keyword search
@@ -49,10 +50,45 @@ local default; an `Http` adapter (Voyage/OpenAI) stays opt-in.
   `Nx.Serving` (`Bumblebee.Text.text_embedding`) in the supervision tree **only
   when semantic search is enabled**, so default builds skip the model load.
 
-> EXLA is a heavy compile dep (included unconditionally; serving/model only when
-> enabled). If that build cost is unacceptable for the lean default, fall back to
-> the `Http` embedder as the only built-in and make Bumblebee a documented
-> opt-in dep.
+> EXLA is a heavy compile dep. This paragraph used to end "if that build cost is
+> unacceptable for the lean default, fall back to the `Http` embedder". It was
+> unacceptable — see below — and the answer taken was neither of the two offered
+> here: the deps became opt-in, the Bumblebee adapter stayed the only built-in.
+
+## Building with the ML stack (`KILN_ML=1`)
+
+Bumblebee, Nx and EXLA are **left out of the dependency tree** unless `KILN_ML`
+is set to an on-spelling (#1321). They are 671 MB of `deps/` — 773 MB with them,
+102 MB without, `deps/exla` alone accounting for 666 MB — plus a one-time 110 MB
+download of the prebuilt XLA archive, which is not a price a first `mix setup`
+should pay for a feature that ships `semantic: false`. `only: [:dev, :test]` did
+not avoid it: `mix deps.get` fetches every dependency regardless of `:only`,
+which filters compilation, not the download.
+
+The cost is disk and bandwidth rather than time: adding the whole stack to an
+otherwise-complete build measured ~46 s on an Apple Silicon laptop, of which the
+EXLA NIF was ~16 s. EXLA links against a **prebuilt** `xla_extension` archive
+and compiles only its own eight C++ files; the "~13 min" figure that used to sit
+in `mix.exs` describes building XLA itself (`XLA_BUILD=1`), which nothing here
+asks for.
+
+```bash
+KILN_ML=1 mix deps.get
+KILN_ML=1 mix compile
+```
+
+Keep the variable exported for every subsequent `mix` invocation — it decides
+the dependency tree, so a `mix test` without it compiles the other shape.
+
+**What a lean build does instead.** `KilnCMS.Search.ML.available?/0` is the
+compile-time answer, and every module on this path is compiled in one of two
+shapes around it: `KilnCMS.Search.Embedder.Bumblebee.embed/1` and
+`KilnCMS.Search.Reranker.Bumblebee.scores/2` return
+`{:error, %KilnCMS.Search.ML.NotCompiledError{}}` — the `{:error, term()}` their
+behaviours already document, which callers already treat as "no vector" —
+`KilnCMS.Application` starts no serving, and hybrid search runs its keyword,
+title, alias, block and tag legs without the semantic one. An install that has
+set `semantic: true` on a lean build is told so once at boot.
 
 ## Phase 1 — Embedding storage + pipeline
 - Custom Ash type `KilnCMS.Search.Embedding` (`storage_type` `:vector` with the
@@ -342,7 +378,10 @@ multilingual embedder with `BAAI/bge-reranker-v2-m3` via `rerank_model:`.
 ## Risks / open items
 1. pgvector in production — **confirmed available**.
 2. Local vs hosted embeddings — **local Bumblebee** chosen.
-3. EXLA build size in the default image — accept, or gate Bumblebee as opt-in.
+3. EXLA build size in the default image — **resolved (#1321): gated**. The
+   deps are opt-in behind `KILN_ML`; the Bumblebee adapter remains the only
+   built-in embedder, and a lean build reports semantic search unavailable
+   rather than losing the adapter.
 4. Meilisearch (already in compose) is the consciously-not-taken alternative.
 
 ## Cut line

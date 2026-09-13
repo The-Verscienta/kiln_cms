@@ -12,18 +12,27 @@ defmodule KilnCMS.Search.Reranker.Bumblebee do
   """
   @behaviour KilnCMS.Search.Reranker
 
-  @impl true
-  def scores(query, docs) when is_binary(query) and is_list(docs) do
-    results =
-      KilnCMS.Search.RerankerServing.name()
-      |> Nx.Serving.batched_run(Enum.map(docs, &{query, &1}))
-      |> List.wrap()
+  if KilnCMS.Search.ML.available?() do
+    @impl true
+    def scores(query, docs) when is_binary(query) and is_list(docs) do
+      results =
+        KilnCMS.Search.RerankerServing.name()
+        |> Nx.Serving.batched_run(Enum.map(docs, &{query, &1}))
+        |> List.wrap()
 
-    {:ok, Enum.map(results, &top_score/1)}
-  rescue
-    error -> {:error, error}
+      {:ok, Enum.map(results, &top_score/1)}
+    rescue
+      error -> {:error, error}
+    end
+
+    defp top_score(%{predictions: [%{score: score} | _]}), do: score
+    defp top_score(_), do: 0.0
+  else
+    # As in the embedder: `{:error, _}` is the documented shape, and
+    # `KilnCMS.Search.hybrid/3` already keeps the fused order when reranking
+    # fails.
+    @impl true
+    def scores(query, docs) when is_binary(query) and is_list(docs),
+      do: {:error, KilnCMS.Search.ML.unavailable()}
   end
-
-  defp top_score(%{predictions: [%{score: score} | _]}), do: score
-  defp top_score(_), do: 0.0
 end

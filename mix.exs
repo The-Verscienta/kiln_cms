@@ -1,3 +1,10 @@
+# The optional ML stack (#1321) is decided before anything else in this file:
+# `deps/0` below reads it to leave Bumblebee/Nx/EXLA out of the tree entirely
+# unless `KILN_ML` is on, and `config/dev.exs` + `config/test.exs` require the
+# same snippet for the same answer. See `config/ml_flag.exs` for why the flag
+# lives in a standalone `.exs` and not in `lib/`.
+Code.require_file(Path.expand("config/ml_flag.exs", __DIR__))
+
 defmodule KilnCMS.MixProject do
   use Mix.Project
 
@@ -142,6 +149,13 @@ defmodule KilnCMS.MixProject do
         # excluded from the reference by `filter_modules` above.
         "Example.Catalog",
         "Example.Plugin",
+        # Behaviour callbacks (`@impl true`, so ExDoc hides them). Both are
+        # named by `docs/semantic-search-plan.md` and `KilnCMS.Search.ML`,
+        # which have to say which functions return
+        # `%KilnCMS.Search.ML.NotCompiledError{}` in a lean build (#1321) —
+        # naming them is the point, and there is nothing to link them to.
+        "KilnCMS.Search.Embedder.Bumblebee.embed/1",
+        "KilnCMS.Search.Reranker.Bumblebee.scores/2",
         # A dependency's module, marked `@moduledoc false` upstream. Naming it
         # is correct and useful — `KilnCMS.CMS.Calculations.RelatedLinks`
         # explains a real behaviour of it — but ExDoc has nothing to link a
@@ -613,21 +627,18 @@ defmodule KilnCMS.MixProject do
       {:ex_aws, "~> 2.5"},
       {:ex_aws_s3, "~> 2.5"},
       {:sweet_xml, "~> 0.7"},
-      # Semantic search: pgvector storage + local embeddings (Bumblebee/Nx/EXLA).
-      # The model + Nx.Serving only start when semantic search is enabled in
-      # config; the deps compile regardless. See docs/semantic-search-plan.md.
+      # Semantic search's STORAGE half: the pgvector column type and its
+      # Postgrex extension. Cheap, pure Elixir, and unconditional —
+      # `KilnCMS.Repo.installed_extensions/0` requires the `vector` extension
+      # whether or not anything embeds, so this is not part of the optional ML
+      # stack below (see `ml_deps/0`).
       {:pgvector, "~> 0.3"},
-      {:bumblebee, "~> 0.7"},
-      {:nx, "~> 0.12"},
-      # EXLA compiles a heavy XLA NIF from source (~13 min, multi-GB RAM) and
-      # pulls the :xla archive — too much for the small prod build host. Keep it
-      # for local dev/test speed; prod/e2e fall back to Nx.BinaryBackend (see
-      # config/dev.exs + test.exs). Semantic search is disabled by default in
-      # prod; restore EXLA there via an off-box image build before enabling it.
-      {:exla, "~> 0.12", only: [:dev, :test]},
       # Bumblebee's `progress_bar` still caps `decimal ~> 2.0`, but Ash/ecto 3.14
       # need `decimal ~> 3.0`. progress_bar only uses decimal for CLI download
       # progress formatting, so forcing 3.x is safe. Override resolves the clash.
+      # Unconditional even though the clash is Bumblebee's: Ash/ecto want 3.x
+      # regardless, so pinning it here keeps the resolved version the same
+      # whether or not the ML stack is in the tree.
       {:decimal, "~> 3.0", override: true},
       {:hammer, "~> 7.0"},
       {:remote_ip, "~> 1.2"},
@@ -688,8 +699,59 @@ defmodule KilnCMS.MixProject do
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"}
-    ]
+    ] ++ ml_deps()
   end
+
+  # The optional ML stack, in the tree only when `KILN_ML` is on (#1321).
+  #
+  # Semantic search is disabled by default (`config :kiln_cms, KilnCMS.Search,
+  # semantic: false`), and these three are 87% of the dependency tree on disk:
+  # 773 MB with them, 102 MB without, `deps/exla` alone accounting for 666 MB.
+  # A machine that has never built them also downloads a 110 MB prebuilt XLA
+  # archive. `only: [:dev, :test]` did NOT avoid any of that: `mix deps.get`
+  # fetches every dependency regardless of `:only`, which filters compilation,
+  # not the download. The only way to skip the cost is to leave them out of the
+  # list.
+  #
+  # The saving is disk and bandwidth, not wall clock: adding the stack to an
+  # otherwise-complete build measured ~46 s on an Apple Silicon laptop. The
+  # "~13 min compile, multi-GB RAM" this comment used to carry was stale — see
+  # config/ml_flag.exs.
+  #
+  # Leaving them out is safe for the rest of the build because every module on
+  # the semantic path degrades rather than failing to compile — see
+  # `KilnCMS.Search.ML`, which is the single compile-time answer to "is this
+  # build's ML stack present?" and is what `KilnCMS.Search.Serving`,
+  # `KilnCMS.Search.RerankerServing`, both Bumblebee adapters and
+  # `KilnCMS.Application`'s serving children branch on.
+  #
+  # Two things stay true whichever way the flag is set:
+  #
+  #   * `mix.lock` keeps its entries for all three and their transitives.
+  #     `mix deps.get` does not prune the lock of deps that are not in the
+  #     current tree (measured), so a lean `deps.get` cannot strip them — and
+  #     `mix deps.audit`, which reads the lock alone, still audits EXLA.
+  #   * `mix deps.unlock --unused` WOULD strip them, so it runs only on the ML
+  #     build. See `aliases/0` and CI's `ml` job.
+  #
+  # EXLA keeps `only: [:dev, :test]` inside the opt-in: even with `KILN_ML=1`
+  # it has no business in a prod release image, whose build host cannot afford
+  # the NIF compile. Prod/e2e fall back to Nx.BinaryBackend (see
+  # config/config.exs); restore EXLA there via an off-box image build before
+  # enabling semantic search in production.
+  defp ml_deps do
+    if ml?() do
+      [
+        {:bumblebee, "~> 0.7"},
+        {:nx, "~> 0.12"},
+        {:exla, "~> 0.12", only: [:dev, :test]}
+      ]
+    else
+      []
+    end
+  end
+
+  defp ml?, do: KilnCMS.Config.MLFlag.enabled?()
 
   # Aliases are shortcuts or tasks specific to the current project.
   # For example, to install project dependencies and perform other setup tasks, run:
@@ -699,7 +761,23 @@ defmodule KilnCMS.MixProject do
   # See the documentation for `Mix` for more info on aliases.
   defp aliases do
     [
-      setup: ["deps.get", "ash.setup", "assets.setup", "assets.build", "run priv/repo/seeds.exs"],
+      # `kiln.ml.note` last: one line saying whether this build has the optional
+      # ML stack and how to change that (#1321). It reads what actually
+      # compiled (`KilnCMS.Search.ML.available?/0`) rather than the env var, so
+      # it cannot disagree with the build it is describing.
+      #
+      # A trailing task after `run priv/repo/seeds.exs` does run — measured, and
+      # not in tension with the `e2e.setup` note below: what that one records is
+      # that the VM is torn down when the *chain* ends, which a `phx.server`
+      # needs to outlive. A task that prints a line and returns does not.
+      setup: [
+        "deps.get",
+        "ash.setup",
+        "assets.setup",
+        "assets.build",
+        "run priv/repo/seeds.exs",
+        "kiln.ml.note"
+      ],
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["ash.setup --quiet", "test"],
@@ -726,28 +804,44 @@ defmodule KilnCMS.MixProject do
         "esbuild kiln_cms --minify",
         "phx.digest"
       ],
-      precommit: [
-        "compile --warnings-as-errors",
-        "deps.unlock --unused",
-        "format --check-formatted",
-        "credo --strict",
-        "sobelow --config",
-        "deps.audit",
-        "kiln.plugins.doctor",
-        # Cheap, and says in a second what CI's `image` job takes a full
-        # dependency compile to discover: a Dockerfile pin that can't satisfy
-        # this file's `elixir:` requirement (#600).
-        "kiln.toolchain.check",
-        # An `authorize?: false` on a request path with no comment saying why
-        # it is safe (#1309). Cheap, and the reason belongs next to the bypass.
-        "kiln.authz.check",
-        # Catches untranslated/fuzzy msgstrs locally. Read-only, so `precommit`
-        # keeps its non-destructive contract — the *drift* half of the gate
-        # still lives in CI only, because `gettext.extract --merge` rewrites
-        # priv/gettext. Run that yourself before pushing.
-        "kiln.gettext.check",
-        "test"
-      ]
+      precommit:
+        ["compile --warnings-as-errors"] ++
+          unlock_unused_step() ++
+          [
+            "format --check-formatted",
+            "credo --strict",
+            "sobelow --config",
+            "deps.audit",
+            "kiln.plugins.doctor",
+            # Cheap, and says in a second what CI's `image` job takes a full
+            # dependency compile to discover: a Dockerfile pin that can't satisfy
+            # this file's `elixir:` requirement (#600).
+            "kiln.toolchain.check",
+            # An `authorize?: false` on a request path with no comment saying why
+            # it is safe (#1309). Cheap, and the reason belongs next to the bypass.
+            "kiln.authz.check",
+            # Catches untranslated/fuzzy msgstrs locally. Read-only, so `precommit`
+            # keeps its non-destructive contract — the *drift* half of the gate
+            # still lives in CI only, because `gettext.extract --merge` rewrites
+            # priv/gettext. Run that yourself before pushing.
+            "kiln.gettext.check",
+            "test"
+          ]
     ]
+  end
+
+  # `deps.unlock --unused` DELETES every lock entry for a dep that is not in the
+  # current tree — and without `KILN_ML` on, Bumblebee/Nx/EXLA and their eleven
+  # transitives are not in the tree (#1321). Running it on a lean build would
+  # silently strip them from `mix.lock`, which is both a large unrelated diff
+  # and a loss of the versions `mix deps.audit` reads. So the lean build skips
+  # it, and the ML build runs it — CI's `ml` job is the gate that runs the
+  # read-only `--check-unused` half on the full tree.
+  #
+  # Fourteen lock entries hang on this: bumblebee, nx and exla, plus axon,
+  # complex, nx_image, nx_signal, polaris, progress_bar, safetensors,
+  # tokenizers, unpickler, unzip and xla.
+  defp unlock_unused_step do
+    if ml?(), do: ["deps.unlock --unused"], else: []
   end
 end
