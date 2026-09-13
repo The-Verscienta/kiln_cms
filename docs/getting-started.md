@@ -83,7 +83,7 @@ declarative, so the module *is* the specification.
 |--------------|------|
 | Use the editor | [Editor shortcuts](editor-shortcuts.md), [Editorial advisories](advisories.md), [Claim checking](compliance.md) |
 | Model new content | [Extending the content model](extending-content.md) |
-| Overlay the core with your own project | [The overlay contract](overlay-contract.md) — what you may rely on across releases; [Downstream projects](../projects/README.md) for the mechanics |
+| Overlay the core with your own project | [The overlay contract](overlay-contract.md) — what you may rely on across releases; [Downstream projects](https://github.com/The-Verscienta/kiln_cms/blob/main/projects/README.md) for the mechanics |
 | Understand who can do what | [Authorization policy matrix](policy-matrix.md), [Granular RBAC](granular-rbac.md) |
 | Run several sites from one install | [Multi-tenancy](multi-tenancy.md) |
 | Consume the content headlessly | [Headless consumer guide](headless-consumer-guide.md) — it routes you to [JSON:API](json-api.md), [GraphQL](headless-graphql-api.md), [MCP](mcp.md) or [RAG](rag.md) |
