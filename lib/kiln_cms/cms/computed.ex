@@ -312,24 +312,12 @@ defmodule KilnCMS.CMS.Computed do
   # represent — `parse/1` is called directly by the fields admin, so a raise
   # here is a 500 on a form.
   defp to_number(text) do
-    case {Integer.parse(text), safe_float(text)} do
+    case {Integer.parse(text), Kiln.FieldType.parse_float(text)} do
       {{integer, ""}, _} -> integer
       {_, {float, ""}} -> float
       {{integer, _remainder}, _} -> integer
       {:error, _} -> 0
     end
-  end
-
-  @doc false
-  # `Float.parse/1` is not total, and *how* it fails is version-dependent: for a
-  # literal that overflows a double it returns the bare atom `:error` on Elixir
-  # 1.20 but **raises** ArgumentError from `:erlang.list_to_float/1` on 1.19
-  # (this project's pinned toolchain — see `.tool-versions`). Neither is safe to
-  # pattern-match on directly, so normalize both into `:error` here.
-  def safe_float(text) do
-    Float.parse(text)
-  rescue
-    ArgumentError -> :error
   end
 
   # --- recursive-descent parser ----------------------------------------------
@@ -527,7 +515,7 @@ defmodule KilnCMS.CMS.Computed do
         {:ok, integer}
 
       _ ->
-        case safe_float(trimmed) do
+        case Kiln.FieldType.parse_float(trimmed) do
           {float, ""} -> {:ok, float}
           _ -> :error
         end
