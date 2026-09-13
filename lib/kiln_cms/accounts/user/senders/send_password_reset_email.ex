@@ -8,6 +8,12 @@ defmodule KilnCMS.Accounts.User.Senders.SendPasswordResetEmail do
   rather than on the action because the sender is the outbound boundary every
   entry point passes through, and it is the mail, not the request, that costs
   the recipient something.
+
+  `budget_checked?: true` means the caller has **already charged** this address's
+  budget and was allowed; only `KilnCMS.Accounts.AdminPasswordReset` passes it.
+  It is not a bypass — the budget is still spent, exactly once — it exists so the
+  admin path can refuse *truthfully* when the budget is gone, instead of this
+  sender dropping the mail after the console has reported it sent.
   """
 
   use AshAuthentication.Sender
@@ -26,7 +32,13 @@ defmodule KilnCMS.Accounts.User.Senders.SendPasswordResetEmail do
     site = KilnCMS.Branding.for_org(opts[:tenant]).site_name
     address = to_string(user.email)
 
-    if AccountThrottle.allow_mail?(:password_reset, address) do
+    # `Keyword.get`, not `opts[...]`: the opt is absent on every path but the
+    # admin one, and `nil or …` raises rather than falling through to the budget.
+    # When the caller already charged the budget (and was allowed), charging it
+    # again here would spend two units per admin reset.
+    budget_checked? = Keyword.get(opts, :budget_checked?, false)
+
+    if budget_checked? or AccountThrottle.allow_mail?(:password_reset, address) do
       new()
       |> from(Application.fetch_env!(:kiln_cms, :email_from))
       |> to(address)

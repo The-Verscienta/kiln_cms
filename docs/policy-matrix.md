@@ -223,10 +223,39 @@ editor/admin only (privacy-first: no per-user data is stored anyway).
 |--------|:-----:|:----------------------:|:-----------------------:|:---------:|
 | read | ✅ all | 🔎 own record | 🔎 filtered out | ❌ |
 | `change_password` | ✅ | ✅ (own) | ❌ | ❌ |
+| `manage_access`, `grant_temporary_role`, `send_password_reset` | ✅ | ❌ | ❌ | ❌ |
+| `anonymize` | ✅ | ❌ | ❌ | ❌ |
+| `expire_role_grant` | ✅ | ❌ | ❌ | ❌ (⚙️ AshOban sweep) |
 | auth flows (sign-in, register, reset) | ✅ | ✅ | ✅ | ✅ (AshAuthentication bypass) |
 
+"admin" throughout this section is `KilnCMS.Accounts.Checks.PlatformAdmin`: the
+**effective** platform role, which counts a temporary admin grant only until it
+expires — re-checked at authorization, so a long-lived LiveView or GraphQL
+socket's actor stops authorizing the moment its grant runs out.
+`:manage_access` and `:grant_temporary_role` additionally carry
+`Validations.StandingAdminOnly`: a *temporary* admin passes the policy but cannot
+confer or extend a tier.
+
 Field policy: the `role` field is visible only to **admins or the user
-themselves**; other readers see the record without `role`.
+themselves**; other readers see the record without `role`. `granted_role` and
+`granted_role_expires_at` are `public? false` and so reach no API surface at all —
+field policies cover only public fields, which is why they are not listed beside
+`role` there. What they *could* leak is through the read-time fold
+(`KilnCMS.Accounts.Preparations.FoldRoleGrant` presents a live grant as `role`),
+and that fold declines whenever `role` itself came back forbidden.
+
+The three admin levers above are the account console's
+([`account-administration.md`](account-administration.md)). Two are refused for
+everyone, admins included:
+
+| Action | Why nobody may call it |
+|---|---|
+| `:sign_in_with_passkey` | Mints a session token; only the verified WebAuthn ceremony reaches it (`authorize?: false`), and the preparation refuses any actor-carrying call — so not even an admin can mint a token for another account |
+| `:sync_billing_audiences` | Entitlements are recomputed by `KilnCMS.Billing.Entitlements` alone; the change module refuses an actor-carrying call, so no authorized path grants an audience by hand |
+
+`NotLastAdmin` sits on `:manage_access` and `:anonymize` as a **validation**, not
+a policy: admins bypass `User`'s policies wholesale, so a `forbid_if` would never
+fire, and the refusal has to carry a sentence.
 
 **Demo mode** (`KILN_DEMO_RESET=confirm`) narrows the self-service column:
 `change_password` and the TOTP actions (`setup_totp`, `confirm_totp`,
@@ -279,7 +308,15 @@ deletable.
 | Action | admin | editor | viewer | anonymous |
 |--------|:-----:|:------:|:------:|:---------:|
 | read (`read`, `for_user`, `for_org`) | ✅ all | 🔎 own rows | 🔎 own rows | ❌ |
-| `create`, `update`, `destroy` | ✅ | ❌ | ❌ | ❌ |
+| `create`, `update`, `destroy`, `grant_temporary_role` | ✅ | ❌ | ❌ | ❌ |
+| `expire_role_grant` | ✅ | ❌ | ❌ | ❌ (⚙️ AshOban sweep) |
+
+The AshOban grant is an **unconditional** `bypass AshOban.Checks.AshObanInteraction`
+at the top of the policies, not one scoped to `expire_role_grant`: the scheduler
+reads the rows to sweep through the primary read first, and a write-scoped grant
+leaves that read filtered to nothing. Every create/update also carries
+`Validations.StandingAdminOnly`, so a temporary platform admin cannot confer a
+site tier that would outlast its own grant.
 
 The read grants above are why both resources scope their deny to write actions
 only: Ash AND-combines every applicable policy, so a bare `policy always()`

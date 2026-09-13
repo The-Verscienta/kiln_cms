@@ -20,7 +20,8 @@ defmodule KilnCMS.Accounts.OrgMembership do
     otp_app: :kiln_cms,
     domain: KilnCMS.Accounts,
     data_layer: AshPostgres.DataLayer,
-    authorizers: [Ash.Policy.Authorizer]
+    authorizers: [Ash.Policy.Authorizer],
+    extensions: [AshOban]
 
   postgres do
     table "org_memberships"
@@ -44,6 +45,23 @@ defmodule KilnCMS.Accounts.OrgMembership do
     end
   end
 
+  # Expired per-site temporary tiers, on the same hourly sweep and for the same
+  # reasons as `KilnCMS.Accounts.User`'s — see that resource's trigger and
+  # `KilnCMS.Accounts.RoleGrant`. Authorization never waits for it.
+  oban do
+    triggers do
+      trigger :expire_role_grants do
+        action :expire_role_grant
+        queue :default
+        scheduler_cron "10 * * * *"
+        where expr(not is_nil(granted_role) and granted_role_expires_at <= now())
+
+        worker_module_name KilnCMS.Accounts.OrgMembership.AshOban.Worker.ExpireRoleGrants
+        scheduler_module_name KilnCMS.Accounts.OrgMembership.AshOban.Scheduler.ExpireRoleGrants
+      end
+    end
+  end
+
   actions do
     defaults [:read, :create]
 
@@ -64,10 +82,44 @@ defmodule KilnCMS.Accounts.OrgMembership do
       primary? true
       require_atomic? false
 
+      # Writes the standing `role`, so a folded base record would lose it
+      # silently; and a new standing tier at or above a live temporary one makes
+      # that grant meaningless. Both mirror `User.:manage_access` — see those
+      # modules.
+      validate KilnCMS.Accounts.Validations.UnfoldedRecord
+      change KilnCMS.Accounts.Changes.ClearRedundantRoleGrant
+
       # The per-org role, audiences and type scopes all live here, so an edit
       # narrows a live socket's grant the same way `manage_access` does (#675).
       change {KilnCMS.Accounts.Changes.EvictSessions,
               reason: :membership_changed, user_id: :user_id}
+    end
+
+    # Time-boxed per-site elevation (`KilnCMS.Accounts.RoleGrant`) — the
+    # membership twin of `User.:grant_temporary_role`, and its own action for the
+    # same reason: it leaves the standing tier alone. Clearing both fields revokes
+    # a grant early.
+    update :grant_temporary_role do
+      description "Grant or revoke a time-boxed elevation above the standing site tier."
+      accept [:granted_role, :granted_role_expires_at]
+      require_atomic? false
+      validate KilnCMS.Accounts.Validations.TemporaryRoleGrant
+
+      change {KilnCMS.Accounts.Changes.EvictSessions,
+              reason: :role_grant_changed, user_id: :user_id}
+    end
+
+    # The expiry sweep's write (AshOban trigger above): clears the two dead
+    # columns and drops sockets that authorized while the grant was live.
+    update :expire_role_grant do
+      description "Clear an expired temporary site tier (system sweep)."
+      accept []
+      require_atomic? false
+      change set_attribute(:granted_role, nil)
+      change set_attribute(:granted_role_expires_at, nil)
+
+      change {KilnCMS.Accounts.Changes.EvictSessions,
+              reason: :role_grant_expired, user_id: :user_id}
     end
 
     default_accept [
@@ -96,7 +148,16 @@ defmodule KilnCMS.Accounts.OrgMembership do
 
   policies do
     # Managing memberships is a platform-operator task for now — admins only.
-    bypass actor_attribute_equals(:role, :admin) do
+    bypass KilnCMS.Accounts.Checks.PlatformAdmin do
+      authorize_if always()
+    end
+
+    # The hourly `expire_role_grants` trigger runs with no actor. Unconditional —
+    # not scoped to `action(:expire_role_grant)` — because AshOban's scheduler
+    # first *reads* the rows to sweep, and a write-scoped grant never matched that
+    # read: the self-only read policy below filtered it to nothing, so the sweep
+    # silently never ran. Mirrors `KilnCMS.Accounts.Token`.
+    bypass AshOban.Checks.AshObanInteraction do
       authorize_if always()
     end
 
@@ -114,12 +175,24 @@ defmodule KilnCMS.Accounts.OrgMembership do
     end
   end
 
+  # Presents a live temporary tier as `role` on every read, so
+  # `KilnCMS.Accounts.Scoping.effective_tier/2` — which reads the membership's
+  # `role` for a member — resolves the grant without knowing it exists.
+  preparations do
+    prepare KilnCMS.Accounts.Preparations.FoldRoleGrant
+  end
+
   validations do
     # A malformed grant map must fail on the admin's write, not crash the
     # editor's next save (see the validation module).
     validate KilnCMS.Accounts.Validations.FieldGrantsShape, on: [:create, :update]
     # A client-supplied role_id must reference a role of THIS org.
     validate KilnCMS.Accounts.Validations.RoleBelongsToOrg, on: [:create, :update]
+    # A temporary platform admin must not confer a site tier — on anyone, itself
+    # included — that would outlast the grant that let it act. Covers create,
+    # `:update` and `:grant_temporary_role`; the actorless sweep and billing sync
+    # pass. See the validation module.
+    validate KilnCMS.Accounts.Validations.StandingAdminOnly, on: [:create, :update]
   end
 
   attributes do
@@ -131,6 +204,20 @@ defmodule KilnCMS.Accounts.OrgMembership do
       default :viewer
       allow_nil? false
       public? true
+    end
+
+    # A time-boxed elevation above the standing tier above — the per-site twin of
+    # `User.granted_role`. Same modelling and same reasons: `role` keeps the
+    # standing tier, `KilnCMS.Accounts.Preparations.FoldRoleGrant` presents this
+    # one while it is live, and expiry is a comparison rather than a scheduled
+    # write. See KilnCMS.Accounts.RoleGrant.
+    attribute :granted_role, :atom do
+      constraints one_of: [:admin, :editor, :viewer]
+      public? false
+    end
+
+    attribute :granted_role_expires_at, :utc_datetime_usec do
+      public? false
     end
 
     # The per-org read axis (mirrors `User.audiences` — see KilnCMS.CMS.Audiences).

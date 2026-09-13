@@ -142,7 +142,7 @@ defmodule KilnCMS.Billing.Settings do
     # read with `authorize?: false` as system callers
     # (`KilnCMS.Billing.credentials/0`).
     policy always() do
-      authorize_if actor_attribute_equals(:role, :admin)
+      authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
     end
   end
 

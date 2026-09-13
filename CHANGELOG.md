@@ -37,6 +37,65 @@ migration, a rewritten column, a dropped config key).
   can pin itself with `DOCS_SOURCE_REF=$(git rev-parse HEAD) mix docs`.
 ### Added
 
+- **`/editor/accounts` — the instance-wide account register.** Platform-admin
+  only. Lists every registration (search by email or name; filter by platform
+  role, or to unconfirmed / temporarily elevated / erased accounts), and carries
+  the levers that belong to an *account* rather than to a site: the standing
+  platform role and consumer audiences, a time-boxed role grant, a
+  password-reset link, signing every session out, and removing the account.
+  `/editor/team` is unchanged and still answers the other question — who may
+  author what on *this* site. See `docs/account-administration.md`.
+
+- **Temporary roles that expire on their own.** Either tier can be granted for a
+  bounded window — "admin until Friday" on the platform role from
+  `/editor/accounts`, "editor on this site until Friday" on the site tier from
+  `/editor/team`. Two new columns on `users` and `org_memberships`
+  (`granted_role`, `granted_role_expires_at`); the standing `role` is never
+  overwritten, so expiry is a comparison rather than a scheduled write and a
+  missed sweep cannot leave anyone elevated.
+  `KilnCMS.Accounts.Preparations.FoldRoleGrant` presents a live grant as `role`
+  on every read, which is how it reaches `Scoping.effective_tier/2` and the
+  `actor_attribute_equals(:role, …)` policies without either knowing it exists.
+  An hourly AshOban sweep clears expired columns and drops the holder's live
+  sockets. Grants are elevations only, and carry no scope axes. The window is one
+  of five offered durations or an explicit UTC datetime.
+
+- **Admin-initiated password resets.** `Accounts.send_user_password_reset/2`
+  mails a named account a reset link and reports whether it went — which the
+  anonymous form deliberately cannot, since it must stay indistinguishable for
+  addresses that don't exist. Bypasses (and logs) the per-address mail budget:
+  nobody reaches it without an admin session, and a silent drop there would make
+  the console's confirmation a lie. Erased accounts are refused.
+
+- **Account removal with a content disposition.**
+  `KilnCMS.Accounts.AccountRemoval.remove/3` erases the account and applies one
+  of three dispositions to everything it authored, across every content type on
+  every site: **keep** (published work stays in delivery; its byline stops naming
+  a person), **archive** (the workflow transition, reversible by an editor), or
+  **trash** (soft-delete, restorable from `/editor/trash`). Content first,
+  account second, so a partial run leaves a recoverable account rather than a
+  tombstone with unhandled content. Hard-delete (`:purge`) is deliberately not
+  offered.
+
+- **A guard on the last admin.** Demoting or erasing the only platform admin is
+  refused rather than silently locking every operator out of `/editor` — `/setup`
+  does not come back, because the account still exists. A temporary admin does
+  not count as the other one, and the guard covers actorless system calls too;
+  only `Staging.Scrub` is exempt, by name.
+
+- **`KilnCMS.Accounts.Checks.PlatformAdmin` replaces
+  `actor_attribute_equals(:role, :admin)`** on every platform resource. It asks
+  for the *effective* role and re-checks a temporary grant's expiry at
+  authorization time, so a LiveView or GraphQL socket that mounted while a grant
+  was live stops authorizing as admin the moment it expires. Behaviour for
+  standing admins is unchanged.
+
+- **Erasure revokes API keys.** `:anonymize` deleted passkeys and IdP links and
+  revoked session tokens, but left API keys live — each a complete credential for
+  the erased account. It now revokes them, and clears any temporary grants.
+
+- **`ContentTypes.count!/2`** — the count `list!/2` would return rows for,
+  without the rows, for compiled and dynamic types alike.
 - **The release image is published to GHCR on every version tag.**
   `docker pull ghcr.io/the-verscienta/kiln_cms:<version>` (or `:latest`) now
   gets the project-agnostic core, built by
