@@ -1,6 +1,6 @@
 # @kiln-cms/client
 
-Official JS/TS client for the [Kiln CMS](https://github.com/The-Verscienta/kiln_cms)
+Official JS/TS client for the [KilnCMS](https://github.com/The-Verscienta/kiln_cms)
 delivery APIs — the JSON:API read surface at `/api/json/*`, per-type and hybrid
 search, fired artifacts at `/api/content/:type/:slug` (including `?as_of=`
 point-in-time reads), and preview tokens. Ships with **`kiln-types`**, a

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Kiln CMS delivery schema (parity fixture)",
+  "title": "KilnCMS delivery schema (parity fixture)",
   "description": "Hand-written fixture exercising every construct the emitters map. `KilnCMS.SchemaExport.TypeScript` (ExUnit) and `emitTypes` (vitest) must both reproduce fixtures/golden.d.ts from it, byte-for-byte below the header line — the tripwire that keeps the two emitters in lockstep.",
   "x-kiln": {
     "surface": "json",
