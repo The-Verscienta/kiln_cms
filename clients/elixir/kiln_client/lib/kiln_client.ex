@@ -1,6 +1,6 @@
 defmodule KilnClient do
   @moduledoc """
-  Official Elixir client for the Kiln CMS delivery APIs — the JSON:API read
+  Official Elixir client for the KilnCMS delivery APIs — the JSON:API read
   surface at `/api/json/*`, per-type and hybrid search, and fired artifacts at
   `/api/content/:type/:slug` (see Kiln's `docs/json-api.md` and
   `docs/headless-consumer-guide.md`).

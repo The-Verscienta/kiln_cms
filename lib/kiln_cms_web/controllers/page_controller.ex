@@ -8,11 +8,17 @@ defmodule KilnCMSWeb.PageController do
   #
   # Not routed directly: `/` goes to `ContentController.home/2`, which calls
   # this for a site that has no published Home page of its own.
+  # `locale` keeps the delivery chrome's nav links prefixed for the request's
+  # locale. No `locale_links`: the switcher needs a URL per locale, and the site
+  # root has none — `Plugs.SetLocale` strips a locale prefix only when a segment
+  # follows it, so `/fr` is a page slug and `/fr/` 404s. Every OTHER delivery
+  # page has a real per-locale URL, which is why they pass the links and this
+  # one draws no switcher rather than a row of dead links.
   def home(conn, _params) do
     render(conn, :home,
-      current_scope: nil,
       current_user: conn.assigns[:current_user],
-      current_org: KilnCMSWeb.Tenant.current_org(conn)
+      current_org: KilnCMSWeb.Tenant.current_org(conn),
+      locale: conn.assigns[:locale] || KilnCMS.I18n.default_locale()
     )
   end
 

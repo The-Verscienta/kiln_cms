@@ -27,6 +27,29 @@ migration, a rewritten column, a dropped config key).
 
 ## [Unreleased]
 
+### Changed
+
+- **The stock front page now renders in the public delivery chrome.** `/` was
+  the one public URL served out of `Layouts.app`, the authoring shell — so a
+  first-run instance gave its front page a theme toggle and an account menu no
+  other public page has, while skipping the site's own header and footer menus,
+  its theme preset and the attribution line. It now uses `Layouts.public` like
+  every other delivery URL. That layout gained two optional attrs to make the
+  move lossless: `wide`, which widens `--public-measure` to the 72rem the page
+  was drawn at (all the old `container_class` was doing), and `current_user`,
+  which draws the account/sign-out pair for a signed-in reader. Nothing changes
+  for a site that has published a Home page of its own — that page already
+  rendered in this shell.
+
+- **The public search form has a submit button.** It was a label and a single
+  text input, which submits on Enter and nothing else: a touch keyboard without
+  a Search key and a screen reader reading the form both had no way to run the
+  query. The button carries a `public-search-submit` hook for the theme presets.
+
+- **The product name is spelled `KilnCMS` everywhere.** Thirteen places still
+  said "Kiln CMS" — among them the heading and opening line of
+  `docs/design-language.md`, which `scripts/publish_docs.exs` publishes as a
+  public docs page, and the `title` of the exported delivery schema.
 ### Fixed
 
 - **`mix docs` "View Source" links point at the release tag, not `main`.**
