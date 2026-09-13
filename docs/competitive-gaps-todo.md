@@ -190,8 +190,9 @@ action needed:
   **Caveat:** CRDT co-editing is **not**. It sits behind the `:collab_prototype`
   flag, which is on in dev and test and **off in prod**, and the flag is
   VM-global rather than per-document. Do not cite live co-editing as a shipped
-  advantage until #1324 resolves — that issue exists precisely because the docs
-  read as though it shipped.
+  advantage: #1324 resolved by labelling it prod-disabled everywhere, *not* by
+  shipping it. Graduating it is Theme F of
+  [content-editor-modernization.md](content-editor-modernization.md).
 - Deep security posture (Ash policies, SSRF-safe webhooks, audits)
 - Built-in semantic/hybrid search (pgvector + Bumblebee + reranking)
 - Built-in send-only MTA with DKIM
@@ -214,7 +215,7 @@ backlog. Newer evaluator-facing gaps were filed as individual issues in August
 | No first-run setup wizard | [#1317](https://github.com/The-Verscienta/kiln_cms/issues/1317) |
 | Public site has no theme system | [#1318](https://github.com/The-Verscienta/kiln_cms/issues/1318) |
 | Field-level localization (document-per-locale only today) | [#1327](https://github.com/The-Verscienta/kiln_cms/issues/1327) |
-| Co-editing is dev-only but docs read as shipped | [#1324](https://github.com/The-Verscienta/kiln_cms/issues/1324) |
+| Co-editing is dev-only but docs read as shipped | [#1324](https://github.com/The-Verscienta/kiln_cms/issues/1324) — **resolved by labelling**, not by shipping; graduating it is Theme F of [content-editor-modernization.md](content-editor-modernization.md) |
 
 Before adding a row here, check whether it belongs on an issue instead. A
 checklist in a doc drifts silently; an issue does not.
