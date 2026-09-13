@@ -311,9 +311,13 @@ defmodule Mix.Tasks.Kiln.Authz.CheckTest do
 
       Mix.shell(Mix.Shell.Process)
 
-      assert_raise Mix.Error, ~r/1 unexplained policy bypass/, fn -> Check.run([dir]) end
-      assert_received {:mix_shell, :error, [msg]}
-      assert msg =~ "bad.ex:2:"
+      assert_raise Mix.Error, ~r/1 file\(s\) off the authz ratchet/, fn -> Check.run([dir]) end
+
+      # Two error lines: the file's verdict, then the site it is about.
+      assert_received {:mix_shell, :error, [verdict]}
+      assert verdict =~ "bad.ex: 1 unexplained `authorize?: false`, 0 allowed."
+      assert_received {:mix_shell, :error, [site]}
+      assert site =~ "bad.ex:2:"
     after
       Mix.shell(Mix.Shell.IO)
     end
@@ -337,11 +341,69 @@ defmodule Mix.Tasks.Kiln.Authz.CheckTest do
       Mix.shell(Mix.Shell.IO)
     end
 
-    test "the repo's own web tree is clean" do
+    test "the repo's own tree is on the ratchet" do
       Mix.shell(Mix.Shell.Process)
       assert :ok = Check.run([])
     after
       Mix.shell(Mix.Shell.IO)
+    end
+  end
+
+  describe "problems/2 — the #1402 ratchet" do
+    # `run/1` scans all of `lib/` against a 129-entry backlog, so the ratchet
+    # arithmetic is driven here against a two-entry one instead. It is worth
+    # pinning directly: wrong in the permissive direction, a ratchet passes
+    # forever and nobody finds out.
+    @backlog %{"lib/a.ex" => 3}
+
+    test "a file at its allowance, and a clean file, are fine" do
+      assert Check.problems(%{"lib/a.ex" => 3, "lib/b.ex" => 0}, @backlog) == []
+    end
+
+    test "a backlogged file that gains a site is a regression" do
+      assert [message] = Check.problems(%{"lib/a.ex" => 4}, @backlog)
+      assert message =~ "lib/a.ex: 4 unexplained"
+      assert message =~ "3 allowed by the #1402 backlog"
+    end
+
+    test "a file with no entry may have none at all" do
+      assert [message] = Check.problems(%{"lib/new.ex" => 1}, @backlog)
+      assert message =~ "lib/new.ex: 1 unexplained"
+      assert message =~ "0 allowed."
+    end
+
+    test "a backlogged file that improves must have its number lowered" do
+      assert [message] = Check.problems(%{"lib/a.ex" => 1}, @backlog)
+      assert message =~ "allows 3 but the file has 1"
+      assert message =~ "lower the number to 1"
+    end
+
+    test "a backlogged file that is finished must have its entry dropped" do
+      assert [message] = Check.problems(%{"lib/a.ex" => 0}, @backlog)
+      assert message =~ "drop the entry"
+    end
+
+    test "entries for files the scan did not cover are left alone" do
+      # Scanning one file must not report every other backlog entry as stale.
+      assert Check.problems(%{"lib/b.ex" => 0}, @backlog) == []
+    end
+  end
+
+  describe "the real backlog" do
+    test "every entry names a file that exists and is positive" do
+      # A stale path can never be cleared by the ratchet (nothing scans it), so
+      # it would sit there forever looking like outstanding work that is
+      # already done. A zero or negative entry would be a no-op allowance.
+      for {path, count} <- Check.backlog() do
+        assert File.exists?(path), "#{path} is in the #1402 backlog but does not exist"
+        assert count > 0, "#{path} has a non-positive backlog entry"
+      end
+    end
+
+    test "it is the only thing standing between the gate and all of lib/" do
+      # Guards the guard: if the backlog were empty the ratchet tests above
+      # would still pass while the real gate checked nothing new.
+      assert map_size(Check.backlog()) > 0
     end
   end
 end

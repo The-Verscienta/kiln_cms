@@ -172,6 +172,9 @@ defmodule KilnCMS.Accounts.AccountRemoval do
     %{counts: counts, unreadable: unreadable}
   end
 
+  # `authorize?: false`: the same reasoning as `authored_batch/4` below. This is
+  # the admin's confirmation count across every org the person authored in, which
+  # no actor's own scope covers, and it writes nothing.
   defp count_authored(ct, user_id, org_id) do
     {:ok,
      ContentTypes.count!(ct.type,
