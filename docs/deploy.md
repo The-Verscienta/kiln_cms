@@ -285,9 +285,10 @@ registered user with authorization bypassed — once, and only for the first one
 3. Sign in; promote everyone else through the editor UI as that admin — no
    `authorize?: false` needed again.
 
-The same section in the [README](../README.md#creating-an-admin-user) covers
-the development seed script and the platform variants (`fly ssh console` and
-the like).
+The same section in the
+[README](https://github.com/The-Verscienta/kiln_cms/blob/main/README.md#creating-an-admin-user)
+covers the development seed script and the platform variants (`fly ssh console`
+and the like).
 
 ## Reverse proxy and TLS
 
@@ -483,8 +484,9 @@ shell for the first-admin `bin/kiln_cms remote`.
 
 ## Production hardening checklist
 
-The [README's checklist](../README.md#production-hardening-checklist) is the
-canonical list; in deploy order:
+The
+[README's checklist](https://github.com/The-Verscienta/kiln_cms/blob/main/README.md#production-hardening-checklist)
+is the canonical list; in deploy order:
 
 - `dev_routes` off — it is; a `:prod` release refuses to boot otherwise.
 - Database TLS on (default), with `DATABASE_SSL_CACERTFILE` when the provider
