@@ -27,6 +27,15 @@ migration, a rewritten column, a dropped config key).
 
 ## [Unreleased]
 
+### Changed
+
+- **The docs publisher no longer installs `earmark`.**
+  `scripts/publish_docs.exs` renders with `earmark_parser` — the parser mix.exs
+  already depends on — and a renderer ported from `KilnCMS.Markdown`, so the
+  retired package and its stored-XSS advisory are gone from the repo entirely.
+  Nothing about a guide's published HTML changes, with one exception: the
+  fenced HTML example in `docs/visual-editing-bridge.md` regains two lines that
+  earmark's own parser was silently eating.
 ### Fixed
 
 - **`mix docs` "View Source" links point at the release tag, not `main`.**

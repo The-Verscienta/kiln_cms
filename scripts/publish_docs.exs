@@ -23,14 +23,19 @@
 # mix.exs is what publishes it.
 #
 # A standalone script rather than a mix task on purpose: CI publishes without
-# compiling the application, and Markdown rendering stays out of the release.
+# compiling the application, so nothing here may reach a `KilnCMS.*` module.
 # The server treats the HTML it sends as untrusted — the rich-text cast
 # sanitizes it like any other API write.
 #
 # Renamed or deleted guides are not unpublished; do that in the editor.
 
+# The PARSER only, matching mix.exs. Not `earmark`: that package is retired on
+# Hex and carries a stored-XSS advisory in its HTML renderer, so nothing in
+# this repo may install it. Its `Earmark.Transform` is replaced by the renderer
+# under "AST → HTML" below — a port of `KilnCMS.Markdown`'s, which this script
+# cannot call for the reason above.
 Mix.install([
-  {:earmark, "~> 1.4"},
+  {:earmark_parser, "~> 1.4"},
   {:req, "~> 0.5"},
   {:jason, "~> 1.4"}
 ])
@@ -92,12 +97,27 @@ defmodule PublishDocs do
 
   @doc "Renders one guide to `{title, html}`. `slugs` maps repo paths to slugs."
   def render(doc, markdown, slugs) do
-    {:ok, ast, _messages} =
-      markdown |> strip_front_matter() |> Earmark.Parser.as_ast(gfm: true)
-
+    ast = markdown |> strip_front_matter() |> parse(doc.path)
     {h1, ast} = pop_h1(ast)
-    ast = Earmark.Transform.map_ast(ast, &rewrite(&1, doc.path, slugs), true)
-    {doc.title || h1 || doc.slug, Earmark.Transform.transform(ast, compact_output: true)}
+    {doc.title || h1 || doc.slug, ast |> map_ast(&rewrite(&1, doc.path, slugs)) |> render_ast()}
+  end
+
+  # Same options as `KilnCMS.Markdown`, so a guide reads here the way the same
+  # Markdown pasted into the editor would. `{:error, ast, messages}` is
+  # earmark_parser's "parsed, with warnings" (an unclosed fence, a stray `]`):
+  # the tree is still the guide, so it publishes, and the warnings go to stderr
+  # where the workflow log keeps them.
+  defp parse(markdown, source) do
+    {ast, messages} =
+      case EarmarkParser.as_ast(markdown, gfm_tables: true, breaks: false, pure_links: true) do
+        {:ok, ast, messages} -> {ast, messages}
+        {:error, ast, messages} -> {ast, messages}
+      end
+
+    for {severity, line, message} <- messages,
+        do: IO.puts(:stderr, "  #{severity} #{source}:#{line}: #{message}")
+
+    ast
   end
 
   defp strip_front_matter("---\n" <> rest = markdown) do
@@ -111,31 +131,31 @@ defmodule PublishDocs do
 
   # The page template prints the title, so the document's own H1 would print
   # twice.
-  defp pop_h1([{"h1", _, children, _} | rest]), do: {text(children), rest}
+  defp pop_h1([{"h1", _attrs, children, _meta} | rest]) do
+    case children |> plain_text() |> String.trim() do
+      "" -> {nil, rest}
+      heading -> {heading, rest}
+    end
+  end
+
   defp pop_h1(ast), do: {nil, ast}
 
-  defp text(nodes) when is_list(nodes), do: nodes |> Enum.map_join(&text/1) |> String.trim()
-  defp text({_tag, _attrs, children, _meta}), do: text(children)
-  defp text(binary) when is_binary(binary), do: binary
+  # `Earmark.Transform.map_ast(ast, fun, _ignore_strings = true)`: rewrite each
+  # element, then descend into what the rewrite returned.
+  defp map_ast(nodes, fun) when is_list(nodes), do: Enum.map(nodes, &map_ast(&1, fun))
+
+  defp map_ast({_tag, _attrs, _children, _meta} = node, fun) do
+    {tag, attrs, children, meta} = fun.(node)
+    {tag, attrs, map_ast(children, fun), meta}
+  end
+
+  defp map_ast(other, _fun), do: other
 
   defp rewrite({"a", attrs, children, meta}, source, slugs),
     do: {"a", update_attr(attrs, "href", &link(&1, source, slugs)), children, meta}
 
   defp rewrite({"img", attrs, children, meta}, source, _slugs),
     do: {"img", update_attr(attrs, "src", &asset(&1, source)), children, meta}
-
-  # Fenced code: Earmark writes `class="elixir"`, and the rich-text scrubber
-  # keeps only `language-<lang>` (and only for a language Kiln highlights).
-  defp rewrite({"code", attrs, children, meta}, _source, _slugs) do
-    attrs =
-      Enum.flat_map(attrs, fn
-        {"class", "inline"} -> []
-        {"class", lang} -> [{"class", "language-" <> lang}]
-        other -> [other]
-      end)
-
-    {"code", attrs, children, meta}
-  end
 
   defp rewrite(node, _source, _slugs), do: node
 
@@ -187,6 +207,155 @@ defmodule PublishDocs do
     end
   end
 
+  # ── AST → HTML ────────────────────────────────────────────────────────────
+  #
+  # A port of the renderer in `KilnCMS.Markdown` (lib/kiln_cms/markdown.ex),
+  # which this script cannot call — CI publishes without compiling the
+  # application, and that module reaches `KilnCMS.HTMLSanitizer` and
+  # `KilnCMS.Blocks.Html`. Keep the two in step: same closed tag lists, same
+  # escaping, same `language-` convention, so a guide published from here and
+  # the same Markdown pasted into the editor produce the same HTML.
+  #
+  # The one deliberate difference is raw HTML the author wrote. There is no
+  # sanitizer here, so an element outside the lists below keeps its text and
+  # loses its tag rather than being handed through — the guides write none, and
+  # `--dry-run --out` shows it the moment one does.
+
+  # Structure Markdown syntax can produce, rendered bare. Attributes are
+  # dropped because they are presentation (earmark_parser's table
+  # `style="text-align"`), and the rich-text scrubber strips them on write
+  # anyway. `a`, `img`, `pre` and `code` have their own clauses below, because
+  # theirs matter.
+  @plain_tags ~w(p h1 h2 h3 h4 h5 h6 ul ol li blockquote strong em del table thead tbody tfoot tr th td)
+  @void_tags ~w(br hr)
+
+  # Raw HTML that is never content. Rendering the children instead would keep
+  # `alert(1)` as a paragraph of visible text.
+  @dropped_raw ~w(script style noscript iframe object embed template head title)
+
+  defp render_ast(nodes) when is_list(nodes), do: Enum.map_join(nodes, &render_ast/1)
+
+  defp render_ast(text) when is_binary(text), do: text |> strip_comments() |> escape_text()
+
+  # An HTML comment: `{:comment, [], [lines], %{comment: true}}`, whose tag is
+  # an atom and so matches none of the lists. Its text is a note to whoever
+  # edits the guide — the catch-all at the bottom would publish it as prose.
+  defp render_ast({_tag, _attrs, _children, %{comment: true}}), do: ""
+
+  defp render_ast({tag, _attrs, _children, _meta}) when tag in @dropped_raw, do: ""
+
+  defp render_ast({"pre", _attrs, children, _meta}) do
+    {language, text} =
+      case children do
+        [{"code", attrs, kids, _meta}] -> {code_language(attrs), plain_text(kids)}
+        kids -> {nil, plain_text(kids)}
+      end
+
+    class = if language, do: ~s( class="language-#{escape(language)}"), else: ""
+    "<pre><code#{class}>" <> escape(text) <> "</code></pre>"
+  end
+
+  defp render_ast({"code", _attrs, children, _meta}),
+    do: "<code>" <> escape(plain_text(children)) <> "</code>"
+
+  defp render_ast({"a", attrs, children, _meta}) do
+    case attrs |> attr("href") |> safe_url(~w(http https mailto)) do
+      nil -> render_ast(children)
+      href -> ~s(<a href="#{escape(href)}">) <> render_ast(children) <> "</a>"
+    end
+  end
+
+  defp render_ast({"img", attrs, _children, _meta}) do
+    src = attrs |> attr("src") |> safe_url(~w(http https))
+    alt = attr(attrs, "alt") || ""
+    title = attr(attrs, "title")
+
+    if src do
+      title_attr = if title in [nil, ""], do: "", else: ~s( title="#{escape(title)}")
+      ~s(<img src="#{escape(src)}" alt="#{escape(alt)}"#{title_attr}>)
+    else
+      # An unusable URL: the alt text is still the author's words.
+      escape_text(alt)
+    end
+  end
+
+  defp render_ast({tag, _attrs, children, _meta}) when tag in @plain_tags,
+    do: "<#{tag}>" <> render_ast(children) <> "</#{tag}>"
+
+  defp render_ast({tag, _attrs, _children, _meta}) when tag in @void_tags, do: "<#{tag}>"
+
+  # Anything else (an element the lists don't know): its text is still the
+  # author's, the wrapper is not trusted.
+  defp render_ast({_tag, _attrs, children, _meta}) when is_list(children),
+    do: render_ast(children)
+
+  defp render_ast(_other), do: ""
+
+  # `KilnCMS.HTMLSanitizer.safe_href/1` and `safe_image_src/1`, narrowed to
+  # what this script can check without the application: an in-page fragment, a
+  # same-origin path, or a URL in `schemes`. Anything else loses its anchor (or
+  # its `<img>`) and keeps its text — the scrubber would drop it on write.
+  defp safe_url(nil, _schemes), do: nil
+
+  defp safe_url(url, schemes) do
+    url = String.trim(url)
+
+    cond do
+      url == "" -> nil
+      # A backslash is a slash to every browser, so `/\evil.example.com` is the
+      # `//host` escape wearing a different hat.
+      String.contains?(url, "\\") -> nil
+      String.starts_with?(url, "#") -> url
+      String.starts_with?(url, "//") -> nil
+      String.starts_with?(url, "/") -> if String.contains?(url, ".."), do: nil, else: url
+      true -> if URI.parse(url).scheme in schemes, do: url
+    end
+  end
+
+  # earmark_parser tags a fence as `class="elixir"`; the rich-text scrubber
+  # keeps only `language-<lang>`, and only for a language Kiln highlights. An
+  # info string with more than a language keeps its first word.
+  defp code_language(attrs) do
+    with class when is_binary(class) <- attr(attrs, "class"),
+         [first | _] <- String.split(class),
+         language = String.replace_prefix(first, "language-", ""),
+         true <- Regex.match?(~r/\A[A-Za-z0-9_+#-]{1,40}\z/, language) do
+      language
+    else
+      _ -> nil
+    end
+  end
+
+  # A comment written mid-sentence stays inside the paragraph's text run, where
+  # the block clause above never sees it. `KilnCMS.Markdown` hands such a run
+  # to the sanitizer, which drops comments; this does the same by hand. Code
+  # content does not come through here — `plain_text/1` keeps a fenced HTML
+  # example's comments intact.
+  defp strip_comments(text), do: String.replace(text, ~r/<!--.*?-->/s, "")
+
+  defp plain_text(nodes) when is_list(nodes), do: Enum.map_join(nodes, &plain_text/1)
+  defp plain_text(text) when is_binary(text), do: text
+  defp plain_text({_tag, _attrs, children, _meta}), do: plain_text(children)
+  defp plain_text(_other), do: ""
+
+  # earmark_parser pre-escapes some attribute values (`alt`) and not others
+  # (`href`), so every value is decoded before it is escaped exactly once.
+  defp attr(attrs, name) do
+    Enum.find_value(attrs, fn
+      {^name, value} when is_binary(value) -> decode(value)
+      _ -> nil
+    end)
+  end
+
+  defp decode(value) do
+    value
+    |> String.replace("&quot;", ~s("))
+    |> String.replace("&#39;", "'")
+    |> String.replace("&lt;", "<")
+    |> String.replace("&gt;", ">")
+    |> String.replace("&amp;", "&")
+  end
+
   @doc "The `/docs` index page body: every guide, under its mix.exs section."
   def index_html(docs) do
     sections =
@@ -207,12 +376,21 @@ defmodule PublishDocs do
       "Every page is published from #{source}.</p>" <> sections
   end
 
+  # An attribute value or code content: every markup character.
   defp escape(text) do
+    text
+    |> escape_text()
+    |> String.replace(~s("), "&quot;")
+    |> String.replace("'", "&#39;")
+  end
+
+  # A text run. Quotes are left alone: they are not markup in element content,
+  # and escaping them only makes a guide's HTML harder to read in a diff.
+  defp escape_text(text) do
     text
     |> String.replace("&", "&amp;")
     |> String.replace("<", "&lt;")
     |> String.replace(">", "&gt;")
-    |> String.replace("\"", "&quot;")
   end
 
   # ── JSON:API client ───────────────────────────────────────────────────────
