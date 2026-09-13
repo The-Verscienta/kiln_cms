@@ -4,7 +4,7 @@ What a `projects/<name>/` subproject may rely on, what it may not, and what
 happens when something it relies on has to change.
 
 Two other documents already own neighbouring ground, and this one does not
-repeat them: [Downstream projects](../projects/README.md) describes the
+repeat them: [Downstream projects](https://github.com/The-Verscienta/kiln_cms/blob/main/projects/README.md) describes the
 *mechanics* — how an overlay attaches, how it is activated and built — and
 [`CHANGELOG.md`](../CHANGELOG.md) defines what major, minor and patch *mean*
 here. The question neither answers is the one a team has to answer before
