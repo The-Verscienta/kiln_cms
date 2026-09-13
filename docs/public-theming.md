@@ -52,9 +52,16 @@ for this purpose. The hooks have no styles of their own:
 | `public-article`, `public-masthead`, `public-title`, `public-meta`, `public-lede`, `public-body` | The document templates (`show*`) |
 | `public-title` | Every other public page's `<h1>` (blog, events, search, lock, teaser) |
 | `public-index` | The blog index list |
+| `public-search-submit` | The search form's submit button |
 
 Custom CSS can target the same hooks. Rename one and you break every preset
 and every site stylesheet that uses it.
+
+One page opts out of the preset's reading measure: the stock front page passes
+`wide` to `Layouts.public/1`, which stamps `data-public-wide="true"` on
+`.public-shell` and pins `--public-measure` to the 72rem that page was drawn at.
+It is a fixed marketing design carrying none of the hooks above, so a preset's
+measure would only crush it. Every other page takes the preset's own value.
 
 Full-bleed images need an honest `sizes`, or the browser fetches a candidate
 for the 768px column and upscales it. `KilnCMSWeb.ContentHTML.image_sizes/1`

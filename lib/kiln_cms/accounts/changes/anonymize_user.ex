@@ -70,6 +70,8 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
   #
   # Cross-org by necessity: the person may hold memberships on several sites, and
   # each write is re-scoped to its own row's `org_id`.
+  # `authorize?: false` on the read: erasure is already authorized as `:anonymize`,
+  # and no actor may read another person's memberships across every org.
   defp cancel_memberships(user) do
     case KilnCMS.Billing.memberships_for_export(user.id, authorize?: false) do
       {:ok, memberships} ->
@@ -84,6 +86,11 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
   # signs its owner in with no password — so an erased account whose keys survive
   # can still authenticate, which the token revocation above does nothing about.
   # `:revoke` (not a delete) keeps the audit row, as the rest of erasure does.
+  #
+  # `authorize?: false`: erasure is authorized once, as the `:anonymize` action
+  # (or the staging scrub). The person being erased owns these rows, so no
+  # admin actor would be admitted to them, and the filter pins every row to
+  # this user's id.
   defp revoke_api_keys(user) do
     require Ash.Query
 
@@ -107,6 +114,11 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
   # drops a forced change equal to `changeset.data`, and a caller holding a struct
   # read before the grant existed has `granted_role: nil` there — so `nil` → `nil`
   # was "no change" and the column kept its grant.
+  #
+  # `authorize?: false`: erasure is authorized once, as the `:anonymize` action
+  # (or the staging scrub). The person being erased owns these rows, so no
+  # admin actor would be admitted to them, and the filter pins every row to
+  # this user's id.
   defp clear_account_grant(user) do
     require Ash.Query
 
@@ -124,6 +136,11 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
   # above: the membership row survives erasure (it is the audit of who belonged
   # where), and a live `granted_role` on it would keep the tombstone a site
   # editor or admin until it expired.
+  #
+  # `authorize?: false`: erasure is authorized once, as the `:anonymize` action
+  # (or the staging scrub). The person being erased owns these rows, so no
+  # admin actor would be admitted to them, and the filter pins every row to
+  # this user's id.
   defp clear_membership_grants(user) do
     require Ash.Query
 
@@ -148,6 +165,11 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
   # tokens — personal data (and usable credentials) that must not survive
   # erasure, and removing the link also prevents any future SSO sign-in from
   # re-attaching to the tombstoned account.
+  #
+  # `authorize?: false`: erasure is authorized once, as the `:anonymize` action
+  # (or the staging scrub). The person being erased owns these rows, so no
+  # admin actor would be admitted to them, and the filter pins every row to
+  # this user's id.
   defp remove_identities(user) do
     require Ash.Query
 
@@ -164,6 +186,11 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
   # Delete the user's WebAuthn credentials (#331 passkeys): a surviving
   # passkey would let the erased account sign straight back in — the same
   # class of live credential as the IdP links above.
+  #
+  # `authorize?: false`: erasure is authorized once, as the `:anonymize` action
+  # (or the staging scrub). The person being erased owns these rows, so no
+  # admin actor would be admitted to them, and the filter pins every row to
+  # this user's id.
   defp remove_passkeys(user) do
     require Ash.Query
 
@@ -179,6 +206,12 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
 
   # Revoke (mark as `revocation`) every stored token for this subject, mirroring
   # AshAuthentication's `log_out_everywhere` add-on.
+  #
+  # `authorize?: false`: erasure is authorized once, as the `:anonymize` action
+  # (or the staging scrub). The person being erased owns these rows, so no
+  # admin actor would be admitted to them, and the filter pins every row to
+  # this user's id; the private `ash_authentication?` context is what the token
+  # resource requires of any revocation.
   defp revoke_tokens(user) do
     subject = AshAuthentication.user_to_subject(user)
 
