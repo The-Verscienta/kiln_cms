@@ -54,8 +54,10 @@ RUN mix local.hex --force && mix local.rebar --force
 ENV MIX_ENV="prod"
 
 COPY mix.exs mix.lock ./
+# mix.exs requires config/ml_flag.exs to decide its dep list (#1321), so it has
+# to be in the image before the first `mix` command that loads the project.
+COPY config/ml_flag.exs config/
 RUN mix deps.get --only $MIX_ENV
-RUN mkdir config
 
 COPY config/config.exs config/${MIX_ENV}.exs config/
 # Cap the BEAM to 2 schedulers *for the build only* (inline, so it never reaches
