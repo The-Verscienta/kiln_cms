@@ -51,14 +51,22 @@ defmodule KilnCMS.Firing.ReferenceEdge do
   policies do
     # The edge table is the link graph, including edges whose source is an
     # unpublished draft — an enumeration surface that says which documents exist
-    # and reference each other. It was world-readable (#565); nothing outside the
-    # re-fire wave reads it, and the wave runs as the system (authorize?: false),
-    # so editors-and-up is the whole legitimate audience.
+    # and reference each other. It was world-readable (#565); outside the
+    # re-fire wave only editors-and-up have a reason to see it, and the wave
+    # itself now says so out loud rather than bypassing (#1402).
     policy action_type(:read) do
+      authorize_if KilnCMS.Checks.SystemActor
       authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 
+    # The graph is derived from the document that fires — there is no
+    # caller-facing write path and never was, which is why this reads
+    # `forbid_if always()`. What used to reach it was `authorize?: false` in
+    # `KilnCMS.Firing.References.rebuild/4`; that is now a declared grant to
+    # the fire path's system actor (#1402), and `authorize_if` rather than
+    # `bypass` so a policy added to this resource later still applies to it.
     policy action_type([:create, :update, :destroy]) do
+      authorize_if KilnCMS.Checks.SystemActor
       forbid_if always()
     end
   end

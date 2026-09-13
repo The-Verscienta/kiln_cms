@@ -123,6 +123,12 @@ defmodule KilnCMS.Search.Meilisearch do
 
   defp enqueue_reindex_source({_resource, lister}, acc) do
     # Strict tenancy (#419): list published docs per org (reads need a tenant).
+    #
+    # Bypass kept (#1402), for the reason `MeilisearchWorker.load/3` gives: a
+    # system-actor clause on the `Content` read policy would be a standing
+    # corpus-wide grant. What bounds this instead is the query — one org at a
+    # time, `state: :published`, and a select of `[:id, :state, :org_id]`, so
+    # only ids leave here and they leave as Oban job args.
     published =
       Enum.flat_map(KilnCMS.Accounts.list_org_ids(), fn org_id ->
         lister.(

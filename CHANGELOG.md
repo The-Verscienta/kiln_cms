@@ -27,6 +27,56 @@ migration, a rewritten column, a dropped config key).
 
 ## [Unreleased]
 
+### Security
+
+- **A system actor, so internal callers run under the policies instead of
+  around them.** `%KilnCMS.SystemActor{}` and the `KilnCMS.Checks.SystemActor`
+  policy check replace `authorize?: false` for workers, jobs and other trusted
+  internal code: the grant is declared in the resource's `policies` block and
+  listed in `docs/policy-matrix.md` (a test fails the build if a resource
+  admits the actor without a row there), and it is admitted with `authorize_if`
+  rather than `bypass`, so a policy added to the resource later still applies.
+  The first resource converted is `Firing.ReferenceEdge` — the re-fire wave's
+  link graph, which has no caller-facing write path at all. No behaviour
+  changes for any caller-facing path (#1402).
+- **The firing path runs under the policies.** Everything `KilnCMS.Firing.*`
+  touches now carries `%KilnCMS.SystemActor{}` and a matching policy clause
+  instead of `authorize?: false`: the artifact table (written only by the
+  engine, destroyed only by unpublish), the reference graph, the type and
+  field definitions it reads, and the one system-only content action that
+  recomputes `search_text`. Two reads deliberately keep their bypass, and now
+  say why — a system clause on the `Content` read policy would be a standing
+  grant over the whole corpus, much wider than the call it would replace.
+  `mix kiln.authz.check` gates `lib/kiln_cms/firing/` from here on (#1402).
+- **The semantic index runs under its policies.** `Search.BlockEmbedding` and
+  `Search.TagEmbedding` — internal indexes with no caller-facing write path —
+  admit `%KilnCMS.SystemActor{}` by name, so the indexer, `BlockSearch` and
+  `Search.Related` no longer bypass them; the document-level `:set_embedding`
+  vector write joins `:reindex_search_text` as the second system-only content
+  action named in the content resources' own create/update policy. Two tag
+  reads turn out to need no bypass at all
+  (taxonomy is world-readable). The workers' *document* reads keep theirs, and
+  say why. `mix kiln.authz.check` now also gates `lib/kiln_cms/search/`
+  (#1402).
+- **Editorial automation runs under the policies.** `KilnCMS.Automation.RuleWorker`
+  carries `%KilnCMS.SystemActor{}`: `Automation.Rule` and `Social.Account`
+  admit it for **reads only** (authoring a rule, and the credentials for a
+  site's public voice, stay admin acts), and `CMS.Comment` / `CMS.Task` admit
+  it for create and read but **not** update — automation posts findings and
+  opens tasks, it does not edit what anyone said or close their work. The
+  content and user lookups keep their bypass, and now say why.
+  `mix kiln.authz.check` now also gates `lib/kiln_cms/automation/` (#1402).
+- **Billing and the newsletter tier sync run under the policies.** The last two
+  of the four modules #1329 audited: `Billing.Settings` (read and first-use
+  init only — the write path to payment credentials stays platform-admin),
+  `Billing.Membership` and `Billing.MembershipEvent` (the provider-state,
+  append and GDPR-erasure actions that are `forbid_if always()` for every
+  person, admin included), and `Newsletter.Segment` / `Subscriber` /
+  `SegmentMembership` for the tier-backed lifecycle. The one caller that may
+  take those actions is now named in each policy block instead of reaching
+  around it. The `Accounts.User` lookups keep their bypass, and say why
+  (#1402).
+
 ### Fixed
 
 - **`mix docs` "View Source" links point at the release tag, not `main`.**
