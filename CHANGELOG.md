@@ -37,6 +37,28 @@ migration, a rewritten column, a dropped config key).
   can pin itself with `DOCS_SOURCE_REF=$(git rev-parse HEAD) mix docs`.
 ### Added
 
+- **Notifications are persisted, not only mailed.** Every workflow event
+  already dispatched by email and Web Push — submitted for review, published,
+  returned to draft, a comment, an `@mention`, a task assignment — now also
+  writes a `KilnCMS.Notifications.Notification` row for each recipient, so an
+  editor who does not read email and has not granted push has somewhere to find
+  out. The row is written from the same place, on the same already-filtered
+  recipient list, that enqueues the mail job: an event a user has muted in their
+  account preferences stays muted in the inbox too. Rows are org-scoped and
+  readable **only by their own recipient** — there is no admin bypass. The bell
+  and `/editor/inbox` that read them follow. Reading one is announced on the
+  recipient's own PubSub topic, so a notification read on a phone drops the
+  badge on the desktop.
+
+### Changed
+
+- **Workflow and task notifications now dispatch after the write commits.**
+  `NotifyWorkflowEmail` and `NotifyTaskAssigned` moved from
+  `Ash.Changeset.after_action` to `after_transaction`, joining `NotifyComment`,
+  which was already there. Two effects: a query inside the notifier can no
+  longer poison the editorial action's transaction and lose the content, and a
+  rolled-back submit-for-review no longer mails the reviewers about a
+  transition that never happened.
 - **The release image is published to GHCR on every version tag.**
   `docker pull ghcr.io/the-verscienta/kiln_cms:<version>` (or `:latest`) now
   gets the project-agnostic core, built by
