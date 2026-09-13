@@ -89,12 +89,19 @@ defmodule KilnCMS.MixProject do
       # HTML only. Nothing consumes the EPUB, and building it doubles both the
       # run time and every warning the docs gate reports.
       formatters: ["html"],
-      # Docs are built from `main`, which runs ahead of the latest release tag
-      # (`v0.5.0`…). ExDoc's default `source_ref` of "v#{version}" would link
-      # "View Source" to the tagged file, which can lack the function being
-      # documented or sit at a different line. Point at the branch the docs
-      # were built from instead.
-      source_ref: "main",
+      # "View Source" links are only useful if they point at an immutable ref.
+      # A branch is not one: links built from `main` keep resolving as the
+      # branch moves, so a published build eventually points at a shifted line
+      # or a function that no longer exists. Point at this version's release
+      # tag — `@version` is bumped to match the tag in the release commit
+      # (see `docs/releasing.md`), so a docs build of a release resolves to
+      # exactly the code it documents.
+      #
+      # A build from an untagged mid-cycle `main` is the case the tag cannot
+      # cover: `@version` there still names the *previous* release, whose tag
+      # predates the code being documented. Pin such a build to its own commit
+      # with `DOCS_SOURCE_REF=$(git rev-parse HEAD) mix docs`.
+      source_ref: System.get_env("DOCS_SOURCE_REF", "v#{@version}"),
       nest_modules_by_prefix: [KilnCMS, KilnCMSWeb, Kiln],
       # Two exclusions:
       #
@@ -584,8 +591,9 @@ defmodule KilnCMS.MixProject do
       # Elixir — the one ex_doc already uses, now needed at runtime. Not
       # `earmark`: that package is retired on Hex, carries a stored-XSS advisory
       # in its HTML renderer, and would fail `mix deps.audit`. Its AST is
-      # rendered through Floki (which escapes) instead, and the HTML is never
-      # trusted even then — see `KilnCMS.Markdown`.
+      # rendered to HTML by `KilnCMS.Markdown` itself, from a closed tag list
+      # with every text run and attribute escaped, and the result is sanitized
+      # on the way into storage even then — see that module.
       {:earmark_parser, "~> 1.4"},
       # Fire-time syntax highlighting for rich-text code blocks (#503). Each
       # lexer is its own OTP app that registers language names with
