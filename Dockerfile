@@ -54,9 +54,10 @@ RUN mix local.hex --force && mix local.rebar --force
 ENV MIX_ENV="prod"
 
 COPY mix.exs mix.lock ./
-# mix.exs requires config/ml_flag.exs to decide its dep list (#1321), so it has
+# mix.exs requires config/ml_flag.exs (which requires strict_test_flag.exs) to
+# decide its dep list (#1321), so both have
 # to be in the image before the first `mix` command that loads the project.
-COPY config/ml_flag.exs config/
+COPY config/ml_flag.exs config/strict_test_flag.exs config/
 RUN mix deps.get --only $MIX_ENV
 
 COPY config/config.exs config/${MIX_ENV}.exs config/
