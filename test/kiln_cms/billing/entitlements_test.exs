@@ -84,6 +84,48 @@ defmodule KilnCMS.Billing.EntitlementsTest do
     user.audiences
   end
 
+  describe "a member holding a temporary site tier" do
+    # The recompute reads memberships and writes their audiences back. A live
+    # temporary tier folded into `role` used to make that write refused by
+    # `UnfoldedRecord` — and the refusal was discarded, so the entitlement
+    # silently never landed.
+    test "still has the membership's audiences synced" do
+      u = user()
+      t = tier()
+
+      org_membership =
+        Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+          user_id: u.id,
+          organization_id: default_org_id(),
+          role: :viewer
+        })
+
+      {:ok, _} =
+        Accounts.grant_membership_temporary_role(
+          org_membership,
+          %{
+            granted_role: :editor,
+            granted_role_expires_at: DateTime.add(DateTime.utc_now(), 3, :hour)
+          },
+          actor: admin()
+        )
+
+      membership(u, t, :active)
+      assert {:ok, _delta} = Entitlements.recompute(u.id)
+
+      synced =
+        Accounts.get_org_membership!(
+          u.id,
+          default_org_id(),
+          KilnCMS.Accounts.RoleGrant.unfolded() ++ [authorize?: false]
+        )
+
+      assert @gated in synced.audiences
+      # The grant itself is untouched by the sync.
+      assert synced.granted_role == :editor
+    end
+  end
+
   describe "granting and revoking" do
     test "an active membership grants its tier's audience" do
       u = user()
