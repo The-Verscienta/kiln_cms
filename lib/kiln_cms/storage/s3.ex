@@ -70,7 +70,7 @@ defmodule KilnCMS.Storage.S3 do
       here — S3 stores a fixed set of system headers (`Content-Type`,
       `Content-Disposition`, `Cache-Control`, …) and anything else comes back
       prefixed as `x-amz-meta-*`. Serve it from the CDN or bucket instead; see
-      the "Production storage & CDN" section of `docs/media-pipeline.md`.
+      the "Production storage and CDN" section of `docs/media-pipeline.md`.
 
   ## Private storage (#481)
 
