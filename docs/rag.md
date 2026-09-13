@@ -110,7 +110,7 @@ which is worse than the disclosure.
 
 - **Retrieval** reuses `KilnCMS.Search.global/2` — the same keyword + semantic
   RRF hybrid search behind `/api/search`, reranked when a switch says so (see
-  [Reranking ask's sources](#reranking-asks-sources)). It **degrades to keyword**
+  [Reranking ask sources](#reranking-ask-sources)). It **degrades to keyword**
   when semantic search is disabled, so `/api/ask` works with no model stack;
   turning on semantic search (`config :kiln_cms, KilnCMS.Search, semantic: true`)
   improves retrieval quality automatically.
@@ -138,13 +138,13 @@ at. Run it before and after any change to the search stack (a floor, a leg, a
 reranker, a model), and with `--url https://your-site --ask` against the
 deployment itself, where it reads the `score`/`legs` fields above. The
 format, the classes and how to write a set for your own corpus are in
-[`search-roadmap.md` §11](./search-roadmap.md#11-ranking-eval-harness).
+[`search-roadmap.md`](./search-roadmap.md), §11 *Ranking eval harness*.
 
-## Reranking ask's sources
+## Reranking ask sources
 
 Kiln ships a cross-encoder reranker — `BAAI/bge-reranker-base` behind a
-Bumblebee `Nx.Serving`, see
-[semantic-search-plan.md](semantic-search-plan.md#phase-3--hybrid-fusion--optional-rerank)
+Bumblebee `Nx.Serving`, see *Phase 3 — Hybrid fusion (+ optional rerank)* in
+[semantic-search-plan.md](semantic-search-plan.md)
 — that rescores every fused candidate against the query and reorders each
 section by that score. It is **off by default**, and until now it had a single
 switch, `config :kiln_cms, KilnCMS.Search, rerank: true`, which reranks *every*
