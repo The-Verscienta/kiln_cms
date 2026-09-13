@@ -149,7 +149,7 @@ defmodule KilnCMS.Billing.Settings do
     # to payment credentials. `:init` accepts no attributes, and every secret
     # column is vault-encrypted and `sensitive?`.
     policy always() do
-      authorize_if actor_attribute_equals(:role, :admin)
+      authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
 
       forbid_unless action([:read, :init])
       authorize_if KilnCMS.Checks.SystemActor

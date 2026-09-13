@@ -43,6 +43,9 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
       revoke_tokens(user)
       remove_identities(user)
       remove_passkeys(user)
+      revoke_api_keys(user)
+      clear_account_grant(user)
+      clear_membership_grants(user)
       cancel_memberships(user)
       :ok = History.anonymize_actor(user.id)
       :ok = KilnCMS.Billing.anonymize_actor(user.id)
@@ -75,6 +78,63 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
       _error ->
         :ok
     end
+  end
+
+  # Revoke every live API key. A key is a whole credential — `:sign_in_with_api_key`
+  # signs its owner in with no password — so an erased account whose keys survive
+  # can still authenticate, which the token revocation above does nothing about.
+  # `:revoke` (not a delete) keeps the audit row, as the rest of erasure does.
+  defp revoke_api_keys(user) do
+    require Ash.Query
+
+    KilnCMS.Accounts.ApiKey
+    |> Ash.Query.filter(user_id == ^user.id and is_nil(revoked_at))
+    |> Ash.bulk_update!(:revoke, %{},
+      authorize?: false,
+      strategy: [:atomic, :atomic_batches, :stream],
+      return_records?: false,
+      return_errors?: true
+    )
+  end
+
+  # Clear the account's own temporary grant. `role: :viewer` alone did nothing
+  # while a grant was live — `FoldRoleGrant` kept presenting the tombstone as the
+  # granted tier, which put `anonymized-…@deleted.invalid` on the admin roster and
+  # in the assignee picker until the grant ran out: the gap `audiences` had above,
+  # on the axis that grants the most.
+  #
+  # A bulk write filtered in SQL rather than `force_change_attributes` above: Ash
+  # drops a forced change equal to `changeset.data`, and a caller holding a struct
+  # read before the grant existed has `granted_role: nil` there — so `nil` → `nil`
+  # was "no change" and the column kept its grant.
+  defp clear_account_grant(user) do
+    require Ash.Query
+
+    KilnCMS.Accounts.User
+    |> Ash.Query.filter(id == ^user.id and not is_nil(granted_role))
+    |> Ash.bulk_update!(:expire_role_grant, %{},
+      authorize?: false,
+      strategy: [:atomic, :atomic_batches, :stream],
+      return_records?: false,
+      return_errors?: true
+    )
+  end
+
+  # Clear any temporary per-site tier. Same reasoning as the account's own grant
+  # above: the membership row survives erasure (it is the audit of who belonged
+  # where), and a live `granted_role` on it would keep the tombstone a site
+  # editor or admin until it expired.
+  defp clear_membership_grants(user) do
+    require Ash.Query
+
+    KilnCMS.Accounts.OrgMembership
+    |> Ash.Query.filter(user_id == ^user.id and not is_nil(granted_role))
+    |> Ash.bulk_update!(:expire_role_grant, %{},
+      authorize?: false,
+      strategy: [:atomic, :atomic_batches, :stream],
+      return_records?: false,
+      return_errors?: true
+    )
   end
 
   # A throwaway bcrypt hash of random bytes — there is no plaintext that matches
