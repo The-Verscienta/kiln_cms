@@ -24,6 +24,8 @@ defmodule KilnCMS.Search.EmbeddingWorker do
 
   alias KilnCMS.Search
 
+  require Logger
+
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"org_id" => org_id, "resource" => resource, "id" => id}}) do
     if Search.semantic?() do
@@ -85,8 +87,18 @@ defmodule KilnCMS.Search.EmbeddingWorker do
     )
     |> Ash.update()
     |> case do
-      {:ok, _record} -> :ok
-      _error -> :ok
+      {:ok, _record} ->
+        :ok
+
+      # Still `:ok` — a retry would hit the same refusal — but never silently:
+      # a vector that fails to clear leaves locked content in semantic search.
+      {:error, error} ->
+        Logger.warning(
+          "embedding clear failed for #{inspect(record.__struct__)} #{record.id}: " <>
+            Exception.message(error)
+        )
+
+        :ok
     end
   end
 end

@@ -85,6 +85,48 @@ defmodule KilnCMS.Search.EmbeddingPipelineTest do
     assert length(CMS.list_page_versions!(authorize?: false)) == before
   end
 
+  test "locking a previously indexed document clears its document-level vector (#496)" do
+    admin = admin()
+
+    page =
+      CMS.create_page!(%{title: "Confidential otters", slug: slug(), blocks: []}, actor: admin)
+      |> then(&CMS.publish_page!(&1, actor: admin))
+
+    KilnCMS.DataCase.drain_oban()
+    indexed = CMS.get_page!(page.id, authorize?: false)
+    assert is_list(indexed.embedding)
+    assert %DateTime{} = indexed.embedded_at
+
+    indexed
+    |> CMS.update_page!(%{access_password: "shared secret"}, actor: admin)
+
+    KilnCMS.DataCase.drain_oban()
+
+    locked = CMS.get_page!(page.id, authorize?: false)
+    assert is_binary(locked.access_password_hash)
+    assert locked.embedding == nil
+    assert locked.embedded_at == nil
+  end
+
+  test "`:set_embedding` with an explicit nil clears the vector instead of erroring" do
+    admin = admin()
+    page = CMS.create_page!(%{title: "Clear me", slug: slug()}, actor: admin)
+    KilnCMS.DataCase.drain_oban()
+    page = CMS.get_page!(page.id, authorize?: false)
+    assert is_list(page.embedding)
+
+    assert {:ok, cleared} =
+             page
+             |> Ash.Changeset.for_update(:set_embedding, %{embedding: nil},
+               authorize?: false,
+               tenant: page.org_id
+             )
+             |> Ash.update()
+
+    assert cleared.embedding == nil
+    assert cleared.embedded_at == nil
+  end
+
   test "with semantic search disabled, no job is enqueued and no embedding stored" do
     put_search_env(semantic: false)
     admin = admin()
