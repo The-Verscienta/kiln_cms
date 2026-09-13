@@ -150,7 +150,16 @@ defmodule KilnCMS.Beta.Round do
   # `log_out_everywhere` add-on that `apply_on_password_change?` hangs off.
   # Both are re-run explicitly below.
   defp seat(email, role, facilitator?, reset?) do
-    case Accounts.get_user_by_email(email, not_found_error?: false, authorize?: false) do
+    # `RoleGrant.unfolded/0` because `ensure_role/2` below writes `role`: a record
+    # read with a live temporary role folded into that field is refused by
+    # `:manage_access` (see `KilnCMS.Accounts.Validations.UnfoldedRecord`), and
+    # comparing against a folded role would also mistake "admin until Friday" for
+    # a seat already sitting at the right tier.
+    case Accounts.get_user_by_email(
+           email,
+           KilnCMS.Accounts.RoleGrant.unfolded() ++
+             [not_found_error?: false, authorize?: false]
+         ) do
       {:ok, nil} ->
         password = generate_password()
 

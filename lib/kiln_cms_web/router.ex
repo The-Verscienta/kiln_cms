@@ -383,6 +383,12 @@ defmodule KilnCMSWeb.Router do
       live "/editor/slugs", SlugRegenLive, :index
       # Team + granular-RBAC management (#332 slice 4).
       live "/editor/team", TeamLive, :index
+      # The instance-wide account register: who has signed up, their platform
+      # role, time-boxed elevations, reset links, and account removal. Separate
+      # from `/editor/team`, which is about one site's memberships — see the
+      # LiveView's moduledoc.
+      live "/editor/accounts", AccountsLive, :index
+      live "/editor/accounts/:id", AccountsLive, :show
       # Editorial automation (#342) — no-code "when X happens, do Y" rules.
       live "/editor/automation", AutomationLive, :index
       # Social accounts the `:social_post` automation reaction announces to

@@ -115,7 +115,7 @@ defmodule KilnCMS.Billing.WebhookEvent do
     # global role — an `OrgAdmin` check would resolve a tenant-less subject to the
     # default org (the `KilnCMS.Mail.Settings` hazard).
     policy action_type(:read) do
-      authorize_if actor_attribute_equals(:role, :admin)
+      authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
     end
 
     # Written only by the receiver and worker, both `authorize?: false`.

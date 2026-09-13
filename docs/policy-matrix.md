@@ -44,21 +44,91 @@ audience-restricted published rows additionally require membership.
 Two non-role actors also appear below:
 
 - **anonymous** — no actor (`authorize?: true` with no `actor:`); the public site / headless API.
-- **system** — trusted internal callers running with `authorize?: false` (the delivery controller recording views, the webhook delivery worker, the AshOban scheduler). System calls bypass policies entirely and are intentionally *not* expressible as a role.
+- **system** — trusted internal callers: workers, Oban jobs, the AshOban
+  scheduler, delivery-path bookkeeping, mix tasks. Not a role, because it is
+  not a person: it is either `%KilnCMS.SystemActor{}` running *under* the
+  policies (see [The system actor](#the-system-actor) below — the direction of
+  travel, #1402) or, still, a raw `authorize?: false` that runs around them.
 
-  Because a system call skips *every* policy on the resource, each site is a
-  piece of the authorization surface this matrix does not show. So each one on
-  a request path has to say why it is safe: every `authorize?: false` under
-  `lib/kiln_cms_web/` sits next to a comment (within the 12 lines above the
-  call, or anywhere inside it) that names the bypass (`authorize?` or `bypass`)
-  and gives the reason — a delivery action whose own filter carries the
-  published/audience/unlock grant, a tenant already scoped by the router, a
-  pre-auth flow with no actor, a system read of display data on a
-  self-only-read resource. One comment covers one call: a second bypass pasted
-  under a justified one needs its own. `mix kiln.authz.check` (part of
+  Because a raw bypass skips *every* policy on the resource, each remaining
+  site is a piece of the authorization surface this matrix does not show. So
+  each one on a request path has to say why it is safe: every
+  `authorize?: false` under `lib/kiln_cms_web/` sits next to a comment (within
+  the 12 lines above the call, or anywhere inside it) that names the bypass
+  (`authorize?` or `bypass`) and gives the reason — a delivery action whose own
+  filter carries the published/audience/unlock grant, a tenant already scoped
+  by the router, a pre-auth flow with no actor, a system read of display data
+  on a self-only-read resource. One comment covers one call: a second bypass
+  pasted under a justified one needs its own. `mix kiln.authz.check` (part of
   `mix precommit` and CI) fails on a new one without that comment (#1309).
-  Non-web code is not gated yet — a system actor (#1402) is the way to move
-  worker code *under* the policies instead of around them.
+
+### The system actor
+
+`%KilnCMS.SystemActor{}` (`lib/kiln_cms/system_actor.ex`) is the actor a worker,
+an Oban job, a delivery-path bookkeeping write or a mix task passes instead of
+`authorize?: false`. `KilnCMS.Checks.SystemActor` is the policy check that
+admits it. The actor answers **who**, never **which org**: a system call still
+passes `tenant:` explicitly and `multitenancy strategy :attribute` is untouched.
+
+**It is not a privilege boundary against our own code** — any module that can
+build a system actor could have written `authorize?: false` instead. Three
+things it does buy:
+
+1. **The grant is declared** where every other grant is, so this document can
+   list it. The table below is enforced: `KilnCMS.PolicyCoverageTest` fails the
+   build when a resource admits `Checks.SystemActor` without a row here.
+2. **A policy added tomorrow still applies.** An `authorize_if` clause grants
+   exactly the policy it sits in; a bypass (and `authorize?: false`) grants
+   everything, forever, including policies that do not exist yet.
+3. **Validations, changes and the tenant filter keep running**, exactly as they
+   do for a person.
+
+**Admitted with `authorize_if`, never `bypass`.** A `bypass
+Checks.SystemActor` is the same standing grant `authorize?: false` gave, only
+spelled differently, and it would swallow every policy declared beneath it —
+including ones a later PR adds, which is the thing this exists to stop.
+`PolicyCoverageTest` fails the build on a system-actor bypass. (The one
+top-of-stack clause that IS right is `bypass
+AshOban.Checks.AshObanInteraction` on `publish_scheduled`: there the caller
+genuinely *is* the AshOban scheduler and Ash itself vouches for it from the
+trigger metadata on the changeset, rather than from an actor the caller chose.
+Prefer that check wherever the caller is the scheduler.)
+
+Ash **ANDs** policies, so on a resource with a broad `action_type(:update)`
+policy written for people, a second policy admitting system code changes
+nothing — the broad one still refuses — and widening *it* would grant system
+every update on the resource. The answer is still not a bypass: narrow the
+grant inside the policy that would otherwise refuse, with `action/1` as a
+check.
+
+```elixir
+policy action_type([:create, :update]) do
+  authorize_if KilnCMS.CMS.Checks.EditableContentType
+
+  # System-only actions, and only those.
+  forbid_unless action([:reindex_search_text, :set_embedding])
+  authorize_if KilnCMS.Checks.SystemActor
+end
+```
+
+For a person the first clause has already decided; for a system actor every
+other action forbids at the second. Nothing is short-circuited.
+
+**Scope is per resource and action, not per subsystem.** The `subsystem` label
+on the struct (`SystemActor.new(:firing)`) is provenance for logs, telemetry
+and `Ash.Error.Forbidden` messages; the check matches any system actor.
+Deciding "system may record a view but not purge content" is done by which
+rows appear below — encoding the caller's identity a second time inside the
+policy would let the two drift.
+
+The struct carries no `:id` and no `:role`, so every actor-attribute check
+written for people resolves it to nothing: `Scoping.effective_tier/2` returns
+`:none`, `Scoping.audiences/2` returns `[]`. A system actor can therefore only
+ever be authorized by an explicit clause below.
+
+| Resource | Actions admitting `Checks.SystemActor` | Why |
+|---|---|---|
+| `Firing.ReferenceEdge` | `read`, `from_source`, `to_target`, `upsert`, `destroy` | The re-fire wave rebuilds a document's outgoing edges on every fire and walks them backwards to find referrers. The graph is derived from the document itself and has no caller-facing write path (`forbid_if always()` for everyone, admin included), so the fire path was the only thing the old bypass existed for. |
 
 Legend: ✅ allowed · ❌ forbidden · 🔎 allowed but row-filtered (reads return only the rows the policy permits, never an error) · ⚙️ system-only (`authorize?: false`).
 
@@ -223,17 +293,46 @@ editor/admin only (privacy-first: no per-user data is stored anyway).
 |--------|:-----:|:----------------------:|:-----------------------:|:---------:|
 | read | ✅ all | 🔎 own record | 🔎 filtered out | ❌ |
 | `change_password` | ✅ | ✅ (own) | ❌ | ❌ |
+| `manage_access`, `grant_temporary_role`, `send_password_reset` | ✅ | ❌ | ❌ | ❌ |
+| `anonymize` | ✅ | ❌ | ❌ | ❌ |
+| `expire_role_grant` | ✅ | ❌ | ❌ | ❌ (⚙️ AshOban sweep) |
 | auth flows (sign-in, register, reset) | ✅ | ✅ | ✅ | ✅ (AshAuthentication bypass) |
 
+"admin" throughout this section is `KilnCMS.Accounts.Checks.PlatformAdmin`: the
+**effective** platform role, which counts a temporary admin grant only until it
+expires — re-checked at authorization, so a long-lived LiveView or GraphQL
+socket's actor stops authorizing the moment its grant runs out.
+`:manage_access` and `:grant_temporary_role` additionally carry
+`Validations.StandingAdminOnly`: a *temporary* admin passes the policy but cannot
+confer or extend a tier.
+
 Field policy: the `role` field is visible only to **admins or the user
-themselves**; other readers see the record without `role`.
+themselves**; other readers see the record without `role`. `granted_role` and
+`granted_role_expires_at` are `public? false` and so reach no API surface at all —
+field policies cover only public fields, which is why they are not listed beside
+`role` there. What they *could* leak is through the read-time fold
+(`KilnCMS.Accounts.Preparations.FoldRoleGrant` presents a live grant as `role`),
+and that fold declines whenever `role` itself came back forbidden.
+
+The three admin levers above are the account console's
+([`account-administration.md`](account-administration.md)). Two are refused for
+everyone, admins included:
+
+| Action | Why nobody may call it |
+|---|---|
+| `:sign_in_with_passkey` | Mints a session token; only the verified WebAuthn ceremony reaches it (`authorize?: false`), and the preparation refuses any actor-carrying call — so not even an admin can mint a token for another account |
+| `:sync_billing_audiences` | Entitlements are recomputed by `KilnCMS.Billing.Entitlements` alone; the change module refuses an actor-carrying call, so no authorized path grants an audience by hand |
+
+`NotLastAdmin` sits on `:manage_access` and `:anonymize` as a **validation**, not
+a policy: admins bypass `User`'s policies wholesale, so a `forbid_if` would never
+fire, and the refusal has to carry a sentence.
 
 **Demo mode** (`KILN_DEMO_RESET=confirm`) narrows the self-service column:
 `change_password` and the TOTP actions (`setup_totp`, `confirm_totp`,
 `disable_totp`, `regenerate_totp_recovery_codes`) refuse every non-admin actor
 with `DemoAccountLocked`, as do `Passkey.register` and `Passkey.destroy` below.
 Every visitor to a demo is the same shared account. See
-[`demo-mode.md`](demo-mode.md#7-the-shared-accounts-credentials).
+[`demo-mode.md`](demo-mode.md#7-credentials-for-the-shared-account).
 
 `Token` — every AshAuthentication action is gated to the AshAuthentication
 interaction bypass, and the nightly expunge trigger to the AshOban one. There are
@@ -279,7 +378,15 @@ deletable.
 | Action | admin | editor | viewer | anonymous |
 |--------|:-----:|:------:|:------:|:---------:|
 | read (`read`, `for_user`, `for_org`) | ✅ all | 🔎 own rows | 🔎 own rows | ❌ |
-| `create`, `update`, `destroy` | ✅ | ❌ | ❌ | ❌ |
+| `create`, `update`, `destroy`, `grant_temporary_role` | ✅ | ❌ | ❌ | ❌ |
+| `expire_role_grant` | ✅ | ❌ | ❌ | ❌ (⚙️ AshOban sweep) |
+
+The AshOban grant is an **unconditional** `bypass AshOban.Checks.AshObanInteraction`
+at the top of the policies, not one scoped to `expire_role_grant`: the scheduler
+reads the rows to sweep through the primary read first, and a write-scoped grant
+leaves that read filtered to nothing. Every create/update also carries
+`Validations.StandingAdminOnly`, so a temporary platform admin cannot confer a
+site tier that would outlast its own grant.
 
 The read grants above are why both resources scope their deny to write actions
 only: Ash AND-combines every applicable policy, so a bare `policy always()`
