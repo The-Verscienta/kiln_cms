@@ -132,12 +132,16 @@ defmodule KilnCMS.Search.TagEmbedding do
   policies do
     # A tag name is world-readable on the tag itself, but this table is only
     # ever read by `Search.Related` as the system; keep it off the API surface
-    # the same way `BlockEmbedding` is.
+    # the same way `BlockEmbedding` is. Same shape as that resource since
+    # #1402: the system reader and the system writer are named here instead of
+    # bypassing the block.
     policy action_type(:read) do
+      authorize_if KilnCMS.Checks.SystemActor
       authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 
     policy action_type([:create, :update, :destroy]) do
+      authorize_if KilnCMS.Checks.SystemActor
       forbid_if always()
     end
   end

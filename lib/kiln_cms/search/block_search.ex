@@ -73,6 +73,10 @@ defmodule KilnCMS.Search.BlockSearch do
       block_type: opts[:block_type],
       limit: opts[:limit] || 10
     })
-    |> Ash.read!(authorize?: false, tenant: opts[:org_id])
+    # `BlockEmbedding` is an internal index, not a caller-facing resource: its
+    # read policy admits editors-and-up plus the search system actor (#1402).
+    # Whether the CALLER may see a hit is decided one tier up, by hydrating the
+    # document under their own authorization — see `KilnCMS.Search`.
+    |> Ash.read!(actor: KilnCMS.SystemActor.new(:search), tenant: opts[:org_id])
   end
 end

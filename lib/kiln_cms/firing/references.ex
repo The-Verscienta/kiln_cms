@@ -151,6 +151,12 @@ defmodule KilnCMS.Firing.References do
     |> Enum.uniq()
   end
 
+  # The fire path has no request actor: it runs from `Engine.fire/2` inside
+  # `FireWorker` / `RefireWorker` / `DeleteArtifacts`. `Firing.ReferenceEdge`'s
+  # policies admit this actor by name (#1402) instead of the bypass that used
+  # to be the only way into a `forbid_if always()` write path.
+  defp system_actor, do: KilnCMS.SystemActor.new(:firing)
+
   @doc """
   Replace a document's outgoing edges to match its current references.
 
@@ -166,14 +172,15 @@ defmodule KilnCMS.Firing.References do
     # rebuild can never delete or upsert across a tenant boundary. `org_id` is set
     # from the tenant (writable? false), so it's not in the built attrs maps.
     #
-    # Both writes below run `authorize?: false`: `rebuild/4` is called from
-    # `Engine.fire/2` on the fire path (workers, no actor), and
-    # `Firing.ReferenceEdge` closes create/update/destroy to every actor
-    # (`forbid_if always()`) — the edge graph is system bookkeeping derived
-    # from the document itself, and the tenant bounds what it can touch.
+    # Both writes below run as the **system actor** (#1402) rather than
+    # `authorize?: false`: `rebuild/4` is called from `Engine.fire/2` on the
+    # fire path (workers, no request actor), and `Firing.ReferenceEdge`'s write
+    # policy now admits that actor by name — the edge graph is system
+    # bookkeeping derived from the document itself, closed to every person
+    # (`forbid_if always()`), and the tenant bounds what it can touch.
     Firing.ReferenceEdge
     |> Ash.Query.filter(from_type == ^from_type and from_id == ^from_id)
-    |> Ash.bulk_destroy!(:destroy, %{}, authorize?: false, tenant: org_id)
+    |> Ash.bulk_destroy!(:destroy, %{}, actor: system_actor(), tenant: org_id)
 
     (extract(typed_blocks) ++ media_refs(typed_blocks) ++ document_media_refs(document))
     |> Enum.uniq()
@@ -181,8 +188,8 @@ defmodule KilnCMS.Firing.References do
       %{from_type: from_type, from_id: from_id, to_type: to_type, to_id: to_id}
     end)
     |> Ash.bulk_create!(Firing.ReferenceEdge, :upsert,
-      # Same fire-path bypass as the destroy above (see that comment).
-      authorize?: false,
+      # Same fire-path actor as the destroy above (see that comment).
+      actor: system_actor(),
       tenant: org_id,
       return_errors?: true,
       stop_on_error?: true,
@@ -203,11 +210,12 @@ defmodule KilnCMS.Firing.References do
   def invalidate(org_id, to_type, to_id, visited) do
     # Tenant-scoped `edges_to` (epic #336): a wave only ever sees same-org
     # referrers, so a re-fire can never cross a tenant boundary. `org_id` is
-    # carried in the job args so the worker restores it as its tenant.
-    # `authorize?: false` because the wave runs from `FireWorker`/`RefireWorker`
-    # (and `DeleteArtifacts`) with no actor; the read is tenant-scoped and only
-    # `{from_type, from_id}` pairs leave this function, as job args.
-    {:ok, edges} = Firing.edges_to(to_type, to_id, authorize?: false, tenant: org_id)
+    # carried in the job args so the worker restores it as its tenant. Runs as
+    # the system actor (#1402) — the wave is `FireWorker`/`RefireWorker` (and
+    # `DeleteArtifacts`) with no request actor, `ReferenceEdge`'s read policy
+    # admits it alongside editors, and only `{from_type, from_id}` pairs leave
+    # this function, as job args.
+    {:ok, edges} = Firing.edges_to(to_type, to_id, actor: system_actor(), tenant: org_id)
 
     edges
     |> Enum.map(&{&1.from_type, &1.from_id})

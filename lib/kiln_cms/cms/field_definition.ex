@@ -120,7 +120,13 @@ defmodule KilnCMS.CMS.FieldDefinition do
     end
 
     # Editors may read definitions so the content editor can render the fields.
+    #
+    # The system actor reads them too (#1402): firing a document needs the field
+    # schema to turn `custom_fields` values into JSON-LD
+    # (`KilnCMS.Firing.CustomFields`). Read-only — defining a field stays admin,
+    # through the policy below and the bypass above.
     policy action_type(:read) do
+      authorize_if KilnCMS.Checks.SystemActor
       authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 
