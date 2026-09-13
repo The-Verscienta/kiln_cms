@@ -686,6 +686,15 @@ defmodule KilnCMSWeb.Layouts do
         path: ~p"/editor/tasks",
         icon: "hero-clipboard-document-check"
       },
+      # The notification inbox (#1320), next to Tasks: both answer "what is
+      # waiting for me", and the bell in the top bar is the glance while this
+      # is the list.
+      %{
+        key: :inbox,
+        label: gettext("Inbox"),
+        path: ~p"/editor/inbox",
+        icon: "hero-inbox"
+      },
       # Content releases (#500) — editorial planning, so it sits with the author
       # group next to the calendar it plots onto, not with the admin tools. The
       # admin-only half (schedule/publish/roll back) is gated on the page.
