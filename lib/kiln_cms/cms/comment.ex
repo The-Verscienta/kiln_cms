@@ -227,7 +227,16 @@ defmodule KilnCMS.CMS.Comment do
 
     # Editor-facing only — no audience/public-read carve-out, unlike content
     # links: a comment thread is never part of a delivered document.
+    #
+    # The system actor is admitted for the same two action types (#1402):
+    # `KilnCMS.Automation.RuleWorker` posts an editorial-intelligence
+    # reaction's findings as a document-level comment (#946), which is a create
+    # on a thread it has to be able to read. It stamps no `author_id` — the
+    # actor has no `:id`, deliberately — so `created_by_rule_id` carries the
+    # provenance exactly as it did under the bypass. `update` is NOT admitted:
+    # automation posts, it does not edit what anyone said.
     policy action_type([:create, :read]) do
+      authorize_if KilnCMS.Checks.SystemActor
       authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 
