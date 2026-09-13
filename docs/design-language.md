@@ -128,6 +128,16 @@ written as a function component or a raw `class="…"` in a template.
 - Status terminology stays consistent everywhere it appears (draft, in
   review, published, archived — never a synonym mid-flow).
 - Copy overall: concise, calm, action-oriented, non-technical where possible.
+- No internal metaphors in editor-facing strings. Kiln's own vocabulary —
+  "firing", the kiln imagery — stays in module names, module docs and
+  comments. What an author reads says what happened to *their* content:
+  "published with…", not "fired as…"; "hasn't finished publishing", not
+  "hasn't been fired". The same applies to implementation nouns the author
+  never chose: name the behaviour ("question-and-answer structured data"),
+  not the schema.org type ("FAQPage"). The one audience that keeps the term
+  is the operator/integrator — "fired artifact" is the name the API reference,
+  `docs/static-export.md` and the System → Delivery cache panel all use for
+  the same thing, and renaming it only there would break the trail.
 
 ## UX patterns
 

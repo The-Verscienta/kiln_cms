@@ -4,7 +4,7 @@ KilnCMS serves public content as **server-rendered HTML** (`KilnCMSWeb.ContentCo
 plus headless **fired artifacts** (`KilnCMSWeb.ArtifactController`). This doc records the
 target SLOs, the knobs that hit them, and how to run a basic load check. It complements
 [`observability.md`](observability.md) (telemetry events) and the production hardening
-checklist in the [README](../README.md).
+checklist in the [README](https://github.com/The-Verscienta/kiln_cms/blob/main/README.md).
 
 ## SLO targets
 
