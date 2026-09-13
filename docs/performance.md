@@ -22,8 +22,12 @@ These are origin-side targets (excluding network/CDN). The delivery path is desi
 
 - **Cache-hit delivery does no DB work.** The cached payload carries the record, the
   media-enriched blocks (resolved `srcset`), and the locale `translations` list, so a hit
-  issues zero queries (`KilnCMS.Cache`, `ContentController.payload/3`). Hit/miss is emitted
-  as `[:kiln_cms, :cache, :content]` telemetry.
+  issues zero queries (`KilnCMS.Cache`, `ContentController.payload/3`). Every lookup is
+  emitted as `[:kiln_cms, :cache, :content]` telemetry, tagged `hit`, `miss`, `coalesced`
+  (the request found no entry and was served by another caller's in-flight read — the shape
+  a stampede is made of, so a spike here is the signal, not a healthy hit rate) or `error`
+  (the fetch failed and the caller recomputed outside the per-key deduplication; a sustained
+  rate here means every concurrent request is hitting the database at once).
 - **CDN offload.** Published HTML sends `Cache-Control: public, max-age=60,
   stale-while-revalidate=300`, a content `ETag` (→ `304` on `If-None-Match`), and
   `Vary: Accept-Language`. 404s send `Cache-Control: no-store`. The in-BEAM cache is

@@ -136,10 +136,17 @@ defmodule KilnCMS.Automation.Rule do
   end
 
   policies do
-    # Editor-workflow configuration is admin-only; the executor reads with
-    # `authorize?: false` (system job).
+    # Editor-workflow configuration is admin-only.
     policy always() do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
+
+      # `KilnCMS.Automation.RuleWorker` re-reads the rule it was enqueued for
+      # (#1402). READ only, and narrowed here rather than granted by a second
+      # policy, because Ash ANDs policies: a second one would not lift this
+      # one's refusal, and widening this one outright would let system code
+      # author rules. Authoring stays admin.
+      forbid_unless action_type(:read)
+      authorize_if KilnCMS.Checks.SystemActor
     end
   end
 

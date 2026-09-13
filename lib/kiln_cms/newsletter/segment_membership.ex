@@ -29,7 +29,14 @@ defmodule KilnCMS.Newsletter.SegmentMembership do
   end
 
   policies do
+    # A join row between a subscriber and a segment. Admins manage them by
+    # hand; `KilnCMS.Newsletter.TierSync` adds and removes the tier-backed ones
+    # as entitlements change, and is admitted by name (#1402) rather than
+    # bypassing. The grant is the whole resource because the sync genuinely
+    # does read, create and destroy here — there is nothing narrower to say,
+    # and the row carries no data of its own beyond the two ids.
     policy always() do
+      authorize_if KilnCMS.Checks.SystemActor
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
     end
   end
