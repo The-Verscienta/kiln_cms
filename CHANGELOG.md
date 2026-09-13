@@ -27,6 +27,18 @@ migration, a rewritten column, a dropped config key).
 
 ## [Unreleased]
 
+### Security
+
+- **A system actor, so internal callers run under the policies instead of
+  around them.** `%KilnCMS.SystemActor{}` and the `KilnCMS.Checks.SystemActor`
+  policy check replace `authorize?: false` for workers, jobs and other trusted
+  internal code: the grant is declared in the resource's `policies` block and
+  listed in `docs/policy-matrix.md` (a test fails the build if a resource
+  admits the actor without a row there), and it is admitted with `authorize_if`
+  rather than `bypass`, so a policy added to the resource later still applies.
+  The first resource converted is `Firing.ReferenceEdge` — the re-fire wave's
+  link graph, which has no caller-facing write path at all. No behaviour
+  changes for any caller-facing path (#1402).
 ### Fixed
 
 - **`mix docs` "View Source" links point at the release tag, not `main`.**
