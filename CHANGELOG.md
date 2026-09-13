@@ -273,6 +273,12 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **A `.md` file that opens with an HTML comment keeps its title.** A license
+  or editing note above the leading `# H1` — a common shape for an imported
+  file — sat in front of the heading in the parsed tree, so
+  `KilnCMS.Markdown.parse_document/2` stopped recognizing it as the document's
+  title: the import arrived untitled *and* with the heading still in the body,
+  which then printed the name twice.
 - **The content-cache metric no longer inverts during a stampede, and a Courier
   failure no longer amplifies one.** A burst of concurrent requests for one
   just-invalidated key is deduplicated by Cachex into a single database read,
