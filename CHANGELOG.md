@@ -27,6 +27,15 @@ migration, a rewritten column, a dropped config key).
 
 ## [Unreleased]
 
+### Changed
+
+- **The docs publisher no longer installs `earmark`.**
+  `scripts/publish_docs.exs` renders with `earmark_parser` — the parser mix.exs
+  already depends on — and a renderer ported from `KilnCMS.Markdown`, so the
+  retired package and its stored-XSS advisory are gone from the repo entirely.
+  Nothing about a guide's published HTML changes, with one exception: the
+  fenced HTML example in `docs/visual-editing-bridge.md` regains two lines that
+  earmark's own parser was silently eating.
 ### Security
 
 - **A system actor, so internal callers run under the policies instead of
@@ -39,6 +48,44 @@ migration, a rewritten column, a dropped config key).
   The first resource converted is `Firing.ReferenceEdge` — the re-fire wave's
   link graph, which has no caller-facing write path at all. No behaviour
   changes for any caller-facing path (#1402).
+- **The firing path runs under the policies.** Everything `KilnCMS.Firing.*`
+  touches now carries `%KilnCMS.SystemActor{}` and a matching policy clause
+  instead of `authorize?: false`: the artifact table (written only by the
+  engine, destroyed only by unpublish), the reference graph, the type and
+  field definitions it reads, and the one system-only content action that
+  recomputes `search_text`. Two reads deliberately keep their bypass, and now
+  say why — a system clause on the `Content` read policy would be a standing
+  grant over the whole corpus, much wider than the call it would replace.
+  `mix kiln.authz.check` gates `lib/kiln_cms/firing/` from here on (#1402).
+- **The semantic index runs under its policies.** `Search.BlockEmbedding` and
+  `Search.TagEmbedding` — internal indexes with no caller-facing write path —
+  admit `%KilnCMS.SystemActor{}` by name, so the indexer, `BlockSearch` and
+  `Search.Related` no longer bypass them; the document-level `:set_embedding`
+  vector write joins `:reindex_search_text` as the second system-only content
+  action named in the content resources' own create/update policy. Two tag
+  reads turn out to need no bypass at all
+  (taxonomy is world-readable). The workers' *document* reads keep theirs, and
+  say why. `mix kiln.authz.check` now also gates `lib/kiln_cms/search/`
+  (#1402).
+- **Editorial automation runs under the policies.** `KilnCMS.Automation.RuleWorker`
+  carries `%KilnCMS.SystemActor{}`: `Automation.Rule` and `Social.Account`
+  admit it for **reads only** (authoring a rule, and the credentials for a
+  site's public voice, stay admin acts), and `CMS.Comment` / `CMS.Task` admit
+  it for create and read but **not** update — automation posts findings and
+  opens tasks, it does not edit what anyone said or close their work. The
+  content and user lookups keep their bypass, and now say why.
+  `mix kiln.authz.check` now also gates `lib/kiln_cms/automation/` (#1402).
+- **Billing and the newsletter tier sync run under the policies.** The last two
+  of the four modules #1329 audited: `Billing.Settings` (read and first-use
+  init only — the write path to payment credentials stays platform-admin),
+  `Billing.Membership` and `Billing.MembershipEvent` (the provider-state,
+  append and GDPR-erasure actions that are `forbid_if always()` for every
+  person, admin included), and `Newsletter.Segment` / `Subscriber` /
+  `SegmentMembership` for the tier-backed lifecycle. The one caller that may
+  take those actions is now named in each policy block instead of reaching
+  around it. The `Accounts.User` lookups keep their bypass, and say why
+  (#1402).
+
 ### Fixed
 
 - **`mix docs` "View Source" links point at the release tag, not `main`.**
@@ -80,6 +127,19 @@ migration, a rewritten column, a dropped config key).
   longer poison the editorial action's transaction and lose the content, and a
   rolled-back submit-for-review no longer mails the reviewers about a
   transition that never happened.
+- **A secrets-rotation runbook**, [`docs/secrets-rotation.md`](docs/secrets-rotation.md),
+  closing residual risk 12 in `docs/threat-model.md` (#1304). Per-secret
+  procedures against a running deployment, written from what the code does
+  rather than what would be reasonable — so it says plainly that nothing here
+  supports a dual-key transition: `TOKEN_SIGNING_SECRET` and `SECRET_KEY_BASE`
+  are hard cutovers that sign every user out, while `DATABASE_URL` and the S3
+  keys can be rolled without downtime only because Postgres and S3 will each
+  hold two credentials at once. It also documents the trap: `SECRET_KEY_BASE`
+  keys `KilnCMS.Keys.Vault`, so rotating it **permanently orphans** the DKIM
+  key, social credentials, payment secrets and the ActivityPub actor key, with
+  no re-encryption path — and every one of those fails quietly, behind a
+  settings page that keeps rendering from its plaintext columns. The actor key
+  is called out as the one rotation that cannot be done safely today.
 - **`/editor/accounts` — the instance-wide account register.** Platform-admin
   only. Lists every registration (search by email or name; filter by platform
   role, or to unconfirmed / temporarily elevated / erased accounts), and carries
@@ -205,6 +265,22 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **The content-cache metric no longer inverts during a stampede, and a Courier
+  failure no longer amplifies one.** A burst of concurrent requests for one
+  just-invalidated key is deduplicated by Cachex into a single database read,
+  but every deduplicated caller was counted as a cache **hit** — so the worse
+  the stampede, the healthier `[:kiln_cms, :cache, :content]` looked. Those
+  callers are now tagged `coalesced`, distinct from a genuine `hit`. Separately,
+  when Cachex answers a fetch with an error (its courier worker died, or the
+  fallback itself raised), every blocked caller fell through to a silent
+  per-caller recompute — N simultaneous rebuilds, N sitemap rebuilds on the
+  generic helper, exactly the stampede the cache exists to prevent. The most
+  common form of that — a fallback raising, which on the delivery path is just a
+  404 — now runs once for the whole burst and hands every waiting caller the
+  original exception, so a missing hot URL costs one database read instead of
+  one per request. What is left in that arm is the cache itself failing, where
+  the caller still computes (a dead courier must not take the site down) but the
+  degrade is logged and tagged `error` so it is visible while it happens.
 - **An arrow key can no longer walk a calendar chip off the grid it is drawn
   on.** On the editorial calendar, `ArrowDown` from the last row of a month
   that ends on a Sunday — or either vertical key in week view, whose grid is a
