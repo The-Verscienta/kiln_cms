@@ -103,6 +103,16 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **An arrow key can no longer walk a calendar chip off the grid it is drawn
+  on.** On the editorial calendar, `ArrowDown` from the last row of a month
+  that ends on a Sunday — or either vertical key in week view, whose grid is a
+  single row — moved the chip to a day the rendered window does not cover. The
+  move was written and announced, and then the re-query drew a calendar the
+  chip is not in: it vanished, with nothing on screen saying where it went. The
+  server now refuses a target outside the window it is rendering and says so,
+  the way it already refuses a move into the past. Dragging could never reach
+  this state — every drop target is a cell on screen — so this was the keyboard
+  path only (#1384).
 - **An HTML comment in imported Markdown is no longer published as prose.**
   `<!-- a note to whoever edits this file -->` standing on its own between
   paragraphs came through `KilnCMS.Markdown` as a visible paragraph — earmark

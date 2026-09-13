@@ -625,9 +625,10 @@ defmodule KilnCMSWeb.CalendarLiveTest do
       # midnight chip on the 15th of *next* month is always itself in the
       # future, unlike the old end-of-current-month fixture, which was born
       # already-past on the last day of a month and proved the refusal for
-      # the wrong reason (#1357). The target day is off the mounted month,
-      # which the handler must tolerate anyway: arrow keys can walk a chip
-      # onto any date.
+      # the wrong reason (#1357). Today may or may not be a cell of the
+      # mounted month's grid depending on the real-clock day, and either way
+      # this is the past refusal: it is asked before the off-grid one
+      # (#1384), which the test below this one pins on purpose.
       day = soon()
       at = DateTime.new!(day, ~T[00:00:00])
       page = scheduled_page(admin, at)
@@ -748,6 +749,177 @@ defmodule KilnCMSWeb.CalendarLiveTest do
     defp month_with_trailing_padding do
       Stream.iterate(soon(), &Date.shift(&1, month: 1))
       |> Enum.find(fn day -> Date.end_of_week(Date.end_of_month(day)).month != day.month end)
+    end
+
+    # --- off the rendered grid (#1384) ----------------------------------------
+
+    # A month far enough out that the week either side of its grid is still in
+    # the future. `soon/0` alone is not far enough for these: the grid of *next*
+    # month can start in this one, so a backwards nudge off it lands behind
+    # today on the last days of a month — and `refuse_past/1` is asked first, so
+    # the test would pass on the wrong refusal.
+    defp far_month, do: Date.shift(soon(), month: 2)
+
+    # The first such month whose grid has the shape a given edge needs.
+    defp far_month(shaped?) do
+      far_month() |> Stream.iterate(&Date.shift(&1, month: 1)) |> Enum.find(shaped?)
+    end
+
+    defp week_calendar_at(%Date{} = at),
+      do: ~p"/editor/calendar?view=week&at=#{Date.to_iso8601(at)}"
+
+    # One off-grid nudge, end to end: a future chip on `from`, the calendar
+    # mounted at `path`, and the target `to` that an arrow key would compute
+    # pushed the way the hook pushes it.
+    #
+    # Three assertions, because the bug was that the write *succeeded*: the
+    # record is untouched, the refusal says why, and the chip is still drawn on
+    # the grid it was nudged from — which is the part a "Moved …" announcement
+    # and a vanished chip got wrong.
+    defp assert_refuses_off_grid(conn, admin, path, %Date{} = from, %Date{} = to) do
+      at = DateTime.new!(from, ~T[09:00:00])
+      page = scheduled_page(admin, at)
+
+      {:ok, lv, html} = conn |> log_in(admin) |> live(path)
+      assert html =~ page.title
+
+      html =
+        render_hook(lv, "reschedule", %{
+          "id" => page.id,
+          "type" => "page",
+          "kind" => "publish",
+          "date" => Date.to_iso8601(to)
+        })
+
+      assert DateTime.compare(CMS.get_page!(page.id, actor: admin).scheduled_at, at) == :eq
+      assert html =~ "That day is not on this calendar"
+      assert html =~ page.title
+    end
+
+    test "refuses ArrowDown off the last row of a month ending on a Sunday", %{conn: conn} do
+      admin = authed_admin()
+      # The case #1332 named: no trailing padding row, so the grid stops at the
+      # month's own last day and a week forward from it is off the grid.
+      day = far_month(&(Date.day_of_week(Date.end_of_month(&1)) == 7))
+      last = Date.end_of_month(day)
+      assert Date.end_of_week(last) == last
+
+      assert_refuses_off_grid(conn, admin, calendar_at(day), last, Date.add(last, 7))
+    end
+
+    test "refuses ArrowUp off the first row of a month starting on a Monday", %{conn: conn} do
+      admin = authed_admin()
+      # The mirror: no leading padding row, so a week back from the first row
+      # is off the top of the grid.
+      day = far_month(&(Date.day_of_week(Date.beginning_of_month(&1)) == 1))
+      first = Date.beginning_of_month(day)
+      assert Date.beginning_of_week(first) == first
+
+      assert_refuses_off_grid(conn, admin, calendar_at(day), first, Date.add(first, -7))
+    end
+
+    test "refuses ArrowLeft off the grid's first cell", %{conn: conn} do
+      admin = authed_admin()
+      day = far_month()
+      # The first cell, padding or not — padding days are themselves on the
+      # grid, so the chip renders there and only the target is outside.
+      first = day |> Date.beginning_of_month() |> Date.beginning_of_week()
+
+      assert_refuses_off_grid(conn, admin, calendar_at(day), first, Date.add(first, -1))
+    end
+
+    test "refuses ArrowRight off the grid's last cell", %{conn: conn} do
+      admin = authed_admin()
+      day = far_month()
+      last = day |> Date.end_of_month() |> Date.end_of_week()
+
+      assert_refuses_off_grid(conn, admin, calendar_at(day), last, Date.add(last, 1))
+    end
+
+    test "refuses ArrowDown in week view, whose grid is a single row", %{conn: conn} do
+      admin = authed_admin()
+      day = far_month()
+
+      assert_refuses_off_grid(conn, admin, week_calendar_at(day), day, Date.add(day, 7))
+    end
+
+    test "refuses ArrowUp in week view, whose grid is a single row", %{conn: conn} do
+      admin = authed_admin()
+      day = far_month()
+
+      assert_refuses_off_grid(conn, admin, week_calendar_at(day), day, Date.add(day, -7))
+    end
+
+    test "refuses ArrowRight off the end of the week view's row", %{conn: conn} do
+      admin = authed_admin()
+      day = far_month()
+      sunday = day |> Date.beginning_of_week() |> Date.add(6)
+
+      assert_refuses_off_grid(conn, admin, week_calendar_at(day), sunday, Date.add(sunday, 1))
+    end
+
+    test "refuses ArrowLeft off the start of the week view's row", %{conn: conn} do
+      admin = authed_admin()
+      day = far_month()
+      monday = Date.beginning_of_week(day)
+
+      assert_refuses_off_grid(conn, admin, week_calendar_at(day), monday, Date.add(monday, -1))
+    end
+
+    test "a nudge within the week view's own row still moves", %{conn: conn} do
+      admin = authed_admin()
+      # The other side of the four refusals above: week view queries a
+      # seven-day window, and a check that judged it against the month's grid —
+      # or simply refused everything — would pass every one of them.
+      day = far_month()
+      monday = Date.beginning_of_week(day)
+      at = DateTime.new!(monday, ~T[09:00:00])
+      page = scheduled_page(admin, at)
+
+      {:ok, lv, html} = conn |> log_in(admin) |> live(week_calendar_at(day))
+      assert html =~ page.title
+
+      target = Date.add(monday, 1)
+
+      render_hook(lv, "reschedule", %{
+        "id" => page.id,
+        "type" => "page",
+        "kind" => "publish",
+        "date" => Date.to_iso8601(target)
+      })
+      |> assert_move_accepted()
+
+      assert DateTime.to_date(CMS.get_page!(page.id, actor: admin).scheduled_at) == target
+    end
+
+    test "a nudge that is both into the past and off the grid names the past", %{conn: conn} do
+      admin = authed_admin()
+      # Last month's grid: every cell of it is behind us, so the day before its
+      # first cell is refused twice over. Which message the editor reads is
+      # decided by the order the two checks are asked in, and "into the past" is
+      # the more useful half of the answer — a fixed order, not an accident.
+      day = recently()
+      at = DateTime.new!(day, ~T[09:00:00])
+      page = scheduled_page(admin, at)
+
+      {:ok, lv, _html} = open_calendar_on(conn, admin, day, page)
+
+      before_grid =
+        day |> Date.beginning_of_month() |> Date.beginning_of_week() |> Date.add(-1)
+
+      html =
+        render_hook(lv, "reschedule", %{
+          "id" => page.id,
+          "type" => "page",
+          "kind" => "publish",
+          "date" => Date.to_iso8601(before_grid)
+        })
+
+      assert html =~ "Can&#39;t reschedule into the past" or
+               html =~ "Can't reschedule into the past"
+
+      refute html =~ "That day is not on this calendar"
+      assert DateTime.compare(CMS.get_page!(page.id, actor: admin).scheduled_at, at) == :eq
     end
 
     test "a viewer never reaches the calendar at all", %{conn: conn} do

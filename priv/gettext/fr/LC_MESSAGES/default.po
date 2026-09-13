@@ -10631,6 +10631,11 @@ msgstr "Cette colonne est pleine. Faites-y de la place d'abord."
 msgid "That content couldn't be found."
 msgstr "Ce contenu est introuvable."
 
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "That day is not on this calendar — nothing moved."
+msgstr "Ce jour n'est pas sur ce calendrier — rien n'a été déplacé."
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "That didn't work — try again."
