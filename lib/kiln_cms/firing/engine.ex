@@ -10,6 +10,28 @@ defmodule KilnCMS.Firing.Engine do
 
   `read/4` is the delivery path: cache → artifact table, **never** the live tree.
   Every read/write is scoped to the document's `org_id` tenant (epic #336).
+
+  ## Who the engine is (#1402)
+
+  Firing has no request actor — it runs from `FireWorker` / `RefireWorker` /
+  `Sweep`, or synchronously from the publish hook. It therefore runs as
+  `%KilnCMS.SystemActor{subsystem: :firing}`, and the resources it touches
+  admit that actor by name instead of being bypassed:
+
+    * `Firing.PublishedArtifact` — read, upsert and destroy. Nothing but the
+      engine has ever written one.
+    * `KilnCMS.CMS.TypeDefinition` — read, to resolve a dynamic document's
+      public type name.
+    * the content resource's `:reindex_search_text` — a system-only action on
+      a denormalized column, admitted by name inside the content macro's
+      `action_type([:create, :update])` policy (see `KilnCMS.Checks.SystemActor`
+      for why that, and not a bypass).
+
+  What is deliberately *not* converted is the content read in
+  `KilnCMS.Firing.Sweep` and `Firing.Delivery`: granting the system actor a
+  clause on the `Content` read policy would hand every system caller the whole
+  corpus, drafts included — much wider than the one bypass it would replace.
+  Those sites keep the bypass and say why.
   """
   require Logger
 
@@ -18,6 +40,7 @@ defmodule KilnCMS.Firing.Engine do
   alias KilnCMS.CMS.TypedBlocks
   alias KilnCMS.Firing
   alias KilnCMS.Firing.Cache
+  alias KilnCMS.SystemActor
 
   # `:llm` (#357) is the Markdown surface answer engines extract from.
   @surfaces KilnCMS.Firing.Surfaces.all()
@@ -155,7 +178,11 @@ defmodule KilnCMS.Firing.Engine do
     if search_text != Map.get(document, :search_text) do
       document
       |> Ash.Changeset.for_update(:reindex_search_text, %{search_text: search_text},
-        authorize?: false,
+        # A system-only action (#1402): the content macro's
+        # `action_type([:create, :update])` policy — the one written for people
+        # — narrows its own grant with `forbid_unless action(...)` and admits
+        # this actor there, so nothing in the stack is short-circuited.
+        actor: system_actor(),
         tenant: org_id
       )
       |> Ash.update()
@@ -181,7 +208,11 @@ defmodule KilnCMS.Firing.Engine do
         {:ok, body}
 
       :miss ->
-        case Firing.get_artifact(type, id, surface, authorize?: false, tenant: org_id) do
+        # The artifact read runs as the fire path's system actor (#1402):
+        # `PublishedArtifact`'s read policy admits it alongside editors and
+        # `DocumentReadable`. Whoever asked for this body was authorized for
+        # the *document* upstream — see that policy block.
+        case Firing.get_artifact(type, id, surface, actor: system_actor(), tenant: org_id) do
           {:ok, %{body: body} = artifact} ->
             # Cache BEFORE enqueuing: a job cannot start before its insert
             # returns, so this ordering guarantees the re-fire's fresh body is
@@ -334,8 +365,11 @@ defmodule KilnCMS.Firing.Engine do
   @doc "Delete every fired artifact for a document and evict the cache (unpublish)."
   @spec purge(Ash.UUID.t(), atom(), Ash.UUID.t()) :: :ok
   def purge(org_id, type, id) do
-    {:ok, artifacts} = Firing.artifacts_for(type, id, authorize?: false, tenant: org_id)
-    Enum.each(artifacts, &Ash.destroy!(&1, authorize?: false, tenant: org_id))
+    # Both run as the system actor (#1402). `PublishedArtifact` is written and
+    # destroyed only here; its write policy is `forbid_if always()` for every
+    # person, admin included, and admits this actor by name.
+    {:ok, artifacts} = Firing.artifacts_for(type, id, actor: system_actor(), tenant: org_id)
+    Enum.each(artifacts, &Ash.destroy!(&1, actor: system_actor(), tenant: org_id))
     Cache.evict(org_id, type, id)
     :ok
   end
@@ -379,7 +413,7 @@ defmodule KilnCMS.Firing.Engine do
     # the "recipe" type. The "entry" fallback below is now reserved for a
     # genuinely missing row (deleted mid-request, or a stale cache).
     case KilnCMS.CMS.get_type_definition_including_archived(id,
-           authorize?: false,
+           actor: system_actor(),
            tenant: org_id
          ) do
       {:ok, definition} -> definition.name
@@ -388,6 +422,9 @@ defmodule KilnCMS.Firing.Engine do
   end
 
   def public_type(document), do: to_string(document_type(document))
+
+  # Firing has no request actor. See the moduledoc's "Who the engine is".
+  defp system_actor, do: SystemActor.new(:firing)
 
   defp persist(document, type, org_id, artifacts) do
     fired_at = DateTime.utc_now()
@@ -405,8 +442,9 @@ defmodule KilnCMS.Firing.Engine do
             fired_at: fired_at
           },
           # `org_id` is set from the tenant (writable? false), so pass it as the
-          # tenant rather than in the attrs map.
-          authorize?: false,
+          # tenant rather than in the attrs map. System actor (#1402): the
+          # engine is the only writer `PublishedArtifact` has.
+          actor: system_actor(),
           tenant: org_id
         )
 
