@@ -75,11 +75,16 @@ defmodule KilnCMS.Automation.RuleWorker do
   times per document costs real tokens to tell an editor something they can ask
   for directly.
 
-  ## Why every Ash call here is `authorize?: false` (#1309)
+  ## How this worker is authorized (#1309, #1402)
 
-  An Oban worker has no request actor and there is no system actor yet
-  (#946), so a policy check would refuse everything. What makes the bypass
-  safe rather than an escalation:
+  An Oban worker has no request actor, so it runs as
+  `%KilnCMS.SystemActor{subsystem: :automation}`. The resources a reaction
+  actually touches admit that actor by name — `Automation.Rule` (read only),
+  `CMS.Comment` and `CMS.Task` (create and read, never update),
+  `Social.Account` (read only) — so those calls now run *under* the policies.
+
+  What still runs `authorize?: false`, and why it is safe rather than an
+  escalation:
 
     * **Tenant is always the rule's own.** The rule itself is read under the
       job's `org_id` (what `Automation.dispatch/3` read it under; a pre-#336 job
@@ -92,14 +97,23 @@ defmodule KilnCMS.Automation.RuleWorker do
       `Newsletter.send_as_newsletter/2` resolves that under the document's own
       tenant, so it cannot point across sites.
     * **Rules are authored only by org admins** (`KilnCMS.Automation.Rule` is
-      `policy always() → OrgAdmin`), and each bypassed target write is one an
-      `OrgAdmin` is already granted in that org (`Comment`/`Task` carry an
-      `OrgAdmin` bypass; `Social.Account` is admin-only) — so the bypass grants
-      the author nothing their own session couldn't do. Ash *validations*
-      (e.g. `AssigneeIsEditor` on `Task`) still run under `authorize?: false`.
+      admin-only to write), and every target a reaction touches is one an
+      `OrgAdmin` is already granted in that org — so neither the actor nor the
+      remaining bypasses grant the rule's author anything their own session
+      couldn't do. Ash *validations* (e.g. `AssigneeIsEditor` on `Task`) run
+      whatever the actor is, including under a bypass.
     * The one tenant-less read (`Accounts.User` in `editor?/2`) is a
       by-primary-key lookup of a global row; the candidate's tier is then
-      resolved on the rule's own org (`Scoping.effective_tier/2`).
+      resolved on the rule's own org (`Scoping.effective_tier/2`). Left as a
+      bypass deliberately: `User`'s read policy is self-only, and admitting
+      the system actor there would be a standing grant over every account on
+      the deployment — far wider than this one lookup of one id, of which only
+      a boolean leaves.
+    * The **content** reads (`ContentTypes.get_record/3`) are the document the
+      event names. Admitting the system actor on the `Content` read policy
+      would be a standing corpus-wide grant, drafts included, to every system
+      caller — wider than these calls, which are one id under the rule's own
+      tenant.
   """
   use Oban.Worker, queue: :default, max_attempts: 5
 
@@ -111,6 +125,9 @@ defmodule KilnCMS.Automation.RuleWorker do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
 
+  # A reaction has no request actor. See "How this worker is authorized".
+  defp system_actor, do: KilnCMS.SystemActor.new(:automation)
+
   @impl Oban.Worker
   def perform(%Oban.Job{
         args: %{"rule_id" => rule_id, "event" => event, "payload" => payload} = args
@@ -118,10 +135,11 @@ defmodule KilnCMS.Automation.RuleWorker do
     # `org_id` scopes the rule read to its own site (epic #336); a pre-#336 job
     # carries none and reads under the default org (a non-default org's rule
     # from that era is treated as gone). `rule_id` was enqueued by
-    # `Automation.dispatch/3`, not supplied by a user; system read,
-    # `authorize?: false` per the moduledoc.
+    # `Automation.dispatch/3`, not supplied by a user. `Automation.Rule`
+    # admits this worker's system actor for reads (#1402) — authoring a rule
+    # is still admin-only.
     case Automation.get_rule(rule_id,
-           authorize?: false,
+           actor: system_actor(),
            tenant: args["org_id"] || KilnCMS.Accounts.default_org_id()
          ) do
       {:ok, %{enabled: true} = rule} -> run(rule, event, payload)
@@ -318,8 +336,9 @@ defmodule KilnCMS.Automation.RuleWorker do
 
   defp open_lifecycle_tasks(type, id, org_id) do
     KilnCMS.CMS.list_open_tasks_of_kind!(type, id, :lifecycle_review,
-      # System read, tenant-scoped (bypass rationale in the moduledoc).
-      authorize?: false,
+      # `CMS.Task` admits this worker's system actor for reads (#1402); the
+      # probe is what stops a duplicate reminder being created blind.
+      actor: system_actor(),
       tenant: org_id
     )
   rescue
@@ -375,15 +394,18 @@ defmodule KilnCMS.Automation.RuleWorker do
       auto_complete_on_publish: false
     }
 
-    # No system actor exists yet in this codebase (every other `assign_task`
-    # caller is a human editor's own session) — `:assign`'s change only sets
-    # `creator_id` when an actor is present, and that column is NOT NULL, so
-    # a bare system call raises. The assignee is the most meaningful stand-in
-    # available for a rule-generated task: they are who acts on it.
+    # A stand-in actor, kept deliberately (#1402). A system actor would be
+    # authorized here — `CMS.Task` admits it for creates — but it carries no
+    # `:id`, so `:assign`'s stamping change would leave `creator_id` unset and
+    # this task would lose the one "who" it has. Unlike the intelligence
+    # reactions below it sets no `created_by_rule_id`, so nothing else would
+    # carry the provenance. The assignee is the most meaningful stand-in for a
+    # rule-generated lifecycle review: they are who acts on it, and they have
+    # already passed `editor?/2` — which is the same resolution
+    # `AssigneeIsEditor` then makes at the write.
     #
-    # `authorize?: false` with a stand-in actor: the assignee has already
-    # passed `editor?/2` and `AssigneeIsEditor` still runs; tenant is the
-    # rule's own (moduledoc).
+    # The bypass stays with it: the stand-in is a bare `%{id: _}` map, not an
+    # actor any policy could resolve a tier for.
     case KilnCMS.CMS.assign_task(attrs,
            actor: %{id: assignee_id},
            authorize?: false,
@@ -419,7 +441,9 @@ defmodule KilnCMS.Automation.RuleWorker do
   # admin-only, and only an admin could have authored the rule) — bypass
   # rationale in the moduledoc.
   defp announce_to(record, provider, org_id, rule_id, template) do
-    KilnCMS.Social.accounts_for_provider!(provider, authorize?: false, tenant: org_id)
+    # `Social.Account` admits this worker's system actor for reads (#1402) —
+    # the credentials' write path stays admin-only.
+    KilnCMS.Social.accounts_for_provider!(provider, actor: system_actor(), tenant: org_id)
     |> Enum.each(fn account ->
       case KilnCMS.Social.Announcer.announce(record, account,
              automation_rule_id: rule_id,
@@ -638,10 +662,11 @@ defmodule KilnCMS.Automation.RuleWorker do
             body: body,
             created_by_rule_id: context.rule_id
           },
-          # No actor exists for automation; `authorize?: false` under the
-          # rule's own tenant, on the event's own document (moduledoc).
-          actor: nil,
-          authorize?: false,
+          # `CMS.Comment` admits this worker's system actor for creates
+          # (#1402). It stamps no `author_id` — the actor deliberately has no
+          # `:id` — so `created_by_rule_id` carries the provenance, exactly as
+          # it did under the bypass this replaced.
+          actor: system_actor(),
           tenant: context.org_id
         )
       end,
@@ -675,11 +700,12 @@ defmodule KilnCMS.Automation.RuleWorker do
             created_by_rule_id: context.rule_id,
             kind: :intelligence_finding
           },
-          # No actor exists for automation; `authorize?: false` under the
-          # rule's own tenant — `AssigneeIsEditor` still vets `assignee`
-          # (moduledoc).
-          actor: nil,
-          authorize?: false,
+          # `CMS.Task` admits this worker's system actor for creates (#1402);
+          # `AssigneeIsEditor` still vets `assignee`, since validations run
+          # whatever the actor is. An actor with an `:id` may not set
+          # `created_by_rule_id` (`:assign`'s anti-spoof validation) — the
+          # system actor has none, which is exactly why it may.
+          actor: system_actor(),
           tenant: context.org_id
         )
       end,

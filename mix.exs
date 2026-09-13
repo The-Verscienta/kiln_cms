@@ -305,6 +305,7 @@ defmodule KilnCMS.MixProject do
       "docs/two-factor-auth.md": [],
       "docs/sso.md": [],
       "docs/threat-model.md": [],
+      "docs/secrets-rotation.md": [],
       # Design notes & decision records
       "docs/advanced-analytics-plan.md": [],
       "docs/collaborative-editing-spike.md": [],
@@ -426,7 +427,8 @@ defmodule KilnCMS.MixProject do
         "docs/passkeys.md",
         "docs/two-factor-auth.md",
         "docs/sso.md",
-        "docs/threat-model.md"
+        "docs/threat-model.md",
+        "docs/secrets-rotation.md"
       ],
       "Design notes & decision records": [
         "docs/advanced-analytics-plan.md",

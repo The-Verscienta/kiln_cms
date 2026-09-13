@@ -34,6 +34,12 @@ defmodule KilnCMS.Billing do
 
   alias KilnCMS.Billing.Settings
 
+  # The checkout path, the webhook receiver, the reconcile sweep and GDPR
+  # erasure all reach billing with no actor of their own. `Settings` admits
+  # this actor for `:read`/`:init`; `Membership` and `MembershipEvent` admit it
+  # for the actions closed to every person (#1402).
+  defp system_actor, do: KilnCMS.SystemActor.new(:billing)
+
   resources do
     resource KilnCMS.Billing.Settings do
       define :init_settings, action: :init
@@ -105,19 +111,19 @@ defmodule KilnCMS.Billing do
   end
 
   @doc """
-  The settings singleton, or nil before first use. A system read
-  (`authorize?: false`): the admin-only policy guards the UI path, while the
-  checkout and webhook paths read config actorlessly.
+  The settings singleton, or nil before first use. Read as the system actor
+  (#1402): the platform-admin policy guards the UI path, while the checkout and
+  webhook paths have no actor of their own.
   """
   @spec get_settings() :: Settings.t() | nil
   def get_settings do
     # The row is a singleton (unique `singleton` column), so a bare read returns
-    # at most one record. `authorize?: false`: no actor on the checkout/webhook
-    # paths (and `KilnCMS.Keys.fetch/1`), and `Settings` is a tenant-less,
-    # platform-admin-only singleton whose secret columns are vault-encrypted and
-    # `sensitive?`; the struct never leaves the server. The one web caller
-    # (`BillingLive`, via `ensure_settings!/0`) is itself platform-admin-gated.
-    case list_settings!(authorize?: false) do
+    # at most one record. `Settings` admits this actor for `:read` and `:init`
+    # only — its write path stays platform-admin — and every secret column is
+    # vault-encrypted and `sensitive?`; the struct never leaves the server. The
+    # one web caller (`BillingLive`, via `ensure_settings!/0`) is itself
+    # platform-admin-gated.
+    case list_settings!(actor: system_actor()) do
       [settings | _rest] -> settings
       [] -> nil
     end
@@ -136,13 +142,14 @@ defmodule KilnCMS.Billing do
   end
 
   defp create_settings! do
-    # `authorize?: false` on the create: `ensure_settings!/0` takes no actor.
-    # Its callers are `BillingLive` (which mounts behind `platform_admin?`) and
+    # `ensure_settings!/0` takes no actor, so the system actor stands in — and
+    # `Settings` admits it for `:init` by name (#1402). Its callers are
+    # `BillingLive` (which mounts behind `platform_admin?`) and
     # `verify_credentials/1` (which pre-checks its actor against `Settings`'
     # policy before calling), and `:init` accepts no attributes — it inserts the
     # empty singleton row, which the identity makes a no-op on a race. Nothing
     # caller-supplied reaches it.
-    init_settings!(%{}, authorize?: false)
+    init_settings!(%{}, actor: system_actor())
   rescue
     # Lost a concurrent-creation race on the singleton identity: the row exists
     # now, so read it.
@@ -283,11 +290,12 @@ defmodule KilnCMS.Billing do
   """
   @spec anonymize_membership(struct()) :: :ok
   def anonymize_membership(membership) do
-    # `authorize?: false` is the only way in: `Membership`'s policy closes
-    # `:anonymize` to every actor (`forbid_if always()`), and the caller is
-    # `Accounts.Changes.AnonymizeUser` — an admin-policied erasure with no actor
-    # to hand down. `accept []`, tenant re-scoped to the row's own org.
-    anonymize_membership_row(membership, authorize?: false, tenant: membership.org_id)
+    # `Membership`'s policy closes `:anonymize` to every PERSON, admin
+    # included (`forbid_if always()`), and admits the system actor by name
+    # (#1402). The caller is `Accounts.Changes.AnonymizeUser` — an
+    # admin-policied erasure with no actor to hand down. `accept []`, tenant
+    # re-scoped to the row's own org.
+    anonymize_membership_row(membership, actor: system_actor(), tenant: membership.org_id)
     :ok
   end
 
@@ -300,19 +308,20 @@ defmodule KilnCMS.Billing do
   """
   @spec anonymize_actor(Ash.UUID.t()) :: :ok
   def anonymize_actor(user_id) do
-    # The read and the bulk update both run `authorize?: false`: `MembershipEvent`
-    # is append-only to every actor (`forbid_if always()` on update), so the
-    # bypass is the only route, and the caller is `Accounts.Changes.AnonymizeUser`
-    # (`User.:anonymize`, admin-policied) with no actor in hand. `user_id` is the
-    # row being erased, not input; the filter carries the grant, `accept []`, and
-    # each org's sweep is scoped to its own tenant.
+    # The read and the bulk update both run as the system actor (#1402):
+    # `MembershipEvent` is append-only to every PERSON (`forbid_if always()` on
+    # create/update) and admits this actor by name, and the caller is
+    # `Accounts.Changes.AnonymizeUser` (`User.:anonymize`, admin-policied) with
+    # no actor in hand. `user_id` is the row being erased, not input; the filter
+    # carries the grant, `accept []`, and each org's sweep is scoped to its own
+    # tenant.
     Enum.each(KilnCMS.Accounts.list_org_ids(), fn org_id ->
       KilnCMS.Billing.MembershipEvent
-      |> Ash.Query.for_read(:read, %{}, authorize?: false, tenant: org_id)
+      |> Ash.Query.for_read(:read, %{}, actor: system_actor(), tenant: org_id)
       |> Ash.Query.filter(actor_id == ^user_id)
       |> Ash.bulk_update(:anonymize_actor, %{},
-        # Same bypass as the read above.
-        authorize?: false,
+        # Same actor as the read above.
+        actor: system_actor(),
         tenant: org_id,
         return_errors?: false
       )
