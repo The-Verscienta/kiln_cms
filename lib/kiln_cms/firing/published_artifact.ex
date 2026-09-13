@@ -66,8 +66,12 @@ defmodule KilnCMS.Firing.PublishedArtifact do
   end
 
   policies do
-    # Writes happen only via the firing engine (which runs authorize?: false), so
-    # they're forbidden through normal policy.
+    # Writes happen only via the firing engine, which is the system: the engine
+    # fires a document and persists what it rendered. Nobody else has ever had a
+    # write path here, and #1402 replaced the engine's `authorize?: false` with
+    # a declared grant to `%KilnCMS.SystemActor{}` — `authorize_if` rather than
+    # `bypass`, so a policy added to this resource later applies to the engine
+    # too.
     #
     # Reads re-enforce the **audience axis** one layer down (#565). An artifact
     # carries the rendered body of its document, so `authorize_if always()` here
@@ -76,10 +80,22 @@ defmodule KilnCMS.Firing.PublishedArtifact do
     # delegates to the document's own read policy rather than restating it; see
     # `Checks.DocumentReadable` for why that beats denormalizing the audience.
     #
+    # The system actor is admitted alongside it, because delivery has already
+    # decided the audience question by the time it asks for a body:
+    # `Firing.Delivery.resolve/5` reads the *document* first (its own filter
+    # carries the published/audience/unlock grant) and only then fetches the
+    # artifact by id. Re-running `DocumentReadable` there with the anonymous
+    # actor would refuse every gated document delivery had just unlocked.
+    #
     # `access_type :runtime` is required by the manual check: rows are fetched,
-    # then filtered. Not a hot path — delivery reads artifacts as the system.
+    # then filtered. Delivery does now run this policy rather than skipping it,
+    # but it never reaches the manual check's query: the system clause is a
+    # `SimpleCheck` on the actor struct and it is first, so the hot path costs
+    # one struct match.
     policy action_type(:read) do
       access_type :runtime
+
+      authorize_if KilnCMS.Checks.SystemActor
 
       # Editors and admins see every document, so they see every artifact. A
       # simple check, so it short-circuits before the runtime check's query.
@@ -88,6 +104,7 @@ defmodule KilnCMS.Firing.PublishedArtifact do
     end
 
     policy action_type([:create, :update, :destroy]) do
+      authorize_if KilnCMS.Checks.SystemActor
       forbid_if always()
     end
   end
