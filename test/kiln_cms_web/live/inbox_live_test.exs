@@ -130,12 +130,14 @@ defmodule KilnCMSWeb.InboxLiveTest do
 
       {:ok, lv, _html} = conn |> log_in(me) |> live(~p"/editor/inbox")
 
-      html = lv |> element("button", "Mark all read") |> render_click()
+      # Scoped to `#main`: the top bar's bell has a "Mark all read" of its own
+      # (#1320), so a bare `button` selector matches two.
+      html = lv |> element("#main button", "Mark all read") |> render_click()
 
       assert html =~ "Marked 2 notifications read"
       assert Notifications.unread_count(me, nil) == 0
       # The button goes away with the count it acted on.
-      refute has_element?(lv, "button", "Mark all read")
+      refute has_element?(lv, "#main button", "Mark all read")
     end
 
     test "marking a colleague's notification by id does nothing", %{conn: conn} do
@@ -186,10 +188,12 @@ defmodule KilnCMSWeb.InboxLiveTest do
       assert html =~ "Already seen"
       assert html =~ "Unread (1)"
 
-      unread = lv |> element("a", "Unread (1)") |> render_click()
+      unread = lv |> element("#main a", "Unread (1)") |> render_click()
 
       assert unread =~ "Still waiting"
-      refute unread =~ "Already seen"
+      # `main/1` again: the bell's dropdown lists read items too, on purpose,
+      # so the whole-page HTML legitimately still mentions "Already seen".
+      refute main(unread) =~ "Already seen"
     end
 
     test "an empty unread filter says so differently from an empty inbox", %{conn: conn} do
@@ -281,5 +285,14 @@ defmodule KilnCMSWeb.InboxLiveTest do
 
       assert render(lv) =~ "Tasks"
     end
+  end
+
+  # The console shell carries a notification bell whose dropdown renders
+  # content titles and `?comment=` deep links of its own (#1320), so a
+  # whole-page substring assertion can no longer tell this page's list apart
+  # from the chrome around it. `main/1` narrows to `<main id="main">`, which is
+  # the page's own body — the assertion means what it says again.
+  defp main(html) do
+    html |> Floki.parse_document!() |> Floki.find("#main") |> Floki.raw_html()
   end
 end
