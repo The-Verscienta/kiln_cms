@@ -27,6 +27,20 @@ defmodule Mix.Tasks.Kiln.UpdateTest do
 
   - Something unreleased.
 
+  ## [0.4.0]
+
+  ### Upgrade notes
+
+  1. Set NEWER_ENV_VAR before deploying.
+
+  ### Breaking
+
+  - `POST /api/thing` answers 200 where it answered 201.
+
+  ### Added
+
+  - A feature that is not upgrade advice.
+
   ## [0.3.0]
 
   ### Added
@@ -50,6 +64,9 @@ defmodule Mix.Tasks.Kiln.UpdateTest do
   ## [0.1.0]
 
   First release.
+
+  [0.4.0]: https://example.com/compare/v0.3.0...v0.4.0
+  [0.3.0]: https://example.com/compare/v0.2.0...v0.3.0
   """
 
   describe "upgrade_notes/3" do
@@ -76,11 +93,59 @@ defmodule Mix.Tasks.Kiln.UpdateTest do
     end
 
     test "stops at the next h3 so unrelated sections aren't read as advice" do
-      [{_, body}] = Update.upgrade_notes(@changelog, version("0.2.0"), version("0.3.0"))
+      [{_, [{"Upgrade notes", body}]}] =
+        Update.upgrade_notes(@changelog, version("0.2.0"), version("0.3.0"))
 
       assert body =~ "Set NEW_ENV_VAR"
       refute body =~ "not upgrade advice"
       refute body =~ "###"
+    end
+
+    # `Upgrading` is what every release up to 0.8.0 spelled it, and the notes
+    # are read from the changelog at the *target* tag — so a pin moving to one
+    # of those tags reads the old spelling forever. It has to keep working.
+    test "reads the legacy `Upgrading` spelling as `Upgrade notes`" do
+      [{_, blocks}] = Update.upgrade_notes(@changelog, version("0.2.0"), version("0.3.0"))
+
+      assert [{"Upgrade notes", _}] = blocks
+    end
+
+    test "carries Breaking alongside Upgrade notes, in the file's own order" do
+      [{_, blocks}] = Update.upgrade_notes(@changelog, version("0.3.0"), version("0.4.0"))
+
+      assert [{"Upgrade notes", notes}, {"Breaking", breaking}] = blocks
+      assert notes =~ "Set NEWER_ENV_VAR"
+      assert breaking =~ "answers 200 where it answered 201"
+    end
+
+    # Everything else a release changed is deliberately not printed: an
+    # operator moving a pin is asking what breaks, and #1325 was filed because
+    # the answer was buried in the whole entry.
+    test "prints nothing from Added, Changed, Fixed or Security" do
+      [{_, blocks}] = Update.upgrade_notes(@changelog, version("0.3.0"), version("0.4.0"))
+
+      refute Enum.any?(blocks, fn {_name, body} -> body =~ "not upgrade advice" end)
+    end
+
+    # The oldest release is the last section in the file, so its body runs on
+    # into the trailing link-reference block. Printing that as advice buries
+    # the advice above it.
+    test "does not read the trailing link-reference block as advice" do
+      changelog = """
+      ## [0.2.0]
+
+      ### Upgrade notes
+
+      Run the backfill task after deploying.
+
+      [0.2.0]: https://example.com/releases/v0.2.0
+      [0.1.0]: https://example.com/releases/v0.1.0
+      """
+
+      [{_, [{"Upgrade notes", body}]}] =
+        Update.upgrade_notes(changelog, version("0.1.0"), version("0.2.0"))
+
+      assert body == "Run the backfill task after deploying."
     end
 
     test "skips releases that carry no Upgrading section" do
@@ -96,6 +161,15 @@ defmodule Mix.Tasks.Kiln.UpdateTest do
       notes = Update.upgrade_notes(@changelog, nil, version("0.3.0"))
 
       assert length(notes) == 2
+    end
+
+    test "a release with neither section contributes nothing" do
+      baseline = version("0.1.0")
+
+      refute Enum.any?(
+               Update.upgrade_notes(@changelog, nil, version("0.4.0")),
+               fn {found, _} -> Version.compare(found, baseline) == :eq end
+             )
     end
 
     test "ignores Unreleased and prose that merely mentions a version" do

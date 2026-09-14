@@ -348,7 +348,26 @@ defmodule KilnCMS.MixProject do
         title: "Elixir client",
         filename: "elixir-client-readme"
       ]
-    ]
+    ] ++ release_history() ++ decisions()
+  end
+
+  # The long-form release entries and the decision records behind CHANGELOG.md
+  # (#1325). Globbed rather than listed because `mix kiln.changelog --condense`
+  # creates and renames them: a release cut and forgotten here would turn every
+  # "long form" link in CHANGELOG.md into a docs warning. Their order in the
+  # sidebar comes from `groups_for_extras/0`, so appending is enough.
+  defp release_history do
+    "docs/changelog/*.md"
+    |> Path.wildcard()
+    |> Enum.sort(:desc)
+    |> Enum.map(&{String.to_atom(&1), [filename: "changelog-" <> Path.basename(&1, ".md")]})
+  end
+
+  defp decisions do
+    "docs/decisions/*.md"
+    |> Path.wildcard()
+    |> Enum.sort()
+    |> Enum.map(&{String.to_atom(&1), [filename: "decision-" <> Path.basename(&1, ".md")]})
   end
 
   defp groups_for_extras do
@@ -460,6 +479,8 @@ defmodule KilnCMS.MixProject do
         "docs/deploy-staging.md",
         "docs/deploy-write-visual-editing.md"
       ],
+      "Architecture decisions": Enum.map(decisions(), fn {path, _} -> to_string(path) end),
+      "Release history": Enum.map(release_history(), fn {path, _} -> to_string(path) end),
       "Project history": [
         "CHANGELOG.md",
         "KilnCMS_Project_Plan.md",
@@ -864,6 +885,10 @@ defmodule KilnCMS.MixProject do
             # it is safe, and no allowance in the task's shrinking backlog (#1309,
             # #1402). Cheap, and the reason belongs next to the bypass.
             "kiln.authz.check",
+            # An Unreleased entry over three lines, or one with nowhere to link
+            # (#1325). Read-only; `--condense` is the half that rewrites the file
+            # and it is a release step, not a precommit one.
+            "kiln.changelog --check",
             # Catches untranslated/fuzzy msgstrs locally. Read-only, so `precommit`
             # keeps its non-destructive contract — the *drift* half of the gate
             # still lives in CI only, because `gettext.extract --merge` rewrites
