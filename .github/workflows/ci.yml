@@ -113,8 +113,12 @@ jobs:
           save-cache: "true"
           compile: warnings-as-errors
 
-      - name: Check unused deps are unlocked
-        run: mix deps.unlock --check-unused
+      # NOTE (#1321): `mix deps.unlock --check-unused` is NOT here any more. This
+      # job builds the LEAN tree (no KILN_ML), where Bumblebee/Nx/EXLA and their
+      # transitives are legitimately absent from the dependency graph while
+      # still in mix.lock — so the check would fail on every run. It moved to
+      # the `ml` job below, which is the only leg with the full tree and
+      # therefore the only one that can answer the question.
 
       - name: Check the toolchain declarations agree
         # .tool-versions is the source of truth, and this job already reads it
@@ -885,6 +889,153 @@ jobs:
       - name: Run the strict smoke suite
         # test_helper includes only :strict_tenancy-tagged tests on this leg.
         run: mix test
+
+  # The optional ML stack (#1321). Every other leg compiles WITHOUT
+  # Bumblebee/Nx/EXLA, because they are 671 MB of `deps/` plus a 110 MB archive
+  # download for a feature that ships disabled — the whole point of the
+  # `KILN_ML` gate. This is the leg that pays that price, so the semantic path
+  # keeps a build and a test run rather than only a comment saying it should
+  # work.
+  #
+  # What it uniquely covers:
+  #
+  #   * That the ML shape of `KilnCMS.Search.Serving`,
+  #     `KilnCMS.Search.RerankerServing` and both Bumblebee adapters still
+  #     COMPILES — the lean legs compile the other shape, so nothing else in
+  #     this file would notice a `Bumblebee.Text.text_embedding/3` call going
+  #     stale against a version bump.
+  #   * `mix deps.unlock --check-unused`, which needs the full tree (see the
+  #     note in `build`).
+  #   * `KilnCMS.Search.MLTest`, whose assertions branch on
+  #     `KilnCMS.Search.ML.available?/0` and therefore assert something
+  #     DIFFERENT here than they do on the lean legs.
+  #
+  # It does NOT run the model: no weights are downloaded and no inference
+  # happens. `@tag :calibration` stays excluded here as everywhere (see
+  # test/test_helper.exs) — that one downloads from Hugging Face and takes
+  # minutes, which is not a thing to do on every PR.
+  #
+  # Own build root and own cache key, like the strict leg above and for a
+  # sharper reason: this is the one job whose compiled config differs from its
+  # config FILES (config/test.exs points Nx at EXLA.Backend only when KILN_ML is
+  # on), so it must never share `_build` with a job that would restore it as
+  # its own. See .github/actions/setup-mix's header.
+  ml:
+    name: Optional ML stack (semantic search)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        # pgvector rather than plain postgres — see `build`.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      KILN_ML: "1"
+      # MIX_BUILD_ROOT (not MIX_BUILD_PATH): rebar deps lose their include
+      # paths under a bare BUILD_PATH — see the strict leg.
+      MIX_BUILD_ROOT: _build_ml
+      MIX_TEST_PARTITION: ml
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Elixir/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          # Reads .tool-versions — the single source of truth (#600). Do not
+          # restate the versions here; `mix kiln.toolchain.check` guards the
+          # two places that genuinely cannot read it (mix.exs, Dockerfile).
+          version-file: .tool-versions
+          # Required by setup-beam whenever version-file is used: it refuses to
+          # guess. Suits us — .tool-versions carries exact versions precisely so
+          # the Dockerfile can mirror them.
+          version-type: strict
+
+      - name: Cache deps and ML build
+        uses: actions/cache@v5
+        with:
+          path: |
+            deps
+            _build_ml
+            ~/.cache/xla
+          # `~/.cache/xla` is where the :xla package caches the 110 MB archive
+          # it downloads AND the built `libexla.so` (keyed on toolchain + xla +
+          # exla versions). Without it in the key, every run re-downloads the
+          # archive and rebuilds the NIF; with it, both are free.
+          key: ml-v1-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            ml-v1-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
+
+      - name: Install dependencies
+        # local.rebar explicitly, as the strict leg does: this job has no warm
+        # _build on first runs and rebar-built deps fail without the bootstrap.
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+          mix deps.get
+
+      - name: Check unused deps are unlocked
+        # The full tree, so this is the one leg that can tell an unused lock
+        # entry from one belonging to an opted-out dependency (#1321).
+        run: mix deps.unlock --check-unused
+
+      - name: Confirm the ML stack is actually in this build
+        # Guards the guard. If `KILN_ML` ever stops reaching `mix.exs` — a typo
+        # in the value, a rename of the variable, a refactor of
+        # `config/ml_flag.exs` — every step below would still pass, having
+        # compiled and tested the lean shape twice and the ML shape never. The
+        # leg has to fail loudly in that case, not quietly test nothing.
+        run: |
+          set -euo pipefail
+          for dep in bumblebee nx exla; do
+            test -d "deps/$dep" || {
+              echo "::error::KILN_ML=1 but deps/$dep was not fetched — the gate in mix.exs is not reading the flag."
+              exit 1
+            }
+          done
+          echo "bumblebee, nx and exla are all present."
+
+      - name: Compile (warnings as errors)
+        # On a cold cache this unpacks the 666 MB xla_extension and builds the
+        # EXLA NIF. That is minutes on this runner rather than the "~13 min"
+        # folklore — EXLA links a prebuilt XLA and compiles only its own eight
+        # C++ files (~16 s on an Apple Silicon laptop).
+        run: mix compile --warnings-as-errors
+
+      - name: Assert the compiled build agrees
+        # The other half of the guard above: fetched is not compiled-in.
+        # `KilnCMS.Search.ML.available?/0` is the compile-time constant every
+        # module on the semantic path branches on, so this is the single
+        # question worth asking of the finished build.
+        #
+        # Printed and compared in bash rather than branched on in Elixir:
+        # `available?/0` is a compile-time constant, so an `unless` on it inside
+        # `mix run -e` is a dead clause the type checker warns about.
+        run: |
+          set -euo pipefail
+          available=$(mix run --no-start -e 'IO.puts(KilnCMS.Search.ML.available?())' | tail -n 1)
+          echo "KilnCMS.Search.ML.available?/0 => $available"
+          if [ "$available" != "true" ]; then
+            echo "::error::The ML leg compiled the LEAN shape — KILN_ML did not reach the compiler."
+            exit 1
+          fi
+
+      - name: Run the semantic-search suite
+        # The search tests plus the flag's own wiring tests. Not the whole
+        # suite: the lean legs already run that, and what is unique here is the
+        # ML shape of these modules.
+        run: mix test test/kiln_cms/search test/kiln_cms/config/ml_flag_test.exs
 
   # Overlay drift check (#504): the core drift check above can't see project
   # overlays, so a core migration touching a `KilnCMS.CMS.Content`-macro

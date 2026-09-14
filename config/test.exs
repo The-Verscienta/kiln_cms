@@ -262,8 +262,23 @@ config :phoenix,
   sort_verified_routes_query_params: true
 
 # Use the EXLA (XLA) backend for Nx in tests — the :exla dep is only available in
-# dev/test. Prod/e2e fall back to Nx.BinaryBackend (see config/config.exs).
-config :nx, default_backend: EXLA.Backend
+# dev/test, and then only with `KILN_ML=1` (#1321). Prod/e2e fall back to
+# Nx.BinaryBackend (see config/config.exs).
+#
+# Conditional, not unconditional: configuring an application that is not in the
+# tree makes Mix print "You are configuring an application that does not really
+# exist" on every boot of a lean build.
+#
+# This is the one value in this file that depends on the ENVIRONMENT rather
+# than on this file's bytes, which matters for CI's shared `deps`/`_build`
+# cache — see .github/actions/setup-mix, whose key hashes this file. The `ml`
+# job is the only one that sets KILN_ML, and it carries its own MIX_BUILD_ROOT
+# and its own cache key for exactly this reason.
+Code.require_file(Path.expand("ml_flag.exs", __DIR__))
+
+if KilnCMS.Config.MLFlag.enabled?() do
+  config :nx, default_backend: EXLA.Backend
+end
 
 # Exercise the collab CRDT channel in tests (joins refuse when off).
 config :kiln_cms, :collab_prototype, true
