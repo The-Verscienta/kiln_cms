@@ -482,7 +482,7 @@ defmodule KilnCMSWeb.Tenant do
   # It also returns `:error` when the read itself fails — which must not be
   # cached and must not be treated as “no such org”.
   defp default_org do
-    case Accounts.default_org() do
+    case read_degrading_exit(&Accounts.default_org/0) do
       %Accounts.Organization{} = org -> org
       _ -> %Accounts.Organization{id: Accounts.default_org_id()}
     end
@@ -539,7 +539,7 @@ defmodule KilnCMSWeb.Tenant do
   # request outright. See that function.
   defp resolve_known(host) do
     if host == base_host() do
-      case Accounts.default_org() do
+      case read_degrading_exit(&Accounts.default_org/0) do
         %Accounts.Organization{} = org -> org
         nil -> nil
         :error -> :error

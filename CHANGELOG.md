@@ -70,6 +70,29 @@ migration, a rewritten column, a dropped config key).
 
 ### Changed
 
+- **`config/runtime.exs` is now an index, not a 1,523-line file.** The
+  configuration moved into per-concern fragments under `config/runtime/`
+  (`observability.exs`, `governance.exs`, `prod/mailer.exs`, …), evaluated in
+  exactly the order their blocks appeared before. Behaviour is unchanged: the
+  same variables are read, in the same sequence, producing the same
+  application env and the same boot warnings in the same order. Operators
+  change nothing.
+
+  One thing to know if you build releases outside the shipped Dockerfile:
+  `mix release` copies only `config/runtime.exs` into `releases/<vsn>/`, so the
+  fragments are copied alongside it by a `:steps` hook in `mix.exs`, and the
+  Dockerfile now `COPY`s the directory into the build context. The hook refuses
+  to assemble a release if the directory is missing rather than producing an
+  image that fails on first boot.
+
+- **`docs/environment-variables.md` and `.env.example` lead with the short
+  list.** Both now open with **Required (3)** — `DATABASE_URL`,
+  `SECRET_KEY_BASE`, `TOKEN_SIGNING_SECRET`, the only variables that stop a
+  production boot — then **Common (10)**, then everything else grouped by
+  feature. The previous "Required (production)" section also listed `PHX_HOST`
+  and `PHX_SERVER`, neither of which raises; both are still documented, under
+  server & networking. The required set is derived from the code and pinned by
+  a test, so it cannot drift from what actually raises.
 - **The stock front page now renders in the public delivery chrome.** `/` was
   the one public URL served out of `Layouts.app`, the authoring shell — so a
   first-run instance gave its front page a theme toggle and an account menu no
@@ -166,6 +189,16 @@ migration, a rewritten column, a dropped config key).
   can pin itself with `DOCS_SOURCE_REF=$(git rev-parse HEAD) mix docs`.
 ### Added
 
+- **A Configure hub at `/editor/configure`.** The console had twenty-odd
+  configuration screens and no screen that *was* configuration: the one page
+  named Settings is your own profile and 2FA, and a sidebar link is a name with
+  no explanation attached, so "where do I turn off full-text RSS" meant guessing
+  between Feeds, Delivery and Code injection. The hub lists every configuration
+  screen you may open, grouped as the sidebar groups them, each with a line
+  saying what it is for, over a filter that matches those descriptions and a
+  keyword list as well as the names — "rss" finds Feeds, "stripe" finds
+  Billing, "passkey" finds your own settings (#1319).
+
 - **Notifications are persisted, not only mailed.** Every workflow event
   already dispatched by email and Web Push — submitted for review, published,
   returned to draft, a comment, an `@mention`, a task assignment — now also
@@ -210,6 +243,7 @@ migration, a rewritten column, a dropped config key).
   no re-encryption path — and every one of those fails quietly, behind a
   settings page that keeps rendering from its plaintext columns. The actor key
   is called out as the one rotation that cannot be done safely today.
+
 - **`/editor/accounts` — the instance-wide account register.** Platform-admin
   only. Lists every registration (search by email or name; filter by platform
   role, or to unconfirmed / temporarily elevated / erased accounts), and carries
@@ -284,6 +318,7 @@ migration, a rewritten column, a dropped config key).
   front, that KilnCMS is consumed as a git-submodule overlay rather than a Hex
   package, and which surfaces are stable, which move without notice, and which
   are off by default (#1328).
+
 - **`docs/overlay-contract.md` — what a downstream overlay may rely on across
   releases.** The semver table says a major bump means "the overlay contract
   broke", but nothing said which surfaces that covers. This one does: a table
@@ -332,6 +367,24 @@ migration, a rewritten column, a dropped config key).
   probed rather than declared, and the hand-rolled `@behaviour` path breaks on
   callback additions. Linked from `projects/README.md` (which keeps the
   mechanics) and the getting-started guide router (#1328).
+
+### Changed
+
+- **The Configure sidebar is sections, and ⌘K finds settings screens.** The
+  admin half of the console nav now sits in collapsible sections — Content
+  model, Capture, Delivery, Integrations, Organization, Account — with
+  **Operations** ruled off below them for the instance-wide screens a platform
+  admin owns (Team, Accounts, Billing, Mail, API keys, Backups, System). Every item in
+  that band is platform-gated, so an org admin sees no band at all. Which
+  sections are collapsed is remembered per browser, like the icon rail, and is
+  ignored in the rail itself. The ⌘K palette gained a **Go to** category ahead
+  of the content results, searching the same list the sidebar and the hub
+  draw — by name, section, description and keyword, already filtered to what
+  you may open — so "backups" or "dkim" is one keystroke from the screen rather
+  than a scan down 25 items. The per-user screen is now labelled **Your
+  settings** under an **Account** heading, so nothing named "Settings" looks
+  like it holds the site's configuration, and the System screen no longer
+  describes itself as "the Kiln core this instance is built from" (#1319).
 
 ### Fixed
 

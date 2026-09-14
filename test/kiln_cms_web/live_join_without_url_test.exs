@@ -157,7 +157,8 @@ defmodule KilnCMSWeb.LiveJoinWithoutUrlTest do
     @routes ~w(
       /account /media /editor /editor/overview /editor/calendar /editor/translations
       /editor/search /editor/taxonomy /editor/analytics /editor/settings
-      /editor/trash /editor/webhooks /editor/redirects /editor/slugs /editor/team
+      /editor/configure /editor/trash /editor/webhooks /editor/redirects /editor/slugs
+      /editor/team
       /editor/automation /editor/fields /editor/types /editor/branding /editor/mail
       /editor/newsletter /editor/billing /editor/governance /editor/forms
       /editor/api-keys /editor/system

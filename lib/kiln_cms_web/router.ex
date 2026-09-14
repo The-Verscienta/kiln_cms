@@ -386,6 +386,9 @@ defmodule KilnCMSWeb.Router do
         # so the bell in their top bar has to be live too (#1320).
         {KilnCMSWeb.LiveNotifications, :notifications}
       ] do
+      # The configuration hub (#1319) — a map of every settings screen, holding
+      # no settings of its own. Admin-gated like the screens it points at.
+      live "/editor/configure", ConfigureLive, :index
       live "/editor/trash", TrashLive, :index
       live "/editor/webhooks", WebhookLive, :index
       # Pathauto redirect management (#457) — list/prune automatic rows, add

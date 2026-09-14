@@ -919,6 +919,60 @@ const Hooks = {
   },
 }
 
+// Collapsible nav sections (#1319), persisted the same way the rail is: the
+// list of collapsed group keys lives on <html data-nav-collapsed>, which
+// LiveView never patches, and in localStorage, which root.html.heex replays
+// before first paint. The server always renders the expanded markup — CSS does
+// the hiding — so the only thing left to correct here is `aria-expanded`.
+const collapsedGroups = () =>
+  (document.documentElement.dataset.navCollapsed || "").split(" ").filter(Boolean)
+
+// One head, told what <html> already says. A section holding the current page
+// is kept open by app.css whatever <html> says, so it reads as expanded too.
+const markNavGroup = btn =>
+  btn.setAttribute(
+    "aria-expanded",
+    String(
+      !collapsedGroups().includes(btn.dataset.navGroupToggle) ||
+        !!btn.closest(".side-group")?.querySelector("[aria-current]"),
+    ),
+  )
+
+const syncNavGroups = () =>
+  document.querySelectorAll("[data-nav-group-toggle]").forEach(markNavGroup)
+
+// morphdom calls onNodeAdded for every node of an added subtree, so coalesce
+// those calls into one pass over the few heads once the patch is done.
+let navSyncQueued = false
+const queueNavSync = () => {
+  if (navSyncQueued) return
+  navSyncQueued = true
+  queueMicrotask(() => {
+    navSyncQueued = false
+    syncNavGroups()
+  })
+}
+
+// Navigating moves aria-current, which changes which sections read as open.
+window.addEventListener("phx:page-loading-stop", syncNavGroups)
+
+const toggleNavGroup = key => {
+  const collapsed = collapsedGroups()
+  const next = collapsed.includes(key)
+    ? collapsed.filter(k => k !== key)
+    : [...collapsed, key]
+  if (next.length) document.documentElement.dataset.navCollapsed = next.join(" ")
+  else delete document.documentElement.dataset.navCollapsed
+  try {
+    localStorage.setItem("kiln:nav-collapsed", next.join(" "))
+  } catch (_) {
+    // Storage blocked: the section still toggles for this page view.
+  }
+  syncNavGroups()
+}
+
+syncNavGroups()
+
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
@@ -947,6 +1001,12 @@ const liveSocket = new LiveSocket("/live", Socket, {
       for (const cls of ["kiln-issue-mark", "kiln-focus-pulse", "fresh"]) {
         if (from.classList.contains(cls)) to.classList.add(cls)
       }
+      // The nav section heads always arrive from the server as expanded
+      // (#1319) — the collapse lives on <html data-nav-collapsed> and in CSS,
+      // so a patch would otherwise tell a screen reader a section is open
+      // while it is drawn shut. `onNodeAdded` below covers the other half: a
+      // live redirect rebuilds the sidebar rather than updating it.
+      if (from.hasAttribute("data-nav-group-toggle")) markNavGroup(to)
       if (from.tagName === "DETAILS") {
         const serverOpen = to.hasAttribute("open")
         const prevServerOpen = from.dataset.serverOpen
@@ -955,6 +1015,10 @@ const liveSocket = new LiveSocket("/live", Socket, {
         }
         to.dataset.serverOpen = String(serverOpen)
       }
+    },
+
+    onNodeAdded() {
+      queueNavSync()
     },
   },
 })
@@ -1098,6 +1162,11 @@ document.addEventListener("click", e => {
     // The clicked toggle just hid itself; hand focus to its twin.
     document.querySelector(collapse ? ".side-expand" : ".side-collapse")?.focus()
   }
+  // In rail mode the group heads are hairlines with no label, so a collapsed
+  // section would lose its items with nothing on screen to say why. CSS
+  // already forces them open there; refuse the toggle so the two agree.
+  const groupToggle = e.target.closest("[data-nav-group-toggle]")
+  if (groupToggle && !railMode()) toggleNavGroup(groupToggle.dataset.navGroupToggle)
   // Self-closing menus are <details data-autoclose> (the sidebar account menu,
   // the top bar's notification bell): a click anywhere outside closes them.
   // Keyed on the attribute rather than each class, so the next such menu opts
