@@ -69,6 +69,19 @@ defmodule KilnCMSWeb.NotificationBellTest do
     notification
   end
 
+  # `record_in_app/1` broadcasts before it returns, so the page already holds
+  # the message when the test calls `render/1`. Handling it, the page's hook
+  # calls `NotificationBell.refresh/0` — a `send_update/2` to the page's own
+  # process — and that update is queued *behind* the render already waiting.
+  # One render can therefore read the page before the bell changes. The first
+  # drains the broadcast (queueing the update); the second reads the result.
+  # For the "does not move" case it is what makes an unchanged badge mean
+  # something: the update has had its chance to land.
+  defp render_after_broadcast(lv) do
+    _drained = render(lv)
+    render(lv)
+  end
+
   defp badge(html) do
     html
     |> Floki.parse_fragment!()
@@ -210,7 +223,7 @@ defmodule KilnCMSWeb.NotificationBellTest do
           actor_name: "Grace"
         })
 
-      updated = render(lv)
+      updated = render_after_broadcast(lv)
       assert badge(updated) == "1"
       assert updated =~ "Grace assigned you a task"
     end
@@ -231,7 +244,7 @@ defmodule KilnCMSWeb.NotificationBellTest do
           title: "Not mine"
         })
 
-      assert badge(render(lv)) == ""
+      assert badge(render_after_broadcast(lv)) == ""
     end
   end
 
@@ -256,7 +269,7 @@ defmodule KilnCMSWeb.NotificationBellTest do
           actor_name: "Grace"
         })
 
-      assert badge(render(lv)) == "1"
+      assert badge(render_after_broadcast(lv)) == "1"
     end
 
     test "the editor content list has one", %{conn: conn} do
