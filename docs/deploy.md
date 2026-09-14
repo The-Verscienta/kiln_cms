@@ -57,7 +57,7 @@ step and the decisions behind it.
 Three variables **raise on boot** when missing; two more are effectively
 required because their defaults are wrong for any real deployment. Every
 variable is documented in full in
-[`environment-variables.md`](environment-variables.md#required-production) —
+[`environment-variables.md`](environment-variables.md#required-3) —
 this is the deploy-time summary.
 
 | Variable | What it is | How to produce it |
@@ -80,7 +80,7 @@ Two more that a real deployment almost always wants:
   brute-force protection on `/sign-in` stops being per-IP. Nothing errors —
   the app logs a warning once. Leave it unset **only** when the app is
   internet-facing directly. Details and the private-range caveat are under
-  *Optional — server & networking* in
+  *server & networking* in
   [`environment-variables.md`](environment-variables.md).
 
 Generate the two secrets once, store them in your secret manager, and never

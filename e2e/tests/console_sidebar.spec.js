@@ -56,6 +56,67 @@ test.describe("console sidebar", () => {
     await expect(page.locator(".side-tip")).toHaveCount(0);
   });
 
+  // Collapsible Configure sections (#1319). Same reasoning as the rail: the
+  // state lives on <html data-nav-collapsed> and in localStorage, the server
+  // always renders the section expanded, and CSS does the hiding — so the only
+  // place the feature is real is a browser.
+  test("sections collapse, survive navigation and reload, and yield to the rail", async ({
+    page,
+  }) => {
+    const html = page.locator("html");
+    const head = sidebar(page).getByRole("button", { name: "Delivery" });
+    const branding = sidebar(page).getByRole("link", { name: "Branding", exact: true });
+
+    await expect(head).toHaveAttribute("aria-expanded", "true");
+    await expect(branding).toBeVisible();
+
+    await head.click();
+    await expect(html).toHaveAttribute("data-nav-collapsed", /\bdelivery\b/);
+    await expect(head).toHaveAttribute("aria-expanded", "false");
+    await expect(branding).toBeHidden();
+
+    // A live navigation re-renders the sidebar from a server that thinks every
+    // section is open; the client's state outlives the patch either way.
+    await sidebar(page).getByRole("link", { name: "Media", exact: true }).click();
+    await expect(page).toHaveURL("/media");
+    await expect(branding).toBeHidden();
+    await expect(head).toHaveAttribute("aria-expanded", "false");
+
+    // Restored before first paint, like the rail.
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(html).toHaveAttribute("data-nav-collapsed", /\bdelivery\b/);
+
+    // The rail has no room to explain a missing section, so collapse is
+    // ignored there and the head stops taking clicks.
+    await page.getByRole("button", { name: "Collapse sidebar" }).click();
+    await expect(branding).toBeVisible();
+    await page.getByRole("button", { name: "Expand sidebar" }).click();
+    await expect(branding).toBeHidden();
+
+    await head.click();
+    await expect(html).not.toHaveAttribute("data-nav-collapsed", /\bdelivery\b/);
+    await expect(branding).toBeVisible();
+  });
+
+  // The operator band (#1319): the instance-wide screens, ruled off from the
+  // day-to-day admin above them.
+  test("the operator screens are set apart from day-to-day admin", async ({ page }) => {
+    const ops = sidebar(page).locator('.side-group-op[data-nav-group="operations"]');
+
+    await expect(ops.getByRole("button", { name: "Operations" })).toBeVisible();
+    await expect(ops.getByRole("link", { name: "Backups", exact: true })).toBeVisible();
+    await expect(ops.getByRole("link", { name: "System", exact: true })).toBeVisible();
+    await expect(
+      sidebar(page).locator('.side-group-op[data-nav-group="delivery"]'),
+    ).toHaveCount(0);
+
+    // A rule above the band, not just a heading: the separation has to read at
+    // a glance, which a sixth identical group head does not.
+    await expect
+      .poll(() => ops.evaluate(el => getComputedStyle(el).borderTopWidth))
+      .toBe("1px");
+  });
+
   test("the theme switch sets the theme from the sidebar", async ({ page }) => {
     const html = page.locator("html");
 
