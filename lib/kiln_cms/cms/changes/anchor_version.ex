@@ -51,13 +51,22 @@ defmodule KilnCMS.CMS.Changes.AnchorVersion do
     if skip?(changeset) do
       changeset
     else
-      actor_id = context.actor && context.actor.id
+      actor_id = actor_id(context.actor)
 
       Ash.Changeset.after_transaction(changeset, fn _changeset, result ->
         extend(result, actor_id)
       end)
     end
   end
+
+  # Only a person has an id to attribute. `%KilnCMS.SystemActor{}` (#1402)
+  # deliberately has no `:id`, and `context.actor.id` on it raised a `KeyError`
+  # while the changeset was being built — failing the write itself, whatever
+  # the policies would have said. A system write is recorded as `nil`, the
+  # same as an actorless one: `subsystem` is log provenance, not an identity
+  # `HistoryAnchor.actor_id` could hold.
+  defp actor_id(%{id: id}), do: id
+  defp actor_id(_actor), do: nil
 
   defp extend({:ok, record} = result, actor_id) do
     Chain.extend(record, actor_id: actor_id)
