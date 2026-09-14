@@ -45,6 +45,11 @@ defmodule KilnCMS.Docs.ExtrasLinksTest do
     * an apostrophe or slash becomes a `-` — `What's` is `what-s`, not `whats`;
     * only `##` and `###` headings get an id at all.
 
+  An explicit `<a id="…"></a>` is an anchor in both: ExDoc passes raw HTML
+  through, and GitHub keeps the id — prefixed `user-content-`, exactly as it
+  prefixes a heading's, and resolved the same way. The `docs/changelog/`
+  archives anchor every long-form entry like this.
+
   38 of 110 fragment links were dead in the generated docs, and `mix docs`
   never looks at a fragment; one more, written against ExDoc's slug, was dead
   on github.com instead. The second test fails when a fragment is missing from
@@ -290,9 +295,19 @@ defmodule KilnCMS.Docs.ExtrasLinksTest do
   end
 
   defp heading_ids(extra) do
-    if Path.extname(extra) in @markdown_ext,
-      do: extra |> File.read!() |> heading_ids_of(),
-      else: %{exdoc: [], github: []}
+    if Path.extname(extra) in @markdown_ext do
+      markdown = File.read!(extra)
+      %{exdoc: exdoc, github: github} = heading_ids_of(markdown)
+      anchors = explicit_anchors(markdown)
+      %{exdoc: exdoc ++ anchors, github: github ++ anchors}
+    else
+      %{exdoc: [], github: []}
+    end
+  end
+
+  # `<a id="…"></a>` outside code: a target in both renderings (see moduledoc).
+  defp explicit_anchors(markdown) do
+    for [_, id] <- Regex.scan(~r/<a id="([^"]+)"><\/a>/, prose(markdown)), do: id
   end
 
   defp heading_ids_of(markdown) do

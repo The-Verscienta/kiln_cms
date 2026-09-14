@@ -3,7 +3,7 @@
 - **Status** — accepted, shipped in
   [0.5.0](../changelog/v0.5.0.md) (Security).
 - **References** — [#688](https://github.com/The-Verscienta/kiln_cms/issues/688).
-- **Changelog** — [0.5.0 → Security](../../CHANGELOG.md#050---2026-08-09).
+- **Changelog** — the 0.5.0 Security section of [CHANGELOG.md](../../CHANGELOG.md).
 
 ## Decision
 

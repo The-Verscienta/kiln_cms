@@ -1050,6 +1050,9 @@ defmodule Mix.Tasks.Kiln.Changelog do
     end
   end
 
+  # Links back to CHANGELOG.md name the release in words and carry no
+  # `#fragment`: ExDoc ids a version heading `0-8-0-2026-09-11` and GitHub ids it
+  # `080---2026-09-11`, so any fragment is dead in one of the two.
   defp render_archive(release, sections) do
     body =
       sections
@@ -1062,10 +1065,10 @@ defmodule Mix.Tasks.Kiln.Changelog do
     """
     # KilnCMS #{label(release)} — full release notes
 
-    The long-form entries behind
-    [CHANGELOG.md → #{label(release)}](../../CHANGELOG.md##{slug(release.heading)}),
-    as they were written when each change merged. `CHANGELOG.md` carries the
-    one-line summary of each; this file carries the reasoning.
+    The long-form entries behind the #{label(release)} section of
+    [CHANGELOG.md](../../CHANGELOG.md), as they were written when each change
+    merged. `CHANGELOG.md` carries the one-line summary of each; this file
+    carries the reasoning.
 
     #{reroot_links(body)}
     """
@@ -1089,7 +1092,7 @@ defmodule Mix.Tasks.Kiln.Changelog do
     - **Status** — accepted, shipped in
       [#{release.version}](../changelog/v#{release.version}.md) (#{section}).
     - **References** — #{if refs == [], do: "none recorded", else: Enum.map_join(refs, ", ", &"[##{&1}](#{@repo_url}/issues/#{&1})")}.
-    - **Changelog** — [#{release.version} → #{section}](../../CHANGELOG.md##{slug(release.heading)}).
+    - **Changelog** — the #{release.version} #{section} section of [CHANGELOG.md](../../CHANGELOG.md).
 
     ## Decision
 
@@ -1447,8 +1450,9 @@ defmodule Mix.Tasks.Kiln.Changelog do
          Regex.match?(~r/\A#{@decisions_dir}\/\d{4}-/, path))
   end
 
-  # An archive's prose is its entries. Its intro and anchor tags are generated,
-  # and change when a release is cut and the file renamed.
+  # An archive's prose is its entries. Its intro, its anchor tags and a decision
+  # record's status block are generated, and change when a release is cut, the
+  # file renamed, or the link format revised.
   defp archive_prose(text) do
     text
     |> String.split(~r/\n\s*\n/)
@@ -1456,7 +1460,8 @@ defmodule Mix.Tasks.Kiln.Changelog do
       para = String.trim(para)
 
       String.starts_with?(para, "<a id=") or
-        String.starts_with?(para, "The long-form entries behind")
+        String.starts_with?(para, "The long-form entries behind") or
+        String.starts_with?(para, "- **Status** —")
     end)
     |> Enum.join("\n\n")
   end

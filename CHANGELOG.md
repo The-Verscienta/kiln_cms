@@ -57,30 +57,30 @@ Every summary line below that was shortened links to its own entry there.
 ### Added
 
 - **`/editor/accounts` — the instance-wide account register.**
-  ([long form](docs/changelog/unreleased.md#editoraccounts-the-instance-wide-account-register))
+  ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462) · [long form](docs/changelog/unreleased.md#editoraccounts-the-instance-wide-account-register))
 
 - **Temporary roles that expire on their own.**
-  ([long form](docs/changelog/unreleased.md#temporary-roles-that-expire-on-their-own))
+  ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462) · [long form](docs/changelog/unreleased.md#temporary-roles-that-expire-on-their-own))
 
 - **Admin-initiated password resets.**
-  ([long form](docs/changelog/unreleased.md#admin-initiated-password-resets))
+  ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462) · [long form](docs/changelog/unreleased.md#admin-initiated-password-resets))
 
 - **Account removal with a content disposition.**
-  ([long form](docs/changelog/unreleased.md#account-removal-with-a-content-disposition))
+  ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462) · [long form](docs/changelog/unreleased.md#account-removal-with-a-content-disposition))
 
 - **A guard on the last admin.**
-  ([long form](docs/changelog/unreleased.md#a-guard-on-the-last-admin))
+  ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462) · [long form](docs/changelog/unreleased.md#a-guard-on-the-last-admin))
 
 - **`KilnCMS.Accounts.Checks.PlatformAdmin` replaces
   `actor_attribute_equals(:role, :admin)`** on every platform resource.
-  ([long form](docs/changelog/unreleased.md#kilncmsaccountschecksplatformadmin-replaces-actorattributeequalsrole-admin-on))
+  ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462) · [long form](docs/changelog/unreleased.md#kilncmsaccountschecksplatformadmin-replaces-actorattributeequalsrole-admin-on))
 
 - **Erasure revokes API keys.**
-  ([long form](docs/changelog/unreleased.md#erasure-revokes-api-keys))
+  ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462) · [long form](docs/changelog/unreleased.md#erasure-revokes-api-keys))
 
 - **`ContentTypes.count!/2`** — the count `list!/2` would return rows for,
   without the rows, for compiled and dynamic types alike.
-  ([long form](docs/changelog/unreleased.md#contenttypescount2-the-count-list2-would-return-rows-for-without-the-rows-for))
+  ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462) · [long form](docs/changelog/unreleased.md#contenttypescount2-the-count-list2-would-return-rows-for-without-the-rows-for))
 
 - **The release image is published to GHCR on every version tag.**
   ([#1328](https://github.com/The-Verscienta/kiln_cms/issues/1328) · [long form](docs/changelog/unreleased.md#the-release-image-is-published-to-ghcr-on-every-version-tag))
@@ -95,12 +95,12 @@ Every summary line below that was shortened links to its own entry there.
 
 - **`Kiln.FieldType.parse_float/1` — a covered numeric parse for a custom field
   type's `cast/2`.**
-  ([long form](docs/changelog/unreleased.md#kilnfieldtypeparsefloat1-a-covered-numeric-parse-for-a-custom-field-types-cast2))
+  ([#1456](https://github.com/The-Verscienta/kiln_cms/issues/1456) · [long form](docs/changelog/unreleased.md#kilnfieldtypeparsefloat1-a-covered-numeric-parse-for-a-custom-field-types-cast2))
 
 ### Changed
 
 - **The in-tree example overlay no longer reaches past the overlay contract.**
-  ([long form](docs/changelog/unreleased.md#the-in-tree-example-overlay-no-longer-reaches-past-the-overlay-contract))
+  ([#1456](https://github.com/The-Verscienta/kiln_cms/issues/1456) · [long form](docs/changelog/unreleased.md#the-in-tree-example-overlay-no-longer-reaches-past-the-overlay-contract))
 
 - **`docs/overlay-contract.md` says why the example's `:test` plugin list names
   a core fixture.**
@@ -113,20 +113,20 @@ Every summary line below that was shortened links to its own entry there.
 ### Fixed
 
 - **`mix docs` "View Source" links point at the release tag, not `main`.**
-  ([long form](docs/changelog/unreleased.md#mix-docs-view-source-links-point-at-the-release-tag-not-main))
+  ([#1450](https://github.com/The-Verscienta/kiln_cms/issues/1450) · [long form](docs/changelog/unreleased.md#mix-docs-view-source-links-point-at-the-release-tag-not-main))
 
 - **An arrow key can no longer walk a calendar chip off the grid it is drawn
   on.**
   ([#1384](https://github.com/The-Verscienta/kiln_cms/issues/1384) · [long form](docs/changelog/unreleased.md#an-arrow-key-can-no-longer-walk-a-calendar-chip-off-the-grid-it-is-drawn-on))
 
 - **An HTML comment in imported Markdown is no longer published as prose.**
-  ([long form](docs/changelog/unreleased.md#an-html-comment-in-imported-markdown-is-no-longer-published-as-prose))
+  ([#1454](https://github.com/The-Verscienta/kiln_cms/issues/1454) · [long form](docs/changelog/unreleased.md#an-html-comment-in-imported-markdown-is-no-longer-published-as-prose))
 
 - **Links to a `README.md` from a guide pointed at the wrong README.**
-  ([long form](docs/changelog/unreleased.md#links-to-a-readmemd-from-a-guide-pointed-at-the-wrong-readme))
+  ([#1464](https://github.com/The-Verscienta/kiln_cms/issues/1464) · [long form](docs/changelog/unreleased.md#links-to-a-readmemd-from-a-guide-pointed-at-the-wrong-readme))
 
 - **The new-password button says "Change password".**
-  ([long form](docs/changelog/unreleased.md#the-new-password-button-says-change-password))
+  ([#1451](https://github.com/The-Verscienta/kiln_cms/issues/1451) · [long form](docs/changelog/unreleased.md#the-new-password-button-says-change-password))
 
 - **Both password forms check the confirmation as you type.**
   ([#1446](https://github.com/The-Verscienta/kiln_cms/issues/1446) · [long form](docs/changelog/unreleased.md#both-password-forms-check-the-confirmation-as-you-type))

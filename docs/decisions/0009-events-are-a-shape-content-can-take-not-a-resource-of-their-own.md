@@ -3,7 +3,7 @@
 - **Status** — accepted, shipped in
   [0.5.0](../changelog/v0.5.0.md) (Added).
 - **References** — [#766](https://github.com/The-Verscienta/kiln_cms/issues/766), [#480](https://github.com/The-Verscienta/kiln_cms/issues/480).
-- **Changelog** — [0.5.0 → Added](../../CHANGELOG.md#050---2026-08-09).
+- **Changelog** — the 0.5.0 Added section of [CHANGELOG.md](../../CHANGELOG.md).
 
 ## Decision
 
