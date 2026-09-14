@@ -69,8 +69,9 @@ defmodule KilnCMSWeb.NotificationBellTest do
     notification
   end
 
-  # `record_in_app/1` broadcasts before it returns, so the page already holds
-  # the message when the test calls `render/1`. Handling it, the page's hook
+  # A write that notifies the page — `record_in_app/1`, or marking a row read —
+  # broadcasts before it returns, so the page already holds the message when
+  # the test calls `render/1`. Handling it, the page's hook
   # calls `NotificationBell.refresh/0` — a `send_update/2` to the page's own
   # process — and that update is queued *behind* the render already waiting.
   # One render can therefore read the page before the bell changes. The first
@@ -111,7 +112,7 @@ defmodule KilnCMSWeb.NotificationBellTest do
       {:ok, _marked} = Notifications.mark_notification_read(one, actor: me)
       # Marking read broadcasts on the recipient's topic, which is what the
       # hook turns into a `send_update` — so the badge moves with no reload.
-      assert badge(render(lv)) == "1"
+      assert badge(render_after_broadcast(lv)) == "1"
     end
 
     test "it does not count a colleague's notifications", %{conn: conn} do
