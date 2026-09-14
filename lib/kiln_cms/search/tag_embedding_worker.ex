@@ -25,7 +25,10 @@ defmodule KilnCMS.Search.TagEmbeddingWorker do
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"org_id" => org_id, "tag_id" => tag_id}}) do
     if Search.semantic?() do
-      case KilnCMS.CMS.get_tag(tag_id, authorize?: false, tenant: org_id) do
+      # Taxonomy is world-readable (published content references it), so the
+      # tag read needs no bypass at all — an actorless authorized read returns
+      # exactly the same row (#1402).
+      case KilnCMS.CMS.get_tag(tag_id, tenant: org_id) do
         {:ok, %{name: name} = tag} when is_binary(name) -> store(tag, org_id)
         _gone -> :ok
       end
@@ -41,7 +44,9 @@ defmodule KilnCMS.Search.TagEmbeddingWorker do
       vector when is_list(vector) ->
         KilnCMS.SearchIndex.upsert_tag_embedding!(
           %{tag_id: tag.id, name: tag.name, embedding: vector, embedded_at: DateTime.utc_now()},
-          authorize?: false,
+          # `TagEmbedding` admits the search system actor by name (#1402);
+          # nothing else writes that table.
+          actor: KilnCMS.SystemActor.new(:search),
           tenant: org_id
         )
 

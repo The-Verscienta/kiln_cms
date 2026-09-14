@@ -62,6 +62,15 @@ Two non-role actors also appear below:
   pasted under a justified one needs its own. `mix kiln.authz.check` (part of
   `mix precommit` and CI) fails on a new one without that comment (#1309).
 
+  **The gate covers all of `lib/`** (#1402). Files that predate the
+  system-actor migration and still carry unexplained bypasses are listed in the
+  task's `@backlog` with the exact count each one has — 129 files, 313 sites
+  when that landed. It is a ratchet, not an exemption: a file with no entry
+  must be clean, so new code is gated from the day it lands; a listed file may
+  not gain a site; and a listed file that *loses* one fails too, with the
+  number to write, because an allowance nobody maintains stops being a
+  ratchet. Nothing may be added. Emptying it finishes #1402.
+
 ### The system actor
 
 `%KilnCMS.SystemActor{}` (`lib/kiln_cms/system_actor.ex`) is the actor a worker,
@@ -129,6 +138,22 @@ ever be authorized by an explicit clause below.
 | Resource | Actions admitting `Checks.SystemActor` | Why |
 |---|---|---|
 | `Firing.ReferenceEdge` | `read`, `from_source`, `to_target`, `upsert`, `destroy` | The re-fire wave rebuilds a document's outgoing edges on every fire and walks them backwards to find referrers. The graph is derived from the document itself and has no caller-facing write path (`forbid_if always()` for everyone, admin included), so the fire path was the only thing the old bypass existed for. |
+| `Firing.PublishedArtifact` | `read`, `for_document`, `get_surface`, `upsert`, `destroy` | The firing engine is the only writer an artifact has ever had, and unpublish is the only destroyer. On read the actor is admitted **alongside** `Checks.DocumentReadable`, not instead of it: delivery settles the audience question on the *document* first (`Firing.Delivery.resolve/5`) and then fetches the body by id, so re-running the document check there with the anonymous actor would refuse every gated page delivery had just unlocked. |
+| `CMS.TypeDefinition` | `read`, `by_name`, `including_archived` | Read-only. The fire path resolves a dynamic document's public type name and its schema.org `@type` from its definition. Writing one is still admin-only. |
+| `CMS.FieldDefinition` | `read`, `for_type`, `for_definition` | Read-only. Firing needs the field schema to turn a document's `custom_fields` values into JSON-LD. Defining a field is still admin-only. |
+| `Search.BlockEmbedding` | `read`, `for_document`, `nearest`, `upsert`, `destroy` | The per-block semantic index. `Search.BlockIndexer` is the only writer it has ever had — rows are derived from the document's own block tree — and `BlockSearch` / `Search.Related` are its only readers. Whether a *caller* may see a hit is decided one tier up, when the matching document is hydrated under their own authorization. |
+| `Search.TagEmbedding` | `read`, `for_tags`, `nearest`, `upsert`, `destroy` | Same shape, for tag-name vectors: written by `TagEmbeddingWorker` and `Search.Related`, read by `Search.Related` only. |
+| `Automation.Rule` | `read` **only** | `KilnCMS.Automation.RuleWorker` re-reads the rule it was enqueued for. Authoring a rule is still admin-only — the grant is narrowed to reads inside the existing `policy always()` with `forbid_unless action_type(:read)`. |
+| `Social.Account` | `read`, `enabled_for_provider` **only** | The announcer lists a provider's enabled accounts for a publish. Minting, editing or deleting the credentials for a site's public voice stays an admin act, narrowed the same way. |
+| `CMS.Comment` | `create`, `read` | An editorial-intelligence reaction posts its findings as a document-level comment (#946) on a thread it must be able to read. No `author_id` is stamped — the actor has no `:id` — so `created_by_rule_id` carries the provenance. `update` is **not** admitted: automation posts, it does not edit what anyone said. |
+| `CMS.Task` | `create`, `read` | The same reaction assigns findings as a task, and the lifecycle sweep probes for an open review before opening another. `AssigneeIsEditor` still vets the assignee (validations run whatever the actor is) and `creator_id` stays unstamped. `update` is **not** admitted: automation opens tasks, it does not complete them. |
+| `Billing.Settings` | `read`, `init` **only** | The checkout path and the webhook receiver resolve provider credentials with no actor of their own, and `ensure_settings!/0` inserts the empty singleton on first use. Narrowed inside the existing platform-admin policy; the write path to payment credentials stays platform-admin, and every secret column is vault-encrypted and `sensitive?`. |
+| `Billing.Membership` | `read`, `apply_provider_state`, `anonymize` | A paid membership is what grants an audience and a newsletter tier segment, so the tier sync must see the ones it is syncing. The two writes are `forbid_if always()` for every person — this resource has no admin bypass — and are taken only by the verified webhook worker, the reconcile sweep and GDPR erasure. |
+| `Billing.MembershipEvent` | `read`, `append`, `anonymize_actor` | The append-only entitlement trail. No person may write one and there is no `destroy` action at all; the billing pipeline appends and GDPR erasure redacts the acting admin. |
+| `Newsletter.Segment` | `read`, `for_tier`, `sync_managed` **only** | The tier-backed lifecycle is driven by billing, not by a human: both write actions are `forbid_if always()` for everyone including admins. Managing a segment by hand stays an admin act, so the grant is narrowed inside the blanket admin policy as well — Ash ANDs policies, so both halves are needed. |
+| `Newsletter.Subscriber` | `read`, `link_member` **only** | `link_member` is the one write that may set `user_id`, and it is `forbid_if always()` for everyone. Narrowed the same way, so admin-only list management is untouched. |
+| `Newsletter.SegmentMembership` | all | The join row between a subscriber and a tier segment. The sync genuinely reads, creates and destroys them as entitlements change, and the row carries nothing beyond the two ids. |
+| `CMS.Page`, `CMS.Post`, `CMS.Entry` (content) | `reindex_search_text` and `set_embedding` **only**, named inside the `action_type([:create, :update])` policy | Two system-only actions on denormalized columns: the fragment-expanded search text (`Firing.Engine.fire/2`) and the document-level search vector (`Search.EmbeddingWorker`). Both accept no `:blocks` and both are ignored by PaperTrail. The grant sits inside the policy written for people, narrowed to those two actions by `forbid_unless action(...)` — see above for why that rather than a bypass. Keep the list short and every member system-only. Nothing else on the content resources admits the system actor: it holds no tier, so `EditableContentType` / `ReadableContentType` / `InAudience` all refuse it, and a system actor reads no content at all. |
 
 Legend: ✅ allowed · ❌ forbidden · 🔎 allowed but row-filtered (reads return only the rows the policy permits, never an error) · ⚙️ system-only (`authorize?: false`).
 
@@ -264,15 +289,16 @@ filtered to nothing rather than erroring, so the list never leaks.
 
 ## Custom fields — `FieldDefinition`
 
-| Action | admin | editor | viewer | anonymous |
-|--------|:-----:|:------:|:------:|:---------:|
-| read (`read`, `for_type`) | ✅ | ✅ | ❌ | ❌ |
-| `create`, `update`, `destroy` | ✅ | ❌ | ❌ | ❌ |
+| Action | admin | editor | viewer | anonymous | system |
+|--------|:-----:|:------:|:------:|:---------:|:------:|
+| read (`read`, `for_type`, `for_definition`) | ✅ | ✅ | ❌ | ❌ | ✅ |
+| `create`, `update`, `destroy` | ✅ | ❌ | ❌ | ❌ | ❌ |
 
 Defining the schema (fields per content type) is admin-only; editors read
-definitions so the content editor can render the inputs. Both the editor and the
-`ApplyCustomFields` write change read definitions as the **system**
-(`authorize?: false`).
+definitions so the content editor can render the inputs. Firing reads them to
+turn `custom_fields` values into JSON-LD, as `%KilnCMS.SystemActor{}` (#1402 —
+`KilnCMS.Firing.CustomFields`); the `ApplyCustomFields` write change still
+reads them with `authorize?: false`.
 
 ## Analytics — `ContentView`, `ContentViewDay`, `SearchQuery`
 
@@ -508,13 +534,15 @@ console. See [code-injection.md](code-injection.md).
 
 ## Content types — `TypeDefinition`
 
-| Action | admin | editor | viewer | anonymous |
-|--------|:-----:|:------:|:------:|:---------:|
-| read (`read`, `by_name`, `archived`) | ✅ | ✅ | ❌ | ❌ |
-| `create`, `update`, `destroy` (soft), `restore` | ✅ | ❌ | ❌ | ❌ |
+| Action | admin | editor | viewer | anonymous | system |
+|--------|:-----:|:------:|:------:|:---------:|:------:|
+| read (`read`, `by_name`, `archived`) | ✅ | ✅ | ❌ | ❌ | ✅ |
+| `create`, `update`, `destroy` (soft), `restore` | ✅ | ❌ | ❌ | ❌ | ❌ |
 
 Admins own the schema; editors read definitions so the editor UI can list
-dynamic types. Mirrors `FieldDefinition`.
+dynamic types. Mirrors `FieldDefinition`. Firing and delivery read them as
+`%KilnCMS.SystemActor{}` (#1402), to resolve a dynamic document's public type
+name, its URL segment and its schema.org `@type`.
 
 The same reads are routed read-only over JSON:API (`/api/json/type-definitions`,
 `/by-name/:name`, `/:id`, with `include=field_definitions`) and MCP
@@ -569,15 +597,21 @@ tenant context.
 | `Firing.ReferenceEdge` | ✅ editor / admin | ❌ **everyone, incl. admin** |
 | `Search.BlockEmbedding` | ✅ editor / admin | ❌ **everyone, incl. admin** |
 
-These three have no bypass of any kind: the firing engine and the search indexer
-write them as the **system**, so no caller-facing write path exists.
+These three have no caller-facing write path: the firing engine and the search
+indexer write them as the **system**, so nobody — admin included — can create,
+update or destroy one through a policy meant for people. All three now say so in
+the policy block rather than being reached around it: each admits
+`%KilnCMS.SystemActor{}` by name (#1402, and see
+[The system actor](#the-system-actor)). `Search.TagEmbedding` — absent from the
+table only because nothing caller-facing reads it — has the same shape.
 
 All three used to read `authorize_if always()`. That was tightened in #565, and
-the reason it was safe is that every production reader is a system path
-(`authorize?: false`): `Firing.Delivery` / `Firing.Engine.read/4` for artifacts,
-`Firing.References` for the re-fire wave, `Search.BlockIndexer` /
-`Search.BlockSearch` / `Search.Related` for embeddings. What changed is what an
-*actor-carrying* caller sees.
+the reason it was safe is that every production reader is a system path:
+`Firing.Delivery` / `Firing.Engine.read/4` for artifacts, `Firing.References`
+for the re-fire wave, `Search.BlockIndexer` / `Search.BlockSearch` /
+`Search.Related` for embeddings. What changed is what an *actor-carrying*
+caller sees. Every one of those system paths now carries
+`%KilnCMS.SystemActor{}` rather than `authorize?: false`.
 
 `PublishedArtifact` is the one that mattered: it holds the **rendered body** of a
 document, so a blanket grant meant the audience axis enforced on `Content` was
@@ -593,6 +627,34 @@ document, because firing is asynchronous. Editors short-circuit the check.
 The other two are enumeration surfaces — the link graph (including edges from
 unpublished drafts) and `ancestor_context` block text from every indexed
 document, drafts included — so they are simply editor-and-up.
+
+## In-app notifications — `Notifications.Notification` (#1320)
+
+| Action | own recipient | another user (any role) | anonymous |
+|--------|:-------------:|:-----------------------:|:---------:|
+| read (`read`, `for_user`, `unread_for_user`) | ✅ | 🔎 nothing | 🔎 nothing |
+| `mark_read`, `mark_unread` | ✅ | ❌ | ❌ |
+| `notify` (create) | ❌ | ❌ | ⚙️ actor-less only |
+
+`authorize_if expr(user_id == ^actor(:id))` is the whole read policy, and this
+is the one resource in the tree with **no admin bypass at all**. A notification
+list is a reading history — who was named in which review note, which drafts
+someone is watching — and a platform admin has no operational need for it. The
+sibling `Accounts.PushSubscription` *does* have an admin bypass (an operator
+has to be able to see where a device came from); this deliberately does not.
+
+`notify` is the notifier's write, and it addresses somebody *other* than
+whoever acted, so it cannot be authorized against the acting user. Rather than
+calling it with `authorize?: false`, it is gated `forbid_if actor_present()` +
+`authorize_if always()`: the policy still runs and still decides, so an
+authenticated caller that reaches the action is refused by a rule a reader can
+see. `KilnCMS.Notifications.record_in_app/1` is the only caller.
+
+An actor-less *read* is fail-closed for free: `^actor(:id)` templates to `nil`,
+the filter reduces to `user_id == NULL`, and no row satisfies it.
+
+Org-scoped (`multitenancy strategy :attribute, attribute :org_id`) — a user who
+edits two sites sees each site's notifications in that site's console only.
 
 ## Webhook deliveries — `WebhookDelivery`
 

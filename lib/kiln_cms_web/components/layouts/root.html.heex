@@ -182,6 +182,14 @@
         if (localStorage.getItem("kiln:sidebar") === "collapsed") {
           document.documentElement.setAttribute("data-sidebar", "collapsed");
         }
+        // Which nav sections are collapsed (#1319), for the same reason: a
+        // section that painted open and then snapped shut would be worse than
+        // one that never collapsed. A space-separated list of group keys, read
+        // by `[data-nav-collapsed~="..."]` rules in app.css.
+        const navCollapsed = localStorage.getItem("kiln:nav-collapsed");
+        if (navCollapsed) {
+          document.documentElement.setAttribute("data-nav-collapsed", navCollapsed);
+        }
         window.addEventListener("storage", (e) => e.key === "phx:theme" && setTheme(e.newValue || "system"));
         
         window.addEventListener("phx:set-theme", (e) => setTheme(e.target.dataset.phxTheme));

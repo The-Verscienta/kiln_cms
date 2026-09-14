@@ -7,6 +7,139 @@ carries the reasoning.
 
 ## Added
 
+<a id="a-configure-hub-at-editorconfigure"></a>
+
+- **A Configure hub at `/editor/configure`.** The console had twenty-odd
+  configuration screens and no screen that *was* configuration: the one page
+  named Settings is your own profile and 2FA, and a sidebar link is a name with
+  no explanation attached, so "where do I turn off full-text RSS" meant guessing
+  between Feeds, Delivery and Code injection. The hub lists every configuration
+  screen you may open, grouped as the sidebar groups them, each with a line
+  saying what it is for, over a filter that matches those descriptions and a
+  keyword list as well as the names — "rss" finds Feeds, "stripe" finds
+  Billing, "passkey" finds your own settings (#1319).
+
+<a id="notifications-are-persisted-not-only-mailed"></a>
+
+- **Notifications are persisted, not only mailed.** Every workflow event
+  already dispatched by email and Web Push — submitted for review, published,
+  returned to draft, a comment, an `@mention`, a task assignment — now also
+  writes a `KilnCMS.Notifications.Notification` row for each recipient, so an
+  editor who does not read email and has not granted push has somewhere to find
+  out. The row is written from the same place, on the same already-filtered
+  recipient list, that enqueues the mail job: an event a user has muted in their
+  account preferences stays muted in the inbox too. Rows are org-scoped and
+  readable **only by their own recipient** — there is no admin bypass. The bell
+  and `/editor/inbox` that read them follow. Reading one is announced on the
+  recipient's own PubSub topic, so a notification read on a phone drops the
+  badge on the desktop.
+
+<a id="editorinbox"></a>
+
+- **`/editor/inbox`.** The notification inbox: everything the console has told
+  this editor about, newest first, with an unread filter, per-row mark-read /
+  mark-unread and mark-all-read. Every row deep-links to the thing it concerns
+  — a comment or a block-anchored task opens that block's thread via the
+  `?comment=<block_id>` param the editor already reads at mount, which is the
+  console's only durable block anchor (heading `id`s exist in public delivery
+  only). Live: one `on_mount` hook subscribes each console page to the viewer's
+  own notification topic, so the list follows a notification that lands, or one
+  read in another tab, without a reload.
+
+## Changed
+
+<a id="configruntimeexs-is-now-an-index-not-a-1523-line-file"></a>
+
+- **`config/runtime.exs` is now an index, not a 1,523-line file.** The
+  configuration moved into per-concern fragments under `config/runtime/`
+  (`observability.exs`, `governance.exs`, `prod/mailer.exs`, …), evaluated in
+  exactly the order their blocks appeared before. Behaviour is unchanged: the
+  same variables are read, in the same sequence, producing the same
+  application env and the same boot warnings in the same order. Operators
+  change nothing.
+
+  One thing to know if you build releases outside the shipped Dockerfile:
+  `mix release` copies only `config/runtime.exs` into `releases/<vsn>/`, so the
+  fragments are copied alongside it by a `:steps` hook in `mix.exs`, and the
+  Dockerfile now `COPY`s the directory into the build context. The hook refuses
+  to assemble a release if the directory is missing rather than producing an
+  image that fails on first boot.
+
+<a id="docsenvironment-variablesmd-and-envexample-lead-with-the-short-list"></a>
+
+- **`docs/environment-variables.md` and `.env.example` lead with the short
+  list.** Both now open with **Required (3)** — `DATABASE_URL`,
+  `SECRET_KEY_BASE`, `TOKEN_SIGNING_SECRET`, the only variables that stop a
+  production boot — then **Common (10)**, then everything else grouped by
+  feature. The previous "Required (production)" section also listed `PHX_HOST`
+  and `PHX_SERVER`, neither of which raises; both are still documented, under
+  server & networking. The required set is derived from the code and pinned by
+  a test, so it cannot drift from what actually raises.
+
+<a id="the-stock-front-page-now-renders-in-the-public-delivery-chrome"></a>
+
+- **The stock front page now renders in the public delivery chrome.** `/` was
+  the one public URL served out of `Layouts.app`, the authoring shell — so a
+  first-run instance gave its front page a theme toggle and an account menu no
+  other public page has, while skipping the site's own header and footer menus,
+  its theme preset and the attribution line. It now uses `Layouts.public` like
+  every other delivery URL. That layout gained two optional attrs to make the
+  move lossless: `wide`, which widens `--public-measure` to the 72rem the page
+  was drawn at (all the old `container_class` was doing), and `current_user`,
+  which draws the account/sign-out pair for a signed-in reader. Nothing changes
+  for a site that has published a Home page of its own — that page already
+  rendered in this shell.
+
+<a id="the-public-search-form-has-a-submit-button"></a>
+
+- **The public search form has a submit button.** It was a label and a single
+  text input, which submits on Enter and nothing else: a touch keyboard without
+  a Search key and a screen reader reading the form both had no way to run the
+  query. The button carries a `public-search-submit` hook for the theme presets.
+
+<a id="the-product-name-is-spelled-kilncms-everywhere"></a>
+
+- **The product name is spelled `KilnCMS` everywhere.** Thirteen places still
+  said "Kiln CMS" — among them the heading and opening line of
+  `docs/design-language.md`, which `scripts/publish_docs.exs` publishes as a
+  public docs page, and the `title` of the exported delivery schema.
+
+<a id="the-docs-publisher-no-longer-installs-earmark"></a>
+
+- **The docs publisher no longer installs `earmark`.**
+  `scripts/publish_docs.exs` renders with `earmark_parser` — the parser mix.exs
+  already depends on — and a renderer ported from `KilnCMS.Markdown`, so the
+  retired package and its stored-XSS advisory are gone from the repo entirely.
+  Nothing about a guide's published HTML changes, with one exception: the
+  fenced HTML example in `docs/visual-editing-bridge.md` regains two lines that
+  earmark's own parser was silently eating.
+
+<a id="workflow-and-task-notifications-now-dispatch-after-the-write-commits"></a>
+
+- **Workflow and task notifications now dispatch after the write commits.**
+  `NotifyWorkflowEmail` and `NotifyTaskAssigned` moved from
+  `Ash.Changeset.after_action` to `after_transaction`, joining `NotifyComment`,
+  which was already there. Two effects: a query inside the notifier can no
+  longer poison the editorial action's transaction and lose the content, and a
+  rolled-back submit-for-review no longer mails the reviewers about a
+  transition that never happened.
+
+<a id="a-secrets-rotation-runbook-docssecrets-rotationmddocssecrets-rotationmd-closing"></a>
+
+- **A secrets-rotation runbook**, [`docs/secrets-rotation.md`](../secrets-rotation.md),
+  closing residual risk 12 in `docs/threat-model.md` (#1304). Per-secret
+  procedures against a running deployment, written from what the code does
+  rather than what would be reasonable — so it says plainly that nothing here
+  supports a dual-key transition: `TOKEN_SIGNING_SECRET` and `SECRET_KEY_BASE`
+  are hard cutovers that sign every user out, while `DATABASE_URL` and the S3
+  keys can be rolled without downtime only because Postgres and S3 will each
+  hold two credentials at once. It also documents the trap: `SECRET_KEY_BASE`
+  keys `KilnCMS.Keys.Vault`, so rotating it **permanently orphans** the DKIM
+  key, social credentials, payment secrets and the ActivityPub actor key, with
+  no re-encryption path — and every one of those fails quietly, behind a
+  settings page that keeps rendering from its plaintext columns. The actor key
+  is called out as the one rotation that cannot be done safely today.
+
 <a id="editoraccounts-the-instance-wide-account-register"></a>
 
 - **`/editor/accounts` — the instance-wide account register.** Platform-admin
@@ -135,8 +268,6 @@ carries the reasoning.
   in the covered-surfaces table, because a downstream field type needs it for
   exactly the reason the core's own `Geolocation` does.
 
-## Changed
-
 <a id="the-in-tree-example-overlay-no-longer-reaches-past-the-overlay-contract"></a>
 
 - **The in-tree example overlay no longer reaches past the overlay contract.**
@@ -159,6 +290,24 @@ carries the reasoning.
   probed rather than declared, and the hand-rolled `@behaviour` path breaks on
   callback additions. Linked from `projects/README.md` (which keeps the
   mechanics) and the getting-started guide router (#1328).
+
+<a id="the-configure-sidebar-is-sections-and-k-finds-settings-screens"></a>
+
+- **The Configure sidebar is sections, and ⌘K finds settings screens.** The
+  admin half of the console nav now sits in collapsible sections — Content
+  model, Capture, Delivery, Integrations, Organization, Account — with
+  **Operations** ruled off below them for the instance-wide screens a platform
+  admin owns (Team, Accounts, Billing, Mail, API keys, Backups, System). Every item in
+  that band is platform-gated, so an org admin sees no band at all. Which
+  sections are collapsed is remembered per browser, like the icon rail, and is
+  ignored in the rail itself. The ⌘K palette gained a **Go to** category ahead
+  of the content results, searching the same list the sidebar and the hub
+  draw — by name, section, description and keyword, already filtered to what
+  you may open — so "backups" or "dkim" is one keystroke from the screen rather
+  than a scan down 25 items. The per-user screen is now labelled **Your
+  settings** under an **Account** heading, so nothing named "Settings" looks
+  like it holds the site's configuration, and the System screen no longer
+  describes itself as "the Kiln core this instance is built from" (#1319).
 
 <a id="changelogmd-is-a-summary-and-the-reasoning-moved-to-docschangelog-and"></a>
 
@@ -202,6 +351,34 @@ carries the reasoning.
   the release commit bumps to match the tag. A build from an untagged `main`
   can pin itself with `DOCS_SOURCE_REF=$(git rev-parse HEAD) mix docs`.
 
+<a id="a-md-file-that-opens-with-an-html-comment-keeps-its-title"></a>
+
+- **A `.md` file that opens with an HTML comment keeps its title.** A license
+  or editing note above the leading `# H1` — a common shape for an imported
+  file — sat in front of the heading in the parsed tree, so
+  `KilnCMS.Markdown.parse_document/2` stopped recognizing it as the document's
+  title: the import arrived untitled *and* with the heading still in the body,
+  which then printed the name twice.
+
+<a id="the-content-cache-metric-no-longer-inverts-during-a-stampede-and-a-courier"></a>
+
+- **The content-cache metric no longer inverts during a stampede, and a Courier
+  failure no longer amplifies one.** A burst of concurrent requests for one
+  just-invalidated key is deduplicated by Cachex into a single database read,
+  but every deduplicated caller was counted as a cache **hit** — so the worse
+  the stampede, the healthier `[:kiln_cms, :cache, :content]` looked. Those
+  callers are now tagged `coalesced`, distinct from a genuine `hit`. Separately,
+  when Cachex answers a fetch with an error (its courier worker died, or the
+  fallback itself raised), every blocked caller fell through to a silent
+  per-caller recompute — N simultaneous rebuilds, N sitemap rebuilds on the
+  generic helper, exactly the stampede the cache exists to prevent. The most
+  common form of that — a fallback raising, which on the delivery path is just a
+  404 — now runs once for the whole burst and hands every waiting caller the
+  original exception, so a missing hot URL costs one database read instead of
+  one per request. What is left in that arm is the cache itself failing, where
+  the caller still computes (a dead courier must not take the site down) but the
+  degrade is logged and tagged `error` so it is visible while it happens.
+
 <a id="an-arrow-key-can-no-longer-walk-a-calendar-chip-off-the-grid-it-is-drawn-on"></a>
 
 - **An arrow key can no longer walk a calendar chip off the grid it is drawn
@@ -240,6 +417,16 @@ carries the reasoning.
   `test/kiln_cms/docs/extras_links_test.exs` fails the build if a relative link
   between extras renders as a link to a different file than the one it names.
 
+<a id="both-password-forms-check-the-confirmation-as-you-type"></a>
+
+- **Both password forms check the confirmation as you type.** On `/register`
+  and on the new-password page behind a reset link, the two password boxes
+  disagreeing was held back until submit — which on registration also clears the
+  password field, so a typo in the confirmation cost re-typing both.
+  `KilnCMSWeb.AuthConfirmationFeedback` reveals that one error on `phx-change`;
+  every other field — an empty email, an invalid reset token — stays quiet until
+  submit, as before.
+
 <a id="the-new-password-button-says-change-password"></a>
 
 - **The new-password button says "Change password".** The button on the page
@@ -251,16 +438,6 @@ carries the reasoning.
   declare compiles and is then read by nothing. Kiln's own form component
   declares it. A new test checks every setting in that file the same way, so the
   next one that lands on a key upstream renamed fails instead of going quiet.
-
-<a id="both-password-forms-check-the-confirmation-as-you-type"></a>
-
-- **Both password forms check the confirmation as you type.** On `/register`
-  and on the new-password page behind a reset link, the two password boxes
-  disagreeing was held back until submit — which on registration also clears the
-  password field, so a typo in the confirmation cost re-typing both.
-  `KilnCMSWeb.AuthConfirmationFeedback` reveals that one error on `phx-change`;
-  every other field — an empty email, an invalid reset token — stays quiet until
-  submit, as before.
 
 ## Security
 
@@ -276,4 +453,64 @@ carries the reasoning.
   The first resource converted is `Firing.ReferenceEdge` — the re-fire wave's
   link graph, which has no caller-facing write path at all. No behaviour
   changes for any caller-facing path (#1402).
+
+<a id="the-firing-path-runs-under-the-policies"></a>
+
+- **The firing path runs under the policies.** Everything `KilnCMS.Firing.*`
+  touches now carries `%KilnCMS.SystemActor{}` and a matching policy clause
+  instead of `authorize?: false`: the artifact table (written only by the
+  engine, destroyed only by unpublish), the reference graph, the type and
+  field definitions it reads, and the one system-only content action that
+  recomputes `search_text`. Two reads deliberately keep their bypass, and now
+  say why — a system clause on the `Content` read policy would be a standing
+  grant over the whole corpus, much wider than the call it would replace.
+  `mix kiln.authz.check` gates `lib/kiln_cms/firing/` from here on (#1402).
+
+<a id="the-semantic-index-runs-under-its-policies"></a>
+
+- **The semantic index runs under its policies.** `Search.BlockEmbedding` and
+  `Search.TagEmbedding` — internal indexes with no caller-facing write path —
+  admit `%KilnCMS.SystemActor{}` by name, so the indexer, `BlockSearch` and
+  `Search.Related` no longer bypass them; the document-level `:set_embedding`
+  vector write joins `:reindex_search_text` as the second system-only content
+  action named in the content resources' own create/update policy. Two tag
+  reads turn out to need no bypass at all
+  (taxonomy is world-readable). The workers' *document* reads keep theirs, and
+  say why. `mix kiln.authz.check` now also gates `lib/kiln_cms/search/`
+  (#1402).
+
+<a id="editorial-automation-runs-under-the-policies"></a>
+
+- **Editorial automation runs under the policies.** `KilnCMS.Automation.RuleWorker`
+  carries `%KilnCMS.SystemActor{}`: `Automation.Rule` and `Social.Account`
+  admit it for **reads only** (authoring a rule, and the credentials for a
+  site's public voice, stay admin acts), and `CMS.Comment` / `CMS.Task` admit
+  it for create and read but **not** update — automation posts findings and
+  opens tasks, it does not edit what anyone said or close their work. The
+  content and user lookups keep their bypass, and now say why.
+  `mix kiln.authz.check` now also gates `lib/kiln_cms/automation/` (#1402).
+
+<a id="billing-and-the-newsletter-tier-sync-run-under-the-policies"></a>
+
+- **Billing and the newsletter tier sync run under the policies.** The last two
+  of the four modules #1329 audited: `Billing.Settings` (read and first-use
+  init only — the write path to payment credentials stays platform-admin),
+  `Billing.Membership` and `Billing.MembershipEvent` (the provider-state,
+  append and GDPR-erasure actions that are `forbid_if always()` for every
+  person, admin included), and `Newsletter.Segment` / `Subscriber` /
+  `SegmentMembership` for the tier-backed lifecycle. The one caller that may
+  take those actions is now named in each policy block instead of reaching
+  around it. The `Accounts.User` lookups keep their bypass, and say why
+  (#1402).
+
+<a id="mix-kilnauthzcheck-now-gates-all-of-lib"></a>
+
+- **`mix kiln.authz.check` now gates all of `lib/`.** It was the web layer
+  only; every file is checked from here on, with the pre-existing unexplained
+  bypasses recorded per file in the task's `@backlog` — 129 files, 313 sites.
+  That list is a ratchet: a file with no entry must be clean, so **new code is
+  gated from the day it lands**; a listed file may not gain a site; and a
+  listed file that loses one fails too, with the number to write, so the
+  allowance can never drift out of date. Nothing may be added to it, and
+  emptying it finishes #1402.
 

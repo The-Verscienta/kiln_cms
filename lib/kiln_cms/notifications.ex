@@ -44,13 +44,144 @@ defmodule KilnCMS.Notifications do
 
   Push is off unless the deployment has VAPID keys, and carries no draft
   content — see `KilnCMS.Push`.
+
+  ## The in-app channel rides it too (#1320)
+
+  So does the third channel: a `KilnCMS.Notifications.Notification` row per
+  recipient, which the console bell and `/editor/inbox` read. Same rule, same
+  reason — persistence happens in `notify/4` and `enqueue_comment/5`, *after*
+  `wants?/2` has already filtered, so an event a user muted for their account
+  is absent from their inbox as well as from their mail and their phone. There
+  is no second preference lookup and no second recipient list to drift.
+
+  Best-effort, like the other two: a notification that cannot be written is
+  logged and dropped, never raised into the editorial action that caused it.
+  The triggering changes (`KilnCMS.CMS.Changes.NotifyWorkflowEmail`,
+  `NotifyComment`, `NotifyTaskAssigned`) all run this from
+  `Ash.Changeset.after_transaction/2` so the row is inserted after the write
+  commits and a rolled-back write notifies nobody.
+
+  Also the Ash domain for that resource — the same shape `KilnCMS.Mail` has,
+  where one module is both the channel's entry point and the domain for the
+  rows it owns.
   """
+  use Ash.Domain
   use Gettext, backend: KilnCMSWeb.Gettext
+
+  require Logger
 
   alias KilnCMS.Accounts.Scoping
   alias KilnCMS.Accounts.User
+  alias KilnCMS.Notifications.Notification
   alias KilnCMS.Notifications.WorkflowMailWorker
   alias KilnCMS.Push
+
+  resources do
+    resource Notification do
+      # System-only: the notifier writes a row addressed to somebody other
+      # than whoever acted, so the action is actor-less by policy rather than
+      # by `authorize?: false` — see the resource.
+      define :record_notification, action: :notify
+
+      define :notifications_for_user, action: :for_user, args: [:user_id]
+      define :unread_notifications_for_user, action: :unread_for_user, args: [:user_id]
+      define :get_notification, action: :read, get_by: [:id]
+      define :mark_notification_read, action: :mark_read
+      define :mark_notification_unread, action: :mark_unread
+    end
+  end
+
+  @doc """
+  The PubSub topic one user's notification changes are announced on.
+
+  Deliberately content-free messages (`:notifications_changed`) on a per-user
+  topic: a subscriber re-reads under its **own** actor and tenant, so a user
+  with two consoles open on two sites cannot be handed the other site's row by
+  a broadcast. Re-reading costs two indexed queries; getting the scoping wrong
+  costs a cross-tenant leak.
+  """
+  @spec topic(String.t()) :: String.t()
+  def topic(user_id) when is_binary(user_id), do: "notifications:user:#{user_id}"
+
+  @doc """
+  How many unread notifications `user` has on `org` — the bell's badge and the
+  inbox's unread tab.
+
+  Authorized as `user`: the read action filters to their own rows *and* the
+  policy requires it, so a wrong `user` argument counts zero rather than
+  somebody else's inbox. A failed read counts zero — a badge is chrome, and a
+  console page must not 500 because a count query did.
+  """
+  @spec unread_count(struct(), term()) :: non_neg_integer()
+  def unread_count(%{id: user_id} = user, org) do
+    Notification
+    |> Ash.Query.for_read(:unread_for_user, %{user_id: user_id}, actor: user, tenant: org)
+    # A count has no use for the action's `inserted_at: :desc` ordering.
+    |> Ash.Query.unset(:sort)
+    |> Ash.count(actor: user, tenant: org)
+    |> case do
+      {:ok, count} -> count
+      _error -> 0
+    end
+  end
+
+  @doc """
+  The `limit` most recent notifications for `user` on `org`, newest first —
+  the inbox list and the bell's dropdown.
+
+  Read *and* unread: this is "what happened lately", not a queue, and an item
+  that vanishes the moment it is read takes its own deep link with it.
+  """
+  @spec recent(struct(), term(), pos_integer()) :: [Notification.t()]
+  def recent(user, org, limit), do: read_window(user, org, :for_user, limit)
+
+  @doc """
+  The `limit` most recent **unread** notifications — the inbox's unread filter.
+
+  A separate read rather than a filter over `recent/3`'s window: a backlog
+  longer than the window would otherwise hide the oldest unread items behind
+  newer read ones, which is the case the filter exists for.
+  """
+  @spec recent_unread(struct(), term(), pos_integer()) :: [Notification.t()]
+  def recent_unread(user, org, limit), do: read_window(user, org, :unread_for_user, limit)
+
+  defp read_window(%{id: user_id} = user, org, action, limit) do
+    Notification
+    |> Ash.Query.for_read(action, %{user_id: user_id}, actor: user, tenant: org)
+    |> Ash.Query.limit(limit)
+    |> Ash.read(actor: user, tenant: org)
+    |> case do
+      {:ok, notifications} -> notifications
+      _error -> []
+    end
+  end
+
+  @doc """
+  Mark every unread notification `user` has on `org` as read; returns how many
+  moved.
+
+  Streamed rather than atomic because `:mark_read` keeps an already-set
+  `read_at` (see the resource) — and because it is authorized per row, so a
+  caller cannot sweep an inbox that is not theirs. One user's unread set is
+  tens of rows, not thousands.
+  """
+  @spec mark_all_read(struct(), term()) :: non_neg_integer()
+  def mark_all_read(%{id: user_id} = user, org) do
+    Notification
+    |> Ash.Query.for_read(:unread_for_user, %{user_id: user_id}, actor: user, tenant: org)
+    |> Ash.bulk_update(:mark_read, %{},
+      actor: user,
+      tenant: org,
+      strategy: [:stream],
+      allow_stream_with: :full_read,
+      return_records?: true,
+      return_errors?: true
+    )
+    |> case do
+      %Ash.BulkResult{status: :success, records: records} -> length(records || [])
+      _partial_or_error -> 0
+    end
+  end
 
   @type event ::
           :submitted_for_review
@@ -255,7 +386,20 @@ defmodule KilnCMS.Notifications do
     _error -> []
   end
 
+  # The comment channels, from the one already-filtered audience — the
+  # `wants?(&1, :comment)` pass happens in `mention_roster/1` and
+  # `thread_audience/2` above, so muting comment mail mutes the inbox too.
+  #
+  # The in-app row is written for the recipient regardless of whether they
+  # have a deliverable address: the preference decision was taken upstream,
+  # and `email_of/1` returning nil is a missing *channel*, not an opt-out.
   defp enqueue_comment(event, user, comment, record, actor) do
+    persist(user, event, record,
+      block_id: comment.block_id,
+      excerpt: snippet(comment.body),
+      actor: actor
+    )
+
     %{
       "to" => email_of(user),
       "event" => to_string(event),
@@ -301,12 +445,73 @@ defmodule KilnCMS.Notifications do
     end
   end
 
-  # One recipient list, both channels. Push first because it is a cheap enqueue
+  # One recipient list, every channel. Push first because it is a cheap enqueue
   # that cannot fail the caller; either way the editorial action is already
-  # committed and neither channel may raise into it.
+  # committed and no channel may raise into it.
+  #
+  # `recipients` has already been through `wants?/2` at every call site above,
+  # which is why the in-app row is written here and not at the lifecycle call
+  # sites: a muted event is missing from all three channels because there is
+  # one decision, taken once. Adding a fourth channel means adding it here.
   defp notify(recipients, event, record, actor) do
     Push.notify(recipients, push_payload(event, record))
-    Enum.each(recipients, &enqueue(email_of(&1), event, record, actor))
+
+    Enum.each(recipients, fn recipient ->
+      enqueue(email_of(recipient), event, record, actor)
+      persist(recipient, event, record, block_id: nil, actor: actor)
+    end)
+  end
+
+  # The in-app channel for a content record (#1320) — the shape both choke
+  # points above hand over.
+  defp persist(recipient, event, record, opts) do
+    record_in_app(%{
+      user_id: recipient.id,
+      org_id: Map.get(record, :org_id),
+      event: event,
+      content_type: kind(record),
+      content_id: record.id,
+      block_id: Keyword.get(opts, :block_id),
+      title: record.title,
+      excerpt: Keyword.get(opts, :excerpt),
+      actor_name: actor_name(Keyword.get(opts, :actor))
+    })
+  end
+
+  @doc """
+  Record one in-app notification and announce it (#1320).
+
+  Public for `KilnCMS.Notifications.Tasks`, whose recipient is a single known
+  assignee resolved next to its own mail rather than through `notify/4`'s
+  recipient pass — the same "one decision, every channel" rule, taken in that
+  module instead of this one. Everything content-lifecycle-shaped goes through
+  `notify/4` / `enqueue_comment/5` and must keep doing so.
+
+  Never raises: a notification that cannot be recorded is logged and dropped,
+  because the editorial action it describes has already committed and losing a
+  bell badge is a smaller harm than losing the publish.
+
+  The write is **actor-less on purpose** — the row is addressed to `user_id`,
+  not to whoever acted, so it cannot be authorized against the acting user.
+  The resource's `:notify` policy (`forbid_if actor_present()`) is the grant.
+  This is not an `authorize?: false` bypass: the policy runs, and an
+  authenticated caller reaching that action is refused by it.
+  """
+  @spec record_in_app(map()) :: :ok
+  def record_in_app(%{user_id: _user_id, org_id: org_id} = attrs) do
+    attrs
+    |> Map.delete(:org_id)
+    |> record_notification!(tenant: org_id)
+
+    # Only after the row exists — see `topic/1` for why the message carries
+    # nothing and every subscriber re-reads for itself.
+    Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic(attrs.user_id), :notifications_changed)
+
+    :ok
+  rescue
+    error ->
+      Logger.error("in-app notification not recorded: #{Exception.message(error)}")
+      :ok
   end
 
   # Deliberately content-free beyond the type name — see `KilnCMS.Push`. No

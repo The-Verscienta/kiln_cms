@@ -56,6 +56,44 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **A Configure hub at `/editor/configure`.**
+  ([#1319](https://github.com/The-Verscienta/kiln_cms/issues/1319) · [long form](docs/changelog/unreleased.md#a-configure-hub-at-editorconfigure))
+
+- **Notifications are persisted, not only mailed.**
+  ([long form](docs/changelog/unreleased.md#notifications-are-persisted-not-only-mailed))
+
+- **`/editor/inbox`.**
+  ([long form](docs/changelog/unreleased.md#editorinbox))
+
+### Changed
+
+- **`config/runtime.exs` is now an index, not a 1,523-line file.**
+  ([long form](docs/changelog/unreleased.md#configruntimeexs-is-now-an-index-not-a-1523-line-file))
+
+- **`docs/environment-variables.md` and `.env.example` lead with the short
+  list.**
+  ([long form](docs/changelog/unreleased.md#docsenvironment-variablesmd-and-envexample-lead-with-the-short-list))
+
+- **The stock front page now renders in the public delivery chrome.**
+  ([long form](docs/changelog/unreleased.md#the-stock-front-page-now-renders-in-the-public-delivery-chrome))
+
+- **The public search form has a submit button.**
+  ([long form](docs/changelog/unreleased.md#the-public-search-form-has-a-submit-button))
+
+- **The product name is spelled `KilnCMS` everywhere.**
+  ([long form](docs/changelog/unreleased.md#the-product-name-is-spelled-kilncms-everywhere))
+
+- **The docs publisher no longer installs `earmark`.**
+  ([long form](docs/changelog/unreleased.md#the-docs-publisher-no-longer-installs-earmark))
+
+- **Workflow and task notifications now dispatch after the write commits.**
+  ([long form](docs/changelog/unreleased.md#workflow-and-task-notifications-now-dispatch-after-the-write-commits))
+
+- **A secrets-rotation runbook**,
+  [`docs/secrets-rotation.md`](docs/secrets-rotation.md), closing residual risk
+  12 in `docs/threat-model.md`.
+  ([#1304](https://github.com/The-Verscienta/kiln_cms/issues/1304) · [long form](docs/changelog/unreleased.md#a-secrets-rotation-runbook-docssecrets-rotationmddocssecrets-rotationmd-closing))
+
 - **`/editor/accounts` — the instance-wide account register.**
   ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462) · [long form](docs/changelog/unreleased.md#editoraccounts-the-instance-wide-account-register))
 
@@ -80,7 +118,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **`ContentTypes.count!/2`** — the count `list!/2` would return rows for,
   without the rows, for compiled and dynamic types alike.
-  ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462) · [long form](docs/changelog/unreleased.md#contenttypescount2-the-count-list2-would-return-rows-for-without-the-rows-for))
+  ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462))
 
 - **The release image is published to GHCR on every version tag.**
   ([#1328](https://github.com/The-Verscienta/kiln_cms/issues/1328) · [long form](docs/changelog/unreleased.md#the-release-image-is-published-to-ghcr-on-every-version-tag))
@@ -97,14 +135,15 @@ Every summary line below that was shortened links to its own entry there.
   type's `cast/2`.**
   ([#1456](https://github.com/The-Verscienta/kiln_cms/issues/1456) · [long form](docs/changelog/unreleased.md#kilnfieldtypeparsefloat1-a-covered-numeric-parse-for-a-custom-field-types-cast2))
 
-### Changed
-
 - **The in-tree example overlay no longer reaches past the overlay contract.**
   ([#1456](https://github.com/The-Verscienta/kiln_cms/issues/1456) · [long form](docs/changelog/unreleased.md#the-in-tree-example-overlay-no-longer-reaches-past-the-overlay-contract))
 
 - **`docs/overlay-contract.md` says why the example's `:test` plugin list names
   a core fixture.**
   ([#1328](https://github.com/The-Verscienta/kiln_cms/issues/1328) · [long form](docs/changelog/unreleased.md#docsoverlay-contractmd-says-why-the-examples-test-plugin-list-names-a-core))
+
+- **The Configure sidebar is sections, and ⌘K finds settings screens.**
+  ([#1319](https://github.com/The-Verscienta/kiln_cms/issues/1319) · [long form](docs/changelog/unreleased.md#the-configure-sidebar-is-sections-and-k-finds-settings-screens))
 
 - **`CHANGELOG.md` is a summary, and the reasoning moved to `docs/changelog/`
   and `docs/decisions/`**.
@@ -114,6 +153,13 @@ Every summary line below that was shortened links to its own entry there.
 
 - **`mix docs` "View Source" links point at the release tag, not `main`.**
   ([#1450](https://github.com/The-Verscienta/kiln_cms/issues/1450) · [long form](docs/changelog/unreleased.md#mix-docs-view-source-links-point-at-the-release-tag-not-main))
+
+- **A `.md` file that opens with an HTML comment keeps its title.**
+  ([long form](docs/changelog/unreleased.md#a-md-file-that-opens-with-an-html-comment-keeps-its-title))
+
+- **The content-cache metric no longer inverts during a stampede, and a Courier
+  failure no longer amplifies one.**
+  ([long form](docs/changelog/unreleased.md#the-content-cache-metric-no-longer-inverts-during-a-stampede-and-a-courier))
 
 - **An arrow key can no longer walk a calendar chip off the grid it is drawn
   on.**
@@ -125,17 +171,32 @@ Every summary line below that was shortened links to its own entry there.
 - **Links to a `README.md` from a guide pointed at the wrong README.**
   ([#1464](https://github.com/The-Verscienta/kiln_cms/issues/1464) · [long form](docs/changelog/unreleased.md#links-to-a-readmemd-from-a-guide-pointed-at-the-wrong-readme))
 
-- **The new-password button says "Change password".**
-  ([#1451](https://github.com/The-Verscienta/kiln_cms/issues/1451) · [long form](docs/changelog/unreleased.md#the-new-password-button-says-change-password))
-
 - **Both password forms check the confirmation as you type.**
   ([#1446](https://github.com/The-Verscienta/kiln_cms/issues/1446) · [long form](docs/changelog/unreleased.md#both-password-forms-check-the-confirmation-as-you-type))
+
+- **The new-password button says "Change password".**
+  ([#1451](https://github.com/The-Verscienta/kiln_cms/issues/1451) · [long form](docs/changelog/unreleased.md#the-new-password-button-says-change-password))
 
 ### Security
 
 - **A system actor, so internal callers run under the policies instead of around
   them.**
   ([#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402) · [long form](docs/changelog/unreleased.md#a-system-actor-so-internal-callers-run-under-the-policies-instead-of-around-them))
+
+- **The firing path runs under the policies.**
+  ([#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402) · [long form](docs/changelog/unreleased.md#the-firing-path-runs-under-the-policies))
+
+- **The semantic index runs under its policies.**
+  ([#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402) · [long form](docs/changelog/unreleased.md#the-semantic-index-runs-under-its-policies))
+
+- **Editorial automation runs under the policies.**
+  ([#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402) · [long form](docs/changelog/unreleased.md#editorial-automation-runs-under-the-policies))
+
+- **Billing and the newsletter tier sync run under the policies.**
+  ([#1329](https://github.com/The-Verscienta/kiln_cms/issues/1329), [#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402) · [long form](docs/changelog/unreleased.md#billing-and-the-newsletter-tier-sync-run-under-the-policies))
+
+- **`mix kiln.authz.check` now gates all of `lib/`.**
+  ([#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402) · [long form](docs/changelog/unreleased.md#mix-kilnauthzcheck-now-gates-all-of-lib))
 
 ## [0.8.0] - 2026-09-11
 

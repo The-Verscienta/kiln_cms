@@ -44,6 +44,7 @@ defmodule KilnCMS.MixProject do
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
+      releases: releases(),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
       listeners: [Phoenix.CodeReloader],
       # `mix coveralls.*` (#1314) — floor and skip list in coveralls.json.
@@ -291,6 +292,7 @@ defmodule KilnCMS.MixProject do
       "docs/two-factor-auth.md": [],
       "docs/sso.md": [],
       "docs/threat-model.md": [],
+      "docs/secrets-rotation.md": [],
       # Design notes & decision records
       "docs/advanced-analytics-plan.md": [],
       "docs/collaborative-editing-spike.md": [],
@@ -431,7 +433,8 @@ defmodule KilnCMS.MixProject do
         "docs/passkeys.md",
         "docs/two-factor-auth.md",
         "docs/sso.md",
-        "docs/threat-model.md"
+        "docs/threat-model.md",
+        "docs/secrets-rotation.md"
       ],
       "Design notes & decision records": [
         "docs/advanced-analytics-plan.md",
@@ -549,6 +552,45 @@ defmodule KilnCMS.MixProject do
   # reusable core in `lib/`.
   defp elixirc_paths(:test), do: ["lib", "projects", "test/support"]
   defp elixirc_paths(_), do: ["lib", "projects"]
+
+  # `mix release` copies `config/runtime.exs` into `releases/<vsn>/` and nothing
+  # else from `config/`. Since #1322 that file is a list of `import_config`
+  # calls against per-concern fragments in `config/runtime/`, and
+  # `import_config` resolves relative to the importing file's own directory —
+  # `releases/<vsn>/` in a release — so without this step every release boots to
+  #
+  #     ** (File.Error) could not read file .../releases/<vsn>/runtime/console.exs
+  #
+  # before the endpoint starts. It fails loudly and immediately, but only in a
+  # release: `mix test` and `mix phx.server` read the fragments straight out of
+  # `config/`, so nothing in CI exercises this path. The Dockerfile has the
+  # matching half (`COPY config/runtime config/runtime`) — the build context
+  # must contain the directory for this step to find it.
+  defp releases do
+    [
+      kiln_cms: [
+        steps: [:assemble, &copy_runtime_config_fragments/1]
+      ]
+    ]
+  end
+
+  defp copy_runtime_config_fragments(%Mix.Release{} = release) do
+    source = "config/runtime"
+    target = Path.join(release.version_path, "runtime")
+
+    unless File.dir?(source) do
+      Mix.raise("""
+      #{source}/ is missing, so the release would ship a config/runtime.exs whose \
+      import_config calls cannot resolve, and every boot would fail. If this is a \
+      Docker build, the Dockerfile needs `COPY config/runtime config/runtime`.\
+      """)
+    end
+
+    File.mkdir_p!(target)
+    File.cp_r!(source, target)
+
+    release
+  end
 
   # Specifies your project dependencies.
   #
@@ -760,8 +802,9 @@ defmodule KilnCMS.MixProject do
         # dependency compile to discover: a Dockerfile pin that can't satisfy
         # this file's `elixir:` requirement (#600).
         "kiln.toolchain.check",
-        # An `authorize?: false` on a request path with no comment saying why
-        # it is safe (#1309). Cheap, and the reason belongs next to the bypass.
+        # An `authorize?: false` anywhere in `lib/` with no comment saying why
+        # it is safe, and no allowance in the task's shrinking backlog (#1309,
+        # #1402). Cheap, and the reason belongs next to the bypass.
         "kiln.authz.check",
         # An Unreleased entry over three lines, or one with nowhere to link
         # (#1325). Read-only; `--condense` is the half that rewrites the file

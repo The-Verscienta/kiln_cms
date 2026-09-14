@@ -1,9 +1,9 @@
-# Kiln CMS — Design Language
+# KilnCMS — Design Language
 
 *Applies to the admin & authoring UI (`/editor/*`, media, auth). The public
 delivery frontend keeps its own minimal chrome.*
 
-Kiln CMS is a focused, editor-first content management system for thoughtful
+KilnCMS is a focused, editor-first content management system for thoughtful
 creators and teams. It prioritizes clarity, speed, and editorial flow over
 feature bloat. **Voice**: calm, confident, precise — like a trusted editor.
 The design goals: reduce cognitive load for writers/editors, make publishing
@@ -100,7 +100,11 @@ written as a function component or a raw `class="…"` in a template.
   Wrap wide tables in `overflow-x-auto`. Also styles the `<.table>` component.
 - **Shell nav** — `.side-link` (+ `aria-current="page"` for the active item:
   a bordered, raised row with the icon in ember ink), `.side-icon` (its
-  outlined icon), `.side-section` (sentence-case group label),
+  outlined icon), `.side-group` (one nav section, keyed by `data-nav-group`;
+  `.side-group-op` for the ruled-off operator band), `.side-section` (the
+  section head — a `<button data-nav-group-toggle>` that collapses the
+  `.side-group-items` below it, carrying `.side-section-chevron` and, on the
+  operator band, `.side-section-mark`),
   `.side-icon-btn` (the bordered square button), `.side-theme` (segmented
   System / Light / Dark switch), `.side-account` + `.side-menu` (account row
   and its menu). Panel colours are the `sidebar`, `sidebar-raised` and
@@ -176,12 +180,31 @@ The authoring app frame (`lib/kiln_cms_web/components/layouts.ex`):
 - **Left sidebar** (persistent and full-height on `lg+`, slide-in drawer on
   mobile via a CSS-only peer checkbox — works before the LiveView socket
   connects), drawn after Untitled UI's dark sidebar: in dark mode the panel
-  sits a step *below* the workspace. Brand row with a collapse button, two
-  role-gated nav groups (**author**: Content, Media, Taxonomy, Calendar,
-  Translations, Analytics — **configure**: Content types, Fields, Forms,
-  Webhooks, Mail, Trash, Settings), plugin-contributed items, then a foot with
-  the segmented theme switch and the account row (avatar, name over email)
-  whose menu holds Account, GraphQL / JSON:API and Sign out.
+  sits a step *below* the workspace. Brand row with a collapse button, the
+  role-gated nav (below), plugin-contributed items, then a foot with the
+  segmented theme switch and the account row (avatar, name over email) whose
+  menu holds Account, GraphQL / JSON:API and Sign out.
+- **The nav itself** is data, in `KilnCMSWeb.ConsoleNav` — the sidebar draws
+  it, the Configure hub (`/editor/configure`) lists it with a one-line
+  description per screen, and the ⌘K palette searches it by name, section,
+  description and keyword. So a screen is reachable the day it is added, and
+  one the actor may not open is absent from all three. The **author** items
+  (Content, Media, Taxonomy, Calendar, Translations, Analytics, …) run
+  ungrouped at the top; below them an admin gets the **Configure** hub link,
+  then collapsible sections — Content model, Capture, Delivery, Integrations,
+  Organization, Account (**Your settings**, the per-user screen) — and
+  **Operations**, ruled off below them for the instance-wide, platform-admin
+  screens (Team, Accounts, Billing, Mail, API keys, Backups, System). Every item in that
+  band is `platform: true`, so for anyone else the band empties and is dropped:
+  the separation is never half day-to-day admin. A non-admin gets the Account
+  section alone.
+- **Section collapse** is stored the way the rail is: a space-separated list of
+  group keys on `<html data-nav-collapsed>` + `localStorage`
+  (`kiln:nav-collapsed`), replayed by `root.html.heex` before first paint. The
+  server always renders the section expanded and `app.css` does the hiding (one
+  `--side-group-display` rule per group key), so nothing flashes open and no
+  assign is involved; `app.js` only corrects `aria-expanded`. In the icon rail
+  collapse is ignored — a 4.5rem column has no room to say why items are gone.
 - **Icon rail** (`lg+`): the collapse button folds the sidebar to icons. The
   state lives on `<html data-sidebar="collapsed">` + `localStorage`
   (`kiln:sidebar`), restored before first paint by `root.html.heex` and
@@ -223,9 +246,14 @@ The authoring app frame (`lib/kiln_cms_web/components/layouts.ex`):
    Still deliberately bespoke: **icon-only / subtle destructive** buttons (kept
    as `btn-ghost` + `hover:text-error` rather than a solid `btn-danger`) and the
    translation locale **chips** (a matched link/button pair, not tabs).
-4. `Layouts.app/1` is **still used** by the `/` marketing landing
-   (`page_html/home.html.heex`) — a public-facing page, not an authoring tool —
-   so it is intentionally retained. Retire it only if/when the home page moves to
+4. **Done:** the `/` marketing landing (`page_html/home.html.heex`) moved to
+   `Layouts.public`. It is a public-facing page, not an authoring tool, and
+   serving it from the authoring shell gave the site root a theme toggle and an
+   account menu no other public URL has while skipping the site's own nav, theme
+   preset and attribution. `Layouts.public` took two optional attrs to absorb it
+   — `wide` (the reading-measure opt-out, replacing the old `container_class`)
+   and `current_user` (the account/sign-out pair). `Layouts.app/1` now has one
+   caller left, `page_html/developers.html.heex`; retire it when that page gets
    `Layouts.public` or its own treatment.
 
 Keep this document in step with the kit: **new shared pattern → document it here
