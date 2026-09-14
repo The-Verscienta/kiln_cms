@@ -40,6 +40,83 @@ redeploy" and nothing else.
 
   Entries accrete one per pull request and are condensed by script — write the
   entry however long it needs to be, then run:
+### Added
+
+- **Notifications are persisted, not only mailed.** Every workflow event
+  already dispatched by email and Web Push — submitted for review, published,
+  returned to draft, a comment, an `@mention`, a task assignment — now also
+  writes a `KilnCMS.Notifications.Notification` row for each recipient, so an
+  editor who does not read email and has not granted push has somewhere to find
+  out. The row is written from the same place, on the same already-filtered
+  recipient list, that enqueues the mail job: an event a user has muted in their
+  account preferences stays muted in the inbox too. Rows are org-scoped and
+  readable **only by their own recipient** — there is no admin bypass. The bell
+  and `/editor/inbox` that read them follow. Reading one is announced on the
+  recipient's own PubSub topic, so a notification read on a phone drops the
+  badge on the desktop.
+- **`/editor/inbox`.** The notification inbox: everything the console has told
+  this editor about, newest first, with an unread filter, per-row mark-read /
+  mark-unread and mark-all-read. Every row deep-links to the thing it concerns
+  — a comment or a block-anchored task opens that block's thread via the
+  `?comment=<block_id>` param the editor already reads at mount, which is the
+  console's only durable block anchor (heading `id`s exist in public delivery
+  only). Live: one `on_mount` hook subscribes each console page to the viewer's
+  own notification topic, so the list follows a notification that lands, or one
+  read in another tab, without a reload.
+- **A notification bell in the console top bar**, on every `/editor/*` page:
+  an unread badge (capped at `8+`, with the real number in its accessible
+  label), a dropdown of the eight most recent items — read ones included, since
+  a list that empties itself takes each item's deep link with it — and
+  mark-all-read. PubSub-driven: the badge moves when a notification arrives or
+  is read elsewhere, without a reload. Clicking an item marks it read and
+  navigates to the block, comment or task it concerns.
+
+### Changed
+
+- **Workflow and task notifications now dispatch after the write commits.**
+  `NotifyWorkflowEmail` and `NotifyTaskAssigned` moved from
+  `Ash.Changeset.after_action` to `after_transaction`, joining `NotifyComment`,
+  which was already there. Two effects: a query inside the notifier can no
+  longer poison the editorial action's transaction and lose the content, and a
+  rolled-back submit-for-review no longer mails the reviewers about a
+  transition that never happened.
+
+### Changed
+
+- **The ML stack behind semantic search is now opt-in (`KILN_ML=1`).** A first
+  `mix setup` fetched 773 MB of dependencies, 666 MB of it `deps/exla`, to back
+  semantic search — which ships disabled. Bumblebee, Nx and EXLA now stay out of
+  the dependency tree unless `KILN_ML` is set, taking a default `deps/` to
+  102 MB and saving a one-time 110 MB archive download; `mix setup` prints one
+  line saying so.
+
+  Nothing is removed. `KilnCMS.Search.Embedder.Bumblebee` and
+  `KilnCMS.Search.Reranker.Bumblebee` still exist and return
+  `{:error, %KilnCMS.Search.ML.NotCompiledError{}}` in a lean build, so hybrid
+  search falls back to its keyword legs and every caller's existing error
+  handling covers it. A deployment that has set `semantic: true` is warned once
+  at boot that its build cannot serve it.
+
+  **Upgrading:** a deployment already running semantic search must build with
+  `KILN_ML=1` — `KILN_ML=1 mix deps.get && KILN_ML=1 mix compile` — and keep the
+  variable set for every `mix` invocation, including in its image build.
+  Nothing in the database or configuration changes. Contributors touching the
+  semantic path should read the `KILN_ML` note in `CONTRIBUTING.md`: a lean
+  build compiles a different shape of those modules.
+- **`config/runtime.exs` is now an index, not a 1,523-line file.** The
+  configuration moved into per-concern fragments under `config/runtime/`
+  (`observability.exs`, `governance.exs`, `prod/mailer.exs`, …), evaluated in
+  exactly the order their blocks appeared before. Behaviour is unchanged: the
+  same variables are read, in the same sequence, producing the same
+  application env and the same boot warnings in the same order. Operators
+  change nothing.
+
+  One thing to know if you build releases outside the shipped Dockerfile:
+  `mix release` copies only `config/runtime.exs` into `releases/<vsn>/`, so the
+  fragments are copied alongside it by a `:steps` hook in `mix.exs`, and the
+  Dockerfile now `COPY`s the directory into the build context. The hook refuses
+  to assemble a release if the directory is missing rather than producing an
+  image that fails on first boot.
 
       mix kiln.changelog --condense
 
@@ -60,34 +137,34 @@ Every summary line below that was shortened links to its own entry there.
   ([#1319](https://github.com/The-Verscienta/kiln_cms/issues/1319) · [long form](docs/changelog/unreleased.md#a-configure-hub-at-editorconfigure))
 
 - **Notifications are persisted, not only mailed.**
-  ([long form](docs/changelog/unreleased.md#notifications-are-persisted-not-only-mailed))
+  ([#1472](https://github.com/The-Verscienta/kiln_cms/issues/1472) · [long form](docs/changelog/unreleased.md#notifications-are-persisted-not-only-mailed))
 
 - **`/editor/inbox`.**
-  ([long form](docs/changelog/unreleased.md#editorinbox))
+  ([#1472](https://github.com/The-Verscienta/kiln_cms/issues/1472) · [long form](docs/changelog/unreleased.md#editorinbox))
 
 ### Changed
 
 - **`config/runtime.exs` is now an index, not a 1,523-line file.**
-  ([long form](docs/changelog/unreleased.md#configruntimeexs-is-now-an-index-not-a-1523-line-file))
+  ([#1476](https://github.com/The-Verscienta/kiln_cms/issues/1476) · [long form](docs/changelog/unreleased.md#configruntimeexs-is-now-an-index-not-a-1523-line-file))
 
 - **`docs/environment-variables.md` and `.env.example` lead with the short
   list.**
-  ([long form](docs/changelog/unreleased.md#docsenvironment-variablesmd-and-envexample-lead-with-the-short-list))
+  ([#1476](https://github.com/The-Verscienta/kiln_cms/issues/1476) · [long form](docs/changelog/unreleased.md#docsenvironment-variablesmd-and-envexample-lead-with-the-short-list))
 
 - **The stock front page now renders in the public delivery chrome.**
-  ([long form](docs/changelog/unreleased.md#the-stock-front-page-now-renders-in-the-public-delivery-chrome))
+  ([#1461](https://github.com/The-Verscienta/kiln_cms/issues/1461) · [long form](docs/changelog/unreleased.md#the-stock-front-page-now-renders-in-the-public-delivery-chrome))
 
 - **The public search form has a submit button.**
-  ([long form](docs/changelog/unreleased.md#the-public-search-form-has-a-submit-button))
+  ([#1461](https://github.com/The-Verscienta/kiln_cms/issues/1461) · [long form](docs/changelog/unreleased.md#the-public-search-form-has-a-submit-button))
 
 - **The product name is spelled `KilnCMS` everywhere.**
-  ([long form](docs/changelog/unreleased.md#the-product-name-is-spelled-kilncms-everywhere))
+  ([#1461](https://github.com/The-Verscienta/kiln_cms/issues/1461) · [long form](docs/changelog/unreleased.md#the-product-name-is-spelled-kilncms-everywhere))
 
 - **The docs publisher no longer installs `earmark`.**
-  ([long form](docs/changelog/unreleased.md#the-docs-publisher-no-longer-installs-earmark))
+  ([#1452](https://github.com/The-Verscienta/kiln_cms/issues/1452) · [long form](docs/changelog/unreleased.md#the-docs-publisher-no-longer-installs-earmark))
 
 - **Workflow and task notifications now dispatch after the write commits.**
-  ([long form](docs/changelog/unreleased.md#workflow-and-task-notifications-now-dispatch-after-the-write-commits))
+  ([#1472](https://github.com/The-Verscienta/kiln_cms/issues/1472) · [long form](docs/changelog/unreleased.md#workflow-and-task-notifications-now-dispatch-after-the-write-commits))
 
 - **A secrets-rotation runbook**,
   [`docs/secrets-rotation.md`](docs/secrets-rotation.md), closing residual risk
@@ -155,11 +232,11 @@ Every summary line below that was shortened links to its own entry there.
   ([#1450](https://github.com/The-Verscienta/kiln_cms/issues/1450) · [long form](docs/changelog/unreleased.md#mix-docs-view-source-links-point-at-the-release-tag-not-main))
 
 - **A `.md` file that opens with an HTML comment keeps its title.**
-  ([long form](docs/changelog/unreleased.md#a-md-file-that-opens-with-an-html-comment-keeps-its-title))
+  ([#1455](https://github.com/The-Verscienta/kiln_cms/issues/1455) · [long form](docs/changelog/unreleased.md#a-md-file-that-opens-with-an-html-comment-keeps-its-title))
 
 - **The content-cache metric no longer inverts during a stampede, and a Courier
   failure no longer amplifies one.**
-  ([long form](docs/changelog/unreleased.md#the-content-cache-metric-no-longer-inverts-during-a-stampede-and-a-courier))
+  ([#1475](https://github.com/The-Verscienta/kiln_cms/issues/1475) · [long form](docs/changelog/unreleased.md#the-content-cache-metric-no-longer-inverts-during-a-stampede-and-a-courier))
 
 - **An arrow key can no longer walk a calendar chip off the grid it is drawn
   on.**

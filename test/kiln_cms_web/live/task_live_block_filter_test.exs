@@ -95,7 +95,7 @@ defmodule KilnCMSWeb.TaskLiveBlockFilterTest do
 
       assert html =~ "No block spec"
       refute html =~ "removed block"
-      refute html =~ "?comment="
+      refute main(html) =~ "?comment="
     end
 
     # Nothing cascades when a block is deleted, so the task is still real and
@@ -115,7 +115,7 @@ defmodule KilnCMSWeb.TaskLiveBlockFilterTest do
       {:ok, _lv, html} = live(ctx.conn, ~p"/editor/tasks")
 
       assert html =~ "removed block"
-      refute html =~ "?comment=#{doomed}"
+      refute main(html) =~ "?comment=#{doomed}"
     end
   end
 
@@ -214,5 +214,14 @@ defmodule KilnCMSWeb.TaskLiveBlockFilterTest do
       assert html =~ "1 open task anchored to a block"
       assert html =~ "/editor/tasks?view=team&amp;scope=block"
     end
+  end
+
+  # The console shell carries a notification bell whose dropdown renders
+  # content titles and `?comment=` deep links of its own (#1320), so a
+  # whole-page substring assertion can no longer tell this page's list apart
+  # from the chrome around it. `main/1` narrows to `<main id="main">`, which is
+  # the page's own body — the assertion means what it says again.
+  defp main(html) do
+    html |> Floki.parse_document!() |> Floki.find("#main") |> Floki.raw_html()
   end
 end

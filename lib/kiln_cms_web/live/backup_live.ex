@@ -156,7 +156,15 @@ defmodule KilnCMSWeb.BackupLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.console flash={@flash} current_user={@current_user} active={:backups}>
+    <%!-- `current_org` was the one console call site not passing it (#1320):
+          the top bar's bell scopes its rows by tenant, so a page that omitted
+          it would read this admin's notifications across every site. --%>
+    <Layouts.console
+      flash={@flash}
+      current_user={@current_user}
+      current_org={@current_org}
+      active={:backups}
+    >
       <div class="mx-auto max-w-3xl space-y-6 p-4 sm:p-6">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div>
