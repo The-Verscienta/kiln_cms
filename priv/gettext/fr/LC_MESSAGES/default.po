@@ -4910,6 +4910,16 @@ msgstr "Erreur 404"
 msgid "Error 500"
 msgstr "Erreur 500"
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Essentials"
+msgstr "L'essentiel"
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Essentials: Home, Content, Media, Calendar, Tasks and Inbox, then Configure and Your settings."
+msgstr "L'essentiel : Accueil, Contenu, Médias, Calendrier, Tâches et Boîte de réception, puis Configurer et Vos paramètres."
+
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Event"
@@ -4940,6 +4950,11 @@ msgstr "Chaque requête relit la base de données jusqu'à ce que le cache se re
 msgid "Every scanned slug already matches its derivation."
 msgstr "Chaque slug analysé correspond déjà à sa dérivation."
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every screen stays in search (⌘K) either way; this only decides what the sidebar lists."
+msgstr "Dans les deux cas, chaque écran reste accessible par la recherche (⌘K) ; ce choix ne décide que de ce que liste la barre latérale."
+
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "Every settings screen, and what each one is for."
@@ -4960,6 +4975,11 @@ msgstr "Tous les comptes inscrits sur cette instance, et leurs accès."
 msgid "Everyone registered on this instance. Roles here are the platform role; per-site tiers live on each site's team page."
 msgstr "Toutes les personnes inscrites sur cette instance. Les rôles indiqués ici sont le rôle de plateforme ; les niveaux par site se trouvent sur la page Équipe de chaque site."
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Everything"
+msgstr "Tout"
+
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex
 #, elixir-autogen, elixir-format
 msgid "Everything a content team needs"
@@ -4974,6 +4994,11 @@ msgstr "Tout ce qui a une cadence la respecte."
 #, elixir-autogen, elixir-format
 msgid "Everything you can change about this site, and about this deployment. Your own profile, password and sign-in live under Your settings instead."
 msgstr "Tout ce que vous pouvez modifier sur ce site et sur ce déploiement. Votre profil, votre mot de passe et votre connexion se trouvent dans Vos paramètres."
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Everything: every screen you can open, grouped by section."
+msgstr "Tout : chaque écran que vous pouvez ouvrir, regroupé par section."
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/content_editor/markdown_import.ex
@@ -10255,7 +10280,6 @@ msgstr "Configurez votre site"
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
-#: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Settings"
 msgstr "Paramètres"
@@ -10294,6 +10318,16 @@ msgstr "Publier un lancement nécessite un accès administrateur."
 #, elixir-autogen, elixir-format
 msgid "Shorten"
 msgstr "Raccourcir"
+
+#: lib/kiln_cms_web/components/layouts.ex
+#, elixir-autogen, elixir-format
+msgid "Show all tools"
+msgstr "Afficher tous les outils"
+
+#: lib/kiln_cms_web/components/layouts.ex
+#, elixir-autogen, elixir-format
+msgid "Show essentials"
+msgstr "Afficher l'essentiel"
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
@@ -10380,6 +10414,11 @@ msgstr "Colonnes côte à côte contenant des blocs imbriqués"
 #, elixir-autogen, elixir-format
 msgid "Side-by-side preview"
 msgstr "Aperçu côte à côte"
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sidebar"
+msgstr "Barre latérale"
 
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/controllers/error_html/403.html.heex
@@ -11640,6 +11679,11 @@ msgstr "La même liste est disponible sur le serveur via %{list}, et %{doctor} v
 #, elixir-autogen, elixir-format
 msgid "The shipped pack deliberately leaves out bare marketing words — \"best\", \"free\", \"proven\" — because they have too many legitimate uses to flag without knowing a publication's subject. That is what the phrase list above is for."
 msgstr "Le jeu de règles fourni exclut délibérément les mots publicitaires seuls — « best », « free », « proven » — car ils ont trop d'usages légitimes pour être signalés sans connaître le sujet de la publication. C'est à cela que sert la liste d'expressions ci-dessus."
+
+#: lib/kiln_cms_web/nav_preset.ex
+#, elixir-autogen, elixir-format
+msgid "The sidebar could not be changed."
+msgstr "La barre latérale n'a pas pu être modifiée."
 
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
@@ -13353,6 +13397,7 @@ msgid "Your role cannot copy this content's blocks, so it cannot be translated."
 msgstr "Votre rôle ne peut pas copier les blocs de ce contenu, il ne peut donc pas être traduit."
 
 #: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Your settings"
 msgstr "Vos paramètres"

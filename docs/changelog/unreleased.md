@@ -7,6 +7,31 @@ carries the reasoning.
 
 ## Added
 
+<a id="sidebar-presets-essentials-and-everything"></a>
+
+- **Sidebar presets: Essentials and Everything.** A usability pass on
+  kilncms.dev found a platform admin's sidebar listing 38 items, most of them
+  screens a writer opens a few times a year. Each user now picks a sidebar
+  preset (`User.nav_preset`, stored server-side, so it follows them across
+  devices and the first paint is already right). **Essentials** lists Home,
+  Content, Media, Calendar, Tasks and Inbox, then the Configure hub for an
+  admin and Your settings. **Everything** is the sidebar as it was. Only the
+  sidebar filters (`KilnCMSWeb.ConsoleNav.sidebar/3`): the Configure hub and
+  the ⌘K palette still read the full map, and the page you are on is drawn
+  even when the preset would hide it. Switch with "Show all tools" / "Show
+  essentials" at the foot of the sidebar or on Your settings. Either redraws
+  the sidebar in place through the self-only `:set_nav_preset` action.
+
+  **Upgrading:** the migration adds the column with a default of `everything`
+  (so every existing account is backfilled to the sidebar it already had) and
+  then changes the column default to `essentials`, which is also the
+  resource's create-time default. Nobody who already knows where Menus is
+  finds it gone after an upgrade. Accounts created by the seeds after the
+  migration (the demo admin and editor) start on Essentials.
+
+  Also: `/editor/settings` is titled **Your settings**, as the nav already
+  named it, and "site settings" in ⌘K now finds the Configure hub first.
+
 <a id="a-configure-hub-at-editorconfigure"></a>
 
 - **A Configure hub at `/editor/configure`.** The console had twenty-odd

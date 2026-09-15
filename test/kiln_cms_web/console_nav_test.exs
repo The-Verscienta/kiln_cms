@@ -248,6 +248,115 @@ defmodule KilnCMSWeb.ConsoleNavTest do
       assert length(ConsoleNav.search("e", admin, nil)) == 6
       assert length(ConsoleNav.search("e", admin, nil, limit: 2)) == 2
     end
+
+    # Usability pass, M5: "settings" is a name match for the per-user screen, so
+    # it leads — but someone after SITE configuration types "site settings", and
+    # that used to match nothing at all.
+    test "“settings” leads with Your settings, and the hub follows" do
+      assert [:settings, :configure | _] = found("settings", authed_user(:admin))
+    end
+
+    test "“site settings” finds the Configure hub first" do
+      admin = authed_user(:admin)
+
+      assert [:configure | _] = found("site settings", admin)
+      assert [:configure | _] = found("Site Settings", admin)
+      # An editor has no hub, and nothing else claims the phrase.
+      assert found("site settings", authed_user(:editor)) == []
+    end
+  end
+
+  # Sidebar presets: Essentials is the daily author screens plus the hub and Your
+  # settings; Everything is the full map. Only the sidebar filters.
+  describe "sidebar presets" do
+    defp with_preset(user, preset) do
+      {:ok, updated} = Accounts.set_nav_preset(user, preset, actor: user)
+      %{user | nav_preset: updated.nav_preset}
+    end
+
+    defp sidebar_keys(user, active \\ nil) do
+      nav = ConsoleNav.sidebar(user, nil, active)
+
+      %{
+        author: Enum.map(nav.author, & &1.key),
+        hub: nav.hub && nav.hub.key,
+        pinned: Enum.map(nav.pinned, & &1.key),
+        groups: Enum.map(nav.configure_groups, & &1.key),
+        plugin: nav.plugin
+      }
+    end
+
+    test "a new account starts on Essentials" do
+      assert authed_user(:editor).nav_preset == :essentials
+      assert authed_user(:admin).nav_preset == :essentials
+    end
+
+    test "Essentials, for an admin: the daily screens, the hub and Your settings" do
+      admin = authed_user(:admin)
+
+      assert %{
+               author: [:overview, :content, :media, :calendar, :tasks, :inbox],
+               hub: :configure,
+               pinned: [:settings],
+               groups: [],
+               plugin: []
+             } = sidebar_keys(admin)
+    end
+
+    test "Essentials, for an editor: the daily screens and Your settings, no hub" do
+      assert %{
+               author: [:overview, :content, :media, :calendar, :tasks, :inbox],
+               hub: nil,
+               pinned: [:settings],
+               groups: []
+             } = sidebar_keys(authed_user(:editor))
+    end
+
+    test "Everything is exactly nav/2" do
+      for role <- [:admin, :editor] do
+        user = with_preset(authed_user(role), :everything)
+        nav = ConsoleNav.nav(user, nil)
+
+        assert ConsoleNav.sidebar(user, nil) == Map.put(nav, :pinned, [])
+      end
+    end
+
+    test "a page the preset would hide is drawn anyway while you are on it" do
+      admin = authed_user(:admin)
+
+      # An author screen keeps its place in the author list…
+      assert %{author: [:overview, :content, :media, :menus, :calendar, :tasks, :inbox]} =
+               sidebar_keys(admin, :menus)
+
+      # …a grouped screen is pinned above Your settings…
+      assert %{pinned: [:redirects, :settings], groups: []} = sidebar_keys(admin, :redirects)
+
+      # …and one the actor may not open is still not conjured up.
+      assert %{pinned: [:settings]} = sidebar_keys(authed_user(:editor), :redirects)
+      assert %{pinned: [:settings]} = sidebar_keys(admin, :settings)
+    end
+
+    test "the hub and ⌘K read the whole map whatever the preset" do
+      essentials = authed_user(:admin)
+      everything = with_preset(authed_user(:admin), :everything)
+
+      strip = fn user -> user |> ConsoleNav.destinations(nil) |> Enum.map(& &1.key) end
+
+      assert strip.(essentials) == strip.(everything)
+      assert :menus in strip.(essentials)
+      assert :backups in strip.(essentials)
+
+      assert ConsoleNav.nav(essentials, nil).configure_groups ==
+               ConsoleNav.nav(everything, nil).configure_groups
+
+      assert [:taxonomy | _] = found("taxonomy", essentials)
+    end
+
+    test "anything but an explicit :essentials draws everything" do
+      assert ConsoleNav.preset(nil) == :everything
+      assert ConsoleNav.preset(%{}) == :everything
+      assert ConsoleNav.preset(%{nav_preset: %Ash.ForbiddenField{}}) == :everything
+    end
   end
 
   describe "the palette" do
@@ -269,9 +378,17 @@ defmodule KilnCMSWeb.ConsoleNavTest do
     end
   end
 
+  # An admin on the Everything preset — what the section, band and hub tests
+  # below are about. A new account is on Essentials, which draws no sections.
+  defp everything_admin do
+    user = authed_user(:admin)
+    {:ok, _} = Accounts.set_nav_preset(user, :everything, actor: user)
+    user
+  end
+
   describe "the sidebar" do
     test "draws each section as a collapsible head", %{conn: conn} do
-      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor")
+      {:ok, lv, _html} = conn |> log_in(everything_admin()) |> live(~p"/editor")
 
       for key <- [
             :content_model,
@@ -295,7 +412,7 @@ defmodule KilnCMSWeb.ConsoleNavTest do
     end
 
     test "sets the operator band apart", %{conn: conn} do
-      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor")
+      {:ok, lv, _html} = conn |> log_in(everything_admin()) |> live(~p"/editor")
 
       assert has_element?(lv, ~s(aside .side-group-op[data-nav-group="operations"]))
       refute has_element?(lv, ~s(aside .side-group-op[data-nav-group="delivery"]))
@@ -326,6 +443,105 @@ defmodule KilnCMSWeb.ConsoleNavTest do
         assert css =~ ~s([data-nav-collapsed~="#{key}"] .side-group[data-nav-group="#{key}"]),
                "assets/css/app.css has no collapse rule for the #{key} nav section"
       end
+    end
+
+    test "Essentials draws the daily screens, the hub and Your settings — no sections",
+         %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor")
+
+      for path <- ~w(/editor/overview /editor /media /editor/calendar /editor/tasks /editor/inbox
+                     /editor/configure /editor/settings) do
+        assert has_element?(lv, ~s(aside a.side-link[href="#{path}"])), "#{path} missing"
+      end
+
+      for path <- ~w(/editor/taxonomy /editor/menus /editor/releases /editor/analytics
+                     /editor/links /editor/redirects /editor/backups) do
+        refute has_element?(lv, ~s(aside a.side-link[href="#{path}"])), "#{path} drawn"
+      end
+
+      refute has_element?(lv, "aside .side-group")
+      assert has_element?(lv, "aside #nav-preset-switch", "Show all tools")
+    end
+
+    test "Essentials still draws the current page, marked current", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/redirects")
+
+      assert has_element?(
+               lv,
+               ~s(aside a.side-link[href="/editor/redirects"][aria-current="page"])
+             )
+
+      refute has_element?(lv, ~s(aside a.side-link[href="/editor/slugs"]))
+    end
+
+    test "the switch changes the sidebar in place and is saved on the user", %{conn: conn} do
+      user = authed_user(:admin)
+      {:ok, lv, _html} = conn |> log_in(user) |> live(~p"/editor")
+
+      refute has_element?(lv, ~s(aside a.side-link[href="/editor/menus"]))
+
+      lv |> element("#nav-preset-switch") |> render_click()
+
+      assert has_element?(lv, ~s(aside a.side-link[href="/editor/menus"]))
+      assert has_element?(lv, ~s(aside .side-group[data-nav-group="operations"]))
+      assert has_element?(lv, "aside #nav-preset-switch", "Show essentials")
+      assert {:ok, %{nav_preset: :everything}} = Accounts.get_user(user.id, actor: user)
+
+      lv |> element("#nav-preset-switch") |> render_click()
+
+      refute has_element?(lv, ~s(aside a.side-link[href="/editor/menus"]))
+      assert {:ok, %{nav_preset: :essentials}} = Accounts.get_user(user.id, actor: user)
+    end
+
+    test "the switch works from an admin-session page too", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/configure")
+
+      lv |> element("#nav-preset-switch") |> render_click()
+
+      assert has_element?(lv, ~s(aside .side-group[data-nav-group="delivery"]))
+    end
+
+    test "a forged preset value changes nothing", %{conn: conn} do
+      user = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(user) |> live(~p"/editor")
+
+      render_click(lv, "set_nav_preset", %{"preset" => "admin"})
+
+      assert {:ok, %{nav_preset: :essentials}} = Accounts.get_user(user.id, actor: user)
+      assert has_element?(lv, "aside #nav-preset-switch", "Show all tools")
+    end
+  end
+
+  describe "the preset's update policy" do
+    test "a user may set their own preset" do
+      user = authed_user(:editor)
+
+      assert {:ok, %{nav_preset: :everything}} =
+               Accounts.set_nav_preset(user, :everything, actor: user)
+    end
+
+    test "nobody else but a platform admin may set it" do
+      target = authed_user(:editor)
+      other = authed_user(:editor)
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               Accounts.set_nav_preset(target, :everything, actor: other)
+
+      assert {:ok, %{nav_preset: :essentials}} =
+               Accounts.get_user(target.id, actor: target)
+    end
+
+    test "it accepts only the preset, and only the two values" do
+      user = authed_user(:editor)
+
+      assert {:error, %Ash.Error.Invalid{}} = Accounts.set_nav_preset(user, :admin, actor: user)
+
+      assert {:error, %Ash.Error.Invalid{}} =
+               user
+               |> Ash.Changeset.for_update(
+                 :set_nav_preset,
+                 %{nav_preset: :everything, role: :admin}, actor: user)
+               |> Ash.update()
     end
   end
 end

@@ -131,7 +131,15 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Upgrade notes
+
+- **Existing accounts keep the full sidebar; new ones start on Essentials.**
+  ([long form](docs/changelog/unreleased.md#sidebar-presets-essentials-and-everything))
+
 ### Added
+
+- **Sidebar presets: Essentials and Everything.**
+  ([long form](docs/changelog/unreleased.md#sidebar-presets-essentials-and-everything))
 
 - **A Configure hub at `/editor/configure`.**
   ([#1319](https://github.com/The-Verscienta/kiln_cms/issues/1319) · [long form](docs/changelog/unreleased.md#a-configure-hub-at-editorconfigure))
