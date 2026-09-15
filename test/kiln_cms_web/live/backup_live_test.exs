@@ -274,11 +274,43 @@ defmodule KilnCMSWeb.BackupLiveTest do
   end
 
   describe "the overview warning" do
-    test "an admin with no backup sees the strip", %{conn: conn} do
-      {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+    # Day one of every install: nothing has run because nothing could have yet.
+    # Still said — backups are not optional before launch — but as a neutral
+    # next step, not the red alarm (usability pass, M2). `Backups.stale?(nil)`
+    # itself stays true; the branch is in the view.
+    test "an admin with no backup ever recorded gets the calm set-up notice, not the alarm",
+         %{conn: conn} do
+      assert KilnCMS.Backups.stale?(nil)
 
-      assert html =~ "overview-backup-warning"
-      assert html =~ "No backup has ever been recorded"
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      assert has_element?(
+               lv,
+               "#overview-backup-setup[href='/editor/backups']",
+               "Backups aren't set up yet — turn them on before you go live."
+             )
+
+      refute has_element?(lv, "#overview-backup-warning")
+      refute render(lv) =~ "No backup has ever been recorded"
+    end
+
+    test "a failed backup is the red alarm", %{conn: conn, dir: dir} do
+      seed_manifest!(dir, ok: false)
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      assert has_element?(lv, "#overview-backup-warning", "The last backup failed.")
+      refute has_element?(lv, "#overview-backup-setup")
+    end
+
+    test "a backup that went stale is the red alarm", %{conn: conn, dir: dir} do
+      long_ago = DateTime.add(DateTime.utc_now(), -30, :day)
+      seed_manifest!(dir, started_at: long_ago, finished_at: long_ago)
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      assert has_element?(lv, "#overview-backup-warning", "The last backup was 30 days ago.")
+      refute has_element?(lv, "#overview-backup-setup")
     end
 
     test "it disappears once a backup is fresh", %{conn: conn, dir: dir} do
@@ -286,9 +318,10 @@ defmodule KilnCMSWeb.BackupLiveTest do
       # its absence is what makes the red one land.
       seed_manifest!(dir, [])
 
-      {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+      {:ok, lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
 
       refute html =~ "overview-backup-warning"
+      refute has_element?(lv, "#overview-backup-setup")
     end
 
     test "an editor never sees it — they can't act on it", %{conn: conn} do

@@ -417,7 +417,11 @@ defmodule KilnCMSWeb.Layouts do
       {gettext("Search")}
     </.link>
 
-    <div class="min-h-screen bg-base-100 lg:grid lg:grid-cols-[var(--side-w)_1fr]">
+    <%!-- `minmax(0, 1fr)`, not a bare `1fr`: a `1fr` track never shrinks below
+          its content's min-content width, so one wide descendant (a long <pre>,
+          a wide table) widened the column past the viewport and scrolled the
+          whole shell sideways — even when that descendant scrolls itself. --%>
+    <div class="min-h-screen bg-base-100 lg:grid lg:grid-cols-[var(--side-w)_minmax(0,1fr)]">
       <%!-- CSS-only mobile drawer: the peer checkbox drives the sidebar + backdrop
             with no socket round-trip, so the menu works before LiveView connects. --%>
       <input id="kiln-nav-toggle" type="checkbox" class="peer sr-only" aria-hidden="true" />
@@ -432,11 +436,17 @@ defmodule KilnCMSWeb.Layouts do
             icon rail. The rail state lives on <html data-sidebar> — restored
             before first paint by root.html.heex, flipped by app.js — because
             LiveView never patches <html>, so it outlives every live navigation
-            with no server round-trip. --%>
+            with no server round-trip.
+
+            The slide is the drawer's alone (`lg:transition-none`): at lg the
+            translate is simply cancelled, so a window crossing 64rem — a
+            resize, a snap, a zoom — shows the rail at once instead of sliding
+            it in with every label cropped from the left. --%>
       <aside class={[
         "side-shell fixed inset-y-0 left-0 z-40 flex w-64 -translate-x-full flex-col border-r shadow-xl",
         "border-sidebar-line bg-sidebar transition-transform peer-checked:translate-x-0",
-        "lg:sticky lg:bottom-auto lg:z-auto lg:h-screen lg:w-auto lg:translate-x-0 lg:shadow-none"
+        "lg:sticky lg:bottom-auto lg:z-auto lg:h-screen lg:w-auto lg:translate-x-0 lg:shadow-none",
+        "lg:transition-none"
       ]}>
         <div class="side-head flex h-16 shrink-0 items-center gap-2.5 px-4">
           <img

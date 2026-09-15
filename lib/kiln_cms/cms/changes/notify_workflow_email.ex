@@ -27,8 +27,19 @@ defmodule KilnCMS.CMS.Changes.NotifyWorkflowEmail do
 
   The `{:error, _}` clause falls through untouched, so a failed write is
   returned unchanged and dispatches nothing.
+
+  ## A dispatch failure is logged, never raised
+
+  Post-commit is not the same as harmless: an exception from an
+  `after_transaction` hook still propagates to whoever called the action, so a
+  raise in `Notifications.dispatch/3` (an author load, the admin roster, an
+  `Oban.insert!`) would crash the LiveView or API request whose publish had
+  *already committed* — reporting a failure for a write that succeeded. The
+  rescue returns the committed result, exactly as `NotifyComment` does.
   """
   use Ash.Resource.Change
+
+  require Logger
 
   alias KilnCMS.Notifications
 
@@ -45,6 +56,10 @@ defmodule KilnCMS.CMS.Changes.NotifyWorkflowEmail do
   defp dispatch({:ok, record} = result, event, actor) do
     Notifications.dispatch(event, record, actor)
     result
+  rescue
+    error ->
+      Logger.error("workflow notification #{event} failed: #{Exception.message(error)}")
+      result
   end
 
   defp dispatch(other, _event, _actor), do: other

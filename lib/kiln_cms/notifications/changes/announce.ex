@@ -26,12 +26,21 @@ defmodule KilnCMS.Notifications.Changes.Announce do
   The message carries nothing — see `KilnCMS.Notifications.topic/1` for why
   every subscriber re-reads under its own actor and tenant rather than being
   handed a row.
+
+  ## A sweep announces once, not per row
+
+  `KilnCMS.Notifications.mark_all_read/2` streams `:mark_read` over every
+  unread row, and a per-row announcement would send each open console one
+  re-read *per row* for a single click. It passes `context: %{announce?:
+  false}` and broadcasts once itself when the sweep is done.
   """
   use Ash.Resource.Change
 
   alias KilnCMS.Notifications
 
   @impl true
+  def change(%{context: %{announce?: false}} = changeset, _opts, _context), do: changeset
+
   def change(changeset, _opts, _context) do
     Ash.Changeset.after_transaction(changeset, &announce/2)
   end

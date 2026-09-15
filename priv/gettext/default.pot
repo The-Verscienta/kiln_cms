@@ -119,6 +119,13 @@ msgid_plural "%{count} documents"
 msgstr[0] ""
 msgstr[1] ""
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} draft"
+msgid_plural "%{count} drafts"
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} edit(s) since the last anchor — covered at the next publish."
@@ -172,11 +179,19 @@ msgstr[1] ""
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
+msgid "%{count} in review"
+msgid_plural "%{count} in review"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
 msgid "%{count} item needs your approval"
 msgid_plural "%{count} items need your approval"
 msgstr[0] ""
 msgstr[1] ""
 
+#: lib/kiln_cms_web/live/overview_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} media item"
@@ -243,6 +258,13 @@ msgstr[1] ""
 #, elixir-autogen, elixir-format
 msgid "%{count} post"
 msgid_plural "%{count} posts"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} published"
+msgid_plural "%{count} published"
 msgstr[0] ""
 msgstr[1] ""
 
@@ -2112,6 +2134,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Backups"
+msgstr ""
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Backups aren't set up yet — turn them on before you go live."
 msgstr ""
 
 #: lib/kiln_cms_web/console_nav.ex
@@ -4368,6 +4395,16 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
+msgid "Done — editors submit for review and an admin publishes."
+msgstr ""
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Done — you publish directly. Anyone you add as an editor can too."
+msgstr ""
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
 msgid "Done:"
 msgstr ""
 
@@ -4669,6 +4706,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Edits keep the previous file for already-published content."
+msgstr ""
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Either way, a platform admin can change it later on the Team page."
+msgstr ""
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Either way, you can change it later on the Team page."
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -5884,9 +5931,19 @@ msgstr ""
 msgid "How URLs are built, and bulk regeneration."
 msgstr ""
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "How do you publish?"
+msgstr ""
+
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "How this instance sends email, and its DNS records."
+msgstr ""
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "I have a team — review before publishing"
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
@@ -6180,6 +6237,11 @@ msgstr ""
 #: lib/kiln_cms_web/controllers/content_html.ex
 #, elixir-autogen, elixir-format
 msgid "June"
+msgstr ""
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Just me — publish directly"
 msgstr ""
 
 #: lib/kiln_cms_web/live/menu_live.ex
@@ -7752,6 +7814,11 @@ msgstr ""
 msgid "Nothing unread."
 msgstr ""
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nothing written or uploaded yet."
+msgstr ""
+
 #: lib/kiln_cms_web/live/notification_bell.ex
 #, elixir-autogen, elixir-format
 msgid "Nothing yet."
@@ -7992,9 +8059,19 @@ msgstr ""
 msgid "Open Backups to check the schedule or take one now."
 msgstr ""
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Open Backups to set a schedule or take the first one."
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
 msgid "Open Swagger UI"
+msgstr ""
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Open Team"
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex
@@ -9591,6 +9668,11 @@ msgstr ""
 msgid "Rich text editor"
 msgstr ""
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Right now editors submit their work for review and only an admin can publish. Pick what fits this site."
+msgstr ""
+
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Role"
@@ -10603,6 +10685,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Some content could not be read and was not handled: %{types}."
+msgstr ""
+
+#: lib/kiln_cms_web/live/inbox_live.ex
+#, elixir-autogen, elixir-format
+msgid "Some notifications could not be marked read."
 msgstr ""
 
 #: lib/kiln_cms_web/live/billing_live.ex
@@ -12895,11 +12982,6 @@ msgstr ""
 msgid "What a match on these phrases means"
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex
-#, elixir-autogen, elixir-format
-msgid "What needs you next — then eight domains around your content."
-msgstr ""
-
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "What other servers show for this actor. Peers refetch it on their own schedule."
@@ -13306,6 +13388,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Your browser will prompt you to confirm with this device's screen lock."
+msgstr ""
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Your choice could not be saved."
 msgstr ""
 
 #: lib/kiln_cms_web/live/account_live.ex
