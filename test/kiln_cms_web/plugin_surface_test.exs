@@ -40,13 +40,48 @@ defmodule KilnCMSWeb.PluginSurfaceTest do
     |> AshAuthentication.Plug.Helpers.store_in_session(user)
   end
 
-  test "the plugin nav item is role-gated", %{conn: conn} do
-    {:ok, _lv, admin_html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor")
-    assert admin_html =~ ~s(href="/editor/fixture")
-    assert admin_html =~ "Fixture"
+  # The sidebar preset a user is on. This test is about ROLE-gating, so both users
+  # are put on Everything: a new account starts on Essentials, which draws no
+  # plugin items for anyone — and the editor's refute would then pass whatever
+  # the role gate did.
+  defp everything(user) do
+    {:ok, _} = KilnCMS.Accounts.set_nav_preset(user, :everything, actor: user)
+    user
+  end
 
-    {:ok, _lv, editor_html} = build_conn() |> log_in(authed_user(:editor)) |> live(~p"/editor")
-    refute editor_html =~ ~s(href="/editor/fixture")
+  test "the plugin nav item is role-gated", %{conn: conn} do
+    {:ok, admin_lv, _html} = conn |> log_in(everything(authed_user(:admin))) |> live(~p"/editor")
+    assert has_element?(admin_lv, ~s(aside a.side-link[href="/editor/fixture"]), "Fixture")
+
+    {:ok, editor_lv, _html} =
+      build_conn() |> log_in(everything(authed_user(:editor))) |> live(~p"/editor")
+
+    # Scoped to the sidebar, and the sidebar is proven to be the full one — so
+    # the absence is the role gate's doing, not the preset's.
+    assert has_element?(editor_lv, "aside #nav-preset-switch", "Show essentials")
+    refute has_element?(editor_lv, ~s(aside a.side-link[href="/editor/fixture"]))
+  end
+
+  # Essentials hides plugin items from the sidebar — a link, never the screen:
+  # an admin still reaches it through ⌘K, and through "Show all tools".
+  test "on Essentials the plugin item leaves the sidebar but stays reachable", %{conn: conn} do
+    admin = authed_user(:admin)
+    assert admin.nav_preset == :essentials
+
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor")
+    refute has_element?(lv, ~s(aside a.side-link[href="/editor/fixture"]))
+
+    assert "/editor/fixture" in Enum.map(
+             KilnCMSWeb.ConsoleNav.search("fixture", admin, nil),
+             & &1.path
+           )
+
+    lv |> element("#nav-preset-switch", "Show all tools") |> render_click()
+    assert has_element?(lv, ~s(aside a.side-link[href="/editor/fixture"]), "Fixture")
+
+    # And the route itself never depended on the sidebar.
+    {:ok, _lv, html} = build_conn() |> log_in(admin) |> live("/editor/fixture")
+    assert html =~ "Fixture plugin panel"
   end
 
   test "the plugin admin route mounts in the admin live session", %{conn: conn} do

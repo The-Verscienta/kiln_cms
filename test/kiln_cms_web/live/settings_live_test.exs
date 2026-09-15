@@ -57,6 +57,41 @@ defmodule KilnCMSWeb.SettingsLiveTest do
     end
   end
 
+  # Usability pass, M5: the nav calls this screen "Your settings" and site
+  # configuration lives in the Configure hub, so a page titled plain "Settings"
+  # sent people looking for site settings to the wrong place.
+  describe "naming" do
+    test "the page is titled Your settings, like the nav", %{conn: conn} do
+      {:ok, lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/settings")
+
+      assert has_element?(lv, "h1", "Your settings")
+      assert html =~ ~r/<title[^>]*>\s*Your settings/
+    end
+  end
+
+  describe "the sidebar preset" do
+    test "offers both presets and marks the current one", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/settings")
+
+      assert has_element?(lv, ~s(#settings-nav-preset-essentials[aria-pressed="true"]))
+      assert has_element?(lv, ~s(#settings-nav-preset-everything[aria-pressed="false"]))
+    end
+
+    test "choosing Everything saves it and redraws the sidebar", %{conn: conn} do
+      user = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(user) |> live(~p"/editor/settings")
+
+      refute has_element?(lv, ~s(aside a.side-link[href="/editor/taxonomy"]))
+
+      lv |> element("#settings-nav-preset-everything") |> render_click()
+
+      assert reload(user).nav_preset == :everything
+      assert has_element?(lv, ~s(#settings-nav-preset-everything[aria-pressed="true"]))
+      assert has_element?(lv, ~s(aside a.side-link[href="/editor/taxonomy"]))
+      assert has_element?(lv, "aside #nav-preset-switch", "Show essentials")
+    end
+  end
+
   describe "saving preferences" do
     test "muting an event persists to the user", %{conn: conn} do
       user = authed_user(:editor)

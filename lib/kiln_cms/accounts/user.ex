@@ -167,7 +167,8 @@ defmodule KilnCMS.Accounts.User do
       :notify_on_review_request,
       :notify_on_publish,
       :notify_on_return_to_draft,
-      :notify_on_comment
+      :notify_on_comment,
+      :nav_preset
     ] do
       authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
       authorize_if expr(id == ^actor(:id))
@@ -222,6 +223,14 @@ defmodule KilnCMS.Accounts.User do
     # edit their own; admins can edit anyone's (via the policy bypass).
     update :update_profile do
       accept [:name]
+    end
+
+    # The console sidebar preset (`KilnCMSWeb.ConsoleNav.sidebar/3`). Its own
+    # action, accepting nothing else, so the sidebar switch can never be a way
+    # to write any other column. Self-only, like the notification prefs below.
+    update :set_nav_preset do
+      description "Choose how much of the console the sidebar shows."
+      accept [:nav_preset]
     end
 
     # Self-service workflow-notification preferences (issue #46). A user can
@@ -836,6 +845,10 @@ defmodule KilnCMS.Accounts.User do
       authorize_if expr(id == ^actor(:id))
     end
 
+    policy action(:set_nav_preset) do
+      authorize_if expr(id == ^actor(:id))
+    end
+
     # 2FA is strictly self-service: a user manages the second factor on their own
     # account only (the admin bypass above still lets an operator intervene).
     # `:consume_totp_recovery_code` runs pre-auth as a system call
@@ -1039,6 +1052,22 @@ defmodule KilnCMS.Accounts.User do
     # the setting nobody finds.
     attribute :notify_on_comment, :boolean do
       default true
+      allow_nil? false
+      public? true
+    end
+
+    # How much of the console the sidebar shows (`KilnCMSWeb.ConsoleNav.sidebar/3`):
+    # the daily author screens, or every screen. Per user and server-side, so it
+    # follows them across devices and the first paint is already right.
+    #
+    # `:essentials` for an account created from now on. Accounts that existed
+    # before this column were backfilled to `:everything` by its migration, which
+    # adds the column with that default and only then switches the default —
+    # nobody who already knows where Menus is finds it gone after an upgrade.
+    # Personal, so it is in the self-or-admin field policy above.
+    attribute :nav_preset, :atom do
+      constraints one_of: [:essentials, :everything]
+      default :essentials
       allow_nil? false
       public? true
     end

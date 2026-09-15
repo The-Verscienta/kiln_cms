@@ -119,6 +119,8 @@ defmodule KilnCMS.Accounts do
       define :get_user, action: :read, get_by: [:id]
       define :get_user_by_email, action: :get_by_email, args: [:email]
       define :update_notification_prefs, action: :update_notification_prefs
+      # The console sidebar preset — self only; pass `actor: user`.
+      define :set_nav_preset, action: :set_nav_preset, args: [:nav_preset]
       # Two-factor (TOTP) self-service (issue #331) — pass `actor: user` (self).
       define :setup_totp, action: :setup_totp
       define :confirm_totp, action: :confirm_totp
