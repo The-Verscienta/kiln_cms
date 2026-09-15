@@ -144,6 +144,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **Home says what the site holds, asks how you publish, and doesn't alarm on day one.**
+  ([long form](docs/changelog/unreleased.md#home-says-what-the-site-holds-asks-how-you-publish-and-doesnt-alarm-on-day-one))
+
 - **`config/runtime.exs` is now an index, not a 1,523-line file.**
   ([#1476](https://github.com/The-Verscienta/kiln_cms/issues/1476) · [long form](docs/changelog/unreleased.md#configruntimeexs-is-now-an-index-not-a-1523-line-file))
 

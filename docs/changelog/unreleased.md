@@ -48,6 +48,25 @@ carries the reasoning.
 
 ## Changed
 
+<a id="home-says-what-the-site-holds-asks-how-you-publish-and-doesnt-alarm-on-day-one"></a>
+
+- **Home says what the site holds, asks how you publish, and doesn't alarm on
+  day one.** Three findings from a live usability pass on kilncms.dev. The line
+  under the Home heading was a tagline ("What needs you next — then eight
+  domains around your content"); it is now the site's status in numbers every
+  reader of the page may see — "71 published · 1 draft · 3 media items",
+  pluralised, with "in review" only when something is. A seeded deploy never
+  sees `/setup`, so nobody was ever asked who publishes and the console kept the
+  newsroom default (editors submit for review); an admin of a site with no
+  editorial-settings row now gets a one-time **How do you publish?** card —
+  "Just me" lets editors publish, "I have a team" keeps review — written through
+  the same save and OrgAdmin policy as Team's switch, and gone for good once any
+  answer is recorded (`KilnCMS.CMS.EditorialSettings.chosen?/1`; the publish
+  check's fail-closed read is unchanged). And a deployment where no backup was
+  ever recorded now shows a neutral "Backups aren't set up yet" notice rather
+  than the red alarm; a failed backup, or one that went stale, is still the
+  alarm, and `KilnCMS.Backups.stale?/1` still counts "never" as stale.
+
 <a id="configruntimeexs-is-now-an-index-not-a-1523-line-file"></a>
 
 - **`config/runtime.exs` is now an index, not a 1,523-line file.** The
