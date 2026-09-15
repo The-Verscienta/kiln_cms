@@ -56,6 +56,35 @@ defmodule KilnCMS.CMS.EditorialSettings do
   end
 
   @doc """
+  Whether anyone has ever answered for `org` — i.e. a settings row exists.
+
+  A separate question from `editors_can_publish?/1`, which folds "no row" into
+  `false` so the publish check fails closed. Home asks this one to decide
+  whether to put "How do you publish?" to an admin of a site that never saw
+  `/setup` (a seeded deploy). A read failure answers `true`: the cost of that
+  is one unasked question, where answering `false` would nag on every blip.
+  Never use this to decide what an editor may do.
+  """
+  @spec chosen?(Ash.UUID.t() | struct() | nil) :: boolean()
+  def chosen?(nil), do: true
+
+  def chosen?(org) do
+    # Policy bypass (`authorize?: false`), same as `editors_can_publish?/1`: an
+    # existence probe on the one settings row of a tenant the caller already
+    # resolved. Nothing from the row leaves this function but a boolean, and it
+    # authorizes nothing — Home shows the card only to an admin, and the save
+    # behind the card runs as the actor under the resource's write policy.
+    SiteEditorialSettings
+    |> Ash.Query.limit(1)
+    |> Ash.read_one(authorize?: false, tenant: org)
+    |> case do
+      {:ok, nil} -> false
+      {:ok, %SiteEditorialSettings{}} -> true
+      {:error, _reason} -> true
+    end
+  end
+
+  @doc """
   Save `changes` to the site's editorial settings without resetting the columns
   the caller did not mention.
 

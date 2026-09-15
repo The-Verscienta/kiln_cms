@@ -43,6 +43,17 @@ defmodule KilnCMSWeb.SearchPaletteLiveTest do
 
   defp slug, do: "palette-#{System.unique_integer([:positive])}"
 
+  # The href of the first console-screen result in the rendered palette. Scoped
+  # to <main>: the sidebar in <aside> links to the same screens.
+  defp first_screen_href(html) do
+    html
+    |> LazyHTML.from_fragment()
+    |> LazyHTML.query(~s(main a[href^="/editor/"]))
+    |> Enum.map(&(&1 |> LazyHTML.attribute("href") |> List.first()))
+    |> Enum.reject(&(&1 == ~p"/editor/search"))
+    |> List.first()
+  end
+
   test "viewers are redirected away", %{conn: conn} do
     conn = log_in(conn, authed_user(:viewer))
     assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/editor/search")
@@ -148,6 +159,19 @@ defmodule KilnCMSWeb.SearchPaletteLiveTest do
       # Their own settings still answer.
       lv |> form("#palette-search", %{q: "passkey"}) |> render_change()
       assert has_element?(lv, ~s(a[href="#{~p"/editor/settings"}"]), "Your settings")
+    end
+
+    # Usability pass, M5. Order in the rendered list, not just presence: the
+    # first "Go to" row is what Enter would take.
+    test "“site settings” puts the Configure hub first; “settings” puts Your settings first",
+         %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/search")
+
+      html = lv |> form("#palette-search", %{q: "site settings"}) |> render_change()
+      assert first_screen_href(html) == ~p"/editor/configure"
+
+      html = lv |> form("#palette-search", %{q: "settings"}) |> render_change()
+      assert first_screen_href(html) == ~p"/editor/settings"
     end
 
     test "a settings-only match is not 'no results', and is not recorded as a find",

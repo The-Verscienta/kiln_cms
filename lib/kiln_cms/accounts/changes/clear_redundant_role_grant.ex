@@ -26,9 +26,7 @@ defmodule KilnCMS.Accounts.Changes.ClearRedundantRoleGrant do
   @impl true
   def change(changeset, _opts, _context) do
     granted = Ash.Changeset.get_attribute(changeset, :granted_role)
-    # `standing_role/1` rather than `get_attribute(:role)`: on a changeset that
-    # doesn't submit a role it falls back to the record's standing tier, which on
-    # a folded record is NOT what that field holds.
+    # The tier the write leaves behind: the submitted role, else the record's.
     role = RoleGrant.standing_role(changeset)
 
     # `granted in tiers()`, not `not is_nil(granted)`: a record read with a

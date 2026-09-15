@@ -114,7 +114,12 @@ defmodule KilnCMSWeb.LiveUserAuth do
        )
        |> Phoenix.LiveView.redirect(to: ~p"/sign-in")}
     else
-      require_signed_in(hook, socket)
+      case require_signed_in(hook, socket) do
+        # Every signed-in page may render the console shell, whose sidebar
+        # carries the preset switch — see `KilnCMSWeb.NavPreset`.
+        {:cont, socket} -> {:cont, KilnCMSWeb.NavPreset.attach(socket)}
+        halt -> halt
+      end
     end
   end
 

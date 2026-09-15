@@ -47,7 +47,7 @@
 
       <div class="mt-8 flex flex-wrap items-center gap-3">
         <a
-          :if={@current_user && @current_user.role in [:editor, :admin]}
+          :if={KilnCMS.Accounts.RoleGrant.effective_role(@current_user) in [:editor, :admin]}
           href={~p"/editor/overview"}
           class="btn btn-primary"
         >
@@ -63,7 +63,7 @@
       <%!-- Onboarding for viewer-role accounts (#142): self-registration defaults
             to :viewer, which can't reach the editor, so explain the next step. --%>
       <p
-        :if={@current_user && @current_user.role == :viewer}
+        :if={KilnCMS.Accounts.RoleGrant.effective_role(@current_user) == :viewer}
         class="mt-8 rounded-lg border border-base-content/15 bg-base-200/60 px-4 py-3 text-sm text-base-content/70"
       >
         {gettext(

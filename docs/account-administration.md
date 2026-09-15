@@ -57,23 +57,32 @@ Here `role` keeps the standing value for the whole life of the grant and
 `granted_role` shadows it, so expiry is a *comparison* rather than an event.
 Nothing has to run on time.
 
-**How it reaches the policies.** Two layers, because either alone has a hole.
+**How it reaches the policies: at the decision.** A loaded `role` is always the
+standing tier — nothing rewrites it on read. Every place that decides what
+someone may do asks `RoleGrant.effective_role/1`, which compares
+`granted_role_expires_at` with the clock *now*:
+`KilnCMS.Accounts.Checks.PlatformAdmin` (on every platform resource, in place of
+`actor_attribute_equals(:role, :admin)`), `Scoping.effective_tier/2` (every
+org-scoped tier check and the console nav) and
+`LiveUserAuth.platform_admin_user?/1`. Rosters ask the same rule in SQL,
+`RoleGrant.expression/1`.
 
-- `KilnCMS.Accounts.Preparations.FoldRoleGrant` — on both resources' top-level
-  `preparations`, so it runs for *every* read — presents a live grant as `role`
-  on the records a read returns. That is what makes rosters, the console and
-  anything reading `user.role` see the tier in force.
-- The **authorization decision** re-checks the expiry itself.
-  `KilnCMS.Accounts.Checks.PlatformAdmin` (on every platform resource, in place
-  of `actor_attribute_equals(:role, :admin)`), `Scoping.effective_tier/2` and
-  `LiveUserAuth.platform_admin_user?/1` all ask `RoleGrant.effective_role/1`,
-  which compares `granted_role_expires_at` with the clock *now*.
-
-The second layer exists because an actor struct can outlive its grant: a
+Deciding at the decision matters because an actor struct outlives its load: a
 LiveView assigns `current_user` once at mount, and the GraphQL socket freezes it
-at connect. With only the fold, a grant that expired mid-session kept authorizing
-that session as an admin. With the check, it stops the second it expires,
-whether or not anything re-reads the account.
+at connect. A grant stops authorizing the second it expires, whether or not
+anything re-reads the account.
+
+An earlier version folded a live grant into `role` on every read instead. It
+still needed the decision-time check for those long-lived actors, and the fold
+made every *write* of `role` hazardous: Ash drops a submitted attribute equal to
+`changeset.data`, so promoting a temporary admin from an ordinary read silently
+wrote nothing. It also fails in the unsafe direction — code that trusts a folded
+`role` keeps honouring an expired grant — where code that reads `role` directly
+today merely ignores a live one.
+
+**Reading a tier in new code.** `user.role` is the standing tier. To ask what
+someone may do *now*, call `RoleGrant.effective_role(user)` (platform role) or
+`Scoping.effective_tier(user, org)` (on a site).
 
 **A grantee cannot grant.** `Validations.StandingAdminOnly` refuses
 `:manage_access` and `:grant_temporary_role` on `User`, and every create/update
@@ -98,29 +107,10 @@ which `RoleGrant` would read as no grant at all.
 
 **The hourly sweep** (`AshOban` triggers `expire_role_grants` on both resources)
 clears the two dead columns and evicts the holder's live sockets. Enforcement does
-not depend on it — see the two layers above. Both resources grant
+not depend on it — see above. Both resources grant
 `AshOban.Checks.AshObanInteraction` as an **unconditional** bypass, like
 `KilnCMS.Accounts.Token`: the scheduler *reads* the rows before any worker writes,
 and a grant scoped to the write action leaves that read filtered to nothing.
-
-### Reading a row you are about to write
-
-Ash discards a submitted attribute that equals `changeset.data`, and it does so
-when params are *cast* — before any change or validation could put the row back.
-So a write of `role` built on a folded record silently loses the one edit that
-matters most: promoting a temporary admin to a permanent one submits
-`role: :admin`, matches the folded `:admin` on the struct, is dropped as a no-op,
-and reports success while the column stays `:editor`.
-
-A caller about to write a role therefore reads with `RoleGrant.unfolded/0`:
-
-```elixir
-user = Accounts.get_user!(id, [actor: admin] ++ RoleGrant.unfolded())
-Accounts.manage_user_access!(user, %{role: :admin}, actor: admin)
-```
-
-Forgetting is not silent: `KilnCMS.Accounts.Validations.UnfoldedRecord` refuses a
-changeset built on a folded record, naming the fix.
 
 ## Password resets
 
