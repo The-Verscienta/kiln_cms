@@ -568,6 +568,18 @@ carries the reasoning.
   declares it. A new test checks every setting in that file the same way, so the
   next one that lands on a key upstream renamed fails instead of going quiet.
 
+<a id="the-console-sidebar-no-longer-slides-in-with-its-labels-cropped"></a>
+
+- **The console sidebar no longer slides in with its labels cropped.** A
+  usability pass saw "Home" read "me" and "KilnCMS" read "CMS". The sidebar's
+  `transition-transform` exists for the mobile drawer but ran on desktop too, so
+  a window crossing 64rem (a resize, a snap, a zoom) slid the rail in from
+  off-canvas for ~150ms. It now animates only as a drawer. The same pass found
+  the content column was a bare `1fr`, which never shrinks below its content's
+  min-content width: one long `<pre>` or wide table scrolled the whole console
+  sideways even when that element scrolls itself. The column is
+  `minmax(0, 1fr)` now. A Playwright spec pins both, and fails without the fix.
+
 <a id="with-every-write-anchoring-on-a-system-actor-write-no-longer-crashes-in"></a>
 
 - **With every-write anchoring on, a system-actor write no longer crashes in
