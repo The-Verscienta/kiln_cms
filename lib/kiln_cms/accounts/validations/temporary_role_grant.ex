@@ -48,12 +48,8 @@ defmodule KilnCMS.Accounts.Validations.TemporaryRoleGrant do
   defp expired,
     do: {:error, field: :granted_role_expires_at, message: "must be in the future"}
 
-  # `RoleGrant.standing_role/1` rather than `get_attribute(:role)`, for two
-  # reasons: a single submit that sets `role` and the grant together is judged
-  # against the tier it is *about to* have, and a changeset built on a folded
-  # record (where `role` already shows the live grant) is judged against the tier
-  # the row actually stores — otherwise extending a live "admin until Friday"
-  # would be refused for not being an elevation over itself.
+  # `RoleGrant.standing_role/1`: a single submit that sets `role` and the grant
+  # together is judged against the tier it is *about to* have.
   defp check_elevation(changeset, role) do
     standing = RoleGrant.standing_role(changeset)
 

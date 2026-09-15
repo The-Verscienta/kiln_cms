@@ -73,6 +73,63 @@ defmodule KilnCMSWeb.ConsoleNav do
     }
   end
 
+  # The author screens a writer opens most days. Taxonomy, Menus, Releases,
+  # Translations, Analytics and Links are real work too, but periodic work —
+  # set up a menu, plan a release, read last month's numbers — and each is one
+  # ⌘K away (and back in the sidebar with "Show all tools"). Calendar stays
+  # because it is where scheduled work is seen; Inbox and Tasks because they
+  # are "what is waiting for me".
+  @essential_keys [:overview, :content, :media, :calendar, :tasks, :inbox]
+
+  @doc """
+  The nav as the SIDEBAR draws it for `user` — `nav/2` filtered by the user's
+  sidebar preset (`User.nav_preset`).
+
+    * `:everything` — `nav/2` unchanged, plus `pinned: []`.
+    * `:essentials` — the daily author screens, the Configure hub for an admin,
+      and `:pinned`: **Your settings**, plus whichever screen is `active` when
+      the preset would otherwise hide it, so nobody lands on a page the sidebar
+      pretends is not there. Configure sections and plugin items are dropped.
+
+  Only the sidebar reads this. The Configure hub and the ⌘K palette read
+  `nav/2` / `destinations/2`, so a preset hides a link, never a screen.
+  """
+  def sidebar(user, org, active \\ nil) do
+    nav = nav(user, org)
+
+    case preset(user) do
+      :essentials -> essentials(nav, active)
+      :everything -> Map.put(nav, :pinned, [])
+    end
+  end
+
+  @doc """
+  The user's sidebar preset. Anything but an explicit `:essentials` — no user, a
+  user struct from before the column, a field policy's `%Ash.ForbiddenField{}` —
+  draws everything: a missing link is worse than a long list.
+  """
+  def preset(%{nav_preset: :essentials}), do: :essentials
+  def preset(_user), do: :everything
+
+  defp essentials(nav, active) do
+    grouped = Enum.flat_map(nav.configure_groups, & &1.items)
+    settings = Enum.find(grouped, &(&1.key == :settings))
+    # A configure screen the reader is on (Menus is an author item; Redirects
+    # is grouped) — shown where the preset would hide it.
+    stray = active && Enum.find(grouped, &(&1.key == active and &1.key != :settings))
+
+    %{
+      nav
+      | author: Enum.filter(nav.author, &(&1.key in @essential_keys or on_page?(&1, active))),
+        configure_groups: [],
+        plugin: []
+    }
+    |> Map.put(:pinned, Enum.reject([stray, settings], &is_nil/1))
+  end
+
+  defp on_page?(_item, nil), do: false
+  defp on_page?(item, active), do: item.key == active
+
   @doc """
   Every console screen `user` may open on `org`, flattened for the ⌘K palette.
 
@@ -249,7 +306,9 @@ defmodule KilnCMSWeb.ConsoleNav do
       path: ~p"/editor/configure",
       icon: "hero-cog-6-tooth",
       description: gettext("Every settings screen, and what each one is for."),
-      keywords: ["settings", "preferences", "admin", "options"]
+      # "site settings" is what someone looking for site configuration types;
+      # "settings" alone rightly leads with Your settings (a name match).
+      keywords: ["settings", "site settings", "site", "preferences", "admin", "options"]
     }
 
   # Deliberately labelled for the person, not the site: the complaint behind
@@ -361,7 +420,17 @@ defmodule KilnCMSWeb.ConsoleNav do
             path: ~p"/editor/branding",
             icon: "hero-swatch",
             description: gettext("Name, logo, colours and the public theme."),
-            keywords: ["theme", "logo", "colours", "colors", "favicon", "appearance"]
+            # "site name", not "site settings": the hub is where a site-settings
+            # search should land first, and a tie would sort Branding ahead.
+            keywords: [
+              "theme",
+              "logo",
+              "colours",
+              "colors",
+              "favicon",
+              "appearance",
+              "site name"
+            ]
           },
           %{
             key: :code_injection,

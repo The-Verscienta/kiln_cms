@@ -47,7 +47,7 @@ defmodule KilnCMSWeb.AccountsLiveTest do
 
   defp in_hours(hours), do: DateTime.add(DateTime.utc_now(), hours, :hour)
 
-  defp reread(user), do: Accounts.get_user!(user.id, RoleGrant.unfolded() ++ [authorize?: false])
+  defp reread(user), do: Accounts.get_user!(user.id, authorize?: false)
 
   describe "authorization" do
     test "anonymous users are redirected to sign-in", %{conn: conn} do

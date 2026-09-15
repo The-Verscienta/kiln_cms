@@ -80,13 +80,10 @@ defmodule KilnCMS.Accounts.Validations.NotLastAdmin do
   defp exempt?(%{context: %{last_admin_guard?: false}}), do: true
   defp exempt?(_changeset), do: false
 
-  # The record was read through `KilnCMS.Accounts.Preparations.FoldRoleGrant`, so
-  # `changeset.data.role` may be an *effective* tier — and an admin who is only
-  # temporarily an admin is not one this guard should count on keeping.
-  # `RoleGrant.standing_role/1` unfolds it back to the tier the row actually
-  # stores, which is what `last_admin?/1`'s count sees.
-  defp standing_admin?(changeset),
-    do: KilnCMS.Accounts.RoleGrant.standing_role(changeset.data) == :admin
+  # The STANDING role — the column as stored, which is what `last_admin?/1`'s
+  # count sees. An admin who is only temporarily one is not an admin this guard
+  # should count on keeping.
+  defp standing_admin?(changeset), do: changeset.data.role == :admin
 
   defp demoting_an_admin?(changeset),
     do: Ash.Changeset.get_attribute(changeset, :role) != :admin

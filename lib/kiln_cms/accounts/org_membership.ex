@@ -82,11 +82,8 @@ defmodule KilnCMS.Accounts.OrgMembership do
       primary? true
       require_atomic? false
 
-      # Writes the standing `role`, so a folded base record would lose it
-      # silently; and a new standing tier at or above a live temporary one makes
-      # that grant meaningless. Both mirror `User.:manage_access` — see those
-      # modules.
-      validate KilnCMS.Accounts.Validations.UnfoldedRecord
+      # A new standing tier at or above a live temporary one makes that grant
+      # meaningless. Mirrors `User.:manage_access` — see the change module.
       change KilnCMS.Accounts.Changes.ClearRedundantRoleGrant
 
       # The per-org role, audiences and type scopes all live here, so an edit
@@ -175,13 +172,6 @@ defmodule KilnCMS.Accounts.OrgMembership do
     end
   end
 
-  # Presents a live temporary tier as `role` on every read, so
-  # `KilnCMS.Accounts.Scoping.effective_tier/2` — which reads the membership's
-  # `role` for a member — resolves the grant without knowing it exists.
-  preparations do
-    prepare KilnCMS.Accounts.Preparations.FoldRoleGrant
-  end
-
   validations do
     # A malformed grant map must fail on the admin's write, not crash the
     # editor's next save (see the validation module).
@@ -208,9 +198,9 @@ defmodule KilnCMS.Accounts.OrgMembership do
 
     # A time-boxed elevation above the standing tier above — the per-site twin of
     # `User.granted_role`. Same modelling and same reasons: `role` keeps the
-    # standing tier, `KilnCMS.Accounts.Preparations.FoldRoleGrant` presents this
-    # one while it is live, and expiry is a comparison rather than a scheduled
-    # write. See KilnCMS.Accounts.RoleGrant.
+    # standing tier, `KilnCMS.Accounts.Scoping.effective_tier/2` applies this one
+    # while it is live, and expiry is a comparison rather than a scheduled write.
+    # See KilnCMS.Accounts.RoleGrant.
     attribute :granted_role, :atom do
       constraints one_of: [:admin, :editor, :viewer]
       public? false

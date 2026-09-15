@@ -134,9 +134,14 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
 
                 A button, not a badge: it opens the Settings tab, where the
                 Accessibility section lives — the "expandable to the panel"
-                half of the ask. It reuses the tab strip's own event rather
-                than introducing a scroll hook, so there is one code path that
-                changes which panel is showing.
+                half of the ask. It reuses the tab strip's own event, so there
+                is one code path that changes which panel is showing.
+
+                Switching the tab alone was not enough: Accessibility is six
+                sections down the Settings panel, so the click appeared to do
+                nothing. `data-kiln-reveal` names the section; the client
+                (assets/js/reveal_section.js) waits for the patch that renders
+                it, then scrolls to it and moves focus there.
 
                 Hidden on a brand-new page: greeting an author with a verdict
                 on an empty draft is noise. NOT gated on `total`, which is a
@@ -150,6 +155,8 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
             type="button"
             phx-click="switch_inspector_tab"
             phx-value-tab="settings"
+            data-kiln-reveal="inspector-accessibility"
+            aria-controls="inspector-accessibility"
             class={[
               "inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium",
               a11y_chip_class(@a11y_report.grade)

@@ -40,13 +40,15 @@ defmodule KilnCMSWeb.InboxLive do
   # is generous enough that hitting the end means the backlog is real.
   @window 100
 
+  # No load here: `handle_params/3` always runs straight after `mount/3` and
+  # has to read the filter anyway, so a read in both was two identical pairs
+  # of queries on every page load.
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
      socket
      |> assign(:page_title, gettext("Inbox"))
-     |> assign(:filter, :all)
-     |> load_notifications()}
+     |> assign(:filter, :all)}
   end
 
   @impl true
@@ -74,16 +76,25 @@ defmodule KilnCMSWeb.InboxLive do
     {:noreply, mark(socket, id, &Notifications.mark_notification_unread/2)}
   end
 
+  # No reload after the sweep — see `mark/3`.
   def handle_event("mark-all-read", _params, socket) do
-    marked = Notifications.mark_all_read(socket.assigns.current_user, socket.assigns.current_org)
+    case Notifications.mark_all_read(socket.assigns.current_user, socket.assigns.current_org) do
+      {:ok, marked} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :info,
+           ngettext(
+             "Marked %{count} notification read",
+             "Marked %{count} notifications read",
+             marked
+           )
+         )}
 
-    {:noreply,
-     socket
-     |> put_flash(
-       :info,
-       ngettext("Marked %{count} notification read", "Marked %{count} notifications read", marked)
-     )
-     |> load_notifications()}
+      {:error, _errors} ->
+        {:noreply,
+         put_flash(socket, :error, gettext("Some notifications could not be marked read."))}
+    end
   end
 
   # The guards above are half of #764; the other half — the catch-all that
@@ -94,12 +105,23 @@ defmodule KilnCMSWeb.InboxLive do
   # The id comes from the client, so it is looked up rather than trusted: the
   # read is authorized as this user, and the resource's self-only policy means
   # another user's id simply is not found.
+  #
+  # Both calls carry the tenant. Under strict tenancy a tenant-less read of
+  # this org-scoped resource is refused outright, and the `else` below would
+  # have turned every click into a silent no-op.
+  #
+  # And no reload afterwards. A successful mark is announced on this user's
+  # topic (`KilnCMS.Notifications.Changes.Announce`), and this page is
+  # subscribed to it like every console page — so the list *and* the bell
+  # re-read once, from that. A reload here as well was the same two queries
+  # again a moment later.
   defp mark(socket, id, fun) do
     actor = socket.assigns.current_user
+    tenant = socket.assigns.current_org
 
-    with {:ok, notification} <- Notifications.get_notification(id, actor: actor),
-         {:ok, _updated} <- fun.(notification, actor: actor) do
-      load_notifications(socket)
+    with {:ok, notification} <- Notifications.get_notification(id, actor: actor, tenant: tenant),
+         {:ok, _updated} <- fun.(notification, actor: actor, tenant: tenant) do
+      socket
     else
       _refused -> socket
     end

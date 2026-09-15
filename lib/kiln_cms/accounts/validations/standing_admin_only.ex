@@ -43,7 +43,7 @@ defmodule KilnCMS.Accounts.Validations.StandingAdminOnly do
 
   def validate(_changeset, _opts, %{actor: actor}) do
     grantee? =
-      RoleGrant.effective_role(actor) == :admin and RoleGrant.standing_role(actor) != :admin
+      RoleGrant.effective_role(actor) == :admin and Map.get(actor, :role) != :admin
 
     if grantee? do
       {:error,

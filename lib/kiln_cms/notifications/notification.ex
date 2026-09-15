@@ -65,6 +65,15 @@ defmodule KilnCMS.Notifications.Notification do
   still runs and still decides — an authenticated request that reaches this
   action is refused by a rule a reader can see, instead of by the absence of
   one.
+
+  ## The actor's name is a snapshot, so erasure has to reach it
+
+  `actor_name` sits in *other people's* inboxes, which is exactly where
+  `KilnCMS.Accounts.Changes.AnonymizeUser` would never look. So each row also
+  records the acting account's `actor_id` — never rendered, only the key
+  erasure finds rows by — and `KilnCMS.Notifications.anonymize_actor/1` blanks
+  both through `:forget_actor`, which is system-only on the same terms as
+  `:notify`.
   """
   use Ash.Resource,
     otp_app: :kiln_cms,
@@ -109,6 +118,7 @@ defmodule KilnCMS.Notifications.Notification do
         :block_id,
         :title,
         :excerpt,
+        :actor_id,
         :actor_name
       ]
     end
@@ -154,6 +164,13 @@ defmodule KilnCMS.Notifications.Notification do
       change set_attribute(:read_at, nil)
       change Announce
     end
+
+    update :forget_actor do
+      description "Blank who did it, for an erased account (system-only — see the moduledoc)."
+      accept []
+      change set_attribute(:actor_name, nil)
+      change set_attribute(:actor_id, nil)
+    end
   end
 
   policies do
@@ -162,8 +179,19 @@ defmodule KilnCMS.Notifications.Notification do
       authorize_if expr(user_id == ^actor(:id))
     end
 
-    policy action_type(:update) do
+    # The recipient's own read state. Named rather than `action_type(:update)`
+    # so the erasure sweep below is not also held to "is the recipient", which
+    # an actor-less system write never is.
+    policy action([:mark_read, :mark_unread]) do
       authorize_if expr(user_id == ^actor(:id))
+    end
+
+    # Erasure (`KilnCMS.Notifications.anonymize_actor/1`): the rows belong to
+    # other recipients, so like `:notify` it is the system's, and refused to
+    # any request carrying an actor.
+    policy action(:forget_actor) do
+      forbid_if actor_present()
+      authorize_if always()
     end
 
     # The write addresses someone other than whoever acted, so it cannot be
@@ -262,6 +290,14 @@ defmodule KilnCMS.Notifications.Notification do
       allow_nil? true
       public? true
       constraints max_length: Limits.line()
+    end
+
+    # Which account did it — not rendered anywhere, and not an FK (accounts
+    # are erased, never deleted). It exists so erasure can find the
+    # `actor_name` snapshots above; see the moduledoc.
+    attribute :actor_id, :uuid do
+      allow_nil? true
+      public? false
     end
 
     # When the recipient saw it. Nil = unread, which is what the bell counts.

@@ -91,6 +91,11 @@ function withinBlock(block, d) {
       return pm ? all(pm, HEADINGS).filter(blank) : headingInputs(block)
     case "heading_levels_skipped":
       return pm ? all(pm, `h${d.jumpLevel}`).slice(0, 1) : headingInputs(block)
+    case "heading_anchor_renamed": {
+      if (!pm) return headingInputs(block)
+      const named = all(pm, HEADINGS).filter(h => fold(h.textContent) === fold(d.jumpText || ""))
+      return named.length ? named : all(pm, HEADINGS)
+    }
     case "link_text_empty":
       return pm ? all(pm, "a").filter(blank) : []
     case "link_text_uninformative": {

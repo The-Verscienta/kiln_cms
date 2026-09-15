@@ -74,6 +74,34 @@ defmodule KilnCMS.HeadingAnchorsTest do
     end
   end
 
+  describe "reserved ids" do
+    test "a heading never takes an id the page layout owns" do
+      assert "main" in HeadingAnchors.reserved_ids()
+
+      assert [%{anchor: "main-1"}, %{content: ~s(<h2 id="main-2">Main</h2>)}] =
+               HeadingAnchors.anchor_tree([
+                 %{type: "heading", content: "Main"},
+                 %{type: "rich_text", content: "<h2>Main</h2>"}
+               ])
+    end
+
+    test "ids/1 numbers the way anchor_tree/1 does" do
+      texts = ["Overview", "Main", "Overview", "!!", "Overview-1"]
+      tree = Enum.map(texts, &%{type: "heading", content: &1})
+
+      assert HeadingAnchors.ids(texts) ==
+               tree |> HeadingAnchors.anchor_tree() |> Enum.map(&Map.get(&1, :anchor))
+
+      assert HeadingAnchors.ids(texts) == [
+               "overview",
+               "main-1",
+               "overview-1",
+               nil,
+               "overview-1-1"
+             ]
+    end
+  end
+
   describe "anchor_tree/1" do
     test "one numbering across heading blocks, prose and columns, in page order" do
       tree = [

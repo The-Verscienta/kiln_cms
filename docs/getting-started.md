@@ -55,7 +55,7 @@ Once it boots, the surfaces worth opening:
 | `/` | the delivered site |
 | `/editor` | the authoring UI — this is the product |
 | `/admin` | AshAdmin raw CRUD (dev only) |
-| `/gql` · `/gql/playground` | GraphQL endpoint and playground |
+| `/gql` · `/gql/playground` | GraphQL endpoint; the GraphiQL playground is dev only (production serves the endpoint alone) |
 | `/api/json/swaggerui` | JSON:API browser over the OpenAPI spec (dev/test; `API_DOCS_ENABLED` in prod) |
 | `/mcp` | the MCP endpoint for LLM authoring |
 

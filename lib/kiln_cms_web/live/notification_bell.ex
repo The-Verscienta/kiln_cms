@@ -30,11 +30,26 @@ defmodule KilnCMSWeb.NotificationBell do
   notification is for. The badge counts the unread subset; `/editor/inbox` is
   the full list, and this is a window onto the top of it.
 
-  ## Clicking an item marks it read on the way out
+  ## Clicking an item marks it read, *then* navigates
 
-  `phx-click` fires on the component and the link then navigates, so the badge
-  is already right when the editor arrives. The recipient's *other* open
-  consoles follow through the resource's own broadcast.
+  An item is a button whose handler marks the row read and only then
+  `push_navigate`s to its deep link. It was a `<.link navigate>` carrying a
+  `phx-click`, which never marked anything: LiveView's client handles a live
+  link by swapping the main view first and running the link's `phx-click`
+  afterwards, by which point this component — and the `phx-target` the event
+  was addressed to — has gone with the old page. The destination is taken
+  from the row the server looked up, never from the client.
+
+  The recipient's *other* open consoles follow through the resource's own
+  broadcast.
+
+  ## It reads on a refresh, not on every render
+
+  `update/2` runs whenever the parent LiveView re-renders the layout — a
+  flash, a form change, anything — and the layout hands over the same user
+  and org every time. Re-reading on each of those put a count and a list query
+  on every console render. It re-reads when `refresh/0` asks, and when the
+  user or org it was given actually changes (which includes the first mount).
   """
   use KilnCMSWeb, :live_component
 
@@ -74,25 +89,51 @@ defmodule KilnCMSWeb.NotificationBell do
   end
 
   @impl true
-  def update(assigns, socket), do: {:ok, socket |> assign(assigns) |> load()}
+  def update(assigns, socket) do
+    scope_before = scope(socket.assigns)
+    socket = assign(socket, assigns)
 
-  @impl true
-  def handle_event("mark-read", %{"id" => id}, socket) when is_binary(id) do
-    actor = socket.assigns.current_user
-
-    with {:ok, notification} <- Notifications.get_notification(id, actor: actor),
-         {:ok, _marked} <- Notifications.mark_notification_read(notification, actor: actor) do
-      {:noreply, load(socket)}
+    if Map.has_key?(assigns, :refreshed_at) or scope(socket.assigns) != scope_before do
+      {:ok, load(socket)}
     else
-      # Somebody else's id, or a row that has since gone. The policy already
-      # refused it; there is nothing to report and nothing to change.
-      _refused -> {:noreply, socket}
+      {:ok, socket}
     end
   end
 
+  defp scope(assigns), do: {id_of(assigns[:current_user]), id_of(assigns[:current_org])}
+
+  defp id_of(%{id: id}), do: id
+  defp id_of(id) when is_binary(id), do: id
+  defp id_of(_none), do: nil
+
+  @impl true
+  def handle_event("open", %{"id" => id}, socket) when is_binary(id) do
+    actor = socket.assigns.current_user
+    tenant = socket.assigns[:current_org]
+
+    case Notifications.get_notification(id, actor: actor, tenant: tenant) do
+      {:ok, notification} ->
+        # Best-effort: a row that fails to mark read is still a link worth
+        # following, and the editor would rather arrive than be stopped here.
+        _marked = Notifications.mark_notification_read(notification, actor: actor, tenant: tenant)
+        {:noreply, push_navigate(socket, to: Link.editor_path(notification))}
+
+      # Somebody else's id, or a row that has since gone. The policy already
+      # refused it; there is nothing to open.
+      _refused ->
+        {:noreply, socket}
+    end
+  end
+
+  # No local reload: the sweep announces once on this user's topic, and every
+  # live_session that renders the console shell mounts `LiveNotifications`,
+  # so that announcement is what re-reads the bell (and the inbox list, when
+  # the bell is on that page). Reloading here as well ran both queries twice.
   def handle_event("mark-all-read", _params, socket) do
-    Notifications.mark_all_read(socket.assigns.current_user, socket.assigns.current_org)
-    {:noreply, load(socket)}
+    _result =
+      Notifications.mark_all_read(socket.assigns.current_user, socket.assigns[:current_org])
+
+    {:noreply, socket}
   end
 
   # `KilnCMSWeb.MalformedEvent` injects a catch-all into every Kiln *LiveView*,
@@ -154,12 +195,22 @@ defmodule KilnCMSWeb.NotificationBell do
 
           <ul :if={@notifications != []} class="bell-list">
             <li :for={notification <- @notifications}>
-              <.link
-                navigate={Link.editor_path(notification)}
-                phx-click="mark-read"
+              <%!-- A button, not a live link — see the moduledoc on why a
+                    `phx-click` on a `navigate` link never reaches this
+                    component. `data-guard-nav` puts it back under the
+                    editor's unsaved-changes confirm (app.js `UnsavedGuard`),
+                    which a live link had for free and a server-side
+                    `push_navigate` does not. --%>
+              <button
+                type="button"
+                data-guard-nav
+                phx-click="open"
                 phx-value-id={notification.id}
                 phx-target={@myself}
-                class={["bell-item", is_nil(notification.read_at) && "bell-item-unread"]}
+                class={[
+                  "bell-item w-full text-left",
+                  is_nil(notification.read_at) && "bell-item-unread"
+                ]}
               >
                 <span class="bell-item-head">
                   <span class="truncate font-medium">
@@ -176,7 +227,7 @@ defmodule KilnCMSWeb.NotificationBell do
                   </time>
                 </span>
                 <span class="bell-item-sub">{notification.title}</span>
-              </.link>
+              </button>
             </li>
           </ul>
 

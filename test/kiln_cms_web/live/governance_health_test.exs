@@ -112,9 +112,13 @@ defmodule KilnCMSWeb.GovernanceHealthTest do
 
     {:ok, _lv, html} = conn |> log_in(admin) |> live(~p"/editor/governance")
 
-    # Worst first: the expired row's link precedes the overdue one's.
-    expired_at = :binary.match(html, "#{expired.id}") |> elem(0)
-    overdue_at = :binary.match(html, "Merely overdue") |> elem(0)
+    # Worst first: the expired row's link precedes the overdue one's. Within
+    # `#main`: both publishes notified this admin, so the top bar's bell lists
+    # "Merely overdue" above the page body, and a whole-page position compares
+    # the chrome against the list rather than two rows of the list.
+    body = main_html(html)
+    expired_at = :binary.match(body, "#{expired.id}") |> elem(0)
+    overdue_at = :binary.match(body, "Merely overdue") |> elem(0)
     assert expired_at < overdue_at
   end
 

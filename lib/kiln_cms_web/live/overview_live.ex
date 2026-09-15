@@ -16,6 +16,7 @@ defmodule KilnCMSWeb.OverviewLive do
   alias KilnCMS.Branding
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.EditorialSettings
   alias KilnCMS.CMS.StarterContent
 
   alias KilnCMS.CMS.{
@@ -56,13 +57,57 @@ defmodule KilnCMSWeb.OverviewLive do
      |> assign_blocked_experiments()
      |> assign(:page_title, gettext("Home"))
      |> load_metrics()
-     |> assign_getting_started()}
+     |> assign_getting_started()
+     |> assign_publishing_choice()}
   end
+
+  # "How do you publish?" — asked of an admin whose site never answered. `/setup`
+  # asks it, but a seeded deploy never sees `/setup`, keeps the fail-closed
+  # default (editors submit for review) and the console reads like a newsroom to
+  # someone working alone. Keyed on the ROW, not the value: once anyone has
+  # chosen — here, in `/setup`, or on Team — either answer is deliberate and the
+  # card is gone for good.
+  defp assign_publishing_choice(socket) do
+    %{admin?: admin?, current_org: org} = socket.assigns
+    assign(socket, :ask_publishing?, admin? and not EditorialSettings.chosen?(org))
+  end
+
+  # Same write, actor and policy as Team's switch (`TeamLive`, the OrgAdmin write
+  # policy on the settings row) — this card only offers it earlier. "solo" is
+  # the wizard's default answer (editors may publish), "team" is review first.
+  @impl true
+  def handle_event("choose_publishing", %{"mode" => mode}, socket)
+      when mode in ["solo", "team"] do
+    %{actor: actor, current_org: org} = socket.assigns
+
+    case EditorialSettings.save(%{editors_can_publish: mode == "solo"}, actor: actor, tenant: org) do
+      {:ok, settings} ->
+        message =
+          if settings.editors_can_publish,
+            do: gettext("Done — you publish directly. Anyone you add as an editor can too."),
+            else: gettext("Done — editors submit for review and an admin publishes.")
+
+        {:noreply,
+         socket
+         |> assign(:ask_publishing?, false)
+         |> put_flash(:info, message)}
+
+      {:error, error} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           ash_error_message(error, fallback: gettext("Your choice could not be saved."))
+         )}
+    end
+  end
+
+  # A pushed payload is client-chosen; give the guard above somewhere to fall.
+  def handle_event("choose_publishing", _params, socket), do: {:noreply, socket}
 
   # The checklist's "Create one" (step 2), for a site with no Home page — one
   # that skipped `/setup` (seeded, or upgraded from before it made one), or
   # whose starter page was deleted.
-  @impl true
   def handle_event("create_home", _params, socket) do
     %{actor: actor, current_org: org} = socket.assigns
     brand = Branding.for_org(org)
@@ -290,10 +335,71 @@ defmodule KilnCMSWeb.OverviewLive do
       <div class="space-y-5">
         <div>
           <h1 class="text-xl font-semibold tracking-tight">{gettext("Home")}</h1>
-          <p class="text-sm text-base-content/60">
-            {gettext("What needs you next — then eight domains around your content.")}
+          <%!-- A status line, not a tagline: what the site holds right now, in
+                numbers every reader of this page may see (content the actor
+                can read, and the media library — never the admin-only tiles). --%>
+          <p id="overview-summary" class="text-sm text-base-content/60">
+            {summary_line(@by_state, @total, @media_count)}
           </p>
         </div>
+
+        <%!-- Publishing mode — see `assign_publishing_choice/1`. Above the
+              backup notice and the checklist: it changes what the editor's
+              Publish button does, so it is worth answering before anything is
+              written. --%>
+        <section
+          :if={@ask_publishing?}
+          id="overview-publishing-choice"
+          class="card card-pad space-y-3"
+          aria-labelledby="overview-publishing-choice-heading"
+        >
+          <div>
+            <h2 id="overview-publishing-choice-heading" class="text-sm font-semibold">
+              {gettext("How do you publish?")}
+            </h2>
+            <p class="text-xs text-base-content/60">
+              {gettext(
+                "Right now editors submit their work for review and only an admin can publish. Pick what fits this site."
+              )}
+            </p>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button
+              type="button"
+              id="overview-publishing-solo"
+              phx-click="choose_publishing"
+              phx-value-mode="solo"
+              class="btn btn-sm btn-primary"
+            >
+              {gettext("Just me — publish directly")}
+            </button>
+            <button
+              type="button"
+              id="overview-publishing-team"
+              phx-click="choose_publishing"
+              phx-value-mode="team"
+              class="btn btn-sm"
+            >
+              {gettext("I have a team — review before publishing")}
+            </button>
+          </div>
+          <%!-- Team is a platform-admin screen, so an admin of one site is
+                told who can change it rather than linked to a page that turns
+                them away. --%>
+          <p :if={@platform_admin?} class="text-xs text-base-content/60">
+            {gettext("Either way, you can change it later on the Team page.")}
+            <.link
+              id="overview-publishing-team-link"
+              navigate={~p"/editor/team"}
+              class="font-medium text-primary hover:underline"
+            >
+              {gettext("Open Team")} <span aria-hidden="true">→</span>
+            </.link>
+          </p>
+          <p :if={!@platform_admin?} class="text-xs text-base-content/60">
+            {gettext("Either way, a platform admin can change it later on the Team page.")}
+          </p>
+        </section>
 
         <%!-- Stale-backup warning (#484). A strip above the grid rather than a
               ninth tile: the grid is a fixed 3×3 with the centre taken, so
@@ -311,8 +417,32 @@ defmodule KilnCMSWeb.OverviewLive do
               Absent entirely when backups are healthy — a permanent green
               banner is one nobody reads, and its absence is what makes the red
               one land. --%>
+        <%!-- …except on a deployment where no backup was EVER recorded. That
+              is every fresh install on day one, and a red alarm there reads as
+              "something broke" before anything could have. It is still said
+              (backups are not optional before launch), in a neutral tone and
+              with the next step. `Backups.stale?(nil)` stays true — other
+              callers rely on "never" counting as stale — so the branch is
+              here, on `@backup_state`. A backup that ran and failed, or went
+              stale, is the red strip below. --%>
         <.overview_strip
-          :if={@platform_admin? and @backup_alarming?}
+          :if={@platform_admin? and @backup_state == :never}
+          id="overview-backup-setup"
+          navigate={~p"/editor/backups"}
+          tone_class="border-base-content/20 bg-base-200/40 hover:bg-base-200/60"
+          icon="hero-information-circle"
+          icon_class="text-base-content/60"
+        >
+          <span class="block text-sm font-medium">
+            {gettext("Backups aren't set up yet — turn them on before you go live.")}
+          </span>
+          <span class="block text-xs text-base-content/70">
+            {gettext("Open Backups to set a schedule or take the first one.")}
+          </span>
+        </.overview_strip>
+
+        <.overview_strip
+          :if={@platform_admin? and @backup_state == :alarm}
           id="overview-backup-warning"
           navigate={~p"/editor/backups"}
           tone_class="border-error/30 bg-error/5 hover:bg-error/10"
@@ -718,12 +848,43 @@ defmodule KilnCMSWeb.OverviewLive do
     status = KilnCMS.Backups.status()
 
     socket
-    # NOT `status.stale?` alone. A backup that failed five minutes ago is not
-    # stale — it is recent and worthless — and gating on age let the overview
-    # stay clean while `/editor/backups` said "The last backup failed". Same
-    # trap as `BackupLive.alarming?/1`; it needed fixing in both places.
-    |> assign(:backup_alarming?, status.stale? or failed?(status))
+    |> assign(:backup_state, backup_state(status))
     |> assign(:backup_headline, backup_headline(status))
+  end
+
+  # `:never` — no manifest at all: a deployment that has not had its first
+  # backup, which on day one is expected rather than an incident.
+  #
+  # `:alarm` — NOT `status.stale?` alone. A backup that failed five minutes ago
+  # is not stale — it is recent and worthless — and gating on age let the
+  # overview stay clean while `/editor/backups` said "The last backup failed".
+  # Same trap as `BackupLive.alarming?/1`; it needed fixing in both places.
+  defp backup_state(%{manifest: nil}), do: :never
+
+  defp backup_state(status) do
+    if status.stale? or failed?(status), do: :alarm, else: :ok
+  end
+
+  # "71 published · 1 draft · 3 media items". Published, drafts and media are
+  # always counted (a zero is information); "in review" only when there is
+  # something in it. An empty site says so in words instead of a row of zeros.
+  defp summary_line(by_state, total, media_count) do
+    published = Map.get(by_state, :published, 0)
+    in_review = Map.get(by_state, :in_review, 0)
+    drafts = Map.get(by_state, :draft, 0)
+
+    if total == 0 and media_count == 0 do
+      gettext("Nothing written or uploaded yet.")
+    else
+      [
+        ngettext("%{count} published", "%{count} published", published),
+        in_review > 0 && ngettext("%{count} in review", "%{count} in review", in_review),
+        ngettext("%{count} draft", "%{count} drafts", drafts),
+        ngettext("%{count} media item", "%{count} media items", media_count)
+      ]
+      |> Enum.filter(& &1)
+      |> Enum.join(" · ")
+    end
   end
 
   defp failed?(%{manifest: %{ok: false}}), do: true

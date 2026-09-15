@@ -52,6 +52,7 @@ defmodule KilnCMS.Notifications.Tasks do
         # the task's own field rather than a comment body — the same value
         # the email's `note_line/1` renders.
         excerpt: task.note,
+        actor_id: actor_id(actor),
         actor_name: actor_name(actor)
       })
     end
@@ -109,11 +110,22 @@ defmodule KilnCMS.Notifications.Tasks do
   defp actor_name(%{name: name}) when is_binary(name) and name != "", do: name
   defp actor_name(_actor), do: nil
 
+  # Only a real account has an id erasure can later find — see
+  # `KilnCMS.Notifications.anonymize_actor/1`.
+  defp actor_id(%KilnCMS.Accounts.User{id: id}), do: id
+  defp actor_id(_actor), do: nil
+
   # The title of the content the task hangs off, for the inbox row — the same
   # resolution (and the same `content_type` fallback when the record is gone)
   # `TaskMailWorker.content_title/3` uses for the email subject. A system read:
   # the assignee's own read policy governs what they may open in the editor,
   # not whether they may be told the name of the thing they were assigned.
+  #
+  # The rescue is load-bearing. `ContentTypes.get_record/3` *raises* for a
+  # `content_type` the registry does not know (a dynamic type since deleted,
+  # say), and this runs first in `dispatch_assigned/2` — so without it the
+  # function-wide rescue there swallowed the email and the `task.assigned`
+  # webhook too, for want of an inbox row's title.
   defp content_title(task) do
     case ContentTypes.get_record(task.content_type, task.content_id,
            # `authorize?: false`: a system read — see above; the recipient is already decided.
@@ -124,5 +136,7 @@ defmodule KilnCMS.Notifications.Tasks do
       {:ok, %{title: title}} when is_binary(title) -> title
       _unreadable -> task.content_type
     end
+  rescue
+    _unknown_type -> task.content_type
   end
 end
