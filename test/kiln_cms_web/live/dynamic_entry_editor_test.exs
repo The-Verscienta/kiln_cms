@@ -66,21 +66,34 @@ defmodule KilnCMSWeb.DynamicEntryEditorTest do
     definition = define_recipe_type!(admin)
     conn = log_in(conn, admin)
 
-    # The content index offers the dynamic type and creates an entry.
+    # The content index offers the dynamic type; New opens the unsaved editor
+    # and the first title creates the entry (through `ContentTypes.create!`,
+    # which sets `type_definition_id`, as before).
     {:ok, index_lv, html} = live(conn, ~p"/editor")
     assert html =~ "New recipe"
 
-    {:error, {:live_redirect, %{to: edit_path}}} =
+    {:error, {:live_redirect, %{to: new_path}}} =
       index_lv
       |> element("button[phx-value-kind='#{definition.name}']")
       |> render_click()
 
-    entry = hd(ContentTypes.list!(definition.name, actor: admin))
-    assert edit_path == "/editor/content/#{definition.name}/#{entry.id}"
+    assert new_path == "/editor/content/#{definition.name}/new"
+    assert ContentTypes.list!(definition.name, actor: admin) == []
 
-    # The editor mounts the dynamic kind and renders its custom-field input.
-    {:ok, editor_lv, html} = live(conn, edit_path)
-    assert html =~ "Servings"
+    {:ok, editor_lv, html} = live(conn, new_path)
+    refute html =~ "Servings"
+
+    render_change(editor_lv, "validate", %{
+      "form" => %{"title" => "Pancakes"},
+      "_target" => ["form", "title"]
+    })
+
+    entry = hd(ContentTypes.list!(definition.name, actor: admin))
+    assert entry.type_definition_id == definition.id
+    assert_patch(editor_lv, "/editor/content/#{definition.name}/#{entry.id}")
+
+    # The same LiveView now renders the dynamic kind's custom-field input.
+    assert render(editor_lv) =~ "Servings"
 
     editor_lv
     |> form("##{definition.name}-editor", %{

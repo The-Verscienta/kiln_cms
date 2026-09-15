@@ -45,6 +45,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMS.Search.Related
   alias KilnCMS.Slug
   alias KilnCMS.Unsplash
+  alias KilnCMSWeb.ContentEditor.NewDraft
   alias KilnCMSWeb.EditorTelemetry
   alias KilnCMSWeb.Presence
   alias KilnCMSWeb.VersionDiffComponents
@@ -105,378 +106,475 @@ defmodule KilnCMSWeb.ContentEditorLive do
   @body_image_accept ~w(.jpg .jpeg .png .webp .gif)
   @body_image_max_entries 8
 
+  # An unsaved new document (`/editor/content/:type/new`). Nothing here reads
+  # or writes a row: the page shows the title alone, and the writer's first
+  # commit — a non-blank title or Save — creates the draft and carries on in
+  # this same process (`materialize_draft/1`). Presence, collab, field locks,
+  # comments, tasks, releases and history are all keyed on a record id, so
+  # they start there rather than being faked with a nil one here.
   @impl true
-  def mount(%{"id" => id} = params, _session, socket) do
-    # Deep-linked from the content list's "Assign" button (#501): open
-    # straight to the Settings tab with the assignment form expanded.
-    assign_deep_link? = params["assign"] in ["1", "true"]
+  def mount(params, _session, %{assigns: %{live_action: :new}} = socket) do
+    actor = socket.assigns.current_user
+    org = socket.assigns.current_org
 
+    case ContentTypes.get(params["type"], org) do
+      nil ->
+        {:ok, push_navigate(socket, to: ~p"/editor")}
+
+      content_type ->
+        if NewDraft.may_author?(actor, org.id, content_type) do
+          {:ok, assign_new_draft(socket, content_type)}
+        else
+          {:ok,
+           socket
+           |> put_flash(
+             :error,
+             gettext("You can't create %{type} content.",
+               type: String.downcase(content_type.label)
+             )
+           )
+           |> push_navigate(to: ~p"/editor")}
+        end
+    end
+  end
+
+  def mount(%{"id" => id} = params, _session, socket) do
     case content_kind(params, socket) do
       nil ->
         {:ok, push_navigate(socket, to: ~p"/editor")}
 
       kind ->
-        actor = socket.assigns.current_user
-        org = socket.assigns.current_org
-        record = fetch!(kind, id, actor, org)
-        field_definitions = field_definitions(kind, actor, org)
-        content_type = ContentTypes.get!(kind, org)
+        record = fetch!(kind, id, socket.assigns.current_user, socket.assigns.current_org)
+        {:ok, mount_record(socket, kind, record, params)}
+    end
+  end
 
-        topic = Presence.topic(kind, id)
+  # No URL state of its own: the one patch this view makes is the unsaved
+  # editor becoming the saved one (`materialize_draft/1`), which has already
+  # mounted the record by the time the URL follows. LiveView calls
+  # `handle_params/3` on every patch, so it must exist.
+  @impl true
+  def handle_params(_params, _uri, socket), do: {:noreply, socket}
 
-        if connected?(socket) do
-          ^topic = Presence.track_editor(self(), kind, id, actor)
-          Phoenix.PubSub.subscribe(KilnCMS.PubSub, topic)
-          # Preview-window joins/leaves, so broadcast_preview/1 can no-op
-          # while no pop-out is watching.
-          Phoenix.PubSub.subscribe(KilnCMS.PubSub, Presence.preview_topic(kind, id))
-          # Block discussions: threads and block tasks changing anywhere —
-          # another editor's window, the API, `AutoCompleteTasks` on publish,
-          # or an editorial-intelligence rule delivering a document-level
-          # comment in the background (#946) — arrive as
-          # `{:block_thread_changed, _}` / `{:block_task_changed, _}` on the
-          # collab topic, which also carries this document's typing
-          # indicators. `BroadcastComment` fires that topic unconditionally
-          # (block-scoped or the `nil` block_id a document-level comment
-          # carries), and the handler below reloads the whole comment list
-          # regardless of which block_id it names — so the Document notes
-          # panel (which reads `@comments` too) picks up an automation
-          # comment through this one subscription, no second one needed.
-          Collab.subscribe(kind, record.id)
-        end
+  defp assign_new_draft(socket, content_type) do
+    socket
+    |> assign(:kind, content_type.type)
+    |> assign(:content_type, content_type)
+    |> assign(:actor, socket.assigns.current_user)
+    |> assign(:record, nil)
+    |> assign(:page_title, gettext("New %{type}", type: String.downcase(content_type.label)))
+    |> assign(:form, to_form(%{"title" => ""}, as: :form))
+  end
+
+  # The writer's first commit on `/editor/content/:type/new`: create the row
+  # (`NewDraft.create/3` — the scaffold the New button always wrote, same action,
+  # actor and tenant), run the record half of mount in THIS process, and patch
+  # the URL to the edit route. A patch, not a navigation: the LiveView is not
+  # remounted, so the title input the writer is typing in keeps its DOM id
+  # (`form_title` in both templates) and LiveView restores its focus and
+  # selection after the patch — keystrokes still in the input's debounce are
+  # not lost to a reload. `replace: true` so Back leaves the editor instead of
+  # returning to a fresh unsaved `/new`.
+  #
+  # LiveView runs one event at a time per process, so a burst of keystrokes
+  # cannot create twice: the first assigns `@record`, and every later event
+  # takes the ordinary clauses.
+  defp materialize_draft(socket) do
+    %{kind: kind, actor: actor, current_org: org} = socket.assigns
+
+    case NewDraft.create(kind, actor, org) do
+      {:ok, created} ->
+        record = fetch!(kind, created.id, actor, org)
 
         {:ok,
          socket
-         |> assign(:kind, kind)
-         |> assign(:content_type, content_type)
-         |> assign(:slug_targets, slug_targets(content_type))
-         # The type's own field-type tokens (#804), off the definitions this
-         # mount already loaded — so the live preview derives through exactly
-         # the vocabulary `Changes.DeriveSlug` uses, at no extra query.
-         |> assign(
-           :slug_token_definitions,
-           KilnCMS.CMS.Slugs.type_token_definitions(field_definitions)
-         )
-         |> assign(:has_excerpt, content_type.excerpt?)
-         |> assign(:actor, actor)
-         |> assign(:tier, KilnCMSWeb.LiveUserAuth.effective_tier(socket))
-         # Whether this site lets editors publish — only which workflow button
-         # is OFFERED; the content policy (`Checks.EditorMayPublish`) decides.
-         |> assign(
-           :editors_can_publish,
-           KilnCMS.CMS.EditorialSettings.editors_can_publish?(socket.assigns.current_org)
-         )
-         |> assign(:block_types, block_types())
-         |> assign(:nested_child_types, nested_child_types())
-         |> assign(:editors, Presence.editors(kind, id))
-         |> assign(:preview_open?, Presence.previews_open?(kind, id))
-         # Advisory field locks (KilnCMS.Collab.FieldLock): the record's lock
-         # map as it stands, the field this session is focused on, the open
-         # takeover dialog, and the fields a takeover is waiting on us to flush.
-         |> assign_locks(if(connected?(socket), do: FieldLock.locks(topic), else: %{}))
-         |> assign(:self_field, nil)
-         |> assign(:takeover, nil)
-         |> assign(:flushing, [])
-         # Deep-link focus from an external front end (#355): `?focus=<field>`
-         # scrolls to and pulses that field's input on load (block ids use the
-         # in-context editor's `?focus=`; this is the custom/core-field twin).
-         |> assign(:focus_field, params["focus"])
-         # Debounced draft autosave: pending timer ref + status indicator state.
-         |> assign(:autosave_timer, nil)
-         |> assign(:save_state, :saved)
-         # A live document's settings edited since the last Save
-         # (docs/working-copy.md) — its text autosaves, its settings do not.
-         |> assign(:settings_dirty?, false)
-         # When the record was last written, by anyone: the stamp the save
-         # line shows between saves (`SavedTicker`). Follows `updated_at` so
-         # two tabs agree on it.
-         |> assign(:saved_at, record.updated_at)
-         # Paste/drop image uploads: which block each in-flight file was dropped
-         # on, keyed by its (client-unique) file name — see "body_images_anchor".
-         |> assign(:body_upload_anchors, %{})
-         |> allow_upload(:body_images,
-           accept: @body_image_accept,
-           max_entries: @body_image_max_entries,
-           max_file_size: Ingest.max_image_size(),
-           auto_upload: true,
-           progress: &handle_body_image_progress/3
-         )
-         # Debounced comments reload (#1252 review) — see @comments_reload_debounce_ms.
-         |> assign(:comments_reload_timer, nil)
-         # Set when an optimistic-lock conflict blocks saving until reload.
-         |> assign(:conflict, false)
-         # Bumped on server-driven form replacement (conflict reload, version
-         # restore) so rich-text blocks remount and reload TipTap from the new
-         # content — `phx-update="ignore"` otherwise keeps the stale editor (#135).
-         |> assign(:editor_version, 0)
-         # Version compare (#467): the (at most two) history entries picked in the
-         # version panel, and the computed diff while the modal is open. Restoring
-         # blind is the thing this replaces, so the modal offers Restore itself.
-         |> assign(:current_pick, @current_pick)
-         |> assign(:compare_pick, [])
-         |> assign(:compare, nil)
-         # Right inspector rail (Theme A): which panel is showing. All panels stay
-         # mounted (form fields must survive submit) — the tab only toggles CSS
-         # visibility, never `:if`. Always mounts as `:preview` here (even for
-         # the `?assign=1` deep link, switched to `:settings` further below,
-         # AFTER `assign_record/2`) — `refresh_preview_html/2` only computes
-         # `@preview_html` when `inspector_tab` is `nil`/`:preview` at mount, so
-         # defaulting straight to `:settings` left it unassigned and crashed
-         # the Preview panel, which stays rendered (CSS-hidden) either way.
-         |> assign(:inspector_tab, :preview)
-         # Preview render is only refreshed while the Preview tab is showing;
-         # this tracks whether an off-tab edit left it needing a re-render.
-         |> assign(:preview_stale, false)
-         # Side-by-side preview: `:rail` keeps the inspector a narrow column,
-         # `:split` widens it to half the editor (`toggle_preview_layout`).
-         |> assign(:preview_layout, :rail)
-         # AI-assisted SEO drafting (#60). Read once at mount: this is global
-         # app config, so it can't change under a live session. `seo_drafts`
-         # holds the current proposal (never persisted, never broadcast — each
-         # editor's suggestions are their own); `seo_dismissed` tracks fields
-         # already accepted or waved away so their cards stop rendering.
-         |> assign(:seo_enabled?, KilnCMS.Seo.enabled?())
-         |> assign(:seo_egress?, KilnCMS.Seo.egress?())
-         |> assign(:seo_provider, KilnCMS.Seo.provider())
-         |> assign(:seo_drafting?, false)
-         |> assign(:seo_drafts, nil)
-         |> assign(:seo_dismissed, MapSet.new())
-         # Block-level AI assist (#60) — the body-copy twin of the metadata
-         # drafting above, and a separate switch, so a deployment can run one
-         # without the other. Read once at mount for the same reason.
-         # `assist_block` is the id of the block whose panel is open (nil =
-         # closed); only one is ever open, so one suggestion is ever in flight.
-         |> assign(:assist_enabled?, KilnCMS.Assist.enabled?())
-         |> assign(:assist_egress?, KilnCMS.Assist.egress?())
-         |> assign(:assist_provider, KilnCMS.Assist.provider())
-         |> assign(:assist_block, nil)
-         |> assign(:assist_action, :rewrite)
-         |> assign(:assist_instruction, nil)
-         |> assign(:assist_running?, false)
-         |> assign(:assist_result, nil)
-         # Block-level editorial comments (#404): loaded once at mount (a
-         # document's comment volume is small) and refreshed after
-         # add/resolve/unresolve. `comment_block` is the id of the block whose
-         # thread panel is open (nil = closed, one at a time — same pattern as
-         # `assist_block`); `comment_draft` is that panel's textarea value.
-         |> assign(:comments, load_comments(kind, record.id, actor, org))
-         # `?comment=<block_id>` opens that block's thread on arrival — the
-         # landing side of the shared preview's comment pins (#802).
-         |> assign(:comment_block, params["comment"])
-         |> assign(:comment_draft, nil)
-         # Mention autocomplete: the candidates for the `@…` currently being
-         # typed in the open composer. Filtered in memory from `mention_roster`
-         # (loaded once — an org's roster doesn't change mid-session), so a
-         # keystroke costs no query. `Notifications.mention_roster/1` is the
-         # list `NotifyComment` resolves against after the write, so what the
-         # dropdown offers is exactly who a mention reaches.
-         |> assign(:mention_roster, Notifications.mention_roster(org))
-         |> assign(:mention_suggestions, [])
-         # Who is typing into which block's composer, as `block_id => %{name =>
-         # timer_ref}`. Transient and never persisted; each entry cancels
-         # itself after `@typing_ttl` so a peer who closes the tab mid-word
-         # doesn't type forever.
-         |> assign(:typing, %{})
-         # The task form inside a block's discussion (nil = closed). Separate
-         # from `task_draft`, which belongs to the settings panel's
-         # document-level assignment — two forms, two drafts, so opening one
-         # never half-fills the other.
-         |> assign(:block_task_draft, nil)
-         # `?threads=unresolved` opens straight onto the blocks needing
-         # attention — the landing side of a "here's what's left" link, the
-         # same way `?comment=` lands on one block's thread.
-         |> assign(:thread_filter, thread_filter_param(params["threads"]))
-         # Internal-link suggestions (#377). `nil` = never opened; loading is
-         # deferred to first open because it costs a pgvector query plus a
-         # record read per neighbour, which no page-load should pay.
-         |> assign(:seo_links, nil)
-         |> assign(:seo_links_loading?, false)
-         # Content intelligence (#339): near-duplicates + tag suggestions, both
-         # from the block embeddings this document already has. Same deferral
-         # and the same reason as the link suggestions above, doubled — this
-         # runs the vector query *and* embeds every unapplied tag name.
-         # `nil` = never run; `[]` = ran and found nothing.
-         |> assign(:intel_duplicates, nil)
-         |> assign(:intel_tags, nil)
-         |> assign(:intel_loading?, false)
-         # Media picker (image blocks) + relationship pickers (taxonomy, siblings).
-         # `picking` is nil (closed), a block index (fill that image block), or
-         # `:new` (insert a new image block — opened from the editor chrome).
-         |> assign(:picking, nil)
-         |> assign(:picked, [])
-         |> assign(:media_query, "")
-         # nil = not searching (browse the mounted window); a list = DB search
-         # results, so the picker also finds items beyond that window.
-         |> assign(:picker_media, nil)
-         # Unsplash search tab inside the image picker (mirrors `MediaLive`'s
-         # own Unsplash tab — see `KilnCMS.Unsplash`). `picker_tab` switches
-         # the drawer between the library grid and this search panel;
-         # `reset_picker/1` puts it back to `:library` whenever the drawer
-         # closes, so reopening it never lands on a stale search.
-         |> assign(:unsplash_enabled?, Unsplash.enabled?())
-         |> assign(:picker_tab, :library)
-         |> assign(:unsplash_query, "")
-         |> assign(:unsplash_photos, [])
-         |> assign(:unsplash_page, 1)
-         |> assign(:unsplash_more?, false)
-         |> assign(:unsplash_searching?, false)
-         |> assign(:unsplash_importing, MapSet.new())
-         |> assign(
-           :media,
-           # The picker grid needs only these fields; a select keeps 500
-           # variants/EXIF-bearing rows out of the editor's heap. Images
-           # only (#481 added non-image documents to the library, which the
-           # image/gallery/featured/social-image pickers below have no way
-           # to render or insert as an `<img>`) — filtered on `content_type`,
-           # NOT `width`: a just-uploaded image has `width: nil` until
-           # `Media.VariantWorker` runs (see `media_live.ex`), and that
-           # window is common enough that a handful of pre-existing tests
-           # seed images without ever setting it. `width` is still the right
-           # signal for "does this item have a thumbnail to show" (the
-           # library grid, `thumb_src/1`) — just not for "is this an image".
-           #
-           # A NULL `content_type` counts as an image, not excluded: every
-           # row was implicitly an image before #481 (documents didn't
-           # exist), and plenty of seed data/tests still create rows without
-           # setting it. Only a row with a *known, non-image* content_type
-           # is confidently a document, below.
-           CMS.list_media_items!(
-             actor: actor,
-             tenant: org,
-             query: [
-               filter: expr(is_nil(content_type) or ilike(content_type, "image/%")),
-               select: [:id, :url, :alt, :caption, :filename],
-               sort: [inserted_at: :desc],
-               limit: @max_media
-             ]
-           )
-         )
-         |> assign(
-           :file_media,
-           # The document counterpart of `:media` above (#481) — for the
-           # file-block picker. `content_type`/`byte_size` are denormalized
-           # onto the block at pick time (see `pick_file/2`), same as `alt`
-           # is for an image block. Requires an EXPLICIT non-image
-           # content_type (see the image filter's comment above) — a row
-           # with no content_type at all defaults to the image bucket, not
-           # this one. Documents only: video/audio/caption tracks (#494)
-           # have their own list below.
-           CMS.list_media_items!(
-             actor: actor,
-             tenant: org,
-             query: [
-               filter: document_filter(),
-               select: [:id, :filename, :content_type, :byte_size, :audience],
-               sort: [inserted_at: :desc],
-               limit: @max_media
-             ]
-           )
-         )
-         |> assign(
-           :av_media,
-           # Playable media (#494) — video and audio, for the video/audio
-           # block pickers. `duration_seconds` and `variants` come along
-           # because the picker shows the length and the poster thumbnail,
-           # and `duration_seconds` is denormalized onto the block at pick
-           # time for the JSON-LD `duration`.
-           CMS.list_media_items!(
-             actor: actor,
-             tenant: org,
-             query: [
-               filter: av_filter(),
-               select: [
-                 :id,
-                 :filename,
-                 :content_type,
-                 :byte_size,
-                 :audience,
-                 :duration_seconds,
-                 :variants
-               ],
-               sort: [inserted_at: :desc],
-               limit: @max_media
-             ]
-           )
-         )
-         |> assign(:file_picking, nil)
-         |> assign(:picker_files, nil)
-         |> assign(:file_query, "")
-         # The A/V picker fills one of three different field pairs on a video
-         # block (the media itself, its poster, its caption track), so it
-         # carries a `{block_id, field}` target rather than a bare block id
-         # like `@file_picking` does — see `open_av_picker`.
-         |> assign(:av_picking, nil)
-         |> assign(:picker_av, nil)
-         |> assign(:av_query, "")
-         # Taxonomy pick-lists are scanned by eye, so they load in alphabetical
-         # order rather than whatever Postgres hands back. Tags additionally
-         # carry their group, which sections the picker (see `tag_picker/1`).
-         |> assign(
-           :categories,
-           CMS.list_categories!(actor: actor, tenant: org, query: [sort: [name: :asc]])
-         )
-         # Three columns, not every column (#528). Cap at `@max_tags` (#1149) —
-         # since #638 an unrendered tag is no longer detached by omission, so a
-         # bounded window is safe. The filter box queries the full vocabulary;
-         # `all_pickable_tags/2` still unions every attached tag so detach stays
-         # reachable. See `load_org_tags/3` and `handle_event("filter_tags", …)`.
-         |> assign(:tag_query, "")
-         |> assign(:tags, load_org_tags(actor, org, ""))
-         |> assign(:max_tags, max_tags())
-         # `TagGroup`'s primary read is already ordered by position then name.
-         #
-         # #528 also proposed skipping this read when no tag carries a group —
-         # the zero-group case, which is most installs. It is NOT safe, and the
-         # suite says so: with no groups loaded, `bucket_for/3` files a tag
-         # whose group does not resolve under "Ungrouped", so a tag a
-         # collaborator attaches after mount from an out-of-scope group lands
-         # there instead of in "Also attached", losing the note explaining where
-         # the tag came from. Since #638 a mis-filed tag is no longer *detached*
-         # by the next save — the merge verbs only remove what was rendered and
-         # unticked — so this is now a labelling question rather than a
-         # data-loss one. Still worth one small indexed read: "Ungrouped" tells
-         # an editor nothing about why a tag they cannot find in any group is on
-         # their post.
-         |> assign(:tag_groups, CMS.list_tag_groups!(actor: actor, tenant: org))
-         # Which tag-picker sections render expanded, and which have rendered at
-         # all (#523). Both start empty and are filled by `assign_record/2`
-         # below — see `refresh_tag_index/1`.
-         |> assign(:tag_sections_open, MapSet.new())
-         |> assign(:tag_sections_seen, MapSet.new())
-         |> assign(:audiences, audience_options())
-         |> assign(:field_definitions, field_definitions)
-         |> assign(:reference_options, reference_options(field_definitions, actor, org))
-         # CRDT collab prototype: when enabled, rich-text blocks sync live
-         # between editors over the collab channel (see KilnCMS.Collab.Crdt).
-         |> assign(:collab_token, collab_token(actor))
-         # From `record.id`, not the route param: the channel rebuilds the doc
-         # key from the record it resolves, and a differently-cased id in the
-         # URL would otherwise name the same document under a different key
-         # (#655).
-         |> assign(:collab_topic, "collab:#{kind}:#{record.id}")
-         |> assign(:siblings, siblings(kind, id, actor, org))
-         # Editorial tasks (#501): open tasks on this record (usually zero or
-         # one), plus the org members eligible to be assigned one. Reloaded
-         # after assign/complete; the assignee list is loaded once (an org's
-         # editor roster doesn't change mid-session).
-         |> assign(:tasks, load_tasks(kind, record.id, actor, org))
-         |> assign(:assignable_users, assignable_users(org))
-         |> assign(:task_assign_open?, assign_deep_link?)
-         |> assign(:task_draft, %{})
-         # What the site does with an open task on publish (#818) — the assign
-         # form's blank option names it, so the author sees what "site default"
-         # means rather than having to go and look.
-         |> assign(:auto_complete_default, KilnCMS.CMS.TaskSettings.site_default(org))
-         # Content releases (#500 / #836): the record's pending release, if any,
-         # plus the releases it could be added to.
-         |> assign_release_state(kind, record.id, actor, org)
-         |> assign_record(record)
-         # `?focus=slug` / `?focus=path_alias` names an input in Settings → URL,
-         # which the FocusField hook cannot scroll to while the panel is hidden.
-         |> open_settings_if_deep_linked(
-           assign_deep_link? or params["focus"] in ["slug", "path_alias"]
-         )}
+         |> mount_record(kind, record, %{})
+         |> push_patch(to: ~p"/editor/content/#{kind}/#{record.id}", replace: true)}
+
+      {:error, %Ash.Error.Forbidden{}} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, gettext("You can't create this content."))
+         |> push_navigate(to: ~p"/editor")}
+
+      {:error, _invalid} ->
+        {:noreply, put_flash(socket, :error, gettext("Couldn't create the draft. Try again."))}
     end
+  end
+
+  # The change event a title keystroke sends, replayed into the full editor's
+  # `validate` once the row exists — so the typed title lands on the real form
+  # and the slug re-derives from it, exactly as the next keystroke would.
+  defp title_change(title),
+    do: %{"form" => %{"title" => title}, "_target" => ["form", "title"]}
+
+  # The record half of mount — everything keyed on a saved row. Run from
+  # `mount/3` for `/editor/content/:type/:id`, and from `materialize_draft/1`
+  # when an unsaved new document gets its row.
+  defp mount_record(socket, kind, record, params) do
+    # Deep-linked from the content list's "Assign" button (#501): open
+    # straight to the Settings tab with the assignment form expanded.
+    assign_deep_link? = params["assign"] in ["1", "true"]
+
+    actor = socket.assigns.current_user
+    org = socket.assigns.current_org
+    id = record.id
+    field_definitions = field_definitions(kind, actor, org)
+    content_type = ContentTypes.get!(kind, org)
+
+    topic = Presence.topic(kind, id)
+
+    if connected?(socket) do
+      ^topic = Presence.track_editor(self(), kind, id, actor)
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, topic)
+      # Preview-window joins/leaves, so broadcast_preview/1 can no-op
+      # while no pop-out is watching.
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, Presence.preview_topic(kind, id))
+      # Block discussions: threads and block tasks changing anywhere —
+      # another editor's window, the API, `AutoCompleteTasks` on publish,
+      # or an editorial-intelligence rule delivering a document-level
+      # comment in the background (#946) — arrive as
+      # `{:block_thread_changed, _}` / `{:block_task_changed, _}` on the
+      # collab topic, which also carries this document's typing
+      # indicators. `BroadcastComment` fires that topic unconditionally
+      # (block-scoped or the `nil` block_id a document-level comment
+      # carries), and the handler below reloads the whole comment list
+      # regardless of which block_id it names — so the Document notes
+      # panel (which reads `@comments` too) picks up an automation
+      # comment through this one subscription, no second one needed.
+      Collab.subscribe(kind, record.id)
+    end
+
+    socket
+    |> assign(:kind, kind)
+    |> assign(:content_type, content_type)
+    |> assign(:slug_targets, slug_targets(content_type))
+    # The type's own field-type tokens (#804), off the definitions this
+    # mount already loaded — so the live preview derives through exactly
+    # the vocabulary `Changes.DeriveSlug` uses, at no extra query.
+    |> assign(
+      :slug_token_definitions,
+      KilnCMS.CMS.Slugs.type_token_definitions(field_definitions)
+    )
+    |> assign(:has_excerpt, content_type.excerpt?)
+    |> assign(:actor, actor)
+    |> assign(:tier, KilnCMSWeb.LiveUserAuth.effective_tier(socket))
+    # Whether this site lets editors publish — only which workflow button
+    # is OFFERED; the content policy (`Checks.EditorMayPublish`) decides.
+    |> assign(
+      :editors_can_publish,
+      KilnCMS.CMS.EditorialSettings.editors_can_publish?(socket.assigns.current_org)
+    )
+    |> assign(:block_types, block_types())
+    |> assign(:nested_child_types, nested_child_types())
+    |> assign(:editors, Presence.editors(kind, id))
+    |> assign(:preview_open?, Presence.previews_open?(kind, id))
+    # Advisory field locks (KilnCMS.Collab.FieldLock): the record's lock
+    # map as it stands, the field this session is focused on, the open
+    # takeover dialog, and the fields a takeover is waiting on us to flush.
+    |> assign_locks(if(connected?(socket), do: FieldLock.locks(topic), else: %{}))
+    |> assign(:self_field, nil)
+    |> assign(:takeover, nil)
+    |> assign(:flushing, [])
+    # Deep-link focus from an external front end (#355): `?focus=<field>`
+    # scrolls to and pulses that field's input on load (block ids use the
+    # in-context editor's `?focus=`; this is the custom/core-field twin).
+    |> assign(:focus_field, params["focus"])
+    # Debounced draft autosave: pending timer ref + status indicator state.
+    |> assign(:autosave_timer, nil)
+    |> assign(:save_state, :saved)
+    # A live document's settings edited since the last Save
+    # (docs/working-copy.md) — its text autosaves, its settings do not.
+    |> assign(:settings_dirty?, false)
+    # When the record was last written, by anyone: the stamp the save
+    # line shows between saves (`SavedTicker`). Follows `updated_at` so
+    # two tabs agree on it.
+    |> assign(:saved_at, record.updated_at)
+    # Paste/drop image uploads: which block each in-flight file was dropped
+    # on, keyed by its (client-unique) file name — see "body_images_anchor".
+    |> assign(:body_upload_anchors, %{})
+    |> allow_upload(:body_images,
+      accept: @body_image_accept,
+      max_entries: @body_image_max_entries,
+      max_file_size: Ingest.max_image_size(),
+      auto_upload: true,
+      progress: &handle_body_image_progress/3
+    )
+    # Debounced comments reload (#1252 review) — see @comments_reload_debounce_ms.
+    |> assign(:comments_reload_timer, nil)
+    # Set when an optimistic-lock conflict blocks saving until reload.
+    |> assign(:conflict, false)
+    # Bumped on server-driven form replacement (conflict reload, version
+    # restore) so rich-text blocks remount and reload TipTap from the new
+    # content — `phx-update="ignore"` otherwise keeps the stale editor (#135).
+    |> assign(:editor_version, 0)
+    # Version compare (#467): the (at most two) history entries picked in the
+    # version panel, and the computed diff while the modal is open. Restoring
+    # blind is the thing this replaces, so the modal offers Restore itself.
+    |> assign(:current_pick, @current_pick)
+    |> assign(:compare_pick, [])
+    |> assign(:compare, nil)
+    # Right inspector rail (Theme A): which panel is showing. All panels stay
+    # mounted (form fields must survive submit) — the tab only toggles CSS
+    # visibility, never `:if`. Always mounts as `:preview` here (even for
+    # the `?assign=1` deep link, switched to `:settings` further below,
+    # AFTER `assign_record/2`) — `refresh_preview_html/2` only computes
+    # `@preview_html` when `inspector_tab` is `nil`/`:preview` at mount, so
+    # defaulting straight to `:settings` left it unassigned and crashed
+    # the Preview panel, which stays rendered (CSS-hidden) either way.
+    |> assign(:inspector_tab, :preview)
+    # Preview render is only refreshed while the Preview tab is showing;
+    # this tracks whether an off-tab edit left it needing a re-render.
+    |> assign(:preview_stale, false)
+    # Side-by-side preview: `:rail` keeps the inspector a narrow column,
+    # `:split` widens it to half the editor (`toggle_preview_layout`).
+    |> assign(:preview_layout, :rail)
+    # AI-assisted SEO drafting (#60). Read once at mount: this is global
+    # app config, so it can't change under a live session. `seo_drafts`
+    # holds the current proposal (never persisted, never broadcast — each
+    # editor's suggestions are their own); `seo_dismissed` tracks fields
+    # already accepted or waved away so their cards stop rendering.
+    |> assign(:seo_enabled?, KilnCMS.Seo.enabled?())
+    |> assign(:seo_egress?, KilnCMS.Seo.egress?())
+    |> assign(:seo_provider, KilnCMS.Seo.provider())
+    |> assign(:seo_drafting?, false)
+    |> assign(:seo_drafts, nil)
+    |> assign(:seo_dismissed, MapSet.new())
+    # Block-level AI assist (#60) — the body-copy twin of the metadata
+    # drafting above, and a separate switch, so a deployment can run one
+    # without the other. Read once at mount for the same reason.
+    # `assist_block` is the id of the block whose panel is open (nil =
+    # closed); only one is ever open, so one suggestion is ever in flight.
+    |> assign(:assist_enabled?, KilnCMS.Assist.enabled?())
+    |> assign(:assist_egress?, KilnCMS.Assist.egress?())
+    |> assign(:assist_provider, KilnCMS.Assist.provider())
+    |> assign(:assist_block, nil)
+    |> assign(:assist_action, :rewrite)
+    |> assign(:assist_instruction, nil)
+    |> assign(:assist_running?, false)
+    |> assign(:assist_result, nil)
+    # Block-level editorial comments (#404): loaded once at mount (a
+    # document's comment volume is small) and refreshed after
+    # add/resolve/unresolve. `comment_block` is the id of the block whose
+    # thread panel is open (nil = closed, one at a time — same pattern as
+    # `assist_block`); `comment_draft` is that panel's textarea value.
+    |> assign(:comments, load_comments(kind, record.id, actor, org))
+    # `?comment=<block_id>` opens that block's thread on arrival — the
+    # landing side of the shared preview's comment pins (#802).
+    |> assign(:comment_block, params["comment"])
+    |> assign(:comment_draft, nil)
+    # Mention autocomplete: the candidates for the `@…` currently being
+    # typed in the open composer. Filtered in memory from `mention_roster`
+    # (loaded once — an org's roster doesn't change mid-session), so a
+    # keystroke costs no query. `Notifications.mention_roster/1` is the
+    # list `NotifyComment` resolves against after the write, so what the
+    # dropdown offers is exactly who a mention reaches.
+    |> assign(:mention_roster, Notifications.mention_roster(org))
+    |> assign(:mention_suggestions, [])
+    # Who is typing into which block's composer, as `block_id => %{name =>
+    # timer_ref}`. Transient and never persisted; each entry cancels
+    # itself after `@typing_ttl` so a peer who closes the tab mid-word
+    # doesn't type forever.
+    |> assign(:typing, %{})
+    # The task form inside a block's discussion (nil = closed). Separate
+    # from `task_draft`, which belongs to the settings panel's
+    # document-level assignment — two forms, two drafts, so opening one
+    # never half-fills the other.
+    |> assign(:block_task_draft, nil)
+    # `?threads=unresolved` opens straight onto the blocks needing
+    # attention — the landing side of a "here's what's left" link, the
+    # same way `?comment=` lands on one block's thread.
+    |> assign(:thread_filter, thread_filter_param(params["threads"]))
+    # Internal-link suggestions (#377). `nil` = never opened; loading is
+    # deferred to first open because it costs a pgvector query plus a
+    # record read per neighbour, which no page-load should pay.
+    |> assign(:seo_links, nil)
+    |> assign(:seo_links_loading?, false)
+    # Content intelligence (#339): near-duplicates + tag suggestions, both
+    # from the block embeddings this document already has. Same deferral
+    # and the same reason as the link suggestions above, doubled — this
+    # runs the vector query *and* embeds every unapplied tag name.
+    # `nil` = never run; `[]` = ran and found nothing.
+    |> assign(:intel_duplicates, nil)
+    |> assign(:intel_tags, nil)
+    |> assign(:intel_loading?, false)
+    # Media picker (image blocks) + relationship pickers (taxonomy, siblings).
+    # `picking` is nil (closed), a block index (fill that image block), or
+    # `:new` (insert a new image block — opened from the editor chrome).
+    |> assign(:picking, nil)
+    |> assign(:picked, [])
+    |> assign(:media_query, "")
+    # nil = not searching (browse the mounted window); a list = DB search
+    # results, so the picker also finds items beyond that window.
+    |> assign(:picker_media, nil)
+    # Unsplash search tab inside the image picker (mirrors `MediaLive`'s
+    # own Unsplash tab — see `KilnCMS.Unsplash`). `picker_tab` switches
+    # the drawer between the library grid and this search panel;
+    # `reset_picker/1` puts it back to `:library` whenever the drawer
+    # closes, so reopening it never lands on a stale search.
+    |> assign(:unsplash_enabled?, Unsplash.enabled?())
+    |> assign(:picker_tab, :library)
+    |> assign(:unsplash_query, "")
+    |> assign(:unsplash_photos, [])
+    |> assign(:unsplash_page, 1)
+    |> assign(:unsplash_more?, false)
+    |> assign(:unsplash_searching?, false)
+    |> assign(:unsplash_importing, MapSet.new())
+    |> assign(
+      :media,
+      # The picker grid needs only these fields; a select keeps 500
+      # variants/EXIF-bearing rows out of the editor's heap. Images
+      # only (#481 added non-image documents to the library, which the
+      # image/gallery/featured/social-image pickers below have no way
+      # to render or insert as an `<img>`) — filtered on `content_type`,
+      # NOT `width`: a just-uploaded image has `width: nil` until
+      # `Media.VariantWorker` runs (see `media_live.ex`), and that
+      # window is common enough that a handful of pre-existing tests
+      # seed images without ever setting it. `width` is still the right
+      # signal for "does this item have a thumbnail to show" (the
+      # library grid, `thumb_src/1`) — just not for "is this an image".
+      #
+      # A NULL `content_type` counts as an image, not excluded: every
+      # row was implicitly an image before #481 (documents didn't
+      # exist), and plenty of seed data/tests still create rows without
+      # setting it. Only a row with a *known, non-image* content_type
+      # is confidently a document, below.
+      CMS.list_media_items!(
+        actor: actor,
+        tenant: org,
+        query: [
+          filter: expr(is_nil(content_type) or ilike(content_type, "image/%")),
+          select: [:id, :url, :alt, :caption, :filename],
+          sort: [inserted_at: :desc],
+          limit: @max_media
+        ]
+      )
+    )
+    |> assign(
+      :file_media,
+      # The document counterpart of `:media` above (#481) — for the
+      # file-block picker. `content_type`/`byte_size` are denormalized
+      # onto the block at pick time (see `pick_file/2`), same as `alt`
+      # is for an image block. Requires an EXPLICIT non-image
+      # content_type (see the image filter's comment above) — a row
+      # with no content_type at all defaults to the image bucket, not
+      # this one. Documents only: video/audio/caption tracks (#494)
+      # have their own list below.
+      CMS.list_media_items!(
+        actor: actor,
+        tenant: org,
+        query: [
+          filter: document_filter(),
+          select: [:id, :filename, :content_type, :byte_size, :audience],
+          sort: [inserted_at: :desc],
+          limit: @max_media
+        ]
+      )
+    )
+    |> assign(
+      :av_media,
+      # Playable media (#494) — video and audio, for the video/audio
+      # block pickers. `duration_seconds` and `variants` come along
+      # because the picker shows the length and the poster thumbnail,
+      # and `duration_seconds` is denormalized onto the block at pick
+      # time for the JSON-LD `duration`.
+      CMS.list_media_items!(
+        actor: actor,
+        tenant: org,
+        query: [
+          filter: av_filter(),
+          select: [
+            :id,
+            :filename,
+            :content_type,
+            :byte_size,
+            :audience,
+            :duration_seconds,
+            :variants
+          ],
+          sort: [inserted_at: :desc],
+          limit: @max_media
+        ]
+      )
+    )
+    |> assign(:file_picking, nil)
+    |> assign(:picker_files, nil)
+    |> assign(:file_query, "")
+    # The A/V picker fills one of three different field pairs on a video
+    # block (the media itself, its poster, its caption track), so it
+    # carries a `{block_id, field}` target rather than a bare block id
+    # like `@file_picking` does — see `open_av_picker`.
+    |> assign(:av_picking, nil)
+    |> assign(:picker_av, nil)
+    |> assign(:av_query, "")
+    # Taxonomy pick-lists are scanned by eye, so they load in alphabetical
+    # order rather than whatever Postgres hands back. Tags additionally
+    # carry their group, which sections the picker (see `tag_picker/1`).
+    |> assign(
+      :categories,
+      CMS.list_categories!(actor: actor, tenant: org, query: [sort: [name: :asc]])
+    )
+    # Three columns, not every column (#528). Cap at `@max_tags` (#1149) —
+    # since #638 an unrendered tag is no longer detached by omission, so a
+    # bounded window is safe. The filter box queries the full vocabulary;
+    # `all_pickable_tags/2` still unions every attached tag so detach stays
+    # reachable. See `load_org_tags/3` and `handle_event("filter_tags", …)`.
+    |> assign(:tag_query, "")
+    |> assign(:tags, load_org_tags(actor, org, ""))
+    |> assign(:max_tags, max_tags())
+    # `TagGroup`'s primary read is already ordered by position then name.
+    #
+    # #528 also proposed skipping this read when no tag carries a group —
+    # the zero-group case, which is most installs. It is NOT safe, and the
+    # suite says so: with no groups loaded, `bucket_for/3` files a tag
+    # whose group does not resolve under "Ungrouped", so a tag a
+    # collaborator attaches after mount from an out-of-scope group lands
+    # there instead of in "Also attached", losing the note explaining where
+    # the tag came from. Since #638 a mis-filed tag is no longer *detached*
+    # by the next save — the merge verbs only remove what was rendered and
+    # unticked — so this is now a labelling question rather than a
+    # data-loss one. Still worth one small indexed read: "Ungrouped" tells
+    # an editor nothing about why a tag they cannot find in any group is on
+    # their post.
+    |> assign(:tag_groups, CMS.list_tag_groups!(actor: actor, tenant: org))
+    # Which tag-picker sections render expanded, and which have rendered at
+    # all (#523). Both start empty and are filled by `assign_record/2`
+    # below — see `refresh_tag_index/1`.
+    |> assign(:tag_sections_open, MapSet.new())
+    |> assign(:tag_sections_seen, MapSet.new())
+    |> assign(:audiences, audience_options())
+    |> assign(:field_definitions, field_definitions)
+    |> assign(:reference_options, reference_options(field_definitions, actor, org))
+    # CRDT collab prototype: when enabled, rich-text blocks sync live
+    # between editors over the collab channel (see KilnCMS.Collab.Crdt).
+    |> assign(:collab_token, collab_token(actor))
+    # From `record.id`, not the route param: the channel rebuilds the doc
+    # key from the record it resolves, and a differently-cased id in the
+    # URL would otherwise name the same document under a different key
+    # (#655).
+    |> assign(:collab_topic, "collab:#{kind}:#{record.id}")
+    |> assign(:siblings, siblings(kind, id, actor, org))
+    # Editorial tasks (#501): open tasks on this record (usually zero or
+    # one), plus the org members eligible to be assigned one. Reloaded
+    # after assign/complete; the assignee list is loaded once (an org's
+    # editor roster doesn't change mid-session).
+    |> assign(:tasks, load_tasks(kind, record.id, actor, org))
+    |> assign(:assignable_users, assignable_users(org))
+    |> assign(:task_assign_open?, assign_deep_link?)
+    |> assign(:task_draft, %{})
+    # What the site does with an open task on publish (#818) — the assign
+    # form's blank option names it, so the author sees what "site default"
+    # means rather than having to go and look.
+    |> assign(:auto_complete_default, KilnCMS.CMS.TaskSettings.site_default(org))
+    # Content releases (#500 / #836): the record's pending release, if any,
+    # plus the releases it could be added to.
+    |> assign_release_state(kind, record.id, actor, org)
+    |> assign_record(record)
+    # `?focus=slug` / `?focus=path_alias` names an input in Settings → URL,
+    # which the FocusField hook cannot scroll to while the panel is hidden.
+    |> open_settings_if_deep_linked(
+      assign_deep_link? or params["focus"] in ["slug", "path_alias"]
+    )
   end
 
   # See the `:inspector_tab` mount comment above for why this runs AFTER
@@ -1459,6 +1557,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # `{:shutdown, :closed}` instead and must fall through to the lock's
   # monitor, so the grace period can hand the field back silently.
   @impl true
+  # Nothing was tracked or locked for an unsaved new document.
+  def terminate(_reason, %{assigns: %{record: nil}}), do: :ok
+
   def terminate({:shutdown, :left}, %{assigns: %{kind: kind, record: record}} = _socket) do
     FieldLock.release_all(Presence.topic(kind, record.id), self())
     :ok
@@ -1467,6 +1568,50 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def terminate(_reason, _socket), do: :ok
 
   @impl true
+  # An unsaved new document handles two events, and a change is a commit only
+  # when there is something to keep. Everything else on the full editor needs a
+  # record and is not rendered here; a forged event for it is dropped rather
+  # than reaching a clause that reads `@record.id`.
+  def handle_event(
+        "validate",
+        %{"form" => %{"title" => title}},
+        %{assigns: %{record: nil}} = socket
+      )
+      when is_binary(title) do
+    if String.trim(title) == "" do
+      {:noreply, assign(socket, :form, to_form(%{"title" => title}, as: :form))}
+    else
+      case materialize_draft(socket) do
+        {:ok, socket} -> handle_event("validate", title_change(title), socket)
+        {:noreply, socket} -> {:noreply, socket}
+      end
+    end
+  end
+
+  def handle_event("save", params, %{assigns: %{record: nil}} = socket) do
+    title =
+      case params do
+        %{"form" => %{"title" => title}} when is_binary(title) -> String.trim(title)
+        _other -> ""
+      end
+
+    case materialize_draft(socket) do
+      {:ok, socket} when title == "" ->
+        {:noreply, put_flash(socket, :info, gettext("Saved."))}
+
+      {:ok, socket} ->
+        # Through `validate` first so the slug derives from the title exactly
+        # as it would have while typing, then the ordinary Save.
+        {:noreply, socket} = handle_event("validate", title_change(title), socket)
+        handle_event("save", %{"form" => AshPhoenix.Form.params(socket.assigns.form)}, socket)
+
+      {:noreply, socket} ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event(_event, _params, %{assigns: %{record: nil}} = socket), do: {:noreply, socket}
+
   # A paste/drop upload starting (`BodyImageUploader` → `this.upload/2`) arrives
   # as the form's own change event with `_target` naming the file input. The
   # entries ride along on the socket; nothing in the form moved, so this must
@@ -1969,11 +2114,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Narrow the block tree to blocks needing attention, and back.
   #
-  # An assign, not a URL patch: this LiveView has no `handle_params/3` — every
-  # param it cares about is read once at mount — and adding one so a display
-  # filter could round-trip through the address bar would put every future
-  # patch through a callback this module has never needed. `?threads=` is the
-  # way *in* to a filtered view; the chip is the way to change it once there.
+  # An assign, not a URL patch: every param this LiveView cares about is read
+  # once at mount, and its `handle_params/3` is a deliberate no-op (it exists
+  # only for the unsaved-draft → saved transition). Round-tripping a display
+  # filter through the address bar would give that callback work it has never
+  # needed. `?threads=` is the way *in* to a filtered view; the chip is the way
+  # to change it once there.
   def handle_event("toggle_thread_filter", _params, socket) do
     filter = if socket.assigns.thread_filter == :unresolved, do: nil, else: :unresolved
     {:noreply, assign(socket, :thread_filter, filter)}
@@ -4908,7 +5054,67 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  # An unsaved new document: the title and a Save draft button, inside a form
+  # with the same id as the full editor's, and a title input with the same id
+  # (`form_title`) — so when the first commit mounts the record, the patch
+  # updates the input the writer is typing in rather than replacing it. No
+  # `field_attrs/1`: there is no lock topic to focus against yet.
   @impl true
+  def render(%{record: nil} = assigns) do
+    ~H"""
+    <Layouts.console
+      flash={@flash}
+      current_user={@current_user}
+      current_org={@current_org}
+      page_title={@page_title}
+      active={:content}
+    >
+      <.form
+        for={@form}
+        phx-change="validate"
+        phx-submit="save"
+        id={"#{@kind}-editor"}
+        class="space-y-6"
+      >
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+          <div class="min-w-0">
+            <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
+              &larr; {gettext("All content")}
+            </.link>
+            <h1 class="mt-1 truncate text-2xl font-semibold">{@page_title}</h1>
+          </div>
+          <%!-- `formnovalidate`: saving an untitled draft is this button's whole
+                job, and the title below is `required`. Without it a real
+                browser runs constraint validation first, shows its "fill in
+                this field" bubble and never fires the submit, so `phx-submit`
+                never reaches the server. LiveViewTest skips browser
+                validation, so only e2e saw it (#1497). --%>
+          <button
+            type="submit"
+            id="new-draft-save"
+            formnovalidate
+            class="btn btn-sm btn-default"
+          >
+            {gettext("Save draft")}
+          </button>
+        </div>
+
+        <p id="new-draft-status" role="status" class="text-sm text-base-content/60">
+          {gettext("Not saved yet. The draft is created as soon as you give it a title.")}
+        </p>
+
+        <.input
+          field={@form[:title]}
+          label={gettext("Title")}
+          required
+          autofocus
+          phx-debounce="300"
+        />
+      </.form>
+    </Layouts.console>
+    """
+  end
+
   def render(assigns) do
     assigns =
       assigns

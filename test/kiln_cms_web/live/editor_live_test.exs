@@ -2832,10 +2832,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ "content-new-menu"
       assert html =~ "New recipe"
 
-      {:error, {:live_redirect, %{to: to}}} =
-        lv |> element(~s(#content-new-menu button[phx-value-kind="page"])) |> render_click()
-
-      assert to =~ "/editor/content/page/"
+      assert {:error, {:live_redirect, %{to: "/editor/content/page/new"}}} =
+               lv
+               |> element(~s(#content-new-menu button[phx-value-kind="page"]))
+               |> render_click()
     end
 
     test "edits a page via the generic /editor/content/:type/:id route", %{conn: conn} do

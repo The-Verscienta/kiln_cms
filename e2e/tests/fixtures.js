@@ -161,21 +161,34 @@ async function signInAsEditor(page) {
   await signInAs(page, EDITOR);
 }
 
-// Start a fresh draft of `kind` ("page" by default) from the editor index (the
-// `new` handler creates an "Untitled …" draft and navigates into the editor).
+// Start a fresh draft of `kind` ("page" by default) from the editor index.
+// New opens the editor on an UNSAVED document at /editor/content/<kind>/new;
+// nothing is written until a title is typed or Save is pressed. This fixture
+// presses "Save draft" straight away, so callers get the same "Untitled …"
+// draft the New button used to create on the click — a real id to hold for
+// cleanup and list selectors before anything is typed — and waits for the
+// patch to the real edit route.
 // Past @max_inline_new_buttons content types the per-type "New …" buttons
 // collapse into the #content-new-menu <details> dropdown, so open it first.
 //
-// Returns the new record's id (the last URL segment), so a caller can hold it
-// for cleanup before it has typed a title — the draft is findable by nothing
-// else until then.
+// Returns the new record's id (the last URL segment).
 async function newDraftContent(page, kind = "page") {
   await page.goto("/editor");
   const newMenu = page.locator("#content-new-menu summary");
   if (await newMenu.count()) await newMenu.click();
   await page.click(`button[phx-click="new"][phx-value-kind="${kind}"]`);
-  await page.waitForURL(new RegExp(`/editor/(content/${kind}|${kind}s)/`));
-  await base.expect(page.locator('form[id$="-editor"]')).toBeVisible();
+  await page.waitForURL(new RegExp(`/editor/content/${kind}/new$`));
+  await page.click("#new-draft-save");
+  await page.waitForURL(new RegExp(`/editor/content/${kind}/[0-9a-f-]{36}$`));
+  await base.expect(page.locator('form[id$="-editor"] [role="tablist"]')).toBeVisible();
+  // Save draft says "Saved.", like any Save. Dismiss it the way `save()` does:
+  // the flash group sits over the top-right of the page, so leaving it up
+  // intercepts the caller's next click there (the image picker's first button
+  // in focus_trap.spec.js). The old New button wrote the row without a flash.
+  const flash = page.locator("#flash-info");
+  await base.expect(flash).toContainText("Saved.");
+  await flash.click();
+  await base.expect(flash).toBeHidden();
   return new URL(page.url()).pathname.split("/").pop();
 }
 

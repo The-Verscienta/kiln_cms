@@ -95,6 +95,19 @@ carries the reasoning.
 
 ## Changed
 
+<a id="new-page-no-longer-writes-a-row-until-you-start-writing"></a>
+
+- **"New page" no longer writes a row until you start writing.** Clicking New
+  used to create an "Untitled …" draft on the spot, so looking and pressing Back
+  left a row behind for the weekly untitled sweep. New now opens
+  `/editor/content/:type/new`, an unsaved editor showing the title and a Save
+  draft button. The first non-blank title keystroke, or Save draft, creates the
+  draft through the same create action, actor and site as before, and the same
+  editor carries on at `/editor/content/:type/:id` without reloading, so the
+  caret stays in the title. Someone who may not author the type is turned away
+  at `/new` with the same refusal the content list already applied. The
+  untitled sweep stays, for drafts abandoned after they were created.
+
 <a id="the-editor-opens-on-the-title-and-the-canvas"></a>
 
 - **The editor opens on the title and the canvas.** A usability pass found

@@ -46,6 +46,9 @@ defmodule KilnCMSWeb.ContentEditor.MarkdownImport do
 
   # ── Events ────────────────────────────────────────────────────────────────
 
+  # An unsaved new document offers no import (it has no block form yet).
+  defp on_event(_event, _params, %{assigns: %{record: nil}} = socket), do: {:cont, socket}
+
   # Prose only: the reply is inserted INTO the block the author pasted in, so
   # an image becomes a link to it rather than a block of its own (see
   # `KilnCMS.Markdown.to_tiptap/1`). A refusal replies too — the client then

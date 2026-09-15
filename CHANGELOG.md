@@ -81,6 +81,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **"New page" no longer writes a row until you start writing.** The draft is
+  created on the first title keystroke or Save.
+  ([long form](docs/changelog/unreleased.md#new-page-no-longer-writes-a-row-until-you-start-writing))
+
 - **The editor opens on the title and the canvas.** Slug, path alias and
   redirects moved to Settings → URL; "Edit URL" under the title jumps there.
   ([long form](docs/changelog/unreleased.md#the-editor-opens-on-the-title-and-the-canvas))
