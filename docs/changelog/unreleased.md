@@ -34,6 +34,18 @@ carries the reasoning.
   recipient's own PubSub topic, so a notification read on a phone drops the
   badge on the desktop.
 
+<a id="the-editor-says-when-a-headings-link-gets-a-number"></a>
+
+- **The editor says when a heading's `#link` gets a number.** Public pages give
+  every heading a GitHub-style id (#1439), and a heading whose slug is already
+  taken — by an earlier heading with the same words, or by an id the page
+  layout owns, such as `<main id="main">` — is numbered (`#main-1`), so a page
+  never carries a duplicate id. `KilnCMS.HeadingAnchors.reserved_ids/0` names
+  the layout's ids, and a controller test renders a public page and fails if
+  the layout grows one the list doesn't. The SEO panel now reports each heading
+  whose link isn't its plain slug, with the link it really has and a jump to
+  it, so an author sharing a section link copies the right one.
+
 <a id="editorinbox"></a>
 
 - **`/editor/inbox`.** The notification inbox: everything the console has told
