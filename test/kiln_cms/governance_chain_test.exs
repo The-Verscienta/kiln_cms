@@ -268,6 +268,30 @@ defmodule KilnCMS.Governance.ChainTest do
     assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
   end
 
+  # #1402: `%KilnCMS.SystemActor{}` has no `:id`, and `RecordPublishedVersion`
+  # read `context.actor.id` while building the changeset — a system-actor
+  # publish raised a `KeyError` instead of publishing.
+  test "a system-actor publish is wired and anchored, attributed to no one" do
+    page =
+      CMS.create_page!(
+        %{title: "Anchored", slug: "chain-sys-pub-#{System.unique_integer([:positive])}"},
+        actor: admin()
+      )
+
+    # No system actor may publish under the policies; past them, the actor
+    # still reaches the change.
+    {:ok, _page} =
+      CMS.publish_page(page, %{},
+        actor: KilnCMS.SystemActor.new(:firing),
+        authorize?: false
+      )
+
+    anchor = Chain.latest_anchor("page", page.id, page.org_id)
+    assert anchor.published_version_id
+    assert is_nil(anchor.actor_id)
+    assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+  end
+
   test "edits after the anchor don't break verification (unanchored tail)" do
     actor = admin()
     page = published_page(actor)
