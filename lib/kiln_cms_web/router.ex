@@ -525,6 +525,23 @@ defmodule KilnCMSWeb.Router do
   @doc "Absinthe.Plug options for the `/gql` endpoint (see the forward below)."
   def graphql_opts, do: @graphql_opts
 
+  # GraphiQL playground — dev/CI only (`config :kiln_cms, dev_routes: true` in
+  # dev.exs). It MUST be declared before the always-on `/gql` scope below:
+  # routes match in declaration order and that scope's `forward "/"` claims
+  # every `/gql/*` path, so a playground registered after it was unreachable
+  # even in dev. Production keeps the headless `/gql` endpoint only, where
+  # `/gql/playground` falls through to Absinthe's JSON 400.
+  if Application.compile_env(:kiln_cms, :dev_routes) do
+    scope "/gql" do
+      pipe_through [:graphql]
+
+      forward "/playground", Absinthe.Plug.GraphiQL,
+        schema: Module.concat(["KilnCMSWeb.GraphqlSchema"]),
+        socket: Module.concat(["KilnCMSWeb.GraphqlSocket"]),
+        interface: :simple
+    end
+  end
+
   scope "/gql" do
     pipe_through [:graphql]
 
@@ -1109,19 +1126,6 @@ defmodule KilnCMSWeb.Router do
   # scope "/api", KilnCMSWeb do
   #   pipe_through :api
   # end
-
-  # API explorer UIs — dev/CI only (`config :kiln_cms, dev_routes: true` in
-  # dev.exs). Production keeps `/gql` and `/api/json` headless endpoints only.
-  if Application.compile_env(:kiln_cms, :dev_routes) do
-    scope "/gql" do
-      pipe_through [:graphql]
-
-      forward "/playground", Absinthe.Plug.GraphiQL,
-        schema: Module.concat(["KilnCMSWeb.GraphqlSchema"]),
-        socket: Module.concat(["KilnCMSWeb.GraphqlSocket"]),
-        interface: :simple
-    end
-  end
 
   # --- Content-Security-Policy plugs ----------------------------------------
   #

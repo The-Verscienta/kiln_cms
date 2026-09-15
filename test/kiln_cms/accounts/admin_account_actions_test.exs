@@ -97,6 +97,23 @@ defmodule KilnCMS.Accounts.AdminAccountActionsTest do
       assert_no_email_sent()
     end
 
+    # "Sent" means queued. `KilnCMS.Mail.enqueue!/1` refuses an address with no
+    # `@` (the seed skips the resource's own validation, so the row can hold one)
+    # — the failure the action's rescue exists for, reported by name instead of
+    # crashing the console or claiming a send.
+    @tag :capture_log
+    test "mail the queue refuses is reported, not claimed sent" do
+      admin = user(:admin)
+      subject = user(:editor, %{email: "no-at-sign-#{System.unique_integer([:positive])}"})
+      on_exit(fn -> AccountThrottle.reset(to_string(subject.email)) end)
+
+      assert {:error, error} = Accounts.send_user_password_reset(subject.id, actor: admin)
+      assert Exception.message(error) =~ "could not be queued"
+
+      drain_oban()
+      assert_no_email_sent()
+    end
+
     # One admin reset spends one unit, not two (the action charges; the sender is
     # told it was charged) — and shares the budget with the owner's own requests.
     test "an admin reset spends exactly one unit of the shared budget" do
@@ -131,30 +148,30 @@ defmodule KilnCMS.Accounts.AdminAccountActionsTest do
           actor: standing
         )
 
-      # The session actor: loaded through a read, so the grant is folded in.
+      # The session actor, as a read returns it: standing `role`, live grant beside it.
       actor = Accounts.get_user!(temp.id, authorize?: false)
-      assert actor.role == :admin
+      assert KilnCMS.Accounts.RoleGrant.effective_role(actor) == :admin
 
       %{standing: standing, temp: temp, actor: actor}
     end
 
     test "cannot make itself a permanent admin", %{temp: temp, actor: actor} do
       target =
-        Accounts.get_user!(temp.id, KilnCMS.Accounts.RoleGrant.unfolded() ++ [authorize?: false])
+        Accounts.get_user!(temp.id, authorize?: false)
 
       assert {:error, error} = Accounts.manage_user_access(target, %{role: :admin}, actor: actor)
       assert Exception.message(error) =~ "standing admin"
 
       assert Accounts.get_user!(
                temp.id,
-               KilnCMS.Accounts.RoleGrant.unfolded() ++ [authorize?: false]
+               authorize?: false
              ).role ==
                :editor
     end
 
     test "cannot extend its own grant", %{temp: temp, actor: actor} do
       target =
-        Accounts.get_user!(temp.id, KilnCMS.Accounts.RoleGrant.unfolded() ++ [authorize?: false])
+        Accounts.get_user!(temp.id, authorize?: false)
 
       assert {:error, error} =
                Accounts.grant_user_temporary_role(
@@ -229,7 +246,7 @@ defmodule KilnCMS.Accounts.AdminAccountActionsTest do
       erased =
         Accounts.get_user!(
           subject.id,
-          KilnCMS.Accounts.RoleGrant.unfolded() ++ [authorize?: false]
+          authorize?: false
         )
 
       assert is_nil(erased.granted_role)
@@ -246,7 +263,7 @@ defmodule KilnCMS.Accounts.AdminAccountActionsTest do
                Accounts.get_org_membership!(
                  subject.id,
                  Accounts.default_org_id(),
-                 KilnCMS.Accounts.RoleGrant.unfolded() ++ [authorize?: false]
+                 authorize?: false
                ).granted_role
              )
 

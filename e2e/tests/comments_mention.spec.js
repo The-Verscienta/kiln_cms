@@ -21,6 +21,7 @@ const {
   signInAsAdmin,
   signInAsEditor,
   newDraftPage,
+  fillSlug,
   save,
   addBlock,
   deleteContentById,
@@ -59,7 +60,7 @@ test.describe("block discussions", () => {
     // Title and slug BEFORE the block, as editor.spec.js does — then one Save,
     // so the title on the mention email is the real one, not "Untitled".
     await page.fill('input[name$="[title]"]', title);
-    await page.fill('input[name$="[slug]"]', `e2e-mention-${stamp}`);
+    await fillSlug(page, `e2e-mention-${stamp}`);
     await addBlock(page, "rich_text");
     await save(page);
 

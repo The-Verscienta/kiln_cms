@@ -1007,12 +1007,26 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert render(lv) =~ "Trash is empty"
     end
 
+    # About ROLE-gating, so both users are on the Everything preset: a new
+    # account starts on Essentials, which draws no configure items for anyone,
+    # and the editor's refute would then pass whatever the role gate did. The
+    # lookups are scoped to the sidebar.
     test "the trash link is shown to admins only", %{conn: conn} do
-      {:ok, _lv, editor_html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
-      refute editor_html =~ "/editor/trash"
+      everything = fn user ->
+        {:ok, _} = KilnCMS.Accounts.set_nav_preset(user, :everything, actor: user)
+        user
+      end
 
-      {:ok, _lv, admin_html} = build_conn() |> log_in(authed_user(:admin)) |> live(~p"/editor")
-      assert admin_html =~ "/editor/trash"
+      {:ok, editor_lv, _html} =
+        conn |> log_in(everything.(authed_user(:editor))) |> live(~p"/editor")
+
+      assert has_element?(editor_lv, "aside #nav-preset-switch", "Show essentials")
+      refute has_element?(editor_lv, ~s(aside a.side-link[href="/editor/trash"]))
+
+      {:ok, admin_lv, _html} =
+        build_conn() |> log_in(everything.(authed_user(:admin))) |> live(~p"/editor")
+
+      assert has_element?(admin_lv, ~s(aside a.side-link[href="/editor/trash"]))
     end
   end
 

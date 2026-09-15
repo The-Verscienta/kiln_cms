@@ -29,6 +29,8 @@ import {FocusTrap} from "./focus_trap"
 import {PasskeyEnroll, initPasskeySignIn} from "./passkeys"
 import {PushToggle} from "./push"
 import {initAdvisoryJump} from "./advisory_jump"
+import {initRevealSection} from "./reveal_section"
+import {FlashAutoDismiss} from "./flash_auto_dismiss"
 import {SavedTicker} from "./saved_ticker"
 import {BodyImageUploader} from "./body_image_uploader"
 import {watchLiveness} from "./liveness"
@@ -39,6 +41,9 @@ const Hooks = {
   SavedTicker,
   BodyImageUploader,
   FocusTrap,
+  // Info flashes close themselves after a few seconds — see
+  // assets/js/flash_auto_dismiss.js.
+  FlashAutoDismiss,
   // Passkey enrolment on /editor/settings (#331) — see assets/js/passkeys.js.
   PasskeyEnroll,
   // Web Push opt-in on /editor/settings (#628) — see assets/js/push.js.
@@ -193,20 +198,7 @@ const Hooks = {
     mounted() {
       const name = this.el.dataset.kilnFocus
       if (!name) return
-      requestAnimationFrame(() => {
-        const target =
-          document.getElementById(`custom-field-${name}`) ||
-          document.querySelector(`[phx-value-field="${CSS.escape(name)}"]`)
-        if (!target) return
-        for (let d = target.closest("details"); d; d = d.parentElement.closest("details")) {
-          d.open = true
-        }
-        target.scrollIntoView({behavior: "smooth", block: "center"})
-        const wrap = target.closest("div") || target
-        wrap.classList.add("kiln-focus-pulse")
-        setTimeout(() => wrap.classList.remove("kiln-focus-pulse"), 1600)
-        if (typeof target.focus === "function") target.focus({preventScroll: true})
-      })
+      requestAnimationFrame(() => focusEditorField(name))
     },
   },
   // Multiplayer preview cursors (#343): report this viewer's pointer position
@@ -1041,6 +1033,10 @@ document.addEventListener(
 // highlights what it is about — see assets/js/advisory_jump.js.
 initAdvisoryJump()
 
+// A button carrying `data-kiln-reveal="<id>"` scrolls to and focuses that
+// section once its click has been answered — see assets/js/reveal_section.js.
+initRevealSection()
+
 // ⌘K / Ctrl-K opens the editor search palette from anywhere (no-op if already
 // there). Skipped while typing in an input so it doesn't hijack the field.
 // Prefer the hidden `navigate` link rendered in the app layout so connected
@@ -1085,6 +1081,29 @@ window.addEventListener("phx:lock_granted", ({detail}) => {
   attempt()
 })
 window.addEventListener("phx:page-loading-stop", _info => topbar.hide())
+
+// Scroll an editor field into view, pulse it and focus it. Shared by the
+// FocusField deep-link hook and `phx:kiln:focus-field`, which the content
+// editor pushes when "Edit URL" (or a save refused on the slug) opens
+// Settings → URL: the event lands after the patch that un-hides the panel.
+function focusEditorField(name) {
+  const target =
+    document.getElementById(`custom-field-${name}`) ||
+    document.querySelector(`[phx-value-field="${CSS.escape(name)}"]`)
+  if (!target) return
+  for (let d = target.closest("details"); d; d = d.parentElement.closest("details")) {
+    d.open = true
+  }
+  target.scrollIntoView({behavior: "smooth", block: "center"})
+  const wrap = target.closest("div") || target
+  wrap.classList.add("kiln-focus-pulse")
+  setTimeout(() => wrap.classList.remove("kiln-focus-pulse"), 1600)
+  if (typeof target.focus === "function") target.focus({preventScroll: true})
+}
+
+window.addEventListener("phx:kiln:focus-field", ({detail}) => {
+  if (detail && detail.field) requestAnimationFrame(() => focusEditorField(detail.field))
+})
 
 // connect if there are any LiveViews on the page
 liveSocket.connect()

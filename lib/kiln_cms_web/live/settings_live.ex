@@ -20,7 +20,10 @@ defmodule KilnCMSWeb.SettingsLive do
 
     {:ok,
      socket
-     |> assign(:page_title, gettext("Settings"))
+     # "Your settings", as the nav names it (#1319): site configuration lives in
+     # the Configure hub, and a page titled plain "Settings" invites the search
+     # for it here.
+     |> assign(:page_title, gettext("Your settings"))
      |> assign(:form, prefs_form(user))
      |> assign(:profile_form, profile_form(user))
      |> assign(:password_form, password_form(user))
@@ -435,6 +438,8 @@ defmodule KilnCMSWeb.SettingsLive do
     """
   end
 
+  defp nav_preset_value(user), do: Atom.to_string(KilnCMSWeb.ConsoleNav.preset(user))
+
   defp prefs_form(user) do
     user
     |> AshPhoenix.Form.for_update(:update_notification_prefs, actor: user, as: "user")
@@ -465,11 +470,52 @@ defmodule KilnCMSWeb.SettingsLive do
     >
       <div class="space-y-6">
         <div>
-          <h1 class="text-2xl font-semibold">{gettext("Settings")}</h1>
+          <h1 class="text-2xl font-semibold">{gettext("Your settings")}</h1>
           <p class="text-sm text-base-content/70">
             {gettext("Manage your profile, password, and notification preferences.")}
           </p>
         </div>
+
+        <%!-- The sidebar preset — the same choice as the switch at the foot of
+              the sidebar, and the same event (`KilnCMSWeb.NavPreset`), which
+              updates `@current_user` so both redraw together. --%>
+        <section id="settings-sidebar" class="card card-pad max-w-xl">
+          <h2 class="mb-1 text-lg font-medium">{gettext("Sidebar")}</h2>
+          <p class="mb-4 text-sm text-base-content/60">
+            {gettext(
+              "Every screen stays in search (⌘K) either way; this only decides what the sidebar lists."
+            )}
+          </p>
+          <div class="flex flex-wrap gap-2" role="group" aria-label={gettext("Sidebar")}>
+            <button
+              :for={
+                {value, label} <- [
+                  {"essentials", gettext("Essentials")},
+                  {"everything", gettext("Everything")}
+                ]
+              }
+              type="button"
+              id={"settings-nav-preset-#{value}"}
+              phx-click="set_nav_preset"
+              phx-value-preset={value}
+              aria-pressed={to_string(nav_preset_value(@current_user) == value)}
+              class={[
+                "btn btn-sm",
+                nav_preset_value(@current_user) == value && "btn-primary"
+              ]}
+            >
+              {label}
+            </button>
+          </div>
+          <p class="mt-3 text-xs text-base-content/60">
+            {if nav_preset_value(@current_user) == "essentials",
+              do:
+                gettext(
+                  "Essentials: Home, Content, Media, Calendar, Tasks and Inbox, then Configure and Your settings."
+                ),
+              else: gettext("Everything: every screen you can open, grouped by section.")}
+          </p>
+        </section>
 
         <section class="card card-pad max-w-xl">
           <h2 class="mb-1 text-lg font-medium">{gettext("Profile")}</h2>

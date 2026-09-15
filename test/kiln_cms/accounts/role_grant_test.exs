@@ -30,9 +30,6 @@ defmodule KilnCMS.Accounts.RoleGrantTest do
 
   defp reread(user), do: Accounts.get_user!(user.id, authorize?: false)
 
-  defp reread_unfolded(user),
-    do: Accounts.get_user!(user.id, RoleGrant.unfolded() ++ [authorize?: false])
-
   describe "effective_role/1" do
     test "a live grant shadows the standing role" do
       record = %{role: :editor, granted_role: :admin, granted_role_expires_at: in_hours(1)}
@@ -73,7 +70,7 @@ defmodule KilnCMS.Accounts.RoleGrantTest do
     end
   end
 
-  describe "the fold on read" do
+  describe "a read" do
     setup do
       admin = user(:admin)
       subject = user(:editor)
@@ -88,34 +85,24 @@ defmodule KilnCMS.Accounts.RoleGrantTest do
       %{admin: admin, subject: subject}
     end
 
-    test "presents the granted tier as `role`", %{subject: subject} do
-      folded = reread(subject)
+    # `role` is the column, always; the grant is applied where a tier is decided.
+    test "returns the row as stored, the grant beside the standing role", %{subject: subject} do
+      read = reread(subject)
 
-      assert folded.role == :admin
-      # The standing tier is still what the column holds, and still reachable.
-      assert RoleGrant.standing_role(folded) == :editor
-      assert RoleGrant.folded?(folded)
+      assert read.role == :editor
+      assert read.granted_role == :admin
+      assert RoleGrant.effective_role(read) == :admin
     end
 
-    test "`unfolded/0` returns the row as stored", %{subject: subject} do
-      raw = reread_unfolded(subject)
-
-      assert raw.role == :editor
-      assert raw.granted_role == :admin
-      refute RoleGrant.folded?(raw)
-    end
-
-    # The whole point of folding rather than sweeping: nothing has to run for the
-    # elevation to end.
-    test "stops folding the instant the grant expires", %{admin: admin, subject: subject} do
-      subject = reread_unfolded(subject)
+    # Nothing has to run for the elevation to end.
+    test "stops applying the grant the instant it expires", %{subject: subject} do
+      subject = reread(subject)
 
       # Seeded past the expiry rather than written through the action, which
       # (correctly) refuses a past date.
       Ash.Seed.update!(subject, %{granted_role_expires_at: in_hours(-1)})
 
-      assert reread(subject).role == :editor
-      assert admin.role == :admin
+      assert RoleGrant.effective_role(reread(subject)) == :editor
     end
   end
 
@@ -136,7 +123,7 @@ defmodule KilnCMS.Accounts.RoleGrantTest do
 
       assert {:ok, revoked} =
                Accounts.grant_user_temporary_role(
-                 reread_unfolded(granted),
+                 reread(granted),
                  %{granted_role: nil, granted_role_expires_at: nil},
                  actor: admin
                )
@@ -190,10 +177,9 @@ defmodule KilnCMS.Accounts.RoleGrantTest do
       assert Exception.message(error) =~ "is required"
     end
 
-    # Extending a live grant compares against the STANDING tier, not the folded
-    # one — otherwise "admin until Friday" could never be extended, because the
-    # record would already read as an admin.
-    test "a live grant can be extended from a folded record", %{admin: admin, subject: subject} do
+    # Extending a live grant compares against the STANDING tier, not the granted
+    # one — otherwise "admin until Friday" could never be extended.
+    test "a live grant can be extended", %{admin: admin, subject: subject} do
       {:ok, _} =
         Accounts.grant_user_temporary_role(
           subject,
@@ -201,12 +187,9 @@ defmodule KilnCMS.Accounts.RoleGrantTest do
           actor: admin
         )
 
-      folded = reread(subject)
-      assert folded.role == :editor
-
       assert {:ok, extended} =
                Accounts.grant_user_temporary_role(
-                 folded,
+                 reread(subject),
                  %{granted_role: :editor, granted_role_expires_at: in_hours(48)},
                  actor: admin
                )
@@ -230,33 +213,18 @@ defmodule KilnCMS.Accounts.RoleGrantTest do
       %{admin: admin, subject: subject}
     end
 
-    # The bug the fold could have introduced: Ash discards a submitted attribute
-    # equal to `changeset.data` at cast time, so promoting a temporary admin from
-    # a FOLDED record would silently write nothing.
-    test "a folded record is refused rather than silently dropped", %{
-      admin: admin,
-      subject: subject
-    } do
-      folded = reread(subject)
-
-      assert {:error, error} =
-               Accounts.manage_user_access(folded, %{role: :admin}, actor: admin)
-
-      assert Exception.message(error) =~ "folded"
-      # And the column really did not move.
-      assert reread_unfolded(subject).role == :editor
-    end
-
-    test "an unfolded record promotes permanently and clears the grant", %{
+    # Straight off an ordinary read. When reads presented a live grant as `role`,
+    # Ash dropped this `role: :admin` as equal to the record's and wrote nothing,
+    # and every writer had to ask for the row "unfolded" first.
+    test "promotes permanently from an ordinary read and clears the grant", %{
       admin: admin,
       subject: subject
     } do
       assert {:ok, promoted} =
-               Accounts.manage_user_access(reread_unfolded(subject), %{role: :admin},
-                 actor: admin
-               )
+               Accounts.manage_user_access(reread(subject), %{role: :admin}, actor: admin)
 
       assert promoted.role == :admin
+      assert reread(subject).role == :admin
       # A standing tier at or above the grant makes it meaningless — see
       # Changes.ClearRedundantRoleGrant.
       assert is_nil(promoted.granted_role)
@@ -268,9 +236,7 @@ defmodule KilnCMS.Accounts.RoleGrantTest do
       subject: subject
     } do
       assert {:ok, demoted} =
-               Accounts.manage_user_access(reread_unfolded(subject), %{role: :viewer},
-                 actor: admin
-               )
+               Accounts.manage_user_access(reread(subject), %{role: :viewer}, actor: admin)
 
       assert demoted.role == :viewer
       assert demoted.granted_role == :admin
@@ -296,7 +262,7 @@ defmodule KilnCMS.Accounts.RoleGrantTest do
           )
       end
 
-      Ash.Seed.update!(reread_unfolded(expired), %{granted_role_expires_at: in_hours(-1)})
+      Ash.Seed.update!(reread(expired), %{granted_role_expires_at: in_hours(-1)})
 
       assert %{success: success, failure: 0} =
                AshOban.schedule_and_run_triggers({User, :expire_role_grants},
@@ -306,8 +272,8 @@ defmodule KilnCMS.Accounts.RoleGrantTest do
                )
 
       assert success >= 1
-      assert is_nil(reread_unfolded(expired).granted_role)
-      assert reread_unfolded(live).granted_role == :editor
+      assert is_nil(reread(expired).granted_role)
+      assert reread(live).granted_role == :editor
     end
 
     test "the membership trigger actually runs too" do
@@ -337,10 +303,8 @@ defmodule KilnCMS.Accounts.RoleGrantTest do
       )
 
       assert is_nil(
-               Accounts.get_org_membership!(
-                 member.id,
-                 Accounts.default_org_id(),
-                 RoleGrant.unfolded() ++ [authorize?: false]
+               Accounts.get_org_membership!(member.id, Accounts.default_org_id(),
+                 authorize?: false
                ).granted_role
              )
     end
@@ -359,24 +323,23 @@ defmodule KilnCMS.Accounts.RoleGrantTest do
           )
       end
 
-      Ash.Seed.update!(reread_unfolded(expired), %{granted_role_expires_at: in_hours(-1)})
+      Ash.Seed.update!(reread(expired), %{granted_role_expires_at: in_hours(-1)})
 
-      assert {:ok, swept} =
-               Accounts.expire_user_role_grant(reread_unfolded(expired), authorize?: false)
+      assert {:ok, swept} = Accounts.expire_user_role_grant(reread(expired), authorize?: false)
 
       assert is_nil(swept.granted_role)
       assert is_nil(swept.granted_role_expires_at)
       # The standing tier is what it always was.
       assert swept.role == :viewer
 
-      assert reread_unfolded(live).granted_role == :editor
+      assert reread(live).granted_role == :editor
     end
   end
 
   describe "an actor that outlives its grant" do
-    # A LiveView assigns `current_user` once at mount. The folded `role: :admin`
-    # on that struct must stop authorizing the moment the grant expires — the
-    # expiry is re-checked at the decision, not trusted from the load.
+    # A LiveView assigns `current_user` once at mount. The grant on that struct
+    # must stop authorizing the moment it expires — the expiry is compared at the
+    # decision, not trusted from the load.
     setup do
       admin = user(:admin)
       subject = user(:editor)
@@ -388,9 +351,9 @@ defmodule KilnCMS.Accounts.RoleGrantTest do
           actor: admin
         )
 
-      # Mount-time actor, folded while the grant was live...
+      # Mount-time actor, read while the grant was live...
       actor = reread(subject)
-      assert actor.role == :admin
+      assert KilnCMS.Accounts.Checks.PlatformAdmin.match?(actor, %{}, [])
 
       # ...and then the clock moves past the expiry, with the struct unchanged.
       stale = %{actor | granted_role_expires_at: in_hours(-1)}
@@ -416,34 +379,6 @@ defmodule KilnCMS.Accounts.RoleGrantTest do
     end
   end
 
-  describe "the fold is idempotent" do
-    # A second fold pass (an `Ash.load/2` re-runs a read's preparations) must not
-    # overwrite `:standing_role` with the granted tier.
-    test "folding a folded record keeps the standing role" do
-      admin = user(:admin)
-      subject = user(:editor)
-
-      {:ok, _} =
-        Accounts.grant_user_temporary_role(
-          subject,
-          %{granted_role: :admin, granted_role_expires_at: in_hours(3)},
-          actor: admin
-        )
-
-      folded = reread(subject)
-      assert RoleGrant.standing_role(folded) == :editor
-
-      {:ok, [refolded]} =
-        KilnCMS.Accounts.Preparations.FoldRoleGrant.prepare(Ash.Query.new(User), [], %{})
-        |> Map.fetch!(:after_action)
-        |> List.last()
-        |> then(& &1.(Ash.Query.new(User), [folded]))
-
-      assert refolded.role == :admin
-      assert RoleGrant.standing_role(refolded) == :editor
-    end
-  end
-
   describe "ClearRedundantRoleGrant" do
     # A narrowed select leaves the grant columns unloaded; that is not a grant.
     test "does not revoke a grant whose columns were not selected" do
@@ -463,45 +398,13 @@ defmodule KilnCMS.Accounts.RoleGrantTest do
         User
         |> Ash.Query.deselect([:granted_role, :granted_role_expires_at])
         |> Ash.Query.filter(id == ^subject.id)
-        |> Ash.read_one!(authorize?: false, context: %{fold_role_grant?: false})
+        |> Ash.read_one!(authorize?: false)
 
       assert %Ash.NotLoaded{} = narrowed.granted_role
 
       {:ok, _} = Accounts.manage_user_access(narrowed, %{audiences: [:member]}, actor: admin)
 
-      assert reread_unfolded(subject).granted_role == :admin
-    end
-  end
-
-  describe "UnfoldedRecord" do
-    # Only a write that SUBMITS `role` is at risk from a folded base.
-    test "does not refuse an update that never mentions role" do
-      admin = user(:admin)
-      member = user(:viewer)
-
-      membership =
-        Ash.Seed.seed!(OrgMembership, %{
-          user_id: member.id,
-          organization_id: Accounts.default_org_id(),
-          role: :viewer
-        })
-
-      {:ok, _} =
-        Accounts.grant_membership_temporary_role(
-          membership,
-          %{granted_role: :editor, granted_role_expires_at: in_hours(3)},
-          actor: admin
-        )
-
-      folded =
-        Accounts.get_org_membership!(member.id, Accounts.default_org_id(), authorize?: false)
-
-      assert RoleGrant.folded?(folded)
-
-      assert {:ok, updated} =
-               Accounts.update_org_membership(folded, %{audiences: [:member]}, authorize?: false)
-
-      assert updated.audiences == [:member]
+      assert reread(subject).granted_role == :admin
     end
   end
 
@@ -593,7 +496,7 @@ defmodule KilnCMS.Accounts.RoleGrantTest do
           )
       end
 
-      Ash.Seed.update!(reread_unfolded(lapsed), %{granted_role_expires_at: in_hours(-1)})
+      Ash.Seed.update!(reread(lapsed), %{granted_role_expires_at: in_hours(-1)})
 
       ids =
         KilnCMS.Accounts.Scoping.users_with_tier(Accounts.default_org_id(), [:admin])

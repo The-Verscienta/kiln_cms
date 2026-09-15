@@ -204,8 +204,30 @@ async function newDraftPage(page) {
 // find (see the fixture-race note on `waitForLiveConnected`).
 async function saveDraft(page, { title, slug }) {
   await page.fill('input[name$="[title]"]', title);
-  if (slug) await page.fill('input[name$="[slug]"]', slug);
+  if (slug) await fillSlug(page, slug);
   await save(page);
+}
+
+// Type a slug. The slug input lives in the inspector's Settings → URL section,
+// not under the title, and the rail shows Preview by default — a CSS-hidden
+// input can't be filled. "Edit URL" (the line under the title) opens Settings
+// and focuses the slug, the way a writer gets there. Afterwards the tab that
+// was showing is put back, so a caller asserting on the Preview panel next
+// still finds it visible.
+async function fillSlug(page, slug) {
+  const input = page.locator('input[name$="[slug]"]');
+  const selected = page.locator('button[role="tab"][aria-selected="true"]');
+  const tab = await selected.getAttribute("phx-value-tab");
+  if (!(await input.isVisible())) await page.click("#edit-url");
+  await base.expect(input).toBeVisible();
+  await input.fill(slug);
+  if (tab && tab !== "settings") {
+    await page.click(`button[role="tab"][phx-value-tab="${tab}"]`);
+    await base.expect(page.locator(`button[role="tab"][phx-value-tab="${tab}"]`)).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  }
 }
 
 // Press Save on the open draft and wait for the "Saved." flash (see above).
@@ -344,6 +366,7 @@ module.exports = {
   newDraftPage,
   newDraftContent,
   saveDraft,
+  fillSlug,
   save,
   addBlock,
   createTagGroup,

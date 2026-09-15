@@ -117,7 +117,7 @@ defmodule KilnCMS.Billing.EntitlementsTest do
         Accounts.get_org_membership!(
           u.id,
           default_org_id(),
-          KilnCMS.Accounts.RoleGrant.unfolded() ++ [authorize?: false]
+          authorize?: false
         )
 
       assert @gated in synced.audiences

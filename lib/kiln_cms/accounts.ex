@@ -119,6 +119,8 @@ defmodule KilnCMS.Accounts do
       define :get_user, action: :read, get_by: [:id]
       define :get_user_by_email, action: :get_by_email, args: [:email]
       define :update_notification_prefs, action: :update_notification_prefs
+      # The console sidebar preset — self only; pass `actor: user`.
+      define :set_nav_preset, action: :set_nav_preset, args: [:nav_preset]
       # Two-factor (TOTP) self-service (issue #331) — pass `actor: user` (self).
       define :setup_totp, action: :setup_totp
       define :confirm_totp, action: :confirm_totp
@@ -129,9 +131,6 @@ defmodule KilnCMS.Accounts do
       # from the ceremony after Wax verification; see the action + preparation).
       define :complete_passkey_sign_in, action: :sign_in_with_passkey, args: [:user_id]
       # Admin-only: assign role + consumer audiences; pass `actor: admin`.
-      # The record MUST come from a read that suppressed the temporary-role fold
-      # (`KilnCMS.Accounts.RoleGrant.unfolded/0`) — the action refuses a folded
-      # one, because Ash would silently drop a `role` write that matched it.
       define :manage_user_access, action: :manage_access
       # Time-boxed elevation above the standing role (KilnCMS.Accounts.RoleGrant).
       # Pass both grant fields to grant, both blank to revoke early.

@@ -188,6 +188,20 @@ defmodule KilnCMSWeb.SeoComponents do
         to: a.to
       )
 
+  # Says what the link IS rather than that something is wrong: the numbered
+  # id is correct, and the author only needs it when sharing a section link.
+  def finding_message(%{code: :heading_anchor_renamed, args: a}, _pinned?) do
+    ngettext(
+      "“%{example}” links as #%{anchor}, not #%{slug} — an earlier heading or the page itself already uses #%{slug}.",
+      "%{count} headings link with a number added — “%{example}” links as #%{anchor}, not #%{slug}, because an earlier heading or the page itself already uses it.",
+      a.count,
+      count: a.count,
+      example: a.example,
+      anchor: a.anchor,
+      slug: a.slug
+    )
+  end
+
   # ── Images ────────────────────────────────────────────────────────────────
 
   def finding_message(%{code: :images_missing_alt, args: a}, _pinned?) do

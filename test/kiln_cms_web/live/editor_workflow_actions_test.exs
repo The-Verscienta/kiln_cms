@@ -104,8 +104,17 @@ defmodule KilnCMSWeb.EditorWorkflowActionsTest do
   end
 
   describe "console nav" do
+    # These are about the FULL sidebar, so the user is put on the Everything
+    # preset: a new account starts on Essentials, which draws no configure
+    # sections — the refutes below would then pass for the wrong reason, and
+    # `/editor/types` would only be found via the Home Structure tile.
+    defp everything(user) do
+      {:ok, _} = KilnCMS.Accounts.set_nav_preset(user, :everything, actor: user)
+      user
+    end
+
     test "a per-org admin is not shown links to the platform-admin consoles", %{conn: conn} do
-      person = authed_user(:editor)
+      person = everything(authed_user(:editor))
 
       Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
         user_id: person.id,
@@ -115,8 +124,9 @@ defmodule KilnCMSWeb.EditorWorkflowActionsTest do
 
       {:ok, lv, _html} = conn |> log_in(person) |> live(~p"/editor/overview")
 
-      # The org-admin groups render...
-      assert has_element?(lv, ~s(a[href="/editor/types"]))
+      # The org-admin groups render in the sidebar (scoped to <aside>: the Home
+      # Structure tile links to /editor/types too)...
+      assert has_element?(lv, ~s(aside a.side-link[href="/editor/types"]))
       # ...but not the consoles that would only bounce them.
       for path <-
             ~w(/editor/team /editor/billing /editor/system /editor/mail /editor/backups /editor/api-keys) do
@@ -125,11 +135,13 @@ defmodule KilnCMSWeb.EditorWorkflowActionsTest do
     end
 
     test "a platform admin is shown them, API keys included", %{conn: conn} do
-      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+      {:ok, lv, _html} =
+        conn |> log_in(everything(authed_user(:admin))) |> live(~p"/editor/overview")
 
       for path <-
             ~w(/editor/team /editor/billing /editor/system /editor/mail /editor/backups /editor/api-keys) do
-        assert has_element?(lv, ~s(a[href="#{path}"])), "#{path} missing for a platform admin"
+        assert has_element?(lv, ~s(aside a.side-link[href="#{path}"])),
+               "#{path} missing for a platform admin"
       end
     end
   end

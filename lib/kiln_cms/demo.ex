@@ -102,8 +102,9 @@ defmodule KilnCMS.Demo do
   """
   @spec locks_credentials?(term()) :: boolean()
   def locks_credentials?(nil), do: false
-  def locks_credentials?(%{role: :admin}), do: false
-  def locks_credentials?(_actor), do: enabled?()
+
+  def locks_credentials?(actor),
+    do: KilnCMS.Accounts.RoleGrant.effective_role(actor) != :admin and enabled?()
 
   @doc """
   Where the golden snapshot lives: `KILN_DEMO_GOLDEN_PATH`, else `demo/golden.dump`
