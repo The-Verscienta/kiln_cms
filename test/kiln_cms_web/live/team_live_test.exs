@@ -270,7 +270,7 @@ defmodule KilnCMSWeb.TeamLiveTest do
     Accounts.get_org_membership!(
       membership.user_id,
       membership.organization_id,
-      KilnCMS.Accounts.RoleGrant.unfolded() ++ [authorize?: false]
+      authorize?: false
     )
   end
 end

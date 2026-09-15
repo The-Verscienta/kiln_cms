@@ -147,6 +147,12 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **A temporary role is applied where a tier is decided; `role` on a read is always the standing tier.**
+  ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462) · [Account administration](docs/account-administration.md))
+
+- **Account removal no longer scans every admin-defined entry per type** — `entries.author_id` is indexed.
+  ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462))
+
 - **`config/runtime.exs` is now an index, not a 1,523-line file.**
   ([#1476](https://github.com/The-Verscienta/kiln_cms/issues/1476) · [long form](docs/changelog/unreleased.md#configruntimeexs-is-now-an-index-not-a-1523-line-file))
 

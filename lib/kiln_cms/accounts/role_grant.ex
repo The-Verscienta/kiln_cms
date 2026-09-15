@@ -22,20 +22,27 @@ defmodule KilnCMS.Accounts.RoleGrant do
   a row that already authorizes correctly. `effective_role/1` is the single
   answer, and `expression/1` is the same rule in SQL.
 
-  ## Where the rule is applied
+  ## Where the rule is applied: at the decision
 
-  `role` on an **actor struct** is what the policies read
-  (`actor_attribute_equals(:role, :admin)` on a dozen resources,
-  `KilnCMS.Accounts.Scoping.effective_tier/2`,
-  `KilnCMSWeb.LiveUserAuth.platform_admin?/1`). Rather than teach each of those
-  about the grant — a list to forget to add to, failing open —
-  `KilnCMS.Accounts.Preparations.FoldRoleGrant` folds `effective_role/1` into
-  the `role` field of every record both resources return. Every actor in the
-  system is loaded through a read, so by the time a grant is a millisecond past
-  its expiry the struct handed to Ash already says the standing tier.
+  `role` on a loaded record is always the **standing** tier — the column as
+  stored. Nothing rewrites it on read. Every place that decides what someone may
+  do asks `effective_role/1` instead, at the moment of deciding:
+  `KilnCMS.Accounts.Checks.PlatformAdmin` (the platform resources' admin check),
+  `KilnCMS.Accounts.Scoping.effective_tier/2` (every org-scoped tier check, the
+  console nav) and `KilnCMSWeb.LiveUserAuth.platform_admin_user?/1`.
 
-  The pre-fold value stays reachable as `:standing_role` metadata, which is what
-  the admin console shows beside the countdown — see `standing_role/1`.
+  An earlier version folded the grant into `role` on every read instead. It
+  needed a second layer anyway — a LiveView holds the actor it mounted with, so a
+  folded `role` outlived the grant that put it there — and the fold itself brought
+  two write hazards (Ash drops a submitted `role` equal to the folded one; a read
+  with an `after_action` hook cannot run atomically) that took a context flag, a
+  validation and a special case for Ash's internal reads to contain.
+
+  Deciding at the decision also fails in the safe direction. A site that reads
+  `role` directly where it should ask `effective_role/1` merely ignores a live
+  grant — the grantee sees less than they were given, and says so. The fold's
+  failure was the opposite: a site that trusted a folded `role` kept honouring a
+  grant after it expired.
 
   ## Elevation only
 
@@ -62,17 +69,15 @@ defmodule KilnCMS.Accounts.RoleGrant do
   The tier that applies to `record` right now: `granted_role` while the grant is
   live, the row's own `role` otherwise.
 
-  Takes a `User`, an `OrgMembership`, or any map carrying the three fields, so
-  the preparation and the console share one answer.
+  Takes a `User`, an `OrgMembership`, or any map carrying the three fields — a
+  bare `%{role: :admin}` system actor included, which has no grant and so answers
+  its `role`.
   """
-  @spec effective_role(map()) :: atom() | nil
+  @spec effective_role(map() | nil) :: atom() | nil
+  def effective_role(nil), do: nil
+
   def effective_role(record) do
-    # `standing_role/1`, not `Map.get(record, :role)`, on the expired branch: on a
-    # struct `FoldRoleGrant` folded while the grant was live, `role` still holds
-    # the granted tier. Reading it would make the check this function backs
-    # (`KilnCMS.Accounts.Checks.PlatformAdmin`) keep authorizing a long-lived
-    # actor whose grant has since run out.
-    if live?(record), do: Map.get(record, :granted_role), else: standing_role(record)
+    if live?(record), do: Map.get(record, :granted_role), else: Map.get(record, :role)
   end
 
   @doc """
@@ -93,65 +98,19 @@ defmodule KilnCMS.Accounts.RoleGrant do
   end
 
   @doc """
-  The standing tier behind a folded record — the value `role` held before
-  `KilnCMS.Accounts.Preparations.FoldRoleGrant` replaced it, or `role` itself on
-  a record that carried no live grant.
+  The standing tier a write will leave behind: the submitted `role` when the
+  action carries one, the record's own `role` otherwise.
 
-  Given a changeset, answers the tier the write is *about to* leave behind: the
-  submitted `role` when the action carries one, the record's standing tier
-  otherwise. That distinction is what lets one submit set `role` and the grant
-  together and be judged against the right baseline.
+  That distinction is what lets one submit set `role` and the grant together and
+  be judged against the right baseline.
   """
-  @spec standing_role(Ash.Changeset.t() | map()) :: atom() | nil
+  @spec standing_role(Ash.Changeset.t()) :: atom() | nil
   def standing_role(%Ash.Changeset{} = changeset) do
     case Ash.Changeset.fetch_change(changeset, :role) do
       {:ok, role} -> role
-      :error -> standing_role(changeset.data)
+      :error -> Map.get(changeset.data, :role)
     end
   end
-
-  def standing_role(%{__metadata__: %{standing_role: role}}) when role in @tiers, do: role
-  def standing_role(record), do: Map.get(record, :role)
-
-  @doc """
-  Whether `record` came back from a read that folded a live grant into `role`.
-
-  A folded record is the wrong base for a write and wrong in a silent direction
-  — see `KilnCMS.Accounts.Validations.UnfoldedRecord`, which refuses one.
-  """
-  @spec folded?(map()) :: boolean()
-  def folded?(%{__metadata__: %{standing_role: role}}) when role in @tiers, do: true
-  def folded?(_record), do: false
-
-  @doc """
-  Read options that suppress the fold — how a caller that is about to *write* a
-  role, or wants to show both tiers, asks for the row as stored.
-
-  A function rather than a documented literal so there is one spelling of the
-  context key: a typo'd one would fold silently, which is the failure this exists
-  to avoid. `KilnCMS.Accounts.Preparations.FoldRoleGrant` reads it.
-
-      Accounts.get_user(id, [actor: admin] ++ RoleGrant.unfolded())
-  """
-  @spec unfolded() :: keyword()
-  def unfolded, do: [context: %{fold_role_grant?: false}]
-
-  @doc false
-  # The inverse, for the preparation: whether this query wants the fold. Defaults
-  # to folding, so a read that says nothing gets the enforcing behaviour.
-  #
-  # Ash's own `internal?` reads never fold. Those are the ones Ash runs *in
-  # support of a write* — the atomic-upgrade re-read, relationship management —
-  # and for them the fold is not merely unnecessary but wrong, for the reason
-  # `unfolded/0` exists: a row about to be written must be seen as stored. It also
-  # keeps the hook off those queries entirely, which matters because a read
-  # carrying an `after_action` hook cannot be run as a single atomic statement, so
-  # folding there would quietly downgrade every `require_atomic?` update on these
-  # two resources to the stream strategy.
-  @spec fold?(Ash.Query.t()) :: boolean()
-  def fold?(%{context: %{fold_role_grant?: false}}), do: false
-  def fold?(%{context: %{private: %{internal?: true}}}), do: false
-  def fold?(_query), do: true
 
   @doc """
   Whether `granted` outranks `standing` — the elevation rule a grant must
@@ -166,11 +125,10 @@ defmodule KilnCMS.Accounts.RoleGrant do
   @doc """
   `effective_role/1` as an Ash expression over the grant columns, for the one
   place the question has to be asked of rows that were never loaded:
-  `KilnCMS.Accounts.Scoping.users_with_tier/2`'s roster query, and the AshOban
-  triggers' `where`.
+  `KilnCMS.Accounts.Scoping.users_with_tier/2`'s roster query.
 
   Written as a filter — "is the effective tier one of `tiers`" — rather than as
-  a projection, because that is what both callers need and because `if/3` over
+  a projection, because that is what the caller needs and because `if/3` over
   two enum columns reads far worse in SQL than the two-branch disjunction does.
   Splices into a larger filter with `^`, including inside an `exists/2` over
   `org_memberships` (whose columns are named identically, deliberately).
@@ -189,12 +147,4 @@ defmodule KilnCMS.Accounts.RoleGrant do
            granted_role in ^tiers)
     )
   end
-
-  @doc """
-  The attributes that make up a grant, in the order the console's form submits
-  them. Named here so the resources, the validation and the console cannot drift
-  on the spelling.
-  """
-  @spec fields() :: [atom()]
-  def fields, do: [:granted_role, :granted_role_expires_at]
 end

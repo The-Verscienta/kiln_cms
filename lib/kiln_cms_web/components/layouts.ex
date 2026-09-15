@@ -1123,7 +1123,8 @@ defmodule KilnCMSWeb.Layouts do
   # Shared authoring-nav links — rendered inline on desktop and stacked in the
   # mobile menu, so they're defined once. Used only by `Layouts.app` (the `/`
   # landing header), which has no site context — so these gate on the global
-  # `@current_user.role` (≈ the effective tier on the default org). The
+  # effective platform role (`RoleGrant.effective_role/1`, ≈ the effective tier
+  # on the default org), resolved once per render. The
   # per-org-tier nav is `console_nav` on the authoring surface (#419).
   attr :current_user, :map, default: nil
 
@@ -1135,19 +1136,20 @@ defmodule KilnCMSWeb.Layouts do
         "rounded-lg px-3 py-1.5 text-sm font-medium text-base-content/80 transition " <>
           "hover:bg-base-200 hover:text-base-content"
       )
+      |> assign(:tier, KilnCMS.Accounts.RoleGrant.effective_role(assigns.current_user))
 
     ~H"""
     <a href="/developers#graphql" class={@item}>{gettext("GraphQL")}</a>
     <a href="/developers#json-api" class={@item}>{gettext("JSON:API")}</a>
     <a
-      :if={@current_user && @current_user.role in [:editor, :admin]}
+      :if={@tier in [:editor, :admin]}
       href={~p"/editor/overview"}
       class={@item}
     >
       {gettext("Editor")}
     </a>
     <a
-      :if={@current_user && @current_user.role in [:editor, :admin]}
+      :if={@tier in [:editor, :admin]}
       href={~p"/editor/calendar"}
       class={@item}
     >
@@ -1156,7 +1158,7 @@ defmodule KilnCMSWeb.Layouts do
     <%!-- Only meaningful with more than one configured locale. --%>
     <a
       :if={
-        @current_user && @current_user.role in [:editor, :admin] &&
+        @tier in [:editor, :admin] &&
           length(KilnCMS.I18n.locales()) > 1
       }
       href={~p"/editor/translations"}
@@ -1165,35 +1167,35 @@ defmodule KilnCMSWeb.Layouts do
       {gettext("Translations")}
     </a>
     <a
-      :if={@current_user && @current_user.role in [:editor, :admin]}
+      :if={@tier in [:editor, :admin]}
       href={~p"/editor/settings"}
       class={@item}
     >
       {gettext("Settings")}
     </a>
     <a
-      :if={@current_user && @current_user.role == :admin}
+      :if={@tier == :admin}
       href={~p"/editor/fields"}
       class={@item}
     >
       {gettext("Fields")}
     </a>
     <a
-      :if={@current_user && @current_user.role == :admin}
+      :if={@tier == :admin}
       href={~p"/editor/forms"}
       class={@item}
     >
       {gettext("Forms")}
     </a>
     <a
-      :if={@current_user && @current_user.role == :admin}
+      :if={@tier == :admin}
       href={~p"/editor/types"}
       class={@item}
     >
       {gettext("Types")}
     </a>
     <a
-      :if={@current_user && @current_user.role == :admin}
+      :if={@tier == :admin}
       href={~p"/editor/api-keys"}
       class={@item}
     >
@@ -1202,7 +1204,7 @@ defmodule KilnCMSWeb.Layouts do
     <%!-- Plugin-contributed nav (D18), each gated by its declared role. --%>
     <a
       :for={item <- Kiln.Plugins.nav_items()}
-      :if={@current_user && KilnCMSWeb.ConsoleNav.plugin_visible?(item, @current_user.role)}
+      :if={@current_user && KilnCMSWeb.ConsoleNav.plugin_visible?(item, @tier)}
       href={item.path}
       class={@item}
     >

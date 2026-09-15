@@ -194,17 +194,16 @@ Either tier — the site tier on a membership, or the platform role on the user 
 can be granted for a bounded window: "editor on this site until Friday". Two
 columns carry it, `granted_role` and `granted_role_expires_at`, and the standing
 `role` is never overwritten, so expiry is a comparison rather than a scheduled
-write. `KilnCMS.Accounts.Preparations.FoldRoleGrant` presents a live grant as
-`role` on every read, which is how it reaches `Scoping.effective_tier/2` and the
-`actor_attribute_equals(:role, …)` policies without either knowing it exists.
+write. A loaded `role` is always the standing tier; `Scoping.effective_tier/2`
+and `Checks.PlatformAdmin` apply a live grant through
+`KilnCMS.Accounts.RoleGrant.effective_role/1` at the moment they decide.
 
 Grant a site tier from `/editor/team` (on the member's Edit panel) and a platform
 role from `/editor/accounts`. A grant carries **no scope axes** — it moves the
 tier only, leaving `editable_types`, `readable_types`, `field_grants` and the
 custom role exactly as they were.
 
-Full rules, including why a write of `role` must read the row unfolded first:
-[Account administration](account-administration.md).
+Full rules: [Account administration](account-administration.md).
 
 ## Later phases
 

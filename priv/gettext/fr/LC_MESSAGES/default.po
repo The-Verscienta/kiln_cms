@@ -4783,6 +4783,16 @@ msgstr "L'activation crée l'identité d'acteur permanente de ce site. L'identif
 msgid "End it now"
 msgstr "Y mettre fin maintenant"
 
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "End this temporary role now?"
+msgstr "Mettre fin à ce rôle temporaire maintenant ?"
+
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "End this temporary tier now?"
+msgstr "Mettre fin à ce niveau temporaire maintenant ?"
+
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Endpoint"

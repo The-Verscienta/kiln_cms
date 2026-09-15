@@ -207,6 +207,29 @@ defmodule KilnCMSWeb.PageControllerTest do
     assert html =~ "Open editor"
   end
 
+  # A read returns the standing `role`, so a gate that read `user.role` would see
+  # a viewer here. The page asks the effective role, which counts the live grant.
+  test "a viewer holding a live editor grant is shown the editor, not onboarding", %{
+    conn: conn
+  } do
+    viewer = user(:viewer)
+
+    {:ok, _} =
+      KilnCMS.Accounts.grant_user_temporary_role(
+        viewer,
+        %{
+          granted_role: :editor,
+          granted_role_expires_at: DateTime.add(DateTime.utc_now(), 1, :hour)
+        },
+        actor: user(:admin)
+      )
+
+    html = conn |> log_in(viewer) |> get(~p"/") |> html_response(200)
+
+    assert html =~ "Open editor"
+    refute html =~ "signed in as a viewer"
+  end
+
   # Both actions used to render `<Layouts.app>` without `current_org`, so the
   # nil-defaulted attr fell through to `Branding.for_org(nil)` — the DEFAULT
   # org's logo and site name, served under a tenant's own hostname. Surfaced
