@@ -254,6 +254,10 @@ Every summary line below that was shortened links to its own entry there.
 - **The new-password button says "Change password".**
   ([#1451](https://github.com/The-Verscienta/kiln_cms/issues/1451) · [long form](docs/changelog/unreleased.md#the-new-password-button-says-change-password))
 
+- **With every-write anchoring on, a system-actor write no longer crashes in
+  `AnchorVersion`; its anchor is attributed to `actor_id: nil`.**
+  ([#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402), [#910](https://github.com/The-Verscienta/kiln_cms/issues/910))
+
 ### Security
 
 - **A system actor, so internal callers run under the policies instead of around

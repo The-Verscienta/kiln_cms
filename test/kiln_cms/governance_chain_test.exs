@@ -612,6 +612,38 @@ defmodule KilnCMS.Governance.ChainTest do
       # tamper verdict above.
       assert autosave_count(page) == 3
     end
+
+    # #1402: internal callers run as `%KilnCMS.SystemActor{}`, which has no
+    # `:id`. `AnchorVersion.change/3` read `context.actor.id` while BUILDING the
+    # changeset, so any system-actor write it did not skip by name raised a
+    # `KeyError` (#910 found it on `:reindex_search_text`) — before the policies
+    # were even asked.
+    test "a system-actor versioned write is anchored and attributed to no one" do
+      actor = admin()
+
+      page =
+        CMS.create_page!(
+          %{title: "Draft", slug: "chain-sys-#{System.unique_integer([:positive])}"},
+          actor: actor
+        )
+
+      system = KilnCMS.SystemActor.new(:firing)
+
+      # No versioned content action admits a system actor, so the honest answer
+      # is a policy refusal — not a crash while building the changeset.
+      assert {:error, %Ash.Error.Forbidden{}} =
+               CMS.update_page(page, %{title: "Refused"}, actor: system)
+
+      # The write itself, past the policies, still carries the system actor into
+      # the change: it is versioned, and the chain extends over it.
+      page = CMS.update_page!(page, %{title: "System"}, actor: system, authorize?: false)
+
+      anchor = Chain.latest_anchor("page", page.id, page.org_id)
+      assert anchor.version_count == Chain.compute(Page, page.id, page.org_id).version_count
+      assert anchor.version_count == 2
+      assert is_nil(anchor.actor_id)
+      assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+    end
   end
 
   # #910: `KilnCMS.Firing.Engine.fire/2` recomputes `search_text` against a
