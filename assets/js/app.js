@@ -30,6 +30,7 @@ import {PasskeyEnroll, initPasskeySignIn} from "./passkeys"
 import {PushToggle} from "./push"
 import {initAdvisoryJump} from "./advisory_jump"
 import {initRevealSection} from "./reveal_section"
+import {FlashAutoDismiss} from "./flash_auto_dismiss"
 import {SavedTicker} from "./saved_ticker"
 import {BodyImageUploader} from "./body_image_uploader"
 import {watchLiveness} from "./liveness"
@@ -40,6 +41,9 @@ const Hooks = {
   SavedTicker,
   BodyImageUploader,
   FocusTrap,
+  // Info flashes close themselves after a few seconds — see
+  // assets/js/flash_auto_dismiss.js.
+  FlashAutoDismiss,
   // Passkey enrolment on /editor/settings (#331) — see assets/js/passkeys.js.
   PasskeyEnroll,
   // Web Push opt-in on /editor/settings (#628) — see assets/js/push.js.
