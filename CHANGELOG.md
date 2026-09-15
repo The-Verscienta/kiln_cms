@@ -139,6 +139,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Notifications are persisted, not only mailed.**
   ([#1472](https://github.com/The-Verscienta/kiln_cms/issues/1472) · [long form](docs/changelog/unreleased.md#notifications-are-persisted-not-only-mailed))
 
+- **The editor says when a heading's `#link` gets a number.**
+  ([#1439](https://github.com/The-Verscienta/kiln_cms/pull/1439) · [long form](docs/changelog/unreleased.md#the-editor-says-when-a-headings-link-gets-a-number))
+
 - **`/editor/inbox`.**
   ([#1472](https://github.com/The-Verscienta/kiln_cms/issues/1472) · [long form](docs/changelog/unreleased.md#editorinbox))
 

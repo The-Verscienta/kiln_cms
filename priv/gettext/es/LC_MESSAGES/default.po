@@ -14306,6 +14306,13 @@ msgstr "— Elija un tipo —"
 msgid "— Ungrouped —"
 msgstr "— Sin grupo —"
 
+#: lib/kiln_cms_web/components/seo_components.ex
+#, elixir-autogen, elixir-format
+msgid "“%{example}” links as #%{anchor}, not #%{slug} — an earlier heading or the page itself already uses #%{slug}."
+msgid_plural "%{count} headings link with a number added — “%{example}” links as #%{anchor}, not #%{slug}, because an earlier heading or the page itself already uses it."
+msgstr[0] "“%{example}” enlaza como #%{anchor}, no como #%{slug}: un encabezado anterior o la propia página ya usa #%{slug}."
+msgstr[1] "%{count} encabezados enlazan con un número añadido: “%{example}” enlaza como #%{anchor}, no como #%{slug}, porque un encabezado anterior o la propia página ya lo usa."
+
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "“%{name}” holds %{count} tag(s). Delete the group anyway? The tags are kept and become ungrouped."

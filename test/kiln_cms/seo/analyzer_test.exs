@@ -379,6 +379,54 @@ defmodule KilnCMS.Seo.AnalyzerTest do
       assert finding.args == %{from: 2, to: 4, indexes: [length(long_body()) + 1]}
     end
 
+    # The public page never duplicates an id — a repeat or a layout-owned id
+    # is numbered (`KilnCMS.HeadingAnchors`) — so this tells the author which
+    # `#link` a heading really has.
+    test "a heading whose #link gets a number is reported with its real anchor" do
+      blocks =
+        long_body() ++
+          [
+            %{"_type" => "heading", "text" => "Main", "level" => 2},
+            %{"_type" => "heading", "text" => "Setup", "level" => 2},
+            %{
+              "_type" => "rich_text",
+              "body" => [
+                %{"_type" => "block", "style" => "h2", "children" => [%{"text" => "Setup"}]}
+              ]
+            }
+          ]
+
+      report = analyze(%{}, blocks)
+      finding = Enum.find(report.findings, &(&1.code == :heading_anchor_renamed))
+      n = length(long_body())
+
+      assert finding.severity == :info
+      assert finding.lenses == [:seo]
+
+      assert finding.args == %{
+               count: 2,
+               example: "Main",
+               anchor: "main-1",
+               slug: "main",
+               indexes: [n, n + 2]
+             }
+
+      assert KilnCMSWeb.SeoComponents.finding_message(finding) ==
+               "2 headings link with a number added — “Main” links as #main-1, not #main, " <>
+                 "because an earlier heading or the page itself already uses it."
+    end
+
+    test "headings that each keep their own slug report nothing" do
+      blocks =
+        long_body() ++
+          [
+            %{"_type" => "heading", "text" => "Setup", "level" => 2},
+            %{"_type" => "heading", "text" => "Usage", "level" => 2}
+          ]
+
+      refute Enum.any?(analyze(%{}, blocks).findings, &(&1.code == :heading_anchor_renamed))
+    end
+
     test "long content with no headings at all is reported" do
       blocks = [
         %{

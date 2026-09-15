@@ -24,12 +24,28 @@ defmodule KilnCMS.HeadingAnchors do
   Ids are derived, never stored. The rich-text scrubber
   (`KilnCMS.HTMLSanitizer.RichText`) still strips every attribute off a
   heading, so an author picks the words, not the id.
+
+  ## Ids the page already owns
+
+  The numbering starts with `reserved_ids/0` — the ids the public layout puts
+  on every page — already taken, so a heading called "Main" is `#main-1` and
+  never a second `id="main"`. The author hears about it in the editor
+  (`Kiln.Advisory.Checks.Headings`, which numbers through `ids/1`, the same
+  counter). `KilnCMSWeb.ContentControllerTest` renders a public page and fails
+  if the layout grows an id this list doesn't name.
   """
 
   # Everything github-slugger keeps: letters, combining marks, digits,
   # connector punctuation (`_`), `-` and space. The id charset is therefore
   # closed — no quote, `<` or `&` can reach the attribute.
   @stripped ~r/[^\p{L}\p{M}\p{N}\p{Pc} -]/u
+
+  # `<main id="main">` in `Layouts.public`, the skip link's target.
+  @reserved_ids ~w(main)
+
+  @doc "The ids public page chrome uses, which no heading may take."
+  @spec reserved_ids() :: [String.t()]
+  def reserved_ids, do: @reserved_ids
 
   @bare_heading ~r/<h([1-6])>(.*?)<\/h\1>/s
 
@@ -63,8 +79,29 @@ defmodule KilnCMS.HeadingAnchors do
   """
   @spec anchor_tree([map()]) :: [map()]
   def anchor_tree(blocks) when is_list(blocks) do
-    {blocks, _seen} = anchor_blocks(blocks, %{})
+    {blocks, _seen} = anchor_blocks(blocks, seed())
     blocks
+  end
+
+  @doc """
+  The ids a page's headings get, in order, for their plain texts — `nil`
+  where a heading has no slug. The same counter `anchor_tree/1` runs, so the
+  editor can say which heading links somewhere other than its own slug.
+
+      iex> KilnCMS.HeadingAnchors.ids(["Main", "Setup", "Setup", "?!"])
+      ["main-1", "setup", "setup-1", nil]
+  """
+  @spec ids([String.t()]) :: [String.t() | nil]
+  def ids(texts) when is_list(texts) do
+    {ids, _seen} =
+      Enum.map_reduce(texts, seed(), fn text, seen ->
+        case slug(text) do
+          nil -> {nil, seen}
+          base -> unique(base, seen)
+        end
+      end)
+
+    ids
   end
 
   @doc """
@@ -74,7 +111,9 @@ defmodule KilnCMS.HeadingAnchors do
   entity-escaped. A heading that already carries attributes is left alone.
   """
   @spec put_ids(String.t()) :: String.t()
-  def put_ids(html) when is_binary(html), do: html |> put_ids(%{}) |> elem(0)
+  def put_ids(html) when is_binary(html), do: html |> put_ids(seed()) |> elem(0)
+
+  defp seed, do: Map.new(@reserved_ids, &{&1, 0})
 
   defp anchor_blocks(blocks, seen), do: Enum.map_reduce(blocks, seen, &anchor_block/2)
 
