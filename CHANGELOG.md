@@ -275,6 +275,10 @@ Every summary line below that was shortened links to its own entry there.
 - **`mix kiln.authz.check` now gates all of `lib/`.**
   ([#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402) · [long form](docs/changelog/unreleased.md#mix-kilnauthzcheck-now-gates-all-of-lib))
 
+- **Firing no longer fails, or mints an unattributed anchor, with every-write anchoring on.**
+  `:reindex_search_text` is skipped by `AnchorVersion` as PaperTrail already skips it.
+  ([#910](https://github.com/The-Verscienta/kiln_cms/issues/910))
+
 ## [0.8.0] - 2026-09-11
 
 Long form: [docs/changelog/v0.8.0.md](docs/changelog/v0.8.0.md) —
