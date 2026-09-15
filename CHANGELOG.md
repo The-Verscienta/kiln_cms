@@ -258,6 +258,10 @@ Every summary line below that was shortened links to its own entry there.
   `AnchorVersion`; its anchor is attributed to `actor_id: nil`.**
   ([#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402), [#910](https://github.com/The-Verscienta/kiln_cms/issues/910))
 
+- **A system-actor publish or membership transition no longer crashes on the
+  actor's missing `:id`; it is attributed to `actor_id: nil`.**
+  ([#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402), [#1486](https://github.com/The-Verscienta/kiln_cms/pull/1486))
+
 ### Security
 
 - **A system actor, so internal callers run under the policies instead of around
