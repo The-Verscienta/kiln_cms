@@ -119,6 +119,13 @@ msgid_plural "%{count} documents"
 msgstr[0] "%{count} document"
 msgstr[1] "%{count} documents"
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} draft"
+msgid_plural "%{count} drafts"
+msgstr[0] "%{count} brouillon"
+msgstr[1] "%{count} brouillons"
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} edit(s) since the last anchor — covered at the next publish."
@@ -172,11 +179,19 @@ msgstr[1] "%{count} images sélectionnées"
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
+msgid "%{count} in review"
+msgid_plural "%{count} in review"
+msgstr[0] "%{count} en relecture"
+msgstr[1] "%{count} en relecture"
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
 msgid "%{count} item needs your approval"
 msgid_plural "%{count} items need your approval"
 msgstr[0] "%{count} élément nécessite votre approbation"
 msgstr[1] "%{count} éléments nécessitent votre approbation"
 
+#: lib/kiln_cms_web/live/overview_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} media item"
@@ -252,6 +267,13 @@ msgid "%{count} post"
 msgid_plural "%{count} posts"
 msgstr[0] "%{count} article"
 msgstr[1] "%{count} articles"
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} published"
+msgid_plural "%{count} published"
+msgstr[0] "%{count} publié"
+msgstr[1] "%{count} publiés"
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -2125,6 +2147,11 @@ msgstr "Sauvegarde lancée — cette page se met à jour à la fin."
 #, elixir-autogen, elixir-format
 msgid "Backups"
 msgstr "Sauvegardes"
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Backups aren't set up yet — turn them on before you go live."
+msgstr "Les sauvegardes ne sont pas encore configurées — activez-les avant la mise en ligne."
 
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/billing_live.ex
@@ -4380,6 +4407,16 @@ msgstr "Terminer la sélection"
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
+msgid "Done — editors submit for review and an admin publishes."
+msgstr "C'est fait — les éditeurs soumettent à relecture et un administrateur publie."
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Done — you publish directly. Anyone you add as an editor can too."
+msgstr "C'est fait — vous publiez directement. Les éditeurs que vous ajoutez le peuvent aussi."
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
 msgid "Done:"
 msgstr "Terminé :"
 
@@ -4677,6 +4714,16 @@ msgstr "Les éditeurs envoient leur travail en relecture, et un administrateur l
 #, elixir-autogen, elixir-format
 msgid "Edits keep the previous file for already-published content."
 msgstr "Les modifications conservent le fichier précédent pour le contenu déjà publié."
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Either way, a platform admin can change it later on the Team page."
+msgstr "Dans les deux cas, un administrateur de la plateforme pourra le modifier plus tard sur la page Équipe."
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Either way, you can change it later on the Team page."
+msgstr "Dans les deux cas, vous pourrez le modifier plus tard sur la page Équipe."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/newsletter_live.ex
@@ -5926,10 +5973,20 @@ msgstr "Survolez un bloc et cliquez sur Modifier pour le changer sur la page."
 msgid "How URLs are built, and bulk regeneration."
 msgstr "Comment les URL sont construites, et régénération en masse."
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "How do you publish?"
+msgstr "Comment publiez-vous ?"
+
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "How this instance sends email, and its DNS records."
 msgstr "Comment cette instance envoie ses e-mails, et ses enregistrements DNS."
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "I have a team — review before publishing"
+msgstr "J'ai une équipe — relecture avant publication"
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -6223,6 +6280,11 @@ msgstr "Retournez dans la console pour rédiger et publier."
 #, elixir-autogen, elixir-format
 msgid "June"
 msgstr "juin"
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Just me — publish directly"
+msgstr "Moi seul — publier directement"
 
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
@@ -7793,6 +7855,11 @@ msgstr "Rien à renommer"
 msgid "Nothing unread."
 msgstr "Rien de non lu."
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nothing written or uploaded yet."
+msgstr "Rien n'a encore été rédigé ni importé."
+
 #: lib/kiln_cms_web/live/notification_bell.ex
 #, elixir-autogen, elixir-format
 msgid "Nothing yet."
@@ -8033,10 +8100,20 @@ msgstr "Ouvrir %{type}"
 msgid "Open Backups to check the schedule or take one now."
 msgstr "Ouvrez Sauvegardes pour vérifier la planification ou en lancer une."
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Open Backups to set a schedule or take the first one."
+msgstr "Ouvrez Sauvegardes pour planifier une sauvegarde ou lancer la première."
+
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
 msgid "Open Swagger UI"
 msgstr "Ouvrir Swagger UI"
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Open Team"
+msgstr "Ouvrir Équipe"
 
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex
 #, elixir-autogen, elixir-format
@@ -9631,6 +9708,11 @@ msgstr "Bloc de texte enrichi"
 #, elixir-autogen, elixir-format
 msgid "Rich text editor"
 msgstr "Éditeur de texte enrichi"
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Right now editors submit their work for review and only an admin can publish. Pick what fits this site."
+msgstr "Actuellement, les éditeurs soumettent leur travail à relecture et seul un administrateur peut publier. Choisissez ce qui convient à ce site."
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
@@ -12958,11 +13040,6 @@ msgstr "Ce à quoi un document de ce site est confronté en ce moment : les règ
 msgid "What a match on these phrases means"
 msgstr "Ce que signifie une correspondance sur ces expressions"
 
-#: lib/kiln_cms_web/live/overview_live.ex
-#, elixir-autogen, elixir-format
-msgid "What needs you next — then eight domains around your content."
-msgstr "Ce qui requiert votre attention en premier — puis huit domaines autour de votre contenu."
-
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "What other servers show for this actor. Peers refetch it on their own schedule."
@@ -13370,6 +13447,11 @@ msgstr "Votre navigateur bloque les notifications pour ce site. Autorisez-les da
 #, elixir-autogen, elixir-format
 msgid "Your browser will prompt you to confirm with this device's screen lock."
 msgstr "Votre navigateur vous demandera de confirmer avec le verrouillage d'écran de cet appareil."
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Your choice could not be saved."
+msgstr "Votre choix n'a pas pu être enregistré."
 
 #: lib/kiln_cms_web/live/account_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
