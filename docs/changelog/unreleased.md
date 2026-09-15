@@ -458,6 +458,21 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="a-menu-items-edit-form-no-longer-shares-input-ids-with-the-add-form"></a>
+
+- **A menu item's Edit form no longer shares input ids with the Add form.**
+  The "Add an item" card is always on the menu builder, and the inline Edit
+  form was built from the same `item` params with no id prefix, so opening
+  Edit rendered two `id="item_label"` inputs (and two of every other field).
+  Clicking an Edit label focused the Add form's input, and LiveView's DOM
+  patching could target the wrong element. The Edit form now keeps the
+  `item[...]` param names but prefixes its ids with the item
+  (`edit_item_<id>_label`), both when it opens and when a refused save
+  re-renders it. This also removes an intermittent CI failure: LiveViewTest
+  reports a duplicate id by messaging its own proxy after replying, so the
+  existing Edit test only failed when the proxy got scheduled before the test
+  exited.
+
 <a id="notification-bell-and-inbox-fixes-from-review"></a>
 
 - **Notification bell and inbox fixes from review.** A review of the
