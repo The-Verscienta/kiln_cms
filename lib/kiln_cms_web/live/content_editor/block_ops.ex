@@ -32,6 +32,10 @@ defmodule KilnCMSWeb.ContentEditor.BlockOps do
     {:cont, attach_hook(socket, :editor_block_ops, :handle_event, &on_event/3)}
   end
 
+  # An unsaved new document has no block form yet (the canvas appears once
+  # the row exists), so a block event from one is not ours to apply.
+  defp on_event(_event, _params, %{assigns: %{record: nil}} = socket), do: {:cont, socket}
+
   # A columns block carries a socket-managed child tree, so it's inserted with a
   # stable id (seeded into `block_children`) and a default two-column layout.
   # `after` (a block id, "start", or absent) positions the new block (B2).

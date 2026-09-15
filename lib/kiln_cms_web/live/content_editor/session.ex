@@ -77,6 +77,11 @@ defmodule KilnCMSWeb.ContentEditor.Session do
 
   # ── handle_info hooks ───────────────────────────────────────────────────────
 
+  # An unsaved new document (`/editor/content/:type/new`) has no record, and
+  # every hook below is keyed on one (lock topic, presence, autosave). Pass
+  # through; `ContentEditorLive` handles or drops it.
+  defp info(_message, %{assigns: %{record: nil}} = socket), do: {:cont, socket}
+
   # A pop-out preview window opened or closed — flip the broadcast gate.
   defp info(
          %Phoenix.Socket.Broadcast{event: "presence_diff", topic: "previewing:" <> _},
@@ -251,6 +256,9 @@ defmodule KilnCMSWeb.ContentEditor.Session do
   defp info(_message, socket), do: {:cont, socket}
 
   # ── handle_event hooks ──────────────────────────────────────────────────────
+
+  # No record, no lock topic: see the matching `info/2` guard above.
+  defp event(_event, _params, %{assigns: %{record: nil}} = socket), do: {:cont, socket}
 
   defp event("field_focus", %{"field" => field}, socket) when is_binary(field) do
     {:halt, focus_field(socket, field)}

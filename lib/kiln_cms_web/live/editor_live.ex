@@ -9,13 +9,12 @@ defmodule KilnCMSWeb.EditorLive do
 
   import Ash.Expr, only: [expr: 1]
 
-  alias KilnCMS.Accounts.Scoping
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Compliance
   alias KilnCMS.Compliance.Settings
   alias KilnCMS.I18n
-  alias KilnCMS.Slug
+  alias KilnCMSWeb.ContentEditor.NewDraft
   alias KilnCMSWeb.Params
 
   import KilnCMSWeb.ComplianceComponents, only: [compliance_grade_badge: 1]
@@ -212,28 +211,10 @@ defmodule KilnCMSWeb.EditorLive do
   defp editable_types(org_id, actor) do
     org_id
     |> ContentTypes.all_for_org()
-    |> Enum.filter(&may_author?(actor, org_id, &1))
+    # The same question the create policy asks, shared with the unsaved-editor
+    # mount so the button and the page it opens cannot disagree.
+    |> Enum.filter(&NewDraft.may_author?(actor, org_id, &1))
   end
-
-  # The same question the create policy asks (`Checks.EditableContentType`), so
-  # the button and the action cannot disagree.
-  defp may_author?(actor, org_id, content_type) do
-    case Scoping.effective_tier(actor, org_id) do
-      :admin ->
-        true
-
-      :editor ->
-        Scoping.permitted?(actor, org_id, :editable_types, type_name_of(content_type))
-
-      _ ->
-        false
-    end
-  end
-
-  # `editable_types` groups every dynamic type under `entry` (see
-  # docs/granular-rbac.md) — deliberately, unlike field grants.
-  defp type_name_of(%{source: :dynamic}), do: "entry"
-  defp type_name_of(%{type: type}), do: to_string(type)
 
   # The types this page pulls rows from: every editable type, or just the one
   # the `type` filter names. Filtering here rather than after the merge keeps
@@ -249,19 +230,12 @@ defmodule KilnCMSWeb.EditorLive do
   defp type_value(%{type: type}), do: to_string(type)
 
   @impl true
+  # Opens the editor on an UNSAVED document; no row is written here. The first
+  # title or Save creates it (`KilnCMSWeb.ContentEditor.NewDraft`), so an
+  # abandoned click no longer leaves an "Untitled …" draft behind. The `/new`
+  # mount re-checks who may author the type — this button is not the boundary.
   def handle_event("new", %{"kind" => kind}, socket) when is_binary(kind) do
-    attrs = %{
-      title: "Untitled #{kind}",
-      # NOT `System.unique_integer/1` (#834): that counter resets on every VM
-      # start, while the `untitled-N` rows it must miss live in Postgres and
-      # outlive any restart — so a fresh node re-issues low numbers and the
-      # create fails with "slug has already been taken", leaving the button
-      # doing nothing.
-      slug: "untitled-#{Slug.random_suffix()}"
-    }
-
-    record = create!(kind, attrs, socket.assigns.actor, socket.assigns.current_org)
-    {:noreply, push_navigate(socket, to: edit_path(kind, record.id))}
+    {:noreply, push_navigate(socket, to: ~p"/editor/content/#{kind}/new")}
   end
 
   # Filter state lives in the URL (audit U-M3): refresh, back button, and
@@ -586,9 +560,6 @@ defmodule KilnCMSWeb.EditorLive do
   # tenant-scoped so an editor on one site's subdomain can only see and act on
   # that site's content. `org_id` is writable? false, so the tenant is the only
   # way to set/scope it.
-  defp create!(kind, attrs, actor, org),
-    do: ContentTypes.create!(kind, attrs, actor: actor, tenant: org)
-
   defp get!(kind, id, actor, org),
     do: ContentTypes.get_record!(kind, id, actor: actor, tenant: org)
 

@@ -3217,6 +3217,11 @@ msgstr "No se pudo crear ese menú."
 msgid "Couldn't create that translation."
 msgstr "No se pudo crear esa traducción."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't create the draft. Try again."
+msgstr "No se pudo crear el borrador. Inténtalo de nuevo."
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't delete that field."
@@ -6992,6 +6997,7 @@ msgstr "Nuevo"
 msgid "New %{kind} name"
 msgstr "Nombre de la nueva %{kind}"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "New %{type}"
@@ -7618,6 +7624,11 @@ msgstr "Fuera de los feeds"
 #, elixir-autogen, elixir-format
 msgid "Not restored"
 msgstr "No se restaura"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Not saved yet. The draft is created as soon as you give it a title."
+msgstr "Aún no se ha guardado. El borrador se crea en cuanto le das un título."
 
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
@@ -9802,6 +9813,11 @@ msgstr "Guardar personalización de marca"
 #, elixir-autogen, elixir-format
 msgid "Save details"
 msgstr "Guardar detalles"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Save draft"
+msgstr "Guardar borrador"
 
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #: lib/kiln_cms_web/live/presentation_live.ex
@@ -13082,6 +13098,16 @@ msgstr "Puede crear e iniciar uno, pero no se sirve ninguna variante ni se mide 
 #, elixir-autogen, elixir-format
 msgid "You can view this content but not edit it."
 msgstr "Puedes ver este contenido, pero no editarlo."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "You can't create %{type} content."
+msgstr "No puedes crear contenido de tipo %{type}."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "You can't create this content."
+msgstr "No puedes crear este contenido."
 
 #: lib/kiln_cms_web/controllers/billing_controller.ex
 #, elixir-autogen, elixir-format

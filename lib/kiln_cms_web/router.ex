@@ -357,6 +357,10 @@ defmodule KilnCMSWeb.Router do
       # Generic editor route — works for any content type (incl. ones generated
       # by `mix kiln.gen.content`). The `:page`/`:post` routes are kept as
       # backward-compatible aliases.
+      # An unsaved new document: nothing is written until the writer's first
+      # title or Save, then the same LiveView patches to the `:id` route. Must
+      # precede it, or "new" would be read as an id.
+      live "/editor/content/:type/new", ContentEditorLive, :new
       live "/editor/content/:type/:id", ContentEditorLive, :content
       live "/editor/pages/:id", ContentEditorLive, :page
       live "/editor/posts/:id", ContentEditorLive, :post

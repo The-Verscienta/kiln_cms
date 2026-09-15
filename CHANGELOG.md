@@ -144,6 +144,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **"New page" no longer writes a row until you start writing.** The draft is
+  created on the first title keystroke or Save.
+  ([long form](docs/changelog/unreleased.md#new-page-no-longer-writes-a-row-until-you-start-writing))
+
 - **`config/runtime.exs` is now an index, not a 1,523-line file.**
   ([#1476](https://github.com/The-Verscienta/kiln_cms/issues/1476) · [long form](docs/changelog/unreleased.md#configruntimeexs-is-now-an-index-not-a-1523-line-file))
 
