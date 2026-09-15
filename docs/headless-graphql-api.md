@@ -18,7 +18,7 @@ what the surface exposes and how writes are authorized.
 | Path | Availability | Purpose |
 |------|--------------|---------|
 | `POST /gql` | always on | GraphQL query endpoint (headless consumers) |
-| `/gql/playground` | **dev only** | Interactive GraphiQL playground |
+| `/gql/playground` | **dev only** — not served by a production build | Interactive GraphiQL playground |
 
 The endpoint is rate-limited (`KilnCMSWeb.Plugs.RateLimit, :gql`) and reads an
 optional bearer token (`load_from_bearer`). Anonymous requests are fully
@@ -275,7 +275,9 @@ content never leaves a stale artifact. Draft edits do not fire.
 
 ## Playground examples
 
-Open `/gql/playground` in dev and try these.
+Open `/gql/playground` on a local development server and try these. A
+production deployment does not serve the playground; send the same queries as a
+`POST` to `/gql` instead.
 
 ### Fetch a published post by slug
 

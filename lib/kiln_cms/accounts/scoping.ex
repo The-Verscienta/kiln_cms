@@ -201,20 +201,18 @@ defmodule KilnCMS.Accounts.Scoping do
   (what the web layer passes from `current_org`), an `%Organization{}`, or nil
   (default org).
 
-  Nothing here knows about **temporary tiers** (`KilnCMS.Accounts.RoleGrant`) and
-  nothing needs to: both the actor and the membership were loaded through reads
-  that `KilnCMS.Accounts.Preparations.FoldRoleGrant` had already folded, so the
-  `role` each branch reads is the tier in force at that moment.
+  Every branch resolves **temporary tiers** (`KilnCMS.Accounts.RoleGrant`) through
+  `RoleGrant.effective_role/1`, here, at the moment of the decision — on the user
+  for the platform and legacy branches, on the membership for the member branch.
+  A loaded `role` is always the standing tier, and a LiveView holds the actor it
+  mounted with, so the grant's expiry has to be compared with the clock now
+  rather than trusted from any earlier read.
   """
   @spec effective_tier(
           map() | nil,
           Ash.Query.t() | Ash.Changeset.t() | struct() | String.t() | nil
         ) :: :admin | :editor | :viewer | :none
   def effective_tier(%{} = actor, subject) do
-    # `RoleGrant.effective_role/1` rather than matching `%{role: :admin}`: a
-    # LiveView holds the actor it mounted with, so a folded `role: :admin` can
-    # outlive the grant that put it there. The expiry is re-checked here, at the
-    # moment of the decision.
     if RoleGrant.effective_role(actor) == :admin,
       do: :admin,
       else: member_tier(actor, subject)
@@ -226,7 +224,7 @@ defmodule KilnCMS.Accounts.Scoping do
     org = subject_org_id(subject)
 
     case affiliation(actor, org) do
-      {:member, membership} -> membership.role
+      {:member, membership} -> RoleGrant.effective_role(membership)
       :unaffiliated -> legacy_tier(actor, org)
       :foreign_org -> :none
     end
@@ -259,9 +257,9 @@ defmodule KilnCMS.Accounts.Scoping do
 
     # Every `role` test goes through `RoleGrant.expression/1`, which is
     # `effective_role/1` in SQL — a temporary admin belongs on the admin roster
-    # while their grant is live and not a minute longer. The read below folds the
-    # returned rows the same way (`Preparations.FoldRoleGrant`), so a caller that
-    # reads `user.role` off this list sees the tier it matched on.
+    # while their grant is live and not a minute longer. The rows come back as
+    # stored, so a caller that needs the tier a row matched on asks
+    # `RoleGrant.effective_role/1`, not `user.role`.
     #
     # The `exists/2` clause resolves the same expression against the membership's
     # own columns, which are named identically for exactly this reason.

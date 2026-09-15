@@ -34,14 +34,28 @@
       )}
     </p>
     <pre class="mt-4 overflow-x-auto rounded-lg bg-base-200/60 p-4 text-xs leading-6"><code>curl -s "https://&lt;this-site&gt;/api/json/posts?sort=-published_at&amp;page[limit]=5"</code></pre>
+    <%!-- The explorer and spec follow `:api_docs` (off in prod unless
+         `API_DOCS_ENABLED`); `ApiDocs` 404s both when it is off, so only link
+         to them when they will actually answer. --%>
+    <p
+      :if={!KilnCMSWeb.Plugs.ApiDocs.enabled?()}
+      id="api-docs-disabled"
+      class="mt-4 rounded-lg border border-base-content/15 bg-base-200/60 px-4 py-3 text-sm text-base-content/70"
+    >
+      {gettext(
+        "The interactive Swagger UI and the OpenAPI spec are switched off on this deployment. An operator can turn them on with API_DOCS_ENABLED=true."
+      )}
+    </p>
     <div class="mt-4 flex flex-wrap items-center gap-3">
       <a
+        :if={KilnCMSWeb.Plugs.ApiDocs.enabled?()}
         href="/api/json/swaggerui"
         class="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-content shadow-sm transition hover:bg-primary/90"
       >
         {gettext("Open Swagger UI")}
       </a>
       <a
+        :if={KilnCMSWeb.Plugs.ApiDocs.enabled?()}
         href="/api/json/open_api"
         class="rounded-lg border border-base-content/20 px-4 py-2 text-sm font-semibold transition hover:bg-base-200"
       >

@@ -110,6 +110,43 @@ defmodule KilnCMSWeb.CalendarLiveTest do
     assert html =~ "Scheduled unpublish"
   end
 
+  test "a month cell's '+N more' links to the week holding that day", %{conn: conn} do
+    admin = authed_admin()
+    day = soon()
+
+    titles =
+      for hour <- 8..12 do
+        page =
+          CMS.create_page!(
+            %{
+              title: "Crowded #{hour} #{System.unique_integer([:positive])}",
+              slug: slug(),
+              scheduled_at: DateTime.new!(day, Time.new!(hour, 0, 0))
+            },
+            actor: admin
+          )
+
+        page.title
+      end
+
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(calendar_at(day))
+
+    # Scoped to the day's grid cell: the small-screen list below the grid
+    # renders every title, so a page-wide match would find all five.
+    cell = "ul[data-calendar-drop='#{Date.to_iso8601(day)}']"
+    shown = fn -> Enum.count(titles, &(lv |> element(cell) |> render() =~ &1)) end
+
+    # Five on one day, four chips per month cell: one is hidden.
+    assert shown.() == 4
+
+    lv |> element("#{cell} a", "+1 more") |> render_click()
+
+    assert_patch(lv, ~p"/editor/calendar?#{[view: "week", at: Date.to_iso8601(day)]}")
+
+    assert shown.() == 5
+    refute has_element?(lv, "#{cell} a", "more")
+  end
+
   test "month navigation moves the window", %{conn: conn} do
     admin = authed_admin()
     this_month = DateTime.new!(Date.beginning_of_month(Date.utc_today()), ~T[12:00:00])
