@@ -540,7 +540,9 @@ defmodule KilnCMSWeb.ConsoleNavTest do
                user
                |> Ash.Changeset.for_update(
                  :set_nav_preset,
-                 %{nav_preset: :everything, role: :admin}, actor: user)
+                 %{nav_preset: :everything, role: :admin},
+                 actor: user
+               )
                |> Ash.update()
     end
   end
