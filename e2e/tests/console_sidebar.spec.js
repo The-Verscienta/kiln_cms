@@ -17,6 +17,15 @@ test.describe("console sidebar", () => {
 
   test.beforeEach(async ({ page }) => {
     await signInAsAdmin(page);
+
+    // The seeded admin is a new account, so its sidebar preset is Essentials,
+    // which draws no configure sections. The preset is stored on the user and
+    // the tests below share one, so switch only when it isn't already on.
+    const showAll = sidebar(page).getByRole("button", { name: "Show all tools" });
+    if (await showAll.count()) {
+      await showAll.click();
+      await expect(sidebar(page).getByRole("button", { name: "Show essentials" })).toBeVisible();
+    }
   });
 
   test("collapses to an icon rail that survives navigation and reload", async ({ page }) => {

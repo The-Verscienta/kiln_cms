@@ -7,6 +7,31 @@ carries the reasoning.
 
 ## Added
 
+<a id="sidebar-presets-essentials-and-everything"></a>
+
+- **Sidebar presets: Essentials and Everything.** A usability pass on
+  kilncms.dev found a platform admin's sidebar listing 38 items, most of them
+  screens a writer opens a few times a year. Each user now picks a sidebar
+  preset (`User.nav_preset`, stored server-side, so it follows them across
+  devices and the first paint is already right). **Essentials** lists Home,
+  Content, Media, Calendar, Tasks and Inbox, then the Configure hub for an
+  admin and Your settings. **Everything** is the sidebar as it was. Only the
+  sidebar filters (`KilnCMSWeb.ConsoleNav.sidebar/3`): the Configure hub and
+  the ⌘K palette still read the full map, and the page you are on is drawn
+  even when the preset would hide it. Switch with "Show all tools" / "Show
+  essentials" at the foot of the sidebar or on Your settings. Either redraws
+  the sidebar in place through the self-only `:set_nav_preset` action.
+
+  **Upgrading:** the migration adds the column with a default of `everything`
+  (so every existing account is backfilled to the sidebar it already had) and
+  then changes the column default to `essentials`, which is also the
+  resource's create-time default. Nobody who already knows where Menus is
+  finds it gone after an upgrade. Accounts created by the seeds after the
+  migration (the demo admin and editor) start on Essentials.
+
+  Also: `/editor/settings` is titled **Your settings**, as the nav already
+  named it, and "site settings" in ⌘K now finds the Configure hub first.
+
 <a id="a-configure-hub-at-editorconfigure"></a>
 
 - **A Configure hub at `/editor/configure`.** The console had twenty-odd
@@ -34,6 +59,18 @@ carries the reasoning.
   recipient's own PubSub topic, so a notification read on a phone drops the
   badge on the desktop.
 
+<a id="the-editor-says-when-a-headings-link-gets-a-number"></a>
+
+- **The editor says when a heading's `#link` gets a number.** Public pages give
+  every heading a GitHub-style id (#1439), and a heading whose slug is already
+  taken — by an earlier heading with the same words, or by an id the page
+  layout owns, such as `<main id="main">` — is numbered (`#main-1`), so a page
+  never carries a duplicate id. `KilnCMS.HeadingAnchors.reserved_ids/0` names
+  the layout's ids, and a controller test renders a public page and fails if
+  the layout grows one the list doesn't. The SEO panel now reports each heading
+  whose link isn't its plain slug, with the link it really has and a jump to
+  it, so an author sharing a section link copies the right one.
+
 <a id="editorinbox"></a>
 
 - **`/editor/inbox`.** The notification inbox: everything the console has told
@@ -45,6 +82,16 @@ carries the reasoning.
   only). Live: one `on_mount` hook subscribes each console page to the viewer's
   own notification topic, so the list follows a notification that lands, or one
   read in another tab, without a reload.
+
+<a id="a-notification-bell-in-the-console-top-bar-on-every-editor-page-an-unread-badge"></a>
+
+- **A notification bell in the console top bar**, on every `/editor/*` page:
+  an unread badge (capped at `8+`, with the real number in its accessible
+  label), a dropdown of the eight most recent items — read ones included, since
+  a list that empties itself takes each item's deep link with it — and
+  mark-all-read. PubSub-driven: the badge moves when a notification arrives or
+  is read elsewhere, without a reload. Clicking an item marks it read and
+  navigates to the block, comment or task it concerns.
 
 ## Changed
 
@@ -66,6 +113,29 @@ carries the reasoning.
   ever recorded now shows a neutral "Backups aren't set up yet" notice rather
   than the red alarm; a failed backup, or one that went stale, is still the
   alarm, and `KilnCMS.Backups.stale?/1` still counts "never" as stale.
+
+<a id="the-ml-stack-behind-semantic-search-is-now-opt-in-kilnml1"></a>
+
+- **The ML stack behind semantic search is now opt-in (`KILN_ML=1`).** A first
+  `mix setup` fetched 773 MB of dependencies, 666 MB of it `deps/exla`, to back
+  semantic search — which ships disabled. Bumblebee, Nx and EXLA now stay out of
+  the dependency tree unless `KILN_ML` is set, taking a default `deps/` to
+  102 MB and saving a one-time 110 MB archive download; `mix setup` prints one
+  line saying so.
+
+  Nothing is removed. `KilnCMS.Search.Embedder.Bumblebee` and
+  `KilnCMS.Search.Reranker.Bumblebee` still exist and return
+  `{:error, %KilnCMS.Search.ML.NotCompiledError{}}` in a lean build, so hybrid
+  search falls back to its keyword legs and every caller's existing error
+  handling covers it. A deployment that has set `semantic: true` is warned once
+  at boot that its build cannot serve it.
+
+  **Upgrading:** a deployment already running semantic search must build with
+  `KILN_ML=1` — `KILN_ML=1 mix deps.get && KILN_ML=1 mix compile` — and keep the
+  variable set for every `mix` invocation, including in its image build.
+  Nothing in the database or configuration changes. Contributors touching the
+  semantic path should read the `KILN_ML` note in `CONTRIBUTING.md`: a lean
+  build compiles a different shape of those modules.
 
 <a id="configruntimeexs-is-now-an-index-not-a-1523-line-file"></a>
 
@@ -178,11 +248,10 @@ carries the reasoning.
   `/editor/team`. Two new columns on `users` and `org_memberships`
   (`granted_role`, `granted_role_expires_at`); the standing `role` is never
   overwritten, so expiry is a comparison rather than a scheduled write and a
-  missed sweep cannot leave anyone elevated.
-  `KilnCMS.Accounts.Preparations.FoldRoleGrant` presents a live grant as `role`
-  on every read, which is how it reaches `Scoping.effective_tier/2` and the
-  `actor_attribute_equals(:role, …)` policies without either knowing it exists.
-  An hourly AshOban sweep clears expired columns and drops the holder's live
+  missed sweep cannot leave anyone elevated. A loaded `role` is always the
+  standing tier; every tier decision (`Checks.PlatformAdmin`,
+  `Scoping.effective_tier/2`) applies a live grant through
+  `RoleGrant.effective_role/1` at the moment it decides. An hourly AshOban sweep clears expired columns and drops the holder's live
   sockets. Grants are elevations only, and carry no scope axes. The window is one
   of five offered durations or an explicit UTC datetime.
 
@@ -191,9 +260,10 @@ carries the reasoning.
 - **Admin-initiated password resets.** `Accounts.send_user_password_reset/2`
   mails a named account a reset link and reports whether it went — which the
   anonymous form deliberately cannot, since it must stay indistinguishable for
-  addresses that don't exist. Bypasses (and logs) the per-address mail budget:
-  nobody reaches it without an admin session, and a silent drop there would make
-  the console's confirmation a lie. Erased accounts are refused.
+  addresses that don't exist. It charges the per-address mail budget once and
+  refuses by name when the budget is spent, rather than reporting "sent" for mail
+  the sender would drop. "Sent" means the mail was queued. Erased accounts are
+  refused.
 
 <a id="account-removal-with-a-content-disposition"></a>
 
@@ -361,6 +431,22 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="five-editor-console-rough-edges-a-first-time-user-hit"></a>
+
+- **Five editor-console rough edges a first-time user hit.** The path-alias
+  field's placeholder (`/products/shoes/size/42`) read like a live address;
+  it is now an obvious example, and the help text says to leave it blank to
+  use the slug. The "N a11y issues" chip switched the inspector to Settings but
+  left the Accessibility section six panels down, off screen; it now scrolls
+  to that section and moves focus there. A crowded month cell's "+N more" was
+  plain text; it links to the week holding that day, keeping the filters. The
+  Team page listed only site memberships, so an admin created by `/setup`
+  (admin by account role, no membership) was missing and a fresh install read
+  "Members (0)"; site admins are now listed and counted, labelled "Site admin",
+  with no site-tier controls that would not apply to them. And info flashes
+  such as "You are now signed in" close after five seconds (paused while
+  hovered or focused); error flashes still wait to be closed.
+
 <a id="mix-docs-view-source-links-point-at-the-release-tag-not-main"></a>
 
 - **`mix docs` "View Source" links point at the release tag, not `main`.**
@@ -458,6 +544,20 @@ carries the reasoning.
   declares it. A new test checks every setting in that file the same way, so the
   next one that lands on a key upstream renamed fails instead of going quiet.
 
+<a id="with-every-write-anchoring-on-a-system-actor-write-no-longer-crashes-in"></a>
+
+- **With every-write anchoring on, a system-actor write no longer crashes in
+  `AnchorVersion`; its anchor is attributed to `actor_id: nil`.**
+  ([#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402), [#910](https://github.com/The-Verscienta/kiln_cms/issues/910))
+
+<a id="developers-no-longer-links-to-a-swagger-ui-and-openapi-spec-that-404"></a>
+
+- **`/developers` no longer links to a Swagger UI and OpenAPI spec that 404,
+  and the GraphiQL playground is reachable in dev again.** Production turns
+  `:api_docs` off, so the page now shows those links only when
+  `API_DOCS_ENABLED` serves them. The dev-only `/gql/playground` forward was
+  declared after the `/gql` catch-all and never matched; it now comes first.
+
 ## Security
 
 <a id="a-system-actor-so-internal-callers-run-under-the-policies-instead-of-around-them"></a>
@@ -532,4 +632,10 @@ carries the reasoning.
   listed file that loses one fails too, with the number to write, so the
   allowance can never drift out of date. Nothing may be added to it, and
   emptying it finishes #1402.
+
+<a id="firing-no-longer-fails-or-mints-an-unattributed-anchor-with-every-write"></a>
+
+- **Firing no longer fails, or mints an unattributed anchor, with every-write anchoring on.**
+  `:reindex_search_text` is skipped by `AnchorVersion` as PaperTrail already skips it.
+  ([#910](https://github.com/The-Verscienta/kiln_cms/issues/910))
 

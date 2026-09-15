@@ -671,7 +671,7 @@ defmodule KilnCMSWeb.CalendarLive do
               its own: seven columns on a phone is a horizontal scroll. When the
               editor has explicitly chosen List, it shows at every width. --%>
         <div :if={@view in ["month", "week"]} class="hidden md:block">
-          <.grid days={@days} by_day={@by_day} view={@view} at={@at} />
+          <.grid days={@days} by_day={@by_day} view={@view} at={@at} filters={@filters} />
         </div>
         <div :if={@view in ["month", "week"]} class="md:hidden">
           <.event_list events={@events} />
@@ -761,6 +761,7 @@ defmodule KilnCMSWeb.CalendarLive do
   attr :by_day, :map, required: true
   attr :view, :string, required: true
   attr :at, :any, required: true
+  attr :filters, :map, required: true
 
   defp grid(assigns) do
     ~H"""
@@ -800,7 +801,12 @@ defmodule KilnCMSWeb.CalendarLive do
               <div class={["mb-1 text-xs", today?(day) && "font-bold text-primary"]}>
                 {day.day}
               </div>
-              <.day_chips events={Map.get(@by_day, day, [])} view={@view} day={day} />
+              <.day_chips
+                events={Map.get(@by_day, day, [])}
+                view={@view}
+                day={day}
+                filters={@filters}
+              />
             </td>
           </tr>
         </tbody>
@@ -812,6 +818,7 @@ defmodule KilnCMSWeb.CalendarLive do
   attr :events, :list, required: true
   attr :view, :string, required: true
   attr :day, :any, required: true
+  attr :filters, :map, required: true
 
   defp day_chips(assigns) do
     # Week columns are tall enough to show the day in full; month cells are not,
@@ -858,10 +865,25 @@ defmodule KilnCMSWeb.CalendarLive do
         </.link>
       </li>
       <%!-- Not a disclosure: expanding in place would resize the cell and shift
-            every row below it. The overflow says how much is hidden and the
-            week view is one click away, where it all fits. --%>
-      <li :if={@hidden != []} class="px-1.5 text-xs text-base-content/60">
-        {ngettext("+%{count} more", "+%{count} more", length(@hidden), count: length(@hidden))}
+            every row below it. The overflow says how much is hidden and links
+            to the week holding this day, where it all fits — same filters,
+            anchored on this day, so the hidden chips are what you land on. --%>
+      <li :if={@hidden != []} class="px-1.5 text-xs">
+        <.link
+          patch={calendar_path(%{view: "week", at: @day}, @filters)}
+          class="link text-base-content/70 hover:text-base-content"
+          aria-label={
+            ngettext(
+              "%{count} more on %{date} — show the week",
+              "%{count} more on %{date} — show the week",
+              length(@hidden),
+              count: length(@hidden),
+              date: Date.to_iso8601(@day)
+            )
+          }
+        >
+          {ngettext("+%{count} more", "+%{count} more", length(@hidden), count: length(@hidden))}
+        </.link>
       </li>
     </ul>
     """

@@ -8,6 +8,7 @@ defmodule KilnCMS.Accounts.AccountRemovalTest do
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.AccountRemoval
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.ContentTypes
 
   defp user(role) do
     Ash.Seed.seed!(KilnCMS.Accounts.User, %{
@@ -176,6 +177,32 @@ defmodule KilnCMS.Accounts.AccountRemovalTest do
 
       assert {:ok, %{affected: 1, failed: 0, unreadable: []}} =
                AccountRemoval.remove(author, :archive, actor: admin)
+    end
+
+    # A type whose read fails is not "nothing to do". Reported by name on the
+    # confirmation screen and in the result, and the other types still run.
+    @tag :capture_log
+    test "names a type whose read failed, and still disposes of the rest", %{
+      admin: admin,
+      author: author
+    } do
+      post = post_by(author)
+
+      # A type the registry doesn't know: `ContentTypes.list!/2` and `count!/2`
+      # raise on it, as they would for a dynamic type dropped mid-sweep.
+      with_ghost = fn org_id ->
+        ContentTypes.all_for_org(org_id) ++ [%{type: :vanished_type, label: "Vanished"}]
+      end
+
+      assert %{counts: counts, unreadable: ["Vanished"]} =
+               AccountRemoval.authored_counts(author, types_for_org: with_ghost)
+
+      assert {"Post", 1} in counts
+
+      assert {:ok, %{affected: 1, failed: 0, unreadable: ["Vanished"]}} =
+               AccountRemoval.remove(author, :archive, actor: admin, types_for_org: with_ghost)
+
+      assert {:ok, %{state: :archived}} = reread(post)
     end
   end
 end

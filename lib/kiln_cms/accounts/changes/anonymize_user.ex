@@ -105,8 +105,8 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
   end
 
   # Clear the account's own temporary grant. `role: :viewer` alone did nothing
-  # while a grant was live — `FoldRoleGrant` kept presenting the tombstone as the
-  # granted tier, which put `anonymized-…@deleted.invalid` on the admin roster and
+  # while a grant was live — the effective tier stayed the granted one, which put
+  # `anonymized-…@deleted.invalid` on the admin roster and
   # in the assignee picker until the grant ran out: the gap `audiences` had above,
   # on the axis that grants the most.
   #

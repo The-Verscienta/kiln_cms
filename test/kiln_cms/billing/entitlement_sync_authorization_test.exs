@@ -140,6 +140,27 @@ defmodule KilnCMS.Billing.EntitlementSyncAuthorizationTest do
       assert {:ok, _anonymized} =
                Ash.update(row, %{}, action: :anonymize, actor: billing_system(), tenant: org_id())
     end
+
+    # `RecordTransition` read `context.actor.id` in its after_action; the system
+    # actor has no `:id`, so an admitted provider-state write raised a
+    # `KeyError` and rolled the transition back.
+    test "a system-actor provider-state transition is recorded, attributed to no one" do
+      row = membership(user(:viewer))
+
+      assert {:ok, %{status: :past_due}} =
+               Billing.apply_provider_state(row, %{status: :past_due},
+                 actor: billing_system(),
+                 tenant: org_id()
+               )
+
+      assert [event] =
+               KilnCMS.Billing.MembershipEvent
+               |> Ash.Query.filter(membership_id == ^row.id)
+               |> Ash.read!(authorize?: false, tenant: org_id())
+
+      assert event.to_status == :past_due
+      assert is_nil(event.actor_id)
+    end
   end
 
   describe "Billing.MembershipEvent — the append-only entitlement trail" do

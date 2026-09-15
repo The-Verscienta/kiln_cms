@@ -214,6 +214,13 @@ msgid_plural "%{count} minutes"
 msgstr[0] "%{count} minute"
 msgstr[1] "%{count} minutes"
 
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} more on %{date} — show the week"
+msgid_plural "%{count} more on %{date} — show the week"
+msgstr[0] "%{count} de plus le %{date} — afficher la semaine"
+msgstr[1] "%{count} de plus le %{date} — afficher la semaine"
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} of %{cap} slots used"
@@ -959,11 +966,6 @@ msgstr "Un lien n'apparaît ici qu'après %{count} vérifications infructueuses 
 msgid "A media library"
 msgstr "Une médiathèque"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex
-#, elixir-autogen, elixir-format
-msgid "A multi-segment canonical URL. When set, the flat slug URL 301s here; changing it leaves a redirect behind on published content."
-msgstr "Une URL canonique à plusieurs segments. Lorsqu'elle est définie, l'URL de slug simple redirige ici en 301 ; la modifier laisse une redirection derrière elle sur le contenu publié."
-
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
 msgid "A page is reached"
@@ -1512,6 +1514,11 @@ msgstr "Ajoute des détails tirés de ce bloc et du reste de la page."
 #, elixir-autogen, elixir-format
 msgid "Admin"
 msgstr "Administrateur"
+
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "Admin on every site through their account role, so there is no site tier to set here."
+msgstr "Administrateur sur tous les sites via le rôle de son compte : il n'y a donc pas de niveau de site à définir ici."
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
@@ -4830,6 +4837,16 @@ msgstr "L'activation crée l'identité d'acteur permanente de ce site. L'identif
 msgid "End it now"
 msgstr "Y mettre fin maintenant"
 
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "End this temporary role now?"
+msgstr "Mettre fin à ce rôle temporaire maintenant ?"
+
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "End this temporary tier now?"
+msgstr "Mettre fin à ce niveau temporaire maintenant ?"
+
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Endpoint"
@@ -4957,6 +4974,16 @@ msgstr "Erreur 404"
 msgid "Error 500"
 msgstr "Erreur 500"
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Essentials"
+msgstr "L'essentiel"
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Essentials: Home, Content, Media, Calendar, Tasks and Inbox, then Configure and Your settings."
+msgstr "L'essentiel : Accueil, Contenu, Médias, Calendrier, Tâches et Boîte de réception, puis Configurer et Vos paramètres."
+
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Event"
@@ -4987,6 +5014,11 @@ msgstr "Chaque requête relit la base de données jusqu'à ce que le cache se re
 msgid "Every scanned slug already matches its derivation."
 msgstr "Chaque slug analysé correspond déjà à sa dérivation."
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every screen stays in search (⌘K) either way; this only decides what the sidebar lists."
+msgstr "Dans les deux cas, chaque écran reste accessible par la recherche (⌘K) ; ce choix ne décide que de ce que liste la barre latérale."
+
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "Every settings screen, and what each one is for."
@@ -5007,6 +5039,11 @@ msgstr "Tous les comptes inscrits sur cette instance, et leurs accès."
 msgid "Everyone registered on this instance. Roles here are the platform role; per-site tiers live on each site's team page."
 msgstr "Toutes les personnes inscrites sur cette instance. Les rôles indiqués ici sont le rôle de plateforme ; les niveaux par site se trouvent sur la page Équipe de chaque site."
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Everything"
+msgstr "Tout"
+
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex
 #, elixir-autogen, elixir-format
 msgid "Everything a content team needs"
@@ -5021,6 +5058,11 @@ msgstr "Tout ce qui a une cadence la respecte."
 #, elixir-autogen, elixir-format
 msgid "Everything you can change about this site, and about this deployment. Your own profile, password and sign-in live under Your settings instead."
 msgstr "Tout ce que vous pouvez modifier sur ce site et sur ce déploiement. Votre profil, votre mot de passe et votre connexion se trouvent dans Vos paramètres."
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Everything: every screen you can open, grouped by section."
+msgstr "Tout : chaque écran que vous pouvez ouvrir, regroupé par section."
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/content_editor/markdown_import.ex
@@ -6451,6 +6493,11 @@ msgstr "Laissez vide pour conserver l'actuel."
 msgid "Leave blank to use the duration above."
 msgstr "Laissez vide pour utiliser la durée ci-dessus."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Leave blank to use the slug URL above. Set a nested address such as /about/team and the slug URL redirects (301) to it; changing it later leaves a redirect behind on published content."
+msgstr "Laissez vide pour utiliser l'URL du slug ci-dessus. Définissez une adresse imbriquée comme /about/team et l'URL du slug y redirige (301) ; la modifier ensuite laisse une redirection derrière elle sur le contenu publié."
+
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "Leave it open"
@@ -6626,6 +6673,11 @@ msgstr "Messagerie"
 #, elixir-autogen, elixir-format
 msgid "Manage"
 msgstr "Gérer"
+
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "Manage account"
+msgstr "Gérer le compte"
 
 #: lib/kiln_cms_web/live/account_live.ex
 #, elixir-autogen, elixir-format
@@ -10337,7 +10389,6 @@ msgstr "Configurez votre site"
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
-#: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Settings"
 msgstr "Paramètres"
@@ -10376,6 +10427,16 @@ msgstr "Publier un lancement nécessite un accès administrateur."
 #, elixir-autogen, elixir-format
 msgid "Shorten"
 msgstr "Raccourcir"
+
+#: lib/kiln_cms_web/components/layouts.ex
+#, elixir-autogen, elixir-format
+msgid "Show all tools"
+msgstr "Afficher tous les outils"
+
+#: lib/kiln_cms_web/components/layouts.ex
+#, elixir-autogen, elixir-format
+msgid "Show essentials"
+msgstr "Afficher l'essentiel"
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
@@ -10463,6 +10524,11 @@ msgstr "Colonnes côte à côte contenant des blocs imbriqués"
 msgid "Side-by-side preview"
 msgstr "Aperçu côte à côte"
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sidebar"
+msgstr "Barre latérale"
+
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/controllers/error_html/403.html.heex
 #: lib/kiln_cms_web/live/auth_page_title.ex
@@ -10545,6 +10611,11 @@ msgstr "L'authentification unique a échoué — l'identité n'a pas pu être v�
 #, elixir-autogen, elixir-format
 msgid "Site"
 msgstr "Site"
+
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "Site admin"
+msgstr "Administrateur du site"
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
@@ -11617,6 +11688,11 @@ msgstr "L'icône de l'application d'édition installée sur l'écran d'accueil d
 msgid "The iframe sizes itself to the form."
 msgstr "L'iframe s'ajuste à la taille du formulaire."
 
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex
+#, elixir-autogen, elixir-format
+msgid "The interactive Swagger UI and the OpenAPI spec are switched off on this deployment. An operator can turn them on with API_DOCS_ENABLED=true."
+msgstr "Le Swagger UI interactif et la spécification OpenAPI sont désactivés sur ce déploiement. Un opérateur peut les activer avec API_DOCS_ENABLED=true."
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "The last backup failed"
@@ -11722,6 +11798,11 @@ msgstr "La même liste est disponible sur le serveur via %{list}, et %{doctor} v
 #, elixir-autogen, elixir-format
 msgid "The shipped pack deliberately leaves out bare marketing words — \"best\", \"free\", \"proven\" — because they have too many legitimate uses to flag without knowing a publication's subject. That is what the phrase list above is for."
 msgstr "Le jeu de règles fourni exclut délibérément les mots publicitaires seuls — « best », « free », « proven » — car ils ont trop d'usages légitimes pour être signalés sans connaître le sujet de la publication. C'est à cela que sert la liste d'expressions ci-dessus."
+
+#: lib/kiln_cms_web/nav_preset.ex
+#, elixir-autogen, elixir-format
+msgid "The sidebar could not be changed."
+msgstr "La barre latérale n'a pas pu être modifiée."
 
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
@@ -13435,6 +13516,7 @@ msgid "Your role cannot copy this content's blocks, so it cannot be translated."
 msgstr "Votre rôle ne peut pas copier les blocs de ce contenu, il ne peut donc pas être traduit."
 
 #: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Your settings"
 msgstr "Vos paramètres"
@@ -13661,6 +13743,11 @@ msgstr "brouillon créé"
 #, elixir-autogen, elixir-format
 msgid "due %{date}"
 msgstr "à réviser le %{date}"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "e.g. /about/team"
+msgstr "ex. /about/team"
 
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
@@ -14387,6 +14474,13 @@ msgstr "— Choisir un type —"
 #, elixir-autogen, elixir-format
 msgid "— Ungrouped —"
 msgstr "— Sans groupe —"
+
+#: lib/kiln_cms_web/components/seo_components.ex
+#, elixir-autogen, elixir-format
+msgid "“%{example}” links as #%{anchor}, not #%{slug} — an earlier heading or the page itself already uses #%{slug}."
+msgid_plural "%{count} headings link with a number added — “%{example}” links as #%{anchor}, not #%{slug}, because an earlier heading or the page itself already uses it."
+msgstr[0] "« %{example} » a pour lien #%{anchor}, et non #%{slug} — un titre précédent ou la page elle-même utilise déjà #%{slug}."
+msgstr[1] "%{count} titres ont un lien numéroté — « %{example} » a pour lien #%{anchor}, et non #%{slug}, car un titre précédent ou la page elle-même l'utilise déjà."
 
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format

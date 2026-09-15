@@ -471,6 +471,7 @@ defmodule KilnCMSWeb.Layouts do
           <.console_nav current_user={@current_user} current_org={@current_org} active={@active} />
         </nav>
         <div class="shrink-0 space-y-3 border-t border-sidebar-line px-3 pt-3 pb-4">
+          <.nav_preset_switch :if={@current_user} current_user={@current_user} />
           <.sidebar_theme_toggle />
           <.sidebar_account :if={@current_user} current_user={@current_user} />
         </div>
@@ -667,13 +668,25 @@ defmodule KilnCMSWeb.Layouts do
   attr :current_org, :map, default: nil
   attr :active, :atom, default: nil
 
+  #
+  # Which items are drawn at all follows the user's sidebar preset
+  # (`ConsoleNav.sidebar/3`): Essentials drops the periodic author screens and
+  # the configure sections, keeping the hub and Your settings as `pinned` links
+  # — plus the current page if the preset would have hidden it. The hub and ⌘K
+  # read the unfiltered map, so nothing becomes unreachable.
   defp console_nav(assigns) do
-    nav = KilnCMSWeb.ConsoleNav.nav(assigns[:current_user], assigns[:current_org])
+    nav =
+      KilnCMSWeb.ConsoleNav.sidebar(
+        assigns[:current_user],
+        assigns[:current_org],
+        assigns[:active]
+      )
 
     assigns =
       assigns
       |> assign(:author, nav.author)
       |> assign(:hub, nav.hub)
+      |> assign(:pinned, nav.pinned)
       |> assign(:configure_groups, nav.configure_groups)
       |> assign(:plugin, nav.plugin)
 
@@ -681,8 +694,12 @@ defmodule KilnCMSWeb.Layouts do
     <.side_link :for={i <- @author} item={i} active={@active} />
     <%!-- The Configure hub (#1319) sits above the sections rather than inside
           one: it is the way in when you do not yet know which section owns the
-          thing you came to change. --%>
-    <.side_link :if={@hub} item={@hub} active={@active} class="mt-5" />
+          thing you came to change. In Essentials, `@pinned` (Your settings, and
+          a hidden current page) rides in the same block. --%>
+    <div :if={@hub || @pinned != []} class="mt-5" data-nav-pinned>
+      <.side_link :if={@hub} item={@hub} active={@active} />
+      <.side_link :for={i <- @pinned} item={i} active={@active} />
+    </div>
     <div
       :for={group <- @configure_groups}
       class={["side-group", group[:operator?] && "side-group-op"]}
@@ -731,6 +748,41 @@ defmodule KilnCMSWeb.Layouts do
       <.icon name={@item.icon} class="side-icon size-5 shrink-0" />
       <span class="side-text truncate">{@item.label}</span>
     </.link>
+    """
+  end
+
+  attr :current_user, :map, required: true
+
+  # The sidebar preset switch (`KilnCMSWeb.NavPreset` handles the event on
+  # every signed-in LiveView). One button naming what it will DO, not a
+  # two-state control naming where you are: "Show all tools" is the sentence a
+  # writer who cannot find Menus needs to read. A server round-trip, unlike the
+  # rail and section collapse, because the choice is stored on the user — which
+  # is also what lets the first paint already be right, with nothing to replay.
+  defp nav_preset_switch(assigns) do
+    essentials? = KilnCMSWeb.ConsoleNav.preset(assigns.current_user) == :essentials
+
+    assigns =
+      assigns
+      |> assign(:next, if(essentials?, do: "everything", else: "essentials"))
+      |> assign(:icon, if(essentials?, do: "hero-squares-plus", else: "hero-squares-2x2"))
+      |> assign(
+        :label,
+        if(essentials?, do: gettext("Show all tools"), else: gettext("Show essentials"))
+      )
+
+    ~H"""
+    <button
+      type="button"
+      id="nav-preset-switch"
+      class="side-link w-full"
+      phx-click="set_nav_preset"
+      phx-value-preset={@next}
+      data-side-tip={@label}
+    >
+      <.icon name={@icon} class="side-icon size-5 shrink-0" />
+      <span class="side-text truncate">{@label}</span>
+    </button>
     """
   end
 
@@ -1123,7 +1175,8 @@ defmodule KilnCMSWeb.Layouts do
   # Shared authoring-nav links — rendered inline on desktop and stacked in the
   # mobile menu, so they're defined once. Used only by `Layouts.app` (the `/`
   # landing header), which has no site context — so these gate on the global
-  # `@current_user.role` (≈ the effective tier on the default org). The
+  # effective platform role (`RoleGrant.effective_role/1`, ≈ the effective tier
+  # on the default org), resolved once per render. The
   # per-org-tier nav is `console_nav` on the authoring surface (#419).
   attr :current_user, :map, default: nil
 
@@ -1135,19 +1188,20 @@ defmodule KilnCMSWeb.Layouts do
         "rounded-lg px-3 py-1.5 text-sm font-medium text-base-content/80 transition " <>
           "hover:bg-base-200 hover:text-base-content"
       )
+      |> assign(:tier, KilnCMS.Accounts.RoleGrant.effective_role(assigns.current_user))
 
     ~H"""
     <a href="/developers#graphql" class={@item}>{gettext("GraphQL")}</a>
     <a href="/developers#json-api" class={@item}>{gettext("JSON:API")}</a>
     <a
-      :if={@current_user && @current_user.role in [:editor, :admin]}
+      :if={@tier in [:editor, :admin]}
       href={~p"/editor/overview"}
       class={@item}
     >
       {gettext("Editor")}
     </a>
     <a
-      :if={@current_user && @current_user.role in [:editor, :admin]}
+      :if={@tier in [:editor, :admin]}
       href={~p"/editor/calendar"}
       class={@item}
     >
@@ -1156,7 +1210,7 @@ defmodule KilnCMSWeb.Layouts do
     <%!-- Only meaningful with more than one configured locale. --%>
     <a
       :if={
-        @current_user && @current_user.role in [:editor, :admin] &&
+        @tier in [:editor, :admin] &&
           length(KilnCMS.I18n.locales()) > 1
       }
       href={~p"/editor/translations"}
@@ -1165,35 +1219,35 @@ defmodule KilnCMSWeb.Layouts do
       {gettext("Translations")}
     </a>
     <a
-      :if={@current_user && @current_user.role in [:editor, :admin]}
+      :if={@tier in [:editor, :admin]}
       href={~p"/editor/settings"}
       class={@item}
     >
       {gettext("Settings")}
     </a>
     <a
-      :if={@current_user && @current_user.role == :admin}
+      :if={@tier == :admin}
       href={~p"/editor/fields"}
       class={@item}
     >
       {gettext("Fields")}
     </a>
     <a
-      :if={@current_user && @current_user.role == :admin}
+      :if={@tier == :admin}
       href={~p"/editor/forms"}
       class={@item}
     >
       {gettext("Forms")}
     </a>
     <a
-      :if={@current_user && @current_user.role == :admin}
+      :if={@tier == :admin}
       href={~p"/editor/types"}
       class={@item}
     >
       {gettext("Types")}
     </a>
     <a
-      :if={@current_user && @current_user.role == :admin}
+      :if={@tier == :admin}
       href={~p"/editor/api-keys"}
       class={@item}
     >
@@ -1202,7 +1256,7 @@ defmodule KilnCMSWeb.Layouts do
     <%!-- Plugin-contributed nav (D18), each gated by its declared role. --%>
     <a
       :for={item <- Kiln.Plugins.nav_items()}
-      :if={@current_user && KilnCMSWeb.ConsoleNav.plugin_visible?(item, @current_user.role)}
+      :if={@current_user && KilnCMSWeb.ConsoleNav.plugin_visible?(item, @tier)}
       href={item.path}
       class={@item}
     >

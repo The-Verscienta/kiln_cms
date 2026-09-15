@@ -159,17 +159,16 @@ defmodule KilnCMS.Accounts.User do
     # `granted_role`/`granted_role_expires_at` are NOT listed here, and cannot be:
     # field policies only cover public fields, and those two are `public? false`
     # (access-control config, like `audiences`) so they reach no API surface at
-    # all. What they could still leak is through the fold — writing a real tier
-    # into the `role` field this policy withholds — which
-    # `KilnCMS.Accounts.Preparations.FoldRoleGrant` declines to do precisely
-    # because `role` comes back forbidden. See that module's `fold/1`.
+    # all. Nothing copies them into `role` on read, so this policy is the whole
+    # of what an API caller can learn about a tier.
     field_policy [
       :email,
       :role,
       :notify_on_review_request,
       :notify_on_publish,
       :notify_on_return_to_draft,
-      :notify_on_comment
+      :notify_on_comment,
+      :nav_preset
     ] do
       authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
       authorize_if expr(id == ^actor(:id))
@@ -182,8 +181,8 @@ defmodule KilnCMS.Accounts.User do
   end
 
   # Expired temporary roles (`KilnCMS.Accounts.RoleGrant`). Authorization does not
-  # wait for this — `FoldRoleGrant` stops presenting a grant the instant it
-  # expires — so the trigger is hygiene plus the session eviction, and a missed
+  # wait for this — every tier decision compares the expiry with the clock — so
+  # the trigger is hygiene plus the session eviction, and a missed
   # run cannot leave anyone elevated. Hourly rather than nightly for the
   # eviction's sake: a grant that ran out at 09:00 should not leave its holder's
   # open console authorized until 04:00 tomorrow.
@@ -226,6 +225,14 @@ defmodule KilnCMS.Accounts.User do
       accept [:name]
     end
 
+    # The console sidebar preset (`KilnCMSWeb.ConsoleNav.sidebar/3`). Its own
+    # action, accepting nothing else, so the sidebar switch can never be a way
+    # to write any other column. Self-only, like the notification prefs below.
+    update :set_nav_preset do
+      description "Choose how much of the console the sidebar shows."
+      accept [:nav_preset]
+    end
+
     # Self-service workflow-notification preferences (issue #46). A user can
     # toggle their own; admins can edit anyone's via the policy bypass.
     update :update_notification_prefs do
@@ -250,11 +257,6 @@ defmodule KilnCMS.Accounts.User do
       # A temporary admin must not be able to make itself a permanent one — the
       # bound on a grant is otherwise whatever the grantee decides. See the module.
       validate KilnCMS.Accounts.Validations.StandingAdminOnly
-
-      # This action writes the STANDING role, so it must not be handed a record
-      # whose live temporary role was folded into that field — the write would be
-      # dropped as a no-op. See the validation module.
-      validate KilnCMS.Accounts.Validations.UnfoldedRecord
 
       # An admin demoting the last admin locks every operator out of `/editor`
       # with no route back through the UI — see the validation module.
@@ -843,6 +845,10 @@ defmodule KilnCMS.Accounts.User do
       authorize_if expr(id == ^actor(:id))
     end
 
+    policy action(:set_nav_preset) do
+      authorize_if expr(id == ^actor(:id))
+    end
+
     # 2FA is strictly self-service: a user manages the second factor on their own
     # account only (the admin bypass above still lets an operator intervene).
     # `:consume_totp_recovery_code` runs pre-auth as a system call
@@ -903,13 +909,6 @@ defmodule KilnCMS.Accounts.User do
     end
   end
 
-  # Presents a live temporary role as `role` on every read, so the actor struct
-  # every policy reads already carries the effective tier. See the module — this
-  # is the whole enforcement mechanism for `KilnCMS.Accounts.RoleGrant`.
-  preparations do
-    prepare KilnCMS.Accounts.Preparations.FoldRoleGrant
-  end
-
   attributes do
     uuid_primary_key :id
 
@@ -954,10 +953,9 @@ defmodule KilnCMS.Accounts.User do
     end
 
     # A time-boxed elevation above `role` — "admin until Friday". `role` above
-    # stays the standing tier for the whole life of the grant, and
-    # `KilnCMS.Accounts.Preparations.FoldRoleGrant` presents this one as `role`
-    # on every read while it is live, so expiry needs nothing scheduled to take
-    # effect. See KilnCMS.Accounts.RoleGrant for why it is modelled this way
+    # stays the standing tier for the whole life of the grant, and every tier
+    # decision asks `KilnCMS.Accounts.RoleGrant.effective_role/1`, so expiry needs
+    # nothing scheduled to take effect. See that module for why it is modelled this way
     # round; `:grant_temporary_role` is the only action that writes it.
     #
     # Access-control config, so `public? false` like `audiences`: it reaches no
@@ -1054,6 +1052,22 @@ defmodule KilnCMS.Accounts.User do
     # the setting nobody finds.
     attribute :notify_on_comment, :boolean do
       default true
+      allow_nil? false
+      public? true
+    end
+
+    # How much of the console the sidebar shows (`KilnCMSWeb.ConsoleNav.sidebar/3`):
+    # the daily author screens, or every screen. Per user and server-side, so it
+    # follows them across devices and the first paint is already right.
+    #
+    # `:essentials` for an account created from now on. Accounts that existed
+    # before this column were backfilled to `:everything` by its migration, which
+    # adds the column with that default and only then switches the default —
+    # nobody who already knows where Menus is finds it gone after an upgrade.
+    # Personal, so it is in the self-or-admin field policy above.
+    attribute :nav_preset, :atom do
+      constraints one_of: [:essentials, :everything]
+      default :essentials
       allow_nil? false
       public? true
     end
