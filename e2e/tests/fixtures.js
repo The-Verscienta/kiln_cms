@@ -148,6 +148,11 @@ async function signInAs(page, { email, password }) {
   // Editors/admins land on the console overview by default after sign-in
   // (#157); both seeded users carry an editorial role (see priv/repo/seeds.exs).
   await base.expect(page).toHaveURL("/editor/overview");
+  // The URL changes on the redirect, before the landing LiveView's join acks,
+  // so a spec's first click after sign-in could still be dropped — the
+  // console_sidebar.spec.js beforeEach lost its "Show all tools" click that way
+  // on main. Hand back a page that can take events.
+  await waitForLiveConnected(page);
 }
 
 async function signInAsAdmin(page) {
