@@ -28,6 +28,8 @@ defmodule KilnCMSWeb.TeamLive do
   """
   use KilnCMSWeb, :live_view
 
+  require Ash.Expr
+
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.Role
   alias KilnCMS.Accounts.RoleGrant
@@ -305,8 +307,32 @@ defmodule KilnCMSWeb.TeamLive do
     roles =
       Accounts.list_roles_for_org!(org.id, actor: actor, query: [sort: [name: :asc]])
 
-    socket |> assign(:members, members) |> assign(:roles, roles)
+    socket
+    |> assign(:members, members)
+    |> assign(:site_admins, site_admins_without_membership(actor, org.id))
+    |> assign(:roles, roles)
   end
+
+  # Platform admins — `User.role == :admin`, or a live admin grant — reach every
+  # site with no OrgMembership row at all: the account `/setup` creates is one.
+  # Listing memberships alone left them off this page, so a fresh install showed
+  # "Members (0)" to the admin looking at it. They are the same people
+  # `Scoping.users_with_tier/2` counts as admins, through the same expression;
+  # an admin who also holds a membership here is already on the list and is
+  # left out of this one. Read as the actor, like the membership list.
+  defp site_admins_without_membership(actor, org_id) do
+    admin = RoleGrant.expression([:admin])
+
+    Accounts.list_users!(
+      actor: actor,
+      query: [
+        filter: Ash.Expr.expr(^admin and not exists(org_memberships, organization_id == ^org_id)),
+        sort: [email: :asc]
+      ]
+    )
+  end
+
+  defp site_admin?(user), do: RoleGrant.effective_role(user) == :admin
 
   defp get_membership(socket, id) do
     case Enum.find(socket.assigns.members, &(&1.id == id)) do
@@ -519,7 +545,9 @@ defmodule KilnCMSWeb.TeamLive do
         </section>
 
         <section class="space-y-4">
-          <h2 class="text-lg font-medium">{gettext("Members")} ({length(@members)})</h2>
+          <h2 class="text-lg font-medium">
+            {gettext("Members")} ({length(@members) + length(@site_admins)})
+          </h2>
 
           <form phx-submit="add_member" class="card card-pad space-y-4" id="add-member-form">
             <div class="grid gap-4 sm:grid-cols-3">
@@ -553,11 +581,34 @@ defmodule KilnCMSWeb.TeamLive do
             <.button type="submit" variant="primary">{gettext("Add member")}</.button>
           </form>
 
-          <p :if={@members == []} class="text-sm text-base-content/60">
+          <p :if={@members == [] and @site_admins == []} class="text-sm text-base-content/60">
             {gettext("No members on this site yet.")}
           </p>
 
-          <ul :if={@members != []} class="card divide-y divide-base-content/10 overflow-hidden">
+          <ul
+            :if={@members != [] or @site_admins != []}
+            class="card divide-y divide-base-content/10 overflow-hidden"
+          >
+            <%!-- Admin through their account role, not a membership: there is
+                  no site tier, custom role or scope to edit and nothing to
+                  remove here, so the row offers none — the role is changed
+                  where it is held, on the account. --%>
+            <li :for={user <- @site_admins} id={"site-admin-#{user.id}"} class="p-4">
+              <div class="min-w-0 space-y-1">
+                <span class="font-medium">{user.email}</span>
+                <p class="text-sm text-base-content/70">
+                  <.badge variant="info">{gettext("Site admin")}</.badge>
+                </p>
+                <p class="text-xs text-base-content/60">
+                  {gettext(
+                    "Admin on every site through their account role, so there is no site tier to set here."
+                  )}
+                  <.link navigate={~p"/editor/accounts/#{user.id}"} class="link">
+                    {gettext("Manage account")}
+                  </.link>
+                </p>
+              </div>
+            </li>
             <li :for={membership <- @members} id={"member-#{membership.id}"} class="p-4">
               <div
                 :if={@member_edit == nil || @member_edit.id != membership.id}
@@ -566,6 +617,12 @@ defmodule KilnCMSWeb.TeamLive do
                 <div class="min-w-0 space-y-1">
                   <span class="font-medium">{membership.user.email}</span>
                   <p class="text-sm text-base-content/70">
+                    <%!-- A membership never demotes a platform admin
+                          (`Scoping.effective_tier/2`), so say so beside
+                          whatever tier the row holds. --%>
+                    <.badge :if={site_admin?(membership.user)} variant="info" class="mr-1">
+                      {gettext("Site admin")}
+                    </.badge>
                     <.badge>{membership.role}</.badge>
                     <.badge :if={grant_summary(membership)} variant="warning" class="ml-1">
                       {grant_summary(membership)}
