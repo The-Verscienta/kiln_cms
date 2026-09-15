@@ -439,6 +439,14 @@ carries the reasoning.
   declares it. A new test checks every setting in that file the same way, so the
   next one that lands on a key upstream renamed fails instead of going quiet.
 
+<a id="developers-no-longer-links-to-a-swagger-ui-and-openapi-spec-that-404"></a>
+
+- **`/developers` no longer links to a Swagger UI and OpenAPI spec that 404,
+  and the GraphiQL playground is reachable in dev again.** Production turns
+  `:api_docs` off, so the page now shows those links only when
+  `API_DOCS_ENABLED` serves them. The dev-only `/gql/playground` forward was
+  declared after the `/gql` catch-all and never matched; it now comes first.
+
 ## Security
 
 <a id="a-system-actor-so-internal-callers-run-under-the-policies-instead-of-around-them"></a>

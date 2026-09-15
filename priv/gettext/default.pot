@@ -11535,6 +11535,11 @@ msgstr ""
 msgid "The iframe sizes itself to the form."
 msgstr ""
 
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex
+#, elixir-autogen, elixir-format
+msgid "The interactive Swagger UI and the OpenAPI spec are switched off on this deployment. An operator can turn them on with API_DOCS_ENABLED=true."
+msgstr ""
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "The last backup failed"
