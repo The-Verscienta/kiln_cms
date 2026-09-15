@@ -97,6 +97,13 @@ config :kiln_cms, KilnCMS.Social, req_options: [plug: {Req.Test, KilnCMS.Social}
 config :kiln_cms, KilnCMS.Branding.AppIcon,
   req_options: [plug: {Req.Test, KilnCMS.Branding.AppIcon}]
 
+# Media sideloading (#487) fetches attachment URLs taken from an uploaded export
+# file — the most content-chosen fetch in the system. Stubbed so the importer
+# never dials a site being migrated away from; a test that lets media through
+# installs its own `Req.Test.stub/2`, and one that does not gets a loud
+# "no stub" failure rather than a silent network attempt.
+config :kiln_cms, KilnCMS.Media.Ingest, req_options: [plug: {Req.Test, KilnCMS.Media.Ingest}]
+
 # Web Push (#628). No VAPID keys by default, so `KilnCMS.Push.enabled?/0` is
 # false and the suite's editorial actions enqueue no push jobs — the push tests
 # configure a pair explicitly. `req_options` points the sender at a stub for

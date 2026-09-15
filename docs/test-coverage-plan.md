@@ -1,14 +1,14 @@
 # Test coverage plan
 
-**Status: living document** — batches 1–6 landed; the floor in
+**Status: living document** — batches 1–7 landed; the floor in
 `coveralls.json` is the enforced number, the figures below are the last
 measured run.
 
 Where the suite's remaining blind spots are, in the order they are worth
-closing, and why each one is on the list. Written against a full measured run
-on 2026-08-22: **7,344 tests, 0 failures, 83.1% line coverage**, floor 82.5
-(`coveralls.json`). Batches 1-6 below have since landed; the suite now measures
-**83.6% locally over 7,493 tests**, the floor has moved to **82.7**, and the
+closing, and why each one is on the list. Written against a full measured run on
+2026-08-22: **7,344 tests, 0 failures, 83.1% line coverage**, floor 82.5
+(`coveralls.json`). Batches 1-7 below have since landed; the suite now measures
+**84.6% locally over 8,486 tests**, the floor has moved to **82.7**, and the
 Playwright suite is at 25 journeys.
 
 Reproduce the numbers with:
@@ -19,7 +19,7 @@ Reproduce the numbers with:
 This is not a plan to reach a percentage. The floor exists so coverage cannot
 silently fall (see CONTRIBUTING.md), and every item below earns its place by
 naming a *behaviour nothing currently proves* — not by the size of its
-uncovered block. Six items are listed as already done so the patterns they
+uncovered block. Seven items are listed as already done so the patterns they
 set are reusable; the rest are ordered by what a defect there would cost.
 
 ## Ground rule for anything added here
@@ -204,24 +204,50 @@ What is left in both is fault injection — storage failing mid-write, a probe
 that succeeds while the poster extraction fails — plus two `Logger.error`
 arms for a promotion that cannot happen with a working store.
 
+### 7. `KilnCMS.Media.Ingest` — the fetch seam, then its tests
+
+Batch 6 left this out on purpose: everything still uncovered sat behind one
+obstacle. `download/1` called `SafeFetch.get/2` with **no `req_options`**, so
+the fetch the WordPress importer points at every attachment URL in an uploaded
+export — the most content-chosen request the system makes — was the one fetch in
+the tree that could not be pointed at a `Req.Test` stub. Every comparable module
+already takes one from config (`Webhooks`, `OEmbed`, `Federation`,
+`Links.External`, `Storage.S3`, `Social`, `Push`).
+
+`Ingest.req_options/0` follows that shape, plus a `config/test.exs` entry.
+`SafeFetch` merges it *after* its own options, so address pinning and redirect
+refusal still apply to a stubbed request. **64% (as measured on 2026-09-03) →
+74% (107/143).**
+
+The tests pin what Ingest does with each answer rather than re-testing
+`SafeFetch`, whose own suite already covers the byte cap and redirect mechanics:
+a stored image named after the URL's last segment, percent-decoded, and a
+generated name when the URL has no last segment; a non-2xx reported as
+`{:http_status, status}` with nothing stored; a transport failure returned
+rather than raised; and a `302` pointing at the cloud metadata address producing
+exactly one request. Both mutations — dropping the seam, and passing
+`max_redirects` — fail the file.
+
+Two things this turned up:
+
+* **Two importer tests were getting their "unreachable image" from the real
+  network.** `import_test.exs` let media through in two places and relied on a
+  live connection to the fixture's host failing. Both now stub the 404, and
+  the stub being configured means a future test that forgets one fails loudly
+  ("cannot find mock/stub") instead of dialling out. The reachable case — an
+  imported post's image block re-pointed at the stored item — had no test at
+  all and now does.
+* **The stored image is not the served bytes.** Every image is re-encoded by
+  `ImageProcessor.strip_metadata/2` on the way in (#215), so an assertion that
+  the blob equals the response body is wrong. The test asserts a real PNG
+  landed under the item's key instead.
+
+What is left is fault injection rather than missing seams: the sync A/V strip
+branches (no temp space, a timed-out remux), the storage-failure arms that
+delete a half-written blob, the logs for a derivation or strip job that failed
+to enqueue, and the one-time warning for a missing private storage root.
+
 ## Next
-
-### 7. `KilnCMS.Media.Ingest` — 64%, and it needs a seam first
-
-Left out of batch 6 deliberately. Its unsafe-URL guard is already well covered
-(`store_url/2` refuses loopback, private ranges, link-local and `file://`), and
-almost everything still uncovered is behind one obstacle: `download/1` calls
-`SafeFetch.get/2` with **no `req_options`**, so there is no way to point it at
-a `Req.Test` stub. Every comparable module in the tree takes one from config —
-`Webhooks`, `OEmbed`, `Federation`, `Links.External`, `Storage.S3`, `Unsplash`,
-`Updates` — so `Ingest` is the anomaly, and the fetch that most deserves a
-test is the one that cannot have one. This is the most content-chosen fetch
-in the system: the URLs come out of a WXR file someone uploaded.
-
-Adding `req_options: KilnCMS.Media.Ingest.req_options()` and a `config/test.exs`
-entry would follow the established convention and unlock the HTTP-status,
-too-large, and filename-derivation branches. That is a small lib change, so it
-wants its own PR rather than riding along with tests.
 
 ### 8. `KilnCMS.Storage.S3` — 56% (25 uncovered)
 

@@ -661,7 +661,11 @@ defmodule KilnCMS.Media.Ingest do
   #
   # sobelow_skip ["Traversal.FileModule"]
   defp download(url) do
-    case SafeFetch.get(url, max_bytes: @max_download_size, receive_timeout: @download_timeout) do
+    case SafeFetch.get(url,
+           max_bytes: @max_download_size,
+           receive_timeout: @download_timeout,
+           req_options: req_options()
+         ) do
       {:ok, %{status: status, body: body}} when status in 200..299 ->
         write_temp(body)
 
@@ -698,6 +702,20 @@ defmodule KilnCMS.Media.Ingest do
       "/" -> "imported-#{Ecto.UUID.generate()}"
       name -> name
     end
+  end
+
+  @doc """
+  Extra `Req` options for the sideload fetch in `store_url/2`.
+
+  The seam the suite stubs through (`req_options: [plug: {Req.Test, …}]`), the
+  same shape `KilnCMS.Social`, `KilnCMS.OEmbed` and `KilnCMS.Push` use. Empty in
+  production. It is *merged* by `SafeFetch` after its own options rather than
+  replacing them, so the address pinning and redirect refusal still apply to a
+  stubbed request.
+  """
+  @spec req_options() :: keyword()
+  def req_options do
+    :kiln_cms |> Application.get_env(__MODULE__, []) |> Keyword.get(:req_options, [])
   end
 
   defp put_present(map, _key, nil), do: map
