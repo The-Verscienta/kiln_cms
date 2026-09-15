@@ -937,11 +937,6 @@ msgstr ""
 msgid "A media library"
 msgstr ""
 
-#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
-#, elixir-autogen, elixir-format
-msgid "A multi-segment canonical URL. When set, the flat slug URL 301s here; changing it leaves a redirect behind on published content."
-msgstr ""
-
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
 msgid "A page is reached"
@@ -6392,6 +6387,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Leave blank to use the duration above."
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#, elixir-autogen, elixir-format
+msgid "Leave blank to use the slug URL above. Set a nested address such as /about/team and the slug URL redirects (301) to it; changing it later leaves a redirect behind on published content."
 msgstr ""
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
@@ -13596,6 +13596,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "due %{date}"
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#, elixir-autogen, elixir-format
+msgid "e.g. /about/team"
 msgstr ""
 
 #: lib/kiln_cms_web/live/api_key_live.ex

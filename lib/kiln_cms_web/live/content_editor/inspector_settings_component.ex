@@ -91,13 +91,13 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
           <.input
             field={@form[:path_alias]}
             label={gettext("Path alias (optional)")}
-            placeholder="/products/shoes/size/42"
+            placeholder={gettext("e.g. /about/team")}
             readonly={field_locked?(@locked_fields, "path_alias")}
             {field_attrs("path_alias")}
           />
           <p class="mt-1 text-xs text-base-content/60">
             {gettext(
-              "A multi-segment canonical URL. When set, the flat slug URL 301s here; changing it leaves a redirect behind on published content."
+              "Leave blank to use the slug URL above. Set a nested address such as /about/team and the slug URL redirects (301) to it; changing it later leaves a redirect behind on published content."
             )}
           </p>
           <.field_cursors field="path_alias" cursors={@cursors} />

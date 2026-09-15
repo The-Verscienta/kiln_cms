@@ -937,11 +937,6 @@ msgstr "Un lien n'apparaît ici qu'après %{count} vérifications infructueuses 
 msgid "A media library"
 msgstr "Une médiathèque"
 
-#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
-#, elixir-autogen, elixir-format
-msgid "A multi-segment canonical URL. When set, the flat slug URL 301s here; changing it leaves a redirect behind on published content."
-msgstr "Une URL canonique à plusieurs segments. Lorsqu'elle est définie, l'URL de slug simple redirige ici en 301 ; la modifier laisse une redirection derrière elle sur le contenu publié."
-
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
 msgid "A page is reached"
@@ -6393,6 +6388,11 @@ msgstr "Laissez vide pour conserver l'actuel."
 #, elixir-autogen, elixir-format
 msgid "Leave blank to use the duration above."
 msgstr "Laissez vide pour utiliser la durée ci-dessus."
+
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#, elixir-autogen, elixir-format
+msgid "Leave blank to use the slug URL above. Set a nested address such as /about/team and the slug URL redirects (301) to it; changing it later leaves a redirect behind on published content."
+msgstr "Laissez vide pour utiliser l'URL du slug ci-dessus. Définissez une adresse imbriquée comme /about/team et l'URL du slug y redirige (301) ; la modifier ensuite laisse une redirection derrière elle sur le contenu publié."
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
@@ -13597,6 +13597,11 @@ msgstr "brouillon créé"
 #, elixir-autogen, elixir-format
 msgid "due %{date}"
 msgstr "à réviser le %{date}"
+
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#, elixir-autogen, elixir-format
+msgid "e.g. /about/team"
+msgstr "ex. /about/team"
 
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
