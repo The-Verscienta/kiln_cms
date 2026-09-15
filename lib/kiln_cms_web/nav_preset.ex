@@ -12,9 +12,10 @@ defmodule KilnCMSWeb.NavPreset do
   no navigation.
 
   Only `nav_preset` is copied onto the socket's user, never the returned
-  record: the socket actor carries a folded temporary role
-  (`KilnCMS.Accounts.Preparations.FoldRoleGrant`) that an update's return value
-  does not, and swapping the struct would quietly demote a live grant.
+  record: the socket actor was loaded at mount with whatever it needs to
+  authorize (a temporary role and its expiry among them), and an update's
+  return value is not guaranteed to carry the same, so swapping the struct
+  could quietly change what the rest of the session is allowed to do.
   """
   use Gettext, backend: KilnCMSWeb.Gettext
 
