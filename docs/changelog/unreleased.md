@@ -46,7 +46,40 @@ carries the reasoning.
   own notification topic, so the list follows a notification that lands, or one
   read in another tab, without a reload.
 
+<a id="a-notification-bell-in-the-console-top-bar-on-every-editor-page-an-unread-badge"></a>
+
+- **A notification bell in the console top bar**, on every `/editor/*` page:
+  an unread badge (capped at `8+`, with the real number in its accessible
+  label), a dropdown of the eight most recent items — read ones included, since
+  a list that empties itself takes each item's deep link with it — and
+  mark-all-read. PubSub-driven: the badge moves when a notification arrives or
+  is read elsewhere, without a reload. Clicking an item marks it read and
+  navigates to the block, comment or task it concerns.
+
 ## Changed
+
+<a id="the-ml-stack-behind-semantic-search-is-now-opt-in-kilnml1"></a>
+
+- **The ML stack behind semantic search is now opt-in (`KILN_ML=1`).** A first
+  `mix setup` fetched 773 MB of dependencies, 666 MB of it `deps/exla`, to back
+  semantic search — which ships disabled. Bumblebee, Nx and EXLA now stay out of
+  the dependency tree unless `KILN_ML` is set, taking a default `deps/` to
+  102 MB and saving a one-time 110 MB archive download; `mix setup` prints one
+  line saying so.
+
+  Nothing is removed. `KilnCMS.Search.Embedder.Bumblebee` and
+  `KilnCMS.Search.Reranker.Bumblebee` still exist and return
+  `{:error, %KilnCMS.Search.ML.NotCompiledError{}}` in a lean build, so hybrid
+  search falls back to its keyword legs and every caller's existing error
+  handling covers it. A deployment that has set `semantic: true` is warned once
+  at boot that its build cannot serve it.
+
+  **Upgrading:** a deployment already running semantic search must build with
+  `KILN_ML=1` — `KILN_ML=1 mix deps.get && KILN_ML=1 mix compile` — and keep the
+  variable set for every `mix` invocation, including in its image build.
+  Nothing in the database or configuration changes. Contributors touching the
+  semantic path should read the `KILN_ML` note in `CONTRIBUTING.md`: a lean
+  build compiles a different shape of those modules.
 
 <a id="configruntimeexs-is-now-an-index-not-a-1523-line-file"></a>
 
@@ -439,6 +472,12 @@ carries the reasoning.
   declares it. A new test checks every setting in that file the same way, so the
   next one that lands on a key upstream renamed fails instead of going quiet.
 
+<a id="with-every-write-anchoring-on-a-system-actor-write-no-longer-crashes-in"></a>
+
+- **With every-write anchoring on, a system-actor write no longer crashes in
+  `AnchorVersion`; its anchor is attributed to `actor_id: nil`.**
+  ([#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402), [#910](https://github.com/The-Verscienta/kiln_cms/issues/910))
+
 ## Security
 
 <a id="a-system-actor-so-internal-callers-run-under-the-policies-instead-of-around-them"></a>
@@ -513,4 +552,10 @@ carries the reasoning.
   listed file that loses one fails too, with the number to write, so the
   allowance can never drift out of date. Nothing may be added to it, and
   emptying it finishes #1402.
+
+<a id="firing-no-longer-fails-or-mints-an-unattributed-anchor-with-every-write"></a>
+
+- **Firing no longer fails, or mints an unattributed anchor, with every-write anchoring on.**
+  `:reindex_search_text` is skipped by `AnchorVersion` as PaperTrail already skips it.
+  ([#910](https://github.com/The-Verscienta/kiln_cms/issues/910))
 
