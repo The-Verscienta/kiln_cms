@@ -129,6 +129,18 @@ defmodule KilnCMSWeb.ContentEditorNewDraftTest do
   test "Save on a blank new document creates the untitled draft", %{conn: conn, editor: editor} do
     {:ok, lv, _html} = live(conn, ~p"/editor/content/page/new")
 
+    # The title is `required`, and a real browser runs constraint validation
+    # before firing the submit: without `formnovalidate` on Save draft, a blank
+    # title makes the button do nothing at all. `render_submit/1` below skips
+    # browser validation, so it cannot see that. Pin the attribute instead
+    # (#1497: every e2e spec that opened a new draft timed out on this).
+    assert has_element?(lv, ~s{form#page-editor input[name="form[title]"][required]})
+
+    assert has_element?(
+             lv,
+             ~s{form#page-editor button#new-draft-save[type="submit"][formnovalidate]}
+           )
+
     html = lv |> form("#page-editor", %{"form" => %{"title" => ""}}) |> render_submit()
 
     assert [page] = pages(editor)

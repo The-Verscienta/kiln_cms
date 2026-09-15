@@ -5072,7 +5072,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
             </.link>
             <h1 class="mt-1 truncate text-2xl font-semibold">{@page_title}</h1>
           </div>
-          <button type="submit" id="new-draft-save" class="btn btn-sm btn-default">
+          <%!-- `formnovalidate`: saving an untitled draft is this button's whole
+                job, and the title below is `required`. Without it a real
+                browser runs constraint validation first, shows its "fill in
+                this field" bubble and never fires the submit, so `phx-submit`
+                never reaches the server. LiveViewTest skips browser
+                validation, so only e2e saw it (#1497). --%>
+          <button
+            type="submit"
+            id="new-draft-save"
+            formnovalidate
+            class="btn btn-sm btn-default"
+          >
             {gettext("Save draft")}
           </button>
         </div>

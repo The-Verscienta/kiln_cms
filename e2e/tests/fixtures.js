@@ -181,6 +181,14 @@ async function newDraftContent(page, kind = "page") {
   await page.click("#new-draft-save");
   await page.waitForURL(new RegExp(`/editor/content/${kind}/[0-9a-f-]{36}$`));
   await base.expect(page.locator('form[id$="-editor"] [role="tablist"]')).toBeVisible();
+  // Save draft says "Saved.", like any Save. Dismiss it the way `save()` does:
+  // the flash group sits over the top-right of the page, so leaving it up
+  // intercepts the caller's next click there (the image picker's first button
+  // in focus_trap.spec.js). The old New button wrote the row without a flash.
+  const flash = page.locator("#flash-info");
+  await base.expect(flash).toContainText("Saved.");
+  await flash.click();
+  await base.expect(flash).toBeHidden();
   return new URL(page.url()).pathname.split("/").pop();
 }
 
