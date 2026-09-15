@@ -95,6 +95,20 @@ carries the reasoning.
 
 ## Changed
 
+<a id="the-editor-opens-on-the-title-and-the-canvas"></a>
+
+- **The editor opens on the title and the canvas.** A usability pass found
+  writers met a Slug field, a URL line, SEO hints, a Path alias field with a
+  paragraph of routing help and a redirects list before reaching the first
+  block. Those are settings of the document, not its writing, so they now live
+  in a **URL** section at the top of the inspector's Settings tab. Under the
+  title a compact line shows the live address with an **Edit URL** button that
+  opens Settings and focuses the slug. The inputs are still part of the editor
+  form: auto-derived slugs, autosave and field locks work as before. A slug or
+  path-alias error marks the Settings tab and the line under the title, and a
+  save refused on either opens Settings → URL on the field instead of saying
+  "fix the errors below" about a field that is off screen.
+
 <a id="home-says-what-the-site-holds-asks-how-you-publish-and-doesnt-alarm-on-day-one"></a>
 
 - **Home says what the site holds, asks how you publish, and doesn't alarm on

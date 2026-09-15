@@ -81,6 +81,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **The editor opens on the title and the canvas.** Slug, path alias and
+  redirects moved to Settings → URL; "Edit URL" under the title jumps there.
+  ([long form](docs/changelog/unreleased.md#the-editor-opens-on-the-title-and-the-canvas))
+
 - **Home says what the site holds, asks how you publish, and doesn't alarm on day one.**
   ([long form](docs/changelog/unreleased.md#home-says-what-the-site-holds-asks-how-you-publish-and-doesnt-alarm-on-day-one))
 

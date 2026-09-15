@@ -28,7 +28,6 @@ defmodule KilnCMSWeb.ContentEditorLive do
   import KilnCMSWeb.BlockDiscussionComponents,
     only: [block_discussion: 1, discussion_state: 3]
 
-  import KilnCMSWeb.SeoComponents, only: [seo_findings: 1]
   import KilnCMSWeb.VersionDiffComponents, only: [version_compare: 1]
 
   alias KilnCMS.Accounts
@@ -472,7 +471,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # plus the releases it could be added to.
          |> assign_release_state(kind, record.id, actor, org)
          |> assign_record(record)
-         |> open_settings_if_deep_linked(assign_deep_link?)}
+         # `?focus=slug` / `?focus=path_alias` names an input in Settings → URL,
+         # which the FocusField hook cannot scroll to while the panel is hidden.
+         |> open_settings_if_deep_linked(
+           assign_deep_link? or params["focus"] in ["slug", "path_alias"]
+         )}
     end
   end
 
@@ -930,22 +933,6 @@ defmodule KilnCMSWeb.ContentEditorLive do
     )
   end
 
-  # The full public path previewed under the slug field, live from the form.
-  # The canonical URL previewed under the slug field: a multi-segment path
-  # alias (#485) when one is typed, else the flat prefix + slug.
-  defp live_public_path(form, content_type) do
-    case form[:path_alias].value do
-      alias_path when is_binary(alias_path) and alias_path != "" -> alias_path
-      _blank -> KilnCMS.CMS.Slugs.public_path(content_type, form[:slug].value)
-    end
-  end
-
-  # The slug-scoped slice of the SEO report (#456 is the inline slice of #476) —
-  # the same findings, filtered to the field the slug input is responsible for,
-  # so the hints stay next to the thing they describe.
-  defp slug_report(report),
-    do: %{report | findings: Enum.filter(report.findings, &(&1.field == :slug))}
-
   # Seed the socket-managed children of every stored `columns` block, keyed by the
   # block's stable id (#335). Children live in socket state (not bound form
   # inputs) because a `{:array, :map}` field isn't an AshPhoenix sub-form; they're
@@ -1072,12 +1059,6 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
     assign(socket, :redirects, redirects)
   end
-
-  # The day a redirect was recorded — its `inserted_at`, not `updated_at`: the
-  # `[:path, :locale]` upsert refreshes the latter whenever another record
-  # vacates the same path, and "since" is what the editor is asking.
-  defp redirect_since(%{inserted_at: %DateTime{} = at}), do: Calendar.strftime(at, "%Y-%m-%d")
-  defp redirect_since(_redirect), do: "—"
 
   defp load_versions(socket) do
     opts = [
@@ -1372,7 +1353,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
           {:noreply,
            socket
            |> assign(:form, form)
-           |> put_flash(:error, gettext("Please fix the errors below."))}
+           |> flash_save_errors()}
         end
     end
   end
@@ -1423,7 +1404,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     else
       socket
       |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params, errors: true))
-      |> put_flash(:error, gettext("Please fix the errors below."))
+      |> flash_save_errors()
     end
   end
 
@@ -1602,6 +1583,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Unknown/garbled tab value — ignore it rather than crash the editor.
   def handle_event("switch_inspector_tab", _params, socket), do: {:noreply, socket}
+
+  # "Edit URL" under the title: the slug lives in Settings → URL, so open that
+  # panel and put the caret in the slug. The focus runs client-side after the
+  # patch that un-hides the panel (`phx:kiln:focus-field` in app.js) — focusing
+  # an input inside a `hidden` panel does nothing.
+  def handle_event("edit_url", _params, socket) do
+    {:noreply, reveal_url_field(socket, "slug")}
+  end
 
   # Side-by-side preview (Theme A): `:split` widens the inspector to half the
   # editor beside the canvas. Entering it shows the Preview tab through the same
@@ -3625,6 +3614,28 @@ defmodule KilnCMSWeb.ContentEditorLive do
       else: socket
   end
 
+  # Open Settings and focus one of its URL inputs (`"slug"` / `"path_alias"`).
+  defp reveal_url_field(socket, field) do
+    socket
+    |> show_inspector_tab(:settings)
+    |> push_event("kiln:focus-field", %{field: field})
+  end
+
+  # A refused save whose problem is the slug or path alias: those inputs are in
+  # Settings → URL, off screen while the writer is on the canvas, so "fix the
+  # errors below" would send them hunting. Jump to the field and say where it is.
+  defp flash_save_errors(socket) do
+    case url_error_field(socket.assigns.form) do
+      nil ->
+        put_flash(socket, :error, gettext("Please fix the errors below."))
+
+      field ->
+        socket
+        |> reveal_url_field(field)
+        |> put_flash(:error, gettext("The URL needs fixing — see Settings → URL."))
+    end
+  end
+
   # #817 (follow-up to #501): "Submit for review" only ever reaches here for
   # an editor (workflow_buttons/1 shows that button only when @state == :draft
   # and @tier == :editor — an admin's own path skips straight to Publish), so
@@ -5062,7 +5073,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
           )
         ]}>
           <div class="min-w-0 space-y-6">
-            <div class="grid gap-4 sm:grid-cols-2">
+            <%!-- Canvas first: the title, then the blocks. Slug, path alias and
+                  redirects live in Settings → URL (the rail below renders
+                  inside this same form, so they still submit with it); this
+                  line keeps the address visible and one click from editable. --%>
+            <div>
               <div
                 class={["relative", lock_ring(@locked_fields, "title")]}
                 {takeover_attrs(@locked_fields, "title")}
@@ -5072,101 +5087,35 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   label={gettext("Title")}
                   required
                   readonly={field_locked?(@locked_fields, "title")}
+                  class="w-full rounded-lg border border-base-content/15 bg-base-100 px-3 py-2.5 text-xl font-semibold text-base-content transition placeholder:text-base-content/50 focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20 read-only:cursor-default"
                   {field_attrs("title")}
                 />
                 <.field_cursors field="title" cursors={@cursors} />
               </div>
-              <div
-                class={["relative", lock_ring(@locked_fields, "slug")]}
-                {takeover_attrs(@locked_fields, "slug")}
+              <p
+                id="url-summary"
+                class="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-base-content/60"
               >
-                <.input
-                  field={@form[:slug]}
-                  label={gettext("Slug")}
-                  required
-                  readonly={field_locked?(@locked_fields, "slug")}
-                  {field_attrs("slug")}
-                />
-                <p class="mt-1 text-xs text-base-content/60">
-                  {gettext("URL:")}
-                  <a
-                    :if={@record.state == :published}
-                    href={live_public_path(@form, @content_type)}
-                    target="_blank"
-                    rel="noopener"
-                    class="link font-mono"
-                  >
-                    {live_public_path(@form, @content_type)}
-                  </a>
-                  <span :if={@record.state != :published} class="font-mono">
-                    {live_public_path(@form, @content_type)}
-                  </span>
-                </p>
-                <%!-- Slug-scoped findings stay inline next to the field they
-                      concern (#456); the full set lives in the SEO panel. --%>
-                <.seo_findings
-                  report={slug_report(@seo_report)}
-                  slug_customized?={@slug_customized?}
-                  class="mt-1"
-                />
-                <.field_cursors field="slug" cursors={@cursors} />
-              </div>
-              <div
-                class={["relative sm:col-span-2", lock_ring(@locked_fields, "path_alias")]}
-                {takeover_attrs(@locked_fields, "path_alias")}
-              >
-                <.input
-                  field={@form[:path_alias]}
-                  label={gettext("Path alias (optional)")}
-                  placeholder={gettext("e.g. /about/team")}
-                  readonly={field_locked?(@locked_fields, "path_alias")}
-                  {field_attrs("path_alias")}
-                />
-                <p class="mt-1 text-xs text-base-content/60">
-                  {gettext(
-                    "Leave blank to use the slug URL above. Set a nested address such as /about/team and the slug URL redirects (301) to it; changing it later leaves a redirect behind on published content."
-                  )}
-                </p>
-                <.field_cursors field="path_alias" cursors={@cursors} />
-              </div>
-              <%!-- The old addresses that still reach this record: a published
-                    slug or alias change leaves a 301 behind, and this is where
-                    the author sees it standing — and retires it, for the day
-                    the old URL should stop answering. Empty for a record that
-                    has never moved (most drafts), so the block is absent rather
-                    than an empty heading. Delete is a write on the target's
-                    behalf, hence `@may_write?` like every other write
-                    affordance here; the policy re-checks it. --%>
-              <div :if={@redirects != []} id="slug-redirects" class="text-xs sm:col-span-2">
-                <p class="text-base-content/60">{gettext("Redirects to this address")}</p>
-                <ul class="mt-1 space-y-1">
-                  <li
-                    :for={redirect <- @redirects}
-                    id={"slug-redirect-#{redirect.id}"}
-                    class="flex flex-wrap items-center gap-x-2 gap-y-1"
-                  >
-                    <span class="font-mono">{redirect.path}</span>
-                    <span aria-hidden="true" class="text-base-content/40">&rarr;</span>
-                    <span class="font-mono text-base-content/70">
-                      {KilnCMS.CMS.Slugs.public_path_for(@content_type, @record)}
-                    </span>
-                    <span class="text-base-content/50">
-                      {gettext("since %{date}", date: redirect_since(redirect))}
-                    </span>
-                    <button
-                      :if={@may_write?}
-                      type="button"
-                      phx-click="delete_redirect"
-                      phx-value-id={redirect.id}
-                      data-confirm={gettext("Delete this redirect? The old URL will 404.")}
-                      aria-label={gettext("Delete redirect")}
-                      class="btn btn-xs btn-ghost text-base-content/60 hover:text-error"
-                    >
-                      {gettext("Delete")}
-                    </button>
-                  </li>
-                </ul>
-              </div>
+                <span class="sr-only">{gettext("URL:")}</span>
+                <span class="min-w-0 break-all font-mono">
+                  {live_public_path(@form, @content_type)}
+                </span>
+                <span
+                  :if={url_error_field(@form)}
+                  class="inline-flex items-center gap-1 text-error"
+                >
+                  <.icon name="hero-exclamation-circle" class="size-3.5" />
+                  {gettext("Needs attention")}
+                </span>
+                <button
+                  type="button"
+                  id="edit-url"
+                  phx-click="edit_url"
+                  class="btn-link underline hover:text-base-content"
+                >
+                  {gettext("Edit URL")}
+                </button>
+              </p>
             </div>
 
             <div
@@ -5668,7 +5617,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
           <div class="space-y-3 lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:self-start lg:overflow-y-auto lg:pr-0.5">
             <.inspector_tabs
               tab={@inspector_tab}
-              settings_alert={any_custom_field_errors?(@form, @field_definitions)}
+              settings_alert={
+                any_custom_field_errors?(@form, @field_definitions) or
+                  url_error_field(@form) != nil
+              }
             />
 
             <%!-- ── Preview ─────────────────────────────────────────────── --%>
@@ -5690,6 +5642,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
               form={@form}
               record={@record}
               kind={@kind}
+              content_type={@content_type}
+              redirects={@redirects}
               current_org={@current_org}
               may_schedule?={@tier == :admin or (@tier == :editor and @editors_can_publish)}
               tasks={@tasks}

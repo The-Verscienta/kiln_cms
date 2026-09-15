@@ -7,6 +7,7 @@ const {
   expect,
   signInAsAdmin,
   newDraftPage,
+  fillSlug,
   addBlock,
   createTagGroup,
   createTag,
@@ -28,7 +29,7 @@ test.describe("editor journey", () => {
 
     // Title + slug (overwrite the auto-generated placeholders).
     await page.fill('input[name$="[title]"]', title);
-    await page.fill('input[name$="[slug]"]', slug);
+    await fillSlug(page, slug);
 
     // Add a TipTap rich-text block and type into the ProseMirror editor.
     await addBlock(page, "rich_text");
@@ -59,7 +60,7 @@ test.describe("editor journey", () => {
   test("slash command transforms a rich-text block", async ({ page }) => {
     await newDraftPage(page);
     await page.fill('input[name$="[title]"]', "E2E Slash");
-    await page.fill('input[name$="[slug]"]', `e2e-slash-${Date.now()}`);
+    await fillSlug(page, `e2e-slash-${Date.now()}`);
 
     await addBlock(page, "rich_text");
     const editor = page.locator('[phx-hook="RichText"] [data-editor] .ProseMirror').first();
@@ -89,7 +90,7 @@ test.describe("editor journey", () => {
   }) => {
     await newDraftPage(page);
     await page.fill('input[name$="[title]"]', "E2E Stored Mark");
-    await page.fill('input[name$="[slug]"]', `e2e-stored-mark-${Date.now()}`);
+    await fillSlug(page, `e2e-stored-mark-${Date.now()}`);
 
     await addBlock(page, "rich_text");
     const block = page.locator('[phx-hook="RichText"]').first();
@@ -130,7 +131,7 @@ test.describe("editor journey", () => {
     const linkText = "the refund policy";
     await newDraftPage(page);
     await page.fill('input[name$="[title]"]', "E2E Link");
-    await page.fill('input[name$="[slug]"]', slug);
+    await fillSlug(page, slug);
 
     await addBlock(page, "rich_text");
     const editor = page.locator('[phx-hook="RichText"] [data-editor] .ProseMirror').first();
@@ -261,7 +262,7 @@ test.describe("editor journey", () => {
   test("reorder blocks via drag-and-drop (SortableJS)", async ({ page }) => {
     await newDraftPage(page);
     await page.fill('input[name$="[title]"]', "E2E Reorder");
-    await page.fill('input[name$="[slug]"]', `e2e-reorder-${Date.now()}`);
+    await fillSlug(page, `e2e-reorder-${Date.now()}`);
 
     // Two heading blocks (simple textareas) so order is easy to assert. The
     // typed-block DSL's generic editor (dsl_block_fields) binds the primary
@@ -312,7 +313,7 @@ test.describe("editor journey", () => {
     // the id-keyed rich_text_body event) still saves against the reordered block.
     await newDraftPage(page);
     await page.fill('input[name$="[title]"]', "E2E Reorder Editor");
-    await page.fill('input[name$="[slug]"]', `e2e-reorder-editor-${Date.now()}`);
+    await fillSlug(page, `e2e-reorder-editor-${Date.now()}`);
 
     // A heading (with identifiable text) first, then a rich-text block below it.
     await addBlock(page, "heading");
@@ -548,7 +549,7 @@ test.describe("editor journey", () => {
   }) => {
     await newDraftPage(page);
     await page.fill('input[name$="[title]"]', "E2E Nested Heading");
-    await page.fill('input[name$="[slug]"]', `e2e-cols-${Date.now()}`);
+    await fillSlug(page, `e2e-cols-${Date.now()}`);
 
     await addBlock(page, "columns");
 
