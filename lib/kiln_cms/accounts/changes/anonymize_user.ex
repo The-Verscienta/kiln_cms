@@ -49,6 +49,8 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
       cancel_memberships(user)
       :ok = History.anonymize_actor(user.id)
       :ok = KilnCMS.Billing.anonymize_actor(user.id)
+      # Their name, snapshotted into other people's inboxes (#1320).
+      :ok = KilnCMS.Notifications.anonymize_actor(user.id)
       {:ok, user}
     end)
   end

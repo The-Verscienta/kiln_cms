@@ -71,6 +71,45 @@ defmodule KilnCMS.Notifications.TasksTest do
     assert delivery.payload["id"] == task.id
   end
 
+  # The inbox row's title is resolved through the content-type registry, which
+  # *raises* for a type it does not know. That lookup runs first, so before it
+  # was rescued on its own the whole dispatch bailed out — no email, no
+  # webhook — because an inbox row could not find a title.
+  test "a content type the registry does not know still emails and fires task.assigned" do
+    editor = user(:editor)
+    assignee = user(:editor)
+
+    CMS.create_webhook_endpoint!(
+      %{url: "https://example.test/hook", events: ["task.assigned"]},
+      actor: user(:admin)
+    )
+
+    {:ok, task} =
+      CMS.assign_task(
+        %{
+          content_type: "vanishedtype",
+          content_id: Ecto.UUID.generate(),
+          assignee_id: assignee.id
+        },
+        actor: editor
+      )
+
+    assert [row] = KilnCMS.Notifications.notifications_for_user!(assignee.id, actor: assignee)
+    # No record to name, so the type stands in — the email's own fallback.
+    assert row.title == "vanishedtype"
+    assert row.actor_id == editor.id
+
+    # The *enqueue* is what the rescue restores; pinned before draining, since
+    # what the mail job then does with an unknown type is its own concern.
+    assert_enqueued worker: KilnCMS.Notifications.TaskMailWorker, args: %{"task_id" => task.id}
+
+    drain()
+
+    assert [delivery] = CMS.recent_webhook_deliveries!(authorize?: false)
+    assert delivery.event == "task.assigned"
+    assert delivery.payload["id"] == task.id
+  end
+
   test "reassigning re-notifies the new assignee" do
     editor = user(:editor)
     first = user(:editor)

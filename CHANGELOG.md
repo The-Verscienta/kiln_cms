@@ -177,6 +177,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Notification bell and inbox fixes from review: items mark read, entry links resolve, erasure reaches inboxes.**
+  ([long form](docs/changelog/unreleased.md#notification-bell-and-inbox-fixes-from-review))
+
 - **Five editor-console rough edges a first-time user hit.**
   ([long form](docs/changelog/unreleased.md#five-editor-console-rough-edges-a-first-time-user-hit))
 

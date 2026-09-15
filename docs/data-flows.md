@@ -34,6 +34,7 @@ your deployment.
 | Display name | `users.name` | Yes (optional) | Shown to other editors (presence) and as the JSON-LD author byline. Blank by default. |
 | RBAC role | `users.role` | No | `:admin` / `:editor` / `:viewer`. |
 | Notification preferences | `users.notify_on_*` | No | Per-user opt-out (issue #46). |
+| In-app notifications | `notifications` | Yes | One row per recipient (#1320): event, content title, a comment excerpt, and the acting user's display name (`actor_name`) plus `actor_id`. Readable only by the recipient — no admin bypass. Deleted with the recipient's account row; `actor_name`/`actor_id` nulled when the *actor* is erased. No retention purge yet. |
 | Auth tokens | `tokens` | Pseudonymous | jti, subject (`user?id=<uuid>`), purpose, expiry. See [Auth tokens](#auth-token-retention-218). |
 | Audit / version history | `document_events`, AshPaperTrail versions | Pseudonymous | Carries `actor_id`. See [Audit trail vs erasure](#audit-trail-vs-user-erasure-219). |
 | Recorded search queries | `search_queries` | Possibly | Query text only — **no** actor/IP. See *Search query retention (#213) + disclosure (#220)* below. |
@@ -240,6 +241,11 @@ It:
 8. **Cancels every paid membership** and drops the stored provider customer and
    subscription ids. Without this, a late webhook or the nightly reconcile would
    recompute entitlements and re-grant access to the erased account.
+9. **Blanks their name in other people's in-app notifications** — nulls
+   `actor_name` and `actor_id` on every `notifications` row the user caused, on
+   every site. The name was copied into each recipient's inbox when the event
+   happened, so scrubbing `users.name` alone left it there. The rows stay and
+   render a neutral "An editor".
 
 The account **row is retained** (with no personal data) so authorship links and
 referential integrity in content/version history are preserved. Membership rows

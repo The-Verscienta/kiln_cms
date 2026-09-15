@@ -147,6 +147,42 @@ defmodule KilnCMS.Notifications.NotificationTest do
     end
   end
 
+  describe "erasure reaches the actor's name" do
+    test "anonymize_actor/1 blanks the name and id on rows that account caused" do
+      recipient = user()
+      actor = user()
+      bystander = user()
+
+      caused = record(recipient, %{actor_id: actor.id, actor_name: "Jane Editor"})
+      other = record(recipient, %{actor_id: bystander.id, actor_name: "Grace"})
+
+      assert :ok = Notifications.anonymize_actor(actor.id)
+
+      rows =
+        Map.new(
+          Notifications.notifications_for_user!(recipient.id, actor: recipient),
+          &{&1.id, &1}
+        )
+
+      assert is_nil(rows[caused.id].actor_name)
+      assert is_nil(rows[caused.id].actor_id)
+      # The row itself stays — it still records that the event happened.
+      assert rows[caused.id].title == caused.title
+      # Nobody else's name moves.
+      assert rows[other.id].actor_name == "Grace"
+    end
+
+    test "an actor-carrying call to :forget_actor is forbidden" do
+      recipient = user()
+      mine = record(recipient, %{actor_name: "Jane Editor"})
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               mine
+               |> Ash.Changeset.for_update(:forget_actor, %{}, actor: recipient)
+               |> Ash.update()
+    end
+  end
+
   describe "tenancy" do
     test "a notification recorded under one org is not in another org's list" do
       me = user()
@@ -325,6 +361,30 @@ defmodule KilnCMS.Notifications.NotificationTest do
       assert {:error, _forbidden} = Notifications.mark_notification_read(mine, actor: colleague)
 
       # No badge moves for a read that did not happen.
+      refute_receive :notifications_changed, 50
+    end
+
+    test "mark_all_read reports how many moved and announces once, not per row" do
+      me = user()
+      record(me)
+      record(me)
+      record(me)
+
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, Notifications.topic(me.id))
+
+      assert {:ok, 3} = Notifications.mark_all_read(me, nil)
+
+      assert_receive :notifications_changed
+      # Three rows, one announcement: each would otherwise be a re-read in
+      # every open console.
+      refute_receive :notifications_changed, 50
+    end
+
+    test "mark_all_read with nothing unread moves nothing and announces nothing" do
+      me = user()
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, Notifications.topic(me.id))
+
+      assert {:ok, 0} = Notifications.mark_all_read(me, nil)
       refute_receive :notifications_changed, 50
     end
 

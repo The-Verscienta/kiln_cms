@@ -88,6 +88,30 @@ defmodule KilnCMS.Accounts.AnonymizeUserTest do
       assert is_nil(reloaded.actor_id)
     end
 
+    test "blanks their name in other people's in-app notifications", %{
+      admin: admin,
+      subject: subject
+    } do
+      recipient = user(:editor)
+
+      :ok =
+        KilnCMS.Notifications.record_in_app(%{
+          user_id: recipient.id,
+          org_id: nil,
+          event: :comment_mention,
+          content_type: "page",
+          content_id: Ash.UUID.generate(),
+          title: "A draft",
+          actor_id: subject.id,
+          actor_name: "Jane Editor"
+        })
+
+      {:ok, _} = Accounts.anonymize_user(subject, actor: admin)
+
+      assert [row] = KilnCMS.Notifications.notifications_for_user!(recipient.id, actor: recipient)
+      assert is_nil(row.actor_name)
+    end
+
     test "is forbidden for non-admins", %{subject: subject} do
       editor = user(:editor)
       assert {:error, %Ash.Error.Forbidden{}} = Accounts.anonymize_user(subject, actor: editor)
