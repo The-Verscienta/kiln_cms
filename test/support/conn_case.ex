@@ -78,6 +78,19 @@ defmodule KilnCMSWeb.ConnCase do
   def org_conn(conn, org), do: %{conn | host: "#{org.slug}.#{KilnCMSWeb.Tenant.base_host()}"}
 
   @doc """
+  Narrow a rendered console page to its own body, `<main id="main">`.
+
+  The console shell carries a notification bell whose dropdown renders content
+  titles and `?comment=` deep links of its own (#1320), so a whole-page
+  `refute html =~ …` can no longer tell a page's list apart from the chrome
+  around it. Scoped to `#main`, the assertion means what it says again.
+  """
+  @spec main_html(String.t()) :: String.t()
+  def main_html(html) do
+    html |> Floki.parse_document!() |> Floki.find("#main") |> Floki.raw_html()
+  end
+
+  @doc """
   A bare `Phoenix.ConnTest.build_conn/0` peering from loopback — the shared
   rate-limit bucket. Opt in only when a test *needs* every request to share one
   address (e.g. proving a per-account budget is not per-IP).

@@ -228,6 +228,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Notification bell and inbox fixes from review: items mark read, entry links resolve, erasure reaches inboxes.**
+  ([long form](docs/changelog/unreleased.md#notification-bell-and-inbox-fixes-from-review))
+
 - **`mix docs` "View Source" links point at the release tag, not `main`.**
   ([#1450](https://github.com/The-Verscienta/kiln_cms/issues/1450) · [long form](docs/changelog/unreleased.md#mix-docs-view-source-links-point-at-the-release-tag-not-main))
 

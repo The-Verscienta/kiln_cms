@@ -10594,6 +10594,11 @@ msgstr "Parte del contenido no se pudo contar (%{types}), así que las cifras de
 msgid "Some content could not be read and was not handled: %{types}."
 msgstr "Parte del contenido no se pudo leer y no se procesó: %{types}."
 
+#: lib/kiln_cms_web/live/inbox_live.ex
+#, elixir-autogen, elixir-format
+msgid "Some notifications could not be marked read."
+msgstr "No se pudieron marcar como leídas algunas notificaciones."
+
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
 msgid "Some tiers grant an audience that is no longer configured. Restore it in config :kiln_cms, :audiences, or retire those tiers."

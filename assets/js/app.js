@@ -240,7 +240,10 @@ const Hooks = {
   // `data-dirty` on the form in sync with its save state; this hook guards
   // full page unloads (tab close, hard reload, plain links) via `beforeunload`
   // and in-app LiveView navigation (e.g. "← All content") by confirming
-  // clicks on live links while dirty.
+  // clicks on live links while dirty — and on `[data-guard-nav]` controls,
+  // which navigate from the server (`push_navigate`) rather than being links:
+  // the notification bell's items mark read *then* navigate, and without the
+  // attribute a click on one discarded unsaved edits with no warning.
   UnsavedGuard: {
     mounted() {
       this.beforeUnload = e => {
@@ -253,7 +256,7 @@ const Hooks = {
 
       this.onClick = e => {
         if (!this.dirty()) return
-        const link = e.target.closest && e.target.closest("a[data-phx-link]")
+        const link = e.target.closest && e.target.closest("a[data-phx-link], [data-guard-nav]")
         if (!link || link.target === "_blank") return
         const message =
           this.el.dataset.unsavedMessage || "You have unsaved changes. Leave without saving?"

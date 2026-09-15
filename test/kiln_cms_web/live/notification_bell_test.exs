@@ -137,16 +137,17 @@ defmodule KilnCMSWeb.NotificationBellTest do
   end
 
   describe "the dropdown" do
-    test "it lists recent items with their deep links", %{conn: conn} do
+    # The deep link itself is pinned by the click test below: an item is a
+    # button that navigates after marking read, so it carries no `href`.
+    test "it lists recent items", %{conn: conn} do
       me = authed_user()
-      block_id = Ecto.UUID.generate()
-      notification = notify(me, %{content_type: "post", block_id: block_id})
+      notification = notify(me, %{content_type: "post"})
 
       {:ok, _lv, html} = conn |> log_in(me) |> live(~p"/editor/tasks")
 
       assert html =~ "Grace mentioned you"
       assert html =~ "The intro"
-      assert html =~ "/editor/posts/#{notification.content_id}?comment=#{block_id}"
+      assert html =~ "phx-value-id=\"#{notification.id}\""
       # And the way out to the full list.
       assert html =~ "/editor/inbox"
     end
@@ -164,18 +165,61 @@ defmodule KilnCMSWeb.NotificationBellTest do
       assert badge(html) == ""
     end
 
-    test "clicking an item marks it read", %{conn: conn} do
+    test "clicking an item marks it read, then goes to its deep link", %{conn: conn} do
       me = authed_user()
-      notification = notify(me)
+      block_id = Ecto.UUID.generate()
+      notification = notify(me, %{content_type: "post", block_id: block_id})
 
       {:ok, lv, _html} = conn |> log_in(me) |> live(~p"/editor/tasks")
 
-      lv
-      |> element(".bell-item[phx-value-id='#{notification.id}']")
-      |> render_click()
+      assert {:error, {:live_redirect, %{to: to}}} =
+               lv
+               |> element(".bell-item[phx-value-id='#{notification.id}']")
+               |> render_click()
+
+      assert to == "/editor/posts/#{notification.content_id}?comment=#{block_id}"
 
       assert [read] = Notifications.notifications_for_user!(me.id, actor: me)
       assert read.read_at
+    end
+
+    # The regression the click test above cannot see: LiveViewTest delivers a
+    # `phx-click` on a `navigate` link, but the browser client swaps the page
+    # first and the component's event never lands. Items must not be live
+    # links with a click binding at all.
+    test "an item is a button, not a live link carrying a phx-click", %{conn: conn} do
+      me = authed_user()
+      notify(me)
+
+      {:ok, _lv, html} = conn |> log_in(me) |> live(~p"/editor/tasks")
+      doc = Floki.parse_document!(html)
+
+      # `data-guard-nav`: a button navigates server-side, which the editor's
+      # unsaved-changes confirm only covers when the control opts in.
+      assert [_item] = Floki.find(doc, "button.bell-item[phx-click][data-guard-nav]")
+      assert Floki.find(doc, "[data-phx-link][phx-click]") == []
+    end
+
+    test "a colleague's id opens nothing", %{conn: conn} do
+      me = authed_user()
+      colleague = authed_user()
+      theirs = notify(colleague)
+      mine = notify(me)
+
+      {:ok, lv, _html} = conn |> log_in(me) |> live(~p"/editor/tasks")
+
+      # Retarget my own button at their id — the shape a client can always send.
+      html =
+        lv
+        |> element(".bell-item[phx-value-id='#{mine.id}']")
+        |> render_click(%{"id" => theirs.id})
+
+      assert is_binary(html)
+
+      assert [still_unread] =
+               Notifications.notifications_for_user!(colleague.id, actor: colleague)
+
+      assert is_nil(still_unread.read_at)
     end
 
     test "mark-all-read clears the badge", %{conn: conn} do
@@ -188,7 +232,7 @@ defmodule KilnCMSWeb.NotificationBellTest do
 
       lv |> element(".bell-action") |> render_click()
 
-      assert badge(render(lv)) == ""
+      assert badge(render_after_broadcast(lv)) == ""
       assert Notifications.unread_count(me, nil) == 0
     end
 

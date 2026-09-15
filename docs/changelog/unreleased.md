@@ -342,6 +342,30 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="notification-bell-and-inbox-fixes-from-review"></a>
+
+- **Notification bell and inbox fixes from review.** A review of the
+  notification centre (#1320) found real defects, now fixed:
+  - **Clicking a bell item never marked it read.** LiveView's client swaps the
+    page for a `navigate` link before running its `phx-click`, so the
+    component's event had no target (LiveViewTest still passed). Items are
+    buttons that mark read and then `push_navigate`; they carry
+    `data-guard-nav`, which the editor's unsaved-changes confirm now covers.
+  - **Notifications on dynamic content types linked nowhere.** `Entry` exports
+    no `__kiln_content_type__`, so rows stored `"content"` and every channel
+    linked `/editor/content/content/:id`; the type's own name now comes from the
+    registry.
+  - **Erasure left the actor's name in other people's inboxes.** Rows now record
+    `actor_id` (new nullable column), and `anonymize_user` blanks
+    `actor_name`/`actor_id` on every row that account caused.
+  - Mark-read in the bell and inbox passes the tenant (a strict-tenancy build
+    made every click a silent no-op); "Mark all read" announces once rather than
+    per row and reports a failure instead of "Marked 0"; the bell re-reads on a
+    refresh rather than on every console render; the inbox loads once per mount;
+    a task on an unknown content type still emails and fires `task.assigned`;
+    and a raise dispatching a workflow notification after the write committed
+    is logged rather than crashing the caller.
+
 <a id="mix-docs-view-source-links-point-at-the-release-tag-not-main"></a>
 
 - **`mix docs` "View Source" links point at the release tag, not `main`.**
