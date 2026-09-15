@@ -159,11 +159,10 @@ carries the reasoning.
   `/editor/team`. Two new columns on `users` and `org_memberships`
   (`granted_role`, `granted_role_expires_at`); the standing `role` is never
   overwritten, so expiry is a comparison rather than a scheduled write and a
-  missed sweep cannot leave anyone elevated.
-  `KilnCMS.Accounts.Preparations.FoldRoleGrant` presents a live grant as `role`
-  on every read, which is how it reaches `Scoping.effective_tier/2` and the
-  `actor_attribute_equals(:role, …)` policies without either knowing it exists.
-  An hourly AshOban sweep clears expired columns and drops the holder's live
+  missed sweep cannot leave anyone elevated. A loaded `role` is always the
+  standing tier; every tier decision (`Checks.PlatformAdmin`,
+  `Scoping.effective_tier/2`) applies a live grant through
+  `RoleGrant.effective_role/1` at the moment it decides. An hourly AshOban sweep clears expired columns and drops the holder's live
   sockets. Grants are elevations only, and carry no scope axes. The window is one
   of five offered durations or an explicit UTC datetime.
 
@@ -172,9 +171,10 @@ carries the reasoning.
 - **Admin-initiated password resets.** `Accounts.send_user_password_reset/2`
   mails a named account a reset link and reports whether it went — which the
   anonymous form deliberately cannot, since it must stay indistinguishable for
-  addresses that don't exist. Bypasses (and logs) the per-address mail budget:
-  nobody reaches it without an admin session, and a silent drop there would make
-  the console's confirmation a lie. Erased accounts are refused.
+  addresses that don't exist. It charges the per-address mail budget once and
+  refuses by name when the budget is spent, rather than reporting "sent" for mail
+  the sender would drop. "Sent" means the mail was queued. Erased accounts are
+  refused.
 
 <a id="account-removal-with-a-content-disposition"></a>
 

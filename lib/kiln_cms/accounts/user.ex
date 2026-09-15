@@ -159,10 +159,8 @@ defmodule KilnCMS.Accounts.User do
     # `granted_role`/`granted_role_expires_at` are NOT listed here, and cannot be:
     # field policies only cover public fields, and those two are `public? false`
     # (access-control config, like `audiences`) so they reach no API surface at
-    # all. What they could still leak is through the fold — writing a real tier
-    # into the `role` field this policy withholds — which
-    # `KilnCMS.Accounts.Preparations.FoldRoleGrant` declines to do precisely
-    # because `role` comes back forbidden. See that module's `fold/1`.
+    # all. Nothing copies them into `role` on read, so this policy is the whole
+    # of what an API caller can learn about a tier.
     field_policy [
       :email,
       :role,
@@ -182,8 +180,8 @@ defmodule KilnCMS.Accounts.User do
   end
 
   # Expired temporary roles (`KilnCMS.Accounts.RoleGrant`). Authorization does not
-  # wait for this — `FoldRoleGrant` stops presenting a grant the instant it
-  # expires — so the trigger is hygiene plus the session eviction, and a missed
+  # wait for this — every tier decision compares the expiry with the clock — so
+  # the trigger is hygiene plus the session eviction, and a missed
   # run cannot leave anyone elevated. Hourly rather than nightly for the
   # eviction's sake: a grant that ran out at 09:00 should not leave its holder's
   # open console authorized until 04:00 tomorrow.
@@ -250,11 +248,6 @@ defmodule KilnCMS.Accounts.User do
       # A temporary admin must not be able to make itself a permanent one — the
       # bound on a grant is otherwise whatever the grantee decides. See the module.
       validate KilnCMS.Accounts.Validations.StandingAdminOnly
-
-      # This action writes the STANDING role, so it must not be handed a record
-      # whose live temporary role was folded into that field — the write would be
-      # dropped as a no-op. See the validation module.
-      validate KilnCMS.Accounts.Validations.UnfoldedRecord
 
       # An admin demoting the last admin locks every operator out of `/editor`
       # with no route back through the UI — see the validation module.
@@ -903,13 +896,6 @@ defmodule KilnCMS.Accounts.User do
     end
   end
 
-  # Presents a live temporary role as `role` on every read, so the actor struct
-  # every policy reads already carries the effective tier. See the module — this
-  # is the whole enforcement mechanism for `KilnCMS.Accounts.RoleGrant`.
-  preparations do
-    prepare KilnCMS.Accounts.Preparations.FoldRoleGrant
-  end
-
   attributes do
     uuid_primary_key :id
 
@@ -954,10 +940,9 @@ defmodule KilnCMS.Accounts.User do
     end
 
     # A time-boxed elevation above `role` — "admin until Friday". `role` above
-    # stays the standing tier for the whole life of the grant, and
-    # `KilnCMS.Accounts.Preparations.FoldRoleGrant` presents this one as `role`
-    # on every read while it is live, so expiry needs nothing scheduled to take
-    # effect. See KilnCMS.Accounts.RoleGrant for why it is modelled this way
+    # stays the standing tier for the whole life of the grant, and every tier
+    # decision asks `KilnCMS.Accounts.RoleGrant.effective_role/1`, so expiry needs
+    # nothing scheduled to take effect. See that module for why it is modelled this way
     # round; `:grant_temporary_role` is the only action that writes it.
     #
     # Access-control config, so `public? false` like `audiences`: it reaches no

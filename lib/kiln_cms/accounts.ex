@@ -129,9 +129,6 @@ defmodule KilnCMS.Accounts do
       # from the ceremony after Wax verification; see the action + preparation).
       define :complete_passkey_sign_in, action: :sign_in_with_passkey, args: [:user_id]
       # Admin-only: assign role + consumer audiences; pass `actor: admin`.
-      # The record MUST come from a read that suppressed the temporary-role fold
-      # (`KilnCMS.Accounts.RoleGrant.unfolded/0`) — the action refuses a folded
-      # one, because Ash would silently drop a `role` write that matched it.
       define :manage_user_access, action: :manage_access
       # Time-boxed elevation above the standing role (KilnCMS.Accounts.RoleGrant).
       # Pass both grant fields to grant, both blank to revoke early.

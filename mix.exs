@@ -443,6 +443,7 @@ defmodule KilnCMS.MixProject do
       "Security & access": [
         "docs/policy-matrix.md",
         "docs/granular-rbac.md",
+        "docs/account-administration.md",
         "docs/multi-tenancy.md",
         "docs/passkeys.md",
         "docs/two-factor-auth.md",

@@ -143,7 +143,11 @@ defmodule KilnCMSWeb.AuthController do
   def sign_in_destination(conn, user) do
     # A reader lands on their own account page (#337 Phase 2), not the site root
     # — `/` is a dead end for someone who just signed in to manage a membership.
-    default = if user.role in [:editor, :admin], do: ~p"/editor/overview", else: ~p"/account"
+    default =
+      if KilnCMS.Accounts.RoleGrant.effective_role(user) in [:editor, :admin],
+        do: ~p"/editor/overview",
+        else: ~p"/account"
+
     SafeRedirect.local_path(get_session(conn, :return_to), default)
   end
 

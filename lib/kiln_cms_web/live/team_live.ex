@@ -18,10 +18,8 @@ defmodule KilnCMSWeb.TeamLive do
 
   A member's tier can also be granted **temporarily** — "editor on this site until
   Friday" — which leaves the standing tier alone and expires on its own; see
-  `KilnCMS.Accounts.RoleGrant`. That is why the membership list is read with
-  `RoleGrant.unfolded/0`: this page shows the standing tier beside a live grant,
-  and writes the standing tier, which Ash would silently drop against a folded
-  record.
+  `KilnCMS.Accounts.RoleGrant`. A membership's `role` is always that standing
+  tier; this page shows a live grant beside it and never writes one into it.
 
   The instance-wide account register — who has signed up at all, their platform
   role, password resets, account removal — is `KilnCMSWeb.AccountsLive`.
@@ -294,12 +292,9 @@ defmodule KilnCMSWeb.TeamLive do
     members =
       Accounts.list_memberships_for_org!(
         org.id,
-        RoleGrant.unfolded() ++
-          [
-            actor: actor,
-            load: [:user, :custom_role],
-            query: [sort: [inserted_at: :asc]]
-          ]
+        actor: actor,
+        load: [:user, :custom_role],
+        query: [sort: [inserted_at: :asc]]
       )
 
     roles =
@@ -757,6 +752,7 @@ defmodule KilnCMSWeb.TeamLive do
           type="button"
           phx-click="revoke_member_role"
           phx-value-id={@membership.id}
+          data-confirm={gettext("End this temporary tier now?")}
           class="btn btn-sm btn-default"
         >
           {gettext("End it now")}

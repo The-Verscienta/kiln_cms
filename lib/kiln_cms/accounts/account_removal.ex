@@ -98,10 +98,15 @@ defmodule KilnCMS.Accounts.AccountRemoval do
   stop the erasure: the account is the part a data-subject request is about.
 
   `actor` must be an admin (the erasure's own policy enforces it).
+
+  `:types_for_org` replaces `KilnCMS.CMS.ContentTypes.all_for_org/1` as the list
+  of types swept per org — for tests, which cannot otherwise make a real type's
+  read fail.
   """
   @spec remove(struct(), disposition(), keyword()) :: {:ok, result()} | {:error, term()}
   def remove(user, disposition, opts \\ []) when disposition in @dispositions do
     actor = Keyword.fetch!(opts, :actor)
+    types_for_org = types_for_org(opts)
 
     # Preflight the erasure before touching any content. Some refusals are
     # deterministic — `NotLastAdmin` on the instance's only admin, a policy the
@@ -111,7 +116,7 @@ defmodule KilnCMS.Accounts.AccountRemoval do
     # policies, without writing anything.
     with :ok <- erasure_allowed(user, actor) do
       %{affected: affected, failed: failed, unreadable: unreadable} =
-        dispose_content(user, disposition, actor)
+        dispose_content(user, disposition, actor, types_for_org)
 
       with {:ok, _erased} <- Accounts.anonymize_user(user, actor: actor) do
         {:ok,
@@ -146,14 +151,18 @@ defmodule KilnCMS.Accounts.AccountRemoval do
   `ContentTypes`' own `:label`, the same one every picker in the console shows.
   A system read: it spans organizations by design and no single actor's scope
   covers them all.
+
+  Takes `:types_for_org` as `remove/3` does.
   """
-  @spec authored_counts(struct()) :: %{
+  @spec authored_counts(struct(), keyword()) :: %{
           counts: [{String.t(), non_neg_integer()}],
           unreadable: [String.t()]
         }
-  def authored_counts(user) do
+  def authored_counts(user, opts \\ []) do
+    types_for_org = types_for_org(opts)
+
     results =
-      for org_id <- Accounts.list_org_ids(), ct <- ContentTypes.all_for_org(org_id) do
+      for org_id <- Accounts.list_org_ids(), ct <- types_for_org.(org_id) do
         {ct.label, count_authored(ct, user.id, org_id)}
       end
 
@@ -191,17 +200,20 @@ defmodule KilnCMS.Accounts.AccountRemoval do
       :error
   end
 
-  # `:keep` is the absence of work, not a loop over every document doing nothing.
-  defp dispose_content(_user, :keep, _actor), do: %{affected: 0, failed: 0, unreadable: []}
+  defp types_for_org(opts), do: Keyword.get(opts, :types_for_org, &ContentTypes.all_for_org/1)
 
-  defp dispose_content(user, disposition, actor) do
+  # `:keep` is the absence of work, not a loop over every document doing nothing.
+  defp dispose_content(_user, :keep, _actor, _types_for_org),
+    do: %{affected: 0, failed: 0, unreadable: []}
+
+  defp dispose_content(user, disposition, actor, types_for_org) do
     # Cross-organization by necessity: the account may have authored on several
     # sites, and each write is re-scoped to its own org (#419). One type's failure
     # is recorded and the sweep continues — a partial disposition an admin is told
     # about beats abandoning the rest.
     {affected, failed, unreadable} =
       Enum.reduce(Accounts.list_org_ids(), {0, 0, []}, fn org_id, totals ->
-        Enum.reduce(ContentTypes.all_for_org(org_id), totals, fn ct, acc ->
+        Enum.reduce(types_for_org.(org_id), totals, fn ct, acc ->
           dispose_type(ct, user, disposition, actor, org_id, acc, nil)
         end)
       end)

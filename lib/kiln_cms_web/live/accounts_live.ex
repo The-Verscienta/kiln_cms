@@ -18,16 +18,11 @@ defmodule KilnCMSWeb.AccountsLive do
   separate surfaces because they are separate objects; the account detail links
   out to each site's team page for the per-site tiers.
 
-  ## Every read here suppresses the temporary-role fold
+  ## Roles on this page
 
-  `KilnCMS.Accounts.RoleGrant.unfolded/0` on every read: this page both *shows*
-  the standing role beside a live grant (impossible if the grant has replaced it)
-  and *writes* the standing role, which Ash would silently drop as a no-op
-  against a folded record. `KilnCMS.Accounts.Validations.UnfoldedRecord` refuses
-  the write rather than letting that pass, so forgetting shows up as an error
-  here instead of a wrong column in the database. The actor is still
-  `current_user` from the session — folded, like every other page's — so nothing
-  on this page authorizes against an unfolded role.
+  `role` on every record here is the **standing** role, as stored; a live
+  temporary one is `granted_role` beside it (`KilnCMS.Accounts.RoleGrant`). The
+  page shows both, and writes only the standing one through `:manage_access`.
   """
   use KilnCMSWeb, :live_view
 
@@ -278,16 +273,13 @@ defmodule KilnCMSWeb.AccountsLive do
 
     rows =
       Accounts.list_users!(
-        RoleGrant.unfolded() ++
-          [
-            actor: actor,
-            query: [
-              filter: register_filter(socket.assigns),
-              sort: [email: :asc],
-              limit: @per_page + 1,
-              offset: offset
-            ]
-          ]
+        actor: actor,
+        query: [
+          filter: register_filter(socket.assigns),
+          sort: [email: :asc],
+          limit: @per_page + 1,
+          offset: offset
+        ]
       )
 
     socket
@@ -332,7 +324,7 @@ defmodule KilnCMSWeb.AccountsLive do
     do: Ash.Expr.expr(not is_nil(granted_role) and granted_role_expires_at > now())
 
   defp fetch_account(socket, id) do
-    case Accounts.get_user(id, RoleGrant.unfolded() ++ [actor: socket.assigns.actor]) do
+    case Accounts.get_user(id, actor: socket.assigns.actor) do
       {:ok, %{} = user} -> {:ok, user}
       _ -> :error
     end
@@ -351,9 +343,9 @@ defmodule KilnCMSWeb.AccountsLive do
   end
 
   defp memberships(user, actor) do
-    Accounts.list_memberships_for_user!(
-      user.id,
-      RoleGrant.unfolded() ++ [actor: actor, load: [:organization, :custom_role]]
+    Accounts.list_memberships_for_user!(user.id,
+      actor: actor,
+      load: [:organization, :custom_role]
     )
   end
 
@@ -719,7 +711,12 @@ defmodule KilnCMSWeb.AccountsLive do
             remaining: time_left(@account.granted_role_expires_at)
           )}
         </p>
-        <button type="button" phx-click="revoke_grant" class="btn btn-sm btn-default">
+        <button
+          type="button"
+          phx-click="revoke_grant"
+          data-confirm={gettext("End this temporary role now?")}
+          class="btn btn-sm btn-default"
+        >
           {gettext("End it now")}
         </button>
       </div>
