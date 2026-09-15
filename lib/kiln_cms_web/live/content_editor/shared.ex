@@ -27,6 +27,29 @@ defmodule KilnCMSWeb.ContentEditor.Shared do
   # same canonical field list.
   def seo_suggestion_fields, do: @seo_suggestion_fields
 
+  # The canonical URL previewed from the live form: a multi-segment path alias
+  # (#485) when one is typed, else the flat prefix + slug. Shown twice — the
+  # compact line under the title and the Settings → URL section.
+  def live_public_path(form, content_type) do
+    case form[:path_alias].value do
+      alias_path when is_binary(alias_path) and alias_path != "" -> alias_path
+      _blank -> KilnCMS.CMS.Slugs.public_path(content_type, form[:slug].value)
+    end
+  end
+
+  # The first URL field (slug, then path alias) carrying an error the input
+  # itself would show. Those inputs live in Settings → URL, which is usually
+  # not the panel on screen, so the editor needs its own signal: the line under
+  # the title, the Settings tab dot, and a save that jumps there. Gated on
+  # `used_input?/1` exactly as `<.input>` gates its own error text, so the
+  # signal never names an error the field is not displaying.
+  def url_error_field(form) do
+    Enum.find(["slug", "path_alias"], fn name ->
+      field = form[String.to_existing_atom(name)]
+      Phoenix.Component.used_input?(field) and field.errors != []
+    end)
+  end
+
   # Current ids for a (possibly unloaded) relationship list.
   def current_ids(records) when is_list(records), do: Enum.map(records, & &1.id)
   def current_ids(_), do: []

@@ -33,6 +33,115 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
   def render(assigns) do
     ~H"""
     <div class={["space-y-4", @inspector_tab != :settings && "hidden"]}>
+      <%!-- URL — first in Settings, and its own section rather than part of
+              "SEO & scheduling": it is the setting a writer reaches for most
+              (the line under the title links straight here), and that section
+              sits below Accessibility and Compliance and runs a dozen fields
+              long. Moved out of the canvas column so the title leads straight
+              into the blocks; still inputs on the page's editor form. --%>
+      <.inspector_section id="inspector-url" title={gettext("URL")}>
+        <:aside>
+          <span
+            :if={url_error_field(@form)}
+            class="inline-flex items-center gap-1 text-xs text-error"
+          >
+            <.icon name="hero-exclamation-circle" class="size-3.5" />
+            {gettext("Needs attention")}
+          </span>
+        </:aside>
+        <div
+          class={["relative", lock_ring(@locked_fields, "slug")]}
+          {takeover_attrs(@locked_fields, "slug")}
+        >
+          <.input
+            field={@form[:slug]}
+            label={gettext("Slug")}
+            required
+            readonly={field_locked?(@locked_fields, "slug")}
+            {field_attrs("slug")}
+          />
+          <p class="mt-1 break-all text-xs text-base-content/60">
+            {gettext("URL:")}
+            <a
+              :if={@record.state == :published}
+              href={live_public_path(@form, @content_type)}
+              target="_blank"
+              rel="noopener"
+              class="link font-mono"
+            >
+              {live_public_path(@form, @content_type)}
+            </a>
+            <span :if={@record.state != :published} class="font-mono">
+              {live_public_path(@form, @content_type)}
+            </span>
+          </p>
+          <%!-- Slug-scoped findings stay next to the field they concern
+                  (#456); the full set lives in SEO & scheduling below. --%>
+          <.seo_findings
+            report={slug_report(@seo_report)}
+            slug_customized?={@slug_customized?}
+            class="mt-1"
+          />
+          <.field_cursors field="slug" cursors={@cursors} />
+        </div>
+        <div
+          class={["relative", lock_ring(@locked_fields, "path_alias")]}
+          {takeover_attrs(@locked_fields, "path_alias")}
+        >
+          <.input
+            field={@form[:path_alias]}
+            label={gettext("Path alias (optional)")}
+            placeholder="/products/shoes/size/42"
+            readonly={field_locked?(@locked_fields, "path_alias")}
+            {field_attrs("path_alias")}
+          />
+          <p class="mt-1 text-xs text-base-content/60">
+            {gettext(
+              "A multi-segment canonical URL. When set, the flat slug URL 301s here; changing it leaves a redirect behind on published content."
+            )}
+          </p>
+          <.field_cursors field="path_alias" cursors={@cursors} />
+        </div>
+        <%!-- The old addresses that still reach this record: a published
+                slug or alias change leaves a 301 behind, and this is where
+                the author sees it standing — and retires it, for the day
+                the old URL should stop answering. Empty for a record that
+                has never moved (most drafts), so the block is absent rather
+                than an empty heading. Delete is a write on the target's
+                behalf, hence `@may_write?` like every other write
+                affordance here; the policy re-checks it. --%>
+        <div :if={@redirects != []} id="slug-redirects" class="text-xs">
+          <p class="text-base-content/60">{gettext("Redirects to this address")}</p>
+          <ul class="mt-1 space-y-1">
+            <li
+              :for={redirect <- @redirects}
+              id={"slug-redirect-#{redirect.id}"}
+              class="flex flex-wrap items-center gap-x-2 gap-y-1"
+            >
+              <span class="break-all font-mono">{redirect.path}</span>
+              <span aria-hidden="true" class="text-base-content/40">&rarr;</span>
+              <span class="break-all font-mono text-base-content/70">
+                {KilnCMS.CMS.Slugs.public_path_for(@content_type, @record)}
+              </span>
+              <span class="text-base-content/50">
+                {gettext("since %{date}", date: redirect_since(redirect))}
+              </span>
+              <button
+                :if={@may_write?}
+                type="button"
+                phx-click="delete_redirect"
+                phx-value-id={redirect.id}
+                data-confirm={gettext("Delete this redirect? The old URL will 404.")}
+                aria-label={gettext("Delete redirect")}
+                class="btn btn-xs btn-ghost text-base-content/60 hover:text-error"
+              >
+                {gettext("Delete")}
+              </button>
+            </li>
+          </ul>
+        </div>
+      </.inspector_section>
+
       <.inspector_section title={gettext("Assignment")}>
         <.task_list
           tasks={@tasks}
@@ -589,4 +698,16 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
     </div>
     """
   end
+
+  # The slug-scoped slice of the SEO report (#456 is the inline slice of #476) —
+  # the same findings, filtered to the field the slug input is responsible for,
+  # so the hints stay next to the thing they describe.
+  defp slug_report(report),
+    do: %{report | findings: Enum.filter(report.findings, &(&1.field == :slug))}
+
+  # The day a redirect was recorded — its `inserted_at`, not `updated_at`: the
+  # `[:path, :locale]` upsert refreshes the latter whenever another record
+  # vacates the same path, and "since" is what the editor is asking.
+  defp redirect_since(%{inserted_at: %DateTime{} = at}), do: Calendar.strftime(at, "%Y-%m-%d")
+  defp redirect_since(_redirect), do: "—"
 end

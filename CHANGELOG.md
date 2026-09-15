@@ -144,6 +144,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **The editor opens on the title and the canvas.** Slug, path alias and
+  redirects moved to Settings → URL; "Edit URL" under the title jumps there.
+  ([long form](docs/changelog/unreleased.md#the-editor-opens-on-the-title-and-the-canvas))
+
 - **`config/runtime.exs` is now an index, not a 1,523-line file.**
   ([#1476](https://github.com/The-Verscienta/kiln_cms/issues/1476) · [long form](docs/changelog/unreleased.md#configruntimeexs-is-now-an-index-not-a-1523-line-file))
 

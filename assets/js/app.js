@@ -193,20 +193,7 @@ const Hooks = {
     mounted() {
       const name = this.el.dataset.kilnFocus
       if (!name) return
-      requestAnimationFrame(() => {
-        const target =
-          document.getElementById(`custom-field-${name}`) ||
-          document.querySelector(`[phx-value-field="${CSS.escape(name)}"]`)
-        if (!target) return
-        for (let d = target.closest("details"); d; d = d.parentElement.closest("details")) {
-          d.open = true
-        }
-        target.scrollIntoView({behavior: "smooth", block: "center"})
-        const wrap = target.closest("div") || target
-        wrap.classList.add("kiln-focus-pulse")
-        setTimeout(() => wrap.classList.remove("kiln-focus-pulse"), 1600)
-        if (typeof target.focus === "function") target.focus({preventScroll: true})
-      })
+      requestAnimationFrame(() => focusEditorField(name))
     },
   },
   // Multiplayer preview cursors (#343): report this viewer's pointer position
@@ -1085,6 +1072,29 @@ window.addEventListener("phx:lock_granted", ({detail}) => {
   attempt()
 })
 window.addEventListener("phx:page-loading-stop", _info => topbar.hide())
+
+// Scroll an editor field into view, pulse it and focus it. Shared by the
+// FocusField deep-link hook and `phx:kiln:focus-field`, which the content
+// editor pushes when "Edit URL" (or a save refused on the slug) opens
+// Settings → URL: the event lands after the patch that un-hides the panel.
+function focusEditorField(name) {
+  const target =
+    document.getElementById(`custom-field-${name}`) ||
+    document.querySelector(`[phx-value-field="${CSS.escape(name)}"]`)
+  if (!target) return
+  for (let d = target.closest("details"); d; d = d.parentElement.closest("details")) {
+    d.open = true
+  }
+  target.scrollIntoView({behavior: "smooth", block: "center"})
+  const wrap = target.closest("div") || target
+  wrap.classList.add("kiln-focus-pulse")
+  setTimeout(() => wrap.classList.remove("kiln-focus-pulse"), 1600)
+  if (typeof target.focus === "function") target.focus({preventScroll: true})
+}
+
+window.addEventListener("phx:kiln:focus-field", ({detail}) => {
+  if (detail && detail.field) requestAnimationFrame(() => focusEditorField(detail.field))
+})
 
 // connect if there are any LiveViews on the page
 liveSocket.connect()

@@ -937,7 +937,7 @@ msgstr "Un lien n'apparaît ici qu'après %{count} vérifications infructueuses 
 msgid "A media library"
 msgstr "Une médiathèque"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "A multi-segment canonical URL. When set, the flat slug URL 301s here; changing it leaves a redirect behind on published content."
 msgstr "Une URL canonique à plusieurs segments. Lorsqu'elle est définie, l'URL de slug simple redirige ici en 301 ; la modifier laisse une redirection derrière elle sur le contenu publié."
@@ -3883,7 +3883,7 @@ msgid "Defined types"
 msgstr "Types définis"
 
 #: lib/kiln_cms_web/live/billing_live.ex
-#: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/experiment_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
@@ -3958,7 +3958,7 @@ msgstr "Supprimer le menu"
 msgid "Delete permanently"
 msgstr "Supprimer définitivement"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "Delete redirect"
@@ -4024,7 +4024,7 @@ msgstr "Supprimer cet élément et tout ce qui est imbriqué dessous ?"
 msgid "Delete this menu and all of its items?"
 msgstr "Supprimer ce menu et tous ses éléments ?"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "Delete this redirect? The old URL will 404."
@@ -4549,6 +4549,11 @@ msgstr "Modifier"
 #, elixir-autogen, elixir-format
 msgid "Edit %{kind}"
 msgstr "Modifier : %{kind}"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Edit URL"
+msgstr "Modifier l'URL"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -6970,6 +6975,12 @@ msgstr "Quasi-doublons de cette page, et étiquettes suggérées par son contenu
 msgid "Need more than a preset? Custom CSS for the public site lives in"
 msgstr "Besoin de plus qu'un préréglage ? Le CSS personnalisé du site public se trouve dans"
 
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Needs attention"
+msgstr "À corriger"
+
 #: lib/kiln_cms_web/components/advisory_components.ex
 #, elixir-autogen, elixir-format
 msgid "Needs work"
@@ -8290,7 +8301,7 @@ msgstr "Chemin"
 msgid "Path alias"
 msgstr "Alias de chemin"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "Path alias (optional)"
 msgstr "Alias de chemin (facultatif)"
@@ -8950,7 +8961,7 @@ msgstr "Redirection depuis %{path} créée."
 msgid "Redirects"
 msgstr "Redirections"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "Redirects to this address"
 msgstr "Redirections vers cette adresse"
@@ -10522,9 +10533,9 @@ msgstr "Ignoré"
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/billing_live.ex
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/content_editor/markdown_import.ex
 #: lib/kiln_cms_web/live/content_editor/shared.ex
-#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/form_live.ex
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
@@ -11381,6 +11392,11 @@ msgstr "Le calendrier de publication de KilnCMS avec des articles programmés."
 #, elixir-autogen, elixir-format
 msgid "The SEO title just repeats the page title — a distinct one usually reads better."
 msgstr "Le titre SEO ne fait que répéter le titre de la page — un titre distinct se lit généralement mieux."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "The URL needs fixing — see Settings → URL."
+msgstr "L'URL est à corriger — voir Paramètres → URL."
 
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
@@ -12281,6 +12297,7 @@ msgstr "Types"
 msgid "Typography and page width for the public pages."
 msgstr "Typographie et largeur de page des pages publiques."
 
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
@@ -12302,6 +12319,7 @@ msgstr "Segment d'URL"
 msgid "URL segment (defaults to machine name + \"s\")"
 msgstr "Segment d'URL (par défaut : nom machine + « s »)"
 
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "URL:"
@@ -14054,7 +14072,7 @@ msgstr "signé avec une clé que nous ne détenons plus"
 msgid "since"
 msgstr "depuis le"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "since %{date}"
 msgstr "depuis le %{date}"
