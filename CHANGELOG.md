@@ -131,13 +131,24 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Upgrade notes
+
+- **Existing accounts keep the full sidebar; new ones start on Essentials.**
+  ([long form](docs/changelog/unreleased.md#sidebar-presets-essentials-and-everything))
+
 ### Added
+
+- **Sidebar presets: Essentials and Everything.**
+  ([long form](docs/changelog/unreleased.md#sidebar-presets-essentials-and-everything))
 
 - **A Configure hub at `/editor/configure`.**
   ([#1319](https://github.com/The-Verscienta/kiln_cms/issues/1319) · [long form](docs/changelog/unreleased.md#a-configure-hub-at-editorconfigure))
 
 - **Notifications are persisted, not only mailed.**
   ([#1472](https://github.com/The-Verscienta/kiln_cms/issues/1472) · [long form](docs/changelog/unreleased.md#notifications-are-persisted-not-only-mailed))
+
+- **The editor says when a heading's `#link` gets a number.**
+  ([#1439](https://github.com/The-Verscienta/kiln_cms/pull/1439) · [long form](docs/changelog/unreleased.md#the-editor-says-when-a-headings-link-gets-a-number))
 
 - **`/editor/inbox`.**
   ([#1472](https://github.com/The-Verscienta/kiln_cms/issues/1472) · [long form](docs/changelog/unreleased.md#editorinbox))
@@ -147,6 +158,12 @@ Every summary line below that was shortened links to its own entry there.
 - **The editor opens on the title and the canvas.** Slug, path alias and
   redirects moved to Settings → URL; "Edit URL" under the title jumps there.
   ([long form](docs/changelog/unreleased.md#the-editor-opens-on-the-title-and-the-canvas))
+
+- **A temporary role is applied where a tier is decided; `role` on a read is always the standing tier.**
+  ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462) · [Account administration](docs/account-administration.md))
+
+- **Account removal no longer scans every admin-defined entry per type** — `entries.author_id` is indexed.
+  ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462))
 
 - **`config/runtime.exs` is now an index, not a 1,523-line file.**
   ([#1476](https://github.com/The-Verscienta/kiln_cms/issues/1476) · [long form](docs/changelog/unreleased.md#configruntimeexs-is-now-an-index-not-a-1523-line-file))
@@ -232,6 +249,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Five editor-console rough edges a first-time user hit.**
+  ([long form](docs/changelog/unreleased.md#five-editor-console-rough-edges-a-first-time-user-hit))
+
 - **`mix docs` "View Source" links point at the release tag, not `main`.**
   ([#1450](https://github.com/The-Verscienta/kiln_cms/issues/1450) · [long form](docs/changelog/unreleased.md#mix-docs-view-source-links-point-at-the-release-tag-not-main))
 
@@ -261,6 +281,14 @@ Every summary line below that was shortened links to its own entry there.
 - **With every-write anchoring on, a system-actor write no longer crashes in
   `AnchorVersion`; its anchor is attributed to `actor_id: nil`.**
   ([#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402), [#910](https://github.com/The-Verscienta/kiln_cms/issues/910))
+
+- **A system-actor publish or membership transition no longer crashes on the
+  actor's missing `:id`; it is attributed to `actor_id: nil`.**
+  ([#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402), [#1486](https://github.com/The-Verscienta/kiln_cms/pull/1486))
+
+- **`/developers` no longer links to a Swagger UI and OpenAPI spec that 404,
+  and the GraphiQL playground is reachable in dev again.**
+  ([long form](docs/changelog/unreleased.md#developers-no-longer-links-to-a-swagger-ui-and-openapi-spec-that-404))
 
 ### Security
 

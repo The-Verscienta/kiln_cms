@@ -12,6 +12,7 @@ defmodule Kiln.Advisory.Checks.Headings do
   use Kiln.Advisory
 
   alias Kiln.Advisory.Context
+  alias KilnCMS.HeadingAnchors
 
   # Below this a page is short enough to read straight through, so demanding
   # section headings would be noise.
@@ -19,7 +20,7 @@ defmodule Kiln.Advisory.Checks.Headings do
 
   @impl Kiln.Advisory
   def check(%Context{body: body}) do
-    [headings_present(body), heading_order(body), empty_headings(body)]
+    [headings_present(body), heading_order(body), empty_headings(body), anchors_renamed(body)]
   end
 
   defp headings_present(%{word_count: count}) when count < @headings_expected_from, do: :n_a
@@ -61,6 +62,43 @@ defmodule Kiln.Advisory.Checks.Headings do
       count: length(indexes),
       indexes: Enum.uniq(indexes)
     })
+  end
+
+  # A heading's `#link` on the public page is its slug, unless something got
+  # there first — an earlier heading with the same words, or an id the page
+  # layout owns (`HeadingAnchors.reserved_ids/0`) — in which case it is
+  # numbered. The page never carries a duplicate id; this tells the author the
+  # link someone would share is `#main-1`, not the `#main` they'd guess.
+  #
+  # Info, not a warning: repeated sub-headings ("Example", "Example") are
+  # ordinary and numbering them is correct. SEO panel only — it's about links
+  # into the page, which a screen-reader outline doesn't depend on.
+  defp anchors_renamed(%{headings: []}), do: :n_a
+
+  defp anchors_renamed(%{headings: headings}) do
+    renamed =
+      headings
+      |> Enum.zip(HeadingAnchors.ids(Enum.map(headings, & &1.text)))
+      |> Enum.filter(fn {heading, id} -> id && id != HeadingAnchors.slug(heading.text) end)
+
+    case renamed do
+      [] ->
+        :ok
+
+      [{first, anchor} | _] ->
+        :info
+        |> finding(:heading_anchor_renamed, :body, %{
+          count: length(renamed),
+          example: first.text,
+          anchor: anchor,
+          slug: HeadingAnchors.slug(first.text),
+          indexes:
+            renamed
+            |> Enum.flat_map(fn {h, _} -> List.wrap(Map.get(h, :index)) end)
+            |> Enum.uniq()
+        })
+        |> lensed([:seo])
+    end
   end
 
   defp skipped_level(headings) do

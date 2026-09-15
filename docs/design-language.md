@@ -198,6 +198,19 @@ The authoring app frame (`lib/kiln_cms_web/components/layouts.ex`):
   band is `platform: true`, so for anyone else the band empties and is dropped:
   the separation is never half day-to-day admin. A non-admin gets the Account
   section alone.
+- **Sidebar presets** — **Essentials** and **Everything**, per user
+  (`User.nav_preset`, saved server-side so it follows them across devices and
+  the first paint is already right). Essentials draws Home, Content, Media,
+  Calendar, Tasks and Inbox, then the Configure hub (admins) and Your settings;
+  Everything is the full map above. Only the sidebar filters
+  (`ConsoleNav.sidebar/3`) — the hub and ⌘K read `nav/2`, so a preset hides a
+  link, never a screen — and the page you are on is drawn even when the preset
+  would hide it, marked current. The switch sits at the foot of the sidebar
+  ("Show all tools" / "Show essentials", named for what it will do) and on Your
+  settings; both send `set_nav_preset`, which `KilnCMSWeb.NavPreset` handles on
+  every signed-in LiveView and answers by updating `current_user`, so the
+  sidebar redraws in place. New accounts start on Essentials; accounts that
+  existed before presets were migrated to Everything.
 - **Section collapse** is stored the way the rail is: a space-separated list of
   group keys on `<html data-nav-collapsed>` + `localStorage`
   (`kiln:nav-collapsed`), replayed by `root.html.heex` before first paint. The

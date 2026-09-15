@@ -336,9 +336,8 @@ Field policy: the `role` field is visible only to **admins or the user
 themselves**; other readers see the record without `role`. `granted_role` and
 `granted_role_expires_at` are `public? false` and so reach no API surface at all —
 field policies cover only public fields, which is why they are not listed beside
-`role` there. What they *could* leak is through the read-time fold
-(`KilnCMS.Accounts.Preparations.FoldRoleGrant` presents a live grant as `role`),
-and that fold declines whenever `role` itself came back forbidden.
+`role` there. Nothing copies a grant into `role` on read, so the `role` a reader
+is allowed to see is always the standing one.
 
 The three admin levers above are the account console's
 ([`account-administration.md`](account-administration.md)). Two are refused for

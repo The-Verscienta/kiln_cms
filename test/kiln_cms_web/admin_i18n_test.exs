@@ -28,6 +28,11 @@ defmodule KilnCMSWeb.AdminI18nTest do
         "password" => @password
       })
 
+    # The localization assertions read sidebar labels (Analytics, Taxonomy),
+    # which the Essentials preset a new account starts on does not draw — so
+    # the refute below would pass for the wrong reason. Full sidebar.
+    {:ok, _} = KilnCMS.Accounts.set_nav_preset(user, :everything, actor: user)
+
     user
   end
 

@@ -15,7 +15,7 @@ defmodule KilnCMS.CMS.Changes.RecordPublishedVersion do
 
   @impl true
   def change(changeset, _opts, context) do
-    actor_id = context.actor && context.actor.id
+    actor_id = actor_id(context.actor)
 
     Ash.Changeset.after_transaction(changeset, fn _changeset, result ->
       case result do
@@ -24,6 +24,12 @@ defmodule KilnCMS.CMS.Changes.RecordPublishedVersion do
       end
     end)
   end
+
+  # Only a person has an id to attribute. `%KilnCMS.SystemActor{}` (#1402) has
+  # no `:id`, so `context.actor.id` would raise a `KeyError` while the changeset
+  # is built and fail the publish — see `KilnCMS.CMS.Changes.AnchorVersion`.
+  defp actor_id(%{id: id}), do: id
+  defp actor_id(_actor), do: nil
 
   defp wire_version(record, actor_id) do
     version_module = Module.concat(record.__struct__, Version)

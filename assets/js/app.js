@@ -29,6 +29,8 @@ import {FocusTrap} from "./focus_trap"
 import {PasskeyEnroll, initPasskeySignIn} from "./passkeys"
 import {PushToggle} from "./push"
 import {initAdvisoryJump} from "./advisory_jump"
+import {initRevealSection} from "./reveal_section"
+import {FlashAutoDismiss} from "./flash_auto_dismiss"
 import {SavedTicker} from "./saved_ticker"
 import {BodyImageUploader} from "./body_image_uploader"
 import {watchLiveness} from "./liveness"
@@ -39,6 +41,9 @@ const Hooks = {
   SavedTicker,
   BodyImageUploader,
   FocusTrap,
+  // Info flashes close themselves after a few seconds — see
+  // assets/js/flash_auto_dismiss.js.
+  FlashAutoDismiss,
   // Passkey enrolment on /editor/settings (#331) — see assets/js/passkeys.js.
   PasskeyEnroll,
   // Web Push opt-in on /editor/settings (#628) — see assets/js/push.js.
@@ -1027,6 +1032,10 @@ document.addEventListener(
 // Clicking a finding in the editor's advisory panels scrolls to and
 // highlights what it is about — see assets/js/advisory_jump.js.
 initAdvisoryJump()
+
+// A button carrying `data-kiln-reveal="<id>"` scrolls to and focuses that
+// section once its click has been answered — see assets/js/reveal_section.js.
+initRevealSection()
 
 // ⌘K / Ctrl-K opens the editor search palette from anywhere (no-op if already
 // there). Skipped while typing in an input so it doesn't hijack the field.
