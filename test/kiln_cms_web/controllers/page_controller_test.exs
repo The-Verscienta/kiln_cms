@@ -172,14 +172,38 @@ defmodule KilnCMSWeb.PageControllerTest do
   # #319: the header/footer API links land on a served docs page, not on the
   # raw endpoints (which 404/400 in a browser).
   test "GET /developers serves the API docs page", %{conn: conn} do
+    set_api_docs(true)
     html = conn |> get(~p"/developers") |> html_response(200)
 
     assert html =~ "Developer APIs"
     # Onward links to the browsable explorer + spec and the auth endpoint.
-    assert html =~ "/api/json/swaggerui"
-    assert html =~ "/api/json/open_api"
+    assert html =~ ~s(href="/api/json/swaggerui")
+    assert html =~ ~s(href="/api/json/open_api")
+    refute html =~ ~s(id="api-docs-disabled")
     assert html =~ "/api/auth/sign_in"
     assert html =~ "GraphQL"
+  end
+
+  # Production turns `:api_docs` off, and `KilnCMSWeb.Plugs.ApiDocs` then 404s
+  # both routes — so the page must not offer links that lead nowhere.
+  test "GET /developers drops the explorer links when API docs are off", %{conn: conn} do
+    set_api_docs(false)
+    html = conn |> get(~p"/developers") |> html_response(200)
+
+    refute html =~ ~s(href="/api/json/swaggerui")
+    refute html =~ ~s(href="/api/json/open_api")
+    assert html =~ ~s(id="api-docs-disabled")
+    assert html =~ "API_DOCS_ENABLED=true"
+    # The rest of the page still stands.
+    assert html =~ "Developer APIs"
+    assert html =~ "/api/auth/sign_in"
+  end
+
+  # `:api_docs` is process-wide app config, which is why this module is not async.
+  defp set_api_docs(value) do
+    previous = Application.get_env(:kiln_cms, :api_docs)
+    Application.put_env(:kiln_cms, :api_docs, value)
+    on_exit(fn -> Application.put_env(:kiln_cms, :api_docs, previous) end)
   end
 
   test "home and nav point API links at the docs page, not raw endpoints", %{conn: conn} do

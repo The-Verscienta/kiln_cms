@@ -274,6 +274,10 @@ Every summary line below that was shortened links to its own entry there.
   actor's missing `:id`; it is attributed to `actor_id: nil`.**
   ([#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402), [#1486](https://github.com/The-Verscienta/kiln_cms/pull/1486))
 
+- **`/developers` no longer links to a Swagger UI and OpenAPI spec that 404,
+  and the GraphiQL playground is reachable in dev again.**
+  ([long form](docs/changelog/unreleased.md#developers-no-longer-links-to-a-swagger-ui-and-openapi-spec-that-404))
+
 ### Security
 
 - **A system actor, so internal callers run under the policies instead of around
