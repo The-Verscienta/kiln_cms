@@ -72,6 +72,7 @@ defmodule KilnCMSWeb.CoreComponents do
       :if={msg = render_slot(@inner_block) || Phoenix.Flash.get(@flash, @kind)}
       id={@id}
       phx-click={JS.push("lv:clear-flash", value: %{key: @kind}) |> hide("##{@id}")}
+      phx-hook={@kind == :info && "FlashAutoDismiss"}
       role="alert"
       class="fixed top-3 right-3 z-50"
       {@rest}

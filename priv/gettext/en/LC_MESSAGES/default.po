@@ -199,6 +199,13 @@ msgid_plural "%{count} minutes"
 msgstr[0] ""
 msgstr[1] ""
 
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} more on %{date} — show the week"
+msgid_plural "%{count} more on %{date} — show the week"
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} of %{cap} slots used"
@@ -937,11 +944,6 @@ msgstr ""
 msgid "A media library"
 msgstr ""
 
-#: lib/kiln_cms_web/live/content_editor_live.ex
-#, elixir-autogen, elixir-format
-msgid "A multi-segment canonical URL. When set, the flat slug URL 301s here; changing it leaves a redirect behind on published content."
-msgstr ""
-
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
 msgid "A page is reached"
@@ -1489,6 +1491,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format, fuzzy
 msgid "Admin"
+msgstr ""
+
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "Admin on every site through their account role, so there is no site tier to set here."
 msgstr ""
 
 #: lib/kiln_cms_web/live/system_live.ex
@@ -6399,6 +6406,11 @@ msgstr ""
 msgid "Leave blank to use the duration above."
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Leave blank to use the slug URL above. Set a nested address such as /about/team and the slug URL redirects (301) to it; changing it later leaves a redirect behind on published content."
+msgstr ""
+
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "Leave it open"
@@ -6573,6 +6585,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Manage"
+msgstr ""
+
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "Manage account"
 msgstr ""
 
 #: lib/kiln_cms_web/live/account_live.ex
@@ -10474,6 +10491,11 @@ msgstr ""
 msgid "Site"
 msgstr ""
 
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "Site admin"
+msgstr ""
+
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "Site default (completes it)"
@@ -13588,6 +13610,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "due %{date}"
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "e.g. /about/team"
 msgstr ""
 
 #: lib/kiln_cms_web/live/api_key_live.ex

@@ -237,6 +237,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Five editor-console rough edges a first-time user hit.**
+  ([long form](docs/changelog/unreleased.md#five-editor-console-rough-edges-a-first-time-user-hit))
+
 - **`mix docs` "View Source" links point at the release tag, not `main`.**
   ([#1450](https://github.com/The-Verscienta/kiln_cms/issues/1450) · [long form](docs/changelog/unreleased.md#mix-docs-view-source-links-point-at-the-release-tag-not-main))
 

@@ -354,6 +354,22 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="five-editor-console-rough-edges-a-first-time-user-hit"></a>
+
+- **Five editor-console rough edges a first-time user hit.** The path-alias
+  field's placeholder (`/products/shoes/size/42`) read like a live address;
+  it is now an obvious example, and the help text says to leave it blank to
+  use the slug. The "N a11y issues" chip switched the inspector to Settings but
+  left the Accessibility section six panels down, off screen; it now scrolls
+  to that section and moves focus there. A crowded month cell's "+N more" was
+  plain text; it links to the week holding that day, keeping the filters. The
+  Team page listed only site memberships, so an admin created by `/setup`
+  (admin by account role, no membership) was missing and a fresh install read
+  "Members (0)"; site admins are now listed and counted, labelled "Site admin",
+  with no site-tier controls that would not apply to them. And info flashes
+  such as "You are now signed in" close after five seconds (paused while
+  hovered or focused); error flashes still wait to be closed.
+
 <a id="mix-docs-view-source-links-point-at-the-release-tag-not-main"></a>
 
 - **`mix docs` "View Source" links point at the release tag, not `main`.**

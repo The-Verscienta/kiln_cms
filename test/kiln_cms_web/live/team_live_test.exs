@@ -67,6 +67,58 @@ defmodule KilnCMSWeb.TeamLiveTest do
       assert html =~ to_string(colleague.email)
     end
 
+    test "a site admin with no membership is listed and counted, without site-tier controls",
+         %{conn: conn} do
+      # What `/setup` creates: `User.role == :admin` and no OrgMembership row.
+      admin = authed_user(:admin)
+      conn = log_in(conn, admin)
+
+      {:ok, view, html} = live(conn, ~p"/editor/team")
+
+      assert has_element?(view, "#site-admin-#{admin.id}", "Site admin")
+      assert has_element?(view, "#site-admin-#{admin.id}", to_string(admin.email))
+      refute has_element?(view, "#site-admin-#{admin.id} button")
+      refute html =~ "No members on this site yet."
+      assert html =~ ~r/Members\s*\(\d+\)/
+      refute html =~ ~r/Members\s*\(0\)/
+    end
+
+    test "a normal membership keeps its edit and remove controls", %{conn: conn} do
+      colleague = authed_user(:editor)
+
+      {:ok, membership} =
+        Accounts.create_org_membership(
+          %{user_id: colleague.id, organization_id: Accounts.default_org_id(), role: :editor},
+          authorize?: false
+        )
+
+      {:ok, view, _html} = live(conn, ~p"/editor/team")
+
+      assert has_element?(view, "#member-#{membership.id} button", "Edit")
+      assert has_element?(view, "#member-#{membership.id} button[phx-click='remove_member']")
+      refute has_element?(view, "#member-#{membership.id}", "Site admin")
+      refute has_element?(view, "#site-admin-#{colleague.id}")
+    end
+
+    test "an admin who also holds a membership is listed once, on the membership row",
+         %{conn: conn} do
+      other_admin = authed_user(:admin)
+
+      {:ok, membership} =
+        Accounts.create_org_membership(
+          %{user_id: other_admin.id, organization_id: Accounts.default_org_id(), role: :viewer},
+          authorize?: false
+        )
+
+      {:ok, view, html} = live(conn, ~p"/editor/team")
+
+      refute has_element?(view, "#site-admin-#{other_admin.id}")
+      assert has_element?(view, "#member-#{membership.id}", "Site admin")
+
+      occurrences = html |> String.split(to_string(other_admin.email)) |> length() |> Kernel.-(1)
+      assert occurrences == 1
+    end
+
     test "adding an unknown email flashes an error", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/editor/team")
 
