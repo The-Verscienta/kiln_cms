@@ -110,14 +110,19 @@ defmodule KilnCMSWeb.InboxLiveTest do
 
       assert render(lv) =~ "Mark read"
 
-      html = lv |> element("button[phx-value-id='#{notification.id}']") |> render_click()
-      assert html =~ "Mark unread"
+      # The page does not reload itself after a mark; the row changes when the
+      # write's own announcement comes back to this process. `render_click`
+      # returns before that message is handled, so the row is read with a
+      # `render/1` afterwards.
+      # `#main`: the bell's dropdown item carries the same `phx-value-id`.
+      lv |> element("#main button[phx-value-id='#{notification.id}']") |> render_click()
+      assert render(lv) =~ "Mark unread"
 
       assert [read] = Notifications.notifications_for_user!(me.id, actor: me)
       assert read.read_at
 
-      html = lv |> element("button[phx-value-id='#{notification.id}']") |> render_click()
-      assert html =~ "Mark read"
+      lv |> element("#main button[phx-value-id='#{notification.id}']") |> render_click()
+      assert render(lv) =~ "Mark read"
 
       assert [unread] = Notifications.notifications_for_user!(me.id, actor: me)
       assert is_nil(unread.read_at)
@@ -193,7 +198,7 @@ defmodule KilnCMSWeb.InboxLiveTest do
       assert unread =~ "Still waiting"
       # `main/1` again: the bell's dropdown lists read items too, on purpose,
       # so the whole-page HTML legitimately still mentions "Already seen".
-      refute main(unread) =~ "Already seen"
+      refute main_html(unread) =~ "Already seen"
     end
 
     test "an empty unread filter says so differently from an empty inbox", %{conn: conn} do
@@ -285,14 +290,5 @@ defmodule KilnCMSWeb.InboxLiveTest do
 
       assert render(lv) =~ "Tasks"
     end
-  end
-
-  # The console shell carries a notification bell whose dropdown renders
-  # content titles and `?comment=` deep links of its own (#1320), so a
-  # whole-page substring assertion can no longer tell this page's list apart
-  # from the chrome around it. `main/1` narrows to `<main id="main">`, which is
-  # the page's own body — the assertion means what it says again.
-  defp main(html) do
-    html |> Floki.parse_document!() |> Floki.find("#main") |> Floki.raw_html()
   end
 end

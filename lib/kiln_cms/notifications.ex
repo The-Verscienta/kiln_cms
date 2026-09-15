@@ -68,10 +68,12 @@ defmodule KilnCMS.Notifications do
   use Ash.Domain
   use Gettext, backend: KilnCMSWeb.Gettext
 
+  require Ash.Query
   require Logger
 
   alias KilnCMS.Accounts.Scoping
   alias KilnCMS.Accounts.User
+  alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Notifications.Notification
   alias KilnCMS.Notifications.WorkflowMailWorker
   alias KilnCMS.Push
@@ -157,30 +159,97 @@ defmodule KilnCMS.Notifications do
   end
 
   @doc """
-  Mark every unread notification `user` has on `org` as read; returns how many
-  moved.
+  Mark every unread notification `user` has on `org` as read.
+
+  `{:ok, count}` with how many moved, or `{:error, errors}` when any row
+  failed — a caller must not report "Marked 0" for a sweep that broke, which
+  is what a bare count made of a failure.
 
   Streamed rather than atomic because `:mark_read` keeps an already-set
   `read_at` (see the resource) — and because it is authorized per row, so a
   caller cannot sweep an inbox that is not theirs. One user's unread set is
   tens of rows, not thousands.
+
+  Announced **once**, here, rather than per row by
+  `KilnCMS.Notifications.Changes.Announce`: every row's announcement would
+  send each of the user's open consoles a re-read of its own. Any row that
+  did move is enough to announce — a partial sweep still changed the count.
   """
-  @spec mark_all_read(struct(), term()) :: non_neg_integer()
+  @spec mark_all_read(struct(), term()) :: {:ok, non_neg_integer()} | {:error, term()}
   def mark_all_read(%{id: user_id} = user, org) do
-    Notification
-    |> Ash.Query.for_read(:unread_for_user, %{user_id: user_id}, actor: user, tenant: org)
-    |> Ash.bulk_update(:mark_read, %{},
-      actor: user,
-      tenant: org,
-      strategy: [:stream],
-      allow_stream_with: :full_read,
-      return_records?: true,
-      return_errors?: true
-    )
-    |> case do
-      %Ash.BulkResult{status: :success, records: records} -> length(records || [])
-      _partial_or_error -> 0
+    result =
+      Notification
+      |> Ash.Query.for_read(:unread_for_user, %{user_id: user_id}, actor: user, tenant: org)
+      |> Ash.bulk_update(:mark_read, %{},
+        actor: user,
+        tenant: org,
+        context: %{announce?: false},
+        strategy: [:stream],
+        allow_stream_with: :full_read,
+        return_records?: true,
+        return_errors?: true
+      )
+
+    moved = length(result.records || [])
+
+    if moved > 0 do
+      Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic(user_id), :notifications_changed)
     end
+
+    case result do
+      %Ash.BulkResult{status: :success} -> {:ok, moved}
+      %Ash.BulkResult{errors: errors} -> {:error, errors}
+    end
+  end
+
+  @doc """
+  Blank `actor_id`'s name on every notification that account caused, on every
+  org — the in-app step of erasure (`KilnCMS.Accounts.Changes.AnonymizeUser`).
+
+  The name is a snapshot sitting in *other people's* inboxes (see the
+  resource), so scrubbing the account row leaves it behind. The row stays: a
+  notification of an event is still a record of the event, and renders the
+  neutral "An editor" once the name is gone — the same *what without the who*
+  `KilnCMS.History.anonymize_actor/1` keeps for audit events.
+
+  One org at a time, and a failing org does not stop the others; any failure
+  raises at the end so the erasure fails loudly and can be retried (the sweep
+  is idempotent). The query is not authorized as a read — the read policy is
+  self-only, so an actor-less read matches nothing and erasure would silently
+  succeed at doing nothing — but the update's own system-only policy still
+  runs and decides.
+  """
+  @spec anonymize_actor(String.t()) :: :ok
+  def anonymize_actor(actor_id) when is_binary(actor_id) do
+    failed =
+      Enum.reject(KilnCMS.Accounts.list_org_ids(), fn org_id ->
+        try do
+          Notification
+          |> Ash.Query.filter(actor_id == ^actor_id)
+          |> Ash.bulk_update!(:forget_actor, %{},
+            tenant: org_id,
+            authorize_query?: false,
+            strategy: [:atomic, :atomic_batches, :stream],
+            return_records?: false,
+            return_errors?: true
+          )
+
+          true
+        rescue
+          error ->
+            Logger.error(
+              "notification anonymize_actor failed for org #{org_id}: #{inspect(error)}"
+            )
+
+            false
+        end
+      end)
+
+    if failed != [] do
+      raise "notification anonymize_actor failed for orgs: #{Enum.join(failed, ", ")}"
+    end
+
+    :ok
   end
 
   @type event ::
@@ -474,6 +543,7 @@ defmodule KilnCMS.Notifications do
       block_id: Keyword.get(opts, :block_id),
       title: record.title,
       excerpt: Keyword.get(opts, :excerpt),
+      actor_id: actor_id(Keyword.get(opts, :actor)),
       actor_name: actor_name(Keyword.get(opts, :actor))
     })
   end
@@ -578,11 +648,25 @@ defmodule KilnCMS.Notifications do
   # `KilnCMS.CMS.Content` exposes `__kiln_content_type__/0` (the same hook
   # `KilnCMS.CMS.ContentTypes` discovers), so new types (product, recipe, …) work
   # without touching this module. Falls back to "content" for any non-content struct.
-  defp kind(%mod{}) do
-    if function_exported?(mod, :__kiln_content_type__, 0) do
-      to_string(mod.__kiln_content_type__())
-    else
-      "content"
+  #
+  # A dynamic entry is asked of the registry, by its `type_definition_id`.
+  # Every admin-defined type shares `KilnCMS.CMS.Entry`, which exports no
+  # `__kiln_content_type__/0` (the entry tier is discovered from rows, not
+  # modules), so an entry fell through to "content": the inbox row stored
+  # `content_type: "content"`, and the bell, the inbox and the email all
+  # linked to `/editor/content/content/:id`, which resolves no type. The
+  # registry answers with the type's own name ("recipe") — what the editor
+  # route takes, and what `type_name_for/1` exists to give (#927).
+  defp kind(%mod{} = record) do
+    cond do
+      function_exported?(mod, :__kiln_dynamic_entry__, 0) ->
+        ContentTypes.type_name_for(record) || "content"
+
+      function_exported?(mod, :__kiln_content_type__, 0) ->
+        to_string(mod.__kiln_content_type__())
+
+      true ->
+        "content"
     end
   end
 
@@ -592,6 +676,11 @@ defmodule KilnCMS.Notifications do
   # renders a neutral "An editor" / "A reviewer".
   defp actor_name(%{name: name}) when is_binary(name) and name != "", do: name
   defp actor_name(_actor), do: nil
+
+  # Only a real account has an id erasure can later find (`anonymize_actor/1`).
+  # A system actor (#1402) or no actor at all records nil.
+  defp actor_id(%User{id: id}), do: id
+  defp actor_id(_actor), do: nil
 
   defp same_user?(_user, nil), do: false
   defp same_user?(%{id: id}, %{id: id}), do: true

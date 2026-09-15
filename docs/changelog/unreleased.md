@@ -83,6 +83,16 @@ carries the reasoning.
   own notification topic, so the list follows a notification that lands, or one
   read in another tab, without a reload.
 
+<a id="a-notification-bell-in-the-console-top-bar-on-every-editor-page-an-unread-badge"></a>
+
+- **A notification bell in the console top bar**, on every `/editor/*` page:
+  an unread badge (capped at `8+`, with the real number in its accessible
+  label), a dropdown of the eight most recent items — read ones included, since
+  a list that empties itself takes each item's deep link with it — and
+  mark-all-read. PubSub-driven: the badge moves when a notification arrives or
+  is read elsewhere, without a reload. Clicking an item marks it read and
+  navigates to the block, comment or task it concerns.
+
 ## Changed
 
 <a id="new-page-no-longer-writes-a-row-until-you-start-writing"></a>
@@ -111,6 +121,48 @@ carries the reasoning.
   path-alias error marks the Settings tab and the line under the title, and a
   save refused on either opens Settings → URL on the field instead of saying
   "fix the errors below" about a field that is off screen.
+
+<a id="home-says-what-the-site-holds-asks-how-you-publish-and-doesnt-alarm-on-day-one"></a>
+
+- **Home says what the site holds, asks how you publish, and doesn't alarm on
+  day one.** Three findings from a live usability pass on kilncms.dev. The line
+  under the Home heading was a tagline ("What needs you next — then eight
+  domains around your content"); it is now the site's status in numbers every
+  reader of the page may see — "71 published · 1 draft · 3 media items",
+  pluralised, with "in review" only when something is. A seeded deploy never
+  sees `/setup`, so nobody was ever asked who publishes and the console kept the
+  newsroom default (editors submit for review); an admin of a site with no
+  editorial-settings row now gets a one-time **How do you publish?** card —
+  "Just me" lets editors publish, "I have a team" keeps review — written through
+  the same save and OrgAdmin policy as Team's switch, and gone for good once any
+  answer is recorded (`KilnCMS.CMS.EditorialSettings.chosen?/1`; the publish
+  check's fail-closed read is unchanged). And a deployment where no backup was
+  ever recorded now shows a neutral "Backups aren't set up yet" notice rather
+  than the red alarm; a failed backup, or one that went stale, is still the
+  alarm, and `KilnCMS.Backups.stale?/1` still counts "never" as stale.
+
+<a id="the-ml-stack-behind-semantic-search-is-now-opt-in-kilnml1"></a>
+
+- **The ML stack behind semantic search is now opt-in (`KILN_ML=1`).** A first
+  `mix setup` fetched 773 MB of dependencies, 666 MB of it `deps/exla`, to back
+  semantic search — which ships disabled. Bumblebee, Nx and EXLA now stay out of
+  the dependency tree unless `KILN_ML` is set, taking a default `deps/` to
+  102 MB and saving a one-time 110 MB archive download; `mix setup` prints one
+  line saying so.
+
+  Nothing is removed. `KilnCMS.Search.Embedder.Bumblebee` and
+  `KilnCMS.Search.Reranker.Bumblebee` still exist and return
+  `{:error, %KilnCMS.Search.ML.NotCompiledError{}}` in a lean build, so hybrid
+  search falls back to its keyword legs and every caller's existing error
+  handling covers it. A deployment that has set `semantic: true` is warned once
+  at boot that its build cannot serve it.
+
+  **Upgrading:** a deployment already running semantic search must build with
+  `KILN_ML=1` — `KILN_ML=1 mix deps.get && KILN_ML=1 mix compile` — and keep the
+  variable set for every `mix` invocation, including in its image build.
+  Nothing in the database or configuration changes. Contributors touching the
+  semantic path should read the `KILN_ML` note in `CONTRIBUTING.md`: a lean
+  build compiles a different shape of those modules.
 
 <a id="configruntimeexs-is-now-an-index-not-a-1523-line-file"></a>
 
@@ -406,6 +458,30 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="notification-bell-and-inbox-fixes-from-review"></a>
+
+- **Notification bell and inbox fixes from review.** A review of the
+  notification centre (#1320) found real defects, now fixed:
+  - **Clicking a bell item never marked it read.** LiveView's client swaps the
+    page for a `navigate` link before running its `phx-click`, so the
+    component's event had no target (LiveViewTest still passed). Items are
+    buttons that mark read and then `push_navigate`; they carry
+    `data-guard-nav`, which the editor's unsaved-changes confirm now covers.
+  - **Notifications on dynamic content types linked nowhere.** `Entry` exports
+    no `__kiln_content_type__`, so rows stored `"content"` and every channel
+    linked `/editor/content/content/:id`; the type's own name now comes from the
+    registry.
+  - **Erasure left the actor's name in other people's inboxes.** Rows now record
+    `actor_id` (new nullable column), and `anonymize_user` blanks
+    `actor_name`/`actor_id` on every row that account caused.
+  - Mark-read in the bell and inbox passes the tenant (a strict-tenancy build
+    made every click a silent no-op); "Mark all read" announces once rather than
+    per row and reports a failure instead of "Marked 0"; the bell re-reads on a
+    refresh rather than on every console render; the inbox loads once per mount;
+    a task on an unknown content type still emails and fires `task.assigned`;
+    and a raise dispatching a workflow notification after the write committed
+    is logged rather than crashing the caller.
+
 <a id="five-editor-console-rough-edges-a-first-time-user-hit"></a>
 
 - **Five editor-console rough edges a first-time user hit.** The path-alias
@@ -519,6 +595,24 @@ carries the reasoning.
   declares it. A new test checks every setting in that file the same way, so the
   next one that lands on a key upstream renamed fails instead of going quiet.
 
+<a id="the-console-sidebar-no-longer-slides-in-with-its-labels-cropped"></a>
+
+- **The console sidebar no longer slides in with its labels cropped.** A
+  usability pass saw "Home" read "me" and "KilnCMS" read "CMS". The sidebar's
+  `transition-transform` exists for the mobile drawer but ran on desktop too, so
+  a window crossing 64rem (a resize, a snap, a zoom) slid the rail in from
+  off-canvas for ~150ms. It now animates only as a drawer. The same pass found
+  the content column was a bare `1fr`, which never shrinks below its content's
+  min-content width: one long `<pre>` or wide table scrolled the whole console
+  sideways even when that element scrolls itself. The column is
+  `minmax(0, 1fr)` now. A Playwright spec pins both, and fails without the fix.
+
+<a id="with-every-write-anchoring-on-a-system-actor-write-no-longer-crashes-in"></a>
+
+- **With every-write anchoring on, a system-actor write no longer crashes in
+  `AnchorVersion`; its anchor is attributed to `actor_id: nil`.**
+  ([#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402), [#910](https://github.com/The-Verscienta/kiln_cms/issues/910))
+
 <a id="developers-no-longer-links-to-a-swagger-ui-and-openapi-spec-that-404"></a>
 
 - **`/developers` no longer links to a Swagger UI and OpenAPI spec that 404,
@@ -601,4 +695,10 @@ carries the reasoning.
   listed file that loses one fails too, with the number to write, so the
   allowance can never drift out of date. Nothing may be added to it, and
   emptying it finishes #1402.
+
+<a id="firing-no-longer-fails-or-mints-an-unattributed-anchor-with-every-write"></a>
+
+- **Firing no longer fails, or mints an unattributed anchor, with every-write anchoring on.**
+  `:reindex_search_text` is skipped by `AnchorVersion` as PaperTrail already skips it.
+  ([#910](https://github.com/The-Verscienta/kiln_cms/issues/910))
 

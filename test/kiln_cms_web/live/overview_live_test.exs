@@ -13,6 +13,7 @@ defmodule KilnCMSWeb.OverviewLiveTest do
   alias KilnCMS.Accounts.User
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.EditorialSettings
   alias KilnCMS.CMS.Page
   alias KilnCMSWeb.Tenant
 
@@ -50,6 +51,153 @@ defmodule KilnCMSWeb.OverviewLiveTest do
       Page,
       Map.merge(%{title: "A page", slug: "ov-#{System.unique_integer([:positive])}"}, attrs)
     )
+  end
+
+  describe "the summary line under the heading" do
+    test "counts published, drafts and media, pluralised, and names review only when non-empty",
+         %{conn: conn} do
+      seed_page(%{state: :published})
+      seed_page(%{state: :published})
+      seed_page(%{state: :draft})
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/overview")
+
+      summary = lv |> element("#overview-summary") |> render()
+
+      assert summary =~ "2 published · 1 draft · 0 media items"
+      refute summary =~ "in review"
+      refute summary =~ "eight domains"
+    end
+
+    test "an in-review item is counted", %{conn: conn} do
+      seed_page(%{state: :in_review})
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      assert lv |> element("#overview-summary") |> render() =~
+               "0 published · 1 in review · 0 drafts · 0 media items"
+    end
+
+    test "an empty site says so in words", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      summary = lv |> element("#overview-summary") |> render()
+
+      assert summary =~ "Nothing written or uploaded yet."
+      refute summary =~ "0 published"
+    end
+  end
+
+  # H3: a seeded deploy never sees `/setup`, so nobody was ever asked who
+  # publishes. The card asks an admin once, and the row it writes retires it.
+  describe "the publishing-mode card" do
+    test "an admin on a site that never chose is asked", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      assert has_element?(lv, "#overview-publishing-choice", "How do you publish?")
+      assert has_element?(lv, "#overview-publishing-solo", "Just me — publish directly")
+
+      assert has_element?(
+               lv,
+               "#overview-publishing-team",
+               "I have a team — review before publishing"
+             )
+
+      assert has_element?(lv, "#overview-publishing-team-link[href='/editor/team']")
+    end
+
+    for value <- [true, false] do
+      test "a site that already chose (editors_can_publish: #{value}) is not asked", %{conn: conn} do
+        admin = authed_user(:admin)
+        org = KilnCMS.Accounts.default_org_id()
+
+        {:ok, _} =
+          EditorialSettings.save(%{editors_can_publish: unquote(value)},
+            actor: admin,
+            tenant: org
+          )
+
+        {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/overview")
+
+        refute has_element?(lv, "#overview-publishing-choice")
+      end
+    end
+
+    test "an editor is never asked", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/overview")
+
+      refute has_element?(lv, "#overview-publishing-choice")
+    end
+
+    test "“Just me” lets editors publish, writes the row and retires the card", %{conn: conn} do
+      org = KilnCMS.Accounts.default_org_id()
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      refute EditorialSettings.chosen?(org)
+
+      lv |> element("#overview-publishing-solo") |> render_click()
+
+      refute has_element?(lv, "#overview-publishing-choice")
+      assert EditorialSettings.chosen?(org)
+      assert EditorialSettings.editors_can_publish?(org)
+    end
+
+    test "“I have a team” keeps review, writes the row and retires the card", %{conn: conn} do
+      org = KilnCMS.Accounts.default_org_id()
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      lv |> element("#overview-publishing-team") |> render_click()
+
+      refute has_element?(lv, "#overview-publishing-choice")
+      assert EditorialSettings.chosen?(org)
+      refute EditorialSettings.editors_can_publish?(org)
+
+      # And it stays gone on the next visit.
+      {:ok, lv2, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+      refute has_element?(lv2, "#overview-publishing-choice")
+    end
+
+    test "an org admin (not a platform admin) is asked, without a link to Team", %{conn: conn} do
+      user = authed_user(:editor)
+
+      Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+        user_id: user.id,
+        organization_id: KilnCMS.Accounts.default_org_id(),
+        role: :admin
+      })
+
+      {:ok, lv, _html} = conn |> log_in(user) |> live(~p"/editor/overview")
+
+      assert has_element?(lv, "#overview-publishing-choice")
+      refute has_element?(lv, "#overview-publishing-team-link")
+    end
+
+    # The save runs under the same OrgAdmin write policy as Team's switch. Take
+    # the admin tier away between mount and click and the policy refuses: the
+    # page must say so and keep asking, not pretend the choice was recorded.
+    test "a refused save shows an error and keeps the card", %{conn: conn} do
+      org = KilnCMS.Accounts.default_org_id()
+      user = authed_user(:editor)
+
+      membership =
+        Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+          user_id: user.id,
+          organization_id: org,
+          role: :admin
+        })
+
+      {:ok, lv, _html} = conn |> log_in(user) |> live(~p"/editor/overview")
+      assert has_element?(lv, "#overview-publishing-choice")
+
+      Ash.Seed.update!(membership, %{role: :editor})
+
+      html = lv |> element("#overview-publishing-solo") |> render_click()
+
+      assert has_element?(lv, "#overview-publishing-choice")
+      refute html =~ "Done — you publish directly"
+      assert has_element?(lv, "#flash-error")
+      refute EditorialSettings.chosen?(org)
+    end
   end
 
   # First-run checklist (usability review, B4): the path from `/setup` to a
