@@ -262,6 +262,10 @@ Every summary line below that was shortened links to its own entry there.
   actor's missing `:id`; it is attributed to `actor_id: nil`.**
   ([#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402), [#1486](https://github.com/The-Verscienta/kiln_cms/pull/1486))
 
+- **The console sidebar no longer slides in with its labels cropped, and wide
+  content no longer scrolls the whole console sideways.**
+  ([long form](docs/changelog/unreleased.md#the-console-sidebar-no-longer-slides-in-with-its-labels-cropped))
+
 ### Security
 
 - **A system actor, so internal callers run under the policies instead of around
