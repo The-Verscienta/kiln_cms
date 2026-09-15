@@ -69,6 +69,11 @@ defmodule KilnCMS.CMS.EditorialSettings do
   def chosen?(nil), do: true
 
   def chosen?(org) do
+    # Policy bypass (`authorize?: false`), same as `editors_can_publish?/1`: an
+    # existence probe on the one settings row of a tenant the caller already
+    # resolved. Nothing from the row leaves this function but a boolean, and it
+    # authorizes nothing — Home shows the card only to an admin, and the save
+    # behind the card runs as the actor under the resource's write policy.
     SiteEditorialSettings
     |> Ash.Query.limit(1)
     |> Ash.read_one(authorize?: false, tenant: org)
