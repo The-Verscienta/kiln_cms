@@ -30,7 +30,14 @@ defmodule Mix.Tasks.Kiln.ChangelogCondenseTest do
 
   defp condense!(dir), do: File.cd!(dir, fn -> Changelog.run(["--condense"]) end)
   defp check!(dir), do: File.cd!(dir, fn -> Changelog.run(["--check"]) end)
+  defp verify!(dir, ref), do: File.cd!(dir, fn -> Changelog.run(["--verify", ref]) end)
   defp read!(dir, path), do: File.read!(Path.join(dir, path))
+
+  defp commit!(dir, subject) do
+    for args <- [~w[add -A], ~w[-c user.name=t -c user.email=t@t commit -qm] ++ [subject]] do
+      {_out, 0} = System.cmd("git", args, cd: dir, stderr_to_stdout: true)
+    end
+  end
 
   defp write_archive!(dir, body) do
     File.mkdir_p!(Path.join(dir, "docs/changelog"))
@@ -250,6 +257,45 @@ defmodule Mix.Tasks.Kiln.ChangelogCondenseTest do
 
     assert read!(dir, "CHANGELOG.md") =~ "[long form](docs/changelog/v0.9.0.md#"
     check!(dir)
+  end
+
+  # The release-cut order `docs/releasing.md` gives: `--condense`, then
+  # `--verify`. A summary condensed before its merge had a number gets the pull
+  # request on the next run, beside its long-form link. That is navigation, not
+  # prose, so `--verify` must not read it as a lost paragraph — and must still
+  # catch a sentence dropped from the long form.
+  test "--verify accepts a pull request --condense attributed, not a dropped sentence",
+       %{tmp_dir: dir} do
+    write_changelog!(dir, """
+    ## [Unreleased]
+
+    ### Added
+
+    - **Widget export writes one file per locale.** Each locale gets its own file,
+      so a translator can take one without the others.
+    """)
+
+    condense!(dir)
+    {_out, 0} = System.cmd("git", ~w[init -q], cd: dir, stderr_to_stdout: true)
+    commit!(dir, "Add widget export (#1450)")
+    assert read!(dir, "CHANGELOG.md") =~ "\n  ([long form](docs/changelog/unreleased.md#"
+
+    condense!(dir)
+
+    assert read!(dir, "CHANGELOG.md") =~
+             "([#1450](https://github.com/The-Verscienta/kiln_cms/issues/1450) · [long form]("
+
+    verify!(dir, "HEAD")
+    assert_received {:mix_shell, :info, ["No loss: " <> _]}
+
+    archive = "docs/changelog/unreleased.md"
+
+    File.write!(
+      Path.join(dir, archive),
+      String.replace(read!(dir, archive), "so a translator", "")
+    )
+
+    assert_raise Mix.Error, ~r/1 paragraph\(s\) .* no destination/, fn -> verify!(dir, "HEAD") end
   end
 
   describe "the Unreleased cap after --condense" do

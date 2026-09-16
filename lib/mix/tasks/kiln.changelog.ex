@@ -725,10 +725,18 @@ defmodule Mix.Tasks.Kiln.Changelog do
   # author's and stays prose.
   defp bare(text) do
     text
-    |> String.replace(~r/\s*\(\s*(?:\[(?:#\d+|long\s+form)\]\([^)]*\)\s*[,·]?\s*)+\)/u, "")
-    |> String.replace(~r/\s*\((?:#\d+[,;]?\s*)+\)/, "")
+    |> strip_links_line()
     |> String.trim()
     |> String.trim_trailing(".")
+  end
+
+  # The links line — `([#1234](…) · [long form](…))` — and an author's bare
+  # `(#1234)`. Navigation, not prose: `--condense` rewrites the line when it
+  # attributes a pull request, so `--verify` must not read that as a loss.
+  defp strip_links_line(text) do
+    text
+    |> String.replace(~r/\s*\(\s*(?:\[(?:#\d+|long\s+form)\]\([^)]*\)\s*[,·]?\s*)+\)/u, "")
+    |> String.replace(~r/\s*\((?:#\d+[,;]?\s*)+\)/, "")
   end
 
   # One anchor per archive block, unique within the release and stable across
@@ -1541,6 +1549,9 @@ defmodule Mix.Tasks.Kiln.Changelog do
   defp normalize(text) do
     text
     |> String.replace(~r/^\s*[-*]\s+/m, "")
+    # Before targets go: the links line is matched by its targets. A pull
+    # request `--condense` attributed, beside the long-form link, is navigation.
+    |> strip_links_line()
     # Link targets are re-rooted when an entry moves into `docs/` (see
     # `reroot_links/1`); the link *text* is prose and is still compared.
     |> String.replace(~r/\]\([^)\s]*\)/, "]")

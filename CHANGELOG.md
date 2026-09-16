@@ -188,6 +188,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **`mix kiln.changelog --verify` no longer reports a loss for a pull request
+  `--condense` credited.**
+  ([long form](docs/changelog/unreleased.md#mix-kiln-changelog-verify-no-longer-reports-a-loss-for-a-credited-pull-request))
+
 - **`mix kiln.changelog --condense` no longer breaks on a release where two
   summaries link one long form.**
   ([long form](docs/changelog/unreleased.md#mix-kiln-changelog-condense-no-longer-breaks-on-a-shared-long-form))
