@@ -485,6 +485,21 @@ migration (the demo admin and editor) start on Essentials.
 
 ## Fixed
 
+<a id="mix-kiln-changelog-verify-no-longer-reports-a-loss-for-a-credited-pull-request"></a>
+
+- **`mix kiln.changelog --verify` no longer reports a loss for a pull request
+  `--condense` credited.** `docs/releasing.md` runs `--condense` and then
+  `--verify`, and on `main` that failed with eight `MISSING:` paragraphs. Each
+  was a summary condensed before its merge had a number: the next `--condense`
+  found the pull request in git history and wrote it into the links line beside
+  the long-form link, `([long form](…))` becoming `([#1496](…) · [long
+  form](…))`. `--verify` drops link targets but kept link text, so the old
+  `([long form])` no longer appeared anywhere and the summary read as lost.
+  `--verify` now strips the links line — and an author's bare `(#1234)` — before
+  comparing, the same way `--check` and `--condense` already do. Only a
+  parenthetical made entirely of `#1234` and `long form` links is removed, so a
+  sentence dropped from a summary or a long form is still a loss.
+
 <a id="mix-kiln-changelog-condense-no-longer-breaks-on-a-shared-long-form"></a>
 
 - **`mix kiln.changelog --condense` no longer breaks on a release where two
