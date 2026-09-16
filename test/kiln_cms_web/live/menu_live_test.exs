@@ -230,6 +230,54 @@ defmodule KilnCMSWeb.MenuLiveTest do
     assert html =~ ~s(value="Section")
   end
 
+  # The add form is always on the page, so an open edit form must not reuse its
+  # input ids — two `item_label`s break `label for=` and DOM patching. The
+  # ClientProxy reports a duplicate id by messaging ITSELF after replying to
+  # the click, so the failure only lands if the proxy handles another call:
+  # each `render/1` below forces that, instead of racing the test's exit.
+  test "an open edit form and the add form never share input ids", %{conn: conn} do
+    m = menu()
+    first = item(m, %{label: "First", link_type: :none, position: 0})
+    second = item(m, %{label: "Second", link_type: :none, position: 1})
+
+    {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/menus/#{m.id}")
+
+    # Add form first (a refused submit re-renders it with the typed params),
+    # then Edit.
+    lv
+    |> form("#new-item-form",
+      item: %{label: "Draft", link_type: "content", target_type: "page", target_slug: "no-such"}
+    )
+    |> render_submit()
+
+    render_click(lv, "edit_item", %{"id" => first.id})
+    render(lv)
+
+    # Edit first, then the add form; then switch to another item's edit form.
+    lv
+    |> form("#new-item-form",
+      item: %{label: "Again", link_type: "content", target_type: "page", target_slug: "no-such"}
+    )
+    |> render_submit()
+
+    render_click(lv, "edit_item", %{"id" => second.id})
+    html = render(lv)
+
+    assert has_element?(lv, "#new-item-form input#item_label")
+    assert has_element?(lv, "#edit-item-#{second.id} input[name='item[label]'][value='Second']")
+    refute has_element?(lv, "#edit-item-#{second.id} input#item_label")
+    refute has_element?(lv, "#edit-item-#{first.id}")
+
+    # Each label still points at its own input.
+    [edit_input_id] =
+      html
+      |> LazyHTML.from_document()
+      |> LazyHTML.query("#edit-item-#{second.id} input[name='item[label]']")
+      |> LazyHTML.attribute("id")
+
+    assert has_element?(lv, "#edit-item-#{second.id} label[for='#{edit_input_id}']")
+  end
+
   # A slug is unique per locale, not globally, so an unscoped lookup raises
   # `MultipleResults` the moment a page is translated.
   test "a translated slug resolves to the menu's own locale", %{conn: conn} do

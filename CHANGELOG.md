@@ -185,6 +185,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **A menu item's Edit form no longer shares input ids with the Add form.**
+  ([long form](docs/changelog/unreleased.md#a-menu-items-edit-form-no-longer-shares-input-ids-with-the-add-form))
+
 - **Notification bell and inbox fixes from review: items mark read, entry links resolve, erasure reaches inboxes.**
   ([long form](docs/changelog/unreleased.md#notification-bell-and-inbox-fixes-from-review))
 
