@@ -532,6 +532,29 @@ migration (the demo admin and editor) start on Essentials.
   existing Edit test only failed when the proxy got scheduled before the test
   exited.
 
+<a id="editing-a-live-pages-body-no-longer-blanks-its-title"></a>
+
+- **Editing a live page's body no longer blanks its title or strands the change
+  in the working copy.** On a published document the editor autosaves the text
+  into the working copy (docs/working-copy.md), which is written as a whole:
+  both columns go out on every save. The params it submitted came from
+  `AshPhoenix.Form.params/1`, which round-trips only *touched* fields — and the
+  form is rebuilt from the record after every write, so it starts each round
+  untouched. An edit that did not arrive through the form's own change event —
+  the TipTap hook pushing a rich-text body, a media pick, any block operation —
+  therefore submitted `blocks` with no `title` at all, and the absent param
+  landed as an explicit `nil`. Two things followed: the title input went blank
+  (the editor renders the working view of the row), and "Publish changes" then
+  failed for good, because promoting the copy moved that `nil` onto a `title`
+  the row will not accept — the body saved to the draft and never reached the
+  live site, while the settings that save straight through `:update` kept
+  publishing normally. An absent param now means *unchanged* on this path, and
+  the throwaway form no longer pre-loads the basis title onto the struct it
+  builds on: Ash drops a change whose value already equals the changeset's
+  data, so a title submitted unchanged was dropped against that doctored struct
+  and never written. A failed "Publish changes" also names the field that
+  refused it instead of the blanket "That action isn't allowed right now."
+
 <a id="notification-bell-and-inbox-fixes-from-review"></a>
 
 - **Notification bell and inbox fixes from review.** A review of the
