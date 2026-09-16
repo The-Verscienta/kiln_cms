@@ -108,6 +108,28 @@ defmodule KilnCMS.Notifications.TasksTest do
     assert [delivery] = CMS.recent_webhook_deliveries!(authorize?: false)
     assert delivery.event == "task.assigned"
     assert delivery.payload["id"] == task.id
+
+    # The mail job resolves the title itself, and the unknown type raised
+    # there too — the job retried to discard and no mail was ever sent.
+    assert [email] = sent_emails("Task assigned")
+    assert email.subject == "Task assigned: vanishedtype"
+
+    # A block-scoped task also looks the record up for its block line.
+    {:ok, _block_task} =
+      CMS.assign_task(
+        %{
+          content_type: "vanishedtype",
+          content_id: Ecto.UUID.generate(),
+          block_id: Ecto.UUID.generate(),
+          assignee_id: assignee.id
+        },
+        actor: editor
+      )
+
+    drain()
+
+    assert [block_email] = sent_emails("Task assigned")
+    assert block_email.subject == "Task assigned: vanishedtype"
   end
 
   test "reassigning re-notifies the new assignee" do

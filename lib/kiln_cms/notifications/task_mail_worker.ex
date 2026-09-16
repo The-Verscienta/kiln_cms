@@ -88,6 +88,9 @@ defmodule KilnCMS.Notifications.TaskMailWorker do
       _unreadable ->
         ""
     end
+  rescue
+    # An unknown `content_type` raises — see `content_title/3`.
+    _unknown_type -> ""
   end
 
   defp build_digest_email(args) do
@@ -130,6 +133,11 @@ defmodule KilnCMS.Notifications.TaskMailWorker do
       {:ok, record} -> record.title
       _ -> content_type
     end
+  rescue
+    # `ContentTypes.get_record/3` *raises* for a `content_type` the registry
+    # does not know (a dynamic type since deleted, say). Uncaught, the job
+    # retries until discarded and the assignee never gets the mail.
+    _unknown_type -> content_type
   end
 
   defp due_line(nil), do: ""
