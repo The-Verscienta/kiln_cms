@@ -292,7 +292,14 @@ defmodule KilnCMS.Portability.ImportTest do
 
     # The property that matters: a migration must not lose a post because one
     # of its images 404s.
+    #
+    # The 404 is stubbed rather than left to a real connection attempt against
+    # the fixture's host. Before `Ingest.req_options/0` existed this test got
+    # its failure from the network — hermetic only by accident, and a different
+    # failure on every machine.
     test "an unreachable image does not fail the record", %{parsed: parsed, actor: actor} do
+      Req.Test.stub(KilnCMS.Media.Ingest, fn conn -> Plug.Conn.send_resp(conn, 404, "") end)
+
       report = import!(parsed, actor: actor)
 
       assert length(report.created) == 3
@@ -306,7 +313,40 @@ defmodule KilnCMS.Portability.ImportTest do
         |> Enum.find(&(&1.type == :image))
 
       assert image.value.url == "https://old.example.com/wp-content/pic.jpg"
+      assert [%{reason: {:http_status, 404}}] = report.media.failed
     end
+
+    # The other half, which had no test at all while the fetch could not be
+    # stubbed: an image that DOES resolve is stored and the post's block points
+    # at the stored item rather than at the site being migrated away from.
+    test "a reachable image is sideloaded and linked", %{parsed: parsed, actor: actor} do
+      Req.Test.stub(KilnCMS.Media.Ingest, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("image/png")
+        |> Plug.Conn.send_resp(200, png())
+      end)
+
+      report = import!(parsed, actor: actor)
+
+      assert report.media.imported == 1
+      assert report.media.failed == []
+
+      image =
+        posts(actor)
+        |> find("hello-world")
+        |> Map.fetch!(:blocks)
+        |> Enum.find(&(&1.type == :image))
+
+      assert is_binary(image.value.media_id)
+      refute image.value.url == "https://old.example.com/wp-content/pic.jpg"
+    end
+  end
+
+  # 1x1 PNG — the same bytes `AVQuarantineTest` uses.
+  defp png do
+    Base.decode64!(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+    )
   end
 
   describe "envelope fidelity" do
@@ -631,7 +671,11 @@ defmodule KilnCMS.Portability.ImportTest do
 
     test "media failures survive the concurrent fetch", %{parsed: parsed, actor: actor} do
       # The fixture's one image is unreachable, so this exercises the error path
-      # through Task.async_stream rather than the serial reduce it replaced.
+      # through Task.async_stream rather than the serial reduce it replaced. The
+      # stub is registered in the test process and reaches the stream's workers
+      # through `$callers`.
+      Req.Test.stub(KilnCMS.Media.Ingest, fn conn -> Plug.Conn.send_resp(conn, 404, "") end)
+
       report = import!(parsed, actor: actor)
 
       assert length(report.created) == 3

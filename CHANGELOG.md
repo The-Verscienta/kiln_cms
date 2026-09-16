@@ -61,6 +61,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **Media sideloading can be tested without the network.**
+  ([#487](https://github.com/The-Verscienta/kiln_cms/issues/487) · [long form](docs/changelog/unreleased.md#media-sideloading-can-be-tested-without-the-network))
+
 - **Sidebar presets: Essentials and Everything.**
   ([long form](docs/changelog/unreleased.md#sidebar-presets-essentials-and-everything))
 
