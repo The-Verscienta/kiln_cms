@@ -41,7 +41,10 @@ defmodule Mix.Tasks.Kiln.Changelog do
     * an entry carries no link at all (no issue/PR reference and no long-form
       link), so a reader has nowhere to go for the detail;
     * a release uses a section name outside the seven above;
-    * a long-form link points at a file or anchor that does not exist.
+    * a long-form link points at a file or anchor that does not exist;
+    * two summaries in one release link the *same* long form — the archive has
+      one block under that anchor, and `--condense` would write it out once per
+      summary.
 
   ### `--condense`
 
@@ -855,6 +858,15 @@ defmodule Mix.Tasks.Kiln.Changelog do
     end
   end
 
+  # The same link, file and all: two summaries share a long form only when they
+  # name the same anchor *in the same archive file*.
+  defp long_form_target(entry) do
+    case Regex.run(~r/\[long\s+form\]\(\s*(#{@archive_dir}\/[^)#\s]+#[^)\s]+)\)/, entry) do
+      [_, target] -> target
+      nil -> nil
+    end
+  end
+
   # The anchor is looked up in this release's archive whichever file the link
   # names, so point the link at that file too: renaming `unreleased.md` by hand
   # at a release cut would otherwise leave every summary linking the old name.
@@ -1255,12 +1267,45 @@ defmodule Mix.Tasks.Kiln.Changelog do
 
     problems =
       Enum.flat_map(releases, fn release ->
-        release.body
-        |> sections()
-        |> Enum.flat_map(&check_section(release, &1))
+        check_shared_anchors(release) ++
+          (release.body
+           |> sections()
+           |> Enum.flat_map(&check_section(release, &1)))
       end) ++ check_links(text) ++ check_duplicate_anchors()
 
     report(problems)
+  end
+
+  # Two summaries in one release pointing at one long form. The archive holds a
+  # single block under that anchor, so `--condense` hands each summary the same
+  # block and writes it out once per section — and the run after that reads an
+  # archive with two blocks under one `<a id>` and stops. Caught here it is one
+  # release with one link to rename; caught there it is a file nobody edited by
+  # hand, in whichever branch condensed next.
+  defp check_shared_anchors(release) do
+    release.body
+    |> sections()
+    |> Enum.flat_map(fn {name, body} ->
+      name |> units(body) |> Enum.map(&{name, long_form_target(&1)})
+    end)
+    |> Enum.reject(fn {_name, target} -> is_nil(target) end)
+    |> Enum.group_by(&elem(&1, 1), &elem(&1, 0))
+    |> Enum.filter(fn {_target, names} -> length(names) > 1 end)
+    |> Enum.sort()
+    |> Enum.map(fn {target, names} -> shared_anchor_message(release, target, names) end)
+  end
+
+  defp shared_anchor_message(release, target, names) do
+    """
+    #{describe(release)}: #{length(names)} summaries link the same long form,
+    #{target} (under #{Enum.join(Enum.uniq(names), ", ")}).
+
+    There is one archive block behind that anchor, and `--condense` writes it
+    out once for each summary that names it — leaving two blocks under one
+    `<a id>`, which is not readable back. Give one of them its own long form:
+    add an `<a id>` block for it in the archive, carrying the part of the
+    entry that summary stands for, and point its `[long form]` link there.
+    """
   end
 
   defp check_section(_release, {nil, _body}), do: []

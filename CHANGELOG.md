@@ -57,7 +57,7 @@ Every summary line below that was shortened links to its own entry there.
 ### Upgrade notes
 
 - **Existing accounts keep the full sidebar; new ones start on Essentials.**
-  ([long form](docs/changelog/unreleased.md#sidebar-presets-essentials-and-everything))
+  ([long form](docs/changelog/unreleased.md#sidebar-presets-essentials-and-everything-upgrading))
 
 ### Added
 
@@ -187,6 +187,10 @@ Every summary line below that was shortened links to its own entry there.
   ([#1325](https://github.com/The-Verscienta/kiln_cms/issues/1325) · [long form](docs/changelog/unreleased.md#changelogmd-is-a-summary-and-the-reasoning-moved-to-docschangelog-and))
 
 ### Fixed
+
+- **`mix kiln.changelog --condense` no longer breaks on a release where two
+  summaries link one long form.**
+  ([long form](docs/changelog/unreleased.md#mix-kiln-changelog-condense-no-longer-breaks-on-a-shared-long-form))
 
 - **A menu item's Edit form no longer shares input ids with the Add form.**
   ([long form](docs/changelog/unreleased.md#a-menu-items-edit-form-no-longer-shares-input-ids-with-the-add-form))

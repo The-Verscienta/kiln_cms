@@ -32,6 +32,15 @@ defmodule Mix.Tasks.Kiln.ChangelogCondenseTest do
   defp check!(dir), do: File.cd!(dir, fn -> Changelog.run(["--check"]) end)
   defp read!(dir, path), do: File.read!(Path.join(dir, path))
 
+  defp write_archive!(dir, body) do
+    File.mkdir_p!(Path.join(dir, "docs/changelog"))
+
+    File.write!(
+      Path.join(dir, "docs/changelog/v0.9.0.md"),
+      "# KilnCMS 0.9.0 — full release notes\n\n" <> body
+    )
+  end
+
   # Everything --condense writes, so "a second run changes nothing" is one `==`.
   # Globbed relative to `dir`, since the tmp_dir path is built from the test
   # name and can contain glob syntax.
@@ -144,6 +153,86 @@ defmodule Mix.Tasks.Kiln.ChangelogCondenseTest do
 
     for word <- ~w(Bodl Pasword Adit), do: assert(archive =~ word)
     check!(dir)
+  end
+
+  # Two summaries naming one anchor was green under `--check` and only failed
+  # the *second* `--condense` — the archive by then held two blocks under one
+  # `<a id>`, in a file nobody had edited by hand, and whoever condensed next
+  # inherited it. So the rule reads the summaries, where the fix is one link.
+  test "two summaries linking one long form fail --check", %{tmp_dir: dir} do
+    write_changelog!(dir, """
+    ## [0.9.0] - 2026-09-20
+
+    ### Upgrade notes
+
+    - **Existing accounts keep the sidebar they had.**
+      ([long form](docs/changelog/v0.9.0.md#sidebar-presets))
+
+    ### Added
+
+    - **Sidebar presets.**
+      ([long form](docs/changelog/v0.9.0.md#sidebar-presets))
+    """)
+
+    write_archive!(dir, """
+    ## Added
+
+    <a id="sidebar-presets"></a>
+
+    - **Sidebar presets.** Each user picks one.
+
+      **Upgrading:** the column backfills to the sidebar the account had.
+    """)
+
+    assert_raise Mix.Error, fn -> check!(dir) end
+    assert_received {:mix_shell, :error, [message]}
+    assert message =~ "2 summaries link the same long form"
+    assert message =~ "docs/changelog/v0.9.0.md#sidebar-presets"
+    assert message =~ "under Upgrade notes, Added"
+  end
+
+  # The fix that rule asks for: the upgrade note gets an anchor and a block of
+  # its own, and the pair then survives the runs the shared anchor could not.
+  test "a long form per summary condenses twice and passes --check", %{tmp_dir: dir} do
+    write_changelog!(dir, """
+    ## [0.9.0] - 2026-09-20
+
+    ### Upgrade notes
+
+    - **Existing accounts keep the sidebar they had.**
+      ([long form](docs/changelog/v0.9.0.md#sidebar-presets-upgrading))
+
+    ### Added
+
+    - **Sidebar presets.**
+      ([long form](docs/changelog/v0.9.0.md#sidebar-presets))
+    """)
+
+    write_archive!(dir, """
+    ## Upgrade notes
+
+    <a id="sidebar-presets-upgrading"></a>
+
+    **Upgrading:** the column backfills to the sidebar the account had.
+
+    ## Added
+
+    <a id="sidebar-presets"></a>
+
+    - **Sidebar presets.** Each user picks one.
+    """)
+
+    check!(dir)
+    condense!(dir)
+    first = snapshot(dir)
+    condense!(dir)
+
+    assert snapshot(dir) == first
+    check!(dir)
+
+    archive = read!(dir, "docs/changelog/v0.9.0.md")
+    assert archive =~ "backfills to the sidebar the account had"
+    assert archive =~ "Each user picks one."
   end
 
   # With no pull request to link, a summary still has to link somewhere, or

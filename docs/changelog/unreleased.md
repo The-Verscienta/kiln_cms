@@ -5,6 +5,17 @@ The long-form entries behind the Unreleased section of
 merged. `CHANGELOG.md` carries the one-line summary of each; this file
 carries the reasoning.
 
+## Upgrade notes
+
+<a id="sidebar-presets-essentials-and-everything-upgrading"></a>
+
+**Upgrading:** the migration adds the column with a default of `everything`
+(so every existing account is backfilled to the sidebar it already had) and
+then changes the column default to `essentials`, which is also the
+resource's create-time default. Nobody who already knows where Menus is
+finds it gone after an upgrade. Accounts created by the seeds after the
+migration (the demo admin and editor) start on Essentials.
+
 ## Added
 
 <a id="media-sideloading-can-be-tested-without-the-network"></a>
@@ -44,13 +55,6 @@ carries the reasoning.
   even when the preset would hide it. Switch with "Show all tools" / "Show
   essentials" at the foot of the sidebar or on Your settings. Either redraws
   the sidebar in place through the self-only `:set_nav_preset` action.
-
-  **Upgrading:** the migration adds the column with a default of `everything`
-  (so every existing account is backfilled to the sidebar it already had) and
-  then changes the column default to `essentials`, which is also the
-  resource's create-time default. Nobody who already knows where Menus is
-  finds it gone after an upgrade. Accounts created by the seeds after the
-  migration (the demo admin and editor) start on Essentials.
 
   Also: `/editor/settings` is titled **Your settings**, as the nav already
   named it, and "site settings" in ⌘K now finds the Configure hub first.
@@ -480,6 +484,23 @@ carries the reasoning.
   installed.
 
 ## Fixed
+
+<a id="mix-kiln-changelog-condense-no-longer-breaks-on-a-shared-long-form"></a>
+
+- **`mix kiln.changelog --condense` no longer breaks on a release where two
+  summaries link one long form.** Under `## [Unreleased]`, the **Upgrade
+  notes** entry for the sidebar presets pointed at the same archive anchor as
+  the **Added** entry that introduced them. The archive holds one block under
+  an anchor, so `--condense` handed that block to both summaries and wrote it
+  out under both sections — and every run after that read an archive with two
+  blocks under one `<a id>` and stopped. `--check` was green throughout,
+  because it only ever looked at the archive on disk, so the failure landed on
+  whoever condensed next, in a file they had not touched by hand. The upgrade
+  note now has an anchor and a long form of its own (the `**Upgrading:**`
+  paragraph about the column default, which is what an operator moving a pin
+  is being sent to read), and `--check` fails a release whose summaries name
+  one long form twice — where the fix is still one link to rename rather than
+  an archive to unpick (#333).
 
 <a id="a-menu-items-edit-form-no-longer-shares-input-ids-with-the-add-form"></a>
 
