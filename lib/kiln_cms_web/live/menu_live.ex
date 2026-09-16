@@ -131,7 +131,7 @@ defmodule KilnCMSWeb.MenuLive do
         {:noreply, socket}
 
       item ->
-        {:noreply, assign(socket, :editing, {id, to_form(item_form(item, socket), as: :item)})}
+        {:noreply, assign(socket, :editing, {id, edit_form(id, item_form(item, socket))})}
     end
   end
 
@@ -150,7 +150,7 @@ defmodule KilnCMSWeb.MenuLive do
       {:error, error} ->
         {:noreply,
          socket
-         |> assign(:editing, {id, to_form(params, as: :item)})
+         |> assign(:editing, {id, edit_form(id, params)})
          |> put_flash(:error, error_message(error, gettext("Couldn't save that item.")))}
     end
   end
@@ -478,6 +478,11 @@ defmodule KilnCMSWeb.MenuLive do
       _ -> nil
     end
   end
+
+  # The add form is always on the page and also submits as `item[...]`, so the
+  # edit form keeps the same param names but its own id prefix — otherwise both
+  # render `id="item_label"`, and labels and DOM patching target the wrong input.
+  defp edit_form(id, params), do: to_form(params, as: :item, id: "edit_item_#{id}")
 
   # An existing item projected back onto the form's shape — including the
   # target's *slug*, which the row stores only as an id.

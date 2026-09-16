@@ -61,6 +61,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **Media sideloading can be tested without the network.**
+  ([#487](https://github.com/The-Verscienta/kiln_cms/issues/487) · [long form](docs/changelog/unreleased.md#media-sideloading-can-be-tested-without-the-network))
+
 - **Sidebar presets: Essentials and Everything.**
   ([long form](docs/changelog/unreleased.md#sidebar-presets-essentials-and-everything))
 
@@ -188,6 +191,9 @@ Every summary line below that was shortened links to its own entry there.
 - **`mix kiln.changelog --condense` no longer breaks on a release where two
   summaries link one long form.**
   ([long form](docs/changelog/unreleased.md#mix-kiln-changelog-condense-no-longer-breaks-on-a-shared-long-form))
+
+- **A menu item's Edit form no longer shares input ids with the Add form.**
+  ([long form](docs/changelog/unreleased.md#a-menu-items-edit-form-no-longer-shares-input-ids-with-the-add-form))
 
 - **Notification bell and inbox fixes from review: items mark read, entry links resolve, erasure reaches inboxes.**
   ([long form](docs/changelog/unreleased.md#notification-bell-and-inbox-fixes-from-review))

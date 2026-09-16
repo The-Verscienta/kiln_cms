@@ -18,6 +18,29 @@ migration (the demo admin and editor) start on Essentials.
 
 ## Added
 
+<a id="media-sideloading-can-be-tested-without-the-network"></a>
+
+- **Media sideloading can be tested without the network.** `Media.Ingest.store_url/2`
+  — the fetch the WordPress importer points at every attachment URL in an
+  uploaded export (#487), and so the most content-chosen request the system
+  makes — called `SafeFetch.get/2` with no `req_options`. Every comparable
+  module takes one from config (`Webhooks`, `OEmbed`, `Federation`,
+  `Links.External`, `Storage.S3`, `Social`, `Push`), so this was the one fetch
+  that could not be pointed at a `Req.Test` stub, and everything past its SSRF
+  refusals had never run in a test. `Ingest.req_options/0` follows the same
+  shape and is merged by `SafeFetch` after its own options, so address pinning
+  and redirect refusal still apply to a stubbed request. The new tests pin what
+  Ingest does with each answer: a stored image named after the URL's last
+  segment (percent-decoded, since editors search by it), a non-2xx reported as
+  `{:http_status, status}` with nothing stored, a transport failure returned as
+  an error rather than raised, and a `302` pointing at the cloud metadata
+  address producing exactly one request — never a followed second one. Two
+  importer tests that had been getting their "unreachable image" from a real
+  connection attempt now stub the 404 instead, and the reachable case — an
+  imported post's image block re-pointed at the stored item — has a test for
+  the first time. With the stub configured, a test that lets media through
+  without installing one fails loudly instead of dialling out.
+
 <a id="sidebar-presets-essentials-and-everything"></a>
 
 - **Sidebar presets: Essentials and Everything.** A usability pass on
@@ -478,6 +501,21 @@ migration (the demo admin and editor) start on Essentials.
   is being sent to read), and `--check` fails a release whose summaries name
   one long form twice — where the fix is still one link to rename rather than
   an archive to unpick (#333).
+
+<a id="a-menu-items-edit-form-no-longer-shares-input-ids-with-the-add-form"></a>
+
+- **A menu item's Edit form no longer shares input ids with the Add form.**
+  The "Add an item" card is always on the menu builder, and the inline Edit
+  form was built from the same `item` params with no id prefix, so opening
+  Edit rendered two `id="item_label"` inputs (and two of every other field).
+  Clicking an Edit label focused the Add form's input, and LiveView's DOM
+  patching could target the wrong element. The Edit form now keeps the
+  `item[...]` param names but prefixes its ids with the item
+  (`edit_item_<id>_label`), both when it opens and when a refused save
+  re-renders it. This also removes an intermittent CI failure: LiveViewTest
+  reports a duplicate id by messaging its own proxy after replying, so the
+  existing Edit test only failed when the proxy got scheduled before the test
+  exited.
 
 <a id="notification-bell-and-inbox-fixes-from-review"></a>
 

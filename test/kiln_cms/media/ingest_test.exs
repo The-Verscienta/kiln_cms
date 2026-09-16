@@ -49,6 +49,109 @@ defmodule KilnCMS.Media.IngestTest do
     end
   end
 
+  describe "store_url/2 fetching (#487)" do
+    # Everything past the SSRF refusals above used to be untestable: `download/1`
+    # took no `req_options`, so the only way to reach it was the real network.
+    # These go through `Req.Test` via `Ingest.req_options/0` instead. The byte
+    # cap and redirect mechanics themselves are `SafeFetchTest`'s job; what is
+    # pinned here is what Ingest does with each answer.
+
+    # 1x1 PNG — the same bytes `AVQuarantineTest` uses.
+    defp png do
+      Base.decode64!(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+      )
+    end
+
+    # Serves `png/0` and reports each request to the test, so a test can assert
+    # how many requests were made as well as what came back.
+    defp serve(status \\ 200, headers \\ []) do
+      test = self()
+
+      Req.Test.stub(KilnCMS.Media.Ingest, fn conn ->
+        send(test, {:fetched, conn.request_path})
+
+        conn =
+          Enum.reduce(headers, conn, fn {k, v}, c -> Plug.Conn.put_resp_header(c, k, v) end)
+
+        Plug.Conn.send_resp(conn, status, if(status in 200..299, do: png(), else: ""))
+      end)
+    end
+
+    defp media_count, do: KilnCMS.CMS.MediaItem |> Ash.read!(authorize?: false) |> length()
+
+    test "stores what was served as an image, named after the URL's last segment" do
+      serve()
+
+      assert {:ok, item} =
+               Ingest.store_url("https://media.test/wp-content/uploads/cat.png", actor: actor())
+
+      assert item.filename == "cat.png"
+      assert item.content_type == "image/png"
+      assert_received {:fetched, "/wp-content/uploads/cat.png"}
+
+      # A stored PNG, not the served bytes verbatim: every image is re-encoded by
+      # `ImageProcessor.strip_metadata/2` on the way in (#215 — uploaded photos
+      # carry GPS and device data), so the blob gains chunks the source did not
+      # have. What must hold is that a real image landed under the item's key.
+      assert {:ok, <<137, 80, 78, 71, 13, 10, 26, 10, _rest::binary>>} =
+               KilnCMS.Storage.fetch(item.storage_key)
+    end
+
+    test "a percent-encoded filename is decoded, since editors search by it" do
+      serve()
+
+      assert {:ok, item} =
+               Ingest.store_url("https://media.test/uploads/my%20cat.png", actor: actor())
+
+      assert item.filename == "my cat.png"
+    end
+
+    test "a URL with no last segment gets a generated name, never an empty one" do
+      # WordPress attachment URLs end in a filename, but an export can carry a
+      # bare host or a trailing slash. An empty filename is not something an
+      # editor can find the item by, so the fallback is a generated name.
+      serve()
+
+      assert {:ok, item} = Ingest.store_url("https://media.test/", actor: actor())
+      assert "imported-" <> _ = item.filename
+    end
+
+    test "a non-2xx answer is an error naming the status, and stores nothing" do
+      serve(404)
+      before = media_count()
+
+      assert {:error, {:http_status, 404}} =
+               Ingest.store_url("https://media.test/gone.png", actor: actor())
+
+      assert media_count() == before
+    end
+
+    test "a redirect is reported, not followed — even one pointing somewhere private" do
+      # Ingest takes SafeFetch's default of no redirects. A followed redirect is
+      # a fresh resolution the address pin never sees, so an exported file that
+      # points at a host answering `302 Location: http://169.254.169.254/` must
+      # produce one request and an error, never a second request.
+      serve(302, [{"location", "http://169.254.169.254/latest/meta-data/"}])
+
+      assert {:error, {:http_status, 302}} =
+               Ingest.store_url("https://media.test/moved.png", actor: actor())
+
+      assert_received {:fetched, "/moved.png"}
+      refute_received {:fetched, _}
+    end
+
+    test "a transport failure is an error, not a crash, and stores nothing" do
+      # The importer treats every `{:error, _}` as "skip this asset and carry on";
+      # an exception here would cost the whole run instead.
+      Req.Test.stub(KilnCMS.Media.Ingest, &Req.Test.transport_error(&1, :econnrefused))
+      before = media_count()
+
+      assert {:error, _reason} = Ingest.store_url("https://media.test/cat.png", actor: actor())
+      assert media_count() == before
+    end
+  end
+
   describe "store_file/3" do
     test "refuses a file no processor recognises, and writes nothing" do
       path = Path.join(System.tmp_dir!(), "ingest-#{System.unique_integer([:positive])}.bin")
