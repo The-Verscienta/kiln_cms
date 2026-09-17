@@ -202,6 +202,9 @@ Every summary line below that was shortened links to its own entry there.
 - **A menu item's Edit form no longer shares input ids with the Add form.**
   ([long form](docs/changelog/unreleased.md#a-menu-items-edit-form-no-longer-shares-input-ids-with-the-add-form))
 
+- **Editing a live page's body no longer blanks its title or strands the change in the working copy.**
+  ([long form](docs/changelog/unreleased.md#editing-a-live-pages-body-no-longer-blanks-its-title))
+
 - **Notification bell and inbox fixes from review: items mark read, entry links resolve, erasure reaches inboxes.**
   ([long form](docs/changelog/unreleased.md#notification-bell-and-inbox-fixes-from-review))
 

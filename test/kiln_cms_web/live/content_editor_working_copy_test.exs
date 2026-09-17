@@ -10,6 +10,7 @@ defmodule KilnCMSWeb.ContentEditorWorkingCopyTest do
   @moduletag :capture_log
 
   import Phoenix.LiveViewTest
+  import KilnCMS.TipTapFixtures
 
   alias KilnCMS.Accounts.User
   alias KilnCMS.CMS
@@ -45,6 +46,24 @@ defmodule KilnCMSWeb.ContentEditorWorkingCopyTest do
   end
 
   defp slug, do: "wc-live-#{System.unique_integer([:positive])}"
+
+  # A live document whose body is a rich-text block — the one the TipTap hook
+  # pushes into, rather than a form input.
+  defp live_rich_text_page(admin) do
+    page =
+      CMS.create_page!(
+        %{
+          title: "Live title",
+          slug: slug(),
+          blocks: [%{"_type" => "rich_text", "legacy_html" => ""}]
+        },
+        actor: admin
+      )
+
+    page = CMS.publish_page!(page, %{}, actor: admin)
+    KilnCMS.DataCase.drain_oban()
+    reload(page)
+  end
 
   defp live_page(admin) do
     page =
@@ -230,6 +249,90 @@ defmodule KilnCMSWeb.ContentEditorWorkingCopyTest do
 
     refute WorkingCopy.pending?(reload(page))
     refute html =~ "Live · draft"
+  end
+
+  # An edit that does not come through the form's own change event — the TipTap
+  # hook pushes its document, `AshPhoenix.Form.params/1` only round-trips
+  # TOUCHED fields, and the form is rebuilt untouched after every write — used
+  # to submit `blocks` with no `title` at all. The working copy is written
+  # whole, so the absent param landed as an explicit `nil`: the title input went
+  # blank and "Publish changes" then failed forever against a `title` that
+  # cannot be null, leaving a live document that saved and never went live.
+  test "a body pushed by the editor hook keeps the title and still publishes", %{conn: conn} do
+    editor = authed_user(:editor)
+    page = live_rich_text_page(authed_user(:admin))
+    [%Ash.Union{value: block}] = page.blocks
+
+    {:ok, lv, _html} = open(conn, editor, page)
+
+    render_hook(lv, "rich_text_body", %{
+      "id" => block.id,
+      "idx" => "0",
+      "doc" => doc([para("typed into the live page")])
+    })
+
+    html = autosave(lv)
+
+    saved = reload(page)
+    assert saved.working_title == "Live title"
+    assert WorkingCopy.pending?(saved)
+    assert has_element?(lv, ~s(input[name="form[title]"][value="Live title"]))
+    assert html =~ "Live · draft"
+
+    html = lv |> element("#publish-changes") |> render_click()
+    assert html =~ "Published your changes."
+
+    published = reload(page)
+    assert published.title == "Live title"
+    refute WorkingCopy.pending?(published)
+
+    assert [%Ash.Union{value: %{body: [%{"children" => [%{"text" => text}]}]}}] = published.blocks
+    assert text == "typed into the live page"
+  end
+
+  # The same absent-title hole through a second door: every block operation
+  # rebuilds the params from the form (`AshPhoenix.Form.params/1`) and puts its
+  # own `blocks` on them, so none of them carry the title either.
+  test "adding a block keeps the working title", %{conn: conn} do
+    editor = authed_user(:editor)
+    page = live_page(authed_user(:admin))
+    {:ok, lv, _html} = open(conn, editor, page)
+
+    type_title(lv, "Edited title")
+    autosave(lv)
+
+    render_click(lv, "add_block", %{"type" => "heading"})
+    autosave(lv)
+
+    saved = reload(page)
+    assert saved.title == "Live title"
+    assert saved.working_title == "Edited title"
+    assert has_element?(lv, ~s(input[name="form[title]"][value="Edited title"]))
+  end
+
+  # A working copy that cannot be promoted — the title emptied on a live
+  # document — must say which field is in the way. The generic refusal left the
+  # editor clicking a button that did nothing.
+  test "a publish the row refuses names the field", %{conn: conn} do
+    admin = authed_user(:admin)
+    page = live_page(admin)
+
+    {:ok, _} =
+      CMS.save_page_working_copy(page, %{working_title: nil, working_blocks: page.blocks},
+        actor: admin,
+        tenant: page.org_id
+      )
+
+    # Stamped by hand: `:save_working_copy` clears a copy that matches the live
+    # text, and a blank title is only reachable through the editor's own path.
+    Ash.Seed.update!(reload(page), %{working_copy_at: DateTime.utc_now()})
+
+    {:ok, lv, _html} = open(conn, admin, reload(page))
+    html = lv |> element("#publish-changes") |> render_click()
+
+    assert html =~ "Title"
+    refute html =~ "That action isn&#39;t allowed right now."
+    assert WorkingCopy.pending?(reload(page))
   end
 
   test "the content list marks a live record edited since publishing", %{conn: conn} do

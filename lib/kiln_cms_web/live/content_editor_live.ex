@@ -3745,9 +3745,56 @@ defmodule KilnCMSWeb.ContentEditorLive do
       {:error, error} ->
         if stale_conflict?(error),
           do: flag_conflict(socket),
-          else: put_flash(socket, :error, gettext("That action isn't allowed right now."))
+          else: put_flash(socket, :error, live_transition_error(error))
     end
   end
+
+  # "Publish changes" hands the working copy to columns the row constrains —
+  # `title` cannot be null — so a copy that is not promotable fails here rather
+  # than at the keystroke that made it so, and the editor is left looking at a
+  # document that saves and never goes live. Name the field, the way
+  # `restore_error_message/1` does for a version restore; the generic line is
+  # for everything with no field to point at (a policy refusal, a row filter
+  # that no longer matches).
+  defp live_transition_error(error) do
+    error
+    |> Ash.Error.to_error_class()
+    |> Map.get(:errors, [])
+    |> Enum.flat_map(&field_error/1)
+    |> Enum.map_join(" ", fn {field, message} ->
+      "#{VersionDiffComponents.field_label(field)} #{message}."
+    end)
+    |> case do
+      "" -> gettext("That action isn't allowed right now.")
+      message -> message
+    end
+  end
+
+  # One Ash error as `{field, message}`, rendered through AshPhoenix's own
+  # protocol and `translate_error/1` — the path every field error the editor
+  # already shows takes, so a flash and an inline error say the same words.
+  # Errors with no form representation (a policy refusal, a row filter that
+  # matched nothing) drop out and leave the generic line.
+  defp field_error(error) do
+    if AshPhoenix.FormData.Error.impl_for(error) do
+      error
+      |> AshPhoenix.FormData.Error.to_form_error()
+      |> List.wrap()
+      |> Enum.flat_map(fn
+        {field, message, vars} when not is_nil(field) and is_binary(message) ->
+          [{field, translate_error({message, error_vars(vars)})}]
+
+        _other ->
+          []
+      end)
+    else
+      []
+    end
+  end
+
+  defp error_vars(vars) when is_list(vars), do: vars
+  defp error_vars(vars) when is_map(vars), do: Map.to_list(vars)
+  defp error_vars(_vars), do: []
 
   # Show inspector panel `tab`. Coming back to Preview after edits happened
   # while it was hidden catches it up now: `refresh_preview` short-circuits
@@ -3843,28 +3890,39 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # The working-copy twin of `autosave_draft/1`: the same params the form
   # holds, submitted to `:save_working_copy` under the working column names.
   #
-  # The throwaway form is built on a struct whose `working_title` /
-  # `working_blocks` already carry the text the copy is measured against
-  # (`WorkingCopy.basis/1` — the previous copy, else the published text).
-  # Two reasons. The block sub-forms then bind to existing blocks by index, so
-  # each is an update of a block rather than a create of a new one — exactly
-  # how the draft path's sub-forms bind to `blocks`. And an unchanged text
-  # registers as no change at all: `StampWorkingCopy` compares the copy to the
-  # published text and clears it when they agree.
+  # The throwaway form is built on a struct whose `working_blocks` already
+  # carry the tree the copy is measured against (`WorkingCopy.basis/1` — the
+  # previous copy, else the published body), so the block sub-forms bind to
+  # existing blocks by index and each is an update of a block rather than a
+  # create of a new one — exactly how the draft path's sub-forms bind to
+  # `blocks`. An unchanged text still registers as no change at all:
+  # `StampWorkingCopy` compares the copy to the published text and clears it
+  # when they agree.
+  #
+  # `working_title` is deliberately NOT faked the same way. Ash drops a change
+  # whose value already equals the changeset's data, so a title submitted as
+  # the basis title — which is what an edit to the BODY alone submits — would
+  # be dropped against the doctored struct and never written, leaving the
+  # column NULL on a stamped working copy. The block tree escapes this only
+  # because a tree cast from params is never `==` to one loaded from the row
+  # (see `WorkingCopy.same_blocks?/3`).
   defp autosave_working_copy(socket, params) do
     record = socket.assigns.record
     basis = WorkingCopy.basis(record)
 
     form =
       AshPhoenix.Form.for_update(
-        %{record | working_title: basis.title, working_blocks: basis.blocks},
+        %{record | working_blocks: basis.blocks},
         :save_working_copy,
         actor: socket.assigns.actor,
         tenant: record.org_id,
         forms: [auto?: true]
       )
 
-    copy = %{"working_title" => params["title"], "working_blocks" => params["blocks"] || []}
+    copy = %{
+      "working_title" => unchanged_to(params, "title", basis.title),
+      "working_blocks" => unchanged_to(params, "blocks", basis.blocks)
+    }
 
     result =
       EditorTelemetry.span(:autosave, %{kind: socket.assigns.kind}, fn ->
@@ -3880,6 +3938,27 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
       {:error, form} ->
         handle_autosave_error(socket, form)
+    end
+  end
+
+  # An absent param means UNCHANGED, and on this path that has to be said out
+  # loud. `:save_working_copy` accepts both columns on every write, so whatever
+  # is not in `params` lands as an explicit `nil`/`[]` — while the draft path's
+  # `:autosave` simply leaves an unsupplied attribute alone.
+  #
+  # `AshPhoenix.Form.params/1` only round-trips TOUCHED fields, and the form is
+  # rebuilt from the record after every write (`assign_record/2`), so it starts
+  # each round untouched. A text edit that does not come from the form's own
+  # change event — the TipTap hook's `rich_text_body` push, a media pick, any
+  # block operation — therefore submits `blocks` without `title`, and used to
+  # blank `working_title`: the title input went empty (the editor renders
+  # `WorkingCopy.view/1`) and "Publish changes" then failed for good, because
+  # `PromoteWorkingCopy` moved that `nil` onto a `title` that cannot be null.
+  # The body saved to the working copy and never reached the live columns.
+  defp unchanged_to(params, key, basis) do
+    case Map.get(params, key) do
+      nil -> basis
+      value -> value
     end
   end
 
