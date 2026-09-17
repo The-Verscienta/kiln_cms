@@ -197,6 +197,9 @@ Every summary line below that was shortened links to its own entry there.
   and `docs/decisions/`**.
   ([#1325](https://github.com/The-Verscienta/kiln_cms/issues/1325) · [long form](docs/changelog/unreleased.md#changelogmd-is-a-summary-and-the-reasoning-moved-to-docschangelog-and))
 
+- **The coverage floor moves 82.7 → 84.5.**
+  ([long form](docs/changelog/unreleased.md#the-coverage-floor-moves-827-to-845))
+
 ### Fixed
 
 - **A failed S3 multipart upload is aborted instead of left on the bucket.**
