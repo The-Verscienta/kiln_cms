@@ -18,6 +18,20 @@ migration (the demo admin and editor) start on Essentials.
 
 ## Added
 
+<a id="the-fields-admin-explains-each-field-type-under-its-picker"></a>
+
+- **The fields admin explains each field type under its picker.** Choosing a
+  type on `/editor/fields`, in the add form or an inline edit, now shows a
+  sentence or two under the select: what the field holds and what it is for
+  (a Select is "one choice from a fixed list, which you type into Options
+  below"; a Date & time range makes the type an event with a calendar feed).
+  Every core and built-in type has one, translated. Plugin types supply their
+  own through a new optional `c:Kiln.FieldType.description/0`, defaulted to `nil`
+  by `use Kiln.FieldType`, so existing plugins compile unchanged and simply
+  show nothing. Also fixed: opening a field's inline edit form rendered every
+  input with the same id as the always-visible add form, so its labels
+  targeted the add form's inputs; the edit form now has its own id prefix.
+
 <a id="a-custom-field-can-be-added-to-several-content-types-at-once-and-its-machine"></a>
 
 - **A custom field can be added to several content types at once, and its

@@ -153,7 +153,9 @@ agility of a live marketplace while staying compile-time-safe:
   runtime in the fields admin (`/editor/fields`). A type declares `cast/2`
   plus how it edits: `input_type/0` + `input_attrs/1` for a single control, or
   `input_parts/1` for a **composite** value rendered as one labelled input per
-  part and cast as a map.
+  part and cast as a map. An optional `description/0` is shown under the type
+  picker once an admin selects the type, next to the core types' own
+  descriptions.
 
   Two implementations ship in-tree and are written against exactly this
   contract rather than special-cased in the host, so they double as reference

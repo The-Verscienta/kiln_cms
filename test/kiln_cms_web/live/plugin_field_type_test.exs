@@ -49,6 +49,18 @@ defmodule KilnCMSWeb.PluginFieldTypeTest do
     assert html =~ "Rating"
   end
 
+  test "selecting the plugin type shows the plugin's own description", %{conn: conn} do
+    admin = authed_admin()
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+    html =
+      lv
+      |> form("#new-field-form", field_definition: %{field_type: "rating"})
+      |> render_change()
+
+    assert html =~ "One to five stars. For a review score."
+  end
+
   test "the content editor renders the plugin's input kind and attributes", %{conn: conn} do
     admin = authed_admin()
 
