@@ -202,6 +202,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **The console's mobile nav drawer announces itself, takes the keyboard, and
+  closes when it takes you somewhere.**
+  ([long form](docs/changelog/unreleased.md#the-consoles-mobile-nav-drawer-announces-itself-takes-the-keyboard-and-closes))
+
 - **A failed S3 multipart upload is aborted instead of left on the bucket.**
   ([#494](https://github.com/The-Verscienta/kiln_cms/issues/494) · [long form](docs/changelog/unreleased.md#a-failed-s3-multipart-upload-is-aborted-instead-of-left-on-the-bucket))
 

@@ -1071,6 +1071,26 @@
   }
 }
 
+/* The console's mobile nav drawer (`Layouts.console/1`). Unlayered on purpose:
+   the slide comes from a `transition-transform` UTILITY on the aside, and
+   utilities outrank `@layer components` — only an unlayered rule can answer a
+   reader who asked for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  .side-shell {
+    transition: none;
+  }
+}
+
+/* While the drawer is over the page, the page behind it does not scroll —
+   otherwise a swipe on the scrim carries the content away under it. Scoped
+   below lg, where the drawer exists at all; browsers without `:has` keep the
+   old behaviour rather than breaking. */
+@media (max-width: 63.999rem) {
+  body:has(#kiln-nav-toggle:checked) {
+    overflow: hidden;
+  }
+}
+
 /* Public rich-text typography (#147). The delivered article wrapper uses
    `prose max-w-none`, but the Tailwind Typography plugin isn't installed, so the
    sanitized `<p>/<h*>/<ul>/<blockquote>/<a>/<code>` inside each rich-text

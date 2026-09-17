@@ -550,6 +550,30 @@ migration (the demo admin and editor) start on Essentials.
 
 ## Fixed
 
+<a id="the-consoles-mobile-nav-drawer-announces-itself-takes-the-keyboard-and-closes"></a>
+
+- **The console's mobile nav drawer announces itself, takes the keyboard, and
+  closes when it takes you somewhere.**
+  Below 64rem the sidebar is a drawer driven by a CSS checkbox, which is what
+  lets it open before the LiveView socket connects. What the checkbox could not
+  do is say anything: its hamburger was a bare `<label>`, so a screen reader was
+  told neither that it opens the navigation nor whether the navigation is
+  currently open, and the `sr-only` checkbox behind it sat in the tab order
+  while `aria-hidden` kept it from announcing anything at all. The hamburger is
+  now a named control (`role="button"`, `aria-controls`, `aria-expanded`) and
+  the checkbox has left the tab order. `app.js` keeps the state honest and adds
+  what a `<label>` does not answer to — Enter and Space, Escape to dismiss, and
+  focus moved into the drawer on open and handed back on close; while the
+  drawer is open, Tab stays inside it rather than walking into the page behind
+  the scrim, and that page no longer scrolls under it. Opening a nav item now
+  closes the drawer: a live navigation patches the page in place, so nothing
+  was dismissing a drawer left spread over the page the reader had just asked
+  for. The panel also honours `prefers-reduced-motion`, which its
+  `transition-transform` utility had been overriding. The drawer is the one
+  part of the sidebar that exists only below 64rem, and every existing sidebar
+  spec runs at 1280 — `e2e/tests/console_drawer.spec.js` covers it at phone
+  width.
+
 <a id="the-kilncmsdev-docs-publisher-works-again-and-ci-proves-it"></a>
 
 - **The kilncms.dev docs publisher works again, and CI proves it.**
