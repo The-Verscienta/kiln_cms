@@ -808,6 +808,24 @@ migration (the demo admin and editor) start on Essentials.
   exports, check any that relied on the old default: pass `--state published
   --state draft` to keep it.
 
+<a id="the-kilncmsdev-docs-publisher-works-again-and-ci-proves-it"></a>
+
+- **The kilncms.dev docs publisher works again, and CI proves it.**
+  `scripts/publish_docs.exs` builds its catalogue by evaluating `extras/0` and
+  `groups_for_extras/0` out of `mix.exs`, since it publishes without compiling
+  the app. The changelog restructure (#1325) gave both of them zero-arity
+  private helpers — `release_history/0` and `decisions/0`, which glob
+  `docs/changelog` and `docs/decisions` — and evaluating a body that calls them
+  raised `undefined function release_history/0`. Every docs publish since has
+  failed, so kilncms.dev has been serving the guides as they were before that
+  merge. The extractor now resolves local zero-arity calls by evaluating those
+  helpers too. The publish workflow only runs on `main`, after a merge, which
+  is why nothing caught it; the Docs job in CI now runs the publisher's own
+  `--all --dry-run`, which renders every guide and needs no site, key or
+  network. The long-form changelog entries and the architecture decision
+  records are marked internal, like `CHANGELOG.md` and the decision-records
+  group they succeed, so they do not appear at `/docs`.
+
 ## Security
 
 <a id="a-system-actor-so-internal-callers-run-under-the-policies-instead-of-around-them"></a>

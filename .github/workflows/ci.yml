@@ -599,6 +599,16 @@ jobs:
       - name: Build documentation
         run: mix docs --warnings-as-errors
 
+      # The kilncms.dev publisher reads its catalogue out of mix.exs by
+      # evaluating `extras/0` and `groups_for_extras/0` (it never compiles the
+      # app). A mix.exs change those cannot be evaluated from breaks publishing
+      # silently — the publish workflow only runs on main, after the merge, and
+      # #1325's globbed helpers broke it for every push in between. The dry run
+      # renders every guide and writes them to a temp dir; it needs no site, no
+      # key and no network beyond Mix.install's three packages.
+      - name: Check the docs publisher can still read mix.exs
+        run: elixir scripts/publish_docs.exs --all --dry-run --out "$RUNNER_TEMP/docs-html"
+
   client:
     name: Elixir client (kiln_client)
     runs-on: ubuntu-latest

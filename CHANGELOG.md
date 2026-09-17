@@ -274,6 +274,9 @@ Every summary line below that was shortened links to its own entry there.
   own state.**
   ([long form](docs/changelog/unreleased.md#a-content-export-holds-every-record-and-restores-each-in-its-own-state))
 
+- **The kilncms.dev docs publisher works again, and CI proves it.**
+  ([long form](docs/changelog/unreleased.md#the-kilncmsdev-docs-publisher-works-again-and-ci-proves-it))
+
 ### Security
 
 - **A system actor, so internal callers run under the policies instead of around
