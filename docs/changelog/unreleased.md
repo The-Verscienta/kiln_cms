@@ -695,6 +695,17 @@ migration (the demo admin and editor) start on Essentials.
   `API_DOCS_ENABLED` serves them. The dev-only `/gql/playground` forward was
   declared after the `/gql` catch-all and never matched; it now comes first.
 
+<a id="mix-kiln-export-content-refuses-a-state-it-does-not-know"></a>
+
+- **`mix kiln.export.content` refuses a `--state` it does not know.** The value
+  went through `String.to_existing_atom/1`. Most typos (`--state publishd`)
+  crashed with a bare `ArgumentError`, but any word that already existed as an
+  atom elsewhere (`--state admin`) reached the filter, matched nothing, and the
+  task wrote an envelope with no records and exited 0: an empty backup that
+  looked like a successful one. `--state` now accepts exactly `draft`,
+  `in_review`, `published` and `archived`, and refuses anything else by name.
+  `in_review` was always a valid state, but the task's help did not list it.
+
 ## Security
 
 <a id="a-system-actor-so-internal-callers-run-under-the-policies-instead-of-around-them"></a>

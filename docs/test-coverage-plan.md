@@ -258,11 +258,50 @@ to editors as lost uploads, and none of these paths has ever run.
 
 ### 9. `KilnCMS.Portability.CLI` — 6% (62 uncovered)
 
-The thinnest-covered non-macro module in the tree. `Portability.Export` (80%)
-and `Portability.Import` (79%) carry the logic, so this is argument parsing,
-output formatting, and exit codes — cheap to cover with a captured-IO test per
-subcommand, and worth it because a wrong exit code here breaks somebody's
-migration script silently.
+**Done**, in `test/kiln_cms/portability/cli_test.exs` and
+`test/mix/tasks/kiln_portability_tasks_test.exs`. **`CLI` 6% → 94%. The three
+tasks it serves, from 0%, now sit at 90–92% each.** The lines left are fallback
+clauses for shapes the callers never pass.
+
+The module was smaller than this entry first described. It has no
+subcommands or exit codes of its own. It holds four functions the
+`kiln.import.wordpress`, `kiln.import.content` and `kiln.export.content` tasks
+share: `scope!` (who a run acts as), `print_report`, `author_map!` and
+`maybe_drain_media`. The tasks hold the argument parsing, so both are covered.
+
+`scope!` is tested for what it refuses. An `--actor` or `--org` that matches
+nothing raises, and never falls back to an admin or the default organization.
+No admin and no `--actor` raises too. The "Acting as" line names the user the
+run is really attributed to. The report tests use a real import of the WXR
+fixture, so the text is pinned against the real report shape:
+
+* A dry run's banner is the first and the last line, and its counts use the
+  future tense.
+* A real run has no banner.
+* A re-run counts what was already there as skipped.
+* An unmapped author is listed with the `--author-map` hint, and a mapped one
+  without it.
+* The failure list is capped at 20 lines, but its summary count is the full
+  number.
+
+The task tests check each task's switches and each refusal: an export written
+with `--out` imports into another organization, and so does a CSV export. A
+dry-run import writes nothing. `--drain-media` is accepted (#931). CSV
+without exactly one `--type` is refused, and so is a CSV whose type carries
+prose. A CSV with an unknown column, an empty CSV, a file that isn't JSON, JSON
+with no `records`, a missing file, and a WXR over the 64 MB limit are each
+refused with their own message. The WXR test uses a sparse file, since the
+size check is a stat. Seven mutations each fail the files, among them an actor
+or organization miss falling back, the closing dry-run banner removed, the
+list cap moved, and `--drain-media` undeclared again.
+
+One thing this turned up: **`--state` accepted any word that already existed
+as an atom.** It went through `String.to_existing_atom/1`. A typo crashed with
+a bare `ArgumentError`, but a word that was an atom elsewhere (`--state admin`)
+matched nothing and gave an empty export that exited 0. The task now accepts
+exactly `draft | in_review | published | archived` and refuses anything else
+by name. The default is still published and draft, so content in review is
+left out unless named; `docs/content-portability.md` now says so.
 
 ### 10. Console screens at 46–65%
 

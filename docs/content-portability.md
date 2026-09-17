@@ -135,6 +135,12 @@ mix kiln.export.content --out content.json
 mix kiln.export.content --type post --state published --out published-posts.json
 ```
 
+With no `--state`, the export holds published and draft records. Content
+waiting for review (`in_review`) and archived content are left out unless you
+name them, e.g. `--state draft --state in_review --state published --state
+archived` for everything. An unknown `--state` is refused rather than
+exporting nothing.
+
 ```json
 {
   "kiln_export": { "version": 1, "exported_at": "...", "types": ["post", "page"] },

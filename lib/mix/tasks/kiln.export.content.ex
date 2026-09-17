@@ -19,7 +19,7 @@ defmodule Mix.Tasks.Kiln.Export.Content do
       --format FORMAT    json (default) | csv. CSV needs exactly one --type and
                          refuses a type whose records carry prose blocks.
       --type NAME        export only this type; repeatable
-      --state STATE      published | draft | archived; repeatable
+      --state STATE      draft | in_review | published | archived; repeatable
                          (default: published and draft)
       --locale LOCALE    restrict to one locale
       --limit N          at most N records per type
@@ -112,11 +112,24 @@ defmodule Mix.Tasks.Kiln.Export.Content do
     Mix.raise("--format csv needs exactly one --type (a CSV has one header row)")
   end
 
+  # Every workflow state a record can be in (`KilnCMS.CMS.Content`'s state
+  # machine). Matched as strings rather than `String.to_existing_atom/1`: that
+  # raised a bare ArgumentError on a typo, and — worse — let any word that
+  # happened to be an atom elsewhere (`--state admin`) through to the filter,
+  # where it matched nothing and the task wrote an empty export and exited 0.
+  @states ~w(draft in_review published archived)
+
   defp states(opts) do
     case Keyword.get_values(opts, :state) do
       [] -> [:published, :draft]
-      list -> Enum.map(list, &String.to_existing_atom/1)
+      list -> Enum.map(list, &state!/1)
     end
+  end
+
+  defp state!(state) when state in @states, do: String.to_existing_atom(state)
+
+  defp state!(other) do
+    Mix.raise("unknown --state #{inspect(other)} (expected one of: #{Enum.join(@states, ", ")})")
   end
 
   defp emit(json, nil), do: IO.puts(json)
