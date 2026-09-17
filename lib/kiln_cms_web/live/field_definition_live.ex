@@ -311,7 +311,16 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   defp edit_form(id, actor, org) do
     CMS.get_field_definition!(id, actor: actor, tenant: org)
-    |> AshPhoenix.Form.for_update(:update, actor: actor, tenant: org, as: "field_definition")
+    |> AshPhoenix.Form.for_update(:update,
+      actor: actor,
+      tenant: org,
+      as: "field_definition",
+      # The add form is always on the page and also submits as
+      # `field_definition[...]`; the same param names are fine, but without its
+      # own id prefix both render `id="field_definition_label"` and every other
+      # input twice, so labels and DOM patching target the add form's inputs.
+      id: "edit_field_definition_#{id}"
+    )
     |> to_form()
   end
 
@@ -361,6 +370,92 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       nil -> Phoenix.Naming.humanize(type)
       module -> module.label()
     end
+  end
+
+  # What the selected type holds and what it is for, shown under the picker.
+  # The form's value is an atom until the first change event and a string after
+  # it; it is matched against the registered names rather than turned into an
+  # atom, since it arrives from the client.
+  defp type_description(value, field_types) do
+    case Enum.find(field_types, &(to_string(&1) == to_string(value))) do
+      nil -> nil
+      type -> core_type_description(type) || plugin_type_description(type)
+    end
+  end
+
+  defp core_type_description(:string),
+    do: gettext("A single line of text. For short values like a subtitle, a SKU or a byline.")
+
+  defp core_type_description(:text),
+    do: gettext("Several lines of plain text. For notes, a summary or a postal address.")
+
+  defp core_type_description(:integer),
+    do: gettext("A whole number. For a count, a quantity, a rank or a year.")
+
+  defp core_type_description(:float),
+    do: gettext("A number that can have decimals. For a weight, a measurement or a score.")
+
+  defp core_type_description(:boolean),
+    do: gettext("A yes-or-no checkbox. For a flag such as “Featured” or “In stock”.")
+
+  defp core_type_description(:date),
+    do:
+      gettext(
+        "A calendar date with no time of day. For a deadline, a birthday or a release date."
+      )
+
+  defp core_type_description(:datetime),
+    do: gettext("A date and a time of day. For when something opens, happened or expires.")
+
+  defp core_type_description(:url),
+    do: gettext("A web address. For a link to an external site, a source or a download.")
+
+  defp core_type_description(:select),
+    do:
+      gettext(
+        "One choice from a fixed list, which you type into Options below. For a size, a status or a category."
+      )
+
+  defp core_type_description(:media),
+    do: gettext("An image or file from the media library. For a hero image, a logo or a PDF.")
+
+  defp core_type_description(:reference),
+    do:
+      gettext(
+        "A link to another piece of content, of the type you pick below. For a related article, an author or a parent product."
+      )
+
+  defp core_type_description(:geolocation),
+    do:
+      gettext(
+        "A point on a map: latitude, longitude and zoom. For a shop, a venue or where a photo was taken."
+      )
+
+  defp core_type_description(:computed),
+    do:
+      gettext(
+        "Worked out from a formula on every save, so editors can't type into it. For a reading time or a code built from the title."
+      )
+
+  defp core_type_description(:datetime_range),
+    do:
+      gettext(
+        "A start and an end, in a time zone, optionally all day. A content type with one of these is an event and gets a calendar feed."
+      )
+
+  defp core_type_description(:recurrence),
+    do:
+      gettext(
+        "How often an event repeats, such as every Tuesday. Use it alongside a date & time range, which says when it starts."
+      )
+
+  defp core_type_description(_type), do: nil
+
+  # Plugin types describe themselves; `description/0` is optional in the
+  # contract, so a hand-rolled type without it shows nothing.
+  defp plugin_type_description(type) do
+    module = KilnCMS.CMS.FieldTypes.get(type)
+    if module && function_exported?(module, :description, 0), do: module.description()
   end
 
   defp content_type_label(type) do
@@ -495,6 +590,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
               type="select"
               label={gettext("Field type")}
               options={Enum.map(@field_types, &{type_label(&1), &1})}
+              hint={type_description(@form[:field_type].value, @field_types)}
             />
             <.input
               :if={reference?(@form)}
@@ -632,6 +728,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                     type="select"
                     label={gettext("Field type")}
                     options={Enum.map(@field_types, &{type_label(&1), &1})}
+                    hint={type_description(@edit.form[:field_type].value, @field_types)}
                   />
                   <.input field={@edit.form[:label]} label={gettext("Label")} />
                   <.input

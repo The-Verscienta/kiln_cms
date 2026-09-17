@@ -882,6 +882,11 @@ msgstr ""
 msgid "A block"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A calendar date with no time of day. For a deadline, a birthday or a release date."
+msgstr ""
+
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #, elixir-autogen, elixir-format
 msgid "A campaign for this publish revision was already sent."
@@ -895,6 +900,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "A custom role bundles granular scope — define \"Blog editor\" once, assign it to any member. A member's own scope overrides their role per axis."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A date and a time of day. For when something opens, happened or expires."
 msgstr ""
 
 #: lib/kiln_cms_web/live/overview_live.ex
@@ -961,9 +971,19 @@ msgstr[1] ""
 msgid "A link is only listed after it fails %{count} checks in a row, so a brief outage at a busy host never reaches this page."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A link to another piece of content, of the type you pick below. For a related article, an author or a parent product."
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/page_html.ex
 #, elixir-autogen, elixir-format
 msgid "A media library"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A number that can have decimals. For a weight, a measurement or a score."
 msgstr ""
 
 #: lib/kiln_cms_web/live/experiments_live.ex
@@ -984,6 +1004,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "A piece of content belongs to one category."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A point on a map: latitude, longitude and zoom. For a shop, a venue or where a photo was taken."
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/page_html.ex
@@ -1021,6 +1046,16 @@ msgstr ""
 msgid "A short summary shown in listings and used as a fallback for social shares."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A single line of text. For short values like a subtitle, a SKU or a byline."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A start and an end, in a time zone, optionally all day. A content type with one of these is an event and gets a calendar feed."
+msgstr ""
+
 #: lib/kiln_cms_web/live/form_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "A submission whose text contains any of these words or phrases is scored as spam and held for review rather than delivered. Matching ignores case and applies to every form on this site."
@@ -1044,6 +1079,21 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "A version you were comparing was superseded."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A web address. For a link to an external site, a source or a download."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A whole number. For a count, a quantity, a rank or a year."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A yes-or-no checkbox. For a flag such as “Featured” or “In stock”."
 msgstr ""
 
 #: lib/kiln_cms_web/console_nav.ex
@@ -1755,6 +1805,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "An export is capped at %{max} records — %{over} selected rows are not in this file."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "An image or file from the media library. For a hero image, a logo or a PDF."
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/error_html/500.html.heex
@@ -6003,6 +6058,11 @@ msgstr ""
 msgid "How do you publish?"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "How often an event repeats, such as every Tuesday. Use it alongside a date & time range, which says when it starts."
+msgstr ""
+
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "How this instance sends email, and its DNS records."
@@ -8029,6 +8089,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Once it's published, your home page is what visitors see at your site's address."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "One choice from a fixed list, which you type into Options below. For a size, a status or a category."
 msgstr ""
 
 #: lib/kiln_cms_web/live/release_live.ex
@@ -10458,6 +10523,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Several images with captions, published with image-gallery structured data"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Several lines of plain text. For notes, a summary or a postal address."
 msgstr ""
 
 #: lib/kiln_cms_web/live/token_preview_live.ex
@@ -13241,6 +13311,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Witnessed by checkpoint #%{sequence} at anchor position %{position}"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Worked out from a formula on every save, so editors can't type into it. For a reading time or a code built from the title."
 msgstr ""
 
 #: lib/kiln_cms_web/components/version_diff_components.ex

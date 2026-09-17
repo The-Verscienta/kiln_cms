@@ -22,6 +22,10 @@ defmodule Example.FieldTypes.Money do
   def label, do: "Money"
 
   @impl Kiln.FieldType
+  def description,
+    do: "An amount with its currency code. For a price, a fee or a donation target."
+
+  @impl Kiln.FieldType
   def cast(value, _definition) do
     with {:ok, parts} <- parts(value),
          {:ok, amount} <- amount(Map.get(parts, "amount")),

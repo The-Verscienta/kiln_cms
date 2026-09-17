@@ -181,6 +181,10 @@ if Code.ensure_loaded?(Igniter) do
           {:ok, value |> to_string() |> String.trim()}
         end
 
+        # Shown under the type picker once an admin selects it: what the field
+        # holds and what it is for.
+        # def description, do: "One to five stars. For a review score."
+
         # The editor renders <input type={input_type()} {input_attrs(definition)}>.
         # def input_type, do: "number"
         # def input_attrs(_definition), do: %{min: 1, max: 5}

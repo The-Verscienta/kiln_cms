@@ -61,6 +61,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **The fields admin explains each field type under its picker.**
+  ([long form](docs/changelog/unreleased.md#the-fields-admin-explains-each-field-type-under-its-picker))
+
 - **A custom field can be added to several content types at once, and its
   machine name fills itself in.**
   ([long form](docs/changelog/unreleased.md#a-custom-field-can-be-added-to-several-content-types-at-once-and-its-machine))

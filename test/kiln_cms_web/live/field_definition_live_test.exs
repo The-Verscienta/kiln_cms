@@ -207,6 +207,68 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     assert html =~ "second-title"
   end
 
+  describe "the field type description" do
+    test "follows the type picked in the add form", %{conn: conn} do
+      admin = authed_user(:admin)
+      {:ok, lv, html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      # The form starts on String, and says what that is before any change.
+      assert html =~ "A single line of text."
+
+      html =
+        lv
+        |> form("#new-field-form", field_definition: %{field_type: "select"})
+        |> render_change()
+
+      assert html =~ "One choice from a fixed list"
+      refute html =~ "A single line of text."
+
+      html =
+        lv
+        |> form("#new-field-form", field_definition: %{field_type: "datetime_range"})
+        |> render_change()
+
+      assert html =~ "gets a calendar feed"
+    end
+
+    test "is shown in the edit form too", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      field =
+        CMS.create_field_definition!(
+          %{content_type: :page, name: "venue", label: "Venue", field_type: :geolocation},
+          actor: admin
+        )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+      lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+
+      assert lv |> element("#edit-field-#{field.id}") |> render() =~ "A point on a map"
+
+      html =
+        lv
+        |> form("#edit-field-#{field.id}", field_definition: %{field_type: "boolean"})
+        |> render_change()
+
+      assert html =~ "A yes-or-no checkbox."
+    end
+
+    test "every built-in type has one", %{conn: conn} do
+      admin = authed_user(:admin)
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      for type <- KilnCMS.CMS.FieldTypes.reserved() do
+        html =
+          lv
+          |> element("#new-field-form")
+          |> render_change(%{"field_definition" => %{"field_type" => to_string(type)}})
+
+        assert type_hint(html) not in [nil, ""],
+               "no description under the picker for #{inspect(type)}"
+      end
+    end
+  end
+
   describe "the machine name" do
     test "follows the label until the admin edits it", %{conn: conn} do
       admin = authed_user(:admin)
@@ -405,6 +467,16 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
       refute CMS.list_field_definitions!(authorize?: false)
              |> Enum.any?(&(&1.name == "orphan"))
     end
+  end
+
+  # The help text under the add form's type picker: the wrapper holding the
+  # select, then its hint paragraph.
+  defp type_hint(html) do
+    html
+    |> Floki.parse_document!()
+    |> Floki.find("#new-field-form div.mb-2:has(select#field_definition_field_type) > p.text-xs")
+    |> Floki.text()
+    |> String.trim()
   end
 
   defp label_change(lv, label, name) do
