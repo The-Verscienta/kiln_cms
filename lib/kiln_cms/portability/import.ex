@@ -83,6 +83,7 @@ defmodule KilnCMS.Portability.Import do
           created: [map()],
           skipped: [map()],
           failed: [map()],
+          incomplete: [map()],
           media: map(),
           taxonomy: map(),
           redirects: map(),
@@ -131,6 +132,7 @@ defmodule KilnCMS.Portability.Import do
        created: Enum.filter(results, &(&1.outcome == :created)),
        skipped: Enum.filter(results, &(&1.outcome == :skipped)),
        failed: Enum.filter(results, &(&1.outcome == :failed)),
+       incomplete: Enum.filter(results, &(Map.get(&1, :issues, []) != [])),
        taxonomy: taxonomy.report,
        media: media.report,
        redirects: redirects,
@@ -211,7 +213,7 @@ defmodule KilnCMS.Portability.Import do
   # the import. Applied after the create (which stamps the operator via
   # `relate_actor`) through the resource's own narrow `:reassign_author` action,
   # so it carries none of `:update`'s webhook/artifact side effects.
-  defp reassign_author(created, record, opts) do
+  defp reassign_author({created, issues}, record, opts) do
     with author when is_binary(author) <- record[:author],
          %{by_key: by_key} <- Keyword.get(opts, :authors),
          user_id when is_binary(user_id) <- Map.get(by_key, down(author)),
@@ -221,19 +223,17 @@ defmodule KilnCMS.Portability.Import do
       |> Ash.update()
       |> case do
         {:ok, updated} ->
-          updated
+          {updated, issues}
 
         {:error, reason} ->
-          Logger.warning("Import: could not attribute #{created.id}: #{inspect(reason)}")
-          created
+          {created, note(issues, "attributed to the acting user, not its author", reason, record)}
       end
     else
-      _ -> created
+      _ -> {created, issues}
     end
   rescue
     error ->
-      Logger.warning("Import: could not attribute #{created.id}: #{inspect(error)}")
-      created
+      {created, note(issues, "attributed to the acting user, not its author", error, record)}
   end
 
   defp apply_limit(records, nil), do: records
@@ -880,9 +880,14 @@ defmodule KilnCMS.Portability.Import do
 
     case create_via_action(record.kind, attrs, opts) do
       {:ok, created} ->
-        created =
-          record
-          |> maybe_publish(created, opts)
+        # Each step returns `{record, issues}`: a step that could not finish
+        # adds a line rather than only logging one. A record that arrived as a
+        # draft because the publish was refused is still an import the operator
+        # has to know about — the log is on the server, the report is what they
+        # are reading.
+        {created, issues} =
+          {created, []}
+          |> maybe_publish(record, opts)
           |> maybe_restore_state(record, opts)
           |> restore_published_at(record, opts)
           |> reassign_author(record, opts)
@@ -893,7 +898,8 @@ defmodule KilnCMS.Portability.Import do
            kind: record.kind,
            title: record.title,
            slug: created.slug,
-           id: created.id
+           id: created.id,
+           issues: Enum.reverse(issues)
          }}
 
       {:error, reason} ->
@@ -966,34 +972,25 @@ defmodule KilnCMS.Portability.Import do
   # the publish transition, so the record is already published and every one of
   # those fired. A 4,000-post import meant 4,000 spurious `updated` webhooks to
   # every subscriber and a second artifact fire per record.
-  defp restore_published_at(created, %{published_at: %DateTime{} = at}, opts) do
+  defp restore_published_at({created, issues}, %{published_at: %DateTime{} = at} = record, opts) do
     created
     |> Ash.Changeset.for_update(:backdate_published_at, %{published_at: at}, scope(opts))
     |> Ash.update()
     |> case do
       {:ok, updated} ->
-        updated
+        {updated, issues}
 
       {:error, reason} ->
-        # Logged, not swallowed. Silently keeping the import timestamp is the
-        # exact outcome this function exists to prevent, and every other failure
-        # path in this module logs.
-        Logger.warning(
-          "Import: could not restore published_at for #{created.id}: #{inspect(reason)}"
-        )
-
-        created
+        # Reported, not swallowed. Silently keeping the import timestamp is the
+        # exact outcome this function exists to prevent.
+        {created, note(issues, "dated at the import, not its source date", reason, record)}
     end
   rescue
     error ->
-      Logger.warning(
-        "Import: could not restore published_at for #{created.id}: #{inspect(error)}"
-      )
-
-      created
+      {created, note(issues, "dated at the import, not its source date", error, record)}
   end
 
-  defp restore_published_at(created, _record, _opts), do: created
+  defp restore_published_at({created, issues}, _record, _opts), do: {created, issues}
 
   # `ContentTypes` exposes only the raising create. An import must survive one
   # bad record without abandoning the other 3,999, so the raise is converted
@@ -1017,25 +1014,48 @@ defmodule KilnCMS.Portability.Import do
   # imported draft, which is recoverable; the alternative (treating it as a
   # record failure) would throw away a successful content import over a
   # workflow permission.
-  defp maybe_publish(%{state: :published} = record, created, opts) do
+  defp maybe_publish({created, issues}, %{state: :published} = record, opts) do
     case ContentTypes.transition(record.kind, "publish", created, scope(opts)) do
       {:ok, published} ->
-        published
+        {published, issues}
 
       other ->
-        Logger.warning(
-          "Import: #{record.kind} #{inspect(record.title)} imported but not published: #{inspect(other)}"
-        )
-
-        created
+        {created, note(issues, "left as a draft — the publish was refused", other, record)}
     end
   rescue
-    error ->
-      Logger.warning("Import: publish failed for #{inspect(record.title)}: #{inspect(error)}")
-      created
+    error -> {created, note(issues, "left as a draft — the publish failed", error, record)}
   end
 
-  defp maybe_publish(_record, created, _opts), do: created
+  defp maybe_publish({created, issues}, _record, _opts), do: {created, issues}
+
+  # One line for the report, and the same line in the log (which carries the
+  # record id and runs on the server, where an operator reading the report is
+  # not).
+  defp note(issues, what, reason, record) do
+    Logger.warning("Import: #{record.kind} #{inspect(record.title)} #{what}: #{inspect(reason)}")
+
+    ["#{what} (#{short_reason(reason)})" | issues]
+  end
+
+  # An Ash error inspects to hundreds of lines. The report needs the gist; the
+  # log above kept the whole thing.
+  defp short_reason(%{__struct__: struct} = reason) do
+    message =
+      case reason do
+        %{errors: [%{message: message} | _]} when is_binary(message) -> message
+        _ -> Exception.message(reason)
+      end
+
+    "#{inspect(struct)}: #{first_line(message)}"
+  rescue
+    _ -> inspect(struct)
+  end
+
+  defp short_reason(reason), do: reason |> inspect() |> first_line()
+
+  defp first_line(text) do
+    text |> to_string() |> String.split("\n", parts: 2) |> hd() |> String.slice(0, 120)
+  end
 
   # The export carries every workflow state. Anything the envelope does not name
   # (an older export, a hand-written file) imports as a draft, as it always has.
@@ -1050,32 +1070,23 @@ defmodule KilnCMS.Portability.Import do
   # and replaying those would email every reviewer and send a webhook per
   # record. Logged on failure and left a draft, the same trade `maybe_publish/3`
   # makes: a draft is recoverable, a lost record is not.
-  defp maybe_restore_state(created, %{state: state} = record, opts)
+  defp maybe_restore_state({created, issues}, %{state: state} = record, opts)
        when state in [:in_review, :archived] do
     created
     |> Ash.Changeset.for_update(:restore_imported_state, %{state: state}, scope(opts))
     |> Ash.update()
     |> case do
       {:ok, restored} ->
-        restored
+        {restored, issues}
 
       {:error, reason} ->
-        Logger.warning(
-          "Import: #{record.kind} #{inspect(record.title)} imported as a draft, not #{state}: #{inspect(reason)}"
-        )
-
-        created
+        {created, note(issues, "imported as a draft, not #{state}", reason, record)}
     end
   rescue
-    error ->
-      Logger.warning(
-        "Import: #{record.kind} #{inspect(record.title)} imported as a draft, not #{state}: #{inspect(error)}"
-      )
-
-      created
+    error -> {created, note(issues, "imported as a draft, not #{state}", error, record)}
   end
 
-  defp maybe_restore_state(created, _record, _opts), do: created
+  defp maybe_restore_state({created, issues}, _record, _opts), do: {created, issues}
 
   # Re-point every media-bearing map at the `MediaItem` sideloaded for its URL —
   # at ANY depth, matching `resolve_manifest_urls/2` and `collect_urls/1`.

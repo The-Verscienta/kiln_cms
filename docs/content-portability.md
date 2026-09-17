@@ -29,6 +29,16 @@ create action would ultimately reject is still counted as importable — a dry
 run can over-report. Media is the reverse: it fetches nothing, so it reports
 what it `would_import` rather than what is reachable.
 
+### "Imported, but not as the source had it"
+
+A record can land and still not match its source: the actor was not allowed to
+publish it (an editor importing live content into a site where editors cannot
+publish), a state could not be restored, a source date or byline would not
+apply. The record counts as created — it exists — and the report lists it
+under this heading with the reason, so the difference is something you read
+rather than something you find later in the editor. These were previously only
+written to the server log.
+
 ## Migrating from WordPress
 
 ```bash

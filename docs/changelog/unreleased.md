@@ -823,6 +823,20 @@ migration (the demo admin and editor) start on Essentials.
   exports, check any that relied on the old default: pass `--state published
   --state draft` to keep it.
 
+<a id="an-import-report-says-when-a-record-landed-but-not-as-the-source-had-it"></a>
+
+- **An import report says when a record landed but not as the source had it.**
+  Four steps run after each record is created — publish, restore its workflow
+  state, put back its source date, attribute it to its author — and each one
+  can fail on its own without failing the import. All four only wrote a line to
+  the server log, so the report counted the record as created and said nothing.
+  An editor importing a live site into an org where editors cannot publish got
+  "4,000 created" for 4,000 drafts. The report now carries `incomplete`: the
+  Records line says how many are not as the source had them, and each is listed
+  with its reason under "Imported, but not as the source had it". The reason is
+  the gist of the error rather than the hundred-line inspect of it; the log
+  still has the whole thing.
+
 ## Security
 
 <a id="a-system-actor-so-internal-callers-run-under-the-policies-instead-of-around-them"></a>

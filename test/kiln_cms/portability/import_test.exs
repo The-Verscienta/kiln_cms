@@ -655,6 +655,74 @@ defmodule KilnCMS.Portability.ImportTest do
     end
   end
 
+  describe "a record that landed, but not as the source had it" do
+    # The import used to log these and count the record as created, so a report
+    # saying "4,000 created" could mean 4,000 drafts of content that was live
+    # on the source site. `report.incomplete` says which, and why.
+
+    setup do
+      org =
+        Ash.Seed.seed!(KilnCMS.Accounts.Organization, %{
+          name: "Import Target",
+          slug: "import-target-#{System.unique_integer([:positive])}",
+          status: :active
+        })
+
+      editor =
+        Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+          email: "import-editor-#{System.unique_integer([:positive])}@example.com",
+          hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+          confirmed_at: DateTime.utc_now(),
+          role: :viewer
+        })
+
+      Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+        user_id: editor.id,
+        organization_id: org.id,
+        role: :editor
+      })
+
+      %{org: org, editor: editor}
+    end
+
+    # An editor may not publish unless the site says so, so importing a
+    # published record as one leaves a draft — the exact case that was silent.
+    test "a publish the actor may not make is reported, not just logged", %{
+      parsed: parsed,
+      org: org,
+      editor: editor
+    } do
+      {:ok, report} =
+        Import.run(parsed, actor: editor, tenant: org.id, skip_media: true)
+
+      assert length(report.created) == 3
+      assert [%{kind: kind, title: title, issues: [issue]}] = report.incomplete
+      assert kind in [:post, :page]
+      assert is_binary(title)
+      assert issue =~ "left as a draft — the publish was refused"
+      # The gist of the error, not the hundred-line inspect of it.
+      assert String.length(issue) < 200
+
+      # And it is the record that stayed a draft: every other one is unremarked.
+      imported =
+        CMS.list_posts!(actor: editor, tenant: org.id) ++
+          CMS.list_pages!(actor: editor, tenant: org.id)
+
+      refute Enum.any?(imported, &(&1.state == :published))
+    end
+
+    test "an import where everything worked reports nothing incomplete", %{
+      parsed: parsed,
+      actor: actor
+    } do
+      {:ok, report} = Import.run(parsed, actor: actor, skip_media: true)
+
+      assert length(report.created) == 3
+      assert report.incomplete == []
+      assert Enum.all?(report.created, &(&1.issues == []))
+    end
+  end
+
   describe "scale (#951)" do
     test "progress is reported to the caller's sink", %{parsed: parsed, scope: scope} do
       me = self()
