@@ -1,13 +1,13 @@
 # Test coverage plan
 
-**Status: living document** — batches 1–7 landed; the floor in
+**Status: living document** — batches 1–8 landed; the floor in
 `coveralls.json` is the enforced number, the figures below are the last
 measured run.
 
 Where the suite's remaining blind spots are, in the order they are worth
 closing, and why each one is on the list. Written against a full measured run on
 2026-08-22: **7,344 tests, 0 failures, 83.1% line coverage**, floor 82.5
-(`coveralls.json`). Batches 1-7 below have since landed; the suite now measures
+(`coveralls.json`). Batches 1-8 below have since landed; the suite now measures
 **84.6% locally over 8,486 tests**, the floor has moved to **82.7**, and the
 Playwright suite is at 25 journeys.
 
@@ -19,7 +19,7 @@ Reproduce the numbers with:
 This is not a plan to reach a percentage. The floor exists so coverage cannot
 silently fall (see CONTRIBUTING.md), and every item below earns its place by
 naming a *behaviour nothing currently proves* — not by the size of its
-uncovered block. Seven items are listed as already done so the patterns they
+uncovered block. Eight items are listed as already done so the patterns they
 set are reusable; the rest are ordered by what a defect there would cost.
 
 ## Ground rule for anything added here
@@ -247,14 +247,46 @@ branches (no temp space, a timed-out remux), the storage-failure arms that
 delete a half-written blob, the logs for a derivation or strip job that failed
 to enqueue, and the one-time warning for a missing private storage root.
 
+### 8. `KilnCMS.Storage.S3` — `test/kiln_cms/storage/s3_test.exs`
+
+No seam was needed: `config/test.exs` already routes ExAws through `Req.Test`.
+**56% → 55 of 57 lines.** The two left are the `header/2` fallbacks for a
+header list that isn't `{name, value}` pairs, which Req never returns.
+
+Every error answer now has a test that pins its *shape*, not just
+`{:error, _}`. A store refused by the bucket returns `{:http_error, 403, _}`.
+A store whose temp file is gone returns the stat error before any request is
+sent. A fetch that gets a 404 returns the 404 rather than an empty body. A
+DELETE that gets a 404 means the bucket is gone, and it returns an error, not
+`:ok`. Private fetch and delete pass their errors through. A transport failure
+is returned, not raised; the test sets `:ex_aws, :retries` to one attempt so
+ExAws's backoff doesn't slow the suite.
+
+Ranged reads had no S3 test at all, only Local's. The media download
+controller picks 206, 416 or a plain 200 from the returned shape, so the tests
+pin each one. The range header covers both `a-b` and `a-`. The served range
+comes from `Content-Range`, not from the request. A 416 returns
+`:range_not_satisfiable`. A 200 without `Content-Range`, or with an unknown
+total (`bytes 0-2/*`), returns `:no_content_range` instead of guessing. The
+private variant reads the private bucket.
+
+Multipart (#494) now runs on a file one byte over the 16 MB threshold. The
+tests cover the whole happy path: object metadata rides on the initiate call,
+the file goes up as four parts summing to the file size, and completion lists
+every part's ETag. A part refused mid-upload fails the store with nothing
+completed, and a refused initiate sends no parts. Five mutations each fail the
+file: a delete error turned into `:ok`, the 416 arm removed, multipart never
+chosen, the `a-` range header changed, and a range guessed when
+`Content-Range` is missing.
+
+One thing this turned up: **a truncated multipart is never aborted.**
+`ExAws.S3.Upload` returns the part error without sending
+`AbortMultipartUpload`, so the parts already uploaded stay on the bucket. They
+are invisible to listing and billed until a lifecycle rule clears them. The
+test pins that the store fails; cleaning up the orphaned parts is a separate
+fix.
+
 ## Next
-
-### 8. `KilnCMS.Storage.S3` — 56% (25 uncovered)
-
-`config/test.exs` already points it at `Req.Test`, so the Bluesky stub
-pattern transfers directly. Cover the error branches: a 403 from a wrong
-credential, a 404 on delete, a truncated multipart. Storage failures surface
-to editors as lost uploads, and none of these paths has ever run.
 
 ### 9. `KilnCMS.Portability.CLI` — 6% (62 uncovered)
 
