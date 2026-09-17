@@ -188,6 +188,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Task emails for content of a deleted content type are sent instead of crashing the mail job.**
+  ([#1320](https://github.com/The-Verscienta/kiln_cms/issues/1320))
+
 - **`mix kiln.changelog --verify` no longer reports a loss for a pull request
   `--condense` credited.**
   ([long form](docs/changelog/unreleased.md#mix-kiln-changelog-verify-no-longer-reports-a-loss-for-a-credited-pull-request))
