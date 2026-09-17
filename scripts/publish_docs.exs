@@ -43,9 +43,16 @@ Mix.install([
 defmodule PublishDocs do
   @repo_url "https://github.com/The-Verscienta/kiln_cms"
   @raw_url "https://raw.githubusercontent.com/The-Verscienta/kiln_cms/main"
+  # Groups that stay off the public site. "Architecture decisions" and
+  # "Release history" are the #1325 successors to the decision-records group
+  # and to CHANGELOG.md (which lives in "Project history"), so they inherit
+  # that treatment rather than appearing at /docs the first time this script
+  # runs again.
   @internal_groups [
     "Design notes & decision records",
+    "Architecture decisions",
     "Audits & release checklists",
+    "Release history",
     "Project history"
   ]
   # The index can't be a page with slug `docs`: a page slug may not shadow a
@@ -73,19 +80,41 @@ defmodule PublishDocs do
     end
   end
 
-  # Both functions are literal keyword lists, so evaluating the body is safe,
-  # and it avoids defining the project module inside this script's own
-  # Mix.install project.
+  # Evaluating the body, rather than defining mix.exs's project module inside
+  # this script's own Mix.install project.
+  #
+  # Both functions build keyword lists, and both now call zero-arity private
+  # helpers of their own — `release_history/0` and `decisions/0`, which glob
+  # docs/changelog and docs/decisions (#1325). Those calls are resolved the
+  # same way, by evaluating the helper's body and splicing the result in.
+  # Without that, evaluating `extras/0` raised "undefined function
+  # release_history/0" and every docs publish since has failed.
   defp eval_defp(ast, name) do
+    body = defp_body(ast, name) || raise "mix.exs has no `defp #{name}`"
+
+    {resolved, _} =
+      Macro.prewalk(body, nil, fn
+        {call, _meta, args} = node, acc when is_atom(call) and args in [[], nil] ->
+          if defp_body(ast, call),
+            do: {Macro.escape(eval_defp(ast, call)), acc},
+            else: {node, acc}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    {value, _binding} = Code.eval_quoted(resolved)
+    value
+  end
+
+  defp defp_body(ast, name) do
     {_, body} =
       Macro.prewalk(ast, nil, fn
         {:defp, _, [{^name, _, _}, [do: body]]} = node, nil -> {node, body}
         node, acc -> {node, acc}
       end)
 
-    body || raise "mix.exs has no `defp #{name}`"
-    {value, _binding} = Code.eval_quoted(body)
-    value
+    body
   end
 
   defp slug("README.md", _opts), do: "overview"
