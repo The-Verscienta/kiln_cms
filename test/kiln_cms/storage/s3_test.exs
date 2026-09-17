@@ -244,7 +244,9 @@ defmodule KilnCMS.Storage.S3Test do
   describe "multipart upload (#494)" do
     # Above 16 MB, `store/2` streams 5 MB parts: initiate (POST ?uploads), one
     # PUT per part, complete (POST ?uploadId). A part refused mid-way must
-    # fail the store — never complete a truncated object under the key.
+    # fail the store — never complete a truncated object under the key — and
+    # abort the upload (DELETE ?uploadId), or the parts already sent stay on
+    # the bucket, unlisted and billed.
 
     @over_threshold 16 * 1024 * 1024 + 1
 
@@ -254,9 +256,10 @@ defmodule KilnCMS.Storage.S3Test do
       path
     end
 
-    # Answers the three multipart calls; the part numbers in `fail_parts` are
-    # refused with a 403, every other part gets a 200 and an ETag.
-    defp stub_multipart(fail_parts \\ []) do
+    # Answers the multipart calls; the part numbers in `fail_parts` are
+    # refused with a 403, every other part gets a 200 and an ETag. `complete`
+    # and `abort` are the statuses those two calls answer with.
+    defp stub_multipart(fail_parts \\ [], complete \\ 200, abort \\ 204) do
       test_pid = self()
 
       Req.Test.stub(KilnCMS.Storage.S3, fn conn ->
@@ -279,13 +282,22 @@ defmodule KilnCMS.Storage.S3Test do
 
           {"POST", %{"uploadId" => "up-1"}} ->
             send(test_pid, {:mp, :complete, body})
+            answer_complete(conn, complete)
 
-            Plug.Conn.send_resp(conn, 200, """
-            <CompleteMultipartUploadResult><Bucket>kiln-test</Bucket><Key>big.mp4</Key><ETag>"done"</ETag></CompleteMultipartUploadResult>
-            """)
+          {"DELETE", %{"uploadId" => upload_id}} ->
+            send(test_pid, {:mp, :abort, upload_id})
+            Plug.Conn.send_resp(conn, abort, "")
         end
       end)
     end
+
+    defp answer_complete(conn, 200) do
+      Plug.Conn.send_resp(conn, 200, """
+      <CompleteMultipartUploadResult><Bucket>kiln-test</Bucket><Key>big.mp4</Key><ETag>"done"</ETag></CompleteMultipartUploadResult>
+      """)
+    end
+
+    defp answer_complete(conn, status), do: Plug.Conn.send_resp(conn, status, "")
 
     defp answer_part(conn, _n, true = _refused), do: Plug.Conn.send_resp(conn, 403, "")
 
@@ -317,19 +329,46 @@ defmodule KilnCMS.Storage.S3Test do
 
       for n <- 1..4,
           do: assert(complete =~ "<PartNumber>#{n}</PartNumber><ETag>\"etag-#{n}\"</ETag>")
+
+      refute_received {:mp, :abort, _upload_id}
     end
 
-    test "a part refused mid-upload fails the store, and nothing is completed" do
+    test "a part refused mid-upload fails the store, completes nothing, and aborts the upload" do
       stub_multipart([2])
 
       assert {:error, {:http_error, 403, _resp}} = S3.store("big.mp4", big_source())
       refute_received {:mp, :complete, _body}
+      assert_received {:mp, :abort, "up-1"}
+      refute_received {:mp, :abort, _upload_id}
+    end
+
+    test "a refused complete fails the store with the complete's error, and aborts the upload" do
+      # 4xx, not 5xx: ExAws retries a 5xx with backoff.
+      stub_multipart([], 400)
+
+      assert {:error, {:http_error, 400, _resp}} = S3.store("big.mp4", big_source())
+      assert_received {:mp, :complete, _body}
+      assert_received {:mp, :abort, "up-1"}
+    end
+
+    test "an abort that fails too still returns the part's error, not the abort's" do
+      stub_multipart([3], 200, 404)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, {:http_error, 403, _resp}} = S3.store("big.mp4", big_source())
+        end)
+
+      assert_received {:mp, :abort, "up-1"}
+      assert log =~ "up-1"
+      assert log =~ "could not be aborted"
     end
 
     test "an initiate refused by the bucket fails before any part is sent" do
       stub(403)
 
       assert {:error, {:http_error, 403, _resp}} = S3.store("big.mp4", big_source())
+      # No upload id came back, so there is nothing to abort either.
       assert_received {:s3, "POST", _path, _body, _headers}
       refute_received {:s3, _method, _path, _body, _headers}
     end
