@@ -119,6 +119,59 @@ defmodule KilnCMSWeb.ExperimentsLiveTest do
       assert experiment.goal_form_id == form.id
       assert [%{control: true, patch: %{}}] = experiment.variants
     end
+
+    # Every goal picker can be submitted with its target left unpicked: the
+    # form and funnel selects each carry a blank option, and the goal document
+    # is a free text input. That travels as "", and "" is not "no target" —
+    # `Delivery.converts?/3` compares the stored id to the one in hand and
+    # `Health` branches on `nil`. Ash casts "" to nil for each of these (the
+    # `:uuid`s when they cast; `:goal_content_type`, a `:string`, when it
+    # applies its default `allow_empty?: false`), so the LiveView hands the
+    # params over unfiltered. This asserts the outcome, not the mechanism.
+    test "a blank goal target is stored as nothing, not as an empty string", %{conn: conn} do
+      admin = authed_user(:admin)
+      post = post!(admin)
+      conn = log_in(conn, admin)
+
+      create = fn goal, goal_params ->
+        {:ok, lv, _html} = live(conn, ~p"/editor/experiments")
+        render_change(lv, "pick_type", %{"experiment" => %{"content_type" => "post"}})
+        render_change(lv, "pick_type", %{"experiment" => %{"goal" => goal}})
+
+        name = "Blank #{goal} target"
+
+        {:error, {:live_redirect, _}} =
+          lv
+          |> form("#new-experiment",
+            experiment:
+              Map.merge(
+                %{name: name, content_type: "post", document_id: post.id, goal: goal},
+                goal_params
+              )
+          )
+          |> render_submit()
+
+        [experiment] =
+          Experiments.list_experiments!(authorize?: false, tenant: org_id())
+          |> Enum.filter(&(&1.name == name))
+
+        experiment
+      end
+
+      form_goal = create.("form_submission", %{goal_form_id: ""})
+      assert form_goal.goal == :form_submission
+      assert is_nil(form_goal.goal_form_id)
+
+      funnel_goal = create.("funnel_completion", %{goal_funnel_id: ""})
+      assert funnel_goal.goal == :funnel_completion
+      assert is_nil(funnel_goal.goal_funnel_id)
+
+      # The goal type select offers no blank option, so only the document id
+      # can be left empty here.
+      view_goal = create.("content_view", %{goal_content_type: "post", goal_document_id: ""})
+      assert view_goal.goal == :content_view
+      assert is_nil(view_goal.goal_document_id)
+    end
   end
 
   describe "the experiment page" do
