@@ -8,10 +8,19 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   `FieldDefinition` policy.
 
   Fields attach to either a **built-in** (compiled) content type or an
-  admin-defined **dynamic** one (`/editor/types` — decision D17). The type
-  select encodes the scope: a compiled type's atom name, or `"def:<uuid>"` for
+  admin-defined **dynamic** one (`/editor/types` — decision D17). Each type
+  checkbox encodes a scope: a compiled type's atom name, or `"def:<uuid>"` for
   a dynamic type, unpacked into `content_type` XOR `type_definition_id` by
-  `normalize/1`.
+  `normalize/2`.
+
+  A definition still has exactly one owner, so ticking several types creates one
+  definition per type under the same machine name. Each is then its own row —
+  edited, renamed or deleted without touching the others — while delivery sees
+  the same `custom_fields` key on every type that carries it.
+
+  The machine name follows the label as it is typed until the admin edits the
+  name themselves, and a name already defined on a ticked type is refused before
+  anything is written — for every ticked type, not only the first.
   """
   use KilnCMSWeb, :live_view
 
@@ -35,7 +44,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
        |> assign(:field_types, FieldDefinition.field_types())
        |> assign(:target_types, ContentTypes.options(org))
        |> assign(:edit, nil)
-       |> assign(:form, create_form(actor, org))
+       |> reset_create_form()
        |> load_definitions()}
     else
       # Defense-in-depth: the `:live_admin_required` on_mount guard already
@@ -50,22 +59,56 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   # --- create ----------------------------------------------------------------
 
   @impl true
-  def handle_event("validate", %{"field_definition" => params}, socket) when is_map(params) do
+  def handle_event("validate", %{"field_definition" => params} = event, socket)
+      when is_map(params) do
+    scopes = selected_scopes(params)
+    name_edited? = name_edited?(event["_target"], params, socket.assigns.name_edited?)
+    params = if name_edited?, do: params, else: suggest_name(params)
+
+    form =
+      socket.assigns.form
+      |> AshPhoenix.Form.validate(normalize(params, List.first(scopes)))
+      |> refuse_duplicates(params, scopes, socket.assigns)
+
     {:noreply,
-     assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, normalize(params)))}
+     socket
+     |> assign(:form, form)
+     |> assign(:scopes, scopes)
+     |> assign(:name_edited?, name_edited?)
+     |> assign(:scope_error, nil)}
   end
 
   def handle_event("create", %{"field_definition" => params}, socket) when is_map(params) do
-    case AshPhoenix.Form.submit(socket.assigns.form, params: normalize(params)) do
-      {:ok, _definition} ->
+    scopes = selected_scopes(params)
+    # A submit without a preceding change event (or with the name cleared)
+    # still gets the name its label suggests.
+    params = if blank?(params["name"]), do: suggest_name(params), else: params
+    assigns = socket.assigns
+    socket = assign(socket, :scopes, scopes)
+
+    forms =
+      Enum.map(scopes, fn scope ->
+        assigns.actor
+        |> create_form(assigns.current_org)
+        |> AshPhoenix.Form.validate(normalize(params, scope))
+        |> refuse_duplicates(params, scopes, assigns)
+      end)
+
+    cond do
+      scopes == [] ->
         {:noreply,
          socket
-         |> assign(:form, create_form(socket.assigns.actor, socket.assigns.current_org))
-         |> load_definitions()
-         |> put_flash(:info, gettext("Field added."))}
+         |> assign(:form, AshPhoenix.Form.validate(assigns.form, normalize(params, nil)))
+         |> assign(:scope_error, gettext("Pick at least one content type."))}
 
-      {:error, form} ->
+      invalid = Enum.find(forms, &(not &1.source.valid?)) ->
+        # Submitting an invalid form writes nothing; it is what marks every
+        # error on it for display.
+        {:error, form} = AshPhoenix.Form.submit(invalid, params: nil)
         {:noreply, assign(socket, :form, form)}
+
+      true ->
+        {:noreply, create_all(socket, forms)}
     end
   end
 
@@ -117,6 +160,105 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     {:noreply, assign(socket, :edit, nil)}
   end
 
+  # --- create helpers --------------------------------------------------------
+
+  # Every form already validated, so a failure here is a write that raced this
+  # one (another admin defining the same name a moment earlier). Earlier types
+  # in the list keep their field; the flash says which, rather than implying
+  # nothing happened.
+  defp create_all(socket, forms) do
+    result =
+      Enum.reduce_while(forms, [], fn form, created ->
+        case AshPhoenix.Form.submit(form, params: nil) do
+          {:ok, definition} -> {:cont, [definition | created]}
+          {:error, form} -> {:halt, {created, form}}
+        end
+      end)
+
+    case result do
+      {created, form} ->
+        socket
+        |> assign(:form, form)
+        |> load_definitions()
+        |> put_flash(:error, partial_create_message(created, socket.assigns.dynamic_types))
+
+      created ->
+        socket
+        |> reset_create_form()
+        |> load_definitions()
+        |> put_flash(
+          :info,
+          ngettext("Field added.", "Field added to %{count} content types.", length(created))
+        )
+    end
+  end
+
+  defp partial_create_message([], _dynamic_types), do: gettext("Couldn't add that field.")
+
+  defp partial_create_message(created, dynamic_types) do
+    types =
+      created
+      |> Enum.reverse()
+      |> Enum.map_join(", ", &group_heading(scope_key(&1), dynamic_types))
+
+    gettext("Added to %{types} only — the next content type refused it.", types: types)
+  end
+
+  defp reset_create_form(socket) do
+    socket
+    |> assign(:form, create_form(socket.assigns.actor, socket.assigns.current_org))
+    |> assign(:scopes, [])
+    |> assign(:scope_error, nil)
+    |> assign(:name_edited?, false)
+  end
+
+  # The machine name tracks the label until the admin types into the name
+  # input; clearing that input hands it back to the label.
+  defp name_edited?(["field_definition", "name"], params, _edited?),
+    do: not blank?(params["name"])
+
+  defp name_edited?(_target, _params, edited?), do: edited?
+
+  defp suggest_name(params),
+    do: Map.put(params, "name", FieldDefinition.name_from_label(params["label"]))
+
+  defp blank?(value), do: value in [nil, ""]
+
+  # The ticked type checkboxes. The hidden `""` keeps the key present when every
+  # box is cleared.
+  defp selected_scopes(params) do
+    params
+    |> Map.get("scopes", [])
+    |> List.wrap()
+    |> Enum.reject(&blank?/1)
+    |> Enum.uniq()
+  end
+
+  # A name already defined on any ticked type. The identities refuse it too,
+  # but only at insert, one type at a time — and only after the types before it
+  # were written.
+  defp refuse_duplicates(form, params, scopes, assigns) do
+    name = params["name"]
+
+    taken_on =
+      assigns.definitions
+      |> Enum.filter(&(&1.name == name and scope_param(&1) in scopes))
+      |> Enum.map(&group_heading(scope_key(&1), assigns.dynamic_types))
+
+    if blank?(name) or taken_on == [] do
+      form
+    else
+      # Translated here: resource messages reach `translate_error/1` as msgids
+      # of the untranslated "errors" domain, so this one falls back to itself.
+      message = gettext("is already a field on %{types}", types: Enum.join(taken_on, ", "))
+
+      AshPhoenix.Form.add_error(
+        form,
+        Ash.Error.Changes.InvalidAttribute.exception(field: :name, message: message)
+      )
+    end
+  end
+
   # --- data ------------------------------------------------------------------
 
   defp load_definitions(socket) do
@@ -134,7 +276,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         group_heading(scope, socket.assigns.dynamic_types)
       end)
 
-    assign(socket, :grouped, grouped)
+    socket |> assign(:definitions, definitions) |> assign(:grouped, grouped)
   end
 
   # A definition's owner: a compiled content type XOR a dynamic one.
@@ -142,6 +284,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     do: {:compiled, content_type}
 
   defp scope_key(%{type_definition_id: id}), do: {:dynamic, id}
+
+  # The same owner, as the type checkbox's value.
+  defp scope_param(definition) do
+    case scope_key(definition) do
+      {:compiled, type} -> to_string(type)
+      {:dynamic, id} -> "def:#{id}"
+    end
+  end
 
   defp group_heading({:compiled, type}, _dynamic_types), do: content_type_label(type)
 
@@ -167,9 +317,10 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   # Options are entered one-per-line (or comma-separated) in a textarea and
   # stored as a string array. Split, trim and drop blanks before they reach the
-  # attribute. Only meaningful for `:select`, harmless otherwise. The scope
-  # select is unpacked into `content_type` XOR `type_definition_id` here.
-  defp normalize(params) do
+  # attribute. Only meaningful for `:select`, harmless otherwise. `scope` — one
+  # ticked type, or nil for the edit form, which never moves a field — is
+  # unpacked into `content_type` XOR `type_definition_id` here.
+  defp normalize(params, scope \\ nil) do
     options =
       params
       |> Map.get("options", "")
@@ -178,7 +329,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       |> Enum.map(&String.trim/1)
       |> Enum.reject(&(&1 == ""))
 
-    params |> Map.put("options", options) |> unpack_scope()
+    params |> Map.delete("scopes") |> Map.put("options", options) |> unpack_scope(scope)
   end
 
   # Whether the reference-target select applies to the form's current type.
@@ -187,32 +338,13 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   # Whether the compute-formula textarea applies (a `:computed` field, #429).
   defp computed?(form), do: to_string(form[:field_type].value) == "computed"
 
-  defp unpack_scope(params) do
-    case Map.pop(params, "scope") do
-      {nil, params} ->
-        params
+  defp unpack_scope(params, nil), do: params
 
-      {"def:" <> id, params} ->
-        params |> Map.put("type_definition_id", id) |> Map.put("content_type", nil)
+  defp unpack_scope(params, "def:" <> id),
+    do: params |> Map.put("type_definition_id", id) |> Map.put("content_type", nil)
 
-      {type, params} ->
-        params |> Map.put("content_type", type) |> Map.put("type_definition_id", nil)
-    end
-  end
-
-  # The scope select's current value, surviving re-renders during validation.
-  defp scope_value(form) do
-    case form[:type_definition_id].value do
-      empty when empty in [nil, ""] ->
-        case form[:content_type].value do
-          nil -> nil
-          type -> to_string(type)
-        end
-
-      id ->
-        "def:#{id}"
-    end
-  end
+  defp unpack_scope(params, type),
+    do: params |> Map.put("content_type", type) |> Map.put("type_definition_id", nil)
 
   # Textarea value for the options field: the stored list joined by newlines.
   defp options_text(form) do
@@ -265,6 +397,25 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     """
   end
 
+  attr :value, :string, required: true
+  attr :label, :string, required: true
+  attr :scopes, :list, required: true
+
+  defp scope_checkbox(assigns) do
+    ~H"""
+    <label class="flex items-center gap-2 text-sm">
+      <input
+        type="checkbox"
+        name="field_definition[scopes][]"
+        value={@value}
+        checked={@value in @scopes}
+        class="size-4 rounded border border-base-content/30 accent-primary"
+      />
+      {@label}
+    </label>
+    """
+  end
+
   defp editing?(nil, _id), do: false
   defp editing?(%{id: id}, id), do: true
   defp editing?(_edit, _id), do: false
@@ -303,46 +454,47 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             phx-submit="create"
             class="card card-pad grid gap-4 sm:grid-cols-2"
           >
-            <div>
-              <label for="new-field-scope" class="mb-1 block text-sm font-medium">
-                {gettext("Content type")}
-              </label>
-              <select
-                id="new-field-scope"
-                name="field_definition[scope]"
-                class="field-select"
-              >
-                <optgroup label={gettext("Built-in")}>
-                  <option
-                    :for={ct <- @content_types}
-                    value={ct.type}
-                    selected={scope_value(@form) == to_string(ct.type)}
-                  >
-                    {ct.label}
-                  </option>
-                </optgroup>
-                <optgroup :if={@dynamic_types != []} label={gettext("Custom")}>
-                  <option
-                    :for={dt <- @dynamic_types}
-                    value={"def:#{dt.definition.id}"}
-                    selected={scope_value(@form) == "def:#{dt.definition.id}"}
-                  >
-                    {dt.label}
-                  </option>
-                </optgroup>
-              </select>
-            </div>
-            <.input
-              field={@form[:field_type]}
-              type="select"
-              label={gettext("Field type")}
-              options={Enum.map(@field_types, &{type_label(&1), &1})}
-            />
+            <fieldset class="sm:col-span-2">
+              <legend class="mb-1 block text-sm font-medium">
+                {gettext("Content types")}
+              </legend>
+              <p class="mb-2 text-xs text-base-content/60">
+                {gettext(
+                  "Tick every type that should carry this field. Each gets its own copy under the same machine name, which you can then change on its own."
+                )}
+              </p>
+              <input type="hidden" name="field_definition[scopes][]" value="" />
+              <div class="grid gap-x-4 gap-y-1 sm:grid-cols-3">
+                <.scope_checkbox
+                  :for={ct <- @content_types}
+                  value={to_string(ct.type)}
+                  label={ct.label}
+                  scopes={@scopes}
+                />
+                <.scope_checkbox
+                  :for={dt <- @dynamic_types}
+                  value={"def:#{dt.definition.id}"}
+                  label={dt.label}
+                  scopes={@scopes}
+                />
+              </div>
+              <p :if={@scope_error} class="mt-1.5 flex items-center gap-2 text-sm text-error">
+                <.icon name="hero-exclamation-circle" class="size-5" />
+                {@scope_error}
+              </p>
+            </fieldset>
             <.input field={@form[:label]} label={gettext("Label")} placeholder="Shoe size" />
             <.input
               field={@form[:name]}
               label={gettext("Machine name")}
               placeholder="shoe_size"
+              hint={gettext("Filled in from the label until you change it.")}
+            />
+            <.input
+              field={@form[:field_type]}
+              type="select"
+              label={gettext("Field type")}
+              options={Enum.map(@field_types, &{type_label(&1), &1})}
             />
             <.input
               :if={reference?(@form)}

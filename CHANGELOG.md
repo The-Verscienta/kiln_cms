@@ -61,6 +61,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **A custom field can be added to several content types at once, and its
+  machine name fills itself in.**
+  ([long form](docs/changelog/unreleased.md#a-custom-field-can-be-added-to-several-content-types-at-once-and-its-machine))
+
 - **Media sideloading can be tested without the network.**
   ([#487](https://github.com/The-Verscienta/kiln_cms/issues/487) · [long form](docs/changelog/unreleased.md#media-sideloading-can-be-tested-without-the-network))
 

@@ -86,7 +86,7 @@ test.describe("dynamic content types", () => {
 
     // Give it a string field, scoped to the new type via the "Custom" group.
     await page.goto("/editor/fields");
-    await page.selectOption("#new-field-scope", { label });
+    await page.locator("#new-field-form").getByRole("checkbox", { name: label, exact: true }).check();
     await page.selectOption('#new-field-form select[name="field_definition[field_type]"]', "string");
     await page.fill('#new-field-form input[name="field_definition[label]"]', "Chef");
     await page.fill('#new-field-form input[name="field_definition[name]"]', fieldName);

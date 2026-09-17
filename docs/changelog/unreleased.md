@@ -18,6 +18,25 @@ migration (the demo admin and editor) start on Essentials.
 
 ## Added
 
+<a id="a-custom-field-can-be-added-to-several-content-types-at-once-and-its-machine"></a>
+
+- **A custom field can be added to several content types at once, and its
+  machine name fills itself in.** On `/editor/fields` the type select is now a
+  set of checkboxes. Ticking several creates one ordinary field per type under
+  the same machine name, so delivery sees the same `custom_fields` key on each,
+  and every copy is still edited, renamed or deleted on its own. A definition
+  keeps exactly one owner: a shared definition linked to many types would have
+  touched every reader of `content_type`/`type_definition_id`, and each type
+  usually wants its own label, required flag and position anyway. The machine
+  name follows the label as it is typed (`FieldDefinition.name_from_label/1`:
+  accents folded, `field_` prefixed onto a leading digit) until the admin types
+  into it, and clearing it hands it back to the label. A name already defined
+  on any ticked type is flagged under the input while typing and refused on
+  submit before anything is written, so a clash on the third type no longer
+  leaves the first two created. The identities still back this at insert; if
+  another admin wins that race mid-list, the flash names the types that did
+  get the field.
+
 <a id="media-sideloading-can-be-tested-without-the-network"></a>
 
 - **Media sideloading can be tested without the network.** `Media.Ingest.store_url/2`

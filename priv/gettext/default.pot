@@ -1495,6 +1495,11 @@ msgstr ""
 msgid "Added %{date}"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Added to %{types} only — the next content type refused it."
+msgstr ""
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Added to the release."
@@ -2333,7 +2338,6 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/feed_settings_live.ex
-#: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Built-in"
 msgstr ""
@@ -3059,7 +3063,6 @@ msgstr ""
 #: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/experiments_live.ex
 #: lib/kiln_cms_web/live/feed_settings_live.ex
-#: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
 #: lib/kiln_cms_web/live/menu_live.ex
 #: lib/kiln_cms_web/live/slug_regen_live.ex
@@ -3088,6 +3091,7 @@ msgid "Content type → attributes a member may change. Empty = no field restric
 msgstr ""
 
 #: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #: lib/kiln_cms_web/live/type_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -3178,6 +3182,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't add it to that release: %{reason}"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't add that field."
 msgstr ""
 
 #: lib/kiln_cms_web/live/menu_live.ex
@@ -3755,7 +3764,6 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/feed_settings_live.ex
-#: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Custom"
 msgstr ""
@@ -5272,7 +5280,9 @@ msgstr ""
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Field added."
-msgstr ""
+msgid_plural "Field added to %{count} content types."
+msgstr[0] ""
+msgstr[1] ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -5321,6 +5331,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
 msgid "File path"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Filled in from the label until you change it."
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
@@ -8557,6 +8572,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Pick a release first."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Pick at least one content type."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -12245,6 +12265,11 @@ msgstr ""
 msgid "Tick a row to export."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Tick every type that should carry this field. Each gets its own copy under the same machine name, which you can then change on its own."
+msgstr ""
+
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
 msgid "Tier deleted."
@@ -13899,6 +13924,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "instance"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "is already a field on %{types}"
 msgstr ""
 
 #: lib/kiln_cms_web/live/media_live.ex

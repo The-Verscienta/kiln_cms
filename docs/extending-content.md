@@ -23,6 +23,12 @@ UI" workflow, scoped to fields.
   `:recurrence`, `:computed` — plus
   anything a plugin registers (see
   [plugin-extensibility.md](plugin-extensibility.md)).
+- **Several types at once**: tick more than one content type and the form
+  creates one definition per type under the same machine name. They are
+  separate rows: each is edited, renamed or deleted on its own. The machine
+  name fills itself in from the label (`FieldDefinition.name_from_label/1`)
+  until you edit it, and a name already defined on any ticked type is refused
+  before anything is written.
 - **Store**: values live in the `custom_fields` map on each content record.
 - **Validate**: `KilnCMS.CMS.Changes.ApplyCustomFields` runs on every write — it
   coerces values to the declared type, enforces `required`, checks `:select`
