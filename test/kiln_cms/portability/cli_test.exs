@@ -198,7 +198,8 @@ defmodule KilnCMS.Portability.CLITest do
           failed: [],
           taxonomy: %{categories: %{matched: 0, created: 0}, tags: %{matched: 0, created: 0}},
           media: %{imported: 0, failed: []},
-          redirects: %{created: 0}
+          redirects: %{created: 0},
+          incomplete: []
         },
         overrides
       )
@@ -227,6 +228,36 @@ defmodule KilnCMS.Portability.CLITest do
 
       assert out =~ ~s("Page 20")
       refute out =~ "more"
+    end
+
+    test "a record that landed but not as the source had it is counted and listed" do
+      incomplete = [
+        %{
+          kind: :post,
+          title: "Live on the old site",
+          issues: ["left as a draft — the publish was refused (Ash.Error.Forbidden: forbidden)"]
+        },
+        %{kind: :page, title: "Two problems", issues: ["dated at the import", "no byline"]}
+      ]
+
+      CLI.print_report(report(%{created: incomplete, incomplete: incomplete}))
+      out = output()
+
+      # The created count still counts them — they exist — but the line says
+      # how many are not what the source had.
+      assert out =~ "Records:   2 created (2 not as the source had it), 0 skipped"
+      assert out =~ "\nImported, but not as the source had it (2):"
+      assert out =~ ~s(  post "Live on the old site": left as a draft — the publish was refused)
+      # Several problems on one record read as one line.
+      assert out =~ ~s(  page "Two problems": dated at the import; no byline)
+    end
+
+    test "an import with nothing incomplete says nothing about it" do
+      CLI.print_report(report(%{created: [%{kind: :post, title: "Fine", issues: []}]}))
+      out = output()
+
+      assert out =~ "Records:   1 created, 0 skipped"
+      refute out =~ "not as the source had it"
     end
 
     test "media that could not be fetched is listed by URL" do
