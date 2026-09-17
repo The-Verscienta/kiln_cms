@@ -521,6 +521,21 @@ migration (the demo admin and editor) start on Essentials.
 
 ## Fixed
 
+<a id="a-failed-s3-multipart-upload-is-aborted-instead-of-left-on-the-bucket"></a>
+
+- **A failed S3 multipart upload is aborted instead of left on the bucket.**
+  Files over 16 MB go to the S3 adapter as a multipart upload (#494). When a
+  part or the final complete call was refused, `ExAws.S3.upload/3` returned
+  the error without sending `AbortMultipartUpload`, so the parts already sent
+  stayed on the bucket as an incomplete upload: not visible in a listing, and
+  billed until a lifecycle rule removed them. `KilnCMS.Storage.S3` now starts
+  the upload itself so it has the upload id, and on a failed part or complete
+  it sends the abort before returning the original error
+  (`{:error, {:http_error, status, _}}`, unchanged). The abort is
+  best-effort: if it fails too, the store still returns the part's error and
+  logs a warning naming the upload id. A lifecycle rule that expires
+  incomplete multipart uploads is still worth having as a backstop.
+
 <a id="mix-kiln-changelog-verify-no-longer-reports-a-loss-for-a-credited-pull-request"></a>
 
 - **`mix kiln.changelog --verify` no longer reports a loss for a pull request

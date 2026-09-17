@@ -279,12 +279,21 @@ file: a delete error turned into `:ok`, the 416 arm removed, multipart never
 chosen, the `a-` range header changed, and a range guessed when
 `Content-Range` is missing.
 
-One thing this turned up: **a truncated multipart is never aborted.**
+One thing this turned up: **a truncated multipart was never aborted.**
 `ExAws.S3.Upload` returns the part error without sending
-`AbortMultipartUpload`, so the parts already uploaded stay on the bucket. They
-are invisible to listing and billed until a lifecycle rule clears them. The
-test pins that the store fails; cleaning up the orphaned parts is a separate
-fix.
+`AbortMultipartUpload`, so the parts already uploaded stayed on the bucket.
+They were invisible to listing and billed until a lifecycle rule cleared them.
+The adapter now runs the initiate step itself, so it holds the upload id, and
+sends the abort (`DELETE ?uploadId`) when a part or the complete call is
+refused. It still returns the original error. The stub answers the abort, and
+three tests pin it: a refused part aborts `up-1` and sends no complete, a
+refused complete aborts too, and an abort that fails as well still returns the
+part's 403 and logs the upload id. The happy path asserts no abort is sent.
+Removing the abort fails all three, and so does aborting the wrong upload id.
+Returning the abort's error instead of the part's fails the last one. The one
+new line without a test is the arm that turns a part upload's task timeout into
+an error; before, that timeout crashed the caller and still left the parts
+behind.
 
 ## Next
 
