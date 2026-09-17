@@ -141,6 +141,23 @@ migration (the demo admin and editor) start on Essentials.
 
 ## Changed
 
+<a id="keyword-search-matches-the-last-word-as-a-prefix"></a>
+
+- **Keyword search matches the last word as a prefix.** The keyword leg was
+  whole-word only (`plainto_tsquery`), so a search box running as the reader
+  typed matched on "huang" and on "huang lian" but on nothing in between:
+  "huang li" returned no Huang Lian at all. `:search`, `:search_any` (and
+  their published twins, and so `KilnCMS.Search.hybrid/3` and `/api/search`)
+  now append `:*` to the last lexeme of `plainto_tsquery`'s own text form,
+  so user text still never reaches `to_tsquery`. The rewrite is parsed under
+  `'simple'`, since its lexemes are already stemmed and stemming them again
+  shortens the prefix. A prefix query matches everything the whole-word
+  query did. `search_rank`/`search_rank_any` now add the whole-word score to
+  the prefix score, so "huang qi" still puts Huang Qi above Huang Qin;
+  `highlight` and `passage` use the prefix query so a prefix hit is marked.
+  Earlier words stay whole-word ("hua lian" does not match). With more keyword
+  hits, the hybrid fuzzy and any-term fallbacks switch on less often.
+
 <a id="new-page-no-longer-writes-a-row-until-you-start-writing"></a>
 
 - **"New page" no longer writes a row until you start writing.** Clicking New

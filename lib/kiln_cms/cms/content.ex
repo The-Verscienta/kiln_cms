@@ -1192,13 +1192,26 @@ defmodule KilnCMS.CMS.Content do
     # raises on syntax (`a & | b`) where `plainto_tsquery` only strips it.
     # Ranked by `ts_rank` over the OR query, so a record matching more of
     # the terms rises above one matching a single term.
+    #
+    # In both, the query's LAST lexeme matches as a prefix (`'lia':*`): search
+    # runs as the reader types, and a whole-word match fails closed on the
+    # word still being typed — "huang lia" matched nothing, where "huang"
+    # before it matched Huang Lian and "huang lian" after it matched again.
+    # Same in-SQL rewrite as the OR form: `:*` is appended to the last quoted
+    # lexeme of `plainto_tsquery`'s text, so user text still never reaches
+    # `to_tsquery`. The rewrite is parsed under `'simple'`, not the locale's
+    # config: its lexemes are already stemmed, and stemming them a second
+    # time shortens the prefix ("databse" → 'databs' → 'datab':*, which then
+    # matches "database"). A prefix query matches everything the whole-word query
+    # does, so nothing that matched before stops matching; what it adds is
+    # scored lower (see `search_rank`).
     search_read = fn name, published?, terms ->
       match_ast =
         case terms do
           :all ->
             quote do
               fragment(
-                "search_vector @@ plainto_tsquery(kiln_regconfig(?), ?)",
+                "search_vector @@ to_tsquery('simple', regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*'))",
                 ^arg(:locale),
                 ^arg(:query)
               )
@@ -1207,8 +1220,7 @@ defmodule KilnCMS.CMS.Content do
           :any ->
             quote do
               fragment(
-                "search_vector @@ to_tsquery(kiln_regconfig(?), replace(plainto_tsquery(kiln_regconfig(?), ?)::text, ' & ', ' | '))",
-                ^arg(:locale),
+                "search_vector @@ to_tsquery('simple', replace(regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*'), ' & ', ' | '))",
                 ^arg(:locale),
                 ^arg(:query)
               )
@@ -3532,12 +3544,18 @@ defmodule KilnCMS.CMS.Content do
         # Full-text relevance of a row against a query — higher is more
         # relevant. Used to order the `:search` action; `query`/`locale` are the
         # same values that action filters on, so the weighted `search_vector` is
-        # ranked with the matching locale's text-search config. Internal.
+        # ranked with the matching locale's text-search config. The action
+        # matches the last term as a prefix, so the rank is the whole-word
+        # score plus the prefix score: a finished word ("huang qi") scores on
+        # both for Huang Qi and on the prefix alone for Huang Qin, so the
+        # whole-word match is favoured. Internal.
         calculate :search_rank,
                   :float,
                   expr(
                     fragment(
-                      "ts_rank(search_vector, plainto_tsquery(kiln_regconfig(?), ?))",
+                      "ts_rank(search_vector, plainto_tsquery(kiln_regconfig(?), ?)) + ts_rank(search_vector, to_tsquery('simple', regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*')))",
+                      ^arg(:locale),
+                      ^arg(:query),
                       ^arg(:locale),
                       ^arg(:query)
                     )
@@ -3551,13 +3569,16 @@ defmodule KilnCMS.CMS.Content do
         # with every term the row matches, so a record naming two of the
         # query's four words outranks one naming a single word. The query is
         # rewritten from `plainto_tsquery`'s own text form, exactly as the
-        # action's filter does it. Internal.
+        # action's filter does it, whole-word score plus prefix score as in
+        # `search_rank`. Internal.
         calculate :search_rank_any,
                   :float,
                   expr(
                     fragment(
-                      "ts_rank(search_vector, to_tsquery(kiln_regconfig(?), replace(plainto_tsquery(kiln_regconfig(?), ?)::text, ' & ', ' | ')))",
+                      "ts_rank(search_vector, to_tsquery(kiln_regconfig(?), replace(plainto_tsquery(kiln_regconfig(?), ?)::text, ' & ', ' | '))) + ts_rank(search_vector, to_tsquery('simple', replace(regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*'), ' & ', ' | ')))",
                       ^arg(:locale),
+                      ^arg(:locale),
+                      ^arg(:query),
                       ^arg(:locale),
                       ^arg(:query)
                     )
@@ -3575,7 +3596,7 @@ defmodule KilnCMS.CMS.Content do
                   :string,
                   expr(
                     fragment(
-                      "ts_headline(kiln_regconfig(?), coalesce(search_text, ''), plainto_tsquery(kiln_regconfig(?), ?), 'StartSel=<mark>, StopSel=</mark>, MaxFragments=2, MaxWords=18, MinWords=5')",
+                      "ts_headline(kiln_regconfig(?), coalesce(search_text, ''), to_tsquery('simple', regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*')), 'StartSel=<mark>, StopSel=</mark>, MaxFragments=2, MaxWords=18, MinWords=5')",
                       ^arg(:locale),
                       ^arg(:locale),
                       ^arg(:query)
@@ -3606,7 +3627,7 @@ defmodule KilnCMS.CMS.Content do
                   :string,
                   expr(
                     fragment(
-                      "(SELECT CASE WHEN length(h.text) >= 120 THEN h.text ELSE left(coalesce(?, ''), 300) END FROM (SELECT regexp_replace(ts_headline(kiln_regconfig(?), coalesce(?, ''), plainto_tsquery(kiln_regconfig(?), ?), 'StartSel=<mark>, StopSel=</mark>, MaxFragments=3, MaxWords=40, MinWords=15'), '<mark>|</mark>', '', 'g') AS text) AS h)",
+                      "(SELECT CASE WHEN length(h.text) >= 120 THEN h.text ELSE left(coalesce(?, ''), 300) END FROM (SELECT regexp_replace(ts_headline(kiln_regconfig(?), coalesce(?, ''), to_tsquery('simple', regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*')), 'StartSel=<mark>, StopSel=</mark>, MaxFragments=3, MaxWords=40, MinWords=15'), '<mark>|</mark>', '', 'g') AS text) AS h)",
                       ^ref(:search_text),
                       ^arg(:locale),
                       ^ref(:search_text),

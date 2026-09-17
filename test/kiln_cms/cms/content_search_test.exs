@@ -90,6 +90,55 @@ defmodule KilnCMS.CMS.ContentSearchTest do
     assert page.id in ids
   end
 
+  describe "search as you type" do
+    # The last term matches as a prefix: "huang lia" is what a reader has
+    # typed on the way to "huang lian", and matched nothing while the
+    # keyword leg was whole-word only.
+    test "a partly typed last word matches" do
+      admin = admin()
+      stem = "coptis#{System.unique_integer([:positive])}"
+      page = CMS.create_page!(%{title: "Huang #{stem}lian", slug: slug()}, actor: admin)
+
+      for typed <- ["huang #{stem}", "huang #{stem}l", "huang #{stem}lia", "huang #{stem}lian"] do
+        ids = CMS.search_pages!(typed, actor: admin) |> Enum.map(& &1.id)
+        assert page.id in ids, "#{inspect(typed)} should match"
+      end
+    end
+
+    test "only the last word is a prefix — an earlier partial word still fails" do
+      admin = admin()
+      stem = "coptis#{System.unique_integer([:positive])}"
+      CMS.create_page!(%{title: "Huang #{stem}lian", slug: slug()}, actor: admin)
+
+      assert CMS.search_pages!("hua #{stem}lian", actor: admin) == []
+    end
+
+    test "a finished word ranks its exact match above a longer word it prefixes" do
+      admin = admin()
+      term = "qi#{System.unique_integer([:positive])}"
+
+      longer = CMS.create_page!(%{title: "Huang #{term}n", slug: slug()}, actor: admin)
+      exact = CMS.create_page!(%{title: "Huang #{term}", slug: slug()}, actor: admin)
+
+      assert [exact.id, longer.id] ==
+               CMS.search_pages!("huang #{term}", actor: admin) |> Enum.map(& &1.id)
+    end
+
+    test "the highlight marks the prefix match" do
+      admin = admin()
+      stem = "coptis#{System.unique_integer([:positive])}"
+      CMS.create_page!(%{title: "Huang #{stem}lian", slug: slug()}, actor: admin)
+
+      [hit] =
+        CMS.search_pages!("huang #{stem}li",
+          actor: admin,
+          load: [highlight: %{query: "huang #{stem}li", locale: KilnCMS.I18n.default_locale()}]
+        )
+
+      assert hit.highlight =~ "<mark>#{stem}lian</mark>"
+    end
+  end
+
   test "orders results by relevance (ts_rank), strongest match first" do
     admin = admin()
     term = "otter#{System.unique_integer([:positive])}"

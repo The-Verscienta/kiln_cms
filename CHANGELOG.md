@@ -88,6 +88,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **Keyword search matches the last word as a prefix.** "huang lia" finds
+  Huang Lian; finished words still rank first.
+  ([long form](docs/changelog/unreleased.md#keyword-search-matches-the-last-word-as-a-prefix))
+
 - **"New page" no longer writes a row until you start writing.** The draft is
   created on the first title keystroke or Save.
   ([long form](docs/changelog/unreleased.md#new-page-no-longer-writes-a-row-until-you-start-writing))
