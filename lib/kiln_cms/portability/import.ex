@@ -297,7 +297,7 @@ defmodule KilnCMS.Portability.Import do
       slug: record["slug"],
       blocks: blocks,
       excerpt: record["excerpt"],
-      state: if(record["state"] == "published", do: :published, else: :draft),
+      state: envelope_state(record["state"]),
       published_at: parse_datetime(record["published_at"]),
       source_url: nil,
       source_id: nil,
@@ -883,6 +883,7 @@ defmodule KilnCMS.Portability.Import do
         created =
           record
           |> maybe_publish(created, opts)
+          |> maybe_restore_state(record, opts)
           |> restore_published_at(record, opts)
           |> reassign_author(record, opts)
 
@@ -1035,6 +1036,46 @@ defmodule KilnCMS.Portability.Import do
   end
 
   defp maybe_publish(_record, created, _opts), do: created
+
+  # The export carries every workflow state. Anything the envelope does not name
+  # (an older export, a hand-written file) imports as a draft, as it always has.
+  defp envelope_state("published"), do: :published
+  defp envelope_state("in_review"), do: :in_review
+  defp envelope_state("archived"), do: :archived
+  defp envelope_state(_other), do: :draft
+
+  # A record that was in review or archived on the source is put back there,
+  # through the resource's narrow `:restore_imported_state` action rather than
+  # `:submit_for_review`/`:archive` — a restore is not new editorial activity,
+  # and replaying those would email every reviewer and send a webhook per
+  # record. Logged on failure and left a draft, the same trade `maybe_publish/3`
+  # makes: a draft is recoverable, a lost record is not.
+  defp maybe_restore_state(created, %{state: state} = record, opts)
+       when state in [:in_review, :archived] do
+    created
+    |> Ash.Changeset.for_update(:restore_imported_state, %{state: state}, scope(opts))
+    |> Ash.update()
+    |> case do
+      {:ok, restored} ->
+        restored
+
+      {:error, reason} ->
+        Logger.warning(
+          "Import: #{record.kind} #{inspect(record.title)} imported as a draft, not #{state}: #{inspect(reason)}"
+        )
+
+        created
+    end
+  rescue
+    error ->
+      Logger.warning(
+        "Import: #{record.kind} #{inspect(record.title)} imported as a draft, not #{state}: #{inspect(error)}"
+      )
+
+      created
+  end
+
+  defp maybe_restore_state(created, _record, _opts), do: created
 
   # Re-point every media-bearing map at the `MediaItem` sideloaded for its URL —
   # at ANY depth, matching `resolve_manifest_urls/2` and `collect_urls/1`.
