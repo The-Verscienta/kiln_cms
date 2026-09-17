@@ -1,15 +1,15 @@
 # Test coverage plan
 
-**Status: living document** — batches 1–8 landed; the floor in
+**Status: living document** — batches 1–9 landed; the floor in
 `coveralls.json` is the enforced number, the figures below are the last
 measured run.
 
 Where the suite's remaining blind spots are, in the order they are worth
 closing, and why each one is on the list. Written against a full measured run on
 2026-08-22: **7,344 tests, 0 failures, 83.1% line coverage**, floor 82.5
-(`coveralls.json`). Batches 1-8 below have since landed; the suite now measures
-**84.6% locally over 8,486 tests**, the floor has moved to **82.7**, and the
-Playwright suite is at 25 journeys.
+(`coveralls.json`). Batches 1-9 below have since landed; CI's own Coverage job
+measured **85.0%** on `main` on 2026-09-17 (84.6% locally over 8,537 tests),
+the floor has moved to **84.5**, and the Playwright suite is at 25 journeys.
 
 Reproduce the numbers with:
 
@@ -19,7 +19,7 @@ Reproduce the numbers with:
 This is not a plan to reach a percentage. The floor exists so coverage cannot
 silently fall (see CONTRIBUTING.md), and every item below earns its place by
 naming a *behaviour nothing currently proves* — not by the size of its
-uncovered block. Eight items are listed as already done so the patterns they
+uncovered block. Nine items are listed as already done so the patterns they
 set are reusable; the rest are ordered by what a defect there would cost.
 
 ## Ground rule for anything added here
@@ -295,9 +295,7 @@ new line without a test is the arm that turns a part upload's task timeout into
 an error; before, that timeout crashed the caller and still left the parts
 behind.
 
-## Next
-
-### 9. `KilnCMS.Portability.CLI` — 6% (62 uncovered)
+### 9. `KilnCMS.Portability.CLI` and the three mix tasks it serves
 
 **Done**, in `test/kiln_cms/portability/cli_test.exs` and
 `test/mix/tasks/kiln_portability_tasks_test.exs`. **`CLI` 6% → 94%. The three
@@ -344,6 +342,8 @@ exactly `draft | in_review | published | archived` and refuses anything else
 by name. The default is still published and draft, so content in review is
 left out unless named; `docs/content-portability.md` now says so.
 
+## Next
+
 ### 10. Console screens at 46–65%
 
 `newsletter_live` (46%, 86 uncovered), `settings_live` (57%, 88),
@@ -354,8 +354,10 @@ percentage: for each screen, list the events its template can push, and cover
 the ones with a persistence or authorization consequence. The rest is
 rendering that a snapshot would pin without proving anything.
 
-### 11. Mix tasks — 51.6% as a directory (587 uncovered)
+### 11. Mix tasks — 69.5% as a directory (575 uncovered)
 
+It was 51.6% when this list was written; batch 9 covered the three portability
+tasks and took the directory to 69.5% (CI, 2026-09-17). What is left:
 `kiln.federation` (0/40) and `kiln.audit.checkpoint` (0/46) have never run;
 `kiln.update` is 14%, `kiln.toolchain.check` 17%. The number reads worse than
 it is — most tasks are thin shells over modules that *are* tested — so the
@@ -385,8 +387,13 @@ Three things report low and should be left alone:
 total. After a batch lands, re-measure and raise it to just under the new
 number — the floor's job is to stop regression, so leaving it behind a batch
 that moved the total gives back exactly what the batch bought. It moved to
-**82.7** with batch 3; `coveralls.json`'s own comment carries the measurement
-it was set against, and that comment is the thing to update next time.
+**82.7** with batch 3 and to **84.5** after batch 9, measured against CI's
+85.0%; `coveralls.json`'s own comment carries the measurement it was set
+against, and that comment is the thing to update next time.
+
+Do not let it drift behind again. Batches 8 and 9 both landed with the floor
+still at 82.7, so the slack under CI's number had grown to 2.3 points — enough
+for several modules to lose their tests without the gate saying a word.
 
 Raise it against **CI's** measured number, not a local one. Which tests run is
 host-dependent (`:pg_tools`, `:ffmpeg`/`:no_ffmpeg`, `:qpdf` are excluded where
