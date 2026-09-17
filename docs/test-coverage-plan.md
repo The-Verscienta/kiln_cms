@@ -344,15 +344,48 @@ left out unless named; `docs/content-portability.md` now says so.
 
 ## Next
 
-### 10. Console screens at 46–65%
+### 10. Console screens
 
-`newsletter_live` (46%, 86 uncovered), `settings_live` (57%, 88),
-`experiments_live` (60%, 45), `field_definition_live` (64%, 60),
-`social_live` (65%, 47). These are large screens where the mount and the happy
+Measured 2026-09-17: `settings_live` (61.7%, 90 uncovered), `experiments_live`
+(60.9%, 45), `social_live` (65.7%, 47), `field_definition_live` (86.6%, 33 —
+lifted by #1511/#1512). These are large screens where the mount and the happy
 path are covered and the branchy event handlers are not. Do not chase the
 percentage: for each screen, list the events its template can push, and cover
 the ones with a persistence or authorization consequence. The rest is
 rendering that a snapshot would pin without proving anything.
+
+**`newsletter_live` is done — `test/kiln_cms_web/live/newsletter_live_test.exs`,
+46.2% → 93.1%.** It was the worst of the five, and six of its eight events had
+never run; each one writes or deletes a row, and the rows are people's inboxes.
+The tests drive the rendered page (`render_submit`/`render_click` on the real
+form ids and buttons), so they also pin that the event a button pushes is the
+event the module handles.
+
+What they cover: a segment created, refused when blank, and refused on a taken
+slug (uniqueness is the database's, so it lands on submit, not on change); a
+segment deleted, and a delete of a missing one reported rather than crashing;
+a subscriber added as **pending** and counted as such in the heading; confirm
+and remove, each with their refusal; the send form end to end, with the
+campaign appearing in the history table; only published posts offered; and no
+campaign written when no post is chosen.
+
+Two things this turned up. A **forged id** — the shape the buttons push, with
+somebody else's uuid — must be refused rather than obeyed; the test names a
+subscriber that must survive it. And a **manual re-send is allowed on purpose**:
+the `:already_sent` dedupe belongs to the automation identity ({rule, content,
+publish revision}), not to a person pressing Send twice. The opposite is the
+natural guess, and being wrong about it is two copies in every inbox, so it is
+pinned.
+
+Nine mutations fail the file, among them the delete error arm reporting
+success, confirm doing nothing, the heading counting everyone, remove taking
+the first subscriber rather than the named one, and the post list ignoring
+`state` (that last one survived the first pass — the draft-post test exists
+because of it).
+
+What is left there is the send-error message helpers (a gated post, a missing
+segment, an unfired publish) and the tier-backed segment branch of
+`sendable_audiences/1`, which needs a membership tier to reach.
 
 ### 11. Mix tasks — 69.5% as a directory (575 uncovered)
 
