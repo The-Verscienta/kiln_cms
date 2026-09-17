@@ -704,7 +704,21 @@ migration (the demo admin and editor) start on Essentials.
   task wrote an envelope with no records and exited 0: an empty backup that
   looked like a successful one. `--state` now accepts exactly `draft`,
   `in_review`, `published` and `archived`, and refuses anything else by name.
-  `in_review` was always a valid state, but the task's help did not list it.
+
+<a id="a-content-export-holds-every-record-and-restores-each-in-its-own-state"></a>
+
+- **A content export holds every record, and an import restores each one in
+  its own state.** `mix kiln.export.content` without `--state` exported only
+  published and draft records, so a backup silently left out the review queue
+  and the archive. The importer also turned every record that wasn't published
+  into a draft, so an archived post brought back from an export reappeared in
+  the editors' draft list. The export now includes all four states by default.
+  The import puts in-review and archived records back into those states through
+  a new import-only `:restore_imported_state` action, which sends no review
+  emails and no webhooks, because a restore is not new editorial activity. The
+  state change is still recorded in the record's version history. If you script
+  exports, check any that relied on the old default: pass `--state published
+  --state draft` to keep it.
 
 ## Security
 

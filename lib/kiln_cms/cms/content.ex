@@ -1726,6 +1726,9 @@ defmodule KilnCMS.CMS.Content do
           # Archive must not be a one-way door (audit U-H3): a mistaken (or
           # bulk) archive is recoverable by returning the record to draft.
           transition :unarchive, from: :archived, to: :draft
+          # An importer restoring a record's source state, without replaying the
+          # editorial events (see the action).
+          transition :restore_imported_state, from: :draft, to: [:in_review, :archived]
         end
       end
 
@@ -2679,6 +2682,41 @@ defmodule KilnCMS.CMS.Content do
         update :backdate_published_at do
           require_atomic? false
           accept [:published_at]
+        end
+
+        # Internal: put an imported draft back into the workflow state it had on
+        # the source site — `in_review` or `archived` (#487).
+        #
+        # The importer creates every record as a draft, and until this action it
+        # left the non-published ones there, so a restored backup quietly
+        # returned archived content to the editors' draft list. Not through
+        # `:submit_for_review`/`:archive`: those are editorial events, and an
+        # import replaying them would email every reviewer once per in-review
+        # record (`NotifyWorkflowEmail`) and send a webhook per record to every
+        # subscriber. The archive teardown (`ClearPublishedVersion`,
+        # `DeleteArtifacts`) has nothing to act on for a record that was never
+        # published, which is the only thing this is called on.
+        #
+        # Unlike the two actions above, it is NOT in `ignore_actions`: a state
+        # change is an editorial fact, and the record's history should show it
+        # arriving in that state rather than read as a draft forever.
+        update :restore_imported_state do
+          require_atomic? false
+          accept []
+
+          argument :state, :atom do
+            allow_nil? false
+            constraints one_of: [:in_review, :archived]
+          end
+
+          change filter(expr(^ref(:state) == :draft))
+
+          change fn changeset, _context ->
+            AshStateMachine.transition_state(
+              changeset,
+              Ash.Changeset.get_argument(changeset, :state)
+            )
+          end
         end
 
         # Internal: attribute an imported record to its original author (#950).

@@ -250,6 +250,10 @@ Every summary line below that was shortened links to its own entry there.
 - **`mix kiln.export.content` refuses a `--state` it does not know.**
   ([long form](docs/changelog/unreleased.md#mix-kiln-export-content-refuses-a-state-it-does-not-know))
 
+- **A content export holds every record, and an import restores each in its
+  own state.**
+  ([long form](docs/changelog/unreleased.md#a-content-export-holds-every-record-and-restores-each-in-its-own-state))
+
 ### Security
 
 - **A system actor, so internal callers run under the policies instead of around

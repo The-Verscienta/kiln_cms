@@ -20,7 +20,7 @@ defmodule Mix.Tasks.Kiln.Export.Content do
                          refuses a type whose records carry prose blocks.
       --type NAME        export only this type; repeatable
       --state STATE      draft | in_review | published | archived; repeatable
-                         (default: published and draft)
+                         (default: every state)
       --locale LOCALE    restrict to one locale
       --limit N          at most N records per type
       --actor EMAIL      read as this user (default: the first admin)
@@ -121,7 +121,7 @@ defmodule Mix.Tasks.Kiln.Export.Content do
 
   defp states(opts) do
     case Keyword.get_values(opts, :state) do
-      [] -> [:published, :draft]
+      [] -> Enum.map(@states, &String.to_existing_atom/1)
       list -> Enum.map(list, &state!/1)
     end
   end

@@ -135,11 +135,16 @@ mix kiln.export.content --out content.json
 mix kiln.export.content --type post --state published --out published-posts.json
 ```
 
-With no `--state`, the export holds published and draft records. Content
-waiting for review (`in_review`) and archived content are left out unless you
-name them, e.g. `--state draft --state in_review --state published --state
-archived` for everything. An unknown `--state` is refused rather than
-exporting nothing.
+With no `--state`, the export holds **every** record: draft, in review,
+published and archived. Name one or more `--state`s to narrow it; an unknown
+`--state` is refused rather than exporting nothing.
+
+**Each record imports in the state it was exported in.** Published records go
+through the ordinary publish transition, so they version, fire and enter
+delivery like any publish. Records in review or archived are put back into that
+state quietly, by an import-only action. A restore is not new editorial
+activity, so it sends no review emails and no webhooks. A state the importer
+does not recognise (an older or hand-written envelope) imports as a draft.
 
 ```json
 {

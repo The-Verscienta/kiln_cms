@@ -56,6 +56,12 @@ defmodule KilnCMS.Portability.Export do
   # JSON document.
   @page_size 200
 
+  # Every workflow state (`KilnCMS.CMS.Content`'s state machine). The default is
+  # all of them: an export is what people keep as a backup, and one that left
+  # out review queues and the archive without saying so would be a backup that
+  # restores less than it appears to hold.
+  @all_states [:draft, :in_review, :published, :archived]
+
   @typedoc "The JSON-serializable envelope."
   @type envelope :: %{required(String.t()) => term()}
 
@@ -65,7 +71,8 @@ defmodule KilnCMS.Portability.Export do
   Options:
 
     * `:actor` / `:tenant` — every read runs under them
-    * `:states` — which workflow states to include (default `[:published, :draft]`)
+    * `:states` — which workflow states to include (default: all of them —
+      `[:draft, :in_review, :published, :archived]`)
     * `:locale` — restrict to one locale (default: all)
     * `:limit` — cap the number of records per type
   """
@@ -121,7 +128,7 @@ defmodule KilnCMS.Portability.Export do
   # ── Records ────────────────────────────────────────────────────────────────
 
   defp export_type(descriptor, opts) do
-    states = Keyword.get(opts, :states, [:published, :draft])
+    states = Keyword.get(opts, :states, @all_states)
 
     descriptor
     |> stream_records(states, opts)

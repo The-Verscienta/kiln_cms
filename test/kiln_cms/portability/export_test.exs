@@ -6,6 +6,9 @@ defmodule KilnCMS.Portability.ExportTest do
   read is a report, not a backup.
   """
   use KilnCMS.DataCase, async: false
+  use Oban.Testing, repo: KilnCMS.Repo
+
+  require Ash.Query
 
   alias KilnCMS.CMS
   alias KilnCMS.Portability.Export
@@ -284,6 +287,103 @@ defmodule KilnCMS.Portability.ExportTest do
       assert [image] = gallery.value.images
       refute image["media_id"] == item.id
       assert image["url"] == "https://cdn.example.com/pic.jpg"
+    end
+  end
+
+  describe "every workflow state (#487)" do
+    # An export is what people keep as a backup. Until this, it held published
+    # and draft records only, and the importer turned anything that was not
+    # published into a draft — so a restore dropped the review queue and the
+    # archive, and anything that did come back came back in the wrong state.
+
+    setup %{actor: actor, post: post} do
+      in_review =
+        CMS.create_page!(%{title: "Waiting", slug: "waiting"}, actor: actor)
+        |> CMS.submit_page_for_review!(%{}, actor: actor)
+
+      archived = CMS.archive_post!(post, %{}, actor: actor)
+
+      %{in_review: in_review, archived: archived}
+    end
+
+    test "the default export carries all four states", %{actor: actor} do
+      {:ok, envelope} = Export.run(:all, actor: actor)
+
+      assert envelope["records"] |> Enum.map(& &1["state"]) |> Enum.sort() ==
+               ["archived", "draft", "in_review"]
+
+      {:ok, published_only} = Export.run(:all, actor: actor, states: [:published])
+      assert published_only["records"] == []
+    end
+
+    test "they import back in the state they had, and quietly", %{actor: actor} do
+      {:ok, envelope} = Export.run(:all, actor: actor)
+      target = KilnCMS.OrgFixtures.org("restore-states")
+
+      # Someone who WOULD be told about a submission, and an endpoint that WOULD
+      # receive a webhook — so "nothing was sent" is a claim with a recipient.
+      reviewer = user(:admin)
+
+      Ash.Seed.seed!(KilnCMS.CMS.WebhookEndpoint, %{
+        org_id: target.id,
+        url: "https://example.com/hooks/restore",
+        events: KilnCMS.CMS.WebhookEndpoint.events(target.id),
+        active: true,
+        secret: KilnCMS.CMS.WebhookEndpoint.generate_secret()
+      })
+
+      scope = [actor: actor, tenant: target.id]
+      {:ok, report} = Import.run_envelope(envelope, scope ++ [skip_media: true])
+      assert length(report.created) == 3
+
+      states =
+        (CMS.list_posts!(scope) ++ CMS.list_pages!(scope))
+        |> Map.new(&{&1.slug, &1.state})
+
+      assert states == %{"exportable" => :archived, "waiting" => :in_review, "a-draft" => :draft}
+
+      # Before draining: a drained delivery job is no longer "enqueued".
+      refute_enqueued(worker: KilnCMS.Webhooks.DeliveryWorker)
+
+      KilnCMS.DataCase.drain_oban()
+      Swoosh.TestAssertions.assert_no_email_sent()
+      assert KilnCMS.Notifications.notifications_for_user!(reviewer.id, actor: reviewer) == []
+    end
+
+    test "an envelope state the importer does not know imports as a draft", %{actor: actor} do
+      {:ok, envelope} = Export.run([:post], actor: actor)
+      envelope = update_in(envelope, ["records", Access.all(), "state"], fn _ -> "pending" end)
+      for post <- CMS.list_posts!(actor: actor), do: CMS.purge_post!(post, actor: actor)
+
+      {:ok, _report} = Import.run_envelope(envelope, actor: actor, skip_media: true)
+
+      assert [%{state: :draft}] = CMS.list_posts!(actor: actor)
+    end
+
+    test "the restore action moves only a draft, and only to in_review or archived", %{
+      actor: actor,
+      draft: draft,
+      archived: archived
+    } do
+      restore = fn record, state ->
+        record
+        |> Ash.Changeset.for_update(:restore_imported_state, %{state: state}, actor: actor)
+        |> Ash.update()
+      end
+
+      assert {:error, %Ash.Error.Invalid{}} = restore.(draft, :published)
+      # Not a draft: refused (the state machine allows only `from: :draft`, and
+      # the action's compare-and-swap filter would match no row besides).
+      assert {:error, _stale} = restore.(archived, :in_review)
+      assert {:ok, %{state: :archived}} = restore.(draft, :archived)
+
+      # Recorded, unlike the other import-only actions: a state change is an
+      # editorial fact the record's history should show.
+      assert KilnCMS.CMS.Page.Version
+             |> Ash.Query.filter(
+               version_source_id == ^draft.id and version_action_name == :restore_imported_state
+             )
+             |> Ash.count!(authorize?: false) == 1
     end
   end
 
