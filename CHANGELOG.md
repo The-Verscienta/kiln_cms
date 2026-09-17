@@ -202,6 +202,9 @@ Every summary line below that was shortened links to its own entry there.
 - **A failed S3 multipart upload is aborted instead of left on the bucket.**
   ([#494](https://github.com/The-Verscienta/kiln_cms/issues/494) · [long form](docs/changelog/unreleased.md#a-failed-s3-multipart-upload-is-aborted-instead-of-left-on-the-bucket))
 
+- **The kilncms.dev docs publisher works again, and CI proves it.**
+  ([long form](docs/changelog/unreleased.md#the-kilncmsdev-docs-publisher-works-again-and-ci-proves-it))
+
 - **Task emails for content of a deleted content type are sent instead of crashing the mail job.**
   ([#1320](https://github.com/The-Verscienta/kiln_cms/issues/1320))
 
@@ -273,9 +276,6 @@ Every summary line below that was shortened links to its own entry there.
 - **A content export holds every record, and an import restores each in its
   own state.**
   ([long form](docs/changelog/unreleased.md#a-content-export-holds-every-record-and-restores-each-in-its-own-state))
-
-- **The kilncms.dev docs publisher works again, and CI proves it.**
-  ([long form](docs/changelog/unreleased.md#the-kilncmsdev-docs-publisher-works-again-and-ci-proves-it))
 
 ### Security
 
