@@ -70,7 +70,7 @@ defmodule KilnCMS.Storage.S3 do
       here — S3 stores a fixed set of system headers (`Content-Type`,
       `Content-Disposition`, `Cache-Control`, …) and anything else comes back
       prefixed as `x-amz-meta-*`. Serve it from the CDN or bucket instead; see
-      the "Production storage & CDN" section of `docs/media-pipeline.md`.
+      the "Production storage and CDN" section of `docs/media-pipeline.md`.
 
   ## Private storage (#481)
 
@@ -93,6 +93,8 @@ defmodule KilnCMS.Storage.S3 do
   to the public bucket.
   """
   @behaviour KilnCMS.Storage
+
+  require Logger
 
   # Keys are write-once UUIDs (see "Caching" above), so responses never need
   # revalidation. Mirrors the /uploads Plug.Static config in KilnCMSWeb.Endpoint.
@@ -272,14 +274,78 @@ defmodule KilnCMS.Storage.S3 do
     end
   end
 
+  # The initiate, part and complete steps are driven here rather than through
+  # `ExAws.S3.upload/3 |> ExAws.request()`, whose `perform/2` returns a failed
+  # part's error without aborting. The parts already sent would then stay on
+  # the bucket as an incomplete multipart upload — invisible to a listing, and
+  # billed until a lifecycle rule clears them. Holding the `upload_id` lets a
+  # failed part or complete send `AbortMultipartUpload` before returning the
+  # original error.
+  #
+  # The steps call `ExAws.S3` operations with `ExAws.request/1` rather than the
+  # `ExAws.S3.Upload` helpers: those pass `ExAws.request/2` a config map where
+  # its spec takes a keyword list, and dialyzer then reads them as never
+  # returning.
   defp multipart_put(bucket, key, source_path, opts) do
-    source_path
-    |> ExAws.S3.Upload.stream_file()
-    |> ExAws.S3.upload(bucket, key, opts)
-    |> ExAws.request()
-    |> case do
-      {:ok, _resp} -> {:ok, key}
+    with {:ok, %{body: %{upload_id: upload_id}}} <-
+           bucket |> ExAws.S3.initiate_multipart_upload(key, opts) |> ExAws.request() do
+      case upload_parts_and_complete(bucket, key, upload_id, source_path) do
+        {:ok, _resp} ->
+          {:ok, key}
+
+        {:error, reason} ->
+          abort_multipart(bucket, key, upload_id)
+          {:error, reason}
+      end
+    end
+  end
+
+  # Every part runs to an answer before the error is taken, so no part is still
+  # in flight when the abort goes out (S3 keeps a part that lands after it).
+  defp upload_parts_and_complete(bucket, key, upload_id, source_path) do
+    parts =
+      source_path
+      |> ExAws.S3.Upload.stream_file()
+      |> Stream.with_index(1)
+      |> Task.async_stream(&upload_part(bucket, key, upload_id, &1),
+        max_concurrency: 4,
+        timeout: 30_000,
+        on_timeout: :kill_task
+      )
+      |> Enum.map(fn
+        {:ok, part} -> part
+        {:exit, reason} -> {:error, reason}
+      end)
+
+    case Enum.find(parts, &match?({:error, _reason}, &1)) do
+      nil ->
+        bucket
+        |> ExAws.S3.complete_multipart_upload(key, upload_id, parts)
+        |> ExAws.request()
+
+      error ->
+        error
+    end
+  end
+
+  defp upload_part(bucket, key, upload_id, {chunk, n}) do
+    case bucket |> ExAws.S3.upload_part(key, upload_id, n, chunk) |> ExAws.request() do
+      {:ok, %{headers: headers}} -> {n, header(headers, "etag")}
       {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # Best-effort: the store has already failed, and the caller gets that error
+  # whether or not the abort lands. A lifecycle rule is the backstop.
+  defp abort_multipart(bucket, key, upload_id) do
+    case bucket |> ExAws.S3.abort_multipart_upload(key, upload_id) |> ExAws.request() do
+      {:ok, _resp} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "S3 multipart upload #{upload_id} for #{key} failed and could not be aborted: #{inspect(reason)}"
+        )
     end
   end
 

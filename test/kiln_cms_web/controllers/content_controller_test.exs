@@ -74,6 +74,26 @@ defmodule KilnCMSWeb.ContentControllerTest do
       assert html =~ ~s(<a href="#1-getting-started">above</a>)
     end
 
+    # The guard on `HeadingAnchors.reserved_ids/0`: a heading-free page's ids
+    # are all chrome, and every one must be reserved — otherwise a heading with
+    # the same words would duplicate it. A new id in the public layout fails
+    # here until it is added to the list.
+    test "every id the public chrome emits is reserved from headings", %{conn: conn} do
+      bare = page(%{blocks: []})
+      html = conn |> get(~p"/#{bare.slug}") |> html_response(200)
+
+      chrome_ids = ~r/\bid="([^"]+)"/ |> Regex.scan(html) |> Enum.map(&List.last/1)
+
+      assert chrome_ids != []
+      assert chrome_ids -- KilnCMS.HeadingAnchors.reserved_ids() == []
+
+      titled = page(%{blocks: [%{"_type" => "heading", "text" => "Main"}]})
+      html = build_conn() |> get(~p"/#{titled.slug}") |> html_response(200)
+
+      assert [_one] = Regex.scan(~r/\bid="main"/, html)
+      assert html =~ ~r/<h2 id="main-1"/
+    end
+
     # #479: HTML delivery renders live from the block tree, not from the fired
     # artifact, so fragment expansion has to happen on this path too.
     test "a fragment block inlines its target's body", %{conn: conn} do
@@ -681,6 +701,17 @@ defmodule KilnCMSWeb.ContentControllerTest do
       refute filtered =~ "#{term} outside"
       # The clear-filter link appears once a facet is active.
       assert filtered =~ "All results"
+    end
+
+    # The form was a label and one input — no submit control at all. A lone text
+    # input submits on Enter and nothing else, which leaves a touch keyboard
+    # without a Search key, and a screen reader reading the form, with no way to
+    # run the query.
+    test "the form carries a submit control", %{conn: conn} do
+      html = conn |> get(~p"/search") |> html_response(200)
+
+      assert html =~ ~s(type="submit")
+      assert html =~ "public-search-submit"
     end
 
     test "a typo gets fuzzy-rescued results plus a did-you-mean link", %{conn: conn} do

@@ -417,7 +417,11 @@ defmodule KilnCMSWeb.Layouts do
       {gettext("Search")}
     </.link>
 
-    <div class="min-h-screen bg-base-100 lg:grid lg:grid-cols-[var(--side-w)_1fr]">
+    <%!-- `minmax(0, 1fr)`, not a bare `1fr`: a `1fr` track never shrinks below
+          its content's min-content width, so one wide descendant (a long <pre>,
+          a wide table) widened the column past the viewport and scrolled the
+          whole shell sideways — even when that descendant scrolls itself. --%>
+    <div class="min-h-screen bg-base-100 lg:grid lg:grid-cols-[var(--side-w)_minmax(0,1fr)]">
       <%!-- CSS-only mobile drawer: the peer checkbox drives the sidebar + backdrop
             with no socket round-trip, so the menu works before LiveView connects. --%>
       <input id="kiln-nav-toggle" type="checkbox" class="peer sr-only" aria-hidden="true" />
@@ -432,11 +436,17 @@ defmodule KilnCMSWeb.Layouts do
             icon rail. The rail state lives on <html data-sidebar> — restored
             before first paint by root.html.heex, flipped by app.js — because
             LiveView never patches <html>, so it outlives every live navigation
-            with no server round-trip. --%>
+            with no server round-trip.
+
+            The slide is the drawer's alone (`lg:transition-none`): at lg the
+            translate is simply cancelled, so a window crossing 64rem — a
+            resize, a snap, a zoom — shows the rail at once instead of sliding
+            it in with every label cropped from the left. --%>
       <aside class={[
         "side-shell fixed inset-y-0 left-0 z-40 flex w-64 -translate-x-full flex-col border-r shadow-xl",
         "border-sidebar-line bg-sidebar transition-transform peer-checked:translate-x-0",
-        "lg:sticky lg:bottom-auto lg:z-auto lg:h-screen lg:w-auto lg:translate-x-0 lg:shadow-none"
+        "lg:sticky lg:bottom-auto lg:z-auto lg:h-screen lg:w-auto lg:translate-x-0 lg:shadow-none",
+        "lg:transition-none"
       ]}>
         <div class="side-head flex h-16 shrink-0 items-center gap-2.5 px-4">
           <img
@@ -471,6 +481,7 @@ defmodule KilnCMSWeb.Layouts do
           <.console_nav current_user={@current_user} current_org={@current_org} active={@active} />
         </nav>
         <div class="shrink-0 space-y-3 border-t border-sidebar-line px-3 pt-3 pb-4">
+          <.nav_preset_switch :if={@current_user} current_user={@current_user} />
           <.sidebar_theme_toggle />
           <.sidebar_account :if={@current_user} current_user={@current_user} />
         </div>
@@ -520,6 +531,19 @@ defmodule KilnCMSWeb.Layouts do
                 <span>{gettext("Search")}</span>
                 <span class="kbd ml-1">⌘K</span>
               </.link>
+              <%!-- The notification bell (#1320). A LiveComponent, so it loads
+                    and owns its own rows from the `current_user` this layout
+                    already has — see `KilnCMSWeb.NotificationBell` for why it
+                    is not two more attributes on all 43 call sites. Rendered
+                    only for a signed-in user: there is nothing to count
+                    otherwise, and the component's reads need an actor. --%>
+              <.live_component
+                :if={@current_user}
+                module={KilnCMSWeb.NotificationBell}
+                id={KilnCMSWeb.NotificationBell.id()}
+                current_user={@current_user}
+                current_org={@current_org}
+              />
               {render_slot(@actions)}
               <.locale_switcher />
             </div>
@@ -636,337 +660,139 @@ defmodule KilnCMSWeb.Layouts do
   defp user_initial(%{email: email}), do: user_initial(%{email: to_string(email)})
   defp user_initial(_), do: "?"
 
-  # The console sidebar navigation: two role-gated groups (author + configure)
-  # plus any plugin-contributed items. `active` (an atom like :content) lights
-  # the matching link via aria-current, which the `.side-link` style keys off.
+  # The console sidebar navigation. The item list itself lives in
+  # `KilnCMSWeb.ConsoleNav` — the ⌘K palette searches the same list (#1319), so
+  # this component is the drawing half only. `active` (an atom like :content)
+  # lights the matching link via aria-current, which the `.side-link` style
+  # keys off.
+  #
+  # Each configure section is collapsible, and its state is stored exactly the
+  # way the rail's is (#1441): in `localStorage`, applied to
+  # `<html data-nav-collapsed="delivery operations">` by root.html.heex before
+  # first paint, and flipped there by app.js. NOT in an assign — a section that
+  # re-opened on every live navigation, or that flashed open on every page load
+  # before a hook could close it, is worse than one that never collapsed. The
+  # server therefore always renders the expanded markup and CSS does the
+  # hiding; app.js corrects `aria-expanded` once the document exists.
   attr :current_user, :map, default: nil
   attr :current_org, :map, default: nil
   attr :active, :atom, default: nil
 
+  #
+  # Which items are drawn at all follows the user's sidebar preset
+  # (`ConsoleNav.sidebar/3`): Essentials drops the periodic author screens and
+  # the configure sections, keeping the hub and Your settings as `pinned` links
+  # — plus the current page if the preset would have hidden it. The hub and ⌘K
+  # read the unfiltered map, so nothing becomes unreachable.
   defp console_nav(assigns) do
-    # Effective capability tier on the CURRENT site (#419) — a global editor
-    # demoted (or promoted) by an org membership sees the nav for that tier.
-    # Resolve against the passed `current_org` (falling back to the default org
-    # only when absent), NOT the default org unconditionally. The fallback is
-    # spelled out rather than routed through `Tenant.current_org_id/1`, which
-    # now raises on a missing assign (#563): `console/1` declares
-    # `attr :current_org, :map, default: nil`, so nil is inside the component's
-    # own contract and is the component's to resolve, not the tenant resolver's.
-    # The tier only picks which nav links render — every action behind them
-    # re-authorizes against the real org — so a default-org tier here is a
-    # cosmetic wrong answer, not an access-control one.
-    role =
-      KilnCMS.Accounts.Scoping.effective_tier(
+    nav =
+      KilnCMSWeb.ConsoleNav.sidebar(
         assigns[:current_user],
-        assigns[:current_org] || KilnCMS.Accounts.default_org_id()
+        assigns[:current_org],
+        assigns[:active]
       )
-
-    multi_locale? = length(KilnCMS.I18n.locales()) > 1
-
-    author = [
-      %{
-        key: :overview,
-        label: gettext("Home"),
-        path: ~p"/editor/overview",
-        icon: "hero-squares-2x2"
-      },
-      %{key: :content, label: gettext("Content"), path: ~p"/editor", icon: "hero-document-text"},
-      %{key: :media, label: gettext("Media"), path: ~p"/media", icon: "hero-photo"},
-      %{key: :taxonomy, label: gettext("Taxonomy"), path: ~p"/editor/taxonomy", icon: "hero-tag"},
-      %{key: :menus, label: gettext("Menus"), path: ~p"/editor/menus", icon: "hero-bars-3"},
-      %{
-        key: :calendar,
-        label: gettext("Calendar"),
-        path: ~p"/editor/calendar",
-        icon: "hero-calendar-days"
-      },
-      %{
-        key: :tasks,
-        label: gettext("Tasks"),
-        path: ~p"/editor/tasks",
-        icon: "hero-clipboard-document-check"
-      },
-      # Content releases (#500) — editorial planning, so it sits with the author
-      # group next to the calendar it plots onto, not with the admin tools. The
-      # admin-only half (schedule/publish/roll back) is gated on the page.
-      %{
-        key: :releases,
-        label: gettext("Releases"),
-        path: ~p"/editor/releases",
-        icon: "hero-rocket-launch"
-      },
-      multi_locale? &&
-        %{
-          key: :translations,
-          label: gettext("Translations"),
-          path: ~p"/editor/translations",
-          icon: "hero-language"
-        },
-      %{
-        key: :analytics,
-        label: gettext("Analytics"),
-        path: ~p"/editor/analytics",
-        icon: "hero-chart-bar"
-      },
-      # Outbound broken links (#474). In the author group, not the admin one:
-      # fixing a dead citation is editorial work. The opt-in switch on the page
-      # is what admins own.
-      %{
-        key: :links,
-        label: gettext("Links"),
-        path: ~p"/editor/links",
-        icon: "hero-link-slash"
-      }
-    ]
-
-    # The instance-wide consoles — Team, Billing, System, Mail, Backups, API
-    # keys — gate their pages on the GLOBAL role (`LiveUserAuth.platform_admin?/1`,
-    # #419/#1160), not on the per-org tier `role` above. A per-org admin passes
-    # `role == :admin` and would be shown links those pages only bounce, so the
-    # links ask the same predicate the pages do.
-    platform_admin? = KilnCMSWeb.LiveUserAuth.platform_admin_user?(assigns[:current_user])
-
-    settings = %{
-      key: :settings,
-      label: gettext("Settings"),
-      path: ~p"/editor/settings",
-      icon: "hero-cog-6-tooth"
-    }
-
-    configure_groups =
-      if role == :admin do
-        [
-          %{
-            label: gettext("Content model"),
-            items: [
-              %{
-                key: :types,
-                label: gettext("Content types"),
-                path: ~p"/editor/types",
-                icon: "hero-cube"
-              },
-              %{
-                key: :fields,
-                label: gettext("Fields"),
-                path: ~p"/editor/fields",
-                icon: "hero-adjustments-horizontal"
-              },
-              # Next to Content types, not down with Mail: what a feed carries
-              # is a statement about content types, and the "has a public
-              # index" switch this page defers to lives two items up (#719).
-              %{key: :feeds, label: gettext("Feeds"), path: ~p"/editor/feeds", icon: "hero-rss"}
-            ]
-          },
-          %{
-            label: gettext("Capture"),
-            items: [
-              %{
-                key: :forms,
-                label: gettext("Forms"),
-                path: ~p"/editor/forms",
-                icon: "hero-clipboard-document-list"
-              },
-              %{
-                key: :funnels,
-                label: gettext("Funnels"),
-                path: ~p"/editor/funnels",
-                icon: "hero-funnel"
-              },
-              # Content experiments (#982). Beside Funnels: both are "measure
-              # what this content does", and an experiment's goal can be a funnel.
-              %{
-                key: :experiments,
-                label: gettext("Experiments"),
-                path: ~p"/editor/experiments",
-                icon: "hero-beaker"
-              },
-              # Per-site claim checking (#857). Called "Claim checking" rather
-              # than "Compliance", which is already the Governance page's
-              # subject and the name of the editor panel this switches on — an
-              # admin looking for one should not have to guess which of two
-              # items owns it.
-              %{
-                key: :compliance,
-                label: gettext("Claim checking"),
-                path: ~p"/editor/compliance",
-                icon: "hero-scale"
-              }
-            ]
-          },
-          %{
-            label: gettext("Delivery"),
-            items: [
-              %{
-                key: :branding,
-                label: gettext("Branding"),
-                path: ~p"/editor/branding",
-                icon: "hero-swatch"
-              },
-              %{
-                key: :code_injection,
-                label: gettext("Code injection"),
-                path: ~p"/editor/code-injection",
-                icon: "hero-code-bracket"
-              },
-              %{
-                key: :redirects,
-                label: gettext("Redirects"),
-                path: ~p"/editor/redirects",
-                icon: "hero-arrow-uturn-right"
-              },
-              %{key: :slugs, label: gettext("Slugs"), path: ~p"/editor/slugs", icon: "hero-link"},
-              %{
-                key: :social,
-                label: gettext("Social"),
-                path: ~p"/editor/social",
-                icon: "hero-megaphone"
-              }
-            ]
-          },
-          %{
-            label: gettext("Ops"),
-            items: [
-              %{
-                key: :webhooks,
-                label: gettext("Webhooks"),
-                path: ~p"/editor/webhooks",
-                icon: "hero-bolt"
-              },
-              # ActivityPub federation (#967) — beside Webhooks: both are "what
-              # this site tells other servers", and both are admin-only.
-              %{
-                key: :federation,
-                label: gettext("Federation"),
-                path: ~p"/editor/federation",
-                icon: "hero-globe-alt"
-              },
-              %{
-                key: :automation,
-                label: gettext("Automation"),
-                path: ~p"/editor/automation",
-                icon: "hero-cpu-chip"
-              },
-              %{
-                platform: true,
-                key: :backups,
-                label: gettext("Backups"),
-                path: ~p"/editor/backups",
-                icon: "hero-archive-box"
-              },
-              %{
-                platform: true,
-                key: :mail,
-                label: gettext("Mail"),
-                path: ~p"/editor/mail",
-                icon: "hero-envelope"
-              },
-              %{
-                key: :newsletter,
-                label: gettext("Newsletter"),
-                path: ~p"/editor/newsletter",
-                icon: "hero-megaphone"
-              }
-            ]
-          },
-          %{
-            label: gettext("Org"),
-            items: [
-              %{
-                platform: true,
-                key: :team,
-                label: gettext("Team"),
-                path: ~p"/editor/team",
-                icon: "hero-user-group"
-              },
-              %{
-                key: :governance,
-                label: gettext("Governance"),
-                path: ~p"/editor/governance",
-                icon: "hero-shield-check"
-              },
-              %{
-                platform: true,
-                key: :billing,
-                label: gettext("Billing"),
-                path: ~p"/editor/billing",
-                icon: "hero-credit-card"
-              },
-              %{
-                platform: true,
-                key: :api_keys,
-                label: gettext("API keys"),
-                path: ~p"/editor/api-keys",
-                icon: "hero-key"
-              },
-              %{
-                key: :trash,
-                label: gettext("Trash"),
-                path: ~p"/editor/trash",
-                icon: "hero-trash"
-              },
-              %{
-                platform: true,
-                key: :system,
-                label: gettext("System"),
-                path: ~p"/editor/system",
-                icon: "hero-server-stack"
-              },
-              settings
-            ]
-          }
-        ]
-      else
-        [%{label: gettext("Configure"), items: [settings]}]
-      end
-
-    # Drop the platform-only items for anyone else, then any group left empty.
-    configure_groups =
-      configure_groups
-      |> Enum.map(fn group ->
-        %{group | items: visible_nav_items(group.items, platform_admin?)}
-      end)
-      |> Enum.reject(&(&1.items == []))
-
-    plugin =
-      for item <- Kiln.Plugins.nav_items(), nav_item_visible?(item, role) do
-        %{key: nil, label: item.label, path: item.path, icon: "hero-puzzle-piece"}
-      end
 
     assigns =
       assigns
-      |> assign(:author, Enum.filter(author, & &1))
-      |> assign(:configure_groups, configure_groups)
-      |> assign(:plugin, plugin)
+      |> assign(:author, nav.author)
+      |> assign(:hub, nav.hub)
+      |> assign(:pinned, nav.pinned)
+      |> assign(:configure_groups, nav.configure_groups)
+      |> assign(:plugin, nav.plugin)
 
     ~H"""
     <.side_link :for={i <- @author} item={i} active={@active} />
-    <div :for={group <- @configure_groups}>
-      <p class="side-section">{group.label}</p>
-      <.side_link :for={i <- group.items} item={i} active={@active} />
+    <%!-- The Configure hub (#1319) sits above the sections rather than inside
+          one: it is the way in when you do not yet know which section owns the
+          thing you came to change. In Essentials, `@pinned` (Your settings, and
+          a hidden current page) rides in the same block. --%>
+    <div :if={@hub || @pinned != []} class="mt-5" data-nav-pinned>
+      <.side_link :if={@hub} item={@hub} active={@active} />
+      <.side_link :for={i <- @pinned} item={i} active={@active} />
+    </div>
+    <div
+      :for={group <- @configure_groups}
+      class={["side-group", group[:operator?] && "side-group-op"]}
+      data-nav-group={group.key}
+    >
+      <button
+        type="button"
+        class="side-section"
+        data-nav-group-toggle={group.key}
+        aria-expanded="true"
+        aria-controls={"side-group-#{group.key}"}
+      >
+        <span class="side-text">{group.label}</span>
+        <%!-- Operator-only band (#1319). Three signals, not one: a rule above
+              the band, its own name, and this mark — because colour or an icon
+              alone is exactly what stops being seen after a day. In the rail
+              only the dimmer icon tint survives, which is the most a 4.5rem
+              column can say. --%>
+        <.icon
+          :if={group[:operator?]}
+          name="hero-wrench-screwdriver"
+          class="side-section-mark size-3.5"
+        />
+        <.icon name="hero-chevron-down" class="side-section-chevron size-3.5" />
+      </button>
+      <div class="side-group-items" id={"side-group-#{group.key}"}>
+        <.side_link :for={i <- group.items} item={i} active={@active} />
+      </div>
     </div>
     <.side_link :for={i <- @plugin} item={i} active={@active} />
     """
   end
 
-  # Items tagged `platform: true` are for platform admins alone (see the
-  # comment on `platform_admin?` in `console_nav/1`).
-  defp visible_nav_items(items, true = _platform_admin?), do: items
-  defp visible_nav_items(items, false), do: Enum.reject(items, &Map.get(&1, :platform, false))
-
   attr :item, :map, required: true
   attr :active, :atom, default: nil
+  attr :class, :string, default: nil
 
   defp side_link(assigns) do
     ~H"""
     <.link
       navigate={@item.path}
-      class="side-link"
-      aria-current={@item.key == @active && "page"}
+      class={["side-link", @class]}
+      aria-current={@item.key && @item.key == @active && "page"}
       data-side-tip={@item.label}
     >
       <.icon name={@item.icon} class="side-icon size-5 shrink-0" />
       <span class="side-text truncate">{@item.label}</span>
     </.link>
+    """
+  end
+
+  attr :current_user, :map, required: true
+
+  # The sidebar preset switch (`KilnCMSWeb.NavPreset` handles the event on
+  # every signed-in LiveView). One button naming what it will DO, not a
+  # two-state control naming where you are: "Show all tools" is the sentence a
+  # writer who cannot find Menus needs to read. A server round-trip, unlike the
+  # rail and section collapse, because the choice is stored on the user — which
+  # is also what lets the first paint already be right, with nothing to replay.
+  defp nav_preset_switch(assigns) do
+    essentials? = KilnCMSWeb.ConsoleNav.preset(assigns.current_user) == :essentials
+
+    assigns =
+      assigns
+      |> assign(:next, if(essentials?, do: "everything", else: "essentials"))
+      |> assign(:icon, if(essentials?, do: "hero-squares-plus", else: "hero-squares-2x2"))
+      |> assign(
+        :label,
+        if(essentials?, do: gettext("Show all tools"), else: gettext("Show essentials"))
+      )
+
+    ~H"""
+    <button
+      type="button"
+      id="nav-preset-switch"
+      class="side-link w-full"
+      phx-click="set_nav_preset"
+      phx-value-preset={@next}
+      data-side-tip={@label}
+    >
+      <.icon name={@icon} class="side-icon size-5 shrink-0" />
+      <span class="side-text truncate">{@label}</span>
+    </button>
     """
   end
 
@@ -1016,12 +842,19 @@ defmodule KilnCMSWeb.Layouts do
   # The account row — avatar, name over email — opening a menu of what used to
   # sit loose in the footer. A <details> so it opens before the socket
   # connects; `ignore_attributes` keeps LiveView's next patch from stripping the
-  # client-set `open`, and app.js closes it on an outside click or Escape.
+  # client-set `open`, and `data-autoclose` is what app.js keys the
+  # outside-click/Escape close on (#1320 generalized it off `.side-account`, so
+  # the bell could share one handler rather than adding a second).
   defp sidebar_account(assigns) do
     assigns = assign(assigns, :name, display_name(assigns.current_user))
 
     ~H"""
-    <details id="side-account" class="side-account" phx-mounted={JS.ignore_attributes(["open"])}>
+    <details
+      id="side-account"
+      class="side-account"
+      data-autoclose
+      phx-mounted={JS.ignore_attributes(["open"])}
+    >
       <summary class="side-account-row" data-side-tip={@name || @current_user.email}>
         <span class="grid size-9 shrink-0 place-items-center rounded-full bg-primary/15 text-sm font-semibold text-primary-ink uppercase">
           {user_initial(@current_user)}
@@ -1085,6 +918,22 @@ defmodule KilnCMSWeb.Layouts do
     default: nil,
     doc: "the request's organization (#336), supplying the white-label branding (#48)"
 
+  # The stock front page is a marketing page, not an article: a screenshot row
+  # and a feature grid that the reading measure would crush. It opts out with
+  # `wide`, which widens `--public-measure` for that page alone (app.css) rather
+  # than letting each caller invent its own container width — the mistake that
+  # had `/` rendering in the *authoring* shell just to get `max-w-6xl`.
+  attr :wide, :boolean,
+    default: false,
+    doc: "widen the reading measure for a full-width page (the stock front page)"
+
+  # Optional, and nil for the content delivery templates on purpose: a published
+  # Page or Post is the same document for every reader, and this layout has no
+  # authoring nav to hang an account menu off. Passed only where a signed-in
+  # reader is the point — the stock front page, which had these two links from
+  # `Layouts.app` before it moved here and must not lose them.
+  attr :current_user, :any, default: nil, doc: "signed-in reader, for the account/sign-out pair"
+
   slot :inner_block, required: true
 
   def public(assigns) do
@@ -1100,7 +949,7 @@ defmodule KilnCMSWeb.Layouts do
       |> assign(:footer_items, public_menu_items(brand.footer_menu_key, assigns))
 
     ~H"""
-    <div class="public-shell" data-public-theme={@brand.theme}>
+    <div class="public-shell" data-public-theme={@brand.theme} data-public-wide={@wide && "true"}>
       <%!-- The `public-*` classes are style hooks for the theme presets in
             app.css. They carry no styles of their own. --%>
       <header class="public-header border-b border-base-content/10 px-4 py-4 sm:px-6 lg:px-8">
@@ -1138,6 +987,12 @@ defmodule KilnCMSWeb.Layouts do
                 {item.label}
               </a>
             <% end %>
+            <a :if={@current_user} href={~p"/account"} class="hover:text-base-content">
+              {gettext("Account")}
+            </a>
+            <a :if={@current_user} href={~p"/sign-out"} class="hover:text-base-content">
+              {gettext("Sign out")}
+            </a>
             <span
               :if={length(@locale_links) > 1}
               class="flex items-center gap-1"
@@ -1330,7 +1185,8 @@ defmodule KilnCMSWeb.Layouts do
   # Shared authoring-nav links — rendered inline on desktop and stacked in the
   # mobile menu, so they're defined once. Used only by `Layouts.app` (the `/`
   # landing header), which has no site context — so these gate on the global
-  # `@current_user.role` (≈ the effective tier on the default org). The
+  # effective platform role (`RoleGrant.effective_role/1`, ≈ the effective tier
+  # on the default org), resolved once per render. The
   # per-org-tier nav is `console_nav` on the authoring surface (#419).
   attr :current_user, :map, default: nil
 
@@ -1342,19 +1198,20 @@ defmodule KilnCMSWeb.Layouts do
         "rounded-lg px-3 py-1.5 text-sm font-medium text-base-content/80 transition " <>
           "hover:bg-base-200 hover:text-base-content"
       )
+      |> assign(:tier, KilnCMS.Accounts.RoleGrant.effective_role(assigns.current_user))
 
     ~H"""
     <a href="/developers#graphql" class={@item}>{gettext("GraphQL")}</a>
     <a href="/developers#json-api" class={@item}>{gettext("JSON:API")}</a>
     <a
-      :if={@current_user && @current_user.role in [:editor, :admin]}
+      :if={@tier in [:editor, :admin]}
       href={~p"/editor/overview"}
       class={@item}
     >
       {gettext("Editor")}
     </a>
     <a
-      :if={@current_user && @current_user.role in [:editor, :admin]}
+      :if={@tier in [:editor, :admin]}
       href={~p"/editor/calendar"}
       class={@item}
     >
@@ -1363,7 +1220,7 @@ defmodule KilnCMSWeb.Layouts do
     <%!-- Only meaningful with more than one configured locale. --%>
     <a
       :if={
-        @current_user && @current_user.role in [:editor, :admin] &&
+        @tier in [:editor, :admin] &&
           length(KilnCMS.I18n.locales()) > 1
       }
       href={~p"/editor/translations"}
@@ -1372,35 +1229,35 @@ defmodule KilnCMSWeb.Layouts do
       {gettext("Translations")}
     </a>
     <a
-      :if={@current_user && @current_user.role in [:editor, :admin]}
+      :if={@tier in [:editor, :admin]}
       href={~p"/editor/settings"}
       class={@item}
     >
       {gettext("Settings")}
     </a>
     <a
-      :if={@current_user && @current_user.role == :admin}
+      :if={@tier == :admin}
       href={~p"/editor/fields"}
       class={@item}
     >
       {gettext("Fields")}
     </a>
     <a
-      :if={@current_user && @current_user.role == :admin}
+      :if={@tier == :admin}
       href={~p"/editor/forms"}
       class={@item}
     >
       {gettext("Forms")}
     </a>
     <a
-      :if={@current_user && @current_user.role == :admin}
+      :if={@tier == :admin}
       href={~p"/editor/types"}
       class={@item}
     >
       {gettext("Types")}
     </a>
     <a
-      :if={@current_user && @current_user.role == :admin}
+      :if={@tier == :admin}
       href={~p"/editor/api-keys"}
       class={@item}
     >
@@ -1409,7 +1266,7 @@ defmodule KilnCMSWeb.Layouts do
     <%!-- Plugin-contributed nav (D18), each gated by its declared role. --%>
     <a
       :for={item <- Kiln.Plugins.nav_items()}
-      :if={@current_user && nav_item_visible?(item, @current_user.role)}
+      :if={@current_user && KilnCMSWeb.ConsoleNav.plugin_visible?(item, @tier)}
       href={item.path}
       class={@item}
     >
@@ -1419,13 +1276,6 @@ defmodule KilnCMSWeb.Layouts do
     <a :if={@current_user} href={~p"/sign-out"} class={@item}>{gettext("Sign out")}</a>
     """
   end
-
-  # A plugin nav item is visible when the user's effective tier meets its
-  # declared role (`:editor` admits admins too, mirroring the core links);
-  # `:viewer`/`:none` see neither.
-  defp nav_item_visible?(%{role: :admin}, tier), do: tier == :admin
-  defp nav_item_visible?(%{role: :editor}, tier), do: tier in [:editor, :admin]
-  defp nav_item_visible?(_item, _tier), do: false
 
   @doc """
   Provides dark vs light theme toggle based on themes defined in app.css.

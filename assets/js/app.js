@@ -29,6 +29,8 @@ import {FocusTrap} from "./focus_trap"
 import {PasskeyEnroll, initPasskeySignIn} from "./passkeys"
 import {PushToggle} from "./push"
 import {initAdvisoryJump} from "./advisory_jump"
+import {initRevealSection} from "./reveal_section"
+import {FlashAutoDismiss} from "./flash_auto_dismiss"
 import {SavedTicker} from "./saved_ticker"
 import {BodyImageUploader} from "./body_image_uploader"
 import {watchLiveness} from "./liveness"
@@ -39,6 +41,9 @@ const Hooks = {
   SavedTicker,
   BodyImageUploader,
   FocusTrap,
+  // Info flashes close themselves after a few seconds — see
+  // assets/js/flash_auto_dismiss.js.
+  FlashAutoDismiss,
   // Passkey enrolment on /editor/settings (#331) — see assets/js/passkeys.js.
   PasskeyEnroll,
   // Web Push opt-in on /editor/settings (#628) — see assets/js/push.js.
@@ -193,20 +198,7 @@ const Hooks = {
     mounted() {
       const name = this.el.dataset.kilnFocus
       if (!name) return
-      requestAnimationFrame(() => {
-        const target =
-          document.getElementById(`custom-field-${name}`) ||
-          document.querySelector(`[phx-value-field="${CSS.escape(name)}"]`)
-        if (!target) return
-        for (let d = target.closest("details"); d; d = d.parentElement.closest("details")) {
-          d.open = true
-        }
-        target.scrollIntoView({behavior: "smooth", block: "center"})
-        const wrap = target.closest("div") || target
-        wrap.classList.add("kiln-focus-pulse")
-        setTimeout(() => wrap.classList.remove("kiln-focus-pulse"), 1600)
-        if (typeof target.focus === "function") target.focus({preventScroll: true})
-      })
+      requestAnimationFrame(() => focusEditorField(name))
     },
   },
   // Multiplayer preview cursors (#343): report this viewer's pointer position
@@ -240,7 +232,10 @@ const Hooks = {
   // `data-dirty` on the form in sync with its save state; this hook guards
   // full page unloads (tab close, hard reload, plain links) via `beforeunload`
   // and in-app LiveView navigation (e.g. "← All content") by confirming
-  // clicks on live links while dirty.
+  // clicks on live links while dirty — and on `[data-guard-nav]` controls,
+  // which navigate from the server (`push_navigate`) rather than being links:
+  // the notification bell's items mark read *then* navigate, and without the
+  // attribute a click on one discarded unsaved edits with no warning.
   UnsavedGuard: {
     mounted() {
       this.beforeUnload = e => {
@@ -253,7 +248,7 @@ const Hooks = {
 
       this.onClick = e => {
         if (!this.dirty()) return
-        const link = e.target.closest && e.target.closest("a[data-phx-link]")
+        const link = e.target.closest && e.target.closest("a[data-phx-link], [data-guard-nav]")
         if (!link || link.target === "_blank") return
         const message =
           this.el.dataset.unsavedMessage || "You have unsaved changes. Leave without saving?"
@@ -919,6 +914,60 @@ const Hooks = {
   },
 }
 
+// Collapsible nav sections (#1319), persisted the same way the rail is: the
+// list of collapsed group keys lives on <html data-nav-collapsed>, which
+// LiveView never patches, and in localStorage, which root.html.heex replays
+// before first paint. The server always renders the expanded markup — CSS does
+// the hiding — so the only thing left to correct here is `aria-expanded`.
+const collapsedGroups = () =>
+  (document.documentElement.dataset.navCollapsed || "").split(" ").filter(Boolean)
+
+// One head, told what <html> already says. A section holding the current page
+// is kept open by app.css whatever <html> says, so it reads as expanded too.
+const markNavGroup = btn =>
+  btn.setAttribute(
+    "aria-expanded",
+    String(
+      !collapsedGroups().includes(btn.dataset.navGroupToggle) ||
+        !!btn.closest(".side-group")?.querySelector("[aria-current]"),
+    ),
+  )
+
+const syncNavGroups = () =>
+  document.querySelectorAll("[data-nav-group-toggle]").forEach(markNavGroup)
+
+// morphdom calls onNodeAdded for every node of an added subtree, so coalesce
+// those calls into one pass over the few heads once the patch is done.
+let navSyncQueued = false
+const queueNavSync = () => {
+  if (navSyncQueued) return
+  navSyncQueued = true
+  queueMicrotask(() => {
+    navSyncQueued = false
+    syncNavGroups()
+  })
+}
+
+// Navigating moves aria-current, which changes which sections read as open.
+window.addEventListener("phx:page-loading-stop", syncNavGroups)
+
+const toggleNavGroup = key => {
+  const collapsed = collapsedGroups()
+  const next = collapsed.includes(key)
+    ? collapsed.filter(k => k !== key)
+    : [...collapsed, key]
+  if (next.length) document.documentElement.dataset.navCollapsed = next.join(" ")
+  else delete document.documentElement.dataset.navCollapsed
+  try {
+    localStorage.setItem("kiln:nav-collapsed", next.join(" "))
+  } catch (_) {
+    // Storage blocked: the section still toggles for this page view.
+  }
+  syncNavGroups()
+}
+
+syncNavGroups()
+
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
@@ -947,6 +996,12 @@ const liveSocket = new LiveSocket("/live", Socket, {
       for (const cls of ["kiln-issue-mark", "kiln-focus-pulse", "fresh"]) {
         if (from.classList.contains(cls)) to.classList.add(cls)
       }
+      // The nav section heads always arrive from the server as expanded
+      // (#1319) — the collapse lives on <html data-nav-collapsed> and in CSS,
+      // so a patch would otherwise tell a screen reader a section is open
+      // while it is drawn shut. `onNodeAdded` below covers the other half: a
+      // live redirect rebuilds the sidebar rather than updating it.
+      if (from.hasAttribute("data-nav-group-toggle")) markNavGroup(to)
       if (from.tagName === "DETAILS") {
         const serverOpen = to.hasAttribute("open")
         const prevServerOpen = from.dataset.serverOpen
@@ -955,6 +1010,10 @@ const liveSocket = new LiveSocket("/live", Socket, {
         }
         to.dataset.serverOpen = String(serverOpen)
       }
+    },
+
+    onNodeAdded() {
+      queueNavSync()
     },
   },
 })
@@ -976,6 +1035,10 @@ document.addEventListener(
 // Clicking a finding in the editor's advisory panels scrolls to and
 // highlights what it is about — see assets/js/advisory_jump.js.
 initAdvisoryJump()
+
+// A button carrying `data-kiln-reveal="<id>"` scrolls to and focuses that
+// section once its click has been answered — see assets/js/reveal_section.js.
+initRevealSection()
 
 // ⌘K / Ctrl-K opens the editor search palette from anywhere (no-op if already
 // there). Skipped while typing in an input so it doesn't hijack the field.
@@ -1021,6 +1084,29 @@ window.addEventListener("phx:lock_granted", ({detail}) => {
   attempt()
 })
 window.addEventListener("phx:page-loading-stop", _info => topbar.hide())
+
+// Scroll an editor field into view, pulse it and focus it. Shared by the
+// FocusField deep-link hook and `phx:kiln:focus-field`, which the content
+// editor pushes when "Edit URL" (or a save refused on the slug) opens
+// Settings → URL: the event lands after the patch that un-hides the panel.
+function focusEditorField(name) {
+  const target =
+    document.getElementById(`custom-field-${name}`) ||
+    document.querySelector(`[phx-value-field="${CSS.escape(name)}"]`)
+  if (!target) return
+  for (let d = target.closest("details"); d; d = d.parentElement.closest("details")) {
+    d.open = true
+  }
+  target.scrollIntoView({behavior: "smooth", block: "center"})
+  const wrap = target.closest("div") || target
+  wrap.classList.add("kiln-focus-pulse")
+  setTimeout(() => wrap.classList.remove("kiln-focus-pulse"), 1600)
+  if (typeof target.focus === "function") target.focus({preventScroll: true})
+}
+
+window.addEventListener("phx:kiln:focus-field", ({detail}) => {
+  if (detail && detail.field) requestAnimationFrame(() => focusEditorField(detail.field))
+})
 
 // connect if there are any LiveViews on the page
 liveSocket.connect()
@@ -1098,16 +1184,25 @@ document.addEventListener("click", e => {
     // The clicked toggle just hid itself; hand focus to its twin.
     document.querySelector(collapse ? ".side-expand" : ".side-collapse")?.focus()
   }
-  // The account menu is a <details>: a click anywhere outside closes it.
-  document.querySelectorAll(".side-account[open]").forEach(d => {
+  // In rail mode the group heads are hairlines with no label, so a collapsed
+  // section would lose its items with nothing on screen to say why. CSS
+  // already forces them open there; refuse the toggle so the two agree.
+  const groupToggle = e.target.closest("[data-nav-group-toggle]")
+  if (groupToggle && !railMode()) toggleNavGroup(groupToggle.dataset.navGroupToggle)
+  // Self-closing menus are <details data-autoclose> (the sidebar account menu,
+  // the top bar's notification bell): a click anywhere outside closes them.
+  // Keyed on the attribute rather than each class, so the next such menu opts
+  // in by declaring it instead of by editing this file.
+  document.querySelectorAll("details[data-autoclose][open]").forEach(d => {
     if (!d.contains(e.target)) d.removeAttribute("open")
   })
 })
 document.addEventListener("keydown", e => {
-  const open = e.key === "Escape" && document.querySelector(".side-account[open]")
+  const open = e.key === "Escape" && document.querySelector("details[data-autoclose][open]")
   if (!open) return
   open.removeAttribute("open")
-  open.querySelector("summary").focus()
+  // Focus goes back to the control that opened it, not to <body>.
+  open.querySelector("summary")?.focus()
 })
 
 if (process.env.NODE_ENV === "development") {

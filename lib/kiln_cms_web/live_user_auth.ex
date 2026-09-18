@@ -114,7 +114,12 @@ defmodule KilnCMSWeb.LiveUserAuth do
        )
        |> Phoenix.LiveView.redirect(to: ~p"/sign-in")}
     else
-      require_signed_in(hook, socket)
+      case require_signed_in(hook, socket) do
+        # Every signed-in page may render the console shell, whose sidebar
+        # carries the preset switch — see `KilnCMSWeb.NavPreset`.
+        {:cont, socket} -> {:cont, KilnCMSWeb.NavPreset.attach(socket)}
+        halt -> halt
+      end
     end
   end
 
@@ -373,6 +378,11 @@ defmodule KilnCMSWeb.LiveUserAuth do
   only `current_user` (the console nav) asks, so the links it offers and the
   pages behind them answer from one predicate.
   """
-  def platform_admin_user?(%{role: :admin}), do: true
+  #
+  # Re-checks the grant's expiry now rather than trusting the mount-time `role`,
+  # for the reason `KilnCMS.Accounts.Checks.PlatformAdmin` gives.
+  def platform_admin_user?(%{} = user),
+    do: KilnCMS.Accounts.RoleGrant.effective_role(user) == :admin
+
   def platform_admin_user?(_user), do: false
 end

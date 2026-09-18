@@ -282,6 +282,39 @@ defmodule KilnCMS.NotificationsTest do
     CMS.submit_page_for_review!(page, %{}, actor: editor, tenant: org)
   end
 
+  describe "a dynamic entry is named by its own type, not the shared Entry module" do
+    # Every admin-defined type is a `KilnCMS.CMS.Entry`, whose module answers
+    # `:entry`. Stored as the inbox row's `content_type` that built
+    # `/editor/content/entry/:id`, which resolves no type — so the bell, the
+    # inbox and the email all linked nowhere.
+    test "the in-app row and its deep link carry the type's name" do
+      org = KilnCMS.OrgFixtures.org("notif-entry")
+      author = user(:admin)
+      name = "gadget#{System.unique_integer([:positive])}"
+
+      CMS.create_type_definition!(%{name: name, label: "Gadget"}, actor: author, tenant: org)
+
+      entry =
+        CMS.ContentTypes.create!(
+          name,
+          %{title: "A gadget", slug: slug(), blocks: []},
+          actor: author,
+          tenant: org
+        )
+
+      assert :ok = KilnCMS.Notifications.dispatch(:published, entry, nil)
+
+      assert [row] =
+               KilnCMS.Notifications.notifications_for_user!(author.id,
+                 actor: author,
+                 tenant: org
+               )
+
+      assert row.content_type == name
+      assert KilnCMS.Notifications.Link.editor_path(row) == "/editor/content/#{name}/#{entry.id}"
+    end
+  end
+
   # One email per recipient, so a duplicate recipient shows up as a repeat.
   defp all_recipients(emails), do: emails |> Enum.flat_map(&recipients/1) |> Enum.sort()
 end

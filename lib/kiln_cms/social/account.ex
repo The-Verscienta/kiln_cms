@@ -90,10 +90,19 @@ defmodule KilnCMS.Social.Account do
   end
 
   policies do
-    # Credentials for the site's public voice — admin-only. The announcer reads
-    # with `authorize?: false` as a system job.
+    # Credentials for the site's public voice — admin-only.
     policy always() do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
+
+      # `KilnCMS.Automation.RuleWorker` lists a provider's enabled accounts to
+      # announce a publish on them (#1402). READ only: minting, editing or
+      # deleting the credentials for a site's public voice is an admin act, and
+      # narrowing here rather than adding a second policy is what keeps it that
+      # way (Ash ANDs policies, so a second one could not lift this one's
+      # refusal, and widening this one outright would hand system code the
+      # credentials' write path).
+      forbid_unless action_type(:read)
+      authorize_if KilnCMS.Checks.SystemActor
     end
   end
 

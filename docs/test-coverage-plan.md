@@ -1,15 +1,15 @@
 # Test coverage plan
 
-**Status: living document** — batches 1–6 landed; the floor in
+**Status: living document** — batches 1–9 landed; the floor in
 `coveralls.json` is the enforced number, the figures below are the last
 measured run.
 
 Where the suite's remaining blind spots are, in the order they are worth
-closing, and why each one is on the list. Written against a full measured run
-on 2026-08-22: **7,344 tests, 0 failures, 83.1% line coverage**, floor 82.5
-(`coveralls.json`). Batches 1-6 below have since landed; the suite now measures
-**83.6% locally over 7,493 tests**, the floor has moved to **82.7**, and the
-Playwright suite is at 25 journeys.
+closing, and why each one is on the list. Written against a full measured run on
+2026-08-22: **7,344 tests, 0 failures, 83.1% line coverage**, floor 82.5
+(`coveralls.json`). Batches 1-9 below have since landed; CI's own Coverage job
+measured **85.0%** on `main` on 2026-09-17 (84.6% locally over 8,537 tests),
+the floor has moved to **84.5**, and the Playwright suite is at 25 journeys.
 
 Reproduce the numbers with:
 
@@ -19,7 +19,7 @@ Reproduce the numbers with:
 This is not a plan to reach a percentage. The floor exists so coverage cannot
 silently fall (see CONTRIBUTING.md), and every item below earns its place by
 naming a *behaviour nothing currently proves* — not by the size of its
-uncovered block. Six items are listed as already done so the patterns they
+uncovered block. Nine items are listed as already done so the patterns they
 set are reusable; the rest are ordered by what a defect there would cost.
 
 ## Ground rule for anything added here
@@ -204,52 +204,193 @@ What is left in both is fault injection — storage failing mid-write, a probe
 that succeeds while the poster extraction fails — plus two `Logger.error`
 arms for a promotion that cannot happen with a working store.
 
+### 7. `KilnCMS.Media.Ingest` — the fetch seam, then its tests
+
+Batch 6 left this out on purpose: everything still uncovered sat behind one
+obstacle. `download/1` called `SafeFetch.get/2` with **no `req_options`**, so
+the fetch the WordPress importer points at every attachment URL in an uploaded
+export — the most content-chosen request the system makes — was the one fetch in
+the tree that could not be pointed at a `Req.Test` stub. Every comparable module
+already takes one from config (`Webhooks`, `OEmbed`, `Federation`,
+`Links.External`, `Storage.S3`, `Social`, `Push`).
+
+`Ingest.req_options/0` follows that shape, plus a `config/test.exs` entry.
+`SafeFetch` merges it *after* its own options, so address pinning and redirect
+refusal still apply to a stubbed request. **64% (as measured on 2026-09-03) →
+74% (107/143).**
+
+The tests pin what Ingest does with each answer rather than re-testing
+`SafeFetch`, whose own suite already covers the byte cap and redirect mechanics:
+a stored image named after the URL's last segment, percent-decoded, and a
+generated name when the URL has no last segment; a non-2xx reported as
+`{:http_status, status}` with nothing stored; a transport failure returned
+rather than raised; and a `302` pointing at the cloud metadata address producing
+exactly one request. Both mutations — dropping the seam, and passing
+`max_redirects` — fail the file.
+
+Two things this turned up:
+
+* **Two importer tests were getting their "unreachable image" from the real
+  network.** `import_test.exs` let media through in two places and relied on a
+  live connection to the fixture's host failing. Both now stub the 404, and
+  the stub being configured means a future test that forgets one fails loudly
+  ("cannot find mock/stub") instead of dialling out. The reachable case — an
+  imported post's image block re-pointed at the stored item — had no test at
+  all and now does.
+* **The stored image is not the served bytes.** Every image is re-encoded by
+  `ImageProcessor.strip_metadata/2` on the way in (#215), so an assertion that
+  the blob equals the response body is wrong. The test asserts a real PNG
+  landed under the item's key instead.
+
+What is left is fault injection rather than missing seams: the sync A/V strip
+branches (no temp space, a timed-out remux), the storage-failure arms that
+delete a half-written blob, the logs for a derivation or strip job that failed
+to enqueue, and the one-time warning for a missing private storage root.
+
+### 8. `KilnCMS.Storage.S3` — `test/kiln_cms/storage/s3_test.exs`
+
+No seam was needed: `config/test.exs` already routes ExAws through `Req.Test`.
+**56% → 55 of 57 lines.** The two left are the `header/2` fallbacks for a
+header list that isn't `{name, value}` pairs, which Req never returns.
+
+Every error answer now has a test that pins its *shape*, not just
+`{:error, _}`. A store refused by the bucket returns `{:http_error, 403, _}`.
+A store whose temp file is gone returns the stat error before any request is
+sent. A fetch that gets a 404 returns the 404 rather than an empty body. A
+DELETE that gets a 404 means the bucket is gone, and it returns an error, not
+`:ok`. Private fetch and delete pass their errors through. A transport failure
+is returned, not raised; the test sets `:ex_aws, :retries` to one attempt so
+ExAws's backoff doesn't slow the suite.
+
+Ranged reads had no S3 test at all, only Local's. The media download
+controller picks 206, 416 or a plain 200 from the returned shape, so the tests
+pin each one. The range header covers both `a-b` and `a-`. The served range
+comes from `Content-Range`, not from the request. A 416 returns
+`:range_not_satisfiable`. A 200 without `Content-Range`, or with an unknown
+total (`bytes 0-2/*`), returns `:no_content_range` instead of guessing. The
+private variant reads the private bucket.
+
+Multipart (#494) now runs on a file one byte over the 16 MB threshold. The
+tests cover the whole happy path: object metadata rides on the initiate call,
+the file goes up as four parts summing to the file size, and completion lists
+every part's ETag. A part refused mid-upload fails the store with nothing
+completed, and a refused initiate sends no parts. Five mutations each fail the
+file: a delete error turned into `:ok`, the 416 arm removed, multipart never
+chosen, the `a-` range header changed, and a range guessed when
+`Content-Range` is missing.
+
+One thing this turned up: **a truncated multipart was never aborted.**
+`ExAws.S3.Upload` returns the part error without sending
+`AbortMultipartUpload`, so the parts already uploaded stayed on the bucket.
+They were invisible to listing and billed until a lifecycle rule cleared them.
+The adapter now runs the initiate step itself, so it holds the upload id, and
+sends the abort (`DELETE ?uploadId`) when a part or the complete call is
+refused. It still returns the original error. The stub answers the abort, and
+three tests pin it: a refused part aborts `up-1` and sends no complete, a
+refused complete aborts too, and an abort that fails as well still returns the
+part's 403 and logs the upload id. The happy path asserts no abort is sent.
+Removing the abort fails all three, and so does aborting the wrong upload id.
+Returning the abort's error instead of the part's fails the last one. The one
+new line without a test is the arm that turns a part upload's task timeout into
+an error; before, that timeout crashed the caller and still left the parts
+behind.
+
+### 9. `KilnCMS.Portability.CLI` and the three mix tasks it serves
+
+**Done**, in `test/kiln_cms/portability/cli_test.exs` and
+`test/mix/tasks/kiln_portability_tasks_test.exs`. **`CLI` 6% → 94%. The three
+tasks it serves, from 0%, now sit at 90–92% each.** The lines left are fallback
+clauses for shapes the callers never pass.
+
+The module was smaller than this entry first described. It has no
+subcommands or exit codes of its own. It holds four functions the
+`kiln.import.wordpress`, `kiln.import.content` and `kiln.export.content` tasks
+share: `scope!` (who a run acts as), `print_report`, `author_map!` and
+`maybe_drain_media`. The tasks hold the argument parsing, so both are covered.
+
+`scope!` is tested for what it refuses. An `--actor` or `--org` that matches
+nothing raises, and never falls back to an admin or the default organization.
+No admin and no `--actor` raises too. The "Acting as" line names the user the
+run is really attributed to. The report tests use a real import of the WXR
+fixture, so the text is pinned against the real report shape:
+
+* A dry run's banner is the first and the last line, and its counts use the
+  future tense.
+* A real run has no banner.
+* A re-run counts what was already there as skipped.
+* An unmapped author is listed with the `--author-map` hint, and a mapped one
+  without it.
+* The failure list is capped at 20 lines, but its summary count is the full
+  number.
+
+The task tests check each task's switches and each refusal: an export written
+with `--out` imports into another organization, and so does a CSV export. A
+dry-run import writes nothing. `--drain-media` is accepted (#931). CSV
+without exactly one `--type` is refused, and so is a CSV whose type carries
+prose. A CSV with an unknown column, an empty CSV, a file that isn't JSON, JSON
+with no `records`, a missing file, and a WXR over the 64 MB limit are each
+refused with their own message. The WXR test uses a sparse file, since the
+size check is a stat. Seven mutations each fail the files, among them an actor
+or organization miss falling back, the closing dry-run banner removed, the
+list cap moved, and `--drain-media` undeclared again.
+
+One thing this turned up: **`--state` accepted any word that already existed
+as an atom.** It went through `String.to_existing_atom/1`. A typo crashed with
+a bare `ArgumentError`, but a word that was an atom elsewhere (`--state admin`)
+matched nothing and gave an empty export that exited 0. The task now accepts
+exactly `draft | in_review | published | archived` and refuses anything else
+by name. The default is still published and draft, so content in review is
+left out unless named; `docs/content-portability.md` now says so.
+
 ## Next
 
-### 7. `KilnCMS.Media.Ingest` — 64%, and it needs a seam first
+### 10. Console screens
 
-Left out of batch 6 deliberately. Its unsafe-URL guard is already well covered
-(`store_url/2` refuses loopback, private ranges, link-local and `file://`), and
-almost everything still uncovered is behind one obstacle: `download/1` calls
-`SafeFetch.get/2` with **no `req_options`**, so there is no way to point it at
-a `Req.Test` stub. Every comparable module in the tree takes one from config —
-`Webhooks`, `OEmbed`, `Federation`, `Links.External`, `Storage.S3`, `Unsplash`,
-`Updates` — so `Ingest` is the anomaly, and the fetch that most deserves a
-test is the one that cannot have one. This is the most content-chosen fetch
-in the system: the URLs come out of a WXR file someone uploaded.
-
-Adding `req_options: KilnCMS.Media.Ingest.req_options()` and a `config/test.exs`
-entry would follow the established convention and unlock the HTTP-status,
-too-large, and filename-derivation branches. That is a small lib change, so it
-wants its own PR rather than riding along with tests.
-
-### 8. `KilnCMS.Storage.S3` — 56% (25 uncovered)
-
-`config/test.exs` already points it at `Req.Test`, so the Bluesky stub
-pattern transfers directly. Cover the error branches: a 403 from a wrong
-credential, a 404 on delete, a truncated multipart. Storage failures surface
-to editors as lost uploads, and none of these paths has ever run.
-
-### 9. `KilnCMS.Portability.CLI` — 6% (62 uncovered)
-
-The thinnest-covered non-macro module in the tree. `Portability.Export` (80%)
-and `Portability.Import` (79%) carry the logic, so this is argument parsing,
-output formatting, and exit codes — cheap to cover with a captured-IO test per
-subcommand, and worth it because a wrong exit code here breaks somebody's
-migration script silently.
-
-### 10. Console screens at 46–65%
-
-`newsletter_live` (46%, 86 uncovered), `settings_live` (57%, 88),
-`experiments_live` (60%, 45), `field_definition_live` (64%, 60),
-`social_live` (65%, 47). These are large screens where the mount and the happy
+Measured 2026-09-17: `settings_live` (61.7%, 90 uncovered), `experiments_live`
+(60.9%, 45), `social_live` (65.7%, 47), `field_definition_live` (86.6%, 33 —
+lifted by #1511/#1512). These are large screens where the mount and the happy
 path are covered and the branchy event handlers are not. Do not chase the
 percentage: for each screen, list the events its template can push, and cover
 the ones with a persistence or authorization consequence. The rest is
 rendering that a snapshot would pin without proving anything.
 
-### 11. Mix tasks — 51.6% as a directory (587 uncovered)
+**`newsletter_live` is done — `test/kiln_cms_web/live/newsletter_live_test.exs`,
+46.2% → 93.1%.** It was the worst of the five, and six of its eight events had
+never run; each one writes or deletes a row, and the rows are people's inboxes.
+The tests drive the rendered page (`render_submit`/`render_click` on the real
+form ids and buttons), so they also pin that the event a button pushes is the
+event the module handles.
 
+What they cover: a segment created, refused when blank, and refused on a taken
+slug (uniqueness is the database's, so it lands on submit, not on change); a
+segment deleted, and a delete of a missing one reported rather than crashing;
+a subscriber added as **pending** and counted as such in the heading; confirm
+and remove, each with their refusal; the send form end to end, with the
+campaign appearing in the history table; only published posts offered; and no
+campaign written when no post is chosen.
+
+Two things this turned up. A **forged id** — the shape the buttons push, with
+somebody else's uuid — must be refused rather than obeyed; the test names a
+subscriber that must survive it. And a **manual re-send is allowed on purpose**:
+the `:already_sent` dedupe belongs to the automation identity ({rule, content,
+publish revision}), not to a person pressing Send twice. The opposite is the
+natural guess, and being wrong about it is two copies in every inbox, so it is
+pinned.
+
+Nine mutations fail the file, among them the delete error arm reporting
+success, confirm doing nothing, the heading counting everyone, remove taking
+the first subscriber rather than the named one, and the post list ignoring
+`state` (that last one survived the first pass — the draft-post test exists
+because of it).
+
+What is left there is the send-error message helpers (a gated post, a missing
+segment, an unfired publish) and the tier-backed segment branch of
+`sendable_audiences/1`, which needs a membership tier to reach.
+
+### 11. Mix tasks — 69.5% as a directory (575 uncovered)
+
+It was 51.6% when this list was written; batch 9 covered the three portability
+tasks and took the directory to 69.5% (CI, 2026-09-17). What is left:
 `kiln.federation` (0/40) and `kiln.audit.checkpoint` (0/46) have never run;
 `kiln.update` is 14%, `kiln.toolchain.check` 17%. The number reads worse than
 it is — most tasks are thin shells over modules that *are* tested — so the
@@ -279,8 +420,13 @@ Three things report low and should be left alone:
 total. After a batch lands, re-measure and raise it to just under the new
 number — the floor's job is to stop regression, so leaving it behind a batch
 that moved the total gives back exactly what the batch bought. It moved to
-**82.7** with batch 3; `coveralls.json`'s own comment carries the measurement
-it was set against, and that comment is the thing to update next time.
+**82.7** with batch 3 and to **84.5** after batch 9, measured against CI's
+85.0%; `coveralls.json`'s own comment carries the measurement it was set
+against, and that comment is the thing to update next time.
+
+Do not let it drift behind again. Batches 8 and 9 both landed with the floor
+still at 82.7, so the slack under CI's number had grown to 2.3 points — enough
+for several modules to lose their tests without the gate saying a word.
 
 Raise it against **CI's** measured number, not a local one. Which tests run is
 host-dependent (`:pg_tools`, `:ffmpeg`/`:no_ffmpeg`, `:qpdf` are excluded where

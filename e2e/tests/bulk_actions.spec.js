@@ -124,6 +124,6 @@ test.describe("content list bulk actions", () => {
     // that has left /editor, so afterEach costs nothing and still covers the
     // case where an assertion above failed before the delete ran.
     await page.goto("/editor/trash");
-    for (const n of [1, 2]) await expect(page.getByText(`${prefix} ${n}`)).toBeVisible();
+    for (const n of [1, 2]) await expect(page.locator("#main").getByText(`${prefix} ${n}`)).toBeVisible();
   });
 });

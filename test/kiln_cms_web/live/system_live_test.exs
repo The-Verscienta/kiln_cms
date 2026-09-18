@@ -399,10 +399,19 @@ defmodule KilnCMSWeb.SystemLiveTest do
     html |> Floki.parse_document!() |> Floki.find("#plugins") |> Floki.raw_html()
   end
 
+  # The panel renders one row per compiled plugin, each with its own `dl`, so
+  # this scopes to the fixture plugin's row before reading the pairs. An
+  # unscoped `#plugins dl > div` merges every plugin's counts into one map,
+  # which holds only while the fixture plugin is the sole entry — untrue in a
+  # downstream project's composed suite, where its own plugin is registered
+  # beside the fixture (projects/README.md) and contributes rows of its own.
   defp contribution_counts(html) do
     html
     |> Floki.parse_document!()
-    |> Floki.find("#plugins dl > div")
+    |> Floki.find("#plugins li")
+    |> Enum.find([], &(&1 |> Floki.raw_html() |> String.contains?("KilnCMS.FixturePlugin")))
+    |> List.wrap()
+    |> Floki.find("dl > div")
     |> Map.new(fn pair ->
       {pair |> Floki.find("dt") |> Floki.text() |> String.trim(),
        pair |> Floki.find("dd") |> Floki.text() |> String.trim()}

@@ -48,6 +48,42 @@ defmodule KilnCMS.CMS.FieldDefinition do
   @spec field_types() :: [atom()]
   def field_types, do: KilnCMS.CMS.FieldTypes.names()
 
+  @doc """
+  The machine name a field's label suggests: lowercase ASCII letters, digits
+  and underscores, starting with a letter — the shape the `name` validation
+  below accepts.
+
+  Accents fold to their base letter and any other run of characters becomes a
+  single underscore. A label that starts with a digit gets a `field_` prefix
+  rather than losing the digit, and a label with nothing usable in it suggests
+  `""`, which the validation then refuses on its own terms.
+
+      iex> KilnCMS.CMS.FieldDefinition.name_from_label("Shoe size (EU)")
+      "shoe_size_eu"
+
+      iex> KilnCMS.CMS.FieldDefinition.name_from_label("Crème brûlée")
+      "creme_brulee"
+
+      iex> KilnCMS.CMS.FieldDefinition.name_from_label("3D model")
+      "field_3d_model"
+  """
+  @spec name_from_label(String.t() | nil) :: String.t()
+  def name_from_label(label) when is_binary(label) do
+    name =
+      label
+      |> String.normalize(:nfd)
+      |> String.replace(~r/\p{Mn}/u, "")
+      |> String.downcase()
+      |> String.replace(~r/[^a-z0-9]+/, "_")
+      |> String.trim("_")
+
+    name = if name =~ ~r/\A[0-9]/, do: "field_" <> name, else: name
+
+    name |> String.slice(0, KilnCMS.Limits.line()) |> String.trim_trailing("_")
+  end
+
+  def name_from_label(_label), do: ""
+
   admin do
     resource_group :content
     table_columns [:content_type, :name, :label, :field_type, :required, :position]
@@ -120,7 +156,13 @@ defmodule KilnCMS.CMS.FieldDefinition do
     end
 
     # Editors may read definitions so the content editor can render the fields.
+    #
+    # The system actor reads them too (#1402): firing a document needs the field
+    # schema to turn `custom_fields` values into JSON-LD
+    # (`KilnCMS.Firing.CustomFields`). Read-only — defining a field stays admin,
+    # through the policy below and the bypass above.
     policy action_type(:read) do
+      authorize_if KilnCMS.Checks.SystemActor
       authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 

@@ -131,10 +131,11 @@ defmodule KilnCMS.Search.HybridTest do
       CMS.create_page!(%{title: "alpha #{n}", slug: slug()}, actor: admin)
     end
 
-    # Matches the fuzzy leg (title ILIKE "alpha%") but not the keyword leg
-    # ("alphaa" doesn't stem to "alpha") — it can only surface if the fallback
-    # runs, which the three keyword hits keep switched off.
-    near_miss = CMS.create_page!(%{title: "alphaa", slug: slug()}, actor: admin)
+    # Matches the fuzzy leg (trigram-similar to "alpha") but not the keyword
+    # leg — not "alphaa", which the keyword leg's prefix match on the last
+    # term now reaches — so it can only surface if the fallback runs, which
+    # the three keyword hits keep switched off.
+    near_miss = CMS.create_page!(%{title: "alphx", slug: slug()}, actor: admin)
     KilnCMS.DataCase.drain_oban()
 
     put_search_env(semantic: false)

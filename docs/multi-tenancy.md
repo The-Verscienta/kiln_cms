@@ -7,7 +7,7 @@ A single-site install is just a deployment with one org — the **default org** 
 and never has to think about any of this.
 
 This page is the isolation model in one place. The configuration table is in
-[environment-variables.md](environment-variables.md#optional--multi-tenancy-336);
+[environment-variables.md](environment-variables.md#multi-tenancy-336);
 who can do what *within* an org is in [granular-rbac.md](granular-rbac.md).
 
 ## The model: one database, rows tagged by org
@@ -59,7 +59,7 @@ unmatched host then gets a `404` (or a `503` with `retry-after` if the lookup
 could not run because the database is down) instead of the default org. The
 apex (`PHX_HOST`) is never refused; health probes and the payment webhook are
 exempt. The full behaviour, including what static files do, is under
-[`TENANT_STRICT_HOST`](environment-variables.md#optional--multi-tenancy-336).
+[`TENANT_STRICT_HOST`](environment-variables.md#multi-tenancy-336).
 
 Kiln warns if you forget: at boot, when the second org is created, and on
 `/editor/system` for as long as the gap stays open.

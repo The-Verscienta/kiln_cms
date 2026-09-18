@@ -1,5 +1,13 @@
 # Multiplayer live preview with presence
 
+> **Scope: co-*viewing*, which is on in production.** This page is about two
+> people watching the same draft preview — a presence bar and live cursors, both
+> live in a production build. CRDT co-*editing* (simultaneous typing in one
+> rich-text block) is a **separate prototype, disabled in production**: it is
+> gated on `config :kiln_cms, :collab_prototype`, which is set only in
+> `config/dev.exs` and `config/test.exs`. See
+> [collaborative-editing-spike.md](collaborative-editing-spike.md).
+
 Two (or more) people can open the **same** live preview of a draft and see each
 other in it — a live presence bar of who's watching, plus each other's **cursors**
 moving over the page in real time
@@ -10,11 +18,9 @@ feature even Sanity gates behind enterprise pricing.
 ## The asymmetry
 
 A `Phoenix.Presence` tracker already exists; shared preview is near-trivial on
-top. (This page is about *viewing* together, which is on in production. CRDT
-co-*editing* is a separate, dev-only prototype —
-[production status: disabled](collaborative-editing-spike.md).) `Phoenix.Presence` handles
-join/leave over the cluster, and native `Phoenix.PubSub` carries cursor moves —
-no external realtime service, sub-200ms on a LAN.
+top. `Phoenix.Presence` handles join/leave over the cluster, and native
+`Phoenix.PubSub` carries cursor moves — no external realtime service, sub-200ms
+on a LAN.
 
 ## Using it
 

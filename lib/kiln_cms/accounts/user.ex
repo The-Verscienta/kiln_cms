@@ -12,7 +12,7 @@ defmodule KilnCMS.Accounts.User do
     # `SecondFactorHoldExtension` carries no DSL of its own: it is the
     # compile-time pin on the `tokens` settings below that the two-factor hold
     # (#742) depends on. See `KilnCMS.Accounts.Verifiers.SecondFactorHoldContract`.
-    extensions: [AshAuthentication, KilnCMS.Accounts.SecondFactorHoldExtension]
+    extensions: [AshAuthentication, AshOban, KilnCMS.Accounts.SecondFactorHoldExtension]
 
   # The remember-me cookie's name, which is `__Host-`-prefixed exactly when the
   # session cookie is (#699). Resolved here rather than written as a literal
@@ -156,21 +156,47 @@ defmodule KilnCMS.Accounts.User do
     # to admins or the user themselves, so anonymous and bearer-other API callers
     # only ever get the public byline (`id`, `name`). Internal byline/JSON-LD
     # loads run with `authorize?: false`, so they still read `name`.
+    # `granted_role`/`granted_role_expires_at` are NOT listed here, and cannot be:
+    # field policies only cover public fields, and those two are `public? false`
+    # (access-control config, like `audiences`) so they reach no API surface at
+    # all. Nothing copies them into `role` on read, so this policy is the whole
+    # of what an API caller can learn about a tier.
     field_policy [
       :email,
       :role,
       :notify_on_review_request,
       :notify_on_publish,
       :notify_on_return_to_draft,
-      :notify_on_comment
+      :notify_on_comment,
+      :nav_preset
     ] do
-      authorize_if actor_attribute_equals(:role, :admin)
+      authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
       authorize_if expr(id == ^actor(:id))
     end
 
     # Everything else (id, name, timestamps) follows the resource read policy.
     field_policy :* do
       authorize_if always()
+    end
+  end
+
+  # Expired temporary roles (`KilnCMS.Accounts.RoleGrant`). Authorization does not
+  # wait for this — every tier decision compares the expiry with the clock — so
+  # the trigger is hygiene plus the session eviction, and a missed
+  # run cannot leave anyone elevated. Hourly rather than nightly for the
+  # eviction's sake: a grant that ran out at 09:00 should not leave its holder's
+  # open console authorized until 04:00 tomorrow.
+  oban do
+    triggers do
+      trigger :expire_role_grants do
+        action :expire_role_grant
+        queue :default
+        scheduler_cron "5 * * * *"
+        where expr(not is_nil(granted_role) and granted_role_expires_at <= now())
+
+        worker_module_name KilnCMS.Accounts.User.AshOban.Worker.ExpireRoleGrants
+        scheduler_module_name KilnCMS.Accounts.User.AshOban.Scheduler.ExpireRoleGrants
+      end
     end
   end
 
@@ -199,6 +225,14 @@ defmodule KilnCMS.Accounts.User do
       accept [:name]
     end
 
+    # The console sidebar preset (`KilnCMSWeb.ConsoleNav.sidebar/3`). Its own
+    # action, accepting nothing else, so the sidebar switch can never be a way
+    # to write any other column. Self-only, like the notification prefs below.
+    update :set_nav_preset do
+      description "Choose how much of the console the sidebar shows."
+      accept [:nav_preset]
+    end
+
     # Self-service workflow-notification preferences (issue #46). A user can
     # toggle their own; admins can edit anyone's via the policy bypass.
     update :update_notification_prefs do
@@ -220,10 +254,67 @@ defmodule KilnCMS.Accounts.User do
       require_atomic? false
       validate KilnCMS.Accounts.Validations.FieldGrantsShape
 
+      # A temporary admin must not be able to make itself a permanent one — the
+      # bound on a grant is otherwise whatever the grantee decides. See the module.
+      validate KilnCMS.Accounts.Validations.StandingAdminOnly
+
+      # An admin demoting the last admin locks every operator out of `/editor`
+      # with no route back through the UI — see the validation module.
+      validate KilnCMS.Accounts.Validations.NotLastAdmin
+
+      # A standing tier at or above a live temporary one makes the grant
+      # meaningless; leaving it on the row would show a countdown that changes
+      # nothing when it runs out.
+      change KilnCMS.Accounts.Changes.ClearRedundantRoleGrant
+
       # Every socket authorizes once, at connect and join, and never again — so
       # a demotion or a narrowed scope left the live ones holding the grant they
       # had (#675). Dropping them makes the next message prove it again.
       change {KilnCMS.Accounts.Changes.EvictSessions, reason: :access_changed}
+    end
+
+    # Time-boxed elevation (`KilnCMS.Accounts.RoleGrant`) — "admin until Friday".
+    # Its own action rather than two more fields on `:manage_access`, because it
+    # is the one write here that does NOT change what the person permanently is:
+    # `role` is untouched, which is what lets expiry be a comparison rather than
+    # a scheduled revert. Clearing both fields revokes a grant early.
+    update :grant_temporary_role do
+      description "Grant or revoke a time-boxed elevation above the standing role."
+      accept [:granted_role, :granted_role_expires_at]
+      # The validation compares two attributes plus the standing role — no atomic
+      # expression.
+      require_atomic? false
+
+      # A grantee cannot extend or re-grant itself; see the validation module.
+      validate KilnCMS.Accounts.Validations.StandingAdminOnly
+      validate KilnCMS.Accounts.Validations.TemporaryRoleGrant
+
+      # Both directions matter (#675). Revoking early narrows a live socket's
+      # grant; granting widens it, and a socket authorized a moment ago would
+      # otherwise keep the old tier until it happened to reconnect.
+      change {KilnCMS.Accounts.Changes.EvictSessions, reason: :role_grant_changed}
+    end
+
+    # The expiry sweep's write (AshOban trigger below). Authorization never needs
+    # it — `RoleGrant` already reads an expired grant as no grant — so this is
+    # hygiene plus the eviction: it clears the two dead columns and drops sockets
+    # that authorized while the grant was live.
+    update :expire_role_grant do
+      description "Clear an expired temporary role (system sweep)."
+      accept []
+      require_atomic? false
+      change set_attribute(:granted_role, nil)
+      change set_attribute(:granted_role_expires_at, nil)
+      change {KilnCMS.Accounts.Changes.EvictSessions, reason: :role_grant_expired}
+    end
+
+    # Send an account a password-reset link on an operator's behalf. Separate
+    # from the anonymous `:request_password_reset_token` above, which cannot
+    # report what happened by design — see KilnCMS.Accounts.AdminPasswordReset.
+    action :send_password_reset, :atom do
+      description "Email a password-reset link to a named account (admin-only)."
+      argument :user_id, :uuid, allow_nil?: false
+      run KilnCMS.Accounts.AdminPasswordReset
     end
 
     # Billing-derived read entitlements (#337 Phase 2). Written only by
@@ -250,6 +341,13 @@ defmodule KilnCMS.Accounts.User do
       description "Scrub personal data from a user while retaining audit history."
       require_atomic? false
       accept []
+
+      # Erasure resets the role to `:viewer`, so it is a demotion — `demotes?`
+      # rather than letting the validation read the attribute, because whether it
+      # would see `:admin` or the already-forced `:viewer` depends on which of the
+      # two lines below is declared first.
+      validate {KilnCMS.Accounts.Validations.NotLastAdmin, demotes?: true}
+
       change KilnCMS.Accounts.Changes.AnonymizeUser
 
       # The erasure revokes tokens, which stops new connections; the live ones
@@ -711,9 +809,22 @@ defmodule KilnCMS.Accounts.User do
       authorize_if always()
     end
 
+    # The hourly `expire_role_grants` trigger runs with no actor. Unconditional,
+    # like `KilnCMS.Accounts.Token`'s: AshOban's scheduler *reads* the rows it will
+    # sweep through the primary read before any worker writes, and a grant scoped
+    # to `action(:expire_role_grant)` never matched that read — with a nil actor the
+    # self-only read policy below filtered it to zero rows, so the sweep (and the
+    # session eviction it exists for) silently never ran. `AshObanInteraction` only
+    # matches AshOban's own scheduler/worker context.
+    bypass AshOban.Checks.AshObanInteraction do
+      authorize_if always()
+    end
+
     # Admins manage all users — listing accounts and assigning roles (RBAC
-    # promotion happens here, never via self-registration).
-    bypass actor_attribute_equals(:role, :admin) do
+    # promotion happens here, never via self-registration). `PlatformAdmin`
+    # re-checks a temporary admin grant's expiry at authorization time; see
+    # that module.
+    bypass KilnCMS.Accounts.Checks.PlatformAdmin do
       authorize_if always()
     end
 
@@ -734,6 +845,10 @@ defmodule KilnCMS.Accounts.User do
       authorize_if expr(id == ^actor(:id))
     end
 
+    policy action(:set_nav_preset) do
+      authorize_if expr(id == ^actor(:id))
+    end
+
     # 2FA is strictly self-service: a user manages the second factor on their own
     # account only (the admin bypass above still lets an operator intervene).
     # `:consume_totp_recovery_code` runs pre-auth as a system call
@@ -750,7 +865,7 @@ defmodule KilnCMS.Accounts.User do
     # Erasure is an operator action — admins only (covered by the admin bypass
     # above; this makes the intent explicit and forbids everyone else).
     policy action(:anonymize) do
-      authorize_if actor_attribute_equals(:role, :admin)
+      authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
     end
 
     # First-run bootstrap (#1317): anyone may create the first admin while no
@@ -774,8 +889,14 @@ defmodule KilnCMS.Accounts.User do
     # Assigning the editorial role and consumer audiences is an admin action —
     # never self-service (a user must not grant themselves access). Covered by
     # the admin bypass above; explicit here to forbid everyone else.
-    policy action(:manage_access) do
-      authorize_if actor_attribute_equals(:role, :admin)
+    #
+    # `:grant_temporary_role` and `:send_password_reset` are the same kind of
+    # operator lever and get the same grant. The two that confer a tier also carry
+    # `Validations.StandingAdminOnly`, because a *temporary* admin passes this.
+    # `:expire_role_grant` is reached by the sweep through the AshOban bypass at
+    # the top, and by an admin through the `PlatformAdmin` bypass.
+    policy action([:manage_access, :grant_temporary_role, :send_password_reset]) do
+      authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
     end
 
     # Billing entitlements are system-only: only `KilnCMS.Billing.Entitlements`
@@ -829,6 +950,24 @@ defmodule KilnCMS.Accounts.User do
       default :viewer
       allow_nil? false
       public? true
+    end
+
+    # A time-boxed elevation above `role` — "admin until Friday". `role` above
+    # stays the standing tier for the whole life of the grant, and every tier
+    # decision asks `KilnCMS.Accounts.RoleGrant.effective_role/1`, so expiry needs
+    # nothing scheduled to take effect. See that module for why it is modelled this way
+    # round; `:grant_temporary_role` is the only action that writes it.
+    #
+    # Access-control config, so `public? false` like `audiences`: it reaches no
+    # API surface, and the field policy above therefore cannot cover it (field
+    # policies only apply to public fields). See the comment there.
+    attribute :granted_role, :atom do
+      constraints one_of: [:admin, :editor, :viewer]
+      public? false
+    end
+
+    attribute :granted_role_expires_at, :utc_datetime_usec do
+      public? false
     end
 
     # Consumer-facing access tiers this user belongs to (the *read* axis, kept
@@ -913,6 +1052,22 @@ defmodule KilnCMS.Accounts.User do
     # the setting nobody finds.
     attribute :notify_on_comment, :boolean do
       default true
+      allow_nil? false
+      public? true
+    end
+
+    # How much of the console the sidebar shows (`KilnCMSWeb.ConsoleNav.sidebar/3`):
+    # the daily author screens, or every screen. Per user and server-side, so it
+    # follows them across devices and the first paint is already right.
+    #
+    # `:essentials` for an account created from now on. Accounts that existed
+    # before this column were backfilled to `:everything` by its migration, which
+    # adds the column with that default and only then switches the default —
+    # nobody who already knows where Menus is finds it gone after an upgrade.
+    # Personal, so it is in the self-or-admin field policy above.
+    attribute :nav_preset, :atom do
+      constraints one_of: [:essentials, :everything]
+      default :essentials
       allow_nil? false
       public? true
     end

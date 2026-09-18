@@ -1,7 +1,7 @@
 {
   "name": "@kiln-cms/client",
   "version": "0.1.0",
-  "description": "Official JS/TS client for the Kiln CMS delivery APIs — typed JSON:API reads, search, fired artifacts, preview tokens, point-in-time reads, and the kiln-types generator.",
+  "description": "Official JS/TS client for the KilnCMS delivery APIs — typed JSON:API reads, search, fired artifacts, preview tokens, point-in-time reads, and the kiln-types generator.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",

@@ -77,13 +77,19 @@ defmodule KilnCMS.Billing.Changes.RecordTransition do
         provider_event_id: Ash.Changeset.get_argument(changeset, :provider_event_id),
         # Non-nil only when a human caused it — i.e. an admin comp. Webhook-driven
         # transitions run actorless, and their provenance is the event id above.
-        actor_id: context.actor && context.actor.id,
+        actor_id: actor_id(context.actor),
         note: membership.note
       },
       authorize?: false,
       tenant: membership.org_id
     )
   end
+
+  # `%KilnCMS.SystemActor{}` (#1402) has no `:id` — `context.actor.id` on it
+  # raised a `KeyError` inside this after_action and rolled the transition back.
+  # A system-driven transition is recorded like an actorless webhook one.
+  defp actor_id(%{id: id}), do: id
+  defp actor_id(_actor), do: nil
 
   # A renewal is an `:active -> :active` transition that moved the period end; it
   # is worth its own kind so the trail distinguishes "kept paying" from

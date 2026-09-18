@@ -1,3 +1,10 @@
+# The optional ML stack (#1321) is decided before anything else in this file:
+# `deps/0` below reads it to leave Bumblebee/Nx/EXLA out of the tree entirely
+# unless `KILN_ML` is on, and `config/dev.exs` + `config/test.exs` require the
+# same snippet for the same answer. See `config/ml_flag.exs` for why the flag
+# lives in a standalone `.exs` and not in `lib/`.
+Code.require_file(Path.expand("config/ml_flag.exs", __DIR__))
+
 defmodule KilnCMS.MixProject do
   use Mix.Project
 
@@ -44,6 +51,7 @@ defmodule KilnCMS.MixProject do
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
+      releases: releases(),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
       listeners: [Phoenix.CodeReloader],
       # `mix coveralls.*` (#1314) — floor and skip list in coveralls.json.
@@ -89,12 +97,19 @@ defmodule KilnCMS.MixProject do
       # HTML only. Nothing consumes the EPUB, and building it doubles both the
       # run time and every warning the docs gate reports.
       formatters: ["html"],
-      # Docs are built from `main`, which runs ahead of the latest release tag
-      # (`v0.5.0`…). ExDoc's default `source_ref` of "v#{version}" would link
-      # "View Source" to the tagged file, which can lack the function being
-      # documented or sit at a different line. Point at the branch the docs
-      # were built from instead.
-      source_ref: "main",
+      # "View Source" links are only useful if they point at an immutable ref.
+      # A branch is not one: links built from `main` keep resolving as the
+      # branch moves, so a published build eventually points at a shifted line
+      # or a function that no longer exists. Point at this version's release
+      # tag — `@version` is bumped to match the tag in the release commit
+      # (see `docs/releasing.md`), so a docs build of a release resolves to
+      # exactly the code it documents.
+      #
+      # A build from an untagged mid-cycle `main` is the case the tag cannot
+      # cover: `@version` there still names the *previous* release, whose tag
+      # predates the code being documented. Pin such a build to its own commit
+      # with `DOCS_SOURCE_REF=$(git rev-parse HEAD) mix docs`.
+      source_ref: System.get_env("DOCS_SOURCE_REF", "v#{@version}"),
       nest_modules_by_prefix: [KilnCMS, KilnCMSWeb, Kiln],
       # Two exclusions:
       #
@@ -135,6 +150,13 @@ defmodule KilnCMS.MixProject do
         # excluded from the reference by `filter_modules` above.
         "Example.Catalog",
         "Example.Plugin",
+        # Behaviour callbacks (`@impl true`, so ExDoc hides them). Both are
+        # named by `docs/semantic-search-plan.md` and `KilnCMS.Search.ML`,
+        # which have to say which functions return
+        # `%KilnCMS.Search.ML.NotCompiledError{}` in a lean build (#1321) —
+        # naming them is the point, and there is nothing to link them to.
+        "KilnCMS.Search.Embedder.Bumblebee.embed/1",
+        "KilnCMS.Search.Reranker.Bumblebee.scores/2",
         # A dependency's module, marked `@moduledoc false` upstream. Naming it
         # is correct and useful — `KilnCMS.CMS.Calculations.RelatedLinks`
         # explains a real behaviour of it — but ExDoc has nothing to link a
@@ -181,6 +203,30 @@ defmodule KilnCMS.MixProject do
   # `title:` is only overridden where a document's H1 carries internal phase
   # numbering that would otherwise read as part of the feature's name.
   # `filename:` is required wherever two extras share a basename (README).
+  #
+  # **A shared basename makes relative links to those files unwritable.** ExDoc
+  # resolves a relative link from one extra to another by basename and nothing
+  # else — `ExDoc.Formatter.extra_paths/1` is a `Map.put(acc,
+  # Path.basename(source_path), id)` folded over this list in order, and
+  # `ExDoc.Autolink.build_extra_link/2` looks a link up as
+  # `config.extras[Path.basename(path)]`. The directories in the link are never
+  # consulted, and `filename:` renames the *output* page without affecting this
+  # lookup. So every relative link to any of the four README extras below
+  # resolved to whichever is registered last — ten links written as
+  # `../README.md`, `../projects/README.md` or `../examples/README.md` rendered
+  # as links to the Elixir client's page.
+  #
+  # `--warnings-as-errors` does not catch it: ExDoc warns when a basename is
+  # absent from that map, not when it is present and wrong. The docs job stayed
+  # green for as long as the links were wrong.
+  #
+  # Link a README by its full
+  # `https://github.com/The-Verscienta/kiln_cms/blob/main/…` URL instead —
+  # correct both on github.com and in the generated docs.
+  # `test/kiln_cms/docs/extras_links_test.exs` fails the build if a relative link
+  # between extras renders as a link to a different file than it names, for
+  # README and for any basename that collides later. Reordering this list is not
+  # a fix: it only changes which of the colliding links is wrong.
   defp extras do
     [
       # Getting started
@@ -216,6 +262,7 @@ defmodule KilnCMS.MixProject do
       "docs/social-posting.md": [],
       "docs/point-in-time.md": [],
       # Modeling & extending
+      "docs/overlay-contract.md": [title: "The overlay contract"],
       "docs/extending-content.md": [],
       "docs/events.md": [title: "Events"],
       "docs/design-language.md": [],
@@ -253,11 +300,13 @@ defmodule KilnCMS.MixProject do
       "docs/policy-matrix.md": [],
       "docs/code-injection.md": [],
       "docs/granular-rbac.md": [],
+      "docs/account-administration.md": [],
       "docs/multi-tenancy.md": [],
       "docs/passkeys.md": [],
       "docs/two-factor-auth.md": [],
       "docs/sso.md": [],
       "docs/threat-model.md": [],
+      "docs/secrets-rotation.md": [],
       # Design notes & decision records
       "docs/advanced-analytics-plan.md": [],
       "docs/collaborative-editing-spike.md": [],
@@ -267,6 +316,7 @@ defmodule KilnCMS.MixProject do
       "docs/content-experiments-plan.md": [],
       "docs/mobile-admin-spike.md": [],
       "docs/plugin-system-plan.md": [],
+      "docs/plugin-registry-plan.md": [],
       "docs/search-roadmap.md": [],
       "docs/search-tsvector-migration.md": [],
       "docs/semantic-search-plan.md": [],
@@ -298,7 +348,26 @@ defmodule KilnCMS.MixProject do
         title: "Elixir client",
         filename: "elixir-client-readme"
       ]
-    ]
+    ] ++ release_history() ++ decisions()
+  end
+
+  # The long-form release entries and the decision records behind CHANGELOG.md
+  # (#1325). Globbed rather than listed because `mix kiln.changelog --condense`
+  # creates and renames them: a release cut and forgotten here would turn every
+  # "long form" link in CHANGELOG.md into a docs warning. Their order in the
+  # sidebar comes from `groups_for_extras/0`, so appending is enough.
+  defp release_history do
+    "docs/changelog/*.md"
+    |> Path.wildcard()
+    |> Enum.sort(:desc)
+    |> Enum.map(&{String.to_atom(&1), [filename: "changelog-" <> Path.basename(&1, ".md")]})
+  end
+
+  defp decisions do
+    "docs/decisions/*.md"
+    |> Path.wildcard()
+    |> Enum.sort()
+    |> Enum.map(&{String.to_atom(&1), [filename: "decision-" <> Path.basename(&1, ".md")]})
   end
 
   defp groups_for_extras do
@@ -335,6 +404,7 @@ defmodule KilnCMS.MixProject do
         "docs/chain-fold-order.md"
       ],
       "Modeling & extending": [
+        "docs/overlay-contract.md",
         "docs/extending-content.md",
         "docs/events.md",
         "docs/design-language.md",
@@ -373,11 +443,13 @@ defmodule KilnCMS.MixProject do
       "Security & access": [
         "docs/policy-matrix.md",
         "docs/granular-rbac.md",
+        "docs/account-administration.md",
         "docs/multi-tenancy.md",
         "docs/passkeys.md",
         "docs/two-factor-auth.md",
         "docs/sso.md",
-        "docs/threat-model.md"
+        "docs/threat-model.md",
+        "docs/secrets-rotation.md"
       ],
       "Design notes & decision records": [
         "docs/advanced-analytics-plan.md",
@@ -388,6 +460,7 @@ defmodule KilnCMS.MixProject do
         "docs/content-experiments-plan.md",
         "docs/mobile-admin-spike.md",
         "docs/plugin-system-plan.md",
+        "docs/plugin-registry-plan.md",
         "docs/search-roadmap.md",
         "docs/search-tsvector-migration.md",
         "docs/semantic-search-plan.md",
@@ -407,6 +480,8 @@ defmodule KilnCMS.MixProject do
         "docs/deploy-staging.md",
         "docs/deploy-write-visual-editing.md"
       ],
+      "Architecture decisions": Enum.map(decisions(), fn {path, _} -> to_string(path) end),
+      "Release history": Enum.map(release_history(), fn {path, _} -> to_string(path) end),
       "Project history": [
         "CHANGELOG.md",
         "KilnCMS_Project_Plan.md",
@@ -493,6 +568,45 @@ defmodule KilnCMS.MixProject do
   defp elixirc_paths(:test), do: ["lib", "projects", "test/support"]
   defp elixirc_paths(_), do: ["lib", "projects"]
 
+  # `mix release` copies `config/runtime.exs` into `releases/<vsn>/` and nothing
+  # else from `config/`. Since #1322 that file is a list of `import_config`
+  # calls against per-concern fragments in `config/runtime/`, and
+  # `import_config` resolves relative to the importing file's own directory —
+  # `releases/<vsn>/` in a release — so without this step every release boots to
+  #
+  #     ** (File.Error) could not read file .../releases/<vsn>/runtime/console.exs
+  #
+  # before the endpoint starts. It fails loudly and immediately, but only in a
+  # release: `mix test` and `mix phx.server` read the fragments straight out of
+  # `config/`, so nothing in CI exercises this path. The Dockerfile has the
+  # matching half (`COPY config/runtime config/runtime`) — the build context
+  # must contain the directory for this step to find it.
+  defp releases do
+    [
+      kiln_cms: [
+        steps: [:assemble, &copy_runtime_config_fragments/1]
+      ]
+    ]
+  end
+
+  defp copy_runtime_config_fragments(%Mix.Release{} = release) do
+    source = "config/runtime"
+    target = Path.join(release.version_path, "runtime")
+
+    unless File.dir?(source) do
+      Mix.raise("""
+      #{source}/ is missing, so the release would ship a config/runtime.exs whose \
+      import_config calls cannot resolve, and every boot would fail. If this is a \
+      Docker build, the Dockerfile needs `COPY config/runtime config/runtime`.\
+      """)
+    end
+
+    File.mkdir_p!(target)
+    File.cp_r!(source, target)
+
+    release
+  end
+
   # Specifies your project dependencies.
   #
   # Type `mix help deps` for examples and options.
@@ -556,8 +670,9 @@ defmodule KilnCMS.MixProject do
       # Elixir — the one ex_doc already uses, now needed at runtime. Not
       # `earmark`: that package is retired on Hex, carries a stored-XSS advisory
       # in its HTML renderer, and would fail `mix deps.audit`. Its AST is
-      # rendered through Floki (which escapes) instead, and the HTML is never
-      # trusted even then — see `KilnCMS.Markdown`.
+      # rendered to HTML by `KilnCMS.Markdown` itself, from a closed tag list
+      # with every text run and attribute escaped, and the result is sanitized
+      # on the way into storage even then — see that module.
       {:earmark_parser, "~> 1.4"},
       # Fire-time syntax highlighting for rich-text code blocks (#503). Each
       # lexer is its own OTP app that registers language names with
@@ -577,21 +692,18 @@ defmodule KilnCMS.MixProject do
       {:ex_aws, "~> 2.5"},
       {:ex_aws_s3, "~> 2.5"},
       {:sweet_xml, "~> 0.7"},
-      # Semantic search: pgvector storage + local embeddings (Bumblebee/Nx/EXLA).
-      # The model + Nx.Serving only start when semantic search is enabled in
-      # config; the deps compile regardless. See docs/semantic-search-plan.md.
+      # Semantic search's STORAGE half: the pgvector column type and its
+      # Postgrex extension. Cheap, pure Elixir, and unconditional —
+      # `KilnCMS.Repo.installed_extensions/0` requires the `vector` extension
+      # whether or not anything embeds, so this is not part of the optional ML
+      # stack below (see `ml_deps/0`).
       {:pgvector, "~> 0.3"},
-      {:bumblebee, "~> 0.7"},
-      {:nx, "~> 0.12"},
-      # EXLA compiles a heavy XLA NIF from source (~13 min, multi-GB RAM) and
-      # pulls the :xla archive — too much for the small prod build host. Keep it
-      # for local dev/test speed; prod/e2e fall back to Nx.BinaryBackend (see
-      # config/dev.exs + test.exs). Semantic search is disabled by default in
-      # prod; restore EXLA there via an off-box image build before enabling it.
-      {:exla, "~> 0.12", only: [:dev, :test]},
       # Bumblebee's `progress_bar` still caps `decimal ~> 2.0`, but Ash/ecto 3.14
       # need `decimal ~> 3.0`. progress_bar only uses decimal for CLI download
       # progress formatting, so forcing 3.x is safe. Override resolves the clash.
+      # Unconditional even though the clash is Bumblebee's: Ash/ecto want 3.x
+      # regardless, so pinning it here keeps the resolved version the same
+      # whether or not the ML stack is in the tree.
       {:decimal, "~> 3.0", override: true},
       {:hammer, "~> 7.0"},
       {:remote_ip, "~> 1.2"},
@@ -652,8 +764,59 @@ defmodule KilnCMS.MixProject do
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"}
-    ]
+    ] ++ ml_deps()
   end
+
+  # The optional ML stack, in the tree only when `KILN_ML` is on (#1321).
+  #
+  # Semantic search is disabled by default (`config :kiln_cms, KilnCMS.Search,
+  # semantic: false`), and these three are 87% of the dependency tree on disk:
+  # 773 MB with them, 102 MB without, `deps/exla` alone accounting for 666 MB.
+  # A machine that has never built them also downloads a 110 MB prebuilt XLA
+  # archive. `only: [:dev, :test]` did NOT avoid any of that: `mix deps.get`
+  # fetches every dependency regardless of `:only`, which filters compilation,
+  # not the download. The only way to skip the cost is to leave them out of the
+  # list.
+  #
+  # The saving is disk and bandwidth, not wall clock: adding the stack to an
+  # otherwise-complete build measured ~46 s on an Apple Silicon laptop. The
+  # "~13 min compile, multi-GB RAM" this comment used to carry was stale — see
+  # config/ml_flag.exs.
+  #
+  # Leaving them out is safe for the rest of the build because every module on
+  # the semantic path degrades rather than failing to compile — see
+  # `KilnCMS.Search.ML`, which is the single compile-time answer to "is this
+  # build's ML stack present?" and is what `KilnCMS.Search.Serving`,
+  # `KilnCMS.Search.RerankerServing`, both Bumblebee adapters and
+  # `KilnCMS.Application`'s serving children branch on.
+  #
+  # Two things stay true whichever way the flag is set:
+  #
+  #   * `mix.lock` keeps its entries for all three and their transitives.
+  #     `mix deps.get` does not prune the lock of deps that are not in the
+  #     current tree (measured), so a lean `deps.get` cannot strip them — and
+  #     `mix deps.audit`, which reads the lock alone, still audits EXLA.
+  #   * `mix deps.unlock --unused` WOULD strip them, so it runs only on the ML
+  #     build. See `aliases/0` and CI's `ml` job.
+  #
+  # EXLA keeps `only: [:dev, :test]` inside the opt-in: even with `KILN_ML=1`
+  # it has no business in a prod release image, whose build host cannot afford
+  # the NIF compile. Prod/e2e fall back to Nx.BinaryBackend (see
+  # config/config.exs); restore EXLA there via an off-box image build before
+  # enabling semantic search in production.
+  defp ml_deps do
+    if ml?() do
+      [
+        {:bumblebee, "~> 0.7"},
+        {:nx, "~> 0.12"},
+        {:exla, "~> 0.12", only: [:dev, :test]}
+      ]
+    else
+      []
+    end
+  end
+
+  defp ml?, do: KilnCMS.Config.MLFlag.enabled?()
 
   # Aliases are shortcuts or tasks specific to the current project.
   # For example, to install project dependencies and perform other setup tasks, run:
@@ -663,7 +826,23 @@ defmodule KilnCMS.MixProject do
   # See the documentation for `Mix` for more info on aliases.
   defp aliases do
     [
-      setup: ["deps.get", "ash.setup", "assets.setup", "assets.build", "run priv/repo/seeds.exs"],
+      # `kiln.ml.note` last: one line saying whether this build has the optional
+      # ML stack and how to change that (#1321). It reads what actually
+      # compiled (`KilnCMS.Search.ML.available?/0`) rather than the env var, so
+      # it cannot disagree with the build it is describing.
+      #
+      # A trailing task after `run priv/repo/seeds.exs` does run — measured, and
+      # not in tension with the `e2e.setup` note below: what that one records is
+      # that the VM is torn down when the *chain* ends, which a `phx.server`
+      # needs to outlive. A task that prints a line and returns does not.
+      setup: [
+        "deps.get",
+        "ash.setup",
+        "assets.setup",
+        "assets.build",
+        "run priv/repo/seeds.exs",
+        "kiln.ml.note"
+      ],
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["ash.setup --quiet", "test"],
@@ -690,28 +869,49 @@ defmodule KilnCMS.MixProject do
         "esbuild kiln_cms --minify",
         "phx.digest"
       ],
-      precommit: [
-        "compile --warnings-as-errors",
-        "deps.unlock --unused",
-        "format --check-formatted",
-        "credo --strict",
-        "sobelow --config",
-        "deps.audit",
-        "kiln.plugins.doctor",
-        # Cheap, and says in a second what CI's `image` job takes a full
-        # dependency compile to discover: a Dockerfile pin that can't satisfy
-        # this file's `elixir:` requirement (#600).
-        "kiln.toolchain.check",
-        # An `authorize?: false` on a request path with no comment saying why
-        # it is safe (#1309). Cheap, and the reason belongs next to the bypass.
-        "kiln.authz.check",
-        # Catches untranslated/fuzzy msgstrs locally. Read-only, so `precommit`
-        # keeps its non-destructive contract — the *drift* half of the gate
-        # still lives in CI only, because `gettext.extract --merge` rewrites
-        # priv/gettext. Run that yourself before pushing.
-        "kiln.gettext.check",
-        "test"
-      ]
+      precommit:
+        ["compile --warnings-as-errors"] ++
+          unlock_unused_step() ++
+          [
+            "format --check-formatted",
+            "credo --strict",
+            "sobelow --config",
+            "deps.audit",
+            "kiln.plugins.doctor",
+            # Cheap, and says in a second what CI's `image` job takes a full
+            # dependency compile to discover: a Dockerfile pin that can't satisfy
+            # this file's `elixir:` requirement (#600).
+            "kiln.toolchain.check",
+            # An `authorize?: false` anywhere in `lib/` with no comment saying why
+            # it is safe, and no allowance in the task's shrinking backlog (#1309,
+            # #1402). Cheap, and the reason belongs next to the bypass.
+            "kiln.authz.check",
+            # An Unreleased entry over three lines, or one with nowhere to link
+            # (#1325). Read-only; `--condense` is the half that rewrites the file
+            # and it is a release step, not a precommit one.
+            "kiln.changelog --check",
+            # Catches untranslated/fuzzy msgstrs locally. Read-only, so `precommit`
+            # keeps its non-destructive contract — the *drift* half of the gate
+            # still lives in CI only, because `gettext.extract --merge` rewrites
+            # priv/gettext. Run that yourself before pushing.
+            "kiln.gettext.check",
+            "test"
+          ]
     ]
+  end
+
+  # `deps.unlock --unused` DELETES every lock entry for a dep that is not in the
+  # current tree — and without `KILN_ML` on, Bumblebee/Nx/EXLA and their eleven
+  # transitives are not in the tree (#1321). Running it on a lean build would
+  # silently strip them from `mix.lock`, which is both a large unrelated diff
+  # and a loss of the versions `mix deps.audit` reads. So the lean build skips
+  # it, and the ML build runs it — CI's `ml` job is the gate that runs the
+  # read-only `--check-unused` half on the full tree.
+  #
+  # Fourteen lock entries hang on this: bumblebee, nx and exla, plus axon,
+  # complex, nx_image, nx_signal, polaris, progress_bar, safetensors,
+  # tokenizers, unpickler, unzip and xla.
+  defp unlock_unused_step do
+    if ml?(), do: ["deps.unlock --unused"], else: []
   end
 end

@@ -109,7 +109,7 @@ defmodule KilnCMSWeb.TaskLiveTest do
     assert html =~ page.title
 
     html = lv |> element("button", "Mark done") |> render_click()
-    refute html =~ page.title
+    refute main_html(html) =~ page.title
   end
 
   test "an overdue task is flagged", %{conn: conn} do

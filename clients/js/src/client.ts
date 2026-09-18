@@ -1,5 +1,5 @@
 /**
- * Typed client for the Kiln CMS delivery APIs — the JSON:API read surface at
+ * Typed client for the KilnCMS delivery APIs — the JSON:API read surface at
  * `/api/json/*`, per-type and hybrid search, fired artifacts at
  * `/api/content/:type/:slug` (including `?as_of=` point-in-time reads), and
  * preview tokens (see Kiln's `docs/json-api.md` and

@@ -39,11 +39,19 @@ defmodule KilnCMS.CMS.Changes.AnchorVersion do
   # ignores it, so there is no version to fold — and it fires on a SCHEDULE over
   # rows nobody touched, so without this entry an hourly sweep would mint an
   # anchor per finished event, each attributed to `actor_id: nil`.
+  # `:reindex_search_text` (#910) is here for the same reason again:
+  # PaperTrail ignores it too, and it runs from `Engine.fire/2` on every fire
+  # or re-fire — including a re-fire wave visiting a document with no prior
+  # anchor — so without this entry it would mint one for a write that isn't an
+  # edit at all. Since #1402 the fire runs as a `%KilnCMS.SystemActor{}`, which
+  # has no `:id`, so the same missing entry instead raised a `KeyError` in
+  # `change/3` below and failed the fire whenever `audit_anchor_every_write` is on.
   @versionless_actions [
     :set_embedding,
     :set_published_version_id,
     :set_oembed_metadata,
-    :set_next_occurrence
+    :set_next_occurrence,
+    :reindex_search_text
   ]
 
   @impl true
@@ -51,13 +59,22 @@ defmodule KilnCMS.CMS.Changes.AnchorVersion do
     if skip?(changeset) do
       changeset
     else
-      actor_id = context.actor && context.actor.id
+      actor_id = actor_id(context.actor)
 
       Ash.Changeset.after_transaction(changeset, fn _changeset, result ->
         extend(result, actor_id)
       end)
     end
   end
+
+  # Only a person has an id to attribute. `%KilnCMS.SystemActor{}` (#1402)
+  # deliberately has no `:id`, and `context.actor.id` on it raised a `KeyError`
+  # while the changeset was being built — failing the write itself, whatever
+  # the policies would have said. A system write is recorded as `nil`, the
+  # same as an actorless one: `subsystem` is log provenance, not an identity
+  # `HistoryAnchor.actor_id` could hold.
+  defp actor_id(%{id: id}), do: id
+  defp actor_id(_actor), do: nil
 
   defp extend({:ok, record} = result, actor_id) do
     Chain.extend(record, actor_id: actor_id)

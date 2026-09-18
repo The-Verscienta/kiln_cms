@@ -268,6 +268,30 @@ defmodule KilnCMS.Governance.ChainTest do
     assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
   end
 
+  # #1402: `%KilnCMS.SystemActor{}` has no `:id`, and `RecordPublishedVersion`
+  # read `context.actor.id` while building the changeset — a system-actor
+  # publish raised a `KeyError` instead of publishing.
+  test "a system-actor publish is wired and anchored, attributed to no one" do
+    page =
+      CMS.create_page!(
+        %{title: "Anchored", slug: "chain-sys-pub-#{System.unique_integer([:positive])}"},
+        actor: admin()
+      )
+
+    # No system actor may publish under the policies; past them, the actor
+    # still reaches the change.
+    {:ok, _page} =
+      CMS.publish_page(page, %{},
+        actor: KilnCMS.SystemActor.new(:firing),
+        authorize?: false
+      )
+
+    anchor = Chain.latest_anchor("page", page.id, page.org_id)
+    assert anchor.published_version_id
+    assert is_nil(anchor.actor_id)
+    assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+  end
+
   test "edits after the anchor don't break verification (unanchored tail)" do
     actor = admin()
     page = published_page(actor)
@@ -611,6 +635,95 @@ defmodule KilnCMS.Governance.ChainTest do
       # setting. The alternative — coalescing anyway — is the permanent false
       # tamper verdict above.
       assert autosave_count(page) == 3
+    end
+
+    # #1402: internal callers run as `%KilnCMS.SystemActor{}`, which has no
+    # `:id`. `AnchorVersion.change/3` read `context.actor.id` while BUILDING the
+    # changeset, so any system-actor write it did not skip by name raised a
+    # `KeyError` (#910 found it on `:reindex_search_text`) — before the policies
+    # were even asked.
+    test "a system-actor versioned write is anchored and attributed to no one" do
+      actor = admin()
+
+      page =
+        CMS.create_page!(
+          %{title: "Draft", slug: "chain-sys-#{System.unique_integer([:positive])}"},
+          actor: actor
+        )
+
+      system = KilnCMS.SystemActor.new(:firing)
+
+      # No versioned content action admits a system actor, so the honest answer
+      # is a policy refusal — not a crash while building the changeset.
+      assert {:error, %Ash.Error.Forbidden{}} =
+               CMS.update_page(page, %{title: "Refused"}, actor: system)
+
+      # The write itself, past the policies, still carries the system actor into
+      # the change: it is versioned, and the chain extends over it.
+      page = CMS.update_page!(page, %{title: "System"}, actor: system, authorize?: false)
+
+      anchor = Chain.latest_anchor("page", page.id, page.org_id)
+      assert anchor.version_count == Chain.compute(Page, page.id, page.org_id).version_count
+      assert anchor.version_count == 2
+      assert is_nil(anchor.actor_id)
+      assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+    end
+  end
+
+  # #910: `KilnCMS.Firing.Engine.fire/2` recomputes `search_text` against a
+  # fragment-expanded tree via a narrow `:reindex_search_text` action — a
+  # background write PaperTrail already ignores, so `AnchorVersion` must
+  # ignore it too, the same reason `:set_oembed_metadata` is in
+  # `@versionless_actions`: without it, a fire (or re-fire) of a document with
+  # no PRIOR anchor mints one, for a write that is not an edit at all. Since
+  # #1402 the fire runs as a `%KilnCMS.SystemActor{}` (no `:id`), so the same
+  # gap now raises a `KeyError` in `AnchorVersion.change/3` and fails the fire —
+  # this test catches either failure.
+  describe "reindex_search_text does not extend the anchor chain (#910)" do
+    test "firing a document with no prior anchor, whose search_text actually changes, mints no anchor" do
+      actor = admin()
+
+      shared =
+        CMS.create_page!(
+          %{
+            title: "Shared",
+            slug: "anchor-frag-shared-#{System.unique_integer([:positive])}",
+            blocks: [%{"_type" => "heading", "text" => "Fragmentword"}]
+          },
+          actor: actor
+        )
+        |> then(&CMS.publish_page!(&1, %{}, actor: actor))
+
+      host =
+        CMS.create_page!(
+          %{
+            title: "Host",
+            slug: "anchor-frag-host-#{System.unique_integer([:positive])}",
+            blocks: [%{"_type" => "fragment", "ref" => %{"type" => "page", "id" => shared.id}}]
+          },
+          actor: actor
+        )
+
+      # `audit_anchor_every_write` is off by default, and `host` was never
+      # published (the only other anchor source), so it starts with none.
+      assert is_nil(Chain.latest_anchor("page", host.id, host.org_id))
+
+      prev = Application.get_env(:kiln_cms, :audit_anchor_every_write)
+      Application.put_env(:kiln_cms, :audit_anchor_every_write, true)
+
+      on_exit(fn ->
+        if is_nil(prev),
+          do: Application.delete_env(:kiln_cms, :audit_anchor_every_write),
+          else: Application.put_env(:kiln_cms, :audit_anchor_every_write, prev)
+      end)
+
+      # `host`'s raw search_text has no fragment words (a bare `%Fragment{}`
+      # block's own search_text/1 is ""), so this fire's `reindex_search_text`
+      # genuinely writes — the case that must NOT reach `AnchorVersion`.
+      {:ok, _artifacts} = KilnCMS.Firing.Engine.fire(host)
+
+      assert Ash.reload!(host, authorize?: false).search_text =~ "Fragmentword"
+      assert is_nil(Chain.latest_anchor("page", host.id, host.org_id))
     end
   end
 

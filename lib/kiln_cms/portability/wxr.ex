@@ -51,7 +51,7 @@ defmodule KilnCMS.Portability.WXR do
           slug: String.t() | nil,
           blocks: [map()],
           excerpt: String.t() | nil,
-          state: :draft | :published,
+          state: :draft | :in_review | :published | :archived,
           published_at: DateTime.t() | nil,
           source_url: String.t() | nil,
           source_id: String.t() | nil,

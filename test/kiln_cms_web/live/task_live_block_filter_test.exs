@@ -95,7 +95,7 @@ defmodule KilnCMSWeb.TaskLiveBlockFilterTest do
 
       assert html =~ "No block spec"
       refute html =~ "removed block"
-      refute html =~ "?comment="
+      refute main_html(html) =~ "?comment="
     end
 
     # Nothing cascades when a block is deleted, so the task is still real and
@@ -115,7 +115,7 @@ defmodule KilnCMSWeb.TaskLiveBlockFilterTest do
       {:ok, _lv, html} = live(ctx.conn, ~p"/editor/tasks")
 
       assert html =~ "removed block"
-      refute html =~ "?comment=#{doomed}"
+      refute main_html(html) =~ "?comment=#{doomed}"
     end
   end
 

@@ -9,6 +9,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
 
   alias KilnCMS.Accounts.User
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.FieldDefinition
 
   @password "password123456"
 
@@ -48,7 +49,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     lv
     |> form("#new-field-form",
       field_definition: %{
-        scope: "page",
+        scopes: ["page"],
         name: "heel_height",
         label: "Heel",
         field_type: "string"
@@ -72,7 +73,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     lv
     |> form("#new-field-form",
       field_definition: %{
-        scope: "page",
+        scopes: ["page"],
         name: "latin_name",
         label: "Latin name",
         field_type: "string",
@@ -133,7 +134,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
       lv
       |> form("#new-field-form",
         field_definition: %{
-          scope: "page",
+          scopes: ["page"],
           name: "reading_time",
           label: "Reading time",
           field_type: "computed",
@@ -204,5 +205,309 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     html = render_change(form(lv, "#page-editor"), %{"form" => %{"title" => "Second Title"}})
 
     assert html =~ "second-title"
+  end
+
+  describe "the field type description" do
+    test "follows the type picked in the add form", %{conn: conn} do
+      admin = authed_user(:admin)
+      {:ok, lv, html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      # The form starts on String, and says what that is before any change.
+      assert html =~ "A single line of text."
+
+      html =
+        lv
+        |> form("#new-field-form", field_definition: %{field_type: "select"})
+        |> render_change()
+
+      assert html =~ "One choice from a fixed list"
+      refute html =~ "A single line of text."
+
+      html =
+        lv
+        |> form("#new-field-form", field_definition: %{field_type: "datetime_range"})
+        |> render_change()
+
+      assert html =~ "gets a calendar feed"
+    end
+
+    test "is shown in the edit form too", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      field =
+        CMS.create_field_definition!(
+          %{content_type: :page, name: "venue", label: "Venue", field_type: :geolocation},
+          actor: admin
+        )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+      lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+
+      assert lv |> element("#edit-field-#{field.id}") |> render() =~ "A point on a map"
+
+      html =
+        lv
+        |> form("#edit-field-#{field.id}", field_definition: %{field_type: "boolean"})
+        |> render_change()
+
+      assert html =~ "A yes-or-no checkbox."
+    end
+
+    test "every built-in type has one", %{conn: conn} do
+      admin = authed_user(:admin)
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      for type <- KilnCMS.CMS.FieldTypes.reserved() do
+        html =
+          lv
+          |> element("#new-field-form")
+          |> render_change(%{"field_definition" => %{"field_type" => to_string(type)}})
+
+        assert type_hint(html) not in [nil, ""],
+               "no description under the picker for #{inspect(type)}"
+      end
+    end
+  end
+
+  describe "the machine name" do
+    test "follows the label until the admin edits it", %{conn: conn} do
+      admin = authed_user(:admin)
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      label_change(lv, "Shoe size (EU)", "")
+      assert name_value(lv) == "shoe_size_eu"
+
+      # Retyping the label moves the suggestion with it.
+      label_change(lv, "Heel height", "shoe_size_eu")
+      assert name_value(lv) == "heel_height"
+
+      # Typing into the name takes it over: the label no longer rewrites it.
+      lv
+      |> form("#new-field-form")
+      |> render_change(%{
+        "_target" => ["field_definition", "name"],
+        "field_definition" => %{"label" => "Heel height", "name" => "heel"}
+      })
+
+      label_change(lv, "Heel height (cm)", "heel")
+      assert name_value(lv) == "heel"
+
+      # Clearing the name hands it back to the label.
+      lv
+      |> form("#new-field-form")
+      |> render_change(%{
+        "_target" => ["field_definition", "name"],
+        "field_definition" => %{"label" => "Heel height (cm)", "name" => ""}
+      })
+
+      label_change(lv, "Heel height (mm)", "")
+      assert name_value(lv) == "heel_height_mm"
+    end
+
+    test "a submit with no name uses the one the label suggests", %{conn: conn} do
+      admin = authed_user(:admin)
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      lv
+      |> form("#new-field-form",
+        field_definition: %{scopes: ["page"], label: "Crème brûlée", field_type: "string"}
+      )
+      |> render_submit()
+
+      assert :page
+             |> CMS.field_definitions_for!(authorize?: false)
+             |> Enum.any?(&(&1.name == "creme_brulee" and &1.label == "Crème brûlée"))
+    end
+  end
+
+  test "name_from_label/1 suggests a name the validation accepts" do
+    assert FieldDefinition.name_from_label("Shoe size (EU)") == "shoe_size_eu"
+    assert FieldDefinition.name_from_label("  Crème   brûlée!! ") == "creme_brulee"
+    assert FieldDefinition.name_from_label("3D model") == "field_3d_model"
+    assert FieldDefinition.name_from_label("日本") == ""
+    assert FieldDefinition.name_from_label(nil) == ""
+  end
+
+  describe "a duplicate machine name" do
+    test "is flagged while typing and refused on submit", %{conn: conn} do
+      admin = authed_user(:admin)
+      create_field!(admin, :page, "heel_height")
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      html =
+        lv
+        |> form("#new-field-form")
+        |> render_change(%{
+          "_target" => ["field_definition", "label"],
+          "field_definition" => %{"scopes" => ["", "page"], "label" => "Heel height"}
+        })
+
+      assert html =~ "is already a field on Page"
+
+      html =
+        lv
+        |> form("#new-field-form",
+          field_definition: %{
+            scopes: ["page"],
+            name: "heel_height",
+            label: "Heel height again",
+            field_type: "string"
+          }
+        )
+        |> render_submit()
+
+      assert html =~ "is already a field on Page"
+      refute html =~ "Field added"
+
+      assert [_only_the_original] =
+               :page
+               |> CMS.field_definitions_for!(authorize?: false)
+               |> Enum.filter(&(&1.name == "heel_height"))
+    end
+
+    test "on one ticked type writes nothing to the others", %{conn: conn} do
+      admin = authed_user(:admin)
+      recipe = type_definition!(admin, "Recipe")
+      create_field!(admin, :page, "servings")
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      html =
+        lv
+        |> form("#new-field-form",
+          field_definition: %{
+            # The taken type last, so a create-as-you-go loop would already
+            # have written the recipe's copy by the time it hit the page's.
+            scopes: ["def:#{recipe.id}", "page"],
+            name: "servings",
+            label: "Servings",
+            field_type: "integer"
+          }
+        )
+        |> render_submit()
+
+      assert html =~ "is already a field on Page"
+      assert CMS.field_definitions_for_definition!(recipe.id, authorize?: false) == []
+    end
+
+    test "on a type that is not ticked is allowed", %{conn: conn} do
+      admin = authed_user(:admin)
+      recipe = type_definition!(admin, "Recipe")
+      create_field!(admin, :page, "servings")
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      html =
+        lv
+        |> form("#new-field-form",
+          field_definition: %{
+            scopes: ["def:#{recipe.id}"],
+            name: "servings",
+            label: "Servings",
+            field_type: "integer"
+          }
+        )
+        |> render_submit()
+
+      refute html =~ "is already a field"
+
+      assert [%{name: "servings"}] =
+               CMS.field_definitions_for_definition!(recipe.id, authorize?: false)
+    end
+  end
+
+  describe "several content types" do
+    test "get one field each, under the same machine name", %{conn: conn} do
+      admin = authed_user(:admin)
+      recipe = type_definition!(admin, "Recipe")
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      html =
+        lv
+        |> form("#new-field-form",
+          field_definition: %{
+            scopes: ["page", "def:#{recipe.id}"],
+            label: "Prep time",
+            field_type: "integer",
+            required: "true"
+          }
+        )
+        |> render_submit()
+
+      assert html =~ "Field added to 2 content types."
+
+      assert [%{label: "Prep time", field_type: :integer, required: true} = on_page] =
+               :page
+               |> CMS.field_definitions_for!(authorize?: false)
+               |> Enum.filter(&(&1.name == "prep_time"))
+
+      assert [%{label: "Prep time", field_type: :integer, required: true} = on_recipe] =
+               CMS.field_definitions_for_definition!(recipe.id, authorize?: false)
+
+      # Two rows, not one shared: each is edited on its own.
+      assert on_page.id != on_recipe.id
+      assert on_page.content_type == :page and on_page.type_definition_id == nil
+      assert on_recipe.content_type == nil and on_recipe.type_definition_id == recipe.id
+
+      # The form starts over, types unticked.
+      refute has_element?(lv, "#new-field-form input[type=checkbox][value=page][checked]")
+    end
+
+    test "none ticked is refused with a message", %{conn: conn} do
+      admin = authed_user(:admin)
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      html =
+        lv
+        |> form("#new-field-form",
+          field_definition: %{label: "Orphan", name: "orphan", field_type: "string"}
+        )
+        |> render_submit()
+
+      assert html =~ "Pick at least one content type."
+
+      refute CMS.list_field_definitions!(authorize?: false)
+             |> Enum.any?(&(&1.name == "orphan"))
+    end
+  end
+
+  # The help text under the add form's type picker: the wrapper holding the
+  # select, then its hint paragraph.
+  defp type_hint(html) do
+    html
+    |> Floki.parse_document!()
+    |> Floki.find("#new-field-form div.mb-2:has(select#field_definition_field_type) > p.text-xs")
+    |> Floki.text()
+    |> String.trim()
+  end
+
+  defp label_change(lv, label, name) do
+    lv
+    |> form("#new-field-form")
+    |> render_change(%{
+      "_target" => ["field_definition", "label"],
+      "field_definition" => %{"label" => label, "name" => name}
+    })
+  end
+
+  defp name_value(lv) do
+    lv
+    |> element(~s|#new-field-form input[name="field_definition[name]"]|)
+    |> render()
+    |> Floki.parse_fragment!()
+    |> Floki.attribute("value")
+    |> List.first()
+  end
+
+  defp create_field!(admin, content_type, name) do
+    CMS.create_field_definition!(
+      %{content_type: content_type, name: name, label: name, field_type: :string},
+      actor: admin
+    )
+  end
+
+  defp type_definition!(admin, label) do
+    CMS.create_type_definition!(
+      %{name: "fd#{System.unique_integer([:positive])}", label: label},
+      actor: admin
+    )
   end
 end

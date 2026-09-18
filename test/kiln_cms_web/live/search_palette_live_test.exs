@@ -43,6 +43,17 @@ defmodule KilnCMSWeb.SearchPaletteLiveTest do
 
   defp slug, do: "palette-#{System.unique_integer([:positive])}"
 
+  # The href of the first console-screen result in the rendered palette. Scoped
+  # to <main>: the sidebar in <aside> links to the same screens.
+  defp first_screen_href(html) do
+    html
+    |> LazyHTML.from_fragment()
+    |> LazyHTML.query(~s(main a[href^="/editor/"]))
+    |> Enum.map(&(&1 |> LazyHTML.attribute("href") |> List.first()))
+    |> Enum.reject(&(&1 == ~p"/editor/search"))
+    |> List.first()
+  end
+
   test "viewers are redirected away", %{conn: conn} do
     conn = log_in(conn, authed_user(:viewer))
     assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/editor/search")
@@ -113,7 +124,7 @@ defmodule KilnCMSWeb.SearchPaletteLiveTest do
     {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/search")
 
     # The input is named and points at the live status region.
-    assert html =~ ~s(aria-label="Search content")
+    assert html =~ ~s(aria-label="Search content and settings")
     assert html =~ ~s(aria-describedby="search-status")
     assert html =~ ~s(id="search-status")
     assert html =~ ~s(aria-live="polite")
@@ -121,5 +132,62 @@ defmodule KilnCMSWeb.SearchPaletteLiveTest do
     # After a search, the status region announces the result count.
     searched = lv |> form("#palette-search", %{q: term}) |> render_change()
     assert searched =~ "results for"
+  end
+
+  # #1319: the palette used to be content-only, so the fastest route to a
+  # settings screen was reading two dozen sidebar links.
+  describe "settings screens (#1319)" do
+    test "a word from a screen's subject finds the screen, and says why", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/search")
+
+      html = lv |> form("#palette-search", %{q: "rss"}) |> render_change()
+
+      # "rss" is in no screen name at all; Feeds is what owns it, and its
+      # description is what tells the reader so.
+      assert has_element?(lv, ~s(a[href="#{~p"/editor/feeds"}"]), "Feeds")
+      assert html =~ "Which types syndicate, and whether in full."
+    end
+
+    test "it offers only screens the viewer could actually open", %{conn: conn} do
+      # An editor's tier gets no site configuration — every one of those pages
+      # is admin-gated at the router, so offering them would only bounce them.
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/search")
+
+      lv |> form("#palette-search", %{q: "rss"}) |> render_change()
+      refute has_element?(lv, ~s(a[href="#{~p"/editor/feeds"}"]))
+
+      # Their own settings still answer.
+      lv |> form("#palette-search", %{q: "passkey"}) |> render_change()
+      assert has_element?(lv, ~s(a[href="#{~p"/editor/settings"}"]), "Your settings")
+    end
+
+    # Usability pass, M5. Order in the rendered list, not just presence: the
+    # first "Go to" row is what Enter would take.
+    test "“site settings” puts the Configure hub first; “settings” puts Your settings first",
+         %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/search")
+
+      html = lv |> form("#palette-search", %{q: "site settings"}) |> render_change()
+      assert first_screen_href(html) == ~p"/editor/configure"
+
+      html = lv |> form("#palette-search", %{q: "settings"}) |> render_change()
+      assert first_screen_href(html) == ~p"/editor/settings"
+    end
+
+    test "a settings-only match is not 'no results', and is not recorded as a find",
+         %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/search")
+
+      html = lv |> form("#palette-search", %{q: "dkim"}) |> render_change()
+
+      refute html =~ "No results"
+      assert has_element?(lv, ~s(a[href="#{~p"/editor/mail"}"]))
+
+      # The analytics counter measures whether readers can find CONTENT, so a
+      # settings hit must not be counted as a document found — otherwise a
+      # query that never matched a document would look like it had.
+      recorded = Enum.find(Analytics.top_searches!(authorize?: false), &(&1.query == "dkim"))
+      assert recorded.result_count == 0
+    end
   end
 end

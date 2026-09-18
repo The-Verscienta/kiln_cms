@@ -1192,13 +1192,26 @@ defmodule KilnCMS.CMS.Content do
     # raises on syntax (`a & | b`) where `plainto_tsquery` only strips it.
     # Ranked by `ts_rank` over the OR query, so a record matching more of
     # the terms rises above one matching a single term.
+    #
+    # In both, the query's LAST lexeme matches as a prefix (`'lia':*`): search
+    # runs as the reader types, and a whole-word match fails closed on the
+    # word still being typed — "huang lia" matched nothing, where "huang"
+    # before it matched Huang Lian and "huang lian" after it matched again.
+    # Same in-SQL rewrite as the OR form: `:*` is appended to the last quoted
+    # lexeme of `plainto_tsquery`'s text, so user text still never reaches
+    # `to_tsquery`. The rewrite is parsed under `'simple'`, not the locale's
+    # config: its lexemes are already stemmed, and stemming them a second
+    # time shortens the prefix ("databse" → 'databs' → 'datab':*, which then
+    # matches "database"). A prefix query matches everything the whole-word query
+    # does, so nothing that matched before stops matching; what it adds is
+    # scored lower (see `search_rank`).
     search_read = fn name, published?, terms ->
       match_ast =
         case terms do
           :all ->
             quote do
               fragment(
-                "search_vector @@ plainto_tsquery(kiln_regconfig(?), ?)",
+                "search_vector @@ to_tsquery('simple', regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*'))",
                 ^arg(:locale),
                 ^arg(:query)
               )
@@ -1207,8 +1220,7 @@ defmodule KilnCMS.CMS.Content do
           :any ->
             quote do
               fragment(
-                "search_vector @@ to_tsquery(kiln_regconfig(?), replace(plainto_tsquery(kiln_regconfig(?), ?)::text, ' & ', ' | '))",
-                ^arg(:locale),
+                "search_vector @@ to_tsquery('simple', replace(regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*'), ' & ', ' | '))",
                 ^arg(:locale),
                 ^arg(:query)
               )
@@ -1726,6 +1738,9 @@ defmodule KilnCMS.CMS.Content do
           # Archive must not be a one-way door (audit U-H3): a mistaken (or
           # bulk) archive is recoverable by returning the record to draft.
           transition :unarchive, from: :archived, to: :draft
+          # An importer restoring a record's source state, without replaying the
+          # editorial events (see the action).
+          transition :restore_imported_state, from: :draft, to: [:in_review, :archived]
         end
       end
 
@@ -2646,11 +2661,18 @@ defmodule KilnCMS.CMS.Content do
         # `KilnCMS.Search.EmbeddingWorker`. Kept separate from `:update` so it
         # neither re-runs the content changes nor enqueues another embedding, and
         # it's excluded from PaperTrail (see the `paper_trail` block).
+        #
+        # A `nil` embedding CLEARS the vector (and `embedded_at`): the worker does
+        # that when a previously indexed document is passphrase-locked (#496).
+        # With `allow_nil?: false` an explicit `nil` was a `Required` error, so
+        # the clear silently never happened and locked content stayed reachable
+        # through document-level semantic search.
         update :set_embedding do
           require_atomic? false
-          argument :embedding, KilnCMS.Search.Vector, allow_nil?: false
+          argument :embedding, KilnCMS.Search.Vector, allow_nil?: true
           change set_attribute(:embedding, arg(:embedding))
-          change set_attribute(:embedded_at, &DateTime.utc_now/0)
+          change set_attribute(:embedded_at, &DateTime.utc_now/0), where: present(:embedding)
+          change set_attribute(:embedded_at, nil), where: absent(:embedding)
         end
 
         # Internal: wire `published_version_id` after publish without a new
@@ -2672,6 +2694,41 @@ defmodule KilnCMS.CMS.Content do
         update :backdate_published_at do
           require_atomic? false
           accept [:published_at]
+        end
+
+        # Internal: put an imported draft back into the workflow state it had on
+        # the source site — `in_review` or `archived` (#487).
+        #
+        # The importer creates every record as a draft, and until this action it
+        # left the non-published ones there, so a restored backup quietly
+        # returned archived content to the editors' draft list. Not through
+        # `:submit_for_review`/`:archive`: those are editorial events, and an
+        # import replaying them would email every reviewer once per in-review
+        # record (`NotifyWorkflowEmail`) and send a webhook per record to every
+        # subscriber. The archive teardown (`ClearPublishedVersion`,
+        # `DeleteArtifacts`) has nothing to act on for a record that was never
+        # published, which is the only thing this is called on.
+        #
+        # Unlike the two actions above, it is NOT in `ignore_actions`: a state
+        # change is an editorial fact, and the record's history should show it
+        # arriving in that state rather than read as a draft forever.
+        update :restore_imported_state do
+          require_atomic? false
+          accept []
+
+          argument :state, :atom do
+            allow_nil? false
+            constraints one_of: [:in_review, :archived]
+          end
+
+          change filter(expr(^ref(:state) == :draft))
+
+          change fn changeset, _context ->
+            AshStateMachine.transition_state(
+              changeset,
+              Ash.Changeset.get_argument(changeset, :state)
+            )
+          end
         end
 
         # Internal: attribute an imported record to its original author (#950).
@@ -2929,6 +2986,28 @@ defmodule KilnCMS.CMS.Content do
         # unrestricted editors are unchanged.
         policy action_type([:create, :update]) do
           authorize_if KilnCMS.CMS.Checks.EditableContentType
+
+          # The internal, system-only update actions (#1402). Admitted HERE
+          # rather than through a `bypass action(...)` at the top of the stack,
+          # because a bypass would also skip every policy declared below it —
+          # including ones a later PR adds, which is the whole thing the system
+          # actor is supposed to stop happening. `forbid_unless` narrows this
+          # policy's remaining grant to exactly those two actions before
+          # offering it, so nothing else on the resource is affected: for a
+          # person the first clause has already decided, and for a system actor
+          # every other action forbids here.
+          #
+          #   * `:reindex_search_text` — recomputes the denormalized
+          #     `search_text` from the fragment-expanded block tree
+          #     (`KilnCMS.Firing.Engine.fire/2`).
+          #   * `:set_embedding` — writes the document-level search vector
+          #     (`KilnCMS.Search.EmbeddingWorker`).
+          #
+          # Both accept no `:blocks`, both are ignored by PaperTrail, and
+          # neither has a caller that is a person. Keep the list that way: an
+          # action anyone else calls does not belong in it.
+          forbid_unless action([:reindex_search_text, :set_embedding])
+          authorize_if KilnCMS.Checks.SystemActor
         end
 
         # Publishing is an admin approval step — editors submit for review
@@ -3465,12 +3544,18 @@ defmodule KilnCMS.CMS.Content do
         # Full-text relevance of a row against a query — higher is more
         # relevant. Used to order the `:search` action; `query`/`locale` are the
         # same values that action filters on, so the weighted `search_vector` is
-        # ranked with the matching locale's text-search config. Internal.
+        # ranked with the matching locale's text-search config. The action
+        # matches the last term as a prefix, so the rank is the whole-word
+        # score plus the prefix score: a finished word ("huang qi") scores on
+        # both for Huang Qi and on the prefix alone for Huang Qin, so the
+        # whole-word match is favoured. Internal.
         calculate :search_rank,
                   :float,
                   expr(
                     fragment(
-                      "ts_rank(search_vector, plainto_tsquery(kiln_regconfig(?), ?))",
+                      "ts_rank(search_vector, plainto_tsquery(kiln_regconfig(?), ?)) + ts_rank(search_vector, to_tsquery('simple', regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*')))",
+                      ^arg(:locale),
+                      ^arg(:query),
                       ^arg(:locale),
                       ^arg(:query)
                     )
@@ -3484,13 +3569,16 @@ defmodule KilnCMS.CMS.Content do
         # with every term the row matches, so a record naming two of the
         # query's four words outranks one naming a single word. The query is
         # rewritten from `plainto_tsquery`'s own text form, exactly as the
-        # action's filter does it. Internal.
+        # action's filter does it, whole-word score plus prefix score as in
+        # `search_rank`. Internal.
         calculate :search_rank_any,
                   :float,
                   expr(
                     fragment(
-                      "ts_rank(search_vector, to_tsquery(kiln_regconfig(?), replace(plainto_tsquery(kiln_regconfig(?), ?)::text, ' & ', ' | ')))",
+                      "ts_rank(search_vector, to_tsquery(kiln_regconfig(?), replace(plainto_tsquery(kiln_regconfig(?), ?)::text, ' & ', ' | '))) + ts_rank(search_vector, to_tsquery('simple', replace(regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*'), ' & ', ' | ')))",
                       ^arg(:locale),
+                      ^arg(:locale),
+                      ^arg(:query),
                       ^arg(:locale),
                       ^arg(:query)
                     )
@@ -3508,7 +3596,7 @@ defmodule KilnCMS.CMS.Content do
                   :string,
                   expr(
                     fragment(
-                      "ts_headline(kiln_regconfig(?), coalesce(search_text, ''), plainto_tsquery(kiln_regconfig(?), ?), 'StartSel=<mark>, StopSel=</mark>, MaxFragments=2, MaxWords=18, MinWords=5')",
+                      "ts_headline(kiln_regconfig(?), coalesce(search_text, ''), to_tsquery('simple', regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*')), 'StartSel=<mark>, StopSel=</mark>, MaxFragments=2, MaxWords=18, MinWords=5')",
                       ^arg(:locale),
                       ^arg(:locale),
                       ^arg(:query)
@@ -3539,7 +3627,7 @@ defmodule KilnCMS.CMS.Content do
                   :string,
                   expr(
                     fragment(
-                      "(SELECT CASE WHEN length(h.text) >= 120 THEN h.text ELSE left(coalesce(?, ''), 300) END FROM (SELECT regexp_replace(ts_headline(kiln_regconfig(?), coalesce(?, ''), plainto_tsquery(kiln_regconfig(?), ?), 'StartSel=<mark>, StopSel=</mark>, MaxFragments=3, MaxWords=40, MinWords=15'), '<mark>|</mark>', '', 'g') AS text) AS h)",
+                      "(SELECT CASE WHEN length(h.text) >= 120 THEN h.text ELSE left(coalesce(?, ''), 300) END FROM (SELECT regexp_replace(ts_headline(kiln_regconfig(?), coalesce(?, ''), to_tsquery('simple', regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*')), 'StartSel=<mark>, StopSel=</mark>, MaxFragments=3, MaxWords=40, MinWords=15'), '<mark>|</mark>', '', 'g') AS text) AS h)",
                       ^ref(:search_text),
                       ^arg(:locale),
                       ^ref(:search_text),

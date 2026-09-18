@@ -193,6 +193,32 @@ defmodule KilnCMSWeb.ContentEditorA11yTest do
       assert chip =~ ~s(phx-value-tab="settings")
     end
 
+    test "names the Accessibility section it brings into view, and clicking it shows that section",
+         %{conn: conn} do
+      user = authed_user(:editor)
+      page = page!(user, [rich([linked("Read ", "click here", "k1")])])
+
+      {lv, _html} = open_editor(conn, user, page)
+
+      # The scroll and focus are client-side (assets/js/reveal_section.js); what
+      # the server owns is the attribute naming the target and the tab switch
+      # that makes the target exist.
+      chip = lv |> element("#a11y-chip") |> render()
+      assert chip =~ ~s(data-kiln-reveal="inspector-accessibility")
+
+      # The Settings panel stays in the DOM, hidden, while another tab is
+      # showing — so the proof is which tab is selected, not whether the
+      # section exists (and why the client waits for it to be *rendered*).
+      settings_tab = "[role=tab][phx-value-tab=settings][aria-selected=true]"
+
+      render_click(lv, "switch_inspector_tab", %{"tab" => "history"})
+      refute has_element?(lv, settings_tab)
+
+      lv |> element("#a11y-chip") |> render_click()
+      assert has_element?(lv, settings_tab)
+      assert has_element?(lv, "#inspector-accessibility")
+    end
+
     test "is absent on an empty draft, where there is nothing to judge", %{conn: conn} do
       # NOT gated on `report.total`: a passing check counts as applicable, so
       # an empty document reports {passed: 1, total: 1} and a `total > 0` gate

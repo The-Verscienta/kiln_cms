@@ -135,6 +135,23 @@ defmodule KilnCMS.MarkdownTest do
       assert html == "<p>before</p><p>after</p>"
     end
 
+    test "an HTML comment between paragraphs is not published as prose" do
+      assert Markdown.to_html(
+               "before\n\n<!-- a note to whoever edits this\n     and more -->\n\nafter"
+             ) ==
+               "<p>before</p><p>after</p>"
+    end
+
+    test "an HTML comment written mid-sentence is dropped too" do
+      assert Markdown.to_html("a <!-- note --> b") == "<p>a  b</p>"
+      assert text("a <!-- note --> b") == "a b"
+    end
+
+    test "a comment inside a fenced block is the example, and survives" do
+      assert Markdown.to_html("```html\n<!-- kept -->\n```") ==
+               ~s(<pre><code class="language-html">&lt;!-- kept --&gt;</code></pre>)
+    end
+
     test "event-handler attributes on raw HTML are stripped" do
       html =
         Markdown.to_html(
@@ -242,6 +259,52 @@ defmodule KilnCMS.MarkdownTest do
       assert doc.title == "The Title"
       assert {doc.slug, doc.excerpt, doc.front_matter} == {nil, nil, %{}}
       assert [%{"value" => %{"body" => body}}] = doc.blocks
+      assert PortableText.to_plain_text(body) == "Body."
+    end
+
+    test "a comment above the leading H1 does not cost it the title" do
+      doc = Markdown.parse_document("<!-- license header -->\n\n# The Title\n\nBody.")
+
+      assert doc.title == "The Title"
+      assert [%{"value" => %{"body" => body}}] = doc.blocks
+      assert Enum.map(body, & &1["style"]) == ["normal"]
+      assert PortableText.to_plain_text(body) == "Body."
+    end
+
+    test "several comments, one of them multi-line, still leave a leading H1" do
+      doc =
+        Markdown.parse_document("""
+        <!-- Copyright the authors.
+             Licensed under the same terms as the rest of the manual. -->
+        <!-- Editors: keep the title in sync with the nav entry. -->
+
+        # The Title
+
+        Body.
+        """)
+
+      assert doc.title == "The Title"
+      assert [%{"value" => %{"body" => body}}] = doc.blocks
+      assert Enum.map(body, & &1["style"]) == ["normal"]
+      assert PortableText.to_plain_text(body) == "Body."
+    end
+
+    test "a comment above an H1 that repeats the front-matter title drops both" do
+      doc =
+        Markdown.parse_document("""
+        ---
+        title: Declared
+        ---
+        <!-- note -->
+
+        # Declared
+
+        Body.
+        """)
+
+      assert doc.title == "Declared"
+      assert [%{"value" => %{"body" => body}}] = doc.blocks
+      assert Enum.map(body, & &1["style"]) == ["normal"]
       assert PortableText.to_plain_text(body) == "Body."
     end
 

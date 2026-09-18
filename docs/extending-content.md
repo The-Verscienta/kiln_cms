@@ -23,6 +23,12 @@ UI" workflow, scoped to fields.
   `:recurrence`, `:computed` — plus
   anything a plugin registers (see
   [plugin-extensibility.md](plugin-extensibility.md)).
+- **Several types at once**: tick more than one content type and the form
+  creates one definition per type under the same machine name. They are
+  separate rows: each is edited, renamed or deleted on its own. The machine
+  name fills itself in from the label (`FieldDefinition.name_from_label/1`)
+  until you edit it, and a name already defined on any ticked type is refused
+  before anything is written.
 - **Store**: values live in the `custom_fields` map on each content record.
 - **Validate**: `KilnCMS.CMS.Changes.ApplyCustomFields` runs on every write — it
   coerces values to the declared type, enforces `required`, checks `:select`
@@ -239,8 +245,8 @@ config :kiln_cms, :plugins, [Ratings.Plugin]
 A `Kiln.Plugin` module contributes, per callback (all optional): **block
 types** (`Kiln.Block` modules — they join the storage union, editor palette,
 firing, search and the XLIFF translation export automatically; see
-[localization workflows](localization-workflows.md#translation-vendors--xliff-20-exportimport)
-for the `translatable:` field option that decides what a translator sees),
+*Translation vendors — XLIFF 2.0 export/import* in
+[localization workflows](localization-workflows.md) for the `translatable:` field option that decides what a translator sees),
 **custom field types** (`Kiln.FieldType`
 modules — admins pick them in the fields admin like any built-in; the
 plugin's `cast/2` coerces + validates every content write to a JSON-native

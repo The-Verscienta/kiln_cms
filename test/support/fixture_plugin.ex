@@ -94,6 +94,9 @@ defmodule KilnCMS.FixturePlugin.FieldTypes.Rating do
   use Kiln.FieldType
 
   @impl Kiln.FieldType
+  def description, do: "One to five stars. For a review score."
+
+  @impl Kiln.FieldType
   def cast(value, _definition) do
     case value do
       n when is_integer(n) and n in 1..5 -> {:ok, n}

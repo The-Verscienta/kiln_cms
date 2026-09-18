@@ -6,6 +6,11 @@ time** and activates it via config — the core repo never changes.
 
 ## The overlay contract
 
+This section describes how an overlay *attaches*. For what it may rely on
+across releases — which surfaces a major bump covers, which may change in a
+minor, and the deprecation path when a covered one has to go — see
+[The overlay contract](../docs/overlay-contract.md).
+
 A subproject is a `projects/<name>/` directory (this path is in
 `elixirc_paths` for every env — see `mix.exs`) containing:
 

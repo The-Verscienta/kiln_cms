@@ -67,6 +67,58 @@ defmodule KilnCMSWeb.TeamLiveTest do
       assert html =~ to_string(colleague.email)
     end
 
+    test "a site admin with no membership is listed and counted, without site-tier controls",
+         %{conn: conn} do
+      # What `/setup` creates: `User.role == :admin` and no OrgMembership row.
+      admin = authed_user(:admin)
+      conn = log_in(conn, admin)
+
+      {:ok, view, html} = live(conn, ~p"/editor/team")
+
+      assert has_element?(view, "#site-admin-#{admin.id}", "Site admin")
+      assert has_element?(view, "#site-admin-#{admin.id}", to_string(admin.email))
+      refute has_element?(view, "#site-admin-#{admin.id} button")
+      refute html =~ "No members on this site yet."
+      assert html =~ ~r/Members\s*\(\d+\)/
+      refute html =~ ~r/Members\s*\(0\)/
+    end
+
+    test "a normal membership keeps its edit and remove controls", %{conn: conn} do
+      colleague = authed_user(:editor)
+
+      {:ok, membership} =
+        Accounts.create_org_membership(
+          %{user_id: colleague.id, organization_id: Accounts.default_org_id(), role: :editor},
+          authorize?: false
+        )
+
+      {:ok, view, _html} = live(conn, ~p"/editor/team")
+
+      assert has_element?(view, "#member-#{membership.id} button", "Edit")
+      assert has_element?(view, "#member-#{membership.id} button[phx-click='remove_member']")
+      refute has_element?(view, "#member-#{membership.id}", "Site admin")
+      refute has_element?(view, "#site-admin-#{colleague.id}")
+    end
+
+    test "an admin who also holds a membership is listed once, on the membership row",
+         %{conn: conn} do
+      other_admin = authed_user(:admin)
+
+      {:ok, membership} =
+        Accounts.create_org_membership(
+          %{user_id: other_admin.id, organization_id: Accounts.default_org_id(), role: :viewer},
+          authorize?: false
+        )
+
+      {:ok, view, html} = live(conn, ~p"/editor/team")
+
+      refute has_element?(view, "#site-admin-#{other_admin.id}")
+      assert has_element?(view, "#member-#{membership.id}", "Site admin")
+
+      occurrences = html |> String.split(to_string(other_admin.email)) |> length() |> Kernel.-(1)
+      assert occurrences == 1
+    end
+
     test "adding an unknown email flashes an error", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/editor/team")
 
@@ -148,5 +200,129 @@ defmodule KilnCMSWeb.TeamLiveTest do
       assert html =~ "Saved."
       assert html =~ "Assignable"
     end
+
+    test "grants and then ends a temporary tier on this site", %{conn: conn} do
+      colleague = authed_user(:viewer)
+
+      {:ok, membership} =
+        Accounts.create_org_membership(
+          %{
+            user_id: colleague.id,
+            organization_id: Accounts.default_org_id(),
+            role: :viewer
+          },
+          authorize?: false
+        )
+
+      {:ok, view, _html} = live(conn, ~p"/editor/team")
+      view |> element("#member-#{membership.id} button", "Edit") |> render_click()
+
+      html =
+        view
+        |> form("#grant-member-#{membership.id}", %{"role" => "editor", "hours" => "24"})
+        |> render_submit()
+
+      assert html =~ "editor on this site until"
+
+      granted = reread_membership(membership)
+      assert granted.granted_role == :editor
+      # The standing site tier is untouched — that is what lets the grant expire
+      # without anything having to run (see KilnCMS.Accounts.RoleGrant).
+      assert granted.role == :viewer
+
+      view |> element("#member-#{membership.id} button", "Edit") |> render_click()
+      html = view |> element("#member-#{membership.id} button", "End it now") |> render_click()
+
+      assert html =~ "Temporary tier ended"
+      assert is_nil(reread_membership(membership).granted_role)
+    end
+
+    test "an explicit expiry wins over the preset on a site tier", %{conn: conn} do
+      colleague = authed_user(:viewer)
+
+      {:ok, membership} =
+        Accounts.create_org_membership(
+          %{
+            user_id: colleague.id,
+            organization_id: Accounts.default_org_id(),
+            role: :viewer
+          },
+          authorize?: false
+        )
+
+      {:ok, view, _html} = live(conn, ~p"/editor/team")
+      view |> element("#member-#{membership.id} button", "Edit") |> render_click()
+
+      until = DateTime.utc_now() |> DateTime.add(9, :day) |> Calendar.strftime("%Y-%m-%dT%H:%M")
+
+      view
+      |> form("#grant-member-#{membership.id}", %{
+        "role" => "editor",
+        "hours" => "24",
+        "until" => until
+      })
+      |> render_submit()
+
+      granted = reread_membership(membership)
+      assert granted.granted_role == :editor
+      assert DateTime.diff(granted.granted_role_expires_at, DateTime.utc_now(), :day) >= 8
+    end
+
+    # A crafted payload — blank role, unparseable date — used to validate as a
+    # no-op revoke and then crash formatting a nil expiry for the success flash.
+    test "a blank role with a garbage date is refused, not crashed on", %{conn: conn} do
+      colleague = authed_user(:viewer)
+
+      {:ok, membership} =
+        Accounts.create_org_membership(
+          %{
+            user_id: colleague.id,
+            organization_id: Accounts.default_org_id(),
+            role: :viewer
+          },
+          authorize?: false
+        )
+
+      {:ok, view, _html} = live(conn, ~p"/editor/team")
+
+      html =
+        render_hook(view, "grant_member_role", %{
+          "membership_id" => membership.id,
+          "role" => "",
+          "hours" => "24",
+          "until" => "nope"
+        })
+
+      assert html =~ "is required"
+      assert is_nil(reread_membership(membership).granted_role)
+    end
+
+    test "offers no grant to a member who already holds the top tier", %{conn: conn} do
+      colleague = authed_user(:viewer)
+
+      {:ok, membership} =
+        Accounts.create_org_membership(
+          %{
+            user_id: colleague.id,
+            organization_id: Accounts.default_org_id(),
+            role: :admin
+          },
+          authorize?: false
+        )
+
+      {:ok, view, _html} = live(conn, ~p"/editor/team")
+      html = view |> element("#member-#{membership.id} button", "Edit") |> render_click()
+
+      assert html =~ "already holds the highest tier"
+      refute html =~ "grant-member-#{membership.id}"
+    end
+  end
+
+  defp reread_membership(membership) do
+    Accounts.get_org_membership!(
+      membership.user_id,
+      membership.organization_id,
+      authorize?: false
+    )
   end
 end

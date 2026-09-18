@@ -1,4 +1,4 @@
-# Kiln CMS Design System
+# KilnCMS Design System
 
 Moved: this brand-level design spec has been folded into
 [`docs/design-language.md`](../docs/design-language.md), which is the

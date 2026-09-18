@@ -55,6 +55,66 @@ defmodule KilnCMSWeb.PageControllerTest do
     assert html =~ ~s(href="https://github.com/The-Verscienta/kiln_cms")
   end
 
+  # The stock front page is a PUBLIC url, and it used to be the only one served
+  # out of `Layouts.app` — the authoring chrome. That gave `/` alone a theme
+  # toggle and an account menu no other delivery page has, and skipped the
+  # site's own header/footer menus, theme preset and attribution line. It now
+  # renders in `Layouts.public` like every other public url, opting out of the
+  # reading measure with `wide` (which is all the old `container_class` was for).
+  describe "the stock front page's shell" do
+    test "renders in the public delivery chrome", %{conn: conn} do
+      html = conn |> get(~p"/") |> html_response(200)
+
+      assert html =~ ~s(class="public-shell")
+      assert html =~ ~s(data-public-wide="true")
+      # The delivery footer's attribution, which `Layouts.app` never drew.
+      assert html =~ "Powered by KilnCMS."
+      # The authoring chrome's theme toggle, which no other public page has.
+      refute html =~ ~s(data-phx-theme="system")
+    end
+
+    # The move must not cost a signed-in reader the two links `Layouts.app`
+    # gave them here — `Layouts.public` has no authoring nav to fall back on,
+    # and `/account` is where sign-in sends a viewer.
+    test "keeps account and sign-out for a signed-in reader", %{conn: conn} do
+      html = conn |> log_in(user(:viewer)) |> get(~p"/") |> html_response(200)
+
+      assert html =~ ~s(href="/account")
+      assert html =~ ~s(href="/sign-out")
+    end
+
+    test "offers neither to an anonymous visitor", %{conn: conn} do
+      html = conn |> get(~p"/") |> html_response(200)
+
+      refute html =~ ~s(href="/sign-out")
+    end
+
+    # The delivery chrome draws a language switcher, which the authoring shell
+    # never did — and the site root is the one delivery URL with no per-locale
+    # form: `Plugs.SetLocale` strips a locale prefix only when a segment
+    # follows it, so `/fr` is read as a page slug and `/fr/` 404s. Passing
+    # `locale_links` here would therefore have put a row of dead links in the
+    # header. Asserted so the omission reads as deliberate and the 404 is
+    # recorded as the reason.
+    test "draws no language switcher, the site root having no per-locale URL", %{conn: conn} do
+      html = conn |> get(~p"/") |> html_response(200)
+
+      refute html =~ ~s(aria-label="Language")
+
+      for locale <- KilnCMS.I18n.locales() -- [KilnCMS.I18n.default_locale()] do
+        assert conn |> get("/#{locale}/") |> response(404)
+      end
+    end
+
+    # The nav links themselves DO carry the prefix — those paths have a segment
+    # after the locale, so they resolve.
+    test "keeps the delivery nav prefixed for a non-default locale", %{conn: conn} do
+      html = conn |> get("/fr/blog") |> html_response(200)
+
+      assert html =~ ~s(href="/fr/search")
+    end
+  end
+
   # The screenshots are static files captured by e2e/screenshots/home.spec.js;
   # a renamed capture would otherwise ship as a row of broken images.
   test "every screenshot the home page shows exists", %{conn: conn} do
@@ -112,14 +172,38 @@ defmodule KilnCMSWeb.PageControllerTest do
   # #319: the header/footer API links land on a served docs page, not on the
   # raw endpoints (which 404/400 in a browser).
   test "GET /developers serves the API docs page", %{conn: conn} do
+    set_api_docs(true)
     html = conn |> get(~p"/developers") |> html_response(200)
 
     assert html =~ "Developer APIs"
     # Onward links to the browsable explorer + spec and the auth endpoint.
-    assert html =~ "/api/json/swaggerui"
-    assert html =~ "/api/json/open_api"
+    assert html =~ ~s(href="/api/json/swaggerui")
+    assert html =~ ~s(href="/api/json/open_api")
+    refute html =~ ~s(id="api-docs-disabled")
     assert html =~ "/api/auth/sign_in"
     assert html =~ "GraphQL"
+  end
+
+  # Production turns `:api_docs` off, and `KilnCMSWeb.Plugs.ApiDocs` then 404s
+  # both routes — so the page must not offer links that lead nowhere.
+  test "GET /developers drops the explorer links when API docs are off", %{conn: conn} do
+    set_api_docs(false)
+    html = conn |> get(~p"/developers") |> html_response(200)
+
+    refute html =~ ~s(href="/api/json/swaggerui")
+    refute html =~ ~s(href="/api/json/open_api")
+    assert html =~ ~s(id="api-docs-disabled")
+    assert html =~ "API_DOCS_ENABLED=true"
+    # The rest of the page still stands.
+    assert html =~ "Developer APIs"
+    assert html =~ "/api/auth/sign_in"
+  end
+
+  # `:api_docs` is process-wide app config, which is why this module is not async.
+  defp set_api_docs(value) do
+    previous = Application.get_env(:kiln_cms, :api_docs)
+    Application.put_env(:kiln_cms, :api_docs, value)
+    on_exit(fn -> Application.put_env(:kiln_cms, :api_docs, previous) end)
   end
 
   test "home and nav point API links at the docs page, not raw endpoints", %{conn: conn} do
@@ -145,6 +229,29 @@ defmodule KilnCMSWeb.PageControllerTest do
 
     refute html =~ "signed in as a viewer"
     assert html =~ "Open editor"
+  end
+
+  # A read returns the standing `role`, so a gate that read `user.role` would see
+  # a viewer here. The page asks the effective role, which counts the live grant.
+  test "a viewer holding a live editor grant is shown the editor, not onboarding", %{
+    conn: conn
+  } do
+    viewer = user(:viewer)
+
+    {:ok, _} =
+      KilnCMS.Accounts.grant_user_temporary_role(
+        viewer,
+        %{
+          granted_role: :editor,
+          granted_role_expires_at: DateTime.add(DateTime.utc_now(), 1, :hour)
+        },
+        actor: user(:admin)
+      )
+
+    html = conn |> log_in(viewer) |> get(~p"/") |> html_response(200)
+
+    assert html =~ "Open editor"
+    refute html =~ "signed in as a viewer"
   end
 
   # Both actions used to render `<Layouts.app>` without `current_org`, so the

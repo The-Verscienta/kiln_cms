@@ -292,7 +292,14 @@ defmodule KilnCMS.Portability.ImportTest do
 
     # The property that matters: a migration must not lose a post because one
     # of its images 404s.
+    #
+    # The 404 is stubbed rather than left to a real connection attempt against
+    # the fixture's host. Before `Ingest.req_options/0` existed this test got
+    # its failure from the network — hermetic only by accident, and a different
+    # failure on every machine.
     test "an unreachable image does not fail the record", %{parsed: parsed, actor: actor} do
+      Req.Test.stub(KilnCMS.Media.Ingest, fn conn -> Plug.Conn.send_resp(conn, 404, "") end)
+
       report = import!(parsed, actor: actor)
 
       assert length(report.created) == 3
@@ -306,7 +313,40 @@ defmodule KilnCMS.Portability.ImportTest do
         |> Enum.find(&(&1.type == :image))
 
       assert image.value.url == "https://old.example.com/wp-content/pic.jpg"
+      assert [%{reason: {:http_status, 404}}] = report.media.failed
     end
+
+    # The other half, which had no test at all while the fetch could not be
+    # stubbed: an image that DOES resolve is stored and the post's block points
+    # at the stored item rather than at the site being migrated away from.
+    test "a reachable image is sideloaded and linked", %{parsed: parsed, actor: actor} do
+      Req.Test.stub(KilnCMS.Media.Ingest, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("image/png")
+        |> Plug.Conn.send_resp(200, png())
+      end)
+
+      report = import!(parsed, actor: actor)
+
+      assert report.media.imported == 1
+      assert report.media.failed == []
+
+      image =
+        posts(actor)
+        |> find("hello-world")
+        |> Map.fetch!(:blocks)
+        |> Enum.find(&(&1.type == :image))
+
+      assert is_binary(image.value.media_id)
+      refute image.value.url == "https://old.example.com/wp-content/pic.jpg"
+    end
+  end
+
+  # 1x1 PNG — the same bytes `AVQuarantineTest` uses.
+  defp png do
+    Base.decode64!(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+    )
   end
 
   describe "envelope fidelity" do
@@ -615,6 +655,74 @@ defmodule KilnCMS.Portability.ImportTest do
     end
   end
 
+  describe "a record that landed, but not as the source had it" do
+    # The import used to log these and count the record as created, so a report
+    # saying "4,000 created" could mean 4,000 drafts of content that was live
+    # on the source site. `report.incomplete` says which, and why.
+
+    setup do
+      org =
+        Ash.Seed.seed!(KilnCMS.Accounts.Organization, %{
+          name: "Import Target",
+          slug: "import-target-#{System.unique_integer([:positive])}",
+          status: :active
+        })
+
+      editor =
+        Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+          email: "import-editor-#{System.unique_integer([:positive])}@example.com",
+          hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+          confirmed_at: DateTime.utc_now(),
+          role: :viewer
+        })
+
+      Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+        user_id: editor.id,
+        organization_id: org.id,
+        role: :editor
+      })
+
+      %{org: org, editor: editor}
+    end
+
+    # An editor may not publish unless the site says so, so importing a
+    # published record as one leaves a draft — the exact case that was silent.
+    test "a publish the actor may not make is reported, not just logged", %{
+      parsed: parsed,
+      org: org,
+      editor: editor
+    } do
+      {:ok, report} =
+        Import.run(parsed, actor: editor, tenant: org.id, skip_media: true)
+
+      assert length(report.created) == 3
+      assert [%{kind: kind, title: title, issues: [issue]}] = report.incomplete
+      assert kind in [:post, :page]
+      assert is_binary(title)
+      assert issue =~ "left as a draft — the publish was refused"
+      # The gist of the error, not the hundred-line inspect of it.
+      assert String.length(issue) < 200
+
+      # And it is the record that stayed a draft: every other one is unremarked.
+      imported =
+        CMS.list_posts!(actor: editor, tenant: org.id) ++
+          CMS.list_pages!(actor: editor, tenant: org.id)
+
+      refute Enum.any?(imported, &(&1.state == :published))
+    end
+
+    test "an import where everything worked reports nothing incomplete", %{
+      parsed: parsed,
+      actor: actor
+    } do
+      {:ok, report} = Import.run(parsed, actor: actor, skip_media: true)
+
+      assert length(report.created) == 3
+      assert report.incomplete == []
+      assert Enum.all?(report.created, &(&1.issues == []))
+    end
+  end
+
   describe "scale (#951)" do
     test "progress is reported to the caller's sink", %{parsed: parsed, scope: scope} do
       me = self()
@@ -631,7 +739,11 @@ defmodule KilnCMS.Portability.ImportTest do
 
     test "media failures survive the concurrent fetch", %{parsed: parsed, actor: actor} do
       # The fixture's one image is unreachable, so this exercises the error path
-      # through Task.async_stream rather than the serial reduce it replaced.
+      # through Task.async_stream rather than the serial reduce it replaced. The
+      # stub is registered in the test process and reaches the stream's workers
+      # through `$callers`.
+      Req.Test.stub(KilnCMS.Media.Ingest, fn conn -> Plug.Conn.send_resp(conn, 404, "") end)
+
       report = import!(parsed, actor: actor)
 
       assert length(report.created) == 3

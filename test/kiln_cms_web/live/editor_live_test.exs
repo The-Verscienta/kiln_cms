@@ -1007,12 +1007,26 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert render(lv) =~ "Trash is empty"
     end
 
+    # About ROLE-gating, so both users are on the Everything preset: a new
+    # account starts on Essentials, which draws no configure items for anyone,
+    # and the editor's refute would then pass whatever the role gate did. The
+    # lookups are scoped to the sidebar.
     test "the trash link is shown to admins only", %{conn: conn} do
-      {:ok, _lv, editor_html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
-      refute editor_html =~ "/editor/trash"
+      everything = fn user ->
+        {:ok, _} = KilnCMS.Accounts.set_nav_preset(user, :everything, actor: user)
+        user
+      end
 
-      {:ok, _lv, admin_html} = build_conn() |> log_in(authed_user(:admin)) |> live(~p"/editor")
-      assert admin_html =~ "/editor/trash"
+      {:ok, editor_lv, _html} =
+        conn |> log_in(everything.(authed_user(:editor))) |> live(~p"/editor")
+
+      assert has_element?(editor_lv, "aside #nav-preset-switch", "Show essentials")
+      refute has_element?(editor_lv, ~s(aside a.side-link[href="/editor/trash"]))
+
+      {:ok, admin_lv, _html} =
+        build_conn() |> log_in(everything.(authed_user(:admin))) |> live(~p"/editor")
+
+      assert has_element?(admin_lv, ~s(aside a.side-link[href="/editor/trash"]))
     end
   end
 
@@ -2818,10 +2832,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ "content-new-menu"
       assert html =~ "New recipe"
 
-      {:error, {:live_redirect, %{to: to}}} =
-        lv |> element(~s(#content-new-menu button[phx-value-kind="page"])) |> render_click()
-
-      assert to =~ "/editor/content/page/"
+      assert {:error, {:live_redirect, %{to: "/editor/content/page/new"}}} =
+               lv
+               |> element(~s(#content-new-menu button[phx-value-kind="page"]))
+               |> render_click()
     end
 
     test "edits a page via the generic /editor/content/:type/:id route", %{conn: conn} do
@@ -2858,15 +2872,17 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
   # Regression for #133: every authoring LiveView must pass current_user to the
   # layout so the console shell shows the authenticated nav (Sign out + sidebar
-  # sections like Media / Settings) instead of Sign in while the editor works.
+  # sections like Media / Your settings) instead of Sign in while the editor
+  # works. The per-user screen was relabelled from "Settings" in #1319, so this
+  # asks for the link rather than the word.
   describe "header navigation (current_user in layout)" do
     test "content list shows authenticated nav for a signed-in editor", %{conn: conn} do
-      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+      {:ok, lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
 
       assert html =~ "Sign out"
       refute html =~ ~r/>\s*Sign in\s*</
       assert html =~ "Media"
-      assert html =~ "Settings"
+      assert has_element?(lv, ~s(aside a.side-link[href="/editor/settings"]), "Your settings")
       # #166: the icon-only theme toggle buttons are labeled.
       assert html =~ ~s(aria-label="Use dark theme")
       assert html =~ ~s(aria-label="Use light theme")

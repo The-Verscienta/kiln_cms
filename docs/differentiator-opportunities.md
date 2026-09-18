@@ -98,9 +98,11 @@ production. Answers Directus Flows without embedding a new JS automation runtime
       shipped in #372 ([multiplayer-preview.md](multiplayer-preview.md))
 - [x] Cursors / presence via Phoenix.Presence — shipped in #372
 
-**The asymmetry:** CRDT collab exists; Phoenix.Presence makes shared preview
-near-trivial. Even Sanity charges enterprise money for real-time collaboration
-features.
+**The asymmetry:** a CRDT collab prototype exists (dev-only — see
+[collaborative-editing-spike.md](collaborative-editing-spike.md)), and
+Phoenix.Presence makes shared *preview* near-trivial on top of presence that is
+already on in production. Even Sanity charges enterprise money for real-time
+collaboration features.
 
 ## 8. Compliance & governance dashboard — [#352](https://github.com/The-Verscienta/kiln_cms/issues/352) `P1`
 

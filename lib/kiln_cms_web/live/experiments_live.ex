@@ -114,25 +114,25 @@ defmodule KilnCMSWeb.ExperimentsLive do
       goal: goal
     }
 
+    # A blank pick travels as "", which Ash casts to nil for all four: the
+    # `:uuid`s in `cast_input/3`, and `:goal_content_type` in
+    # `apply_constraints/3` under the default `allow_empty?: false`.
     case goal do
       "form_submission" ->
-        Map.put(base, :goal_form_id, blank_to_nil(params["goal_form_id"]))
+        Map.put(base, :goal_form_id, params["goal_form_id"])
 
       "funnel_completion" ->
-        Map.put(base, :goal_funnel_id, blank_to_nil(params["goal_funnel_id"]))
+        Map.put(base, :goal_funnel_id, params["goal_funnel_id"])
 
       "content_view" ->
         base
-        |> Map.put(:goal_content_type, blank_to_nil(params["goal_content_type"]))
-        |> Map.put(:goal_document_id, blank_to_nil(params["goal_document_id"]))
+        |> Map.put(:goal_content_type, params["goal_content_type"])
+        |> Map.put(:goal_document_id, params["goal_document_id"])
 
       _other ->
         base
     end
   end
-
-  defp blank_to_nil(""), do: nil
-  defp blank_to_nil(value), do: value
 
   defp load_experiments(socket) do
     experiments =

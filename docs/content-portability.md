@@ -29,6 +29,16 @@ create action would ultimately reject is still counted as importable — a dry
 run can over-report. Media is the reverse: it fetches nothing, so it reports
 what it `would_import` rather than what is reachable.
 
+### "Imported, but not as the source had it"
+
+A record can land and still not match its source: the actor was not allowed to
+publish it (an editor importing live content into a site where editors cannot
+publish), a state could not be restored, a source date or byline would not
+apply. The record counts as created — it exists — and the report lists it
+under this heading with the reason, so the difference is something you read
+rather than something you find later in the editor. These were previously only
+written to the server log.
+
 ## Migrating from WordPress
 
 ```bash
@@ -134,6 +144,17 @@ through a narrow action that fires no webhooks.
 mix kiln.export.content --out content.json
 mix kiln.export.content --type post --state published --out published-posts.json
 ```
+
+With no `--state`, the export holds **every** record: draft, in review,
+published and archived. Name one or more `--state`s to narrow it; an unknown
+`--state` is refused rather than exporting nothing.
+
+**Each record imports in the state it was exported in.** Published records go
+through the ordinary publish transition, so they version, fire and enter
+delivery like any publish. Records in review or archived are put back into that
+state quietly, by an import-only action. A restore is not new editorial
+activity, so it sends no review emails and no webhooks. A state the importer
+does not recognise (an older or hand-written envelope) imports as a draft.
 
 ```json
 {

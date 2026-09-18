@@ -113,7 +113,7 @@ defmodule KilnCMSWeb.TypeDefinitionLiveTest do
     lv
     |> form("#new-field-form",
       field_definition: %{
-        scope: "def:#{definition.id}",
+        scopes: ["def:#{definition.id}"],
         name: "servings",
         label: "Servings",
         field_type: "integer"

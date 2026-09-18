@@ -321,13 +321,22 @@ defmodule KilnCMSWeb.Router do
         {KilnCMSWeb.LiveUserAuth, :current_user},
         {KilnCMSWeb.LiveUserAuth, :assign_current_org},
         {KilnCMSWeb.LiveUserAuth, :live_editor_required},
-        {KilnCMSWeb.LiveUserAuth, :restore_locale}
+        {KilnCMSWeb.LiveUserAuth, :restore_locale},
+        # In-app notifications (#1320). Last, because it needs the
+        # `current_user` the first hook assigns — it subscribes that user's
+        # notification topic so every console page's notification surface
+        # updates live, instead of each of the 43 of them doing it itself.
+        {KilnCMSWeb.LiveNotifications, :notifications}
       ] do
       live "/media", MediaLive, :index
       live "/editor", EditorLive, :index
       live "/editor/overview", OverviewLive, :index
       live "/editor/calendar", CalendarLive, :index
       live "/editor/tasks", TaskLive, :index
+      # The notification inbox (#1320) — what the console has told this editor
+      # about. Editor-gated like the rest; the rows themselves are self-only by
+      # resource policy, so this page can only ever show the viewer's own.
+      live "/editor/inbox", InboxLive, :index
       # Content releases (#500). Editor-gated like the rest; the actions that
       # actually ship content are admin-gated by the resource policy, not here.
       live "/editor/releases", ReleaseLive, :index
@@ -348,6 +357,10 @@ defmodule KilnCMSWeb.Router do
       # Generic editor route — works for any content type (incl. ones generated
       # by `mix kiln.gen.content`). The `:page`/`:post` routes are kept as
       # backward-compatible aliases.
+      # An unsaved new document: nothing is written until the writer's first
+      # title or Save, then the same LiveView patches to the `:id` route. Must
+      # precede it, or "new" would be read as an id.
+      live "/editor/content/:type/new", ContentEditorLive, :new
       live "/editor/content/:type/:id", ContentEditorLive, :content
       live "/editor/pages/:id", ContentEditorLive, :page
       live "/editor/posts/:id", ContentEditorLive, :post
@@ -372,8 +385,14 @@ defmodule KilnCMSWeb.Router do
         {KilnCMSWeb.LiveUserAuth, :current_user},
         {KilnCMSWeb.LiveUserAuth, :assign_current_org},
         {KilnCMSWeb.LiveUserAuth, :live_admin_required},
-        {KilnCMSWeb.LiveUserAuth, :restore_locale}
+        {KilnCMSWeb.LiveUserAuth, :restore_locale},
+        # As in `:editor_routes` — these pages render the same console shell,
+        # so the bell in their top bar has to be live too (#1320).
+        {KilnCMSWeb.LiveNotifications, :notifications}
       ] do
+      # The configuration hub (#1319) — a map of every settings screen, holding
+      # no settings of its own. Admin-gated like the screens it points at.
+      live "/editor/configure", ConfigureLive, :index
       live "/editor/trash", TrashLive, :index
       live "/editor/webhooks", WebhookLive, :index
       # Pathauto redirect management (#457) — list/prune automatic rows, add
@@ -383,6 +402,12 @@ defmodule KilnCMSWeb.Router do
       live "/editor/slugs", SlugRegenLive, :index
       # Team + granular-RBAC management (#332 slice 4).
       live "/editor/team", TeamLive, :index
+      # The instance-wide account register: who has signed up, their platform
+      # role, time-boxed elevations, reset links, and account removal. Separate
+      # from `/editor/team`, which is about one site's memberships — see the
+      # LiveView's moduledoc.
+      live "/editor/accounts", AccountsLive, :index
+      live "/editor/accounts/:id", AccountsLive, :show
       # Editorial automation (#342) — no-code "when X happens, do Y" rules.
       live "/editor/automation", AutomationLive, :index
       # Social accounts the `:social_post` automation reaction announces to
@@ -499,6 +524,23 @@ defmodule KilnCMSWeb.Router do
 
   @doc "Absinthe.Plug options for the `/gql` endpoint (see the forward below)."
   def graphql_opts, do: @graphql_opts
+
+  # GraphiQL playground — dev/CI only (`config :kiln_cms, dev_routes: true` in
+  # dev.exs). It MUST be declared before the always-on `/gql` scope below:
+  # routes match in declaration order and that scope's `forward "/"` claims
+  # every `/gql/*` path, so a playground registered after it was unreachable
+  # even in dev. Production keeps the headless `/gql` endpoint only, where
+  # `/gql/playground` falls through to Absinthe's JSON 400.
+  if Application.compile_env(:kiln_cms, :dev_routes) do
+    scope "/gql" do
+      pipe_through [:graphql]
+
+      forward "/playground", Absinthe.Plug.GraphiQL,
+        schema: Module.concat(["KilnCMSWeb.GraphqlSchema"]),
+        socket: Module.concat(["KilnCMSWeb.GraphqlSocket"]),
+        interface: :simple
+    end
+  end
 
   scope "/gql" do
     pipe_through [:graphql]
@@ -1084,19 +1126,6 @@ defmodule KilnCMSWeb.Router do
   # scope "/api", KilnCMSWeb do
   #   pipe_through :api
   # end
-
-  # API explorer UIs — dev/CI only (`config :kiln_cms, dev_routes: true` in
-  # dev.exs). Production keeps `/gql` and `/api/json` headless endpoints only.
-  if Application.compile_env(:kiln_cms, :dev_routes) do
-    scope "/gql" do
-      pipe_through [:graphql]
-
-      forward "/playground", Absinthe.Plug.GraphiQL,
-        schema: Module.concat(["KilnCMSWeb.GraphqlSchema"]),
-        socket: Module.concat(["KilnCMSWeb.GraphqlSocket"]),
-        interface: :simple
-    end
-  end
 
   # --- Content-Security-Policy plugs ----------------------------------------
   #

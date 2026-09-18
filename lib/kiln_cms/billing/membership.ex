@@ -219,7 +219,15 @@ defmodule KilnCMS.Billing.Membership do
 
     # A member reads their own memberships (`/account`); an org admin reads the
     # site's.
+    #
+    # The system actor is admitted alongside them (#1402): a paid membership is
+    # what grants an audience and a newsletter tier segment, so
+    # `KilnCMS.Newsletter.TierSync` has to see the memberships it is syncing.
+    # The self grant is unaffected — `^actor(:id)` templates to nil for an
+    # actor with no `:id`, and `user_id` is `allow_nil? false`, so that clause
+    # matches no row for a system actor.
     policy action_type(:read) do
+      authorize_if KilnCMS.Checks.SystemActor
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
       authorize_if expr(user_id == ^actor(:id))
     end
@@ -235,11 +243,13 @@ defmodule KilnCMS.Billing.Membership do
     end
 
     # Provider state is applied only by the verified webhook worker and the
-    # reconcile sweep, both of which run `authorize?: false` (or via the AshOban
-    # bypass above). Unlike `KilnCMS.Accounts.User`, this resource has NO admin
-    # bypass, so `forbid_if always()` genuinely closes the action to every
-    # authorized caller.
+    # reconcile sweep; `:anonymize` only by GDPR erasure. Unlike
+    # `KilnCMS.Accounts.User`, this resource has NO admin bypass, so
+    # `forbid_if always()` genuinely closes both actions to every person —
+    # admin included — and the system actor is now named here (#1402) instead
+    # of reaching around the block with `authorize?: false`.
     policy action([:apply_provider_state, :anonymize]) do
+      authorize_if KilnCMS.Checks.SystemActor
       forbid_if always()
     end
   end

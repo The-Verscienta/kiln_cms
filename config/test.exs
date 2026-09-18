@@ -97,6 +97,13 @@ config :kiln_cms, KilnCMS.Social, req_options: [plug: {Req.Test, KilnCMS.Social}
 config :kiln_cms, KilnCMS.Branding.AppIcon,
   req_options: [plug: {Req.Test, KilnCMS.Branding.AppIcon}]
 
+# Media sideloading (#487) fetches attachment URLs taken from an uploaded export
+# file — the most content-chosen fetch in the system. Stubbed so the importer
+# never dials a site being migrated away from; a test that lets media through
+# installs its own `Req.Test.stub/2`, and one that does not gets a loud
+# "no stub" failure rather than a silent network attempt.
+config :kiln_cms, KilnCMS.Media.Ingest, req_options: [plug: {Req.Test, KilnCMS.Media.Ingest}]
+
 # Web Push (#628). No VAPID keys by default, so `KilnCMS.Push.enabled?/0` is
 # false and the suite's editorial actions enqueue no push jobs — the push tests
 # configure a pair explicitly. `req_options` points the sender at a stub for
@@ -262,8 +269,23 @@ config :phoenix,
   sort_verified_routes_query_params: true
 
 # Use the EXLA (XLA) backend for Nx in tests — the :exla dep is only available in
-# dev/test. Prod/e2e fall back to Nx.BinaryBackend (see config/config.exs).
-config :nx, default_backend: EXLA.Backend
+# dev/test, and then only with `KILN_ML=1` (#1321). Prod/e2e fall back to
+# Nx.BinaryBackend (see config/config.exs).
+#
+# Conditional, not unconditional: configuring an application that is not in the
+# tree makes Mix print "You are configuring an application that does not really
+# exist" on every boot of a lean build.
+#
+# This is the one value in this file that depends on the ENVIRONMENT rather
+# than on this file's bytes, which matters for CI's shared `deps`/`_build`
+# cache — see .github/actions/setup-mix, whose key hashes this file. The `ml`
+# job is the only one that sets KILN_ML, and it carries its own MIX_BUILD_ROOT
+# and its own cache key for exactly this reason.
+Code.require_file(Path.expand("ml_flag.exs", __DIR__))
+
+if KilnCMS.Config.MLFlag.enabled?() do
+  config :nx, default_backend: EXLA.Backend
+end
 
 # Exercise the collab CRDT channel in tests (joins refuse when off).
 config :kiln_cms, :collab_prototype, true

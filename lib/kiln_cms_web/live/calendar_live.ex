@@ -154,10 +154,17 @@ defmodule KilnCMSWeb.CalendarLive do
     # markup only offers a handle on draggable lanes, but the payload names its
     # own kind, so a `review_due` or `published` chip pushed by hand would
     # otherwise reach `do_reschedule/3`, which has no clause for it.
+    #
+    # `refuse_past/1` is asked first and `refuse_off_grid/2` second, because a
+    # nudge that is both — ArrowUp off the top of a grid that is already behind
+    # us — is a slip about *when*, and "can't reschedule into the past" is the
+    # more useful half of that answer.
     with {:ok, event} <- find_event(socket.assigns.events, id, kind),
          :ok <- refuse_undraggable(event),
          {:ok, date} <- parse_date(date),
-         :ok <- refuse_past(at_on(event, date)),
+         at = at_on(event, date),
+         :ok <- refuse_past(at),
+         :ok <- refuse_off_grid(at, socket.assigns),
          {:ok, message} <- do_reschedule(event, date, socket) do
       {:noreply, socket |> announce(message) |> load_events()}
     else
@@ -294,6 +301,38 @@ defmodule KilnCMSWeb.CalendarLive do
   defp refuse_past(%DateTime{} = at) do
     if DateTime.before?(at, DateTime.utc_now()) do
       {:error, gettext("Can't reschedule into the past.")}
+    else
+      :ok
+    end
+  end
+
+  # The keyboard's twin of "every drop target is a rendered cell" (#1384).
+  #
+  # A drag can only ever land on a cell that is on screen, so the drop path
+  # cannot reach a date outside the window. Arrow keys can: `nudge()` in
+  # `assets/js/app.js` turns a key into ±1/±7 days from the chip's own date,
+  # with no notion of where the grid ends. So `ArrowDown` from the last row of
+  # a month that ends on a Sunday, `ArrowUp` from the first row of one that
+  # starts on a Monday, either horizontal key at a corner — and in week view,
+  # whose grid is one row tall, *every* `ArrowUp`/`ArrowDown` — walks the chip
+  # off the grid. The write then succeeded and was announced, `load_events/1`
+  # re-queried a window the chip is no longer in, and it vanished from the
+  # calendar the editor was looking at with nothing saying where it went.
+  #
+  # Refusing is the safe first step. Navigating the calendar to the target's
+  # month or week is probably what the editor meant, but a move that silently
+  # takes you somewhere else is its own surprise, and it can be added on top of
+  # a refusal without undoing one.
+  #
+  # Judged on the same full timestamp `refuse_past/1` gets, against the same
+  # half-open window `load_events/1` queries — so "on the grid" here and "in
+  # the re-query" cannot drift apart. The month grid's padding cells are inside
+  # it, as they must be: they are rendered days and legitimate drop targets.
+  defp refuse_off_grid(%DateTime{} = at, %{view: view, at: anchor}) do
+    {from, to} = window(view, anchor)
+
+    if DateTime.before?(at, from) or not DateTime.before?(at, to) do
+      {:error, gettext("That day is not on this calendar — nothing moved.")}
     else
       :ok
     end
@@ -632,7 +671,7 @@ defmodule KilnCMSWeb.CalendarLive do
               its own: seven columns on a phone is a horizontal scroll. When the
               editor has explicitly chosen List, it shows at every width. --%>
         <div :if={@view in ["month", "week"]} class="hidden md:block">
-          <.grid days={@days} by_day={@by_day} view={@view} at={@at} />
+          <.grid days={@days} by_day={@by_day} view={@view} at={@at} filters={@filters} />
         </div>
         <div :if={@view in ["month", "week"]} class="md:hidden">
           <.event_list events={@events} />
@@ -722,6 +761,7 @@ defmodule KilnCMSWeb.CalendarLive do
   attr :by_day, :map, required: true
   attr :view, :string, required: true
   attr :at, :any, required: true
+  attr :filters, :map, required: true
 
   defp grid(assigns) do
     ~H"""
@@ -761,7 +801,12 @@ defmodule KilnCMSWeb.CalendarLive do
               <div class={["mb-1 text-xs", today?(day) && "font-bold text-primary"]}>
                 {day.day}
               </div>
-              <.day_chips events={Map.get(@by_day, day, [])} view={@view} day={day} />
+              <.day_chips
+                events={Map.get(@by_day, day, [])}
+                view={@view}
+                day={day}
+                filters={@filters}
+              />
             </td>
           </tr>
         </tbody>
@@ -773,6 +818,7 @@ defmodule KilnCMSWeb.CalendarLive do
   attr :events, :list, required: true
   attr :view, :string, required: true
   attr :day, :any, required: true
+  attr :filters, :map, required: true
 
   defp day_chips(assigns) do
     # Week columns are tall enough to show the day in full; month cells are not,
@@ -819,10 +865,25 @@ defmodule KilnCMSWeb.CalendarLive do
         </.link>
       </li>
       <%!-- Not a disclosure: expanding in place would resize the cell and shift
-            every row below it. The overflow says how much is hidden and the
-            week view is one click away, where it all fits. --%>
-      <li :if={@hidden != []} class="px-1.5 text-xs text-base-content/60">
-        {ngettext("+%{count} more", "+%{count} more", length(@hidden), count: length(@hidden))}
+            every row below it. The overflow says how much is hidden and links
+            to the week holding this day, where it all fits — same filters,
+            anchored on this day, so the hidden chips are what you land on. --%>
+      <li :if={@hidden != []} class="px-1.5 text-xs">
+        <.link
+          patch={calendar_path(%{view: "week", at: @day}, @filters)}
+          class="link text-base-content/70 hover:text-base-content"
+          aria-label={
+            ngettext(
+              "%{count} more on %{date} — show the week",
+              "%{count} more on %{date} — show the week",
+              length(@hidden),
+              count: length(@hidden),
+              date: Date.to_iso8601(@day)
+            )
+          }
+        >
+          {ngettext("+%{count} more", "+%{count} more", length(@hidden), count: length(@hidden))}
+        </.link>
       </li>
     </ul>
     """

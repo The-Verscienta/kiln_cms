@@ -7,9 +7,9 @@ defmodule KilnCMS.CMS.TaskBlockPerformanceTest do
      Twenty blocks with threads must cost the same two queries as one.
   2. **A single block's reload uses the composite index.** `:for_block` is the
      read a `{:block_thread_changed, _}` handler would use to refresh one
-     block; it must be an index scan on
-     `(org_id, content_type, content_id, block_id)`, not a sequential scan of
-     every task in the org.
+     block; it must be served by the index on
+     `(org_id, content_type, content_id, block_id)`, not by a sequential scan
+     of every task in the org.
   """
   use KilnCMS.DataCase, async: false
 
@@ -102,8 +102,101 @@ defmodule KilnCMS.CMS.TaskBlockPerformanceTest do
            "expected one read of each table regardless of block count, got #{inspect(counts)}"
   end
 
-  test "for_block hits the composite index rather than scanning the table" do
+  # Enough tasks in the org that the planner's choice is not a coin toss. At
+  # fixture scale an index scan and a scan of the org's whole task table cost
+  # the same to within the planner's fuzz factor, so which index it reaches for
+  # is arbitrary — and asserting a specific one there made this case flake. At
+  # this many rows the composite index costs ~8 against ~79 for a sequential
+  # scan; nothing else is close. 200 documents with 10 blocks apiece, one org
+  # and one assignee, which is the shape a busy site's `tasks` actually has.
+  @documents 200
+  @blocks_per_document 10
+
+  # `pg_get_indexdef/3`'s per-column form, so this reads the index's real key
+  # rather than pattern-matching a `CREATE INDEX` string. An index that is
+  # missing (or renamed) yields no rows rather than raising.
+  defp index_columns(name) do
+    KilnCMS.Repo.query!(
+      """
+      SELECT pg_get_indexdef(c.oid, k.ord::int, true)
+      FROM pg_class c
+      JOIN pg_index i ON i.indexrelid = c.oid
+      JOIN LATERAL generate_series(1, i.indnatts) AS k(ord) ON true
+      WHERE c.relname = $1
+      ORDER BY k.ord
+      """,
+      [name]
+    ).rows
+    |> List.flatten()
+  end
+
+  # The SQL Ash issues for a read, so the plan below is the plan for the real
+  # query rather than for a hand-written stand-in that may have drifted from it.
+  defp capture_query(fun) do
+    handler = "perf-sql-#{System.unique_integer([:positive])}"
+    parent = self()
+
+    :telemetry.attach(
+      handler,
+      [:kiln_cms, :repo, :query],
+      fn _event, _measure, meta, _config ->
+        if meta[:source] == "tasks", do: send(parent, {:sql, meta[:query], meta[:params]})
+      end,
+      nil
+    )
+
+    try do
+      fun.()
+    after
+      :telemetry.detach(handler)
+    end
+
+    drain_sql([])
+  end
+
+  defp drain_sql(acc) do
+    receive do
+      {:sql, sql, params} -> drain_sql([{sql, params} | acc])
+    after
+      0 -> Enum.reverse(acc)
+    end
+  end
+
+  defp seed_org_tasks(editor) do
+    KilnCMS.Repo.query!(
+      """
+      INSERT INTO tasks
+        (id, org_id, content_type, content_id, block_id, assignee_id,
+         status, kind, inserted_at, updated_at)
+      SELECT gen_random_uuid(), $1, 'page', d.content_id, gen_random_uuid(), $2,
+             'open', 'manual', now(), now()
+      FROM (SELECT gen_random_uuid() AS content_id FROM generate_series(1, $3)) d,
+           generate_series(1, $4)
+      """,
+      [
+        Ecto.UUID.dump!(KilnCMS.Accounts.default_org_id()),
+        Ecto.UUID.dump!(editor.id),
+        @documents,
+        @blocks_per_document
+      ]
+    )
+  end
+
+  test "the columns for_block filters on have one index, in that order" do
+    # The structural half of the claim, and the half that survives whatever the
+    # planner is feeling: the index `:for_block` needs exists and its key is the
+    # four columns in the order that lets `:for_content` match on the prefix.
+    # Deleting it from the migration fails here even on an empty table.
+    columns = index_columns("tasks_content_lookup_index")
+
+    assert columns == ~w(org_id content_type content_id block_id),
+           "expected tasks_content_lookup_index to key (org_id, content_type, " <>
+             "content_id, block_id) in that order, got: #{inspect(columns)}"
+  end
+
+  test "for_block reads one block's tasks through that index rather than scanning the org" do
     editor = user(:editor)
+    org = KilnCMS.Accounts.default_org_id()
     content_id = Ecto.UUID.generate()
     block_id = Ecto.UUID.generate()
 
@@ -117,35 +210,50 @@ defmodule KilnCMS.CMS.TaskBlockPerformanceTest do
       actor: editor
     )
 
+    seed_org_tasks(editor)
     drain()
 
-    # Postgres will happily scan a tiny table whatever the indexes say, so the
-    # planner is asked with sequential scans disabled: the question is whether
-    # an index *can* serve this predicate, not which one the planner prefers
-    # at fixture scale.
-    # Two statements, two calls: Postgres refuses multiple commands in one
-    # prepared statement, and `SET LOCAL` needs the sandbox's transaction —
-    # which is why this case is `async: false`.
-    KilnCMS.Repo.query!("SET LOCAL enable_seqscan = off", [])
+    # The planner is asked at scale and at its own default settings. The
+    # earlier form of this case set `enable_seqscan = off` instead, which at
+    # fixture scale proves only that *some* index is loadable — and lets the
+    # degenerate answer through, since reading the whole org through
+    # `tasks_assignee_lookup_index` and filtering is still "an index scan".
+    # Volume is what makes the answer stable; an `ANALYZE` here was tried and
+    # dropped, because it changed no plan (statistics faked both ways — a
+    # near-empty `pg_class` and a stale skewed `pg_statistic` — still give the
+    # index) while writing row counts that outlive the sandbox rollback.
+
+    # `tenant:` is what puts `org_id` in the predicate, and `org_id` leads the
+    # index — an unscoped read has nothing to match the first key column with.
+    [{sql, params}] =
+      capture_query(fn ->
+        assert [_one] =
+                 CMS.list_tasks_for_block!("page", content_id, block_id,
+                   actor: editor,
+                   tenant: org
+                 )
+      end)
 
     plan =
-      KilnCMS.Repo.query!(
-        """
-        EXPLAIN (FORMAT TEXT)
-        SELECT id FROM tasks
-        WHERE org_id = $1 AND content_type = $2 AND content_id = $3 AND block_id = $4
-        """,
-        [
-          Ecto.UUID.dump!(KilnCMS.Accounts.default_org_id()),
-          "page",
-          Ecto.UUID.dump!(content_id),
-          Ecto.UUID.dump!(block_id)
-        ]
-      )
+      KilnCMS.Repo.query!("EXPLAIN (FORMAT TEXT) " <> sql, params).rows
+      |> List.flatten()
+      |> Enum.join("\n")
 
-    text = plan.rows |> List.flatten() |> Enum.join("\n")
+    refute plan =~ "Seq Scan on tasks",
+           "expected one block's tasks to be found by index, not by reading " <>
+             "every task in the org, got:\n#{plan}"
 
-    assert text =~ "tasks_content_lookup_index",
-           "expected the composite index to serve for_block's predicate, got:\n#{text}"
+    assert plan =~ "tasks_content_lookup_index",
+           "expected the composite index to serve for_block's predicate, got:\n#{plan}"
+
+    # Named but only partly used would still be a read of the whole org: all
+    # four columns have to be index conditions, not rechecked as a filter.
+    index_cond =
+      plan |> String.split("\n") |> Enum.find("", &(String.trim(&1) =~ ~r/^Index Cond:/))
+
+    for column <- ~w(org_id content_type content_id block_id) do
+      assert index_cond =~ column,
+             "expected #{column} to be matched by the index rather than filtered, got:\n#{plan}"
+    end
   end
 end

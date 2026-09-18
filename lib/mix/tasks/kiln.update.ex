@@ -37,6 +37,16 @@ defmodule Mix.Tasks.Kiln.Update do
   database and a live site, so they stay explicit steps you run yourself; the
   task prints them in order when it finishes.
 
+  ## What it prints from the changelog
+
+  Only the **Breaking** and **Upgrade notes** sections of each release between
+  the two pins, read from `CHANGELOG.md` at the *target* tag. Those two answer
+  "what breaks if I upgrade?"; the rest of a release entry — Added, Changed,
+  Fixed, Security — does not, and printing it verbatim ahead of a production
+  pin move buried the part that does (#1325). Each summary line links to its
+  own long-form entry under `docs/changelog/`, rewritten here to an absolute
+  URL at the tag being installed so it is reachable from a terminal.
+
   ## Options
 
     * `--check` — report what an update would do and exit without changing
@@ -65,6 +75,8 @@ defmodule Mix.Tasks.Kiln.Update do
   @requirements []
 
   @tag_pattern "v*"
+
+  @repo_url "https://github.com/The-Verscienta/kiln_cms"
 
   # What makes a checkout *this* repo rather than merely *a* repo. Both are
   # required: `lib/kiln_cms/application.ex` alone could be a vendored copy
@@ -365,7 +377,10 @@ defmodule Mix.Tasks.Kiln.Update do
   defp report_upgrade_notes(repo, current, target) do
     case git(repo.root, ["show", "#{target.sha}:CHANGELOG.md"]) do
       {:ok, changelog} ->
-        print_upgrade_notes(upgrade_notes(changelog, current.version, target.version))
+        changelog
+        |> upgrade_notes(current.version, target.version)
+        |> print_upgrade_notes(target)
+
         :ok
 
       {:error, reason} ->
@@ -374,21 +389,56 @@ defmodule Mix.Tasks.Kiln.Update do
     end
   end
 
-  defp print_upgrade_notes([]), do: :ok
+  defp print_upgrade_notes([], _target), do: :ok
 
-  defp print_upgrade_notes(notes) do
-    Mix.shell().info([:yellow, "\nUpgrade notes:", :reset])
-    Enum.each(notes, &print_upgrade_note/1)
+  defp print_upgrade_notes(notes, target) do
+    Mix.shell().info([:yellow, "\nWhat this update asks of you:", :reset])
+    Enum.each(notes, &print_upgrade_note(&1, target))
+
+    Mix.shell().info("""
+
+    That is the Breaking and Upgrade-notes sections only. Everything else the
+    release changed is in CHANGELOG.md at #{target.tag}.
+    """)
   end
 
-  defp print_upgrade_note({version, body}) do
+  defp print_upgrade_note({version, blocks}, target) do
     Mix.shell().info([:bright, "\n  #{version}", :reset])
-    body |> String.split("\n") |> Enum.each(&Mix.shell().info("  #{&1}"))
+
+    Enum.each(blocks, fn {name, body} ->
+      Mix.shell().info([:bright, "\n    #{name}", :reset])
+
+      body
+      |> absolutize(target)
+      |> String.split("\n")
+      |> Enum.each(&Mix.shell().info("    #{&1}"))
+    end)
   end
+
+  # The summary lines link to `docs/changelog/...` and `docs/decisions/...`
+  # relative to the repo root (#1325). A relative path is unclickable in a
+  # terminal and ambiguous in a scrollback, so point them at the tag being
+  # installed — the revision whose notes these are.
+  defp absolutize(body, %{tag: tag}) when is_binary(tag) do
+    Regex.replace(~r/\]\((docs\/[^)\s]+)\)/, body, fn _whole, path ->
+      "](#{@repo_url}/blob/#{tag}/#{path})"
+    end)
+  end
+
+  defp absolutize(body, _target), do: body
 
   @doc false
-  # Extracts each `### Upgrading` block for releases in (from, to]. Public only
-  # so it can be tested against changelog fixtures without shelling out to git.
+  # The operator-facing sections of each release in (from, to]: `Breaking`
+  # first, then `Upgrade notes`. Everything else a release changed — Added,
+  # Fixed, Security — is deliberately not printed: an operator moving a pin is
+  # asking "what breaks if I upgrade?", and burying that in a full release
+  # entry is what #1325 was filed about.
+  #
+  # `Upgrading` is the spelling releases up to 0.8.0 used and is read as
+  # `Upgrade notes`, so a pin moving to an older tag still gets its advice.
+  #
+  # Returns `[{version, [{section_name, body}]}]`, oldest first. Public only so
+  # it can be tested against changelog fixtures without shelling out to git.
   def upgrade_notes(changelog, from, to) do
     changelog
     |> String.split(~r/^## /m, trim: true)
@@ -396,14 +446,56 @@ defmodule Mix.Tasks.Kiln.Update do
       with [heading | _] <- String.split(section, "\n", parts: 2),
            %Version{} = version <- section_version(heading),
            true <- in_range?(version, from, to),
-           [_, body] <- String.split(section, ~r/^### Upgrading\s*$/m, parts: 2) do
-        # Stop at the next h3 so a following "### Fixed" isn't read as advice.
-        [{version, body |> String.split(~r/^### /m, parts: 2) |> hd() |> String.trim()}]
+           [_ | _] = blocks <- operator_blocks(section) do
+        [{version, blocks}]
       else
         _ -> []
       end
     end)
     |> Enum.sort_by(fn {version, _} -> version end, Version)
+  end
+
+  # Printed in the order CHANGELOG.md carries them, so the terminal and the file
+  # read the same way round.
+  @operator_sections %{
+    "Upgrade notes" => {0, "Upgrade notes"},
+    "Upgrading" => {0, "Upgrade notes"},
+    "Breaking" => {1, "Breaking"}
+  }
+
+  defp operator_blocks(section) do
+    section
+    |> String.split(~r/^### /m)
+    # Everything before the first h3 is the release heading and any preamble.
+    |> Enum.drop(1)
+    |> Enum.flat_map(fn chunk ->
+      {name, body} =
+        case String.split(chunk, "\n", parts: 2) do
+          [name] -> {String.trim(name), ""}
+          [name, body] -> {String.trim(name), String.trim(body)}
+        end
+
+      case {Map.fetch(@operator_sections, name), strip_link_definitions(body)} do
+        {_, ""} -> []
+        {:error, _} -> []
+        {{:ok, {rank, label}}, body} -> [{rank, label, body}]
+      end
+    end)
+    |> Enum.sort_by(fn {rank, _label, _body} -> rank end)
+    |> Enum.map(fn {_rank, label, body} -> {label, body} end)
+  end
+
+  # The oldest release is the last section in the file, so its body runs on into
+  # the trailing `[0.8.0]: https://...` link-reference block. Printing that as
+  # upgrade advice is noise at best; it also buries the actual advice above it.
+  defp strip_link_definitions(body) do
+    body
+    |> String.split("\n")
+    |> Enum.reverse()
+    |> Enum.drop_while(&String.match?(&1, ~r/^\s*(\[[^\]]+\]:\s*\S+)?\s*$/))
+    |> Enum.reverse()
+    |> Enum.join("\n")
+    |> String.trim()
   end
 
   defp section_version(heading) do

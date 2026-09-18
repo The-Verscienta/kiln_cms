@@ -128,9 +128,12 @@ defmodule KilnCMS.Markdown do
 
   The title is the front matter's `title`, else a **leading** `# H1` (the
   first thing in the body — a heading further down is a section, not the
-  document's name). A leading H1 that supplied the title, or that repeats the
-  front-matter title, is removed from the body: the title is rendered by the
-  page, and keeping it would print it twice.
+  document's name). An HTML comment above it does not cost the heading that
+  place: a `.md` file that opens with a license or editing note still has a
+  leading H1. A leading H1 that supplied the title, or that repeats the
+  front-matter title, is removed from the body — along with any comments in
+  front of it: the title is rendered by the page, and keeping it would print
+  it twice.
 
   Options: `:media_resolver`, as in `to_blocks/2`.
   """
@@ -228,6 +231,13 @@ defmodule KilnCMS.Markdown do
     end
   end
 
+  # A block-level `<!-- … -->` is a node of its own, so a file that opens with a
+  # license or editing note — a common shape for an imported `.md` — puts one in
+  # front of the title heading. Skip past those notes to find it, and hand back
+  # a `rest` without them: they belong to the heading's preamble, and leaving
+  # them in would re-open the body with the chrome the title was lifted out of.
+  defp leading_h1([{_tag, _attrs, _children, %{comment: true}} | rest]), do: leading_h1(rest)
+
   defp leading_h1([{"h1", _attrs, children, _meta} | rest]) do
     case children |> plain_text() |> String.trim() do
       "" -> nil
@@ -284,6 +294,14 @@ defmodule KilnCMS.Markdown do
   end
 
   defp render_node(text, _opts) when is_binary(text), do: text_html(text)
+
+  # An HTML comment: `{:comment, [], [lines], %{comment: true}}`, whose tag is
+  # the ATOM `:comment` and so matches none of the tag lists above. Its text is
+  # a note to whoever edits the file, never content — without this the catch-all
+  # at the bottom would render it as a paragraph of visible prose. A comment
+  # written mid-sentence never reaches here: it stays inside the paragraph's
+  # text run, where `text_html/1` hands it to the sanitizer, which drops it.
+  defp render_node({_tag, _attrs, _children, %{comment: true}}, _opts), do: ""
 
   defp render_node({tag, _attrs, _children, %{verbatim: true}}, _opts)
        when tag in @dropped_raw,
@@ -344,8 +362,8 @@ defmodule KilnCMS.Markdown do
 
   defp render_node({tag, _attrs, _children, _meta}, _opts) when tag in @void_tags, do: "<#{tag}>"
 
-  # Anything else (a comment, an element this list does not know): its text
-  # is still the author's, the wrapper is not trusted.
+  # Anything else (an element this list does not know): its text is still the
+  # author's, the wrapper is not trusted.
   defp render_node({_tag, _attrs, children, _meta}, opts) when is_list(children),
     do: render(children, opts)
 

@@ -83,8 +83,11 @@ defmodule KilnCMS.Portability.CLI do
       shell.info("── DRY RUN — nothing was written ──────────────────────────")
     end
 
+    incomplete = Map.get(report, :incomplete, [])
+
     shell.info("""
-    Records:   #{length(report.created)} #{verb(report.dry_run, "would be created", "created")}, \
+    Records:   #{length(report.created)} #{verb(report.dry_run, "would be created", "created")}\
+    #{incomplete_note(incomplete)}, \
     #{length(report.skipped)} skipped (already present), #{length(report.failed)} failed
     Taxonomy:  #{term_line(report.taxonomy.categories)} categories, \
     #{term_line(report.taxonomy.tags)} tags
@@ -96,6 +99,18 @@ defmodule KilnCMS.Portability.CLI do
     print_authors(shell, Map.get(report, :authors))
 
     print_list(shell, "Failed", report.failed, &"  #{&1.kind} #{inspect(&1.title)}: #{&1.reason}")
+
+    # A record that landed but not as the source had it — a publish the actor
+    # was not allowed to make, a state that could not be restored, a byline
+    # that did not resolve. It counts as created, because it exists; saying
+    # only that would leave the operator to discover the difference in the
+    # editor, or not at all.
+    print_list(
+      shell,
+      "Imported, but not as the source had it",
+      incomplete,
+      &"  #{&1.kind} #{inspect(&1.title)}: #{Enum.join(&1.issues, "; ")}"
+    )
 
     print_list(
       shell,
@@ -188,6 +203,9 @@ defmodule KilnCMS.Portability.CLI do
       shell.info("  … and #{length(items) - @max_listed} more")
     end
   end
+
+  defp incomplete_note([]), do: ""
+  defp incomplete_note(incomplete), do: " (#{length(incomplete)} not as the source had it)"
 
   defp verb(true, dry, _real), do: dry
   defp verb(_false, _dry, real), do: real

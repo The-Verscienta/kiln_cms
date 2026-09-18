@@ -43,6 +43,7 @@ defmodule KilnCMS.Accounts.Scoping do
   require Ash.Query
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.RoleGrant
 
   @axes [:editable_types, :readable_types]
 
@@ -199,24 +200,35 @@ defmodule KilnCMS.Accounts.Scoping do
   `subject` may be the query/changeset under authorization, a raw org id
   (what the web layer passes from `current_org`), an `%Organization{}`, or nil
   (default org).
+
+  Every branch resolves **temporary tiers** (`KilnCMS.Accounts.RoleGrant`) through
+  `RoleGrant.effective_role/1`, here, at the moment of the decision — on the user
+  for the platform and legacy branches, on the membership for the member branch.
+  A loaded `role` is always the standing tier, and a LiveView holds the actor it
+  mounted with, so the grant's expiry has to be compared with the clock now
+  rather than trusted from any earlier read.
   """
   @spec effective_tier(
           map() | nil,
           Ash.Query.t() | Ash.Changeset.t() | struct() | String.t() | nil
         ) :: :admin | :editor | :viewer | :none
-  def effective_tier(%{role: :admin}, _subject), do: :admin
-
   def effective_tier(%{} = actor, subject) do
+    if RoleGrant.effective_role(actor) == :admin,
+      do: :admin,
+      else: member_tier(actor, subject)
+  end
+
+  def effective_tier(_actor, _subject), do: :none
+
+  defp member_tier(actor, subject) do
     org = subject_org_id(subject)
 
     case affiliation(actor, org) do
-      {:member, membership} -> membership.role
+      {:member, membership} -> RoleGrant.effective_role(membership)
       :unaffiliated -> legacy_tier(actor, org)
       :foreign_org -> :none
     end
   end
-
-  def effective_tier(_actor, _subject), do: :none
 
   @doc """
   The users whose `effective_tier/2` on `org` is one of `tiers` — its inverse,
@@ -243,19 +255,31 @@ defmodule KilnCMS.Accounts.Scoping do
     platform? = :admin in tiers
     legacy? = org_id == Accounts.default_org_id()
 
+    # Every `role` test goes through `RoleGrant.expression/1`, which is
+    # `effective_role/1` in SQL — a temporary admin belongs on the admin roster
+    # while their grant is live and not a minute longer. The rows come back as
+    # stored, so a caller that needs the tier a row matched on asks
+    # `RoleGrant.effective_role/1`, not `user.role`.
+    #
+    # The `exists/2` clause resolves the same expression against the membership's
+    # own columns, which are named identically for exactly this reason.
+    admin_tier = RoleGrant.expression([:admin])
+    wanted = RoleGrant.expression(tiers)
+
     Accounts.User
     |> Ash.Query.filter(
-      (^platform? and role == :admin) or
-        (role != :admin and
-           exists(org_memberships, organization_id == ^org_id and role in ^tiers)) or
-        (^legacy? and role in ^tiers and not exists(org_memberships, true))
+      (^platform? and ^admin_tier) or
+        (not (^admin_tier) and exists(org_memberships, organization_id == ^org_id and ^wanted)) or
+        (^legacy? and ^wanted and not exists(org_memberships, true))
     )
     |> Ash.read!(authorize?: false)
   end
 
   # A membership-less account's global role applies only on the default org.
   defp legacy_tier(actor, org) do
-    if org == Accounts.default_org_id(), do: Map.get(actor, :role) || :none, else: :none
+    if org == Accounts.default_org_id(),
+      do: RoleGrant.effective_role(actor) || :none,
+      else: :none
   end
 
   @doc """

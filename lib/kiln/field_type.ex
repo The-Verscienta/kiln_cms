@@ -71,6 +71,14 @@ defmodule Kiln.FieldType do
   @callback label() :: String.t()
 
   @doc """
+  One or two sentences shown under the type picker in the fields admin once an
+  admin selects this type: what the field holds and what it is for ("A colour,
+  picked from a swatch. For brand accents or a category's badge colour."). A
+  plain string, like `c:label/0`. Defaults to `nil`, which shows nothing.
+  """
+  @callback description() :: String.t() | nil
+
+  @doc """
   Coerce + validate one submitted value against a definition. Called with the
   raw form/API value (never blank — blank handling, `required`, and `default`
   are the host's job). Return a JSON-native value or a human message.
@@ -175,7 +183,8 @@ defmodule Kiln.FieldType do
   """
   @callback json_schema(definition :: struct()) :: map()
 
-  # `input_parts/1` and `tokens/1` were added after this contract shipped.
+  # `input_parts/1`, `tokens/1` and `description/0` were added after this
+  # contract shipped.
   # `use Kiln.FieldType` defaults them, but a plugin that hand-rolls
   # `@behaviour Kiln.FieldType` is explicitly sanctioned (`mix
   # kiln.plugins.doctor` requires only `cast/2` and `name/0`), and such a
@@ -185,7 +194,45 @@ defmodule Kiln.FieldType do
   # `KilnCMS.SchemaExport` probes for it with `function_exported?` and falls
   # back to widget inference, so defining a default would mean every type
   # silently claiming to describe itself.
-  @optional_callbacks input_parts: 1, tokens: 1, json_schema: 1
+  @optional_callbacks input_parts: 1, tokens: 1, json_schema: 1, description: 0
+
+  @doc ~S"""
+  `Float.parse/1`, made total — the numeric parse a custom field type's
+  `c:cast/2` should reach for instead of the standard-library call.
+
+  Same contract as `Float.parse/1`: `{float, remainder}` on success, `:error`
+  otherwise.
+
+      iex> Kiln.FieldType.parse_float("1.5")
+      {1.5, ""}
+
+      iex> Kiln.FieldType.parse_float("2.5kg")
+      {2.5, "kg"}
+
+      iex> Kiln.FieldType.parse_float("not a number")
+      :error
+
+  `Float.parse/1` itself is **not** total, and *how* it fails is toolchain-
+  dependent: on a literal that overflows a double it returns the bare atom
+  `:error` on Elixir 1.20 but **raises** `ArgumentError` out of
+  `:erlang.list_to_float/1` on 1.19 (the version `.tool-versions` pins and CI
+  runs). A `cast/2` runs on every content write, including public ones, so
+  there the difference is a validation message on one toolchain and a 500 on
+  the other. Both failures are normalized to `:error` here.
+
+      Kiln.FieldType.parse_float(String.duplicate("9", 400) <> ".0")
+      #=> :error
+
+  `KilnCMS.CMS.FieldTypes.Geolocation` and the example overlay's money type
+  (`projects/example/field_types/money.ex`) both parse their parts through
+  this.
+  """
+  @spec parse_float(String.t()) :: {float(), binary()} | :error
+  def parse_float(text) when is_binary(text) do
+    Float.parse(text)
+  rescue
+    ArgumentError -> :error
+  end
 
   defmacro __using__(_opts) do
     quote do
@@ -210,6 +257,9 @@ defmodule Kiln.FieldType do
       end
 
       @impl Kiln.FieldType
+      def description, do: nil
+
+      @impl Kiln.FieldType
       def input_type, do: "text"
 
       @impl Kiln.FieldType
@@ -223,6 +273,7 @@ defmodule Kiln.FieldType do
 
       defoverridable name: 0,
                      label: 0,
+                     description: 0,
                      input_type: 0,
                      input_attrs: 1,
                      input_parts: 1,

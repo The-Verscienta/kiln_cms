@@ -148,6 +148,11 @@ async function signInAs(page, { email, password }) {
   // Editors/admins land on the console overview by default after sign-in
   // (#157); both seeded users carry an editorial role (see priv/repo/seeds.exs).
   await base.expect(page).toHaveURL("/editor/overview");
+  // The URL changes on the redirect, before the landing LiveView's join acks,
+  // so a spec's first click after sign-in could still be dropped — the
+  // console_sidebar.spec.js beforeEach lost its "Show all tools" click that way
+  // on main. Hand back a page that can take events.
+  await waitForLiveConnected(page);
 }
 
 async function signInAsAdmin(page) {
@@ -161,21 +166,34 @@ async function signInAsEditor(page) {
   await signInAs(page, EDITOR);
 }
 
-// Start a fresh draft of `kind` ("page" by default) from the editor index (the
-// `new` handler creates an "Untitled …" draft and navigates into the editor).
+// Start a fresh draft of `kind` ("page" by default) from the editor index.
+// New opens the editor on an UNSAVED document at /editor/content/<kind>/new;
+// nothing is written until a title is typed or Save is pressed. This fixture
+// presses "Save draft" straight away, so callers get the same "Untitled …"
+// draft the New button used to create on the click — a real id to hold for
+// cleanup and list selectors before anything is typed — and waits for the
+// patch to the real edit route.
 // Past @max_inline_new_buttons content types the per-type "New …" buttons
 // collapse into the #content-new-menu <details> dropdown, so open it first.
 //
-// Returns the new record's id (the last URL segment), so a caller can hold it
-// for cleanup before it has typed a title — the draft is findable by nothing
-// else until then.
+// Returns the new record's id (the last URL segment).
 async function newDraftContent(page, kind = "page") {
   await page.goto("/editor");
   const newMenu = page.locator("#content-new-menu summary");
   if (await newMenu.count()) await newMenu.click();
   await page.click(`button[phx-click="new"][phx-value-kind="${kind}"]`);
-  await page.waitForURL(new RegExp(`/editor/(content/${kind}|${kind}s)/`));
-  await base.expect(page.locator('form[id$="-editor"]')).toBeVisible();
+  await page.waitForURL(new RegExp(`/editor/content/${kind}/new$`));
+  await page.click("#new-draft-save");
+  await page.waitForURL(new RegExp(`/editor/content/${kind}/[0-9a-f-]{36}$`));
+  await base.expect(page.locator('form[id$="-editor"] [role="tablist"]')).toBeVisible();
+  // Save draft says "Saved.", like any Save. Dismiss it the way `save()` does:
+  // the flash group sits over the top-right of the page, so leaving it up
+  // intercepts the caller's next click there (the image picker's first button
+  // in focus_trap.spec.js). The old New button wrote the row without a flash.
+  const flash = page.locator("#flash-info");
+  await base.expect(flash).toContainText("Saved.");
+  await flash.click();
+  await base.expect(flash).toBeHidden();
   return new URL(page.url()).pathname.split("/").pop();
 }
 
@@ -191,8 +209,30 @@ async function newDraftPage(page) {
 // find (see the fixture-race note on `waitForLiveConnected`).
 async function saveDraft(page, { title, slug }) {
   await page.fill('input[name$="[title]"]', title);
-  if (slug) await page.fill('input[name$="[slug]"]', slug);
+  if (slug) await fillSlug(page, slug);
   await save(page);
+}
+
+// Type a slug. The slug input lives in the inspector's Settings → URL section,
+// not under the title, and the rail shows Preview by default — a CSS-hidden
+// input can't be filled. "Edit URL" (the line under the title) opens Settings
+// and focuses the slug, the way a writer gets there. Afterwards the tab that
+// was showing is put back, so a caller asserting on the Preview panel next
+// still finds it visible.
+async function fillSlug(page, slug) {
+  const input = page.locator('input[name$="[slug]"]');
+  const selected = page.locator('button[role="tab"][aria-selected="true"]');
+  const tab = await selected.getAttribute("phx-value-tab");
+  if (!(await input.isVisible())) await page.click("#edit-url");
+  await base.expect(input).toBeVisible();
+  await input.fill(slug);
+  if (tab && tab !== "settings") {
+    await page.click(`button[role="tab"][phx-value-tab="${tab}"]`);
+    await base.expect(page.locator(`button[role="tab"][phx-value-tab="${tab}"]`)).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  }
 }
 
 // Press Save on the open draft and wait for the "Saved." flash (see above).
@@ -331,6 +371,7 @@ module.exports = {
   newDraftPage,
   newDraftContent,
   saveDraft,
+  fillSlug,
   save,
   addBlock,
   createTagGroup,

@@ -122,6 +122,12 @@ defmodule KilnCMSWeb.AuthLive do
 
       @impl true
       def render(assigns), do: @upstream.render(assigns)
+
+      # `KilnCMSWeb.ResetLive` replaces this one: upstream's render names the
+      # component below it as a literal, and that component is the one Kiln
+      # needs to re-point. Everything above `render/1` — the guard, the hooks,
+      # the delegated mount and params — is what it still wants from here.
+      defoverridable render: 1
     end
   end
 end
