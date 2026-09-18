@@ -3,7 +3,8 @@
 Written on 2026-09-18, against v0.9.0. This page says **what 1.0 means**
 and **the order of work to get there**. It does not track status. The
 [issue tracker](https://github.com/The-Verscienta/kiln_cms/issues) and the
-milestones hold that, because a checklist in a doc drifts and an issue does
+milestones ([v0.10.0](https://github.com/The-Verscienta/kiln_cms/milestone/12), [v0.11.0](https://github.com/The-Verscienta/kiln_cms/milestone/13),
+[v0.12.0](https://github.com/The-Verscienta/kiln_cms/milestone/14), [v1.0.0](https://github.com/The-Verscienta/kiln_cms/milestone/15)) hold that, because a checklist in a doc drifts and an issue does
 not. When this page and an issue disagree, the issue wins, and this page
 needs editing.
 
@@ -72,7 +73,7 @@ The things an operator would hit in their first months of running Kiln.
   a bagua, with a "taiji · centre" tile. #1321: the "space-free, non-iCloud
   path" warnings in `CONTRIBUTING.md` and `AGENTS.md` still need verifying,
   then either fixing or reporting upstream.
-- **Docs accuracy pass.** Fix the claims found stale while writing this page:
+- **Docs accuracy pass (#1532).** Fix the claims found stale while writing this page:
   - the README status section names `v0.8.0` and calls #1453 "in flight"
   - it says there are no external contributors (#1445 merged one)
   - its experimental row leaves out the Bumblebee reranker and GraphQL
@@ -82,22 +83,22 @@ The things an operator would hit in their first months of running Kiln.
     (#734 fixed that)
   - `docs/observability.md` calls referrers and funnels unbuilt
   - `docs/beta-testing.md` has an unchecked box for a label that exists
-- **Prepare beta round 1.** Write the exit criteria as numbers (below), and
-  line up the testers.
+- **Prepare beta round 1.** Write the exit criteria as numbers (#1533, and
+  below), and line up the testers.
 
 ### 0.11: first beta round
 
-- **Run round 1 (#59)** against the published image, using the round shapes
+- **Run round 1 (#1534, under #59)** against the published image, using the round shapes
   and scenarios A–G in `docs/beta-testing.md`. Every S1/S2 finding is fixed in
   this milestone.
-- **Re-review the accepted security risks.** Go through the threat model's
+- **Re-review the accepted security risks (#1535).** Go through the threat model's
   accepted residual risks one at a time and record, for each, whether it is
   still accepted at 1.0. The ones most worth deciding explicitly:
   - `TENANT_STRICT_HOST` ships off
   - `/live` events and `/ws/gql` subscription documents are not rate-limited
   - webhooks have no replay protection
   - `/api/ask` lets an anonymous caller drive LLM cost
-- **External review of the authentication surface.** This is the one
+- **External review of the authentication surface (#1536).** This is the one
   #1328 item that needs someone other than the maintainer, and it is the
   cheapest way to answer "bus factor one" for the parts that matter most.
 - **Settle #1336** with the production telemetry #1364 added. Settling it
@@ -107,7 +108,7 @@ The things an operator would hit in their first months of running Kiln.
 
 After 0.12, the covered list changes only by deprecation.
 
-- **Retire the legacy block shape.** The column type has been `BlockUnion`
+- **Retire the legacy block shape (#1537).** The column type has been `BlockUnion`
   since the storage flip, but conversion is lazy: legacy rows stay legacy at
   rest, and the editor and delivery still go through the legacy shape at the
   boundary. Backfill the rows, and run the block upcast path for real. The
@@ -115,7 +116,7 @@ After 0.12, the covered list changes only by deprecation.
   run before a major version depends on it. Then deprecate the bridge:
   `TypedBlocks.to_legacy/1`, `RichText.legacy_html` and the editor's legacy
   sub-forms.
-- **Deprecate what 1.0 will remove.** Candidates:
+- **Deprecate what 1.0 will remove (#1538).** Candidates:
   - the ignored `published?:` option on `KilnCMS.CMS.Content`
   - the `:page`/`:post` editor route aliases
   - the legacy `User.audiences` fallback
@@ -123,7 +124,7 @@ After 0.12, the covered list changes only by deprecation.
 
   Mark them with `@deprecated`, and put them under the project's first
   `### Deprecated` changelog section.
-- **Decide HTTP API versioning.** [`docs/api.md`](api.md) says paths are
+- **Decide HTTP API versioning (#1539).** [`docs/api.md`](api.md) says paths are
   unversioned, and that a breaking change would go under `/api/v1/…`. Decide
   now whether 1.0 ships `/api/v1` as the canonical prefix, rather than
   inventing it later under a deprecation window.
@@ -131,27 +132,29 @@ After 0.12, the covered list changes only by deprecation.
   document per locale. Field-level localization touches the data model, so
   it either lands before the freeze or gets a design that can land after 1.0
   as an addition.
-- **Rehearse an upgrade from every release so far.** On the example overlay,
+- **Rehearse an upgrade from every release so far (#1540).** On the example overlay,
   run `mix kiln.update` from each of v0.5.0 through v0.12.0 up to the
   candidate. The overlay-drift CI job proves the overlay compiles. It does
   not prove the upgrade path.
-- **Run beta round 2.** Its result is the go/no-go for 1.0.
-- **Make release candidates safe to tag.** Today, `kiln.update` picks the
+- **Run beta round 2 (#59).** Its result is the go/no-go for 1.0.
+- **Label every surface (#1542)** as covered, internal or experimental, in
+  one table that agrees with the overlay contract.
+- **Make release candidates safe to tag (#1541).** Today, `kiln.update` picks the
   highest parseable tag, so a `v1.0.0-rc.1` tag would become every
   downstream project's default target. `release.yml` tags every push
   `latest`. Teach both to skip pre-releases before pushing the first RC tag.
 
 ### 1.0.0
 
-- Remove what 0.12 deprecated. That is permitted here, because 1.0 is a
+- Remove what 0.12 deprecated (#1543). That is permitted here, because 1.0 is a
   major.
 - `.github/SECURITY.md` names the supported release lines and the backport
-  policy. Once a line is supported, `release.yml` can publish a floating
+  policy (#1544). Once a line is supported, `release.yml` can publish a floating
   `1.0` tag, which it deliberately does not do today.
 - `docs/overlay-contract.md` drops its "Until 1.0" paragraph. The README
-  stops saying "pre-1.0".
-- Measure the project plan's own v1.0 success metrics and write the results
-  down, including any that were missed:
+  stops saying "pre-1.0". The upgrade note leads with `--allow-major` (#1545).
+- Measure the project plan's own v1.0 success metrics (#1546) and write the
+  results down, including any that were missed:
 
   | Metric | Status today |
   |---|---|
@@ -161,7 +164,7 @@ After 0.12, the covered list changes only by deprecation.
   | Zero-downtime releases | Not yet shown |
   | Positive beta feedback | Measured in beta |
 
-## Beta exit criteria (fill in before round 1)
+## Beta exit criteria (fill in before round 1, #1533)
 
 `docs/beta-testing.md` says "no new S1/S2 on core flows and NPS trending
 positive". That is right, but it is not yet a bar you can check. Pin it down
