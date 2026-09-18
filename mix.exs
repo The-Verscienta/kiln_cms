@@ -327,6 +327,7 @@ defmodule KilnCMS.MixProject do
       "docs/differentiator-opportunities.md": [],
       "docs/cms-comparison.md": [],
       "docs/p3-plan.md": [],
+      "docs/roadmap-1.0.md": [title: "Roadmap to 1.0"],
       # Audits & release checklists
       "docs/audit-2026-07-full-surface.md": [],
       "docs/audit-2026-07-performance-usability.md": [],
@@ -470,7 +471,8 @@ defmodule KilnCMS.MixProject do
         "docs/competitive-gaps-todo.md",
         "docs/differentiator-opportunities.md",
         "docs/cms-comparison.md",
-        "docs/p3-plan.md"
+        "docs/p3-plan.md",
+        "docs/roadmap-1.0.md"
       ],
       "Audits & release checklists": [
         "docs/audit-2026-07-full-surface.md",
