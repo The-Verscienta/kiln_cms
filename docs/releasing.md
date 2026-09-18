@@ -89,16 +89,32 @@ people to pass the flag reflexively.
    the commit and build date. Nothing to run by hand; it authenticates as
    `GITHUB_TOKEN`.
 
-   The tag build is usually cold — the version bump in `mix.exs` invalidates
-   the dep layer — so budget most of an hour, and check the run before
-   announcing the release.
+   The version bump in `mix.exs` invalidates the dep layer, but the build
+   reads `main`'s cache for the rest: v0.9.0's took about nine minutes. Check
+   the run before announcing the release.
 
-   **One-time, the first time this ever runs:** a new GHCR package is created
-   **private**. Open the package (repository → Packages → `kiln_cms`) →
-   *Package settings* → **Change visibility → Public**, and link it to this
-   repository while you are there. Until that is done `docker pull` fails with
-   a 403 for everyone but the maintainer, and the workflow itself reports
-   success — it pushed fine.
+   **Then check that a stranger can pull it.** A private image fails
+   `docker pull` with a 403 for everyone but the maintainer, while the workflow
+   reports success, because it pushed fine. This asks the registry as an
+   anonymous client, with nothing to log out of first:
+
+   ```bash
+   tok=$(curl -s "https://ghcr.io/token?scope=repository:the-verscienta/kiln_cms:pull" \
+     | python3 -c 'import sys, json; print(json.load(sys.stdin).get("token", ""))')
+   curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $tok" \
+     -H "Accept: application/vnd.oci.image.index.v1+json" \
+     https://ghcr.io/v2/the-verscienta/kiln_cms/manifests/X.Y.Z
+   ```
+
+   `200` means it is public. If it is `401` or `403`, open the package
+   (repository → Packages → `kiln_cms`) → *Package settings* → **Change
+   visibility → Public**.
+
+   GitHub's documentation says a new package starts **private** and does not
+   take its repository's visibility. The first publish here did not work that
+   way: v0.9.0's image, pushed by this workflow from this public repository,
+   answered `200` straight after the build, with nobody having changed its
+   settings. Run the check anyway rather than rely on either behaviour.
 
    Only `vX.Y.Z` tags trigger it. A scratch or rescue tag publishes nothing,
    which is the same rule `mix kiln.update` applies to tags it cannot parse.
