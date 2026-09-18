@@ -684,6 +684,12 @@ config :ash,
   bulk_actions_default_to_errors?: true,
   transaction_rollback_on_error?: true,
   redact_sensitive_values_in_errors?: true,
+  # Required since ash 3.33, which refuses to compile without it. Codepoints,
+  # not the previous grapheme-counting `:mixed`: a single grapheme can carry an
+  # unbounded number of combining marks, so counting graphemes let a string of
+  # any size pass `max_length` (EEF-CVE-2026-82752). Codepoints is also how
+  # Postgres counts, so Elixir-side and atomic validation now agree.
+  default_string_length_count: :codepoints,
   known_types: [AshPostgres.Timestamptz, AshPostgres.TimestamptzUsec]
 
 config :spark,
