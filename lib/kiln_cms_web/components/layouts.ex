@@ -477,10 +477,14 @@ defmodule KilnCMSWeb.Layouts do
           <span class="side-text min-w-0 flex-1 truncate font-semibold tracking-tight">
             {brand_name(@current_org)}
           </span>
+          <%!-- Two buttons rather than one that flips: CSS shows each only in the
+                state it names, so each one's static `aria-expanded` is always
+                true while it is on screen — no script has to keep it honest. --%>
           <button
             type="button"
             class="side-icon-btn side-collapse"
             data-sidebar-toggle
+            aria-expanded="true"
             aria-label={gettext("Collapse sidebar")}
             title={gettext("Collapse sidebar")}
           >
@@ -490,6 +494,7 @@ defmodule KilnCMSWeb.Layouts do
             type="button"
             class="side-icon-btn side-expand"
             data-sidebar-toggle
+            aria-expanded="false"
             data-side-tip={gettext("Expand sidebar")}
             aria-label={gettext("Expand sidebar")}
           >
@@ -729,14 +734,20 @@ defmodule KilnCMSWeb.Layouts do
       |> assign(:plugin, nav.plugin)
 
     ~H"""
-    <.side_link :for={i <- @author} item={i} active={@active} />
+    <.side_link :for={i <- @author} item={i} active={@active} user={@current_user} org={@current_org} />
     <%!-- The Configure hub (#1319) sits above the sections rather than inside
           one: it is the way in when you do not yet know which section owns the
           thing you came to change. In Essentials, `@pinned` (Your settings, and
           a hidden current page) rides in the same block. --%>
     <div :if={@hub || @pinned != []} class="mt-5" data-nav-pinned>
-      <.side_link :if={@hub} item={@hub} active={@active} />
-      <.side_link :for={i <- @pinned} item={i} active={@active} />
+      <.side_link :if={@hub} item={@hub} active={@active} user={@current_user} org={@current_org} />
+      <.side_link
+        :for={i <- @pinned}
+        item={i}
+        active={@active}
+        user={@current_user}
+        org={@current_org}
+      />
     </div>
     <div
       :for={group <- @configure_groups}
@@ -764,17 +775,28 @@ defmodule KilnCMSWeb.Layouts do
         <.icon name="hero-chevron-down" class="side-section-chevron size-3.5" />
       </button>
       <div class="side-group-items" id={"side-group-#{group.key}"}>
-        <.side_link :for={i <- group.items} item={i} active={@active} />
+        <.side_link
+          :for={i <- group.items}
+          item={i}
+          active={@active}
+          user={@current_user}
+          org={@current_org}
+        />
       </div>
     </div>
-    <.side_link :for={i <- @plugin} item={i} active={@active} />
+    <.side_link :for={i <- @plugin} item={i} active={@active} user={@current_user} org={@current_org} />
     """
   end
 
   attr :item, :map, required: true
   attr :active, :atom, default: nil
   attr :class, :string, default: nil
+  attr :user, :map, default: nil, doc: "the viewer — only a badged item needs it"
+  attr :org, :any, default: nil
 
+  # An item carrying `badge:` (see `KilnCMSWeb.ConsoleNav`) draws a count
+  # beside its label. It is a LiveComponent that counts once per page, not on
+  # every render — see `KilnCMSWeb.NavBadge`.
   defp side_link(assigns) do
     ~H"""
     <.link
@@ -785,6 +807,14 @@ defmodule KilnCMSWeb.Layouts do
     >
       <.icon name={@item.icon} class="side-icon size-5 shrink-0" />
       <span class="side-text truncate">{@item.label}</span>
+      <.live_component
+        :if={@item[:badge] && @user}
+        module={KilnCMSWeb.NavBadge}
+        id={KilnCMSWeb.NavBadge.id(@item.badge)}
+        kind={@item.badge}
+        user={@user}
+        org={@org}
+      />
     </.link>
     """
   end

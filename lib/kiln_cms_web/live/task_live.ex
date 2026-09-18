@@ -112,6 +112,9 @@ defmodule KilnCMSWeb.TaskLive do
       task ->
         case CMS.complete_task(task, %{}, actor: socket.assigns.current_user) do
           {:ok, _task} ->
+            # The sidebar's Tasks count is on this page too, and completing a
+            # task sends its assignee no notification to re-count on.
+            KilnCMSWeb.NavBadge.refresh(:tasks)
             {:noreply, load_tasks(socket)}
 
           {:error, _error} ->

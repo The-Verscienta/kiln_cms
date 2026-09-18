@@ -2893,8 +2893,18 @@ defmodule KilnCMSWeb.EditorLiveTest do
     test "the sidebar carries the rail toggles, theme switch and account menu", %{conn: conn} do
       {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
 
-      assert has_element?(lv, ~s(aside [data-sidebar-toggle][aria-label="Collapse sidebar"]))
-      assert has_element?(lv, ~s(aside [data-sidebar-toggle][aria-label="Expand sidebar"]))
+      # Each toggle is on screen only in the state it names, so its static
+      # `aria-expanded` is the truth whenever a reader can reach it.
+      assert has_element?(
+               lv,
+               ~s(aside [data-sidebar-toggle][aria-label="Collapse sidebar"][aria-expanded="true"])
+             )
+
+      assert has_element?(
+               lv,
+               ~s(aside [data-sidebar-toggle][aria-label="Expand sidebar"][aria-expanded="false"])
+             )
+
       assert has_element?(lv, ~s(aside .side-theme button[data-phx-theme="dark"]))
       refute has_element?(lv, ~s(header [data-phx-theme]))
       assert has_element?(lv, ~s(#side-account a[href="/account"]), "Account")

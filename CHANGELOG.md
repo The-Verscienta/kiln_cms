@@ -61,6 +61,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **The sidebar's "Tasks" item shows how many of your tasks are open.**
+  ([long form](docs/changelog/unreleased.md#the-sidebars-tasks-item-shows-how-many-of-your-tasks-are-open))
+
 - **The fields admin explains each field type under its picker.**
   ([long form](docs/changelog/unreleased.md#the-fields-admin-explains-each-field-type-under-its-picker))
 

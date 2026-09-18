@@ -18,6 +18,24 @@ migration (the demo admin and editor) start on Essentials.
 
 ## Added
 
+<a id="the-sidebars-tasks-item-shows-how-many-of-your-tasks-are-open"></a>
+
+- **The sidebar's "Tasks" item shows how many of your tasks are open.** A
+  pill beside the label, shrunk to an ember dot on the icon rail; a screen
+  reader hears it as part of the link ("Tasks (3 open)"), uncapped where the
+  pill stops at "99+". It is a LiveComponent (`KilnCMSWeb.NavBadge`) built the
+  way the notification bell is, so the console's 43 call sites carry nothing
+  new and the count runs once per page rather than on every render — a
+  sidebar redraw that reaches it (switching presets, say) re-counts only if
+  the viewer or site changed. Within a page it re-counts when a notification
+  reaches you, which is how an assignment arrives, and when the Tasks screen
+  completes one; a task completed anywhere else shows on the next page. The
+  Inbox has no badge on purpose: its count is the bell's, one row up, and a
+  second copy would show the same number twice and run its query twice. The
+  icon rail's collapse and expand buttons now also carry `aria-expanded` —
+  static, and always true while on screen, since each is shown only in the
+  state it names.
+
 <a id="the-fields-admin-explains-each-field-type-under-its-picker"></a>
 
 - **The fields admin explains each field type under its picker.** Choosing a
