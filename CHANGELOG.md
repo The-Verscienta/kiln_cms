@@ -54,215 +54,227 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+## [0.9.0] - 2026-09-18
+
+Long form: [docs/changelog/v0.9.0.md](docs/changelog/v0.9.0.md) —
+the 0.9.0 entries as they were written when each change merged.
+Every summary line below that was shortened links to its own entry there.
+
 ### Upgrade notes
 
+- **Semantic search now needs an image built with `KILN_ML=1`.**
+  ([#1474](https://github.com/The-Verscienta/kiln_cms/issues/1474) · [long form](docs/changelog/v0.9.0.md#semantic-search-now-needs-an-image-built-with-kilnml1-upgrading))
+
 - **Existing accounts keep the full sidebar; new ones start on Essentials.**
-  ([long form](docs/changelog/unreleased.md#sidebar-presets-essentials-and-everything-upgrading))
+  ([long form](docs/changelog/v0.9.0.md#sidebar-presets-essentials-and-everything-upgrading))
 
 ### Added
 
 - **The sidebar's "Tasks" item shows how many of your tasks are open.**
-  ([long form](docs/changelog/unreleased.md#the-sidebars-tasks-item-shows-how-many-of-your-tasks-are-open))
+  ([#1525](https://github.com/The-Verscienta/kiln_cms/issues/1525) · [long form](docs/changelog/v0.9.0.md#the-sidebars-tasks-item-shows-how-many-of-your-tasks-are-open))
 
 - **The fields admin explains each field type under its picker.**
-  ([long form](docs/changelog/unreleased.md#the-fields-admin-explains-each-field-type-under-its-picker))
+  ([#1512](https://github.com/The-Verscienta/kiln_cms/issues/1512) · [long form](docs/changelog/v0.9.0.md#the-fields-admin-explains-each-field-type-under-its-picker))
 
 - **A custom field can be added to several content types at once, and its
   machine name fills itself in.**
-  ([long form](docs/changelog/unreleased.md#a-custom-field-can-be-added-to-several-content-types-at-once-and-its-machine))
+  ([#1511](https://github.com/The-Verscienta/kiln_cms/issues/1511) · [long form](docs/changelog/v0.9.0.md#a-custom-field-can-be-added-to-several-content-types-at-once-and-its-machine))
 
 - **Media sideloading can be tested without the network.**
-  ([#487](https://github.com/The-Verscienta/kiln_cms/issues/487) · [long form](docs/changelog/unreleased.md#media-sideloading-can-be-tested-without-the-network))
+  ([#487](https://github.com/The-Verscienta/kiln_cms/issues/487) · [long form](docs/changelog/v0.9.0.md#media-sideloading-can-be-tested-without-the-network))
 
 - **Sidebar presets: Essentials and Everything.**
-  ([long form](docs/changelog/unreleased.md#sidebar-presets-essentials-and-everything))
+  ([#1496](https://github.com/The-Verscienta/kiln_cms/issues/1496) · [long form](docs/changelog/v0.9.0.md#sidebar-presets-essentials-and-everything))
 
 - **A Configure hub at `/editor/configure`.**
-  ([#1319](https://github.com/The-Verscienta/kiln_cms/issues/1319) · [long form](docs/changelog/unreleased.md#a-configure-hub-at-editorconfigure))
+  ([#1319](https://github.com/The-Verscienta/kiln_cms/issues/1319) · [long form](docs/changelog/v0.9.0.md#a-configure-hub-at-editorconfigure))
 
 - **Notifications are persisted, not only mailed.**
-  ([#1472](https://github.com/The-Verscienta/kiln_cms/issues/1472) · [long form](docs/changelog/unreleased.md#notifications-are-persisted-not-only-mailed))
+  ([#1472](https://github.com/The-Verscienta/kiln_cms/issues/1472) · [long form](docs/changelog/v0.9.0.md#notifications-are-persisted-not-only-mailed))
 
 - **The editor says when a heading's `#link` gets a number.**
-  ([#1439](https://github.com/The-Verscienta/kiln_cms/pull/1439) · [long form](docs/changelog/unreleased.md#the-editor-says-when-a-headings-link-gets-a-number))
+  ([#1439](https://github.com/The-Verscienta/kiln_cms/pull/1439) · [long form](docs/changelog/v0.9.0.md#the-editor-says-when-a-headings-link-gets-a-number))
 
 - **`/editor/inbox`.**
-  ([#1472](https://github.com/The-Verscienta/kiln_cms/issues/1472) · [long form](docs/changelog/unreleased.md#editorinbox))
+  ([#1472](https://github.com/The-Verscienta/kiln_cms/issues/1472) · [long form](docs/changelog/v0.9.0.md#editorinbox))
 
 - **A notification bell in the console top bar**, on every `/editor/*` page.
-  ([#1478](https://github.com/The-Verscienta/kiln_cms/issues/1478) · [long form](docs/changelog/unreleased.md#a-notification-bell-in-the-console-top-bar-on-every-editor-page-an-unread-badge))
+  ([#1478](https://github.com/The-Verscienta/kiln_cms/issues/1478) · [long form](docs/changelog/v0.9.0.md#a-notification-bell-in-the-console-top-bar-on-every-editor-page-an-unread-badge))
 
 ### Changed
 
 - **Keyword search matches the last word as a prefix.** "huang lia" finds
   Huang Lian; finished words still rank first.
-  ([long form](docs/changelog/unreleased.md#keyword-search-matches-the-last-word-as-a-prefix))
+  ([#1509](https://github.com/The-Verscienta/kiln_cms/issues/1509) · [long form](docs/changelog/v0.9.0.md#keyword-search-matches-the-last-word-as-a-prefix))
 
 - **"New page" no longer writes a row until you start writing.** The draft is
   created on the first title keystroke or Save.
-  ([long form](docs/changelog/unreleased.md#new-page-no-longer-writes-a-row-until-you-start-writing))
+  ([#1497](https://github.com/The-Verscienta/kiln_cms/issues/1497) · [long form](docs/changelog/v0.9.0.md#new-page-no-longer-writes-a-row-until-you-start-writing))
 
 - **The editor opens on the title and the canvas.** Slug, path alias and
   redirects moved to Settings → URL; "Edit URL" under the title jumps there.
-  ([long form](docs/changelog/unreleased.md#the-editor-opens-on-the-title-and-the-canvas))
+  ([#1495](https://github.com/The-Verscienta/kiln_cms/issues/1495) · [long form](docs/changelog/v0.9.0.md#the-editor-opens-on-the-title-and-the-canvas))
 
 - **Home says what the site holds, asks how you publish, and doesn't alarm on day one.**
-  ([long form](docs/changelog/unreleased.md#home-says-what-the-site-holds-asks-how-you-publish-and-doesnt-alarm-on-day-one))
+  ([#1493](https://github.com/The-Verscienta/kiln_cms/issues/1493) · [long form](docs/changelog/v0.9.0.md#home-says-what-the-site-holds-asks-how-you-publish-and-doesnt-alarm-on-day-one))
 
 - **The ML stack behind semantic search is now opt-in (`KILN_ML=1`).**
-  ([#1474](https://github.com/The-Verscienta/kiln_cms/issues/1474) · [long form](docs/changelog/unreleased.md#the-ml-stack-behind-semantic-search-is-now-opt-in-kilnml1))
+  ([#1474](https://github.com/The-Verscienta/kiln_cms/issues/1474) · [long form](docs/changelog/v0.9.0.md#the-ml-stack-behind-semantic-search-is-now-opt-in-kilnml1))
 
-- **A temporary role is applied where a tier is decided; `role` on a read is always the standing tier.**
-  ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462) · [Account administration](docs/account-administration.md))
+- **A temporary role is applied where a tier is decided; `role` on a read is
+  always the standing tier.**
+  ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462) · [long form](docs/changelog/v0.9.0.md#a-temporary-role-is-applied-where-a-tier-is-decided-role-on-a-read-is-always))
 
-- **Account removal no longer scans every admin-defined entry per type** — `entries.author_id` is indexed.
+- **Account removal no longer scans every admin-defined entry per type** —
+  `entries.author_id` is indexed.
   ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462))
 
 - **`config/runtime.exs` is now an index, not a 1,523-line file.**
-  ([#1476](https://github.com/The-Verscienta/kiln_cms/issues/1476) · [long form](docs/changelog/unreleased.md#configruntimeexs-is-now-an-index-not-a-1523-line-file))
+  ([#1476](https://github.com/The-Verscienta/kiln_cms/issues/1476) · [long form](docs/changelog/v0.9.0.md#configruntimeexs-is-now-an-index-not-a-1523-line-file))
 
 - **`docs/environment-variables.md` and `.env.example` lead with the short
   list.**
-  ([#1476](https://github.com/The-Verscienta/kiln_cms/issues/1476) · [long form](docs/changelog/unreleased.md#docsenvironment-variablesmd-and-envexample-lead-with-the-short-list))
+  ([#1476](https://github.com/The-Verscienta/kiln_cms/issues/1476) · [long form](docs/changelog/v0.9.0.md#docsenvironment-variablesmd-and-envexample-lead-with-the-short-list))
 
 - **The stock front page now renders in the public delivery chrome.**
-  ([#1461](https://github.com/The-Verscienta/kiln_cms/issues/1461) · [long form](docs/changelog/unreleased.md#the-stock-front-page-now-renders-in-the-public-delivery-chrome))
+  ([#1461](https://github.com/The-Verscienta/kiln_cms/issues/1461) · [long form](docs/changelog/v0.9.0.md#the-stock-front-page-now-renders-in-the-public-delivery-chrome))
 
 - **The public search form has a submit button.**
-  ([#1461](https://github.com/The-Verscienta/kiln_cms/issues/1461) · [long form](docs/changelog/unreleased.md#the-public-search-form-has-a-submit-button))
+  ([#1461](https://github.com/The-Verscienta/kiln_cms/issues/1461) · [long form](docs/changelog/v0.9.0.md#the-public-search-form-has-a-submit-button))
 
 - **The product name is spelled `KilnCMS` everywhere.**
-  ([#1461](https://github.com/The-Verscienta/kiln_cms/issues/1461) · [long form](docs/changelog/unreleased.md#the-product-name-is-spelled-kilncms-everywhere))
+  ([#1461](https://github.com/The-Verscienta/kiln_cms/issues/1461) · [long form](docs/changelog/v0.9.0.md#the-product-name-is-spelled-kilncms-everywhere))
 
 - **The docs publisher no longer installs `earmark`.**
-  ([#1452](https://github.com/The-Verscienta/kiln_cms/issues/1452) · [long form](docs/changelog/unreleased.md#the-docs-publisher-no-longer-installs-earmark))
+  ([#1452](https://github.com/The-Verscienta/kiln_cms/issues/1452) · [long form](docs/changelog/v0.9.0.md#the-docs-publisher-no-longer-installs-earmark))
 
 - **Workflow and task notifications now dispatch after the write commits.**
-  ([#1472](https://github.com/The-Verscienta/kiln_cms/issues/1472) · [long form](docs/changelog/unreleased.md#workflow-and-task-notifications-now-dispatch-after-the-write-commits))
+  ([#1472](https://github.com/The-Verscienta/kiln_cms/issues/1472) · [long form](docs/changelog/v0.9.0.md#workflow-and-task-notifications-now-dispatch-after-the-write-commits))
 
 - **A secrets-rotation runbook**,
   [`docs/secrets-rotation.md`](docs/secrets-rotation.md), closing residual risk
   12 in `docs/threat-model.md`.
-  ([#1304](https://github.com/The-Verscienta/kiln_cms/issues/1304) · [long form](docs/changelog/unreleased.md#a-secrets-rotation-runbook-docssecrets-rotationmddocssecrets-rotationmd-closing))
+  ([#1304](https://github.com/The-Verscienta/kiln_cms/issues/1304) · [long form](docs/changelog/v0.9.0.md#a-secrets-rotation-runbook-docssecrets-rotationmddocssecrets-rotationmd-closing))
 
 - **`/editor/accounts` — the instance-wide account register.**
-  ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462) · [long form](docs/changelog/unreleased.md#editoraccounts-the-instance-wide-account-register))
+  ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462) · [long form](docs/changelog/v0.9.0.md#editoraccounts-the-instance-wide-account-register))
 
 - **Temporary roles that expire on their own.**
-  ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462) · [long form](docs/changelog/unreleased.md#temporary-roles-that-expire-on-their-own))
+  ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462) · [long form](docs/changelog/v0.9.0.md#temporary-roles-that-expire-on-their-own))
 
 - **Admin-initiated password resets.**
-  ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462) · [long form](docs/changelog/unreleased.md#admin-initiated-password-resets))
+  ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462) · [long form](docs/changelog/v0.9.0.md#admin-initiated-password-resets))
 
 - **Account removal with a content disposition.**
-  ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462) · [long form](docs/changelog/unreleased.md#account-removal-with-a-content-disposition))
+  ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462) · [long form](docs/changelog/v0.9.0.md#account-removal-with-a-content-disposition))
 
 - **A guard on the last admin.**
-  ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462) · [long form](docs/changelog/unreleased.md#a-guard-on-the-last-admin))
+  ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462) · [long form](docs/changelog/v0.9.0.md#a-guard-on-the-last-admin))
 
 - **`KilnCMS.Accounts.Checks.PlatformAdmin` replaces
   `actor_attribute_equals(:role, :admin)`** on every platform resource.
-  ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462) · [long form](docs/changelog/unreleased.md#kilncmsaccountschecksplatformadmin-replaces-actorattributeequalsrole-admin-on))
+  ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462) · [long form](docs/changelog/v0.9.0.md#kilncmsaccountschecksplatformadmin-replaces-actorattributeequalsrole-admin-on))
 
 - **Erasure revokes API keys.**
-  ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462) · [long form](docs/changelog/unreleased.md#erasure-revokes-api-keys))
+  ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462) · [long form](docs/changelog/v0.9.0.md#erasure-revokes-api-keys))
 
 - **`ContentTypes.count!/2`** — the count `list!/2` would return rows for,
   without the rows, for compiled and dynamic types alike.
   ([#1462](https://github.com/The-Verscienta/kiln_cms/issues/1462))
 
 - **The release image is published to GHCR on every version tag.**
-  ([#1328](https://github.com/The-Verscienta/kiln_cms/issues/1328) · [long form](docs/changelog/unreleased.md#the-release-image-is-published-to-ghcr-on-every-version-tag))
+  ([#1328](https://github.com/The-Verscienta/kiln_cms/issues/1328) · [long form](docs/changelog/v0.9.0.md#the-release-image-is-published-to-ghcr-on-every-version-tag))
 
 - **`.github/SUPPORT.md`, and a "Status & maturity" section at the top of the
   README.**
-  ([#1328](https://github.com/The-Verscienta/kiln_cms/issues/1328) · [long form](docs/changelog/unreleased.md#githubsupportmd-and-a-status-maturity-section-at-the-top-of-the-readme))
+  ([#1328](https://github.com/The-Verscienta/kiln_cms/issues/1328) · [long form](docs/changelog/v0.9.0.md#githubsupportmd-and-a-status-maturity-section-at-the-top-of-the-readme))
 
 - **`docs/overlay-contract.md` — what a downstream overlay may rely on across
   releases.**
-  ([#452](https://github.com/The-Verscienta/kiln_cms/issues/452), [#459](https://github.com/The-Verscienta/kiln_cms/issues/459), [#488](https://github.com/The-Verscienta/kiln_cms/issues/488), [#504](https://github.com/The-Verscienta/kiln_cms/issues/504), [#1328](https://github.com/The-Verscienta/kiln_cms/issues/1328) · [long form](docs/changelog/unreleased.md#docsoverlay-contractmd-what-a-downstream-overlay-may-rely-on-across-releases))
+  ([#452](https://github.com/The-Verscienta/kiln_cms/issues/452), [#459](https://github.com/The-Verscienta/kiln_cms/issues/459), [#488](https://github.com/The-Verscienta/kiln_cms/issues/488), [#504](https://github.com/The-Verscienta/kiln_cms/issues/504), [#1328](https://github.com/The-Verscienta/kiln_cms/issues/1328) · [long form](docs/changelog/v0.9.0.md#docsoverlay-contractmd-what-a-downstream-overlay-may-rely-on-across-releases))
 
 - **`Kiln.FieldType.parse_float/1` — a covered numeric parse for a custom field
   type's `cast/2`.**
-  ([#1456](https://github.com/The-Verscienta/kiln_cms/issues/1456) · [long form](docs/changelog/unreleased.md#kilnfieldtypeparsefloat1-a-covered-numeric-parse-for-a-custom-field-types-cast2))
+  ([#1456](https://github.com/The-Verscienta/kiln_cms/issues/1456) · [long form](docs/changelog/v0.9.0.md#kilnfieldtypeparsefloat1-a-covered-numeric-parse-for-a-custom-field-types-cast2))
 
 - **The in-tree example overlay no longer reaches past the overlay contract.**
-  ([#1456](https://github.com/The-Verscienta/kiln_cms/issues/1456) · [long form](docs/changelog/unreleased.md#the-in-tree-example-overlay-no-longer-reaches-past-the-overlay-contract))
+  ([#1456](https://github.com/The-Verscienta/kiln_cms/issues/1456) · [long form](docs/changelog/v0.9.0.md#the-in-tree-example-overlay-no-longer-reaches-past-the-overlay-contract))
 
 - **`docs/overlay-contract.md` says why the example's `:test` plugin list names
   a core fixture.**
-  ([#1328](https://github.com/The-Verscienta/kiln_cms/issues/1328) · [long form](docs/changelog/unreleased.md#docsoverlay-contractmd-says-why-the-examples-test-plugin-list-names-a-core))
+  ([#1328](https://github.com/The-Verscienta/kiln_cms/issues/1328) · [long form](docs/changelog/v0.9.0.md#docsoverlay-contractmd-says-why-the-examples-test-plugin-list-names-a-core))
 
 - **The Configure sidebar is sections, and ⌘K finds settings screens.**
-  ([#1319](https://github.com/The-Verscienta/kiln_cms/issues/1319) · [long form](docs/changelog/unreleased.md#the-configure-sidebar-is-sections-and-k-finds-settings-screens))
+  ([#1319](https://github.com/The-Verscienta/kiln_cms/issues/1319) · [long form](docs/changelog/v0.9.0.md#the-configure-sidebar-is-sections-and-k-finds-settings-screens))
 
 - **`CHANGELOG.md` is a summary, and the reasoning moved to `docs/changelog/`
   and `docs/decisions/`**.
-  ([#1325](https://github.com/The-Verscienta/kiln_cms/issues/1325) · [long form](docs/changelog/unreleased.md#changelogmd-is-a-summary-and-the-reasoning-moved-to-docschangelog-and))
+  ([#1325](https://github.com/The-Verscienta/kiln_cms/issues/1325) · [long form](docs/changelog/v0.9.0.md#changelogmd-is-a-summary-and-the-reasoning-moved-to-docschangelog-and))
 
 - **The coverage floor moves 82.7 → 85.8.**
-  ([long form](docs/changelog/unreleased.md#the-coverage-floor-moves-827-to-858))
+  ([#1526](https://github.com/The-Verscienta/kiln_cms/issues/1526) · [long form](docs/changelog/v0.9.0.md#the-coverage-floor-moves-827-to-858))
 
 ### Fixed
 
 - **The console's mobile nav drawer announces itself, takes the keyboard, and
   closes when it takes you somewhere.**
-  ([long form](docs/changelog/unreleased.md#the-consoles-mobile-nav-drawer-announces-itself-takes-the-keyboard-and-closes))
+  ([#1523](https://github.com/The-Verscienta/kiln_cms/issues/1523) · [long form](docs/changelog/v0.9.0.md#the-consoles-mobile-nav-drawer-announces-itself-takes-the-keyboard-and-closes))
 
 - **A failed S3 multipart upload is aborted instead of left on the bucket.**
-  ([#494](https://github.com/The-Verscienta/kiln_cms/issues/494) · [long form](docs/changelog/unreleased.md#a-failed-s3-multipart-upload-is-aborted-instead-of-left-on-the-bucket))
+  ([#494](https://github.com/The-Verscienta/kiln_cms/issues/494) · [long form](docs/changelog/v0.9.0.md#a-failed-s3-multipart-upload-is-aborted-instead-of-left-on-the-bucket))
 
 - **The kilncms.dev docs publisher works again, and CI proves it.**
-  ([long form](docs/changelog/unreleased.md#the-kilncmsdev-docs-publisher-works-again-and-ci-proves-it))
+  ([#1515](https://github.com/The-Verscienta/kiln_cms/issues/1515) · [long form](docs/changelog/v0.9.0.md#the-kilncmsdev-docs-publisher-works-again-and-ci-proves-it))
 
-- **Task emails for content of a deleted content type are sent instead of crashing the mail job.**
+- **Task emails for content of a deleted content type are sent instead of
+  crashing the mail job.**
   ([#1320](https://github.com/The-Verscienta/kiln_cms/issues/1320))
 
 - **`mix kiln.changelog --verify` no longer reports a loss for a pull request
   `--condense` credited.**
-  ([long form](docs/changelog/unreleased.md#mix-kiln-changelog-verify-no-longer-reports-a-loss-for-a-credited-pull-request))
+  ([#1504](https://github.com/The-Verscienta/kiln_cms/issues/1504) · [long form](docs/changelog/v0.9.0.md#mix-kiln-changelog-verify-no-longer-reports-a-loss-for-a-credited-pull-request))
 
 - **`mix kiln.changelog --condense` no longer breaks on a release where two
   summaries link one long form.**
-  ([long form](docs/changelog/unreleased.md#mix-kiln-changelog-condense-no-longer-breaks-on-a-shared-long-form))
+  ([#1503](https://github.com/The-Verscienta/kiln_cms/issues/1503) · [long form](docs/changelog/v0.9.0.md#mix-kiln-changelog-condense-no-longer-breaks-on-a-shared-long-form))
 
 - **A menu item's Edit form no longer shares input ids with the Add form.**
-  ([long form](docs/changelog/unreleased.md#a-menu-items-edit-form-no-longer-shares-input-ids-with-the-add-form))
+  ([#1501](https://github.com/The-Verscienta/kiln_cms/issues/1501) · [long form](docs/changelog/v0.9.0.md#a-menu-items-edit-form-no-longer-shares-input-ids-with-the-add-form))
 
 - **Editing a live page's body no longer blanks its title or strands the change in the working copy.**
-  ([long form](docs/changelog/unreleased.md#editing-a-live-pages-body-no-longer-blanks-its-title))
+  ([#1506](https://github.com/The-Verscienta/kiln_cms/issues/1506) · [long form](docs/changelog/v0.9.0.md#editing-a-live-pages-body-no-longer-blanks-its-title))
 
 - **Notification bell and inbox fixes from review: items mark read, entry links resolve, erasure reaches inboxes.**
-  ([long form](docs/changelog/unreleased.md#notification-bell-and-inbox-fixes-from-review))
+  ([#1498](https://github.com/The-Verscienta/kiln_cms/issues/1498) · [long form](docs/changelog/v0.9.0.md#notification-bell-and-inbox-fixes-from-review))
 
 - **Five editor-console rough edges a first-time user hit.**
-  ([long form](docs/changelog/unreleased.md#five-editor-console-rough-edges-a-first-time-user-hit))
+  ([#1494](https://github.com/The-Verscienta/kiln_cms/issues/1494) · [long form](docs/changelog/v0.9.0.md#five-editor-console-rough-edges-a-first-time-user-hit))
 
 - **`mix docs` "View Source" links point at the release tag, not `main`.**
-  ([#1450](https://github.com/The-Verscienta/kiln_cms/issues/1450) · [long form](docs/changelog/unreleased.md#mix-docs-view-source-links-point-at-the-release-tag-not-main))
+  ([#1450](https://github.com/The-Verscienta/kiln_cms/issues/1450) · [long form](docs/changelog/v0.9.0.md#mix-docs-view-source-links-point-at-the-release-tag-not-main))
 
 - **A `.md` file that opens with an HTML comment keeps its title.**
-  ([#1455](https://github.com/The-Verscienta/kiln_cms/issues/1455) · [long form](docs/changelog/unreleased.md#a-md-file-that-opens-with-an-html-comment-keeps-its-title))
+  ([#1455](https://github.com/The-Verscienta/kiln_cms/issues/1455) · [long form](docs/changelog/v0.9.0.md#a-md-file-that-opens-with-an-html-comment-keeps-its-title))
 
 - **The content-cache metric no longer inverts during a stampede, and a Courier
   failure no longer amplifies one.**
-  ([#1475](https://github.com/The-Verscienta/kiln_cms/issues/1475) · [long form](docs/changelog/unreleased.md#the-content-cache-metric-no-longer-inverts-during-a-stampede-and-a-courier))
+  ([#1475](https://github.com/The-Verscienta/kiln_cms/issues/1475) · [long form](docs/changelog/v0.9.0.md#the-content-cache-metric-no-longer-inverts-during-a-stampede-and-a-courier))
 
 - **An arrow key can no longer walk a calendar chip off the grid it is drawn
   on.**
-  ([#1384](https://github.com/The-Verscienta/kiln_cms/issues/1384) · [long form](docs/changelog/unreleased.md#an-arrow-key-can-no-longer-walk-a-calendar-chip-off-the-grid-it-is-drawn-on))
+  ([#1384](https://github.com/The-Verscienta/kiln_cms/issues/1384) · [long form](docs/changelog/v0.9.0.md#an-arrow-key-can-no-longer-walk-a-calendar-chip-off-the-grid-it-is-drawn-on))
 
 - **An HTML comment in imported Markdown is no longer published as prose.**
-  ([#1454](https://github.com/The-Verscienta/kiln_cms/issues/1454) · [long form](docs/changelog/unreleased.md#an-html-comment-in-imported-markdown-is-no-longer-published-as-prose))
+  ([#1454](https://github.com/The-Verscienta/kiln_cms/issues/1454) · [long form](docs/changelog/v0.9.0.md#an-html-comment-in-imported-markdown-is-no-longer-published-as-prose))
 
 - **Links to a `README.md` from a guide pointed at the wrong README.**
-  ([#1464](https://github.com/The-Verscienta/kiln_cms/issues/1464) · [long form](docs/changelog/unreleased.md#links-to-a-readmemd-from-a-guide-pointed-at-the-wrong-readme))
+  ([#1464](https://github.com/The-Verscienta/kiln_cms/issues/1464) · [long form](docs/changelog/v0.9.0.md#links-to-a-readmemd-from-a-guide-pointed-at-the-wrong-readme))
 
 - **Both password forms check the confirmation as you type.**
-  ([#1446](https://github.com/The-Verscienta/kiln_cms/issues/1446) · [long form](docs/changelog/unreleased.md#both-password-forms-check-the-confirmation-as-you-type))
+  ([#1446](https://github.com/The-Verscienta/kiln_cms/issues/1446) · [long form](docs/changelog/v0.9.0.md#both-password-forms-check-the-confirmation-as-you-type))
 
 - **The new-password button says "Change password".**
-  ([#1451](https://github.com/The-Verscienta/kiln_cms/issues/1451) · [long form](docs/changelog/unreleased.md#the-new-password-button-says-change-password))
+  ([#1451](https://github.com/The-Verscienta/kiln_cms/issues/1451) · [long form](docs/changelog/v0.9.0.md#the-new-password-button-says-change-password))
 
 - **With every-write anchoring on, a system-actor write no longer crashes in
   `AnchorVersion`; its anchor is attributed to `actor_id: nil`.**
@@ -270,54 +282,54 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A system-actor publish or membership transition no longer crashes on the
   actor's missing `:id`; it is attributed to `actor_id: nil`.**
-  ([#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402), [#1486](https://github.com/The-Verscienta/kiln_cms/pull/1486))
+  ([#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402), [#1486](https://github.com/The-Verscienta/kiln_cms/issues/1486))
 
 - **The console sidebar no longer slides in with its labels cropped, and wide
   content no longer scrolls the whole console sideways.**
-  ([long form](docs/changelog/unreleased.md#the-console-sidebar-no-longer-slides-in-with-its-labels-cropped))
+  ([#1499](https://github.com/The-Verscienta/kiln_cms/issues/1499) · [long form](docs/changelog/v0.9.0.md#the-console-sidebar-no-longer-slides-in-with-its-labels-cropped))
 
 - **`/developers` no longer links to a Swagger UI and OpenAPI spec that 404,
   and the GraphiQL playground is reachable in dev again.**
-  ([long form](docs/changelog/unreleased.md#developers-no-longer-links-to-a-swagger-ui-and-openapi-spec-that-404))
+  ([#1492](https://github.com/The-Verscienta/kiln_cms/issues/1492) · [long form](docs/changelog/v0.9.0.md#developers-no-longer-links-to-a-swagger-ui-and-openapi-spec-that-404))
 
 - **`mix kiln.export.content` refuses a `--state` it does not know.**
-  ([long form](docs/changelog/unreleased.md#mix-kiln-export-content-refuses-a-state-it-does-not-know))
+  ([#1510](https://github.com/The-Verscienta/kiln_cms/issues/1510) · [long form](docs/changelog/v0.9.0.md#mix-kiln-export-content-refuses-a-state-it-does-not-know))
 
 - **A content export holds every record, and an import restores each in its
   own state.**
-  ([long form](docs/changelog/unreleased.md#a-content-export-holds-every-record-and-restores-each-in-its-own-state))
+  ([#1510](https://github.com/The-Verscienta/kiln_cms/issues/1510) · [long form](docs/changelog/v0.9.0.md#a-content-export-holds-every-record-and-restores-each-in-its-own-state))
 
 - **An import report says when a record landed but not as the source had it.**
-  ([long form](docs/changelog/unreleased.md#an-import-report-says-when-a-record-landed-but-not-as-the-source-had-it))
+  ([#1514](https://github.com/The-Verscienta/kiln_cms/issues/1514) · [long form](docs/changelog/v0.9.0.md#an-import-report-says-when-a-record-landed-but-not-as-the-source-had-it))
 
 ### Security
 
 - **The session cookie's signing and encryption salts can be set per
   deployment.**
-  ([#1326](https://github.com/The-Verscienta/kiln_cms/issues/1326) · [long form](docs/changelog/unreleased.md#the-session-cookies-signing-and-encryption-salts-can-be-set-per-deployment))
+  ([#1326](https://github.com/The-Verscienta/kiln_cms/issues/1326) · [long form](docs/changelog/v0.9.0.md#the-session-cookies-signing-and-encryption-salts-can-be-set-per-deployment))
 
 - **A system actor, so internal callers run under the policies instead of around
   them.**
-  ([#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402) · [long form](docs/changelog/unreleased.md#a-system-actor-so-internal-callers-run-under-the-policies-instead-of-around-them))
+  ([#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402) · [long form](docs/changelog/v0.9.0.md#a-system-actor-so-internal-callers-run-under-the-policies-instead-of-around-them))
 
 - **The firing path runs under the policies.**
-  ([#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402) · [long form](docs/changelog/unreleased.md#the-firing-path-runs-under-the-policies))
+  ([#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402) · [long form](docs/changelog/v0.9.0.md#the-firing-path-runs-under-the-policies))
 
 - **The semantic index runs under its policies.**
-  ([#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402) · [long form](docs/changelog/unreleased.md#the-semantic-index-runs-under-its-policies))
+  ([#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402) · [long form](docs/changelog/v0.9.0.md#the-semantic-index-runs-under-its-policies))
 
 - **Editorial automation runs under the policies.**
-  ([#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402) · [long form](docs/changelog/unreleased.md#editorial-automation-runs-under-the-policies))
+  ([#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402) · [long form](docs/changelog/v0.9.0.md#editorial-automation-runs-under-the-policies))
 
 - **Billing and the newsletter tier sync run under the policies.**
-  ([#1329](https://github.com/The-Verscienta/kiln_cms/issues/1329), [#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402) · [long form](docs/changelog/unreleased.md#billing-and-the-newsletter-tier-sync-run-under-the-policies))
+  ([#1329](https://github.com/The-Verscienta/kiln_cms/issues/1329), [#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402) · [long form](docs/changelog/v0.9.0.md#billing-and-the-newsletter-tier-sync-run-under-the-policies))
 
 - **`mix kiln.authz.check` now gates all of `lib/`.**
-  ([#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402) · [long form](docs/changelog/unreleased.md#mix-kilnauthzcheck-now-gates-all-of-lib))
+  ([#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402) · [long form](docs/changelog/v0.9.0.md#mix-kilnauthzcheck-now-gates-all-of-lib))
 
 - **Firing no longer fails, or mints an unattributed anchor, with every-write
   anchoring on.**
-  ([#910](https://github.com/The-Verscienta/kiln_cms/issues/910) · [long form](docs/changelog/unreleased.md#firing-no-longer-fails-or-mints-an-unattributed-anchor-with-every-write))
+  ([#910](https://github.com/The-Verscienta/kiln_cms/issues/910) · [long form](docs/changelog/v0.9.0.md#firing-no-longer-fails-or-mints-an-unattributed-anchor-with-every-write))
 
 ## [0.8.0] - 2026-09-11
 
@@ -1290,7 +1302,8 @@ that `mix kiln.update` compares against.
   one that can't be described by a changelog diff.
   ([long form](docs/changelog/v0.1.0.md#if-your-project-pins-a-sha-from-before-this-tag-your-first-update-is-the-only))
 
-[Unreleased]: https://github.com/The-Verscienta/kiln_cms/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/The-Verscienta/kiln_cms/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/The-Verscienta/kiln_cms/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/The-Verscienta/kiln_cms/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/The-Verscienta/kiln_cms/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/The-Verscienta/kiln_cms/compare/v0.5.0...v0.6.0
