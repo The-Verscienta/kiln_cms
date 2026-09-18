@@ -7,6 +7,18 @@ carries the reasoning.
 
 ## Added
 
+<a id="memberships-can-notify-other-systems-membershipactivated-and-membershipcanceled"></a>
+
+- **Memberships can notify other systems: `membership.activated` and
+  `membership.canceled` webhook events.** They fire when a paid membership starts
+  or stops granting access — not on renewals or dunning retries — so a
+  subscribed endpoint can provision a hosted account, sync a CRM, or revoke
+  either without talking to the payment provider. The event is enqueued in the
+  same transaction as the access change and delivered after it commits, with
+  retries and an `event_id` to dedupe on. The payload carries the member's
+  email; `docs/data-flows.md` records the flow. Opt-in per endpoint.
+  ([#334](https://github.com/The-Verscienta/kiln_cms/issues/334))
+
 <a id="one-click-deploy-templates-for-render-railway-flyio-and-digitalocean"></a>
 
 - **One-click deploy templates for Render, Railway, Fly.io and DigitalOcean.**
