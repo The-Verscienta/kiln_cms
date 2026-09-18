@@ -179,7 +179,10 @@ land in a 1.x minor as an addition:
 
 - agentic editorial automation (#377)
 - the plugin registry (#1447) and the runtime sandbox it defers to (#333)
-- managed hosting (#334)
+- managed hosting (#334). Its first track, one-click deploy templates
+  (#1529), doesn't depend on anything here and can ship in any release.
+  Integration settings in the UI (#1322, in 0.10) are also something the
+  hosted plan needs.
 - graduating CRDT co-editing out of `:collab_prototype` (#1324)
 - semantic search on by default, or an `-ml` image variant
 - SSO with more than one identity provider
