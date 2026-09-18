@@ -292,6 +292,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Security
 
+- **The session cookie's signing and encryption salts can be set per
+  deployment.**
+  ([#1326](https://github.com/The-Verscienta/kiln_cms/issues/1326) · [long form](docs/changelog/unreleased.md#the-session-cookies-signing-and-encryption-salts-can-be-set-per-deployment))
+
 - **A system actor, so internal callers run under the policies instead of around
   them.**
   ([#1402](https://github.com/The-Verscienta/kiln_cms/issues/1402) · [long form](docs/changelog/unreleased.md#a-system-actor-so-internal-callers-run-under-the-policies-instead-of-around-them))

@@ -113,6 +113,60 @@ defmodule KilnCMSWeb.SessionCookieTest do
     end
   end
 
+  describe "the session salts (#1326)" do
+    test "default to this repository's existing values, so no build silently invalidates every live session" do
+      # Both salts used to be literals inside this module; they are now
+      # `Application.compile_env/3` reads with these same values as the
+      # fallback (see the moduledoc), so a deployment that never overrides
+      # `:session_signing_salt` / `:session_encryption_salt` keeps deriving
+      # the exact keys it always has. Pinned as exact values, not merely
+      # truthy, because a *different* default would be the kind of change
+      # that reads as harmless in a diff and silently signs every existing
+      # visitor out.
+      opts = SessionCookie.options(false)
+      assert opts[:signing_salt] == "Dsoh9oKb"
+      assert opts[:encryption_salt] == "8fso5iqxDfI"
+    end
+
+    test "are compile-time config, so an overlay's config/project.exs is what sets them" do
+      # The default test above passes just as well with both salts left as
+      # literals, which is the pre-#1326 code. What the change adds is the
+      # compile-time read, and Mix records every `Application.compile_env/3`
+      # read in the compiled `.app` (a release checks those at boot against
+      # runtime config). Erlang's application controller does not keep that
+      # key, so read the file itself.
+      {:ok, [{:application, :kiln_cms, spec}]} =
+        :kiln_cms |> Application.app_dir("ebin/kiln_cms.app") |> :file.consult()
+
+      read_paths = for {:kiln_cms, path, _return} <- spec[:compile_env], do: path
+
+      assert [:session_signing_salt] in read_paths
+      assert [:session_encryption_salt] in read_paths
+    end
+
+    test "refuse nil, blank and non-string values by name, rather than passing them to Plug" do
+      # Plug raises on a nil `:signing_salt` but reads a nil `:encryption_salt`
+      # as "sign, don't encrypt", silently. A refusal that only covered one key
+      # would leave exactly the dangerous one open, so both are driven.
+      #
+      # The values come through a config read for the reason the
+      # non-boolean test above gives: the real value is an opaque term from
+      # `compile_env/3`, not a literal the type checker can see.
+      for key <- [:session_signing_salt, :session_encryption_salt],
+          bad <- [nil, "", "   ", :not_a_string] do
+        value = Application.get_env(:kiln_cms, :__unset_for_this_test__, bad)
+
+        error = assert_raise ArgumentError, fn -> SessionCookie.salt!(key, value) end
+        assert error.message =~ "config :kiln_cms, #{inspect(key)} must be a non-empty string"
+      end
+    end
+
+    test "pass any non-empty string through unchanged" do
+      assert SessionCookie.salt!(:session_encryption_salt, "8fso5iqxDfI") == "8fso5iqxDfI"
+      assert SessionCookie.salt!(:session_signing_salt, " padded ") == " padded "
+    end
+  end
+
   describe "the endpoint" do
     test "takes its whole session cookie from the rule rather than restating it" do
       running = Endpoint.session_options()
