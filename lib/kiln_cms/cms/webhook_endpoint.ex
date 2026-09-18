@@ -44,8 +44,9 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   `"page.published"`, `"recipe.updated"`), plus `form.submitted` for
   admin-defined public forms, `task.assigned`/`task.overdue` for editorial
   tasks (#501), `release.published`/`release.rolled_back`/`release.failed` for
-  content releases (#500), and `experiment.concluded` for A/B experiments
-  (#499). Derived at
+  content releases (#500), `experiment.concluded` for A/B experiments
+  (#499), and `membership.activated`/`membership.canceled` for paid
+  memberships (`KilnCMS.Billing.MembershipWebhooks`). Derived at
   runtime so generated and admin-defined types get events for free.
 
   Dynamic types are per-org (epic #336), so the console passes the request's
@@ -54,7 +55,11 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   def events(org_id \\ KilnCMS.Accounts.default_org_id()) do
     types = KilnCMS.CMS.ContentTypes.all_for_org(org_id)
     content = for ct <- types, verb <- @verbs, do: "#{ct.type}.#{verb}"
-    content ++ ["form.submitted"] ++ @task_events ++ @release_events ++ @experiment_events
+
+    content ++
+      ["form.submitted"] ++
+      @task_events ++
+      @release_events ++ @experiment_events ++ KilnCMS.Billing.MembershipWebhooks.events()
   end
 
   @doc """

@@ -245,6 +245,57 @@ the checkout session **and** the subscription it creates: session metadata does
 not propagate to the subscription, and the subscription is what carries every
 later event.
 
+## Webhook events
+
+A site can tell another system when a membership starts or stops granting
+access: subscribe a [webhook endpoint](webhooks.md) to
+`membership.activated` and `membership.canceled` at `/editor/webhooks`. That is
+enough to provision a hosted account for a paying customer, add them to a CRM,
+or revoke either, without that system talking to the payment provider.
+
+The events follow **access**, not every status change:
+
+| Transition | Event |
+|------------|-------|
+| `incomplete` or `canceled` → `active`, or any → `comped` | `membership.activated` |
+| `active`, `past_due` or `comped` → `canceled` | `membership.canceled` |
+| `active` → `active` (a renewal), `active` ↔ `past_due` (dunning) | none |
+| `incomplete` → `canceled` (an abandoned checkout) | none |
+
+`past_due` still grants access, so a failing card is not a cancellation; the
+provider giving up on it is.
+
+```jsonc
+// POST to your endpoint, membership.activated
+{
+  "event": "membership.activated",
+  "data": {
+    "event_id": "…",          // the audit row for this transition — dedupe on it
+    "membership_id": "…", "org_id": "…",
+    "user_id": "…", "email": "member@example.com",
+    "tier": { "id": "…", "slug": "hosted-starter", "name": "Hosted Starter", "audience": "members" },
+    "status": "active", "previous_status": "incomplete",
+    "occurred_at": "2026-09-18T12:00:00Z",
+    "activated_at": "2026-09-18T12:00:00Z", "canceled_at": null,
+    "current_period_end": "2026-10-18T12:00:00Z"
+  }
+}
+```
+
+**The event cannot be lost to a crash.** It is enqueued inside the same
+transaction that grants or revokes the access, and delivered after that
+commits, with retries. Content events make the opposite trade (see
+`KilnCMS.Billing.MembershipWebhooks` for why). A redelivery carries the same
+`event_id`, so a receiver that acts on it (creating an account, say) should
+ignore an `event_id` it has already handled.
+
+**The payload carries the member's email.** It is read when the event is
+delivered, never stored in the job queue, but the webhook delivery log keeps
+each payload for its retention window (30 days by default) so it can be
+redelivered. GDPR erasure does not rewrite that log, and erasing a member
+sends no `membership.canceled`: erasure ends the membership locally without
+going through a transition.
+
 ## The member journey
 
 | Page | Who | What |
