@@ -111,7 +111,7 @@ defmodule KilnCMSWeb.CoreComponents do
       <.button navigate={~p"/"}>Home</.button>
   """
   attr :rest, :global, include: ~w(href navigate patch method download name value disabled type)
-  attr :class, :any
+  attr :class, :any, default: nil, doc: "extra classes, added after the `.btn` ones"
   attr :variant, :string, values: ~w(primary danger ghost)
   attr :size, :string, default: nil, values: [nil, "sm"]
   slot :inner_block, required: true
@@ -128,10 +128,10 @@ defmodule KilnCMSWeb.CoreComponents do
         nil -> "btn-default"
       end
 
+    # A caller's `class` (spacing, alignment) adds to the button classes rather
+    # than replacing them — replacing left a bare, unstyled <button>.
     assigns =
-      assign_new(assigns, :class, fn ->
-        ["btn", variant, assigns[:size] == "sm" && "btn-sm"]
-      end)
+      assign(assigns, :class, ["btn", variant, assigns[:size] == "sm" && "btn-sm", assigns.class])
 
     if rest[:href] || rest[:navigate] || rest[:patch] do
       ~H"""
@@ -909,12 +909,10 @@ defmodule KilnCMSWeb.CoreComponents do
 
   def list(assigns) do
     ~H"""
-    <ul class="list">
-      <li :for={item <- @item} class="list-row">
-        <div class="list-col-grow">
-          <div class="font-bold">{item.title}</div>
-          <div>{render_slot(item)}</div>
-        </div>
+    <ul class="card divide-y divide-base-content/10">
+      <li :for={item <- @item} class="card-pad">
+        <div class="text-sm font-medium text-base-content">{item.title}</div>
+        <div class="text-sm text-base-content/70">{render_slot(item)}</div>
       </li>
     </ul>
     """

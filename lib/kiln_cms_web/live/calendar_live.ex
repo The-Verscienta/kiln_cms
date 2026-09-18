@@ -614,7 +614,7 @@ defmodule KilnCMSWeb.CalendarLive do
           <h1 class="text-2xl font-semibold">{gettext("Editorial calendar")}</h1>
 
           <div class="flex flex-wrap items-center gap-2">
-            <div class="join" role="group" aria-label={gettext("Calendar view")}>
+            <div class="flex gap-1" role="group" aria-label={gettext("Calendar view")}>
               <.link
                 :for={
                   {value, label} <- [
@@ -626,7 +626,7 @@ defmodule KilnCMSWeb.CalendarLive do
                 patch={with_view(assigns, value)}
                 aria-current={@view == value && "page"}
                 class={[
-                  "btn btn-sm join-item",
+                  "btn btn-sm",
                   if(@view == value, do: "btn-primary", else: "btn-default")
                 ]}
               >
@@ -943,7 +943,7 @@ defmodule KilnCMSWeb.CalendarLive do
               phx-click="mark_reviewed"
               phx-value-id={ev.id}
               phx-value-type={ev.type}
-              class="btn btn-xs btn-default shrink-0"
+              class="btn btn-sm btn-default shrink-0"
             >
               {gettext("Mark reviewed")}
             </button>

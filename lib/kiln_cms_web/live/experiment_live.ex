@@ -476,7 +476,7 @@ defmodule KilnCMSWeb.ExperimentLive do
           </.link>
           <div class="mt-1 flex flex-wrap items-center gap-3">
             <h1 class="text-2xl font-semibold">{@experiment.name}</h1>
-            <span class="badge badge-sm">{experiment_state_label(@experiment.state)}</span>
+            <.badge>{experiment_state_label(@experiment.state)}</.badge>
           </div>
           <p class="text-sm text-base-content/70">
             <%= if @doc do %>
@@ -578,18 +578,16 @@ defmodule KilnCMSWeb.ExperimentLive do
                     <span :if={row.variant.control} class="ml-1 text-xs text-base-content/60">{gettext(
                       "control"
                     )}</span>
-                    <span
+                    <.badge
                       :if={@results.leader && @results.leader.id == row.variant.id}
-                      class="ml-2 badge badge-sm badge-success"
+                      variant="success"
+                      class="ml-2"
                     >
                       {gettext("leading")}
-                    </span>
-                    <span
-                      :if={winner?(@experiment, row.variant)}
-                      class="ml-2 badge badge-sm badge-info"
-                    >
+                    </.badge>
+                    <.badge :if={winner?(@experiment, row.variant)} variant="info" class="ml-2">
                       {gettext("winner")}
-                    </span>
+                    </.badge>
                     <p :if={row.anomaly} class="text-xs text-warning-ink">
                       {ExperimentPhrases.anomaly_headline(elem(row.anomaly, 0))}
                     </p>

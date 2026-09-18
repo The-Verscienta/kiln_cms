@@ -409,12 +409,9 @@ defmodule KilnCMSWeb.GovernanceLive do
             {finding.title}
           </.link>
           <span class="text-xs text-base-content/50">{finding.type}</span>
-          <span
-            :if={finding.errors?}
-            class="badge badge-sm bg-error/15 text-error-ink"
-          >
+          <.badge :if={finding.errors?} variant="error">
             {gettext("would refuse a publish")}
-          </span>
+          </.badge>
           <span class="w-full font-mono text-xs text-base-content/70">
             {finding.matches |> Enum.flat_map(fn {_code, phrases} -> phrases end) |> Enum.join(", ")}
           </span>

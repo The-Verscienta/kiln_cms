@@ -307,6 +307,23 @@
     opacity: 0.5;
   }
 
+  /* An in-text `<a>` ("View", "Open in editor"). Preflight resets anchors to
+     `color: inherit; text-decoration: inherit`, so without this a link reads
+     as plain body text. Colour stays with the call site, as for `.btn-link`. */
+  .link {
+    text-decoration-line: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+  }
+  .link:hover {
+    text-decoration-thickness: 2px;
+  }
+  .link:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+
   /* A LiveView round-trip in flight. Dim the control and show `progress` so
      a slow publish or purge doesn't invite a second click. The 0.2s delay
      sits on the loading state only, so a fast round-trip never flickers and
@@ -332,6 +349,15 @@
   }
 
   /* ---- Form fields ------------------------------------------------------ */
+  /* The label over a bare `.field-input` / `.field-select` — the same
+     treatment `<.input>` gives its own label. */
+  .field-label {
+    display: block;
+    margin-bottom: 0.25rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--color-base-content);
+  }
   .field-input,
   .field-select {
     width: 100%;

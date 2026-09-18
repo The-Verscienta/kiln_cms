@@ -213,10 +213,10 @@ defmodule KilnCMSWeb.FederationLive do
 
   defp host_of(uri), do: Federation.actor_host(uri) || uri
 
-  defp delivery_state(:pending), do: {gettext("Pending"), "badge-ghost"}
-  defp delivery_state(:delivered), do: {gettext("Delivered"), "badge-success"}
-  defp delivery_state(:failed), do: {gettext("Failed"), "badge-error"}
-  defp delivery_state(other), do: {to_string(other), "badge-ghost"}
+  defp delivery_state(:pending), do: {gettext("Pending"), "outline"}
+  defp delivery_state(:delivered), do: {gettext("Delivered"), "success"}
+  defp delivery_state(:failed), do: {gettext("Failed"), "error"}
+  defp delivery_state(other), do: {to_string(other), "outline"}
 
   defp block_kind(:actor), do: gettext("actor")
   defp block_kind(:instance), do: gettext("instance")
@@ -400,7 +400,7 @@ defmodule KilnCMSWeb.FederationLive do
                           "Block this actor? Its follow is removed and future follows are refused."
                         )
                       }
-                      class="btn btn-ghost btn-xs"
+                      class="btn btn-ghost btn-sm"
                     >
                       {gettext("Block actor")}
                     </button>
@@ -414,7 +414,7 @@ defmodule KilnCMSWeb.FederationLive do
                           "Block this whole instance? Every follower on it is removed and future follows from it are refused."
                         )
                       }
-                      class="btn btn-ghost btn-xs"
+                      class="btn btn-ghost btn-sm"
                     >
                       {gettext("Block instance")}
                     </button>
@@ -425,7 +425,7 @@ defmodule KilnCMSWeb.FederationLive do
                       data-confirm={
                         gettext("Remove this follower? It can follow again unless you block it.")
                       }
-                      class="btn btn-ghost btn-xs text-error"
+                      class="btn btn-ghost btn-sm text-error"
                     >
                       {gettext("Remove")}
                     </button>
@@ -479,7 +479,7 @@ defmodule KilnCMSWeb.FederationLive do
               class="flex flex-wrap items-center justify-between gap-3 p-3 text-sm"
             >
               <div class="min-w-0">
-                <span class="badge badge-sm mr-2">{block_kind(b.kind)}</span>
+                <.badge class="mr-2">{block_kind(b.kind)}</.badge>
                 <span class="break-all font-mono text-xs">{b.value}</span>
                 <span :if={b.reason} class="ml-2 text-xs text-base-content/60">— {b.reason}</span>
               </div>
@@ -487,7 +487,7 @@ defmodule KilnCMSWeb.FederationLive do
                 type="button"
                 phx-click="unblock"
                 phx-value-id={b.id}
-                class="btn btn-ghost btn-xs"
+                class="btn btn-ghost btn-sm"
               >
                 {gettext("Unblock")}
               </button>
@@ -519,8 +519,8 @@ defmodule KilnCMSWeb.FederationLive do
                   <td class="text-xs">{d.activity_type}</td>
                   <td class="break-all font-mono text-xs">{d.inbox_uri}</td>
                   <td>
-                    <% {label, class} = delivery_state(d.state) %>
-                    <span class={["badge badge-sm", class]}>{label}</span>
+                    <% {label, variant} = delivery_state(d.state) %>
+                    <.badge variant={variant}>{label}</.badge>
                   </td>
                   <td class="tabular-nums text-xs">{d.attempts}</td>
                   <td class="text-xs text-base-content/70">
