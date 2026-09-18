@@ -1,0 +1,62 @@
+# Render Blueprint — one-click deploy of Kiln (#1529).
+#
+#   https://render.com/deploy?repo=https://github.com/The-Verscienta/kiln_cms
+#
+# What it creates: the published image as a web service, a Postgres 17 database
+# (pgvector is available on Render), and a 1 GB disk for uploaded media. Full
+# walkthrough, costs and caveats: docs/deploy-platforms.md#render.
+#
+# You are asked for ONE value at deploy time: SECRET_KEY_BASE. Render's
+# generated values are 44 characters and Phoenix requires at least 64, so it
+# cannot be generated here. Produce one with:
+#
+#   openssl rand -base64 64 | tr -d '\n'
+#
+# Back it up with the database — encrypted columns are unreadable without it.
+#
+# Upgrading: change the image tag below (read that release's `### Upgrading`
+# notes in CHANGELOG.md first) and sync the Blueprint. Image-backed services
+# are never redeployed on their own.
+
+services:
+  - type: web
+    name: kiln
+    runtime: image
+    image:
+      url: ghcr.io/the-verscienta/kiln_cms:0.9.0
+    # 512 MB. The disk below needs a paid plan; the free plan also sleeps.
+    plan: 0.5c-512mb
+    # /up is 200 only once the database answers — the right signal for routing.
+    # It is excluded from force_ssl, so Render's plain-HTTP probe gets a 200.
+    healthCheckPath: /up
+    disk:
+      name: media
+      mountPath: /app/media
+      sizeGB: 1
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: kiln-db
+          property: connectionString
+      - key: SECRET_KEY_BASE
+        sync: false
+      - key: TOKEN_SIGNING_SECRET
+        generateValue: true
+      # Uploaded media on the disk above, not in the image (wiped on restart).
+      - key: KILN_MEDIA_ROOT
+        value: /app/media
+      - key: PORT
+        value: "4000"
+      # PHX_HOST is not set: Kiln falls back to RENDER_EXTERNAL_HOSTNAME
+      # (your-service.onrender.com). Add a custom domain? Set PHX_HOST to it.
+      # TRUSTED_PROXIES is not set: Render documents no proxy address range.
+      # See docs/deploy-platforms.md#client-addresses-and-rate-limiting.
+
+databases:
+  - name: kiln-db
+    databaseName: kiln
+    postgresMajorVersion: "17"
+    # 256 MB. The free plan expires after 30 days, deleting the database.
+    plan: 0.1c-256mb
+    # Private network only — the app reaches it internally.
+    ipAllowList: []

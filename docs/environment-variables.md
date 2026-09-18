@@ -73,7 +73,7 @@ looking through [Everything else](#everything-else). Each links to its full row.
 
 | Variable | Why you probably want it | Details |
 |----------|--------------------------|---------|
-| `PHX_HOST` | Your public hostname. Left unset it is `example.com`, and every generated link, email URL **and LiveView socket origin check** uses that — so the console appears to load and then silently fails to connect. | [server & networking](#server-and-networking) |
+| `PHX_HOST` | Your public hostname. Left unset it is `example.com` (or, on Render, Railway and Fly, the platform's own hostname), and every generated link, email URL **and LiveView socket origin check** uses that — so the console appears to load and then silently fails to connect. | [server & networking](#server-and-networking) |
 | `PHX_SERVER` | A release that does not set it boots, answers `bin/kiln_cms rpc`, and keeps the container healthcheck green while serving no HTTP at all. `bin/server` sets it for you. | [server & networking](#server-and-networking) |
 | `PORT` | The port to bind, when `4000` is not what your platform routes to. | [server & networking](#server-and-networking) |
 | `POOL_SIZE` | Postgres pool size. The default of `10` is shared by web requests *and* Oban workers, so a busy instance wants more. | [server & networking](#server-and-networking) |
@@ -81,7 +81,7 @@ looking through [Everything else](#everything-else). Each links to its full row.
 | `DATABASE_SSL` | On by default, and worth knowing before you turn it off: it is the switch a typo used to silently disable (#606). | [database TLS](#database-tls) |
 | `MAIL_MODE` | Without it **no email leaves the deployment** — invitations, password resets and digests are queued, fail in Oban, and retry forever. Nothing raises. | [outbound email](#outbound-email) |
 | `MAIL_FROM_EMAIL` | The address mail is sent from; its domain is the sending and DKIM-signing domain under `MAIL_MODE=direct`. | [outbound email](#outbound-email) |
-| `S3_BUCKET` | Object storage. Without it uploads live on the container's local disk, which a redeploy discards. | [object storage](#object-storage-s3-compatible) |
+| `S3_BUCKET` | Object storage. Without it (or `KILN_MEDIA_ROOT` on a mounted volume) uploads live on the container's local disk, which a redeploy discards. | [object storage](#object-storage-s3-compatible) |
 | `SENTRY_DSN` | Error tracking. It is also the only sink that receives the boot-time configuration warnings described under [On/off variables](#boolean-variables) — without it a mistyped variable is one line in `docker logs`. | [error tracking](#error-tracking-sentry) |
 
 ## Everything else
@@ -94,7 +94,7 @@ optional: unset means the feature is off or keeps the default named in its row.
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
 | `PHX_SERVER` | unset ⇒ no HTTP | Set to start the web server in a release; without it the release boots but does not serve HTTP. The generated `bin/server` script sets this for you. **Presence-checked, not parsed** — the partial exception to the on/off rules above. *Any* value starts the server, including a blank `PHX_SERVER=` and an unrecognized one, because Phoenix documents this as "any truthy value" and reading a declared-but-empty variable as "serve nothing" is a silent outage. The one rule it does honour is the off-spellings: `false`/`0`/`no`/`off` keep the server off, where they used to start it anyway. | [`config/runtime.exs:67`](../config/runtime.exs#L67) |
-| `PHX_HOST` | `example.com` | Public hostname used to generate URLs and validate socket origins (defaults to `example.com`, so effectively required — wrong values break links, emails, **and LiveView socket connections**). Bare hostname; any `https://` prefix or trailing `/` is stripped. | [`lib/kiln_cms/config/host.ex:56`](../lib/kiln_cms/config/host.ex#L56) |
+| `PHX_HOST` | the platform's hostname, else `example.com` | Public hostname used to generate URLs and validate socket origins — wrong values break links, emails, **and LiveView socket connections**. Bare hostname; any `https://` prefix or trailing `/` is stripped. Unset or blank, it falls back to the hostname a one-click platform provides (#1529): `RENDER_EXTERNAL_HOSTNAME`, then `RAILWAY_PUBLIC_DOMAIN`, then `<FLY_APP_NAME>.fly.dev`; with none of those, `example.com`, so on any other host it is effectively required. See [deploy-platforms.md](deploy-platforms.md). | [`lib/kiln_cms/config/host.ex:80`](../lib/kiln_cms/config/host.ex#L80) |
 | `PORT` | `4000` | HTTP listen port the Bandit server binds to. | [`config/runtime.exs:72`](../config/runtime.exs#L72) |
 | `CHECK_ORIGINS` | unset | Comma-separated **extra** origins allowed to open LiveView/channel sockets, for when the app is served from more than one hostname (e.g. mid domain migration). Entries may be full origins (`https://cms.example.com`), scheme-less (`//cms.example.com` — any scheme/port), or bare hosts (normalized to `//host`). The `PHX_HOST` origin is always allowed. Unset ⇒ only `PHX_HOST` may connect. | [`config/runtime/prod/web.exs:42`](../config/runtime/prod/web.exs#L42) |
 | `CORS_ORIGINS` | unset | Comma-separated allowlist (or `*`) of origins allowed cross-origin **HTTP** reads of the headless API (`/api/*`, `/gql`). Read in every environment; without it prod stays same-origin-only. Does not affect sockets — that's `CHECK_ORIGINS`. See [`KilnCMSWeb.CORS`](../lib/kiln_cms_web/cors.ex). | [`config/runtime/cross_origin.exs:16`](../config/runtime/cross_origin.exs#L16) |
@@ -259,16 +259,17 @@ CDN deployment guide.
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `S3_BUCKET` | unset | Enables the S3 adapter. Leave unset to use local storage. | [`config/runtime/prod/storage.exs:13`](../config/runtime/prod/storage.exs#L13) |
-| `S3_PUBLIC_BASE_URL` | — | Public base URL objects are served from — the CDN hostname, including the bucket path if the provider's URLs carry one. **Required when `S3_BUCKET` is set** (raises otherwise). | [`config/runtime/prod/storage.exs:20`](../config/runtime/prod/storage.exs#L20) |
-| `AWS_ACCESS_KEY_ID` | — | S3 access key. **Required when `S3_BUCKET` is set** (`fetch_env!`). | [`config/runtime/prod/storage.exs:46`](../config/runtime/prod/storage.exs#L46) |
-| `AWS_SECRET_ACCESS_KEY` | — | S3 secret key. **Required when `S3_BUCKET` is set** (`fetch_env!`). | [`config/runtime/prod/storage.exs:47`](../config/runtime/prod/storage.exs#L47) |
-| `AWS_REGION` | `us-east-1` | Region. Use `auto` for Cloudflare R2; a real region for B2/Wasabi/AWS. | [`config/runtime/prod/storage.exs:49`](../config/runtime/prod/storage.exs#L49) |
-| `S3_ACL` | unset | Per-object canned ACL (e.g. `public_read`). Only needed if the bucket isn't public at the bucket level. | [`config/runtime/prod/storage.exs:27`](../config/runtime/prod/storage.exs#L27) |
-| `S3_PRIVATE_BUCKET` | unset | A separate bucket for gated documents (#481) — this app's own AWS credentials read it directly, so it needs no public-read config, CDN, or public-base-URL equivalent. Without it, gating a document is refused rather than silently falling back to the public bucket. | [`config/runtime/prod/storage.exs:38`](../config/runtime/prod/storage.exs#L38) |
-| `S3_ENDPOINT_HOST` | unset | Custom endpoint host for non-AWS stores (R2/B2/Wasabi/MinIO). Leave unset for AWS S3. | [`config/runtime/prod/storage.exs:53`](../config/runtime/prod/storage.exs#L53) |
-| `S3_ENDPOINT_SCHEME` | `https://` | Scheme for the custom endpoint. | [`config/runtime/prod/storage.exs:55`](../config/runtime/prod/storage.exs#L55) |
-| `S3_ENDPOINT_PORT` | `443` | Port for the custom endpoint. | [`config/runtime/prod/storage.exs:57`](../config/runtime/prod/storage.exs#L57) |
+| `KILN_MEDIA_ROOT` | unset | A stable directory for the **Local** adapter (#1529): public files in `<dir>/public` (served at `/uploads`), private ones in `<dir>/private` (never served). Unset, local media goes under the release's own `priv/uploads` — a path that changes with every version, so no volume can be mounted there. Set it to where a volume is mounted (`/app/media` in the image and the [one-click templates](deploy-platforms.md#media-storage)). Must be an absolute path; a relative one is ignored with a warning. Ignored when `S3_BUCKET` is set. Also the default for `MEDIA_DIR`. The app checks at boot that it can write there. | [`lib/kiln_cms/config/media_root.ex:27`](../lib/kiln_cms/config/media_root.ex#L27) |
+| `S3_BUCKET` | unset | Enables the S3 adapter. Leave unset to use local storage. | [`config/runtime/prod/storage.exs:37`](../config/runtime/prod/storage.exs#L37) |
+| `S3_PUBLIC_BASE_URL` | — | Public base URL objects are served from — the CDN hostname, including the bucket path if the provider's URLs carry one. **Required when `S3_BUCKET` is set** (raises otherwise). | [`config/runtime/prod/storage.exs:44`](../config/runtime/prod/storage.exs#L44) |
+| `AWS_ACCESS_KEY_ID` | — | S3 access key. **Required when `S3_BUCKET` is set** (`fetch_env!`). | [`config/runtime/prod/storage.exs:70`](../config/runtime/prod/storage.exs#L70) |
+| `AWS_SECRET_ACCESS_KEY` | — | S3 secret key. **Required when `S3_BUCKET` is set** (`fetch_env!`). | [`config/runtime/prod/storage.exs:71`](../config/runtime/prod/storage.exs#L71) |
+| `AWS_REGION` | `us-east-1` | Region. Use `auto` for Cloudflare R2; a real region for B2/Wasabi/AWS. | [`config/runtime/prod/storage.exs:73`](../config/runtime/prod/storage.exs#L73) |
+| `S3_ACL` | unset | Per-object canned ACL (e.g. `public_read`). Only needed if the bucket isn't public at the bucket level. | [`config/runtime/prod/storage.exs:51`](../config/runtime/prod/storage.exs#L51) |
+| `S3_PRIVATE_BUCKET` | unset | A separate bucket for gated documents (#481) — this app's own AWS credentials read it directly, so it needs no public-read config, CDN, or public-base-URL equivalent. Without it, gating a document is refused rather than silently falling back to the public bucket. | [`config/runtime/prod/storage.exs:62`](../config/runtime/prod/storage.exs#L62) |
+| `S3_ENDPOINT_HOST` | unset | Custom endpoint host for non-AWS stores (R2/B2/Wasabi/MinIO). Leave unset for AWS S3. | [`config/runtime/prod/storage.exs:77`](../config/runtime/prod/storage.exs#L77) |
+| `S3_ENDPOINT_SCHEME` | `https://` | Scheme for the custom endpoint. | [`config/runtime/prod/storage.exs:79`](../config/runtime/prod/storage.exs#L79) |
+| `S3_ENDPOINT_PORT` | `443` | Port for the custom endpoint. | [`config/runtime/prod/storage.exs:81`](../config/runtime/prod/storage.exs#L81) |
 
 Media objects are uploaded with `Cache-Control: public, max-age=31536000,
 immutable` — there is no env var for it, because storage keys are write-once
@@ -292,7 +293,7 @@ cron's backups, not only ones taken from the app.
 | `BACKUP_DIR` | `/var/backups/kiln` | Where backups land, for both paths. | [`config/runtime/prod/backups.exs:47`](../config/runtime/prod/backups.exs#L47) |
 | `BACKUP_KEEP_DAYS` | `14` | Local retention in days, enforced by both paths. A non-positive or unparseable value keeps the default and warns — read literally, `0` would delete the backup it had just taken. | [`config/runtime/prod/backups.exs:48`](../config/runtime/prod/backups.exs#L48) |
 | `BACKUP_STALE_AFTER_HOURS` | `36` | How old the newest backup may be before the console warns and the overview shows a red strip. Deliberately longer than a daily cadence: a warning that fires because a nightly job ran at 03:20 instead of 03:17 is one an admin learns to ignore. | [`config/runtime/prod/backups.exs:49`](../config/runtime/prod/backups.exs#L49) |
-| `MEDIA_DIR` | unset | Uploads root to archive — **Local storage adapter only**. Leave unset on S3/R2, where the bucket is backed up provider-side: tarring a directory that doesn't hold the media produces an archive that looks like a media backup and restores nothing. | [`config/runtime/prod/backups.exs:75`](../config/runtime/prod/backups.exs#L75) |
+| `MEDIA_DIR` | `KILN_MEDIA_ROOT`, else unset | Uploads root to archive — **Local storage adapter only**. Leave unset on S3/R2, where the bucket is backed up provider-side: tarring a directory that doesn't hold the media produces an archive that looks like a media backup and restores nothing. When `KILN_MEDIA_ROOT` is set (and `S3_BUCKET` is not), it is the default here and in `scripts/backup.sh`, so a volume-backed deployment states the path once. | [`config/runtime/prod/backups.exs:86`](../config/runtime/prod/backups.exs#L86) |
 
 > **The runtime image needs `pg_dump`.** It installs `postgresql-client-17`,
 > and the **major version must match your Postgres server** — `pg_dump` refuses

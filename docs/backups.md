@@ -211,7 +211,7 @@ configured for cron needs nothing extra for the console.
 |---|---|---|
 | `DATABASE_URL` | backup | source DB (read-only) |
 | `BACKUP_DIR` | backup + app | local backup root (default `/var/backups/kiln`) |
-| `MEDIA_DIR` | backup + app | uploads root (Local adapter only; omit on S3) |
+| `MEDIA_DIR` | backup + app | uploads root (Local adapter only; omit on S3). Defaults to `KILN_MEDIA_ROOT` when that is set |
 | `BACKUP_KEEP_DAYS` | backup + app | local retention (default 14) |
 | `BACKUP_ENABLED` | app | set false to disable the in-app path only; cron is unaffected (default true) |
 | `BACKUP_STALE_AFTER_HOURS` | app | how old before the console warns (default 36) |

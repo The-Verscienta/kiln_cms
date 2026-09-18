@@ -477,7 +477,12 @@ pod killed mid-migration and never converges. Several replicas may start
 together; the migration lock handles it. Use object storage for media, and
 long node names for clustering (above).
 
-**Fly.io / Render / other Dockerfile PaaS.** Build from the Dockerfile; set
+**Render / Railway / Fly.io / DigitalOcean — one-click.** Render, Fly.io and
+DigitalOcean have a template in the repository, and Railway a recipe, that run
+the published image with a database and persistent media: see
+[deploy-platforms.md](deploy-platforms.md).
+
+**Other Dockerfile PaaS.** Build from the Dockerfile; set
 the required variables as secrets; internal port `PORT` (4000); health check
 path `/up` for routing (the platform is the load balancer here) — and if the
 platform *restarts* on health failure, `/live`. `fly ssh console` gets you a

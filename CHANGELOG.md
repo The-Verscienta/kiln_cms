@@ -54,6 +54,20 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Added
+
+- **One-click deploy templates for Render, Railway, Fly.io and DigitalOcean.**
+  ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#one-click-deploy-templates-for-render-railway-flyio-and-digitalocean))
+
+- **`KILN_MEDIA_ROOT`: a stable directory for local media.**
+  ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#kilnmediaroot-a-stable-directory-for-local-media))
+
+### Fixed
+
+- **A PaaS health check no longer gets a redirect, and `PHX_HOST` falls back to
+  the platform's hostname.**
+  ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#a-paas-health-check-no-longer-gets-a-redirect-and-phxhost-falls-back-to-the))
+
 ## [0.9.0] - 2026-09-18
 
 Long form: [docs/changelog/v0.9.0.md](docs/changelog/v0.9.0.md) —
