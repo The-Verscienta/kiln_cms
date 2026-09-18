@@ -64,17 +64,19 @@ defmodule KilnCMSWeb.SessionCookie do
   @host_prefix "__Host-"
 
   # Neither value is a secret on its own — both are combined with
-  # `secret_key_base` via HMAC/HKDF (`Plug.Crypto.KeyGenerator`) to derive the
+  # `secret_key_base` via PBKDF2 (`Plug.Crypto.KeyGenerator`) to derive the
   # actual signing/encryption keys, and `secret_key_base` is what carries the
   # real entropy. But the literals below used to be the only possible value:
   # every KilnCMS deployment built from this open-source tree derived its
   # session keys from the same public salt, rather than something specific to
   # the deployment. `Application.compile_env/3` here is the same pattern
   # `:secure_session_cookie` already uses (see the moduledoc): a downstream
-  # `config/prod.exs` overlay can set `config :kiln_cms, :session_signing_salt,
-  # "…"` / `:session_encryption_salt` to something deployment-specific, and the
-  # default preserves the exact value every existing deployment already
-  # derives its keys from — changing it invalidates every live session.
+  # overlay's `config/project.exs` can set `config :kiln_cms,
+  # :session_signing_salt, "…"` / `:session_encryption_salt` to something
+  # deployment-specific, and the default preserves the exact value every
+  # existing deployment already derives its keys from — changing it
+  # invalidates every live session. `options/1` refuses anything but a
+  # non-empty string; see `salt!/2` for why that cannot be left to Plug.
   @signing_salt Application.compile_env(:kiln_cms, :session_signing_salt, "Dsoh9oKb")
   @encryption_salt Application.compile_env(:kiln_cms, :session_encryption_salt, "8fso5iqxDfI")
 
@@ -154,6 +156,47 @@ defmodule KilnCMSWeb.SessionCookie do
   end
 
   @doc """
+  `value` if it is a usable salt for the config `key`, otherwise an
+  `ArgumentError` that names the key.
+
+  Public so the refusal can be tested: the salts are compile-time, so a test
+  cannot hand `options/1` a bad one.
+
+  The check cannot be left to Plug, because Plug treats the two salts
+  differently. A `nil` `:signing_salt` raises inside `Plug.Session.COOKIE`, but
+  a `nil` `:encryption_salt` is read as "sign, don't encrypt", silently, on
+  both write and read. The cookie stays tamper-proof but its contents become
+  readable by anyone holding it, which undoes #217. And `nil` is the value a
+  natural override produces: `config :kiln_cms, :session_encryption_salt,
+  System.get_env("SESSION_ENCRYPTION_SALT")` in `config/project.exs` compiles to
+  `nil` when a release's build stage does not export that variable, which it
+  usually does not. `compile_env/3`'s default applies only to an *absent* key,
+  never to one present as `nil`.
+
+  A blank string is refused alongside `nil`, for the reason every other setting
+  treats `FOO=` as unset: it is what an empty variable leaves behind.
+
+      iex> KilnCMSWeb.SessionCookie.salt!(:session_signing_salt, "Dsoh9oKb")
+      "Dsoh9oKb"
+  """
+  @spec salt!(atom(), term()) :: String.t()
+  def salt!(key, value) when is_atom(key) do
+    if is_binary(value) and String.trim(value) != "" do
+      value
+    else
+      raise ArgumentError, """
+      config :kiln_cms, #{inspect(key)} must be a non-empty string, got: #{inspect(value)}
+
+      It is combined with secret_key_base to derive the session cookie's keys.
+      Plug does not refuse a nil :encryption_salt: it quietly signs the cookie
+      without encrypting it, so the session becomes readable client-side (#217).
+      If this comes from System.get_env/1, note that it is compile-time config,
+      read while the release is built, not when it boots (#1326).
+      """
+    end
+  end
+
+  @doc """
   The `Plug.Session` options for a given `:secure_session_cookie` setting.
 
   The whole cookie lives here rather than in `KilnCMSWeb.Endpoint` so that the
@@ -167,8 +210,10 @@ defmodule KilnCMSWeb.SessionCookie do
   invalidates existing sessions. The salts themselves default to this
   repository's own values but are `config :kiln_cms, :session_signing_salt` /
   `:session_encryption_salt` overrides away from it (#1326) — set in a
-  downstream `config/prod.exs`, not `secret_key_base` itself, since compile-time
-  config is the only kind `KilnCMSWeb.Endpoint`'s `@session_options` reads.
+  downstream overlay's `config/project.exs`, since compile-time config is the
+  only kind `KilnCMSWeb.Endpoint`'s `@session_options` reads. A salt that is not
+  a non-empty string raises (`salt!/2`), and because the endpoint calls this in
+  a module attribute, it fails the build.
 
   A non-boolean raises rather than being coerced. It is read through
   `Application.compile_env/3`, so this fails the build — but a downstream
@@ -183,8 +228,8 @@ defmodule KilnCMSWeb.SessionCookie do
       [
         store: :cookie,
         key: key(secure?),
-        signing_salt: @signing_salt,
-        encryption_salt: @encryption_salt,
+        signing_salt: salt!(:session_signing_salt, @signing_salt),
+        encryption_salt: salt!(:session_encryption_salt, @encryption_salt),
         same_site: "Lax",
         http_only: true,
         # `__Host-` is honoured only at `Path=/` and only without a `Domain`.

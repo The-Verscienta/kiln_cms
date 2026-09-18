@@ -900,6 +900,21 @@ migration (the demo admin and editor) start on Essentials.
 
 ## Security
 
+<a id="the-session-cookies-signing-and-encryption-salts-can-be-set-per-deployment"></a>
+
+- **The session cookie's signing and encryption salts can be set per
+  deployment.** `KilnCMSWeb.SessionCookie` derived both from string literals in
+  this open-source file, so every deployment built from the tree used the same
+  public salts. Neither is a secret by itself (both are combined with
+  `secret_key_base`, which carries the real entropy), but an overlay can now set
+  `config :kiln_cms, :session_signing_salt` and `:session_encryption_salt` in
+  its `config/project.exs`. They are compile-time config, because the endpoint's
+  session options are a module attribute, so an exported environment variable
+  has no effect. The defaults are the old literals, so upgrading signs nobody
+  out; changing either one later does. A salt that is not a non-empty string
+  fails the build: Plug treats a `nil` encryption salt as "sign, don't encrypt"
+  without a word, which would leave the session readable client-side (#1326).
+
 <a id="a-system-actor-so-internal-callers-run-under-the-policies-instead-of-around-them"></a>
 
 - **A system actor, so internal callers run under the policies instead of

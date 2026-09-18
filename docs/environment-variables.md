@@ -784,17 +784,38 @@ as `Env.positive_integer/1` (#1009). Before that each had hand-rolled its own
 
 ## Compile-time application config (not environment variables)
 
-Everything above is a `System.get_env/1` read in `config/runtime.exs`, which
-executes at boot. The two entries below are `Application.compile_env/3` reads
-instead — the same mechanism `:secure_session_cookie` already uses — because
-`KilnCMSWeb.Endpoint`'s `@session_options` is a module attribute evaluated when
-the endpoint compiles, not when it starts (see
-[`KilnCMSWeb.SessionCookie`](../lib/kiln_cms_web/session_cookie.ex)). They
-cannot be set with an exported shell variable; a downstream deployment sets
-them with `config :kiln_cms, :session_signing_salt, "…"` in its own
-`config/prod.exs` overlay instead.
+Every variable above is read from the process environment when its config
+file is evaluated — almost all of them by `config/runtime.exs`, at boot. The
+two keys below are not environment variables at all. They are
+`Application.compile_env/3` reads, the same mechanism `:secure_session_cookie`
+uses, because `KilnCMSWeb.Endpoint`'s `@session_options` is a module attribute:
+it is fixed when the endpoint *compiles*, not when it starts (see
+[`KilnCMSWeb.SessionCookie`](../lib/kiln_cms_web/session_cookie.ex)). Exporting
+a shell variable at boot changes nothing.
+
+A downstream deployment sets them in its overlay's `config/project.exs`, which
+`config/config.exs` imports last so an overlay can override the core's config:
+
+```elixir
+config :kiln_cms,
+  session_signing_salt: "…",
+  session_encryption_salt: "…"
+```
 
 | Config key | Default | Purpose |
 |------------|---------|---------|
-| `:session_signing_salt` | `"Dsoh9oKb"` | Combined with `secret_key_base` (via `Plug.Crypto.KeyGenerator`) to derive the session cookie's signing key. Not a secret by itself — `secret_key_base` carries the real entropy — but every deployment built from this open-source tree derives its keys from the same public value unless overridden. **Changing it invalidates every existing session.** |
-| `:session_encryption_salt` | `"8fso5iqxDfI"` | Same derivation, for the cookie's encryption key. Same invalidation warning. |
+| `:session_signing_salt` | `"Dsoh9oKb"` | Combined with `secret_key_base` (PBKDF2, via `Plug.Crypto.KeyGenerator`) to derive the session cookie's signing key. Not a secret by itself — `secret_key_base` carries the real entropy — but every deployment built from this open-source tree derives its keys from the same public value unless it overrides this. **Changing it signs every user out.** |
+| `:session_encryption_salt` | `"8fso5iqxDfI"` | The same derivation, for the cookie's encryption key. The same sign-out warning applies. |
+
+Both must be a non-empty string, and anything else **fails the build**. For the
+encryption salt that is not pedantry: `Plug.Session.COOKIE` reads a `nil`
+`:encryption_salt` as "sign, don't encrypt", with no error or warning, so the
+session's contents would become readable by anyone holding the cookie. The
+likeliest way to get a `nil` is to wire the key to `System.get_env/1` in
+`config/project.exs`: a release is compiled in its own build stage, where that
+variable is usually not set, so a hardcoded value is the safer choice here.
+
+A third public salt of the same family, `live_view: [signing_salt: …]` on the
+endpoint in `config/config.exs`, is **not** compile-time. It is endpoint config
+read when the endpoint starts, so `config/project.exs` could always override it
+with no code change. It signs LiveView session tokens, not the session cookie.
