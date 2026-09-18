@@ -1,15 +1,15 @@
 # Test coverage plan
 
-**Status: living document** — batches 1–9 landed; the floor in
+**Status: living document** — all eleven items landed; the floor in
 `coveralls.json` is the enforced number, the figures below are the last
 measured run.
 
 Where the suite's remaining blind spots are, in the order they are worth
 closing, and why each one is on the list. Written against a full measured run on
 2026-08-22: **7,344 tests, 0 failures, 83.1% line coverage**, floor 82.5
-(`coveralls.json`). Batches 1-9 below have since landed; CI's own Coverage job
-measured **85.0%** on `main` on 2026-09-17 (84.6% locally over 8,537 tests),
-the floor has moved to **84.5**, and the Playwright suite is at 25 journeys.
+(`coveralls.json`). Every item below has since landed; CI's own Coverage job
+measured **86.3%** on `main` on 2026-09-18 (8,690 tests locally), the floor has
+moved to **85.8**, and the Playwright suite is at 25 journeys.
 
 Reproduce the numbers with:
 
@@ -19,8 +19,9 @@ Reproduce the numbers with:
 This is not a plan to reach a percentage. The floor exists so coverage cannot
 silently fall (see CONTRIBUTING.md), and every item below earns its place by
 naming a *behaviour nothing currently proves* — not by the size of its
-uncovered block. Nine items are listed as already done so the patterns they
-set are reusable; the rest are ordered by what a defect there would cost.
+uncovered block. They are kept, done, so the patterns they set are reusable —
+the next list should be written against a fresh measured run, not by extending
+this one.
 
 ## Ground rule for anything added here
 
@@ -342,61 +343,64 @@ exactly `draft | in_review | published | archived` and refuses anything else
 by name. The default is still published and draft, so content in review is
 left out unless named; `docs/content-portability.md` now says so.
 
-## Next
+### 10. Console screens — five PRs, one per screen
 
-### 10. Console screens
+| Screen | Before | After | PR |
+|---|---|---|---|
+| `newsletter_live` | 46.2% | 93.1% | #1516 |
+| `settings_live` | 61.7% | 83.8% | #1517 |
+| `experiments_live` | 60.9% | 89.6% | #1518 |
+| `social_live` | 65.7% | 90.5% | #1520 |
+| `field_definition_live` | 64% | 86.6% | lifted by #1511/#1512, no batch needed |
 
-Measured 2026-09-17: `settings_live` (61.7%, 90 uncovered), `experiments_live`
-(60.9%, 45), `social_live` (65.7%, 47), `field_definition_live` (86.6%, 33 —
-lifted by #1511/#1512). These are large screens where the mount and the happy
-path are covered and the branchy event handlers are not. Do not chase the
-percentage: for each screen, list the events its template can push, and cover
-the ones with a persistence or authorization consequence. The rest is
-rendering that a snapshot would pin without proving anything.
+The rule was not to chase the percentage: for each screen, list the events its
+template pushes and cover the ones with a persistence or authorization
+consequence. Three patterns carried across all four:
 
-**`newsletter_live` is done — `test/kiln_cms_web/live/newsletter_live_test.exs`,
-46.2% → 93.1%.** It was the worst of the five, and six of its eight events had
-never run; each one writes or deletes a row, and the rows are people's inboxes.
-The tests drive the rendered page (`render_submit`/`render_click` on the real
-form ids and buttons), so they also pin that the event a button pushes is the
-event the module handles.
+* **Drive the rendered page, not `handle_event/3`.** `render_click` on the
+  real button and `form/3` on the real form id also pin that the event a
+  button pushes is the event the module handles.
+* **Every handler that takes an id from the page gets a "someone else's id"
+  test.** The buttons send `phx-value-id`, so a socket can send any uuid; each
+  test names a row that has to survive the forged one. On settings that meant
+  another *account's* push device, with both accounts' lists asserted after.
+* **Assert a list row as one string** (`"Original title · Form submission ·
+  2 variants"`), not as three substrings that could each come from anywhere on
+  the page.
 
-What they cover: a segment created, refused when blank, and refused on a taken
-slug (uniqueness is the database's, so it lands on submit, not on change); a
-segment deleted, and a delete of a missing one reported rather than crashing;
-a subscriber added as **pending** and counted as such in the heading; confirm
-and remove, each with their refusal; the send form end to end, with the
-campaign appearing in the history table; only published posts offered; and no
-campaign written when no post is chosen.
+What each turned up. Newsletter: a manual re-send is **allowed on purpose** —
+the `:already_sent` dedupe is the automation identity's, and a test asserting
+the opposite failed. Experiments: `blank_to_nil/1` in the goal picker was dead,
+Ash already casting `""` to nil (removed in #1519, the same shape #1365 removed
+from CodeInjectionLive). Settings and social: one mutation per screen survived
+the first pass because the test checked the database and the flash but not
+the page, or deleted the very row whose panel it meant to check — each test now
+asserts the case the code is actually there for.
 
-Two things this turned up. A **forged id** — the shape the buttons push, with
-somebody else's uuid — must be refused rather than obeyed; the test names a
-subscriber that must survive it. And a **manual re-send is allowed on purpose**:
-the `:already_sent` dedupe belongs to the automation identity ({rule, content,
-publish revision}), not to a person pressing Send twice. The opposite is the
-natural guess, and being wrong about it is two copies in every inbox, so it is
-pinned.
+### 11. Mix tasks — 51.6% → 81.9% as a directory
 
-Nine mutations fail the file, among them the delete error arm reporting
-success, confirm doing nothing, the heading counting everyone, remove taking
-the first subscriber rather than the named one, and the post list ignoring
-`state` (that last one survived the first pass — the draft-post test exists
-because of it).
+| Task | Before | After | PR |
+|---|---|---|---|
+| portability CLI + three tasks | 6% / 0% | 90–94% | #1510 |
+| `kiln.federation` | 0% | 95.0% | #1522 |
+| `kiln.audit.checkpoint` | 0% | 89.1% | #1522 |
+| `kiln.update` | 17.8% | 88.5% | #1524 |
+| `kiln.toolchain.check` | 17.1% | 97.6% | #1524 |
 
-What is left there is the send-error message helpers (a gated post, a missing
-segment, an unfired publish) and the tier-backed segment branch of
-`sendable_audiences/1`, which needs a membership tier to reach.
+Only the decisions a task makes itself: argument validation, the
+dry-run/apply split, and exit codes. `kiln.update` runs against a real git
+repo built in the fixture (every guard is a `git` call); the others use
+`File.cd!(dir, fn -> Task.run(args) end)` on a fixture directory, and
+`catch_exit/1` wherever the exit code is the contract.
 
-### 11. Mix tasks — 69.5% as a directory (575 uncovered)
-
-It was 51.6% when this list was written; batch 9 covered the three portability
-tasks and took the directory to 69.5% (CI, 2026-09-17). What is left:
-`kiln.federation` (0/40) and `kiln.audit.checkpoint` (0/46) have never run;
-`kiln.update` is 14%, `kiln.toolchain.check` 17%. The number reads worse than
-it is — most tasks are thin shells over modules that *are* tested — so the
-useful subset is the tasks that make decisions of their own rather than
-delegating: argument validation, the dry-run/apply split, and exit codes. A
-task whose body is one delegating call needs no test.
+The claims worth naming, each pinned: federation's **origin is permanent** —
+re-enabling with a different `--origin` keeps the original actor id, or every
+follower is stranded. The checkpoint audit **exits non-zero** on a deleted row,
+a rewritten row, or no witness at all (an unaudited deployment, not a skipped
+check). `kiln.update --check` **refuses nothing**, and its default target is
+the highest *version*, not the last tag listed — `v1.0.0-rc1` sorts after
+`v1.0.0`. The toolchain gate **raises** rather than printing a mismatch, and
+reports all three in one run.
 
 ## Not gaps — do not chase these
 
@@ -420,9 +424,10 @@ Three things report low and should be left alone:
 total. After a batch lands, re-measure and raise it to just under the new
 number — the floor's job is to stop regression, so leaving it behind a batch
 that moved the total gives back exactly what the batch bought. It moved to
-**82.7** with batch 3 and to **84.5** after batch 9, measured against CI's
-85.0%; `coveralls.json`'s own comment carries the measurement it was set
-against, and that comment is the thing to update next time.
+**82.7** with batch 3, to **84.5** after batch 9 (CI 85.0%), and to **85.8**
+when the list was finished (CI 86.3%); `coveralls.json`'s own comment carries
+the measurement it was set against, and that comment is the thing to update
+next time.
 
 Do not let it drift behind again. Batches 8 and 9 both landed with the floor
 still at 82.7, so the slack under CI's number had grown to 2.3 points — enough

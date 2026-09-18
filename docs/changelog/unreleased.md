@@ -551,20 +551,20 @@ migration (the demo admin and editor) start on Essentials.
   every release up to 0.8.0 used, since it reads the changelog at the tag being
   installed.
 
-<a id="the-coverage-floor-moves-827-to-845"></a>
+<a id="the-coverage-floor-moves-827-to-858"></a>
 
-- **The coverage floor moves 82.7 → 84.5.** `minimum_coverage` in
+- **The coverage floor moves 82.7 → 85.8.** `minimum_coverage` in
   `coveralls.json` is a floor, not a target: it stops coverage regressing
-  silently, so it has to follow the measured number up. Three test batches had
-  landed since it last moved (`Media.Ingest` #1502, `Storage.S3` #1507, the
-  portability CLI and its mix tasks #1510) and CI's Coverage job now reads
-  85.0% on `main`, leaving 2.3 points of slack — room for several modules to
-  lose their tests without the gate noticing. 84.5 restores the half-point
-  margin the previous move used, which is set from CI's number rather than a
-  local one, since which tests run depends on the tools a host has
-  (`:qpdf`, `:ffmpeg`/`:no_ffmpeg`). Contributors see this as a build that
-  fails when a change drops total coverage below 84.5; the fix is to test the
-  change, never to lower the floor.
+  silently, so it has to follow the measured number up. It moved twice in this
+  release as the test-coverage plan was worked through — to 84.5 against CI's
+  85.0% after the `Media.Ingest`, `Storage.S3` and portability batches (#1502,
+  #1507, #1510), then to 85.8 against CI's 86.3% once the console screens
+  (#1516–#1520) and the untested mix tasks (#1522, #1524) had landed. Each move
+  keeps half a point of margin under CI's number rather than a local one, since
+  which tests run depends on the tools a host has (`:qpdf`,
+  `:ffmpeg`/`:no_ffmpeg`). Contributors see this as a build that fails when a
+  change drops total coverage below 85.8; the fix is to test the change, never
+  to lower the floor.
 
 ## Fixed
 
