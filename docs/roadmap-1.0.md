@@ -44,7 +44,7 @@ currently only intends:
 is given `--allow-major`. That includes 0.x → 1.0, even if nothing breaks.
 The 1.0 upgrade note has to say this in its first line. It should also say
 whether the flag is a formality or not: whether 1.0 removed anything (see
-"Retiring legacy shapes" below).
+the 0.12 deprecations below).
 
 ## Milestones
 
