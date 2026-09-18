@@ -223,7 +223,7 @@ defmodule KilnCMSWeb.FederationLiveTest do
 
       {:ok, lv, _html} = live(conn, ~p"/editor/federation")
       assert has_element?(lv, "#delivery-#{delivery.id}", "https://ledger.example/users/l/inbox")
-      assert has_element?(lv, "#delivery-#{delivery.id} .badge", "Pending")
+      assert has_element?(lv, "#delivery-#{delivery.id} span", "Pending")
     end
 
     test "a follower past the drop ceiling is marked, and the deliverable count says so", %{

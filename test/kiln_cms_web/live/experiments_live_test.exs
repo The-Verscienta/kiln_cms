@@ -287,7 +287,7 @@ defmodule KilnCMSWeb.ExperimentsLiveTest do
       # Re-render via a no-op event path: reload the page.
       {:ok, lv, html} = live(conn, ~p"/editor/experiments/#{experiment.id}")
       assert html =~ "leading"
-      assert has_element?(lv, "#result-#{treatment.id} .badge", "leading")
+      assert has_element?(lv, "#result-#{treatment.id} span", "leading")
       refute has_element?(lv, "#results-floor")
 
       # #1087: a blocked experiment says so above the counters. Delete the goal

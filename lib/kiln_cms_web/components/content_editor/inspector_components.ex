@@ -637,14 +637,14 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
           name="task_due_on"
           phx-change="task_draft_change"
           value={@draft["due_on"]}
-          class="input input-sm w-full"
+          class="field-input"
         />
         <textarea
           name="task_note"
           phx-change="task_draft_change"
           phx-debounce="blur"
           placeholder={gettext("Note (optional)")}
-          class="textarea textarea-sm w-full"
+          class="field-input min-h-16"
         >{@draft["note"]}</textarea>
         <%!-- Three values, not a checkbox (#818): the blank option means "use
               whatever the site is set to", which is different from an explicit

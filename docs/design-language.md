@@ -86,10 +86,13 @@ written as a function component or a raw `class="…"` in a template.
   event rather than navigating. It supplies the reset, keyboard focus ring and
   disabled state; the call site keeps its own colour and `underline` /
   `hover:underline` utilities.
+- **Links** — `.link` on an in-text `<a>`: underline, pointer and focus ring
+  (Tailwind's preflight strips an anchor's colour and underline, so a bare `<a>`
+  reads as body text). The call site keeps its own colour.
 - **Surfaces** — `.card` (the one raised container: base-100, hairline border,
   `--radius-lg`) + `.card-pad` for standard interior padding.
 - **Fields** — `.field-input`, `.field-select` (full-width, token border, focus
-  ring). The `<.input>` component is the richer, label+error-aware form control;
+  ring), and `.field-label` for the label above one. The `<.input>` component is the richer, label+error-aware form control;
   these bare classes are for inline filters/toolbars.
 - **Tabs** — `.tabs` (segmented-control container) + `.tab`; drive the active
   segment with `aria-selected="true"` (accessible, no extra class). Used for the

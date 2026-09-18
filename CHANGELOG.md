@@ -54,6 +54,12 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Fixed
+
+- **Buttons, links, badges and fields that rendered unstyled now look like what
+  they are.**
+  ([long form](docs/changelog/unreleased.md#buttons-links-badges-and-fields-that-rendered-unstyled-now-look-like-what-they))
+
 ## [0.9.0] - 2026-09-18
 
 Long form: [docs/changelog/v0.9.0.md](docs/changelog/v0.9.0.md) —

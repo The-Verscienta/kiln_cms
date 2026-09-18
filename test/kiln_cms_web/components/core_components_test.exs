@@ -43,4 +43,28 @@ defmodule KilnCMSWeb.CoreComponentsTest do
       assert html =~ ~s(aria-describedby="f_#{unquote(type)}-error")
     end
   end
+
+  describe "button/1" do
+    defp render_button(assigns),
+      do:
+        render_component(
+          &button/1,
+          Map.merge(%{inner_block: [%{inner_block: fn _, _ -> "Go" end}]}, assigns)
+        )
+
+    defp classes(html) do
+      [_, class] = Regex.run(~r/class="([^"]*)"/, html)
+      String.split(class)
+    end
+
+    test "a caller's class adds to the button classes instead of replacing them" do
+      html = render_button(%{variant: "primary", size: "sm", class: "mt-4 self-start"})
+
+      assert Enum.sort(classes(html)) == Enum.sort(~w(btn btn-primary btn-sm mt-4 self-start))
+    end
+
+    test "without a class it renders just the button classes" do
+      assert classes(render_button(%{})) == ~w(btn btn-default)
+    end
+  end
 end
