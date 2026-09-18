@@ -79,6 +79,11 @@ defmodule KilnCMS.Billing.MembershipWebhookWorker do
   # Same read `KilnCMS.Billing.Entitlements` makes. `nil` for a user erased
   # since — the event still goes out, carrying ids an erased account no longer
   # maps to a person.
+  #
+  # `authorize?: false` because this is a job with no actor, and
+  # `KilnCMS.Accounts.User` admits no system actor. Safe: it reads the one
+  # account the membership row already names, by id, and the email goes only to
+  # endpoints an admin subscribed to membership events.
   defp email(user_id) do
     case Accounts.get_user(user_id, authorize?: false, not_found_error?: false) do
       {:ok, %{email: email}} when not is_nil(email) -> to_string(email)
