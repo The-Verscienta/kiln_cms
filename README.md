@@ -274,6 +274,11 @@ mix ash.setup            # create DB + run migrations
 
 ## Deployment
 
+**One-click:** [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/The-Verscienta/kiln_cms)
+— or Railway, Fly.io and DigitalOcean. Each runs the published image with a
+database and persistent media; [`docs/deploy-platforms.md`](docs/deploy-platforms.md)
+has the steps, costs and caveats for all four.
+
 **[`docs/deploy.md`](docs/deploy.md) is the deploy guide** — required
 environment (`DATABASE_URL`, `SECRET_KEY_BASE`, `TOKEN_SIGNING_SECRET` raise
 on boot; `PHX_HOST`/`PHX_SERVER`), building the image, what runs at boot

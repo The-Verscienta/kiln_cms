@@ -60,6 +60,8 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             BRAND_PRIMARY_COLOR ASK_RERANK
             KILN_DEMO_RESET KILN_DEMO_RESET_CRON KILN_DEMO_GOLDEN_PATH
             KILN_FEDERATION_ENABLED
+            KILN_MEDIA_ROOT MEDIA_DIR S3_PUBLIC_BASE_URL
+            AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
           ) ++ Map.keys(@prod_env)
 
   setup do
@@ -744,6 +746,65 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
 
       assert demo_config(config).demo == nil
       assert demo_config(config).cron == nil
+    end
+  end
+
+  describe "KILN_MEDIA_ROOT (#1529)" do
+    defp local_storage(config), do: get_in(config, [:kiln_cms, KilnCMS.Storage.Local])
+    defp backup_media_dir(config), do: get_in(config, [:kiln_cms, KilnCMS.Backups, :media_dir])
+
+    @s3 %{
+      "S3_BUCKET" => "media",
+      "S3_PUBLIC_BASE_URL" => "https://cdn.example.com",
+      "AWS_ACCESS_KEY_ID" => "id",
+      "AWS_SECRET_ACCESS_KEY" => "secret"
+    }
+
+    test "points the Local adapter at <root>/public and <root>/private" do
+      config = eval(%{"KILN_MEDIA_ROOT" => "/app/media/"})
+
+      assert local_storage(config)[:root] == "/app/media/public"
+      assert local_storage(config)[:private_root] == "/app/media/private"
+    end
+
+    test "is what the in-app backup archives, unless MEDIA_DIR says otherwise" do
+      # One volume, one path stated once: the backup must archive the directory
+      # the adapter writes to — the whole root, so private blobs come too.
+      assert backup_media_dir(eval(%{"KILN_MEDIA_ROOT" => "/app/media"})) == "/app/media"
+
+      assert backup_media_dir(eval(%{"KILN_MEDIA_ROOT" => "/app/media", "MEDIA_DIR" => "/srv/m"})) ==
+               "/srv/m"
+    end
+
+    test "unset or blank leaves the adapter on its priv/uploads default" do
+      for value <- [nil, "", "  "] do
+        config = eval(%{"KILN_MEDIA_ROOT" => value})
+
+        assert local_storage(config) == nil
+        assert backup_media_dir(config) == nil
+      end
+    end
+
+    test "is ignored under S3 — no Local config, and no media backup of an empty dir" do
+      config = eval(Map.put(@s3, "KILN_MEDIA_ROOT", "/app/media"))
+
+      assert get_in(config, [:kiln_cms, KilnCMS.Storage, :adapter]) == KilnCMS.Storage.S3
+      assert local_storage(config) == nil
+      assert backup_media_dir(config) == nil
+    end
+
+    test "a relative path is refused, warned about and COLLECTED" do
+      # Relative to the release's cwd — somewhere nobody chose.
+      {config, stderr} = eval_io(%{"KILN_MEDIA_ROOT" => "media"}, :prod)
+
+      assert local_storage(config) == nil
+      assert backup_media_dir(config) == nil
+      assert stderr =~ "KILN_MEDIA_ROOT"
+
+      assert {"KILN_MEDIA_ROOT", "media", {:expected, "an absolute path, such as /app/media"}} in get_in(
+               config,
+               [:kiln_cms, :config_warnings]
+             )
     end
   end
 

@@ -23,6 +23,7 @@ defmodule KilnCMS.Application do
     warn_if_assist_egresses()
     warn_if_ask_egresses()
     warn_if_semantic_without_ml()
+    warn_if_media_unwritable()
 
     # Ensure custom AshPhoenix form error impls (e.g. for StaleRecord) are
     # loaded so they register with the protocol and prevent unhandled errors.
@@ -504,6 +505,32 @@ defmodule KilnCMS.Application do
 
       :ok
     end
+  end
+
+  # The Local storage adapter's directories must be writable by the release's
+  # user (`nobody` in the image). A PaaS volume mounted root-owned at
+  # KILN_MEDIA_ROOT (#1529) is not, and without this every upload fails on its
+  # own with a bare `:eacces` in the media UI. Prod only: in dev and test the
+  # directories are the checkout's, and probing them at every boot is noise.
+  defp warn_if_media_unwritable do
+    if Application.get_env(:kiln_cms, :compile_env) == :prod and
+         KilnCMS.Storage.adapter() == KilnCMS.Storage.Local do
+      case KilnCMS.Storage.Local.check_writable() do
+        :ok ->
+          :ok
+
+        {:error, dir, reason} ->
+          KilnCMS.Config.Report.warn(
+            "media_storage",
+            "Media storage directory #{dir} is not writable (#{inspect(reason)}), so every " <>
+              "upload will fail. If it is a mounted volume, make it writable by the app's " <>
+              "user (uid 65534, `nobody`), or set S3_BUCKET to use object storage instead. " <>
+              "See docs/deploy-platforms.md."
+          )
+      end
+    end
+
+    :ok
   end
 
   # GraphQL subscription resolution batches through this out-of-band worker in

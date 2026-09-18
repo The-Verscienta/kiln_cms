@@ -36,6 +36,22 @@ defmodule KilnCMS.Config.Host do
   mentions them. `KilnCMS.Config.HostTest` covers the cases instead, restoring
   the variable as it goes.
 
+  ## The platform fallback (#1529)
+
+  When `PHX_HOST` is unset (or blank), the host a one-click deploy platform
+  hands the container is used instead, so a fresh deploy's editor connects
+  before anyone has thought about hostnames:
+
+  | Platform | Variable | Host |
+  |----------|----------|------|
+  | Render | `RENDER_EXTERNAL_HOSTNAME` | as given |
+  | Railway | `RAILWAY_PUBLIC_DOMAIN` | as given |
+  | Fly.io | `FLY_APP_NAME` | `<name>.fly.dev` |
+
+  These are the platform's *default* hostname. An operator who adds a custom
+  domain sets `PHX_HOST` to it, which wins. DigitalOcean App Platform needs no
+  entry: its template binds `PHX_HOST` to `${APP_DOMAIN}` directly.
+
   The `"example.com"` fallback is Phoenix's generated default and is kept
   deliberately: it is an obviously-wrong host, which is what an operator who
   never set `PHX_HOST` should see in a generated URL.
@@ -43,9 +59,17 @@ defmodule KilnCMS.Config.Host do
 
   @default "example.com"
 
+  # In order: the first one set wins. Each maps the variable's value to a host.
+  @platform_hosts [
+    {"RENDER_EXTERNAL_HOSTNAME", &Function.identity/1},
+    {"RAILWAY_PUBLIC_DOMAIN", &Function.identity/1},
+    {"FLY_APP_NAME", &__MODULE__.fly_host/1}
+  ]
+
   @doc """
   The canonical host: `PHX_HOST` with any scheme prefix and trailing slash
-  stripped, or `"example.com"` when it is unset.
+  stripped; when it is unset or blank, the platform's default hostname (see
+  the moduledoc); otherwise `"example.com"`.
 
   Read at each call rather than memoized — `config/runtime.exs` evaluates once
   per boot, and a cached value would be wrong for the test harness that
@@ -53,9 +77,28 @@ defmodule KilnCMS.Config.Host do
   """
   @spec canonical() :: String.t()
   def canonical do
-    (System.get_env("PHX_HOST") || @default)
+    (present("PHX_HOST") || platform_host() || @default)
     |> String.replace_leading("https://", "")
     |> String.replace_leading("http://", "")
     |> String.trim_trailing("/")
+  end
+
+  @doc false
+  # Public only so the `@platform_hosts` capture can name it.
+  def fly_host(app_name), do: app_name <> ".fly.dev"
+
+  defp platform_host do
+    Enum.find_value(@platform_hosts, fn {var, to_host} ->
+      if value = present(var), do: to_host.(value)
+    end)
+  end
+
+  # Blank counts as unset — the convention every other variable follows. A
+  # `PHX_HOST=` line would otherwise put an empty host in the endpoint config.
+  defp present(var) do
+    case System.get_env(var) do
+      nil -> nil
+      raw -> if String.trim(raw) == "", do: nil, else: String.trim(raw)
+    end
   end
 end

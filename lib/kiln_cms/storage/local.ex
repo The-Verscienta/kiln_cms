@@ -3,9 +3,10 @@ defmodule KilnCMS.Storage.Local do
   Local-filesystem `KilnCMS.Storage` adapter.
 
   Files are written under the configured `:root` directory (default:
-  `priv/uploads` resolved via the app dir, kept in sync with the `Plug.Static`
-  mount in `KilnCMSWeb.Endpoint`) and served from `:base_url` (default
-  `/uploads`).
+  `priv/uploads` resolved via the app dir; `<KILN_MEDIA_ROOT>/public` when that
+  is set — see `KilnCMS.Config.MediaRoot`) and served from `:base_url`
+  (default `/uploads`). The `Plug.Static` mount in `KilnCMSWeb.Endpoint` reads
+  `root/0` itself on each request, so the two cannot drift apart.
 
   ## Private storage (#481)
 
@@ -142,6 +143,36 @@ defmodule KilnCMS.Storage.Local do
     |> Keyword.get_lazy(:private_root, fn ->
       Application.app_dir(:kiln_cms, "priv/private_uploads")
     end)
+  end
+
+  @doc """
+  Creates both storage directories if needed and proves each can be written
+  to, by writing and removing a probe file.
+
+  Called at boot (`KilnCMS.Application`) so an unwritable directory is named
+  once in the logs instead of failing every upload. The usual cause is a
+  platform volume mounted root-owned while the image runs as `nobody` (#1529).
+  """
+  @spec check_writable() :: :ok | {:error, Path.t(), term()}
+  def check_writable do
+    Enum.reduce_while([root(), private_root()], :ok, fn dir, :ok ->
+      case probe(dir) do
+        :ok -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, dir, reason}}
+      end
+    end)
+  end
+
+  # A fixed probe name, never a storage key: keys are UUIDs, so it cannot
+  # collide with a blob, and a probe left behind by a crash is harmless.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp probe(dir) do
+    path = Path.join(dir, ".kiln-write-probe")
+
+    with :ok <- File.mkdir_p(dir),
+         :ok <- File.write(path, "") do
+      File.rm(path)
+    end
   end
 
   defp base_url, do: Keyword.get(config(), :base_url, "/uploads")

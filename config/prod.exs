@@ -8,14 +8,23 @@ import Config
 config :kiln_cms, KilnCMSWeb.Endpoint, cache_static_manifest: "priv/static/cache_manifest.json"
 
 # Force using SSL in production. This also sets the "strict-security-transport" header,
-# known as HSTS. If you have a health check endpoint, you may want to exclude it below.
-# Note `:force_ssl` is required to be set at compile-time.
+# known as HSTS. Note `:force_ssl` is required to be set at compile-time.
+#
+# Excluded, so they answer over plain HTTP instead of a 301:
+#
+#   * hosts `localhost`/`127.0.0.1` — the image's own HEALTHCHECK (Dockerfile).
+#   * paths `/live` and `/up` — a PaaS health checker (Render, Railway, Fly,
+#     DigitalOcean) probes the container directly, by its internal address,
+#     with no `X-Forwarded-Proto`, so it would otherwise get a redirect and
+#     read the deploy as unhealthy (#1529). Both carry no data: `/live` is a
+#     bare 200 and `/up` a status. `/ready` returns a monitoring payload and
+#     stays behind HTTPS. Pinned by test/config/prod_force_ssl_test.exs.
 config :kiln_cms, KilnCMSWeb.Endpoint,
   force_ssl: [
     rewrite_on: [:x_forwarded_proto],
     exclude: [
-      # paths: ["/health"],
-      hosts: ["localhost", "127.0.0.1"]
+      hosts: ["localhost", "127.0.0.1"],
+      paths: ["/live", "/up"]
     ]
   ]
 

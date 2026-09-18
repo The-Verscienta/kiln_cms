@@ -71,8 +71,19 @@ backup_opts =
 # Unset on an S3 deployment, deliberately — the bucket is backed up
 # provider-side, and tarring the wrong directory yields an archive that
 # looks like a media backup and restores nothing.
+#
+# Defaults to KILN_MEDIA_ROOT (#1529) — the directory the Local adapter
+# actually writes to once that is set — so a volume-backed deployment backs
+# its media up without stating the path twice. `MediaRoot.fetch/0` is already
+# `:unset` under S3, keeping the rule above.
+media_root =
+  case KilnCMS.Config.MediaRoot.fetch() do
+    {:ok, root} -> root
+    _unset_or_unusable -> nil
+  end
+
 backup_opts =
-  case backup_env.("MEDIA_DIR") do
+  case backup_env.("MEDIA_DIR") || media_root do
     nil -> backup_opts
     media_dir -> Keyword.put(backup_opts, :media_dir, media_dir)
   end

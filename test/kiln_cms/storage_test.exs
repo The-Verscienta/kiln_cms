@@ -216,4 +216,31 @@ defmodule KilnCMS.StorageTest do
       assert {:error, :enoent} = Storage.fetch_range(key, 0, 2)
     end
   end
+
+  describe "check_writable/0 (#1529)" do
+    test "creates missing directories and passes when both are writable", ctx do
+      File.rm_rf!(ctx.root)
+      File.rm_rf!(ctx.private_root)
+
+      assert Storage.Local.check_writable() == :ok
+      assert File.dir?(ctx.root) and File.dir?(ctx.private_root)
+      # The probe cleans up after itself.
+      assert File.ls!(ctx.root) == [] and File.ls!(ctx.private_root) == []
+    end
+
+    test "names the directory it cannot write to", ctx do
+      # A root beneath a regular FILE fails whatever uid runs the suite — a
+      # chmod'd directory would pass under root, which CI containers may be.
+      blocker = Path.join(ctx.private_root, "not-a-dir")
+      File.write!(blocker, "")
+      unwritable = Path.join(blocker, "public")
+
+      Application.put_env(:kiln_cms, Storage.Local,
+        root: unwritable,
+        private_root: ctx.private_root
+      )
+
+      assert {:error, ^unwritable, _reason} = Storage.Local.check_writable()
+    end
+  end
 end

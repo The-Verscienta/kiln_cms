@@ -1,0 +1,101 @@
+# DigitalOcean App Platform spec — deploys the published Kiln image (#1529).
+#
+#   doctl apps create --spec .do/app.yaml
+#
+# Not a "Deploy to DigitalOcean" button: the button builds from a git branch
+# and only offers a dev database. Building from `main` ships unreleased code,
+# and a dev database's user cannot `CREATE EXTENSION vector` (pgvector is not a
+# trusted extension). Full walkthrough: docs/deploy-platforms.md#digitalocean.
+#
+# Before `doctl apps create`, the spec expects:
+#
+#   1. A managed Postgres 17 cluster named `kiln-db` with a database `kiln`, and
+#      `CREATE EXTENSION vector;` run in it once as `doadmin`.
+#   2. A Spaces bucket and access key, for media — App Platform has no
+#      persistent disk, so the Local adapter would lose every upload on
+#      restart.
+#   3. Every `CHANGE_ME` below replaced. SECRET_KEY_BASE and
+#      TOKEN_SIGNING_SECRET: `openssl rand -base64 64 | tr -d '\n'`. Back
+#      SECRET_KEY_BASE up with the database.
+#
+# Upgrading: change the image tag (read that release's `### Upgrading` notes in
+# CHANGELOG.md first), then `doctl apps update <app-id> --spec .do/app.yaml`.
+
+name: kiln
+region: nyc
+
+services:
+  - name: web
+    image:
+      registry_type: GHCR
+      registry: the-verscienta
+      repository: kiln_cms
+      tag: "0.9.0"
+    http_port: 4000
+    instance_count: 1
+    # 1 GB. The 512 MB size works for a small site; see the guide.
+    instance_size_slug: apps-s-1vcpu-1gb
+    # /up is 200 only once the database answers, and is excluded from
+    # force_ssl, so the platform's plain-HTTP probe gets a 200. The delay
+    # covers migrations, which run before the server starts.
+    health_check:
+      http_path: /up
+      initial_delay_seconds: 60
+      period_seconds: 30
+      timeout_seconds: 5
+    envs:
+      - key: DATABASE_URL
+        scope: RUN_TIME
+        value: ${db.DATABASE_URL}
+      - key: PHX_HOST
+        scope: RUN_TIME
+        value: ${APP_DOMAIN}
+      - key: PORT
+        scope: RUN_TIME
+        value: "4000"
+      - key: SECRET_KEY_BASE
+        scope: RUN_TIME
+        type: SECRET
+        value: CHANGE_ME
+      - key: TOKEN_SIGNING_SECRET
+        scope: RUN_TIME
+        type: SECRET
+        value: CHANGE_ME
+      # ---- media on Spaces (S3-compatible) ----
+      - key: S3_BUCKET
+        scope: RUN_TIME
+        value: CHANGE_ME
+      - key: S3_ENDPOINT_HOST
+        scope: RUN_TIME
+        value: nyc3.digitaloceanspaces.com
+      - key: AWS_REGION
+        scope: RUN_TIME
+        value: us-east-1
+      # Spaces objects are private unless each is uploaded public-read.
+      - key: S3_ACL
+        scope: RUN_TIME
+        value: public_read
+      # https://<bucket>.<region>.digitaloceanspaces.com, or the bucket's CDN
+      # endpoint.
+      - key: S3_PUBLIC_BASE_URL
+        scope: RUN_TIME
+        value: CHANGE_ME
+      - key: AWS_ACCESS_KEY_ID
+        scope: RUN_TIME
+        type: SECRET
+        value: CHANGE_ME
+      - key: AWS_SECRET_ACCESS_KEY
+        scope: RUN_TIME
+        type: SECRET
+        value: CHANGE_ME
+      # TRUSTED_PROXIES is not set: App Platform puts its own ingress address
+      # in X-Forwarded-For, so it would not recover the client's. See
+      # docs/deploy-platforms.md#client-addresses-and-rate-limiting.
+
+databases:
+  - name: db
+    engine: PG
+    version: "17"
+    production: true
+    cluster_name: kiln-db
+    db_name: kiln

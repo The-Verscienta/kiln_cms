@@ -5,6 +5,30 @@ import Config
 # at the position this block always occupied; evaluation ORDER matters, see the
 # header of config/runtime.exs before moving anything.
 
+# ## Local media on a stable directory (#1529)
+#
+# KILN_MEDIA_ROOT moves the Local adapter off the release's own priv/uploads
+# (a path that changes with every version and that a PaaS wipes on restart)
+# onto a directory a volume can be mounted at: public blobs in
+# <root>/public, served at /uploads, private ones in <root>/private. Ignored
+# when S3_BUCKET is set. See KilnCMS.Config.MediaRoot.
+case KilnCMS.Config.MediaRoot.fetch() do
+  {:ok, root} ->
+    config :kiln_cms, KilnCMS.Storage.Local,
+      root: KilnCMS.Config.MediaRoot.public_dir(root),
+      private_root: KilnCMS.Config.MediaRoot.private_dir(root)
+
+  {:error, raw} ->
+    KilnCMS.Config.Env.record_unusable(
+      KilnCMS.Config.MediaRoot.var(),
+      raw,
+      "an absolute path, such as /app/media"
+    )
+
+  :unset ->
+    :ok
+end
+
 # ## Object storage (S3-compatible)
 #
 # Opt into the S3 adapter by setting S3_BUCKET. Works with AWS S3, Cloudflare
