@@ -630,7 +630,12 @@ defmodule KilnCMS.MixProject do
       {:ash_graphql, "~> 1.0"},
       {:ash_json_api, "~> 1.0"},
       # MCP server for LLM authoring (write-scoped API keys) — see docs/mcp.md.
-      {:ash_ai, "~> 0.7"},
+      # `~> 1.0.3`: the floor carrying every fix for the advisories filed
+      # against 0.7.x (identity-lookup operator maps, EEx prompt evaluation,
+      # field-policy leaks through the aggregate tool, MCP origin spoofing …),
+      # none backported to 0.x; the ceiling keeps 1.1's reworked read-tool
+      # result shape out of a security change.
+      {:ash_ai, "~> 1.0.3"},
       # Provider-agnostic LLM client behind the optional SEO drafting generator
       # (docs/seo.md). Declared directly rather than leaned on as an `ash_ai`
       # transitive: a minor bump there could make it optional and break us.
