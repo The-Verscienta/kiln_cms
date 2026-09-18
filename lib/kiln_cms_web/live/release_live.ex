@@ -716,7 +716,7 @@ defmodule KilnCMSWeb.ReleaseLive do
                             action: action_label(opposite_action(item.action))
                           )
                         }
-                        class="btn btn-xs btn-ghost gap-1 font-normal"
+                        class="btn btn-sm btn-ghost gap-1 font-normal"
                       >
                         {action_label(item.action)}
                         <.icon name="hero-arrows-right-left" class="size-3 opacity-50" />
@@ -818,7 +818,7 @@ defmodule KilnCMSWeb.ReleaseLive do
                     {gettext("Shown in your local timezone; stored as UTC.")}
                   </p>
                 </div>
-                <.button size="sm" class="btn btn-sm btn-default mt-2">
+                <.button size="sm" class="mt-2">
                   {gettext("Schedule")}
                 </.button>
               </.form>

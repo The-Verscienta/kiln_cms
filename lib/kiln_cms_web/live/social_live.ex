@@ -312,7 +312,7 @@ defmodule KilnCMSWeb.SocialLive do
                   phx-click="delete"
                   phx-value-id={account.id}
                   data-confirm={gettext("Remove this account?")}
-                  class="btn btn-sm btn-error"
+                  class="btn btn-sm btn-danger"
                 >
                   {gettext("Remove")}
                 </button>

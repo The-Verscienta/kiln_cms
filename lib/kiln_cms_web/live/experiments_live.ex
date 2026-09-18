@@ -223,11 +223,11 @@ defmodule KilnCMSWeb.ExperimentsLive do
     do:
       Map.get(titles, {experiment.content_type, experiment.document_id}) || experiment.document_id
 
-  defp experiment_badge(:draft), do: {gettext("Draft"), "badge-ghost"}
-  defp experiment_badge(:running), do: {gettext("Running"), "badge-success"}
-  defp experiment_badge(:concluded), do: {gettext("Concluded"), "badge-info"}
-  defp experiment_badge(:archived), do: {gettext("Archived"), "badge-neutral"}
-  defp experiment_badge(_other), do: {gettext("Unknown"), "badge-ghost"}
+  defp experiment_badge(:draft), do: {gettext("Draft"), "outline"}
+  defp experiment_badge(:running), do: {gettext("Running"), "success"}
+  defp experiment_badge(:concluded), do: {gettext("Concluded"), "info"}
+  defp experiment_badge(:archived), do: {gettext("Archived"), "neutral"}
+  defp experiment_badge(_other), do: {gettext("Unknown"), "outline"}
 
   defp goal_label(:form_submission), do: gettext("Form submission")
   defp goal_label(:content_view), do: gettext("Reaches a page")
@@ -405,8 +405,8 @@ defmodule KilnCMSWeb.ExperimentsLive do
                   {gettext("Blocked — %{reason}", reason: ExperimentPhrases.blocked_headline(reason))}
                 </p>
               </.link>
-              <% {label, class} = experiment_badge(experiment.state) %>
-              <span class={["badge badge-sm", class]}>{label}</span>
+              <% {label, variant} = experiment_badge(experiment.state) %>
+              <.badge variant={variant}>{label}</.badge>
             </li>
           </ul>
         </section>

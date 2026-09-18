@@ -133,7 +133,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
                 phx-value-id={redirect.id}
                 data-confirm={gettext("Delete this redirect? The old URL will 404.")}
                 aria-label={gettext("Delete redirect")}
-                class="btn btn-xs btn-ghost text-base-content/60 hover:text-error"
+                class="btn btn-sm btn-ghost text-base-content/60 hover:text-error"
               >
                 {gettext("Delete")}
               </button>
