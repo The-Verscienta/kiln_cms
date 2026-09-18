@@ -18,14 +18,19 @@ defmodule KilnCMS.Config.HostTest do
 
   alias KilnCMS.Config.Host
 
+  @vars ~w(PHX_HOST RENDER_EXTERNAL_HOSTNAME RAILWAY_PUBLIC_DOMAIN FLY_APP_NAME)
+
   setup do
-    saved = System.get_env("PHX_HOST")
+    saved = Map.new(@vars, &{&1, System.get_env(&1)})
+    # A developer's shell (or CI runner) could carry any of these; each case
+    # sets exactly the ones it is about.
+    Enum.each(@vars, &System.delete_env/1)
 
     on_exit(fn ->
-      case saved do
-        nil -> System.delete_env("PHX_HOST")
-        value -> System.put_env("PHX_HOST", value)
-      end
+      Enum.each(saved, fn
+        {var, nil} -> System.delete_env(var)
+        {var, value} -> System.put_env(var, value)
+      end)
     end)
 
     :ok
@@ -65,6 +70,53 @@ defmodule KilnCMS.Config.HostTest do
     # Kept deliberately wrong-looking: an operator who never set PHX_HOST should
     # see `example.com` in a generated URL rather than something plausible.
     assert canonical(nil) == "example.com"
+  end
+
+  test "blank is unset, not an empty host" do
+    # `PHX_HOST=` in an env file used to reach the endpoint as `url: [host: ""]`.
+    assert canonical("") == "example.com"
+    assert canonical("  ") == "example.com"
+  end
+
+  describe "platform fallback (#1529)" do
+    test "Render's external hostname is used when PHX_HOST is unset" do
+      System.put_env("RENDER_EXTERNAL_HOSTNAME", "kiln-abcd.onrender.com")
+      assert canonical(nil) == "kiln-abcd.onrender.com"
+    end
+
+    test "Railway's public domain is used when PHX_HOST is unset" do
+      System.put_env("RAILWAY_PUBLIC_DOMAIN", "kiln-production.up.railway.app")
+      assert canonical(nil) == "kiln-production.up.railway.app"
+    end
+
+    test "Fly's app name becomes its fly.dev host" do
+      System.put_env("FLY_APP_NAME", "kiln-demo")
+      assert canonical(nil) == "kiln-demo.fly.dev"
+    end
+
+    test "PHX_HOST wins over every platform variable" do
+      # A custom domain is set as PHX_HOST; the platform's default host must
+      # not shadow it, or links and the socket origin check use the wrong one.
+      System.put_env("RENDER_EXTERNAL_HOSTNAME", "kiln-abcd.onrender.com")
+      System.put_env("FLY_APP_NAME", "kiln-demo")
+      assert canonical("cms.example.com") == "cms.example.com"
+    end
+
+    test "a blank PHX_HOST still falls through to the platform" do
+      System.put_env("RAILWAY_PUBLIC_DOMAIN", "kiln-production.up.railway.app")
+      assert canonical("") == "kiln-production.up.railway.app"
+    end
+
+    test "a blank platform variable is skipped, not used" do
+      System.put_env("RENDER_EXTERNAL_HOSTNAME", "")
+      System.put_env("FLY_APP_NAME", "kiln-demo")
+      assert canonical(nil) == "kiln-demo.fly.dev"
+    end
+
+    test "the platform value is normalized like PHX_HOST" do
+      System.put_env("RAILWAY_PUBLIC_DOMAIN", "https://kiln.up.railway.app/")
+      assert canonical(nil) == "kiln.up.railway.app"
+    end
   end
 
   test "only a leading scheme is stripped, not one appearing later" do
