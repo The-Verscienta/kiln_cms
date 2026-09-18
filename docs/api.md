@@ -779,7 +779,9 @@ alters documented response semantics is a breaking change. When one is
 unavoidable it will be introduced under a **`/api/v1/…` prefix** (the current
 unprefixed paths becoming the implicit `v1`), with the previous version kept for
 a deprecation window announced in the changelog and reflected in the OpenAPI
-`deprecated` markers. Adding new endpoints, optional query params, or new
+`deprecated` markers. The window is **at least two minor releases and at least
+six months, whichever is longer**. The prefix is not introduced before it is
+needed: 1.0 ships the unprefixed paths (decided 2026-09-18, #1539). Adding new endpoints, optional query params, or new
 `public?` fields is **not** breaking and can land at any time.
 
 To insulate yourself: consume the published OpenAPI spec (`/api/json/open_api`),
