@@ -2903,6 +2903,22 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert has_element?(lv, ~s(aside a.side-link[data-side-tip="Media"]))
     end
 
+    # The mobile drawer's control is a <label> over a checkbox, so nothing about
+    # it is implicit: the role, what it controls and its state are all written
+    # out (app.js keeps `aria-expanded` current), and the checkbox itself leaves
+    # the tab order it was sitting in while announcing nothing.
+    test "the drawer's hamburger is a named, stateful control", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+
+      assert has_element?(
+               lv,
+               ~s(#kiln-nav-button[role="button"][aria-controls="console-sidebar"][aria-expanded="false"][tabindex="0"])
+             )
+
+      assert has_element?(lv, ~s(#kiln-nav-toggle[tabindex="-1"][aria-hidden="true"]))
+      assert has_element?(lv, ~s(aside#console-sidebar))
+    end
+
     # #139: ⌘K targets a LiveView `navigate` link (data-phx-link="redirect"), so
     # the jump to search is a client-side navigation, not a full page reload.
     test "renders a client-side navigate target for the search shortcut", %{conn: conn} do

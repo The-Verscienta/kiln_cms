@@ -1205,6 +1205,93 @@ document.addEventListener("keydown", e => {
   open.querySelector("summary")?.focus()
 })
 
+// The mobile nav drawer (the same `console/1` shell). The checkbox + <label>
+// pair keeps it opening with no JS at all; everything here is the layer on top:
+// the state a screen reader hears, Escape, the keys a <label> ignores, focus
+// moved in and handed back, and a close on navigation.
+//
+// That last one is not cosmetic: a live navigation patches the page in place
+// rather than reloading it, so a drawer opened on a phone would otherwise stay
+// spread over the page the reader just asked for.
+const navToggle = () => document.getElementById("kiln-nav-toggle")
+const navButton = () => document.getElementById("kiln-nav-button")
+// Below lg the sidebar is a drawer; at lg and up it is simply the sidebar, and
+// none of this applies.
+const drawerMode = () => !matchMedia("(min-width: 64rem)").matches
+const drawerOpen = () => !!navToggle()?.checked && drawerMode()
+const drawerFocusables = () =>
+  Array.from(
+    document.getElementById("console-sidebar")?.querySelectorAll(
+      'a[href], button:not([disabled]), summary, [tabindex]:not([tabindex="-1"])',
+    ) || [],
+  ).filter(el => el.offsetParent !== null)
+
+const syncDrawer = () => navButton()?.setAttribute("aria-expanded", String(!!navToggle()?.checked))
+
+const setDrawer = (open, {moveFocus = true} = {}) => {
+  const cb = navToggle()
+  if (!cb) return
+  cb.checked = open
+  syncDrawer()
+  if (!moveFocus) return
+  if (open) drawerFocusables()[0]?.focus()
+  else navButton()?.focus()
+}
+
+// A click on the <label> — the hamburger or the backdrop — toggles the checkbox
+// natively, so this is where a pointer-opened drawer is finished off. Focus has
+// to follow it in: the Tab trap below holds focus inside the open drawer, and
+// focus left outside it is exactly what that first Tab would carry away.
+// (Setting `checked` from script fires no `change`, so `setDrawer` never
+// re-enters here.)
+document.addEventListener("change", e => {
+  if (e.target.id !== "kiln-nav-toggle") return
+  syncDrawer()
+  if (!drawerMode()) return
+  if (e.target.checked) drawerFocusables()[0]?.focus()
+  else navButton()?.focus()
+})
+
+// `role="button"` promises Enter and Space; a <label> answers to neither.
+document.addEventListener("keydown", e => {
+  if (e.target.id !== "kiln-nav-button") return
+  if (e.key !== "Enter" && e.key !== " ") return
+  e.preventDefault()
+  setDrawer(!navToggle()?.checked)
+})
+
+document.addEventListener("keydown", e => {
+  if (!drawerOpen()) return
+  if (e.key === "Escape") return setDrawer(false)
+  // The drawer covers the page it sits over, so Tab stays inside it until it
+  // is dismissed — otherwise focus walks into content hidden behind a scrim.
+  if (e.key !== "Tab") return
+  const items = drawerFocusables()
+  if (items.length === 0) return
+  const edge = e.shiftKey ? items[0] : items[items.length - 1]
+  if (document.activeElement !== edge) return
+  e.preventDefault()
+  ;(e.shiftKey ? items[items.length - 1] : items[0]).focus()
+})
+
+document.addEventListener("click", e => {
+  // Navigating away closes it; the preset switch and the theme buttons are not
+  // navigation, so they leave it open. Focus follows the new page, not the
+  // hamburger we just left.
+  if (drawerOpen() && e.target.closest("#console-sidebar a[href]")) {
+    setDrawer(false, {moveFocus: false})
+  }
+})
+// Anything else that navigates (⌘K, a redirect after a save) closes it too.
+window.addEventListener("phx:page-loading-start", () => {
+  if (drawerOpen()) setDrawer(false, {moveFocus: false})
+})
+// Widening to desktop dissolves the drawer into the sidebar; leave no checked
+// box behind to spring open when the window narrows again.
+matchMedia("(min-width: 64rem)").addEventListener("change", e => {
+  if (e.matches && navToggle()?.checked) setDrawer(false, {moveFocus: false})
+})
+
 if (process.env.NODE_ENV === "development") {
   window.addEventListener("phx:live_reload:attached", ({detail: reloader}) => {
     // Enable server log streaming to client.

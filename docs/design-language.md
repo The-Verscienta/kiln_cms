@@ -225,6 +225,18 @@ The authoring app frame (`lib/kiln_cms_web/components/layouts.ex`):
   live navigation. Labels go visually hidden (links keep their accessible
   names) and `app.js` shows the hovered or focused item's `data-side-tip` as
   a tooltip.
+- **Mobile drawer** (below `lg`): the same panel, slid in over the page by a
+  CSS checkbox — no JS, no socket. The hamburger is a `<label>` carrying
+  `role="button"`, `aria-controls` and `aria-expanded`, and the checkbox itself
+  is `tabindex="-1"` (an `aria-hidden` control in the tab order announces
+  nothing) and `phx-update="ignore"` (a patch would otherwise reset `checked`
+  and shut the drawer mid-use). `app.js` adds what the markup cannot: Enter and
+  Space, Escape, focus moved in on open and handed back on close, Tab kept
+  inside the drawer, and a close on navigation — a live navigation patches the
+  page in place, so the drawer would otherwise stay over the new one. The page
+  behind does not scroll (`body:has(#kiln-nav-toggle:checked)`), and the slide
+  honours `prefers-reduced-motion` from an *unlayered* rule, since the
+  transition comes from a utility.
 - **Top bar** (sticky): page title, a search affordance with a `⌘K` `.kbd`,
   an `:actions` slot for page-level primary buttons, locale switcher.
 - **Workspace**: `max-w-6xl` content column.
