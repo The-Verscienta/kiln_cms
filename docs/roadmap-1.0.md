@@ -83,8 +83,8 @@ The things an operator would hit in their first months of running Kiln.
     (#734 fixed that)
   - `docs/observability.md` calls referrers and funnels unbuilt
   - `docs/beta-testing.md` has an unchecked box for a label that exists
-- **Prepare beta round 1.** Write the exit criteria as numbers (#1533, and
-  below), and line up the testers.
+- **Prepare beta round 1.** The exit bar is decided (#1533, below); line up
+  the testers.
 
 ### 0.11: first beta round
 
@@ -94,7 +94,8 @@ The things an operator would hit in their first months of running Kiln.
 - **Re-review the accepted security risks (#1535).** Go through the threat model's
   accepted residual risks one at a time and record, for each, whether it is
   still accepted at 1.0. The ones most worth deciding explicitly:
-  - `TENANT_STRICT_HOST` ships off
+  - `TENANT_STRICT_HOST` ships off. Decided: it turns on automatically
+    once a second organization exists (#1547, in this milestone)
   - `/live` events and `/ws/gql` subscription documents are not rate-limited
   - webhooks have no replay protection
   - `/api/ask` lets an anonymous caller drive LLM cost
@@ -124,14 +125,15 @@ After 0.12, the covered list changes only by deprecation.
 
   Mark them with `@deprecated`, and put them under the project's first
   `### Deprecated` changelog section.
-- **Decide HTTP API versioning (#1539).** [`docs/api.md`](api.md) says paths are
-  unversioned, and that a breaking change would go under `/api/v1/…`. Decide
-  now whether 1.0 ships `/api/v1` as the canonical prefix, rather than
-  inventing it later under a deprecation window.
-- **Decide field-level localization (#1327).** Content is currently one
-  document per locale. Field-level localization touches the data model, so
-  it either lands before the freeze or gets a design that can land after 1.0
-  as an addition.
+- **HTTP API versioning: decided (#1539).** 1.0 ships the current
+  unprefixed paths, and `/api/v1` arrives only with the first breaking
+  change. The deprecation window is at least two minor releases and at
+  least six months, whichever is longer, as stated in
+  [`docs/api.md`](api.md).
+- **Field-level localization: design check (#1327).** Decided: it lands
+  after 1.0, as an addition. The v0.12 work is a design note proving that is
+  possible without changing anything covered. If it isn't possible, this
+  comes back as a pre-freeze decision.
 - **Rehearse an upgrade from every release so far (#1540).** On the example overlay,
   run `mix kiln.update` from each of v0.5.0 through v0.12.0 up to the
   candidate. The overlay-drift CI job proves the overlay compiles. It does
@@ -149,7 +151,8 @@ After 0.12, the covered list changes only by deprecation.
 - Remove what 0.12 deprecated (#1543). That is permitted here, because 1.0 is a
   major.
 - `.github/SECURITY.md` names the supported release lines and the backport
-  policy (#1544). Once a line is supported, `release.yml` can publish a floating
+  policy (#1544). Decided: only the latest minor is supported, and the
+  previous minor gets security fixes for 90 days. Once a line is supported, `release.yml` can publish a floating
   `1.0` tag, which it deliberately does not do today.
 - `docs/overlay-contract.md` drops its "Until 1.0" paragraph. The README
   stops saying "pre-1.0". The upgrade note leads with `--allow-major` (#1545).
@@ -164,16 +167,18 @@ After 0.12, the covered list changes only by deprecation.
   | Zero-downtime releases | Not yet shown |
   | Positive beta feedback | Measured in beta |
 
-## Beta exit criteria (fill in before round 1, #1533)
+## Beta exit criteria (decided, #1533)
 
-`docs/beta-testing.md` says "no new S1/S2 on core flows and NPS trending
-positive". That is right, but it is not yet a bar you can check. Pin it down
-before round 1, so the rounds can't talk themselves past it:
+Written down before round 1, in [`docs/beta-testing.md`](beta-testing.md)
+("The v1 bar"). All three must hold:
 
-- zero open S1 findings, and zero S2 findings on scenarios A–G;
-- NPS at or above a number chosen now;
-- at least N testers who are non-technical authors, across at least two
-  rounds.
+- no open S1 finding, and no open S2 finding on Scenarios A–G;
+- at least 80% of testers complete Scenario A in under 5 minutes, which is
+  the project plan's page-building metric;
+- at least 5 non-technical authors, across at least two rounds.
+
+NPS is collected and reported, but it is not a gate. With 4–6 testers a
+round, one answer moves it by 17–25 points.
 
 ## Not needed for 1.0
 
@@ -193,19 +198,27 @@ land in a 1.x minor as an addition:
   [`docs/competitive-gaps-todo.md`](competitive-gaps-todo.md): palette
   drag-to-place, and layout presets
 
-## Decisions only the maintainer can make
+## Decisions (made 2026-09-18)
 
-These block milestones above. Each one is a question, not an engineering
-task:
+The seven questions only the maintainer could answer, and the answers:
 
-1. **The beta bar.** The NPS number and the tester count (0.10).
-2. **Field-level localization:** before the freeze, or additive after 1.0
-   (0.12).
-3. **`/api/v1`:** at 1.0, or not until the first breaking change (0.12).
-4. **The `TENANT_STRICT_HOST` default at 1.0.** It ships off today (0.11).
-5. **Supported release lines, and their length** (1.0).
-6. **Hex.** Stay submodule-only at 1.0, or publish the core. The README says
-   it is not published, and nothing plans otherwise.
-7. **Bus factor.** The README says "if that bus factor is a blocker for you,
-   it should be". Decide whether 1.0 needs a second maintainer, or only the
-   external review from 0.11.
+1. **The beta bar:** no S1s, no S2s on Scenarios A–G, 80% of testers
+   finish Scenario A in under 5 minutes, and at least 5 non-technical
+   authors. NPS is reported but not a gate. See #1533 and
+   [`docs/beta-testing.md`](beta-testing.md).
+2. **Field-level localization:** after 1.0, as an addition, subject to the
+   v0.12 design check (#1327).
+3. **`/api/v1`:** not at 1.0; only at the first breaking change, with a
+   window of at least two minors and six months (#1539,
+   [`docs/api.md`](api.md)).
+4. **`TENANT_STRICT_HOST`:** on automatically once a second organization
+   exists. An explicit setting still wins (#1547).
+5. **Supported release lines:** the latest minor only. The previous minor
+   gets security fixes for 90 days, from short-lived branches cut off its
+   tag (#1544).
+6. **Hex:** Kiln stays submodule-only at 1.0. Overlays compile into the
+   core, which a Hex dependency doesn't model, so this is revisited only if
+   that changes.
+7. **Bus factor:** no second maintainer required for 1.0. The external
+   authentication review (#1536) is the bar, and the README keeps a plain
+   single-maintainer statement after 1.0 (#1545).

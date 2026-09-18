@@ -322,8 +322,8 @@ if it blocks everyone's flow.
 4. **Confirm** with the original tester (or re-run that scenario) that the fix
    lands — close the issue only after the flow actually works.
 5. **Roll up** each round into a short summary on [#59]: top themes, NPS
-   distribution, what changed. Repeat until the NPS and S1/S2 count clear the
-   v1 bar.
+   distribution, Scenario A times, what changed. Repeat until a round clears
+   [the v1 bar](#the-v1-bar).
 
 [#59] stays open until that bar is cleared — it tracks the *program*, not this
 document.
@@ -389,11 +389,28 @@ round can hand somebody `:admin`; put the role back when the round ends.
 - [x] Confirm optional infra the script touches is actually up (media storage;
       `PRESENTATION_PREVIEW_URL` only if the round uses the console) — both in
       the readiness report, as warnings rather than failures.
-- [ ] Check the `beta` label exists:
+- [x] Check the `beta` label exists (it does, as of 2026-09-18):
       `gh label create beta --color 0E8A16 --description "Sourced from a beta testing session"`
       (GitHub silently drops labels an issue form references but the repo
       doesn't define). The task prints the command; it can't run it, because
       that's a network call to GitHub and the round has no credential for it.
 
-When a round shows no new S1/S2 on the core flows and NPS is trending positive,
-the editor is ready for the v1 cut.
+## The v1 bar
+
+Decided on 2026-09-18 (#1533), before any round ran, so no round can argue
+its way past it. The editor is ready for the v1 cut when **all three** hold:
+
+1. **No open S1 finding at all, and no open S2 finding on Scenarios A–G.**
+   An S3 or S4 finding can ship with an issue filed against it.
+2. **At least 80% of testers complete Scenario A in under 5 minutes.** That
+   is the project plan's v1.0 metric "an editor builds a page in under 5
+   minutes", measured on the scenario that exercises it. Time it from the
+   first click in the editor to Submit, and record it in the round's
+   roll-up.
+3. **At least 5 non-technical authors, across at least two rounds.** Count
+   people, not sessions: a tester who returns for round 2 counts once.
+
+NPS is still collected (the 0–10 rating at the end of the feedback form) and
+reported in every roll-up, but it is **not** a gate. With 4–6 testers a
+round, one answer moves the score by 17–25 points, so it can show a trend
+across rounds but can't decide one.
