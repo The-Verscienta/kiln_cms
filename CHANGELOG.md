@@ -61,6 +61,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **The sidebar's "Tasks" item shows how many of your tasks are open.**
+  ([long form](docs/changelog/unreleased.md#the-sidebars-tasks-item-shows-how-many-of-your-tasks-are-open))
+
 - **The fields admin explains each field type under its picker.**
   ([long form](docs/changelog/unreleased.md#the-fields-admin-explains-each-field-type-under-its-picker))
 
@@ -201,6 +204,10 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#the-coverage-floor-moves-827-to-845))
 
 ### Fixed
+
+- **The console's mobile nav drawer announces itself, takes the keyboard, and
+  closes when it takes you somewhere.**
+  ([long form](docs/changelog/unreleased.md#the-consoles-mobile-nav-drawer-announces-itself-takes-the-keyboard-and-closes))
 
 - **A failed S3 multipart upload is aborted instead of left on the bucket.**
   ([#494](https://github.com/The-Verscienta/kiln_cms/issues/494) · [long form](docs/changelog/unreleased.md#a-failed-s3-multipart-upload-is-aborted-instead-of-left-on-the-bucket))

@@ -247,11 +247,14 @@ defmodule KilnCMSWeb.ConsoleNav do
         path: ~p"/editor/calendar",
         icon: "hero-calendar-days"
       },
+      # `badge:` — the sidebar draws the viewer's open-task count beside it
+      # (`KilnCMSWeb.NavBadge`). The hub and ⌘K ignore the key.
       %{
         key: :tasks,
         label: gettext("Tasks"),
         path: ~p"/editor/tasks",
-        icon: "hero-clipboard-document-check"
+        icon: "hero-clipboard-document-check",
+        badge: :tasks
       },
       # The notification inbox (#1320), next to Tasks: both answer "what is
       # waiting for me", and the bell in the top bar is the glance while this

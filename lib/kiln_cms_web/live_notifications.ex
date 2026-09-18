@@ -58,6 +58,7 @@ defmodule KilnCMSWeb.LiveNotifications do
   import Phoenix.LiveView, only: [attach_hook: 4, connected?: 1]
 
   alias KilnCMS.Notifications
+  alias KilnCMSWeb.NavBadge
   alias KilnCMSWeb.NotificationBell
 
   @doc """
@@ -93,6 +94,9 @@ defmodule KilnCMSWeb.LiveNotifications do
   defp refresh(:notifications_changed, socket) do
     # The bell is on every console page; the page-level surface is opt-in.
     NotificationBell.refresh()
+    # Assigning a task notifies its assignee, so this is also the moment a
+    # new task lands in the sidebar's Tasks count.
+    NavBadge.refresh(:tasks)
     {:halt, reload_page(socket)}
   end
 

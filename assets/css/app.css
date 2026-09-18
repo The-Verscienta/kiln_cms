@@ -403,6 +403,26 @@
   .side-link[aria-current] .side-icon {
     color: var(--color-primary-ink);
   }
+  /* A count on a nav item (`KilnCMSWeb.NavBadge`) — the reference's pill.
+     The slot is the component's root, always rendered; `[hidden]` (display
+     none, !important in preflight) takes it away at zero. */
+  .side-badge-slot {
+    display: inline-flex;
+    margin-left: auto;
+  }
+  .side-badge {
+    min-width: 1.5rem;
+    padding: 0 0.45rem;
+    border: 1px solid var(--color-sidebar-line);
+    border-radius: 9999px;
+    background: var(--color-sidebar-raised);
+    font-size: 0.72rem;
+    font-weight: 500;
+    line-height: 1.25rem;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    color: color-mix(in oklch, var(--color-base-content) 75%, transparent);
+  }
   /* A group head is a <button>: the sections collapse (#1319). Which ones are
      collapsed is read from <html data-nav-collapsed="delivery operations">,
      restored by root.html.heex before first paint — so the only thing the rules
@@ -780,6 +800,27 @@
       gap: 0;
       padding-inline: 0;
     }
+    /* The rail has no room for a number: the pill becomes an ember dot on
+       the icon's corner. The count is still in the link's name. */
+    [data-sidebar="collapsed"] .side-link:has(.side-badge-slot) {
+      position: relative;
+    }
+    [data-sidebar="collapsed"] .side-badge-slot {
+      position: absolute;
+      top: 0.3rem;
+      right: 0.4rem;
+      margin: 0;
+    }
+    [data-sidebar="collapsed"] .side-badge {
+      width: 0.5rem;
+      min-width: 0;
+      height: 0.5rem;
+      padding: 0;
+      border: 0;
+      background: var(--color-primary);
+      font-size: 0;
+      line-height: 0;
+    }
     /* A group becomes a hairline. The rail has no room to say *why* items
        would be missing, so section collapse is ignored there — and the head
        is hidden outright rather than shrunk, so it leaves the tab order
@@ -1068,6 +1109,26 @@
 @media (prefers-reduced-motion: reduce) {
   .drawer-in {
     animation: none;
+  }
+}
+
+/* The console's mobile nav drawer (`Layouts.console/1`). Unlayered on purpose:
+   the slide comes from a `transition-transform` UTILITY on the aside, and
+   utilities outrank `@layer components` — only an unlayered rule can answer a
+   reader who asked for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  .side-shell {
+    transition: none;
+  }
+}
+
+/* While the drawer is over the page, the page behind it does not scroll —
+   otherwise a swipe on the scrim carries the content away under it. Scoped
+   below lg, where the drawer exists at all; browsers without `:has` keep the
+   old behaviour rather than breaking. */
+@media (max-width: 63.999rem) {
+  body:has(#kiln-nav-toggle:checked) {
+    overflow: hidden;
   }
 }
 

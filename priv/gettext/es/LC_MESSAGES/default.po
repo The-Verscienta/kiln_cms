@@ -698,6 +698,13 @@ msgstr "%{who} — vence el %{date}%{note}"
 msgid "%{who}%{note}"
 msgstr "%{who}%{note}"
 
+#: lib/kiln_cms_web/live/nav_badge.ex
+#, elixir-autogen, elixir-format
+msgid "(%{count} open)"
+msgid_plural "(%{count} open)"
+msgstr[0] "(%{count} abierta)"
+msgstr[1] "(%{count} abiertas)"
+
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
 msgid "(content unavailable)"

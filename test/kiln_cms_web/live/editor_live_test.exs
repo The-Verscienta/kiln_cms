@@ -2893,14 +2893,40 @@ defmodule KilnCMSWeb.EditorLiveTest do
     test "the sidebar carries the rail toggles, theme switch and account menu", %{conn: conn} do
       {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
 
-      assert has_element?(lv, ~s(aside [data-sidebar-toggle][aria-label="Collapse sidebar"]))
-      assert has_element?(lv, ~s(aside [data-sidebar-toggle][aria-label="Expand sidebar"]))
+      # Each toggle is on screen only in the state it names, so its static
+      # `aria-expanded` is the truth whenever a reader can reach it.
+      assert has_element?(
+               lv,
+               ~s(aside [data-sidebar-toggle][aria-label="Collapse sidebar"][aria-expanded="true"])
+             )
+
+      assert has_element?(
+               lv,
+               ~s(aside [data-sidebar-toggle][aria-label="Expand sidebar"][aria-expanded="false"])
+             )
+
       assert has_element?(lv, ~s(aside .side-theme button[data-phx-theme="dark"]))
       refute has_element?(lv, ~s(header [data-phx-theme]))
       assert has_element?(lv, ~s(#side-account a[href="/account"]), "Account")
       assert has_element?(lv, ~s(#side-account a[href="/sign-out"]), "Sign out")
       # Each nav link names itself for the rail's tooltip.
       assert has_element?(lv, ~s(aside a.side-link[data-side-tip="Media"]))
+    end
+
+    # The mobile drawer's control is a <label> over a checkbox, so nothing about
+    # it is implicit: the role, what it controls and its state are all written
+    # out (app.js keeps `aria-expanded` current), and the checkbox itself leaves
+    # the tab order it was sitting in while announcing nothing.
+    test "the drawer's hamburger is a named, stateful control", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+
+      assert has_element?(
+               lv,
+               ~s(#kiln-nav-button[role="button"][aria-controls="console-sidebar"][aria-expanded="false"][tabindex="0"])
+             )
+
+      assert has_element?(lv, ~s(#kiln-nav-toggle[tabindex="-1"][aria-hidden="true"]))
+      assert has_element?(lv, ~s(aside#console-sidebar))
     end
 
     # #139: ⌘K targets a LiveView `navigate` link (data-phx-link="redirect"), so
