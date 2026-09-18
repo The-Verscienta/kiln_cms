@@ -226,8 +226,12 @@ ENV LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8
 WORKDIR /app
 # /var/backups/kiln is the default BACKUP_DIR (config/runtime.exs); owning it
 # here means a fresh named volume mounted there inherits `nobody` and the
-# in-app Backups page can write without a manual chown.
-RUN mkdir -p /var/backups/kiln && chown nobody /app /var/backups/kiln
+# in-app Backups page can write without a manual chown. /app/media is the
+# KILN_MEDIA_ROOT the one-click templates mount a volume at (#1529), owned for
+# the same reason. It is not the default — unset, media stays in priv/uploads.
+# A platform volume that mounts root-owned regardless is named at boot by
+# KilnCMS.Application's media check; see docs/deploy-platforms.md.
+RUN mkdir -p /var/backups/kiln /app/media && chown nobody /app /var/backups/kiln /app/media
 
 ENV MIX_ENV="prod"
 

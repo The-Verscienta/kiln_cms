@@ -100,9 +100,12 @@ defmodule KilnCMSWeb.Endpoint do
     only: KilnCMSWeb.static_paths(),
     raise_on_missing_only: code_reloading?
 
-  # User-uploaded media (KilnCMS.Storage.Local). Served from priv/uploads,
-  # which the Local adapter writes to (the app-dir paths stay in sync). In
-  # production a remote adapter (S3/MinIO) would serve these instead.
+  # User-uploaded media (KilnCMS.Storage.Local). Served from whatever
+  # directory the Local adapter writes to — `Local.root/0`, called per request
+  # (an MFA `:from`), because `KILN_MEDIA_ROOT` is runtime config and this
+  # plug's options are built at compile time (#1529). Unset, that is still
+  # priv/uploads. In production a remote adapter (S3/MinIO) would serve these
+  # instead.
   plug :secure_upload_headers
 
   # Storage keys are UUIDs, so a blob never changes under its URL — mark the
@@ -110,7 +113,7 @@ defmodule KilnCMSWeb.Endpoint do
   # revalidation round-trip per image per page view on media-heavy pages.
   plug Plug.Static,
     at: "/uploads",
-    from: {:kiln_cms, "priv/uploads"},
+    from: {KilnCMS.Storage.Local, :root, []},
     gzip: false,
     cache_control_for_etags: "public, max-age=31536000, immutable"
 
