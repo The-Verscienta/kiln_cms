@@ -6,7 +6,7 @@ during an incident, against a *running* deployment — so every step below is
 what the code actually does, not what would be reasonable.
 
 Pairs with [`backups.md`](backups.md) (the env snapshot is part of the backup)
-and closes residual risk 12 in [`threat-model.md`](threat-model.md). The
+and closes residual risk 13 in [`threat-model.md`](threat-model.md). The
 canonical list of every variable is
 [`environment-variables.md`](environment-variables.md); this document is only
 about the ones that are *secret*, and only about replacing them.

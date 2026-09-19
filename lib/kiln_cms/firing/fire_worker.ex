@@ -5,7 +5,7 @@ defmodule KilnCMS.Firing.FireWorker do
 
   Enqueued by `KilnCMS.CMS.Changes.FireArtifacts` after the publish transition
   commits, so the publish action returns immediately instead of blocking on a
-  3-surface render + artifact upserts + reference rebuild. Delivery and the
+  per-surface render + artifact upserts + reference rebuild. Delivery and the
   artifact API fall back to a live render on a cache/artifact miss, so content
   is still served in the brief window before the artifact lands.
 

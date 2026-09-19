@@ -2,7 +2,9 @@
 
 KilnCMS instruments the **editor hot path** with `:telemetry` so the actions that
 matter for authoring latency — save, autosave, and the publish workflow — can be
-profiled live in LiveDashboard or scraped into Prometheus/Grafana. This is the
+profiled live in LiveDashboard, or scraped into Prometheus/Grafana once you
+attach a reporter (none ships — see
+[below](#prometheus-and-grafana)). This is the
 Phase 6 "Performance profiling and editor Telemetry" work (issue #41).
 
 ## Events
@@ -58,8 +60,10 @@ sustained gap between them is a backpressure signal, not a bug.
 
 Useful Grafana panel: `sum(rate(kiln_cms_analytics_view_count[5m])) by (type)`.
 
-Referrer attribution, funnels and export are designed on top of this event but
-not built — see [`advanced-analytics-plan.md`](./advanced-analytics-plan.md).
+Referrer attribution, funnels and CSV/JSON export are built (#618–#622), but
+not on this event: they read the stored analytics tables, not the telemetry
+stream. Referrer attribution is off by default (`KILN_ANALYTICS_REFERRERS`).
+See [`advanced-analytics-plan.md`](./advanced-analytics-plan.md).
 
 ## LiveDashboard panel
 
@@ -96,7 +100,7 @@ Prometheus.
 > two shapes that does take. Note plain `Logger.warning` does **not** reach
 > Sentry.
 
-## Prometheus / Grafana path
+## Prometheus and Grafana
 
 For persistent dashboards and alerting, attach a Prometheus reporter and point
 Grafana at it:

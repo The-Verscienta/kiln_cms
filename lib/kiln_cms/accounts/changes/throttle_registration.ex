@@ -13,7 +13,7 @@ defmodule KilnCMS.Accounts.Changes.ThrottleRegistration do
   ## Its own bucket, not `:auth`
 
   Sharing sign-in's would mean a burst of legitimate sign-ups locks *sign-in*
-  for that address — the shared-NAT trade residual risk 4 already records, and
+  for that address — the shared-NAT trade residual risk 5 already records, and
   an office or CI runner behind one egress address is exactly where a burst of
   sign-ups comes from. `:register` is tighter than `:auth` in absolute terms
   because account creation is rarer and more expensive than a sign-in attempt,

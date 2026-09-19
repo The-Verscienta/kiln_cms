@@ -114,6 +114,47 @@ list of content-type name strings (`["post"]`) scoping where the group applies,
 and **an empty list means every content type**; filter on it client-side to
 mirror the editor's sectioning.
 
+### Navigation menus
+
+`menu(key: String!, locale: String): Menu` — one navigation menu, resolved: the
+GraphQL twin of `GET /api/menus/:key` (see [navigation-menus.md](navigation-menus.md)).
+Each item's `url` is its target's *current* published path; items pointing at
+unpublished content, or hidden by an editor, are left out with their children.
+`locale` defaults to the site's default, and a menu with no variant in the
+requested locale is `null` rather than a fallback.
+
+```graphql
+query {
+  menu(key: "main", locale: "en") {
+    name
+    items { label url linkType openInNewTab children { label url } }
+  }
+}
+```
+
+### Point in time — `contentAsOf`
+
+`contentAsOf(type: String!, asOf: DateTime!, limit: Int): [PointInTimeEntry!]`
+— "what was published on this site at `asOf`?", reconstructed from version
+history: the GraphQL twin of `GET /api/content/:type?as_of=`. Each entry is
+`slug`, `title` and `publishedAt`, as they stood at that instant (a later
+rename does not leak in, and since-unpublished content is left out). `limit`
+defaults to 100 and is capped at 500. Compiled types only (`page`, `post`, an
+overlay's types); a dynamic type is an error. See
+[point-in-time.md](point-in-time.md) ("The collection view") for how
+the index is built, and `GET /api/content/:type/:slug?as_of=` for one
+document's body at that date.
+
+```graphql
+query {
+  contentAsOf(type: "post", asOf: "2026-03-01T00:00:00Z", limit: 20) {
+    slug
+    title
+    publishedAt
+  }
+}
+```
+
 ### Health
 
 `health: String` — a lightweight probe that returns `"ok"`.

@@ -38,20 +38,27 @@ scheme.
 
 The JSON:API is one of several headless surfaces. Pick the one that fits:
 
-| Surface                | Endpoint                          | Use case                                              | Reference |
-|------------------------|-----------------------------------|-------------------------------------------------------|-----------|
-| **Sign-in**            | `POST /api/auth/sign_in`          | Exchange credentials for a bearer token (JWT).        | [§ Authentication](#authentication) |
-| **JSON:API**           | `/api/json`                       | Structured, filterable reads of Page/Post/MediaItem.  | [json-api.md](json-api.md) |
-| **GraphQL**            | `POST /gql`                       | Curated delivery reads + full-text/semantic search.   | [headless-graphql-api.md](headless-graphql-api.md) |
-| **Fired artifacts**    | `GET /api/content/:type/:slug`    | Pre-rendered block tree (`json`, `json_ld`, `web`).   | [`examples/README.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/examples/README.md) |
-| **Locales**            | `GET /api/locales`                | Configured content locales, the default, and each locale's fallback chain. | [§ Locale discovery](#locale-discovery) |
-| **Schema**             | `GET /api/schema`                 | JSON Schema for the fired `json` payloads — generate types, validate responses. | [§ Schema discovery](#schema-discovery-typed-clients) |
-| **Embeddable form**    | `<script src="…/embed.js">`       | Render a form in an auto-resizing iframe on any site. | [§ Embeddable forms](#embeddable-forms) |
-| **Visual editing**     | `<script src="…/bridge.js">`      | In-context edit overlay for an external front end (annotated preview + deep-link + live push). | [visual-editing-bridge.md](visual-editing-bridge.md) |
-| **Sitemap**            | `GET /sitemap.xml`                | Enumerate published content for crawling/SSG.         | — |
-| **Feeds**              | `GET /feed.xml`, `GET /feed.json` | Atom 1.0 / JSON Feed 1.1 of newly published content.  | [§ Feeds](#feeds) |
-| **Outbound webhooks**  | (you host the receiver)           | HMAC-signed push on publish/unpublish/update.         | [webhooks.md](webhooks.md) |
-| **Signed preview**     | `GET /preview/:token`             | One unpublished document via a short-lived token.     | [§ Preview tokens](#preview-tokens) |
+| Surface | Endpoint | Use case | Reference |
+|---------|----------|----------|-----------|
+| **Sign-in** | `POST /api/auth/sign_in` | Exchange credentials for a bearer token (JWT). Server-to-server clients use an [API key](#api-keys-third-party-access) instead. | [§ Authentication](#authentication) |
+| **JSON:API** | `/api/json` | Filterable reads of Page, Post and admin-defined types (Entry), media, taxonomy and redirects; per-type search and autocomplete; **writes** — create, update, workflow transitions, soft-delete — with a `read_write` API key. | [json-api.md](json-api.md) |
+| **GraphQL** | `POST /gql`, `/ws/gql` | Delivery reads, search, menus and point-in-time (`contentAsOf`); the same **writes** as mutations; subscriptions over the WebSocket. | [headless-graphql-api.md](headless-graphql-api.md) |
+| **Fired artifacts** | `GET /api/content/:type/:slug` | Pre-rendered output per surface: `json` (default), `json_ld`, `web`, and `llm` (raw `text/markdown`). `?as_of=` reads a document as it stood on a date; `GET /api/content/:type?as_of=` lists what was published then. | [`examples/README.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/examples/README.md), [point-in-time.md](point-in-time.md) |
+| **Hybrid search** | `GET /api/search?q=` | Keyword + semantic + title search across every type, fused and ranked; answers as an anonymous visitor whatever the credential. | [search-roadmap.md](search-roadmap.md) |
+| **Path resolution** | `GET /api/resolve?path=` | "What lives at this URL?" — content, a redirect to follow, or nothing — for a front end's catch-all route. | [json-api.md](json-api.md) (URLs, pathauto & redirects) |
+| **Menus** | `GET /api/menus`, `GET /api/menus/:key` | Resolved navigation trees with live URLs. | [navigation-menus.md](navigation-menus.md) |
+| **Related content** | `GET /api/content/:type/:slug/related` | Published documents semantically closest to this one (empty when semantic search is off). | [rag.md](rag.md) |
+| **Ask your content** | `GET /api/ask?q=` | Cited published passages, plus a generated answer when a generator is configured. | [rag.md](rag.md) |
+| **Provenance** | `GET /api/provenance/:type/:slug`, `…/verify`, `GET /api/provenance/public-key` | Signed manifests proving an artifact is unaltered (404 unless provenance is on). | [provenance.md](provenance.md) |
+| **Locales** | `GET /api/locales` | Configured content locales, the default, and each locale's fallback chain. | [§ Locale discovery](#locale-discovery), [§ Locale fallback](#locale-fallback) |
+| **Schema** | `GET /api/schema` | JSON Schema for the fired `json` payloads — generate types, validate responses. | [§ Schema discovery](#schema-discovery-typed-clients) |
+| **MCP** | `/mcp` | Model Context Protocol server for LLM authoring clients; **API key required**. | [mcp.md](mcp.md) |
+| **Forms** | `GET /api/forms/:slug`, `POST /api/forms/:slug`, `<script src="…/embed.js">` | A form's schema and JSON submission, or an auto-resizing iframe on any site. | [§ Embeddable forms](#embeddable-forms) |
+| **Visual editing** | `<script src="…/bridge.js">` | In-context edit overlay for an external front end (annotated preview + deep-link + live push). | [visual-editing-bridge.md](visual-editing-bridge.md) |
+| **Sitemap** | `GET /sitemap.xml` | Enumerate published content for crawling/SSG. | — |
+| **Feeds** | `GET /feed.xml`, `GET /feed.json` | Atom 1.0 / JSON Feed 1.1 of newly published content. | [§ Feeds](#feeds) |
+| **Outbound webhooks** | (you host the receiver) | HMAC-signed push on publish/unpublish/update. | [webhooks.md](webhooks.md) |
+| **Signed preview** | `GET /preview/:token` | One unpublished document via a short-lived token. | [§ Preview tokens](#preview-tokens) |
 
 ## Authentication
 

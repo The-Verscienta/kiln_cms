@@ -1,10 +1,12 @@
 defmodule KilnCMS.Billing.Changes.RecordTransition do
   @moduledoc """
   On any membership status change: stamp the lifecycle timestamps, recompute the
-  user's entitlements, and append a `KilnCMS.Billing.MembershipEvent` recording the
-  status change *and* the audience delta.
+  user's entitlements, append a `KilnCMS.Billing.MembershipEvent` recording the
+  status change *and* the audience delta, and — when access started or stopped —
+  enqueue the `membership.activated` / `membership.canceled` webhook
+  (`KilnCMS.Billing.MembershipWebhooks`).
 
-  All three happen in the action's `after_action`, i.e. **inside the same
+  All four happen in the action's `after_action`, i.e. **inside the same
   transaction** as the status write. If the recompute fails, the status change
   rolls back with it and Oban retries — an entitlement is not best-effort, so this
   deliberately does *not* copy the never-raise `rescue` used by
@@ -17,6 +19,7 @@ defmodule KilnCMS.Billing.Changes.RecordTransition do
 
   alias KilnCMS.Billing
   alias KilnCMS.Billing.Entitlements
+  alias KilnCMS.Billing.MembershipWebhooks
 
   @impl true
   def change(changeset, _opts, context) do
@@ -26,7 +29,8 @@ defmodule KilnCMS.Billing.Changes.RecordTransition do
     |> stamp_timestamps()
     |> Ash.Changeset.after_action(fn _changeset, membership ->
       with {:ok, delta} <- Entitlements.recompute(membership.user_id),
-           {:ok, _event} <- append_event(changeset, membership, from_status, delta, context) do
+           {:ok, event} <- append_event(changeset, membership, from_status, delta, context),
+           {:ok, _job} <- MembershipWebhooks.enqueue(from_status, membership, event.id) do
         # Newsletter bookkeeping rides the same hook so it can't drift from the
         # entitlement recompute. It returns `:ok` even on failure — a mailing-list
         # write must never roll back the transaction that granted access; the

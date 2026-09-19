@@ -685,11 +685,11 @@ defmodule KilnCMS.CMS.Content do
               end
             end
 
-            # Curated, read-only public surface (D7 — deliberate exposure). The
-            # GraphQL endpoint is a *delivery* API: it exposes published-content
-            # reads only. Authoring/workflow actions (create/update/publish/…) are
-            # intentionally NOT surfaced here — they run through the admin editor
-            # (and the bearer-authenticated JSON:API), behind the role policies.
+            # Curated public queries (D7 — deliberate exposure): published-content
+            # delivery and search, nothing that lists drafts by default. The
+            # authoring/workflow actions are exposed too, as the `mutations`
+            # block below (#330 reversed D7's read-only stance), behind the same
+            # role policies and API-key scope as the JSON:API write routes.
             queries do
               # Published-content delivery: one record by slug+locale, and every
               # published locale variant of a slug (hreflang alternates). Both reads
