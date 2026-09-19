@@ -101,7 +101,11 @@ lower if embeddings dominate.
 
 ## Telemetry to watch
 
-Visible in LiveDashboard → Metrics (`/dev/dashboard` in dev) and scrapeable into Prometheus:
+Defined in `KilnCMSWeb.Telemetry.metrics/0` and visible in LiveDashboard → Metrics
+(`/dev/dashboard` in dev). **No production reporter ships:** the dashboard route
+is dev-only and no Prometheus/StatsD reporter is attached, so in a stock
+production build nothing records these. To scrape them, attach a reporter first
+([Observability → Prometheus and Grafana](observability.md#prometheus-and-grafana)).
 
 - `kiln_cms.cache.content.count` (tag `result: hit | miss`) — **cache hit rate**
 - `kiln_cms.delivery.render.duration` (tags `type`, `status`) — delivery latency
