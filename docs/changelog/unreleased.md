@@ -7,6 +7,47 @@ carries the reasoning.
 
 ## Added
 
+<a id="a-site-can-send-its-mail-through-its-own-smtp-relay-set-from-the-console"></a>
+
+- **A site can send its mail through its own SMTP relay, set from the console.**
+  `/editor/site-mail` (under Configure → Integrations) lets a site admin set
+  the relay host, port, encryption, credentials and From address that site's
+  mail goes out through. No `SMTP_*` variables and no redeploy (#1322). It
+  covers newsletters and their confirmations, form notifications and
+  autoresponders, workflow, task and comment notifications, and automation
+  emails. Account mail (sign-in links, password resets, confirmations, sign-in
+  alerts) stays on the operator's relay, because accounts belong to the
+  deployment. The `SMTP_*` / `MAIL_MODE` variables are unchanged. They are the
+  relay for every site that hasn't set its own.
+
+  This is the first integration #1322 moves out of the environment, and it
+  sets the pattern for the rest:
+
+  - **Stored per site.** The row is per site (`KilnCMS.CMS.SiteMailRelay`, on
+    `KilnCMS.CMS.OrgSettings`), and one site's row never affects another.
+  - **Password encrypted.** It is stored with `KilnCMS.Keys.Vault` and never
+    shown again. A blank save keeps it. It has no env-var or file source, so a
+    site admin can't point it at `SECRET_KEY_BASE`.
+  - **Fails closed.** If the row can't be read, or its password can't be
+    decrypted, that site's mail is *held* and retried. It never falls back to
+    the operator's relay (`KilnCMS.Mail.SiteRelay`), and the page says when the
+    password needs re-entering.
+  - **Built from the row alone.** The connection takes nothing from the
+    operator's mailer config, so the operator's relay password can't end up in
+    a connection to a host a site chose.
+  - **SSRF-checked.** The relay host is refused if it is a private, loopback,
+    link-local or metadata address, at save and again at every connection. The
+    connection goes to the pinned address with gen_smtp's MX lookup off.
+    Certificates are always verified, and there is no unencrypted option.
+  - **Can't suppress addresses.** A hard reject through a site's relay cancels
+    that message but doesn't add the address to the instance-wide suppression
+    list, which would let one site block an address, including its password
+    resets, for every site. A site relay's outage doesn't raise the operator's
+    relay-unreachable alert.
+
+  `docs/secrets-rotation.md` lists the new encrypted column: rotating
+  `SECRET_KEY_BASE` means each site with its own relay re-enters the password.
+
 <a id="one-click-deploy-templates-for-render-railway-flyio-and-digitalocean"></a>
 
 - **One-click deploy templates for Render, Railway, Fly.io and DigitalOcean.**

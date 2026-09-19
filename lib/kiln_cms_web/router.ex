@@ -437,6 +437,9 @@ defmodule KilnCMSWeb.Router do
       # to take on it. Restore stays a documented ops procedure.
       live "/editor/backups", BackupLive, :index
       live "/editor/mail", MailSettingsLive, :index
+      # A site's own SMTP relay and From address (#1322). Org-scoped, unlike
+      # `/editor/mail` above: that is the operator's relay for every site.
+      live "/editor/site-mail", SiteMailLive, :index
       live "/editor/newsletter", NewsletterLive, :index
       # Paid memberships (#337 Phase 2). Instance-wide provider credentials plus
       # per-site tiers, so the page itself gates on `platform_admin?` — see the
