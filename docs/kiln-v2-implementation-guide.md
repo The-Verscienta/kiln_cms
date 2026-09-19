@@ -195,11 +195,21 @@ each renderable to web/json/json-ld. No change yet to how `Page.blocks` is store
 
 ---
 
-## Phase C — Polymorphic embeds + editor composition over typed blocks — ✅ DONE (storage flipped)
+## Phase C — Polymorphic embeds + editor composition over typed blocks — ✅ DONE (column type flipped; legacy rows remain)
 
-> **Storage flip complete.** `Page.blocks`/`Post.blocks` are now stored as the
-> `Ash.Type.Union` (`BlockUnion`) — the typed representation is canonical at rest,
-> not just via the bridge. The flip is **migration-free and low-churn** because
+> **Where this actually stands.** The column *type* is `BlockUnion`, and any
+> write that touches the blocks stores the typed shape. There was no backfill,
+> so a row whose blocks have not been rewritten since the flip is still the
+> legacy `KilnCMS.CMS.Block` shape at rest, converted on every read. Public
+> delivery and the previews still convert back to legacy at the boundary
+> (`TypedBlocks.to_legacy/1`). Retiring both — a backfill, a run of the upcast
+> path on a real corpus, and deprecating the bridge — is
+> [#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537).
+>
+> **Storage flip.** `Page.blocks`/`Post.blocks` are now typed as the
+> `Ash.Type.Union` (`BlockUnion`), so the typed representation is what every
+> new write stores, not just what the bridge produces. The flip is
+> **migration-free and low-churn** because
 > `BlockUnion`'s cast is legacy-tolerant: `cast_input`/`cast_stored` (and their
 > array variants) normalize legacy block params *and* legacy stored rows to the
 > typed shape before the union cast (sanitizing rich-text/media on input — this
