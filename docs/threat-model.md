@@ -292,9 +292,10 @@ build if a resource is ever registered without that authorizer.
 - **Upload handling** — uploads validated from bytes rather than declared type,
   EXIF stripped, and blobs served with `Content-Disposition: attachment` and
   `X-Content-Type-Options: nosniff`.
-- **Static analysis & dependencies** — Credo, Sobelow, Dialyzer, and
-  `mix deps.audit` (mix_audit) in CI and `mix precommit`, failing the build on a
-  known-vulnerable locked dependency.
+- **Static analysis & dependencies** — Credo, Sobelow, Dialyzer, and two
+  dependency audits (`mix deps.audit` against mirego's advisory mirror,
+  `mix hex.audit` against Hex's own feed) in CI and `mix precommit`, failing
+  the build on a known-vulnerable locked dependency.
 
 ## Per-surface risks & mitigations
 
@@ -1149,7 +1150,11 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
 ## Operating the dependency audit
 
 `mix deps.audit` ([mix_audit](https://github.com/mirego/mix_audit)) checks
-`mix.lock` against the Elixir security advisory database. It runs:
+`mix.lock` against mirego's mirror of the Elixir security advisory database,
+and `mix hex.audit` checks it against the advisories Hex itself serves. Both
+run, because the two databases are not the same: on 2026-09-18 the mirror
+knew none of the 89 advisories — six CRITICAL, all in `ash_authentication` —
+that Hex listed against the v0.9.0 lock. They run:
 
 - in CI, as its own **Dependency audit** job in
   [`.github/workflows/ci.yml`](../.github/workflows/ci.yml), and
@@ -1159,8 +1164,9 @@ A new advisory affecting a locked dependency fails the build — including on a 
 that changed no dependencies, since the advisory database moves independently of
 this repo. It is a separate job so that failure does not bury the lint and test
 results of an unrelated change. Remediate by upgrading the dependency; if no
-fixed version exists, document the accepted risk and use mix_audit's ignore
-options rather than dropping the check.
+fixed version exists, document the accepted risk and acknowledge the advisory
+(mix_audit's ignore options; the `:hex` section of `mix.exs` for `hex.audit`)
+rather than dropping the check.
 
 The CI job fetches the advisory database explicitly before auditing. mix_audit
 clones it at run time and discards the exit status of its own git commands, so a
